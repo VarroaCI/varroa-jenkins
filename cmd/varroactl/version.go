@@ -1,3 +1,4 @@
+// Package main implements the varroactl CLI entrypoint.
 package main
 
 import (
