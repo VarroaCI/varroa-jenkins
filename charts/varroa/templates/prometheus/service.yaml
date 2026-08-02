@@ -1,0 +1,21 @@
+{{- if not (include "varroa.isHive" .) }}
+{{- if .Values.prometheus.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "prometheus") }}
+  labels:
+    app.kubernetes.io/component: prometheus
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.prometheus.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.prometheus.service.port }}
+      targetPort: http
+  selector:
+    app.kubernetes.io/component: prometheus
+    {{- include "varroa.selectorLabels" . | nindent 4 }}
+{{- end }}
+
+{{- end }}

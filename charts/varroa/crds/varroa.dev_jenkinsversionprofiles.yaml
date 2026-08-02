@@ -1,0 +1,143 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+  name: jenkinsversionprofiles.varroa.dev
+spec:
+  group: varroa.dev
+  names:
+    kind: JenkinsVersionProfile
+    listKind: JenkinsVersionProfileList
+    plural: jenkinsversionprofiles
+    singular: jenkinsversionprofile
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          JenkinsVersionProfile pins a plugin set and a JCasC overlay to a Jenkins
+          version or LTS line, and supplies the wizard version catalog metadata.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: JenkinsVersionProfileSpec is the desired state of a JenkinsVersionProfile.
+            properties:
+              channel:
+                enum:
+                - lts
+                - weekly
+                type: string
+              eol:
+                description: EOL is an informational end-of-life date string (e.g.
+                  "2026-09-30").
+                type: string
+              jcasc:
+                description: |-
+                  JCasC is a version-specific JCasC overlay merged on top of the
+                  controller's composed bundle at provisioning time. Optional.
+                properties:
+                  content:
+                    description: |-
+                      Content is the JCasC overlay YAML (strategic/ordered merge onto the
+                      composed bundle's jenkins.yaml).
+                    type: string
+                  requiredPlugins:
+                    description: |-
+                      RequiredPlugins lists artifactIds the overlay's config depends on. The
+                      reconciler warns (non-blocking) when any is absent from the pinned set.
+                      Resolves Open Q3 (no UC-metadata key→plugin map needed).
+                    items:
+                      type: string
+                    type: array
+                type: object
+              pluginSetRef:
+                description: |-
+                  PluginSetRef names a ConfigMap (in the operator namespace) holding the
+                  fully-resolved pinned plugin set under key "plugins.yaml" (lockSet YAML:
+                  `core:` seeds + `plugins:` [{artifactId, version}]). The operator copies
+                  it into an owned ConfigMap (status.contentRef). Resolves Open Q1.
+                properties:
+                  name:
+                    type: string
+                required:
+                - name
+                type: object
+              recommended:
+                type: boolean
+              resolveVersion:
+                description: |-
+                  ResolveVersion is the exact 3-segment patch this profile's plugin set was
+                  resolved against (LTS line profiles only). The operator deploys the
+                  Jenkins core at this version rather than the bare line in Version, so the
+                  running core is never older than the core the pinned plugins require
+                  (see AggregatePluginPrerequisitesNotMetException / #185). Empty for
+                  weekly/exact-pin profiles, where Version is already deployable as-is.
+                type: string
+              version:
+                description: |-
+                  Version is the Jenkins version this profile pins. A 3-segment value
+                  (e.g. "2.479.3") is an exact pin; a 2-segment value (e.g. "2.479") is an
+                  LTS line matching any 2.479.x. Required.
+                type: string
+            required:
+            - channel
+            - version
+            type: object
+          status:
+            description: JenkinsVersionProfileStatus is the observed state of a JenkinsVersionProfile.
+            properties:
+              conditions:
+                items:
+                  description: JenkinsVersionProfileCondition is a status condition
+                    for JenkinsVersionProfile.
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
+              contentRef:
+                description: |-
+                  ContentRef is the operator-owned ConfigMap holding the materialized
+                  plugin set actually served to provisioning.
+                type: string
+              pluginCount:
+                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

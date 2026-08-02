@@ -1,0 +1,40 @@
+items:
+  - kind: folder
+    name: mixed-root
+    displayName: "Mixed Tree Root"
+    items:
+      - kind: pipeline
+        name: pipeline-a
+        displayName: "Pipeline A"
+        definition:
+          cpsScmFlowDefinition:
+            scriptPath: Jenkinsfile
+            scm:
+              gitSCM:
+                userRemoteConfigs:
+                  - userRemoteConfig:
+                      url: https://github.com/fake-org/a.git
+                branches:
+                  - branchSpec:
+                      name: "*/main"
+      - kind: freeStyle
+        name: freestyle-b
+        displayName: "FreeStyle B"
+        builders:
+          - shell:
+              command: echo hello
+      - kind: folder
+        name: sub-folder
+        displayName: "Sub Folder"
+        items:
+          - kind: multibranch
+            name: multi-c
+            displayName: "Multibranch C"
+            sourcesList:
+              - branchSource:
+                  source:
+                    git:
+                      remote: https://github.com/fake-org/c.git
+            projectFactory:
+              workflowBranchProjectFactory:
+                scriptPath: Jenkinsfile

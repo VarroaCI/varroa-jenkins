@@ -1,0 +1,3 @@
+---
+jenkins:
+  systemMessage: "Varroa localdev — getting-started controller (bundle served from the in-cluster localdev git server)"

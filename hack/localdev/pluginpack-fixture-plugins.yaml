@@ -1,0 +1,19 @@
+# Small hand-picked plugin list for localdev fixture export.
+# Run `varroactl export plugins --profile jenkins-version-2-555 \
+#   --plugins-file hack/localdev/pluginpack-fixture-plugins.yaml \
+#   --to dir://hack/localdev/pluginpack-fixture` to generate the OCI layout.
+# `core` is the set actually exported; `plugins` supplies the pinned versions.
+core:
+  - display-url-api
+  - jackson2-api
+  - scm-api
+  - structs
+plugins:
+  - artifactId: display-url-api
+    version: 2.217.va_6b_de84cc74b_
+  - artifactId: jackson2-api
+    version: 2.22.0-439.vb_b_43658d6176
+  - artifactId: scm-api
+    version: 728.vc30dcf7a_0df5
+  - artifactId: structs
+    version: 362.va_b_695ef4fdf9

@@ -1,0 +1,131 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+  name: catalogsources.varroa.dev
+spec:
+  group: varroa.dev
+  names:
+    kind: CatalogSource
+    listKind: CatalogSourceList
+    plural: catalogsources
+    singular: catalogsource
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.repoURL
+      name: REPOSITORY
+      type: string
+    - jsonPath: .status.itemCount
+      name: ITEMS
+      type: integer
+    - jsonPath: .status.phase
+      name: SYNC
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          CatalogSource is the Schema for the catalogsources API.
+
+          The object-level rule below binds the zero-source-field shape to the reserved
+          name varroa-update-center (the update-center-backed variant). CEL at the root
+          schema can read metadata.name and metadata.generateName but never
+          metadata.namespace, so "reserved name only in the operator namespace" is a
+          runtime guard in CatalogReconciler, not a validation guard.
+          The has(self.spec) guards are load-bearing: spec is optional in the schema, so
+          an object created with no spec block at all reaches this rule and a bare
+          has(self.spec.repoURL) raises "no such key: spec" instead of the message below.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: CatalogSourceSpec defines the desired state of CatalogSource.
+            properties:
+              ociRef:
+                type: string
+              path:
+                type: string
+              repoURL:
+                type: string
+              revision:
+                type: string
+              secretRef:
+                type: string
+              syncIntervalSeconds:
+                type: integer
+              trusted:
+                type: boolean
+            type: object
+            x-kubernetes-validations:
+            - message: 'repoURL must start with https://, ssh://, or git@ (transport
+                helpers like ext::/file:///fd:: are rejected)'
+              rule: '!has(self.repoURL) || self.repoURL.startsWith(''https://'') ||
+                self.repoURL.startsWith(''ssh://'') || self.repoURL.startsWith(''git@'')'
+            - message: at most one of repoURL or ociRef may be set
+              rule: (has(self.repoURL)?1:0)+(has(self.ociRef)?1:0)<=1
+          status:
+            description: CatalogSourceStatus defines the observed state of CatalogSource.
+            properties:
+              conditions:
+                items:
+                  description: TemplateCatalogCondition is a generic status condition
+                    for catalogs and composed bundles.
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
+              itemCount:
+                type: integer
+              lastSyncTime:
+                format: date-time
+                type: string
+              message:
+                type: string
+              observedRevision:
+                type: string
+              phase:
+                description: CatalogSyncPhase represents the sync phase of a CatalogSource.
+                type: string
+            type: object
+        type: object
+        x-kubernetes-validations:
+        - message: the reserved source name 'varroa-update-center' requires neither
+            repoURL nor ociRef; every other CatalogSource requires exactly one
+          rule: '(has(self.metadata.name) && self.metadata.name == ''varroa-update-center'')
+            ? (!has(self.spec) || (!has(self.spec.repoURL) && !has(self.spec.ociRef)))
+            : (has(self.spec) && (has(self.spec.repoURL) != has(self.spec.ociRef)))'
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -1,0 +1,213 @@
+{{- if not (include "varroa.isHive" .) }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: varroa-nats-auth-config
+  labels:
+    {{- include "varroa.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  auth.conf: |
+    authorization: {
+      users: [
+        {
+          user: "operator"
+          password: "{{ htpasswd "ignored" (include "varroa.nats.operatorPassword" .) | trimPrefix "ignored:" }}"
+          permissions: {
+            publish: [
+              "$KV.mite_desired.>"
+              "mite.*.*.*.out"
+              "events.brood.*"
+              "activity.>"
+              "mite.*.*.*.content"
+              "$JS.API.INFO"
+              "_INBOX_bff.>"
+              "$JS.API.STREAM.*.KV_mite_desired"
+              "$JS.API.STREAM.MSG.*.KV_mite_desired"
+              "$JS.API.STREAM.MSG.*.KV_mite_desired.>"
+              "$JS.API.DIRECT.GET.KV_mite_desired"
+              "$JS.API.DIRECT.GET.KV_mite_desired.>"
+              "$JS.API.CONSUMER.CREATE.KV_mite_desired"
+              "$JS.API.CONSUMER.CREATE.KV_mite_desired.>"
+              "$JS.API.CONSUMER.*.KV_mite_desired.>"
+              "$JS.API.STREAM.*.KV_mite_snapshots"
+              "$JS.API.STREAM.MSG.*.KV_mite_snapshots"
+              "$JS.API.STREAM.MSG.*.KV_mite_snapshots.>"
+              "$JS.API.DIRECT.GET.KV_mite_snapshots"
+              "$JS.API.DIRECT.GET.KV_mite_snapshots.>"
+              "$JS.API.CONSUMER.CREATE.KV_mite_snapshots"
+              "$JS.API.CONSUMER.CREATE.KV_mite_snapshots.>"
+              "$JS.API.CONSUMER.*.KV_mite_snapshots.>"
+              "$JS.API.STREAM.*.KV_mite_presence"
+              "$JS.API.STREAM.MSG.*.KV_mite_presence"
+              "$JS.API.STREAM.MSG.*.KV_mite_presence.>"
+              "$JS.API.DIRECT.GET.KV_mite_presence"
+              "$JS.API.DIRECT.GET.KV_mite_presence.>"
+              "$JS.API.CONSUMER.CREATE.KV_mite_presence"
+              "$JS.API.CONSUMER.CREATE.KV_mite_presence.>"
+              "$JS.API.CONSUMER.*.KV_mite_presence.>"
+              "$KV.mite_snapshots.>"
+              "$KV.varroa_clusters.>"
+              "$JS.API.STREAM.*.KV_varroa_clusters"
+              "$JS.API.STREAM.MSG.*.KV_varroa_clusters"
+              "$JS.API.STREAM.MSG.*.KV_varroa_clusters.>"
+              "$JS.API.DIRECT.GET.KV_varroa_clusters"
+              "$JS.API.DIRECT.GET.KV_varroa_clusters.>"
+              "$JS.API.CONSUMER.CREATE.KV_varroa_clusters"
+              "$JS.API.CONSUMER.CREATE.KV_varroa_clusters.>"
+              "$JS.API.CONSUMER.*.KV_varroa_clusters.>"
+              // Hibernation webhook-replay: own the varroa_webhooks stream and
+              // its durable pull consumer, and ack drained messages.
+              "$JS.API.STREAM.CREATE.varroa_webhooks"
+              "$JS.API.STREAM.UPDATE.varroa_webhooks"
+              "$JS.API.STREAM.INFO.varroa_webhooks"
+              "$JS.API.CONSUMER.CREATE.varroa_webhooks"
+              "$JS.API.CONSUMER.CREATE.varroa_webhooks.>"
+              "$JS.API.CONSUMER.DURABLE.CREATE.varroa_webhooks.>"
+              "$JS.API.CONSUMER.INFO.varroa_webhooks.>"
+              "$JS.API.CONSUMER.MSG.NEXT.varroa_webhooks.>"
+              "$JS.ACK.varroa_webhooks.>"
+            ]
+            subscribe: [
+              "mite.*.*.*.in"
+              "operator.>"
+              "$KV.mite_snapshots.>"
+              "$KV.mite_presence.>"
+              "_INBOX_operator.>"
+              // Hibernation: wake commands and replay results for this cluster.
+              "wake.>"
+              "whreply.>"
+            ]
+          }
+        }
+        {
+          user: "gateway"
+          password: "{{ htpasswd "ignored" (include "varroa.nats.gatewayPassword" .) | trimPrefix "ignored:" }}"
+          permissions: {
+            publish: [
+              "mite.*.*.*.in"
+              "$JS.API.INFO"
+              "$KV.mite_snapshots.>"
+              "$KV.mite_presence.>"
+              "$KV.varroa_consumed_tokens.>"
+              "events.brood.*"
+              "activity.>"
+              "_INBOX_operator.>"
+              "_INBOX_bff.>"
+              "$JS.API.STREAM.*.varroa"
+              "$JS.API.CONSUMER.CREATE.varroa.>"
+              "$JS.API.CONSUMER.*.varroa.>"
+              "$JS.API.CONSUMER.MSG.NEXT.varroa.>"
+              "$JS.ACK.varroa.>"
+              "$JS.API.STREAM.*.KV_mite_desired"
+              "$JS.API.STREAM.MSG.*.KV_mite_desired"
+              "$JS.API.STREAM.MSG.*.KV_mite_desired.>"
+              "$JS.API.DIRECT.GET.KV_mite_desired"
+              "$JS.API.DIRECT.GET.KV_mite_desired.>"
+              "$JS.API.CONSUMER.CREATE.KV_mite_desired"
+              "$JS.API.CONSUMER.CREATE.KV_mite_desired.>"
+              "$JS.API.CONSUMER.*.KV_mite_desired.>"
+              # JetStream flow-control replies for KV watchers (ordered push consumers) — see #339
+              "$JS.FC.KV_mite_desired.>"
+              "$JS.API.STREAM.*.KV_mite_snapshots"
+              "$JS.API.STREAM.MSG.*.KV_mite_snapshots"
+              "$JS.API.STREAM.MSG.*.KV_mite_snapshots.>"
+              "$JS.API.DIRECT.GET.KV_mite_snapshots"
+              "$JS.API.DIRECT.GET.KV_mite_snapshots.>"
+              "$JS.API.CONSUMER.CREATE.KV_mite_snapshots"
+              "$JS.API.CONSUMER.CREATE.KV_mite_snapshots.>"
+              "$JS.API.CONSUMER.*.KV_mite_snapshots.>"
+              "$JS.API.STREAM.*.KV_mite_presence"
+              "$JS.API.STREAM.MSG.*.KV_mite_presence"
+              "$JS.API.STREAM.MSG.*.KV_mite_presence.>"
+              "$JS.API.DIRECT.GET.KV_mite_presence"
+              "$JS.API.DIRECT.GET.KV_mite_presence.>"
+              "$JS.API.CONSUMER.CREATE.KV_mite_presence"
+              "$JS.API.CONSUMER.CREATE.KV_mite_presence.>"
+              "$JS.API.CONSUMER.*.KV_mite_presence.>"
+              "$JS.API.STREAM.*.KV_varroa_consumed_tokens"
+              "$JS.API.STREAM.MSG.*.KV_varroa_consumed_tokens"
+              "$JS.API.STREAM.MSG.*.KV_varroa_consumed_tokens.>"
+              "$JS.API.DIRECT.GET.KV_varroa_consumed_tokens"
+              "$JS.API.DIRECT.GET.KV_varroa_consumed_tokens.>"
+              "$JS.API.CONSUMER.CREATE.KV_varroa_consumed_tokens"
+              "$JS.API.CONSUMER.CREATE.KV_varroa_consumed_tokens.>"
+              "$JS.API.CONSUMER.*.KV_varroa_consumed_tokens.>"
+              // Hibernation: publish REPLAY_WEBHOOK results to the dedicated
+              // whreply subject (kept off the mite inbound subject).
+              "whreply.>"
+            ]
+            subscribe: [
+              "$KV.mite_desired.>"
+              "mite.*.*.*.content"
+              "_INBOX_gateway.>"
+            ]
+          }
+        }
+        {
+          user: "bff"
+          password: "{{ htpasswd "ignored" (include "varroa.nats.bffPassword" .) | trimPrefix "ignored:" }}"
+          permissions: {
+            publish: [
+              "activity.>"
+              "mite.*.*.*.content"
+              "operator.>"
+              "$JS.API.INFO"
+              "$JS.API.STREAM.CREATE.varroa_activity"
+              "$JS.API.STREAM.UPDATE.varroa_activity"
+              "$JS.API.STREAM.INFO.varroa_activity"
+              "$JS.API.CONSUMER.CREATE.varroa_activity"
+              "$JS.API.CONSUMER.CREATE.varroa_activity.>"
+              "$JS.API.CONSUMER.DURABLE.CREATE.varroa_activity.>"
+              "$JS.API.CONSUMER.INFO.varroa_activity.>"
+              "$JS.API.CONSUMER.DELETE.varroa_activity.>"
+              "$JS.API.CONSUMER.MSG.NEXT.varroa_activity.>"
+              "$JS.ACK.varroa_activity.>"
+              "$JS.API.STREAM.*.KV_mite_snapshots"
+              "$JS.API.STREAM.MSG.*.KV_mite_snapshots"
+              "$JS.API.STREAM.MSG.*.KV_mite_snapshots.>"
+              "$JS.API.DIRECT.GET.KV_mite_snapshots"
+              "$JS.API.DIRECT.GET.KV_mite_snapshots.>"
+              "$JS.API.CONSUMER.CREATE.KV_mite_snapshots"
+              "$JS.API.CONSUMER.CREATE.KV_mite_snapshots.>"
+              "$JS.API.CONSUMER.*.KV_mite_snapshots.>"
+              "$JS.API.STREAM.*.KV_mite_presence"
+              "$JS.API.STREAM.MSG.*.KV_mite_presence"
+              "$JS.API.STREAM.MSG.*.KV_mite_presence.>"
+              "$JS.API.DIRECT.GET.KV_mite_presence"
+              "$JS.API.DIRECT.GET.KV_mite_presence.>"
+              "$JS.API.CONSUMER.CREATE.KV_mite_presence"
+              "$JS.API.CONSUMER.CREATE.KV_mite_presence.>"
+              "$JS.API.CONSUMER.*.KV_mite_presence.>"
+              "$JS.API.STREAM.*.KV_varroa_clusters"
+              "$JS.API.STREAM.MSG.*.KV_varroa_clusters"
+              "$JS.API.STREAM.MSG.*.KV_varroa_clusters.>"
+              "$JS.API.DIRECT.GET.KV_varroa_clusters"
+              "$JS.API.DIRECT.GET.KV_varroa_clusters.>"
+              "$JS.API.CONSUMER.CREATE.KV_varroa_clusters"
+              "$JS.API.CONSUMER.CREATE.KV_varroa_clusters.>"
+              "$JS.API.CONSUMER.*.KV_varroa_clusters.>"
+              # JetStream flow-control replies for KV watchers (ordered push consumers) — see #339
+              "$JS.FC.KV_varroa_clusters.>"
+              // Hibernation: publish wake commands, durably queue webhooks, and
+              // ensure the varroa_webhooks stream.
+              "wake.>"
+              "webhook.>"
+              "$JS.API.STREAM.CREATE.varroa_webhooks"
+              "$JS.API.STREAM.UPDATE.varroa_webhooks"
+              "$JS.API.STREAM.INFO.varroa_webhooks"
+            ]
+            subscribe: [
+              "activity.>"
+              "events.brood.>"
+              "$KV.mite_snapshots.>"
+              "$KV.mite_presence.>"
+              "$KV.varroa_clusters.>"
+              "_INBOX_bff.>"
+            ]
+          }
+        }
+      ]
+    }
+
+{{- end }}

@@ -1,0 +1,218 @@
+# composed bundles — now under /clusters/{cluster}/.
+/api/v1/clusters/{cluster}/composedbundles:
+  get:
+    operationId: listComposedBundles
+    tags: [composedbundles]
+    summary: Lists composed bundles, optionally filtered by namespace.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/namespace'
+    responses:
+      "200":
+        description: Composed bundle list (N6 envelope).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/ComposedBundle'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+
+/api/v1/clusters/{cluster}/composedbundles/{ns}:
+  post:
+    operationId: createComposedBundle
+    tags: [composedbundles]
+    summary: Creates a composed bundle.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/ComposedBundle'
+    responses:
+      "201":
+        description: Composed bundle created.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ComposedBundle'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+
+/api/v1/clusters/{cluster}/composedbundles/validate:
+  post:
+    operationId: validateComposedBundle
+    tags: [composedbundles]
+    summary: Validates a composed bundle spec.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/namespace'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/ComposedBundleSpec'
+    responses:
+      "200":
+        description: Validation result.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ComposedBundleValidateResponse'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+
+/api/v1/clusters/{cluster}/composedbundles/{ns}/preview:
+  post:
+    operationId: previewComposedBundle
+    tags: [composedbundles]
+    summary: Previews a composed bundle (dry-run composition).
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/ComposedBundleSpec'
+    responses:
+      "200":
+        description: Preview result.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ComposedBundlePreview'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+
+/api/v1/clusters/{cluster}/composedbundles/{ns}/{name}:
+  get:
+    operationId: getComposedBundle
+    tags: [composedbundles]
+    summary: Gets a composed bundle.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Composed bundle detail.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ComposedBundle'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  put:
+    operationId: updateComposedBundle
+    tags: [composedbundles]
+    summary: Updates a composed bundle.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/ComposedBundle'
+    responses:
+      "200":
+        description: Composed bundle updated.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ComposedBundle'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  delete:
+    operationId: deleteComposedBundle
+    tags: [composedbundles]
+    summary: Deletes a composed bundle.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "204":
+        description: Composed bundle deleted.
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/clusters/{cluster}/composedbundles/{ns}/{name}/pause:
+  post:
+    operationId: pauseComposedBundle
+    tags: [composedbundles]
+    summary: Pauses rollout of a composed bundle.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Bundle paused.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/clusters/{cluster}/composedbundles/{ns}/{name}/resume:
+  post:
+    operationId: resumeComposedBundle
+    tags: [composedbundles]
+    summary: Resumes rollout of a composed bundle.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Bundle resumed.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'

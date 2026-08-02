@@ -1,0 +1,451 @@
+items:
+    - kind: folder
+      name: challenge-freestyle-scm-extensions
+      items:
+        - kind: freeStyle
+          name: freestyle-scm-extensions
+          displayName: FreeStyle SCM Extensions
+          description: FreeStyle job with git SCM and extensions
+          scm:
+            gitSCM:
+                userRemoteConfigs:
+                    - userRemoteConfig:
+                        url: https://github.com/fake-org/fake-repo.git
+                        credentialsId: github-cred
+                branches:
+                    - branchSpec:
+                        name: '*/main'
+                extensions:
+                    - cleanBeforeCheckout:
+                        deleteUntrackedNestedRepositories: true
+                    - cloneOption:
+                        timeout: 30
+                    - pruneStaleBranch: {}
+          builders:
+            - shell:
+                command: echo "hello world"
+    - kind: folder
+      name: challenge-freestyle-builders-publishers
+      items:
+        - kind: freeStyle
+          name: freestyle-builders-publishers
+          displayName: FreeStyle Builders and Publishers
+          description: FreeStyle job with multiple builders and post-build actions
+          builders:
+            - shell:
+                command: make build
+            - maven:
+                targets: clean test
+          publishersList:
+            - archiveArtifacts:
+                allowEmptyArchive: true
+                artifacts: '**/target/*.jar'
+            - jUnitResultArchiver:
+                testResults: '**/target/surefire-reports/*.xml'
+            - mailer:
+                notifyEveryUnstableBuild: true
+                recipients: ci@example.com
+    - kind: folder
+      name: challenge-freestyle-params-triggers
+      items:
+        - kind: freeStyle
+          name: freestyle-params-triggers
+          displayName: FreeStyle Parameters and Triggers
+          description: FreeStyle job with build parameters and SCM trigger
+          triggers:
+            - pollSCM:
+                scmpoll_spec: H/5 * * * *
+            - cron:
+                spec: 0 2 * * *
+          parameters:
+            - string:
+                name: BRANCH
+                description: Branch to build
+                defaultValue: main
+                trim: true
+            - choice:
+                name: ENV
+                description: Target environment
+                choices:
+                    - dev
+                    - staging
+                    - prod
+            - booleanParam:
+                name: DRY_RUN
+                description: Dry run only
+    - kind: folder
+      name: challenge-pipeline-scm-flow
+      items:
+        - kind: pipeline
+          name: pipeline-scm-flow
+          displayName: Pipeline from SCM
+          description: Pipeline job using Jenkinsfile from git
+          definition:
+            cpsScmFlowDefinition:
+                scm:
+                    gitSCM:
+                        userRemoteConfigs:
+                            - userRemoteConfig:
+                                url: https://github.com/fake-org/pipeline-repo.git
+                        branches:
+                            - branchSpec:
+                                name: '*/main'
+                scriptPath: Jenkinsfile
+                lightweight: true
+    - kind: folder
+      name: challenge-pipeline-inline-script
+      items:
+        - kind: pipeline
+          name: pipeline-inline-script
+          displayName: Pipeline with Inline Script
+          description: Pipeline job with inline Groovy script
+          definition:
+            script: |
+                pipeline {
+                    agent any
+                    stages {
+                        stage('Build') {
+                            steps {
+                                echo 'Building...'
+                            }
+                        }
+                    }
+                }
+    - kind: folder
+      name: challenge-pipeline-all-properties
+      items:
+        - kind: pipeline
+          name: pipeline-all-properties
+          displayName: Pipeline All Properties
+          description: Pipeline with all optional properties
+          properties:
+            - buildDiscarder:
+                strategy:
+                    logRotator:
+                        daysToKeep: 30
+                        numToKeep: 10
+            - disableConcurrentBuilds: {}
+            - disableResume: {}
+            - durabilityHint:
+                hint: PERFORMANCE_OPTIMIZED
+          definition:
+            cpsScmFlowDefinition:
+                scm:
+                    gitSCM:
+                        userRemoteConfigs:
+                            - userRemoteConfig:
+                                url: https://github.com/fake-org/project.git
+                        branches:
+                            - branchSpec:
+                                name: '*/main'
+                scriptPath: Jenkinsfile
+          concurrentBuild: true
+          resumeBlocked: true
+          quietPeriod: 5
+    - kind: folder
+      name: challenge-multibranch-git-source
+      items:
+        - kind: multibranch
+          name: multibranch-git-source
+          displayName: Multibranch Git Source
+          description: Multibranch pipeline with git source
+          sourcesList:
+            - branchSource:
+                source:
+                    git:
+                        remote: https://github.com/fake-org/multibranch-git.git
+                        credentialsId: git-cred
+          projectFactory:
+            workflowBranchProjectFactory:
+                scriptPath: Jenkinsfile
+    - kind: folder
+      name: challenge-multibranch-github-source
+      items:
+        - kind: multibranch
+          name: multibranch-github-source
+          displayName: Multibranch GitHub Source
+          description: Multibranch pipeline with GitHub source
+          sourcesList:
+            - branchSource:
+                source:
+                    github:
+                        repoOwner: fake-org
+                        repository: fake-repo
+                        credentialsId: github-cred
+                        traits:
+                            - gitHubBranchDiscovery:
+                                strategyId: 3
+                            - gitHubPullRequestDiscovery:
+                                strategyId: 1
+          projectFactory:
+            workflowBranchProjectFactory:
+                scriptPath: Jenkinsfile
+    - kind: folder
+      name: challenge-multibranch-legacy-source
+      items:
+        - kind: multibranch
+          name: multibranch-legacy-source
+          displayName: Multibranch Legacy Source
+          description: Multibranch pipeline with legacy bare git source
+          sourcesList:
+            - git:
+                remote: https://github.com/fake-org/legacy-repo.git
+                credentialsId: git-cred
+          projectFactory:
+            multiBranchProjectFactory:
+                scriptPath: Jenkinsfile
+    - kind: folder
+      name: challenge-orgfolder-github-navigator
+      items:
+        - kind: organizationFolder
+          name: orgfolder-github-navigator
+          displayName: GitHub Org Folder
+          description: Organization folder with GitHub SCM navigator
+          navigators:
+            - githubNavigator:
+                repoOwner: fake-org
+                credentialsId: github-cred
+          projectFactories:
+            - multiBranchProjectFactory:
+                scriptPath: Jenkinsfile
+    - kind: folder
+      name: challenge-orgfolder-git-navigator
+      items:
+        - kind: organizationFolder
+          name: orgfolder-git-navigator
+          displayName: Git SCM Org Folder
+          description: Organization folder with git SCM navigator
+          navigators:
+            - gitNavigator:
+                remote: https://github.com/fake-org
+                credentialsId: git-cred
+          projectFactories:
+            - multiBranchProjectFactory:
+                scriptPath: Jenkinsfile
+    - kind: folder
+      name: challenge-folder-envvars
+      items:
+        - kind: folder
+          name: folder-envvars
+          displayName: Folder with EnvVars
+          description: Folder with environment variables property
+          properties:
+            - envVars:
+                vars:
+                    ANOTHER_VAR: another-value
+                    MY_VAR: my-value
+    - kind: folder
+      name: challenge-folder-credentials
+      items:
+        - kind: folder
+          name: folder-credentials
+          displayName: Folder with Credentials
+          description: Folder with usernamePassword credential
+          properties:
+            - folderCredentialsProperty:
+                folderCredentials:
+                    - credentials:
+                        - usernamePassword:
+                            password: s3cret
+                            scope: GLOBAL
+                            description: Admin credentials
+                            id: my-user-pass
+                            username: admin
+    - kind: folder
+      name: challenge-folder-item-restrictions
+      items:
+        - kind: folder
+          name: folder-item-restrictions
+          displayName: Folder with Item Restrictions
+          description: Folder with item type restrictions
+          properties:
+            - itemRestrictions:
+                allowedTypes:
+                    - hudson.model.FreeStyleProject
+                    - org.jenkinsci.plugins.workflow.job.WorkflowJob
+                    - com.cloudbees.hudson.plugins.folder.Folder
+                filter: true
+    - kind: folder
+      name: challenge-item-rbac-groups
+      items:
+        - kind: freeStyle
+          name: item-rbac-groups
+          displayName: Item with RBAC Groups
+          description: FreeStyle job with RBAC groups
+          groups:
+            - name: developers
+              members:
+                users:
+                    - alice
+                    - bob
+                external_groups:
+                    - engineering
+              roles:
+                - name: admin
+            - name: viewers
+              members:
+                users:
+                    - charlie
+              roles:
+                - name: viewer
+    - kind: folder
+      name: challenge-deep-nested-folders
+      items:
+        - kind: folder
+          name: top
+          displayName: Top Folder
+          items:
+            - kind: folder
+              name: middle
+              displayName: Middle Folder
+              items:
+                - kind: folder
+                  name: bottom
+                  displayName: Bottom Folder
+                  items:
+                    - kind: freeStyle
+                      name: leaf-job
+                      displayName: Leaf FreeStyle Job
+                      builders:
+                        - shell:
+                            command: echo deep
+    - kind: folder
+      name: challenge-folder-all-properties
+      items:
+        - kind: folder
+          name: folder-all-props
+          displayName: Folder with All Wired Properties
+          description: Folder exercising all three wired properties — envVars, folderCredentials, itemRestrictions (no folderLibraries — known gap)
+          properties:
+            - envVars:
+                vars:
+                    DEPLOY_ENV: staging
+                    LOG_LEVEL: debug
+            - folderCredentialsProperty:
+                folderCredentials:
+                    - credentials:
+                        - usernamePassword:
+                            password: d3pl0y!
+                            scope: GLOBAL
+                            description: Deployment credentials
+                            id: deploy-cred
+                            username: deploy-bot
+            - itemRestrictions:
+                allowedTypes:
+                    - org.jenkinsci.plugins.workflow.job.WorkflowJob
+                    - com.cloudbees.hudson.plugins.folder.Folder
+                filter: true
+    - kind: folder
+      name: challenge-mixed-tree
+      items:
+        - kind: folder
+          name: mixed-root
+          displayName: Mixed Tree Root
+          items:
+            - kind: pipeline
+              name: pipeline-a
+              displayName: Pipeline A
+              definition:
+                cpsScmFlowDefinition:
+                    scm:
+                        gitSCM:
+                            userRemoteConfigs:
+                                - userRemoteConfig:
+                                    url: https://github.com/fake-org/a.git
+                            branches:
+                                - branchSpec:
+                                    name: '*/main'
+                    scriptPath: Jenkinsfile
+            - kind: freeStyle
+              name: freestyle-b
+              displayName: FreeStyle B
+              builders:
+                - shell:
+                    command: echo hello
+            - kind: folder
+              name: sub-folder
+              displayName: Sub Folder
+              items:
+                - kind: multibranch
+                  name: multi-c
+                  displayName: Multibranch C
+                  sourcesList:
+                    - branchSource:
+                        source:
+                            git:
+                                remote: https://github.com/fake-org/c.git
+                  projectFactory:
+                    workflowBranchProjectFactory:
+                        scriptPath: Jenkinsfile
+    - kind: folder
+      name: challenge-pipeline-in-deep-folder
+      items:
+        - kind: folder
+          name: infra
+          displayName: Infrastructure
+          items:
+            - kind: folder
+              name: projects
+              displayName: Projects
+              items:
+                - kind: folder
+                  name: app
+                  displayName: Application
+                  items:
+                    - kind: pipeline
+                      name: pipeline-in-deep-folder
+                      displayName: Pipeline in Deep Folder
+                      definition:
+                        cpsScmFlowDefinition:
+                            scm:
+                                gitSCM:
+                                    userRemoteConfigs:
+                                        - userRemoteConfig:
+                                            url: https://github.com/fake-org/deep-app.git
+                                    branches:
+                                        - branchSpec:
+                                            name: '*/main'
+                            scriptPath: Jenkinsfile
+    - kind: folder
+      name: challenge-multibranch-multiple-sources
+      items:
+        - kind: multibranch
+          name: multibranch-multiple-sources
+          displayName: Multibranch Multiple Sources
+          description: Multibranch pipeline with two git branch sources
+          sourcesList:
+            - branchSource:
+                source:
+                    git:
+                        remote: https://github.com/fake-org/repo-a.git
+                        credentialsId: git-cred
+            - branchSource:
+                source:
+                    git:
+                        remote: https://github.com/fake-org/repo-b.git
+                        credentialsId: git-cred
+          projectFactory:
+            workflowBranchProjectFactory:
+                scriptPath: Jenkinsfile
+    - kind: folder
+      name: challenge-credential-type-secrettext
+      items:
+        - kind: folder
+          name: credential-type-secrettext
+          displayName: Folder with SecretText Credential
+          description: Folder exercising secretText credential type
+          properties:
+            - folderCredentialsProperty:
+                folderCredentials:
+                    - credentials:
+                        - usernamePassword:
+                            password: s3cret
+                            scope: GLOBAL
+                            description: Username/Password credential
+                            id: user-pass
+                            username: admin
+                        - secretText:
+                            id: my-secret
+                            scope: GLOBAL
+                            description: API token
+                            secret: super-secret-token

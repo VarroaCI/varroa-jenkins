@@ -1,0 +1,235 @@
+.page {
+  animation: fade .35s ease;
+}
+
+@keyframes fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.pageHead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
+
+.pageTitle {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -.5px;
+}
+
+.pageDesc {
+  font-size: 13.5px;
+  color: var(--text-2);
+  margin-top: 3px;
+}
+
+/* Table */
+
+.table {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.tableHeader {
+  display: grid;
+  grid-template-columns: 1.5fr 2fr 1fr 1fr 0.8fr 0.8fr 1fr;
+  padding: 12px 18px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.tableRow {
+  display: grid;
+  grid-template-columns: 1.5fr 2fr 1fr 1fr 0.8fr 0.8fr 1fr;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+  font-size: 0.92rem;
+  transition: .12s;
+}
+
+.tableRow:last-child {
+  border-bottom: none;
+}
+
+.tableRow:hover {
+  background: var(--surface-2);
+}
+
+.cellName {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.cellMono {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+/* Status badges */
+
+.phaseBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.phaseReady {
+  background: var(--ok-soft);
+  color: var(--ok-text);
+}
+
+.phaseSyncing {
+  background: var(--info-soft);
+  color: var(--info-text);
+}
+
+.phaseError {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+}
+
+.phasePending {
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
+
+/* Dialog */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.dialog {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 24px;
+  max-width: 520px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.dialogTitle {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+
+.formGroup {
+  margin-bottom: 14px;
+}
+
+.formLabel {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 4px;
+}
+
+.formInput {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.formInput:focus {
+  border-color: var(--accent);
+}
+
+.formCheckbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.formCheckbox input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.dialogActions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+/* Loading, empty, error */
+
+.loadingBanner {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.errorBanner {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  padding: 12px 18px;
+  border-radius: var(--radius);
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.empty {
+  padding: 40px 18px;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+/* Delete dialog body */
+
+.dialogBody {
+  font-size: 14px;
+  color: var(--text-2);
+  margin-bottom: 20px;
+}

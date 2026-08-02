@@ -1,0 +1,138 @@
+{
+  "title": "Varroa Telemetry",
+  "panels": [
+    {
+      "title": "Reconcile Errors",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "rate(varroa_reconcile_errors_total[5m])",
+          "legendFormat": "{{controller}}"
+        }
+      ]
+    },
+    {
+      "title": "Reconcile Duration Heatmap",
+      "type": "heatmap",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "rate(varroa_reconcile_duration_seconds_bucket[5m])",
+          "format": "heatmap",
+          "legendFormat": "{{le}}"
+        }
+      ]
+    },
+    {
+      "title": "Active Mite Connections",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 8, "w": 6, "h": 6 },
+      "targets": [
+        {
+          "expr": "sum(varroa_mite_stream_connections)",
+          "legendFormat": "connections"
+        }
+      ]
+    },
+    {
+      "title": "Mite Stream Disconnect Rate",
+      "type": "timeseries",
+      "gridPos": { "x": 6, "y": 8, "w": 18, "h": 6 },
+      "targets": [
+        {
+          "expr": "rate(varroa_mite_stream_disconnects_total[5m])",
+          "legendFormat": "{{controller}}"
+        }
+      ]
+    },
+    {
+      "title": "Bundle Clone/JCasC Duration",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 14, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(varroa_bundle_clone_duration_seconds_bucket[5m]))",
+          "legendFormat": "clone p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(varroa_bundle_clone_duration_seconds_bucket[5m]))",
+          "legendFormat": "clone p95"
+        },
+        {
+          "expr": "histogram_quantile(0.50, rate(varroa_bundle_jcasc_duration_seconds_bucket[5m]))",
+          "legendFormat": "jcasc p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(varroa_bundle_jcasc_duration_seconds_bucket[5m]))",
+          "legendFormat": "jcasc p95"
+        }
+      ]
+    },
+    {
+      "title": "HTTP Request Rate by Status",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 22, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "rate(varroa_http_requests_total[5m])",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "title": "HTTP Request Latency Heatmap",
+      "type": "heatmap",
+      "gridPos": { "x": 12, "y": 22, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "rate(varroa_http_request_duration_seconds_bucket[5m])",
+          "format": "heatmap",
+          "legendFormat": "{{le}}"
+        }
+      ]
+    },
+    {
+      "title": "Plugin Auth Rate by Outcome",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 30, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "rate(varroa_securityrealm_authenticate_total[5m])",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "title": "JWT Verify Duration Heatmap",
+      "type": "heatmap",
+      "gridPos": { "x": 12, "y": 30, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "rate(varroa_securityrealm_jwt_verify_duration_seconds_bucket[5m])",
+          "format": "heatmap",
+          "legendFormat": "{{le}}"
+        }
+      ]
+    },
+    {
+      "title": "gRPC Stream RTT",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 38, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(varroa_grpc_stream_rtt_seconds_bucket[5m]))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(varroa_grpc_stream_rtt_seconds_bucket[5m]))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(varroa_grpc_stream_rtt_seconds_bucket[5m]))",
+          "legendFormat": "p99"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,213 @@
+{{- if and .Values.updateCenter.enabled (not (include "varroa.isHive" .)) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: varroa-updatecenter
+  labels:
+    app.kubernetes.io/component: varroa-updatecenter
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  {{- /*
+    Plugin uploads are a read-modify-write against a store with no conditional-push
+    primitive, so they require a GENUINE single writer — which takes two conditions,
+    not one: replicas: 1 AND a non-overlapping rollout. A one-replica Deployment on
+    the default RollingUpdate runs the old and new pods concurrently during any
+    rollout, and both would advertise VARROA_UC_SINGLE_WRITER=true. The env var below
+    is derived from this same condition so the two cannot drift.
+  */}}
+  {{- /*
+    updateCenter.uploads is nil-safe here: `helm upgrade --reuse-values` from a
+    release predating this key does not merge in the chart's new default, so
+    .Values.updateCenter.uploads can be an absent map. `default dict` covers that
+    case (falling back to the documented enabled:true default) without using
+    sprig's `default` directly on the bool, which would also (wrongly) coerce an
+    explicit `enabled: false` back to true.
+  */}}
+  {{- $ucUploads := .Values.updateCenter.uploads | default dict }}
+  {{- $ucUploadsEnabled := true }}
+  {{- if hasKey $ucUploads "enabled" }}
+  {{- $ucUploadsEnabled = $ucUploads.enabled }}
+  {{- end }}
+  {{- if or $ucUploadsEnabled (eq .Values.updateCenter.storage.type "local") }}
+  replicas: 1
+  strategy:
+    type: Recreate
+  {{- else }}
+  replicas: {{ .Values.updateCenter.replicas | default 2 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: varroa-updatecenter
+      {{- include "varroa.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Roll the pod when an EXPLICIT import token changes: the token env is
+        # injected from the Secret at start and is not hot-reloaded. Hash the
+        # declared value, not the rendered Secret — re-rendering the Secret would
+        # re-run randAlphaNum and produce a different token than the one actually
+        # applied, causing spurious rolls (and a checksum that never matches).
+        # When the token is auto-generated (importToken unset), the lookup in
+        # secret.yaml keeps it stable across `helm upgrade`, so a constant
+        # checksum is correct. GitOps/ArgoCD (client-side `helm template`, no
+        # cluster lookup) must set updateCenter.importToken explicitly.
+        checksum/import-token: {{ .Values.updateCenter.importToken | default "" | sha256sum }}
+      labels:
+        app.kubernetes.io/component: varroa-updatecenter
+        {{- include "varroa.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: varroa-updatecenter
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.updateCenter.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: updatecenter
+          image: "{{ .Values.updateCenter.image.repository }}:{{ .Values.updateCenter.image.tag }}"
+          imagePullPolicy: {{ .Values.updateCenter.image.pullPolicy }}
+          command: ["/app/varroa-updatecenter"]
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            {{- toYaml .Values.updateCenter.containerSecurityContext | nindent 12 }}
+          env:
+            - name: OPERATOR_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+            - name: VARROA_UC_LISTEN
+              value: ":8080"
+            - name: VARROA_UC_STORAGE_TYPE
+              value: {{ .Values.updateCenter.storage.type | quote }}
+            {{- if eq .Values.updateCenter.storage.type "local" }}
+            - name: VARROA_UC_LOCAL_PATH
+              value: /var/lib/varroa-updatecenter
+            {{- end }}
+            {{- if eq .Values.updateCenter.storage.type "oci" }}
+            {{- if .Values.updateCenter.storage.oci.ref }}
+            - name: VARROA_UC_OCI_REF
+              value: {{ .Values.updateCenter.storage.oci.ref | quote }}
+            {{- end }}
+            - name: VARROA_UC_OCI_INSECURE
+              value: {{ .Values.updateCenter.storage.oci.insecure | quote }}
+            {{- if .Values.updateCenter.storage.oci.existingSecret }}
+            - name: VARROA_UC_OCI_CREDS_PATH
+              value: /etc/oci-creds/config.json
+            {{- end }}
+            {{- end }}
+            - name: VARROA_UC_IMPORT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: varroa-updatecenter-import-token
+                  key: token
+            - name: VARROA_UC_PULLTHROUGH_ENABLED
+              value: {{ .Values.updateCenter.pullThrough.enabled | quote }}
+            - name: VARROA_UC_PULLTHROUGH_UPSTREAM_URL
+              value: {{ .Values.updateCenter.pullThrough.upstreamURL | quote }}
+            - name: VARROA_UC_PULLTHROUGH_DOWNLOAD_URL
+              value: {{ .Values.updateCenter.pullThrough.downloadURL | quote }}
+            {{- if .Values.updateCenter.pullThrough.enabled }}
+            - name: VARROA_UC_LTS_METADATA_FILE
+              value: /etc/varroa/uc/lts-metadata-urls
+            {{- end }}
+            # NOT gated on pull-through: the declared set is needed most in the
+            # air-gapped configuration, where pull-through is off.
+            - name: VARROA_UC_DECLARED_PLUGINS_FILE
+              value: /etc/varroa/uc/declared-plugins
+            - name: VARROA_UC_SINGLE_WRITER
+              value: {{ $ucUploadsEnabled | quote }}
+            {{- with $ucUploads.maxBytes }}
+            - name: VARROA_UC_MAX_UPLOAD_BYTES
+              value: {{ . | quote }}
+            {{- end }}
+            - name: VARROA_TELEMETRY_DISABLED
+              value: {{ .Values.telemetry.disabled | quote }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.telemetry.endpoint | quote }}
+            - name: OTEL_TRACES_ENABLED
+              value: {{ and .Values.telemetry.traces.enabled .Values.telemetry.services.operator.traces.enabled | quote }}
+            - name: OTEL_TRACES_SAMPLER_RATIO
+              value: {{ .Values.telemetry.services.operator.traces.samplerRatio | quote }}
+            - name: OTEL_METRICS_ENABLED
+              value: {{ and .Values.telemetry.metrics.enabled .Values.telemetry.services.operator.metrics.enabled | quote }}
+            - name: OTEL_LOGS_ENABLED
+              value: {{ and .Values.telemetry.logs.enabled .Values.telemetry.services.operator.logs.enabled | quote }}
+            - name: OTEL_LOG_LEVEL
+              value: {{ .Values.telemetry.logs.level | quote }}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "deployment.environment={{ .Values.telemetry.resourceAttributes.deploymentName }},cluster.name={{ .Values.telemetry.resourceAttributes.clusterName }}"
+            - name: METRICS_TOKEN
+              value: {{ .Values.telemetry.metricsToken | quote }}
+            {{- range .Values.updateCenter.env }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: uc-metadata
+              mountPath: /etc/varroa/uc
+              readOnly: true
+            {{- if eq .Values.updateCenter.storage.type "local" }}
+            - name: data
+              mountPath: /var/lib/varroa-updatecenter
+            {{- end }}
+            {{- if and (eq .Values.updateCenter.storage.type "oci") .Values.updateCenter.storage.oci.existingSecret }}
+            - name: oci-creds
+              mountPath: /etc/oci-creds
+              readOnly: true
+            {{- end }}
+            {{- with .Values.updateCenter.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.updateCenter.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      {{- with .Values.updateCenter.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        # Operator-managed ConfigMap carrying the LTS-line metadata source URLs and
+        # the declared plugin set. Mounted unconditionally (gated only on
+        # updateCenter.enabled) because declared-plugins is not a pull-through input.
+        # Optional so the pod starts before the operator first writes it.
+        - name: uc-metadata
+          configMap:
+            name: varroa-updatecenter-metadata
+            optional: true
+        {{- if eq .Values.updateCenter.storage.type "local" }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: varroa-updatecenter
+        {{- end }}
+        {{- if and (eq .Values.updateCenter.storage.type "oci") .Values.updateCenter.storage.oci.existingSecret }}
+        - name: oci-creds
+          secret:
+            secretName: {{ .Values.updateCenter.storage.oci.existingSecret }}
+        {{- end }}
+        {{- with .Values.updateCenter.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<project>
+  <displayName>FreeStyle B</displayName>
+  <builders>
+    <hudson.tasks.Shell>
+      <command>echo hello</command>
+    </hudson.tasks.Shell>
+  </builders>
+</project>

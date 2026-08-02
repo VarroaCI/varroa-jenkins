@@ -1,0 +1,1 @@
+{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:450f808042ffc9ffa123ae1a99540e453a056b2805cc92f779b6233325951ae6","size":2384,"annotations":{"org.opencontainers.image.ref.name":"hack/localdev/pluginpack-fixture"}}]}

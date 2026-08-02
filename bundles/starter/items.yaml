@@ -1,0 +1,34 @@
+---
+# Starter bundle — items.
+#
+# One pipeline whose only job is to prove the whole path works end to end:
+# bundle -> composer -> ComposedBundle content -> mite -> Jenkins.
+#
+# `agent any` is deliberate: a first-run sample must succeed, so it runs on
+# whatever executor is available rather than requiring the Kubernetes cloud to
+# have produced a pod. That means it does NOT prove the cloud works — it proves
+# the configuration pipeline works. Anything claiming to verify agent
+# provisioning has to pin `agent { kubernetes { ... } }` and accept that it fails
+# when the cloud is misconfigured.
+#
+# `workflow-aggregator` supplies the pipeline stack and is part of every
+# JenkinsVersionProfile core set, so this needs no plugin declaration.
+items:
+    - kind: pipeline
+      name: hello-varroa
+      displayName: Hello Varroa
+      description: >-
+        Sample pipeline from Varroa's built-in starter bundle. Delete it by
+        pointing the Controller at your own ComposedBundle.
+      definition:
+        script: |
+            pipeline {
+                agent any
+                stages {
+                    stage('Hello') {
+                        steps {
+                            echo 'hello from Varroa'
+                        }
+                    }
+                }
+            }

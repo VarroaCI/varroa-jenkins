@@ -1,0 +1,253 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+  name: provisioningdefaults.varroa.dev
+spec:
+  group: varroa.dev
+  names:
+    kind: ProvisioningDefaults
+    listKind: ProvisioningDefaultsList
+    plural: provisioningdefaults
+    singular: provisioningdefaults
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.storageClass
+      name: STORAGECLASS
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: AGE
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ProvisioningDefaults is the Schema for the provisioningdefaults
+          API (cluster-scoped).
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ProvisioningDefaultsSpec defines the desired state of ProvisioningDefaults.
+            properties:
+              broodPolicy:
+                description: |-
+                  BroodPolicy constrains which brood operation verbs may run in this cluster.
+                  Nil means every verb is allowed — the singleton is optional and its absence
+                  must not disable functionality.
+                properties:
+                  executeGroovy:
+                    description: |-
+                      ExecuteGroovy governs the executeGroovy verb, which runs arbitrary Groovy
+                      on a controller's script console with Administer rights.
+                    properties:
+                      allowedNamespaces:
+                        description: |-
+                          AllowedNamespaces restricts which namespaces may host an executeGroovy
+                          BroodOperation. It is matched against the BroodOperation's OWN namespace,
+                          not its targets': the operation is the thing being authorized, and a single
+                          operation may fan out to targets in many namespaces.
+
+                          Empty means every namespace, when Enabled is not false. A non-empty list
+                          with Enabled explicitly false is still disabled — Enabled is the outer gate.
+                        items:
+                          type: string
+                        type: array
+                      enabled:
+                        description: |-
+                          Enabled turns the verb on or off cluster-wide. Nil means enabled: the verb
+                          is CloudBees-parity functionality, and a policy object that only some
+                          clusters have must not change behaviour by its absence.
+                        type: boolean
+                    type: object
+                type: object
+              commandDeadlineSec:
+                description: CommandDeadlineSec bounds each mite command (desired-state
+                  apply). 0 = default (1200s/20m).
+                type: integer
+              defaultCPU:
+                type: string
+              defaultMemory:
+                type: string
+              defaultNamespace:
+                description: DefaultNamespace is the namespace the creation wizard
+                  preselects. Empty means "varroa".
+                type: string
+              defaultPlugins:
+                items:
+                  description: PluginEntry defines a single plugin with artifact ID
+                    and version.
+                  properties:
+                    artifactId:
+                      description: ArtifactId is the Jenkins plugin artifact ID.
+                      type: string
+                    version:
+                      description: Version is the pinned plugin version.
+                      type: string
+                  required:
+                  - artifactId
+                  - version
+                  type: object
+                type: array
+              defaultReconciliationPolicy:
+                description: |-
+                  DefaultReconciliationPolicy is the default reconciliation policy for
+                  controllers that don't specify their own.
+                properties:
+                  drainTimeoutSeconds:
+                    description: |-
+                      DrainTimeoutSeconds bounds the quietDown build-drain before a restart-class change.
+                      0 ⇒ disabled (restart immediately, today's behavior). Default seeded to 900.
+                    type: integer
+                  interval:
+                    description: |-
+                      Interval is the duration between steady-state reconciliation ticks in Connected phase.
+                      Format: Go duration string (e.g., "30s", "5m", "1h").
+                      Minimum: 10s. If unset, defaults from ProvisioningDefaults or 30s.
+                    type: string
+                  maxDeferSeconds:
+                    description: |-
+                      MaxDeferSeconds bounds how long `idle` mode defers an apply while builds run
+                      before applying anyway. 0 ⇒ default (1800). Only consulted when Mode == idle.
+                    type: integer
+                  mode:
+                    description: |-
+                      Mode is the reconciliation mode. "automatic" (default) pushes desired state
+                      immediately on config drift. "manual" requires user approval via the API/UI.
+                    enum:
+                    - automatic
+                    - idle
+                    - manual
+                    type: string
+                  rolloutWave:
+                    description: |-
+                      RolloutWave orders progressive bundle rollout. A controller applies a new bundle version only
+                      after every Connected sibling sharing the bundle with a LOWER RolloutWave has applied that same
+                      version successfully. 0 (default/unset) => no earlier waves => applies immediately (today's behavior).
+                    minimum: 0
+                    type: integer
+                type: object
+                x-kubernetes-validations:
+                - message: interval must be at least 10s
+                  rule: '!has(self.interval) || duration(self.interval) >= duration(''10s'')'
+              defaultStorage:
+                type: string
+              defaultVersion:
+                type: string
+              imagePullSecrets:
+                description: ImagePullSecrets is a list of image pull secret names
+                  to attach to StatefulSet pods.
+                items:
+                  type: string
+                type: array
+              ingressAnnotations:
+                additionalProperties:
+                  type: string
+                type: object
+              ingressClassName:
+                description: IngressClassName is the ingress class name for controller
+                  Ingresses.
+                type: string
+              liveFingerprintIntervalSec:
+                description: |-
+                  LiveFingerprintIntervalSec is the mite's live-drift fingerprint cadence, seconds.
+                  0/unset ⇒ default 600 (10m). A negative value disables fingerprinting brood-wide.
+                type: integer
+              namespaces:
+                description: Namespaces is an optional list of additional provisionable
+                  namespaces.
+                items:
+                  type: string
+                type: array
+              pluginUpdateCenterDownloadURL:
+                description: |-
+                  PluginUpdateCenterDownloadURL is the Jenkins update-center binary download URL
+                  (maps to JENKINS_UC_DOWNLOAD_URL). When non-empty, plugins-init uses this mirror.
+                type: string
+              pluginUpdateCenterURL:
+                description: |-
+                  PluginUpdateCenterURL is the Jenkins update-center metadata URL for plugin
+                  resolution (maps to JENKINS_UC). When non-empty, plugins-init uses this mirror.
+                type: string
+              provisioningTimeoutSec:
+                description: ProvisioningTimeoutSec is the max seconds to wait for
+                  provisioning.
+                type: integer
+              rootDomain:
+                description: RootDomain is the root domain for auto-derived ingress
+                  hosts.
+                type: string
+              sizePresets:
+                description: SizePresets are the S/M/L resource cards offered by the
+                  wizard.
+                items:
+                  description: SizePreset defines a named resource size template for
+                    the wizard.
+                  properties:
+                    cpu:
+                      type: string
+                    memory:
+                      type: string
+                    name:
+                      type: string
+                    storage:
+                      type: string
+                  required:
+                  - cpu
+                  - memory
+                  - name
+                  - storage
+                  type: object
+                type: array
+              storageClass:
+                type: string
+              storageSizeGB:
+                type: integer
+            type: object
+          status:
+            description: ProvisioningDefaultsStatus defines the observed state.
+            properties:
+              conditions:
+                items:
+                  description: ProvisioningDefaultsCondition is a status condition
+                    for ProvisioningDefaults.
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

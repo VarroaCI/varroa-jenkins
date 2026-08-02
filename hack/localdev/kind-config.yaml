@@ -1,0 +1,24 @@
+# kind cluster for `make localdev` — created by hack/localdev/localdev.sh.
+# Ports 80/443 map to the host so the localdev ingress is reachable at
+# *.varroa.localtest.me (public DNS -> 127.0.0.1), including from a Windows
+# browser against a WSL2 docker.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: varroa-localdev
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      - containerPort: 80
+        hostPort: 80
+        listenAddress: "0.0.0.0"
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 443
+        listenAddress: "0.0.0.0"
+        protocol: TCP

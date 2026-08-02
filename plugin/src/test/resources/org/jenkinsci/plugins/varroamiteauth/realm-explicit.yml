@@ -1,0 +1,6 @@
+jenkins:
+  securityRealm:
+    varroaMiteAuth:
+      oidcIssuer: "https://dex.example/dex"
+      userClaimNames: "login,sub"
+      groupClaimName: "memberOf"

@@ -1,0 +1,5 @@
+---
+# The version-profile core set already ships the pipeline stack
+# (workflow-aggregator) and cloudbees-folder — no extra plugins needed for the
+# sample items. Add entries here to exercise plugin rolls in localdev.
+plugins: []

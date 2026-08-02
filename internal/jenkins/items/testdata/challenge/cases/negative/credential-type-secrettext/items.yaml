@@ -1,0 +1,20 @@
+items:
+  - kind: folder
+    name: credential-type-secrettext
+    displayName: "Folder with SecretText Credential"
+    description: "Folder exercising secretText credential type"
+    properties:
+      - folderCredentialsProperty:
+          folderCredentials:
+            - credentials:
+                - usernamePassword:
+                    id: user-pass
+                    scope: GLOBAL
+                    username: admin
+                    password: s3cret
+                    description: "Username/Password credential"
+                - secretText:
+                    id: my-secret
+                    scope: GLOBAL
+                    secret: "super-secret-token"
+                    description: "API token"

@@ -1,0 +1,74 @@
+# Example item-level RBAC for Varroa.
+#
+# RBAC is NOT carried in a JCasC bundle — Varroa strips `authorizationStrategy`
+# from bundles and synthesizes the role-strategy config from these CRDs instead
+# (see internal/rbac/resolver.go + generator.go). To see Item roles in the
+# Jenkins UI, apply these and let the operator reconcile RBAC onto the
+# controller, then open: Manage Jenkins -> Manage and Assign Roles.
+#
+# The folder paths below match items in the challenge corpus
+# (internal/jenkins/items/testdata/challenge/bundle-challenge/items.yaml).
+#
+#   kubectl apply -f config/examples/item-rbac-example.yaml
+---
+# An Item-typed role: only roleType: Item lands in the "Item roles" bucket.
+apiVersion: varroa.dev/v1alpha1
+kind: JenkinsRole
+metadata:
+  name: example-folder-developer
+spec:
+  roleType: Item
+  description: Read/build/cancel jobs within a folder subtree.
+  permissions:
+    - hudson.model.Item.Read
+    - hudson.model.Item.Discover
+    - hudson.model.Item.Build
+    - hudson.model.Item.Cancel
+    - hudson.model.Run.Replay
+    - hudson.model.View.Read
+---
+apiVersion: varroa.dev/v1alpha1
+kind: JenkinsRole
+metadata:
+  name: example-folder-viewer
+spec:
+  roleType: Item
+  description: Read-only visibility into matching folders.
+  permissions:
+    - hudson.model.Item.Read
+    - hudson.model.Item.Discover
+    - hudson.model.View.Read
+---
+# Folder scope: lowerScope() turns this into the role-strategy regex
+#   ^challenge-deep-nested-folders($|/.*)$  (Subtree => folder + all descendants)
+# and assigns it to the "Item roles" table with that pattern.
+apiVersion: varroa.dev/v1alpha1
+kind: JenkinsRoleBinding
+metadata:
+  name: example-deep-folder-developers
+spec:
+  roleRef: example-folder-developer
+  subjects:
+    - kind: Group
+      name: developers
+  jenkinsScope:
+    type: Folder
+    folder: challenge-deep-nested-folders
+    propagate: Subtree
+---
+# Pattern scope: the raw regex is passed straight through as the role pattern,
+# so this Item role matches every top-level "challenge-freestyle-*" folder.
+apiVersion: varroa.dev/v1alpha1
+kind: JenkinsRoleBinding
+metadata:
+  name: example-freestyle-viewers
+spec:
+  roleRef: example-folder-viewer
+  subjects:
+    - kind: Group
+      name: viewers
+    - kind: User
+      name: viewer
+  jenkinsScope:
+    type: Pattern
+    pattern: ^challenge-freestyle-.*

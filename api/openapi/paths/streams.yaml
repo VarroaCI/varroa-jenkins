@@ -1,0 +1,83 @@
+# streams — search, brood SSE, stream tickets.
+/api/v1/search:
+  get:
+    operationId: search
+    tags: [streams]
+    summary: Search authorized controllers, namespaces, groups, and catalog items.
+    parameters:
+      - name: q
+        in: query
+        description: Search query string.
+        required: true
+        schema:
+          type: string
+    responses:
+      "200":
+        description: Search results (N6 envelope).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/SearchResult'
+              additionalProperties: false
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/stream/brood:
+  get:
+    operationId: streamBrood
+    tags: [streams]
+    summary: Streams brood-wide events via Server-Sent Events.
+    description: Uses `?ticket=` for browser EventSource auth.
+    x-sse: true
+    responses:
+      "200":
+        description: SSE event stream.
+        content:
+          text/event-stream:
+            schema:
+              type: string
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+
+/api/v1/stream/ticket:
+  post:
+    operationId: createStreamTicket
+    tags: [streams]
+    summary: Creates a short-lived SSE stream ticket.
+    description: >
+      CLI-excluded — browser EventSource workaround. Returns a ticket that
+      can be used as `?ticket=` parameter on SSE endpoints.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [scope]
+            properties:
+              scope:
+                type: string
+            additionalProperties: false
+    responses:
+      "200":
+        description: Stream ticket.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/StreamTicketResponse'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'

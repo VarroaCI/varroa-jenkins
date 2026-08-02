@@ -1,0 +1,195 @@
+{{- if .Values.operator.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-operator") }}
+  labels:
+    app.kubernetes.io/component: varroa-operator
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.operator.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: varroa-operator
+      {{- include "varroa.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: varroa-operator
+        {{- include "varroa.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-operator") }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.operator.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: operator
+          image: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag }}"
+          imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
+          command: ["/app/varroa-operator"]
+          args:
+            - "-bus-ca-file=/etc/nats-creds/ca.crt"
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.operator.service.port }}
+            - name: health
+              containerPort: 8090
+            - name: telemetry
+              containerPort: 9091
+            - name: wake
+              containerPort: {{ .Values.operator.wake.port }}
+          securityContext:
+            {{- toYaml .Values.operator.containerSecurityContext | nindent 12 }}
+          env:
+            - name: OPERATOR_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            - name: MANAGED_NAMESPACES
+              value: {{ join " " .Values.managedNamespaces | quote }}
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+            - name: GIT_CONFIG_NOSYSTEM
+              value: "1"
+            - name: VARROA_BUS_URL
+              value: {{ include "varroa.busURL" (dict "root" $ "tier" "operator") | quote }}
+            - name: VARROA_CLUSTER_NAME
+              value: {{ .Values.cluster.name | quote }}
+            - name: VARROA_JETSTREAM_REPLICAS
+              value: {{ include "varroa.jetStreamReplicas" $ | quote }}
+            - name: BUS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: varroa-nats-creds
+                  key: operator-password
+            - name: VARROA_SHARD_COUNT
+              value: {{ .Values.operator.shardCount | default 256 | quote }}
+            - name: VARROA_MAX_CONCURRENT_RECONCILES
+              value: {{ .Values.operator.maxConcurrentReconciles | quote }}
+            - name: VARROA_WAKE_PORT
+              value: {{ .Values.operator.wake.port | quote }}
+            - name: VARROA_WAKE_ENABLED
+              value: {{ .Values.operator.wake.enabled | quote }}
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: VARROA_OPERATOR_ENDPOINT
+              value: {{ printf "%s.%s.svc.cluster.local:%d" (include "varroa.fullname" (dict "Release" .Release "name" "varroa-gateway")) .Release.Namespace (int .Values.gateway.service.grpcPort) | quote }}
+            {{- $oidcIssuer := .Values.auth.oidc.issuer | default .Values.bff.oidcIssuer | default (and .Values.dex.enabled (.Values.dex.config.issuer | default (printf "https://dex.%s" .Values.global.domain))) | default "" }}
+            - name: VARROA_OIDC_ISSUER
+              value: {{ $oidcIssuer | quote }}
+            - name: VARROA_OIDC_CLIENT_ID
+              value: {{ .Values.auth.oidc.clientId | default .Values.bff.oidcClientId | default "varroa" | quote }}
+            - name: VARROA_OIDC_CLIENT_SECRET
+              {{- if $oidcIssuer }}
+              value: {{ required "auth.oidc.clientSecret (or bff.oidcClientSecret) must be set" (.Values.auth.oidc.clientSecret | default .Values.bff.oidcClientSecret) | quote }}
+              {{- else }}
+              value: {{ .Values.auth.oidc.clientSecret | default .Values.bff.oidcClientSecret | default "" | quote }}
+              {{- end }}
+            - name: VARROA_AUTH_MODE
+              value: {{ .Values.auth.mode | quote }}
+            {{- if .Values.auth.bffUrl }}
+            - name: VARROA_BFF_URL
+              value: {{ .Values.auth.bffUrl | quote }}
+            {{- end }}
+            - name: VARROA_OIDC_REDIRECT_URL
+              value: {{ .Values.auth.oidc.redirectUrl | default .Values.auth.dashboardUrl | default .Values.bff.oidcRedirectUrl | default "" | quote }}
+            - name: VARROA_OIDC_USER_CLAIM
+              value: {{ .Values.auth.oidc.userClaim | default "preferred_username,sub" | quote }}
+            - name: VARROA_OIDC_GROUP_CLAIM
+              value: {{ .Values.auth.oidc.groupClaim | default "groups" | quote }}
+            - name: VARROA_TELEMETRY_DISABLED
+              value: {{ .Values.telemetry.disabled | quote }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.telemetry.endpoint | quote }}
+            - name: OTEL_TRACES_ENABLED
+              value: {{ and .Values.telemetry.traces.enabled .Values.telemetry.services.operator.traces.enabled | quote }}
+            - name: OTEL_TRACES_SAMPLER_RATIO
+              value: {{ .Values.telemetry.services.operator.traces.samplerRatio | quote }}
+            - name: OTEL_METRICS_ENABLED
+              value: {{ and .Values.telemetry.metrics.enabled .Values.telemetry.services.operator.metrics.enabled | quote }}
+            - name: OTEL_LOGS_ENABLED
+              value: {{ and .Values.telemetry.logs.enabled .Values.telemetry.services.operator.logs.enabled | quote }}
+            - name: OTEL_LOG_LEVEL
+              value: {{ .Values.telemetry.logs.level | quote }}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "deployment.environment={{ .Values.telemetry.resourceAttributes.deploymentName }},cluster.name={{ .Values.telemetry.resourceAttributes.clusterName }}"
+            - name: METRICS_TOKEN
+              value: {{ .Values.telemetry.metricsToken | quote }}
+            {{- range .Values.operator.env }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+            - name: VARROA_MITE_IMAGE
+              value: {{ .Values.operator.miteImage | default (printf "%s:%s" .Values.operator.image.repository .Values.operator.image.tag) | quote }}
+            - name: VARROA_VARROACTL_IMAGE
+              value: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag }}"
+            - name: VARROA_SCHEDULE_BFF_URL
+              value: {{ printf "http://%s.%s.svc:%v" (include "varroa.fullname" (dict "Release" .Release "name" "varroa-bff")) .Release.Namespace .Values.bff.service.port | quote }}
+{{- if and .Values.updateCenter.enabled (not (include "varroa.isHive" .)) }}
+            - name: VARROA_UPDATE_CENTER_URL
+              value: {{ printf "http://varroa-updatecenter.%s.svc:8080" .Release.Namespace | quote }}
+{{- end }}
+{{- if .Values.global.imagePullSecrets }}
+            - name: VARROA_IMAGE_PULL_SECRETS
+{{- $pullNames := list }}
+{{- range .Values.global.imagePullSecrets }}{{ $pullNames = append $pullNames .name }}{{- end }}
+              value: {{ join "," $pullNames | quote }}
+{{- end }}
+            {{- if .Values.operator.gitCache.enabled }}
+            - name: VARROA_GIT_CACHE_DIR
+              value: {{ .Values.operator.gitCache.dir | quote }}
+            - name: VARROA_GIT_CACHE_MAX_REPOS
+              value: {{ .Values.operator.gitCache.maxRepos | quote }}
+            - name: VARROA_GIT_CACHE_MAX_SIZE_MIB
+              value: {{ .Values.operator.gitCache.maxSizeMiB | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: nats-creds
+              mountPath: /etc/nats-creds
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.operator.gitCache.enabled }}
+            - name: git-cache
+              mountPath: {{ .Values.operator.gitCache.dir }}
+            {{- end }}
+            {{- with .Values.operator.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.operator.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: nats-creds
+          secret:
+            secretName: varroa-nats-creds
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.operator.gitCache.enabled }}
+        - name: git-cache
+          emptyDir:
+            sizeLimit: {{ .Values.operator.gitCache.volumeSizeLimit }}
+        {{- end }}
+        {{- with .Values.operator.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

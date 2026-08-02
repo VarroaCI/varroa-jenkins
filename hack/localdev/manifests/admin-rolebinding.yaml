@@ -1,0 +1,15 @@
+# Binds the localdev admin user (auth.mode=local; User CR "admin") to the
+# builtin admin VarroaRole (CR name "admin"; Jenkins-facing role
+# "varroa-admin"). Both the username and email subject spellings are bound to
+# cover either claim resolution.
+apiVersion: varroa.dev/v1alpha1
+kind: VarroaRoleBinding
+metadata:
+  name: localdev-admin
+spec:
+  roleRef: admin
+  subjects:
+    - kind: User
+      name: admin@varroa.local
+    - kind: User
+      name: admin

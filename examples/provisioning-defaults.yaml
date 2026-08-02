@@ -1,0 +1,22 @@
+# =============================================================================
+# ProvisioningDefaults — cluster-wide defaults for all Controllers.
+#
+# Apply once per cluster. Every Controller inherits these unless overridden.
+# The operator reads the `varroa-defaults` resource unconditionally on each
+# reconciliation tick.
+#
+# Usage:
+#   kubectl apply -f examples/provisioning-defaults.yaml
+# =============================================================================
+apiVersion: varroa.dev/v1alpha1
+kind: ProvisioningDefaults
+metadata:
+  name: varroa-defaults
+spec:
+  storageClass: openebs-hostpath          # ← adapt to your cluster
+  ingressClassName: nginx                 # ← your ingress controller
+  imagePullSecrets:                       # ← add if using a private registry
+    - ghcr-credentials                     # ← NOTE: Secret must exist in EVERY namespace
+                                           #   that runs controllers (e.g., varroa),
+  ingressAnnotations:                     # ← applied to every Controller ingress
+    cert-manager.io/cluster-issuer: letsencrypt-route53

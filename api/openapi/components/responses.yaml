@@ -1,0 +1,63 @@
+# Shared responses — all error responses carry the Error schema (N1).
+BadRequest:
+  description: Bad request — invalid body, missing required fields, or validation failure.
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/Error'
+
+Unauthorized:
+  description: Not authenticated — missing or invalid bearer token.
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/Error'
+
+Forbidden:
+  description: Forbidden — authenticated but insufficient permissions.
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/Error'
+
+NotFound:
+  description: Resource not found.
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/Error'
+
+Conflict:
+  description: Conflict — resource state prevents the operation (e.g. no pending approval).
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/Error'
+
+MethodNotAllowed:
+  description: Method not allowed on this endpoint.
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/Error'
+
+Internal:
+  description: Internal server error.
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/Error'
+
+ClusterUnreachable:
+  description: Target cluster unreachable over the bus.
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/Error'
+
+ServiceUnavailable:
+  description: Search sources are temporarily unavailable.
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/Error'

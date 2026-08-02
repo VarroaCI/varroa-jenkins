@@ -1,0 +1,333 @@
+.page {
+  animation: fade .35s ease;
+}
+
+@keyframes fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.pageHead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.pageTitle {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -.5px;
+}
+
+.pageDesc {
+  font-size: 13.5px;
+  color: var(--text-2);
+  margin-top: 3px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1.6fr .8fr .9fr 1fr 1fr 1fr 1.3fr;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  transition: .12s;
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.head {
+  cursor: default;
+  background: var(--surface-2);
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 11px 18px;
+}
+
+.head span {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.clusterName {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nameText {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.coreTag {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  padding: 1px 7px;
+  border-radius: 9px;
+  letter-spacing: .3px;
+}
+
+.healthPill {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 12px;
+  display: inline-block;
+}
+
+.statePill {
+  composes: healthPill;
+}
+
+.stateActive {
+  background: var(--ok-soft, #e8f5e9);
+  color: var(--ok-text, #2e7d32);
+}
+
+.stateDraining {
+  background: var(--warn-soft, #fff3e0);
+  color: var(--warn-text, #e65100);
+}
+
+.stateDrained {
+  background: var(--idle-soft, #f5f5f5);
+  color: var(--idle-text, #616161);
+}
+
+.healthy {
+  background: var(--ok-soft, #e8f5e9);
+  color: var(--ok-text, #2e7d32);
+}
+
+.unhealthy {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+}
+
+.drainMeta {
+  font-size: 11.5px;
+  color: var(--text-2);
+  margin-top: 2px;
+}
+
+.drillLink {
+  color: var(--accent-strong);
+  font-weight: 600;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.drillLink:hover {
+  text-decoration: underline;
+}
+
+.drainBtn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--bad-text);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: .12s;
+}
+
+.drainBtn:hover {
+  background: var(--bad-soft);
+}
+
+.cancelBtn {
+  composes: drainBtn;
+  color: var(--accent-strong);
+}
+
+.cancelBtn:hover {
+  background: var(--accent-soft);
+}
+
+.loadingBanner {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.errorBanner {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  padding: 12px 18px;
+  border-radius: var(--radius);
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.empty {
+  padding: 40px 18px;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+/* Modal overlay */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 28px;
+  max-width: 460px;
+  width: 90%;
+  box-shadow: 0 12px 40px rgba(0,0,0,.2);
+}
+
+.modalTitle {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 14px;
+}
+
+.modalBody {
+  font-size: 13.5px;
+  color: var(--text-2);
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+
+.modalBody strong {
+  color: var(--bad-text);
+}
+
+.modalInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  margin-bottom: 14px;
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.modalInput:focus {
+  outline: none;
+  border-color: var(--accent-strong);
+}
+
+.modalActions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.modalCancelBtn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.modalConfirmBtn {
+  background: var(--bad, #d32f2f);
+  border: none;
+  border-radius: 6px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  cursor: pointer;
+}
+
+.modalConfirmBtn:disabled {
+  opacity: .4;
+  cursor: default;
+}
+
+.modalError {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+
+/*
+ * The seven-column grid cannot fit a phone; without this the row forced the
+ * whole page into horizontal scroll. Rows become labelled stacked cards, the
+ * same treatment the controller list uses.
+ */
+@media (max-width: 760px) {
+  .head {
+    display: none;
+  }
+
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 14px 16px;
+    align-items: start;
+  }
+
+  .row > [data-label] {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+    flex-wrap: wrap;
+  }
+
+  .row > [data-label]::before {
+    content: attr(data-label);
+    flex: 0 0 34%;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .4px;
+    text-transform: uppercase;
+    color: var(--text-2);
+  }
+
+  /* Flex items floor at min-content; let values shrink beside their label. */
+  .row > [data-label] > * {
+    min-width: 0;
+  }
+
+  /* The cluster name is the card heading, so it keeps its own line. */
+  .row > .clusterName {
+    display: block;
+  }
+
+  .row > .clusterName::before {
+    display: none;
+  }
+}

@@ -1,0 +1,44 @@
+.table { composes: dataTable from "./tables.module.css"; }
+.nameCell { composes: nameCell from "./tables.module.css"; }
+/* Layout .content already supplies page padding and max-width. */
+.page { animation: fade .35s ease; }
+
+@keyframes fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.header { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 22px; }
+.header h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -.5px; }
+.headerActions { display: flex; gap: 0.5rem; }
+.error { color: var(--bad-text); }
+.empty { text-align: center; padding: 2rem; color: var(--text-2); }
+.actionButtons { display: flex; gap: 0.25rem; }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modalContent { background: var(--surface); padding: 1.5rem; border-radius: 8px; min-width: 300px; }
+.modalActions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
+.warningBanner { background: var(--bad-soft); color: var(--bad-text); padding: 0.5rem 1rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.9rem; }
+
+/* Create-schedule dialog — mirrors the shared brood-operation modal chrome. */
+.dialog {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 24px;
+  max-width: 720px;
+  width: 90%;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.dialogTitle { font-size: 18px; font-weight: 700; margin-bottom: 16px; }
+.formGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+.formGrid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--text-2); }
+.formGrid select, .formGrid input { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; background: var(--surface); color: var(--text); }
+.checkboxRow { flex-direction: row !important; align-items: center; gap: 8px; }
+.pickerSection { margin-bottom: 16px; }
+.pickerLabel { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--text-2); margin-bottom: 8px; }
+.dialogActions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
+.errorText { color: var(--bad-text); font-size: 13px; margin-bottom: 12px; }
+
+/* The Card supplies the outer edge; a trailing row border doubles it. */

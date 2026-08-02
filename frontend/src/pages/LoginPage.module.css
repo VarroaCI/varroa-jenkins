@@ -1,0 +1,272 @@
+/* Split auth shell: brand panel left, auth right.
+   Colour decisions here are measured, not eyeballed — see the notes on
+   .focusRing and .alert, and the --accent-fill contract in
+   ../styles/tokens.css. */
+
+.shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+}
+
+/* ── focus ring — neutral, accent-independent ──────────────────────
+   A solid --accent ring only passes on honey; it fails rust-dark
+   (2.87:1), pollen-light (2.44:1) and propolis-dark (2.55:1). The
+   indicator is the --text ring and both its neighbours are --bg:
+   15.42:1 light / 15.63:1 dark, identical on all four variants. The
+   2px --bg gap keeps it clear of the fill; the 2px perimeter also
+   satisfies 2.4.13. Replaces a --accent-alpha ring that was never
+   defined as a token and so rendered nothing at all. */
+.focusRing:focus-visible {
+  outline: 2px solid transparent; /* survives forced-colors */
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text);
+}
+
+/* ── brand panel ───────────────────────────────────────────────── */
+.brandPanel {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-3);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 48px;
+  padding: clamp(32px, 4vw, 56px);
+}
+
+html[data-theme="dark"] .brandPanel { background: var(--surface-2); }
+
+.comb {
+  position: absolute;
+  inset: -10%;
+  color: var(--border-strong);
+  opacity: .5;
+  pointer-events: none;
+}
+
+html[data-theme="dark"] .comb { opacity: .38; }
+
+.brandPanel > *:not(.comb) { position: relative; z-index: 1; }
+
+.brandmark { display: flex; align-items: center; gap: 11px; }
+/* logotype — exempt from 1.4.11, so --accent is fine here even on
+   pollen-light where it measures 2.44:1 against the panel */
+.brandmark svg { width: 26px; height: 26px; color: var(--accent); display: block; }
+.wordmark { font-size: 16px; font-weight: 600; letter-spacing: 0.01em; }
+
+/* space-between across three children strands the h1 in ~280px of dead
+   space at 1080p — centred by accident, not composed. Grouping the copy
+   and the rail leaves two children: mark at top, statement at the foot,
+   with the lifecycle reading as evidence under the claim. */
+.brandBody { display: flex; flex-direction: column; gap: 40px; }
+
+/* measure lives on the h1 itself — `ch` resolves against the element's
+   own font-size, so putting it on the wrapper would size it in 15px
+   units and trap the 44px headline in a ~168px column */
+.brandCopy h1 {
+  font-size: clamp(30px, 3.4vw, 44px);
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+  font-weight: 700;
+  max-width: 16ch;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.lead {
+  margin: 18px 0 0;
+  font-size: 16px;
+  color: var(--text-2);
+  max-width: 52ch;
+  text-wrap: pretty;
+}
+
+/* ── phase rail — the real Controller lifecycle ────────────────── */
+.railLabel {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  margin: 0 0 16px;
+}
+
+.phaseList { list-style: none; margin: 0; padding: 0; }
+
+.phase {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.01em;
+  /* --text-3 measures 2.85:1 on --surface-3 — fails 4.5:1 for body text.
+     --text-2 is the same intent at 5.47:1 light / 7.35:1 dark. */
+  color: var(--text-2);
+  padding: 5px 0;
+}
+
+.pdot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  flex: none;
+}
+
+.phase[data-current] { color: var(--text); }
+.phase[data-current] .pdot { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+
+/* ── auth panel ────────────────────────────────────────────────── */
+.authPanel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(32px, 4vw, 56px);
+  background: var(--bg);
+}
+
+.card { width: 100%; max-width: 372px; }
+.title { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+.sub { margin: 8px 0 0; color: var(--text-2); font-size: 14px; }
+.body { margin-top: 30px; }
+
+/* ── alert ─────────────────────────────────────────────────────
+   --bad on --bad-soft measures 4.42:1 — under the 4.5:1 floor, and the
+   rule doesn't round. Red is carried by the icon + border (4.42:1 clears
+   the 3:1 non-text bar); the message uses --text at 13.4:1. Themes
+   automatically — replaces hardcoded #fef2f2/#dc2626/#fecaca that had no
+   dark override and glowed on the dark surface. */
+.alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  background: var(--bad-soft);
+  color: var(--text);
+  border: 1px solid var(--bad);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  line-height: 1.45;
+  margin-bottom: 18px;
+}
+
+.alert svg { width: 15px; height: 15px; flex: none; margin-top: 2px; color: var(--bad-text); display: block; }
+
+/* ── fields ────────────────────────────────────────────────────── */
+.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+/* --text-secondary was never a token; --text-2 is the real name */
+.label { font-size: 13px; font-weight: 600; letter-spacing: 0.02em; color: var(--text-2); }
+
+.input {
+  width: 100%;
+  padding: 10px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.input:focus-visible { border-color: var(--accent); }
+.input[aria-invalid="true"] { border-color: var(--bad); }
+.input:disabled { opacity: .55; cursor: not-allowed; }
+
+/* ── buttons ───────────────────────────────────────────────────── */
+.button {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 11px 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-fill);
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: transform .05s ease, background .15s ease, border-color .15s ease;
+}
+
+.button:active:not(:disabled) { transform: translateY(1px); }
+
+.button:hover:not(:disabled) {
+  background: var(--accent-fill-hover);
+  border-color: var(--accent-fill-hover);
+}
+
+.button:disabled { opacity: .6; cursor: not-allowed; }
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border: 2px solid color-mix(in oklch, var(--on-accent) 45%, transparent);
+  border-top-color: var(--on-accent);
+  border-radius: 50%;
+  animation: spin .6s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
+
+/* ── OIDC handoff ──────────────────────────────────────────────── */
+.oidcNote {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 13px 14px;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  color: var(--text-2);
+  line-height: 1.5;
+  margin: 0 0 18px;
+}
+
+.oidcNote svg { width: 15px; height: 15px; flex: none; margin-top: 2px; color: var(--text-2); display: block; }
+.oidcNote strong { color: var(--text); font-weight: 600; }
+
+.footNote {
+  margin: 22px 0 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--text-2);
+  text-align: center;
+}
+
+
+/* Stacked, the brand panel sits ABOVE the form — at full height that's
+   ~550px of storytelling before "Sign in" is reachable, which puts the
+   form off-screen on a 667px viewport. On a phone the panel demotes to a
+   compact header: no rail, no lead, smaller headline. (border-right also
+   has to become border-bottom once stacked.) */
+@media (max-width: 920px) {
+  .shell { grid-template-columns: 1fr; }
+  .brandPanel {
+    min-height: 0;
+    gap: 20px;
+    padding: 24px clamp(24px, 6vw, 32px);
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .brandCopy h1 { font-size: 22px; max-width: 24ch; }
+  .lead,
+  .phaseRail { display: none; }
+  .authPanel { padding-block: 36px; }
+}

@@ -1,0 +1,449 @@
+# RBAC — VarroaRole/VarroaRoleBinding stay core-only (flat paths).
+# JenkinsRole/JenkinsRoleBinding move under /clusters/{cluster}/.
+/api/v1/roles:
+  get:
+    operationId: listVarroaRoles
+    tags: [rbac]
+    summary: Lists VarroaRoles.
+    responses:
+      "200":
+        description: VarroaRole list (N6 envelope).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/VarroaRole'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+  post:
+    operationId: createVarroaRole
+    tags: [rbac]
+    summary: Creates a VarroaRole.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/VarroaRole'
+    responses:
+      "201":
+        description: VarroaRole created.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/VarroaRole'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+
+/api/v1/roles/{name}:
+  get:
+    operationId: getVarroaRole
+    tags: [rbac]
+    summary: Gets a VarroaRole.
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: VarroaRole detail.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/VarroaRole'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  put:
+    operationId: updateVarroaRole
+    tags: [rbac]
+    summary: Updates a VarroaRole.
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/VarroaRole'
+    responses:
+      "200":
+        description: VarroaRole updated.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/VarroaRole'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  delete:
+    operationId: deleteVarroaRole
+    tags: [rbac]
+    summary: Deletes a VarroaRole.
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "204":
+        description: VarroaRole deleted.
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/rolebindings:
+  get:
+    operationId: listVarroaRoleBindings
+    tags: [rbac]
+    summary: Lists VarroaRoleBindings.
+    responses:
+      "200":
+        description: VarroaRoleBinding list (N6 envelope).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/VarroaRoleBinding'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+  post:
+    operationId: createVarroaRoleBinding
+    tags: [rbac]
+    summary: Creates a VarroaRoleBinding.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/VarroaRoleBinding'
+    responses:
+      "201":
+        description: VarroaRoleBinding created.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/VarroaRoleBinding'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+
+/api/v1/rolebindings/{name}:
+  get:
+    operationId: getVarroaRoleBinding
+    tags: [rbac]
+    summary: Gets a VarroaRoleBinding.
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: VarroaRoleBinding detail.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/VarroaRoleBinding'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  put:
+    operationId: updateVarroaRoleBinding
+    tags: [rbac]
+    summary: Updates a VarroaRoleBinding.
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/VarroaRoleBinding'
+    responses:
+      "200":
+        description: VarroaRoleBinding updated.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/VarroaRoleBinding'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  delete:
+    operationId: deleteVarroaRoleBinding
+    tags: [rbac]
+    summary: Deletes a VarroaRoleBinding.
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "204":
+        description: VarroaRoleBinding deleted.
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+# JenkinsRoles (cluster-scoped, under clusters/{cluster}/)
+/api/v1/clusters/{cluster}/jenkinsroles:
+  get:
+    operationId: listJenkinsRoles
+    tags: [rbac]
+    summary: Lists JenkinsRoles on a cluster.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+    responses:
+      "200":
+        description: JenkinsRole list (N6 envelope).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/JenkinsRole'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+  post:
+    operationId: createJenkinsRole
+    tags: [rbac]
+    summary: Creates a JenkinsRole on a cluster.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/JenkinsRole'
+    responses:
+      "201":
+        description: JenkinsRole created.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/JenkinsRole'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+
+/api/v1/clusters/{cluster}/jenkinsroles/{name}:
+  get:
+    operationId: getJenkinsRole
+    tags: [rbac]
+    summary: Gets a JenkinsRole.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: JenkinsRole detail.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/JenkinsRole'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  put:
+    operationId: updateJenkinsRole
+    tags: [rbac]
+    summary: Updates a JenkinsRole.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/JenkinsRole'
+    responses:
+      "200":
+        description: JenkinsRole updated.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/JenkinsRole'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  delete:
+    operationId: deleteJenkinsRole
+    tags: [rbac]
+    summary: Deletes a JenkinsRole.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "204":
+        description: JenkinsRole deleted.
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+# JenkinsRoleBindings (cluster-scoped, under clusters/{cluster}/)
+/api/v1/clusters/{cluster}/jenkinsrolebindings:
+  get:
+    operationId: listJenkinsRoleBindings
+    tags: [rbac]
+    summary: Lists JenkinsRoleBindings on a cluster.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+    responses:
+      "200":
+        description: JenkinsRoleBinding list (N6 envelope).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/JenkinsRoleBinding'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+  post:
+    operationId: createJenkinsRoleBinding
+    tags: [rbac]
+    summary: Creates a JenkinsRoleBinding on a cluster.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/JenkinsRoleBinding'
+    responses:
+      "201":
+        description: JenkinsRoleBinding created.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/JenkinsRoleBinding'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+
+/api/v1/clusters/{cluster}/jenkinsrolebindings/{name}:
+  get:
+    operationId: getJenkinsRoleBinding
+    tags: [rbac]
+    summary: Gets a JenkinsRoleBinding.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: JenkinsRoleBinding detail.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/JenkinsRoleBinding'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  put:
+    operationId: updateJenkinsRoleBinding
+    tags: [rbac]
+    summary: Updates a JenkinsRoleBinding.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/JenkinsRoleBinding'
+    responses:
+      "200":
+        description: JenkinsRoleBinding updated.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/JenkinsRoleBinding'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  delete:
+    operationId: deleteJenkinsRoleBinding
+    tags: [rbac]
+    summary: Deletes a JenkinsRoleBinding.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "204":
+        description: JenkinsRoleBinding deleted.
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'

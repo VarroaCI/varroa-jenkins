@@ -1,0 +1,36 @@
+# =============================================================================
+# Controller — create a managed Jenkins instance.
+#
+# The Controller references a ComposedBundle (must be in Ready phase). The
+# operator provisions a StatefulSet, PVC, ingress, and init ConfigMap, then
+# pushes the composed JCasC bundle via the mite sidecar.
+#
+# Prerequisites:
+#   - ComposedBundle in Ready phase
+#   - ProvisioningDefaults applied (optional but recommended)
+#   - CatalogSource synced (if using catalog items)
+#
+# Usage:
+#   kubectl apply -f examples/controller.yaml
+#   kubectl get controller getting-started -n varroa -w
+# =============================================================================
+apiVersion: varroa.dev/v1alpha1
+kind: Controller
+metadata:
+  name: getting-started
+  namespace: varroa                       # ← CRD lives here
+spec:
+  namespace: varroa                       # ← StatefulSet + sub-resources go here (usually same)
+  version: latest
+  composedBundleRef:
+    name: getting-started-bundle
+  className: prod-large
+  ingressSpec:
+    host: getting-started.<your-domain>   # ← replace <your-domain>
+    tlsSecretName: getting-started-tls
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+  persistence:
+    size: 10Gi

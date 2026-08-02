@@ -1,0 +1,200 @@
+{{- $svc := . -}}
+// {{.Name}}Server is the server-side interface for the {{.Name}} service.
+type {{.Name}}Server interface {
+{{- range .RPCs}}
+	{{.GoName}}({{if not (or .ClientStreams .ServerStreams)}}ctx context.Context, req *{{.RequestType}}{{else if and (not .ClientStreams) .ServerStreams}}req *{{.RequestType}}, stream {{$svc.Name}}_{{.GoName}}Server{{else}}stream {{$svc.Name}}_{{.GoName}}Server{{end}}) ({{if .ServerStreams}}error{{else}}*{{.ResponseType}}, error{{end}})
+{{- end}}
+}
+{{range .RPCs}}
+{{- if or .ClientStreams .ServerStreams}}
+// {{$svc.Name}}_{{.GoName}}Server is the server-side streaming interface.
+type {{$svc.Name}}_{{.GoName}}Server interface {
+	grpc.ServerStream
+{{- if .ServerStreams}}
+	Send(*{{.ResponseType}}) error
+{{- else}}
+	SendAndClose(*{{.ResponseType}}) error
+{{- end}}
+{{- if .ClientStreams}}
+	Recv() (*{{.RequestType}}, error)
+{{- end}}
+}
+{{end}}
+{{- end}}
+
+// {{.Name}}Client is the client-side interface for the {{.Name}} service.
+type {{.Name}}Client interface {
+{{- range .RPCs}}
+	{{.GoName}}(ctx context.Context{{if .ClientStreams}}, opts ...grpc.CallOption{{else}}, req *{{.RequestType}}, opts ...grpc.CallOption{{end}}) ({{if .ServerStreams}}{{$svc.Name}}_{{.GoName}}Client, error{{else}}*{{.ResponseType}}, error{{end}})
+{{- end}}
+}
+{{range .RPCs}}
+{{- if or .ClientStreams .ServerStreams}}
+// {{$svc.Name}}_{{.GoName}}Client is the client-side streaming interface.
+type {{$svc.Name}}_{{.GoName}}Client interface {
+	grpc.ClientStream
+{{- if .ClientStreams}}
+	Send(*{{.RequestType}}) error
+{{- end}}
+{{- if .ServerStreams}}
+	Recv() (*{{.ResponseType}}, error)
+{{- else}}
+	CloseAndRecv() (*{{.ResponseType}}, error)
+{{- end}}
+}
+{{end}}
+{{- end}}
+
+// New{{.Name}}Client creates a new {{.Name}} client.
+func New{{.Name}}Client(cc *grpc.ClientConn) {{.Name}}Client {
+	return &{{.Name | lowerFirst}}Client{cc: cc}
+}
+
+type {{.Name | lowerFirst}}Client struct {
+	cc *grpc.ClientConn
+}
+{{range .RPCs}}
+{{- if or .ClientStreams .ServerStreams}}
+func (c *{{$svc.Name | lowerFirst}}Client) {{.GoName}}(ctx context.Context, opts ...grpc.CallOption) ({{$svc.Name}}_{{.GoName}}Client, error) {
+	desc := &grpc.StreamDesc{
+		StreamName:    "{{.GoName}}",
+		ServerStreams: {{.ServerStreams}},
+		ClientStreams: {{.ClientStreams}},
+	}
+	stream, err := c.cc.NewStream(ctx, desc, "/mitev1.{{$svc.Name}}/{{.GoName}}", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &{{$svc.Name | lowerFirst}}{{.GoName}}Client{ClientStream: stream}
+	return x, nil
+}
+
+type {{$svc.Name | lowerFirst}}{{.GoName}}Client struct {
+	grpc.ClientStream
+}
+{{- if .ClientStreams}}
+func (x *{{$svc.Name | lowerFirst}}{{.GoName}}Client) Send(m *{{.RequestType}}) error {
+	return x.ClientStream.SendMsg(m)
+}
+{{- end}}
+{{- if .ServerStreams}}
+func (x *{{$svc.Name | lowerFirst}}{{.GoName}}Client) Recv() (*{{.ResponseType}}, error) {
+	m := new({{.ResponseType}})
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+{{- else}}
+func (x *{{$svc.Name | lowerFirst}}{{.GoName}}Client) CloseAndRecv() (*{{.ResponseType}}, error) {
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	m := new({{.ResponseType}})
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+{{- end}}
+{{- else}}
+func (c *{{$svc.Name | lowerFirst}}Client) {{.GoName}}(ctx context.Context, req *{{.RequestType}}, opts ...grpc.CallOption) (*{{.ResponseType}}, error) {
+	out := new({{.ResponseType}})
+	err := c.cc.Invoke(ctx, "/mitev1.{{$svc.Name}}/{{.GoName}}", req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+{{- end}}
+{{- end}}
+
+// Unimplemented{{.Name}}Server provides default unimplemented methods.
+type Unimplemented{{.Name}}Server struct{}
+{{range .RPCs}}
+func (Unimplemented{{$svc.Name}}Server) {{.GoName}}({{if not (or .ClientStreams .ServerStreams)}}ctx context.Context, _ *{{.RequestType}}{{else}}_ {{$svc.Name}}_{{.GoName}}Server{{end}}) ({{if .ServerStreams}}error{{else}}*{{.ResponseType}}, error{{end}}) {
+{{- if .ServerStreams}}
+	return status.Error(codes.Unimplemented, "unimplemented")
+{{- else}}
+	return nil, status.Error(codes.Unimplemented, "unimplemented")
+{{- end}}
+}
+{{end}}
+
+// Register{{.Name}}Server registers the {{.Name}} service implementation with a gRPC server.
+func Register{{.Name}}Server(s *grpc.Server, srv {{.Name}}Server) {
+	s.RegisterService(&{{.Name}}_ServiceDesc, srv)
+}
+
+// {{.Name}}_ServiceDesc is the grpc.ServiceDesc for the {{.Name}} service.
+var {{.Name}}_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "mitev1.{{.Name}}",
+	HandlerType: (*{{.Name}}Server)(nil),
+	Methods: []grpc.MethodDesc{
+{{- range .RPCs}}
+{{- if not (or .ClientStreams .ServerStreams)}}
+		{
+			MethodName: "{{.GoName}}",
+			Handler:    _{{$svc.Name}}_{{.GoName}}_Handler,
+		},
+{{- end}}
+{{- end}}
+	},
+	Streams: []grpc.StreamDesc{
+{{- range .RPCs}}
+{{- if or .ClientStreams .ServerStreams}}
+		{
+			StreamName:    "{{.GoName}}",
+			Handler:       _{{$svc.Name}}_{{.GoName}}_Handler,
+			ServerStreams: {{.ServerStreams}},
+			ClientStreams: {{.ClientStreams}},
+		},
+{{- end}}
+{{- end}}
+	},
+}
+
+{{- range .RPCs}}
+{{- if not (or .ClientStreams .ServerStreams)}}
+func _{{$svc.Name}}_{{.GoName}}_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new({{.RequestType}})
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.({{$svc.Name}}Server).{{.GoName}}(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mitev1.{{$svc.Name}}/{{.GoName}}",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.({{$svc.Name}}Server).{{.GoName}}(ctx, req.(*{{.RequestType}}))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+{{- else}}
+func _{{$svc.Name}}_{{.GoName}}_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.({{$svc.Name}}Server).{{.GoName}}(&{{$svc.Name | lowerFirst}}{{.GoName}}Server{stream})
+}
+
+type {{$svc.Name | lowerFirst}}{{.GoName}}Server struct {
+	grpc.ServerStream
+}
+
+func (x *{{$svc.Name | lowerFirst}}{{.GoName}}Server) {{if .ServerStreams}}Send(m *{{.ResponseType}}) error {
+	return x.ServerStream.SendMsg(m)
+}{{else}}SendAndClose(m *{{.ResponseType}}) error {
+	return x.ServerStream.SendMsg(m)
+}{{end}}
+{{- if .ClientStreams}}
+func (x *{{$svc.Name | lowerFirst}}{{.GoName}}Server) Recv() (*{{.RequestType}}, error) {
+	m := new({{.RequestType}})
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+{{- end}}
+{{- end}}
+{{- end}}

@@ -1,0 +1,42 @@
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 3px 10px 3px 8px;
+  border-radius: 20px;
+  letter-spacing: .1px;
+}
+
+.sm {
+  padding: 1px 8px;
+  font-size: 10.5px;
+}
+
+.pdot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.connected { background: var(--ok-soft); color: var(--ok-text); }
+.connected .pdot { background: var(--ok); }
+
+.running { background: var(--info-soft); color: var(--info-text); }
+.running .pdot { background: var(--info); }
+
+.provisioning { background: var(--warn-soft); color: var(--warn-text); }
+.provisioning .pdot { background: var(--warn); }
+
+.failed { background: var(--bad-soft); color: var(--bad-text); }
+.failed .pdot { background: var(--bad); }
+
+.pending { background: var(--idle-soft); color: var(--idle-text); }
+.pending .pdot { background: var(--idle); }
+
+.hibernated { background: #e8deff; color: #6b3fa0; }
+.hibernated .pdot { background: #6b3fa0; }
+
+html[data-theme="dark"] .hibernated { background: #2d1b5e; color: #c4a7f3; }
+html[data-theme="dark"] .hibernated .pdot { background: #c4a7f3; }

@@ -1,0 +1,24 @@
+items:
+  - kind: folder
+    name: folder-all-props
+    displayName: "Folder with All Wired Properties"
+    description: "Folder exercising all three wired properties — envVars, folderCredentials, itemRestrictions (no folderLibraries — known gap)"
+    properties:
+      - envVars:
+          vars:
+            DEPLOY_ENV: staging
+            LOG_LEVEL: debug
+      - folderCredentialsProperty:
+          folderCredentials:
+            - credentials:
+                - usernamePassword:
+                    id: deploy-cred
+                    scope: GLOBAL
+                    username: deploy-bot
+                    password: d3pl0y!
+                    description: "Deployment credentials"
+      - itemRestrictions:
+          allowedTypes:
+            - org.jenkinsci.plugins.workflow.job.WorkflowJob
+            - com.cloudbees.hudson.plugins.folder.Folder
+          filter: true

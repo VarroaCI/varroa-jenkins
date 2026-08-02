@@ -1,0 +1,40 @@
+{{- if and .Values.updateCenter.enabled (not (include "varroa.isHive" .)) }}
+apiVersion: varroa.dev/v1alpha1
+kind: UpdateCenter
+metadata:
+  name: varroa-update-center
+  labels:
+    app.kubernetes.io/component: varroa-updatecenter
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  storage:
+    type: {{ .Values.updateCenter.storage.type }}
+    {{- if eq .Values.updateCenter.storage.type "local" }}
+    local:
+      size: {{ .Values.updateCenter.storage.local.size }}
+      {{- with .Values.updateCenter.storage.local.storageClassName }}
+      storageClassName: {{ . | quote }}
+      {{- end }}
+    {{- end }}
+    {{- if eq .Values.updateCenter.storage.type "oci" }}
+    oci:
+      ref: {{ required "updateCenter.storage.oci.ref is required when storage.type=oci" .Values.updateCenter.storage.oci.ref | quote }}
+      {{- if .Values.updateCenter.storage.oci.existingSecret }}
+      existingSecret: {{ .Values.updateCenter.storage.oci.existingSecret | quote }}
+      {{- end }}
+      insecure: {{ .Values.updateCenter.storage.oci.insecure }}
+    {{- end }}
+  {{- if .Values.updateCenter.pullThrough.enabled }}
+  pullThrough:
+    enabled: true
+    upstreamURL: {{ .Values.updateCenter.pullThrough.upstreamURL | quote }}
+    downloadURL: {{ .Values.updateCenter.pullThrough.downloadURL | quote }}
+  {{- end }}
+  {{- with .Values.updateCenter.seed.refs }}
+  seed:
+    refs:
+    {{- range . }}
+      - {{ . | quote }}
+    {{- end }}
+  {{- end }}
+{{- end }}

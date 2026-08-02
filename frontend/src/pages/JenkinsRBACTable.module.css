@@ -1,0 +1,118 @@
+.scroll {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th,
+.table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.table th {
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 11px;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+}
+
+.table tbody tr:hover {
+  background: var(--surface-2);
+}
+
+.name {
+  font-weight: 650;
+}
+
+/*
+ * break-word, not anywhere: `anywhere` splits inside words, so role names like
+ * example-folder-developer wrapped as "example-folder-develope / r". Long
+ * unbreakable tokens still break; everything else prefers a word boundary, and
+ * .scroll absorbs whatever is left.
+ */
+.mono {
+  color: var(--text-2);
+  font: 12px/1.45 var(--mono);
+  overflow-wrap: break-word;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.badge {
+  display: inline-block;
+  margin: 1px 5px 1px 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.scopeBadge {
+  composes: badge;
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+/*
+ * Above the card-stack breakpoint, keep a floor width so columns are not
+ * squeezed to the point of wrapping; .scroll takes over instead. Scoped to
+ * min-width so it never fights the stacked layout below.
+ */
+@media (min-width: 1081px) {
+  .table {
+    min-width: 860px;
+  }
+}
+
+@media (max-width: 1080px) {
+  .table thead {
+    display: none;
+  }
+
+  .table,
+  .table tbody,
+  .table tr,
+  .table td {
+    display: block;
+    width: 100%;
+  }
+
+  .table tr {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .table td {
+    display: grid;
+    grid-template-columns: minmax(100px, 30%) 1fr;
+    border: 0;
+    padding: 6px 14px;
+  }
+
+  .table td::before {
+    content: attr(data-label);
+    color: var(--text-2);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .4px;
+    text-transform: uppercase;
+  }
+
+  .actions {
+    justify-content: flex-start;
+  }
+}

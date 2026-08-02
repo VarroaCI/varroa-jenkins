@@ -1,0 +1,135 @@
+.topbar {
+  height: 62px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 26px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  backdrop-filter: saturate(140%) blur(8px);
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.crumbs b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.search {
+  margin-left: 8px;
+  flex: 1;
+  max-width: 360px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-3);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 7px 12px;
+  color: var(--text-2);
+  font-size: 13px;
+  transition: .15s;
+}
+
+.search:focus-within {
+  border-color: var(--accent);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.search input {
+  border: none;
+  background: none;
+  outline: none;
+  flex: 1;
+  font-size: 13px;
+  color: var(--text);
+  font-family: inherit;
+}
+
+.kbd {
+  font-size: 10.5px;
+  font-family: var(--mono);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 5px;
+  color: var(--text-2);
+}
+
+.topActions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.iconBtn {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--text-2);
+  border: 1px solid transparent;
+  transition: .15s;
+  position: relative;
+}
+
+.iconBtn:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.dotBadge::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--honey);
+  border: 2px solid var(--surface);
+}
+
+/*
+ * The topbar had no responsive treatment: fixed padding plus breadcrumbs,
+ * search and three actions could not fit a phone, so the bar overflowed and
+ * dragged the whole page into horizontal scroll. Below the tab-bar breakpoint
+ * the crumbs are redundant (the bottom tab bar already shows the section) and
+ * the shortcut hint is meaningless without a physical keyboard, so both go and
+ * the search takes the freed space.
+ */
+@media (max-width: 639.98px) {
+  .topbar {
+    padding: 0 14px;
+    gap: 10px;
+  }
+
+  .crumbs {
+    display: none;
+  }
+
+  .kbd {
+    display: none;
+  }
+
+  .search {
+    margin-left: 0;
+    max-width: none;
+    min-width: 0;
+  }
+}

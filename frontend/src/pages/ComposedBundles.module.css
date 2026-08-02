@@ -1,0 +1,175 @@
+.page {
+  animation: fade .35s ease;
+}
+
+@keyframes fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.pageHead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
+
+.pageTitle {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -.5px;
+}
+
+.pageDesc {
+  font-size: 13.5px;
+  color: var(--text-2);
+  margin-top: 3px;
+}
+
+/* Table */
+
+.table {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.tableHeader {
+  display: grid;
+  grid-template-columns: 2fr 0.7fr 0.9fr 1.2fr 0.7fr 0.7fr 0.8fr;
+  padding: 12px 18px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.tableRow {
+  display: grid;
+  grid-template-columns: 2fr 0.7fr 0.9fr 1.2fr 0.7fr 0.7fr 0.8fr;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+  font-size: 0.92rem;
+  transition: .12s;
+  cursor: pointer;
+}
+
+.tableRow:last-child {
+  border-bottom: none;
+}
+
+.tableRow:hover {
+  background: var(--surface-2);
+}
+
+.cellName {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.cellMono {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+/* Phase pills */
+
+.phasePill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.phaseReady {
+  background: var(--ok-soft);
+  color: var(--ok-text);
+}
+
+.phaseDrifted {
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
+
+.phaseInvalid {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+}
+
+.phasePending {
+  background: var(--info-soft);
+  color: var(--info-text);
+}
+
+/* Badges */
+
+.okBadge {
+  font-size: 13px;
+  color: var(--ok-text);
+  font-weight: 700;
+}
+
+.missingBadge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  font-weight: 600;
+}
+
+.driftedBadge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  background: var(--warn-soft);
+  color: var(--warn-text);
+  font-weight: 600;
+}
+
+/* Loading, empty, error */
+
+.loadingBanner {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.errorBanner {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  padding: 12px 18px;
+  border-radius: var(--radius);
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.empty {
+  padding: 60px 18px;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+}

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<project>
+  <displayName>FreeStyle Builders and Publishers</displayName>
+  <description>FreeStyle job with multiple builders and post-build actions</description>
+  <builders>
+    <hudson.tasks.Shell>
+      <command>make build</command>
+    </hudson.tasks.Shell>
+    <hudson.tasks.Maven>
+      <targets>clean test</targets>
+    </hudson.tasks.Maven>
+  </builders>
+  <publishers>
+    <hudson.tasks.ArtifactArchiver>
+      <artifacts>**/target/*.jar</artifacts>
+      <allowEmptyArchive>true</allowEmptyArchive>
+    </hudson.tasks.ArtifactArchiver>
+    <hudson.tasks.junit.JUnitResultArchiver>
+      <testResults>**/target/surefire-reports/*.xml</testResults>
+    </hudson.tasks.junit.JUnitResultArchiver>
+    <hudson.tasks.Mailer>
+      <recipients>ci@example.com</recipients>
+      <notifyEveryUnstableBuild>true</notifyEveryUnstableBuild>
+    </hudson.tasks.Mailer>
+  </publishers>
+</project>

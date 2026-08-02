@@ -1,0 +1,58 @@
+# Shared path and query parameters.
+
+namespace:
+  name: namespace
+  in: query
+  description: Namespace filter (optional).
+  required: false
+  schema:
+    type: string
+
+cluster:
+  name: cluster
+  in: path
+  description: Cluster name (DNS-1123 label).
+  required: true
+  schema:
+    type: string
+    pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+
+clusterQuery:
+  name: cluster
+  in: query
+  description: Cluster name filter for aggregated list.
+  required: false
+  schema:
+    type: string
+
+ns:
+  name: ns
+  in: path
+  description: Controller namespace.
+  required: true
+  schema:
+    type: string
+
+name:
+  name: name
+  in: path
+  description: Resource name.
+  required: true
+  schema:
+    type: string
+
+prefix:
+  name: prefix
+  in: path
+  description: API key prefix (first 7 characters).
+  required: true
+  schema:
+    type: string
+
+force:
+  name: force
+  in: query
+  description: Force the update, overriding SSA field-ownership conflicts.
+  required: false
+  schema:
+    type: boolean

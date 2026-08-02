@@ -1,0 +1,12 @@
+# Localdev admin user for auth.mode=local. The operator's UserReconciler
+# hashes spec.password into status.credentials.passwordHash and clears it.
+# Login: admin / password (username = the User CR name).
+apiVersion: varroa.dev/v1alpha1
+kind: User
+metadata:
+  name: admin
+  namespace: varroa-system
+spec:
+  email: admin@varroa.local
+  displayName: Localdev Admin
+  password: password

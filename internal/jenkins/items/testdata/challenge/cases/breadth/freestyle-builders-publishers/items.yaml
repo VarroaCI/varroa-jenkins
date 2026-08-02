@@ -1,0 +1,19 @@
+items:
+  - kind: freeStyle
+    name: freestyle-builders-publishers
+    displayName: "FreeStyle Builders and Publishers"
+    description: "FreeStyle job with multiple builders and post-build actions"
+    builders:
+      - shell:
+          command: make build
+      - maven:
+          targets: clean test
+    publishersList:
+      - archiveArtifacts:
+          artifacts: "**/target/*.jar"
+          allowEmptyArchive: true
+      - jUnitResultArchiver:
+          testResults: "**/target/surefire-reports/*.xml"
+      - mailer:
+          recipients: ci@example.com
+          notifyEveryUnstableBuild: true

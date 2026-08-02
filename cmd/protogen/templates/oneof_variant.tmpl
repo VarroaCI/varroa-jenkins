@@ -1,0 +1,8 @@
+{{- $msg := . -}}
+{{- range .OneofFields}}
+type {{$msg.Name}}_{{.GoName}} struct {
+	{{.GoName}} *{{.TypeName}} `json:"{{.JSONName}},omitempty"`
+}
+
+func (*{{$msg.Name}}_{{.GoName}}) is{{$msg.Name}}_{{$msg.OneofName}}() {}
+{{end}}

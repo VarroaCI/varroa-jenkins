@@ -1,0 +1,27 @@
+items:
+  - kind: folder
+    name: infra
+    displayName: "Infrastructure"
+    items:
+      - kind: folder
+        name: projects
+        displayName: "Projects"
+        items:
+          - kind: folder
+            name: app
+            displayName: "Application"
+            items:
+              - kind: pipeline
+                name: pipeline-in-deep-folder
+                displayName: "Pipeline in Deep Folder"
+                definition:
+                  cpsScmFlowDefinition:
+                    scriptPath: Jenkinsfile
+                    scm:
+                      gitSCM:
+                        userRemoteConfigs:
+                          - userRemoteConfig:
+                              url: https://github.com/fake-org/deep-app.git
+                        branches:
+                          - branchSpec:
+                              name: "*/main"

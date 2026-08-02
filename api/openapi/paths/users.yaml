@@ -1,0 +1,187 @@
+# users — admin user management.
+/api/v1/users:
+  get:
+    operationId: listUsers
+    tags: [users]
+    summary: Lists all users (admin only).
+    responses:
+      "200":
+        description: User list (N6 envelope).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/UserListEntry'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+  post:
+    operationId: createUser
+    tags: [users]
+    summary: Creates a new user (admin, local auth only).
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/CreateUserRequest'
+    responses:
+      "201":
+        description: User created.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+              additionalProperties: false
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "501":
+        $ref: '../components/responses.yaml#/MethodNotAllowed'
+
+/api/v1/users/{name}:
+  put:
+    operationId: updateUser
+    tags: [users]
+    summary: Updates a user's identity fields (admin, local auth only).
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/UpdateUserRequest'
+    responses:
+      "200":
+        description: User updated.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+              additionalProperties: false
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "405":
+        $ref: '../components/responses.yaml#/MethodNotAllowed'
+  delete:
+    operationId: deleteUser
+    tags: [users]
+    summary: Deletes a user and deprovisions their access (admin).
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "204":
+        description: User deleted.
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/users/{name}/password:
+  put:
+    operationId: setUserPassword
+    tags: [users]
+    summary: Sets a user's password (admin, local auth only).
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [newPassword]
+            properties:
+              newPassword:
+                type: string
+            additionalProperties: false
+    responses:
+      "200":
+        description: Password set.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+              additionalProperties: false
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "501":
+        $ref: '../components/responses.yaml#/MethodNotAllowed'
+
+/api/v1/identity-settings:
+  get:
+    operationId: getIdentitySettings
+    tags: [identity]
+    summary: Returns identity/OIDC configuration (admin only).
+    responses:
+      "200":
+        description: Identity settings.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/IdentitySettings'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+
+/api/v1/builtin-roles:
+  get:
+    operationId: listBuiltinRoles
+    tags: [identity]
+    summary: Lists built-in roles with resolved Jenkins permissions (admin only).
+    responses:
+      "200":
+        description: Built-in role list (N6 envelope).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/BuiltinRoleRef'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'

@@ -1,0 +1,87 @@
+{{- if not (include "varroa.isHive" .) }}
+{{- if .Values.bff.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-bff") }}
+  labels:
+    app.kubernetes.io/component: varroa-bff
+    {{- include "varroa.labels" . | nindent 4 }}
+rules:
+  # BFF reads CRDs and writes User CRDs for preferences.
+  - apiGroups: ["varroa.dev"]
+    resources: ["controllers", "controllers/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["varroaroles", "varroarolebindings", "jenkinsroles", "jenkinsrolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["teams", "teams/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["podtemplates"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["catalogsources", "catalogsources/status", "composedbundles", "composedbundles/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["catalogitems", "catalogitems/status"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["provisioningdefaults", "provisioningdefaults/status"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["jenkinsversionprofiles", "jenkinsversionprofiles/status"]
+    verbs: ["get", "list", "watch"]
+  # BFF reads the singleton UpdateCenter CR for the update-center admin UI.
+  - apiGroups: ["varroa.dev"]
+    resources: ["updatecenters"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["controllerclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["users", "users/status", "groups"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["buildmetrics"]
+    verbs: ["get", "list", "watch"]
+  # Brood operations: BFF creates runs, toggles suspend, cancels (delete), and
+  # stamps status.startedBy after create.
+  - apiGroups: ["varroa.dev"]
+    resources: ["broodoperations", "broodoperations/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  {{- /* Cluster-wide rules. When .Values.managedNamespaces is set, the three
+       rules below are dropped and replaced by per-namespace Roles (see bff/role.yaml). */}}
+  {{- if not .Values.managedNamespaces }}
+  # BFF streams pod logs directly for the controller logs viewer.
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # BFF deletes pods for hard restart.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
+  # Preflight checks: list resource quotas to validate headroom.
+  - apiGroups: [""]
+    resources: ["resourcequotas"]
+    verbs: ["get", "list"]
+  {{- end }}
+  {{- if .Values.managedNamespaces }}
+  # Deliberately cluster-wide even in scoped mode: backs the preflight host-collision
+  # scan (ListIngressHosts -> Ingresses("").List), which must see every namespace to
+  # detect collisions; exposure is ingress hostnames only.
+  {{- else }}
+  # Preflight checks: list cluster ingresses to detect host collisions.
+  {{- end }}
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list"]
+  # Cluster-scoped namespaces read for the controller-create preflight classification;
+  # cluster-wide in both modes by necessity (see operator ClusterRole comment).
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+{{- end }}
+
+{{- end }}

@@ -1,0 +1,346 @@
+.page {
+  animation: fade .35s ease;
+}
+
+@keyframes fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.pageHead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
+
+.pageTitle {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -.5px;
+}
+
+.pageDesc {
+  font-size: 13.5px;
+  color: var(--text-2);
+  margin-top: 3px;
+}
+
+/* Edit banner for bundle editing mode */
+.editBanner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.backLink {
+  font-size: 13px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.backLink:hover {
+  text-decoration: underline;
+}
+
+/* Toolbar */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-3);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 7px 12px;
+  color: var(--text-2);
+  font-size: 13px;
+  min-width: 200px;
+  flex: 1;
+  transition: .15s;
+}
+
+.searchBox:focus-within {
+  border-color: var(--accent);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.searchBox input {
+  border: none;
+  background: none;
+  outline: none;
+  flex: 1;
+  font-size: 13px;
+  color: var(--text);
+  font-family: inherit;
+}
+
+.filterSelect {
+  font-size: 12.5px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+}
+
+.filterSelect:focus {
+  border-color: var(--accent);
+}
+
+.sourceBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+/* Grid */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  transition: .15s;
+  cursor: pointer;
+  position: relative;
+}
+
+.card:hover {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-sm);
+}
+
+.cardTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.typeIcon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.displayName {
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.path {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+
+.description {
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.5;
+  margin-bottom: 10px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.tags {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.tag {
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+.cardFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.version {
+  font-family: var(--mono);
+}
+
+/* Invalid indicator */
+
+.invalidBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  font-weight: 600;
+}
+
+/* Loading, empty, error */
+
+.loadingBanner {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.errorBanner {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  padding: 12px 18px;
+  border-radius: var(--radius);
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.empty {
+  padding: 60px 18px;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+/* FAB — floating action button */
+.fab {
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  border: none;
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 16px;
+  transition: .15s;
+  z-index: 50;
+}
+
+.fab:hover {
+  background: var(--accent-fill-hover);
+  transform: scale(1.05);
+}
+
+.fabIcon {
+  font-size: 18px;
+}
+
+.fabCount {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* Added badge */
+.addedBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--ok-soft);
+  color: var(--ok-text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* --- Update Center group --------------------------------------------- */
+
+.ucGroup {
+  margin-bottom: 28px;
+}
+
+.groupHeading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.groupTitle {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.groupDesc {
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+/* The badge is advisory: it is never wired to a disabled state, because
+   derivability blocks and compatibility only advises. */
+.compatBadge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
+
+.compatBadge[data-verdict="core-too-old"],
+.compatBadge[data-verdict="dep-below-minimum"] {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+}
+
+.versionSelect {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+}

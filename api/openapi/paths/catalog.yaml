@@ -1,0 +1,206 @@
+# catalog sources and catalog items — now under /clusters/{cluster}/.
+/api/v1/clusters/{cluster}/catalogsources:
+  get:
+    operationId: listCatalogSources
+    tags: [catalog]
+    summary: Lists catalog sources, optionally filtered by namespace.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/namespace'
+    responses:
+      "200":
+        description: Catalog source list (N6 envelope).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/CatalogSource'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+
+/api/v1/clusters/{cluster}/catalogsources/{ns}:
+  post:
+    operationId: createCatalogSource
+    tags: [catalog]
+    summary: Creates a catalog source.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/CatalogSource'
+    responses:
+      "201":
+        description: Catalog source created.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/CatalogSource'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+
+/api/v1/clusters/{cluster}/catalogsources/{ns}/{name}:
+  get:
+    operationId: getCatalogSource
+    tags: [catalog]
+    summary: Gets a catalog source.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Catalog source detail.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/CatalogSource'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  put:
+    operationId: updateCatalogSource
+    tags: [catalog]
+    summary: Updates a catalog source.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/CatalogSource'
+    responses:
+      "200":
+        description: Catalog source updated.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/CatalogSource'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  delete:
+    operationId: deleteCatalogSource
+    tags: [catalog]
+    summary: Deletes a catalog source.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "204":
+        description: Catalog source deleted.
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/clusters/{cluster}/catalogsources/{ns}/{name}/sync:
+  post:
+    operationId: syncCatalogSource
+    tags: [catalog]
+    summary: Triggers a sync of the catalog source (N3 slash-action).
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "202":
+        description: Sync accepted.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+              additionalProperties: false
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+
+/api/v1/clusters/{cluster}/catalogitems:
+  get:
+    operationId: listCatalogItems
+    tags: [catalog]
+    summary: Lists catalog items with optional filters.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/namespace'
+      - name: source
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: type
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+    responses:
+      "200":
+        description: Catalog item list (N6 envelope with operatorNamespace sibling).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/CatalogItemSummary'
+                operatorNamespace:
+                  type: string
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+
+/api/v1/clusters/{cluster}/catalogitems/{ns}/{name}:
+  get:
+    operationId: getCatalogItem
+    tags: [catalog]
+    summary: Gets a catalog item.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: >-
+          Catalog item detail. The item is wrapped so the per-profile lock-pin
+          projection has somewhere to live; the pins are cluster state joined at
+          read time rather than stored on the item, where they would go stale.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/CatalogItemDetailResponse'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'

@@ -1,0 +1,68 @@
+{{- if not (include "varroa.isHive" .) }}
+{{- if .Values.dex.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "dex") }}
+  labels:
+    app.kubernetes.io/component: dex
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.dex.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: dex
+      {{- include "varroa.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: dex
+        {{- include "varroa.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "varroa.fullname" (dict "Release" .Release "name" "dex") }}
+      containers:
+        - name: dex
+          image: "{{ .Values.dex.image.repository }}:{{ .Values.dex.image.tag }}"
+          imagePullPolicy: {{ .Values.dex.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.dex.service.port }}
+            {{- if .Values.dex.grpcApi.enabled }}
+            - name: grpc
+              containerPort: {{ .Values.dex.service.grpcPort }}
+            {{- end }}
+          args:
+            - dex
+            - serve
+            - /etc/dex/config.yaml
+          volumeMounts:
+            - name: config
+              mountPath: /etc/dex
+              readOnly: true
+          {{- with .Values.dex.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          secret:
+            secretName: {{ include "varroa.fullname" (dict "Release" .Release "name" "dex") }}
+{{- end }}
+
+{{- end }}

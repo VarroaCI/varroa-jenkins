@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<flow-definition plugin="workflow-job">
+  <displayName>Pipeline with Inline Script</displayName>
+  <description>Pipeline job with inline Groovy script</description>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps">
+    <script>pipeline {&#xA;    agent any&#xA;    stages {&#xA;        stage(&#39;Build&#39;) {&#xA;            steps {&#xA;                echo &#39;Building...&#39;&#xA;            }&#xA;        }&#xA;    }&#xA;}&#xA;</script>
+    <sandbox>true</sandbox>
+  </definition>
+</flow-definition>

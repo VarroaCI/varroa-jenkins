@@ -1,0 +1,245 @@
+.page {
+  animation: fade .35s ease;
+}
+
+@keyframes fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.backLink {
+  color: var(--text-2);
+  font-size: 0.9rem;
+  display: inline-block;
+  margin-bottom: 20px;
+  text-decoration: none;
+}
+
+.backLink:hover {
+  color: var(--accent);
+}
+
+.title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.subtitle {
+  color: var(--text-2);
+  font-size: 13.5px;
+  margin-bottom: 24px;
+}
+
+.section {
+  margin-bottom: 28px;
+}
+
+.sectionTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 8px 16px;
+  font-size: 0.92rem;
+}
+
+.detailLabel {
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.yamlBlock {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.tags {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.tag {
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+.variableCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+
+.variableName {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.variableMeta {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 2px;
+}
+
+.variableDesc {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.invalidBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  font-weight: 600;
+}
+
+.validBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: var(--ok-soft);
+  color: var(--ok-text);
+  font-weight: 600;
+}
+
+.loadingBanner {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.errorBanner {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  padding: 12px 18px;
+  border-radius: var(--radius);
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+/* --- Pinned closure + compatibility tables --------------------------- */
+
+/* Wide tables scroll inside their own container so the page body never
+   scrolls horizontally: the lock-pin column count grows with the number of
+   eligible version profiles. */
+.tableScroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-2);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.lockUnpinned {
+  color: var(--text-2);
+  font-style: italic;
+  white-space: nowrap;
+}
+
+/* A divergent lock pin predicts the provisioning plugin-version conflict at
+   the point of selection, without inventing a compatibility verdict for it. */
+.lockDiverges {
+  font-family: var(--mono);
+  color: var(--warn-text);
+  background: var(--warn-soft);
+  white-space: nowrap;
+}
+
+.advisoryNote {
+  color: var(--text-2);
+  font-size: 12.5px;
+  margin-bottom: 10px;
+}
+
+.compatMessage {
+  color: var(--text-2);
+  max-width: 42ch;
+}
+
+.compatBadge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--ok-soft);
+  color: var(--ok-text);
+}
+
+.compatBadge[data-verdict="core-too-old"],
+.compatBadge[data-verdict="dep-below-minimum"] {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+}
+
+.compatBadge[data-verdict="lock-too-old"] {
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
+
+.compatBadge[data-verdict="unknown"] {
+  background: var(--surface-2);
+  color: var(--text-2);
+}

@@ -1,0 +1,219 @@
+# broodops — brood operation lifecycle management (cross-cluster per F2).
+/api/v1/brood-operations:
+  post:
+    operationId: createBroodOperation
+    tags: [broodops]
+    summary: Creates a new brood operation. Operator+.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/CreateBroodRequest'
+    responses:
+      "201":
+        description: Brood operation created (at least one cluster succeeded).
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/BroodRun'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "409":
+        description: Conflict (uniform across clusters).
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/BroodCreateFailure'
+      "502":
+        description: All clusters failed or unreachable.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/BroodCreateFailure'
+  get:
+    operationId: listBroodOperations
+    tags: [broodops]
+    summary: Lists brood operations, optionally filtered by namespace or cluster. Viewer+.
+    parameters:
+      - $ref: '../components/parameters.yaml#/namespace'
+      - name: cluster
+        in: query
+        schema:
+          type: string
+        description: Optional cluster filter (narrows fan-out to one cluster).
+      - name: startedBy
+        in: query
+        schema:
+          type: string
+        description: Optional filter by status.startedBy (e.g., schedule:ns/name).
+    responses:
+      "200":
+        description: Brood operation list with fan-out status.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items, clusters]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/BroodRunSummaryRow'
+                clusters:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/BroodRunClusterStatus'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        description: Unknown cluster specified in ?cluster=.
+
+/api/v1/brood-operations/preview:
+  post:
+    operationId: previewBroodOperation
+    tags: [broodops]
+    summary: Previews which controllers a brood operation would target. Viewer+.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/CreateBroodRequest'
+    responses:
+      "200":
+        description: Preview result with per-cluster target tables.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/BroodPreviewResponse'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "502":
+        description: All clusters unreachable.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/BroodCreateFailure'
+
+/api/v1/brood-operations/{ns}/{name}:
+  get:
+    operationId: getBroodOperation
+    tags: [broodops]
+    summary: Gets a logical brood operation run (aggregated across clusters). Viewer+.
+    parameters:
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Brood run detail with per-cluster sections.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/BroodRun'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "502":
+        description: Run not found on reachable clusters but some clusters unreachable.
+  delete:
+    operationId: deleteBroodOperation
+    tags: [broodops]
+    summary: Deletes (cancels) a brood operation across all member clusters. Operator+.
+    parameters:
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Per-cluster cancel results.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clusters]
+              properties:
+                clusters:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/BroodRunClusterStatus'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/brood-operations/{ns}/{name}/suspend:
+  post:
+    operationId: suspendBroodOperation
+    tags: [broodops]
+    summary: Toggles suspend on a brood operation across all member clusters. Operator+.
+    parameters:
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/SuspendBroodRequest'
+    responses:
+      "200":
+        description: Per-cluster suspend results.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clusters]
+              properties:
+                clusters:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/BroodRunClusterStatus'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/brood-operations/{ns}/{name}/stream:
+  get:
+    operationId: streamBroodOperation
+    tags: [broodops]
+    summary: SSE stream of brood operation status changes (BroodRun DTO). Viewer+.
+    parameters:
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: "SSE event stream. Emits `event: status` with BroodRun DTO."
+        content:
+          text/event-stream:
+            schema:
+              type: string
+              description: "event: status\\ndata: <BroodRun>\\n\\n"
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "502":
+        description: Run unreachable (some clusters errored).

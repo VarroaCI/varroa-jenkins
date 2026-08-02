@@ -1,0 +1,133 @@
+# API keys — self-service and admin key management.
+/api/v1/me/apikeys:
+  get:
+    operationId: listMyApiKeys
+    tags: [apikeys]
+    summary: Lists the current user's API keys.
+    responses:
+      "200":
+        description: List of API key metadata (N6 envelope).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/KeyMeta'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+  post:
+    operationId: createApiKey
+    tags: [apikeys]
+    summary: Creates a new API key for the current user.
+    requestBody:
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/CreateKeyRequest'
+    responses:
+      "201":
+        description: API key created.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/TokenResponse'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+
+/api/v1/me/apikeys/{prefix}:
+  delete:
+    operationId: revokeApiKey
+    tags: [apikeys]
+    summary: Revokes one of the current user's API keys.
+    parameters:
+      - $ref: '../components/parameters.yaml#/prefix'
+    responses:
+      "204":
+        description: Key revoked successfully.
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/me/apikeys/{prefix}/rotate:
+  post:
+    operationId: rotateApiKey
+    tags: [apikeys]
+    summary: Rotates an API key (issues a new key, revokes the old one).
+    parameters:
+      - $ref: '../components/parameters.yaml#/prefix'
+    requestBody:
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/CreateKeyRequest'
+    responses:
+      "200":
+        description: Key rotated successfully.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/TokenResponse'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "500":
+        description: Partial failure — new key created but old key could not be revoked.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RotatePartialFailure'
+
+/api/v1/users/{name}/apikeys:
+  get:
+    operationId: listUserApiKeys
+    tags: [apikeys]
+    summary: Lists another user's API keys (admin only).
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: List of API key metadata (N6 envelope).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/KeyMeta'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+
+/api/v1/users/{name}/apikeys/{prefix}:
+  delete:
+    operationId: revokeUserApiKey
+    tags: [apikeys]
+    summary: Revokes another user's API key (admin only).
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+      - $ref: '../components/parameters.yaml#/prefix'
+    responses:
+      "204":
+        description: Key revoked successfully.
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'

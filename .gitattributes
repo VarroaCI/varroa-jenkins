@@ -1,0 +1,9 @@
+# Generated files — do not review or render diffs by default.
+pkg/client/gen.go linguist-generated=true
+api/openapi/varroa.json linguist-generated=true
+api/openapi/varroa.yaml linguist-generated=true
+api/v1alpha1/zz_generated.deepcopy.go linguist-generated=true
+internal/mite/proto/mitev1/mitev1_gen.go linguist-generated=true
+
+# Vendored third-party assets.
+api/openapi/docs/rapidoc-min.js linguist-vendored=true

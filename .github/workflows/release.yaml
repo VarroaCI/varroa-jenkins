@@ -1,0 +1,196 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '*.md'
+    tags: ['v*']
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  check-crds:
+    name: Check CRDs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make check-crds
+
+  check-proto:
+    name: Check Proto
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      - run: make check-proto
+
+  backend:
+    name: Build & push backend
+    needs: [check-crds, check-proto]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      - run: go mod download
+
+      - run: go vet ./...
+      - run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+      - run: golangci-lint run --timeout 10m ./...
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc libc6-dev
+      - run: CGO_ENABLED=1 go test -race -count=1 ./...
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,prefix=,format=short
+            type=sha,prefix=,format=long
+            type=raw,value=latest
+            type=semver,pattern={{version}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            GIT_BRANCH=${{ github.ref_name }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  frontend:
+    name: Build & push frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-frontend
+          tags: |
+            type=sha,prefix=,format=short
+            type=sha,prefix=,format=long
+            type=raw,value=latest
+            type=semver,pattern={{version}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  chart:
+    name: Push Helm chart (OCI)
+    # Only tag pushes carry a real release version; plain pushes to main
+    # build/push images (above) but do not cut a chart version.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch chart dependencies
+        # charts/varroa/charts/ is gitignored — the NATS subchart must be
+        # fetched (pinned by Chart.lock) before packaging, same as
+        # localdev-validate in pr.yaml. helm v3 needs the repo registered first.
+        run: |
+          helm repo add nats https://nats-io.github.io/k8s/helm/charts/ --force-update
+          helm dependency build charts/varroa
+      - name: Push Helm chart (OCI)
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+          helm package charts/varroa --version "${VERSION}" --app-version "${VERSION}"
+          helm push varroa-*.tgz "oci://ghcr.io/${{ github.repository_owner }}/charts"
+
+  publish-plugin-packs:
+    name: Publish plugin packs
+    needs: [check-crds, check-proto]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        profile:
+          - name: "2-555"
+            version: "2.555"
+          - name: "2-570"
+            version: "2.570"
+    steps:
+      - uses: actions/checkout@v4
+
+      # build-plugin-pack.sh parses hack/version-profiles.yaml with yq, which
+      # the runner image does not ship by default.
+      - uses: ./.github/actions/setup-ci-tools
+        with:
+          yq: "true"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      - run: go mod download
+
+      - name: Build varroactl
+        run: make build-cli
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & publish plugin pack
+        run: |
+          hack/build-plugin-pack.sh \
+            "${{ matrix.profile.name }}" \
+            "${{ matrix.profile.version }}" \
+            "ghcr.io/${{ github.repository }}"

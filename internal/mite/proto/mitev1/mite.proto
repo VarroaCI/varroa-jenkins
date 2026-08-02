@@ -1,0 +1,294 @@
+syntax = "proto3";
+
+package mitev1;
+
+option go_package = "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1";
+
+// Mite is the gRPC service for communication between mite sidecar agents
+// and the Varroa server.
+service Mite {
+  // Register exchanges a bootstrap token or existing client certificate
+  // for a new mTLS certificate.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+
+  // CommandStream is a bidirectional stream for command-and-control.
+  // Mites send heartbeats, state snapshots, and command results;
+  // the operator sends desired-state commands.
+  rpc CommandStream(stream MiteMessage) returns (stream OperatorMessage);
+}
+
+message RegisterRequest {
+  // @required
+  string controller_name = 1;
+  // @required
+  string namespace = 2;
+  string bootstrap_token = 3;
+  bytes public_key = 4;
+}
+
+message RegisterResponse {
+  // @required
+  string certificate_pem = 1;
+  // @required
+  string ca_pem = 2;
+  // @required
+  string server_endpoint = 3;
+}
+
+message Hello {
+  // @required
+  string controller_name = 1;
+  // @required
+  string namespace = 2;
+  // @required
+  string version = 3;
+}
+
+message Heartbeat {
+  // @required
+  string version = 1;
+  string actual_state_hash = 2;
+  IdleGauges idle = 3;
+  string installed_plugins_hash = 4;
+}
+
+message IdleGauges {
+  int64 last_http_activity_unix = 1;
+  int64 last_event_unix = 2;
+  int32 running_builds = 3;
+  int32 queue_length = 4;
+  int32 timer_trigger_jobs = 5;
+}
+
+message StateSnapshot {
+  string actual_state_hash = 1;
+  string config_hash = 2;
+  string plugins_hash = 3;
+  string rbac_hash = 4;
+  string jenkins_version = 5;
+  string status = 6;
+  string jenkins_health = 7;
+  string items_hash = 8;
+  bool apply_deferred = 9;
+  string defer_reason = 10;
+  string live_config_hash = 11;
+  bool live_drift = 12;
+}
+
+message DesiredStateCommand {
+  // @required
+  string command_id = 1;
+  string jcasc_yaml = 2;
+  string rbac_yaml = 3;
+  reserved 4, 5;
+  reserved "desired_plugins", "plugin_policy";
+  string desired_state_hash = 6;
+  bool reload = 7;
+  string items_yaml = 8;
+  string mite_jenkins_token = 9;
+  int64  mite_jenkins_token_exp = 10;
+  reserved 11;
+  reserved "banner_url";
+  int64 command_deadline_sec = 12;
+  string apply_when = 13;
+  int64 max_defer_sec = 14;
+  int64 drain_timeout_sec = 15;
+  int64 live_fingerprint_interval_sec = 16;
+}
+
+
+
+message DesiredStateResult {
+  // @required
+  bool config_success = 2;
+  // @required
+  bool rbac_success = 3;
+  // @required
+  bool plugins_success = 4;
+  // @required
+  bool items_success = 8;
+  string config_error = 5;
+  string rbac_error = 6;
+  string plugins_error = 7;
+  string items_error = 9;
+  string applied_hash = 1;
+  reserved 10, 11, 13;
+  reserved "restart_required", "plugin_results", "restart_requested";
+  repeated DeferredDeletion deferred_item_deletions = 12;
+}
+
+message DeferredDeletion {
+  string path = 1;
+  string reason = 2;
+}
+
+
+
+message CommandResult {
+  // @required
+  string command_id = 1;
+  // @required
+  bool success = 2;
+  string error = 3;
+  bool deferred = 4;
+  string defer_reason = 5;
+  // http_status carries the upstream HTTP status code for commands that make an
+  // HTTP call on the mite's behalf (currently REPLAY_WEBHOOK). Zero for commands
+  // that make no HTTP call. Lets the operator's webhook-replay consumer apply its
+  // ack/nak/term decision table on the real status code.
+  int32 http_status = 6;
+  oneof result {
+    DesiredStateResult desired_state = 10;
+  }
+}
+
+message TokenRefreshRequest {
+  // Empty — the mite sends this to request a fresh Jenkins token.
+}
+
+message TokenGrant {
+  string mite_jenkins_token     = 1;
+  int64  mite_jenkins_token_exp = 2;
+}
+
+message ContentRequest {
+  string request_id = 1;
+}
+
+message ContentResponse {
+  string request_id  = 1;
+  string jcasc_yaml  = 2;
+  string items_yaml  = 3;
+  string plugins_txt = 4;
+}
+
+message ObservableSource {
+  // @required
+  string provider = 1;
+  // @required
+  string status = 2;
+  string error = 3;
+  map<string, string> hints = 4;
+}
+
+message ObservabilityBuild {
+  // @required
+  string job_name = 1;
+  // @required
+  int32 build_number = 2;
+  // @required
+  string status = 3;
+  string started_at = 4;
+  int32 duration_seconds = 5;
+  string url = 6;
+}
+
+message ObservabilitySummary {
+  int32 total_jobs = 1;
+  int32 running_builds = 2;
+  repeated ObservabilityBuild recent_builds = 3;
+}
+
+message ObservabilityReport {
+  // @required
+  string observed_at = 1;
+  repeated ObservableSource sources = 2;
+  repeated string capabilities = 3;
+  ObservabilitySummary summary = 4;
+  // @required
+  int32 ttl_seconds = 5;
+}
+
+message JenkinsActivityEvent {
+  string type         = 1;   // taxonomy: build.started|build.completed|job.created|job.updated|job.deleted
+  string actor        = 2;   // Jenkins user id/email that triggered the event ("" if system/anonymous)
+  string message      = 3;   // human-readable summary
+  string item_path    = 4;   // full job/folder path, e.g. "team-a/folder/job"
+  int64  build_number = 5;   // 0 when not a build event
+  string result       = 6;   // SUCCESS|FAILURE|UNSTABLE|ABORTED|NOT_BUILT; "" unless build.completed
+  string url          = 7;   // Jenkins job/build URL (may be relative to the controller root)
+  string timestamp    = 8;   // RFC3339; "" => mite fills time.Now()
+}
+
+message MiteMessage {
+  oneof message {
+    Hello hello = 1;
+    Heartbeat heartbeat = 2;
+    StateSnapshot state_snapshot = 11;
+    CommandResult command_result = 20;
+    TokenRefreshRequest token_refresh_request = 21;
+    ObservabilityReport observability_report = 22;
+    ContentResponse content_response = 23;
+    JenkinsActivityEvent jenkins_activity = 24;
+    PluginInventory plugin_inventory = 25;
+  }
+}
+
+message OperatorMessage {
+  oneof message {
+    DesiredStateCommand desired_state  = 10;
+    ImperativeCommand   imperative     = 11;
+    TokenGrant          token_grant    = 12;
+    ContentRequest      content_request = 13;
+  }
+}
+
+enum CommandType {
+  COMMAND_TYPE_UNSPECIFIED = 0;
+  SAFE_RESTART = 1;
+  DELETE_ITEM = 2;
+  REPLAY_WEBHOOK = 3;
+  COLLECT_PLUGIN_INVENTORY = 4;
+}
+
+message ImperativeCommand {
+  // @required
+  string      command_id = 1;
+  // @required
+  CommandType type       = 2;
+  string      target     = 3;
+  int64       deadline_sec = 4;
+  int64       drain_timeout_sec = 5;
+  ReplayWebhookPayload replay_webhook = 6;
+}
+
+message ReplayWebhookPayload {
+  string path = 1;
+  string query = 2;
+  map<string, string> headers = 3;
+  bytes body = 4;
+  string delivery_id = 5;
+}
+
+message PluginInventory {
+  // @required
+  string installed_plugins_hash = 1;
+  string collected_at = 2;
+  string source = 3;
+  repeated InstalledPlugin plugins = 4;
+  bool degraded = 5;
+  bool truncated = 6;
+  bool collection_failed = 7;
+  string collection_error = 8;
+  bool optional_edges_dropped = 9;
+  bool all_edges_dropped = 10;
+  repeated string warnings = 11;
+}
+
+message InstalledPlugin {
+  // @required
+  string name = 1;
+  // @required
+  string version = 2;
+  string enabled = 3;
+  string detached = 4;
+  string bundled = 5;
+  repeated PluginDep deps = 6;
+}
+
+message PluginDep {
+  // @required
+  string name = 1;
+  string min = 2;
+  bool optional = 3;
+}

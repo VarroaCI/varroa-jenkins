@@ -1,0 +1,29 @@
+.kv {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1px;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.row {
+  background: var(--surface);
+  padding: 13px 15px;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.k {
+  font-size: 11px;
+  color: var(--text-2);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  margin-bottom: 5px;
+}
+
+.v {
+  font-size: 13.5px;
+  font-weight: 500;
+}

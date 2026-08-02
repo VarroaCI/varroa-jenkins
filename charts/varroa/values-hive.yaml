@@ -1,0 +1,32 @@
+# =============================================================================
+# Hive-mode overlay — use with:
+#   helm install varroa charts/varroa -f charts/varroa/values-hive.yaml \
+#     --set cluster.name=<name> \
+#     --set bus.url=tls://<core>:4222 \
+#     [the core's auth.* values]
+# =============================================================================
+
+# Hive mode: operator+gateway only, joined to a core's NATS.
+mode: hive
+
+# The NATS subchart condition cannot be derived from mode; set explicitly.
+# jetStreamReplicas still derives from nats.config.cluster.replicas (default 3)
+# even though the local subchart doesn't render — override it if the core's
+# actual NATS cluster size differs, e.g. --set nats.config.cluster.replicas=5.
+nats:
+  enabled: false
+
+# Belt-and-braces (templates already self-gate on mode):
+dex: {enabled: false}
+bff: {enabled: false}
+frontend: {enabled: false}
+prometheus: {enabled: false}
+grafana: {enabled: false}
+oauth2-proxy: {enabled: false}
+
+# Optional: default-deny NetworkPolicy for the hive namespace (operator+gateway).
+# The core-NATS egress port is derived from bus.url; pin the CIDR in production.
+#networkPolicy:
+#  enabled: true
+#  coreNatsEgress:
+#    cidrs: ["<core-nats-endpoint-ip>/32"]

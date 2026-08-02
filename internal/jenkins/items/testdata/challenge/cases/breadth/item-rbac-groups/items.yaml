@@ -1,0 +1,21 @@
+items:
+  - kind: freeStyle
+    name: item-rbac-groups
+    displayName: "Item with RBAC Groups"
+    description: "FreeStyle job with RBAC groups"
+    groups:
+      - name: developers
+        members:
+          users:
+            - alice
+            - bob
+          external_groups:
+            - engineering
+        roles:
+          - name: admin
+      - name: viewers
+        members:
+          users:
+            - charlie
+        roles:
+          - name: viewer

@@ -1,0 +1,3476 @@
+# Shared schemas for the Varroa BFF API.
+# See design.md §2, §3, and Go struct transcriptions.
+# No additionalProperties: true except labels/annotations/variables string maps.
+
+Error:
+  type: object
+  required: [error]
+  properties:
+    error:
+      type: string
+      description: Human-readable error message.
+  additionalProperties: false
+
+VersionInfo:
+  type: object
+  required: [component, version]
+  properties:
+    component:
+      type: string
+      description: Component name, e.g. "bff".
+    version:
+      type: string
+      description: Build version (git short SHA or "dev").
+  additionalProperties: false
+
+KeyMeta:
+  type: object
+  description: Non-secret metadata for an API key.
+  required: [prefix, created]
+  properties:
+    prefix:
+      type: string
+      description: First 7 characters of the key.
+    created:
+      type: string
+      description: ISO 8601 creation time.
+    lastUsed:
+      type: string
+      description: ISO 8601 last-use time, absent if never used.
+    expires:
+      type: string
+      description: ISO 8601 expiration time, absent if no expiry.
+    name:
+      type: string
+      description: Optional display name (≤128 chars). Absent when unnamed.
+  additionalProperties: false
+
+TokenResponse:
+  type: object
+  required: [token, warning]
+  properties:
+    token:
+      type: string
+      description: The new API key token (shown once).
+    warning:
+      type: string
+      description: Fixed admonition that the token will not be shown again.
+  additionalProperties: false
+
+CreateKeyRequest:
+  type: object
+  description: Request body for creating or rotating an API key.
+  properties:
+    expiresIn:
+      type: string
+      description: Optional duration string (e.g. "720h"), absent for no expiry.
+    name:
+      type: string
+      description: Optional display name (≤128 chars). When rotating, an absent or empty name carries the old key's name forward.
+  additionalProperties: false
+
+RotatePartialFailure:
+  type: object
+  description: Partial failure on rotate — new key created but old key could not be revoked.
+  required: [error, newToken]
+  properties:
+    error:
+      type: string
+      description: Human-readable error message.
+    newToken:
+      type: string
+      description: The new API key (the old key still exists).
+  additionalProperties: false
+
+Me:
+  type: object
+  description: Current user information, enriched from JWT claims and User CRD.
+  required: [subject, email, name, groups, authMode]
+  properties:
+    preferredUsername:
+      type: string
+    subject:
+      type: string
+    email:
+      type: string
+    name:
+      type: string
+    groups:
+      type: array
+      items:
+        type: string
+    displayName:
+      type: string
+    preferences:
+      $ref: '#/Preferences'
+    authMode:
+      type: string
+      enum: [local, ldap, oidc]
+    lastLogin:
+      type: string
+      description: ISO 8601 last login time, absent if never logged in.
+  additionalProperties: false
+
+Preferences:
+  type: object
+  description: User UI preferences.
+  properties:
+    theme:
+      type: string
+    accent:
+      type: string
+    defaultLanding:
+      type: string
+  additionalProperties: false
+
+LoginRequest:
+  type: object
+  required: [username, password]
+  properties:
+    username:
+      type: string
+    password:
+      type: string
+  additionalProperties: false
+
+LoginResponse:
+  type: object
+  description: |
+    Successful login response. Uses snake_case to match OAuth2 conventions.
+  required: [id_token, expires_in]
+  properties:
+    id_token:
+      type: string
+      description: Signed JWT session token.
+    expires_in:
+      type: integer
+      description: Token lifetime in seconds.
+  additionalProperties: false
+
+# --- 3.2 user / group / team / identity schemas ---
+
+UserListEntry:
+  type: object
+  description: Entry for each user in the user list.
+  required: [name, email, groups, managedBy]
+  properties:
+    name:
+      type: string
+    email:
+      type: string
+    displayName:
+      type: string
+    groups:
+      type: array
+      items:
+        type: string
+    lastLogin:
+      type: string
+      description: ISO 8601 last login time.
+    managedBy:
+      type: string
+      description: Source of user management, e.g. "local" or "idp".
+  additionalProperties: false
+
+CreateUserRequest:
+  type: object
+  description: Request body for creating a user (admin, local auth only).
+  required: [username, password]
+  properties:
+    username:
+      type: string
+    email:
+      type: string
+    displayName:
+      type: string
+    password:
+      type: string
+    groups:
+      type: array
+      items:
+        type: string
+  additionalProperties: false
+
+UpdateUserRequest:
+  type: object
+  description: Request body for updating a user's identity fields.
+  properties:
+    email:
+      type: string
+    displayName:
+      type: string
+  additionalProperties: false
+
+GroupEntry:
+  type: object
+  description: Entry for each group in the group list.
+  required: [name, members, memberCount, source]
+  properties:
+    name:
+      type: string
+    displayName:
+      type: string
+    members:
+      type: array
+      items:
+        type: string
+    memberCount:
+      type: integer
+      description: Number of members (from local and/or IDP sources).
+    source:
+      type: string
+      enum: [local, idp, both]
+      description: Origin of the group.
+  additionalProperties: false
+
+CreateGroupRequest:
+  type: object
+  required: [name]
+  properties:
+    name:
+      type: string
+    displayName:
+      type: string
+    members:
+      type: array
+      items:
+        type: string
+  additionalProperties: false
+
+TeamRequest:
+  type: object
+  description: Request body for creating or updating a team.
+  required: [name, namespaces]
+  properties:
+    name:
+      type: string
+      description: Team name (ignored in body for updates).
+    displayName:
+      type: string
+    members:
+      type: array
+      items:
+        type: string
+      description: Direct member usernames.
+    subjects:
+      type: array
+      items:
+        $ref: '#/SubjectRef'
+      description: OIDC subject references.
+    namespaces:
+      type: array
+      items:
+        type: string
+      description: Target namespaces for this team.
+    roleRef:
+      type: string
+      description: Name of a VarroaRole to bind. Must not be "admin".
+    provisionNamespaces:
+      type: boolean
+      description: Whether to auto-provision namespaces.
+  additionalProperties: false
+
+TeamEntry:
+  type: object
+  description: Full team object returned from get/list operations.
+  required: [name, namespaces]
+  properties:
+    name:
+      type: string
+    displayName:
+      type: string
+    members:
+      type: array
+      items:
+        type: string
+    subjects:
+      type: array
+      items:
+        $ref: '#/SubjectRef'
+    namespaces:
+      type: array
+      items:
+        type: string
+    roleRef:
+      type: string
+    provisionNamespaces:
+      type: boolean
+    observedGeneration:
+      type: integer
+      format: int64
+    groupRef:
+      type: string
+      description: Reference to the managed VarroaRoleBinding group.
+    bindingRef:
+      type: string
+      description: Reference to the managed VarroaRoleBinding.
+    namespaceStates:
+      type: array
+      items:
+        $ref: '#/TeamNamespaceState'
+    conditions:
+      type: array
+      items:
+        $ref: '#/TeamCondition'
+  additionalProperties: false
+
+SubjectRef:
+  type: object
+  description: Reference to a subject by kind and name.
+  required: [kind, name]
+  properties:
+    kind:
+      type: string
+      enum: [Group, User]
+      description: Subject kind.
+    name:
+      type: string
+      description: OIDC claim value (group name or user subject).
+  additionalProperties: false
+
+TeamNamespaceState:
+  type: object
+  description: State of a single namespace for a Team.
+  required: [name, state]
+  properties:
+    name:
+      type: string
+    state:
+      type: string
+  additionalProperties: false
+
+TeamCondition:
+  type: object
+  description: Status condition for a Team.
+  required: [type, status]
+  properties:
+    type:
+      type: string
+    status:
+      type: string
+    lastTransitionTime:
+      type: string
+      description: ISO 8601 last transition time.
+    reason:
+      type: string
+    message:
+      type: string
+  additionalProperties: false
+
+IdentitySettings:
+  type: object
+  description: Identity and OIDC configuration (admin view, client secret never included).
+  required: [mode, cookieDomain, defaultRead]
+  properties:
+    mode:
+      type: string
+      enum: [local, ldap, oidc]
+    cookieDomain:
+      type: string
+    defaultRead:
+      type: boolean
+    issuer:
+      type: string
+      description: OIDC issuer URL (present in OIDC mode only).
+    clientId:
+      type: string
+      description: OIDC client ID (present in OIDC mode only).
+    scopes:
+      type: array
+      items:
+        type: string
+      description: OIDC scopes (present in OIDC mode only).
+  additionalProperties: false
+
+BuiltinRoleRef:
+  type: object
+  description: A built-in VarroaRole with resolved Jenkins permissions.
+  required: [name, apiRules, jenkinsRoleRef, jenkinsPermissions]
+  properties:
+    name:
+      type: string
+    apiRules:
+      type: array
+      items:
+        $ref: '#/ApiRuleRef'
+    jenkinsRoleRef:
+      type: string
+      description: Reference to the corresponding JenkinsRole.
+    jenkinsPermissions:
+      type: array
+      items:
+        type: string
+      description: Resolved Jenkins permissions (plugin/controller-level).
+  additionalProperties: false
+
+ApiRuleRef:
+  type: object
+  description: An API rule with resources and verbs.
+  required: [resources, verbs]
+  properties:
+    resources:
+      type: array
+      items:
+        type: string
+    verbs:
+      type: array
+      items:
+        type: string
+  additionalProperties: false
+
+# --- 3.3 controller schemas ---
+
+ObjectMeta:
+  type: object
+  description: Slim Kubernetes ObjectMeta for CRD-shaped request/response bodies.
+  properties:
+    name:
+      type: string
+    namespace:
+      type: string
+    labels:
+      type: object
+      additionalProperties:
+        type: string
+    annotations:
+      type: object
+      additionalProperties:
+        type: string
+
+ComposedBundleRef:
+  type: object
+  description: Reference to a ComposedBundle from a Controller.
+  required: [name]
+  properties:
+    name:
+      type: string
+    namespace:
+      type: string
+      description: Empty = the controller's own namespace.
+  additionalProperties: false
+
+ControllerSpec:
+  type: object
+  description: Desired state of a Controller. Transcribed from v1alpha1.ControllerSpec.
+  properties:
+    namespace:
+      type: string
+      description: Target namespace this controller manages.
+    endpoint:
+      type: string
+      description: API endpoint URL for the controller.
+    version:
+      type: string
+      description: Controller version tag.
+    composedBundleRef:
+      $ref: '#/ComposedBundleRef'
+    pluginSpec:
+      $ref: '#/PluginSpec'
+    backupSpec:
+      $ref: '#/BackupSpec'
+    ingressSpec:
+      $ref: '#/IngressSpec'
+    miteSpec:
+      $ref: '#/MiteSpec'
+    powerState:
+      type: string
+      enum: ["", Running, Stopped, Hibernated]
+      description: Controls whether the controller runs.
+    resources:
+      type: object
+      description: CPU/memory resource requests and limits (transcribed from corev1.ResourceRequirements).
+      properties:
+        requests:
+          type: object
+          description: Minimum resource requests for the Jenkins container.
+          additionalProperties:
+            type: string
+        limits:
+          type: object
+          description: Maximum resource limits for the Jenkins container.
+          additionalProperties:
+            type: string
+    persistence:
+      $ref: '#/PersistenceSpec'
+    reconciliationPolicy:
+      $ref: '#/ReconciliationPolicy'
+    rbacSpec:
+      $ref: '#/RBACSpec'
+    podOverrides:
+      $ref: '#/PodOverrides'
+    resourceOverlay:
+      $ref: '#/ResourceOverlay'
+    className:
+      type: string
+      description: References a ControllerClass by name, layering its defaults between ProvisioningDefaults and the Controller's own spec.
+    hibernation:
+      $ref: '#/HibernationSpec'
+    probes:
+      $ref: '#/ProbesSpec'
+  additionalProperties: false
+
+RBACSpec:
+  type: object
+  description: RBAC configuration mapping OIDC groups to Varroa roles (transcribed from v1alpha1.RBACSpec).
+  properties:
+    groups:
+      type: array
+      description: Group-to-role bindings.
+      items:
+        $ref: '#/RBACGroupBinding'
+  additionalProperties: false
+
+RBACGroupBinding:
+  type: object
+  description: A single OIDC group-to-role binding.
+  required: [name, role]
+  properties:
+    name:
+      type: string
+      description: The OIDC group claim value.
+    role:
+      type: string
+      enum: [admin, operator, developer, viewer]
+      description: Built-in Varroa role short name.
+  additionalProperties: false
+
+PluginSpec:
+  type: object
+  description: Plugin policy and entries (transcribed from v1alpha1.PluginSpec).
+  properties:
+    policy:
+      type: string
+      description: Policy for plugin management (e.g. "pinned").
+    entries:
+      type: array
+      description: Plugins with pinned versions.
+      items:
+        $ref: '#/PluginEntry'
+  additionalProperties: false
+
+PluginEntry:
+  type: object
+  description: A single plugin with pinned version.
+  required: [artifactId, version]
+  properties:
+    artifactId:
+      type: string
+      description: Jenkins plugin artifact ID.
+    version:
+      type: string
+      description: Pinned plugin version.
+  additionalProperties: false
+
+BackupSpec:
+  type: object
+  description: Backup configuration (transcribed from v1alpha1.BackupSpec).
+  properties:
+    enabled:
+      type: boolean
+      description: Whether backups are enabled.
+    schedule:
+      type: string
+      description: Cron expression for the backup schedule.
+    retentionDays:
+      type: integer
+      description: Number of days to retain backups.
+  additionalProperties: false
+
+IngressSpec:
+  type: object
+  description: Ingress configuration (transcribed from v1alpha1.IngressSpec).
+  properties:
+    host:
+      type: string
+      description: Ingress hostname.
+    tlsSecretName:
+      type: string
+      description: Name of the TLS secret.
+    mode:
+      type: string
+      enum: ["", subdomain, path]
+      description: Controls how the controller is exposed. "subdomain" (default) assigns its own host; "path" serves at /jenkins/<ns>/<name>. Immutable after create.
+    annotations:
+      type: object
+      description: Ingress annotations merged onto this controller's ingress.
+      additionalProperties:
+        type: string
+    ingressClassName:
+      type: string
+      description: Override the cluster-level ingress class name for this controller. Empty uses the cluster default.
+  additionalProperties: false
+
+PodOverrides:
+  type: object
+  description: Typed pod-scoped customizations (transcribed from v1alpha1.PodOverrides).
+  properties:
+    env:
+      type: array
+      description: Environment variables added or overridden on the jenkins container (merged by name).
+      items:
+        type: object
+    envFrom:
+      type: array
+      description: envFrom sources added to the jenkins container.
+      items:
+        type: object
+    volumes:
+      type: array
+      description: Pod volumes (merged by name).
+      items:
+        type: object
+    volumeMounts:
+      type: array
+      description: Volume mounts added to the jenkins container (merged by name).
+      items:
+        type: object
+    podLabels:
+      type: object
+      description: Labels added to the pod template metadata.
+      additionalProperties:
+        type: string
+    podAnnotations:
+      type: object
+      description: Annotations added to the pod template metadata.
+      additionalProperties:
+        type: string
+    labels:
+      type: object
+      description: Labels added to the StatefulSet metadata.
+      additionalProperties:
+        type: string
+    annotations:
+      type: object
+      description: Annotations added to the StatefulSet metadata.
+      additionalProperties:
+        type: string
+    jvmOpts:
+      type: string
+      description: JVM options appended (space-joined) to the baseline JAVA_OPTS value.
+    nodeSelector:
+      type: object
+      description: Pod nodeSelector constraints.
+      additionalProperties:
+        type: string
+    tolerations:
+      type: array
+      description: Pod tolerations.
+      items:
+        type: object
+    affinity:
+      type: object
+      description: Pod scheduling affinity.
+    securityContext:
+      type: object
+      description: Pod-level security context.
+  additionalProperties: false
+
+ConflictResponse:
+  type: object
+  description: SSA field-conflict error body returned on 409 Conflict during a PATCH.
+  required: [error, conflicts]
+  properties:
+    error:
+      type: string
+      description: Human-readable conflict error message.
+    conflicts:
+      type: array
+      description: List of conflicting fields.
+      items:
+        $ref: '#/ConflictItem'
+  additionalProperties: false
+
+ConflictItem:
+  type: object
+  description: A single field conflict detail.
+  required: [field, message]
+  properties:
+    field:
+      type: string
+      description: JSON path to the conflicting field (e.g. ".spec.version").
+    manager:
+      type: string
+      description: Field manager that owns the conflict, if identifiable.
+    message:
+      type: string
+      description: Conflict detail message.
+  additionalProperties: false
+
+MiteSpec:
+  type: object
+  description: Mite sidecar configuration (transcribed from v1alpha1.MiteSpec).
+  properties:
+    resources:
+      type: object
+      description: CPU/memory resource requests and limits for the mite sidecar container.
+      properties:
+        requests:
+          type: object
+          description: Minimum resource requests.
+          additionalProperties:
+            type: string
+        limits:
+          type: object
+          description: Maximum resource limits.
+          additionalProperties:
+            type: string
+    image:
+      type: string
+      description: Mite sidecar container image override for this Controller.
+    imagePullPolicy:
+      type: string
+      description: Mite sidecar image pull policy override for this Controller.
+      enum: [Always, Never, IfNotPresent]
+  additionalProperties: false
+
+PersistenceSpec:
+  type: object
+  description: Persistent volume size/class (transcribed from v1alpha1.PersistenceSpec).
+  properties:
+    size:
+      type: string
+      description: Persistent volume storage request (e.g. "20Gi").
+    storageClass:
+      type: string
+      description: Kubernetes StorageClass name for the persistent volume.
+  additionalProperties: false
+
+ResourceOverlay:
+  type: object
+  description: Raw strategic-merge-patch YAML for provisioned resources (transcribed from v1alpha1.ResourceOverlay).
+  properties:
+    statefulSet:
+      type: string
+      description: Strategic-merge-patch YAML applied to the Jenkins StatefulSet.
+    service:
+      type: string
+      description: Strategic-merge-patch YAML applied to the controller Service.
+    ingress:
+      type: string
+      description: Strategic-merge-patch YAML applied to the controller Ingress.
+  additionalProperties: false
+
+ProbesSpec:
+  type: object
+  description: Health probe tuning (transcribed from v1alpha1.ProbesSpec).
+  properties:
+    startup:
+      $ref: '#/ProbeSpec'
+    readiness:
+      $ref: '#/ProbeSpec'
+    liveness:
+      $ref: '#/ProbeSpec'
+  additionalProperties: false
+
+ProbeSpec:
+  type: object
+  description: Curated probe timing knobs (transcribed from corev1.Probe subset).
+  properties:
+    disabled:
+      type: boolean
+      description: Removes this probe entirely. Default false (probe enabled with defaults).
+    initialDelaySeconds:
+      type: integer
+      description: Number of seconds before the first probe attempt.
+    periodSeconds:
+      type: integer
+      description: How often (in seconds) to perform the probe.
+    timeoutSeconds:
+      type: integer
+      description: Number of seconds after which the probe times out.
+    failureThreshold:
+      type: integer
+      description: Minimum consecutive failures for the probe to be considered failed.
+    successThreshold:
+      type: integer
+      description: Minimum consecutive successes for the probe to be considered successful.
+  additionalProperties: false
+
+HibernationSpec:
+  type: object
+  description: Automatic hibernation configuration (transcribed from v1alpha1.HibernationSpec).
+  properties:
+    enabled:
+      type: boolean
+      description: Enables automatic hibernation. When enabled, the controller parks (scales to 0) after inactivity.
+    gracePeriodMinutes:
+      type: integer
+      description: Minutes of inactivity before the controller hibernates. Minimum 5. Default 60.
+    activityIgnoreRegex:
+      type: string
+      description: Regular expression matched against request paths to exclude them from activity tracking.
+  additionalProperties: false
+
+ControllerSummary:
+  type: object
+  description: Summary entry for each controller in the list.
+  required: [name, namespace, cluster, phase, endpoint, miteConnected, routingMode]
+  properties:
+    name:
+      type: string
+    namespace:
+      type: string
+    cluster:
+      type: string
+    phase:
+      type: string
+    endpoint:
+      type: string
+    version:
+      type: string
+      description: Desired Jenkins version (from spec.version).
+    miteConnected:
+      type: boolean
+    miteVersion:
+      type: string
+    jenkinsVersion:
+      type: string
+    jenkinsHealth:
+      type: string
+    composedBundleRef:
+      $ref: '#/ComposedBundleRef'
+    effectiveBundle:
+      $ref: '#/EffectiveBundle'
+    routingMode:
+      type: string
+      description: 'Either "subdomain" or "path".'
+    appliedBundleHash:
+      type: string
+    rolloutWave:
+      type: integer
+      description: RolloutWave from the reconciliation policy.
+  additionalProperties: false
+
+ReconciliationPolicy:
+  type: object
+  description: Reconciliation policy for a controller.
+  properties:
+    mode:
+      type: string
+    interval:
+      type: string
+    maxDeferSeconds:
+      type: integer
+    drainTimeoutSeconds:
+      type: integer
+  additionalProperties: false
+
+PendingRestart:
+  type: object
+  description: Pending restart information.
+  required: [detectedAt, desiredStateHash]
+  properties:
+    detectedAt:
+      type: string
+    desiredStateHash:
+      type: string
+    changes:
+      type: array
+      items:
+        type: string
+  additionalProperties: false
+
+PendingPluginRoll:
+  type: object
+  description: Pending plugin roll information.
+  required: [targetChecksum, since]
+  properties:
+    targetChecksum:
+      type: string
+    since:
+      type: string
+    changes:
+      type: array
+      items:
+        type: string
+  additionalProperties: false
+
+PendingDeletion:
+  type: object
+  description: Pending item deletion.
+  required: [path]
+  properties:
+    path:
+      type: string
+    reason:
+      type: string
+    detectedAt:
+      type: string
+  additionalProperties: false
+
+ApplySectionResult:
+  type: object
+  description: Result for one apply section.
+  required: [name, ok]
+  properties:
+    name:
+      type: string
+    ok:
+      type: boolean
+    error:
+      type: string
+  additionalProperties: false
+
+ApplyResult:
+  type: object
+  description: Result of an apply operation with RFC3339 timestamp.
+  required: [timestamp, succeeded, sections]
+  properties:
+    hash:
+      type: string
+    timestamp:
+      type: string
+    succeeded:
+      type: boolean
+    sections:
+      type: array
+      items:
+        $ref: '#/ApplySectionResult'
+  additionalProperties: false
+
+LiveDrift:
+  type: object
+  description: Live-drift status for a controller.
+  required: [detected]
+  properties:
+    detected:
+      type: boolean
+    liveConfigHash:
+      type: string
+    detectedAt:
+      type: string
+  additionalProperties: false
+
+ReconcileBlocked:
+  type: object
+  description: Read-only projection of whether the controller's reconcile loop is currently blocked by an unresolved error.
+  required: [blocked]
+  properties:
+    blocked:
+      type: boolean
+    reason:
+      type: string
+    message:
+      type: string
+    since:
+      type: string
+  additionalProperties: false
+
+Rollout:
+  type: object
+  description: Rollout gate status for a controller.
+  required: [blocked]
+  properties:
+    targetBundleHash:
+      type: string
+    blocked:
+      type: boolean
+    paused:
+      type: boolean
+    waitingOn:
+      type: array
+      items:
+        type: string
+    blockedSince:
+      type: string
+  additionalProperties: false
+
+VersionStatus:
+  type: object
+  description: Read-only projection of version-related controller conditions.
+  properties:
+    rollPending:
+      type: boolean
+    rollReason:
+      type: string
+    rollMessage:
+      type: string
+    upgradeBlocked:
+      type: boolean
+    blockedReason:
+      type: string
+    blockedMessage:
+      type: string
+  additionalProperties: false
+
+PluginConflict:
+  type: object
+  description: Read-only projection of the plugin-lock-conflict controller condition (ConditionPluginConflict).
+  properties:
+    active:
+      type: boolean
+    reason:
+      type: string
+    message:
+      type: string
+  additionalProperties: false
+
+MiteImageStatus:
+  type: object
+  description: Read-only projection of mite image staleness.
+  properties:
+    image:
+      type: string
+      nullable: true
+    stale:
+      type: boolean
+      nullable: true
+  additionalProperties: false
+
+SourceJSON:
+  type: object
+  description: Observability source status.
+  required: [provider, status]
+  properties:
+    provider:
+      type: string
+    status:
+      type: string
+    error:
+      type: string
+    hints:
+      type: object
+      additionalProperties:
+        type: string
+  additionalProperties: false
+
+FreshnessJSON:
+  type: object
+  description: Observability freshness information.
+  required: [stale]
+  properties:
+    observedAt:
+      type: string
+    miteTTL:
+      type: integer
+    stale:
+      type: boolean
+  additionalProperties: false
+
+RecentBuild:
+  type: object
+  description: A recent build entry.
+  required: [jobName, buildNumber, status]
+  properties:
+    jobName:
+      type: string
+    buildNumber:
+      type: integer
+    status:
+      type: string
+    startedAt:
+      type: string
+    durationSeconds:
+      type: integer
+    url:
+      type: string
+  additionalProperties: false
+
+SummaryJSON:
+  type: object
+  description: Observability summary.
+  properties:
+    totalJobs:
+      type: integer
+    runningBuilds:
+      type: integer
+    recentBuilds:
+      type: array
+      items:
+        $ref: '#/RecentBuild'
+  additionalProperties: false
+
+ControllerObservability:
+  type: object
+  description: Normalized observability model for a controller.
+  required: [sources, capabilities, level, levelName, freshness]
+  properties:
+    sources:
+      type: array
+      items:
+        $ref: '#/SourceJSON'
+    capabilities:
+      type: array
+      items:
+        type: string
+    level:
+      type: integer
+    levelName:
+      type: string
+    warnings:
+      type: array
+      items:
+        type: object
+    freshness:
+      $ref: '#/FreshnessJSON'
+    summary:
+      $ref: '#/SummaryJSON'
+  additionalProperties: false
+
+ControllerDetail:
+  type: object
+  description: Full controller detail including status and sub-resources.
+  required: [name, namespace, cluster, phase, endpoint, version, miteConnected, routingMode, reconcileBlocked]
+  properties:
+    name:
+      type: string
+    namespace:
+      type: string
+    cluster:
+      type: string
+    phase:
+      type: string
+    endpoint:
+      type: string
+    version:
+      type: string
+    powerState:
+      type: string
+    miteConnected:
+      type: boolean
+    miteVersion:
+      type: string
+    jenkinsVersion:
+      type: string
+    jenkinsHealth:
+      type: string
+    lastSeen:
+      type: string
+    certExpiry:
+      type: string
+    desiredStateHash:
+      type: string
+    configHash:
+      type: string
+    rbacHash:
+      type: string
+    reconciliationPolicy:
+      $ref: '#/ReconciliationPolicy'
+    pendingRestart:
+      $ref: '#/PendingRestart'
+    pendingPluginRoll:
+      $ref: '#/PendingPluginRoll'
+    pendingItemDeletions:
+      type: array
+      items:
+        $ref: '#/PendingDeletion'
+    firstConnectedAt:
+      type: string
+    lastReconciledAt:
+      type: string
+    lastApplyResult:
+      $ref: '#/ApplyResult'
+    applyHistory:
+      type: array
+      items:
+        $ref: '#/ApplyResult'
+    composedBundleRef:
+      $ref: '#/ComposedBundleRef'
+    effectiveBundle:
+      $ref: '#/EffectiveBundle'
+    podOverrides:
+      type: object
+    resourceOverlay:
+      type: object
+    observability:
+      $ref: '#/ControllerObservability'
+    routingMode:
+      type: string
+    liveDrift:
+      $ref: '#/LiveDrift'
+    rollout:
+      $ref: '#/Rollout'
+    appliedBundleHash:
+      type: string
+    versionStatus:
+      $ref: '#/VersionStatus'
+    miteImageStatus:
+      $ref: '#/MiteImageStatus'
+    reconcileBlocked:
+      $ref: '#/ReconcileBlocked'
+    pluginConflict:
+      $ref: '#/PluginConflict'
+    pluginInventory:
+      $ref: '#/PluginInventorySummary'
+  additionalProperties: false
+
+CreateControllerRequest:
+  type: object
+  description: Request body for creating a controller. Wraps a Controller CR with optional inline bundle.
+  properties:
+    metadata:
+      $ref: '#/ObjectMeta'
+    spec:
+      $ref: '#/ControllerSpec'
+    bundle:
+      type: object
+      description: Optional inline ComposedBundleSpec.
+  additionalProperties: false
+
+ControllerPatch:
+  type: object
+  description: >
+    Patch body for PATCH /controllers/{ns}/{name}. Exactly one top-level key
+    `spec` is allowed — any other key returns 400 (N5).
+  properties:
+    spec:
+      $ref: '#/ControllerSpec'
+  additionalProperties: false
+
+Check:
+  type: object
+  description: Result of a single preflight validation check.
+  required: [id, status, message]
+  properties:
+    id:
+      type: string
+    status:
+      type: string
+      enum: [pass, warn, fail]
+    message:
+      type: string
+  additionalProperties: false
+
+PreviewRequest:
+  type: object
+  description: Request body for POST /controllers/{ns}/{name}/preview.
+  properties:
+    podOverrides:
+      type: object
+    resourceOverlay:
+      type: object
+    baseline:
+      type: string
+      description: '"live" (default) or "base".'
+  additionalProperties: false
+
+WarningItem:
+  type: object
+  description: A single preview warning about a protected resource path.
+  required: [resource, path, message]
+  properties:
+    resource:
+      type: string
+    path:
+      type: string
+    message:
+      type: string
+  additionalProperties: false
+
+PreviewResponse:
+  type: object
+  description: Response from a controller preview operation.
+  properties:
+    merged:
+      type: object
+      description: Map of resource type to merged YAML.
+      additionalProperties:
+        type: string
+    diff:
+      type: object
+      description: Map of resource type to diff output.
+      additionalProperties:
+        type: string
+    warnings:
+      type: array
+      nullable: true
+      items:
+        $ref: '#/WarningItem'
+    baselineUsed:
+      type: string
+  additionalProperties: false
+
+LogEntry:
+  type: object
+  description: A single structured log line from a controller.
+  required: [timestamp, level, source, message]
+  properties:
+    timestamp:
+      type: string
+      format: date-time
+    level:
+      type: string
+      enum: [ERROR, WARN, DEBUG, INFO]
+    source:
+      type: string
+    message:
+      type: string
+  additionalProperties: false
+
+ControllerDiff:
+  type: object
+  description: Diff between incoming bundle content and last-applied content.
+  properties:
+    incoming:
+      type: object
+      properties:
+        jcasc:
+          type: string
+        items:
+          type: string
+        plugins:
+          type: string
+    applied:
+      type: object
+      properties:
+        jcasc:
+          type: string
+        items:
+          type: string
+        plugins:
+          type: string
+    appliedUnavailable:
+      type: boolean
+  additionalProperties: false
+
+# --- 3.4 RBAC schemas ---
+
+APIRule:
+  type: object
+  description: An API rule defining resource access.
+  required: [resources, verbs]
+  properties:
+    resources:
+      type: array
+      items:
+        type: string
+    verbs:
+      type: array
+      items:
+        type: string
+  additionalProperties: false
+
+VarroaRoleSpec:
+  type: object
+  description: Spec for a VarroaRole (API-level RBAC).
+  properties:
+    apiRules:
+      type: array
+      items:
+        $ref: '#/APIRule'
+    jenkinsPermissions:
+      type: array
+      items:
+        type: string
+      description: Jenkins plugin/controller-level permissions.
+    jenkinsRoleRef:
+      type: string
+      description: Reference to a JenkinsRole.
+  additionalProperties: false
+
+VarroaRoleBindingScope:
+  type: object
+  description: Scope for a VarroaRoleBinding.
+  properties:
+    namespaces:
+      type: array
+      items:
+        type: string
+    controllerSelector:
+      type: object
+      description: Label selector (metav1.LabelSelector).
+  additionalProperties: false
+
+VarroaRoleBindingSpec:
+  type: object
+  description: Spec for a VarroaRoleBinding.
+  required: [subjects, roleRef]
+  properties:
+    subjects:
+      type: array
+      items:
+        $ref: '#/SubjectRef'
+    roleRef:
+      type: string
+    scope:
+      $ref: '#/VarroaRoleBindingScope'
+  additionalProperties: false
+
+JenkinsRoleSpec:
+  type: object
+  description: Spec for a JenkinsRole (Jenkins-level RBAC).
+  required: [permissions]
+  properties:
+    roleType:
+      type: string
+      enum: [Global, Item, Agent]
+    permissions:
+      type: array
+      items:
+        type: string
+    description:
+      type: string
+  additionalProperties: false
+
+JenkinsScope:
+  type: object
+  description: Jenkins-level scope for a binding.
+  required: [type]
+  properties:
+    type:
+      type: string
+      enum: [Global, Folder, Pattern]
+    folder:
+      type: string
+    propagate:
+      type: string
+      enum: [None, Children, Subtree]
+    pattern:
+      type: string
+  additionalProperties: false
+
+JenkinsRoleBindingSpec:
+  type: object
+  description: Spec for a JenkinsRoleBinding.
+  required: [subjects, roleRef]
+  properties:
+    subjects:
+      type: array
+      items:
+        $ref: '#/SubjectRef'
+    roleRef:
+      type: string
+    controllerScope:
+      $ref: '#/VarroaRoleBindingScope'
+    jenkinsScope:
+      $ref: '#/JenkinsScope'
+  additionalProperties: false
+
+# --- 3.4 Catalog schemas ---
+
+CatalogSourceSpec:
+  type: object
+  description: Spec for a CatalogSource (bundle catalog repository).
+  properties:
+    repoURL:
+      type: string
+    ociRef:
+      type: string
+      description: OCI artifact reference; mutually exclusive with repoURL.
+    revision:
+      type: string
+    path:
+      type: string
+    syncIntervalSeconds:
+      type: integer
+    secretRef:
+      type: string
+    trusted:
+      type: boolean
+  additionalProperties: false
+
+CatalogVariable:
+  type: object
+  description: A variable definition for a catalog item.
+  required: [name]
+  properties:
+    name:
+      type: string
+    default:
+      type: string
+    description:
+      type: string
+    required:
+      type: boolean
+    type:
+      type: string
+      description: Parameter type. Omitting the field means "string".
+      enum: [string, number, boolean, credentials]
+    allowedValues:
+      type: array
+      description: Populates a choice/dropdown widget. Only valid when type is "string" or "number".
+      items:
+        type: string
+  additionalProperties: false
+
+CatalogItemSpec:
+  type: object
+  description: Spec for a CatalogItem.
+  required: [sourceRef, type, path]
+  properties:
+    sourceRef:
+      type: string
+    type:
+      type: string
+      enum: [podtemplate, plugin, item, jcasc, rbac, pipeline-template, groovy]
+    displayName:
+      type: string
+    description:
+      type: string
+    path:
+      type: string
+    version:
+      type: string
+    tags:
+      type: array
+      items:
+        type: string
+    variables:
+      type: array
+      items:
+        $ref: '#/CatalogVariable'
+    requires:
+      type: array
+      items:
+        type: string
+  additionalProperties: false
+
+# --- 3.4 ComposedBundle schemas ---
+
+ComposedItemRef:
+  type: object
+  description: Reference to a catalog item composing a bundle.
+  required: [name]
+  properties:
+    name:
+      type: string
+    namespace:
+      type: string
+    pinnedContentHash:
+      type: string
+    variables:
+      type: object
+      additionalProperties:
+        type: string
+  additionalProperties: false
+
+GitBundleSource:
+  type: object
+  description: Git source for a composed bundle input.
+  required: [repoURL, path]
+  properties:
+    repoURL:
+      type: string
+    path:
+      type: string
+    revision:
+      type: string
+    secretRef:
+      type: string
+  additionalProperties: false
+
+OCIBundleSource:
+  type: object
+  description: OCI artifact source for a composed bundle input.
+  required: [ref]
+  properties:
+    ref:
+      type: string
+      description: OCI artifact reference.
+    secretRef:
+      type: string
+      description: Optional pull-credential Secret name.
+    path:
+      type: string
+      description: Optional sub-path within the artifact.
+  additionalProperties: false
+
+ComposedInput:
+  type: object
+  description: A single input to a composed bundle.
+  properties:
+    itemRef:
+      $ref: '#/ComposedItemRef'
+    gitSource:
+      $ref: '#/GitBundleSource'
+    ociSource:
+      $ref: '#/OCIBundleSource'
+  additionalProperties: false
+
+ComposedBundleSpec:
+  type: object
+  description: Spec for a ComposedBundle.
+  required: [inputs]
+  properties:
+    displayName:
+      type: string
+    description:
+      type: string
+    inputs:
+      type: array
+      items:
+        $ref: '#/ComposedInput'
+    variables:
+      type: object
+      additionalProperties:
+        type: string
+    jcascMergeStrategy:
+      type: string
+      enum: [errorOnConflict, override]
+  additionalProperties: false
+
+ComposedBundlePreview:
+  type: object
+  description: Response from a composed bundle preview.
+  required: [bundleYaml, jenkinsYaml, pluginsYaml, itemsYaml, rbacYaml, missing, drifted, warnings, unresolvedVariables]
+  properties:
+    bundleYaml:
+      type: string
+    jenkinsYaml:
+      type: string
+    pluginsYaml:
+      type: string
+    itemsYaml:
+      type: string
+    rbacYaml:
+      type: string
+    missing:
+      type: array
+      items:
+        type: string
+    drifted:
+      type: array
+      items:
+        type: string
+    warnings:
+      type: array
+      items:
+        type: string
+    unresolvedVariables:
+      type: array
+      items:
+        type: string
+  additionalProperties: false
+
+ComposedBundleValidateResponse:
+  type: object
+  description: Response from a composed bundle validation.
+  required: [valid, unresolvedVariables]
+  properties:
+    valid:
+      type: boolean
+    errors:
+      type: array
+      items:
+        type: string
+    warnings:
+      type: array
+      items:
+        type: string
+    unresolvedVariables:
+      type: array
+      items:
+        type: string
+  additionalProperties: false
+
+# --- 3.5 Provisioning schemas ---
+
+SizePreset:
+  type: object
+  description: A size preset for provisioning defaults.
+  required: [name, cpu, memory, storage]
+  properties:
+    name:
+      type: string
+    cpu:
+      type: string
+    memory:
+      type: string
+    storage:
+      type: string
+  additionalProperties: false
+
+ProvisioningDefaultsSpec:
+  type: object
+  description: Spec for ProvisioningDefaults CRD.
+  properties:
+    rootDomain:
+      type: string
+    ingressAnnotations:
+      type: object
+      additionalProperties:
+        type: string
+    defaultCPU:
+      type: string
+    defaultMemory:
+      type: string
+    defaultStorage:
+      type: string
+    defaultVersion:
+      type: string
+    storageClass:
+      type: string
+    storageSizeGB:
+      type: integer
+    ingressClassName:
+      type: string
+    imagePullSecrets:
+      type: array
+      items:
+        type: string
+    provisioningTimeoutSec:
+      type: integer
+    commandDeadlineSec:
+      type: integer
+    liveFingerprintIntervalSec:
+      type: integer
+    defaultReconciliationPolicy:
+      $ref: '#/ReconciliationPolicy'
+    defaultNamespace:
+      type: string
+    namespaces:
+      type: array
+      items:
+        type: string
+    sizePresets:
+      type: array
+      items:
+        $ref: '#/SizePreset'
+    pluginUpdateCenterURL:
+      type: string
+    pluginUpdateCenterDownloadURL:
+      type: string
+    broodPolicy:
+      $ref: '#/BroodPolicy'
+  additionalProperties: false
+
+BroodPolicy:
+  type: object
+  description: >-
+    Cluster-wide constraints on brood operation verbs. Enforced by the operator,
+    not the API: kubectl and GitOps create BroodOperation objects directly.
+  properties:
+    executeGroovy:
+      $ref: '#/ExecuteGroovyPolicy'
+  additionalProperties: false
+
+ExecuteGroovyPolicy:
+  type: object
+  description: >-
+    Governs the executeGroovy verb. Every field absent means enabled — a policy
+    object that only some clusters carry must not change behaviour by its absence.
+  properties:
+    enabled:
+      type: boolean
+      description: Absent means enabled.
+    allowedNamespaces:
+      type: array
+      description: >-
+        Namespaces that may host an executeGroovy BroodOperation, matched against
+        the operation's own namespace rather than its targets'. Empty means all,
+        when enabled is not false.
+      items:
+        type: string
+  additionalProperties: false
+
+EffectiveBundle:
+  type: object
+  description: >-
+    The ComposedBundle a controller is actually using, resolved. Read-only, and
+    deliberately separate from composedBundleRef: that field is the raw spec
+    value the dashboard writes back, so resolving into it would materialize an
+    explicit reference to the starter bundle on the next save.
+  required: [name, namespace, builtIn]
+  properties:
+    name:
+      type: string
+    namespace:
+      type: string
+    builtIn:
+      type: boolean
+      description: >-
+        True when the controller names no bundle and resolved to the built-in
+        starter bundle.
+  additionalProperties: false
+
+VersionCatalogEntry:
+  type: object
+  description: Entry in the version catalog.
+  required: [version, channel, name]
+  properties:
+    version:
+      type: string
+    channel:
+      type: string
+    recommended:
+      type: boolean
+    eol:
+      type: string
+    name:
+      type: string
+    pluginSetReady:
+      type: boolean
+    pluginCount:
+      type: integer
+  additionalProperties: false
+
+VersionProfileCondition:
+  type: object
+  description: Status condition for a version profile.
+  required: [type, status]
+  properties:
+    type:
+      type: string
+    status:
+      type: string
+    reason:
+      type: string
+    message:
+      type: string
+    lastTransitionTime:
+      type: string
+  additionalProperties: false
+
+VersionProfileDetail:
+  type: object
+  description: Full per-profile detail for version profiles.
+  required: [name, version, channel, hasJcasc, conditions]
+  properties:
+    name:
+      type: string
+    version:
+      type: string
+    channel:
+      type: string
+    recommended:
+      type: boolean
+    eol:
+      type: string
+    pluginSetRef:
+      type: string
+    contentRef:
+      type: string
+    pluginCount:
+      type: integer
+    resolveVersion:
+      type: string
+    plugins:
+      type: array
+      items:
+        type: string
+    hasJcasc:
+      type: boolean
+    requiredPlugins:
+      type: array
+      items:
+        type: string
+    conditions:
+      type: array
+      items:
+        $ref: '#/VersionProfileCondition'
+  additionalProperties: false
+
+ControllerClass:
+  type: object
+  description: A ControllerClass CRD (cluster-scoped). Layers cluster-level defaults between ProvisioningDefaults and each Controller via spec.className.
+  required: [apiVersion, kind, metadata]
+  properties:
+    apiVersion:
+      type: string
+    kind:
+      type: string
+    metadata:
+      type: object
+      additionalProperties: true
+    spec:
+      $ref: '#/ControllerClassSpec'
+    status:
+      type: object
+      description: ControllerClassStatus with conditions.
+      properties:
+        conditions:
+          type: array
+          items:
+            $ref: '#/ObjectMeta'
+      additionalProperties: true
+  additionalProperties: true
+
+ControllerClassSpec:
+  type: object
+  description: Desired state of a ControllerClass. Fields that map to a corev1 concept use the literal Kubernetes types.
+  properties:
+    nodeSelector:
+      type: object
+      description: Node selector constraints.
+      additionalProperties:
+        type: string
+    tolerations:
+      type: array
+      description: Pod tolerations.
+      items:
+        type: object
+    affinity:
+      type: object
+      description: Pod scheduling affinity.
+    securityContext:
+      type: object
+      description: Pod-level security context.
+    podLabels:
+      type: object
+      description: Pod labels merged onto the controller pod template.
+      additionalProperties:
+        type: string
+    podAnnotations:
+      type: object
+      description: Pod annotations merged onto the controller pod template.
+      additionalProperties:
+        type: string
+    ingressClassName:
+      type: string
+      description: Default ingress class name for controllers in this class.
+    ingressAnnotations:
+      type: object
+      description: Ingress annotations merged onto the controller ingress.
+      additionalProperties:
+        type: string
+    resources:
+      type: object
+      description: CPU/memory resource requests and limits for the Jenkins container.
+    persistence:
+      type: object
+      description: Persistent volume claim defaults (transcribed from v1alpha1.PersistenceSpec).
+    probes:
+      type: object
+      description: Health probe tuning (transcribed from v1alpha1.ProbesSpec).
+    mite:
+      $ref: '#/ClassMiteSpec'
+    imagePullSecrets:
+      type: array
+      description: Image-pull secret names.
+      items:
+        type: string
+    jvmOpts:
+      type: string
+      description: JVM options prepended to JAVA_OPTS.
+  additionalProperties: false
+
+ClassMiteSpec:
+  type: object
+  description: Mite sidecar configuration for a ControllerClass.
+  properties:
+    image:
+      type: string
+      description: Mite sidecar container image.
+    imagePullPolicy:
+      type: string
+      description: Mite sidecar image pull policy.
+  additionalProperties: false
+
+JenkinsVersionProfile:
+  type: object
+  description: A JenkinsVersionProfile CRD (cluster-scoped).
+  required: [apiVersion, kind, metadata, spec]
+  properties:
+    apiVersion:
+      type: string
+    kind:
+      type: string
+    metadata:
+      type: object
+      additionalProperties: true
+    spec:
+      type: object
+      additionalProperties: true
+    status:
+      type: object
+      additionalProperties: true
+  additionalProperties: true
+
+ProvisioningConfig:
+  type: object
+  description: Aggregate provisioning read surface.
+  required: [rootDomain, defaultNamespace, namespaces, defaultVersion, versions, sizePresets, injectedVariables]
+  properties:
+    rootDomain:
+      type: string
+    defaultNamespace:
+      type: string
+    namespaces:
+      type: array
+      items:
+        type: string
+    defaultVersion:
+      type: string
+    versions:
+      type: array
+      items:
+        $ref: '#/VersionCatalogEntry'
+    sizePresets:
+      type: array
+      items:
+        $ref: '#/SizePreset'
+    injectedVariables:
+      type: array
+      items:
+        type: string
+  additionalProperties: false
+
+DeployableNamespaces:
+  type: object
+  description: The caller's create-authorized namespaces.
+  required: [namespaces, defaultNamespace, allowFreeform, degraded]
+  properties:
+    namespaces:
+      type: array
+      items:
+        type: string
+    defaultNamespace:
+      type: string
+    allowFreeform:
+      type: boolean
+    degraded:
+      type: boolean
+      description: True only when a remote target's inputs were unavailable.
+  additionalProperties: false
+
+# --- 3.5 Activity schemas ---
+
+ActivityEvent:
+  type: object
+  description: A single activity feed event.
+  required: [timestamp, type, source, severity, message]
+  properties:
+    timestamp:
+      type: string
+      format: date-time
+    type:
+      type: string
+    source:
+      type: string
+      enum: [mite, operator, user, api, jenkins]
+    severity:
+      type: string
+      enum: [info, warning, error]
+    actor:
+      type: string
+    controller:
+      type: string
+    namespace:
+      type: string
+    cluster:
+      type: string
+    message:
+      type: string
+    phase:
+      type: string
+    reason:
+      type: string
+    itemPath:
+      type: string
+    buildNumber:
+      type: integer
+      format: int64
+    result:
+      type: string
+    url:
+      type: string
+  additionalProperties: false
+
+# --- 3.5 Streams schemas ---
+
+SearchResult:
+  type: object
+  description: A single search result entry.
+  required: [type, name, link]
+  properties:
+    type:
+      type: string
+    name:
+      type: string
+    cluster:
+      type: string
+    namespace:
+      type: string
+    description:
+      type: string
+    link:
+      type: string
+  additionalProperties: false
+
+StreamTicketResponse:
+  type: object
+  description: Response from POST /stream/ticket.
+  required: [ticket, expiresInSeconds]
+  properties:
+    ticket:
+      type: string
+    expiresInSeconds:
+      type: integer
+  additionalProperties: false
+
+# --- 3.4/3.5 CRD wrapper schemas (restored from typed transcription) ---
+
+TemplateCatalogCondition:
+  type: object
+  description: Status condition for catalog/composedbundle resources.
+  required: [type, status]
+  properties:
+    type:
+      type: string
+    status:
+      type: string
+    lastTransitionTime:
+      type: string
+    reason:
+      type: string
+    message:
+      type: string
+
+VarroaRole:
+  type: object
+  description: A VarroaRole CRD (cluster-scoped, API-level RBAC).
+  properties:
+    apiVersion:
+      type: string
+    kind:
+      type: string
+    metadata:
+      $ref: '#/ObjectMeta'
+    spec:
+      $ref: '#/VarroaRoleSpec'
+
+VarroaRoleBinding:
+  type: object
+  description: A VarroaRoleBinding CRD (cluster-scoped).
+  properties:
+    apiVersion:
+      type: string
+    kind:
+      type: string
+    metadata:
+      $ref: '#/ObjectMeta'
+    spec:
+      $ref: '#/VarroaRoleBindingSpec'
+
+JenkinsRole:
+  type: object
+  description: A JenkinsRole CRD (cluster-scoped, data-plane permissions).
+  properties:
+    apiVersion:
+      type: string
+    kind:
+      type: string
+    metadata:
+      $ref: '#/ObjectMeta'
+    spec:
+      $ref: '#/JenkinsRoleSpec'
+
+JenkinsRoleBinding:
+  type: object
+  description: A JenkinsRoleBinding CRD (cluster-scoped).
+  properties:
+    apiVersion:
+      type: string
+    kind:
+      type: string
+    metadata:
+      $ref: '#/ObjectMeta'
+    spec:
+      $ref: '#/JenkinsRoleBindingSpec'
+
+CatalogSourceStatus:
+  type: object
+  description: Observed state of a CatalogSource.
+  properties:
+    phase:
+      type: string
+      enum: [Pending, Syncing, Ready, Error]
+    observedRevision:
+      type: string
+    lastSyncTime:
+      type: string
+    itemCount:
+      type: integer
+    message:
+      type: string
+    conditions:
+      type: array
+      items:
+        $ref: '#/TemplateCatalogCondition'
+
+CatalogSource:
+  type: object
+  description: A CatalogSource CRD.
+  properties:
+    apiVersion:
+      type: string
+    kind:
+      type: string
+    metadata:
+      $ref: '#/ObjectMeta'
+    spec:
+      $ref: '#/CatalogSourceSpec'
+    status:
+      $ref: '#/CatalogSourceStatus'
+
+CatalogItemStatus:
+  type: object
+  description: Observed state of a CatalogItem.
+  properties:
+    content:
+      type: string
+    contentHash:
+      type: string
+    observedRevision:
+      type: string
+    valid:
+      type: boolean
+    message:
+      type: string
+    closure:
+      type: array
+      description: >-
+        The resolver's own record of what it pinned, for items derived from the
+        update-center store. status.content is a flat plugins.yaml fragment and
+        can express none of these facts.
+      items:
+        $ref: '#/CatalogItemClosureEntry'
+    compat:
+      type: array
+      description: One advisory verdict per JenkinsVersionProfile. Never blocks anything.
+      items:
+        $ref: '#/CatalogItemCompat'
+    conditions:
+      type: array
+      items:
+        $ref: '#/TemplateCatalogCondition'
+
+CatalogItemClosureEntry:
+  type: object
+  description: One pinned member of a derived item's dependency closure.
+  required: [artifactId, version]
+  properties:
+    artifactId:
+      type: string
+    version:
+      type: string
+    direct:
+      type: boolean
+      description: Declared by the root, as opposed to pulled in transitively.
+    provenance:
+      type: string
+      description: Where the selected version came from.
+      enum: [store, lock]
+    minimum:
+      type: string
+      description: The effective minimum in force, when one was declared.
+  additionalProperties: false
+
+CatalogItemCompat:
+  type: object
+  description: One profile's advisory compatibility verdict for a catalog item.
+  required: [profile, verdict]
+  properties:
+    profile:
+      type: string
+    jenkinsVersion:
+      type: string
+      description: The profile's effective deployed core — resolveVersion when set, else version.
+    verdict:
+      type: string
+      enum: [compatible, core-too-old, dep-below-minimum, lock-too-old, unknown]
+    message:
+      type: string
+  additionalProperties: false
+
+CatalogItemLockPins:
+  type: object
+  description: >-
+    One profile's lock pins for a derived item's closure entries. A closure
+    entry the lock does not mention has no key in pins, which is distinct from
+    the lock pinning it at the same version.
+  required: [profile, pins]
+  properties:
+    profile:
+      type: string
+    pins:
+      type: object
+      additionalProperties:
+        type: string
+  additionalProperties: false
+
+CatalogItemDetailResponse:
+  type: object
+  description: >-
+    A CatalogItem plus the per-profile lock-pin projection joined from the
+    JenkinsVersionProfile locks at read time. The pins are cluster state and are
+    deliberately not stored on the item, where they would go stale.
+  required: [item]
+  properties:
+    item:
+      $ref: '#/CatalogItem'
+    lockPins:
+      type: array
+      items:
+        $ref: '#/CatalogItemLockPins'
+  additionalProperties: false
+
+CatalogItem:
+  type: object
+  description: A CatalogItem CRD.
+  properties:
+    apiVersion:
+      type: string
+    kind:
+      type: string
+    metadata:
+      $ref: '#/ObjectMeta'
+    spec:
+      $ref: '#/CatalogItemSpec'
+    status:
+      $ref: '#/CatalogItemStatus'
+
+CatalogItemSummary:
+  type: object
+  description: Summary projection returned by catalog item list responses.
+  required: [name, namespace, type, sourceRef, valid]
+  properties:
+    name:
+      type: string
+    namespace:
+      type: string
+    displayName:
+      type: string
+    type:
+      type: string
+    sourceRef:
+      type: string
+    version:
+      type: string
+    description:
+      type: string
+    tags:
+      type: array
+      items:
+        type: string
+    valid:
+      type: boolean
+    message:
+      type: string
+    contentHash:
+      type: string
+    variables:
+      type: array
+      description: The item's declared variables, so list consumers can render typed inputs without a per-item detail fetch.
+      items:
+        $ref: '#/CatalogVariable'
+    pluginName:
+      type: string
+      description: >-
+        The update-center plugin this item was derived for. The browser collapses
+        rows by it, so a plugin stored at three versions is one row with a version
+        selector. Absent for items that are not update-center-derived.
+    compat:
+      type: array
+      description: >-
+        The item's advisory per-profile verdicts, so a row can be badged without a
+        per-item detail fetch. A badge never disables selection.
+      items:
+        $ref: '#/CatalogItemCompat'
+  additionalProperties: false
+
+InputSummaryEntry:
+  type: object
+  description: Mirror of a single ComposedBundle input for list rendering.
+  required: [kind, type]
+  properties:
+    kind:
+      type: string
+    type:
+      type: string
+    namespace:
+      type: string
+
+ComposedBundleStatus:
+  type: object
+  description: Observed state of a ComposedBundle.
+  properties:
+    phase:
+      type: string
+      enum: [Pending, Ready, Drifted, Invalid]
+    itemCount:
+      type: integer
+    resolvedHash:
+      type: string
+    missingItems:
+      type: array
+      items:
+        type: string
+    driftedItems:
+      type: array
+      items:
+        type: string
+    message:
+      type: string
+    conditions:
+      type: array
+      items:
+        $ref: '#/TemplateCatalogCondition'
+    contentRef:
+      type: string
+    observedRevisions:
+      type: object
+      additionalProperties:
+        type: string
+    observedGeneration:
+      type: integer
+      format: int64
+    errors:
+      type: array
+      items:
+        type: string
+    warnings:
+      type: array
+      items:
+        type: string
+    inputSummary:
+      type: array
+      items:
+        $ref: '#/InputSummaryEntry'
+
+ComposedBundle:
+  type: object
+  description: A ComposedBundle CRD.
+  properties:
+    apiVersion:
+      type: string
+    kind:
+      type: string
+    metadata:
+      $ref: '#/ObjectMeta'
+    spec:
+      $ref: '#/ComposedBundleSpec'
+    status:
+      $ref: '#/ComposedBundleStatus'
+
+ProvisioningDefaultsCondition:
+  type: object
+  description: Status condition for ProvisioningDefaults.
+  required: [type, status]
+  properties:
+    type:
+      type: string
+    status:
+      type: string
+    lastTransitionTime:
+      type: string
+    reason:
+      type: string
+    message:
+      type: string
+
+ProvisioningDefaultsStatus:
+  type: object
+  description: Observed state of ProvisioningDefaults.
+  properties:
+    conditions:
+      type: array
+      items:
+        $ref: '#/ProvisioningDefaultsCondition'
+
+ProvisioningDefaults:
+  type: object
+  description: A ProvisioningDefaults CRD (cluster-scoped).
+  properties:
+    apiVersion:
+      type: string
+    kind:
+      type: string
+    metadata:
+      $ref: '#/ObjectMeta'
+    spec:
+      $ref: '#/ProvisioningDefaultsSpec'
+    status:
+      $ref: '#/ProvisioningDefaultsStatus'
+
+# --- Brood operations ---
+
+BroodOperationDetail:
+  type: object
+  description: Full brood operation resource with spec and status.
+  properties:
+    metadata:
+      $ref: '#/ObjectMeta'
+    spec:
+      type: object
+      properties:
+        action:
+          type: object
+          properties:
+            verb:
+              type: string
+              enum: [restart, reprovision, reconcile, stop, start, executeGroovy]
+            groovy:
+              type: object
+              description: Script selection for verb=executeGroovy. Exactly one of script or itemRef.
+              properties:
+                script:
+                  type: string
+                itemRef:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    pinnedContentHash:
+                      type: string
+                    variables:
+                      type: object
+                      additionalProperties:
+                        type: string
+        targets:
+          type: object
+          properties:
+            names:
+              type: array
+              items:
+                type: string
+            selector:
+              type: object
+            namespaces:
+              type: array
+              items:
+                type: string
+            filters:
+              type: object
+              properties:
+                phase:
+                  type: string
+                version:
+                  type: string
+                bundle:
+                  type: string
+        execution:
+          type: object
+          properties:
+            maxParallel:
+              type: integer
+              format: int32
+            order:
+              type: string
+              enum: [rolloutWave, name]
+            failurePolicy:
+              type: string
+              enum: [FailFast, FailTidy, FailAtEnd]
+        suspend:
+          type: boolean
+        ttlSecondsAfterFinished:
+          type: integer
+          format: int32
+    status:
+      type: object
+      properties:
+        phase:
+          type: string
+          enum: [Pending, Running, Suspended, Succeeded, Failed, Canceled]
+        startedBy:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+        reason:
+          type: string
+        scriptSnapshotRef:
+          type: string
+          description: Name of the owner-referenced ConfigMap holding the once-resolved script content for a catalog-sourced executeGroovy operation. Empty for inline scripts and every other verb.
+        targets:
+          type: array
+          items:
+            type: object
+            properties:
+              namespace:
+                type: string
+              name:
+                type: string
+              wave:
+                type: integer
+                format: int32
+              state:
+                type: string
+                enum: [Pending, Dispatched, Succeeded, Failed, Skipped]
+              reason:
+                type: string
+              dispatchedAt:
+                type: string
+                format: date-time
+              finishedAt:
+                type: string
+                format: date-time
+              output:
+                type: string
+                description: Verb-specific dispatch output (currently executeGroovy only), truncated to 4096 bytes on a UTF-8-safe boundary.
+        summary:
+          type: object
+          properties:
+            total:
+              type: integer
+              format: int32
+            succeeded:
+              type: integer
+              format: int32
+            failed:
+              type: integer
+              format: int32
+            skipped:
+              type: integer
+              format: int32
+        observedGeneration:
+          type: integer
+          format: int64
+  additionalProperties: false
+
+CreateBroodRequest:
+  type: object
+  description: Request body to create or preview a brood operation.
+  properties:
+    namespace:
+      type: string
+      description: Target namespace. Defaults to operator namespace.
+    spec:
+      type: object
+      description: BroodOperationSpec (action, targets, execution).
+    clusters:
+      type: array
+      items:
+        type: string
+      description: Target clusters, or ["all"] for all known clusters. Defaults to the local cluster.
+  additionalProperties: false
+
+BroodRunClusterStatus:
+  type: object
+  description: Per-cluster fan-out outcome row.
+  required: [cluster, ok]
+  properties:
+    cluster:
+      type: string
+    ok:
+      type: boolean
+    error:
+      type: string
+
+BroodRunCluster:
+  type: object
+  description: Per-cluster detail section within a BroodRun.
+  required: [cluster, ok]
+  properties:
+    cluster:
+      type: string
+    ok:
+      type: boolean
+    error:
+      type: string
+    op:
+      $ref: '#/BroodOperationDetail'
+
+BroodRun:
+  type: object
+  description: Aggregated logical run view across clusters.
+  required: [namespace, name, verb, phase, summary, clusters]
+  properties:
+    namespace:
+      type: string
+    name:
+      type: string
+    verb:
+      type: string
+      enum: [restart, reprovision, reconcile, stop, start, executeGroovy]
+    phase:
+      type: string
+      enum: [Pending, Running, Suspended, Succeeded, Failed, Canceled]
+    summary:
+      type: object
+      properties:
+        total:
+          type: integer
+          format: int32
+        succeeded:
+          type: integer
+          format: int32
+        failed:
+          type: integer
+          format: int32
+        skipped:
+          type: integer
+          format: int32
+    startedBy:
+      type: string
+    createdAt:
+      type: string
+      format: date-time
+    clusters:
+      type: array
+      items:
+        $ref: '#/BroodRunCluster'
+
+BroodRunSummaryRow:
+  type: object
+  description: Summary row for a logical run in list responses.
+  required: [namespace, name, verb, phase, summary, clusters]
+  properties:
+    namespace:
+      type: string
+    name:
+      type: string
+    verb:
+      type: string
+      enum: [restart, reprovision, reconcile, stop, start, executeGroovy]
+    phase:
+      type: string
+      enum: [Pending, Running, Suspended, Succeeded, Failed, Canceled]
+    summary:
+      type: object
+      properties:
+        total:
+          type: integer
+          format: int32
+        succeeded:
+          type: integer
+          format: int32
+        failed:
+          type: integer
+          format: int32
+        skipped:
+          type: integer
+          format: int32
+    startedBy:
+      type: string
+    createdAt:
+      type: string
+      format: date-time
+    clusters:
+      type: array
+      items:
+        type: string
+
+BroodCreateFailure:
+  type: object
+  description: Error body when zero clusters succeed on create.
+  required: [error, clusters]
+  properties:
+    error:
+      type: string
+    clusters:
+      type: array
+      items:
+        $ref: '#/BroodRunClusterStatus'
+
+BroodPreviewResponse:
+  type: object
+  description: Per-cluster preview result with targets.
+  required: [clusters]
+  properties:
+    clusters:
+      type: array
+      items:
+        type: object
+        required: [cluster, ok]
+        properties:
+          cluster:
+            type: string
+          ok:
+            type: boolean
+          error:
+            type: string
+          targets:
+            type: array
+            items:
+              type: object
+              required: [namespace, name, wave, applicable]
+              properties:
+                namespace:
+                  type: string
+                name:
+                  type: string
+                wave:
+                  type: integer
+                  format: int32
+                applicable:
+                  type: boolean
+                reason:
+                  type: string
+
+SuspendBroodRequest:
+  type: object
+  description: Request body to toggle suspend on a brood operation.
+  required: [suspend]
+  properties:
+    suspend:
+      type: boolean
+  additionalProperties: false
+
+ClusterInfo:
+  type: object
+  description: Status information for a known cluster.
+  required: [name, core, healthy, lastHeartbeat, operatorVersion, k8sVersion, controllerCount, connectedCount, state]
+  properties:
+    name:
+      type: string
+    core:
+      type: boolean
+      description: "true on exactly one row: the BFF's own cluster"
+    healthy:
+      type: boolean
+    lastHeartbeat:
+      type: string
+      format: date-time
+    operatorVersion:
+      type: string
+    k8sVersion:
+      type: string
+    controllerCount:
+      type: integer
+      format: int32
+    connectedCount:
+      type: integer
+      format: int32
+    state:
+      type: string
+      enum: [active, draining, drained]
+    drainStartedAt:
+      type: string
+      format: date-time
+  additionalProperties: false
+
+ClusterFanoutStatus:
+  type: object
+  description: Per-cluster result of a fan-out list operation.
+  required: [name, ok]
+  properties:
+    name:
+      type: string
+    ok:
+      type: boolean
+    error:
+      type: string
+  additionalProperties: false
+
+# --- Brood schedules ---
+
+BroodScheduleSpec:
+  type: object
+  description: Desired state of a BroodSchedule.
+  required: [schedule, template]
+  properties:
+    schedule:
+      type: string
+      description: Cron expression for when to trigger the operation.
+    suspend:
+      type: boolean
+      description: Suspends the schedule.
+    concurrencyPolicy:
+      type: string
+      enum: [Allow, Forbid, Replace]
+      description: How to handle overlapping executions.
+    startingDeadlineSeconds:
+      type: integer
+      format: int64
+      description: Deadline in seconds for starting the job if it misses its scheduled time.
+    successfulJobsHistoryLimit:
+      type: integer
+      format: int32
+      description: Number of successful finished jobs to retain.
+    failedJobsHistoryLimit:
+      type: integer
+      format: int32
+      description: Number of failed finished jobs to retain.
+    waitForCompletion:
+      type: boolean
+      description: Whether the CronJob should wait for the brood operation to complete.
+    template:
+      type: object
+      description: Template for the brood operation.
+      properties:
+        targets:
+          type: object
+          additionalProperties: true
+          description: Target selection (names or selector).
+        action:
+          type: object
+          properties:
+            verb:
+              type: string
+              description: Brood operation verb.
+        clusters:
+          type: array
+          items:
+            type: string
+          description: Target clusters.
+        execution:
+          type: object
+          additionalProperties: true
+          description: Execution parameters (order, maxParallel, failurePolicy).
+        ttlSecondsAfterFinished:
+          type: integer
+          format: int32
+          description: TTL after the operation finishes.
+
+BroodScheduleResponse:
+  type: object
+  description: Response envelope for a brood schedule create, get, or list.
+  properties:
+    namespace:
+      type: string
+    name:
+      type: string
+    cluster:
+      type: string
+    spec:
+      $ref: '#/BroodScheduleSpec'
+    status:
+      type: object
+      additionalProperties: true
+      description: Observed schedule status (lastScheduleTime, lastSuccessfulTime, active, reason).
+    error:
+      type: string
+      description: Error message if the operation failed.
+
+UpdateCenterStatus:
+  type: object
+  description: Update center status response.
+  properties:
+    enabled:
+      type: boolean
+    phase:
+      type: string
+    conditions:
+      type: array
+      items:
+        $ref: '#/UpdateCenterCondition'
+    pluginCount:
+      type: integer
+    storeBytes:
+      type: integer
+      format: int64
+    gaps:
+      type: array
+      items:
+        $ref: '#/UpdateCenterGap'
+    lastSyncTime:
+      type: string
+      format: date-time
+      nullable: true
+    storageType:
+      type: string
+    pullThroughEnabled:
+      type: boolean
+
+UpdateCenterCondition:
+  type: object
+  properties:
+    type:
+      type: string
+    status:
+      type: string
+    lastTransitionTime:
+      type: string
+      format: date-time
+      nullable: true
+    reason:
+      type: string
+    message:
+      type: string
+
+UpdateCenterGap:
+  type: object
+  properties:
+    plugin:
+      type: string
+    version:
+      type: string
+    requiredBy:
+      type: string
+
+UpdateCenterPlugins:
+  type: object
+  description: Update center plugin inventory response.
+  properties:
+    enabled:
+      type: boolean
+    plugins:
+      type: array
+      items:
+        $ref: '#/UpdateCenterPlugin'
+
+UpdateCenterPlugin:
+  type: object
+  properties:
+    name:
+      type: string
+    version:
+      type: string
+    sha256:
+      type: string
+    sizeBytes:
+      type: integer
+      format: int64
+
+UpdateCenterUploadResult:
+  type: object
+  description: >
+    A successful plugin upload, or the plan a dry run produced. Every mandatory
+    dependency in the transitive closure is listed with how it resolved.
+  required: [plugin, dryRun, closure, optionalDependencies, warnings]
+  properties:
+    plugin:
+      $ref: '#/UpdateCenterUploadedPlugin'
+    dryRun:
+      type: boolean
+      description: True when nothing was written.
+    packRef:
+      type: string
+      description: The store ref of the pack holding the uploaded plugin. Empty on a dry run.
+    closure:
+      type: array
+      items:
+        $ref: '#/UpdateCenterClosureEntry'
+    optionalDependencies:
+      type: array
+      description: Recorded but never resolved.
+      items:
+        $ref: '#/UpdateCenterOptionalDependency'
+    warnings:
+      type: array
+      items:
+        $ref: '#/UpdateCenterUploadWarning'
+
+UpdateCenterUploadedPlugin:
+  type: object
+  required: [name, version, sha256]
+  properties:
+    name:
+      type: string
+    version:
+      type: string
+    sha256:
+      type: string
+      description: 'The computed content digest, "sha256:<hex>".'
+    displayName:
+      type: string
+    requiredCore:
+      type: string
+
+UpdateCenterClosureEntry:
+  type: object
+  description: One mandatory dependency and how it resolved.
+  required: [name, min, status]
+  properties:
+    name:
+      type: string
+    min:
+      type: string
+      description: The highest minimum any path in the closure required.
+    status:
+      type: string
+      enum:
+        - satisfied-store
+        - lock-too-old
+        - declared-not-yet-stored
+        - planned-fetch
+        - not-in-store
+        - unreachable
+        - metadata-unavailable
+        - closure-unverifiable
+    resolvedVersion:
+      type: string
+    source:
+      type: string
+      enum: [store, declared, upstream]
+    fetched:
+      type: boolean
+      description: True when the upload downloaded and stored these bytes.
+
+UpdateCenterOptionalDependency:
+  type: object
+  required: [name, min]
+  properties:
+    name:
+      type: string
+    min:
+      type: string
+
+UpdateCenterUploadWarning:
+  type: object
+  description: A non-rejecting finding about the closure.
+  required: [code, plugin, message]
+  properties:
+    code:
+      type: string
+      enum: [lock-too-old, declared-not-yet-stored]
+    plugin:
+      type: string
+    min:
+      type: string
+    message:
+      type: string
+
+UpdateCenterUnresolvedDependency:
+  type: object
+  description: >
+    One rejecting dependency. The foundInStore/foundDeclared/foundUpstream
+    triple is what makes the diff actionable.
+  required: [name, min, reason]
+  properties:
+    name:
+      type: string
+    min:
+      type: string
+    reason:
+      type: string
+      enum: [not-in-store, unreachable, metadata-unavailable, closure-unverifiable]
+    foundInStore:
+      type: string
+      nullable: true
+    foundDeclared:
+      type: string
+      nullable: true
+    foundUpstream:
+      type: string
+      nullable: true
+    remediation:
+      type: string
+
+UpdateCenterUploadRejection:
+  type: object
+  description: A closure that could not be validated. Every rejecting dependency is listed.
+  required: [error]
+  properties:
+    error:
+      type: string
+      enum:
+        - unresolved-dependencies
+        - closure-unverifiable
+        - closure-too-deep
+        - metadata-unavailable
+        - declared-set-unavailable
+    message:
+      type: string
+    unresolved:
+      type: array
+      items:
+        $ref: '#/UpdateCenterUnresolvedDependency'
+
+PluginInventorySummary:
+  type: object
+  description: Bounded plugin inventory summary from Controller.status.pluginInventory.
+  required: [hash, source, stale, degraded, bootstrapApproximate, optionalEdgesDropped, truncated, total, driftTruncated, pendingCollect]
+  properties:
+    hash:
+      type: string
+    collectedAt:
+      type: string
+    observedAt:
+      type: string
+    source:
+      type: string
+    stale:
+      type: boolean
+    degraded:
+      type: boolean
+    bootstrapApproximate:
+      type: boolean
+    optionalEdgesDropped:
+      type: boolean
+    truncated:
+      type: boolean
+    total:
+      type: integer
+    counts:
+      type: object
+      additionalProperties:
+        type: integer
+    drift:
+      type: array
+      items:
+        $ref: '#/PluginInventoryDriftEntry'
+    versionDrift:
+      type: array
+      items:
+        $ref: '#/PluginInventoryDriftEntry'
+    driftTruncated:
+      type: boolean
+    pendingCollect:
+      $ref: '#/PluginInventoryPendingCollect'
+  additionalProperties: false
+
+PluginInventoryDriftEntry:
+  type: object
+  description: One row of the drift or version-drift list.
+  required: [name]
+  properties:
+    name:
+      type: string
+    version:
+      type: string
+    class:
+      type: string
+    verdict:
+      type: string
+    message:
+      type: string
+  additionalProperties: false
+
+PluginInventoryPendingCollect:
+  type: object
+  description: An in-flight COLLECT_PLUGIN_INVENTORY command.
+  required: [commandId, issuedAt]
+  properties:
+    commandId:
+      type: string
+    issuedAt:
+      type: string
+  additionalProperties: false
+
+ClassifiedPluginInventory:
+  type: object
+  description: Full classified plugin inventory from the plugins sub-resource.
+  required: [hash, source, stale, degraded, bootstrapApproximate, optionalEdgesDropped, truncated, total, driftTruncated, detailAvailable]
+  properties:
+    hash:
+      type: string
+    collectedAt:
+      type: string
+    observedAt:
+      type: string
+    source:
+      type: string
+    stale:
+      type: boolean
+    degraded:
+      type: boolean
+    bootstrapApproximate:
+      type: boolean
+    optionalEdgesDropped:
+      type: boolean
+    truncated:
+      type: boolean
+    total:
+      type: integer
+    counts:
+      type: object
+      additionalProperties:
+        type: integer
+    driftTruncated:
+      type: boolean
+    plugins:
+      type: array
+      items:
+        $ref: '#/ClassifiedPlugin'
+    advisories:
+      type: array
+      items:
+        $ref: '#/PluginAdvisory'
+    detailStale:
+      type: boolean
+    detailAvailable:
+      type: boolean
+  additionalProperties: false
+
+ClassifiedPlugin:
+  type: object
+  description: One classified installed plugin from the read model.
+  required: [name, version, class]
+  properties:
+    name:
+      type: string
+    version:
+      type: string
+    class:
+      type: string
+    declaredBy:
+      type: string
+    contributors:
+      type: array
+      items:
+        type: string
+    impliedBy:
+      type: array
+      items:
+        type: string
+    versionVerdict:
+      type: string
+    enabled:
+      type: string
+    detached:
+      type: string
+    bundled:
+      type: string
+  additionalProperties: false
+
+PluginAdvisory:
+  type: object
+  description: A non-classification finding (e.g. dependencyMinimumUnsatisfied).
+  required: [code, plugin, dependency, min, version]
+  properties:
+    code:
+      type: string
+    plugin:
+      type: string
+    dependency:
+      type: string
+    min:
+      type: string
+    version:
+      type: string
+  additionalProperties: false
+
+# --- Fleet plugin inventory (T2.2) ---
+
+FleetPluginVersionCount:
+  type: object
+  required: [version, controllerCount]
+  properties:
+    version:
+      type: string
+    controllerCount:
+      type: integer
+      minimum: 0
+  additionalProperties: false
+
+FleetPluginClassCount:
+  type: object
+  required: [class, controllerCount]
+  properties:
+    class:
+      type: string
+    controllerCount:
+      type: integer
+      minimum: 0
+  additionalProperties: false
+
+FleetPluginRollupItem:
+  type: object
+  required: [name, controllerCount, versions, classes]
+  properties:
+    name:
+      type: string
+    controllerCount:
+      type: integer
+      minimum: 0
+    versions:
+      type: array
+      items:
+        $ref: '#/FleetPluginVersionCount'
+    classes:
+      type: array
+      items:
+        $ref: '#/FleetPluginClassCount'
+  additionalProperties: false
+
+FleetPluginMissingController:
+  type: object
+  required: [cluster, namespace, name, reason]
+  properties:
+    cluster:
+      type: string
+    namespace:
+      type: string
+    name:
+      type: string
+    reason:
+      type: string
+  additionalProperties: false
+
+FleetPluginCoverage:
+  type: object
+  required:
+    [complete, controllersTotal, controllersReporting,
+     controllersStale, controllersDegraded, controllersTruncated,
+     controllersDetailStale, controllersMissing, clustersNotCovered]
+  properties:
+    complete:
+      type: boolean
+    controllersTotal:
+      type: integer
+      minimum: 0
+    controllersReporting:
+      type: integer
+      minimum: 0
+    controllersStale:
+      type: integer
+      minimum: 0
+    controllersDegraded:
+      type: integer
+      minimum: 0
+    controllersTruncated:
+      type: integer
+      minimum: 0
+    controllersDetailStale:
+      type: integer
+      minimum: 0
+    controllersMissing:
+      type: array
+      items:
+        $ref: '#/FleetPluginMissingController'
+    clustersNotCovered:
+      type: integer
+      minimum: 0
+  additionalProperties: false
+
+FleetPluginsRollup:
+  type: object
+  required: [items, coverage, clusters]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/FleetPluginRollupItem'
+    coverage:
+      $ref: '#/FleetPluginCoverage'
+    clusters:
+      type: array
+      items:
+        $ref: '#/ClusterFanoutStatus'
+  additionalProperties: false
+
+FleetPluginDrillItem:
+  type: object
+  required:
+    [cluster, namespace, controller, version, class, source,
+     collectedAt, detailPath, detailStale, stale, degraded,
+     truncated, optionalEdgesDropped, bootstrapApproximate]
+  properties:
+    cluster:
+      type: string
+    namespace:
+      type: string
+    controller:
+      type: string
+    version:
+      type: string
+    class:
+      type: string
+    source:
+      type: string
+    collectedAt:
+      type: string
+    detailPath:
+      type: string
+    detailStale:
+      type: boolean
+    stale:
+      type: boolean
+    degraded:
+      type: boolean
+    truncated:
+      type: boolean
+    optionalEdgesDropped:
+      type: boolean
+    bootstrapApproximate:
+      type: boolean
+  additionalProperties: false
+
+FleetPluginDrilldown:
+  type: object
+  required: [name, items, versions, coverage, clusters]
+  properties:
+    name:
+      type: string
+    items:
+      type: array
+      items:
+        $ref: '#/FleetPluginDrillItem'
+    versions:
+      type: array
+      items:
+        $ref: '#/FleetPluginVersionCount'
+    coverage:
+      $ref: '#/FleetPluginCoverage'
+    clusters:
+      type: array
+      items:
+        $ref: '#/ClusterFanoutStatus'
+  additionalProperties: false

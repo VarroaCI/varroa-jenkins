@@ -1,0 +1,17 @@
+items:
+  - kind: pipeline
+    name: pipeline-inline-script
+    displayName: "Pipeline with Inline Script"
+    description: "Pipeline job with inline Groovy script"
+    definition:
+      script: |
+        pipeline {
+            agent any
+            stages {
+                stage('Build') {
+                    steps {
+                        echo 'Building...'
+                    }
+                }
+            }
+        }

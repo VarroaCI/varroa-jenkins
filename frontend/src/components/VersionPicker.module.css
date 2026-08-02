@@ -1,0 +1,99 @@
+.optGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.optGridDisabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.opt {
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 13px;
+  cursor: pointer;
+  transition: 0.15s;
+  background: var(--surface-2);
+  position: relative;
+}
+
+.opt:hover {
+  border-color: var(--border-strong);
+  background: var(--surface);
+}
+
+.optOn {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-soft) 60%, transparent);
+}
+
+.oName {
+  font-weight: 700;
+  font-size: 13.5px;
+  font-family: var(--mono, monospace);
+}
+
+.oSub {
+  font-size: 11.5px;
+  color: var(--text-2);
+  margin-top: 2px;
+}
+
+.optOn .oSub {
+  color: var(--accent-strong);
+}
+
+.oBadge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--ok-text);
+  background: var(--ok-soft);
+  padding: 1px 7px;
+  border-radius: 10px;
+}
+
+.oCheck {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  display: none;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.optOn .oCheck {
+  display: grid;
+}
+
+.optOn .oBadge {
+  display: none;
+}
+
+.input {
+  width: 100%;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--mono, monospace);
+  font-size: 13px;
+}
+
+.input:disabled {
+  opacity: 0.55;
+}

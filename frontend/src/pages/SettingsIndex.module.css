@@ -1,0 +1,76 @@
+.page {
+  animation: fade .35s ease;
+}
+
+@keyframes fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.pageHead {
+  margin-bottom: 22px;
+}
+
+.pageTitle {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -.5px;
+}
+
+.pageDesc {
+  font-size: 13.5px;
+  color: var(--text-2);
+  margin-top: 3px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius-sm) + 2px);
+  padding: 16px;
+  text-decoration: none;
+  color: inherit;
+  min-height: 44px;
+  transition: border-color .15s, background .15s;
+}
+
+.card:hover {
+  background: var(--surface-3);
+  border-color: var(--text-2);
+}
+
+.card:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text);
+}
+
+.cardIcon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  margin-bottom: 6px;
+}
+
+.cardTitle {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.cardDesc {
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.4;
+}

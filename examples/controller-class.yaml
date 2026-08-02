@@ -1,0 +1,78 @@
+# =============================================================================
+# ControllerClass — cluster-level defaults template for Controllers.
+#
+# A ControllerClass layers defaults between ProvisioningDefaults and each
+# Controller's own spec, selected via spec.className. This example defines a
+# "prod-large" class for production controllers with generous resources.
+#
+# ControllerClass is cluster-scoped (not namespaced).
+#
+# Usage:
+#   kubectl apply -f examples/controller-class.yaml
+#   kubectl get controllerclass
+# =============================================================================
+apiVersion: varroa.dev/v1alpha1
+kind: ControllerClass
+metadata:
+  name: prod-large
+spec:
+  # Pod scheduling constraints
+  nodeSelector:
+    topology.kubernetes.io/zone: us-east-1a
+  tolerations:
+    - key: "dedicated"
+      operator: "Equal"
+      value: "jenkins"
+      effect: "NoSchedule"
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app.kubernetes.io/component
+                  operator: In
+                  values:
+                    - varroa-controller
+            topologyKey: kubernetes.io/hostname
+
+  # Container resources and storage
+  resources:
+    requests:
+      cpu: "4"
+      memory: 16Gi
+    limits:
+      cpu: "8"
+      memory: 32Gi
+  persistence:
+    size: 100Gi
+    storageClass: openebs-hostpath
+
+  # Mite sidecar image (converges live on an already-Connected Controller)
+  mite:
+    image: ghcr.io/varroaci/varroa-mite:latest
+
+  # Ingress defaults (converge live)
+  ingressClassName: nginx
+  ingressAnnotations:
+    cert-manager.io/cluster-issuer: letsencrypt-route53
+
+  # Pod metadata
+  podLabels:
+    environment: production
+  podAnnotations:
+    sidecar.istio.io/inject: "true"
+
+  # Security
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+
+  # Image pull secret names
+  imagePullSecrets:
+    - ghcr-credentials
+
+  # JVM options (prepended to JAVA_OPTS)
+  jvmOpts: "-XX:+UseG1GC -Xms4g"

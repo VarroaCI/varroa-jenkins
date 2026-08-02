@@ -1,0 +1,36 @@
+.console {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  padding: 14px 16px;
+  overflow: auto;
+  color: var(--code-text);
+}
+
+.logline {
+  display: flex;
+  gap: 12px;
+  padding: 1px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ts {
+  color: #6E7681;
+  flex-shrink: 0;
+}
+
+.lv {
+  flex-shrink: 0;
+  width: 46px;
+  font-weight: 700;
+}
+
+.INFO  { color: #58A6FF; }
+.WARN  { color: #E3B341; }
+.ERROR { color: #FF7B72; }
+.DEBUG { color: #8B949E; }
+.OK    { color: #7EE787; }

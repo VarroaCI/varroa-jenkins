@@ -1,0 +1,76 @@
+# ops — infrastructure endpoints.
+/healthz:
+  get:
+    operationId: getHealthz
+    tags: [ops]
+    summary: Kubernetes health check probe.
+    security: []
+    responses:
+      "200":
+        description: OK — plain-text body for probe compatibility.
+        content:
+          text/plain:
+            schema:
+              type: string
+
+/version:
+  get:
+    operationId: getVersion
+    tags: [ops]
+    summary: Returns the BFF component name and build version.
+    security: []
+    responses:
+      "200":
+        description: Version info (N7).
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/VersionInfo'
+
+/api/v1/openapi.json:
+  get:
+    operationId: getOpenAPISpec
+    tags: [ops]
+    summary: Returns the bundled OpenAPI spec.
+    security: []
+    responses:
+      "200":
+        description: The complete OpenAPI specification.
+        content:
+          application/json:
+            schema:
+              type: object
+
+/api/v1/docs:
+  get:
+    operationId: getDocs
+    tags: [ops]
+    summary: RapiDoc HTML interface.
+    security: []
+    responses:
+      "200":
+        description: RapiDoc HTML page.
+        content:
+          text/html:
+            schema:
+              type: string
+
+/api/v1/docs/{asset}:
+  get:
+    operationId: getDocsAsset
+    tags: [ops]
+    summary: RapiDoc asset (rapidoc-min.js).
+    security: []
+    parameters:
+      - name: asset
+        in: path
+        required: true
+        schema:
+          type: string
+    responses:
+      "200":
+        description: Asset file.
+        content:
+          application/javascript:
+            schema:
+              type: string

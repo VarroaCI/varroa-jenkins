@@ -1,0 +1,227 @@
+.page {
+  animation: fade .35s ease;
+}
+
+
+
+@keyframes fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+
+
+.pageHead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
+
+
+
+.pageTitle {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -.5px;
+}
+
+
+
+.pageDesc {
+  font-size: 13.5px;
+  color: var(--text-2);
+  margin-top: 3px;
+}
+
+
+
+.formGroup {
+  margin-bottom: 18px;
+}
+
+
+
+.formLabel {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+
+
+
+.formInput {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--surface);
+  font-family: inherit;
+}
+
+
+
+.formInput:focus {
+  outline: none;
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+
+
+.formSelect {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+}
+
+
+
+.formSelect:focus {
+  outline: none;
+  border-color: var(--accent-strong);
+}
+
+
+
+.subjectRow {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  align-items: flex-start;
+}
+
+
+
+.subjectRow select {
+  width: 120px;
+  flex-shrink: 0;
+}
+
+
+
+.subjectRow input {
+  flex: 1;
+}
+
+
+
+.labelRow {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  align-items: center;
+}
+
+
+
+.labelRow input {
+  flex: 1;
+}
+
+
+
+.labelEquals {
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+
+
+.scopeToggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text);
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+}
+
+
+
+.scopeToggle:hover {
+  background: var(--surface-2);
+}
+
+
+
+.scopeBody {
+  margin-top: 14px;
+  padding: 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+
+
+.hint {
+  font-size: 0.8rem;
+  color: var(--text-2);
+  margin-top: 4px;
+}
+
+
+
+.removeBtn {
+  background: none;
+  border: none;
+  color: var(--bad-text);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 8px;
+}
+
+
+
+.addBtn {
+  background: none;
+  border: 1px dashed var(--border);
+  color: var(--text-2);
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  margin-top: 6px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+
+
+.addBtn:hover {
+  border-color: var(--accent-strong);
+  color: var(--accent-strong);
+}
+
+
+
+.actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding-top: 8px;
+}
+
+
+
+.errorBanner {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  padding: 12px 18px;
+  border-radius: var(--radius);
+  font-weight: 600;
+  margin-bottom: 16px;
+}

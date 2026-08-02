@@ -1,0 +1,61 @@
+name: Set up CI tools
+description: >
+  Installs CLI tools that the GitHub-hosted runner images preinstall but the
+  self-hosted varroa-jenkins-runner image does not. Every tool is a no-op when a
+  suitable version is already on PATH, so this stays correct on both.
+
+inputs:
+  yq:
+    description: Install mikefarah/yq v4 (a v3 on PATH is treated as missing).
+    required: false
+    default: "false"
+  gh:
+    description: Install the GitHub CLI.
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Install yq (mikefarah v4)
+      if: inputs.yq == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Scripts assert `yq --version` reports v4; a v3 binary must be replaced,
+        # not accepted, so the check matches on the major version rather than
+        # mere presence.
+        if command -v yq >/dev/null 2>&1 && yq --version 2>&1 | grep -q ' v4\.'; then
+          echo "yq already present: $(yq --version 2>&1)"
+          exit 0
+        fi
+        # Pinned, not `latest`: the scripts assert v4, so the day yq v5 ships a
+        # `latest` download would install it and break every workflow at once.
+        ver=4.53.3
+        sudo curl -sSL -o /usr/local/bin/yq \
+          "https://github.com/mikefarah/yq/releases/download/v${ver}/yq_linux_amd64"
+        sudo chmod +x /usr/local/bin/yq
+        yq --version
+        yq --version 2>&1 | grep -q " v${ver}\$" || {
+          echo "ERROR: installed yq is not v${ver}: $(yq --version 2>&1)" >&2
+          exit 1
+        }
+
+    - name: Install GitHub CLI
+      if: inputs.gh == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v gh >/dev/null 2>&1; then
+          echo "gh already present: $(gh --version | head -1)"
+          exit 0
+        fi
+        # Installed from the release tarball rather than apt: no repo/key setup,
+        # and it matches how yq is installed above.
+        ver=2.96.0
+        curl -sSL -o /tmp/gh.tar.gz \
+          "https://github.com/cli/cli/releases/download/v${ver}/gh_${ver}_linux_amd64.tar.gz"
+        sudo tar -xzf /tmp/gh.tar.gz -C /usr/local/bin --strip-components=2 \
+          "gh_${ver}_linux_amd64/bin/gh"
+        rm -f /tmp/gh.tar.gz
+        gh --version

@@ -1,0 +1,67 @@
+{{- if not (include "varroa.isHive" .) }}
+{{- if .Values.bff.enabled }}
+{{- $fullName := include "varroa.fullname" (dict "Release" .Release "name" "varroa-bff") }}
+# Release-namespace write Role: the BFF's signing-key read + API-key Secret CRUD, always
+# scoped to its own namespace. The internet-facing BFF never holds cluster-wide Secret write.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $fullName }}-secrets
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: varroa-bff
+    {{- include "varroa.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+  # Version-profile plugin sets are materialized into ConfigMaps in the release
+  # namespace, and the BFF reads them by (status.contentRef, OPERATOR_NAMESPACE)
+  # — which is fixed to .Release.Namespace. Namespaced on purpose: a ClusterRole
+  # rule would let the internet-facing BFF read every ConfigMap in the cluster
+  # to satisfy a read it only ever performs here.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get"]
+  {{- if .Values.managedNamespaces }}
+  # Scoped mode: the cluster-wide pod-log/pod-delete/quota rules are gated off the BFF
+  # ClusterRole, so controllers living in the release namespace need them here.
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
+  - apiGroups: [""]
+    resources: ["resourcequotas"]
+    verbs: ["get", "list"]
+  {{- end }}
+{{- if .Values.managedNamespaces }}
+{{- $readNamespaces := without .Values.managedNamespaces .Release.Namespace | uniq }}
+{{- range $ns := $readNamespaces }}
+---
+# Scoped mode: per-managed-namespace BFF access — controller log streaming, quota
+# preflight, and pod hard restart.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $fullName }}-managed
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/component: varroa-bff
+    {{- include "varroa.labels" $ | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
+  - apiGroups: [""]
+    resources: ["resourcequotas"]
+    verbs: ["get", "list"]
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- end }}

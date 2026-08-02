@@ -1,0 +1,43 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "varroa.fullname" . }}-alerts
+  labels:
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: varroa
+      rules:
+        - alert: VarroaReconcileErrorRateHigh
+          expr: rate(varroa_reconcile_errors_total[10m]) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Controller {{`{{ $labels.controller }}`}} has high reconcile error rate"
+            description: "Error rate is {{`{{ $value }}`}} errors/sec over 10m"
+        - alert: VarroaMiteStreamDisconnects
+          expr: rate(varroa_mite_stream_disconnects_total[5m]) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Controller {{`{{ $labels.controller }}`}} mite stream flapping"
+            description: "Disconnect rate {{`{{ $value }}`}}/sec over 5m"
+        - alert: VarroaPluginAuthFailureRateHigh
+          expr: |
+            rate(varroa_securityrealm_authenticate_total{outcome=~"invalid_token|expired|unknown_user"}[10m])
+            / rate(varroa_securityrealm_authenticate_total[10m]) > 0.1
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Auth failure rate > 10%"
+        - alert: VarroaBundleCloneSlow
+          expr: histogram_quantile(0.95, rate(varroa_bundle_clone_duration_seconds_bucket[5m])) > 30
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Bundle clone p95 > 30s"
+            description: "Clone p95 is {{`{{ $value }}`}}s"

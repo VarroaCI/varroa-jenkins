@@ -1,0 +1,24 @@
+items:
+  - kind: freeStyle
+    name: freestyle-scm-extensions
+    displayName: "FreeStyle SCM Extensions"
+    description: "FreeStyle job with git SCM and extensions"
+    scm:
+      gitSCM:
+        userRemoteConfigs:
+          - userRemoteConfig:
+              url: https://github.com/fake-org/fake-repo.git
+              credentialsId: github-cred
+        branches:
+          - branchSpec:
+              name: "*/main"
+        extensions:
+          - cleanBeforeCheckout:
+              deleteUntrackedNestedRepositories: true
+          - cloneOption:
+              timeout: 30
+              noTags: false
+          - pruneStaleBranch: {}
+    builders:
+      - shell:
+          command: echo "hello world"

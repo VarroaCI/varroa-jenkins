@@ -1,0 +1,8 @@
+{{- if .Comment}}
+// {{.Comment}}
+{{- end}}
+type {{.Name}} struct {
+{{- range .Fields}}
+	{{.GoName}} {{.GoType}} `json:"{{.JSONName}}{{if not .IsRequired}},omitempty{{end}}"`
+{{- end}}
+}

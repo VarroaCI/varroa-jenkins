@@ -1,0 +1,57 @@
+# MCP — Model Context Protocol, opaque JSON-RPC pass-through.
+/api/v1/mcp:
+  post:
+    operationId: mcpPost
+    tags: [mcp]
+    summary: MCP JSON-RPC pass-through (POST).
+    description: >
+      Opaque MCP Streamable HTTP endpoint. Requests and responses are
+      JSON-RPC with no server-defined schema (coordinator-sanctioned
+      exclusion). The server operates in **stateless** mode
+      (`server.WithStateLess(true)`) — no session affinity is required;
+      the C3 local proxy depends on this. Excluded from codegen.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+    responses:
+      "200":
+        description: JSON-RPC response.
+        content:
+          application/json:
+            schema:
+              type: object
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+  get:
+    operationId: mcpGet
+    tags: [mcp]
+    summary: MCP GET health/liveness check.
+    description: Stateless MCP Streamable HTTP — see POST description.
+    responses:
+      "200":
+        description: OK.
+        content:
+          application/json:
+            schema:
+              type: object
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+  delete:
+    operationId: mcpDelete
+    tags: [mcp]
+    summary: MCP DELETE — cancels a JSON-RPC request by ID.
+    description: Stateless MCP Streamable HTTP — see POST description.
+    responses:
+      "200":
+        description: Cancelled.
+        content:
+          application/json:
+            schema:
+              type: object
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'

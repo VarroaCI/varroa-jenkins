@@ -1,0 +1,15 @@
+{{- if not (include "varroa.isHive" .) }}
+{{- if .Values.grafana.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "grafana") }}
+  labels:
+    app.kubernetes.io/component: grafana
+    {{- include "varroa.labels" . | nindent 4 }}
+data:
+  grafana.ini: |
+    {{- toYaml .Values.grafana.config | nindent 4 }}
+{{- end }}
+
+{{- end }}

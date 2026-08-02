@@ -1,0 +1,10 @@
+items:
+  - kind: folder
+    name: folder-envvars
+    displayName: "Folder with EnvVars"
+    description: "Folder with environment variables property"
+    properties:
+      - envVars:
+          vars:
+            MY_VAR: "my-value"
+            ANOTHER_VAR: "another-value"

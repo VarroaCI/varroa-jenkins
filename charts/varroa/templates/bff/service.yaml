@@ -1,0 +1,21 @@
+{{- if not (include "varroa.isHive" .) }}
+{{- if .Values.bff.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-bff") }}
+  labels:
+    app.kubernetes.io/component: varroa-bff
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.bff.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.bff.service.port }}
+      targetPort: http
+  selector:
+    app.kubernetes.io/component: varroa-bff
+    {{- include "varroa.selectorLabels" . | nindent 4 }}
+{{- end }}
+
+{{- end }}

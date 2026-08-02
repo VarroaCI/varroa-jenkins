@@ -1,0 +1,5 @@
+items:
+  - kind: matrix
+    name: unknown-kind-item
+    displayName: "Unknown Kind"
+    description: "Item with unsupported kind 'matrix'"

@@ -1,0 +1,7 @@
+<?jelly escape-by-default='true'?>
+<div>
+    CJOC-style federated authentication. Validates JWT tokens in the
+    varroa_token cookie (set by Varroa after OIDC login) against Dex's
+    JWKS. Also authenticates the mite sidecar via a shared-secret header
+    from localhost.
+</div>

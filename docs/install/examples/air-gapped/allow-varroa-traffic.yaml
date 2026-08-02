@@ -1,0 +1,333 @@
+# allow-varroa-traffic.yaml
+#
+# Minimal egress allow-list for the Varroa control plane in an air-gapped
+# cluster — derived from `helm template` output when the chart renders with
+# `networkPolicy.enabled=true`, `updateCenter.enabled=true`,
+# `updateCenter.pullThrough.enabled=true`, and `updateCenter.storage.type=oci`.
+# Helm labels and chart-specific comments have been stripped for readability.
+#
+# This is a worked example showing the layered allow rules that
+# networkPolicy.enabled=true produces. In production you enable the chart's
+# own NetworkPolicy rendering rather than maintaining this file directly.
+#
+# Sources:
+#   - operator → NATS, kube-apiserver, git hosts, OCI registry, Jenkins pods,
+#                 updatecenter
+#   - gateway → NATS, kube-apiserver
+#   - bff     → NATS, kube-apiserver, dex, controller Jenkins pods, git hosts,
+#               updatecenter
+#   - dex     → kube-apiserver
+#   - nats    → nats cluster bus
+#   - updatecenter → external OCI registry (pull-through + seed store)
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: varroa-system
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dns-egress
+  namespace: varroa-system
+spec:
+  podSelector: {}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+  policyTypes:
+    - Egress
+---
+# Operator
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: operator
+  namespace: varroa-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: varroa-operator
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8082
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: nats
+      ports:
+        - protocol: TCP
+          port: 4222
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 22
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-updatecenter
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# Gateway
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway
+  namespace: varroa-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: varroa-gateway
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              varroa.dev/tenant: "true"
+      ports:
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 9092
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+---
+# BFF
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bff
+  namespace: varroa-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: varroa-bff
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: brood-schedule
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: frontend
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: prometheus
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: nats
+      ports:
+        - protocol: TCP
+          port: 4222
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/managed-by: varroa-operator
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-updatecenter
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 22
+---
+# Update Center
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: updatecenter
+  namespace: varroa-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: varroa-updatecenter
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/managed-by: varroa-operator
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-operator
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-bff
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+---
+# NATS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nats
+  namespace: varroa-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: nats
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-operator
+      ports:
+        - protocol: TCP
+          port: 4222
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-gateway
+      ports:
+        - protocol: TCP
+          port: 4222
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-bff
+      ports:
+        - protocol: TCP
+          port: 4222
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: [nats-box, test-request-reply]
+      ports:
+        - protocol: TCP
+          port: 4222
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: nats
+      ports:
+        - protocol: TCP
+          port: 6222
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: nats
+      ports:
+        - protocol: TCP
+          port: 6222

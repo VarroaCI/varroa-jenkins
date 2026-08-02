@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<jenkins.branch.OrganizationFolder plugin="branch-api">
+  <displayName>Git SCM Org Folder</displayName>
+  <description>Organization folder with git SCM navigator</description>
+  <navigators>
+    <jenkins.plugins.git.GitSCMNavigator plugin="git">
+      <remote>https://github.com/fake-org</remote>
+      <credentialsId>git-cred</credentialsId>
+    </jenkins.plugins.git.GitSCMNavigator>
+  </navigators>
+  <projectFactories>
+    <org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory class="org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory">
+      <scriptPath>Jenkinsfile</scriptPath>
+    </org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory>
+  </projectFactories>
+</jenkins.branch.OrganizationFolder>

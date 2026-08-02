@@ -1,0 +1,494 @@
+openapi: "3.0.3"
+info:
+  title: Varroa BFF API
+  description: >
+    Varroa is a Jenkins operator that manages controllers, RBAC,
+    API keys, and identity within a Kubernetes cluster.
+
+    ## Authentication
+
+    **Bearer token (primary).** All API calls (except those explicitly
+    marked unauthenticated) require an `Authorization: Bearer <token>`
+    header. The token may be a session JWT obtained from
+    `POST /api/v1/login` (local/LDAP) or via the OIDC flow, or a
+    long-lived `vk_`-prefixed API key. The server routes `vk_`-prefixed
+    tokens to the API-key verifier and everything else to the JWT
+    provider.
+
+    **Cookie (browser only).** On successful login the BFF sets an
+    httpOnly `varroa_token` cookie. Browser-based clients (the Varroa
+    dashboard) may use this cookie instead of a bearer header; the
+    `GET /api/v1/me` endpoint accepts it as a fallback when no bearer
+    token is present.
+
+    **SSE ticket (browser EventSource).** Server-Sent Event streams
+    use query-parameter authentication via `?ticket=<stream-ticket>`
+    because the JavaScript `EventSource` API does not support custom
+    headers. A short-lived ticket is obtained from
+    `POST /api/v1/stream/ticket`.
+
+    The CLI and generated Go client use the bearer header exclusively.
+  version: "1.0.0"
+  x-varroa-flows:
+    cli-auth:
+      description: >
+        Browser-based CLI authentication flow. The CLI opens
+        `https://<server>/cli-auth?port=<p>&state=<nonce>&name=<keyName>`,
+        the user approves the request on the frontend page, which POSTs
+        `/api/v1/me/apikeys {"name": "<keyName>"}` and then redirects the
+        browser to `http://127.0.0.1:<p>/callback?state=<nonce>&token=<vk_>`
+        to deliver the token to the CLI's loopback listener.
+      query-params:
+        port: Loopback listener port on 127.0.0.1.
+        state: Anti-CSRF nonce, echoed back in the callback.
+        name: Optional key display name; default "varroactl".
+      callback: "http://127.0.0.1:{port}/callback?state={state}&token={token}"
+servers:
+  - url: "/"
+    description: Host-relative — the client prepends the base URL.
+security:
+  - bearerAuth: []
+tags:
+  - name: ops
+    description: Infrastructure operations (health, version, docs).
+  - name: auth
+    description: Authentication and session management.
+  - name: apikeys
+    description: Long-lived API key management.
+  - name: users
+    description: User management (admin).
+  - name: groups
+    description: Group management (admin).
+  - name: teams
+    description: Team management (admin).
+  - name: identity
+    description: Identity settings and built-in roles (admin).
+  - name: controllers
+    description: Full controller lifecycle management.
+  - name: clusters
+    description: Cluster membership and health.
+  - name: rbac
+    description: Role-based access control CRDs.
+  - name: catalog
+    description: Bundle catalog sources and items.
+  - name: composedbundles
+    description: Composed bundle management.
+  - name: provisioning
+    description: Provisioning configuration and defaults.
+  - name: activity
+    description: Activity feed and event streams.
+  - name: streams
+    description: Search, brood streams, and stream tickets.
+  - name: mcp
+    description: MCP Streamable HTTP endpoint.
+  - name: broodops
+    description: Brood operation management.
+  - name: broodschedules
+    description: Brood schedule management.
+  - name: updatecenter
+    description: Update center status and plugin inventory.
+  - name: fleetplugins
+    description: Fleet-wide installed-plugin inventory and version-range queries.
+paths:
+  /healthz:
+    $ref: './paths/ops.yaml#/~1healthz'
+  /version:
+    $ref: './paths/ops.yaml#/~1version'
+  /api/v1/openapi.json:
+    $ref: './paths/ops.yaml#/~1api~1v1~1openapi.json'
+  /api/v1/docs:
+    $ref: './paths/ops.yaml#/~1api~1v1~1docs'
+  /api/v1/docs/{asset}:
+    $ref: './paths/ops.yaml#/~1api~1v1~1docs~1{asset}'
+  /api/v1/auth-config:
+    $ref: './paths/auth.yaml#/~1api~1v1~1auth-config'
+  /api/v1/auth/login:
+    $ref: './paths/auth.yaml#/~1api~1v1~1auth~1login'
+  /api/v1/callback:
+    $ref: './paths/auth.yaml#/~1api~1v1~1callback'
+  /api/v1/login:
+    $ref: './paths/auth.yaml#/~1api~1v1~1login'
+  /api/v1/logout:
+    $ref: './paths/auth.yaml#/~1api~1v1~1logout'
+  /api/v1/me:
+    $ref: './paths/auth.yaml#/~1api~1v1~1me'
+  /api/v1/me/preferences:
+    $ref: './paths/auth.yaml#/~1api~1v1~1me~1preferences'
+  /api/v1/me/password:
+    $ref: './paths/auth.yaml#/~1api~1v1~1me~1password'
+  /api/v1/me/permissions:
+    $ref: './paths/auth.yaml#/~1api~1v1~1me~1permissions'
+  /api/v1/me/apikeys:
+    $ref: './paths/apikeys.yaml#/~1api~1v1~1me~1apikeys'
+  /api/v1/me/apikeys/{prefix}:
+    $ref: './paths/apikeys.yaml#/~1api~1v1~1me~1apikeys~1{prefix}'
+  /api/v1/me/apikeys/{prefix}/rotate:
+    $ref: './paths/apikeys.yaml#/~1api~1v1~1me~1apikeys~1{prefix}~1rotate'
+  /api/v1/users/{name}/apikeys:
+    $ref: './paths/apikeys.yaml#/~1api~1v1~1users~1{name}~1apikeys'
+  /api/v1/users/{name}/apikeys/{prefix}:
+    $ref: './paths/apikeys.yaml#/~1api~1v1~1users~1{name}~1apikeys~1{prefix}'
+  /api/v1/users:
+    $ref: './paths/users.yaml#/~1api~1v1~1users'
+  /api/v1/users/{name}:
+    $ref: './paths/users.yaml#/~1api~1v1~1users~1{name}'
+  /api/v1/users/{name}/password:
+    $ref: './paths/users.yaml#/~1api~1v1~1users~1{name}~1password'
+  /api/v1/groups:
+    $ref: './paths/groups.yaml#/~1api~1v1~1groups'
+  /api/v1/groups/{name}:
+    $ref: './paths/groups.yaml#/~1api~1v1~1groups~1{name}'
+  /api/v1/teams:
+    $ref: './paths/teams.yaml#/~1api~1v1~1teams'
+  /api/v1/teams/{name}:
+    $ref: './paths/teams.yaml#/~1api~1v1~1teams~1{name}'
+  /api/v1/identity-settings:
+    $ref: './paths/users.yaml#/~1api~1v1~1identity-settings'
+  /api/v1/builtin-roles:
+    $ref: './paths/users.yaml#/~1api~1v1~1builtin-roles'
+  /api/v1/controllers:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1controllers'
+  /api/v1/clusters:
+    $ref: './paths/clusters.yaml#/~1api~1v1~1clusters'
+  /api/v1/clusters/{cluster}/drain:
+    $ref: './paths/clusters.yaml#/~1api~1v1~1clusters~1{cluster}~1drain'
+  /api/v1/clusters/{cluster}/controllers/{ns}:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}'
+  /api/v1/clusters/{cluster}/controllers/{ns}/preflight:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1preflight'
+  /api/v1/clusters/{cluster}/controllers/{ns}/render:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1render'
+  /api/v1/clusters/{cluster}/controllers/{ns}/{name}:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}'
+  /api/v1/clusters/{cluster}/controllers/{ns}/{name}/yaml:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1yaml'
+  /api/v1/clusters/{cluster}/controllers/{ns}/{name}/reconcile:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1reconcile'
+  /api/v1/clusters/{cluster}/controllers/{ns}/{name}/approve:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1approve'
+  /api/v1/clusters/{cluster}/controllers/{ns}/{name}/approve-deletion:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1approve-deletion'
+  /api/v1/clusters/{cluster}/controllers/{ns}/{name}/reprovision:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1reprovision'
+  /api/v1/clusters/{cluster}/controllers/{ns}/{name}/restart:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1restart'
+  /api/v1/clusters/{cluster}/controllers/{ns}/{name}/preview:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1preview'
+  /api/v1/clusters/{cluster}/controllers/{ns}/{name}/logs:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1logs'
+  /api/v1/clusters/{cluster}/controllers/{ns}/{name}/events:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1events'
+  /api/v1/clusters/{cluster}/controllers/{ns}/{name}/mite/stream:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1mite~1stream'
+  /api/v1/clusters/{cluster}/controllers/{ns}/{name}/diff:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1diff'
+  /api/v1/clusters/{cluster}/controllers/{ns}/{name}/plugins:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1plugins'
+  /api/v1/roles:
+    $ref: './paths/rbac.yaml#/~1api~1v1~1roles'
+  /api/v1/roles/{name}:
+    $ref: './paths/rbac.yaml#/~1api~1v1~1roles~1{name}'
+  /api/v1/rolebindings:
+    $ref: './paths/rbac.yaml#/~1api~1v1~1rolebindings'
+  /api/v1/rolebindings/{name}:
+    $ref: './paths/rbac.yaml#/~1api~1v1~1rolebindings~1{name}'
+  /api/v1/clusters/{cluster}/jenkinsroles:
+    $ref: './paths/rbac.yaml#/~1api~1v1~1clusters~1{cluster}~1jenkinsroles'
+  /api/v1/clusters/{cluster}/jenkinsroles/{name}:
+    $ref: './paths/rbac.yaml#/~1api~1v1~1clusters~1{cluster}~1jenkinsroles~1{name}'
+  /api/v1/clusters/{cluster}/jenkinsrolebindings:
+    $ref: './paths/rbac.yaml#/~1api~1v1~1clusters~1{cluster}~1jenkinsrolebindings'
+  /api/v1/clusters/{cluster}/jenkinsrolebindings/{name}:
+    $ref: './paths/rbac.yaml#/~1api~1v1~1clusters~1{cluster}~1jenkinsrolebindings~1{name}'
+  /api/v1/clusters/{cluster}/composedbundles:
+    $ref: './paths/composedbundles.yaml#/~1api~1v1~1clusters~1{cluster}~1composedbundles'
+  /api/v1/clusters/{cluster}/composedbundles/{ns}:
+    $ref: './paths/composedbundles.yaml#/~1api~1v1~1clusters~1{cluster}~1composedbundles~1{ns}'
+  /api/v1/clusters/{cluster}/composedbundles/validate:
+    $ref: './paths/composedbundles.yaml#/~1api~1v1~1clusters~1{cluster}~1composedbundles~1validate'
+  /api/v1/clusters/{cluster}/composedbundles/{ns}/preview:
+    $ref: './paths/composedbundles.yaml#/~1api~1v1~1clusters~1{cluster}~1composedbundles~1{ns}~1preview'
+  /api/v1/clusters/{cluster}/composedbundles/{ns}/{name}:
+    $ref: './paths/composedbundles.yaml#/~1api~1v1~1clusters~1{cluster}~1composedbundles~1{ns}~1{name}'
+  /api/v1/clusters/{cluster}/composedbundles/{ns}/{name}/pause:
+    $ref: './paths/composedbundles.yaml#/~1api~1v1~1clusters~1{cluster}~1composedbundles~1{ns}~1{name}~1pause'
+  /api/v1/clusters/{cluster}/composedbundles/{ns}/{name}/resume:
+    $ref: './paths/composedbundles.yaml#/~1api~1v1~1clusters~1{cluster}~1composedbundles~1{ns}~1{name}~1resume'
+  /api/v1/clusters/{cluster}/catalogsources:
+    $ref: './paths/catalog.yaml#/~1api~1v1~1clusters~1{cluster}~1catalogsources'
+  /api/v1/clusters/{cluster}/catalogsources/{ns}:
+    $ref: './paths/catalog.yaml#/~1api~1v1~1clusters~1{cluster}~1catalogsources~1{ns}'
+  /api/v1/clusters/{cluster}/catalogsources/{ns}/{name}:
+    $ref: './paths/catalog.yaml#/~1api~1v1~1clusters~1{cluster}~1catalogsources~1{ns}~1{name}'
+  /api/v1/clusters/{cluster}/catalogsources/{ns}/{name}/sync:
+    $ref: './paths/catalog.yaml#/~1api~1v1~1clusters~1{cluster}~1catalogsources~1{ns}~1{name}~1sync'
+  /api/v1/clusters/{cluster}/catalogitems:
+    $ref: './paths/catalog.yaml#/~1api~1v1~1clusters~1{cluster}~1catalogitems'
+  /api/v1/clusters/{cluster}/catalogitems/{ns}/{name}:
+    $ref: './paths/catalog.yaml#/~1api~1v1~1clusters~1{cluster}~1catalogitems~1{ns}~1{name}'
+  /api/v1/clusters/{cluster}/provisioningdefaults/{name}:
+    $ref: './paths/provisioning.yaml#/~1api~1v1~1clusters~1{cluster}~1provisioningdefaults~1{name}'
+  /api/v1/clusters/{cluster}/provisioning/config:
+    $ref: './paths/provisioning.yaml#/~1api~1v1~1clusters~1{cluster}~1provisioning~1config'
+  /api/v1/clusters/{cluster}/namespaces/deployable:
+    $ref: './paths/clusters.yaml#/~1api~1v1~1clusters~1{cluster}~1namespaces~1deployable'
+  /api/v1/clusters/{cluster}/version-profiles:
+    $ref: './paths/provisioning.yaml#/~1api~1v1~1clusters~1{cluster}~1version-profiles'
+  /api/v1/clusters/{cluster}/version-profiles/{name}:
+    $ref: './paths/provisioning.yaml#/~1api~1v1~1clusters~1{cluster}~1version-profiles~1{name}'
+  /api/v1/clusters/{cluster}/controller-classes:
+    $ref: './paths/provisioning.yaml#/~1api~1v1~1clusters~1{cluster}~1controller-classes'
+  /api/v1/clusters/{cluster}/controller-classes/{name}:
+    $ref: './paths/provisioning.yaml#/~1api~1v1~1clusters~1{cluster}~1controller-classes~1{name}'
+  /api/v1/activity:
+    $ref: './paths/activity.yaml#/~1api~1v1~1activity'
+  /api/v1/activity/stream:
+    $ref: './paths/activity.yaml#/~1api~1v1~1activity~1stream'
+  /api/v1/search:
+    $ref: './paths/streams.yaml#/~1api~1v1~1search'
+  /api/v1/stream/brood:
+    $ref: './paths/streams.yaml#/~1api~1v1~1stream~1brood'
+  /api/v1/stream/ticket:
+    $ref: './paths/streams.yaml#/~1api~1v1~1stream~1ticket'
+  /api/v1/mcp:
+    $ref: './paths/mcp.yaml#/~1api~1v1~1mcp'
+  /api/v1/brood-operations:
+    $ref: './paths/broodops.yaml#/~1api~1v1~1brood-operations'
+  /api/v1/brood-operations/preview:
+    $ref: './paths/broodops.yaml#/~1api~1v1~1brood-operations~1preview'
+  /api/v1/brood-operations/{ns}/{name}:
+    $ref: './paths/broodops.yaml#/~1api~1v1~1brood-operations~1{ns}~1{name}'
+  /api/v1/brood-operations/{ns}/{name}/suspend:
+    $ref: './paths/broodops.yaml#/~1api~1v1~1brood-operations~1{ns}~1{name}~1suspend'
+  /api/v1/brood-operations/{ns}/{name}/stream:
+    $ref: './paths/broodops.yaml#/~1api~1v1~1brood-operations~1{ns}~1{name}~1stream'
+  /api/v1/brood-schedules:
+    $ref: './paths/broodschedules.yaml#/~1api~1v1~1brood-schedules'
+  /api/v1/brood-schedules/{ns}/{name}:
+    $ref: './paths/broodschedules.yaml#/~1api~1v1~1brood-schedules~1{ns}~1{name}'
+  /api/v1/brood-schedules/{ns}/{name}/suspend:
+    $ref: './paths/broodschedules.yaml#/~1api~1v1~1brood-schedules~1{ns}~1{name}~1suspend'
+  /api/v1/updatecenter:
+    $ref: './paths/updatecenter.yaml#/~1api~1v1~1updatecenter'
+  /api/v1/updatecenter/plugins:
+    $ref: './paths/updatecenter.yaml#/~1api~1v1~1updatecenter~1plugins'
+  /api/v1/fleet/plugins:
+    $ref: './paths/fleetplugins.yaml#/~1api~1v1~1fleet~1plugins'
+  /api/v1/fleet/plugins/{name}:
+    $ref: './paths/fleetplugins.yaml#/~1api~1v1~1fleet~1plugins~1{name}'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        Session JWT (from POST /api/v1/login or the OIDC flow) or a
+        long-lived vk_ API key. The server routes vk_-prefixed tokens
+        to the API-key verifier and everything else to the JWT provider.
+  schemas:
+    APIRule:
+      $ref: './components/schemas.yaml#/APIRule'
+    ActivityEvent:
+      $ref: './components/schemas.yaml#/ActivityEvent'
+    ApiRuleRef:
+      $ref: './components/schemas.yaml#/ApiRuleRef'
+    ApplyResult:
+      $ref: './components/schemas.yaml#/ApplyResult'
+    ApplySectionResult:
+      $ref: './components/schemas.yaml#/ApplySectionResult'
+    BuiltinRoleRef:
+      $ref: './components/schemas.yaml#/BuiltinRoleRef'
+    CatalogItemSpec:
+      $ref: './components/schemas.yaml#/CatalogItemSpec'
+    CatalogSourceSpec:
+      $ref: './components/schemas.yaml#/CatalogSourceSpec'
+    CatalogVariable:
+      $ref: './components/schemas.yaml#/CatalogVariable'
+    Check:
+      $ref: './components/schemas.yaml#/Check'
+    ComposedBundlePreview:
+      $ref: './components/schemas.yaml#/ComposedBundlePreview'
+    ComposedBundleRef:
+      $ref: './components/schemas.yaml#/ComposedBundleRef'
+    ComposedBundleSpec:
+      $ref: './components/schemas.yaml#/ComposedBundleSpec'
+    ComposedBundleValidateResponse:
+      $ref: './components/schemas.yaml#/ComposedBundleValidateResponse'
+    ComposedInput:
+      $ref: './components/schemas.yaml#/ComposedInput'
+    ComposedItemRef:
+      $ref: './components/schemas.yaml#/ComposedItemRef'
+    ControllerDetail:
+      $ref: './components/schemas.yaml#/ControllerDetail'
+    ControllerDiff:
+      $ref: './components/schemas.yaml#/ControllerDiff'
+    ControllerObservability:
+      $ref: './components/schemas.yaml#/ControllerObservability'
+    ControllerPatch:
+      $ref: './components/schemas.yaml#/ControllerPatch'
+    ControllerSpec:
+      $ref: './components/schemas.yaml#/ControllerSpec'
+    ControllerSummary:
+      $ref: './components/schemas.yaml#/ControllerSummary'
+    CreateControllerRequest:
+      $ref: './components/schemas.yaml#/CreateControllerRequest'
+    CreateGroupRequest:
+      $ref: './components/schemas.yaml#/CreateGroupRequest'
+    CreateKeyRequest:
+      $ref: './components/schemas.yaml#/CreateKeyRequest'
+    CreateUserRequest:
+      $ref: './components/schemas.yaml#/CreateUserRequest'
+    DeployableNamespaces:
+      $ref: './components/schemas.yaml#/DeployableNamespaces'
+    Error:
+      $ref: './components/schemas.yaml#/Error'
+    FreshnessJSON:
+      $ref: './components/schemas.yaml#/FreshnessJSON'
+    GitBundleSource:
+      $ref: './components/schemas.yaml#/GitBundleSource'
+    GroupEntry:
+      $ref: './components/schemas.yaml#/GroupEntry'
+    IdentitySettings:
+      $ref: './components/schemas.yaml#/IdentitySettings'
+    JenkinsRoleBindingSpec:
+      $ref: './components/schemas.yaml#/JenkinsRoleBindingSpec'
+    JenkinsRoleSpec:
+      $ref: './components/schemas.yaml#/JenkinsRoleSpec'
+    JenkinsScope:
+      $ref: './components/schemas.yaml#/JenkinsScope'
+    KeyMeta:
+      $ref: './components/schemas.yaml#/KeyMeta'
+    LiveDrift:
+      $ref: './components/schemas.yaml#/LiveDrift'
+    LogEntry:
+      $ref: './components/schemas.yaml#/LogEntry'
+    LoginRequest:
+      $ref: './components/schemas.yaml#/LoginRequest'
+    LoginResponse:
+      $ref: './components/schemas.yaml#/LoginResponse'
+    Me:
+      $ref: './components/schemas.yaml#/Me'
+    ObjectMeta:
+      $ref: './components/schemas.yaml#/ObjectMeta'
+    PendingDeletion:
+      $ref: './components/schemas.yaml#/PendingDeletion'
+    PendingPluginRoll:
+      $ref: './components/schemas.yaml#/PendingPluginRoll'
+    PendingRestart:
+      $ref: './components/schemas.yaml#/PendingRestart'
+    Preferences:
+      $ref: './components/schemas.yaml#/Preferences'
+    PreviewRequest:
+      $ref: './components/schemas.yaml#/PreviewRequest'
+    PreviewResponse:
+      $ref: './components/schemas.yaml#/PreviewResponse'
+    ProvisioningConfig:
+      $ref: './components/schemas.yaml#/ProvisioningConfig'
+    ProvisioningDefaultsSpec:
+      $ref: './components/schemas.yaml#/ProvisioningDefaultsSpec'
+    RecentBuild:
+      $ref: './components/schemas.yaml#/RecentBuild'
+    ReconciliationPolicy:
+      $ref: './components/schemas.yaml#/ReconciliationPolicy'
+    ReconcileBlocked:
+      $ref: './components/schemas.yaml#/ReconcileBlocked'
+    Rollout:
+      $ref: './components/schemas.yaml#/Rollout'
+    RotatePartialFailure:
+      $ref: './components/schemas.yaml#/RotatePartialFailure'
+    SearchResult:
+      $ref: './components/schemas.yaml#/SearchResult'
+    SizePreset:
+      $ref: './components/schemas.yaml#/SizePreset'
+    SourceJSON:
+      $ref: './components/schemas.yaml#/SourceJSON'
+    StreamTicketResponse:
+      $ref: './components/schemas.yaml#/StreamTicketResponse'
+    SubjectRef:
+      $ref: './components/schemas.yaml#/SubjectRef'
+    SummaryJSON:
+      $ref: './components/schemas.yaml#/SummaryJSON'
+    TeamCondition:
+      $ref: './components/schemas.yaml#/TeamCondition'
+    TeamEntry:
+      $ref: './components/schemas.yaml#/TeamEntry'
+    TeamNamespaceState:
+      $ref: './components/schemas.yaml#/TeamNamespaceState'
+    TeamRequest:
+      $ref: './components/schemas.yaml#/TeamRequest'
+    TokenResponse:
+      $ref: './components/schemas.yaml#/TokenResponse'
+    UpdateUserRequest:
+      $ref: './components/schemas.yaml#/UpdateUserRequest'
+    UserListEntry:
+      $ref: './components/schemas.yaml#/UserListEntry'
+    VarroaRoleBindingScope:
+      $ref: './components/schemas.yaml#/VarroaRoleBindingScope'
+    VarroaRoleBindingSpec:
+      $ref: './components/schemas.yaml#/VarroaRoleBindingSpec'
+    VarroaRoleSpec:
+      $ref: './components/schemas.yaml#/VarroaRoleSpec'
+    VersionCatalogEntry:
+      $ref: './components/schemas.yaml#/VersionCatalogEntry'
+    VersionInfo:
+      $ref: './components/schemas.yaml#/VersionInfo'
+    VersionProfileCondition:
+      $ref: './components/schemas.yaml#/VersionProfileCondition'
+    VersionProfileDetail:
+      $ref: './components/schemas.yaml#/VersionProfileDetail'
+    VersionStatus:
+      $ref: './components/schemas.yaml#/VersionStatus'
+    WarningItem:
+      $ref: './components/schemas.yaml#/WarningItem'
+    CreateBroodRequest:
+      $ref: './components/schemas.yaml#/CreateBroodRequest'
+    BroodOperationDetail:
+      $ref: './components/schemas.yaml#/BroodOperationDetail'
+    BroodPreviewResponse:
+      $ref: './components/schemas.yaml#/BroodPreviewResponse'
+    SuspendBroodRequest:
+      $ref: './components/schemas.yaml#/SuspendBroodRequest'
+    ClusterInfo:
+      $ref: './components/schemas.yaml#/ClusterInfo'
+    ClusterFanoutStatus:
+      $ref: './components/schemas.yaml#/ClusterFanoutStatus'
+    PluginInventorySummary:
+      $ref: './components/schemas.yaml#/PluginInventorySummary'
+    PluginInventoryDriftEntry:
+      $ref: './components/schemas.yaml#/PluginInventoryDriftEntry'
+    PluginInventoryPendingCollect:
+      $ref: './components/schemas.yaml#/PluginInventoryPendingCollect'
+    ClassifiedPluginInventory:
+      $ref: './components/schemas.yaml#/ClassifiedPluginInventory'
+    ClassifiedPlugin:
+      $ref: './components/schemas.yaml#/ClassifiedPlugin'
+    PluginAdvisory:
+      $ref: './components/schemas.yaml#/PluginAdvisory'
+  responses:
+    BadRequest:
+      $ref: './components/responses.yaml#/BadRequest'
+    Conflict:
+      $ref: './components/responses.yaml#/Conflict'
+    Forbidden:
+      $ref: './components/responses.yaml#/Forbidden'
+    Internal:
+      $ref: './components/responses.yaml#/Internal'
+    MethodNotAllowed:
+      $ref: './components/responses.yaml#/MethodNotAllowed'
+    NotFound:
+      $ref: './components/responses.yaml#/NotFound'
+    Unauthorized:
+      $ref: './components/responses.yaml#/Unauthorized'
+  parameters:
+    name:
+      $ref: './components/parameters.yaml#/name'
+    namespace:
+      $ref: './components/parameters.yaml#/namespace'
+    ns:
+      $ref: './components/parameters.yaml#/ns'
+    prefix:
+      $ref: './components/parameters.yaml#/prefix'
+    cluster:
+      $ref: './components/parameters.yaml#/cluster'
+    clusterQuery:
+      $ref: './components/parameters.yaml#/clusterQuery'

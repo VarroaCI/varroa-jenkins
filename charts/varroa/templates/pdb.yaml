@@ -1,0 +1,60 @@
+{{- if .Values.operator.enabled }}
+{{- $replicas := .Values.operator.replicas | int }}
+{{- if gt $replicas 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-operator") }}
+  labels:
+    app.kubernetes.io/component: varroa-operator
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: varroa-operator
+      {{- include "varroa.selectorLabels" . | nindent 6 }}
+---
+{{- end }}
+{{- end }}
+
+{{- if .Values.gateway.enabled }}
+{{- $minReplicas := .Values.gateway.hpa.minReplicas | default .Values.gateway.replicas | int }}
+{{- if gt $minReplicas 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-gateway") }}
+  labels:
+    app.kubernetes.io/component: varroa-gateway
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: varroa-gateway
+      {{- include "varroa.selectorLabels" . | nindent 6 }}
+---
+{{- end }}
+{{- end }}
+
+{{- if not (include "varroa.isHive" .) }}
+{{- if .Values.bff.enabled }}
+{{- $minReplicas := .Values.bff.hpa.minReplicas | default .Values.bff.replicas | int }}
+{{- if gt $minReplicas 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-bff") }}
+  labels:
+    app.kubernetes.io/component: varroa-bff
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: varroa-bff
+      {{- include "varroa.selectorLabels" . | nindent 6 }}
+{{- end }}
+{{- end }}
+{{- end }}

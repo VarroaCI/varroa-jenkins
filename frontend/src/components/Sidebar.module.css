@@ -1,0 +1,303 @@
+.sidebar {
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  padding: 18px 14px;
+  gap: 4px;
+  transition: background .3s, border-color .3s, width .18s cubic-bezier(.4,0,.2,1);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 6px 8px 18px;
+}
+
+.brandMark {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.brandName {
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: -.3px;
+}
+
+.brandSub {
+  font-size: 11px;
+  color: var(--text-2);
+  font-weight: 500;
+  letter-spacing: .2px;
+}
+
+.navLabel {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .7px;
+  color: var(--text-2);
+  text-transform: uppercase;
+  padding: 14px 10px 6px;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-weight: 500;
+  font-size: 13.5px;
+  position: relative;
+  transition: .15s;
+  min-height: 44px;
+  box-sizing: border-box;
+  text-decoration: none;
+}
+
+.navItem:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.navItem:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text); }
+.navItem[aria-disabled="true"] { opacity: .5; pointer-events: none; }
+
+.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.active::before {
+  content: "";
+  position: absolute;
+  left: -14px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+
+.ic {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+}
+
+.navCount {
+  margin-left: auto;
+  font-size: 11px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  padding: 1px 7px;
+  border-radius: 20px;
+  font-weight: 600;
+}
+
+.active .navCount {
+  background: var(--surface);
+  color: var(--accent-strong);
+}
+
+.doorChevron {
+  margin-left: auto;
+  opacity: .5;
+}
+
+/* Collapse toggle button — resets button styles, matches navItem look */
+.collapseBtn {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-weight: 500;
+  font-size: 13.5px;
+  position: relative;
+  transition: .15s;
+  min-height: 44px;
+  box-sizing: border-box;
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+  width: 100%;
+  text-align: left;
+}
+
+.collapseBtn:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.collapseBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text);
+}
+
+.sidebarFoot {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.healthRow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.healthText {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+/* === Collapsed rail === */
+
+.collapsed {
+  --rail-w: 64px;
+  width: var(--rail-w);
+  padding: 18px 8px;
+  align-items: center;
+}
+
+.collapsed .brand > div:last-child {
+  display: none;
+}
+
+.collapsed .brand {
+  padding-inline: 7px;
+}
+
+.collapsed .navLabel {
+  font-size: 0;
+  padding: 0;
+  margin: 8px 0;
+  height: 0;
+  border-top: 1px solid var(--border);
+  overflow: visible;
+  color: transparent;
+}
+
+.collapsed > div:nth-of-type(1) .navLabel {
+  border-top: none;
+  margin-top: 0;
+}
+
+.collapsed .navText {
+  display: none;
+}
+
+.collapsed .navItem {
+  justify-content: center;
+  padding: 11px;
+  min-width: 44px;
+  min-height: 44px;
+  width: 44px;
+  height: 44px;
+  box-sizing: border-box;
+  background: none;
+  z-index: 0;
+}
+
+/* 42×42 visual tile painted on ::after (inset 1px from the 44×44 hit area) */
+.collapsed .navItem::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.collapsed .navItem:hover,
+.collapsed .navItem.active {
+  background: none;
+}
+
+.collapsed .navItem:hover::after {
+  background: var(--surface-3);
+}
+
+.collapsed .active::after {
+  background: var(--accent-soft);
+}
+
+.collapsed .navItem .ic {
+  position: relative;
+  z-index: 1;
+}
+
+.collapsed .collapseBtn {
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 11px;
+  min-width: 44px;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+
+.collapsed .navCount {
+  position: absolute;
+  top: 0;
+  right: 0;
+  margin-left: 0;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 10px;
+  min-height: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  line-height: 16px;
+  font-weight: 600;
+}
+
+.collapsed .active .navCount {
+  background: var(--text);
+  color: var(--bg);
+}
+
+.collapsed .healthText {
+  display: none;
+}
+
+.collapsed .healthRow {
+  justify-content: center;
+}
+
+.collapsed .doorChevron {
+  display: none;
+}
+
+/* Rail flyout */
+.flyout {
+  position: fixed;
+  transform: translateY(-50%);
+  background: var(--text);
+  color: var(--bg);
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  z-index: 100;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0,0,0,.2);
+}

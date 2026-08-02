@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<com.cloudbees.hudson.plugins.folder.Folder plugin="cloudbees-folder">
+  <displayName>Folder with EnvVars</displayName>
+  <description>Folder with environment variables property</description>
+  <properties>
+    <org.jenkinsci.plugins.envinject.EnvInjectFolderProperty>
+      <properties>
+        <EnvInjectJobProperty>
+          <info>
+            <propertiesEntry>
+              <key>ANOTHER_VAR</key>
+              <value>another-value</value>
+            </propertiesEntry>
+            <propertiesEntry>
+              <key>MY_VAR</key>
+              <value>my-value</value>
+            </propertiesEntry>
+          </info>
+        </EnvInjectJobProperty>
+      </properties>
+    </org.jenkinsci.plugins.envinject.EnvInjectFolderProperty>
+  </properties>
+</com.cloudbees.hudson.plugins.folder.Folder>

@@ -1,0 +1,57 @@
+# =============================================================================
+# Local Auth Example — deploy Varroa with its own built-in identity provider.
+#
+# Usage:
+#   helm upgrade --install varroa ./charts/varroa \
+#     -f examples/local-auth-values.yaml \
+#     --set auth.bffUrl=http://<bff-host>:<port>
+#
+# The BFF URL must be reachable by Jenkins controller pods so the plugin can
+# fetch /.well-known/jwks.json. Typical values:
+#   Kind / in-cluster:  http://<release>-varroa-bff.<namespace>.svc.cluster.local:8080
+#   Ingress / external: https://bff.example.com
+# =============================================================================
+
+# ── Auth mode ──────────────────────────────────────────────────────────────
+auth:
+  mode: local
+  # bffUrl is REQUIRED in local mode — set it via --set or override this file.
+  bffUrl: ""
+  # Cookie domain for shared auth across subdomains.
+  # Set to your parent domain with a leading dot (e.g. .example.com).
+  # Required so the dashboard cookie works when navigating to Jenkins controllers.
+  cookieDomain: ""
+  # Dashboard URL for the mite banner back-link.
+  # e.g. https://app.example.com
+  dashboardUrl: ""
+  # OIDC block explicitly cleared (not used in local mode).
+  oidc:
+    issuer: ""
+    clientId: ""
+    clientSecret: ""
+    redirectUrl: ""
+    scopes: ""
+    userClaim: ""
+    groupClaim: ""
+
+# ── Disable external IdP (not needed in local mode) ────────────────────────
+dex:
+  enabled: false
+
+# ── Disable per-controller OAuth proxy ─────────────────────────────────────
+oauth2-proxy:
+  enabled: false
+
+# ── Clear deprecated BFF OIDC settings ─────────────────────────────────────
+bff:
+  oidcIssuer: ""
+  oidcClientId: ""
+  oidcClientSecret: ""
+  oidcRedirectUrl: ""
+
+# ── Examples — dev/demo only ───────────────────────────────────────────────
+# Seed sample item-level RBAC so Item roles appear in Jenkins'
+# Manage and Assign Roles page. See charts/varroa/templates/examples-item-rbac.yaml.
+examples:
+  itemRbac:
+    enabled: true

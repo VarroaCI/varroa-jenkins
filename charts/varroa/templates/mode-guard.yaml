@@ -1,0 +1,54 @@
+{{- /*
+mode-guard.yaml
+Validates mode + hive-mode prerequisites. Renders no objects.
+*/}}
+
+{{- $mode := .Values.mode | default "full" -}}
+{{- if and (ne $mode "full") (ne $mode "hive") -}}
+{{- fail (printf "mode must be \"full\" or \"hive\", got %q" $mode) -}}
+{{- end -}}
+
+{{- if eq $mode "hive" -}}
+
+{{- $clusterName := .Values.cluster.name | default "" -}}
+{{- if empty $clusterName -}}
+{{- fail "mode=hive requires cluster.name" -}}
+{{- end -}}
+
+{{- $busURL := .Values.bus.url | default "" -}}
+{{- if empty $busURL -}}
+{{- fail "mode=hive requires bus.url (the core's external NATS endpoint)" -}}
+{{- end -}}
+
+{{- if .Values.nats.enabled -}}
+{{- fail "mode=hive cannot deploy NATS; set nats.enabled=false (use -f values-hive.yaml)" -}}
+{{- end -}}
+
+{{- end -}}
+
+{{- /* nats.external.host is required when nats.external.enabled */ -}}
+{{- $external := .Values.nats.external | default dict -}}
+{{- if $external.enabled -}}
+{{- if empty $external.host -}}
+{{- fail "nats.external.enabled requires nats.external.host" -}}
+{{- end -}}
+{{- end -}}
+
+{{- /*
+An explicit jetStreamReplicas must not exceed the NATS server count actually
+rendered by the nats-1.2.0 subchart (see varroa.natsServerCount) — JetStream
+cannot replicate beyond the number of servers in the cluster. Only checked
+when the local NATS subchart is rendered (nats.enabled); in hive mode the
+cluster is external and out of this chart's view. This is the guard that
+turns issue #433's silent runtime wedge ("replicas > 1 not supported in
+non-clustered mode") into an install-time error.
+*/ -}}
+{{- if .Values.nats.enabled -}}
+{{- if not (kindIs "invalid" .Values.jetStreamReplicas) -}}
+{{- $serverCount := int (include "varroa.natsServerCount" .) -}}
+{{- $explicit := int .Values.jetStreamReplicas -}}
+{{- if gt $explicit $serverCount -}}
+{{- fail (printf "jetStreamReplicas=%d exceeds the actual NATS server count (%d, from nats.config.cluster.enabled=%v/replicas=%v) — JetStream cannot replicate beyond the number of NATS servers. Lower jetStreamReplicas or raise nats.config.cluster.replicas (with cluster.enabled=true)." $explicit $serverCount .Values.nats.config.cluster.enabled .Values.nats.config.cluster.replicas) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

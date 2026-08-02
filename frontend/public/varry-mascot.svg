@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" fill="none">
+  <!-- Shadow -->
+  <ellipse cx="200" cy="370" rx="120" ry="15" fill="#00000020"/>
+
+  <!-- Back legs (far side) -->
+  <g stroke="#8B3A1A" stroke-width="8" stroke-linecap="round" fill="none" opacity="0.6">
+    <path d="M110 200 Q80 160 65 120"/>
+    <path d="M110 230 Q75 220 55 190"/>
+    <path d="M120 260 Q85 270 60 260"/>
+    <path d="M140 285 Q110 310 80 310"/>
+  </g>
+
+  <!-- Body -->
+  <ellipse cx="200" cy="220" rx="95" ry="75" fill="#C84C1A"/>
+  <ellipse cx="200" cy="220" rx="95" ry="75" fill="url(#bodyGrad)"/>
+
+  <!-- Body gradient -->
+  <defs>
+    <radialGradient id="bodyGrad" cx="40%" cy="35%">
+      <stop offset="0%" stop-color="#E86830"/>
+      <stop offset="100%" stop-color="#A03C10"/>
+    </radialGradient>
+    <radialGradient id="eyeShine" cx="35%" cy="30%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#E8E8E8"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Body pattern (mite texture) -->
+  <ellipse cx="200" cy="195" rx="60" ry="18" fill="#B54515" opacity="0.4"/>
+  <ellipse cx="200" cy="245" rx="45" ry="12" fill="#B54515" opacity="0.3"/>
+
+  <!-- Front legs (near side) -->
+  <g stroke="#A03C10" stroke-width="9" stroke-linecap="round" fill="none">
+    <path d="M285 200 Q315 160 330 120"/>
+    <path d="M290 230 Q325 220 340 190"/>
+    <path d="M285 260 Q320 270 340 260"/>
+    <path d="M260 285 Q290 310 320 310"/>
+  </g>
+  <!-- Little feet -->
+  <g fill="#E86830">
+    <circle cx="65" cy="120" r="6"/>
+    <circle cx="55" cy="190" r="6"/>
+    <circle cx="60" cy="260" r="6"/>
+    <circle cx="80" cy="310" r="6"/>
+    <circle cx="330" cy="120" r="6"/>
+    <circle cx="340" cy="190" r="6"/>
+    <circle cx="340" cy="260" r="6"/>
+    <circle cx="320" cy="310" r="6"/>
+  </g>
+
+  <!-- Antennae -->
+  <g stroke="#8B3A1A" stroke-width="4" stroke-linecap="round" fill="none">
+    <path d="M175 140 Q160 110 150 95"/>
+    <path d="M225 140 Q240 110 250 95"/>
+  </g>
+  <circle cx="150" cy="95" r="5" fill="#E86830"/>
+  <circle cx="250" cy="95" r="5" fill="#E86830"/>
+
+  <!-- Eyes -->
+  <ellipse cx="170" cy="200" rx="28" ry="30" fill="#FFFFFF"/>
+  <ellipse cx="230" cy="200" rx="28" ry="30" fill="#FFFFFF"/>
+  <ellipse cx="174" cy="202" rx="16" ry="18" fill="#2C1810"/>
+  <ellipse cx="234" cy="202" rx="16" ry="18" fill="#2C1810"/>
+  <!-- Eye shine -->
+  <circle cx="180" cy="192" r="7" fill="#FFFFFF"/>
+  <circle cx="240" cy="192" r="7" fill="#FFFFFF"/>
+  <circle cx="168" cy="208" r="3" fill="#FFFFFF" opacity="0.7"/>
+  <circle cx="228" cy="208" r="3" fill="#FFFFFF" opacity="0.7"/>
+
+  <!-- Cute blush -->
+  <ellipse cx="140" cy="225" rx="18" ry="10" fill="#FF6B6B" opacity="0.35"/>
+  <ellipse cx="260" cy="225" rx="18" ry="10" fill="#FF6B6B" opacity="0.35"/>
+
+  <!-- Mouth (happy smile) -->
+  <path d="M182 235 Q200 260 218 235" stroke="#2C1810" stroke-width="4" stroke-linecap="round" fill="none"/>
+
+  <!-- Tiny hardhat -->
+  <ellipse cx="200" cy="150" rx="55" ry="12" fill="#FFD700"/>
+  <path d="M155 150 Q155 100 200 100 Q245 100 245 150" fill="#FFC107"/>
+  <ellipse cx="200" cy="105" rx="15" ry="5" fill="#FFD700" opacity="0.6"/>
+  <rect x="192" y="90" width="16" height="15" rx="3" fill="#FFA000"/>
+
+  <!-- Wrench (resting on body) -->
+  <g transform="translate(285,280) rotate(-30)">
+    <!-- Handle -->
+    <rect x="0" y="-4" width="50" height="8" rx="3" fill="#6B6B6B"/>
+    <rect x="2" y="-4" width="46" height="8" fill="#7D7D7D"/>
+    <!-- Wrench head -->
+    <path d="M50 -10 L65 -10 Q72 -10 72 -3 L72 10" stroke="#6B6B6B" stroke-width="6" stroke-linecap="round" fill="none"/>
+    <path d="M50 10 L60 10 Q68 10 68 3 L68 -10" stroke="#6B6B6B" stroke-width="6" stroke-linecap="round" fill="none"/>
+    <!-- Jaw inner gap -->
+    <rect x="58" y="-3" width="10" height="6" rx="2" fill="#5A5A5A"/>
+    <!-- Highlight on handle -->
+    <rect x="6" y="-2" width="40" height="2" rx="1" fill="#999999" opacity="0.5"/>
+  </g>
+</svg>

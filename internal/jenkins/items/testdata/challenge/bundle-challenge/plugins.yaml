@@ -1,0 +1,32 @@
+---
+plugins:
+    - artifactId: cloudbees-folder
+      version: latest
+    - artifactId: envinject
+      version: latest
+    - artifactId: workflow-job
+      version: latest
+    - artifactId: workflow-cps
+      version: latest
+    - artifactId: workflow-multibranch
+      version: latest
+    - artifactId: branch-api
+      version: latest
+    - artifactId: git
+      version: latest
+    - artifactId: git-client
+      version: latest
+    - artifactId: github-branch-source
+      version: latest
+    - artifactId: pipeline-model-definition
+      version: latest
+    - artifactId: credentials
+      version: latest
+    - artifactId: plain-credentials
+      version: latest
+    - artifactId: ssh-credentials
+      version: latest
+    - artifactId: junit
+      version: latest
+    - artifactId: mailer
+      version: latest

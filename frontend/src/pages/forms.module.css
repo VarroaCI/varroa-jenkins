@@ -1,0 +1,179 @@
+/* Shared form vocabulary intended for composition by Settings, CliAuth, and
+   role-form pages (consumers land in follow-up PRs). */
+
+.formGroup {
+  margin-bottom: 18px;
+}
+
+.formLabel {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+
+/* Helper text under a field. Distinct from .formLabel, which names a field and
+   is deliberately heavier — reusing the label style makes hints shout. */
+.formHint {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--text-2);
+  margin-top: 5px;
+}
+
+.formInput {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--surface);
+  font-family: inherit;
+}
+
+.formInput:focus {
+  outline: none;
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.formSelect {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+}
+
+.formSelect:focus {
+  outline: none;
+  border-color: var(--accent-strong);
+}
+
+.formTextarea {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 0.88rem;
+  resize: vertical;
+}
+
+.formTextarea:focus {
+  outline: none;
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding-top: 8px;
+}
+
+.subjectRow {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  align-items: flex-start;
+}
+
+.subjectRow select {
+  width: 120px;
+  flex-shrink: 0;
+}
+
+.subjectRow input {
+  flex: 1;
+}
+
+.addBtn {
+  align-self: flex-start;
+  background: none;
+  border: 1px dashed var(--border);
+  color: var(--text-2);
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  margin-top: 6px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.addBtn:hover {
+  border-color: var(--accent-strong);
+  color: var(--accent-strong);
+}
+
+.removeBtn {
+  background: none;
+  border: 1px solid var(--bad-text);
+  color: var(--bad-text);
+  padding: 0.2rem 0.4rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.table th {
+  font-weight: 600;
+  color: var(--text-2);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+}
+
+.errorMsg {
+  color: var(--bad-text);
+  font-size: 0.85rem;
+}
+
+.errorBanner {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  padding: 12px 18px;
+  border-radius: var(--radius);
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.dangerBtn {
+  composes: removeBtn;
+}
+
+.backLink {
+  background: none;
+  border: none;
+  color: var(--accent-strong);
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.backLink:hover {
+  color: var(--accent-fill-hover);
+}

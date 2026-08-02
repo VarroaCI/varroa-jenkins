@@ -1,0 +1,85 @@
+/* ============ DESIGN TOKENS ============ */
+/* Direct lift from mockups/varroa-redesign.html */
+
+:root {
+  /* Varroa-inspired: wax comb, honey, mite carapace, propolis, bee-wing */
+  --bg: #FAF6EC;
+  --surface: #FFFFFF;
+  --surface-2: #FCF9F1;
+  --surface-3: #F2EAD9;
+  --border: #EADFC9;
+  --border-strong: #D8C9AC;
+  --text: #2A1B0E;
+  --text-2: #6E5A44;
+  --text-3: #9C886D;
+  --accent: #C2611C;
+  --accent-soft: #FAE7D1;
+  --accent-strong: #9C4413;
+  --honey: #E0A21A;
+  --honey-soft: #FBEDC9;
+  --ok: #2F8F4E; --ok-soft: #E3F1E1; --ok-text: #1F6B39;
+  --warn: #C77F0E; --warn-soft: #FBEBCB; --warn-text: #8A5A06;
+  --bad: #BE3A28; --bad-soft: #F8E2DC; --bad-text: #9E2B1C;
+  --idle: #8A7960; --idle-soft: #EEE6D6; --idle-text: #635745;
+  --info: #2C7D8C; --info-soft: #DCEEF0; --info-text: #1F5E6B;
+  --radius: 14px;
+  --radius-sm: 9px;
+  --shadow-sm: 0 1px 2px rgba(20, 22, 29, .04), 0 1px 3px rgba(20, 22, 29, .05);
+  --shadow-md: 0 4px 16px rgba(20, 22, 29, .07), 0 1px 3px rgba(20, 22, 29, .05);
+  --shadow-lg: 0 18px 48px rgba(20, 22, 29, .16);
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+  --sidebar-w: 248px;
+
+  /* ── accent-fill / on-accent ──────────────────────────────────────
+     --accent CANNOT host label text. Honey #C2611C sits in a luminance
+     dead zone: white measures 4.18:1 and --text 3.98:1 — both under the
+     4.5:1 floor. Pollen is worse (white 2.63:1). So a fill that carries
+     text and the colour of that text are defined as a matched pair, per
+     theme and per accent variant. Every ratio below is measured.
+
+     Use for any accent fill WITH a label on it. Decorative/indicator
+     fills (Sidebar active bar, RecoveryState progress) carry no text —
+     they stay on --accent, which clears the 3:1 non-text bar at 3.88:1.
+
+     LIGHT — fill = --accent-strong, label = white:
+       honey 6.46:1 · rust 9.56:1 · pollen 4.64:1 · propolis 11.16:1
+       (fill vs page: 5.99 / 8.86 / 4.30 / 10.34 — all clear 3:1) */
+  --accent-fill: var(--accent-strong);
+  --accent-fill-hover: #883B10;   /* white 7.84:1 */
+  --on-accent: #FFFFFF;
+
+  /* ── code surface (fixed — same in both themes) ────────────── */
+  --code-bg: #231910; --code-text: #E8DCC8;
+}
+
+html[data-accent="honey"]  { --accent: #C2611C; --accent-soft: #FAE7D1; --accent-strong: #9C4413; --accent-fill-hover: #883B10; }
+html[data-accent="rust"]   { --accent: #A23B1E; --accent-soft: #F6E0D6; --accent-strong: #7C2A12; --accent-fill-hover: #6B240F; }
+html[data-accent="pollen"] { --accent: #D69214; --accent-soft: #FBEDC9; --accent-strong: #A4670B; --accent-fill-hover: #8E590A; }
+html[data-accent="propolis"] { --accent: #7A4A1F; --accent-soft: #EEE1CE; --accent-strong: #583214; --accent-fill-hover: #4A2A11; }
+
+html[data-theme="dark"] {
+  --bg: #14100A; --surface: #1E1710; --surface-2: #241C12; --surface-3: #2E2316;
+  --border: #332817; --border-strong: #473720;
+  --text: #F3E8D6; --text-2: #BCA98C; --text-3: #7F6E56;
+  --accent-soft: #3A230F; --honey-soft: #33260E;
+  --ok-soft: #15241A; --warn-soft: #2C2310; --bad-soft: #2C1712; --idle-soft: #241D12; --info-soft: #102528;
+  --ok-text: #6ECB8B; --warn-text: #E5A93A; --bad-text: #F08A76; --info-text: #5FB8C7; --idle-text: #C9B896;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, .5);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, .6);
+
+  /* DARK inverts the strategy. --accent-strong on near-black is a muddy
+     2.93:1 shape, so the fill LIGHTENS and the label goes dark:
+       honey 5.21:1 · rust 4.98:1 · pollen 7.41:1 · propolis 4.78:1
+       (fill vs page: 5.93 / 5.67 / 8.44 / 5.44 — all clear 3:1)
+     Unlike light, dark needs a per-variant fill — --accent-strong is
+     the wrong direction here, so the cascade can't do it for us. */
+  --accent-fill: #D9762A;
+  --accent-fill-hover: #E88F4A;   /* --on-accent 6.71:1 */
+  --on-accent: #2A1B0E;
+}
+
+html[data-theme="dark"][data-accent="rust"]     { --accent-fill: #D6704C; --accent-fill-hover: #E08060; }
+html[data-theme="dark"][data-accent="pollen"]   { --accent-fill: #E0A21A; --accent-fill-hover: #EDB53C; }
+html[data-theme="dark"][data-accent="propolis"] { --accent-fill: #B08048; --accent-fill-hover: #C69963; }

@@ -1,0 +1,854 @@
+# =============================================================================
+# Varroa Umbrella Chart — Values
+# =============================================================================
+
+global:
+  imagePullSecrets: []
+  # -- Ingress hostname suffix for all services (e.g. example.com → dex.example.com)
+  domain: ""
+
+# -- Namespaces Varroa is allowed to manage workloads in. When EMPTY (default), the operator
+# and BFF keep cluster-wide access (backward-compatible). When set to an explicit list, ALL
+# namespace-scoped operator/BFF rules are DROPPED from the ClusterRoles and replaced by
+# per-namespace Roles, ONLY in these namespaces (+ the release namespace):
+#   - operator: full CRUD on secrets, pods, pods/log, pods/exec, services, configmaps,
+#     persistentvolumeclaims, serviceaccounts, deployments, statefulsets, ingresses,
+#     roles, rolebindings
+#   - BFF: pods/log get, pods delete (hard restart), resourcequotas get/list
+# The sole remaining cluster-wide non-CRD grant is the BFF's read-only ingress access,
+# which backs the host-collision preflight (hostnames only).
+# Additionally, namespace get/list/create/patch (operator) and get/list (BFF) remain
+# cluster-wide by necessity — namespaces are a cluster-scoped resource.
+# Footgun: a Controller or ComposedBundle in a namespace NOT listed here will
+# get RBAC "forbidden" — discover them with `kubectl get controllers,composedbundles -A`.
+# A controller create into a missing namespace is rejected by preflight
+# (TargetNamespaceMissing). A create into an existing-but-unlisted namespace is rejected
+# as TargetNamespaceUnmanaged (add it here and `helm upgrade`).
+managedNamespaces: []
+
+# Deployment mode: "full" (complete control plane — default) or "hive"
+# (operator+gateway only, joined to a core's NATS; requires cluster.name and
+# bus.url, and nats.enabled=false — use -f values-hive.yaml).
+mode: full
+
+# Global NATS bus URL. Empty = per-tier busURL or the in-cluster default
+# nats://<release>-nats:4222. REQUIRED in hive mode (the core's external
+# NATS endpoint, e.g. tls://nats.core.example.com:4222).
+bus:
+  url: ""
+
+# ---------------------------------------------------------------------------
+# Cluster identity — stamps NATS subjects, KV keys, and event payloads.
+# Must be a DNS-1123 label. Default "core" (the primary/full-stack cluster).
+# ---------------------------------------------------------------------------
+cluster:
+  name: core
+
+# ---------------------------------------------------------------------------
+# Telemetry — OpenTelemetry observability pipeline
+# ---------------------------------------------------------------------------
+telemetry:
+  disabled: false
+  # -- OTLP collector endpoint. Empty = no collector: the BFF does not register
+  # /api/v1/otel/v1/traces (cmd/bff/main.go), and the frontend's advertised
+  # tracesEnabled flag is force-derived false in that case (see
+  # templates/frontend/configmap-telemetry.yaml) so it never POSTs into a 404.
+  # services.*.traces.enabled below only takes effect once this is set.
+  endpoint: ""
+  # -- Bearer token for /metrics endpoints. Set empty to disable auth (rely on NetworkPolicy instead).
+  metricsToken: "changeme"
+  metrics:
+    enabled: true
+  traces:
+    enabled: true
+    samplerRatio: 1.0
+  logs:
+    enabled: true
+    level: "info"
+  resourceAttributes:
+    clusterName: ""
+    deploymentName: ""
+  services:
+    operator:
+      traces:
+        enabled: true
+        samplerRatio: 1.0
+      metrics:
+        enabled: true
+      logs:
+        enabled: true
+    bff:
+      traces:
+        enabled: true
+        samplerRatio: 1.0
+      metrics:
+        enabled: true
+      logs:
+        enabled: true
+    gateway:
+      traces:
+        enabled: true
+        samplerRatio: 1.0
+      metrics:
+        enabled: true
+      logs:
+        enabled: true
+    mite:
+      traces:
+        enabled: false
+        samplerRatio: 0.1
+      metrics:
+        enabled: true
+      logs:
+        enabled: true
+    plugin:
+      traces:
+        enabled: false
+      metrics:
+        enabled: true
+      logs:
+        enabled: false
+    frontend:
+      traces:
+        enabled: true
+        samplerRatio: 1.0
+      logs:
+        enabled: false
+
+# ---------------------------------------------------------------------------
+# NetworkPolicy — opt-in default-deny NetworkPolicy set.
+# false renders zero NetworkPolicy objects.
+# ---------------------------------------------------------------------------
+networkPolicy:
+  enabled: false
+  # Namespace selector matching the ingress-controller namespace (matchLabels).
+  ingressControllerNamespaceSelector:
+    kubernetes.io/metadata.name: ingress-nginx
+  # Namespace selector for tenant/controller namespaces allowed to reach the
+  # gateway (mite gRPC :9090 + apikey verify :9092). {} = all namespaces.
+  tenantNamespaceSelector: {}
+  # kube-apiserver egress for operator/gateway/bff/dex/prometheus.
+  # Empty cidrs = 0.0.0.0/0 on the listed ports; pin to your apiserver endpoint IPs.
+  apiServerEgress:
+    cidrs: []
+    ports: [443, 6443]
+  # Dex connector egress (GitHub/OIDC :443; add 636 for LDAP).
+  dexConnectorEgress:
+    enabled: true
+    ports: [443]
+    extraCIDRs: []                     # appended as additional ipBlock entries
+  # operator/bff bundle git clone + non-Dex OIDC issuer egress.
+  gitEgress:
+    enabled: true
+    ports: [443, 22]
+  # Extra prometheus egress rules for user-defined scrape_configs targets.
+  # Raw NetworkPolicy egress entries ({to: [...], ports: [...]}), appended verbatim.
+  prometheusExtraEgress: []
+  # OTLP collector egress ports (rule renders only when telemetry.endpoint is set).
+  telemetryEgress:
+    ports: [4317, 4318]
+  # Update-center pull-through egress (UC → updates.jenkins.io).
+  # Renders only when updateCenter.pullThrough.enabled is also true.
+  pullThroughEgress:
+    # -- Enable egress for update-center pull-through caching.
+    enabled: true
+    # -- CIDR blocks to allow egress to (default 0.0.0.0/0 = all IPs).
+    cidrs: ["0.0.0.0/0"]
+    # -- TCP ports to allow egress on (default 443 = HTTPS).
+    ports: [443]
+  # Update-center OCI-registry egress (UC → external OCI registry for seed store).
+  # Renders only when updateCenter.storage.type=oci is also set.
+  updateCenterRegistryEgress:
+    # -- Enable egress for update-center OCI registry storage.
+    enabled: true
+    # -- CIDR blocks to allow egress to (default 0.0.0.0/0 = all IPs).
+    cidrs: ["0.0.0.0/0"]
+    # -- TCP ports to allow egress on (default 443 = HTTPS).
+    ports: [443]
+  # Operator OCI-registry egress (mode-independent: renders in both full and
+  # hive mode). Allows the operator to reach an external OCI registry for
+  # catalog and config-transport operations, and the update-center component
+  # to reach an OCI-backed storage registry.
+  ociRegistryEgress:
+    # -- Enable the OCI-registry egress rule on the operator policy.
+    enabled: true
+    # -- CIDR blocks to allow egress to (default 0.0.0.0/0 = all IPs).
+    cidrs: ["0.0.0.0/0"]
+    # -- TCP ports to allow egress on (default 443 = HTTPS).
+    ports: [443]
+  # Hive-mode egress to the core's external NATS endpoint (bus.url).
+  # cidrs: [] renders ipBlock 0.0.0.0/0 — pin to the core NATS endpoint IP(s).
+  # ports: [] derives the port from bus.url's trailing ":<port>" (fallback 4222);
+  # set explicitly for multi-server or IPv6 bus.url forms.
+  coreNatsEgress:
+    cidrs: []
+    ports: []
+  # Hive-mode ingress peers allowed to scrape metrics (operator :8080/:9091,
+  # gateway :{grpcPort+1}). Raw NetworkPolicy peers ({namespaceSelector/podSelector}),
+  # rendered verbatim. [] = no rule (metrics unreachable over the pod network;
+  # kubectl exec / port-forward still work). Full mode ignores this value.
+  metricsIngress: []
+
+# ---------------------------------------------------------------------------
+# Dex — OIDC federation broker (optional).
+# Only needed when the upstream identity provider doesn't speak OIDC natively
+# (e.g. GitHub OAuth, LDAP, SAML). When your IdP is an OIDC-compliant provider
+# (Auth0, Okta, Azure AD, Keycloak, Google, etc.), set dex.enabled=false and
+# configure auth.oidc.* directly.
+# ---------------------------------------------------------------------------
+dex:
+  enabled: true
+  image:
+    repository: ghcr.io/dexidp/dex
+    tag: v2.42.0
+    pullPolicy: IfNotPresent
+  replicas: 1
+  # -- Enable Dex's gRPC admin API. Off by default — nothing in Varroa's
+  # control plane uses Dex's gRPC client-management API (CreateClient,
+  # UpdateClient, GetClient, etc.), and the API ships without built-in
+  # authentication upstream. Enable only if you have external automation
+  # that talks to Dex's gRPC endpoint. Note: even when networkPolicy is
+  # enabled, the np-dex policy does NOT allow-list this port — you must
+  # add your own NetworkPolicy rule for it.
+  grpcApi:
+    enabled: false
+  service:
+    type: ClusterIP
+    port: 5556
+    grpcPort: 5557
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+  # Dex connector & issuer configuration (required)
+  config:
+    issuer: ""
+    storage:
+      type: kubernetes
+      config:
+        inCluster: true
+    web:
+      http: 0.0.0.0:5556
+    oauth2:
+      skipApprovalScreen: true
+    staticClients: []
+    connectors: []
+    # ── Connector Configuration ──────────────────────────────────────────
+    # Each connector needs a "claims" mapping so Dex copies upstream group
+    # data into its own ID token. Without this, groups=[] and Jenkins RBAC
+    # group-based permissions will not apply.
+    #
+    # Example — GitHub (OAuth):
+    # connectors:
+    #   - type: github
+    #     id: github
+    #     name: GitHub
+    #     config:
+    #       clientID: <gh-oauth-client-id>
+    #       clientSecret: <gh-oauth-client-secret>
+    #       orgs:
+    #         - name: your-github-org
+    #       loadAllGroups: true
+    #       claims:
+    #         groups: ["groups"]
+    #
+    # Example — Generic OIDC (Okta, Keycloak, Azure AD, etc.):
+    # connectors:
+    #   - type: oidc
+    #     id: upstream-oidc
+    #     name: Corporate IdP
+    #     config:
+    #       issuer: https://idp.example.com
+    #       clientID: <oidc-client-id>
+    #       clientSecret: <oidc-client-secret>
+    #       claims:
+    #         groups: ["groups"]
+    #
+    # Example — LDAP:
+    # connectors:
+    #   - type: ldap
+    #     id: ldap
+    #     name: LDAP
+    #     config:
+    #       host: ldap.example.com:636
+    #       bindDN: cn=admin,dc=example,dc=com
+    #       bindPW: <ldap-password>
+    #       userSearch:
+    #         baseDN: ou=Users,dc=example,dc=com
+    #         filter: "(objectClass=person)"
+    #         username: uid
+    #         idAttr: DN
+    #         emailAttr: mail
+    #       groupSearch:
+    #         baseDN: ou=Groups,dc=example,dc=com
+    #         filter: "(objectClass=groupOfNames)"
+    #         userAttr: DN
+    #         groupAttr: member
+    #         nameAttr: cn
+    #       claims:
+    #         groups: ["groups"]
+
+# ---------------------------------------------------------------------------
+# Authentication — global auth mode shared by the operator and BFF.
+#
+# Two modes:
+#   "oidc"   — Use an external OIDC provider (auth.oidc.*). Can talk to any
+#              RFC-compliant issuer directly, or use Dex (dex.enabled=true) as
+#              a federation broker for GitHub OAuth, LDAP, or SAML.
+#   "local"  — Built-in bcrypt password auth (no external IdP needed).
+#
+# The auth.oidc block centralizes all OIDC settings. When dex.enabled=true and
+# auth.oidc.issuer is empty, the operator/BFF each use their own fallback logic
+# to reconstruct the Dex issuer URL internally.
+# ---------------------------------------------------------------------------
+auth:
+  # -- Auth mode: "oidc" or "local".
+  mode: oidc
+  # -- BFF URL, required when mode=local (the issuer URL for local JWT validation).
+  bffUrl: ""
+  # -- Cookie domain for the varroa_token cookie (e.g. .example.com).
+  # Required for shared auth across subdomains (dashboard → Jenkins controllers).
+  # Replaces the deprecated bff.oidcCookieDomain field.
+  cookieDomain: ""
+  # -- Varroa dashboard URL (required in OIDC and local/ldap modes).
+  # Used for post-logout redirect URI and the mite banner back-link.
+  # Must be an absolute HTTPS origin (HTTP only for local development).
+  # e.g. https://app.example.com
+  dashboardUrl: ""
+
+  # -- OIDC provider configuration (used when mode=oidc).
+  # All fields default to "" — empty means use Go-level built-in defaults
+  # for scopes, userClaim, and groupClaim. The issuer field must be set for
+  # OIDC mode to function.
+  oidc:
+    # -- OIDC issuer URL. Any RFC-compliant issuer works (Auth0, Okta, Azure AD,
+    # Keycloak, Google, Dex, etc.). Example: https://dev-<tenant>.us.auth0.com/
+    issuer: ""
+    # -- OIDC client ID.
+    clientId: ""
+    # -- OIDC client secret.
+    clientSecret: ""
+    # -- OIDC redirect URL (e.g. https://varroa.example.com/api/v1/callback).
+    redirectUrl: ""
+    # -- Comma-separated OIDC scopes. Default: openid,profile,email,groups.
+    scopes: ""
+    # -- Comma-separated JWT claims for kind:User bindings. Default: preferred_username,sub.
+    userClaim: ""
+    # -- Comma-separated JWT claims for kind:Group bindings. Default: groups.
+    groupClaim: ""
+    # -- OIDC shared state signing secret (32+ bytes, base64). Auto-generated on
+    # first install; preserved across upgrades via Helm lookup. Must be identical
+    # across all BFF replicas for callback state validation.
+    stateSecret: ""
+
+# ---------------------------------------------------------------------------
+# Varroa Operator — sharded controller reconciler + hibernation wake server
+# ---------------------------------------------------------------------------
+operator:
+  enabled: true
+  image:
+    repository: ghcr.io/varroaci/varroa-jenkins
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 3
+  service:
+    port: 8080
+  wake:
+    # -- Serve navigation-triggered hibernation wake interstitials.
+    enabled: true
+    # -- Operator pod port used by per-controller wake EndpointSlices.
+    port: 8082
+  # -- NATS bus URL (defaults to nats://<release>-nats:4222)
+  busURL: ""
+  # -- Number of virtual shards (M). Must match across all replicas.
+  shardCount: 256  # Live setting: number of virtual shards for active/active controller sharding. MUST match across all replicas. Changing it is disruptive — scale the operator to 0 (or restart all replicas together), then change; mixed values cause transient dual ownership.
+  # -- Max concurrent Controller reconciles on the active replica (VARROA_MAX_CONCURRENT_RECONCILES)
+  maxConcurrentReconciles: 8
+  # -- Fully-qualified image for controller mite sidecar/init containers (VARROA_MITE_IMAGE).
+  # Empty = follow the release: defaults to operator.image.repository:operator.image.tag,
+  # so a single tag bump (e.g. --set operator.image.tag=$SHA) rolls the whole fleet,
+  # mites included. Set explicitly only to run mites on a deliberately decoupled tag.
+  miteImage: ""
+  # -- On-disk bare-clone cache for bundle/catalog git sources (per-replica emptyDir)
+  gitCache:
+    enabled: true
+    # -- Cache mount path inside the operator container
+    dir: /var/cache/varroa-git
+    # -- LRU bound: max cached repositories
+    maxRepos: 50
+    # -- LRU bound: max total cache size (MiB)
+    maxSizeMiB: 2048
+    # -- emptyDir sizeLimit (headroom above maxSizeMiB)
+    volumeSizeLimit: 3Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
+  env: []
+
+# ---------------------------------------------------------------------------
+# Varroa Gateway — terminates mite gRPC, bridges to NATS bus
+# ---------------------------------------------------------------------------
+gateway:
+  enabled: true
+  image:
+    repository: ghcr.io/varroaci/varroa-jenkins
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 2
+  service:
+    type: ClusterIP
+    grpcPort: 9090
+  busURL: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+  env: []
+  hpa:
+    minReplicas: 2
+    maxReplicas: 10
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
+
+# ---------------------------------------------------------------------------
+# Varroa BFF — stateless API tier (HTTP + SSE from bus)
+# ---------------------------------------------------------------------------
+bff:
+  enabled: true
+  image:
+    repository: ghcr.io/varroaci/varroa-jenkins
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 2
+  service:
+    type: ClusterIP
+    port: 8080
+  busURL: ""
+  # -- Deprecated: use auth.oidc.issuer instead. Will be removed in a future release.
+  oidcIssuer: ""
+  # -- Deprecated: use auth.oidc.clientId instead. Will be removed in a future release.
+  oidcClientId: ""
+  # -- Deprecated: use auth.oidc.clientSecret instead. Will be removed in a future release.
+  oidcClientSecret: ""
+  # -- Deprecated: use auth.oidc.redirectUrl instead. Will be removed in a future release.
+  oidcRedirectUrl: ""
+  # -- Deprecated: use auth.cookieDomain instead. Will be removed in a future release.
+  oidcCookieDomain: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+  env: []
+  hpa:
+    minReplicas: 2
+    maxReplicas: 10
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
+
+# ---------------------------------------------------------------------------
+# Activity feed persistence — JetStream-backed, retention dial
+# ---------------------------------------------------------------------------
+activity:
+  # retention controls how long activity events are kept.
+  # Valid values: off | 7d | 30d | 90d  (default 7d)
+  # "off" = ephemeral in-memory (current behavior, no persistence).
+  retention: "7d"
+  # maxMsgs is the hard cap on the number of stored messages (DiscardOld).
+  maxMsgs: 100000
+  # maxBytes is the hard cap on storage bytes (1 GiB). DiscardOld when hit.
+  maxBytes: 1073741824
+
+# ---------------------------------------------------------------------------
+# JetStream replica count for every stream (activity, webhook replay, imperative
+# command) and KV bucket (snapshots, presence, desired state, clusters, consumed
+# tokens) that Varroa creates. Rendered into the operator/BFF/gateway as
+# VARROA_JETSTREAM_REPLICAS.
+#
+# Leave unset (default) to derive it from the REAL NATS clustering keys —
+# nats.config.cluster.enabled / nats.config.cluster.replicas (the nats-1.2.0
+# subchart's own schema) — CLAMPED to 1..3:
+#   - if nats.config.cluster.enabled is false, the subchart always renders a
+#     single standalone server regardless of .replicas, so this derives to 1;
+#   - otherwise it derives from nats.config.cluster.replicas, floored at 1
+#     (JetStream requires at least one replica) and capped at 3 (R>3 is rarely
+#     useful, so a NATS cluster larger than 3 still tops out at 3-way
+#     replication). Set jetStreamReplicas explicitly to override.
+# Hive-mode installs (nats.enabled=false) still render this from
+# nats.config.cluster.replicas so they replicate against the CORE's NATS
+# cluster — set it to match the core's actual cluster size.
+#
+# A chart-render guard (templates/mode-guard.yaml) fails the install if an
+# explicit jetStreamReplicas exceeds the actual NATS server count, so the two
+# can no longer drift silently.
+#
+# NOTE ON UPGRADES: EnsureStream falls back to UpdateStream, so existing durable
+# streams scale R1->R3 in place on the next reconcile (NATS 2.11). Existing KV
+# buckets do NOT update their replica count in place — CreateKeyValue only sets
+# replicas on first creation. To adopt R3 for a pre-existing soft-state bucket,
+# delete and recreate it; the soft state repopulates within ~30-90s (acceptable).
+# ---------------------------------------------------------------------------
+jetStreamReplicas: null  # null = derive from nats.config.cluster.{enabled,replicas} (clamped 1..3)
+
+# ---------------------------------------------------------------------------
+# NATS — message bus (JetStream-backed)
+#
+# IMPORTANT: bare `helm template` (no cluster) renders fresh random credentials
+# each time because lookup() returns nil. This is expected — `helm template` is
+# not a deploy path. Only `helm install`/`upgrade` against a live cluster
+# produces stable credentials (reused via lookup on upgrade).
+# ---------------------------------------------------------------------------
+nats:
+  enabled: true
+  image:
+    repository: nats
+    tag: 2.11-alpine
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 4222
+    monitorPort: 8222
+  # NOTE: top-level nats.resources is ineffective for the NATS subchart.
+  # Resources are set via nats.container.merge.resources below.
+  config:
+    # THE real clustering knob for the nats-1.2.0 subchart (issue #433: a
+    # decoy top-level `nats.replicas` used to live here and did nothing — the
+    # subchart never read it, so it silently rendered N standalone servers
+    # instead of an N-way cluster). enabled=false always renders exactly one
+    # StatefulSet replica regardless of `replicas` below; jetStreamReplicas
+    # derives from these same two keys (see the comment above jetStreamReplicas).
+    cluster:
+      enabled: true
+      replicas: 3
+    jetstream:
+      enabled: true
+      fileStore:
+        enabled: true
+        dir: /data
+    nats:
+      port: 4222
+      tls:
+        enabled: true
+        # A single Secret holds the server cert/key, the CA, and per-service passwords.
+        # Bare `helm template` (no cluster) renders fresh material each time — not a deploy path.
+        secretName: varroa-nats-creds
+        dir: /etc/nats-certs/nats
+        cert: tls.crt
+        key: tls.key
+    # Authorization and per-service subject ACLs are injected by including
+    # auth.conf from the varroa-nats-auth-config Secret (generated by the
+    # varroa chart template). Passwords are stored as bcrypt hashes — the
+    # plaintext lives only in the varroa-nats-creds Secret that client
+    # deployments consume. Design D1, D3, D4, D5: single account, three users
+    # with per-role ACLs.
+    merge:
+      # nats resolves include paths relative to the main config dir (/etc/nats-config),
+      # so reach the sibling secret mount at /etc/nats-auth via "../".
+      zzzauth$include: ../nats-auth/auth.conf
+  # Mount the auth config Secret into the nats pods so $include resolves.
+  podTemplate:
+    patch:
+    - op: add
+      path: /spec/volumes/-
+      value:
+        name: nats-auth-config
+        secret:
+          secretName: varroa-nats-auth-config
+  container:
+    merge:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          memory: 512Mi
+    patch:
+    - op: add
+      path: /volumeMounts/-
+      value:
+        name: nats-auth-config
+        mountPath: /etc/nats-auth
+        readOnly: true
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+  # External NATS exposure — opt-in, full-mode only.
+  external:
+    enabled: false
+    serviceType: LoadBalancer   # LoadBalancer | NodePort
+    nodePort: 0                 # fixed nodePort when serviceType=NodePort (0 = auto)
+    annotations: {}
+    host: ""                    # REQUIRED when enabled — external DNS name; becomes a cert SAN + NOTES output
+    extraSANs: []               # additional DNS SANs
+    ipSANs: []                  # IP SANs
+    allowedCIDRs: []            # when networkPolicy.enabled=true, ingress CIDRs for external clients ([] = 0.0.0.0/0)
+
+# ---------------------------------------------------------------------------
+# Prometheus — metrics collection & alerting
+# ---------------------------------------------------------------------------
+prometheus:
+  enabled: true
+  image:
+    repository: prom/prometheus
+    tag: v2.55.0
+    pullPolicy: IfNotPresent
+  replicas: 1
+  service:
+    type: ClusterIP
+    port: 9090
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+  config:
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+    scrape_configs: []
+  persistence:
+    enabled: false
+    size: 10Gi
+    storageClass: ""
+
+# ---------------------------------------------------------------------------
+# Grafana — observability dashboards
+# ---------------------------------------------------------------------------
+grafana:
+  enabled: true
+  # -- Grafana admin password. Auto-generated on first install; preserved
+  # across upgrades via Helm lookup. Set explicitly for GitOps/ArgoCD
+  # client-side helm template renders, which have no cluster lookup.
+  adminPassword: ""
+  image:
+    repository: grafana/grafana
+    tag: 11.5.0
+    pullPolicy: IfNotPresent
+  replicas: 1
+  service:
+    type: ClusterIP
+    port: 3000
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+  config:
+    server:
+      http_port: 3000
+    auth:
+      disable_login_form: true
+  # -- Datasource definitions for Grafana
+  datasources: {}
+  persistence:
+    enabled: false
+    size: 10Gi
+    storageClass: ""
+
+    storageClass: ""
+
+# ---------------------------------------------------------------------------
+# Frontend — React SPA served by nginx. All CRD operations flow through the auth-protected Varroa BFF API.
+# ---------------------------------------------------------------------------
+frontend:
+  enabled: true
+  image:
+    repository: ghcr.io/varroaci/varroa-jenkins-frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  service:
+    type: ClusterIP
+    port: 8080
+  # Ingress host for the frontend. Defaults to app.<global.domain> if unset.
+  host: ""
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    runAsGroup: 101
+    fsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
+
+# ---------------------------------------------------------------------------
+# oauth2-proxy — per-controller forward-authentication proxy
+# ---------------------------------------------------------------------------
+oauth2-proxy:
+  enabled: false
+  image:
+    repository: quay.io/oauth2-proxy/oauth2-proxy
+    tag: v7.7.0
+    pullPolicy: IfNotPresent
+  replicas: 1
+  service:
+    type: ClusterIP
+    port: 4180
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+  config:
+    oidcIssuerUrl: ""
+    clientId: ""
+    clientSecret: ""
+    redirectUrl: ""
+    cookieDomain: ""
+    cookieSecret: ""
+
+# ---------------------------------------------------------------------------
+# Ingress — external access
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  tls: []
+
+# ---------------------------------------------------------------------------
+# Examples — sample resources for dev/demo clusters. Keep disabled in prod.
+# ---------------------------------------------------------------------------
+examples:
+  # -- Seed example item-level RBAC (JenkinsRole/JenkinsRoleBinding) so Item
+  # roles show up in Jenkins' Manage and Assign Roles page. See
+  # charts/varroa/templates/examples-item-rbac.yaml.
+  itemRbac:
+    enabled: false
+
+# ---------------------------------------------------------------------------
+# Update Center — OCI-backed plugin metadata + HPI serving
+# ---------------------------------------------------------------------------
+# The update center is a per-cluster HTTP service that provides Jenkins plugin
+# metadata (the standard update-center JSON payloads) and HPI downloads, backed
+# by either a local PVC store or an OCI registry. Disabled by default.
+updateCenter:
+  # -- Enable the update center component.
+  enabled: false
+  image:
+    repository: ghcr.io/varroaci/varroa-jenkins
+    tag: latest
+    pullPolicy: IfNotPresent
+  # -- Replicas (ignored when storage.type=local, which forces 1 + Recreate).
+  replicas: 2
+  # -- Storage backend configuration.
+  storage:
+    # -- Storage type: "local" (PVC) or "oci" (OCI registry).
+    type: local
+    # -- Local PVC storage options (used when type=local).
+    local:
+      # -- Persistent volume size.
+      size: 10Gi
+      # -- Storage class name (empty = cluster default).
+      storageClassName: ""
+    # -- OCI registry storage options (used when type=oci).
+    oci:
+      # -- OCI image reference for the update center content (e.g. ghcr.io/x/y:z).
+      ref: ""
+      # -- Name of an existing Secret holding Docker config.json for registry auth.
+      existingSecret: ""
+      # -- Allow HTTP (plaintext) connections to the registry.
+      insecure: false
+  # -- Plugin upload settings (POST /api/v1/updatecenter/plugins).
+  uploads:
+    # -- Enable the plugin upload endpoint. Uploads are a read-modify-write
+    # against a store with no conditional-push primitive, so enabling this
+    # forces the update-center Deployment to a genuine single writer:
+    # replicas: 1 with a Recreate rollout, regardless of storage.type. Set to
+    # false to keep a horizontally-scaled OCI-backed update center.
+    enabled: true
+    # -- Maximum uploaded artifact size in bytes (empty = the service default,
+    # 256 MiB).
+    maxBytes: ""
+  # -- Pull-through proxy cache settings.
+  pullThrough:
+    # -- Enable pull-through caching from an upstream update center.
+    enabled: false
+    # -- Upstream update-center JSON URL.
+    upstreamURL: "https://updates.jenkins.io"
+    # -- Upstream download base URL for HPI files.
+    downloadURL: "https://updates.jenkins.io/download"
+  # -- Seed plugin references imported on first reconciliation.
+  seed:
+    # -- List of OCI refs to seed (e.g. ["registry.example.org/plugins/pack:v1"]).
+    # Defaults to the first-party varroa-mcp-tools addon pack, which is not
+    # published to updates.jenkins.io and therefore has no other way into an
+    # air-gapped or UC-backed install. An unreachable seed leaves an
+    # informational SeedImported=False condition and a Ready update center —
+    # readiness does not consume SeedImported.
+    refs:
+      - ghcr.io/varroaci/varroa-jenkins/plugin-addon:varroa-mcp-tools-1.0.3
+  # -- Import token for the /api/v1/import endpoint.
+  # If left empty it is auto-generated and preserved across `helm upgrade` via a
+  # cluster lookup. GitOps/ArgoCD render the chart client-side with `helm
+  # template` (no cluster lookup), so auto-gen would rotate the token on every
+  # sync — set a stable explicit value there.
+  importToken: ""
+  # -- Resource requests/limits for the update center container.
+  resources: {}
+  # -- Node selector for the update center pod.
+  nodeSelector: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
+  # -- Extra environment variables (list of {name, value}).
+  env: []
+  # -- Extra volume mounts (list of corev1.VolumeMount).
+  extraVolumeMounts: []
+  # -- Extra volumes (list of corev1.Volume).
+  extraVolumes: []

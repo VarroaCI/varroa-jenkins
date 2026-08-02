@@ -1,0 +1,76 @@
+.cardNote {
+  font-size: 11px;
+  color: var(--text-2);
+  font-weight: 400;
+}
+
+.tabContent {
+  margin-top: 12px;
+}
+
+.yamlTier {
+  min-height: 120px;
+}
+
+.tierLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 8px;
+}
+
+.schemaNote {
+  font-size: 11px;
+  color: var(--text-2);
+  margin-top: 4px;
+}
+
+.previewSection {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.previewHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.previewLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.previewResourceLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 4px;
+}
+
+.muted {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.errorBanner {
+  font-size: 12px;
+  color: var(--warn-text);
+  padding: 6px 10px;
+  background: rgba(255, 0, 0, 0.06);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+}
+
+.warningList {
+  margin-top: 8px;
+}
+
+.warningItem {
+  font-size: 11px;
+  color: var(--warn-text);
+  margin-bottom: 4px;
+}

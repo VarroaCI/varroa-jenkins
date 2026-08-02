@@ -1,0 +1,401 @@
+.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.filterBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 13px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  background: var(--surface);
+  transition: .15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chip:hover {
+  border-color: var(--border-strong);
+}
+
+.chipOn {
+  background: var(--text);
+  color: var(--surface);
+  border-color: var(--text);
+}
+
+.chipCount {
+  opacity: .6;
+  font-size: 11px;
+}
+
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-3);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 7px 12px;
+  color: var(--text-2);
+  font-size: 13px;
+  max-width: 240px;
+  flex: 1;
+  transition: .15s;
+}
+
+.searchBox:focus-within {
+  border-color: var(--accent);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.searchBox input {
+  border: none;
+  background: none;
+  outline: none;
+  flex: 1;
+  font-size: 13px;
+  color: var(--text);
+  font-family: inherit;
+}
+
+/*
+ * Each row is its own grid, so tracks must resolve identically row to row or
+ * the columns drift out of line with each other and with the header. An `fr`
+ * track floors at auto, letting a long value (a controller endpoint, say)
+ * widen its own column and steal width from the rest of that row. minmax(0,…)
+ * pins every track to its share regardless of content; overflow is handled by
+ * the cells instead.
+ */
+.ctrlRow {
+  display: grid;
+  grid-template-columns:
+    40px minmax(0, 1.6fr) minmax(0, .8fr) minmax(0, 1fr)
+    minmax(0, .9fr) minmax(0, 1.1fr) minmax(0, .8fr) 40px;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  transition: .12s;
+  cursor: pointer;
+}
+
+.ctrlRow:last-child {
+  border-bottom: none;
+}
+
+.ctrlRow:hover {
+  background: var(--surface-2);
+}
+
+.head {
+  cursor: default;
+  background: var(--surface-2);
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 11px 18px;
+}
+
+.groupHeader {
+  display: grid;
+  /* Must track .ctrlRow exactly, or grouped views drift out of line. */
+  grid-template-columns:
+    40px minmax(0, 1.6fr) minmax(0, .8fr) minmax(0, 1fr)
+    minmax(0, .9fr) minmax(0, 1.1fr) minmax(0, .8fr) 40px;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 18px;
+  background: var(--surface-3);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-2);
+  letter-spacing: .3px;
+  border-bottom: 1px solid var(--border);
+}
+
+.groupToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.groupToggle input {
+  cursor: pointer;
+}
+
+.groupSelect {
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+.filterField { display: grid; gap: 3px; color: var(--text-2); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.filterField select { min-height: 34px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); padding: 5px 9px; text-transform: none; }
+.filterField select:hover { border-color: var(--text-3); }
+.filterField select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.filterField .filterSelected { border-color: var(--accent); background: var(--accent-soft); }
+
+.head span {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.sortButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--text-2);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.sortButton:hover {
+  color: var(--text);
+}
+
+.sortButton:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+}
+
+.sortIcon {
+  font-size: 9px;
+  opacity: .7;
+}
+
+.miteCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.miteTextOn {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ok-text);
+}
+
+.miteTextOff {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--idle-text);
+}
+
+.ctrlName {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ctrlName b {
+  font-weight: 600;
+  font-size: 14px;
+  display: block;
+}
+
+.ctrlName small {
+  color: var(--text-2);
+  font-size: 12px;
+  font-family: var(--mono);
+}
+
+.monoMuted {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+/*
+ * Plain inline, not inline-flex: an inline-flex box sizes to max-content, so a
+ * long endpoint escaped its grid track and ran into the Mite column. Inline
+ * flow lets the URL wrap inside the track. The trailing arrow is part of the
+ * text, so no flex layout is needed to place it.
+ */
+.ext {
+  display: inline;
+  color: var(--accent-strong);
+  font-weight: 600;
+  font-size: 12.5px;
+  overflow-wrap: break-word;
+}
+
+.ext:hover {
+  text-decoration: underline;
+}
+
+.chevron {
+  color: var(--text-2);
+  text-align: right;
+}
+
+.loadingBanner {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.errorBanner {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  padding: 12px 18px;
+  border-radius: var(--radius);
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.empty {
+  padding: 40px 18px;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.versionCell {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.driftBadge {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--warn-text, #f9a825);
+  background: var(--warn-soft, #fff8e1);
+  padding: 1px 6px;
+  border-radius: 9px;
+}
+.upgradeBadge {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  padding: 1px 6px;
+  border-radius: 9px;
+}
+.eolBadge {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  padding: 0 6px;
+  border-radius: 9px;
+}
+.eolBadgePast {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--bad-text, #d64545);
+  background: var(--bad-soft);
+  padding: 1px 6px;
+  border-radius: 9px;
+}
+
+/* Values wrap inside their track now that tracks no longer grow to fit. */
+.ctrlRow > span { min-width: 0; overflow-wrap: break-word; }
+
+/*
+ * Below the breakpoint the eight-column grid cannot hold: the header labels
+ * collapse into each other and values wrap to one character per line. Each row
+ * becomes a stacked card instead, with every value labelled from its
+ * data-label. Mirrors the card-stack in JenkinsRBACTable.module.css.
+ */
+@media (max-width: 760px) {
+  .head {
+    display: none;
+  }
+
+  .ctrlRow,
+  .groupHeader {
+    grid-template-columns: minmax(0, 30%) minmax(0, 1fr);
+    gap: 8px 12px;
+    padding: 14px 16px;
+    align-items: start;
+  }
+
+  /* The row-select checkbox and the trailing chevron span the card. */
+  .ctrlRow > :first-child {
+    grid-column: 1;
+  }
+
+  .ctrlRow > :last-child {
+    grid-column: 2;
+    text-align: right;
+  }
+
+  /*
+   * flex, not grid: cells like Mite and Version hold several children (a status
+   * dot and its text, a version and its drift badge). Grid would place each one
+   * in its own track and split them across lines; as flex items they stay on a
+   * single line after the label.
+   */
+  .ctrlRow > [data-label] {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+    flex-wrap: wrap;
+  }
+
+  .ctrlRow > [data-label]::before {
+    flex: 0 0 30%;
+  }
+
+  /* Flex items floor at min-content, which pushed even short endpoints onto
+     their own line; let them shrink into the space beside the label. */
+  .ctrlRow > [data-label] > * {
+    min-width: 0;
+  }
+
+  .ctrlRow > [data-label]::before {
+    content: attr(data-label);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .4px;
+    text-transform: uppercase;
+    color: var(--text-2);
+  }
+
+  /* The name block is the card's heading, so it keeps its own line. */
+  .ctrlRow > .ctrlName {
+    display: block;
+  }
+
+  .ctrlRow > .ctrlName::before {
+    display: none;
+  }
+}

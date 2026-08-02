@@ -1,0 +1,12 @@
+items:
+  - kind: folder
+    name: folder-item-restrictions
+    displayName: "Folder with Item Restrictions"
+    description: "Folder with item type restrictions"
+    properties:
+      - itemRestrictions:
+          allowedTypes:
+            - hudson.model.FreeStyleProject
+            - org.jenkinsci.plugins.workflow.job.WorkflowJob
+            - com.cloudbees.hudson.plugins.folder.Folder
+          filter: true

@@ -1,0 +1,215 @@
+.stages {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+}
+
+.stage {
+  flex: 1;
+  min-width: 120px;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.stageLabel {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-2);
+  margin-bottom: 0.25rem;
+}
+
+.stageState {
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.stageHash {
+  font-size: 0.7rem;
+  font-family: monospace;
+  color: var(--text-2);
+  margin-top: 0.15rem;
+}
+
+.stageTs {
+  font-size: 0.65rem;
+  color: var(--text-2);
+}
+
+.stageError {
+  font-size: 0.7rem;
+  color: var(--bad-text);
+  margin-top: 0.25rem;
+}
+
+.stageTelemetry {
+  margin-top: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.telemetryItem {
+  font-size: 0.6rem;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.miteInfo {
+  font-size: 0.8rem;
+  color: var(--text-2);
+  margin-bottom: 0.75rem;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.runningBuilds {
+  font-size: 0.85rem;
+  color: var(--warn-text);
+  margin-bottom: 0.5rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.actionBtn {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.actionBtn:hover {
+  background: var(--surface-2);
+}
+
+.actionBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.diffSection {
+  margin-bottom: 1rem;
+}
+
+.diffError {
+  color: var(--bad-text);
+  font-size: 0.8rem;
+  margin-top: 0.25rem;
+}
+
+.diffNotice {
+  color: var(--warn-text);
+  font-size: 0.8rem;
+  margin-top: 0.25rem;
+}
+
+.diffContent {
+  background: var(--code-bg);
+  color: var(--code-text);
+  padding: 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-family: monospace;
+  max-height: 300px;
+  overflow: auto;
+  margin-top: 0.5rem;
+  white-space: pre-wrap;
+}
+
+.history {
+  margin-top: 1rem;
+}
+
+.history h4 {
+  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
+}
+
+.historyEntry {
+  font-size: 0.75rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.historyEntry.success {
+  color: var(--ok-text);
+}
+
+.historyEntry.failure {
+  color: var(--bad-text);
+}
+
+.historyHash {
+  font-family: monospace;
+  font-size: 0.7rem;
+  min-width: 100px;
+}
+
+.historyTime {
+  font-size: 0.65rem;
+  color: var(--text-2);
+  min-width: 130px;
+}
+
+/* ── Sections band ── */
+.sections {
+  margin-bottom: 1rem;
+}
+
+.sectionsHead {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 0.35rem;
+}
+
+.sec {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ok-text);
+  background: var(--ok-soft);
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.sec[data-ok="false"],
+.sec--sm[data-ok="false"] {
+  color: var(--bad-text);
+  background: var(--bad-soft);
+  box-shadow: 0 0 0 1px var(--bad);
+}
+
+.sec--sm {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ok-text);
+  background: var(--ok-soft);
+  padding: 1px 7px;
+  border-radius: 6px;
+}
+
+.secError {
+  font-size: 12px;
+  color: var(--bad-text);
+  margin-top: 4px;
+}

@@ -1,0 +1,144 @@
+# broodschedules — brood schedule lifecycle management.
+/api/v1/brood-schedules:
+  post:
+    operationId: createBroodSchedule
+    tags: [broodschedules]
+    summary: Creates a new brood schedule. Operator+.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [name, spec]
+            properties:
+              namespace:
+                type: string
+                description: Target namespace (defaults to operator namespace).
+              name:
+                type: string
+                description: Schedule name.
+              cluster:
+                type: string
+                description: Target cluster (defaults to local cluster).
+              spec:
+                $ref: '../components/schemas.yaml#/BroodScheduleSpec'
+    responses:
+      "201":
+        description: Brood schedule created.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/BroodScheduleResponse'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+  get:
+    operationId: listBroodSchedules
+    tags: [broodschedules]
+    summary: Lists brood schedules, optionally filtered by namespace. Viewer+.
+    parameters:
+      - $ref: '../components/parameters.yaml#/namespace'
+    responses:
+      "200":
+        description: Brood schedule list.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/BroodScheduleResponse'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+
+/api/v1/brood-schedules/{ns}/{name}:
+  get:
+    operationId: getBroodSchedule
+    tags: [broodschedules]
+    summary: Gets a brood schedule. Viewer+.
+    parameters:
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Brood schedule detail.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/BroodScheduleResponse'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  delete:
+    operationId: deleteBroodSchedule
+    tags: [broodschedules]
+    summary: Deletes a brood schedule. Operator+.
+    parameters:
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Brood schedule deleted.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/brood-schedules/{ns}/{name}/suspend:
+  post:
+    operationId: suspendBroodSchedule
+    tags: [broodschedules]
+    summary: Toggles suspend on a brood schedule. Operator+.
+    parameters:
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [suspend]
+            properties:
+              suspend:
+                type: boolean
+    responses:
+      "200":
+        description: Suspend status toggled.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                suspend:
+                  type: boolean
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'

@@ -1,0 +1,89 @@
+.table { composes: dataTable from "./tables.module.css"; }
+/* Layout .content already supplies page padding and max-width. */
+.page { animation: fade .35s ease; }
+
+@keyframes fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.header { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 22px; }
+.header h1 { margin: 0; font-family: var(--mono); font-size: 20px; font-weight: 700; letter-spacing: -.5px; }
+.actions { display: flex; gap: 0.5rem; }
+.error { color: var(--bad-text); }
+/* Card-like surface so the panel reads as a raised element, not a bare patch. */
+.meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 0.5rem 16px;
+  margin-bottom: 22px;
+  padding: 15px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.meta div { font-size: 0.9rem; }
+
+/* Per-cluster panel: recessed, so it reads as subordinate to the run summary. */
+.subMeta {
+  background: var(--surface-2);
+  box-shadow: none;
+  margin-bottom: 10px;
+}
+.targetsSection { margin-bottom: 22px; }
+.targetsSection h2 { font-size: 15px; font-weight: 700; margin: 0 0 10px; }
+
+.statePill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 3px 10px 3px 8px;
+  border-radius: 20px;
+  letter-spacing: .1px;
+}
+.stateDot { width: 7px; height: 7px; border-radius: 50%; }
+.statePending { background: var(--idle-soft); color: var(--idle-text); }
+.statePending .stateDot { background: var(--idle); }
+.stateDispatched { background: var(--info-soft); color: var(--info-text); }
+.stateDispatched .stateDot { background: var(--info); }
+.stateSucceeded { background: var(--ok-soft); color: var(--ok-text); }
+.stateSucceeded .stateDot { background: var(--ok); }
+.stateFailed { background: var(--bad-soft); color: var(--bad-text); }
+.stateFailed .stateDot { background: var(--bad); }
+.stateSkipped { background: var(--warn-soft); color: var(--warn-text); }
+.stateSkipped .stateDot { background: var(--warn); }
+
+.outputRow td {
+  background: var(--surface-2);
+}
+
+.outputSummary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.outputSummary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.outputPre {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: .25rem 0 0;
+}
+
+/* The Card supplies the outer edge; a trailing row border doubles it. */

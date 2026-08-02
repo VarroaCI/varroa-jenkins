@@ -1,0 +1,104 @@
+# In-cluster smart-HTTP git server for the localdev sample bundle.
+#
+# The image (hack/localdev/git-server/, built + kind-loaded by localdev.sh) is
+# alpine + git-daemon + busybox httpd: git-http-backend runs as a CGI, because
+# the operator clones with --depth=1 and the smart protocol is required for
+# shallow fetches (dumb HTTP is not). An initContainer builds a bare repo
+# (branch "localdev", pinned — never rely on ambient init.defaultBranch) from
+# the localdev-bundle ConfigMap. The operator clones through the localdev
+# ingress with GIT_SSL_NO_VERIFY=true (self-signed wildcard cert).
+#
+# envsubst'd by hack/localdev/localdev.sh:
+#   ${LOCALDEV_GIT_IMAGE}   — the locally built git-server image
+#   ${LOCALDEV_BUNDLE_HASH} — bundle content hash; changes roll the pod so the
+#                             initContainer rebuilds the repo
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: localdev-git
+  namespace: varroa-system
+  labels:
+    app: localdev-git
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: localdev-git
+  template:
+    metadata:
+      labels:
+        app: localdev-git
+      annotations:
+        varroa.dev/bundle-hash: "${LOCALDEV_BUNDLE_HASH}"
+    spec:
+      initContainers:
+        - name: build-repo
+          image: "${LOCALDEV_GIT_IMAGE}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              work=/tmp/work
+              mkdir -p "$work"
+              cp /bundle-src/* "$work/"
+              cd "$work"
+              git init --initial-branch=localdev
+              git -c user.email=localdev@varroa.dev -c user.name=localdev add -A
+              git -c user.email=localdev@varroa.dev -c user.name=localdev commit -m "localdev bundle"
+              rm -rf /srv/git/localdev-bundle.git
+              git clone --bare "$work" /srv/git/localdev-bundle.git
+          volumeMounts:
+            - name: bundle-src
+              mountPath: /bundle-src
+            - name: repo
+              mountPath: /srv/git
+      containers:
+        - name: git-http
+          image: "${LOCALDEV_GIT_IMAGE}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: repo
+              mountPath: /srv/git
+      volumes:
+        - name: bundle-src
+          configMap:
+            name: localdev-bundle
+        - name: repo
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: localdev-git
+  namespace: varroa-system
+spec:
+  selector:
+    app: localdev-git
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: localdev-git
+  namespace: varroa-system
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - git.varroa.localtest.me
+      secretName: varroa-localdev-tls
+  rules:
+    - host: git.varroa.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: localdev-git
+                port:
+                  number: 80

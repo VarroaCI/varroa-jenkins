@@ -1,0 +1,13 @@
+---
+id: localdev-bundle
+apiVersion: "2"
+version: "1"
+description: Varroa localdev sample bundle (getting-started controller)
+itemRemoveStrategy:
+    items: none
+jcasc:
+    - jenkins.yaml
+plugins:
+    - plugins.yaml
+items:
+    - items.yaml

@@ -1,0 +1,133 @@
+# fleetplugins — fleet-wide installed-plugin inventory.
+# Rollup and per-plugin drilldown, both read-only.
+/api/v1/fleet/plugins:
+  get:
+    operationId: listFleetPlugins
+    tags: [fleetplugins]
+    summary: Lists plugins installed across the fleet, one item per plugin name.
+    parameters:
+      - in: query
+        name: q
+        schema:
+          type: string
+        required: false
+        description: Optional case-insensitive substring filter on plugin name.
+      - in: query
+        name: cluster
+        schema:
+          type: string
+        required: false
+        description: Narrow rows to a single cluster.
+      - in: query
+        name: namespace
+        schema:
+          type: string
+        required: false
+        description: Narrow rows to a single namespace.
+      - in: query
+        name: affected
+        schema:
+          type: string
+        required: false
+        description: >
+          Version-range expression (e.g. `<=4.0.0`, `>=4.0.0,<4.1.0`).
+          Comma = AND; operators `<=` `>=` `!=` `<` `>` `=`.
+    responses:
+      "200":
+        description: Fleet plugin rollup.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/FleetPluginsRollup'
+      "400":
+        description: Malformed affected expression.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        description: Unknown cluster.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "405":
+        description: Method not allowed.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "502":
+        description: Fleet plugin inventory dependency not wired.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+
+/api/v1/fleet/plugins/{name}:
+  get:
+    operationId: getFleetPlugin
+    tags: [fleetplugins]
+    summary: Lists every controller running the named plugin, with version and provenance.
+    parameters:
+      - in: path
+        name: name
+        schema:
+          type: string
+        required: true
+        description: Exact plugin name (not a substring).
+      - in: query
+        name: cluster
+        schema:
+          type: string
+        required: false
+        description: Narrow rows to a single cluster.
+      - in: query
+        name: namespace
+        schema:
+          type: string
+        required: false
+        description: Narrow rows to a single namespace.
+      - in: query
+        name: affected
+        schema:
+          type: string
+        required: false
+        description: >
+          Version-range expression (e.g. `<=4.0.0`, `>=4.0.0,<4.1.0`).
+          Comma = AND; operators `<=` `>=` `!=` `<` `>` `=`.
+    responses:
+      "200":
+        description: Per-plugin drilldown with per-controller rows and version histogram.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/FleetPluginDrilldown'
+      "400":
+        description: Malformed affected expression.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        description: Unknown cluster or empty plugin name.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "405":
+        description: Method not allowed.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "502":
+        description: Fleet plugin inventory dependency not wired.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'

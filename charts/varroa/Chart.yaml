@@ -1,0 +1,19 @@
+apiVersion: v2
+name: varroa
+description: Varroa control-plane umbrella chart — deploys NATS JetStream, Operator (sharded), Gateway (mite gRPC), BFF (HTTP API), Dex, oauth2-proxy, Prometheus, and Grafana
+type: application
+version: 0.3.2
+appVersion: "0.3.0"
+kubeVersion: ">= 1.30"
+keywords:
+  - varroa
+  - jenkins
+  - ci-cd
+  - observability
+maintainers:
+  - name: Varroa Team
+dependencies:
+  - name: nats
+    version: "1.2.0"
+    repository: https://nats-io.github.io/k8s/helm/charts/
+    condition: nats.enabled

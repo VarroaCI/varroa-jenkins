@@ -1,0 +1,12 @@
+items:
+  - kind: multibranch
+    name: multibranch-legacy-source
+    displayName: "Multibranch Legacy Source"
+    description: "Multibranch pipeline with legacy bare git source"
+    sourcesList:
+      - git:
+          remote: https://github.com/fake-org/legacy-repo.git
+          credentialsId: git-cred
+    projectFactory:
+      multiBranchProjectFactory:
+        scriptPath: Jenkinsfile

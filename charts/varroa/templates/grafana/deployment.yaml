@@ -1,0 +1,90 @@
+{{- if not (include "varroa.isHive" .) }}
+{{- if .Values.grafana.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "grafana") }}
+  labels:
+    app.kubernetes.io/component: grafana
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.grafana.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: grafana
+      {{- include "varroa.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: grafana
+        {{- include "varroa.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "varroa.fullname" (dict "Release" .Release "name" "grafana") }}
+      containers:
+        - name: grafana
+          image: "{{ .Values.grafana.image.repository }}:{{ .Values.grafana.image.tag }}"
+          imagePullPolicy: {{ .Values.grafana.image.pullPolicy }}
+          env:
+            - name: GF_SERVER_HTTP_PORT
+              value: {{ .Values.grafana.service.port | quote }}
+            - name: GF_AUTH_DISABLE_LOGIN_FORM
+              value: {{ .Values.grafana.config.auth.disable_login_form | quote }}
+            - name: GF_SECURITY_ADMIN_USER
+              value: admin
+            - name: GF_SECURITY_ADMIN_PASSWORD__FILE
+              value: /etc/grafana/secrets/admin-password
+          ports:
+            - name: http
+              containerPort: {{ .Values.grafana.service.port }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/grafana/config
+              readOnly: true
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+            - name: admin-credentials
+              mountPath: /etc/grafana/secrets
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/grafana
+          {{- with .Values.grafana.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "varroa.fullname" (dict "Release" .Release "name" "grafana") }}
+        - name: datasources
+          secret:
+            secretName: {{ include "varroa.fullname" (dict "Release" .Release "name" "grafana-datasources") }}
+        - name: admin-credentials
+          secret:
+            secretName: {{ include "varroa.fullname" (dict "Release" .Release "name" "grafana-admin") }}
+        - name: data
+          {{- if .Values.grafana.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "varroa.fullname" (dict "Release" .Release "name" "grafana") }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}
+
+{{- end }}

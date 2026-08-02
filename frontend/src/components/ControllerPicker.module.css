@@ -1,0 +1,84 @@
+.picker {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  min-width: 240px;
+  max-width: 320px;
+}
+
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.searchBox span {
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.searchBox input {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  width: 100%;
+  font-family: var(--sans);
+}
+
+.searchBox input::placeholder {
+  color: var(--text-2);
+}
+
+.list {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.1s;
+}
+
+.item:hover {
+  background: var(--surface-2);
+}
+
+.itemOn {
+  background: var(--accent-soft);
+}
+
+.checkbox {
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+.itemLabel {
+  font-weight: 550;
+  color: var(--text);
+}
+
+.itemSub {
+  font-size: 11px;
+  color: var(--text-2);
+  margin-left: auto;
+  font-family: var(--mono);
+}
+
+.selectedInfo {
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--text-2);
+  border-top: 1px solid var(--border);
+  text-align: center;
+}

@@ -1,0 +1,15 @@
+{{- if not (include "varroa.isHive" .) }}
+{{- /*
+  Validate that when Dex is enabled, the effective OIDC issuer (auth.oidc.issuer
+  with fallback to bff.oidcIssuer) either points at the Dex service or is empty
+  (meaning the chart will auto-synthesize the Dex issuer URL).
+*/ -}}
+{{- $effectiveIssuer := .Values.auth.oidc.issuer | default .Values.bff.oidcIssuer }}
+{{- $dexExpectedIssuer := .Values.dex.config.issuer | default (printf "https://dex.%s" .Values.global.domain) }}
+{{- if and .Values.dex.enabled $effectiveIssuer }}
+{{- if ne $effectiveIssuer $dexExpectedIssuer }}
+{{- fail (printf "When dex.enabled=true, the OIDC issuer must match Dex. Expected: %s, got: %s. Set dex.enabled=false for direct OIDC, or set auth.oidc.issuer/bff.oidcIssuer to match dex.config.issuer." $dexExpectedIssuer $effectiveIssuer) }}
+{{- end }}
+{{- end }}
+
+{{- end }}

@@ -1,0 +1,21 @@
+{{- if not (include "varroa.isHive" .) }}
+{{- if and .Values.grafana.enabled .Values.grafana.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "grafana") }}
+  labels:
+    app.kubernetes.io/component: grafana
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.grafana.persistence.size }}
+  {{- if .Values.grafana.persistence.storageClass }}
+  storageClassName: {{ .Values.grafana.persistence.storageClass }}
+  {{- end }}
+{{- end }}
+
+{{- end }}

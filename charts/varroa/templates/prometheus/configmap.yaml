@@ -1,0 +1,15 @@
+{{- if not (include "varroa.isHive" .) }}
+{{- if .Values.prometheus.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "prometheus") }}
+  labels:
+    app.kubernetes.io/component: prometheus
+    {{- include "varroa.labels" . | nindent 4 }}
+data:
+  prometheus.yml: |
+    {{- toYaml .Values.prometheus.config | nindent 4 }}
+{{- end }}
+
+{{- end }}

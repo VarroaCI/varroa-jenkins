@@ -1,0 +1,18 @@
+---
+items:
+    - kind: pipeline
+      name: hello-localdev
+      displayName: Hello Localdev
+      description: Sample pipeline proving the bundle → composer → controller path
+      definition:
+        script: |
+            pipeline {
+                agent any
+                stages {
+                    stage('Hello') {
+                        steps {
+                            echo 'hello from varroa localdev'
+                        }
+                    }
+                }
+            }

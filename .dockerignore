@@ -1,0 +1,18 @@
+.git
+.gitignore
+bin/
+*.md
+.golangci.yml
+Jenkinsfile
+helm/
+k8s/
+# Agent worktrees and scratch — never belongs in the image build context
+# (bloats it to ~280MB and can contain root-owned files Docker can't read).
+.claude/
+# Maven build output — the image builds the plugin itself in a container stage;
+# the host copy is never needed and its in-container runs leave root-owned files
+# Docker cannot read when loading the build context.
+plugin/target/
+# Frontend deps — the frontend image builds these itself.
+frontend/node_modules/
+.reasonix-broker/
