@@ -1,3 +1,4 @@
+// App entry point.
 import { initTelemetry } from './telemetry';
 initTelemetry();
 

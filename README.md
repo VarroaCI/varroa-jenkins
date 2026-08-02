@@ -409,3 +409,4 @@ Varroa is licensed under the [GNU Affero General Public License v3.0](LICENSE)
 (AGPL-3.0). You are free to use, modify, and self-host Varroa. If you offer a
 modified version of Varroa to others over a network, the AGPL requires you to
 make your modified source available to those users.
+
