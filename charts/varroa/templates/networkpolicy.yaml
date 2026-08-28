@@ -1,0 +1,687 @@
+{{- /*
+Reusable snippets
+*/}}
+{{- define "varroa.np.apiServerEgress" -}}
+{{- $cidrs := .Values.networkPolicy.apiServerEgress.cidrs }}
+{{- $ports := .Values.networkPolicy.apiServerEgress.ports }}
+- to:
+{{- if $cidrs }}
+{{- range $cidrs }}
+  - ipBlock:
+      cidr: {{ . }}
+{{- end }}
+{{- else }}
+  - ipBlock:
+      cidr: 0.0.0.0/0
+{{- end }}
+  ports:
+{{- range $ports }}
+  - protocol: TCP
+    port: {{ . }}
+{{- end }}
+{{- end -}}
+
+{{- define "varroa.np.telemetryEgress" -}}
+{{- $ports := .Values.networkPolicy.telemetryEgress.ports }}
+{{- if and .Values.telemetry.endpoint (not .Values.telemetry.disabled) }}
+- to:
+  - ipBlock:
+      cidr: 0.0.0.0/0
+  ports:
+{{- range $ports }}
+  - protocol: TCP
+    port: {{ . }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{- define "varroa.np.componentSelector" -}}
+podSelector:
+  matchLabels:
+    app.kubernetes.io/component: {{ .component }}
+{{- end -}}
+
+{{- define "varroa.np.ingressControllerNS" -}}
+namespaceSelector:
+  matchLabels:
+{{ .Values.networkPolicy.ingressControllerNamespaceSelector | toYaml | nindent 4 }}
+{{- end -}}
+
+{{- define "varroa.np.coreNatsPorts" -}}
+{{- $explicit := .Values.networkPolicy.coreNatsEgress.ports -}}
+{{- if $explicit -}}
+{{ toJson $explicit }}
+{{- else -}}
+{{- $m := regexFind ":[0-9]+$" (trimSuffix "/" .Values.bus.url) -}}
+{{- if $m -}}[{{ trimPrefix ":" $m }}]{{- else -}}[4222]{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- if .Values.networkPolicy.enabled }}
+{{- $full := not (include "varroa.isHive" .) }}
+
+---
+# Policy 1: Default-deny (all pods, no rules)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-np-default-deny
+  labels: {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# Policy 2: DNS egress (all pods)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-np-dns
+  labels: {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+  policyTypes:
+    - Egress
+{{- if .Values.operator.enabled }}
+---
+# Policy: operator
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-np-operator
+  labels: {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: varroa-operator
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+{{- if .Values.operator.wake.enabled }}
+    - from:
+        - {{- include "varroa.np.ingressControllerNS" . | nindent 10 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.operator.wake.port }}
+{{- end }}
+{{- if .Values.networkPolicy.metricsIngress }}
+    - from:
+{{ toYaml .Values.networkPolicy.metricsIngress | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.operator.service.port }}
+        - protocol: TCP
+          port: 9091
+{{- end }}
+  egress:
+{{- if and $full .Values.nats.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: nats
+      ports:
+        - protocol: TCP
+          port: 4222
+{{- end }}
+{{ include "varroa.np.apiServerEgress" . | nindent 4 }}
+{{- if and $full .Values.dex.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: dex
+      ports:
+        - protocol: TCP
+          port: {{ .Values.dex.service.port }}
+{{- end }}
+{{- if .Values.networkPolicy.gitEgress.enabled }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+{{- range .Values.networkPolicy.gitEgress.ports }}
+        - protocol: TCP
+          port: {{ . }}
+{{- end }}
+{{- end }}
+{{- if .Values.networkPolicy.ociRegistryEgress.enabled }}
+    # ociRegistryEgress: operator reaches external OCI registry (mode-independent)
+    - to:
+{{- range .Values.networkPolicy.ociRegistryEgress.cidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+{{- end }}
+      ports:
+{{- range .Values.networkPolicy.ociRegistryEgress.ports }}
+        - protocol: TCP
+          port: {{ . }}
+{{- end }}
+{{- end }}
+{{ include "varroa.np.telemetryEgress" . | nindent 4 }}
+{{- if not $full }}
+    - to:
+{{- if .Values.networkPolicy.coreNatsEgress.cidrs }}
+{{- range .Values.networkPolicy.coreNatsEgress.cidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+{{- end }}
+{{- else }}
+        - ipBlock:
+            cidr: 0.0.0.0/0
+{{- end }}
+      ports:
+{{- range (include "varroa.np.coreNatsPorts" . | fromJsonArray) }}
+        - protocol: TCP
+          port: {{ . }}
+{{- end }}
+{{- end }}
+    # executeGroovy: operator dispatches Groovy scripts directly to a target
+    # controller's Jenkins on :8080 (bypasses the mite). Bimodal by managedNamespaces.
+    - to:
+{{- if .Values.managedNamespaces }}
+{{- range .Values.managedNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+{{- end }}
+{{- else }}
+        - namespaceSelector: {}
+{{- end }}
+      ports:
+        - protocol: TCP
+          port: 8080
+{{- end }}
+{{- if and $full .Values.updateCenter.enabled }}
+    # updatecenter: operator reaches the update-center for seed import + inventory
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-updatecenter
+      ports:
+        - protocol: TCP
+          port: 8080
+{{- end }}
+
+{{- if .Values.gateway.enabled }}
+---
+# Policy: gateway
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-np-gateway
+  labels: {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: varroa-gateway
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+{{- if .Values.networkPolicy.tenantNamespaceSelector }}
+            matchLabels:
+{{ .Values.networkPolicy.tenantNamespaceSelector | toYaml | nindent 14 }}
+{{- else }}
+            {}
+{{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.gateway.service.grpcPort }}
+        - protocol: TCP
+          port: 9092
+{{- if .Values.networkPolicy.metricsIngress }}
+    - from:
+{{ toYaml .Values.networkPolicy.metricsIngress | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ add (.Values.gateway.service.grpcPort | int) 1 }}
+{{- end }}
+  egress:
+{{- if and $full .Values.nats.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: nats
+      ports:
+        - protocol: TCP
+          port: 4222
+{{- end }}
+{{ include "varroa.np.apiServerEgress" . | nindent 4 }}
+{{ include "varroa.np.telemetryEgress" . | nindent 4 }}
+{{- if not $full }}
+    - to:
+{{- if .Values.networkPolicy.coreNatsEgress.cidrs }}
+{{- range .Values.networkPolicy.coreNatsEgress.cidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+{{- end }}
+{{- else }}
+        - ipBlock:
+            cidr: 0.0.0.0/0
+{{- end }}
+      ports:
+{{- range (include "varroa.np.coreNatsPorts" . | fromJsonArray) }}
+        - protocol: TCP
+          port: {{ . }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- if and $full .Values.bff.enabled }}
+---
+# Policy: brood-schedule egress — the fired Job pod (which may run in the
+# operator namespace, subject to default-deny egress) must reach the BFF.
+# Team namespaces have no default-deny, so this is a no-op there.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-np-brood-schedule
+  labels: {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: brood-schedule
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-bff
+      ports:
+        - protocol: TCP
+          port: {{ .Values.bff.service.port }}
+---
+# Policy: bff
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-np-bff
+  labels: {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: varroa-bff
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        # Scheduled brood operations: the fired Job's varroactl call reaches
+        # the BFF from an arbitrary (team) namespace; allow it by pod label.
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: brood-schedule
+        - namespaceSelector:
+            matchLabels:
+{{ .Values.networkPolicy.ingressControllerNamespaceSelector | toYaml | nindent 14 }}
+{{- if .Values.frontend.enabled }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: frontend
+{{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.bff.service.port }}
+{{- if .Values.networkPolicy.metricsIngress }}
+    - from:
+{{ toYaml .Values.networkPolicy.metricsIngress | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.bff.service.port }}
+{{- end }}
+  egress:
+{{- if .Values.nats.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: nats
+      ports:
+        - protocol: TCP
+          port: 4222
+{{- end }}
+{{ include "varroa.np.apiServerEgress" . | nindent 4 }}
+{{- if .Values.dex.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: dex
+      ports:
+        - protocol: TCP
+          port: {{ .Values.dex.service.port }}
+{{- end }}
+    # call_jenkins_tool MCP proxy: BFF reaches labeled controller Jenkins pods
+    # on 8080 in any controller namespace.
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/managed-by: varroa-operator
+      ports:
+        - protocol: TCP
+          port: 8080
+{{- if .Values.updateCenter.enabled }}
+    # updatecenter: BFF reaches the update-center for status/inventory proxy
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-updatecenter
+      ports:
+        - protocol: TCP
+          port: 8080
+{{- end }}
+{{- if .Values.networkPolicy.gitEgress.enabled }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+{{- range .Values.networkPolicy.gitEgress.ports }}
+        - protocol: TCP
+          port: {{ . }}
+{{- end }}
+{{- end }}
+{{ include "varroa.np.telemetryEgress" . | nindent 4 }}
+{{- end }}
+
+{{- if and $full .Values.frontend.enabled }}
+---
+# Policy: frontend
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-np-frontend
+  labels: {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: frontend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+{{ .Values.networkPolicy.ingressControllerNamespaceSelector | toYaml | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+{{- if .Values.bff.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-bff
+      ports:
+        - protocol: TCP
+          port: {{ .Values.bff.service.port }}
+{{- end }}
+{{- end }}
+
+{{- if and $full .Values.dex.enabled }}
+---
+# Policy: dex
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-np-dex
+  labels: {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: dex
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+{{ .Values.networkPolicy.ingressControllerNamespaceSelector | toYaml | nindent 14 }}
+{{- if .Values.operator.enabled }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-operator
+{{- end }}
+{{- if .Values.bff.enabled }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-bff
+{{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.dex.service.port }}
+  egress:
+{{ include "varroa.np.apiServerEgress" . | nindent 4 }}
+{{- if .Values.networkPolicy.dexConnectorEgress.enabled }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+{{- range .Values.networkPolicy.dexConnectorEgress.extraCIDRs }}
+        - ipBlock:
+            cidr: {{ . }}
+{{- end }}
+      ports:
+{{- range .Values.networkPolicy.dexConnectorEgress.ports }}
+        - protocol: TCP
+          port: {{ . }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- if and $full .Values.nats.enabled }}
+---
+# Policy: nats
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-np-nats
+  labels: {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: nats
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+{{- if .Values.operator.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-operator
+      ports:
+        - protocol: TCP
+          port: 4222
+{{- end }}
+{{- if .Values.gateway.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-gateway
+      ports:
+        - protocol: TCP
+          port: 4222
+{{- end }}
+{{- if .Values.bff.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-bff
+      ports:
+        - protocol: TCP
+          port: 4222
+{{- end }}
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: [nats-box, test-request-reply]
+      ports:
+        - protocol: TCP
+          port: 4222
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: nats
+      ports:
+        - protocol: TCP
+          port: 6222
+{{- if .Values.networkPolicy.metricsIngress }}
+    - from:
+{{ toYaml .Values.networkPolicy.metricsIngress | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: 8222
+{{- end }}
+{{- /* External NATS clients (hive clusters via LB/NodePort) */}}
+{{- $external := .Values.nats.external | default dict }}
+{{- if $external.enabled }}
+    - from:
+{{- $cidrs := $external.allowedCIDRs | default list }}
+{{- if $cidrs }}
+{{- range $cidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+{{- end }}
+{{- else }}
+        - ipBlock:
+            cidr: 0.0.0.0/0
+{{- end }}
+      ports:
+        - protocol: TCP
+          port: 4222
+{{- end }}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: nats
+      ports:
+        - protocol: TCP
+          port: 6222
+    {{- /* nats→apiserver egress pruned per task 7.3: live check on 2026-07-03 found no
+         apiserver connections from the nats pod (JetStream needs no k8s API). */}}
+---
+# Policy: nats-clients (nats-box + test-request-reply)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-np-nats-clients
+  labels: {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [nats-box, test-request-reply]
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: nats
+      ports:
+        - protocol: TCP
+          port: 4222
+{{- end }}
+{{- if and $full .Values.updateCenter.enabled }}
+---
+# Policy: updatecenter
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-np-updatecenter
+  labels: {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: varroa-updatecenter
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # (1) Jenkins pods — bimodal by managedNamespaces (executeGroovy convention)
+    - from:
+{{- if .Values.managedNamespaces }}
+{{- range .Values.managedNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/managed-by: varroa-operator
+{{- end }}
+{{- else }}
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/managed-by: varroa-operator
+{{- end }}
+      ports:
+        - protocol: TCP
+          port: 8080
+    # (2) operator pod — import + inventory calls
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-operator
+      ports:
+        - protocol: TCP
+          port: 8080
+    # (3) BFF pod — status/inventory proxy calls
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-bff
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+{{- if and .Values.updateCenter.pullThrough.enabled .Values.networkPolicy.pullThroughEgress.enabled }}
+    # Pull-through egress: UC reaches updates.jenkins.io for plugin metadata/HPIs
+    - to:
+{{- range .Values.networkPolicy.pullThroughEgress.cidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+{{- end }}
+      ports:
+{{- range .Values.networkPolicy.pullThroughEgress.ports }}
+        - protocol: TCP
+          port: {{ . }}
+{{- end }}
+{{- end }}
+{{- if and (eq .Values.updateCenter.storage.type "oci") .Values.networkPolicy.updateCenterRegistryEgress.enabled }}
+    # OCI-registry egress: UC reaches external OCI registry for seed store
+    - to:
+{{- range .Values.networkPolicy.updateCenterRegistryEgress.cidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+{{- end }}
+      ports:
+{{- range .Values.networkPolicy.updateCenterRegistryEgress.ports }}
+        - protocol: TCP
+          port: {{ . }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

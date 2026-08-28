@@ -1,0 +1,19 @@
+items:
+  - kind: folder
+    name: top
+    displayName: "Top Folder"
+    items:
+      - kind: folder
+        name: middle
+        displayName: "Middle Folder"
+        items:
+          - kind: folder
+            name: bottom
+            displayName: "Bottom Folder"
+            items:
+              - kind: freeStyle
+                name: leaf-job
+                displayName: "Leaf FreeStyle Job"
+                builders:
+                  - shell:
+                      command: echo deep

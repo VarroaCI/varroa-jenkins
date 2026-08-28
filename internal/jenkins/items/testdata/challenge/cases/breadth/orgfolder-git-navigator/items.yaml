@@ -1,0 +1,12 @@
+items:
+  - kind: organizationFolder
+    name: orgfolder-git-navigator
+    displayName: "Git SCM Org Folder"
+    description: "Organization folder with git SCM navigator"
+    navigators:
+      - gitNavigator:
+          remote: https://github.com/fake-org
+          credentialsId: git-cred
+    projectFactories:
+      - multiBranchProjectFactory:
+          scriptPath: Jenkinsfile

@@ -1,0 +1,113 @@
+{{- if .Values.operator.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-operator") }}
+  labels:
+    app.kubernetes.io/component: varroa-operator
+    {{- include "varroa.labels" . | nindent 4 }}
+rules:
+  {{- /* Cluster-wide in default mode. When .Values.managedNamespaces is set, this rule is
+       dropped and replaced by per-namespace Roles (see operator/role.yaml), so the operator
+       can no longer act on workloads in namespaces it does not manage. */}}
+  {{- if not .Values.managedNamespaces }}
+  # --- Core resources for provisioning ---
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "pods/exec", "services", "configmaps", "persistentvolumeclaims", "serviceaccounts"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  {{- end }}
+  {{- if not .Values.managedNamespaces }}
+  # Cluster-wide Secret access (default mode). When .Values.managedNamespaces is set,
+  # this rule is dropped and replaced by per-namespace Roles (see operator/role.yaml),
+  # so the operator can no longer read Secrets in namespaces it does not manage.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  {{- end }}
+  {{- /* Cluster-wide in default mode; scoped mode relocates these to per-namespace Roles
+       (see operator/role.yaml). */}}
+  {{- if not .Values.managedNamespaces }}
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+  {{- end }}
+  {{- if not .Values.managedNamespaces }}
+  - apiGroups: ["batch"]
+    resources: ["cronjobs", "jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  {{- end }}
+  # --- CRDs ---
+  - apiGroups: ["varroa.dev"]
+    resources: ["controllers", "controllers/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["varroaroles", "varroarolebindings", "jenkinsroles", "jenkinsrolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["podtemplates", "catalogsources", "catalogsources/status", "catalogitems", "catalogitems/status", "composedbundles", "composedbundles/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["provisioningdefaults", "provisioningdefaults/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["jenkinsversionprofiles", "jenkinsversionprofiles/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["updatecenters", "updatecenters/status"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["controllerclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["users", "users/status", "groups", "buildmetrics"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["teams", "teams/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["broodoperations", "broodoperations/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["broodoperations/finalizers"]
+    verbs: ["update"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["broodschedules", "broodschedules/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["broodschedules/finalizers"]
+    verbs: ["update"]
+  {{- /* Cluster-wide in default mode; scoped mode relocates this to per-namespace Roles
+       (see operator/role.yaml). Needed to create controller agent Roles/RoleBindings. */}}
+  {{- if not .Values.managedNamespaces }}
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  {{- end }}
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  {{- if not .Values.managedNamespaces }}
+  # Preflight checks (bus-initiated controller create runs operator-side):
+  # list resource quotas to validate headroom. Scoped mode relocates this to
+  # the per-namespace Roles (see operator/role.yaml).
+  - apiGroups: [""]
+    resources: ["resourcequotas"]
+    verbs: ["get", "list"]
+  {{- end }}
+  # --- Shard Leases ---
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Namespaces are cluster-scoped; there is no per-namespace Role form, so this grant is
+  # cluster-wide in BOTH default and scoped mode (documented managedNamespaces exception).
+  # get/list: preflight + operator classification; create/patch: internal/tenancy Ensure (change 2).
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "create", "patch"]
+{{- end }}

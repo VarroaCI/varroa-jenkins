@@ -1,0 +1,53 @@
+.metric {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  overflow: hidden;
+}
+
+.mTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mLabel {
+  font-size: 12px;
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.mIc {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+}
+
+.mVal {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  margin-top: 10px;
+  line-height: 1;
+}
+
+.mSub {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-top: 7px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.softOk     { background: var(--ok-soft); color: var(--ok-text); }
+.softWarn   { background: var(--warn-soft); color: var(--warn-text); }
+.softBad    { background: var(--bad-soft); color: var(--bad-text); }
+.softInfo   { background: var(--info-soft); color: var(--info-text); }
+.softAccent { background: var(--accent-soft); color: var(--accent-strong); }
+.softHoney  { background: var(--honey-soft); color: var(--honey); }

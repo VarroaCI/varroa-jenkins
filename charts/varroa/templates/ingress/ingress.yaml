@@ -1,0 +1,49 @@
+{{- if not (include "varroa.isHive" .) }}
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-ingress
+  labels:
+    {{- include "varroa.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+  {{- $domain := .Values.global.domain }}
+  {{- if .Values.dex.enabled }}
+    - host: dex.{{ $domain }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "varroa.fullname" (dict "Release" $.Release "name" "dex") }}
+                port:
+                  number: {{ $.Values.dex.service.port }}
+  {{- end }}
+  {{- if .Values.frontend.enabled }}
+    - host: {{ .Values.frontend.host | default (print "app." $domain) }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "varroa.fullname" (dict "Release" $.Release "name" "frontend") }}
+                port:
+                  number: {{ $.Values.frontend.service.port }}
+  {{- end }}
+{{- end }}
+
+{{- end }}

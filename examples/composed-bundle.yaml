@@ -1,0 +1,43 @@
+# =============================================================================
+# ComposedBundle — assemble items from catalogs and git bundle repositories.
+#
+# This bundle mixes two catalog items (from varroa-platform-catalog) with a
+# direct git bundle (from varroa-jenkins-controllers). The operator resolves
+# all inputs, merges JCasC fragments, and pushes the combined configuration
+# to the Jenkins controller.
+#
+# CRITICAL: The ComposedBundle must be in the SAME namespace as the
+# CatalogSource. CatalogItems live in the CatalogSource's namespace, and the
+# operator looks up itemRefs in the ComposedBundle's own namespace.
+#
+# itemRef.name must match the CatalogItem CRD name, not the catalog.yaml
+# entry name. Find CatalogItem names with:
+#   kubectl get catalogitem -n varroa-system
+#
+# Both referenced repos are public — no secretRef needed.
+#
+# Usage:
+#   kubectl apply -f examples/composed-bundle.yaml
+#   kubectl get composedbundle getting-started-bundle -n varroa-system -w
+# =============================================================================
+apiVersion: varroa.dev/v1alpha1
+kind: ComposedBundle
+metadata:
+  name: getting-started-bundle
+  namespace: varroa-system                   # ← must match CatalogSource namespace!
+spec:
+  displayName: "Getting Started Bundle"
+  description: "Minimal bundle for the Varroa getting-started guide"
+  jcascMergeStrategy: errorOnConflict
+  inputs:
+    # From the platform catalog (use CatalogItem CRD names):
+    - itemRef:
+        name: platform-catalog-plugins-pipeline
+    - itemRef:
+        name: platform-catalog-jcasc-security
+    # From the controllers bundle repo (direct git source):
+    - gitSource:
+        repoURL: https://github.com/varroaci/varroa-jenkins-controllers.git
+        path: bundle-test
+        revision: main
+        # secretRef: git-deploy-key   # ← uncomment if the repo were private

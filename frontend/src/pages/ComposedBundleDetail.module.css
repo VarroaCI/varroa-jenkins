@@ -1,0 +1,402 @@
+.page {
+  animation: fade .35s ease;
+}
+
+@keyframes fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.backLink {
+  display: inline-block;
+  font-size: 13px;
+  color: var(--accent);
+  text-decoration: none;
+  margin-bottom: 16px;
+  font-weight: 600;
+}
+
+.backLink:hover {
+  text-decoration: underline;
+}
+
+.headRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -.4px;
+  margin: 0;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: var(--text-2);
+  margin: 2px 0 0;
+}
+
+.headActions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Phase — badge itself is the shared BundleHealthBadge; this just spaces it */
+
+.phaseRow {
+  margin-bottom: 18px;
+}
+
+/* Banners */
+
+.missingBanner {
+  font-size: 13px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
+.driftedBanner {
+  font-size: 13px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--warn-soft);
+  color: var(--warn-text);
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
+.warningsBanner {
+  font-size: 13px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--warn-soft);
+  color: var(--warn-text);
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
+.warningsBanner ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.nsBadge {
+  margin-left: 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--text-2);
+  background: var(--surface-3);
+  padding: 2px 8px;
+  border-radius: 8px;
+}
+
+/* Sections */
+
+.section {
+  margin-bottom: 24px;
+}
+
+.sectionTitle {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0 0 10px;
+  color: var(--text);
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 24px;
+  font-size: 13.5px;
+  line-height: 1.8;
+}
+
+.detailLabel {
+  color: var(--text-2);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+/* Items */
+
+.itemList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.itemRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  gap: 12px;
+}
+
+.itemName {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.itemMeta {
+  font-size: 11px;
+  color: var(--text-2);
+  margin-top: 2px;
+  font-family: var(--mono);
+}
+
+.itemMissingBadge {
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.itemDriftedBadge {
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  background: var(--warn-soft);
+  color: var(--warn-text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.statusBadge {
+  padding: 2px 8px;
+  border-radius: 5px;
+  background: var(--ok-soft);
+  color: var(--ok-text);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.validationLead {
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.condition {
+  margin-top: 8px;
+  padding: 10px 14px;
+  border-left: 3px solid var(--border-strong);
+  background: var(--surface-2);
+  font-size: 13px;
+}
+
+.diagnostics {
+  margin-top: 24px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.diagnostics summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.diagnostics pre {
+  overflow: auto;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  font: 12px/1.5 var(--mono);
+}
+
+.emptyText {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+/* Variables */
+
+.varGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.varRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 13px;
+}
+
+.varKey {
+  font-weight: 700;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  min-width: 140px;
+}
+
+.varValue {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+/* Loading, empty, error */
+
+/* Attach to controller */
+
+.attachRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.formSelect {
+  flex: 1;
+  max-width: 360px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+
+/* Referenced by controllers */
+
+.refList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.refLink {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  text-decoration: none;
+  transition: background .15s;
+}
+
+.refLink:hover {
+  background: var(--surface-3);
+}
+
+.refName {
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--accent);
+}
+
+.refNamespace {
+  font-size: 11.5px;
+  color: var(--text-2);
+  font-family: var(--mono);
+}
+
+/* Loading, empty, error */
+
+.loadingBanner {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.errorBanner {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  padding: 12px 18px;
+  border-radius: var(--radius);
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+/* Fan-out view */
+.sectionHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.pauseControls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.rollupSummary {
+  font-size: 0.85rem;
+  color: var(--text-2);
+  margin-bottom: 0.5rem;
+}
+
+.pausedTag {
+  color: var(--warn-text);
+}
+
+.waveList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.waveGroup {
+  margin-left: 0;
+}
+
+.waveLabel {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-2);
+  margin-bottom: 0.25rem;
+  padding: 0.15rem 0.5rem;
+  background: var(--surface-2);
+  border-radius: 4px;
+}
+
+.refOnTarget {
+  color: var(--ok-text);
+  margin-right: 0.35rem;
+}
+
+.refPending {
+  color: var(--text-2);
+  margin-right: 0.35rem;
+}
+
+.refPhase {
+  font-size: 0.7rem;
+  color: var(--text-2);
+  margin-left: auto;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  background: var(--surface-2);
+}

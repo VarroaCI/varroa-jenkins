@@ -1,0 +1,23 @@
+{{- if and .Values.operator.enabled .Values.managedNamespaces }}
+{{- $fullName := include "varroa.fullname" (dict "Release" .Release "name" "varroa-operator") }}
+{{- $namespaces := prepend .Values.managedNamespaces .Release.Namespace | uniq }}
+{{- range $ns := $namespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $fullName }}-managed
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/component: varroa-operator
+    {{- include "varroa.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $fullName }}-managed
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullName }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- end }}

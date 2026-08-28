@@ -1,0 +1,8 @@
+items:
+  - kind: freeStyle
+    name: freestyle-unknown-builder
+    displayName: "FreeStyle with Unknown Builder"
+    description: "FreeStyle job whose only builder is an unsupported type"
+    builders:
+      - unknownTool:
+          command: some-unsupported-tool

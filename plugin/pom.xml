@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.jenkins-ci.plugins</groupId>
+        <artifactId>plugin</artifactId>
+        <version>5.31</version>
+        <relativePath />
+    </parent>
+
+    <groupId>org.jenkinsci.plugins</groupId>
+    <artifactId>varroa-mite-auth</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <packaging>hpi</packaging>
+
+    <name>Varroa Mite Authentication</name>
+
+    <properties>
+        <jenkins.version>2.555.3</jenkins.version>
+        <!--
+          Jenkins 2.555.x is a Java-21-only LTS line: jenkins-core 2.555.3 ships
+          class-file-version-65 (Java 21) bytecode. The maven-hpi-plugin pinned by
+          parent 5.31 (3.1784) depends on version-number 1.12, whose
+          JavaSpecificationVersion.fromClassVersion() only maps up to class 64
+          (Java 20) and throws "Unknown Java specification version for class
+          version: 65" during the hpi:validate goal. Override the hpi-plugin to
+          3.1814 (the version pinned by parent 6.2189), which depends on
+          version-number 1.14 and maps class 65 -> Java 21. Build JDK must be 21.
+        -->
+        <hpi-plugin.version>3.1814.v77d15159f9b_d</hpi-plugin.version>
+    </properties>
+
+    <repositories>
+        <repository>
+            <id>repo.jenkins-ci.org</id>
+            <url>https://repo.jenkins-ci.org/public/</url>
+        </repository>
+    </repositories>
+
+    <pluginRepositories>
+        <pluginRepository>
+            <id>repo.jenkins-ci.org</id>
+            <url>https://repo.jenkins-ci.org/public/</url>
+        </pluginRepository>
+    </pluginRepositories>
+    <dependencyManagement>
+        <dependencies>
+            <!--
+              Align plugin dependency versions (incl. configuration-as-code and
+              its test-harness) with the Jenkins 2.555.x baseline so the JCasC
+              round-trip tests resolve a JCasC build compatible with core 2.555.3.
+            -->
+            <dependency>
+                <groupId>io.jenkins.tools.bom</groupId>
+                <artifactId>bom-2.555.x</artifactId>
+                <version>6585.va_085f4d47c41</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <version>5.0.0</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-api</artifactId>
+            <version>1.42.0</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jenkins-ci.plugins</groupId>
+            <artifactId>mailer</artifactId>
+        </dependency>
+
+        <!-- JCasC: required at runtime to configure the realm via a bundle;
+             optional so the plugin still loads where JCasC is absent. -->
+        <dependency>
+            <groupId>io.jenkins</groupId>
+            <artifactId>configuration-as-code</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- JCasC test harness (RealmConfigurator round-trip helpers). -->
+        <dependency>
+            <groupId>io.jenkins.configuration-as-code</groupId>
+            <artifactId>test-harness</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Mockito for endpoint tests. -->
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- role-strategy for the banner role-resolution regression test;
+             production code resolves it reflectively and must keep working
+             when it is absent. -->
+        <dependency>
+            <groupId>org.jenkins-ci.plugins</groupId>
+            <artifactId>role-strategy</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

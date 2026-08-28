@@ -1,0 +1,121 @@
+# clusters — cluster membership and health.
+/api/v1/clusters:
+  get:
+    operationId: listClusters
+    tags: [clusters]
+    summary: Lists all known clusters with status.
+    responses:
+      "200":
+        description: Cluster info list.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/ClusterInfo'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+
+/api/v1/clusters/{cluster}/drain:
+  parameters:
+    - name: cluster
+      in: path
+      required: true
+      schema:
+        type: string
+  post:
+    operationId: drainCluster
+    tags: [clusters]
+    summary: Start a drain on a cluster (deletes all controllers, Jenkins data not migrated).
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [confirm]
+            properties:
+              confirm:
+                type: string
+                description: Must equal the cluster name.
+            additionalProperties: false
+    responses:
+      "202":
+        description: Drain accepted.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                state:
+                  type: string
+              additionalProperties: false
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
+      "500":
+        $ref: '../components/responses.yaml#/Internal'
+      "502":
+        $ref: '../components/responses.yaml#/ClusterUnreachable'
+  delete:
+    operationId: cancelClusterDrain
+    tags: [clusters]
+    summary: Cancel a drain on a cluster (rejoin it to the brood).
+    responses:
+      "200":
+        description: Drain canceled.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                state:
+                  type: string
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
+      "500":
+        $ref: '../components/responses.yaml#/Internal'
+      "502":
+        $ref: '../components/responses.yaml#/ClusterUnreachable'
+
+/api/v1/clusters/{cluster}/namespaces/deployable:
+  parameters:
+    - name: cluster
+      in: path
+      required: true
+      schema:
+        type: string
+  get:
+    operationId: listDeployableNamespaces
+    tags: [clusters]
+    summary: Returns the caller's create-authorized namespaces for the target cluster.
+    responses:
+      "200":
+        description: Deployable namespaces.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/DeployableNamespaces'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'

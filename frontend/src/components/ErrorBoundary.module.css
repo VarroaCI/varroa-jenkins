@@ -1,0 +1,22 @@
+.boundary {
+  padding: 32px;
+  text-align: center;
+}
+
+.title {
+  margin-bottom: 8px;
+  color: var(--bad-text);
+}
+
+.message {
+  color: var(--text-2);
+  margin-bottom: 16px;
+}
+
+.retry {
+  padding: 8px 20px;
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  border: none;
+  border-radius: var(--radius);
+}

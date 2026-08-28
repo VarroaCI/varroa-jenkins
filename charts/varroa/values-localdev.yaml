@@ -1,0 +1,101 @@
+# Localdev overlay for the Varroa umbrella chart — applied with -f on top of
+# the chart defaults by hack/localdev/localdev.sh (never standalone).
+#
+# Image tags and operator.miteImage are injected at deploy time via --set
+# (dev-<image-id> tags derived by the script). Hosts live under
+# varroa.localtest.me (public DNS -> 127.0.0.1).
+#
+# Auth is `local` (the BFF's built-in IdP; users are User CRs) — no Dex, no
+# OIDC discovery. The admin User CR is seeded by the localdev script
+# (hack/localdev/manifests/admin-user.yaml). Local-mode groups resolve from
+# Group CRs (internal/auth/local/provider.go resolveGroups), so group-based
+# RBAC is testable by adding members to a Group; the admin binding itself
+# uses kind: User subjects.
+
+global:
+  domain: varroa.localtest.me
+
+# Single-node NATS on kind — no clustering. cluster.enabled=false makes the
+# subchart always render exactly 1 StatefulSet replica (regardless of
+# cluster.replicas) and also makes the derived jetStreamReplicas resolve to 1,
+# so streams and KV buckets are R1 (a 1-node server cannot host R>1).
+nats:
+  config:
+    cluster:
+      enabled: false
+
+operator:
+  image:
+    repository: varroa-jenkins
+    pullPolicy: IfNotPresent
+  replicas: 1
+  # GIT_SSL_NO_VERIFY: the in-cluster localdev git server serves the sample
+  # bundle over the self-signed localdev wildcard cert.
+  env:
+    - name: GIT_SSL_NO_VERIFY
+      value: "true"
+
+gateway:
+  image:
+    repository: varroa-jenkins
+    pullPolicy: IfNotPresent
+  replicas: 1
+  # The chart always renders an HPA (inside templates/gateway/deployment.yaml);
+  # pin it to 1 so it doesn't scale the deployment back up.
+  hpa:
+    minReplicas: 1
+    maxReplicas: 1
+
+bff:
+  image:
+    repository: varroa-jenkins
+    pullPolicy: IfNotPresent
+  replicas: 1
+  hpa:
+    minReplicas: 1
+    maxReplicas: 1
+
+frontend:
+  image:
+    repository: varroa-frontend
+    pullPolicy: IfNotPresent
+  replicas: 1
+
+# No OTLP collector exists locally — leaving this enabled error-loops the exporters.
+telemetry:
+  disabled: true
+
+ingress:
+  enabled: true
+  className: nginx
+  # HTTPS on the app host — the BFF's login cookies are Secure-only.
+  tls:
+    - hosts:
+        - app.varroa.localtest.me
+      secretName: varroa-localdev-tls
+
+# No external IdP: the BFF is the identity provider in local mode.
+dex:
+  enabled: false
+
+auth:
+  mode: local
+  # Issuer URL for local JWT validation — must be reachable by controller pods
+  # (the Jenkins plugin fetches /.well-known/jwks.json from it).
+  bffUrl: http://varroa-varroa-bff.varroa-system.svc.cluster.local:8080
+  cookieDomain: .varroa.localtest.me
+  dashboardUrl: https://app.varroa.localtest.me
+  # OIDC block cleared (unused in local mode).
+  oidc:
+    issuer: ""
+    clientId: ""
+    clientSecret: ""
+    redirectUrl: ""
+    scopes: ""
+    userClaim: ""
+    groupClaim: ""
+
+# Seed sample item-level RBAC (dev/demo only).
+examples:
+  itemRbac:
+    enabled: true

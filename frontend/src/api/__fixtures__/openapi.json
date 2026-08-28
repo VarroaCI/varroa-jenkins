@@ -1,0 +1,828 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Varroa BFF API",
+    "version": "dev"
+  },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "ControllerSpec": {
+        "additionalProperties": false,
+        "description": "Desired state of a Controller. Transcribed from v1alpha1.ControllerSpec.",
+        "properties": {
+          "backupSpec": {
+            "additionalProperties": false,
+            "description": "Backup configuration (transcribed from v1alpha1.BackupSpec).",
+            "properties": {
+              "enabled": {
+                "description": "Whether backups are enabled.",
+                "type": "boolean"
+              },
+              "retentionDays": {
+                "description": "Number of days to retain backups.",
+                "type": "integer"
+              },
+              "schedule": {
+                "description": "Cron expression for the backup schedule.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "className": {
+            "description": "References a ControllerClass by name, layering its defaults between ProvisioningDefaults and the Controller's own spec.",
+            "type": "string"
+          },
+          "composedBundleRef": {
+            "additionalProperties": false,
+            "description": "Reference to a ComposedBundle from a Controller.",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "description": "Empty = the controller's own namespace.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "endpoint": {
+            "description": "API endpoint URL for the controller.",
+            "type": "string"
+          },
+          "hibernation": {
+            "additionalProperties": false,
+            "description": "Automatic hibernation configuration (transcribed from v1alpha1.HibernationSpec).",
+            "properties": {
+              "activityIgnoreRegex": {
+                "description": "Regular expression matched against request paths to exclude them from activity tracking.",
+                "type": "string"
+              },
+              "enabled": {
+                "description": "Enables automatic hibernation. When enabled, the controller parks (scales to 0) after inactivity.",
+                "type": "boolean"
+              },
+              "gracePeriodMinutes": {
+                "description": "Minutes of inactivity before the controller hibernates. Minimum 5. Default 60.",
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "ingressSpec": {
+            "additionalProperties": false,
+            "description": "Ingress configuration (transcribed from v1alpha1.IngressSpec).",
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Ingress annotations merged onto this controller's ingress.",
+                "type": "object"
+              },
+              "host": {
+                "description": "Ingress hostname.",
+                "type": "string"
+              },
+              "ingressClassName": {
+                "description": "Override the cluster-level ingress class name for this controller. Empty uses the cluster default.",
+                "type": "string"
+              },
+              "mode": {
+                "description": "Controls how the controller is exposed. \"subdomain\" (default) assigns its own host; \"path\" serves at /jenkins/<ns>/<name>. Immutable after create.",
+                "enum": [
+                  "",
+                  "subdomain",
+                  "path"
+                ],
+                "type": "string"
+              },
+              "tlsSecretName": {
+                "description": "Name of the TLS secret.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "miteSpec": {
+            "additionalProperties": false,
+            "description": "Mite sidecar configuration (transcribed from v1alpha1.MiteSpec).",
+            "properties": {
+              "image": {
+                "description": "Mite sidecar container image override for this Controller.",
+                "type": "string"
+              },
+              "imagePullPolicy": {
+                "description": "Mite sidecar image pull policy override for this Controller.",
+                "enum": [
+                  "Always",
+                  "Never",
+                  "IfNotPresent"
+                ],
+                "type": "string"
+              },
+              "resources": {
+                "description": "CPU/memory resource requests and limits for the mite sidecar container.",
+                "properties": {
+                  "limits": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Maximum resource limits.",
+                    "type": "object"
+                  },
+                  "requests": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Minimum resource requests.",
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
+          "persistence": {
+            "additionalProperties": false,
+            "description": "Persistent volume size/class (transcribed from v1alpha1.PersistenceSpec).",
+            "properties": {
+              "size": {
+                "description": "Persistent volume storage request (e.g. \"20Gi\").",
+                "type": "string"
+              },
+              "storageClass": {
+                "description": "Kubernetes StorageClass name for the persistent volume.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "pluginSpec": {
+            "additionalProperties": false,
+            "description": "Plugin policy and entries (transcribed from v1alpha1.PluginSpec).",
+            "properties": {
+              "entries": {
+                "description": "Plugins with pinned versions.",
+                "items": {
+                  "additionalProperties": false,
+                  "description": "A single plugin with pinned version.",
+                  "properties": {
+                    "artifactId": {
+                      "description": "Jenkins plugin artifact ID.",
+                      "type": "string"
+                    },
+                    "version": {
+                      "description": "Pinned plugin version.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "artifactId",
+                    "version"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "policy": {
+                "description": "Policy for plugin management (e.g. \"pinned\").",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "podOverrides": {
+            "additionalProperties": false,
+            "description": "Typed pod-scoped customizations (transcribed from v1alpha1.PodOverrides).",
+            "properties": {
+              "affinity": {
+                "description": "Pod scheduling affinity.",
+                "type": "object"
+              },
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Annotations added to the StatefulSet metadata.",
+                "type": "object"
+              },
+              "env": {
+                "description": "Environment variables added or overridden on the jenkins container (merged by name).",
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "envFrom": {
+                "description": "envFrom sources added to the jenkins container.",
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "jvmOpts": {
+                "description": "JVM options appended (space-joined) to the baseline JAVA_OPTS value.",
+                "type": "string"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Labels added to the StatefulSet metadata.",
+                "type": "object"
+              },
+              "nodeSelector": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Pod nodeSelector constraints.",
+                "type": "object"
+              },
+              "podAnnotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Annotations added to the pod template metadata.",
+                "type": "object"
+              },
+              "podLabels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Labels added to the pod template metadata.",
+                "type": "object"
+              },
+              "securityContext": {
+                "description": "Pod-level security context.",
+                "type": "object"
+              },
+              "tolerations": {
+                "description": "Pod tolerations.",
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "volumeMounts": {
+                "description": "Volume mounts added to the jenkins container (merged by name).",
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "volumes": {
+                "description": "Pod volumes (merged by name).",
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "powerState": {
+            "description": "Controls whether the controller runs. Hibernation is reported in status.hibernated, not requested here.",
+            "enum": [
+              "",
+              "Running",
+              "Stopped"
+            ],
+            "type": "string"
+          },
+          "probes": {
+            "additionalProperties": false,
+            "description": "Health probe tuning (transcribed from v1alpha1.ProbesSpec).",
+            "properties": {
+              "liveness": {
+                "additionalProperties": false,
+                "description": "Curated probe timing knobs (transcribed from corev1.Probe subset).",
+                "properties": {
+                  "disabled": {
+                    "description": "Removes this probe entirely. Default false (probe enabled with defaults).",
+                    "type": "boolean"
+                  },
+                  "failureThreshold": {
+                    "description": "Minimum consecutive failures for the probe to be considered failed.",
+                    "type": "integer"
+                  },
+                  "initialDelaySeconds": {
+                    "description": "Number of seconds before the first probe attempt.",
+                    "type": "integer"
+                  },
+                  "periodSeconds": {
+                    "description": "How often (in seconds) to perform the probe.",
+                    "type": "integer"
+                  },
+                  "successThreshold": {
+                    "description": "Minimum consecutive successes for the probe to be considered successful.",
+                    "type": "integer"
+                  },
+                  "timeoutSeconds": {
+                    "description": "Number of seconds after which the probe times out.",
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "readiness": {
+                "additionalProperties": false,
+                "description": "Curated probe timing knobs (transcribed from corev1.Probe subset).",
+                "properties": {
+                  "disabled": {
+                    "description": "Removes this probe entirely. Default false (probe enabled with defaults).",
+                    "type": "boolean"
+                  },
+                  "failureThreshold": {
+                    "description": "Minimum consecutive failures for the probe to be considered failed.",
+                    "type": "integer"
+                  },
+                  "initialDelaySeconds": {
+                    "description": "Number of seconds before the first probe attempt.",
+                    "type": "integer"
+                  },
+                  "periodSeconds": {
+                    "description": "How often (in seconds) to perform the probe.",
+                    "type": "integer"
+                  },
+                  "successThreshold": {
+                    "description": "Minimum consecutive successes for the probe to be considered successful.",
+                    "type": "integer"
+                  },
+                  "timeoutSeconds": {
+                    "description": "Number of seconds after which the probe times out.",
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "startup": {
+                "additionalProperties": false,
+                "description": "Curated probe timing knobs (transcribed from corev1.Probe subset).",
+                "properties": {
+                  "disabled": {
+                    "description": "Removes this probe entirely. Default false (probe enabled with defaults).",
+                    "type": "boolean"
+                  },
+                  "failureThreshold": {
+                    "description": "Minimum consecutive failures for the probe to be considered failed.",
+                    "type": "integer"
+                  },
+                  "initialDelaySeconds": {
+                    "description": "Number of seconds before the first probe attempt.",
+                    "type": "integer"
+                  },
+                  "periodSeconds": {
+                    "description": "How often (in seconds) to perform the probe.",
+                    "type": "integer"
+                  },
+                  "successThreshold": {
+                    "description": "Minimum consecutive successes for the probe to be considered successful.",
+                    "type": "integer"
+                  },
+                  "timeoutSeconds": {
+                    "description": "Number of seconds after which the probe times out.",
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
+          "rbacSpec": {
+            "additionalProperties": false,
+            "description": "RBAC configuration mapping OIDC groups to Varroa roles (transcribed from v1alpha1.RBACSpec).",
+            "properties": {
+              "groups": {
+                "description": "Group-to-role bindings.",
+                "items": {
+                  "additionalProperties": false,
+                  "description": "A single OIDC group-to-role binding.",
+                  "properties": {
+                    "name": {
+                      "description": "The OIDC group claim value.",
+                      "type": "string"
+                    },
+                    "role": {
+                      "description": "Built-in Varroa role short name.",
+                      "enum": [
+                        "admin",
+                        "operator",
+                        "developer",
+                        "viewer"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "role"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "reconciliationPolicy": {
+            "additionalProperties": false,
+            "description": "Reconciliation policy for a controller.",
+            "properties": {
+              "drainTimeoutSeconds": {
+                "type": "integer"
+              },
+              "interval": {
+                "type": "string"
+              },
+              "maxDeferSeconds": {
+                "type": "integer"
+              },
+              "mode": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "resourceOverlay": {
+            "additionalProperties": false,
+            "description": "Raw strategic-merge-patch YAML for provisioned resources (transcribed from v1alpha1.ResourceOverlay).",
+            "properties": {
+              "ingress": {
+                "description": "Strategic-merge-patch YAML applied to the controller Ingress.",
+                "type": "string"
+              },
+              "service": {
+                "description": "Strategic-merge-patch YAML applied to the controller Service.",
+                "type": "string"
+              },
+              "statefulSet": {
+                "description": "Strategic-merge-patch YAML applied to the Jenkins StatefulSet.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "resources": {
+            "description": "CPU/memory resource requests and limits (transcribed from corev1.ResourceRequirements).",
+            "properties": {
+              "limits": {
+                "additionalProperties": {
+                  "pattern": "^(\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))))?$",
+                  "type": "string"
+                },
+                "description": "Maximum resource limits for the Jenkins container.",
+                "type": "object"
+              },
+              "requests": {
+                "additionalProperties": {
+                  "pattern": "^(\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))))?$",
+                  "type": "string"
+                },
+                "description": "Minimum resource requests for the Jenkins container.",
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
+          "version": {
+            "description": "Controller version tag.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PodOverrides": {
+        "type": "object",
+        "description": "Typed pod-scoped customizations (transcribed from v1alpha1.PodOverrides).",
+        "properties": {
+          "env": {
+            "type": "array",
+            "description": "Environment variables added or overridden on the jenkins container (merged by name).",
+            "items": {
+              "type": "object"
+            }
+          },
+          "envFrom": {
+            "type": "array",
+            "description": "envFrom sources added to the jenkins container.",
+            "items": {
+              "type": "object"
+            }
+          },
+          "volumes": {
+            "type": "array",
+            "description": "Pod volumes (merged by name).",
+            "items": {
+              "type": "object"
+            }
+          },
+          "volumeMounts": {
+            "type": "array",
+            "description": "Volume mounts added to the jenkins container (merged by name).",
+            "items": {
+              "type": "object"
+            }
+          },
+          "podLabels": {
+            "type": "object",
+            "description": "Labels added to the pod template metadata.",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "podAnnotations": {
+            "type": "object",
+            "description": "Annotations added to the pod template metadata.",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "labels": {
+            "type": "object",
+            "description": "Labels added to the StatefulSet metadata.",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "annotations": {
+            "type": "object",
+            "description": "Annotations added to the StatefulSet metadata.",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "jvmOpts": {
+            "type": "string",
+            "description": "JVM options appended (space-joined) to the baseline JAVA_OPTS value."
+          },
+          "nodeSelector": {
+            "type": "object",
+            "description": "Pod nodeSelector constraints.",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "tolerations": {
+            "type": "array",
+            "description": "Pod tolerations.",
+            "items": {
+              "type": "object"
+            }
+          },
+          "affinity": {
+            "type": "object",
+            "description": "Pod scheduling affinity."
+          },
+          "securityContext": {
+            "type": "object",
+            "description": "Pod-level security context."
+          }
+        },
+        "additionalProperties": false
+      },
+      "RBACSpec": {
+        "type": "object",
+        "description": "RBAC configuration mapping OIDC groups to Varroa roles (transcribed from v1alpha1.RBACSpec).",
+        "properties": {
+          "groups": {
+            "type": "array",
+            "description": "Group-to-role bindings.",
+            "items": {
+              "$ref": "#/RBACGroupBinding"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "RBACGroupBinding": {
+        "type": "object",
+        "description": "A single OIDC group-to-role binding.",
+        "required": [
+          "name",
+          "role"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The OIDC group claim value."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "operator",
+              "developer",
+              "viewer"
+            ],
+            "description": "Built-in Varroa role short name."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PluginSpec": {
+        "type": "object",
+        "description": "Plugin policy and entries (transcribed from v1alpha1.PluginSpec).",
+        "properties": {
+          "policy": {
+            "type": "string",
+            "description": "Policy for plugin management (e.g. \"pinned\")."
+          },
+          "entries": {
+            "type": "array",
+            "description": "Plugins with pinned versions.",
+            "items": {
+              "$ref": "#/PluginEntry"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "PluginEntry": {
+        "type": "object",
+        "description": "A single plugin with pinned version.",
+        "required": [
+          "artifactId",
+          "version"
+        ],
+        "properties": {
+          "artifactId": {
+            "type": "string",
+            "description": "Jenkins plugin artifact ID."
+          },
+          "version": {
+            "type": "string",
+            "description": "Pinned plugin version."
+          }
+        },
+        "additionalProperties": false
+      },
+      "BackupSpec": {
+        "type": "object",
+        "description": "Backup configuration (transcribed from v1alpha1.BackupSpec).",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether backups are enabled."
+          },
+          "schedule": {
+            "type": "string",
+            "description": "Cron expression for the backup schedule."
+          },
+          "retentionDays": {
+            "type": "integer",
+            "description": "Number of days to retain backups."
+          }
+        },
+        "additionalProperties": false
+      },
+      "IngressSpec": {
+        "type": "object",
+        "description": "Ingress configuration (transcribed from v1alpha1.IngressSpec).",
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "Ingress hostname."
+          },
+          "tlsSecretName": {
+            "type": "string",
+            "description": "Name of the TLS secret."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "",
+              "subdomain",
+              "path"
+            ],
+            "description": "Controls how the controller is exposed. \"subdomain\" (default) assigns its own host; \"path\" serves at /jenkins/<ns>/<name>. Immutable after create."
+          },
+          "annotations": {
+            "type": "object",
+            "description": "Ingress annotations merged onto this controller's ingress.",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "ingressClassName": {
+            "type": "string",
+            "description": "Override the cluster-level ingress class name for this controller. Empty uses the cluster default."
+          }
+        },
+        "additionalProperties": false
+      },
+      "MiteSpec": {
+        "type": "object",
+        "description": "Mite sidecar configuration (transcribed from v1alpha1.MiteSpec).",
+        "properties": {
+          "resources": {
+            "type": "object",
+            "description": "CPU/memory resource requests and limits for the mite sidecar container.",
+            "properties": {
+              "requests": {
+                "type": "object",
+                "description": "Minimum resource requests.",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "limits": {
+                "type": "object",
+                "description": "Maximum resource limits.",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "image": {
+            "type": "string",
+            "description": "Mite sidecar container image override for this Controller."
+          },
+          "imagePullPolicy": {
+            "type": "string",
+            "description": "Mite sidecar image pull policy override for this Controller.",
+            "enum": [
+              "Always",
+              "Never",
+              "IfNotPresent"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReconciliationPolicy": {
+        "type": "object",
+        "description": "Reconciliation policy for a controller.",
+        "properties": {
+          "mode": {
+            "type": "string"
+          },
+          "interval": {
+            "type": "string"
+          },
+          "maxDeferSeconds": {
+            "type": "integer"
+          },
+          "drainTimeoutSeconds": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ComposedBundleRef": {
+        "type": "object",
+        "description": "Reference to a ComposedBundle from a Controller.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string",
+            "description": "Empty = the controller's own namespace."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProbesSpec": {
+        "type": "object",
+        "description": "Health probe tuning.",
+        "properties": {
+          "liveness": {
+            "type": "object"
+          },
+          "readiness": {
+            "type": "object"
+          },
+          "startup": {
+            "type": "object"
+          }
+        }
+      },
+      "PersistenceSpec": null,
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Human-readable error message."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{{- if not (include "varroa.isHive" .) }}
+{{- if .Values.dex.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "dex") }}
+  labels:
+    app.kubernetes.io/component: dex
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.dex.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.dex.service.port }}
+      targetPort: http
+    {{- if .Values.dex.grpcApi.enabled }}
+    - name: grpc
+      port: {{ .Values.dex.service.grpcPort }}
+      targetPort: grpc
+    {{- end }}
+  selector:
+    app.kubernetes.io/component: dex
+    {{- include "varroa.selectorLabels" . | nindent 4 }}
+{{- end }}
+
+{{- end }}

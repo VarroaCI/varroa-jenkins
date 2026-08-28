@@ -1,0 +1,241 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+  name: updatecenters.varroa.dev
+spec:
+  group: varroa.dev
+  names:
+    kind: UpdateCenter
+    listKind: UpdateCenterList
+    plural: updatecenters
+    singular: updatecenter
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: PHASE
+      type: string
+    - jsonPath: .status.pluginCount
+      name: PLUGINS
+      type: integer
+    - jsonPath: .spec.storage.type
+      name: STORAGE
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: AGE
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          UpdateCenter is the Schema for the updatecenters API. It manages a
+          cluster-scoped plugin update center with OCI or local storage.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: UpdateCenterSpec defines the desired state of an UpdateCenter.
+            properties:
+              pullThrough:
+                description: PullThrough configures pull-through proxy behavior. Optional.
+                properties:
+                  downloadURL:
+                    description: DownloadURL is the upstream download URL (default
+                      https://updates.jenkins.io/download).
+                    type: string
+                  enabled:
+                    description: Enabled enables pull-through caching from an upstream
+                      update center.
+                    type: boolean
+                  upstreamURL:
+                    description: UpstreamURL is the upstream update center URL (default
+                      https://updates.jenkins.io).
+                    type: string
+                type: object
+              seed:
+                description: Seed configures the initial plugin seed. Optional.
+                properties:
+                  refs:
+                    description: Refs is the list of plugin references to seed.
+                    items:
+                      type: string
+                    type: array
+                  secretRef:
+                    description: |-
+                      SecretRef names a Secret in the operator namespace holding pull
+                      credentials for the refs in Refs, which must all live on the same
+                      registry — only one registry's credentials are used. Empty means
+                      no explicit credentials.
+                    type: string
+                type: object
+              storage:
+                description: Storage configures the update center's backing store.
+                  Required.
+                properties:
+                  local:
+                    description: Local configures local PVC storage. Required when
+                      type=local.
+                    properties:
+                      size:
+                        description: Size is the requested persistent volume size
+                          (resource.Quantity string, default "10Gi").
+                        type: string
+                      storageClassName:
+                        description: StorageClassName is the storage class for the
+                          PVC. Optional.
+                        type: string
+                    type: object
+                  oci:
+                    description: OCI configures OCI-compatible registry storage. Required
+                      when type=oci.
+                    properties:
+                      existingSecret:
+                        description: ExistingSecret is the name of an existing secret
+                          for registry auth.
+                        type: string
+                      insecure:
+                        description: Insecure allows plain HTTP connections to the
+                          registry.
+                        type: boolean
+                      ref:
+                        description: Ref is the OCI image reference for the update
+                          center content.
+                        type: string
+                    required:
+                    - ref
+                    type: object
+                  type:
+                    description: Type is the storage backend type. Required.
+                    enum:
+                    - local
+                    - oci
+                    type: string
+                required:
+                - type
+                type: object
+                x-kubernetes-validations:
+                - message: oci storage requires spec.storage.oci
+                  rule: self.type != 'oci' || has(self.oci)
+                - message: local storage requires spec.storage.local
+                  rule: self.type != 'local' || has(self.local)
+                - message: exactly one of spec.storage.oci or spec.storage.local may
+                    be set
+                  rule: '!(has(self.oci) && has(self.local))'
+            required:
+            - storage
+            type: object
+          status:
+            description: UpdateCenterStatus defines the observed state of an UpdateCenter.
+            properties:
+              conditions:
+                description: Conditions describe the current conditions of this UpdateCenter.
+                items:
+                  description: UpdateCenterCondition is a status condition for an
+                    UpdateCenter.
+                  properties:
+                    lastTransitionTime:
+                      description: LastTransitionTime is the last time the condition
+                        changed.
+                      format: date-time
+                      type: string
+                    message:
+                      description: Message is a human-readable message for the condition.
+                      type: string
+                    reason:
+                      description: Reason is a machine-readable reason for the condition.
+                      type: string
+                    status:
+                      description: Status is the condition status.
+                      type: string
+                    type:
+                      description: Type is the condition type.
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
+              gaps:
+                description: Gaps lists plugins required by profiles but missing from
+                  the store.
+                items:
+                  description: UpdateCenterGap identifies a plugin missing from the
+                    store.
+                  properties:
+                    plugin:
+                      description: Plugin is the plugin artifact ID.
+                      type: string
+                    requiredBy:
+                      description: RequiredBy identifies the profile or bundle that
+                        requires this plugin.
+                      type: string
+                    version:
+                      description: Version is the required plugin version.
+                      type: string
+                  required:
+                  - plugin
+                  - requiredBy
+                  - version
+                  type: object
+                type: array
+              lastSyncTime:
+                description: LastSyncTime is the last sync time.
+                format: date-time
+                type: string
+              phase:
+                description: Phase is the current lifecycle phase.
+                enum:
+                - Pending
+                - Ready
+                - Degraded
+                - Error
+                type: string
+              pluginCount:
+                description: PluginCount is the number of plugins stored in this update
+                  center.
+                type: integer
+              resolvedMetadataSources:
+                description: |-
+                  ResolvedMetadataSources lists the update-center metadata endpoints pull-through
+                  consults for sha256 resolution: the weekly source first, then any operator-derived
+                  LTS-line (dynamic-stable) sources. Read-only, operator-managed, bounded.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: atomic
+              seedImportedDigests:
+                description: SeedImportedDigests lists digests of successfully imported
+                  seed plugins.
+                items:
+                  type: string
+                type: array
+              storeBytes:
+                description: StoreBytes is the total bytes stored.
+                format: int64
+                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

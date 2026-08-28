@@ -1,0 +1,13 @@
+---
+id: bundle-challenge
+apiVersion: "2"
+version: "1"
+description: Generated challenge corpus bundle (items-challenge-corpus)
+itemRemoveStrategy:
+    items: none
+jcasc:
+    - jenkins.yaml
+plugins:
+    - plugins.yaml
+items:
+    - items.yaml

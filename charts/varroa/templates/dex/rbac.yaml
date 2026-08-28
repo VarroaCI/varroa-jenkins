@@ -1,0 +1,39 @@
+{{- if not (include "varroa.isHive" .) }}
+{{- if .Values.dex.enabled }}
+{{- if eq (.Values.dex.config.storage).type "kubernetes" }}
+# Dex with kubernetes storage manages its own CRDs (dex.coreos.com) and the
+# CRs under them. Without this ClusterRole a fresh install crash-loops with
+# "failed to list connector objects from storage: ... Forbidden".
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "dex") }}
+  labels:
+    app.kubernetes.io/component: dex
+    {{- include "varroa.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["dex.coreos.com"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "dex") }}
+  labels:
+    app.kubernetes.io/component: dex
+    {{- include "varroa.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "dex") }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "varroa.fullname" (dict "Release" .Release "name" "dex") }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}
+{{- end }}

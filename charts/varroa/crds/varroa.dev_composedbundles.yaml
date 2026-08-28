@@ -1,0 +1,237 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+  name: composedbundles.varroa.dev
+spec:
+  group: varroa.dev
+  names:
+    kind: ComposedBundle
+    listKind: ComposedBundleList
+    plural: composedbundles
+    singular: composedbundle
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.itemCount
+      name: ITEMS
+      type: integer
+    - jsonPath: .status.phase
+      name: READY
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ComposedBundle is the Schema for the composedbundles API (user-authored).
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ComposedBundleSpec defines the desired state of ComposedBundle.
+            properties:
+              description:
+                type: string
+              displayName:
+                type: string
+              inputs:
+                items:
+                  description: |-
+                    ComposedInput is a single input to a ComposedBundle. Exactly one of ItemRef, GitSource, or
+                    OciSource must be set.
+                  properties:
+                    gitSource:
+                      description: GitSource references a git bundle repository.
+                      properties:
+                        path:
+                          description: Path within the repository to the bundle.
+                          type: string
+                        repoURL:
+                          description: Repository URL for the bundle.
+                          type: string
+                        revision:
+                          description: Revision (branch, tag, or commit SHA).
+                          type: string
+                        secretRef:
+                          description: SecretRef names a Secret in the same namespace
+                            for git auth.
+                          type: string
+                      required:
+                      - path
+                      - repoURL
+                      type: object
+                      x-kubernetes-validations:
+                      - message: repoURL must use https://, ssh://, or scp-like git@host:path;
+                          transport helpers (ext::, file://) are not allowed
+                        rule: self.repoURL.startsWith('https://') || self.repoURL.startsWith('ssh://')
+                          || self.repoURL.startsWith('git@')
+                    itemRef:
+                      description: ItemRef references a CatalogItem by name.
+                      properties:
+                        name:
+                          type: string
+                        namespace:
+                          description: |-
+                            Namespace of the CatalogItem. Empty = resolve in the bundle's own namespace
+                            with operator-namespace fallback; set = exact lookup in that namespace only.
+                          maxLength: 63
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          type: string
+                        pinnedContentHash:
+                          type: string
+                        variables:
+                          additionalProperties:
+                            type: string
+                          type: object
+                      required:
+                      - name
+                      type: object
+                    ociSource:
+                      description: OCISource references an OCI artifact.
+                      properties:
+                        path:
+                          description: Path is an optional sub-path within the artifact.
+                          type: string
+                        ref:
+                          description: Ref is the OCI artifact reference.
+                          type: string
+                        secretRef:
+                          description: SecretRef names a Secret in the same namespace
+                            for pull credentials.
+                          type: string
+                      required:
+                      - ref
+                      type: object
+                  type: object
+                  x-kubernetes-validations:
+                  - message: exactly one of itemRef, gitSource, or ociSource must
+                      be set
+                    rule: (has(self.itemRef)?1:0)+(has(self.gitSource)?1:0)+(has(self.ociSource)?1:0)==1
+                type: array
+              jcascMergeStrategy:
+                type: string
+              variables:
+                additionalProperties:
+                  type: string
+                type: object
+            required:
+            - inputs
+            type: object
+          status:
+            description: ComposedBundleStatus defines the observed state of ComposedBundle.
+            properties:
+              conditions:
+                items:
+                  description: TemplateCatalogCondition is a generic status condition
+                    for catalogs and composed bundles.
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
+              contentRef:
+                description: |-
+                  ContentRef names the ConfigMap or Secret holding the materialized,
+                  unresolved bundle content. Owned by this ComposedBundle.
+                type: string
+              driftedItems:
+                items:
+                  type: string
+                type: array
+              errors:
+                description: Errors holds materialize-time validation errors.
+                items:
+                  type: string
+                type: array
+              inputSummary:
+                description: InputSummary mirrors spec.inputs one-to-one, in order,
+                  for list rendering.
+                items:
+                  description: InputSummaryEntry mirrors a single input in a ComposedBundle
+                    spec for list rendering.
+                  properties:
+                    kind:
+                      description: Kind is "itemRef", "gitSource", or "ociSource".
+                      type: string
+                    namespace:
+                      description: |-
+                        Namespace the itemRef resolved in (explicit, bundle, or operator namespace);
+                        empty when unresolved or for gitSource entries.
+                      type: string
+                    type:
+                      description: |-
+                        Type is the referenced CatalogItem's spec.type verbatim
+                        ("jcasc"|"plugin"|"podtemplate"|"rbac"|"item"|"pipeline-template") for itemRef, or
+                        "git" for gitSource.
+                      type: string
+                  required:
+                  - kind
+                  - type
+                  type: object
+                type: array
+              itemCount:
+                type: integer
+              message:
+                type: string
+              missingItems:
+                items:
+                  type: string
+                type: array
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the metadata.generation last reconciled into status.
+                  Used to force a recompose when spec.inputs changes.
+                format: int64
+                type: integer
+              observedRevisions:
+                additionalProperties:
+                  type: string
+                description: |-
+                  ObservedRevisions records the resolved SHA for each git input.
+                  Key is the input index (e.g. "0", "1") or the item ref name.
+                type: object
+              phase:
+                description: ComposedBundlePhase represents the status phase of a
+                  ComposedBundle.
+                type: string
+              resolvedHash:
+                type: string
+              warnings:
+                description: Warnings holds materialize-time validation warnings.
+                items:
+                  type: string
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

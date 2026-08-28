@@ -1,0 +1,18 @@
+/* Brand fonts the Varroa DS references in its --sans / --mono token stacks
+ * ("Inter", "JetBrains Mono") but does not ship itself. Variable woff2 (latin
+ * subset) from @fontsource-variable, declared under the exact family names the
+ * tokens reference so designs render in the intended typography. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url(./inter-latin.woff2) format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url(./jetbrains-mono-latin.woff2) format("woff2");
+}

@@ -1,0 +1,24 @@
+{{- if and .Values.updateCenter.enabled (eq .Values.updateCenter.storage.type "local") (not (include "varroa.isHive" .)) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: varroa-updatecenter
+  annotations:
+    # Keep the plugin-store PVC when the update center is disabled or the release
+    # is uninstalled. Without this, disabling updateCenter.enabled (or a roll from
+    # values that omit it) makes Helm delete this PVC, and with the PV reclaim
+    # policy set to Delete every cached plugin blob is lost with it.
+    helm.sh/resource-policy: keep
+  labels:
+    app.kubernetes.io/component: varroa-updatecenter
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.updateCenter.storage.local.size }}
+  {{- with .Values.updateCenter.storage.local.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

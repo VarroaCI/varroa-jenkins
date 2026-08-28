@@ -1,0 +1,417 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+  name: broodoperations.varroa.dev
+spec:
+  group: varroa.dev
+  names:
+    kind: BroodOperation
+    listKind: BroodOperationList
+    plural: broodoperations
+    singular: broodoperation
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.action.verb
+      name: VERB
+      type: string
+    - jsonPath: .status.phase
+      name: PHASE
+      type: string
+    - jsonPath: .status.summary.total
+      name: TOTAL
+      type: integer
+    - jsonPath: .status.summary.succeeded
+      name: SUCCEEDED
+      type: integer
+    - jsonPath: .status.summary.failed
+      name: FAILED
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: AGE
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: BroodOperation is the Schema for the broodoperations API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: BroodOperationSpec defines the desired state of a BroodOperation.
+            properties:
+              action:
+                description: Action is the operation to perform. Required. Immutable.
+                properties:
+                  groovy:
+                    description: |-
+                      Groovy carries the script for verb=executeGroovy. Required iff Verb ==
+                      executeGroovy; must be absent for every other verb.
+                    properties:
+                      itemRef:
+                        description: |-
+                          ItemRef resolves a CatalogItem of type groovy, using the same
+                          local-first/operator-namespace-fallback resolution mechanics as
+                          ComposedBundle itemRef inputs.
+                        properties:
+                          name:
+                            type: string
+                          namespace:
+                            description: |-
+                              Namespace of the CatalogItem. Empty = resolve in the bundle's own namespace
+                              with operator-namespace fallback; set = exact lookup in that namespace only.
+                            maxLength: 63
+                            pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                            type: string
+                          pinnedContentHash:
+                            type: string
+                          variables:
+                            additionalProperties:
+                              type: string
+                            type: object
+                        required:
+                        - name
+                        type: object
+                      script:
+                        description: Script is an inline Groovy script.
+                        type: string
+                    type: object
+                    x-kubernetes-validations:
+                    - message: exactly one of script or itemRef must be set
+                      rule: '(has(self.script) ? 1 : 0) + (has(self.itemRef) ? 1 :
+                        0) == 1'
+                  verb:
+                    allOf:
+                    - enum:
+                      - restart
+                      - reprovision
+                      - reconcile
+                      - stop
+                      - start
+                      - executeGroovy
+                    - enum:
+                      - restart
+                      - reprovision
+                      - reconcile
+                      - stop
+                      - start
+                      - executeGroovy
+                    description: Verb is the operation to perform.
+                    type: string
+                required:
+                - verb
+                type: object
+                x-kubernetes-validations:
+                - message: groovy is required iff verb is executeGroovy
+                  rule: 'self.verb == ''executeGroovy'' ? has(self.groovy) : !has(self.groovy)'
+              execution:
+                description: |-
+                  Execution controls how the operation is executed. Optional, defaulted. Immutable.
+                  NOTE: must stay a pointer — a value struct is never dropped by omitempty,
+                  so full-object updates would serialize execution:{} and trip the
+                  has(self.execution) == has(oldSelf.execution) CEL rule on CRs created
+                  without an execution block.
+                properties:
+                  failurePolicy:
+                    allOf:
+                    - enum:
+                      - FailFast
+                      - FailTidy
+                      - FailAtEnd
+                    - enum:
+                      - FailFast
+                      - FailTidy
+                      - FailAtEnd
+                    description: FailurePolicy controls behavior on target failure.
+                      Default FailTidy.
+                    type: string
+                  maxParallel:
+                    description: MaxParallel is the maximum number of targets to dispatch
+                      concurrently. Default 1, minimum 1.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  order:
+                    allOf:
+                    - enum:
+                      - rolloutWave
+                      - name
+                    - enum:
+                      - rolloutWave
+                      - name
+                    description: Order controls target dispatch order. Default rolloutWave.
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: spec.execution is immutable
+                  rule: self == oldSelf
+              suspend:
+                description: Suspend pauses a running operation. This is the only
+                  mutable spec field.
+                type: boolean
+              targets:
+                description: Targets defines which controllers to target. Required.
+                  Immutable.
+                properties:
+                  filters:
+                    description: Filters further narrows the target set by controller
+                      properties.
+                    properties:
+                      bundle:
+                        description: Bundle filters by controller spec.composedBundleRef.name
+                          exact match.
+                        type: string
+                      phase:
+                        description: Phase filters by controller status.phase equality.
+                        enum:
+                        - Pending
+                        - Provisioning
+                        - Running
+                        - Connected
+                        - Stopped
+                        - Failed
+                        type: string
+                      version:
+                        description: Version filters by controller spec.version exact
+                          match.
+                        type: string
+                    type: object
+                  names:
+                    description: |-
+                      Names is a list of target controller names. Exactly one of names or selector must be set.
+                      In the team namespace, bare names; in the operator namespace, "ns/name" format.
+                    items:
+                      type: string
+                    type: array
+                  namespaces:
+                    description: |-
+                      Namespaces restricts the selector to specific namespaces. Operator-ns selector mode only.
+                      Use ["all"] to target all namespaces.
+                    items:
+                      type: string
+                    type: array
+                  selector:
+                    description: Selector is a label selector for targeting controllers.
+                      Exactly one of names or selector must be set.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                type: object
+                x-kubernetes-validations:
+                - message: exactly one of names or selector
+                  rule: has(self.names) != has(self.selector)
+                - message: names must be non-empty when present
+                  rule: '!has(self.names) || size(self.names) > 0'
+                - message: namespaces must be non-empty when present
+                  rule: '!has(self.namespaces) || size(self.namespaces) > 0'
+                - message: namespaces requires selector
+                  rule: '!has(self.namespaces) || has(self.selector)'
+              ttlSecondsAfterFinished:
+                description: TTLSecondsAfterFinished bounds the lifetime of the CR
+                  after reaching a terminal phase. Default 604800.
+                format: int32
+                type: integer
+            required:
+            - action
+            - targets
+            type: object
+            x-kubernetes-validations:
+            - message: spec.action is immutable
+              rule: self.action == oldSelf.action
+            - message: spec.targets is immutable
+              rule: self.targets == oldSelf.targets
+            - message: spec.execution is immutable
+              rule: has(self.execution) == has(oldSelf.execution)
+          status:
+            description: BroodOperationStatus defines the observed state of a BroodOperation.
+            properties:
+              finishedAt:
+                description: FinishedAt is when the operation reached a terminal phase.
+                format: date-time
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the metadata.generation last reconciled.
+                format: int64
+                type: integer
+              phase:
+                allOf:
+                - enum:
+                  - Pending
+                  - Running
+                  - Suspended
+                  - Succeeded
+                  - Failed
+                  - Canceled
+                - enum:
+                  - Pending
+                  - Running
+                  - Suspended
+                  - Succeeded
+                  - Failed
+                  - Canceled
+                description: Phase is the current operation phase.
+                type: string
+              reason:
+                description: Reason provides terminal-phase detail (e.g. TenancyViolation).
+                type: string
+              scriptSnapshotRef:
+                description: |-
+                  ScriptSnapshotRef names the owner-referenced ConfigMap holding the
+                  once-resolved, byte-identical script content for an executeGroovy
+                  operation whose script came from action.groovy.itemRef. Empty for
+                  inline scripts and for every other verb.
+                type: string
+              startedAt:
+                description: StartedAt is when the operation moved from Pending to
+                  Running.
+                format: date-time
+                type: string
+              startedBy:
+                description: StartedBy is the user who started the operation. Stamped
+                  by the BFF at create.
+                type: string
+              summary:
+                description: Summary is the aggregate counts.
+                properties:
+                  failed:
+                    description: Failed is the number of failed targets.
+                    type: integer
+                  skipped:
+                    description: Skipped is the number of skipped targets.
+                    type: integer
+                  succeeded:
+                    description: Succeeded is the number of succeeded targets.
+                    type: integer
+                  total:
+                    description: Total is the total number of resolved targets.
+                    type: integer
+                required:
+                - failed
+                - skipped
+                - succeeded
+                - total
+                type: object
+              targets:
+                description: Targets is the snapshot of target states, ordered as
+                  dispatched.
+                items:
+                  description: BroodTargetStatus is the state of a single target within
+                    a brood operation.
+                  properties:
+                    dispatchedAt:
+                      description: DispatchedAt is when the target was dispatched.
+                      format: date-time
+                      type: string
+                    finishedAt:
+                      description: FinishedAt is when the target reached a terminal
+                        state.
+                      format: date-time
+                      type: string
+                    name:
+                      description: Name is the target controller's name.
+                      type: string
+                    namespace:
+                      description: Namespace is the target controller's namespace.
+                      type: string
+                    output:
+                      description: |-
+                        Output holds verb-specific dispatch output for verbs that produce a
+                        response body worth surfacing (currently executeGroovy only), truncated
+                        to 4096 bytes on a UTF-8-safe boundary. Empty for verbs that don't
+                        produce one.
+                      type: string
+                    reason:
+                      description: Reason explains why the target was Skipped or Failed.
+                      type: string
+                    state:
+                      allOf:
+                      - enum:
+                        - Pending
+                        - Dispatched
+                        - Succeeded
+                        - Failed
+                        - Skipped
+                      - enum:
+                        - Pending
+                        - Dispatched
+                        - Succeeded
+                        - Failed
+                        - Skipped
+                      description: State is the current state of this target.
+                      type: string
+                    wave:
+                      description: Wave is the controller's rolloutWave at resolution.
+                      format: int32
+                      type: integer
+                  required:
+                  - name
+                  - namespace
+                  - state
+                  - wave
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

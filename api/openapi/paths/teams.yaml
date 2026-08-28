@@ -1,0 +1,120 @@
+# teams — admin team management.
+/api/v1/teams:
+  get:
+    operationId: listTeams
+    tags: [teams]
+    summary: Lists all teams (admin only).
+    responses:
+      "200":
+        description: Team list (N6 envelope).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/TeamEntry'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+  post:
+    operationId: createTeam
+    tags: [teams]
+    summary: Creates a new team (admin).
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/TeamRequest'
+    responses:
+      "201":
+        description: Team created.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+              additionalProperties: false
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+
+/api/v1/teams/{name}:
+  get:
+    operationId: getTeam
+    tags: [teams]
+    summary: Gets a team's details (admin).
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Team details.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/TeamEntry'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  put:
+    operationId: updateTeam
+    tags: [teams]
+    summary: Updates a team (admin).
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/TeamRequest'
+    responses:
+      "200":
+        description: Team updated.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+              additionalProperties: false
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  delete:
+    operationId: deleteTeam
+    tags: [teams]
+    summary: Deletes a team (admin).
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "204":
+        description: Team deleted.
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'

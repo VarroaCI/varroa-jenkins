@@ -1,0 +1,210 @@
+
+**Varroa Control Plane (v0.3.0 — scaled architecture)**
+
+{{- if .Values.managedNamespaces }}
+
+⚠️  SCOPED RBAC IS ACTIVE (managedNamespaces = {{ join ", " .Values.managedNamespaces }}).
+    ALL operator/BFF workload access — Secrets, pods (incl. logs/exec), services,
+    configmaps, PVCs, serviceaccounts, deployments, statefulsets, ingresses,
+    roles/rolebindings, resourcequotas — is bounded to the release namespace and the
+    listed namespaces. The one exception is the BFF's read-only cluster-wide ingress
+    access (host-collision preflight, hostnames only). A Controller or ComposedBundle
+    in any OTHER namespace will fail closed with an RBAC "forbidden" error. List them
+    with:  kubectl get controllers,composedbundles -A
+    Add any missing namespaces to .Values.managedNamespaces and upgrade.
+    Preflight: creates into a missing namespace → TargetNamespaceMissing (blocked);
+    creates into an existing but unlisted namespace → TargetNamespaceUnmanaged (blocked).
+{{- end }}
+
+{{- if .Values.global.domain }}
+{{- $domain := .Values.global.domain }}
+
+================================================================================
+  Endpoints
+================================================================================
+
+{{- if .Values.dex.enabled }}
+  Dex Issuer:        https://dex.{{ $domain }}
+{{- end }}
+{{- if .Values.bff.enabled }}
+  Varroa BFF:        https://api.{{ $domain }}
+{{- end }}
+
+================================================================================
+  Internal Services
+================================================================================
+{{- if .Values.nats.enabled }}
+  NATS bus:          {{ .Release.Name }}-nats:{{ .Values.nats.service.port }}
+{{- end }}
+{{- if .Values.gateway.enabled }}
+  Gateway (gRPC):    {{ .Release.Name }}-varroa-gateway:{{ .Values.gateway.service.grpcPort }}
+{{- end }}
+{{- if .Values.operator.enabled }}
+  Operator:          {{ .Release.Name }}-varroa-operator ({{ .Values.operator.replicas }} replica(s), {{ .Values.operator.shardCount }} shards)
+{{- end }}
+{{- else }}
+
+{{- if .Values.dex.enabled }}
+  Dex service:       {{ .Release.Name }}-dex:{{ .Values.dex.service.port }}
+{{- end }}
+{{- if .Values.bff.enabled }}
+  BFF service:       {{ .Release.Name }}-varroa-bff:{{ .Values.bff.service.port }}
+{{- end }}
+{{- if .Values.gateway.enabled }}
+  Gateway (gRPC):    {{ .Release.Name }}-varroa-gateway:{{ .Values.gateway.service.grpcPort }}
+{{- end }}
+{{- if .Values.operator.enabled }}
+  Operator:          {{ .Release.Name }}-varroa-operator ({{ .Values.operator.replicas }} replica(s), {{ .Values.operator.shardCount }} shards)
+{{- end }}
+{{- if .Values.nats.enabled }}
+  NATS bus:          {{ .Release.Name }}-nats:{{ .Values.nats.service.port }}
+{{- end }}
+
+Set global.domain in values.yaml to see external URLs.
+{{- end }}
+
+{{- $anyDisabled := or (not .Values.dex.enabled) (not .Values.operator.enabled) (not .Values.gateway.enabled) (not .Values.bff.enabled) (not .Values.nats.enabled) }}
+{{- if $anyDisabled }}
+================================================================================
+  Disabled Services
+================================================================================
+{{- if not .Values.dex.enabled }}
+  • dex
+{{- end }}
+{{- if not .Values.operator.enabled }}
+  • varroa-operator
+{{- end }}
+{{- if not .Values.gateway.enabled }}
+  • varroa-gateway
+{{- end }}
+{{- if not .Values.bff.enabled }}
+  • varroa-bff
+{{- end }}
+{{- if not .Values.nats.enabled }}
+  • nats
+{{- end }}
+{{- end }}
+
+{{- if include "varroa.isHive" . }}
+================================================================================
+  Hive Mode
+================================================================================
+  Cluster name: {{ .Values.cluster.name | default "<not set>" }}
+  Bus URL:      {{ .Values.bus.url | default "<not set>" }}
+
+  This hive cluster requires an existing Secret named "varroa-nats-creds"
+  in this namespace with exactly three keys:
+    operator-password   — NATS operator user password
+    gateway-password    — NATS gateway user password
+    ca.crt              — NATS CA certificate
+
+  Copy from the core:
+    kubectl -n <core-ns> get secret varroa-nats-creds -o json \
+      | jq '{apiVersion, kind, metadata: {name: .metadata.name},
+             data: {"operator-password": .data["operator-password"],
+                    "gateway-password": .data["gateway-password"],
+                    "ca.crt": .data["ca.crt"]}}' \
+      | kubectl --context <hive-context> -n <hive-ns> apply -f -
+
+  See docs/install/multi-cluster.md for the full runbook.
+{{- end }}
+
+{{- if and (not (include "varroa.isHive" .)) ((.Values.nats.external).enabled) }}
+================================================================================
+  External NATS Exposure
+================================================================================
+  External NATS endpoint: {{ .Values.nats.external.host }}:4222
+
+  If this install existed before enabling nats.external, the varroa-nats-creds
+  TLS certificate must be rotated to include the new SANs. Run:
+    kubectl -n {{ .Release.Namespace }} delete secret varroa-nats-creds
+    helm upgrade <release> <chart> ...
+    kubectl -n {{ .Release.Namespace }} rollout restart deploy/varroa-nats
+    kubectl -n {{ .Release.Namespace }} rollout restart deploy/varroa-operator
+    kubectl -n {{ .Release.Namespace }} rollout restart deploy/varroa-gateway
+    kubectl -n {{ .Release.Namespace }} rollout restart deploy/varroa-bff
+  Then re-copy the pruned secret to every hive cluster.
+  See docs/install/multi-cluster.md for the full runbook.
+{{- end }}
+
+{{- if not (include "varroa.isHive" .) }}
+
+{{- if .Values.networkPolicy.enabled }}
+================================================================================
+  NetworkPolicy
+================================================================================
+  NetworkPolicy is ACTIVE (networkPolicy.enabled=true).
+  • By default, NetworkPolicy is opt-in (enabled: false). Enable only after
+    verifying cluster CNI compatibility.
+  • networkPolicy.ingressControllerNamespaceSelector controls which namespace
+    can reach ingress-exposed services (default: ingress-nginx). Tune to match
+    your ingress controller's namespace.
+  • networkPolicy.tenantNamespaceSelector controls which tenant/controller
+    namespaces can reach the gateway on :9090 (gRPC) and :9092 (apikey verify).
+    Default: {} = all namespaces.
+  • kubelet liveness/readiness probes are assumed CNI-exempt (Calico, Cilium
+    default). Clusters that enforce NetworkPolicy on kubelet-originated traffic
+    need a node-CIDR ingress allowance (not shipped).
+  • networkPolicy.apiServerEgress.cidrs should be pinned to your apiserver
+    endpoint IPs in production. Default (empty) uses 0.0.0.0/0 on ports
+    443 and 6443.
+  • networkPolicy.metricsIngress allows your externally-managed scraper to
+    reach operator :8080/:9091, gateway :{grpcPort+1}, bff, and nats :8222
+    (the chart ships no monitoring stack; default [] renders no rule).
+{{- else }}
+================================================================================
+  NetworkPolicy
+================================================================================
+  NetworkPolicy is disabled (networkPolicy.enabled=false).
+  Enable with --set networkPolicy.enabled=true after tuning the selectors
+  (see values.yaml for details).
+{{- end }}
+
+================================================================================
+  Teams
+================================================================================
+  Creating a Team CRD replaces the three hand-authored objects (Group,
+  VarroaRoleBinding, and namespace mux) with a single cluster-scoped resource.
+  The operator composes: (1) a local Group named team-<T> with managed-by and
+  team-name labels; (2) a VarroaRoleBinding named team-<T> scoped to the team's
+  namespaces; (3) an optional namespace provisioner.
+
+  provisionNamespaces opt-in creates and labels namespaces via the tenancy
+  helper.  CAVEAT: in managedNamespaces scoped mode, a runtime-created tenant
+  namespace has NO operator/BFF RBAC until Helm re-renders, so
+  provisionNamespaces is fully meaningful only in cluster-wide-RBAC mode or
+  for namespaces already listed in managedNamespaces.
+{{- end }}
+
+{{- if include "varroa.isHive" . }}
+{{- if .Values.networkPolicy.enabled }}
+================================================================================
+  NetworkPolicy
+================================================================================
+  NetworkPolicy is ACTIVE (networkPolicy.enabled=true).
+  • By default, NetworkPolicy is opt-in (enabled: false). Enable only after
+    verifying cluster CNI compatibility.
+  • The hive-mode NP set covers only the operator and gateway.
+  • networkPolicy.coreNatsEgress.cidrs should be pinned to your core NATS
+    endpoint IP(s) in production. Default (empty) uses 0.0.0.0/0 on the
+    bus.url-derived port (see values.yaml comments for override).
+  • networkPolicy.tenantNamespaceSelector controls which tenant/controller
+    namespaces can reach the gateway on :{{ .Values.gateway.service.grpcPort }} (gRPC)
+    and :9092 (apikey verify). Default: {} = all namespaces.
+  • kubelet liveness/readiness probes are assumed CNI-exempt (Calico, Cilium
+    default). Clusters that enforce NetworkPolicy on kubelet-originated traffic
+    need a node-CIDR ingress allowance (not shipped).
+  • networkPolicy.apiServerEgress.cidrs should be pinned to your apiserver
+    endpoint IPs in production. Default (empty) uses 0.0.0.0/0 on ports
+    443 and 6443.
+  • networkPolicy.metricsIngress allows user-managed scrapers to reach
+    operator :8080/:9091 and gateway :{grpcPort+1}.
+{{- else }}
+================================================================================
+  NetworkPolicy
+================================================================================
+  NetworkPolicy is disabled (networkPolicy.enabled=false).
+  Enable with --set networkPolicy.enabled=true after tuning the selectors
+  (see values.yaml for details).
+{{- end }}
+{{- end }}

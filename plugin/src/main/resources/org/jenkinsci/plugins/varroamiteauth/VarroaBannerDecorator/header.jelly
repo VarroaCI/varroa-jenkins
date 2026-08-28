@@ -1,0 +1,16 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core">
+  <j:set var="configURL" value="${it.bannerConfigURL}"/>
+  <j:if test="${configURL != null and !configURL.isEmpty()}">
+    <script src="${rootURL}/plugin/varroa-mite-auth/banner.js"
+            data-varroa-config="${configURL}"
+            data-user-id="${it.currentUserId}"
+            data-user-name="${it.currentUserName}"
+            data-user-email="${it.currentUserEmail}"
+            data-user-groups="${it.currentUserGroups}"
+            data-user-role="${it.currentUserRole}"
+            data-root-url="${rootURL}"
+            data-crumb-field="${it.crumbFieldName}"
+            data-crumb-value="${it.crumbValue}"></script>
+  </j:if>
+</j:jelly>

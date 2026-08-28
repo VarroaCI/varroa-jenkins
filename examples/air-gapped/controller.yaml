@@ -1,0 +1,14 @@
+# A controller for the air-gapped cluster. The version pin must match a
+# JenkinsVersionProfile whose plugin set has been seeded into the in-cluster
+# update center — plugins-init resolves everything from there, with no
+# fallback to updates.jenkins.io.
+apiVersion: varroa.dev/v1alpha1
+kind: Controller
+metadata:
+  name: builds
+  namespace: varroa-tenants
+spec:
+  namespace: varroa-tenants
+  version: "2.555"               # must match the seeded version profile
+  persistence:
+    size: 20Gi

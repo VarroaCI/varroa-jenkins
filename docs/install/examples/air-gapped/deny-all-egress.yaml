@@ -1,0 +1,24 @@
+# Baseline deny-all-egress NetworkPolicy for air-gapped installations.
+# Apply this before the chart install so no pod can make external connections
+# until explicitly allowed. See docs/install/air-gapped.md.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all-egress
+  namespace: varroa-system
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  # No egress rules → all outbound traffic is denied.
+---
+# Also block inbound traffic not explicitly permitted.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all-ingress
+  namespace: varroa-system
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress

@@ -1,0 +1,49 @@
+# cronjob-seed.yaml
+#
+# CronJob that periodically re-imports a plugin pack into the Varroa Update
+# Center on an air-gapped cluster. Runs on a schedule (hourly by default) and
+# does nothing if the import digest has not changed (the uc:// endpoint is
+# idempotent — it skips already-imported digests).
+#
+# The --from source is a tar.gz seed transferred via sneakernet. Replace with
+# an oci:// reference if the air-gapped cluster has a local mirror registry.
+#
+# Required: the varroa-updatecenter-import-token Secret is created by the chart
+# when updateCenter.enabled=true. The token key is "token" (the uc:// client
+# contract).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: varroa-uc-seed
+  namespace: varroa-system
+spec:
+  schedule: "0 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: varroactl
+              image: ghcr.io/varroaci/varroa-jenkins:latest
+              command:
+                - varroactl
+                - import
+                - --from
+                - tar:///seed/seed.tar.gz
+                - --to
+                - uc://varroa-updatecenter.varroa-system.svc:8080
+              env:
+                - name: VARROACTL_UC_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: varroa-updatecenter-import-token
+                      key: token
+              volumeMounts:
+                - name: seed
+                  mountPath: /seed
+          volumes:
+            - name: seed
+              hostPath:
+                path: /var/varroa/seed
+                type: DirectoryOrCreate
+          restartPolicy: OnFailure

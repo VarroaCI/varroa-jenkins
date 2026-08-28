@@ -1,0 +1,21 @@
+items:
+  - kind: folder
+    name: folder-libraries
+    displayName: "Folder with Libraries"
+    description: "Folder with folderLibraries property (known gap — silently dropped)"
+    properties:
+      - folderLibraries:
+          libraries:
+            - libraryConfiguration:
+                name: my-shared-lib
+                implicit: false
+                allowVersionOverride: true
+                retriever:
+                  modernSCM:
+                    scm:
+                      github:
+                        repoOwner: fake-org
+                        repository: shared-library
+                        traits:
+                          - gitHubBranchDiscovery:
+                              strategyId: 3

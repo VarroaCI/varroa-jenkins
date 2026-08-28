@@ -1,0 +1,80 @@
+{{- if not (include "varroa.isHive" .) }}
+{{- /*
+  Example item-level RBAC, for dev/demo clusters only.
+
+  RBAC is NOT carried in a JCasC bundle — Varroa strips authorizationStrategy
+  from bundle content and synthesizes the role-strategy config from JenkinsRole
+  / JenkinsRoleBinding CRDs (internal/rbac/resolver.go + generator.go). Only
+  roleType: Item lands in the "Item roles" table of Manage and Assign Roles.
+
+  Gated behind examples.itemRbac.enabled (default false). The folder paths match
+  the challenge corpus items. Mirrors config/examples/item-rbac-example.yaml.
+*/ -}}
+{{- if .Values.examples.itemRbac.enabled }}
+---
+apiVersion: varroa.dev/v1alpha1
+kind: JenkinsRole
+metadata:
+  name: example-folder-developer
+  labels:
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  roleType: Item
+  description: Read/build/cancel jobs within a folder subtree.
+  permissions:
+    - hudson.model.Item.Read
+    - hudson.model.Item.Discover
+    - hudson.model.Item.Build
+    - hudson.model.Item.Cancel
+    - hudson.model.Run.Replay
+    - hudson.model.View.Read
+---
+apiVersion: varroa.dev/v1alpha1
+kind: JenkinsRole
+metadata:
+  name: example-folder-viewer
+  labels:
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  roleType: Item
+  description: Read-only visibility into matching folders.
+  permissions:
+    - hudson.model.Item.Read
+    - hudson.model.Item.Discover
+    - hudson.model.View.Read
+---
+apiVersion: varroa.dev/v1alpha1
+kind: JenkinsRoleBinding
+metadata:
+  name: example-deep-folder-developers
+  labels:
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  roleRef: example-folder-developer
+  subjects:
+    - kind: Group
+      name: developers
+  jenkinsScope:
+    type: Folder
+    folder: challenge-deep-nested-folders
+    propagate: Subtree
+---
+apiVersion: varroa.dev/v1alpha1
+kind: JenkinsRoleBinding
+metadata:
+  name: example-freestyle-viewers
+  labels:
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  roleRef: example-folder-viewer
+  subjects:
+    - kind: Group
+      name: viewers
+    - kind: User
+      name: viewer
+  jenkinsScope:
+    type: Pattern
+    pattern: ^challenge-freestyle-.*
+{{- end }}
+
+{{- end }}

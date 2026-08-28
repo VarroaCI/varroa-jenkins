@@ -1,0 +1,73 @@
+# groups — admin group management.
+/api/v1/groups:
+  get:
+    operationId: listGroups
+    tags: [groups]
+    summary: Lists all groups (admin only).
+    responses:
+      "200":
+        description: Group list (N6 envelope).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/GroupEntry'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+  post:
+    operationId: createGroup
+    tags: [groups]
+    summary: Creates a new group (admin, local auth only).
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/CreateGroupRequest'
+    responses:
+      "201":
+        description: Group created.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+              additionalProperties: false
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "501":
+        $ref: '../components/responses.yaml#/MethodNotAllowed'
+
+/api/v1/groups/{name}:
+  delete:
+    operationId: deleteGroup
+    tags: [groups]
+    summary: Deletes a group (admin, local auth only).
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "204":
+        description: Group deleted.
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'

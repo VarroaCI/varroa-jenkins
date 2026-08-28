@@ -1,0 +1,68 @@
+{{- $msg := . -}}
+{{- if .Comment}}
+// {{.Comment}}
+{{- end}}
+type {{.Name}} struct {
+{{- range .Fields}}
+	{{.GoName}} {{.GoType}} `json:"{{.JSONName}}{{if not .IsRequired}},omitempty{{end}}"`
+{{- end}}
+	{{.OneofName | camelCase}} is{{.Name}}_{{.OneofName}} `json:"-"`
+}
+
+type is{{.Name}}_{{.OneofName}} interface {
+	is{{.Name}}_{{.OneofName}}()
+}
+{{template "oneof_variant.tmpl" $msg}}
+func (m *{{.Name}}) MarshalJSON() ([]byte, error) {
+	type alias struct {
+{{- range .Fields}}
+		{{.GoName}} {{.GoType}} `json:"{{.JSONName}}{{if not .IsRequired}},omitempty{{end}}"`
+{{- end}}
+{{- range .OneofFields}}
+		{{.GoName}} *{{.TypeName}} `json:"{{.JSONName}},omitempty"`
+{{- end}}
+	}
+	var a alias
+{{- range .Fields}}
+	a.{{.GoName}} = m.{{.GoName}}
+{{- end}}
+	switch v := m.{{.OneofName | camelCase}}.(type) {
+{{- range .OneofFields}}
+	case *{{$msg.Name}}_{{.GoName}}:
+		a.{{.GoName}} = v.{{.GoName}}
+{{- end}}
+	}
+	return json.Marshal(a)
+}
+
+func (m *{{.Name}}) UnmarshalJSON(data []byte) error {
+	var a struct {
+{{- range .Fields}}
+		{{.GoName}} {{.GoType}} `json:"{{.JSONName}}{{if not .IsRequired}},omitempty{{end}}"`
+{{- end}}
+{{- range .OneofFields}}
+		{{.GoName}} *{{.TypeName}} `json:"{{.JSONName}},omitempty"`
+{{- end}}
+	}
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+{{- range .Fields}}
+	m.{{.GoName}} = a.{{.GoName}}
+{{- end}}
+	switch {
+{{- range .OneofFields}}
+	case a.{{.GoName}} != nil:
+		m.{{$msg.OneofName | camelCase}} = &{{$msg.Name}}_{{.GoName}}{ {{.GoName}}: a.{{.GoName}} }
+{{- end}}
+	}
+	return nil
+}
+{{range .OneofFields}}
+func (m *{{$msg.Name}}) Get{{.GoName}}() *{{.TypeName}} {
+	if x, ok := m.{{$msg.OneofName | camelCase}}.(*{{$msg.Name}}_{{.GoName}}); ok {
+		return x.{{.GoName}}
+	}
+	return nil
+}
+{{end}}

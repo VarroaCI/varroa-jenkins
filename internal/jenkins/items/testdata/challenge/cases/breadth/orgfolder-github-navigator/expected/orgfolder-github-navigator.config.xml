@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<jenkins.branch.OrganizationFolder plugin="branch-api">
+  <displayName>GitHub Org Folder</displayName>
+  <description>Organization folder with GitHub SCM navigator</description>
+  <navigators>
+    <org.jenkinsci.plugins.github_branch_source.GitHubSCMNavigator plugin="github-branch-source">
+      <repoOwner>fake-org</repoOwner>
+      <credentialsId>github-cred</credentialsId>
+    </org.jenkinsci.plugins.github_branch_source.GitHubSCMNavigator>
+  </navigators>
+  <projectFactories>
+    <org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory class="org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory">
+      <scriptPath>Jenkinsfile</scriptPath>
+    </org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory>
+  </projectFactories>
+</jenkins.branch.OrganizationFolder>

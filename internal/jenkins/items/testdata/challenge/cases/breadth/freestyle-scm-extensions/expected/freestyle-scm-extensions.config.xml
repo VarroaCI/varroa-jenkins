@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<project>
+  <displayName>FreeStyle SCM Extensions</displayName>
+  <description>FreeStyle job with git SCM and extensions</description>
+  <scm class="hudson.plugins.git.GitSCM" plugin="git">
+    <configVersion>2</configVersion>
+    <userRemoteConfigs>
+      <hudson.plugins.git.UserRemoteConfig>
+        <url>https://github.com/fake-org/fake-repo.git</url>
+        <credentialsId>github-cred</credentialsId>
+      </hudson.plugins.git.UserRemoteConfig>
+    </userRemoteConfigs>
+    <branches>
+      <hudson.plugins.git.BranchSpec>
+        <name>*/main</name>
+      </hudson.plugins.git.BranchSpec>
+    </branches>
+    <extensions>
+      <hudson.plugins.git.extensions.impl.CleanBeforeCheckout>
+        <deleteUntrackedNestedRepositories>true</deleteUntrackedNestedRepositories>
+      </hudson.plugins.git.extensions.impl.CleanBeforeCheckout>
+      <hudson.plugins.git.extensions.impl.CloneOption>
+        <noTags>false</noTags>
+        <honorRefspec>false</honorRefspec>
+        <shallow>false</shallow>
+        <timeout>30</timeout>
+      </hudson.plugins.git.extensions.impl.CloneOption>
+      <hudson.plugins.git.extensions.impl.PruneStaleBranch></hudson.plugins.git.extensions.impl.PruneStaleBranch>
+    </extensions>
+  </scm>
+  <builders>
+    <hudson.tasks.Shell>
+      <command>echo &#34;hello world&#34;</command>
+    </hudson.tasks.Shell>
+  </builders>
+</project>

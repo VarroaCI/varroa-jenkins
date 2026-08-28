@@ -1,0 +1,74 @@
+/*
+ * Shared data-table treatment, matching the Clusters/Controllers listing.
+ * Compose into a page's own table class rather than restyling per page:
+ *
+ *   .table { composes: dataTable from "./tables.module.css"; }
+ *
+ * Assumes the table is rendered inside a <Card>, whose body padding is what
+ * insets the header band from the card edge.
+ */
+
+.dataTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+/*
+ * Horizontal padding is deliberately tighter than the Clusters listing: these
+ * tables carry many more columns and have to fit the narrower settings shell
+ * without overflowing. Headers wrap rather than forcing the table wider.
+ */
+.dataTable th {
+  background: var(--surface-2);
+  padding: 11px 12px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.dataTable th:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.dataTable th:last-child  { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+
+.dataTable td {
+  padding: 12px;
+  text-align: left;
+  font-size: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* The Card supplies the outer edge; a trailing row border doubles it. */
+.dataTable tbody tr:last-child td { border-bottom: none; }
+
+.dataTable tbody tr:hover { background: var(--surface-2); }
+
+/*
+ * Resource names are identifiers but read as the row's primary label, so they
+ * follow the listing convention: semibold body text, not monospace. Monospace
+ * stays reserved for secondary technical values (SHAs, versions, timings).
+ */
+.nameCell {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+/*
+ * On narrow viewports these tables are far wider than the screen, which made
+ * the whole page scroll sideways. display:block turns the table itself into
+ * the scroll container, so the page stays locked to the viewport width.
+ *
+ * thead and tbody are deliberately left alone here. Giving each its own
+ * `display: table` makes them lay out as two independent tables and their
+ * column widths drift apart (measured 75px on a phone). Untouched, they share
+ * one anonymous table box, so header and body stay in a single grid and that
+ * box sizes to its content for the scroll.
+ */
+@media (max-width: 760px) {
+  .dataTable {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}

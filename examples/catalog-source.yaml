@@ -1,0 +1,24 @@
+# =============================================================================
+# CatalogSource — register a catalog repository.
+#
+# Points at a Varroa platform catalog. The operator clones this repo, parses
+# catalog.yaml, and creates CatalogItem CRDs for each entry.
+#
+# The repoURL below is illustrative — point it at your own catalog repo,
+# following the same catalog.yaml layout.
+#
+# Usage:
+#   kubectl apply -f examples/catalog-source.yaml
+#   kubectl get catalogsource platform-catalog -n varroa-system -w
+# =============================================================================
+apiVersion: varroa.dev/v1alpha1
+kind: CatalogSource
+metadata:
+  name: platform-catalog
+  namespace: varroa-system                # ← catalog lives in the control-plane namespace
+spec:
+  repoURL: https://github.com/your-org/your-casc-catalog.git
+  revision: main
+  syncIntervalSeconds: 300
+  trusted: true
+  # secretRef: git-deploy-key            # ← uncomment if using a private repo

@@ -1,0 +1,151 @@
+/* ── ObservabilityPanel -- extracted from inline styles ── */
+
+/* Empty state: no data yet */
+.emptyText {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+/* Header right: level badge */
+.levelBadge {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent-strong);
+}
+
+/* Warnings block */
+.warnings {
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border-radius: 6px;
+  background: var(--warn-soft);
+  color: var(--warn-text);
+  font-size: 12px;
+}
+
+/* Freshness banner */
+.freshnessBanner {
+  padding: 6px 12px;
+  margin-bottom: 12px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.freshnessBanner[data-stale="true"] {
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
+.freshnessBanner:not([data-stale="true"]) {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+/* No sources empty state */
+.noSources {
+  font-size: 13px;
+  color: var(--text-2);
+  padding: 8px 0;
+}
+
+/* Source cards container */
+.sourceCards {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+/* Single source card */
+.sourceCard {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-size: 12px;
+}
+
+/* Provider label */
+.providerLabel {
+  font-weight: 600;
+}
+
+/* Badge label — tone classes mapped via style[badge.tone] */
+.badgeNotConfigured { color: var(--text-2); }
+.badgeIntended { color: var(--info-text); }
+.badgeConfigured { color: var(--accent); } /* accent fill/accent-strong? --accent is the base accent color, used as non-text */
+.badgeExposed { color: var(--ok-text); }
+.badgeIntegrated { color: var(--ok-text); } /* --ok-strong doesn't exist; use --ok-text */
+.badgeDegraded { color: var(--warn-text); }
+.badgeUnavailable { color: var(--bad-text); }
+.badgeUnknown { color: var(--text-2); }
+
+/* Hint text */
+.hintText {
+  color: var(--text-2);
+  font-size: 10px;
+}
+
+/* Source error */
+.sourceError {
+  color: var(--bad-text);
+  font-size: 10px;
+}
+
+/* Metric chip */
+.metricChip {
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-size: 13px;
+  color: var(--text-2);
+}
+.metricChipLabel {
+  font-size: 11px;
+  color: var(--text-2);
+  text-transform: uppercase;
+}
+.metricChipValue {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+/* Metric chips grid */
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+/* Capability card / recent builds card (identical) */
+.infoBox {
+  padding: 10px 14px;
+  margin-top: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--surface-3);
+  font-size: 13px;
+  color: var(--text-2);
+}
+.infoBoxTitle {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+/* Recent builds title */
+.recentBuildsTitle {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+/* Recent builds grid */
+.recentBuildsGrid {
+  display: grid;
+  gap: 6px;
+}
+
+/* Build status text */
+.buildStatusText {
+  color: var(--text-2);
+}

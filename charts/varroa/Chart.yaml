@@ -1,0 +1,23 @@
+apiVersion: v2
+name: varroa
+description: Varroa control-plane umbrella chart — deploys NATS JetStream, Operator (sharded), Gateway (mite gRPC), BFF (HTTP API), and Dex
+type: application
+version: 0.4.0
+appVersion: "0.3.0"
+# Prerelease-inclusive floor (-0): real managed clusters report vendor-suffixed
+# gitVersions (EKS v1.33.x-eks-<build>, GKE similar) that Masterminds/semver
+# parses as prereleases; a bare ">= 1.30" excludes them and helm install/upgrade
+# fails against every such cluster (live-discovery does no normalization).
+kubeVersion: ">= 1.30.0-0"
+keywords:
+  - varroa
+  - jenkins
+  - ci-cd
+  - observability
+maintainers:
+  - name: Varroa Team
+dependencies:
+  - name: nats
+    version: "1.2.0"
+    repository: https://nats-io.github.io/k8s/helm/charts/
+    condition: nats.enabled

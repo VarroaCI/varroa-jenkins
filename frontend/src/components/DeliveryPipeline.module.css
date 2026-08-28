@@ -1,0 +1,107 @@
+/* ── Delivery pipeline (Bundle → Apply → Jenkins) ────────────────
+   Lifted from mockups/controller-detail-states.html (.pipe/.node/.rail
+   rules). Muted text uses --text-2 (--text-3 fails the text-color
+   ratchet; see frontend/AGENTS.md contrast rule). */
+
+.pipe {
+  display: grid;
+  grid-template-columns: 1fr 44px 1.35fr 44px 1.15fr;
+  align-items: stretch;
+  margin-top: 24px;
+}
+
+.node {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px 13px;
+  min-height: 108px;
+}
+
+.top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+
+.lamp { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+.lamp.ok   { background: var(--ok); }
+.lamp.live { background: var(--ok); animation: breathe 3.2s ease-in-out infinite; }
+.lamp.warn { background: var(--warn); animation: busy 1.1s ease-in-out infinite; }
+.lamp.bad  { background: var(--bad); }
+.lamp.wait { background: var(--idle); opacity: .4; }
+
+.name { font-weight: 700; font-size: 13.5px; }
+.what { color: var(--text-2); font-size: 12px; margin-left: auto; }
+.line { font-size: 13px; color: var(--text); }
+.sub  { font-size: 12px; color: var(--text-2); margin-top: 3px; }
+.mono { font-family: var(--mono); }
+
+.err { border-color: var(--bad); background: var(--bad-soft); }
+.err .line { color: var(--bad-text); font-weight: 600; }
+.dim { opacity: .55; }
+
+/* ── Rails ── */
+.rail { position: relative; align-self: center; height: 2px; background: var(--border-strong); margin: 0 6px; }
+.rail::after {
+  content: ""; position: absolute; inset: -3px 0;
+  background: repeating-linear-gradient(90deg, var(--accent) 0 6px, transparent 6px 14px);
+  opacity: 0; border-radius: 2px; background-size: 28px 100%;
+}
+.rail.flow { background: var(--ok); opacity: .5; }
+.rail.busy::after { opacity: .9; animation: march 0.9s linear infinite; }
+.rail.off { opacity: .35; }
+
+@keyframes march { to { background-position: 28px 0; } }
+@keyframes breathe { 0%,100% { box-shadow: 0 0 0 0 rgba(47,143,78,.45); } 55% { box-shadow: 0 0 0 5px rgba(47,143,78,0); } }
+@keyframes busy { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .rail.busy::after,
+  .lamp.live,
+  .lamp.warn,
+  .step.now .pt { animation: none; }
+}
+
+/* ── Section checks ── */
+.checks { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
+.chk {
+  font-family: var(--mono); font-size: 11.5px; padding: 2px 8px; border-radius: 999px;
+  background: var(--ok-soft); color: var(--ok-text);
+}
+.chk.run  { background: var(--warn-soft); color: var(--warn-text); }
+.chk.bad  { background: var(--bad-soft); color: var(--bad-text); font-weight: 700; }
+.chk.wait { background: var(--surface-3); color: var(--text-2); }
+
+.errText { font-size: 12px; color: var(--bad-text); margin-top: 6px; font-weight: 600; }
+
+/* ── Failed-apply diff affordance ── */
+.diffArea { margin-top: 8px; }
+.diffLink {
+  font: inherit; font-size: 12px; font-weight: 600; color: var(--bad-text);
+  background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline;
+}
+.diffLink:disabled { opacity: .5; cursor: default; }
+.diffError { font-size: 12px; color: var(--bad-text); margin-left: 8px; }
+.diffNotice { font-size: 12px; color: var(--warn-text); margin-top: 4px; }
+.diffContent {
+  background: var(--code-bg); color: var(--code-text);
+  padding: 8px 10px; border-radius: var(--radius-sm); font-family: var(--mono);
+  font-size: 11.5px; max-height: 220px; overflow: auto; margin-top: 6px;
+  white-space: pre-wrap;
+}
+
+/* ── Waking step ticker ── */
+.steps { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.step { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-2); }
+.step .pt { width: 10px; height: 10px; border-radius: 50%; background: var(--surface-3); border: 1px solid var(--border-strong); }
+.step.done { color: var(--ok-text); } .step.done .pt { background: var(--ok); border-color: var(--ok); }
+.step.now  { color: var(--text); font-weight: 600; } .step.now .pt { background: var(--warn); border-color: var(--warn); animation: busy 1.1s ease-in-out infinite; }
+.stepGap { width: 26px; height: 2px; background: var(--border-strong); }
+
+/* ── Quiet (hibernated / stopped) card ── */
+.quietWrap {
+  margin-top: 24px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-2); padding: 30px; text-align: center;
+}
+.moon { font-size: 26px; color: var(--idle-text); }
+.quietWrap h3 { font-size: 15px; margin-top: 8px; }
+.quietWrap p { color: var(--text-2); font-size: 13px; margin-top: 4px; }
+.kept { margin-top: 14px; display: inline-flex; gap: 8px; align-items: center; color: var(--text-2); font-size: 12px; }

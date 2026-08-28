@@ -1,0 +1,19 @@
+items:
+  - kind: multibranch
+    name: multibranch-multiple-sources
+    displayName: "Multibranch Multiple Sources"
+    description: "Multibranch pipeline with two git branch sources"
+    sourcesList:
+      - branchSource:
+          source:
+            git:
+              remote: https://github.com/fake-org/repo-a.git
+              credentialsId: git-cred
+      - branchSource:
+          source:
+            git:
+              remote: https://github.com/fake-org/repo-b.git
+              credentialsId: git-cred
+    projectFactory:
+      workflowBranchProjectFactory:
+        scriptPath: Jenkinsfile

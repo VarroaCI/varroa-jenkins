@@ -1,0 +1,150 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+  name: jenkinsrolebindings.varroa.dev
+spec:
+  group: varroa.dev
+  names:
+    kind: JenkinsRoleBinding
+    listKind: JenkinsRoleBindingList
+    plural: jenkinsrolebindings
+    singular: jenkinsrolebinding
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          JenkinsRoleBinding binds subjects to a JenkinsRole with controller
+          and in-Jenkins scope.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: JenkinsRoleBindingSpec defines the desired state of JenkinsRoleBinding.
+            properties:
+              controllerScope:
+                description: ControllerScope restricts which controllers this binding
+                  applies to.
+                properties:
+                  controllerSelector:
+                    description: ControllerSelector is an optional label selector
+                      over Controller CR labels.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  namespaces:
+                    description: Namespaces is an optional allow-list of Kubernetes
+                      namespaces.
+                    items:
+                      type: string
+                    type: array
+                type: object
+              jenkinsScope:
+                description: JenkinsScope defines the in-Jenkins scope. nil means
+                  Global.
+                properties:
+                  folder:
+                    description: Folder is the folder path, e.g. "team-a/project-x".
+                      Only for Type=Folder.
+                    type: string
+                  pattern:
+                    description: Pattern is the raw regex pattern. Only for Type=Pattern.
+                    type: string
+                  propagate:
+                    description: Propagate is "None", "Children", or "Subtree". Only
+                      for Type=Folder.
+                    type: string
+                  type:
+                    description: Type is "Global", "Folder", or "Pattern".
+                    type: string
+                required:
+                - type
+                type: object
+              roleRef:
+                description: RoleRef is the name of the JenkinsRole to bind.
+                type: string
+              subjects:
+                description: Subjects references the subjects (users/groups) this
+                  binding grants to.
+                items:
+                  description: SubjectRef references a subject by kind and name.
+                  properties:
+                    kind:
+                      description: 'Kind is the subject kind: "Group" or "User".'
+                      type: string
+                    name:
+                      description: Name is the OIDC claim value (group name or user
+                        subject).
+                      type: string
+                  required:
+                  - kind
+                  - name
+                  type: object
+                type: array
+            required:
+            - roleRef
+            - subjects
+            type: object
+        type: object
+    served: true
+    storage: true

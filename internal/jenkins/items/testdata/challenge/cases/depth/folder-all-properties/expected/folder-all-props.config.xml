@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<com.cloudbees.hudson.plugins.folder.Folder plugin="cloudbees-folder">
+  <displayName>Folder with All Wired Properties</displayName>
+  <description>Folder exercising all three wired properties — envVars, folderCredentials, itemRestrictions (no folderLibraries — known gap)</description>
+  <properties>
+    <org.jenkinsci.plugins.envinject.EnvInjectFolderProperty>
+      <properties>
+        <EnvInjectJobProperty>
+          <info>
+            <propertiesEntry>
+              <key>DEPLOY_ENV</key>
+              <value>staging</value>
+            </propertiesEntry>
+            <propertiesEntry>
+              <key>LOG_LEVEL</key>
+              <value>debug</value>
+            </propertiesEntry>
+          </info>
+        </EnvInjectJobProperty>
+      </properties>
+    </org.jenkinsci.plugins.envinject.EnvInjectFolderProperty>
+    <com.cloudbees.hudson.plugins.folder.properties.FolderCredentialsProperty>
+      <domainCredentialsMap>
+        <entry>
+          <com.cloudbees.plugins.credentials.domains.Domain>
+            <specifications></specifications>
+          </com.cloudbees.plugins.credentials.domains.Domain>
+          <java.util.concurrent.CopyOnWriteArrayList>
+            <com.cloudbees.plugins.credentials.impl.UsernamePasswordCredentialsImpl>
+              <scope>GLOBAL</scope>
+              <id>deploy-cred</id>
+              <description>Deployment credentials</description>
+              <username>deploy-bot</username>
+              <password>d3pl0y!</password>
+            </com.cloudbees.plugins.credentials.impl.UsernamePasswordCredentialsImpl>
+          </java.util.concurrent.CopyOnWriteArrayList>
+        </entry>
+      </domainCredentialsMap>
+    </com.cloudbees.hudson.plugins.folder.properties.FolderCredentialsProperty>
+    <com.cloudbees.hudson.plugins.folder.properties.RestrictedProjectsProperty>
+      <allowedTypes>
+        <string>org.jenkinsci.plugins.workflow.job.WorkflowJob</string>
+        <string>com.cloudbees.hudson.plugins.folder.Folder</string>
+      </allowedTypes>
+      <filter>true</filter>
+    </com.cloudbees.hudson.plugins.folder.properties.RestrictedProjectsProperty>
+  </properties>
+</com.cloudbees.hudson.plugins.folder.Folder>

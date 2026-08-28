@@ -1,0 +1,5 @@
+items:
+  - kind: pipeline
+    name: pipeline-missing-definition
+    displayName: "Pipeline Missing Definition"
+    description: "Pipeline item with no definition set"

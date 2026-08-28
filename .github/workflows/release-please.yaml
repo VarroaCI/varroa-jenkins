@@ -1,0 +1,35 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '*.md'
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      # Manifest mode, deliberately. Passing `release-type` here would switch the
+      # action to its non-manifest path (Manifest.fromConfig), which ignores BOTH
+      # .release-please-manifest.json and the config file below — so the committed
+      # version would never be read. The config path must be spelled out: the
+      # action defaults to `release-please-config.json` at the repo root, not
+      # under .github/.
+      #
+      # The tag this creates is pushed with the default GITHUB_TOKEN, and GitHub
+      # does not fire workflow triggers for those — so release.yaml's `push:
+      # tags` trigger will NOT run for it. Publish that release's artifacts by
+      # dispatching release.yaml against the tag; it carries a workflow_dispatch
+      # trigger for exactly this.
+      - uses: google-github-actions/release-please-action@v4
+        with:
+          config-file: .github/release-please-config.json
+          manifest-file: .release-please-manifest.json

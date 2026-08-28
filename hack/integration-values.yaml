@@ -1,0 +1,41 @@
+# CI integration test values for Varroa umbrella chart.
+# Deploys Dex with static password connector, disables everything else.
+# The Varroa API runs as a side-process, not in-cluster.
+
+global:
+  domain: localhost
+
+dex:
+  enabled: true
+  config:
+    issuer: http://dex.varroa-ci.svc:5556
+    storage:
+      type: kubernetes
+      config:
+        inCluster: true
+    connectors:
+    # NOTE: The Dex "local" connector does NOT support group claims.
+    # All authenticated users will have groups=[] in their ID tokens.
+    # This is acceptable for auth flow tests, but group-based RBAC
+    # assignment CANNOT be tested with this connector. For group claim
+    # testing, use a connector that supports groups (GitHub, OIDC, LDAP)
+    # with a claims mapping.
+    - type: local
+      id: local
+      name: Local
+      config:
+        enablePasswordDB: true
+        passwords:
+        - email: admin@varroa.local
+          hash: "$2a$10$KCsGU9DPQYWlRBazSGCBA.9rHqwaF5Lp6rZG7Gm8PIRtG9GC19TcC"
+          username: admin
+          userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
+    staticClients:
+    - id: varroa
+      name: Varroa
+      secret: ZXhhbXBsZS1hcHAtc2VjcmV0
+      redirectURIs:
+      - http://localhost:8080/callback
+
+ingress:
+  enabled: false

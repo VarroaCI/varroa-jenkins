@@ -1,0 +1,27 @@
+items:
+  - kind: freeStyle
+    name: freestyle-params-triggers
+    displayName: "FreeStyle Parameters and Triggers"
+    description: "FreeStyle job with build parameters and SCM trigger"
+    parameters:
+      - string:
+          name: BRANCH
+          description: "Branch to build"
+          defaultValue: main
+          trim: true
+      - choice:
+          name: ENV
+          description: "Target environment"
+          choices:
+            - dev
+            - staging
+            - prod
+      - booleanParam:
+          name: DRY_RUN
+          description: "Dry run only"
+          defaultValue: false
+    triggers:
+      - pollSCM:
+          scmpoll_spec: "H/5 * * * *"
+      - cron:
+          spec: "0 2 * * *"

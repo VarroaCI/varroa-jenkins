@@ -1,0 +1,20 @@
+items:
+  - kind: multibranch
+    name: multibranch-github-source
+    displayName: "Multibranch GitHub Source"
+    description: "Multibranch pipeline with GitHub source"
+    sourcesList:
+      - branchSource:
+          source:
+            github:
+              repoOwner: fake-org
+              repository: fake-repo
+              credentialsId: github-cred
+              traits:
+                - gitHubBranchDiscovery:
+                    strategyId: 3
+                - gitHubPullRequestDiscovery:
+                    strategyId: 1
+    projectFactory:
+      workflowBranchProjectFactory:
+        scriptPath: Jenkinsfile

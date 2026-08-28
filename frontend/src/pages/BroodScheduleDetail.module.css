@@ -1,0 +1,32 @@
+.nameCell { composes: nameCell from "./tables.module.css"; }
+.table { composes: dataTable from "./tables.module.css"; }
+/* Layout .content already supplies page padding and max-width. */
+.page { animation: fade .35s ease; }
+
+@keyframes fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.header { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 22px; }
+.header h1 { margin: 0; font-family: var(--mono); font-size: 20px; font-weight: 700; letter-spacing: -.5px; }
+.actions { display: flex; gap: 0.5rem; }
+.error { color: var(--bad-text); }
+/* Card-like surface so the panel reads as a raised element, not a bare patch. */
+.meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 0.5rem 16px;
+  margin-bottom: 22px;
+  padding: 15px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.meta div { font-size: 0.9rem; }
+.warningBanner { background: var(--bad-soft); color: var(--bad-text); padding: 0.5rem 1rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.9rem; }
+.section { margin-bottom: 2rem; }
+.section h2 { font-size: 1.1rem; margin-bottom: 0.5rem; }
+
+/* The Card supplies the outer edge; a trailing row border doubles it. */

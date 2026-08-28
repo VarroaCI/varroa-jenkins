@@ -1,0 +1,151 @@
+# updatecenter — status and plugin inventory.
+# Minimal spec for contract-test coverage; full responses added in later batches.
+/api/v1/updatecenter:
+  get:
+    operationId: getUpdateCenterStatus
+    tags: [updatecenter]
+    summary: Gets the update center status.
+    responses:
+      "200":
+        description: Update center status.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/UpdateCenterStatus'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "500":
+        $ref: '../components/responses.yaml#/Internal'
+
+/api/v1/updatecenter/plugins:
+  get:
+    operationId: getUpdateCenterPlugins
+    tags: [updatecenter]
+    summary: Gets the update center plugin inventory.
+    parameters:
+      - in: query
+        name: q
+        schema:
+          type: string
+        required: false
+        description: Optional case-insensitive substring filter on plugin name.
+    responses:
+      "200":
+        description: Plugin inventory.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/UpdateCenterPlugins'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "500":
+        $ref: '../components/responses.yaml#/Internal'
+      "502":
+        description: Update center service unreachable.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+
+  post:
+    operationId: uploadUpdateCenterPlugin
+    tags: [updatecenter]
+    summary: Uploads a Jenkins plugin artifact into the update center.
+    description: >
+      Pushes a .hpi/.jpi into the update center store. The transitive mandatory
+      dependency closure is resolved and validated before any byte is committed;
+      an unresolvable closure is rejected with an actionable per-dependency diff.
+      Requires the `updatecenter` / `upload` verb.
+    parameters:
+      - in: query
+        name: dryRun
+        schema:
+          type: boolean
+        required: false
+        description: >
+          Run PARSE, the admission check, PLAN and VALIDATE and return the plan
+          without committing anything.
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required: [file]
+            properties:
+              file:
+                type: string
+                format: binary
+                description: The .hpi/.jpi bytes.
+    responses:
+      "200":
+        description: Dry-run plan; nothing was written.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/UpdateCenterUploadResult'
+      "201":
+        description: The plugin and its planned dependencies were stored.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/UpdateCenterUploadResult'
+      "400":
+        description: >
+          malformed-upload (the body is not multipart/form-data or has no `file`
+          part), invalid-artifact, or missing-manifest-fields.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "409":
+        description: duplicate, version-digest-conflict, or update-center-disabled.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "413":
+        description: too-large — the artifact exceeds the configured byte cap.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "422":
+        description: >
+          unresolved-dependencies, closure-unverifiable, or closure-too-deep.
+          Every rejecting dependency is listed in `unresolved`.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/UpdateCenterUploadRejection'
+      "500":
+        description: update-center-status-unavailable.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "501":
+        description: >
+          uploads-require-single-writer — the update center is not deployed as a
+          single writer, so an upload could not be serialized.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "502":
+        description: update-center-unreachable or fetch-failed.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        description: >
+          declared-set-unavailable or metadata-unavailable. Both are retryable.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/UpdateCenterUploadRejection'

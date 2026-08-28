@@ -1,0 +1,37 @@
+/* Wrapping flex rather than a track grid: with `repeat(auto-fill, ...)` any
+   track the items don't reach still consumes width, and a trailing row that
+   doesn't divide evenly leaves a hole — both render as a phantom bordered
+   cell, because the 1px gap lets the container background through where no
+   .row paints over it. Flex items grow into whatever the last row leaves,
+   so the strip stays solid at any item count and any container width. */
+.kv {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.row {
+  flex: 1 1 220px;
+  min-width: 0;
+  background: var(--surface);
+  padding: 13px 15px;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.k {
+  font-size: 11px;
+  color: var(--text-2);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  margin-bottom: 5px;
+}
+
+.v {
+  font-size: 13.5px;
+  font-weight: 500;
+}

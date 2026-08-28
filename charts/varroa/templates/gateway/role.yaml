@@ -1,0 +1,56 @@
+{{- if .Values.gateway.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-gateway") }}
+  labels:
+    app.kubernetes.io/component: varroa-gateway
+    {{- include "varroa.labels" . | nindent 4 }}
+rules:
+  # Gateway needs read access to the varroa-ca Secret for CA loading.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["varroa-ca"]
+    verbs: ["get"]
+  # Unscoped secrets get for apikey-* secret verification (design.md D4).
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+  # Gateway reads User CRDs (namespace-scoped) during apikey verification.
+  - apiGroups: ["varroa.dev"]
+    resources: ["users"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-gateway") }}-group-reader
+  labels:
+    app.kubernetes.io/component: varroa-gateway
+    {{- include "varroa.labels" . | nindent 4 }}
+rules:
+  # Group CRDs are cluster-scoped (charts/varroa/crds/varroa.dev_groups.yaml:
+  # scope: Cluster), so listing them cannot be granted by a namespaced Role.
+  # This ClusterRole is scoped to exactly one verb on one resource; the
+  # design.md "no ClusterRole" statement assumed Groups were namespaced and
+  # was corrected during verification (see review-log.md).
+  - apiGroups: ["varroa.dev"]
+    resources: ["groups"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-gateway") }}-group-reader
+  labels:
+    app.kubernetes.io/component: varroa-gateway
+    {{- include "varroa.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-gateway") }}-group-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-gateway") }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

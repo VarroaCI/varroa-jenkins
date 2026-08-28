@@ -1,0 +1,40 @@
+# Localdev sample workload: ComposedBundle fed by the in-cluster git server +
+# a Controller with PVC and HTTPS ingress.
+#
+# The mite image is delivered via the operator's --set operator.miteImage
+# (localdev.sh line ~195), not per-Controller in this manifest.
+#
+# getting-started-tls is a per-controller COPY of the localdev cert: controller
+# deletion deletes the secret named in ingressSpec.tlsSecretName.
+apiVersion: varroa.dev/v1alpha1
+kind: ComposedBundle
+metadata:
+  name: getting-started
+  namespace: varroa
+spec:
+  displayName: "Localdev Getting Started"
+  description: "Sample bundle served by the in-cluster localdev git server"
+  jcascMergeStrategy: errorOnConflict
+  inputs:
+    - gitSource:
+        # /cgi-bin/git/ prefix: busybox httpd routes the smart-HTTP CGI there.
+        repoURL: https://git.varroa.localtest.me/cgi-bin/git/localdev-bundle.git
+        revision: localdev
+        path: .
+---
+apiVersion: varroa.dev/v1alpha1
+kind: Controller
+metadata:
+  name: getting-started
+  namespace: varroa
+spec:
+  namespace: varroa
+  version: ""
+  composedBundleRef:
+    name: getting-started
+  ingressSpec:
+    host: getting-started.varroa.localtest.me
+    tlsSecretName: getting-started-tls
+    ingressClassName: nginx
+  persistence:
+    size: 5Gi

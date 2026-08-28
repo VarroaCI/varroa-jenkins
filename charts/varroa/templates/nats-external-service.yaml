@@ -1,0 +1,31 @@
+{{- if and (not (include "varroa.isHive" .)) (.Values.nats.external).enabled -}}
+{{- $external := .Values.nats.external -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-nats-external
+  labels:
+    app.kubernetes.io/component: nats
+    {{- include "varroa.labels" . | nindent 4 }}
+  {{- with $external.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $external.serviceType | default "LoadBalancer" }}
+  {{- if and (eq ($external.serviceType | default "LoadBalancer") "NodePort") (gt ($external.nodePort | int) 0) }}
+  ports:
+    - name: nats
+      port: 4222
+      targetPort: 4222
+      nodePort: {{ $external.nodePort }}
+  {{- else }}
+  ports:
+    - name: nats
+      port: 4222
+      targetPort: 4222
+  {{- end }}
+  selector:
+    app.kubernetes.io/component: nats
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

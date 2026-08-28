@@ -1,0 +1,368 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+  name: broodschedules.varroa.dev
+spec:
+  group: varroa.dev
+  names:
+    kind: BroodSchedule
+    listKind: BroodScheduleList
+    plural: broodschedules
+    singular: broodschedule
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: BroodSchedule is the Schema for the broodschedules API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: BroodScheduleSpec defines the desired state of a BroodSchedule.
+            properties:
+              concurrencyPolicy:
+                default: Forbid
+                description: |-
+                  ConcurrencyPolicy governs how to treat overlapping executions.
+                  When waitForCompletion is true, this governs the underlying brood run's
+                  overlap; when false, it only guards trigger-Job overlap, not run overlap.
+                type: string
+              failedJobsHistoryLimit:
+                default: 1
+                description: FailedJobsHistoryLimit is the number of failed finished
+                  Jobs to retain.
+                format: int32
+                type: integer
+              schedule:
+                description: Schedule is the cron expression for the schedule. Required.
+                type: string
+              startingDeadlineSeconds:
+                description: |-
+                  StartingDeadlineSeconds is the deadline in seconds for starting the Job if it
+                  misses its scheduled time. Default nil (no deadline).
+                format: int64
+                type: integer
+              successfulJobsHistoryLimit:
+                default: 3
+                description: SuccessfulJobsHistoryLimit is the number of successful
+                  finished Jobs to retain.
+                format: int32
+                type: integer
+              suspend:
+                description: Suspend suspends the schedule. Default false.
+                type: boolean
+              template:
+                description: Template is the template for the brood operation to execute.
+                properties:
+                  action:
+                    description: Action is the operation to perform. Required.
+                    properties:
+                      groovy:
+                        description: |-
+                          Groovy carries the script for verb=executeGroovy. Required iff Verb ==
+                          executeGroovy; must be absent for every other verb.
+                        properties:
+                          itemRef:
+                            description: |-
+                              ItemRef resolves a CatalogItem of type groovy, using the same
+                              local-first/operator-namespace-fallback resolution mechanics as
+                              ComposedBundle itemRef inputs.
+                            properties:
+                              name:
+                                type: string
+                              namespace:
+                                description: |-
+                                  Namespace of the CatalogItem. Empty = resolve in the bundle's own namespace
+                                  with operator-namespace fallback; set = exact lookup in that namespace only.
+                                maxLength: 63
+                                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                type: string
+                              pinnedContentHash:
+                                type: string
+                              variables:
+                                additionalProperties:
+                                  type: string
+                                type: object
+                            required:
+                            - name
+                            type: object
+                          script:
+                            description: Script is an inline Groovy script.
+                            type: string
+                        type: object
+                        x-kubernetes-validations:
+                        - message: exactly one of script or itemRef must be set
+                          rule: '(has(self.script) ? 1 : 0) + (has(self.itemRef) ?
+                            1 : 0) == 1'
+                      verb:
+                        allOf:
+                        - enum:
+                          - restart
+                          - reprovision
+                          - reconcile
+                          - stop
+                          - start
+                          - executeGroovy
+                        - enum:
+                          - restart
+                          - reprovision
+                          - reconcile
+                          - stop
+                          - start
+                          - executeGroovy
+                        description: Verb is the operation to perform.
+                        type: string
+                    required:
+                    - verb
+                    type: object
+                    x-kubernetes-validations:
+                    - message: groovy is required iff verb is executeGroovy
+                      rule: 'self.verb == ''executeGroovy'' ? has(self.groovy) : !has(self.groovy)'
+                  clusters:
+                    description: Clusters is the list of clusters to target.
+                    items:
+                      type: string
+                    type: array
+                  execution:
+                    description: Execution controls how the operation is executed.
+                      Optional.
+                    properties:
+                      failurePolicy:
+                        allOf:
+                        - enum:
+                          - FailFast
+                          - FailTidy
+                          - FailAtEnd
+                        - enum:
+                          - FailFast
+                          - FailTidy
+                          - FailAtEnd
+                        description: FailurePolicy controls behavior on target failure.
+                          Default FailTidy.
+                        type: string
+                      maxParallel:
+                        description: MaxParallel is the maximum number of targets
+                          to dispatch concurrently. Default 1, minimum 1.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      order:
+                        allOf:
+                        - enum:
+                          - rolloutWave
+                          - name
+                        - enum:
+                          - rolloutWave
+                          - name
+                        description: Order controls target dispatch order. Default
+                          rolloutWave.
+                        type: string
+                    type: object
+                  targets:
+                    description: Targets defines which controllers to target. Required.
+                    properties:
+                      filters:
+                        description: Filters further narrows the target set by controller
+                          properties.
+                        properties:
+                          bundle:
+                            description: Bundle filters by controller spec.composedBundleRef.name
+                              exact match.
+                            type: string
+                          phase:
+                            description: Phase filters by controller status.phase
+                              equality.
+                            enum:
+                            - Pending
+                            - Provisioning
+                            - Running
+                            - Connected
+                            - Stopped
+                            - Failed
+                            type: string
+                          version:
+                            description: Version filters by controller spec.version
+                              exact match.
+                            type: string
+                        type: object
+                      names:
+                        description: |-
+                          Names is a list of target controller names. Exactly one of names or selector must be set.
+                          In the team namespace, bare names; in the operator namespace, "ns/name" format.
+                        items:
+                          type: string
+                        type: array
+                      namespaces:
+                        description: |-
+                          Namespaces restricts the selector to specific namespaces. Operator-ns selector mode only.
+                          Use ["all"] to target all namespaces.
+                        items:
+                          type: string
+                        type: array
+                      selector:
+                        description: Selector is a label selector for targeting controllers.
+                          Exactly one of names or selector must be set.
+                        properties:
+                          matchExpressions:
+                            description: matchExpressions is a list of label selector
+                              requirements. The requirements are ANDed.
+                            items:
+                              description: |-
+                                A label selector requirement is a selector that contains values, a key, and an operator that
+                                relates the key and values.
+                              properties:
+                                key:
+                                  description: key is the label key that the selector
+                                    applies to.
+                                  type: string
+                                operator:
+                                  description: |-
+                                    operator represents a key's relationship to a set of values.
+                                    Valid operators are In, NotIn, Exists and DoesNotExist.
+                                  type: string
+                                values:
+                                  description: |-
+                                    values is an array of string values. If the operator is In or NotIn,
+                                    the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                    the values array must be empty. This array is replaced during a strategic
+                                    merge patch.
+                                  items:
+                                    type: string
+                                  type: array
+                                  x-kubernetes-list-type: atomic
+                              required:
+                              - key
+                              - operator
+                              type: object
+                            type: array
+                            x-kubernetes-list-type: atomic
+                          matchLabels:
+                            additionalProperties:
+                              type: string
+                            description: |-
+                              matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                              map is equivalent to an element of matchExpressions, whose key field is "key", the
+                              operator is "In", and the values array contains only "value". The requirements are ANDed.
+                            type: object
+                        type: object
+                        x-kubernetes-map-type: atomic
+                    type: object
+                    x-kubernetes-validations:
+                    - message: exactly one of names or selector
+                      rule: has(self.names) != has(self.selector)
+                    - message: names must be non-empty when present
+                      rule: '!has(self.names) || size(self.names) > 0'
+                    - message: namespaces must be non-empty when present
+                      rule: '!has(self.namespaces) || size(self.namespaces) > 0'
+                    - message: namespaces requires selector
+                      rule: '!has(self.namespaces) || has(self.selector)'
+                  ttlSecondsAfterFinished:
+                    description: TTLSecondsAfterFinished bounds the lifetime of the
+                      operation after completion.
+                    format: int32
+                    type: integer
+                required:
+                - action
+                - targets
+                type: object
+              waitForCompletion:
+                default: true
+                description: |-
+                  WaitForCompletion determines whether the CronJob should wait for the brood
+                  operation run to complete before considering the Job successful.
+                type: boolean
+            required:
+            - schedule
+            - template
+            - waitForCompletion
+            type: object
+          status:
+            description: BroodScheduleStatus defines the observed state of a BroodSchedule.
+            properties:
+              active:
+                description: Active is a list of references to active Jobs.
+                items:
+                  description: ObjectReference contains enough information to let
+                    you inspect or modify the referred object.
+                  properties:
+                    apiVersion:
+                      description: API version of the referent.
+                      type: string
+                    fieldPath:
+                      description: |-
+                        If referring to a piece of an object instead of an entire object, this string
+                        should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
+                        For example, if the object reference is to a container within a pod, this would take on a value like:
+                        "spec.containers{name}" (where "name" refers to the name of the container that triggered
+                        the event) or if no container name is specified "spec.containers[2]" (container with
+                        index 2 in this pod). This syntax is chosen only to have some well-defined way of
+                        referencing a part of an object.
+                      type: string
+                    kind:
+                      description: |-
+                        Kind of the referent.
+                        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                      type: string
+                    name:
+                      description: |-
+                        Name of the referent.
+                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                      type: string
+                    namespace:
+                      description: |-
+                        Namespace of the referent.
+                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                      type: string
+                    resourceVersion:
+                      description: |-
+                        Specific resourceVersion to which this reference is made, if any.
+                        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
+                      type: string
+                    uid:
+                      description: |-
+                        UID of the referent.
+                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
+                      type: string
+                  type: object
+                  x-kubernetes-map-type: atomic
+                type: array
+              lastScheduleTime:
+                description: LastScheduleTime is the last time the CronJob was scheduled.
+                format: date-time
+                type: string
+              lastSuccessfulTime:
+                description: LastSuccessfulTime is the last time the CronJob completed
+                  successfully.
+                format: date-time
+                type: string
+              reason:
+                description: Reason provides detail about any schedule-level issues
+                  (e.g. tenancy violation).
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -1,0 +1,17 @@
+items:
+  - kind: pipeline
+    name: pipeline-scm-flow
+    displayName: "Pipeline from SCM"
+    description: "Pipeline job using Jenkinsfile from git"
+    definition:
+      cpsScmFlowDefinition:
+        scriptPath: Jenkinsfile
+        lightweight: true
+        scm:
+          gitSCM:
+            userRemoteConfigs:
+              - userRemoteConfig:
+                  url: https://github.com/fake-org/pipeline-repo.git
+            branches:
+              - branchSpec:
+                  name: "*/main"

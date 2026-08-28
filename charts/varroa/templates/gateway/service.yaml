@@ -1,0 +1,24 @@
+{{- if .Values.gateway.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-gateway") }}
+  labels:
+    app.kubernetes.io/component: varroa-gateway
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.gateway.service.type }}
+  ports:
+    - name: grpc
+      port: {{ .Values.gateway.service.grpcPort }}
+      targetPort: grpc
+    - name: metrics
+      port: {{ add (.Values.gateway.service.grpcPort | int) 1 }}
+      targetPort: metrics
+    - name: verify
+      port: 9092
+      targetPort: 9092
+  selector:
+    app.kubernetes.io/component: varroa-gateway
+    {{- include "varroa.selectorLabels" . | nindent 4 }}
+{{- end }}

@@ -1,0 +1,66 @@
+# activity - history and SSE stream.
+/api/v1/activity:
+  get:
+    operationId: listActivity
+    tags: [activity]
+    summary: Returns authorized, filtered activity history with cursor pagination.
+    parameters:
+      - {name: controller, in: query, schema: {type: string}}
+      - {name: cluster, in: query, schema: {type: string}}
+      - {name: namespace, in: query, schema: {type: string}}
+      - {name: source, in: query, schema: {type: string, enum: [mite, operator, user, api, jenkins, mcp]}}
+      - {name: severity, in: query, schema: {type: string, enum: [info, warning, error]}}
+      - {name: actor, in: query, schema: {type: string}}
+      - {name: type, in: query, schema: {type: string}}
+      - {name: start, in: query, schema: {type: string, format: date-time}}
+      - {name: end, in: query, schema: {type: string, format: date-time}}
+      - {name: cursor, in: query, schema: {type: string}}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 250, default: 100}}
+    responses:
+      "200":
+        description: Activity history page.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items, hasMore, retentionMode]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/ActivityEvent'
+                nextCursor: {type: string}
+                hasMore: {type: boolean}
+                retentionMode: {type: string, enum: [on, off]}
+                retentionDays: {type: integer, enum: [7, 30, 90]}
+              additionalProperties: false
+      "400":
+        description: Invalid filters, cursor, or range.
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "410":
+        description: Cursor has aged out of retention.
+
+/api/v1/activity/stream:
+  get:
+    operationId: streamActivity
+    tags: [activity]
+    summary: Streams filtered activity events via Server-Sent Events.
+    description: SSE stream with event type `activity`; filtering follows authorization.
+    x-sse: true
+    parameters:
+      - {name: controller, in: query, schema: {type: string}}
+      - {name: cluster, in: query, schema: {type: string}}
+      - {name: namespace, in: query, schema: {type: string}}
+      - {name: source, in: query, schema: {type: string}}
+      - {name: severity, in: query, schema: {type: string}}
+      - {name: actor, in: query, schema: {type: string}}
+      - {name: type, in: query, schema: {type: string}}
+    responses:
+      "200":
+        description: 'SSE event stream (event: activity, data = ActivityEvent).'
+        content:
+          text/event-stream:
+            schema: {type: string}
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'

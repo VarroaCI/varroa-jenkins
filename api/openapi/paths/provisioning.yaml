@@ -1,0 +1,218 @@
+# provisioning — defaults, config, version profiles.
+/api/v1/clusters/{cluster}/provisioningdefaults/{name}:
+  get:
+    operationId: getProvisioningDefaults
+    tags: [provisioning]
+    summary: Gets provisioning defaults for a cluster.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Provisioning defaults CRD.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ProvisioningDefaults'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  put:
+    operationId: updateProvisioningDefaults
+    tags: [provisioning]
+    summary: Updates provisioning defaults for a cluster.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/ProvisioningDefaults'
+    responses:
+      "200":
+        description: Provisioning defaults updated.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ProvisioningDefaults'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/clusters/{cluster}/provisioning/config:
+  get:
+    operationId: getProvisioningConfig
+    tags: [provisioning]
+    summary: Returns the aggregate provisioning read surface for a cluster.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+    responses:
+      "200":
+        description: Provisioning configuration.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ProvisioningConfig'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+
+/api/v1/clusters/{cluster}/version-profiles:
+  get:
+    operationId: listVersionProfiles
+    tags: [provisioning]
+    summary: Lists version profiles with full detail for a cluster.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+    responses:
+      "200":
+        description: Version profile list (N6 envelope).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/VersionProfileDetail'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+  post:
+    operationId: createVersionProfile
+    tags: [provisioning]
+    summary: Creates a JenkinsVersionProfile on a cluster.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/JenkinsVersionProfile'
+    responses:
+      "201":
+        description: Version profile created.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/JenkinsVersionProfile'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
+
+/api/v1/clusters/{cluster}/version-profiles/{name}:
+  get:
+    operationId: getVersionProfile
+    tags: [provisioning]
+    summary: Gets a JenkinsVersionProfile CR from a cluster.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: JenkinsVersionProfile CRD.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/JenkinsVersionProfile'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  put:
+    operationId: updateVersionProfile
+    tags: [provisioning]
+    summary: Updates a JenkinsVersionProfile on a cluster.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/JenkinsVersionProfile'
+    responses:
+      "200":
+        description: Version profile updated.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/JenkinsVersionProfile'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
+  delete:
+    operationId: deleteVersionProfile
+    tags: [provisioning]
+    summary: Deletes a JenkinsVersionProfile from a cluster.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "204":
+        description: Deleted.
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/clusters/{cluster}/controller-classes:
+  get:
+    operationId: listControllerClasses
+    tags: [provisioning]
+    summary: Lists ControllerClass CRDs for a cluster.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+    responses:
+      "200":
+        description: ControllerClass list (N6 envelope).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/ControllerClass'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+
+/api/v1/clusters/{cluster}/controller-classes/{name}:
+  get:
+    operationId: getControllerClass
+    tags: [provisioning]
+    summary: Gets a ControllerClass CR from a cluster.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: ControllerClass CRD.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ControllerClass'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'

@@ -1,0 +1,18 @@
+{{- if not (include "varroa.isHive" .) }}
+{{- if .Values.bff.enabled }}
+{{- $fullName := include "varroa.fullname" (dict "Release" .Release "name" "varroa-bff") }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $fullName }}-rbac-federation
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: varroa-bff
+    {{- include "varroa.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create", "get", "update"]
+{{- end }}
+
+{{- end }}

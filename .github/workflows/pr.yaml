@@ -1,0 +1,194 @@
+name: PR
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - 'frontend/**'
+      - '**/*.md'
+      - 'docs/**'
+      - '*.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Pinned deliberately. With @latest, a golangci-lint release lands
+      # mid-week and every open PR goes red on pre-existing code nobody
+      # touched. Bump this on purpose, in its own PR, with the resulting
+      # findings fixed in the same change — and keep it in step with
+      # release.yaml so a push to main cannot fail a check a PR just passed.
+      - run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+      - run: golangci-lint run --timeout 10m ./...
+
+  check-crds:
+    name: Check CRDs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make check-crds
+
+  check-proto:
+    name: Check Proto
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make check-proto
+
+  check-client:
+    name: Check API client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make check-client
+
+  check-bootstrap-deps:
+    name: Check bootstrap closure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Offline: re-verifies the committed bootstrap block against the committed
+      # plugin set. A lock edit that drops or moves a varroa-mite-auth
+      # dependency breaks authentication on every controller, and this is where
+      # that gets caught instead of at Jenkins boot. Recomputing the closure
+      # needs network + a built HPI, which is plugin-lock-refresh's job.
+      - run: go run ./cmd/bootstrapdeps --check
+
+  localdev-validate:
+    name: Validate localdev assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch chart dependencies
+        # charts/varroa/charts/ is gitignored — the NATS subchart must be
+        # fetched (pinned by Chart.lock) before lint/template. helm v3 needs
+        # the repo registered first.
+        run: |
+          helm repo add nats https://nats-io.github.io/k8s/helm/charts/ --force-update
+          helm dependency build charts/varroa
+      - name: Helm lint (localdev overlay)
+        run: helm lint charts/varroa -f charts/varroa/values-localdev.yaml
+      - name: Helm template (localdev overlay renders)
+        run: |
+          helm template varroa charts/varroa \
+            -f charts/varroa/values-localdev.yaml \
+            --set operator.miteImage=ci-check \
+            --set operator.image.tag=ci --set gateway.image.tag=ci \
+            --set bff.image.tag=ci --set frontend.image.tag=ci \
+            > /dev/null
+          # NOTE: bare `helm template` mints fresh random NATS credentials each
+          # run (no cluster for lookup()) — expected, render-only validation.
+      - name: Shellcheck localdev driver
+        run: shellcheck hack/localdev/localdev.sh
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Validate localdev manifests
+        # Core resources are schema-validated by kubeconform; Varroa CRs
+        # (varroa.dev/v1alpha1) use -ignore-missing-schemas because deriving
+        # JSON schemas from charts/varroa/crds/ in CI is brittle — CR field
+        # correctness is covered by the live localdev e2e instead.
+        run: |
+          go install github.com/yannh/kubeconform/cmd/kubeconform@latest
+          export LOCALDEV_BUNDLE_HASH=ci LOCALDEV_MITE_IMAGE=ci-check LOCALDEV_GIT_IMAGE=ci-check
+          for f in hack/localdev/manifests/*.yaml; do
+            envsubst '$LOCALDEV_BUNDLE_HASH $LOCALDEV_MITE_IMAGE $LOCALDEV_GIT_IMAGE' < "$f"
+            echo '---'
+          done | "$(go env GOPATH)/bin/kubeconform" -strict -summary -ignore-missing-schemas
+      - name: Validate OCI-layout fixture structure
+        # Structural check: hack/localdev/pluginpack-fixture/ must be a valid
+        # OCI image-layout (if present). Skips gracefully when the fixture
+        # hasn't been generated yet. Requires no live cluster or registry.
+        run: |
+          go run ./hack/localdev/cmd/validate-oci-layout \
+            --dir hack/localdev/pluginpack-fixture
+
+  govulncheck:
+    name: Vulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: govulncheck ./...
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go mod download
+      - run: go vet ./...
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc libc6-dev
+      - run: CGO_ENABLED=1 go test -v -race -count=1 ./...
+
+  build-backend:
+    name: Build backend image
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            GIT_BRANCH=${{ github.ref_name }}
+          tags: varroa-jenkins:pr-${{ github.event.number || github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-frontend:
+    name: Build frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: false
+          tags: varroa-frontend:pr-${{ github.event.number || github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

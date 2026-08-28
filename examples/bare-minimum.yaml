@@ -1,0 +1,17 @@
+# The smallest Controller Varroa accepts.
+#
+# No bundle and no version: the operator applies its built-in starter bundle
+# (a system message, a Kubernetes cloud so builds get agents, and one sample
+# pipeline) and runs the Jenkins core matching the embedded plugin lock.
+# With no ingress host configured the instance is reachable with
+# `kubectl port-forward` — its status says how.
+#
+#   kubectl apply -f bare-minimum.yaml
+#   kubectl get controllers -n varroa
+apiVersion: varroa.dev/v1alpha1
+kind: Controller
+metadata:
+  name: demo
+  namespace: varroa
+spec:
+  namespace: varroa

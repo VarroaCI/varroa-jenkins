@@ -1,0 +1,102 @@
+.toolbar {
+  margin-bottom: 20px;
+}
+
+.table {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.tableHeader {
+  display: grid;
+  grid-template-columns: 2fr 2fr 1fr 100px;
+  padding: 12px 20px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tableRow {
+  display: grid;
+  grid-template-columns: 2fr 2fr 1fr 100px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+  font-size: 0.92rem;
+}
+
+.tableRow:last-child {
+  border-bottom: none;
+}
+
+.cellName {
+  font-weight: 600;
+}
+
+.cellMuted {
+  font-size: 0.82rem;
+  color: var(--text-2);
+}
+
+/* Detail */
+.backLink {
+  color: var(--text-2);
+  font-size: 0.9rem;
+  display: inline-block;
+  margin-bottom: 20px;
+}
+
+.section {
+  margin-bottom: 28px;
+}
+
+.sectionTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 8px 16px;
+  font-size: 0.92rem;
+}
+
+.detailLabel {
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.bundleCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  margin-bottom: 10px;
+}
+
+.bundleName {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.bundleDesc {
+  font-size: 0.85rem;
+  color: var(--text-2);
+}
+
+.bundlePath {
+  font-size: 0.8rem;
+  color: var(--text-2);
+  font-family: monospace;
+}

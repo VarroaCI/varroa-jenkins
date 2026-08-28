@@ -1,0 +1,50 @@
+# hack/version-profiles.yaml — reviewed source of truth for shipped JenkinsVersionProfiles.
+#
+# This manifest drives hack/gen-plugin-lock.sh. It is the single place to add,
+# remove, or re-pin a supported Jenkins version. Edits land through a reviewed
+# PR; the generated chart templates and lock.yaml are derived, never edited by hand.
+#
+# version:        2-segment (e.g. "2.552") = LTS *line* profile (matches every patch
+#                 of the line); 3-segment (e.g. "2.570") = exact pin.
+# resolveVersion: the docker image tag plugins are resolved against
+#                 (jenkins/jenkins:<resolveVersion>-alpine-jdk21) AND the exact
+#                 core the operator deploys for that line (jenkinsImageForVersion
+#                 prefers a matched profile's resolveVersion over the bare line).
+#                 REQUIRED for 2-segment LTS *line* profiles — pin to the EARLIEST
+#                 patch that satisfies BOTH (a) every jenkins-plugin-cli-pinned
+#                 OSS plugin's required-core, and (b) plugin/pom.xml's
+#                 <jenkins.version> floor for the in-house varroa-mite-auth
+#                 plugin (baked into every controller pod regardless of profile —
+#                 an LTS line whose every patch sits below that floor can never
+#                 boot Jenkins and should not be shipped). A 2-segment weekly
+#                 release (e.g. 2.570) is an exact pin whose own tag exists, so
+#                 resolveVersion defaults to `version`; likewise any 3-segment
+#                 exact pin.
+#
+# Policy (issue #257): the current recommended LTS line + the weekly baseline
+# exact pin.  The weekly entry MUST equal `baseline` (#185/#188 skew constraint:
+# a lock baseline that differs from the controller's Jenkins version aborts
+# plugins-init).
+#
+# A previous LTS line ships again only once a candidate's earliest patch clears
+# plugin/pom.xml's <jenkins.version> floor (the in-house varroa-mite-auth
+# plugin is baked into every controller pod regardless of profile, so a line
+# whose every patch sits below that floor can never boot Jenkins).
+# hack/gen-plugin-lock.sh enforces this at generation time for every profile.
+baseline: "2.570"
+profiles:
+  # LTS line numbers, eol dates, and alpine-jdk21 tag availability confirmed
+  # against endoflife.date/api/jenkins.json and Docker Hub on 2026-07-03.
+  #
+  # Current LTS line (still supported; eol not yet set upstream). resolveVersion
+  # pinned to 2.555.3, not the line's earliest patch (2.555.1) — plugin/pom.xml's
+  # <jenkins.version> requires 2.555.3+ for varroa-mite-auth to load; discovered
+  # live 2026-07-03 (version-test controller failed BootFailure: CASC securityRealm
+  # varroaMiteAuth unresolved because the plugin refused to load on 2.555.1).
+  - version: "2.555"
+    channel: lts
+    recommended: true
+    resolveVersion: "2.555.3"
+  # Weekly baseline — MUST equal `baseline` above.
+  - version: "2.570"
+    channel: weekly

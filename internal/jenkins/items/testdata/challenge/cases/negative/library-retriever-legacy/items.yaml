@@ -1,0 +1,16 @@
+items:
+  - kind: folder
+    name: library-retriever-legacy
+    displayName: "Folder with Legacy Library Retriever"
+    description: "Folder with folderLibraries using legacySCM retriever (known gap — silently dropped)"
+    properties:
+      - folderLibraries:
+          libraries:
+            - libraryConfiguration:
+                name: legacy-lib
+                retriever:
+                  modernSCM:
+                    scm:
+                      github:
+                        repoOwner: fake-org
+                        repository: legacy-lib-repo

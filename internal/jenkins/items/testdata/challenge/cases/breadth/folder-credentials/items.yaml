@@ -1,0 +1,15 @@
+items:
+  - kind: folder
+    name: folder-credentials
+    displayName: "Folder with Credentials"
+    description: "Folder with usernamePassword credential"
+    properties:
+      - folderCredentialsProperty:
+          folderCredentials:
+            - credentials:
+                - usernamePassword:
+                    id: my-user-pass
+                    scope: GLOBAL
+                    username: admin
+                    password: s3cret
+                    description: "Admin credentials"

@@ -1,0 +1,26 @@
+{
+  "pkg": "varroa-frontend",
+  "globalName": "Varroa",
+  "shape": "package",
+  "projectId": "713137af-b310-4be2-94a7-e35fd3e443c3",
+  "srcDir": "src/components",
+  "tsconfig": "tsconfig.json",
+  "tokensPkg": "varroa-frontend",
+  "tokensGlob": "src/styles/*.css",
+  "cssEntry": ".design-sync/closure-extras.css",
+  "readmeHeader": ".design-sync/conventions.md",
+  "extraEntries": [
+    "./.design-sync/ds-reexports.mjs",
+    "./.design-sync/PreviewProvider.tsx"
+  ],
+  "extraFonts": ["./.design-sync/fonts/brand-fonts.css"],
+  "componentSrcMap": { "ToastProvider": null },
+  "provider": { "component": "PreviewProvider" },
+  "overrides": {
+    "Layout": { "cardMode": "single", "viewport": "1180x700" },
+    "Topbar": { "cardMode": "column" },
+    "Sidebar": { "cardMode": "single", "viewport": "300x660" },
+    "ConfigPipeline": { "cardMode": "column" },
+    "MetricCard": { "cardMode": "column" }
+  }
+}

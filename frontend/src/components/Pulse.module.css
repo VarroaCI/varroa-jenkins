@@ -1,0 +1,37 @@
+.pulse {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.pulse i {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+
+.on i {
+  background: var(--ok);
+}
+
+.on i::after,
+.on i::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--ok);
+  animation: ping 1.9s cubic-bezier(0, 0, .2, 1) infinite;
+}
+
+.on i::before {
+  animation-delay: .95s;
+}
+
+.off i {
+  background: var(--idle);
+}
+
+@keyframes ping {
+  0%   { transform: scale(1); opacity: .7; }
+  80%, 100% { transform: scale(3); opacity: 0; }
+}

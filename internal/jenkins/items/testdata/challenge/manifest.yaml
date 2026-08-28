@@ -1,0 +1,84 @@
+cases:
+  # Breadth (15, supported)
+  - name: freestyle-scm-extensions
+    tier: breadth
+    status: supported
+  - name: freestyle-builders-publishers
+    tier: breadth
+    status: supported
+  - name: freestyle-params-triggers
+    tier: breadth
+    status: supported
+  - name: pipeline-scm-flow
+    tier: breadth
+    status: supported
+  - name: pipeline-inline-script
+    tier: breadth
+    status: supported
+  - name: pipeline-all-properties
+    tier: breadth
+    status: supported
+  - name: multibranch-git-source
+    tier: breadth
+    status: supported
+  - name: multibranch-github-source
+    tier: breadth
+    status: supported
+  - name: multibranch-legacy-source
+    tier: breadth
+    status: supported
+  - name: orgfolder-github-navigator
+    tier: breadth
+    status: supported
+  - name: orgfolder-git-navigator
+    tier: breadth
+    status: supported
+  - name: folder-envvars
+    tier: breadth
+    status: supported
+  - name: folder-credentials
+    tier: breadth
+    status: supported
+  - name: folder-item-restrictions
+    tier: breadth
+    status: supported
+  - name: item-rbac-groups
+    tier: breadth
+    status: supported
+
+  # Depth (4, supported)
+  - name: deep-nested-folders
+    tier: depth
+    status: supported
+  - name: folder-all-properties
+    tier: depth
+    status: supported
+  - name: mixed-tree
+    tier: depth
+    status: supported
+  - name: pipeline-in-deep-folder
+    tier: depth
+    status: supported
+
+  # Negative (5 known-gap + 2 promoted supported)
+  - name: multibranch-multiple-sources
+    tier: negative
+    status: supported
+  - name: credential-type-secrettext
+    tier: negative
+    status: supported
+  - name: folder-libraries
+    tier: negative
+    status: known-gap
+  - name: library-retriever-legacy
+    tier: negative
+    status: known-gap
+  - name: unknown-kind
+    tier: negative
+    status: known-gap
+  - name: pipeline-missing-definition
+    tier: negative
+    status: known-gap
+  - name: freestyle-unknown-builder
+    tier: negative
+    status: known-gap

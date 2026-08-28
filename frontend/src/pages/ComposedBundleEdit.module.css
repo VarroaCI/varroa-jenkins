@@ -1,0 +1,33 @@
+.page {
+  animation: fade .35s ease;
+}
+
+@keyframes fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+.backLink {
+  display: inline-block;
+  margin-bottom: 16px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.loadingBanner {
+  padding: 40px 0;
+  color: var(--text-2);
+  font-size: 13px;
+  text-align: center;
+}
+
+.errorBanner {
+  margin-bottom: 16px;
+  padding: 12px 18px;
+  border-radius: var(--radius);
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  font-weight: 600;
+}

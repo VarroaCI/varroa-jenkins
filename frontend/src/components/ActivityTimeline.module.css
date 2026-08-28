@@ -1,0 +1,571 @@
+.timeline {
+  animation: fade 0.3s ease;
+}
+
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ── Filter bar ──────────────────────────────────────────────── */
+
+.filterBar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  border-radius: var(--radius-sm);
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.chip:hover {
+  background: var(--surface-2);
+}
+
+.chipOn {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.chipCount {
+  margin-left: 6px;
+  opacity: 0.65;
+  font-size: 11.5px;
+}
+
+/* ── Stream status ───────────────────────────────────────────── */
+
+.streamStatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 14px;
+}
+
+.liveDot,
+.deadDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.liveDot {
+  background: var(--ok);
+  animation: ping 1.5s ease-in-out infinite;
+}
+
+.deadDot {
+  background: var(--bad);
+}
+
+@keyframes ping {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ── Pause toggle ────────────────────────────────────────────── */
+
+.pauseBtn,
+.pauseBtnLive {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  border-radius: var(--radius-sm);
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.pauseBtn:hover {
+  background: var(--surface-2);
+}
+
+.pauseBtnLive {
+  color: var(--ok-text);
+  border-color: var(--ok);
+  background: var(--ok-soft);
+}
+
+/* ── New pill ────────────────────────────────────────────────── */
+
+.newPill {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  border-radius: var(--radius-sm);
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.newPill:hover {
+  background: var(--accent-fill);
+  color: var(--on-accent);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* ── Scroll container ────────────────────────────────────────── */
+
+.scrollContainer {
+  max-height: calc(100vh - 280px);
+  overflow-y: auto;
+  position: relative;
+}
+
+/* ── Event rows ──────────────────────────────────────────────── */
+
+.eventRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+
+.eventRow:last-child {
+  border-bottom: none;
+}
+
+.controlRow,
+.buildRow {
+  /* Lane-specific hooks retained for row semantics and future variants. */
+}
+
+/* ── Lane rail ───────────────────────────────────────────────── */
+
+.laneRail {
+  width: 3px;
+  min-height: 34px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  align-self: stretch;
+}
+
+.laneRailControl {
+  background: var(--info);
+}
+
+.laneRailBuilds {
+  background: var(--warn);
+}
+
+/* ── Icon ────────────────────────────────────────────────────── */
+
+.eventIcon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  font-size: 13px;
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+.eventIcon[data-style="softInfo"] {
+  background: var(--info-soft);
+  color: var(--info-text);
+}
+
+.eventIcon[data-style="softOk"] {
+  background: var(--ok-soft);
+  color: var(--ok-text);
+}
+
+.eventIcon[data-style="softWarn"] {
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
+
+.eventIcon[data-style="softBad"] {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+}
+
+.eventIcon[data-style="softMuted"] {
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+/* ── Event body ──────────────────────────────────────────────── */
+
+.eventBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.eventHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+  flex-wrap: wrap;
+}
+
+.eventType {
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.buildNumber {
+  font-size: 12.5px;
+  font-weight: 700;
+  font-family: var(--mono);
+  color: var(--text);
+}
+
+.sourceChip {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--text);
+  letter-spacing: 0.3px;
+}
+
+.actor {
+  font-size: 11.5px;
+  color: var(--text-2);
+  font-family: var(--mono);
+}
+
+.resultBadge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.resultBadge[data-style="softOk"] {
+  background: var(--ok-soft);
+  color: var(--ok-text);
+}
+
+.resultBadge[data-style="softBad"] {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+}
+
+.resultBadge[data-style="softWarn"] {
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
+
+.eventMessage {
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.controllerLink {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 550;
+}
+
+.controllerLink:hover {
+  text-decoration: underline;
+}
+
+.namespace {
+  color: var(--text-2);
+  font-size: 11.5px;
+  margin-left: 2px;
+}
+
+.buildLink {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.buildLink:hover {
+  text-decoration: underline;
+}
+
+/* ── Timestamp ───────────────────────────────────────────────── */
+
+.eventTime {
+  font-size: 11.5px;
+  color: var(--text-2);
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* ── Group ───────────────────────────────────────────────────── */
+
+.groupContainer {
+  border-bottom: 1px solid var(--border);
+}
+
+.groupHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s;
+  position: relative;
+}
+
+.groupHeader:hover {
+  background: var(--surface-2);
+}
+
+.groupHeaderExpanded {
+  border-bottom: 1px solid var(--border);
+}
+
+.groupToggle {
+  font-size: 10px;
+  color: var(--text-2);
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+}
+
+.groupMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.groupController {
+  font-weight: 650;
+  font-size: 13px;
+}
+
+.groupCount {
+  font-size: 11.5px;
+  color: var(--text-2);
+  font-family: var(--mono);
+}
+
+.groupTime {
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+
+.breakdownCluster {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.breakdownBadge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.breakdownBadge[data-style="softOk"] {
+  background: var(--ok-soft);
+  color: var(--ok-text);
+}
+
+.breakdownBadge[data-style="softBad"] {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+}
+
+.breakdownBadge[data-style="softWarn"] {
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
+
+.breakdownBadge[data-style="softInfo"] {
+  background: var(--info-soft);
+  color: var(--info-text);
+}
+
+.breakdownBadge[data-style="softMuted"] {
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+.groupMembers {
+  /* Members render their own event rows */
+}
+
+.groupMemberRow {
+  padding-left: 24px;
+}
+
+.groupMemberRow .eventRow {
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── States ──────────────────────────────────────────────────── */
+
+.emptyState {
+  padding: 40px 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+.loadMore { display: block; margin: 18px auto; padding: 8px 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); cursor: pointer; }
+
+.errorBanner {
+  padding: 14px 18px;
+  border-radius: var(--radius-sm);
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.retryBtn {
+  border: 1px solid var(--bad);
+  background: transparent;
+  color: var(--bad-text);
+  border-radius: var(--radius-sm);
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 600;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.retryBtn:hover {
+  background: var(--bad);
+  color: #fff;
+}
+
+/* ── Skeleton loading ────────────────────────────────────────── */
+
+.skeletonList {
+  display: flex;
+  flex-direction: column;
+}
+
+.skeletonRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.skeletonIcon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--surface-3);
+  flex-shrink: 0;
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+.skeletonText {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 3px;
+}
+
+.skeletonLine {
+  height: 12px;
+  border-radius: 4px;
+  background: var(--surface-3);
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+.skeletonTime {
+  width: 45px;
+  height: 12px;
+  border-radius: 4px;
+  background: var(--surface-3);
+  flex-shrink: 0;
+  margin-top: 3px;
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ── Responsive ──────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .filterBar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .eventRow {
+    flex-wrap: wrap;
+  }
+
+  .eventTime {
+    width: 100%;
+    margin-left: 43px;
+    margin-top: 0;
+  }
+}
+
+/* Cluster badge */
+.clusterBadge {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 700;
+  font-family: var(--mono);
+  color: var(--text-2);
+  background: var(--surface-3);
+  padding: 1px 6px;
+  border-radius: 8px;
+  margin-left: 4px;
+  vertical-align: middle;
+  letter-spacing: .2px;
+}

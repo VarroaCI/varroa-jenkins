@@ -1,0 +1,121 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 24px;
+  max-width: 520px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.heading {
+  font-family: var(--sans);
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 8px;
+}
+
+.description {
+  font-family: var(--sans);
+  font-size: 0.875rem;
+  color: var(--text-2);
+  margin: 0 0 16px;
+}
+
+.conflictList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.conflictRow {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+}
+
+.conflictField {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+.conflictDetail {
+  font-family: var(--sans);
+  font-size: 0.8125rem;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.managerLabel {
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.managerValue {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  background: var(--surface-3);
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: var(--text);
+}
+
+.messageText {
+  color: var(--text-2);
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.reloadBtn {
+  font-family: var(--sans);
+  font-size: 0.875rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 20px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.reloadBtn:hover {
+  background: var(--surface-2);
+}
+
+.overrideBtn {
+  font-family: var(--sans);
+  font-size: 0.875rem;
+  color: var(--on-accent);
+  background: var(--accent-fill);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 20px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.overrideBtn:hover {
+  background: var(--accent-fill-hover);
+}

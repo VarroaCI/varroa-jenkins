@@ -1,0 +1,67 @@
+# Helm values for a fully air-gapped install: no outbound internet access.
+# Every external dependency is replaced by a private mirror; Jenkins plugins
+# come from the in-cluster update center, seeded ahead of time (see README.md
+# in this directory and docs/install/air-gapped.md for the full walkthrough).
+
+# All images must be mirrored into your private registry first — the Varroa
+# components below, plus whichever of dex/nats you enable
+# (each has its own image.repository key).
+operator:
+  image:
+    repository: registry.internal.example.com/varroa/varroa-jenkins
+gateway:
+  image:
+    repository: registry.internal.example.com/varroa/varroa-jenkins
+bff:
+  image:
+    repository: registry.internal.example.com/varroa/varroa-jenkins
+frontend:
+  image:
+    repository: registry.internal.example.com/varroa/varroa-jenkins-frontend
+nats:
+  container:
+    image:
+      repository: registry.internal.example.com/varroa/nats
+  natsBox:
+    container:
+      image:
+        repository: registry.internal.example.com/varroa/nats-box
+  reloader:
+    image:
+      repository: registry.internal.example.com/varroa/nats-server-config-reloader
+
+updateCenter:
+  enabled: true
+  image:
+    repository: registry.internal.example.com/varroa/varroa-jenkins
+  pullThrough:
+    enabled: false               # no internet → no pull-through
+  # Seed from the plugin pack exported in step 1 (replaces the default
+  # public ghcr.io seed ref, which is unreachable here).
+  seed:
+    refs:
+      - registry.internal.example.com/varroa/plugin-pack:jenkins-version-2-555
+  storage:
+    type: oci                    # or "local" and pre-populate the PVC
+    oci:
+      ref: registry.internal.example.com/varroa/updatecenter-store:latest
+      existingSecret: registry-cred   # kubernetes.io/dockerconfigjson Secret
+
+networkPolicy:
+  enabled: true
+  # Operator OCI-registry egress: lets the operator reach the private
+  # registry for plugin-pack import and catalog operations.
+  ociRegistryEgress:
+    enabled: true
+    cidrs:
+      - 10.0.0.0/8               # pin to your private registry CIDR
+    ports:
+      - 443
+  # Not needed with pull-through disabled; if you later enable pull-through
+  # against an internal mirror of updates.jenkins.io, open this instead.
+  pullThroughEgress:
+    enabled: false
+  # Lets the updatecenter pod reach the OCI-backed seed store
+  # (rendered only when storage.type=oci).
+  updateCenterRegistryEgress:
+    enabled: true

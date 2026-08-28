@@ -1,0 +1,17 @@
+package: client
+generate:
+  models: true
+  client: true
+output: pkg/client/gen.go
+output-options:
+  exclude-operation-ids:
+    - streamActivity
+    - streamBrood
+    - streamControllerEvents
+    - streamControllerMite
+    - mcpPost
+    - mcpGet
+    - mcpDelete
+    - getDocs
+    - getDocsAsset
+    - getOpenAPISpec

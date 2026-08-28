@@ -1,0 +1,21 @@
+{{- if not (include "varroa.isHive" .) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "frontend") }}-telemetry
+  labels:
+    {{- include "varroa.labels" . | nindent 4 }}
+data:
+  telemetry-config.js: |
+    window.__VARROA_TELEMETRY__ = {
+      disabled: {{ .Values.telemetry.disabled }},
+      bffUrl: "{{ .Values.frontend.bffUrl | default "/api/v1" }}",
+      {{- /* The frontend can only ever reach the BFF's /api/v1/otel/v1/traces route, and the BFF
+             only registers that route when telemetry.endpoint (OTEL_EXPORTER_OTLP_ENDPOINT) is
+             set (see bff/deployment.yaml + cmd/bff/main.go). Gate on the endpoint here too so a
+             chart install that leaves it empty can't advertise traces as enabled and spam 404s. */}}
+      tracesEnabled: {{ and (ne .Values.telemetry.endpoint "") .Values.telemetry.traces.enabled .Values.telemetry.services.frontend.traces.enabled }},
+      samplerRatio: {{ .Values.telemetry.services.frontend.traces.samplerRatio }}
+    };
+
+{{- end }}

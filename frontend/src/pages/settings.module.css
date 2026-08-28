@@ -1,0 +1,123 @@
+/* Settings uses the shared form vocabulary and keeps page-specific layout here. */
+.formGroup { composes: formGroup from "./forms.module.css"; }
+.formLabel { composes: formLabel from "./forms.module.css"; }
+.formHint { composes: formHint from "./forms.module.css"; }
+.formInput { composes: formInput from "./forms.module.css"; }
+.errorMsg { composes: errorMsg from "./forms.module.css"; }
+.errorBanner { composes: errorBanner from "./forms.module.css"; }
+.dangerBtn { composes: dangerBtn from "./forms.module.css"; }
+.backLink { composes: backLink from "./forms.module.css"; }
+.page { composes: page from "./Controllers.module.css"; }
+.pageHead { composes: pageHead from "./Controllers.module.css"; }
+.pageTitle { composes: pageTitle from "./Controllers.module.css"; }
+.pageDesc { composes: pageDesc from "./Controllers.module.css"; }
+
+.muted { color: var(--text-2); }
+.pageNote { margin-bottom: 24px; }
+.toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.stack16 { margin-bottom: 16px; }
+.stack12 { margin-bottom: 12px; }
+.stack24 { margin-top: 24px; }
+.row { display: flex; gap: 8px; align-items: center; }
+.row12 { display: flex; gap: 12px; }
+.rowBetween { display: flex; justify-content: space-between; align-items: center; }
+.grow { flex: 1; }
+.grow2 { flex: 2; }
+.wrap { display: flex; flex-wrap: wrap; gap: 4px; }
+.memberChip { padding: 2px 8px; background: var(--surface-2); border-radius: 12px; font-size: .78rem; }
+.linkBtn { background: none; border: none; cursor: pointer; font: inherit; font-size: .82rem; padding: 2px 4px; color: var(--accent-strong); }
+.linkBtn:hover { color: var(--accent-fill-hover); }
+.dangerLink { color: var(--bad-text); }
+.table { composes: dataTable from "./tables.module.css"; }
+.tableWrap { overflow-x: auto; }
+.sectionTitle { font-size: 1rem; margin-top: 24px; margin-bottom: 12px; }
+.split { display: flex; gap: 12px; }
+.pluginRow, .annotationRow { display: flex; gap: 8px; margin-bottom: 8px; }
+.pluginName { flex: 2; }
+.pluginVersion { flex: 1; }
+.annotationKey { flex: 1; }
+.annotationValue { flex: 2; }
+.addAction { margin-bottom: 24px; }
+.saved { color: var(--ok-text); margin-right: 12px; }
+.savedSmall { color: var(--ok-text); font-size: .8rem; }
+.formError { color: var(--bad-text); font-size: .85rem; }
+.formErrorSmall { color: var(--bad-text); font-size: .8rem; }
+.gridTwo { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.roleSectionTitle { font-size: .85rem; margin-bottom: 8px; color: var(--text-2); }
+.roleRule { margin-bottom: 8px; }
+.roleVerbs { font-size: .8rem; color: var(--accent-strong); margin-bottom: 2px; }
+.roleDetail { font-size: .78rem; color: var(--text-2); }
+.identityNotice { margin-top: 16px; padding: 12px 16px; background: var(--surface-2); border-radius: 8px; }
+.accentLink { color: var(--accent-strong); }
+.userDetails { margin-top: 24px; }
+.editPanel { margin-bottom: 12px; }
+.deletePreview { margin-top: 12px; font-size: .85rem; }
+.previewHeading { margin-bottom: 8px; }
+.previewItem { padding: 2px 0; font-size: .8rem; }
+.previewDangerHeading { margin-top: 8px; margin-bottom: 8px; color: var(--bad-text); }
+.previewDangerItem { padding: 2px 0; font-size: .8rem; color: var(--bad-text); }
+.apiKeyRow { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; gap: 8px; }
+.apiKeyCode { font-size: .78rem; }
+.apiKeyMeta { font-size: .7rem; color: var(--text-2); }
+.resetForm { display: flex; gap: 8px; align-items: center; }
+.resetInput { flex: 1; max-width: 300px; }
+.resetButton { font-size: .8rem; }
+.tableBadge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: .72rem; font-weight: 600; line-height: 1.6; background: var(--surface-2); color: var(--text-2); }
+.recommended { background: var(--accent-soft); color: var(--accent-strong); }
+.eol { background: var(--bad-soft); color: var(--bad-text); }
+.ready { color: var(--ok-text); }
+.notReady { color: var(--bad-text); }
+.profileVersion { font-weight: 600; }
+.profileBadges { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.profileTableWrap { overflow-x: auto; }
+.profileCode { font-size: .78rem; }
+.permissionNote { margin: 0; color: var(--text-2); }
+.checkboxes { display: flex; flex-wrap: wrap; gap: 8px; }
+.checkboxLabel { font-size: .82rem; display: flex; align-items: center; gap: 4px; }
+.noResults { color: var(--text-2); text-align: center; margin-top: 32px; }
+.smallMuted { color: var(--text-2); font-size: .8rem; }
+.inlineActions { display: flex; gap: 8px; margin-top: 12px; }
+.dialogActions { display: flex; gap: 8px; margin-top: 16px; }
+.savedMessage { color: var(--ok-text); font-size: .85rem; }
+
+/* --- Update-center plugin upload ------------------------------------------ */
+.uploadPanel { margin-top: 16px; padding: 12px 16px; background: var(--surface-2); border-radius: 8px; }
+.uploadRow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.uploadFileInput { font-size: .85rem; color: var(--text-2); }
+
+/* The native "Choose File" button is unstyled by default and reads as a stray
+   OS control next to our buttons; match the default Button treatment. */
+.uploadFileInput::file-selector-button {
+  font: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 9px 15px;
+  margin-right: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: .15s;
+}
+
+.uploadFileInput::file-selector-button:hover {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+.uploadBtn {
+  background: none;
+  border: 1px solid var(--accent-strong);
+  color: var(--accent-strong);
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  font-size: .85rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+.uploadBtn:disabled { border-color: var(--border); color: var(--text-2); cursor: not-allowed; }
+.uploadSummary { font-size: .85rem; margin-bottom: 8px; }
+.uploadSuccess { color: var(--ok-text); font-size: .85rem; margin-bottom: 8px; }
+.uploadRemediation { font-size: .8rem; color: var(--text-2); padding: 2px 0; }
+.uploadNote { font-size: .78rem; color: var(--text-2); margin-top: 8px; }

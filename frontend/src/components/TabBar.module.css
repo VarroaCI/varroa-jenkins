@@ -1,0 +1,77 @@
+.tabBar {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 50;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  display: flex;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@media (min-width: 640px) {
+  .tabBar {
+    display: none;
+  }
+}
+
+.tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 48px;
+  padding: 6px 4px;
+  text-decoration: none;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 500;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  position: relative;
+  transition: color .15s;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text);
+  border-radius: var(--radius-sm);
+}
+
+.active {
+  color: var(--accent-strong);
+}
+
+.tabIcon {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+}
+
+.tabLabel {
+  line-height: 1;
+}
+
+.tabCount {
+  position: absolute;
+  top: 3px;
+  right: calc(50% - 22px);
+  background: var(--text);
+  color: var(--bg);
+  font-size: 10px;
+  min-height: 16px;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  line-height: 16px;
+  font-weight: 600;
+  text-align: center;
+}

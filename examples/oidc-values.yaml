@@ -1,0 +1,43 @@
+# Helm values for a production-shaped install with a direct OIDC provider
+# (Auth0, Okta, Azure AD, Keycloak, Google, ...).
+#
+#   helm install varroa oci://ghcr.io/varroaci/charts/varroa \
+#     --namespace varroa-system --create-namespace \
+#     --values oidc-values.yaml
+#
+# Prerequisites: cert-manager with a ClusterIssuer, a DNS wildcard for
+# *.your-domain.com pointing at your ingress controller, and an OIDC client
+# registered with redirect URL https://app.your-domain.com/callback
+# (the chart serves the dashboard at app.<global.domain> by default).
+# See docs/install/prerequisites.md.
+#
+# If your identity provider does not speak OIDC natively (GitHub OAuth, LDAP,
+# SAML), set dex.enabled=true and configure a Dex connector instead — see
+# docs/security/authentication.md.
+
+global:
+  domain: your-domain.com
+
+dex:
+  enabled: false
+
+auth:
+  mode: oidc
+  # The varroa_token cookie is issued on the parent domain so every Jenkins
+  # controller at *.your-domain.com sees it.
+  cookieDomain: .your-domain.com
+  dashboardUrl: https://app.your-domain.com
+  oidc:
+    issuer: https://your-tenant.us.auth0.com/
+    clientId: <oidc-client-id>
+    clientSecret: <oidc-client-secret>
+    redirectUrl: https://app.your-domain.com/callback
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+  tls:
+    - hosts: [app.your-domain.com]
+      secretName: varroa-tls

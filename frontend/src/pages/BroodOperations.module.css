@@ -1,0 +1,56 @@
+/* Layout .content already supplies page padding and max-width. */
+.page { animation: fade .35s ease; }
+
+@keyframes fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.header { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 22px; flex-wrap: wrap; }
+.header h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -.5px; }
+.subtitle { margin: 3px 0 0; color: var(--text-2); font-size: 13.5px; }
+.headerActions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.error { color: var(--bad-text); }
+.empty { text-align: center; padding: 2rem; color: var(--text-2); }
+.table { composes: dataTable from "./tables.module.css"; }
+.nameCell { composes: nameCell from "./tables.module.css"; }
+.table td span { display: block; margin-top: 4px; color: var(--text-2); font-size: 12px; }
+.nameCell span { text-transform: capitalize; }
+.failure { color: var(--bad-text); }
+.degradedBanner { background: var(--warn-soft); color: var(--warn-text); padding: 0.5rem 1rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.9rem; }
+.actionButtons { display: flex; gap: 0.25rem; }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modalContent { background: var(--surface); padding: 1.5rem; border-radius: 8px; min-width: 300px; }
+.modalActions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
+
+.phasePill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 3px 10px 3px 8px;
+  border-radius: 20px;
+  letter-spacing: .1px;
+}
+.phaseDot { width: 7px; height: 7px; border-radius: 50%; }
+.phaseRunning { background: var(--info-soft); color: var(--info-text); }
+.phaseRunning .phaseDot { background: var(--info); }
+.phaseSuspended { background: var(--warn-soft); color: var(--warn-text); }
+.phaseSuspended .phaseDot { background: var(--warn); }
+.phasePending { background: var(--idle-soft); color: var(--idle-text); }
+.phasePending .phaseDot { background: var(--idle); }
+.phaseSucceeded { background: var(--ok-soft); color: var(--ok-text); }
+.phaseSucceeded .phaseDot { background: var(--ok); }
+.phaseFailed { background: var(--bad-soft); color: var(--bad-text); }
+.phaseFailed .phaseDot { background: var(--bad); }
+.phaseCanceled { background: var(--idle-soft); color: var(--idle-text); }
+.phaseCanceled .phaseDot { background: var(--idle); }
+
+.runOverlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.runDialog { background: var(--surface); padding: 1.5rem; border-radius: 8px; max-width: 700px; width: 90%; max-height: 85vh; overflow-y: auto; }
+.runDialogTitle { font-size: 18px; font-weight: 700; margin-bottom: 12px; }
+.runStepLabel { font-weight: 600; font-size: 13px; color: var(--text-2); margin: 12px 0 6px; }
+
+/* The Card supplies the outer edge; a trailing row border doubles it. */
+.table tbody tr:last-child td { border-bottom: none; }

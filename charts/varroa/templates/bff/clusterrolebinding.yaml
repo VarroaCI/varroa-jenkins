@@ -1,0 +1,20 @@
+{{- if not (include "varroa.isHive" .) }}
+{{- if .Values.bff.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-bff") }}
+  labels:
+    app.kubernetes.io/component: varroa-bff
+    {{- include "varroa.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-bff") }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-bff") }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+
+{{- end }}

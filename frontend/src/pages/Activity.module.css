@@ -1,0 +1,431 @@
+.page {
+  animation: fade 0.3s ease;
+  max-width: 960px;
+}
+
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ---- Page head ---- */
+
+.pageHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+
+.pageTitle {
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.3px;
+}
+
+.pageDesc {
+  font-size: 13.5px;
+  color: var(--text-2);
+  margin-top: 4px;
+}
+
+/* ---- Pause toggle ---- */
+
+.pauseBtn,
+.pauseBtnLive {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  border-radius: var(--radius-sm);
+  padding: 7px 15px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.pauseBtn:hover {
+  background: var(--surface-2);
+}
+
+.pauseBtnLive {
+  color: var(--ok-text);
+  border-color: var(--ok);
+  background: var(--ok-soft);
+}
+
+/* ---- Filter bar (matching Controllers pattern) ---- */
+
+.filterBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.filterField { display: grid; gap: 4px; color: var(--text-2); font-size: 11px; font-weight: 650; text-transform: uppercase; }
+.filterField select, .filterField input { min-height: 34px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); padding: 5px 9px; text-transform: none; }
+.filterField select:hover, .filterField input:hover { border-color: var(--text-3); }
+.filterField select:focus, .filterField input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.activeFilters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.activeFilters button, .clearAll { border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); color: var(--text-2); padding: 4px 9px; cursor: pointer; }
+.retentionNote { color: var(--text-2); font-size: 13px; }
+
+.chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  border-radius: var(--radius-sm);
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.chip:hover {
+  background: var(--surface-2);
+}
+
+.chipOn {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.chipCount {
+  margin-left: 6px;
+  opacity: 0.65;
+  font-size: 11.5px;
+}
+
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  flex: 1;
+  max-width: 300px;
+  margin-left: auto;
+}
+
+.searchBox span {
+  color: var(--text-2);
+  font-size: 15px;
+}
+
+.searchBox input {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  width: 100%;
+  font-family: var(--sans);
+}
+
+.searchBox input::placeholder {
+  color: var(--text-2);
+}
+
+/* ---- Stream status ---- */
+
+.streamStatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 14px;
+}
+
+.liveDot,
+.deadDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.liveDot {
+  background: var(--ok);
+  animation: ping 1.5s ease-in-out infinite;
+}
+
+.deadDot {
+  background: var(--bad);
+}
+
+@keyframes ping {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ---- Event list ---- */
+
+.eventList {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Event row ---- */
+
+.eventRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.eventRow:last-child {
+  border-bottom: none;
+}
+
+.eventRowNew {
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---- Icon ---- */
+
+.eventIcon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  font-size: 14px;
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+.eventIcon[data-style="softInfo"] {
+  background: var(--info-soft);
+  color: var(--info-text);
+}
+
+.eventIcon[data-style="softOk"] {
+  background: var(--ok-soft);
+  color: var(--ok-text);
+}
+
+.eventIcon[data-style="softWarn"] {
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
+
+.eventIcon[data-style="softBad"] {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+}
+
+/* ---- Event body ---- */
+
+.eventBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.eventHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+  flex-wrap: wrap;
+}
+
+.eventType {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.sourceChip {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 5px;
+  color: var(--text);
+  letter-spacing: 0.3px;
+}
+
+.actor {
+  font-size: 12px;
+  color: var(--text-2);
+  font-family: var(--mono);
+}
+
+.eventMessage {
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.controllerLink {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 550;
+}
+
+.controllerLink:hover {
+  text-decoration: underline;
+}
+
+.namespace {
+  color: var(--text-2);
+  font-size: 12px;
+  margin-left: 2px;
+}
+
+/* ---- Timestamp ---- */
+
+.eventTime {
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
+/* ---- States ---- */
+
+.emptyState {
+  padding: 40px 0;
+  text-align: center;
+  font-size: 13.5px;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+.errorBanner {
+  padding: 14px 18px;
+  border-radius: var(--radius-sm);
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  font-size: 13.5px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.retryBtn {
+  border: 1px solid var(--bad);
+  background: transparent;
+  color: var(--bad-text);
+  border-radius: var(--radius-sm);
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 600;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.retryBtn:hover {
+  background: var(--bad);
+  color: #fff;
+}
+
+/* ---- Skeleton loading ---- */
+
+.skeletonList {
+  display: flex;
+  flex-direction: column;
+}
+
+.skeletonRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.skeletonIcon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--surface-3);
+  flex-shrink: 0;
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+.skeletonText {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.skeletonLine {
+  height: 12px;
+  border-radius: 4px;
+  background: var(--surface-3);
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+.skeletonTime {
+  width: 50px;
+  height: 12px;
+  border-radius: 4px;
+  background: var(--surface-3);
+  flex-shrink: 0;
+  margin-top: 4px;
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ---- Responsive ---- */
+
+@media (max-width: 768px) {
+  .filterBar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .searchBox {
+    max-width: 100%;
+    margin-left: 0;
+  }
+
+  .eventRow {
+    flex-wrap: wrap;
+  }
+
+  .eventTime {
+    width: 100%;
+    margin-left: 47px;
+    margin-top: 0;
+  }
+}

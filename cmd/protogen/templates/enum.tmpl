@@ -1,0 +1,7 @@
+type {{.Name}} int32
+
+const (
+{{- range .Values}}
+	{{.GoName}} {{$.Name}} = {{.Value}}
+{{- end}}
+)

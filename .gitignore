@@ -1,0 +1,37 @@
+bin/
+# stray `go build ./cmd/<x>` outputs at repo root
+/operator
+/gateway
+/bff
+/mite
+/varroactl
+/fakemite
+/bootstrapdeps
+/protogen
+/updatecenter
+vendor/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+.idea/
+.vscode/
+*.swp
+*.swo
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+/varroa-jenkins
+plugin/target/
+charts/varroa/charts/
+
+# local env overrides (frontend/.env.example ships and stays tracked)
+.env
+frontend/.env*
+!frontend/.env.example
+
+# localdev TLS certs (hack/localdev)
+.localdev/

@@ -1,0 +1,29 @@
+items:
+  - kind: pipeline
+    name: pipeline-all-properties
+    displayName: "Pipeline All Properties"
+    description: "Pipeline with all optional properties"
+    concurrentBuild: true
+    quietPeriod: 5
+    resumeBlocked: true
+    properties:
+      - buildDiscarder:
+          strategy:
+            logRotator:
+              daysToKeep: 30
+              numToKeep: 10
+      - disableConcurrentBuilds: {}
+      - disableResume: {}
+      - durabilityHint:
+          hint: PERFORMANCE_OPTIMIZED
+    definition:
+      cpsScmFlowDefinition:
+        scriptPath: Jenkinsfile
+        scm:
+          gitSCM:
+            userRemoteConfigs:
+              - userRemoteConfig:
+                  url: https://github.com/fake-org/project.git
+            branches:
+              - branchSpec:
+                  name: "*/main"

@@ -1,0 +1,387 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  # Manual fallback for a release-please-created tag. Tags pushed by the action
+  # using the default GITHUB_TOKEN do not trigger other workflows, so the `push`
+  # trigger above never fires for them and the release would publish no
+  # artifacts. Dispatch this workflow against that tag
+  # (`gh workflow run release.yaml --ref vX.Y.Z`) to publish them: the version
+  # comes from GITHUB_REF_NAME, which is the tag name for a tag-ref dispatch.
+  # Dispatching against a branch is a no-op for publishing — every job that
+  # pushes an artifact carries its own `refs/tags/v` guard.
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  check-crds:
+    name: Check CRDs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make check-crds
+
+  check-proto:
+    name: Check Proto
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      - run: make check-proto
+
+  backend:
+    name: Build & push backend
+    # Every publishing job gates on a tag ref. The `push` trigger already
+    # guarantees one, but workflow_dispatch does not: dispatching against a
+    # branch would otherwise build it and push the result over the :latest tag
+    # (docker/metadata-action emits type=raw,value=latest unconditionally, while
+    # its semver pattern silently emits nothing off a tag).
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [check-crds, check-proto]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      - run: go mod download
+
+      - run: go vet ./...
+      # Pinned to the same version as pr.yaml. With @latest a golangci-lint
+      # release lands mid-week and every push to main fails on pre-existing
+      # code nobody touched, so no image publishes. Bump both together.
+      - run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+      - run: golangci-lint run --timeout 10m ./...
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc libc6-dev
+      - run: CGO_ENABLED=1 go test -race -count=1 ./...
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,prefix=,format=short
+            type=sha,prefix=,format=long
+            type=raw,value=latest
+            type=semver,pattern={{version}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            GIT_BRANCH=${{ github.ref_name }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  frontend:
+    name: Build & push frontend
+    # Tag-ref gate: see the backend job.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-frontend
+          tags: |
+            type=sha,prefix=,format=short
+            type=sha,prefix=,format=long
+            type=raw,value=latest
+            type=semver,pattern={{version}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  chart:
+    name: Push Helm chart (OCI)
+    # Only tag pushes carry a real release version; plain pushes to main
+    # build/push images (above) but do not cut a chart version.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # yq is used below to pin the chart's image tags. Jobs do not share
+      # installed tools, so this job needs its own setup step even though
+      # publish-plugin-packs already installs yq.
+      - uses: ./.github/actions/setup-ci-tools
+        with:
+          yq: "true"
+
+      - name: Fetch chart dependencies
+        # charts/varroa/charts/ is gitignored — the NATS subchart must be
+        # fetched (pinned by Chart.lock) before packaging, same as
+        # localdev-validate in pr.yaml. helm v3 needs the repo registered first.
+        run: |
+          helm repo add nats https://nats-io.github.io/k8s/helm/charts/ --force-update
+          helm dependency build charts/varroa
+      - id: owner
+        # OCI repository paths must be lowercase; github.repository_owner
+        # preserves the org/user's actual case (e.g. "VarroaCI"), which
+        # `helm push` rejects outright. The docker jobs above don't need
+        # this because docker/metadata-action already lowercases the image
+        # ref it computes; helm push has no equivalent, so we lowercase by
+        # hand here.
+        run: echo "name=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+      - name: Push Helm chart (OCI)
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          # Refuse anything that isn't a clean semver — VERSION is written into
+          # five values.yaml keys below, and an empty or malformed value would
+          # silently produce a chart that pulls a nonexistent tag.
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "FATAL: refusing to package: '$VERSION' is not semver (from tag '$GITHUB_REF_NAME')" >&2
+            exit 1
+          fi
+
+          # values.yaml ships tag: latest so the private repo's main-push builds
+          # track head. A released chart must instead pin the images published by
+          # THIS run, or `helm install --version X` silently installs whatever
+          # :latest happens to be. docker/metadata-action publishes
+          # type=semver,pattern={{version}}, so "$VERSION" is a real tag.
+          # The mite and varroactl images are derived from operator.image by
+          # templates/operator/deployment.yaml, so pinning operator covers both.
+          # This edit must live in this step: VERSION is a shell variable and does
+          # not survive into another step.
+          for c in operator gateway bff frontend updateCenter; do
+            VERSION="$VERSION" yq -i ".${c}.image.tag = strenv(VERSION)" charts/varroa/values.yaml
+          done
+          yq '.operator.image, .gateway.image, .bff.image, .frontend.image, .updateCenter.image' charts/varroa/values.yaml
+
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+          helm package charts/varroa --version "${VERSION}" --app-version "${VERSION}"
+          # Push the exact file just packaged, never a glob: a stale varroa-*.tgz
+          # left in the workspace would make the glob ambiguous and could push the
+          # wrong chart version.
+          helm push "varroa-${VERSION}.tgz" "oci://ghcr.io/${{ steps.owner.outputs.name }}/charts"
+
+  release:
+    name: Publish release binaries
+    # Only a tag push carries a real release version, and only a tag should ever
+    # create a GitHub Release — a plain push to main must not. `chart` is a
+    # dependency so a Release never advertises binaries for a version whose
+    # images and chart failed to publish. `publish-plugin-packs` is deliberately
+    # NOT a dependency: it is continue-on-error and must not gate the Release.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [backend, frontend, chart]
+    runs-on: ubuntu-latest
+    permissions:
+      # The rest of this workflow runs with the workflow-level `contents: read`.
+      # Creating a Release and uploading assets needs write, scoped to this job.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Build varroactl for every published platform
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          # Same semver guard as the chart job: VERSION is baked into the binary
+          # and into every asset filename, so a malformed value would ship
+          # assets nobody can match to a release.
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "FATAL: refusing to release: '$VERSION' is not semver (from tag '$GITHUB_REF_NAME')" >&2
+            exit 1
+          fi
+
+          mkdir -p dist
+          # CGO_ENABLED=0 keeps varroactl a static, dependency-free download —
+          # the backend image build needs cgo for the race detector, a released
+          # CLI must not need a matching libc.
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            os="${target%/*}"; arch="${target#*/}"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build \
+              -trimpath \
+              -ldflags "-s -w -X main.version=${VERSION}" \
+              -o dist/varroactl ./cmd/varroactl
+            tar -C dist -czf "dist/varroactl_${VERSION}_${os}_${arch}.tar.gz" varroactl
+            rm dist/varroactl
+          done
+
+          # Checksums are generated from inside dist/ so the file lists bare
+          # names, which is what `sha256sum -c` expects after download.
+          (cd dist && sha256sum ./*.tar.gz > SHA256SUMS)
+          ls -l dist
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          # Idempotent by design: release.yaml carries a workflow_dispatch
+          # fallback for release-please tags, so this step can legitimately run
+          # twice against the same tag and must not fail the second time.
+          #
+          # The upload branch is also the NORMAL path from 0.1.1 on, not just a
+          # re-run guard: release-please creates the Release itself (with notes
+          # generated from CHANGELOG.md) and this job only attaches binaries to
+          # it. The --notes below therefore apply solely to a manually cut tag
+          # such as the initial v0.1.0, where no Release exists yet. Do not
+          # "fix" this by forcing --notes onto an existing Release: that would
+          # overwrite release-please's changelog notes with this boilerplate.
+          # Enumerate the exact expected assets, never `dist/*` — the same
+          # no-glob rule the chart push follows. A stray file in dist/ must
+          # fail the upload loudly, not ship as a release asset.
+          assets=()
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            os="${target%/*}"; arch="${target#*/}"
+            assets+=("dist/varroactl_${VERSION}_${os}_${arch}.tar.gz")
+          done
+          assets+=(dist/SHA256SUMS)
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+              --title "v${VERSION}" \
+              --notes "Container images, Helm chart, and \`varroactl\` binaries for v${VERSION}.
+
+          ## Install the chart
+
+          \`\`\`bash
+          helm install varroa oci://ghcr.io/varroaci/charts/varroa --version ${VERSION}
+          \`\`\`
+
+          ## Install varroactl
+
+          Download the archive for your platform below, verify it against \`SHA256SUMS\`, then:
+
+          \`\`\`bash
+          tar -xzf varroactl_${VERSION}_<os>_<arch>.tar.gz
+          install -m 0755 varroactl /usr/local/bin/varroactl
+          \`\`\`
+
+          See [CHANGELOG.md](CHANGELOG.md) for the full list of changes."
+          fi
+
+          gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name'
+
+  publish-plugin-packs:
+    name: Publish plugin packs
+    # Tag-ref gate: see the backend job.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [check-crds, check-proto]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile:
+          - name: "2-555"
+            version: "2.555"
+          - name: "2-570"
+            version: "2.570"
+    # Packs are one of three routes that populate an update center (pull-through
+    # and varroactl import/upload are the others), and nothing in this workflow
+    # depends on this job — it never gated image publishing. Soft-failing gives
+    # up only the red signal: fail-fast:false stops one profile's failure from
+    # cancelling its sibling, continue-on-error stops it reddening a release
+    # that otherwise published images. There is deliberately NO automated tag
+    # check, so a green Release does not prove the packs published — confirm the
+    # ghcr tags by hand.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      # build-plugin-pack.sh parses hack/version-profiles.yaml with yq, which
+      # the runner image does not ship by default.
+      - uses: ./.github/actions/setup-ci-tools
+        with:
+          yq: "true"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      - run: go mod download
+
+      - name: Build varroactl
+        run: make build-cli
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: repo
+        # Same lowercase requirement as the chart job above, for the same
+        # reason: github.repository preserves the org's actual case
+        # ("VarroaCI/varroa-jenkins"), and pushing to
+        # ghcr.io/VarroaCI/varroa-jenkins/plugin-pack fails with
+        # `invalid repository`. The backend and frontend jobs are unaffected
+        # because docker/metadata-action lowercases the ref it computes;
+        # build-plugin-pack.sh takes the base ref verbatim, so lowercase here.
+        # This cannot fail in the private repo, whose owner is already
+        # lowercase, so it only ever breaks in the public org.
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Build & publish plugin pack
+        run: |
+          hack/build-plugin-pack.sh \
+            "${{ matrix.profile.name }}" \
+            "${{ matrix.profile.version }}" \
+            "ghcr.io/${{ steps.repo.outputs.name }}"

@@ -1,0 +1,233 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+  name: catalogitems.varroa.dev
+spec:
+  group: varroa.dev
+  names:
+    kind: CatalogItem
+    listKind: CatalogItemList
+    plural: catalogitems
+    singular: catalogitem
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.type
+      name: TYPE
+      type: string
+    - jsonPath: .spec.sourceRef
+      name: SOURCE
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: CatalogItem is the Schema for the catalogitems API (operator-owned;
+          users read only).
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: CatalogItemSpec defines the desired state of CatalogItem.
+            properties:
+              description:
+                type: string
+              displayName:
+                type: string
+              path:
+                type: string
+              requires:
+                items:
+                  type: string
+                type: array
+              sourceRef:
+                type: string
+              tags:
+                items:
+                  type: string
+                type: array
+              type:
+                description: CatalogItemType is the kind of catalog item.
+                enum:
+                - podtemplate
+                - plugin
+                - item
+                - jcasc
+                - rbac
+                - pipeline-template
+                - groovy
+                type: string
+              variables:
+                items:
+                  description: CatalogVariable declares a user-supplied variable for
+                    a catalog item.
+                  properties:
+                    allowedValues:
+                      description: |-
+                        AllowedValues populates a choice/dropdown widget. Only valid when Type is "string" or
+                        "number" (empty/unset); rejected by ValidateCatalogItem when set with boolean/credentials.
+                      items:
+                        type: string
+                      type: array
+                    default:
+                      type: string
+                    description:
+                      type: string
+                    name:
+                      type: string
+                    required:
+                      type: boolean
+                    type:
+                      description: |-
+                        Type is the parameter type: string|number|boolean|credentials. Omitting the field
+                        means "string" — every pre-existing CatalogItem with untyped variables validates
+                        unchanged. Note: the Enum marker below does not list "" — a client that sends an
+                        explicit `type: ""` (as opposed to omitting the key entirely) would be rejected by
+                        CRD schema validation before ValidateCatalogItem ever runs. Nothing in this codebase
+                        writes an explicit empty string (Go zero value + `omitempty` always omits the key on
+                        marshal), so this is a theoretical corner case, not a behavior change for any real
+                        caller.
+                      enum:
+                      - string
+                      - number
+                      - boolean
+                      - credentials
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+              version:
+                type: string
+            required:
+            - path
+            - sourceRef
+            - type
+            type: object
+          status:
+            description: CatalogItemStatus defines the observed state of CatalogItem.
+            properties:
+              closure:
+                description: |-
+                  Closure is the resolver's own record of what it pinned, for items derived
+                  from the update-center store. Content is a flat plugins.yaml fragment and
+                  can express none of direct-vs-transitive, provenance, or the minimum in
+                  force, so the detail view reads them from here rather than re-deriving
+                  them (it has neither the store annotations nor the solver).
+                items:
+                  description: |-
+                    CatalogItemClosureEntry is one pinned member of a derived item's dependency
+                    closure.
+                  properties:
+                    artifactId:
+                      type: string
+                    direct:
+                      description: |-
+                        Direct reports whether the root declared this dependency itself, as
+                        opposed to it being pulled in transitively.
+                      type: boolean
+                    minimum:
+                      description: Minimum is the effective minimum in force, when
+                        one was declared.
+                      type: string
+                    provenance:
+                      description: Provenance is "store" or "lock" — where the selected
+                        version came from.
+                      type: string
+                    version:
+                      type: string
+                  required:
+                  - artifactId
+                  - version
+                  type: object
+                type: array
+              compat:
+                description: |-
+                  Compat carries one advisory verdict per JenkinsVersionProfile. Verdicts
+                  never set Valid=false and never block selection or provisioning.
+                items:
+                  description: |-
+                    CatalogItemCompat is one profile's advisory compatibility verdict for a
+                    catalog item.
+                  properties:
+                    jenkinsVersion:
+                      description: |-
+                        JenkinsVersion is the profile's effective deployed core version — its
+                        spec.resolveVersion when set, else spec.version.
+                      type: string
+                    message:
+                      type: string
+                    profile:
+                      description: Profile names the JenkinsVersionProfile this verdict
+                        was computed against.
+                      type: string
+                    verdict:
+                      enum:
+                      - compatible
+                      - core-too-old
+                      - dep-below-minimum
+                      - lock-too-old
+                      - unknown
+                      type: string
+                  required:
+                  - profile
+                  - verdict
+                  type: object
+                type: array
+              conditions:
+                description: Conditions carries CompatWarning for derived items.
+                items:
+                  description: TemplateCatalogCondition is a generic status condition
+                    for catalogs and composed bundles.
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
+              content:
+                type: string
+              contentHash:
+                type: string
+              message:
+                type: string
+              observedRevision:
+                type: string
+              valid:
+                type: boolean
+            required:
+            - valid
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

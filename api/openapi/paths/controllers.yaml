@@ -1,0 +1,709 @@
+# controllers — full controller lifecycle management.
+/api/v1/controllers:
+  get:
+    operationId: listControllers
+    tags: [controllers]
+    summary: Lists controllers across clusters, optionally filtered by namespace/cluster.
+    parameters:
+      - $ref: '../components/parameters.yaml#/namespace'
+      - $ref: '../components/parameters.yaml#/clusterQuery'
+    responses:
+      "200":
+        description: Controller summary list with per-cluster fan-out status.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items, clusters]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/ControllerSummary'
+                clusters:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/ClusterFanoutStatus'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+
+/api/v1/clusters/{cluster}/controllers/{ns}:
+  post:
+    operationId: createController
+    tags: [controllers]
+    summary: Creates a new controller in the given namespace on the specified cluster.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/CreateControllerRequest'
+    responses:
+      "201":
+        description: Controller created. Returns the full Controller CRD.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ControllerDetail'
+      "400":
+        description: Validation failure — may include checks.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                checks:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/Check'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/clusters/{cluster}/controllers/{ns}/preflight:
+  post:
+    operationId: preflightController
+    tags: [controllers]
+    summary: Runs preflight validation checks for a controller draft.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/CreateControllerRequest'
+    responses:
+      "200":
+        description: Preflight check results.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [checks]
+              properties:
+                checks:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/Check'
+              additionalProperties: false
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/clusters/{cluster}/controllers/{ns}/render:
+  post:
+    operationId: renderController
+    tags: [controllers]
+    summary: Renders a controller CR draft as raw YAML.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/CreateControllerRequest'
+    responses:
+      "200":
+        description: Rendered controller CR YAML.
+        content:
+          application/yaml:
+            schema:
+              type: string
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+
+/api/v1/clusters/{cluster}/controllers/{ns}/{name}:
+  get:
+    operationId: getController
+    tags: [controllers]
+    summary: Gets a single controller's details.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Controller detail.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ControllerDetail'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  patch:
+    operationId: patchController
+    tags: [controllers]
+    summary: Patches a controller's spec (only `spec` key allowed, N5).
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+      - $ref: '../components/parameters.yaml#/force'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/ControllerPatch'
+    responses:
+      "200":
+        description: Controller updated.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ControllerDetail'
+      "400":
+        description: Validation failure — may include checks.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                checks:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/Check'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        description: SSA field-ownership conflict — retry with `?force=true` to override.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ConflictResponse'
+  delete:
+    operationId: deleteController
+    tags: [controllers]
+    summary: Deletes a controller (async CR deletion).
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Deletion triggered.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/clusters/{cluster}/controllers/{ns}/{name}/yaml:
+  get:
+    operationId: getControllerYaml
+    tags: [controllers]
+    summary: Returns the controller CRD rendered as raw YAML (N4).
+    description: >
+      Server-rendered canonical CR (cleaned of server-side noise). Note the
+      client asymmetry: `varroactl get controller -o yaml` uses this endpoint,
+      while `-o json` marshals the detail DTO from getController client-side.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Controller CRD as YAML.
+        content:
+          application/yaml:
+            schema:
+              type: string
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/clusters/{cluster}/controllers/{ns}/{name}/reconcile:
+  post:
+    operationId: reconcileController
+    tags: [controllers]
+    summary: Triggers a reconciliation for the controller.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "202":
+        description: Reconciliation triggered.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/clusters/{cluster}/controllers/{ns}/{name}/hibernate:
+  post:
+    operationId: hibernateController
+    tags: [controllers]
+    summary: Hibernates a controller, scaling it down and parking it.
+    description: >
+      Parks the controller regardless of its spec.hibernation.enabled setting.
+      Refused with 409 when the controller's spec.powerState is Stopped.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "202":
+        description: Hibernation triggered.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
+
+/api/v1/clusters/{cluster}/controllers/{ns}/{name}/wake:
+  post:
+    operationId: wakeController
+    tags: [controllers]
+    summary: Wakes a hibernated controller, clearing its hibernation and re-provisioning it.
+    description: >
+      The authenticated counterpart to the tokenless traffic wake. Refused with
+      409 when the controller's spec.powerState is Stopped.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "202":
+        description: Wake triggered.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
+
+/api/v1/clusters/{cluster}/controllers/{ns}/{name}/approve:
+  post:
+    operationId: approveController
+    tags: [controllers]
+    summary: Approves a pending restart, reload, or plugin-roll action.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [action]
+            properties:
+              action:
+                type: string
+                enum: [reload, restart, approve, force, force-restart, plugin-roll]
+                description: The action to approve.
+            additionalProperties: false
+    responses:
+      "202":
+        description: Action approved.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status, action]
+              properties:
+                status:
+                  type: string
+                action:
+                  type: string
+              additionalProperties: false
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
+
+/api/v1/clusters/{cluster}/controllers/{ns}/{name}/approve-deletion:
+  post:
+    operationId: approveControllerDeletion
+    tags: [controllers]
+    summary: Approves a pending item deletion.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [path]
+            properties:
+              path:
+                type: string
+            additionalProperties: false
+    responses:
+      "202":
+        description: Deletion approved.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status, path]
+              properties:
+                status:
+                  type: string
+                path:
+                  type: string
+              additionalProperties: false
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
+
+/api/v1/clusters/{cluster}/controllers/{ns}/{name}/reprovision:
+  post:
+    operationId: reprovisionController
+    tags: [controllers]
+    summary: Triggers a full desired-state re-push to the mite.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "202":
+        description: Reprovision triggered.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/clusters/{cluster}/controllers/{ns}/{name}/restart:
+  post:
+    operationId: restartController
+    tags: [controllers]
+    summary: Restarts the controller by deleting its pod.
+    description: >-
+      Deletes the Jenkins pod; the StatefulSet recreates it. Build draining is
+      the pod shutdown path's responsibility, not this endpoint's.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "202":
+        description: Restart triggered.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/clusters/{cluster}/controllers/{ns}/{name}/preview:
+  post:
+    operationId: previewController
+    tags: [controllers]
+    summary: Computes a strategic-merge preview of overlay changes.
+    description: Not available for remote clusters (returns 501).
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/PreviewRequest'
+    responses:
+      "200":
+        description: Preview result with merged YAML, diffs, and warnings.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/PreviewResponse'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "501":
+        description: Not available for remote clusters.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+              additionalProperties: false
+
+/api/v1/clusters/{cluster}/controllers/{ns}/{name}/logs:
+  get:
+    operationId: getControllerLogs
+    tags: [controllers]
+    summary: >
+      Returns controller logs. When `follow=false` (default), returns a JSON
+      array of log entries (N6 envelope). When `follow=true`, returns a
+      Server-Sent Events stream (`text/event-stream`). Not available for
+      remote clusters (returns 501).
+    description: >
+      When `follow=true` the response switches to `text/event-stream`;
+      the SSE mode is not available through the generated Go client.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+      - name: follow
+        in: query
+        description: When true, returns an SSE stream instead of JSON.
+        required: false
+        schema:
+          type: boolean
+    x-sse: true
+    responses:
+      "200":
+        description: >
+          JSON log entries (follow=false) or SSE stream (follow=true).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/LogEntry'
+              additionalProperties: false
+          text/event-stream:
+            schema:
+              type: string
+              description: SSE event stream with log entries.
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "501":
+        description: Not available for remote clusters.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+              additionalProperties: false
+
+/api/v1/clusters/{cluster}/controllers/{ns}/{name}/events:
+  get:
+    operationId: streamControllerEvents
+    tags: [controllers]
+    summary: Streams controller events via Server-Sent Events.
+    description: Uses `?ticket=` for browser EventSource auth.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    x-sse: true
+    responses:
+      "200":
+        description: SSE event stream.
+        content:
+          text/event-stream:
+            schema:
+              type: string
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/clusters/{cluster}/controllers/{ns}/{name}/mite/stream:
+  get:
+    operationId: streamControllerMite
+    tags: [controllers]
+    summary: Streams mite telemetry via Server-Sent Events.
+    description: Uses `?ticket=` for browser EventSource auth.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    x-sse: true
+    responses:
+      "200":
+        description: SSE event stream.
+        content:
+          text/event-stream:
+            schema:
+              type: string
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/clusters/{cluster}/controllers/{ns}/{name}/diff:
+  get:
+    operationId: getControllerDiff
+    tags: [controllers]
+    summary: Returns a diff between incoming bundle content and last-applied content.
+    description: Not available for remote clusters (returns 501).
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Diff result.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ControllerDiff'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "501":
+        description: Not available for remote clusters.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+              additionalProperties: false
+
+/api/v1/clusters/{cluster}/controllers/{ns}/{name}/plugins:
+  get:
+    operationId: getControllerPlugins
+    tags: [controllers]
+    summary: Returns the full classified plugin inventory for a controller.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Classified plugin inventory.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ClassifiedPluginInventory'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'

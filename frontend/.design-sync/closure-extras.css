@@ -1,0 +1,907 @@
+/* Extra stylesheet appended into the styles.css closure via cfg.cssEntry.
+ * Two parts:
+ *   1) Legacy token aliases. A few component CSS modules (LoadingSpinner,
+ *      ConfigPipeline, BundleSelector) reference custom properties named
+ *      "--color-..." and "--text-1" that the app never defines (a partial
+ *      token rename left them dangling, so e.g. the spinner ring renders
+ *      transparent). Map them to the real brand tokens so those components
+ *      render as designed.
+ *   2) The Varroa branded Jenkins theme (public/varroa-theme.css), in scope as
+ *      a first-class design artifact, embedded below so it ships in the closure.
+ *      NOTE: this is a copy of public/varroa-theme.css — regenerate this file if
+ *      that source changes (see .design-sync/NOTES.md).
+ */
+:root {
+  --color-text: var(--text);
+  --color-text-muted: var(--text-2);
+  --text-1: var(--text);
+  --color-border: var(--border);
+  --color-surface: var(--surface);
+  --color-hover: var(--surface-2);
+  --color-primary: var(--accent);
+  --color-code-bg: var(--surface-3);
+  --color-code: var(--text);
+  --color-error: var(--bad);
+  --color-warning: var(--warn);
+  --color-success: var(--ok);
+}
+
+/* ===== embedded: public/varroa-theme.css (Varroa branded Jenkins theme) ===== */
+/*
+ * Varroa Branded Theme for Jenkins
+ * Maps Varroa frontend design tokens (frontend/src/styles/tokens.css) onto
+ * Jenkins UI selectors. Light-only, warm honey/caramel palette.
+ *
+ * Palette reference:
+ *   --bg:       #FAF6EC   warm cream (page background)
+ *   --surface:  #FFFFFF   white (cards, panels)
+ *   --surface-2:#FCF9F1   subtle (hover, alternating rows)
+ *   --surface-3:#F2EAD9   muted (table headers, pane headers)
+ *   --border:   #EADFC9   warm tan (borders)
+ *   --border-strong:#D8C9AC  stronger border
+ *   --text:     #2A1B0E   dark brown (body text)
+ *   --text-2:   #6E5A44   warm brown (secondary)
+ *   --text-3:   #9C886D   muted brown (tertiary)
+ *   --accent:   #C2611C   honey orange (primary actions)
+ *   --accent-strong:#9C4413  hover/focus accent
+ *   --accent-soft:#FAE7D1   accent backgrounds
+ *   --honey:    #E0A21A   warm gold (highlights)
+ *   --ok:       #2F8F4E   green (success)
+ *   --bad:      #BE3A28   red (failure)
+ *   --warn:     #C77F0E   amber (unstable)
+ *   --idle:     #8A7960   gray (aborted, idle)
+ *   --radius:   14px        border radius
+ *   --radius-sm:9px
+ *   --mono:     ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace
+ *   --sans:     -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif
+ */
+
+/* ---- Base & Body ---- */
+:root,
+body#jenkins,
+.jenkins-2\.567 {
+  --blue: #A56734;
+  --accent-color: #A56734;
+  --focus-input-border: #A56734;
+  --focus-input-glow: rgba(165, 103, 52, 0.18);
+}
+
+html, body, #page-body, .app-page-body, .app-page-body--two-column {
+  background: #FAF6EC;
+  color: #2A1B0E;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+}
+
+#page-body,
+.app-page-body,
+.app-page-body--two-column {
+  background: #FAF6EC !important;
+}
+
+a, a:link, a:visited { color: #C2611C; }
+a:hover, a:focus { color: #9C4413; }
+
+/* ---- Header (Jenkins 2.x) ---- */
+.jenkins-header,
+.jenkins-header__main,
+.jenkins-header__navigation,
+#page-header,
+#header {
+  background: #FAF6EC;
+  border-bottom: 1px solid #EADFC9;
+}
+
+.jenkins-header__navigation { background: #FAF6EC !important; }
+.jenkins-header__actions { background: #FAF6EC !important; }
+
+#breadcrumbBar,
+.jenkins-breadcrumbs,
+.top-sticker-inner {
+  background: #FAF6EC !important;
+  border-bottom: 1px solid #EADFC9;
+}
+
+.jenkins-breadcrumbs,
+.jenkins-breadcrumbs__list,
+#breadcrumbs LI a,
+#breadcrumbs LI {
+  color: #6E5A44;
+}
+#breadcrumbs LI a:hover { color: #C2611C; }
+
+.app-jenkins-logo {
+  background: #FAF6EC !important;
+}
+
+#page-header *,
+#breadcrumbBar *,
+.jenkins-breadcrumbs * {
+  border-color: #EADFC9;
+}
+
+/* ---- Sidebar ---- */
+.app-page-body__sidebar,
+#side-panel,
+#tasks {
+  background: #FAF6EC;
+  border-right: 1px solid #EADFC9;
+}
+
+#side-panel,
+#tasks,
+#buildQueue,
+#executors {
+  background: #FAF6EC !important;
+}
+
+.task,
+.task-link-wrapper {
+  color: #2A1B0E;
+}
+
+.task-link-text {
+  color: #2A1B0E;
+}
+
+.task:hover,
+.task-link-wrapper:hover {
+  background: #FAE7D1;
+}
+
+.task-link-wrapper:hover .task-link-text {
+  color: #C2611C;
+}
+
+.task-link-wrapper.active,
+.task.active {
+  background: #FAE7D1;
+  border-left: 3px solid #C2611C;
+}
+
+.task-link-wrapper.active .task-link-text,
+#side-panel .task.active a,
+#tasks .task.active a {
+  color: #9C4413;
+}
+
+/* ---- Main Content ---- */
+#main-panel {
+  background: #FAF6EC;
+  color: #2A1B0E;
+}
+
+#main-table { background: #FAF6EC; }
+
+#main-panel,
+#main-table,
+#view-message,
+#systemmessage,
+#description,
+#description-content,
+#description-edit-form {
+  background: #FAF6EC !important;
+}
+
+.jenkins-form,
+.config-table,
+.jenkins-app-bar,
+.jenkins-app-bar__content,
+.jenkins-app-bar__controls,
+.jenkins-section,
+.jenkins-section__title,
+.jenkins-section__description {
+  background: #FAF6EC !important;
+}
+
+/* ---- Cards & Panels ---- */
+.pane,
+.pane-frame,
+.jenkins-pane {
+  border: 1px solid #EADFC9;
+  border-radius: 14px;
+  background: #FFFFFF;
+}
+
+.pane-content {
+  background: #FFFFFF;
+}
+
+.pane-header {
+  background: #F2EAD9;
+  border-radius: 14px 14px 0 0;
+  color: #2A1B0E;
+  border-bottom: 1px solid #EADFC9;
+}
+
+.pane-header-details,
+.pane-header-title {
+  color: #2A1B0E;
+}
+
+/* ---- Content Blocks ---- */
+.content-block {
+  background: #FFFFFF;
+  border: 1px solid #EADFC9;
+  border-radius: 14px;
+}
+
+.content-block__link {
+  color: #C2611C;
+}
+
+.content-block,
+.content-block__link,
+.empty-state-section a,
+#description-link {
+  box-shadow: 0 1px 2px rgba(20, 22, 29, 0.04), 0 1px 3px rgba(20, 22, 29, 0.05);
+}
+
+.empty-state-section a,
+.content-block a,
+.content-block__link,
+#description-link {
+  background: #FFFFFF !important;
+  border: 1px solid #EADFC9;
+  border-radius: 14px;
+  color: #2A1B0E !important;
+}
+
+.empty-state-section a:hover,
+.content-block a:hover,
+.content-block__link:hover,
+#description-link:hover {
+  background: #FCF9F1 !important;
+  border-color: #D8C9AC;
+  color: #9C4413 !important;
+}
+
+.content-block__link .trailing-icon,
+.content-block__link svg {
+  color: #3A230F;
+}
+
+/* ---- Empty States ---- */
+.empty-state-block,
+.empty-state-section,
+.empty-state-section-list {
+  background: #FAF6EC;
+  color: #6E5A44;
+}
+
+/* ---- Executor / Computer Rows ---- */
+.computer-row {
+  border-bottom: 1px solid #EADFC9;
+  background: #FFFFFF;
+}
+
+.computer-row:hover {
+  background: #FCF9F1;
+}
+
+.executors-cell {
+  color: #6E5A44;
+}
+
+/* ---- Login Page ---- */
+#loginIntro,
+.login,
+.app-sign-in-register {
+  background: #FAF6EC;
+  color: #2A1B0E;
+}
+
+.app-sign-in-register__branding {
+  background: #F2EAD9;
+}
+
+.app-sign-in-register__content,
+.app-sign-in-register__content-inner {
+  background: #FFFFFF;
+}
+
+.login input[type="text"],
+.login input[type="password"],
+.login input[type="submit"] {
+  border-radius: 14px;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: #3A230F;
+}
+
+/* ---- Buttons ---- */
+.jenkins-button,
+.yui-button button,
+button,
+.submit-button {
+  border: 1px solid #D8C9AC;
+  border-radius: 14px;
+  background: #FFFFFF;
+  color: #2A1B0E;
+}
+
+.jenkins-button:hover,
+.yui-button button:hover,
+button:hover {
+  background: #F2EAD9;
+  border-color: #C2611C;
+}
+
+.jenkins-button--primary,
+.login input[type="submit"],
+.submit-button,
+.jenkins-submit-button,
+.advanced-button,
+.advancedButton,
+.hetero-list-add,
+button[type="submit"],
+input[type="submit"],
+input[type="button"],
+button[name="Submit"] {
+  background: #B87433 !important;
+  background-color: #B87433 !important;
+  background-image: none !important;
+  color: #FFFFFF;
+  border-color: #A56734 !important;
+  box-shadow: none !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+}
+
+.advanced-button,
+.advancedButton,
+.hetero-list-add {
+  color: #FFFFFF !important;
+}
+
+.advanced-button svg,
+.advancedButton svg,
+.hetero-list-add svg {
+  color: #FFFFFF !important;
+  stroke: currentColor !important;
+}
+
+.jenkins-button--primary,
+.jenkins-submit-button,
+.advanced-button,
+.advancedButton,
+.hetero-list-add {
+  --accent-color: #A56734 !important;
+  --focus-input-border: #A56734 !important;
+}
+
+button.jenkins-button.jenkins-submit-button.jenkins-button--primary,
+.bottom-sticker-inner .jenkins-button--primary,
+.jenkins-buttons-row .jenkins-button--primary {
+  background: #C2611C !important;
+  background-color: #C2611C !important;
+  background-image: none !important;
+  border-color: #C2611C !important;
+  color: #FFFFFF !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+}
+
+.jenkins-button--primary::before,
+.jenkins-submit-button::before,
+.advanced-button::before,
+.advancedButton::before,
+.hetero-list-add::before {
+  background: #C2611C !important;
+  background-color: #C2611C !important;
+  background-image: none !important;
+  border-color: #C2611C !important;
+}
+
+.jenkins-button--primary:hover::before,
+.jenkins-submit-button:hover::before,
+.advanced-button:hover::before,
+.advancedButton:hover::before,
+.hetero-list-add:hover::before {
+  background: #9C4413 !important;
+  background-color: #9C4413 !important;
+  border-color: #9C4413 !important;
+}
+
+.jenkins-button--primary:hover,
+.login input[type="submit"]:hover,
+.submit-button:hover,
+.jenkins-submit-button:hover,
+.advanced-button:hover,
+.advancedButton:hover,
+.hetero-list-add:hover,
+button[type="submit"]:hover,
+input[type="submit"]:hover,
+input[type="button"]:hover,
+button[name="Submit"]:hover {
+  background: #9C4413 !important;
+  background-color: #9C4413 !important;
+  background-image: none !important;
+  border-color: #9C4413 !important;
+}
+
+.apply-button {
+  background: #D58852 !important;
+  background-color: #D58852 !important;
+  background-image: none !important;
+  border-color: #C97942 !important;
+  color: #FFFFFF !important;
+}
+
+.apply-button::before {
+  background: #D58852 !important;
+  background-color: #D58852 !important;
+  background-image: none !important;
+  border-color: #C97942 !important;
+}
+
+.apply-button:hover,
+.apply-button:hover::before {
+  background: #C97942 !important;
+  background-color: #C97942 !important;
+  border-color: #B66833 !important;
+}
+
+.jenkins-button--primary:focus,
+.jenkins-submit-button:focus,
+.apply-button:focus,
+.advanced-button:focus,
+.advancedButton:focus,
+.hetero-list-add:focus,
+button[type="submit"]:focus,
+input[type="submit"]:focus,
+input[type="button"]:focus,
+button[name="Submit"]:focus {
+  box-shadow: 0 0 0 2px #EADFC9, 0 0 0 4px rgba(122, 74, 31, 0.18) !important;
+}
+
+.jenkins-toggle-switch__label {
+  background: transparent !important;
+  border-color: transparent !important;
+}
+
+.jenkins-toggle-switch label:before,
+.jenkins-toggle-switch label:after,
+.jenkins-toggle-switch__label::before,
+.jenkins-toggle-switch__label::after {
+  border-color: #D8C9AC !important;
+}
+
+.jenkins-toggle-switch label:before,
+.jenkins-toggle-switch__label::before {
+  background: #F3E7D5 !important;
+  border: 1px solid #D8C9AC !important;
+  box-shadow: inset 0 0 0 1px rgba(42, 27, 14, 0.04) !important;
+}
+
+.jenkins-toggle-switch label:after,
+.jenkins-toggle-switch__label::after {
+  background: #FFFDF9 !important;
+  border: 1px solid rgba(121, 87, 55, 0.18) !important;
+  box-shadow: 0 1px 2px rgba(20, 22, 29, 0.06) !important;
+}
+
+.jenkins-toggle-switch__input:checked + .jenkins-toggle-switch__label {
+  background: transparent !important;
+  color: #6E5A44 !important;
+}
+
+.jenkins-toggle-switch input:checked+label:before,
+.jenkins-toggle-switch__input:checked + .jenkins-toggle-switch__label::before {
+  background: #D8B58D !important;
+  border-color: #B9824B !important;
+}
+
+.jenkins-toggle-switch input:checked+label:after,
+.jenkins-toggle-switch__input:checked + .jenkins-toggle-switch__label::before,
+.jenkins-toggle-switch__input:checked + .jenkins-toggle-switch__label::after {
+  background: #FFF7EA !important;
+  border-color: #D8B58D !important;
+}
+
+.jenkins-toggle-switch__label__checked-title {
+  color: #6E5A44 !important;
+}
+
+.jenkins-toggle-switch__label__unchecked-title {
+  color: #6E5A44 !important;
+}
+
+.jenkins-radio__input,
+.jenkins-checkbox input,
+.optional-block-control,
+.block-control,
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: #7A4A1F !important;
+}
+
+.jenkins-radio__input:checked,
+.jenkins-checkbox input:checked,
+.optional-block-control:checked,
+.block-control:checked,
+input[type="checkbox"]:checked,
+input[type="radio"]:checked {
+  accent-color: #7A4A1F !important;
+}
+
+.jenkins-radio__label::before {
+  border-color: #D8C9AC !important;
+  background: #FFFFFF !important;
+}
+
+.jenkins-radio__input + .jenkins-radio__label::before {
+  border-color: #D8C9AC !important;
+  background: #FFFFFF !important;
+}
+
+.jenkins-radio__input:checked + .jenkins-radio__label::before {
+  border-color: #A56734 !important;
+  background: #FFFFFF !important;
+  box-shadow: inset 0 0 0 4px #A56734 !important;
+}
+
+.jenkins-radio__input:focus + .jenkins-radio__label::before {
+  box-shadow: 0 0 0 2px #EADFC9, 0 0 0 4px rgba(122, 74, 31, 0.18) !important;
+}
+
+.jenkins-radio__label,
+.jenkins-checkbox label,
+.jenkins-toggle-switch__label__checked-title,
+.jenkins-toggle-switch__label__unchecked-title {
+  color: #2A1B0E;
+}
+
+.jenkins-checkbox label::before,
+.jenkins-checkbox .attach-previous::before,
+.optional-block-control + label::before,
+.block-control + label::before,
+input[type="checkbox"] + label::before {
+  background: #FFFFFF !important;
+  border: 1px solid #D8C9AC !important;
+  box-shadow: none !important;
+}
+
+.jenkins-checkbox input:checked + label::before,
+.jenkins-checkbox input:checked + .attach-previous::before,
+.optional-block-control:checked + label::before,
+.block-control:checked + label::before,
+input[type="checkbox"]:checked + label::before {
+  background: #7A4A1F !important;
+  border-color: #7A4A1F !important;
+  box-shadow: inset 0 0 0 2px #7A4A1F !important;
+}
+
+.jenkins-checkbox input:checked + label::after,
+.jenkins-checkbox input:checked + .attach-previous::after,
+.optional-block-control:checked + label::after,
+.block-control:checked + label::after,
+input[type="checkbox"]:checked + label::after {
+  color: #FAF6EC !important;
+  border-color: #FAF6EC !important;
+}
+
+/* tertiary buttons (header actions, etc.) should stay transparent */
+.jenkins-button--tertiary {
+  background: transparent;
+  border-color: transparent;
+}
+.jenkins-button--tertiary:hover {
+  background: #F2EAD9;
+  border-color: #EADFC9;
+}
+
+#description-link,
+.description-edit-button .jenkins-button,
+.jenkins-button.jenkins-button--tertiary.rest-api,
+.jenkins-button.jenkins-button--tertiary.jenkins_ver {
+  background: #FFFFFF;
+  border-color: #EADFC9;
+}
+
+#description-link:hover,
+.description-edit-button .jenkins-button:hover,
+.jenkins-button.jenkins-button--tertiary.rest-api:hover,
+.jenkins-button.jenkins-button--tertiary.jenkins_ver:hover {
+  background: #FCF9F1;
+  border-color: #D8C9AC;
+}
+
+.jenkins-buttons-row {
+  background: transparent;
+}
+
+.jenkins-buttons-row--invert {
+  background: #F2EAD9;
+  border-radius: 14px;
+}
+
+/* ---- Forms & Inputs ---- */
+input[type="text"],
+input[type="password"],
+input[type="number"],
+input[type="search"],
+select,
+textarea,
+.jenkins-input {
+  border: 1px solid #EADFC9;
+  border-radius: 9px;
+  background: #FFFFFF;
+  color: #2A1B0E;
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+select:focus,
+textarea:focus,
+.jenkins-input:focus {
+  border-color: #C2611C;
+  outline: none;
+  box-shadow: 0 0 0 2px #FAE7D1;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #9C886D;
+}
+
+.jenkins-form-item {
+  border-bottom: 1px solid #EADFC9;
+}
+
+.setting-main {
+  color: #2A1B0E;
+}
+
+.help-area,
+.help {
+  color: #6E5A44;
+}
+
+.validation-error-area {
+  color: #BE3A28;
+  background: #F8E2DC;
+  border-radius: 9px;
+}
+
+/* ---- Textarea Preview ---- */
+.textarea-preview-container {
+  border: 1px solid #EADFC9;
+  border-radius: 9px;
+  background: #FFFFFF;
+}
+
+.textarea-show-preview,
+.textarea-hide-preview,
+.textarea-preview {
+  color: #C2611C;
+}
+
+/* ---- Tables ---- */
+table, .jenkins-table {
+  border-collapse: collapse;
+  background: #FFFFFF;
+}
+
+table th,
+.jenkins-table th,
+#main-table th,
+.sortheader {
+  background: #F2EAD9;
+  color: #2A1B0E;
+  font-weight: 600;
+  border-bottom: 2px solid #D8C9AC;
+}
+
+table td,
+.jenkins-table td {
+  border-bottom: 1px solid #EADFC9;
+}
+
+table tr:hover td,
+.jenkins-table tr:hover td {
+  background: #FCF9F1;
+}
+
+/* ---- Build Console ---- */
+.console-output,
+pre.console-output {
+  background: #FFFFFF;
+  color: #2A1B0E;
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  border: 1px solid #EADFC9;
+  border-radius: 9px;
+  padding: 16px;
+}
+
+/* ---- Build Status Colors ---- */
+.build-status-icon__wrapper.icon-nobuilt_anime::before,
+.build-status-icon__wrapper.icon-blue::before,
+.build-status-icon__wrapper.icon-blue_anime::before,
+*[style*="blue"],
+.icon-blue .icon,
+.icon-nobuilt_anime .icon,
+.icon-blue_anime .icon {
+  color: #2F8F4E !important;
+}
+
+tr.build-row td.build-status-column .icon-blue,
+tr.build-row td.build-status-column .icon-nobuilt_anime,
+tr.build-row td.build-status-column .icon-blue_anime {
+  color: #2F8F4E !important;
+}
+
+.icon-red .icon,
+.tr .icon-red,
+.build-status-icon__wrapper.icon-red::before,
+.build-status-icon__wrapper.icon-red_anime::before,
+*[style*="red"] {
+  color: #BE3A28 !important;
+}
+
+tr.build-row td.build-status-column .icon-red,
+tr.build-row td.build-status-column .icon-red_anime {
+  color: #BE3A28 !important;
+}
+
+.icon-yellow .icon,
+.icon-yellow_anime .icon,
+.build-status-icon__wrapper.icon-yellow::before,
+.build-status-icon__wrapper.icon-yellow_anime::before,
+*[style*="yellow"] {
+  color: #C77F0E !important;
+}
+
+tr.build-row td.build-status-column .icon-yellow,
+tr.build-row td.build-status-column .icon-yellow_anime {
+  color: #C77F0E !important;
+}
+
+.icon-aborted .icon,
+.icon-aborted_anime .icon,
+.build-status-icon__wrapper.icon-aborted::before,
+.build-status-icon__wrapper.icon-aborted_anime::before {
+  color: #8A7960 !important;
+}
+
+.icon-health-80plus { color: #2F8F4E !important; }
+.icon-health-60to79 { color: #2F8F4E !important; }
+.icon-health-40to59 { color: #C77F0E !important; }
+.icon-health-20to39 { color: #C77F0E !important; }
+.icon-health-00to19 { color: #BE3A28 !important; }
+
+/* ---- Job/build rows ---- */
+.build-row {
+  border-bottom: 1px solid #EADFC9;
+  background: #FFFFFF;
+}
+.build-row:hover { background: #FCF9F1; }
+
+/* ---- Command Palette ---- */
+.jenkins-command-palette__dialog {
+  background: rgba(42, 27, 14, 0.3);
+}
+
+.jenkins-command-palette__wrapper,
+.jenkins-command-palette {
+  background: #FFFFFF;
+  border: 1px solid #EADFC9;
+  border-radius: 14px;
+}
+
+.jenkins-command-palette__results-container {
+  background: #FFFFFF;
+}
+
+.jenkins-search,
+.jenkins-search-container {
+  background: #FFFFFF;
+  border: 1px solid #EADFC9;
+  border-radius: 14px;
+}
+
+.jenkins-search__icon { color: #9C886D; }
+
+/* ---- Dropdowns ---- */
+.jenkins-dropdown,
+.jenkins-dropdown__item {
+  background: #FFFFFF;
+  border-color: #EADFC9;
+  color: #2A1B0E;
+}
+
+.jenkins-dropdown__item:hover {
+  background: #FAE7D1;
+  color: #C2611C;
+}
+
+/* ---- Progress Bars ---- */
+.progress-bar {
+  background: #F2EAD9;
+  border-radius: 9px;
+}
+.progress-bar .percent {
+  background: #C2611C;
+  border-radius: 9px;
+}
+
+/* ---- Tags & Badges ---- */
+.tag, .jenkins-tag {
+  background: #FAE7D1;
+  color: #9C4413;
+  border-radius: 9px;
+  border: 1px solid #EADFC9;
+}
+
+.jenkins-badge {
+  background: #FAE7D1;
+  color: #9C4413;
+  border-radius: 9px;
+}
+.jenkins-\!-danger-color { background: #F8E2DC; color: #BE3A28; }
+
+/* ---- Alerts & Notifications ---- */
+.alert, .jenkins-alert, #notification-bar, .error, .warning {
+  border-radius: 14px;
+}
+
+.alert-success {
+  background: #E3F1E1;
+  border-color: #2F8F4E;
+  color: #2F8F4E;
+}
+.alert-danger, .error {
+  background: #F8E2DC;
+  border-color: #BE3A28;
+  color: #BE3A28;
+}
+.alert-warning, .warning {
+  background: #FBEBCB;
+  border-color: #C77F0E;
+  color: #C77F0E;
+}
+.alert-info {
+  background: #DCEEF0;
+  border-color: #2C7D8C;
+  color: #2C7D8C;
+}
+
+/* ---- Banner message ---- */
+#banner-message {
+  background: #E0A21A;
+  color: #2A1B0E;
+}
+
+/* ---- Footer ---- */
+#footer,
+.page-footer {
+  background: #F2EAD9;
+  color: #9C886D;
+  border-top: 1px solid #EADFC9;
+}
+
+.page-footer__footer-id-placeholder {
+  color: #6E5A44;
+}
+
+.page-footer__links a {
+  color: #6E5A44;
+}
+.page-footer__links a:hover {
+  color: #C2611C;
+}
+
+/* ---- Spinner ---- */
+.jenkins-spinner {
+  color: #C2611C;
+}
+
+/* ---- Scrollbar ---- */
+::-webkit-scrollbar-thumb {
+  background: #D8C9AC;
+  border-radius: 9px;
+}
+::-webkit-scrollbar-track {
+  background: #F2EAD9;
+}
