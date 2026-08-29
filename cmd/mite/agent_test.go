@@ -526,9 +526,9 @@ func TestLegacyMarkerReapplies(t *testing.T) {
 	}
 }
 
-// TestConfigPushUsesReloadNotAdminEndpoints pins the #166 keystone on the mite
-// side: a config push must go through the MANAGE-gated reload endpoint and never
-// touch the ADMINISTER-gated /configuration-as-code/check or /apply endpoints, so
+// TestConfigPushUsesReloadNotAdminEndpoints asserts that a config push must go
+// through the MANAGE-gated reload endpoint and never touch the
+// ADMINISTER-gated /configuration-as-code/check or /apply endpoints, so
 // the mite can run without Jenkins.ADMINISTER.
 func TestConfigPushUsesReloadNotAdminEndpoints(t *testing.T) {
 	t.Setenv("CASC_JENKINS_CONFIG", t.TempDir())
@@ -559,9 +559,9 @@ func TestConfigPushUsesReloadNotAdminEndpoints(t *testing.T) {
 }
 
 // TestConfigPushNeverUsesApplyEvenWithoutReloadFlag guarantees the mite has no
-// remaining path to the admin apply endpoint: even a command that does not set
-// Reload goes through the MANAGE-gated reload path. This makes the #167 role
-// scaling safe — the mite cannot reach an ADMINISTER-only endpoint.
+// path to the admin apply endpoint: even a command that does not set
+// Reload goes through the MANAGE-gated reload path, so the mite's role can
+// stay MANAGE-scoped — it never needs to reach an ADMINISTER-only endpoint.
 func TestConfigPushNeverUsesApplyEvenWithoutReloadFlag(t *testing.T) {
 	t.Setenv("CASC_JENKINS_CONFIG", t.TempDir())
 	srv, hits := fakeJenkins(t, "sess-1")
@@ -963,9 +963,6 @@ func TestSerializedCommandExecution(t *testing.T) {
 // TestConfigPushSuccessWritesLastJcasc verifies a successful reload-based config
 // push records last-jcasc.yaml (for snapshot hashes) and uses only the
 // MANAGE-gated reload endpoint — never the admin check/apply endpoints.
-//
-// #166: the legacy apply-path tests (check-rejection, apply-fail rollback,
-// no-last-good, RBAC SetRBAC-skip) were removed with the apply path itself.
 // Reload-path rollback is covered by the TestApplyConfigViaReload* tests below.
 func TestConfigPushSuccessWritesLastJcasc(t *testing.T) {
 	t.Setenv("CASC_JENKINS_CONFIG", t.TempDir())
@@ -1378,7 +1375,7 @@ func TestApplyConfigViaReloadWritesRbacYaml(t *testing.T) {
 // TestFirstBootAppliesConfigNoRestart verifies that on first boot the mite applies
 // JCasC config via the MANAGE-gated reload and never restarts Jenkins. Managed
 // plugins are installed out of band by the plugins-init init container before the
-// JVM starts (#166), so the mite has no plugin step and no restart.
+// JVM starts, so the mite has no plugin step and no restart.
 func TestFirstBootAppliesConfigNoRestart(t *testing.T) {
 	t.Setenv("CASC_JENKINS_CONFIG", t.TempDir())
 	srv, hits := fakeJenkins(t, "sess-1")

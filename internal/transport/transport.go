@@ -52,7 +52,7 @@ type Transport interface {
 	// mite is currently broken (a KV watch or JetStream subscription failed and
 	// is being retried), with the underlying reason. A degraded bridge means
 	// operator-published desired state is NOT reaching the mite even though its
-	// gRPC stream looks healthy — see #509. False for transports that do not
+	// gRPC stream looks healthy. False for transports that do not
 	// bridge over the bus.
 	StreamDegraded(ns, name string) (reason string, degraded bool)
 

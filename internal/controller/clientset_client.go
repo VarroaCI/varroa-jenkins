@@ -267,8 +267,8 @@ func (c *ClientsetClient) RESTConfig() *rest.Config { return c.restCfg }
 // crdstore onto this config's single dynamic client — so all of them share one
 // 5 QPS bucket, alongside whatever the manager built from the same config.
 // Bulk passes starve everything behind them: the update-center catalog arm
-// alone issues a few hundred CRD calls per sync, which is what let a slow
-// source block ComposedBundle reconciliation for minutes (#510).
+// alone issues a few hundred CRD calls per sync, which is enough to let a slow
+// source block ComposedBundle reconciliation for minutes.
 //
 // controller-runtime's own GetConfig sets QPS to -1, disabling client-side
 // limiting entirely and deferring to API Priority and Fairness. We keep a
@@ -430,7 +430,7 @@ func (c *ClientsetClient) CreatePVC(ctx context.Context, name, namespace, storag
 
 // CreateService creates or updates a ClusterIP Service, optionally applying a
 // strategic-merge overlayYAML first. The Service carries both the Jenkins HTTP
-// port and the fixed inbound agent port (#315): the jenkins/jenkins image pins
+// port and the fixed inbound agent port: the jenkins/jenkins image pins
 // the TCP agent listener at 50000 (JENKINS_SLAVE_AGENT_PORT image env) and the
 // StatefulSet declares the matching containerPort, so kubernetes-plugin agents
 // in TCP inbound mode dial <svc>:50000. Multi-port Services require every port
@@ -481,8 +481,8 @@ func (c *ClientsetClient) CreateService(ctx context.Context, name, namespace str
 		return err
 	}
 
-	// Already exists: update the live object so spec changes converge (#315,
-	// mirroring CreateIngress/#88). Mutate the fetched object to preserve
+	// Already exists: update the live object so spec changes converge
+	// (mirroring CreateIngress). Mutate the fetched object to preserve
 	// resourceVersion, ownerReferences, labels, and the immutable ClusterIP
 	// family fields the API server allocated.
 	existing, getErr := services.Get(ctx, name, metav1.GetOptions{})
@@ -610,7 +610,7 @@ func (c *ClientsetClient) CreateJenkinsCR(ctx context.Context, name, namespace, 
 // CreateIngress reconciles a networking.k8s.io/v1 Ingress to the desired spec,
 // optionally applying a strategic-merge overlayYAML first. It creates the
 // Ingress when absent and updates it when present, so post-provisioning changes
-// (TLS secret, annotations, host) converge instead of going stale (#88). On
+// (TLS secret, annotations, host) converge instead of going stale. On
 // update the live object is mutated in place, preserving its resourceVersion,
 // ownerReferences, and labels; desired annotations are merged onto any added by
 // external controllers (cert-manager, ingress-nginx).
@@ -1005,7 +1005,7 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 										jenkinsEnv := []map[string]interface{}{
 											// SystemReadPermission is opt-in: without it the SYSTEM_READ permission
 											// is disabled and the varroa:system-mite SystemRead grant is inert, so the
-											// mite's drift-baseline /configuration-as-code/export 403s (see #189).
+											// mite's drift-baseline /configuration-as-code/export 403s.
 											{"name": "JAVA_OPTS", "value": javaOptsValue},
 											{"name": "VARROA_OIDC_ISSUER", "value": spec.OIDCIssuer},
 											{"name": "VARROA_LOGIN_URL", "value": spec.VarroaLoginURL},
@@ -1360,8 +1360,8 @@ func parseResourcesSourceAnnotation(sts *unstructured.Unstructured) map[string]s
 //     wins over an old out-of-band edit — otherwise a one-time manual hotfix
 //     (e.g. a direct mite-image STS patch) permanently wedges every future
 //     spec-driven roll for that container, because the "preserved" branch keeps
-//     re-adopting the stale live image forever (#368 fleet incident: a manual
-//     mite-image patch survived a subsequent spec.miteSpec.image edit). The
+//     re-adopting the stale live image forever — a manual mite-image patch must
+//     not survive a subsequent spec.miteSpec.image edit. The
 //     annotation records the operator's own computed desired-value baseline
 //     for this reconcile — written once, before the preservation loop runs —
 //     and is never re-derived from what the template ends up holding after
@@ -1369,12 +1369,12 @@ func parseResourcesSourceAnnotation(sts *unstructured.Unstructured) map[string]s
 //     depends on the stamp keeping that meaning across ticks: comparing this
 //     tick's newly-computed value against the previous stamp only detects
 //     "did the operator's own desired computation change" if the stamp is
-//     also a desired value, not a possibly-preserved live one. An earlier
-//     revision of this code re-stamped from the post-preservation template
-//     instead; that was reverted (PR #373 review) because it made the stamp
-//     equal the preserved value on the very next tick, so an unchanged
-//     desired value no longer matched the stamp and the preserved override
-//     got silently stomped back to desired one reconcile later. Ground truth
+//     also a desired value, not a possibly-preserved live one. Re-stamping
+//     from the post-preservation template instead does not work: it would make
+//     the stamp equal the preserved value on the very next tick, so an
+//     unchanged desired value would no longer match the stamp and the
+//     preserved override would get silently stomped back to desired one
+//     reconcile later. Ground truth
 //     for "what's actually applied" is available separately via the live
 //     container map (GetStatefulSetImages' second return), used only for
 //     informational messaging, never for this decision.
@@ -1477,13 +1477,13 @@ func (c *ClientsetClient) CreateStatefulSet(ctx context.Context, spec StatefulSe
 	// above to work — comparing this tick's want against last tick's prev
 	// only detects "did the operator's own computation change" if prev is
 	// also a desired value, not a possibly-preserved live one. Re-stamping
-	// from the applied template was tried and reverted (PR #373 review):
-	// it turns prev into "whatever got applied" on the very next tick,
-	// which no longer equals this tick's want even when desired never
-	// moved, so the preserved out-of-band value gets stomped back to the
-	// unchanged desired image on the following reconcile — breaking the
-	// exact "persist the hotfix while desired hasn't moved" guarantee (1)
-	// exists for. The live map already carries ground truth for callers
+	// from the applied template does not work: it would turn prev into
+	// "whatever got applied" on the very next tick, which would no longer
+	// equal this tick's want even when desired never moved, so the preserved
+	// out-of-band value would get stomped back to the unchanged desired image
+	// on the following reconcile — breaking the exact "persist the hotfix
+	// while desired hasn't moved" guarantee (1) exists for. The live map
+	// already carries ground truth for callers
 	// that want it (GetStatefulSetImages' second return, GetStatefulSetMiteResources)
 	// — reconcileContainerSpecRoll/reconcileVersionRoll use it only for the
 	// informational "preserved (out-of-band override)" note, not to decide
@@ -1521,12 +1521,12 @@ func (c *ClientsetClient) CreateStatefulSet(ctx context.Context, spec StatefulSe
 				// effectiveDesiredMiteImagePullPolicy) with no
 				// out-of-band-preservation semantic requested for it (same
 				// as resources). Piggybacking pull-policy preservation onto
-				// the image predicate meant that as long as a controller
+				// the image predicate would mean that as long as a controller
 				// had a preserved out-of-band mite image override, a
 				// genuine spec-driven mite pull-policy change would get
 				// silently reverted back to the stale live value on every
 				// Provisioning pass — an unconvergeable Connected-
-				// >Provisioning loop (PR #373 review). Every other
+				// >Provisioning loop. Every other
 				// container (jenkins, plugins-init, init-groovy, ...) has
 				// no independent pull-policy drift check anywhere in the
 				// reconciler, so preserving their out-of-band pull-policy

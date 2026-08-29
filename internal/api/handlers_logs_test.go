@@ -39,7 +39,6 @@ func (c *podNameRecordingClient) StreamPodLogs(_ context.Context, _, podName, _ 
 
 // fetchPodLogsOneShot must address the UID-named StatefulSet pod
 // ("<name>-<uid8>-0"), not the bare "<name>-0" — see controller.PodName.
-// Regression guard for the BFF log-streaming bug after UID-based naming (#69).
 func TestFetchPodLogsOneShot_UsesUIDPodName(t *testing.T) {
 	cr := &v1alpha1.Controller{
 		ObjectMeta: metav1.ObjectMeta{

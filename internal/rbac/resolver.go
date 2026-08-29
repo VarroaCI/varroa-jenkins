@@ -739,9 +739,9 @@ func (r *Resolver) JenkinsRoleAssignments(controller *v1alpha1.Controller) ([]Ro
 			// push again. Relying on the built-in JenkinsRole being reconciled first
 			// is a lockout trap: the operator's JCasC push replaces the whole role
 			// map, dropping the bootstrap role, so if this synthesis is skipped the
-			// mite loses access on the very first push. After PR #172 the mite pushes
-			// config via the MANAGE-gated reload endpoint, so MANAGE (not Administer)
-			// is sufficient for the operator to recover.
+			// mite loses access on the very first push. The mite pushes config via
+			// the MANAGE-gated reload endpoint, so MANAGE (not Administer) is
+			// sufficient for the operator to recover.
 			perms := MiteMinimalPermissions()
 			if jrObj, err := r.jenkinsRoleLister.Get("varroa-system-mite"); err == nil {
 				if jr, ok := jrObj.(*v1alpha1.JenkinsRole); ok && len(jr.Spec.Permissions) > 0 {

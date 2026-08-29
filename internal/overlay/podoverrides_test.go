@@ -38,7 +38,6 @@ func TestCompilePodOverrides_NoJvmOpts(t *testing.T) {
 }
 
 func TestCompilePodOverrides_Env(t *testing.T) {
-	// Set env (probes moved to ProbesSpec, no longer on PodOverrides).
 	// The compiled patch should place env under containers[name=jenkins]
 	// and produce a valid YAML patch.
 	po := &v1alpha1.PodOverrides{

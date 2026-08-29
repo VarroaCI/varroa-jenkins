@@ -1325,11 +1325,11 @@ func TestParseResourcesFromContainerMap_EmptyOrMissingReturnsNil(t *testing.T) {
 	}
 }
 
-// TestApplyUserCRD_StripsResourceVersionOnCreate guards against bug #390: on
-// OIDC login the BFF failed to record the signed-in user because ApplyUserCRD
-// passed a ResourceVersion-bearing object to Create(), which Kubernetes rejects
-// with a "resourceVersion should not be set on objects to be created" Invalid
-// error.  The fix clears Create-forbidden metadata fields before Create.
+// TestApplyUserCRD_StripsResourceVersionOnCreate asserts that ApplyUserCRD
+// clears Create-forbidden metadata fields before Create: passing a
+// ResourceVersion-bearing object to Create() gets a
+// "resourceVersion should not be set on objects to be created" Invalid error
+// from Kubernetes.
 func TestApplyUserCRD_StripsResourceVersionOnCreate(t *testing.T) {
 	scheme := runtime.NewScheme()
 	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "User"}
@@ -1422,11 +1422,11 @@ func TestApplyUserCRD_StripsResourceVersionOnCreate(t *testing.T) {
 	}
 }
 
-// TestPatchControllerStatus_ClearsLastReconcileErrorAt guards the #391/#400
-// regression shape: a merge patch must explicitly null a pointer field to
-// clear it — merely omitting the key leaves the prior value in etcd. This
-// test sets LastReconcileErrorAt on the server-side object, patches with nil,
-// and asserts the field is absent after the patch.
+// TestPatchControllerStatus_ClearsLastReconcileErrorAt asserts that a merge
+// patch must explicitly null a pointer field to clear it — merely omitting
+// the key leaves the prior value in etcd. This test sets LastReconcileErrorAt
+// on the server-side object, patches with nil, and asserts the field is
+// absent after the patch.
 func TestPatchControllerStatus_ClearsLastReconcileErrorAt(t *testing.T) {
 	scheme := runtime.NewScheme()
 	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "Controller"}
@@ -1908,7 +1908,7 @@ users:
 // supplied here to check that clearing seedImportedDigests does not disturb
 // another field carried by the same patch — not as evidence that pluginCount
 // retains by design; it carries the same latent defect for a genuinely zero
-// value (see #551, along with gaps and resolvedMetadataSources).
+// value, along with gaps and resolvedMetadataSources.
 func TestPatchUpdateCenterStatus_ClearsStaleSeedDigests(t *testing.T) {
 	scheme := runtime.NewScheme()
 	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "UpdateCenter"}

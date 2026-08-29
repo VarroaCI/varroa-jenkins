@@ -670,7 +670,7 @@ readLoop:
 			// SSE frames pair an "event: " line with a following "data: "
 			// line; track the event name so the data line below can tell a
 			// terminal "closed" frame (which may carry a reason/message,
-			// e.g. the server's watch-deadline close, #367) apart from a
+			// e.g. the server's watch-deadline close) apart from a
 			// "status" frame.
 			currentEvent = strings.TrimPrefix(line, "event: ")
 			continue

@@ -752,7 +752,7 @@ func (c *ConfigCRUD) HandleVersionProfilesView(data []byte) []byte {
 }
 
 // ---------------------------------------------------------------------------
-// Bundles create/update (Task 2.4)
+// Bundles create/update
 // ---------------------------------------------------------------------------
 
 // HandleBundlesCreate handles operator.<cluster>.bundles.create.
@@ -1050,7 +1050,7 @@ func (c *ConfigCRUD) HandleBindingsUpdate(data []byte) []byte {
 }
 
 // ---------------------------------------------------------------------------
-// Bundles pause/resume (Task 2.5)
+// Bundles pause/resume
 // ---------------------------------------------------------------------------
 
 // HandleBundlesPause handles operator.<cluster>.bundles.pause and
@@ -1128,7 +1128,7 @@ func (c *ConfigCRUD) HandleSourceSync(data []byte) []byte {
 }
 
 // ---------------------------------------------------------------------------
-// Bundles preview/validate (Task 2.6) — shared compose helper
+// Bundles preview/validate — shared compose helper
 // ---------------------------------------------------------------------------
 
 // HandleBundlesPreview handles operator.<cluster>.bundles.preview.
@@ -1158,7 +1158,7 @@ func (c *ConfigCRUD) composeBundle(data []byte, _ /* validateOnly — the BFF di
 		return c.configReply(bus.BundleComposeResponse{Error: "invalid spec JSON", Code: bus.CodeInvalid})
 	}
 
-	// Resolve git auth from local Secrets (port from internal/api/handlers.go:2672).
+	// Resolve git auth from local Secrets.
 	resolvedAuth, gitAuthErrors := c.resolveComposedBundleGitAuth(ctx, req.Namespace, &spec)
 
 	// Resolve OCI auth from local Secrets.
@@ -1174,7 +1174,6 @@ func (c *ConfigCRUD) composeBundle(data []byte, _ /* validateOnly — the BFF di
 		return c.configReply(bus.BundleComposeResponse{Preview: preview})
 	}
 
-	// Build the preview output.
 	preview := &bus.BundleComposePreview{
 		BundleYAML: composed.BundleYAML,
 		Missing:    composed.Missing,
@@ -1216,7 +1215,6 @@ func (c *ConfigCRUD) composeBundle(data []byte, _ /* validateOnly — the BFF di
 	sort.Strings(names)
 	preview.UnresolvedVariables = names
 
-	// Collect errors from git-auth resolution, OCI-auth resolution, and missing-items formatting.
 	var errors []string
 	errors = append(errors, gitAuthErrors...)
 	errors = append(errors, ociAuthErrors...)
@@ -1230,7 +1228,6 @@ func (c *ConfigCRUD) composeBundle(data []byte, _ /* validateOnly — the BFF di
 		errors = append(errors, msg)
 	}
 
-	// Add compose errors.
 	if composed.Errors != nil {
 		errors = append(errors, composed.Errors...)
 	}

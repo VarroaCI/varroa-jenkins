@@ -617,8 +617,8 @@ type ResourceClient interface {
 	// resource requirements (requests+limits for both mite and Jenkins),
 	// live image pull policy, and the varroa.dev/resources-source stamp —
 	// from a single StatefulSet read, so reconcileContainerSpecRoll doesn't
-	// need a separate GetStatefulSetImages call on top of this one (PR #373
-	// review: avoids a redundant API read per controller per reconcile tick).
+	// need a separate GetStatefulSetImages call on top of this one (avoids a
+	// redundant API read per controller per reconcile tick).
 	// found=false when the StatefulSet does not exist yet — callers treat
 	// that as "nothing to roll".
 	GetStatefulSetContainerSpecs(ctx context.Context, name, namespace string) (
@@ -1851,7 +1851,7 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 		}
 	}
 
-	// Keep the Service and Ingress converged after provisioning (#88, #315).
+	// Keep the Service and Ingress converged after provisioning.
 	// handleProvisioning creates them initially; once the controller is past
 	// provisioning, reconcile updates to ports, TLS, annotations, and host on
 	// every tick. Non-fatal: an update failure must not wedge an otherwise-
@@ -2254,7 +2254,7 @@ func (r *Reconciler) handleProvisioning(ctx context.Context, cr *v1alpha1.Contro
 	pre := controllerPrefix(cr)
 
 	// Create/update the Service. Shared with the post-provisioning reconcile
-	// path so the desired-service derivation lives in one place (#315).
+	// path so the desired-service derivation lives in one place.
 	{
 		_, span := tracer.Start(ctx, "provision.createService")
 		err := r.reconcileService(ctx, cr)
@@ -2324,7 +2324,7 @@ func (r *Reconciler) handleProvisioning(ctx context.Context, cr *v1alpha1.Contro
 	profile, matchKind := r.resolveProfileForCr(cr)
 	// Bake-time compat gate (guard-version-upgrade-path §7): a provably-unsafe
 	// core (older than the effective plugin-set source, or unparseable with no
-	// vouching profile) would crash-loop plugins-init (#185). Block BEFORE the
+	// vouching profile) would crash-loop plugins-init. Block BEFORE the
 	// plugins.txt write and all StatefulSet work later in this function, so a
 	// deny never rolls anything. The condition is (re)written every pass.
 	compat := EvaluateCoreCompat(cr.Spec.Version, profile, matchKind, ProfilePluginSetReady(profile), pluginlock.Baseline())
@@ -2550,7 +2550,7 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 	}
 
 	// Create/update the Ingress. Shared with the post-provisioning reconcile path
-	// so the desired-ingress derivation lives in one place (#88).
+	// so the desired-ingress derivation lives in one place.
 	{
 		_, span := tracer.Start(ctx, "provision.createIngress")
 		err := r.reconcileIngress(ctx, cr)
@@ -2632,8 +2632,8 @@ const (
 // reconcileStreamDegradedCondition mirrors the gateway's bus→stream bridge
 // health onto the Controller as ConditionMiteStreamDegraded.
 //
-// This is the visibility half of #509. The gateway retries a failed KV watch
-// forever, so this condition is self-healing — but while it is True, desired
+// The gateway retries a failed KV watch forever, so this condition is
+// self-healing — but while it is True, desired
 // state is not reaching the mite even though the controller is Connected,
 // Ready and reports no apply failure. Without it the only evidence of a
 // starved mite is a single controller-scoped gateway log line.
@@ -2751,7 +2751,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 
 	// A mite can hold a healthy gRPC stream while the gateway's bus→stream
 	// bridge is broken, in which case no desired state reaches it and every
-	// other signal still reads as healthy (#509). Surface that explicitly.
+	// other signal still reads as healthy. Surface that explicitly.
 	// Only meaningful once the mite is known connected.
 	r.reconcileStreamDegradedCondition(cr, logger)
 
@@ -2815,7 +2815,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 				// per-section errors structurally on status (config, rbac, plugins, items).
 				d := r.DesiredState
 				// The mite no longer runs a plugins section (managed plugins converge
-				// via the init-container pod roll, #166), so the plugins section is
+				// via the init-container pod roll), so the plugins section is
 				// always reported OK and never penalizes Succeeded.
 				pluginsOK := true
 				rbacOK := d.ConfigSuccess
@@ -3838,15 +3838,15 @@ func sameOutcome(prev *v1alpha1.ApplyResult, next v1alpha1.ApplyResult) bool {
 }
 
 // reconcileService derives the desired Service for a controller and creates or
-// updates it (#315). Shared by handleProvisioning (initial create) and the
+// updates it. Shared by handleProvisioning (initial create) and the
 // post-provisioning reconcile path so port changes converge instead of going
-// stale — Services created before #315 lack the inbound agent port.
+// stale — a Service missing the inbound agent port must converge to add it.
 func (r *Reconciler) reconcileService(ctx context.Context, cr *v1alpha1.Controller) error {
 	return r.client.CreateService(ctx, controllerPrefix(cr)+"-svc", cr.Namespace, 8080, resourceOverlayService(cr))
 }
 
 // reconcileIngress derives the desired Ingress for a controller and creates or
-// updates it (#88). It is the single source of truth for ingress derivation,
+// updates it. It is the single source of truth for ingress derivation,
 // shared by handleProvisioning (initial create) and the post-provisioning
 // reconcile path so changes to TLS, annotations, or host converge instead of
 // going stale. Returns nil when no host resolves (nothing to reconcile).
@@ -4067,7 +4067,7 @@ func (r *Reconciler) buildDesiredStateCommand(cr *v1alpha1.Controller, resolved 
 	logger := r.Logger.With("controller", cr.Namespace+"/"+cr.Name, "phase", cr.Status.Phase)
 	cmd := &mitev1.DesiredStateCommand{
 		CommandId: fmt.Sprintf("%d", time.Now().UnixNano()),
-		// #166: config push always uses the MANAGE-gated /configuration-as-code/reload
+		// Config push always uses the MANAGE-gated /configuration-as-code/reload
 		// path, never the admin-gated apply path, so the mite can run without
 		// Jenkins.ADMINISTER. Reload is always true; the flag is retained on the
 		// proto for compatibility.
@@ -4247,13 +4247,13 @@ func defaultMiteImage() string {
 // resolved against), ResolveVersion is deployed instead of the bare line —
 // otherwise the running core can be older than the core the pinned plugins
 // require, crash-looping plugins-init
-// (AggregatePluginPrerequisitesNotMetException, #185).
+// (AggregatePluginPrerequisitesNotMetException).
 //
 // The unpinned sentinels "" and "lts" resolve to the embedded plugin-lock
 // baseline, NOT to a floating :latest or :lts tag. ResolveProfile returns
 // (nil, MatchBaseline) for both unconditionally, and resolveCoreSet then pins
 // plugins to pluginlock.Baseline() — so deploying a moving core against a
-// build-time-pinned plugin set reproduces exactly the #185 mismatch this
+// build-time-pinned plugin set reproduces exactly the mismatch this
 // function exists to avoid. Keeping both sides on Baseline() makes core and
 // plugin set agree by construction, and keeps this in step with
 // EvaluateCoreCompat, which reports both sentinels as baseline-backed.
@@ -4275,9 +4275,8 @@ func jenkinsImageForVersion(version string, profile *v1alpha1.JenkinsVersionProf
 // effectiveDesiredMiteImage returns the mite sidecar image that provisioning
 // bakes into the StatefulSet (mite/init-groovy/casc-seed containers all share
 // it) and that reconcileContainerSpecRoll compares against — a single function so
-// the two call sites can never diverge (#368's root cause was exactly this
-// kind of duplication: handleProvisioning knew the defaulting rule, nothing
-// else did). Precedence: an explicit resourceOverlay.statefulSet image for the
+// the two call sites can never diverge on the defaulting rule. Precedence: an
+// explicit resourceOverlay.statefulSet image for the
 // mite container wins (mirrors effectiveDesiredJenkinsImage — CreateStatefulSet
 // applies overlays before stamping varroa.dev/computed-images, so the stamped/
 // live image reflects the overlay, not the class/default; comparing against the

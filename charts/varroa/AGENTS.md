@@ -50,8 +50,7 @@ the packaged CRDs/version-profile manifests. Does not own the Go source it packa
 - **`nats.config.cluster.enabled`/`nats.config.cluster.replicas` are the ONLY real
   clustering knobs** for the vendored nats-1.2.0 subchart (its `stateful-set.yaml`
   hardcodes `replicas: 1` whenever `cluster.enabled` is false, ignoring `replicas`
-  entirely). There used to be a decoy top-level `nats.replicas` (issue #433) that the
-  subchart never read — it is gone. `jetStreamReplicas` (VARROA_JETSTREAM_REPLICAS)
+  entirely). `jetStreamReplicas` (VARROA_JETSTREAM_REPLICAS)
   derives from these same two keys via `varroa.jetStreamReplicas`/`varroa.natsServerCount`,
   clamped 1..3, so the subchart's actual server count and Varroa's requested JetStream
   replication can no longer silently drift; `mode-guard.yaml` fails the render if an

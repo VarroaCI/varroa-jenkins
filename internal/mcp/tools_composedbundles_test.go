@@ -258,9 +258,9 @@ func TestComposedBundleListSchema_UsesAnyOfNotOneOf(t *testing.T) {
 }
 
 // Both create and update must declare displayName in their input schema.
-// create sets the field from args while the schema never advertised it, and
-// with WithInputSchemaValidation an undeclared argument is rejected before the
-// handler runs — so the field was unreachable (#471).
+// With WithInputSchemaValidation an undeclared argument is rejected before
+// the handler runs, so a handler that sets displayName from args while the
+// schema omits it makes the field unreachable.
 func TestComposedBundleTools_DeclareDisplayName(t *testing.T) {
 	var missing []string
 	for _, tool := range liveTools(t) {
@@ -283,8 +283,8 @@ func TestComposedBundleTools_DeclareDisplayName(t *testing.T) {
 }
 
 // update_composed_bundle declares a variables argument and must apply it to
-// the stored object: before the fix the handler acknowledged the update while
-// dropping variables, so a caller's change silently never happened (#471).
+// the stored object: a handler that acknowledges the update while dropping
+// variables leaves a caller's change silently never happened.
 func TestUpdateComposedBundle_AppliesVariables(t *testing.T) {
 	store := crdstore.NewFake()
 	crdstore.MustSeed(store, &v1alpha1.ComposedBundle{
@@ -345,9 +345,9 @@ func composedBundleAdminDeps(store crdstore.Backend) *api.Dependencies {
 	}
 }
 
-// The schema half of #471 is covered above; this is the other half. Declaring
-// displayName is worthless if the handler never applies it, and a test that
-// only reads the schema stays green while the assignment is deleted.
+// The schema-declaration half is covered above; this is the other half.
+// Declaring displayName is worthless if the handler never applies it, and a
+// test that only reads the schema stays green while the assignment is deleted.
 //
 // The three string fields are set by key presence rather than by non-empty
 // value, so each supports all three operations: omit to preserve, pass a value
@@ -772,7 +772,7 @@ func TestComposedBundleDryRunTools_RejectEmptyNamespace(t *testing.T) {
 
 // The schema is a client's only contract for what the handler parses, so a
 // parameter the handler reads but the schema never advertises is unreachable
-// (WithInputSchemaValidation rejects it) — the displayName regression (#471).
+// (WithInputSchemaValidation rejects it).
 // Both dry-run tools must declare jcascMergeStrategy like create does, and the
 // inputs description must name the ociSource variant alongside itemRef/gitSource.
 func TestComposedBundleDryRunTools_DeclareJcascMergeStrategyAndOciInputs(t *testing.T) {

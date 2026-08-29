@@ -141,7 +141,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// pass for the downstream readers. Only the phases that honor the request
 	// (Provisioning's checksum-gate bypass, Connected's forced re-push)
 	// consume it; in any other phase it stays armed so the request fires when
-	// the controller reaches an honoring phase, as it did pre-#274.
+	// the controller reaches an honoring phase.
 	honorsForceReprovision := cr.Status.Phase == v1alpha1.ControllerPhaseProvisioning ||
 		cr.Status.Phase == v1alpha1.ControllerPhaseConnected
 	if cr.Annotations[annotationForceReprovision] != "" && honorsForceReprovision {

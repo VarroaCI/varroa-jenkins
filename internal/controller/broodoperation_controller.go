@@ -570,8 +570,8 @@ func (r *BroodOperationReconciler) evaluateDispatchedTarget(
 	switch verb {
 	case v1alpha1.BroodVerbRestart:
 		// Restart is an operator-driven pod delete (same mechanism as the
-		// single-controller restart; the mite has no SAFE_RESTART handler —
-		// removed in #174). Success evidence is the recreated pod being
+		// single-controller restart; the mite has no SAFE_RESTART handler).
+		// Success evidence is the recreated pod being
 		// Ready: creationTimestamp after dispatch AND kubelet readiness
 		// (Jenkins actually serving). Controller phase is deliberately NOT
 		// part of the predicate — it lags the reconciler tick in both
@@ -805,7 +805,7 @@ func (r *BroodOperationReconciler) dispatchTarget(ctx context.Context, op *v1alp
 	case v1alpha1.BroodVerbRestart:
 		// Operator-driven pod delete, same as the single-controller restart.
 		// The StatefulSet recreates the pod; the mite-owned SIGTERM drain
-		// (#154) quiets Jenkins down within the pod's termination grace.
+		// quiets Jenkins down within the pod's termination grace.
 		return r.resourceClient.DeleteControllerPod(ctx, ns, name)
 
 	case v1alpha1.BroodVerbReconcile:
@@ -1293,7 +1293,7 @@ func (r *BroodOperationReconciler) runGroovyOnTarget(ctx context.Context, ns, na
 	baseEndpoint := fmt.Sprintf("http://%s-svc.%s.svc.cluster.local:8080", controllerPrefix(cr), ns)
 	client := jenkins.NewClient(baseEndpoint, "varroa-operator", token)
 	// /scriptText answers 200 even when the script fails to compile or throws,
-	// so the raw call can't distinguish "ran" from "never executed" (#529). The
+	// so the raw call can't distinguish "ran" from "never executed". The
 	// harness wraps the script and prints a sentinel only on completion.
 	raw, err := client.ScriptConsoleOnce(ctx, wrapGroovyForClassification(script))
 	if err != nil {

@@ -310,7 +310,7 @@ func TestUserListSchema_UsesAnyOfNotOneOf(t *testing.T) {
 
 // Every user handler calls deps.Authorizer.IsAdmin unconditionally. On an
 // incompletely-wired server Authorizer is nil, and each handler must answer a
-// tool error rather than dereference nil and panic (#472).
+// tool error rather than dereference nil and panic.
 func TestUserTools_AuthorizerNilReturnsError(t *testing.T) {
 	deps := &api.Dependencies{Client: &stubClient{}, Store: crdstore.NewFake()}
 	handler := NewHandler(deps)

@@ -49,7 +49,7 @@ func TestEveryListToolDeclaresOutputSchema(t *testing.T) {
 // resultJSON is the single point where api.SanitizeObject runs, which is what
 // makes sanitization global across all 64 tools. A tool that marshals an object
 // itself and returns NewToolResultText would ship an unsanitized CR with a
-// green suite — the failure mode #467 already cost us once.
+// green suite.
 //
 // The allowlist holds rendered argument expressions rather than tool names:
 // matching the expression is precise and needs no walk back up to the enclosing

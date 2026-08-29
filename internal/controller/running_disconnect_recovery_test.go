@@ -24,11 +24,11 @@ func runningCtrl(name string) *v1alpha1.Controller {
 	}
 }
 
-// TestHandleRunning_ProlongedDisconnectResetsToPending is the #302 Fix C
-// regression: a controller observed in Running whose mite never (re)connects
-// must, after the grace period, reset to Pending so the Pending→Provisioning
-// pass runs a full reprovision (rolling the mite container's CA env) instead of
-// waiting out the 5-minute provisioning timeout.
+// TestHandleRunning_ProlongedDisconnectResetsToPending asserts that a
+// controller observed in Running whose mite never (re)connects must, after
+// the grace period, reset to Pending so the Pending→Provisioning pass runs a
+// full reprovision (rolling the mite container's CA env) instead of waiting
+// out the 5-minute provisioning timeout.
 func TestHandleRunning_ProlongedDisconnectResetsToPending(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	rec, _ := newTestReconcilerForGate(client)
@@ -100,8 +100,8 @@ func TestHandleRunning_ReconnectClearsDisconnectTicks(t *testing.T) {
 	}
 }
 
-// TestHandleRunning_ForcePendingClearsGraceWindow is the PR #308 Copilot
-// regression: when handleRunning forces Pending after the grace period it must
+// TestHandleRunning_ForcePendingClearsGraceWindow asserts that when
+// handleRunning forces Pending after the grace period it must
 // clear the disconnected-tick counter, so a Provisioning→Running bounce-back
 // (common while the pod restarts before the mite reconnects) gets a fresh grace
 // window instead of immediately re-forcing Pending — otherwise the controller

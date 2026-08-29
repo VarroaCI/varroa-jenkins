@@ -2,7 +2,7 @@ package rbac
 
 import "testing"
 
-// TestMiteMinimalPermissionsExcludesAdmin pins the #167 outcome: the mite role
+// TestMiteMinimalPermissionsExcludesAdmin pins the outcome: the mite role
 // must never carry Hudson.Administer, and must include the MANAGE-based set it
 // needs to apply config via reload and read system config.
 func TestMiteMinimalPermissionsExcludesAdmin(t *testing.T) {

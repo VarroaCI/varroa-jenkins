@@ -367,8 +367,8 @@ func TestListControllersReturnsSuccess(t *testing.T) {
 
 // get_controller_logs reads pod logs through deps.Client, which is optional and
 // nil on an incompletely-wired server. Its authorizer check is deliberately
-// conditional, so nothing upstream stops a nil Client reaching the log read
-// (#472). Store is present here to isolate Client as the only missing piece.
+// conditional, so nothing upstream stops a nil Client reaching the log read.
+// Store is present here to isolate Client as the only missing piece.
 func TestGetControllerLogs_ClientNilReturnsError(t *testing.T) {
 	handler := NewHandler(&api.Dependencies{Store: crdstore.NewFake()})
 

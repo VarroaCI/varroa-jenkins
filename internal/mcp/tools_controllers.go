@@ -640,9 +640,9 @@ const noSpecFields = "nothing to update: supply version, composedBundleRef, " +
 	"powerState, hibernation, or a spec merge patch"
 
 // unknownControllerArgsError rejects arguments the tool does not understand,
-// naming them. Dropping them silently is the #512 failure mode itself: a
-// `hibernation` argument vanished into a generic "nothing to update", which
-// read as a malformed request rather than an unsupported field. Rejecting
+// naming them. Dropping them silently lets an unsupported field like
+// `hibernation` vanish into a generic "nothing to update", which reads as a
+// malformed request rather than an unsupported field. Rejecting
 // rather than warning also covers the harder half — a misplaced argument
 // alongside a valid one, where the call otherwise succeeds and the caller has
 // no way to learn that half of what they sent never landed.

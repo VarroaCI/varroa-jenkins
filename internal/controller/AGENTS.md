@@ -39,9 +39,8 @@ sections describe.
   composing them. Ownership is the `varroa.dev/starter` label and nothing else; objects
   under the reserved names that lack it are skipped and logged, never overwritten. A tick
   that would write identical bytes performs no write — the content hash is carried in the
-  `varroa.dev/starter-hash` **annotation** for exactly that comparison. Not a label: a
-  sha256 hex digest is 64 characters and label VALUES cap at 63, so the API server
-  rejected every seeded object and the feature was silently dead.
+  `varroa.dev/starter-hash` **annotation**, not a label; see
+  [bundles/AGENTS.md](../../bundles/AGENTS.md) for why.
 - **Brood verb policy is enforced in `reconcilePending`, never in the BFF.**
   `verbPolicyAllows` (`broodoperation_controller.go`) reads
   `ProvisioningDefaults.broodPolicy` and denies with a terminal phase + reason
@@ -179,15 +178,8 @@ sections describe.
     (`effectiveDesiredMiteImage()` changes via class/spec/overlay resolution,
     or `spec.version` edited, or a resourceOverlay change),
     the new desired value wins over the stale hotfix — a real spec edit is
-    stronger evidence of intent than an old out-of-band patch. Found
-    live-broken 2026-07-16: three fleet controllers had been hand-patched to a
-    hotfix mite image working around #368; once #368's fix shipped and
-    the desired mite image changed (via class/spec/overlay) to roll to the real fix, the old
-    unconditional-preservation logic (`live != prev`, ignoring whether `want`
-    also changed) kept re-applying the stale hotfix forever —
-    `reconcileContainerSpecRoll` correctly detected the drift and rolled to
-    Provisioning every tick, but `CreateStatefulSet` silently no-opped the mite
-    container on every provisioning pass. The `varroa.dev/computed-images`
+    stronger evidence of intent than an old out-of-band patch. The
+    `varroa.dev/computed-images`
     stamp is written **once, from the desired state, before the preservation
     loop runs** and is deliberately *not* re-derived from the post-preservation
     template — the stamp's meaning is "the operator's own desired-value

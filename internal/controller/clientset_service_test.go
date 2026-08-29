@@ -13,7 +13,7 @@ import (
 )
 
 // TestCreateServicePorts verifies the controller Service exposes both the HTTP
-// port and the inbound agent port (#315). The jenkins/jenkins image fixes the
+// port and the inbound agent port. The jenkins/jenkins image fixes the
 // TCP agent listener at 50000 (JENKINS_SLAVE_AGENT_PORT) and the StatefulSet
 // declares the matching containerPort; without the Service port, kubernetes
 // plugin agents in TCP inbound mode can never connect back. Multi-port
@@ -46,10 +46,10 @@ func TestCreateServicePorts(t *testing.T) {
 }
 
 // TestCreateServiceUpdatesExisting verifies CreateService reconciles an already
-// existing Service instead of treating it as an idempotent no-op (#315, same
-// trap as #88 for Ingress): a pre-fix Service with a single unnamed port must
-// converge to the named http+agent ports while preserving the allocated
-// ClusterIP (immutable) and metadata owned out of band.
+// existing Service instead of treating it as an idempotent no-op: a live
+// Service with only a single unnamed port must converge to the named
+// http+agent ports while preserving the allocated ClusterIP (immutable) and
+// metadata owned out of band.
 func TestCreateServiceUpdatesExisting(t *testing.T) {
 	c := &ClientsetClient{clientset: fake.NewSimpleClientset()}
 	ctx := context.Background()
@@ -125,9 +125,8 @@ func TestCreateServiceNoOpWhenConverged(t *testing.T) {
 }
 
 // TestServiceReconciledPostProvisioning verifies the Service is re-derived on
-// the Running/Connected tick, not only during provisioning (#315). Without
-// this, Services created by pre-fix operators never converge to expose the
-// agent port.
+// the Running/Connected tick, not only during provisioning. Without this, a
+// Service missing the agent port never converges to expose it.
 func TestServiceReconciledPostProvisioning(t *testing.T) {
 	client := newTestClientWithBundle()
 	rec := newTestReconciler(client)

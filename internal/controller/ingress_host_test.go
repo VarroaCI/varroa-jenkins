@@ -11,8 +11,9 @@ import (
 )
 
 // A Controller with neither spec.ingressSpec.host nor a rootDomain gets no
-// Ingress. That is supported (port-forward), but it used to be completely
-// silent, which is indistinguishable from a broken ingress controller.
+// Ingress. That is supported (port-forward); the reconciler must surface a
+// NoResolvedHost condition, not stay silent — silence is indistinguishable
+// from a broken ingress controller.
 func TestReconcileIngressReportsNoResolvedHost(t *testing.T) {
 	tc := newTestClient()
 	rec := newTestReconciler(tc)

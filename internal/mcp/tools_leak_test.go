@@ -14,11 +14,9 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/rbac"
 )
 
-// These are the assertions #467 lacked. The bug was not that the strip logic
-// was wrong — there was no strip logic on this surface at all — and a green
-// suite never noticed, because nothing asserted on what a tool result must NOT
-// contain. Every check below is a negative one, stated at the MCP tool boundary
-// rather than on the sanitizer in isolation.
+// Every check below is a negative one — asserting what a tool result must NOT
+// contain — stated at the MCP tool boundary rather than on the sanitizer in
+// isolation, so a surface with no strip logic at all still fails the suite.
 
 const (
 	testWakeToken    = "wake-token-that-must-never-ship"
@@ -127,8 +125,8 @@ func TestMCPListControllers_DoesNotLeakWakeToken(t *testing.T) {
 	requireAbsent(t, "list_controllers", got, "wakeToken", testWakeToken, "managedFields")
 }
 
-// The leak class is wider than the one field #467 names: closing it per-domain
-// would have left this path open.
+// The leak class is wider than a single field: closing it per-domain
+// would leave this path open.
 func TestMCPListUsers_DoesNotLeakCredentials(t *testing.T) {
 	got := callToolRaw(t, adminDeps(), "list_users", map[string]interface{}{
 		"namespace": "ns",

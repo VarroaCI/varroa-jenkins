@@ -54,10 +54,10 @@ func specTestDeps() *api.Dependencies {
 	}
 }
 
-// #512 regression, re-pinned for the bus route: update_controller must build a
-// patch whose hibernation carries all three fields — nothing flattened. The
-// MCP local fallback is gone, so the assertion is on the patch handed to
-// Brood.Update rather than on a local store write.
+// update_controller must build a patch whose hibernation carries all three
+// fields — nothing flattened. The MCP local fallback is gone, so the
+// assertion is on the patch handed to Brood.Update rather than on a local
+// store write.
 func TestUpdateControllerSetsHibernation(t *testing.T) {
 	brood := &recordingBrood{}
 	handler := NewHandler(broodHandler(brood).deps)
@@ -206,11 +206,10 @@ func TestMergeControllerSpecOnFreshController(t *testing.T) {
 	}
 }
 
-// The old message listed only the two accepted fields, which is why #512 was
-// filed as a malformed request rather than an unsupported one. An unrecognized
-// argument is now named and rejected — including the harder case where one
-// arrives alongside a valid field, which would otherwise succeed while
-// silently discarding half of what the caller sent.
+// An unrecognized argument must be named and rejected rather than silently
+// dropped — including the harder case where one arrives alongside a valid
+// field, which would otherwise succeed while silently discarding half of
+// what the caller sent.
 func TestUpdateControllerRejectsUnrecognizedArguments(t *testing.T) {
 	cases := []struct {
 		name string

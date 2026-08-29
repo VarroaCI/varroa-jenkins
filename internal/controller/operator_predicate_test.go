@@ -236,8 +236,8 @@ func TestRouting_TriggerReconcile(t *testing.T) {
 }
 
 // TestReconcile_ConsumesForceReprovision verifies the annotation is consumed
-// one-shot at the top of Reconcile (issue #274): a single pass clears it via
-// PATCH regardless of which phase path runs afterwards.
+// one-shot at the top of Reconcile: a single pass clears it via PATCH
+// regardless of which phase path runs afterwards.
 func TestReconcile_ConsumesForceReprovision(t *testing.T) {
 	client := newTestClientWithBundle()
 	cr := testController("test-ctrl", "test-ns", v1alpha1.ControllerPhaseConnected)
@@ -273,7 +273,7 @@ func TestReconcile_ConsumesForceReprovision(t *testing.T) {
 
 // TestReconcile_ForceReprovisionClearFailureRequeues verifies clear-before-act:
 // when the consume PATCH fails, Reconcile returns the error (rate-limited
-// retry) instead of acting on the annotation (issue #274 reload-loop guard).
+// retry) instead of acting on the annotation, guarding against a reload loop.
 func TestReconcile_ForceReprovisionClearFailureRequeues(t *testing.T) {
 	client := newTestClientWithBundle()
 	cr := testController("test-ctrl", "test-ns", v1alpha1.ControllerPhaseConnected)
@@ -296,10 +296,10 @@ func TestReconcile_ForceReprovisionClearFailureRequeues(t *testing.T) {
 	}
 }
 
-// TestReconcile_ForceReprovisionStaysArmedInNonHonoringPhase pins the review
-// fix on #274: a phase that cannot honor the request (Pending/Failed/Stopped)
-// must NOT consume the annotation — it stays armed until Provisioning or
-// Connected fires it.
+// TestReconcile_ForceReprovisionStaysArmedInNonHonoringPhase asserts that a
+// phase that cannot honor the request (Pending/Failed/Stopped) must NOT
+// consume the annotation — it stays armed until Provisioning or Connected
+// fires it.
 func TestReconcile_ForceReprovisionStaysArmedInNonHonoringPhase(t *testing.T) {
 	client := newTestClientWithBundle()
 	cr := testController("test-ctrl", "test-ns", v1alpha1.ControllerPhasePending)

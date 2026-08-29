@@ -15,7 +15,7 @@ import (
 )
 
 // TestMaterializeDir_Regression verifies that materializeDir produces the
-// same MaterializedBundle as the full Materialize path (regression for 3.1).
+// same MaterializedBundle as the full Materialize path.
 func TestMaterializeDir_Regression(t *testing.T) {
 	// Build a bundle directory with standard files.
 	bundleDir := t.TempDir()

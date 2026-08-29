@@ -473,9 +473,9 @@ func TestShardManager_ClockSkewTolerance(t *testing.T) {
 	}
 }
 
-// TestShardManager_RenewalSkipsFreshLeases pins the renewal cadence (issue
-// #280): the rebalance loop only writes a shard-lease renewal once remaining
-// validity drops under 2× the rebalance interval.
+// TestShardManager_RenewalSkipsFreshLeases asserts that the rebalance loop
+// only writes a shard-lease renewal once remaining validity drops under 2×
+// the rebalance interval.
 func TestShardManager_RenewalSkipsFreshLeases(t *testing.T) {
 	h := newHarness(t, time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC))
 	ring := NewRing(4)

@@ -44,19 +44,9 @@ func NewRouter(deps *Dependencies) http.Handler {
 	// RBAC role bindings: GET list, POST create, GET/PUT/DELETE detail.
 	mux.HandleFunc("/rolebindings", srv.handleVarroaRoleBindings)
 	mux.HandleFunc("/rolebindings/", srv.handleVarroaRoleBindingDispatch)
-	// Jenkins roles + bindings, catalog sources/items, composed bundles
-	// are now under /clusters/{cluster}/... (add-remote-config-authoring).
-	// The flat routes below are REMOVED (D5 lockstep — no redirects):
-	//   /jenkinsroles, /jenkinsroles/, /jenkinsrolebindings, /jenkinsrolebindings/
-	//   /catalogsources, /catalogsources/, /catalogitems, /catalogitems/
-	//   /composedbundles, /composedbundles/validate, /composedbundles/
 	// VarroaRole /roles and /rolebindings stay flat (core-only).
 	// Current user permissions.
 	mux.HandleFunc("/me/permissions", srv.handleMePermissions)
-	// Provisioning defaults/config and version profiles are now under
-	// /clusters/{cluster}/... (add-remote-provisioning-config-authoring).
-	// Deployable namespaces: per-caller create-authorized namespace discovery.
-	// REMOVED — moved to /clusters/{cluster}/namespaces/deployable in handleClusterDispatch.
 	// Activity feed.
 	mux.HandleFunc("/activity", srv.handleActivity)
 	mux.HandleFunc("/activity/stream", srv.handleActivityStream)

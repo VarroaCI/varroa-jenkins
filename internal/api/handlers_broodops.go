@@ -729,7 +729,7 @@ func (s *Server) handleBroodSuspend(w http.ResponseWriter, r *http.Request, ns, 
 // fan-out — is deliberately NOT treated as terminal by itself, since targets
 // may become reachable again later (a hibernated controller waking up, a
 // transient bus RPC timeout clearing). Without a hard cap, that combination
-// polls forever and hangs a `varroactl broodop run --watch` client (#367).
+// polls forever and hangs a `varroactl broodop run --watch` client.
 // One hour matches scheduleJobActiveDeadlineSeconds
 // (broodschedule_controller.go) — the bound already accepted elsewhere in
 // this codebase for how long we wait on a whole brood operation to finish
@@ -822,7 +822,6 @@ func (s *Server) handleBroodStreamWithPoll(w http.ResponseWriter, r *http.Reques
 	keepalive := time.NewTicker(30 * time.Second)
 	defer keepalive.Stop()
 
-	// Build initial DTO.
 	lastDTO := buildBroodRunFromDetail(children, statuses)
 	sendSSEBroodRun(w, flusher, lastDTO)
 
@@ -830,8 +829,8 @@ func (s *Server) handleBroodStreamWithPoll(w http.ResponseWriter, r *http.Reques
 	// finished and its CR was garbage-collected in the gap between the
 	// pre-check above and the first poll tick below). Catch that now,
 	// rather than only inside the poll loop — otherwise the very next poll
-	// could observe zero reachable children and, prior to #367, would have
-	// polled forever without ever having noticed the terminal phase.
+	// could observe zero reachable children and poll forever without ever
+	// having noticed the terminal phase.
 	if terminalBroodPhase(children) {
 		sendSSEClosed(w, flusher, "", "")
 		return
@@ -841,7 +840,7 @@ func (s *Server) handleBroodStreamWithPoll(w http.ResponseWriter, r *http.Reques
 	defer poll.Stop()
 
 	// Server-side deadline: an empty/never-terminal reachable target set
-	// must not hold this stream (and its poll loop) open forever (#367).
+	// must not hold this stream (and its poll loop) open forever.
 	deadline := time.NewTimer(maxDuration)
 	defer deadline.Stop()
 
@@ -926,7 +925,7 @@ func sendSSEBroodRun(w http.ResponseWriter, flusher http.Flusher, run *BroodRun)
 // and message are optional: when both are empty, the event carries a bare
 // `{}` payload (the normal terminal-phase / fan-out-error close). When set,
 // message becomes the informative status the client surfaces on exit — used
-// for the deadline-expiry close (#367), where the stream ends without ever
+// for the deadline-expiry close, where the stream ends without ever
 // observing a terminal phase.
 func sendSSEClosed(w http.ResponseWriter, flusher http.Flusher, reason, message string) {
 	if reason == "" && message == "" {

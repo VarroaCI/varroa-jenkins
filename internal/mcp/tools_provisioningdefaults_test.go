@@ -442,7 +442,7 @@ func TestVersionProfileListSchema_UsesAnyOfNotOneOf(t *testing.T) {
 
 // get/create/update/delete_jenkins_version_profile dereference
 // deps.ConfigBrood. On an incompletely-wired server it is nil, and each
-// handler must answer a tool error rather than panic (#472). create/update
+// handler must answer a tool error rather than panic. create/update
 // share the writeProfile closure, whose guard covers both registrations.
 func TestVersionProfileTools_ConfigBroodNilReturnsError(t *testing.T) {
 	deps := &api.Dependencies{Client: &stubClient{}, Store: crdstore.NewFake()}
@@ -476,7 +476,7 @@ func TestVersionProfileTools_ConfigBroodNilReturnsError(t *testing.T) {
 // "_jenkins_version_profile" SUFFIX. A TrimPrefix mistake leaves the verb as
 // the full tool name, and the permission-denial text would then read
 // "version-profiles:create_jenkins_version_profile". The verb is only
-// observable through that text, so assert on it (#473).
+// observable through that text, so assert on it.
 func TestCreateJenkinsVersionProfile_PermissionTextUsesVerb(t *testing.T) {
 	// ConfigBrood is present so the handler reaches the authorization check;
 	// Authorizer is nil, which the writeProfile closure treats as a denial.

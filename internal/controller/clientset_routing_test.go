@@ -117,7 +117,7 @@ func TestBuildStatefulSetBannerUsesClusterAwareControllerPath(t *testing.T) {
 // TestBuildStatefulSetEnablesSystemRead asserts the jenkins container runs with
 // -Djenkins.security.SystemReadPermission=true. Without it the SYSTEM_READ
 // permission is disabled and the varroa:system-mite SystemRead grant is inert,
-// 403ing the mite's drift-baseline /configuration-as-code/export (#189).
+// 403ing the mite's drift-baseline /configuration-as-code/export.
 func TestBuildStatefulSetEnablesSystemRead(t *testing.T) {
 	sts := buildStatefulSet(StatefulSetSpec{
 		Name:           "ci-00000000",
@@ -283,7 +283,7 @@ func TestCreateIngressPathRule(t *testing.T) {
 }
 
 // TestCreateIngressUpdatesExisting verifies CreateIngress reconciles an already
-// existing Ingress instead of leaving it stale (#88): a second call that adds
+// existing Ingress instead of leaving it stale: a second call that adds
 // TLS and an annotation must patch the live object, while preserving metadata
 // (resourceVersion, ownerReferences) and annotations added by other controllers.
 func TestCreateIngressUpdatesExisting(t *testing.T) {

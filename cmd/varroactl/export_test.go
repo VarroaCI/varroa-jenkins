@@ -825,8 +825,8 @@ func testHPIBytes(t *testing.T, shortName, version, longName, jenkinsVersion, de
 	return testHPIBytesRaw(t, mf)
 }
 
-// TestExport_EmptyResolutionRefusesToPublish covers the CLI half of issue #416:
-// a matched profile that resolves to zero plugins must fail loudly rather than
+// TestExport_EmptyResolutionRefusesToPublish covers the CLI half: a matched
+// profile that resolves to zero plugins must fail loudly rather than
 // publish a valid-but-empty pack and exit 0. This holds regardless of the status
 // that accompanied the empty resolution — the CLI does not need to reason about
 // WHY the set is empty in order to refuse it.
@@ -944,7 +944,7 @@ func TestExport_DigestFromResolve(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// #417 — LTS profile dynamic-stable fallback
+// LTS profile dynamic-stable fallback
 // ---------------------------------------------------------------------------
 
 // ltsTestServer creates an httptest server that simulates an upstream where
@@ -1220,7 +1220,7 @@ func TestHasExplicitTag(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// #462 — checksum resolution through ucmeta (metadata sources + archive fallback)
+// Checksum resolution through ucmeta (metadata sources + archive fallback)
 // ---------------------------------------------------------------------------
 
 // recordingServer is an httptest.Server that remembers the path and User-Agent

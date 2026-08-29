@@ -92,11 +92,11 @@ func GetCluster(kv *KV, name string) (*ClusterInfo, error) {
 	return &info, nil
 }
 
-// ClusterDirectory is the BFF-side read seam handed to internal/api
-// (consumed by change C6). It mirrors the bucket into memory via a KV
-// watcher so the frequent List/Get calls don't fan out `Keys()` + one `Get`
-// per key to the KV on every read (issue #280). Bucket MaxAge expiry emits
-// no watch event, so reads filter entries whose heartbeat is older than
+// ClusterDirectory is the BFF-side read seam handed to internal/api.
+// It mirrors the bucket into memory via a KV watcher so the frequent
+// List/Get calls don't fan out `Keys()` + one `Get` per key to the KV on
+// every read. Bucket MaxAge expiry emits no watch event, so reads filter
+// entries whose heartbeat is older than
 // ClusterEntryTTL. When the watch cannot be (re)established, reads fall
 // back to direct KV access.
 type ClusterDirectory struct {

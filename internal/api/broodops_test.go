@@ -282,7 +282,7 @@ func sseEvents(body *bytes.Buffer) []string {
 	return events
 }
 
-// TestBroodHandlers_StreamSSE_TerminalDespiteEmptyReachableSet covers #367:
+// TestBroodHandlers_StreamSSE_TerminalDespiteEmptyReachableSet covers
 // an operation already terminal at connect time, whose CR then disappears
 // from the fan-out (e.g. garbage-collected, or its cluster becomes
 // unreachable) on every subsequent poll, must still close the stream — not
@@ -350,7 +350,7 @@ func TestBroodHandlers_StreamSSE_TerminalDespiteEmptyReachableSet(t *testing.T) 
 	}
 }
 
-// TestBroodHandlers_StreamSSE_DeadlineExpiry covers #367: an operation that
+// TestBroodHandlers_StreamSSE_DeadlineExpiry covers an operation that
 // never reaches a terminal phase because its target set is empty on every
 // poll (all target clusters unreachable) must still close after the
 // server-side deadline, with a final SSE event carrying an informative

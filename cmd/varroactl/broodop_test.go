@@ -253,7 +253,7 @@ func TestBroodOpWatchFailedExit1(t *testing.T) {
 }
 
 // TestBroodOpWatchDeadlineExitsWithMessage verifies that a server-side
-// watch-deadline close (#367) — an "event: closed" frame carrying a
+// watch-deadline close — an "event: closed" frame carrying a
 // reason/message instead of a bare "{}" — makes the client exit non-zero
 // with that message, rather than silently exiting 0 or hanging.
 func TestBroodOpWatchDeadlineExitsWithMessage(t *testing.T) {
@@ -293,13 +293,13 @@ func TestBroodOpWatchStopsOnTerminalStatusWithoutClosedEvent(t *testing.T) {
 }
 
 // TestBroodOpWatchNilMetadata verifies the watch renderer does not panic when a
-// streamed event omits metadata.name/namespace. Regression for the live §8.2
-// nil-pointer crash in renderBroodWatchStatus (waitForCompletion=true path).
+// streamed event omits metadata.name/namespace, in renderBroodWatchStatus's
+// waitForCompletion=true path.
 func TestBroodOpWatchNilMetadata(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		// 1) A keepalive-style frame with neither status nor metadata (all-nil
-		//    op) — this is what crashed §8.2 (nil op.Status deref).
+		//    op), which must not trigger a nil op.Status deref.
 		// 2) A frame with status but no metadata (nil op.Metadata deref).
 		nostatus := `{"type":"ping"}`
 		detail := fakeBroodDetail("test-ns", "test-op")

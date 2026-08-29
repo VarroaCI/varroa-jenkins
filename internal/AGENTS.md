@@ -75,9 +75,9 @@ reading each package's entry point):
   operator sets `cr.Namespace` from the request field, not from the marshalled
   CR, so omitting it 404s; (3) credential stripping happens inside `resultJSON`
   via `api.SanitizeObject`, shared with the REST layer — it is deliberately at
-  that one chokepoint rather than per tool, because #467 was exactly the
-  per-call-site omission that a 64-tool surface makes inevitable, so a tool that
-  bypasses `resultJSON` bypasses redaction; (4) register tools through `addTool`
+  that one chokepoint rather than per tool, because a per-call-site omission
+  is exactly the failure mode a 64-tool surface makes inevitable, so a tool
+  that bypasses `resultJSON` bypasses redaction; (4) register tools through `addTool`
   with a `toolKind`, never `mcpServer.AddTool` — mcp-go's `NewTool` defaults
   every annotation to its most alarming value (`destructiveHint` and
   `openWorldHint` true), so an unclassified tool ships those. `openWorldHint`
@@ -87,16 +87,16 @@ reading each package's entry point):
   dereference, returning a tool error the handler cannot work without it
   (`if deps.Authorizer == nil { return mcp.NewToolResultError(…) }`) — the BFF
   wires them conditionally, and an unguarded dereference panics the request
-  instead of returning a usable error (#472). A dep a tool uses only
+  instead of returning a usable error. A dep a tool uses only
   conditionally needs no such guard: `get_controller_logs` deliberately skips
   authorization when `Authorizer` is nil while still guarding `Client`, which it
   cannot read logs without; (6) declared arguments and
   applied fields must match in both directions. Input schemas *are* validated, so
   a field the handler reads but the schema omits is unreachable, and an argument
-  the schema declares but the handler ignores is accepted and silently dropped —
-  #471 was one of each in the same pair of tools. The reverse also bites: a
-  spec field the REST layer patches freely but no tool argument names is
-  unreachable from MCP (#512, `spec.hibernation`). `create_controller`/
+  the schema declares but the handler ignores is accepted and silently dropped.
+  The reverse also bites: a spec field the REST layer patches freely but no
+  tool argument names is unreachable from MCP (e.g. `spec.hibernation`).
+  `create_controller`/
   `update_controller` answer that with named shorthands over a
   `controllerSpecPatch` merge map plus a generic `spec` object passthrough.
   Unrecognized arguments are **rejected by name** (`unknownControllerArgsError`),

@@ -62,13 +62,11 @@ var clearStatusFields = map[schema.GroupVersionResource]map[string]any{
 	// digest is skipped forever as "already imported" even if the store was wiped
 	// in between.
 	//
-	// Two other UpdateCenter status fields have the same latent defect and are NOT
-	// fixed here: gaps (spec: patched to [] when coverage is complete) and
-	// resolvedMetadataSources (cleared when pull-through is disabled). Both are
-	// omitempty and neither can currently reach empty on the server. They belong to
-	// different features, gaps has a retain-on-failure rule that needs its own
-	// reasoning, and each wants its own regression test — filed as #551 rather than
-	// bundled in blind.
+	// gaps (spec: patched to [] when coverage is complete) and
+	// resolvedMetadataSources (cleared when pull-through is disabled) have the
+	// same latent defect and are out of scope here. Both are omitempty and
+	// neither can currently reach empty on the server; gaps also has a
+	// retain-on-failure rule that needs its own reasoning.
 	updateCentersGVR: {"seedImportedDigests": nil},
 }
 

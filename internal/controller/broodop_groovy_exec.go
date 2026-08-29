@@ -8,7 +8,7 @@ import (
 
 // Jenkins /scriptText returns HTTP 200 even when the script fails to compile or
 // throws — the exception text is just part of the response body — so transport
-// success says nothing about script success (#529). The operator therefore wraps
+// success says nothing about script success. The operator therefore wraps
 // every executeGroovy script in a harness that evaluates it via GroovyShell and
 // prints a completion sentinel, and classifies the response by that sentinel.
 const (

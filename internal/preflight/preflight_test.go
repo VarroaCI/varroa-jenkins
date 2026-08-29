@@ -63,7 +63,7 @@ func TestRunReturnsAllChecks(t *testing.T) {
 	}
 }
 
-// Path mode shares the dashboard host by design (#528), so the availability
+// Path mode shares the dashboard host by design, so the availability
 // check must not flag it as already claimed by the dashboard's own ingress.
 func TestCheckIngressHost_PathModeSkipsAvailability(t *testing.T) {
 	deps := newFakeDeps()
@@ -443,11 +443,11 @@ func TestCheckRBAC_EmptyGroup(t *testing.T) {
 	}
 }
 
-// A draft with no composedBundleRef used to report a bare "no bundle
-// referenced" pass, hiding the one thing that can go wrong on the zero-config
-// path: the operator has not finished seeding the starter, or its compose
-// failed. The wizard shows this check, so a silent pass there is a silent
-// failure later.
+// A draft with no composedBundleRef must check the starter bundle it
+// resolves to rather than report a bare "no bundle referenced" pass, which
+// would hide the one thing that can go wrong on the zero-config path: the
+// operator has not finished seeding the starter, or its compose failed. The
+// wizard shows this check, so a silent pass there is a silent failure later.
 func TestCheckBundle_NilRefChecksTheStarterBundle(t *testing.T) {
 	ctx := context.Background()
 	cr := &v1alpha1.Controller{

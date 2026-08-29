@@ -104,11 +104,10 @@ type testClient struct {
 	stsLiveImages     map[string]string
 	stsImagesErr      error
 	// stsMite* back the resources/pullPolicy/found/err half of
-	// GetStatefulSetContainerSpecs (the two calls were consolidated into one
-	// method, PR #373 review, but tests still set images and mite fields
-	// together as before). stsMiteFound defaults to false (no StatefulSet
-	// yet); set it true to simulate a live StatefulSet with the given
-	// resources/pullPolicy already applied.
+	// GetStatefulSetContainerSpecs; tests set images and mite fields together.
+	// stsMiteFound defaults to false (no StatefulSet yet); set it true to
+	// simulate a live StatefulSet with the given resources/pullPolicy already
+	// applied.
 	stsMiteResources    *corev1.ResourceRequirements
 	stsJenkinsResources *corev1.ResourceRequirements
 	stsMitePullPolicy   string
@@ -1356,7 +1355,7 @@ func TestBuildDesiredStateCommandNilBundleYieldsEmptyJcascYaml(t *testing.T) {
 	}
 }
 
-// TestBuildDesiredStateCommandAlwaysSetsReload pins the #166 keystone: every
+// TestBuildDesiredStateCommandAlwaysSetsReload asserts that every
 // desired-state command must use the MANAGE-gated reload path, never the legacy
 // admin apply path. The operator therefore always sets Reload=true so the mite
 // can run without Jenkins.ADMINISTER.
@@ -1712,8 +1711,7 @@ func TestResolveBundleForController_ReadsConfigMap(t *testing.T) {
 // varroa_controller_endpoint must point at the UID-named Service
 // ("<name>-<uid8>-svc"), which is the Service actually created in
 // handleProvisioning. The bare "<name>-svc" resolves to a stale/non-existent
-// Service with no endpoints, so build agents get connection refused. Regression
-// guard for the agent-connectivity break after UID-based naming (#69).
+// Service with no endpoints, so build agents get connection refused.
 func TestResolveBundleForController_EndpointUsesUIDService(t *testing.T) {
 	client := newTestClientWithBundle()
 	client.composedBundles["test-bundle"] = &v1alpha1.ComposedBundle{
@@ -1973,8 +1971,8 @@ func TestResolveBundleForController_MissingConfigMap(t *testing.T) {
 }
 
 func TestResolveBundleForController_OIDCClientSecretUnresolved(t *testing.T) {
-	// After the #411 fix, ${varroa_oidc_client_secret} is no longer injected
-	// by resolveBundleForController. A bundle containing it should produce
+	// resolveBundleForController must not inject
+	// ${varroa_oidc_client_secret}. A bundle containing it should produce
 	// an "unresolved variables" error.
 	client := newTestClientWithBundle()
 	client.composedBundles["test-bundle"] = &v1alpha1.ComposedBundle{
@@ -2449,7 +2447,7 @@ func mkDSR(cfgOk, rbacOk, pluginsOk, itemsOk bool, cfgErr, rbacErr, pluginsErr, 
 
 // TestIssueSafeRestartDeletesPod verifies the operator restart helper performs a
 // Kubernetes pod delete rather than sending a SAFE_RESTART imperative the mite
-// can no longer service (its role lost Jenkins.ADMINISTER in #173).
+// cannot service (its role lacks Jenkins.ADMINISTER).
 func TestIssueSafeRestartDeletesPod(t *testing.T) {
 	client := newTestClientWithBundle()
 	rec := newTestReconcilerWithTokenSigner(client)
@@ -3396,7 +3394,7 @@ func TestJenkinsImageAndEffectiveDesired(t *testing.T) {
 			t.Errorf("jenkinsImageForVersion(\"\", nil) = %q, want %q", got, want)
 		}
 		if got := jenkinsImageForVersion("", nil); got == "jenkins/jenkins:latest" {
-			t.Error("empty version must not resolve to a floating :latest core (#185)")
+			t.Error("empty version must not resolve to a floating :latest core")
 		}
 	})
 	t.Run("jenkinsImageForVersion lts sentinel pins the baseline too", func(t *testing.T) {
@@ -3405,7 +3403,7 @@ func TestJenkinsImageAndEffectiveDesired(t *testing.T) {
 			t.Errorf("jenkinsImageForVersion(%q, nil) = %q, want %q", "lts", got, want)
 		}
 		if got := jenkinsImageForVersion("lts", nil); got == "jenkins/jenkins:lts" {
-			t.Error("the lts sentinel must not become a floating :lts tag (#185)")
+			t.Error("the lts sentinel must not become a floating :lts tag")
 		}
 	})
 	// Both unpinned sentinels must agree with what EvaluateCoreCompat reports as
@@ -3749,8 +3747,7 @@ func TestReconcileVersionRoll(t *testing.T) {
 	})
 }
 
-// TestReconcileContainerSpecRoll covers issue #368 (image) and its follow-up
-// hardening (resources/imagePullPolicy, PR fix/mite-convergence-hardening): a
+// TestReconcileContainerSpecRoll asserts that a
 // spec.miteSpec.{image,resources,imagePullPolicy} change on an
 // already-Connected controller must roll the StatefulSet's mite container,
 // mirroring reconcileVersionRoll's Connected→Provisioning mechanism but with
@@ -4002,15 +3999,13 @@ func TestReconcileContainerSpecRoll(t *testing.T) {
 		}
 	})
 
-	// Regression test for a Copilot PR-review finding on #370: a
-	// resourceOverlay.statefulSet that declares the mite container's image
+	// A resourceOverlay.statefulSet that declares the mite container's image
 	// must win over spec.miteSpec.image/the default, mirroring
-	// effectiveDesiredJenkinsImage's existing overlay precedence. Before this
-	// fix, effectiveDesiredMiteImage ignored the overlay entirely; since
+	// effectiveDesiredJenkinsImage's existing overlay precedence. Since
 	// CreateStatefulSet applies overlays *before* stamping
-	// varroa.dev/computed-images, the stamped/live image would forever reflect
-	// the overlay while this check kept comparing against the spec/default —
-	// an unconvergeable Connected->Provisioning loop.
+	// varroa.dev/computed-images, the stamped/live image reflects the
+	// overlay; comparing against the spec/default instead would desync from
+	// that stamp forever — an unconvergeable Connected->Provisioning loop.
 	t.Run("overlay-declared image opts out of mite-spec rolls and rolls on overlay change", func(t *testing.T) {
 		client := newTestClient()
 		client.stsComputedImages = map[string]string{"mite": "my-reg/custom-mite:1.0"}
@@ -4050,12 +4045,10 @@ func TestReconcileContainerSpecRoll(t *testing.T) {
 		}
 	})
 
-	// Fix 2 (fix/mite-convergence-hardening): spec.miteSpec.resources and
-	// spec.miteSpec.imagePullPolicy have the same Connected-phase blind spot
-	// #368 fixed for the image — baked only at Provisioning, never
-	// drift-checked. These subtests cover the coordinator's explicit ask:
-	// drift on each field alone rolls; unset/default stays quiet; overlay
-	// governance stays quiet.
+	// spec.miteSpec.resources and spec.miteSpec.imagePullPolicy have the same
+	// Connected-phase blind spot as the image: baked only at Provisioning,
+	// never drift-checked. These subtests cover: drift on each field alone
+	// rolls; unset/default stays quiet; overlay governance stays quiet.
 	t.Run("resources drift alone transitions to Provisioning", func(t *testing.T) {
 		client := newTestClient()
 		client.stsComputedImages = map[string]string{"mite": defaultMiteImage()}
@@ -4163,11 +4156,10 @@ func TestReconcileContainerSpecRoll(t *testing.T) {
 		}
 	})
 
-	// Regression for PR #373 review: an overlay declaring an unquoted
-	// numeric cpu/memory (e.g. `cpu: 1`) decodes as YAML float64, not
-	// string — overlay.ResourcesOverride must still pick it up (a bare
-	// .(string) assertion silently missed it, so the override was ignored
-	// and the drift check compared against the wrong desired value).
+	// An overlay declaring an unquoted numeric cpu/memory (e.g. `cpu: 1`)
+	// decodes as YAML float64, not string — overlay.ResourcesOverride must
+	// still pick it up; a bare .(string) type assertion silently misses
+	// it and compares the drift check against the wrong desired value.
 	t.Run("overlay-declared unquoted numeric resources are detected, no roll when converged", func(t *testing.T) {
 		client := newTestClient()
 		client.stsComputedImages = map[string]string{"mite": defaultMiteImage()}
@@ -4194,15 +4186,12 @@ func TestReconcileContainerSpecRoll(t *testing.T) {
 		}
 	})
 
-	// Quantity-normalization semantics (PR #373 review): "1" and "1000m"
-	// are the same CPU quantity spelled two different ways. The drift
-	// check must treat them as equal — a differently-spelled-but-equal
-	// live value (e.g. left over from before an overlay was added, or
-	// simply written in a different unit) must never be reported as
-	// drift, or resourcesDelta would stay true forever and Connected would
-	// bounce to Provisioning on every reconcile with nothing left to
-	// converge. This is settled behavior, not a TODO: quantity equality,
-	// not string equality, decides resourcesDelta.
+	// "1" and "1000m" are the same CPU quantity spelled two different ways.
+	// The drift check must treat them as equal — a differently-spelled-but-
+	// equal live value must never be reported as drift, or resourcesDelta
+	// would stay true forever and Connected would bounce to Provisioning on
+	// every reconcile with nothing left to converge. Quantity equality, not
+	// string equality, decides resourcesDelta.
 	t.Run("differently-spelled but quantity-equal resources are not drift", func(t *testing.T) {
 		client := newTestClient()
 		client.stsComputedImages = map[string]string{"mite": defaultMiteImage()}
@@ -4231,16 +4220,13 @@ func TestReconcileContainerSpecRoll(t *testing.T) {
 		}
 	})
 
-	// Regression for PR #373 review: a live StatefulSet template that
-	// predates spec.miteSpec.imagePullPolicy being baked onto the mite
-	// container (Fix 2) has no imagePullPolicy set at all, and
-	// GetStatefulSetContainerSpecs reads that back as "". Comparing "" against
-	// the desired default ("IfNotPresent") as a literal delta would trigger
-	// an unnecessary fleet-wide Provisioning roll on every such controller
-	// immediately after this change deploys, even though runtime behavior
-	// already matches the default and spec.miteSpec.imagePullPolicy is
-	// unset. An empty live pull policy must default to
-	// defaultMiteImagePullPolicy before the comparison.
+	// A live StatefulSet template that predates spec.miteSpec.imagePullPolicy
+	// being baked onto the mite container has no imagePullPolicy set at all,
+	// and GetStatefulSetContainerSpecs reads that back as "". An empty live
+	// pull policy must default to defaultMiteImagePullPolicy before
+	// comparing against the desired default ("IfNotPresent"), or every such
+	// controller triggers an unnecessary fleet-wide Provisioning roll even
+	// though runtime behavior already matches the default.
 	t.Run("empty live pullPolicy (pre-existing STS) defaults before comparison, no spurious roll", func(t *testing.T) {
 		client := newTestClient()
 		client.stsComputedImages = map[string]string{"mite": defaultMiteImage()}
@@ -4515,7 +4501,7 @@ func TestReconcileContainerSpecRoll(t *testing.T) {
 		}
 	})
 
-	// --- Controller-level spec.miteSpec image/pullPolicy rolls (#376) ---
+	// --- Controller-level spec.miteSpec image/pullPolicy rolls ---
 
 	t.Run("connected MiteSpec image delta transitions to Provisioning", func(t *testing.T) {
 		client := newTestClient()
@@ -4604,12 +4590,12 @@ func TestReconcileContainerSpecRoll(t *testing.T) {
 }
 
 // TestContainerSpecRollTwoPhaseConvergence exercises the reconcile-level
-// two-phase convergence for a spec.miteSpec.image edit (issue #368): tick 1
+// two-phase convergence for a spec.miteSpec.image edit: tick 1
 // detects the delta on a Connected controller and transitions to
 // Provisioning; tick 2 (provisioning) is represented by advancing the stamp
 // to the desired image, exactly what CreateStatefulSet writes; tick 3+ must
 // go quiet — the "no roll loops" requirement. Also covers the same
-// two-phase shape for a resources-only edit (Fix 2).
+// two-phase shape for a resources-only edit.
 func TestContainerSpecRollTwoPhaseConvergence(t *testing.T) {
 	ctx := context.Background()
 
@@ -5476,7 +5462,7 @@ spec:
 		}
 	})
 
-	// --- Controller-level (spec.miteSpec) precedence (#376) ---
+	// --- Controller-level (spec.miteSpec) precedence ---
 
 	t.Run("MiteSpec imagePullPolicy wins over operator default", func(t *testing.T) {
 		rec := newTestReconciler(newTestClient())

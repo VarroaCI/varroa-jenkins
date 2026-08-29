@@ -87,11 +87,11 @@ func TestObservabilityIntentAnnotationsFromBundleAndCatalogItems(t *testing.T) {
 		},
 	}
 	// ConfigBrood is deliberately nil here: this exercises the legacy/nil
-	// fallback path (#304) that must keep using the local typed client without
+	// fallback path that must keep using the local typed client without
 	// panicking.
 	srv := &Server{deps: &Dependencies{Client: client, Store: storeFromObsClient(client)}}
-	// The bundle lives in varroa-system while the controller is in dev; post-#246
-	// there is no cross-namespace fallback, so the ref must name the namespace
+	// The bundle lives in varroa-system while the controller is in dev; there
+	// is no cross-namespace fallback, so the ref must name the namespace
 	// explicitly (ref.Namespace || cr.Namespace, exact Get).
 	controllerCR := &v1alpha1.Controller{
 		ObjectMeta: metav1.ObjectMeta{Name: "ctrl", Namespace: "dev"},
@@ -170,7 +170,7 @@ func assertObsIntentUnion(t *testing.T, annotations map[string]string) {
 // TestObservabilityIntentAnnotationsCoreViaLocalPath asserts that for a
 // controller on the BFF's own (core) cluster the ConfigBrood local branch
 // resolves the bundle+item through the typed core client and never touches the
-// bus (#304 fast path preserved).
+// bus.
 func TestObservabilityIntentAnnotationsCoreViaLocalPath(t *testing.T) {
 	client := &observabilityIntentClient{
 		bundle: obsIntentBundle(),
@@ -200,7 +200,7 @@ func TestObservabilityIntentAnnotationsCoreViaLocalPath(t *testing.T) {
 // TestObservabilityIntentAnnotationsRemoteViaBus asserts that for a controller
 // on a remote (hive) cluster the ConfigBrood remote branch resolves the
 // bundle+item over the bus (never the local client) and logs no lookup-failed
-// warning (#304 fix).
+// warning.
 func TestObservabilityIntentAnnotationsRemoteViaBus(t *testing.T) {
 	bundleJSON, err := json.Marshal(obsIntentBundle())
 	if err != nil {

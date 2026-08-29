@@ -212,8 +212,8 @@ func TestInventory_MalformedAnnotationFailsClosed(t *testing.T) {
 			}
 			// The only pack in the store is the one that failed to read, so the
 			// scan found nothing readable — the response must still name it. Its
-			// error is allowed (expected) to mention the plugin name: that is the
-			// diagnostic detail issue #432 asked for, not a leaked listing.
+			// error is allowed (expected) to mention the plugin name: that is
+			// diagnostic detail, not a leaked listing.
 			if len(skipped) != 1 || skipped[0].Ref != "pack:v1" {
 				t.Fatalf("expected the unreadable pack disclosed by ref, got %+v", skipped)
 			}
@@ -352,9 +352,9 @@ func (f *failPullStore) Pull(ctx context.Context, ref string) (oci.Manifest, err
 }
 
 // TestInventory_PartialScanServesPartialAndDisclosesSkip is the graceful-
-// degradation case from issue #432: one unreadable plugin-pack manifest (e.g.
-// a legacy pack predating the pack-kind field) must not take the whole
-// inventory offline when at least one OTHER pack is readable. The readable
+// degradation case: one unreadable plugin-pack manifest (e.g. a legacy pack
+// predating the pack-kind field) must not take the whole inventory offline
+// when at least one OTHER pack is readable. The readable
 // subset is served with 200, and the unreadable pack is named — ref and
 // error — in "skippedPacks" instead of being silently dropped.
 func TestInventory_PartialScanServesPartialAndDisclosesSkip(t *testing.T) {
@@ -383,8 +383,8 @@ func TestInventory_PartialScanServesPartialAndDisclosesSkip(t *testing.T) {
 // graceful-degradation contract: when the scan reads NOTHING, a 200 with an
 // empty "plugins" array would be indistinguishable from a genuinely empty
 // store and would license a pruning caller to delete everything. That case
-// must still be a clear, closed error — with every offending ref disclosed,
-// unlike the pre-#432 503 that named only a count.
+// must still be a clear, closed error, with every offending ref disclosed
+// rather than only a count.
 func TestInventory_AllPacksUnreadableFailsClosed(t *testing.T) {
 	base := newTestStore(t)
 	seedRichPack(t, base, "pack-a:v1", []oci.ResolvedPlugin{richPlugin("unreadable-a", "1.0", nil)})

@@ -381,7 +381,7 @@ func TestUCPrune_NothingPrunedOnFetchFailure(t *testing.T) {
 	}
 }
 
-// TestUCPrune_WithheldOnPartialInventory covers issue #432's consumer-side
+// TestUCPrune_WithheldOnPartialInventory asserts the consumer-side
 // requirement: a 200 inventory response that discloses skippedPacks is a
 // LOWER BOUND, not a full listing. Pruning against it would delete every item
 // backed solely by the unreadable pack, so prune must be withheld for that
@@ -797,7 +797,7 @@ func TestUCItemName_IsAPureFunctionAndCollisionFree(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 7.7f — the redundant-derivation skip gate (#510)
+// The redundant-derivation skip gate
 // ---------------------------------------------------------------------------
 
 // ucItemPatchCount is one status patch per derived item per full pass, so it
@@ -837,12 +837,13 @@ func ucReadyProfile(tc *catalogTestClient, lockYAML string) {
 	})
 }
 
-// TestUCSync_UnchangedInputsSkipDerivation is the #510 fix proper. Deriving
-// items is this arm's whole cost — one apply and one status patch per plugin,
-// through the single dynamic client that carries all of the operator's CRD
-// traffic. Repeating it when nothing upstream moved is what stretched the
-// catalog tick to minutes, and every ComposedBundle reconciles behind the
-// sources in that same tick.
+// TestUCSync_UnchangedInputsSkipDerivation asserts that deriving items must
+// be skipped when nothing upstream moved. Deriving is this arm's whole cost —
+// one apply and one status patch per plugin, through the single dynamic
+// client that carries all of the operator's CRD traffic — and repeating it
+// every pass stretches the catalog tick to minutes, starving the
+// ComposedBundle reconciliation that runs behind the sources in that same
+// tick.
 func TestUCSync_UnchangedInputsSkipDerivation(t *testing.T) {
 	tc := newCatalogTestClient()
 	seedSingleton(tc)
@@ -1056,9 +1057,9 @@ func TestInventoryDigest_MetadataChangeMovesTheDigest(t *testing.T) {
 }
 
 // TestUCSync_FailedWriteDoesNotArmTheSkipGate keeps the gate from swallowing a
-// retry. writeCatalogItem used to return nothing on an apply failure, so a
-// transiently-failed item would have waited for the 30-minute repair pass
-// instead of the next tick.
+// retry: writeCatalogItem must surface an apply failure to the caller, or a
+// transiently-failed item waits for the 30-minute repair pass instead of the
+// next tick.
 func TestUCSync_FailedWriteDoesNotArmTheSkipGate(t *testing.T) {
 	ctx := context.Background()
 	tc := newCatalogTestClient()

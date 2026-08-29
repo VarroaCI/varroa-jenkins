@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// #521: Varroa writes a Controller spec as the field manager "varroa-ui", so
+// Varroa writes a Controller spec as the field manager "varroa-ui", so
 // changing a field another manager owns is refused with a field conflict. The
 // operator itself claims spec.powerState when it auto-hibernates a controller,
 // which makes `power controller ... running` on a parked controller the common

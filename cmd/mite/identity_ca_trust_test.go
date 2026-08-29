@@ -48,8 +48,8 @@ func writeMiteIdentity(t *testing.T, miteDir string, caAuth *ca.CA, controllerNa
 	}
 }
 
-// TestLoadOrCreateIdentity_StaleCADiscarded is the #302 regression: a saved
-// identity minted under CA-A must be discarded and re-bootstrapped when the
+// TestLoadOrCreateIdentity_StaleCADiscarded asserts that a saved identity
+// minted under CA-A must be discarded and re-bootstrapped when the
 // current CA (VARROA_CA_PEM) is a DIFFERENT CA-B — as happens after a
 // control-plane reinstall regenerates the internal CA. Reuse based on expiry
 // alone would loop forever on "certificate signed by unknown authority".

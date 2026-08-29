@@ -554,9 +554,8 @@ func TestScheduleReconciler_CronJobBackoffAndRestart(t *testing.T) {
 }
 
 // The chart injects VARROA_IMAGE_PULL_SECRETS / VARROA_SCHEDULE_BFF_URL so the
-// fired Job can pull the private varroactl image and reach the release-prefixed
-// in-cluster BFF Service. Regression for the live-cluster ErrImagePull / wrong
-// Service name found validating section 8.
+// fired Job can pull the private varroactl image and reach the
+// release-prefixed in-cluster BFF Service.
 func TestScheduleReconciler_CronJobImagePullSecretsAndBFFURL(t *testing.T) {
 	t.Setenv("VARROA_IMAGE_PULL_SECRETS", "ghcr-cred, other-cred ")
 	t.Setenv("VARROA_SCHEDULE_BFF_URL", "http://varroa-varroa-bff.varroa-system.svc:8080")

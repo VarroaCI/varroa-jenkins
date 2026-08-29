@@ -184,7 +184,7 @@ func TestBuildMiteImageStatus(t *testing.T) {
 }
 
 // TestListController_Version asserts spec.version surfaces as the list DTO's
-// "version" field (desired version for the upgrade-drift column, #242).
+// "version" field (desired version for the upgrade-drift column).
 func TestListController_Version(t *testing.T) {
 	srv, client := newRoutingTestServer()
 	client.controllers["ci"] = &v1alpha1.Controller{

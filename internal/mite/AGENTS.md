@@ -46,7 +46,7 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   — one central gate, rather than a token threaded through every inbound
   handler method. Without it a stream the mite already replaced keeps
   dispatching and writes a dead connection's version, health, idle gauges or
-  plugin inventory into state the replacement owns (#514). The gate is a check,
+  plugin inventory into state the replacement owns. The gate is a check,
   not a reservation — a supersede landing between it and the handler's write
   still lets that one message through, and a superseded stream that goes silent
   never reaches the gate at all — it writes nothing, but its transport lives
@@ -63,7 +63,7 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   never replays stale commands). Every bus→stream watcher establishes through
   `retryEstablish` — capped exponential backoff, retried for the life of the
   connection, never abandoned. Returning after a single setup error silently
-  starves a connected mite of all desired state (#509); while a watch is down
+  starves a connected mite of all desired state; while a watch is down
   the controller is marked degraded in its `bus.Presence` record, which the
   operator surfaces as condition `MiteStreamDegraded`. Each watcher also
   re-establishes on *post-setup* death — `Updates()` closing, a lost durable

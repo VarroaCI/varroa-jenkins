@@ -7,8 +7,8 @@ package v1alpha1
 // It lives here rather than in the controller package because every consumer
 // that answers "which bundle is this controller using?" needs it: the
 // reconciler, the BFF's config-diff and controller DTOs, and brood-operation
-// target filtering. Each of those previously read spec.composedBundleRef
-// directly and reported "none" for a nil ref, which is now wrong.
+// target filtering. None of them may read spec.composedBundleRef directly
+// and report "none" for a nil ref — a nil ref resolves to this bundle.
 const StarterBundleName = "varroa-starter"
 
 // EffectiveBundleRef resolves the ComposedBundle a Controller actually uses.

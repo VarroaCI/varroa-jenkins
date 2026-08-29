@@ -284,10 +284,9 @@ func (s *Server) handleVersionProfilesForCluster(w http.ResponseWriter, r *http.
 		// returns 200 with no plugins. A NON-empty ContentRef asserts the
 		// plugin set exists, so failing to read it — or reading it and finding
 		// no usable plugin list — is a broken cluster state, not an empty
-		// profile. Reporting either as 200-with-no-plugins is what published
-		// an empty plugin pack and exited 0 (issue #416). The diagnostic is the
-		// status code: VersionProfileDetail is a generated schema and must not
-		// grow a field here.
+		// profile, and must not be reported as 200-with-no-plugins. The
+		// diagnostic is the status code: VersionProfileDetail is a generated
+		// schema and must not grow a field here.
 		var plugins []string
 		if p.Status.ContentRef != "" {
 			cm, cmErr := s.deps.Client.GetConfigMap(ctx, p.Status.ContentRef, s.deps.OperatorNamespace)
@@ -366,9 +365,8 @@ func versionProfileDetailFromCR(p *v1alpha1.JenkinsVersionProfile, plugins []str
 
 // profilePluginSetReady derives the wizard-facing plugin-set readiness for a
 // profile: nil for metadata-only profiles (no pluginSetRef), otherwise the
-// PluginSetReady condition truth. The single derivation shared by the
-// catalog and detail projections (the bug-#416 drift class lived in having
-// two of these).
+// PluginSetReady condition truth. This must be the single derivation shared
+// by the catalog and detail projections — a second copy can drift from it.
 func profilePluginSetReady(p *v1alpha1.JenkinsVersionProfile) *bool {
 	if p.Spec.PluginSetRef == nil {
 		return nil

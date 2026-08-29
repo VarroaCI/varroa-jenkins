@@ -141,11 +141,11 @@ spec:
 			wantOK: true,
 		},
 		{
-			// Regression for PR #373 review: sigs.k8s.io/yaml round-trips YAML
-			// through JSON, so an unquoted numeric scalar decodes as float64,
-			// not string. A bare `.(string)` type assertion silently missed
-			// this and read as "no override" even though the overlay declares
-			// one — the overlay-declared value then got ignored in favor of
+			// sigs.k8s.io/yaml round-trips YAML through JSON, so an unquoted
+			// numeric scalar decodes as float64, not string. A bare
+			// `.(string)` type assertion silently misses this and reads as
+			// "no override" even though the overlay declares one — the
+			// overlay-declared value is then ignored in favor of
 			// the CRD spec default, and the drift check compared against the
 			// wrong desired value.
 			name: "overlay declaring unquoted numeric cpu and memory (YAML decodes as float64)",

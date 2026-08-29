@@ -156,7 +156,7 @@ func (r *JenkinsVersionProfileReconciler) materializePluginSet(ctx context.Conte
 
 	// Distinct from the Helm-owned source ConfigMap (profile.Spec.PluginSetRef,
 	// named "<profile>-pluginset"). Writing the owned copy back over that name
-	// would strip Helm's ownership labels/annotations and break helm upgrade (#204).
+	// would strip Helm's ownership labels/annotations and break helm upgrade.
 	contentName := profile.Name + "-pluginset-content"
 	owner := jenkinsVersionProfileOwnerRef(profile)
 	if err := r.client.CreateOrUpdateConfigMapWithOwner(ctx, contentName, r.operatorNamespace, map[string]string{

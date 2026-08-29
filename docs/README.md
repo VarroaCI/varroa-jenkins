@@ -2,8 +2,6 @@
 
 Varroa manages Jenkins controllers on Kubernetes through declarative resources, shared configuration, centralized access control, and fleet operations.
 
-This handbook is rendered at https://varroa.dev/docs. The `docs/` directory in this repository is the canonical, editable source. Edit the pages here and the site publishes them on its next build.
-
 ## Start here
 
 - **Evaluate:** [Architecture](architecture/overview.md), [prerequisites](install/prerequisites.md), then [create a controller](tutorials/first-controller.md).

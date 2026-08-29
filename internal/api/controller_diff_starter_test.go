@@ -14,11 +14,11 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
-// A Controller with no composedBundleRef runs the built-in starter bundle. The
-// diff handler used to skip bundle resolution entirely for a nil ref, so the
-// Config Pipeline UI showed an empty incoming configuration for a controller
-// that was in fact converging on the starter — the diff claimed Varroa intended
-// to apply nothing.
+// A Controller with no composedBundleRef runs the built-in starter bundle, so
+// the diff handler must resolve the starter bundle for a nil ref rather than
+// skipping bundle resolution — otherwise the Config Pipeline UI shows an empty
+// incoming configuration for a controller that is in fact converging on the
+// starter, and the diff claims Varroa intends to apply nothing.
 func TestControllerDiff_ResolvesStarterBundleForNilRef(t *testing.T) {
 	client := newBundleTestClient()
 	client.configMaps = map[string]map[string]string{

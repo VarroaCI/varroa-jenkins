@@ -224,8 +224,8 @@ func Classify(in Inputs) Classification {
 	//
 	// It is deliberately NOT what the published impliedBy field carries: that
 	// one names the expected roots whose closure reaches the plugin (see
-	// mandatoryRoots/anyRoots below). The two were previously the same map,
-	// which made impliedBy report the parent instead of the root.
+	// mandatoryRoots/anyRoots below). The two must stay separate maps, or
+	// impliedBy reports the parent instead of the root.
 	declaredParents := make(map[string]map[string]bool)
 
 	for len(queue) > 0 {

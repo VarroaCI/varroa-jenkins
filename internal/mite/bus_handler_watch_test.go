@@ -96,10 +96,10 @@ func (f *flakyDesiredKV) attemptCount() int {
 	return f.attempts
 }
 
-// TestWatchDesiredStateRetriesFailedWatchSetup pins the fix for #509: a
+// TestWatchDesiredStateRetriesFailedWatchSetup asserts that a
 // transient Watch() setup failure at connect time must not permanently starve
-// the mite of desired state. Before the fix the goroutine logged and returned,
-// so the desired state published after the failure never reached the stream.
+// the mite of desired state: the goroutine must retry rather than log and
+// return, so desired state published after the failure still reaches the stream.
 func TestWatchDesiredStateRetriesFailedWatchSetup(t *testing.T) {
 	w := newFakeKeyWatcher()
 	kv := &flakyDesiredKV{failures: 2, watcher: w, attempted: make(chan struct{}, 16)}
@@ -334,8 +334,7 @@ func TestRetryEstablishStopsOnContextCancel(t *testing.T) {
 
 // TestWatchKindsTrackDegradationIndependently pins that the three bus watchers
 // do not share one degraded flag. A healthy content subscription clearing the
-// mark would hide a still-broken desired-state watch — exactly the invisibility
-// #509 is about.
+// mark would hide a still-broken desired-state watch, leaving it invisible.
 func TestWatchKindsTrackDegradationIndependently(t *testing.T) {
 	h := &BusHandler{
 		cluster:       "core",
@@ -449,8 +448,7 @@ func TestMarkWatchDegradedIgnoresCancelledConnection(t *testing.T) {
 // TestOnDisconnectIgnoresSupersededStream pins that a late teardown from a
 // stream the mite has already replaced cannot tear down the live connection.
 // Without the token check it cancels the new connection's watch goroutines,
-// leaving a Connected mite receiving no desired state — #509's symptom reached
-// by a different route.
+// leaving a Connected mite receiving no desired state.
 func TestOnDisconnectIgnoresSupersededStream(t *testing.T) {
 	h := &BusHandler{
 		cluster:              "core",

@@ -8,9 +8,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// TestMiteSpecDeepCopyIsolatesScalars ensures that a MiteSpec with the new
-// Image/ImagePullPolicy scalar fields (added for #376 / add-mite-image-controls)
-// produces an independent copy with equal values via DeepCopy.
+// TestMiteSpecDeepCopyIsolatesScalars ensures that a MiteSpec with the
+// Image/ImagePullPolicy scalar fields produces an independent copy with
+// equal values via DeepCopy.
 func TestMiteSpecDeepCopyIsolatesScalars(t *testing.T) {
 	orig := &MiteSpec{
 		Image:           "ghcr.io/varroaci/varroa-jenkins:v2",

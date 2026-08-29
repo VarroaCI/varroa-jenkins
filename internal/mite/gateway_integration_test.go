@@ -349,9 +349,9 @@ func TestGatewayIntegration_DesiredStateLastValue(t *testing.T) {
 
 // TestGatewayIntegration_TokenGrantForwarded proves that a TokenGrant published
 // by the operator to the mite's out subject (the same JetStream subject used for
-// imperative commands) is forwarded to the mite's gRPC stream. Regression test:
-// watchImperative previously acked-and-dropped every non-imperative message,
-// silently swallowing token grants and causing "token refresh grant timeout".
+// imperative commands) is forwarded to the mite's gRPC stream: watchImperative
+// must not ack-and-drop a non-imperative message, which would silently
+// swallow token grants and cause "token refresh grant timeout".
 func TestGatewayIntegration_TokenGrantForwarded(t *testing.T) {
 	natsSrv := startNATS(t)
 	busConn, lis, certAuth := startGatewayWithCA(t, natsSrv.ClientURL())

@@ -219,7 +219,7 @@ func TestGroovyProvenanceEmptyForOtherVerbs(t *testing.T) {
 }
 
 // The finished event is where an auditor looks. It must say which verb ran, who
-// started it, and which script — the message alone previously said none of that.
+// started it, and which script.
 func TestTargetFinishedEventCarriesVerbActorAndProvenance(t *testing.T) {
 	rec, _, _ := newBORec(t)
 	op := groovyOp("team-a")

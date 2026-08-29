@@ -73,7 +73,7 @@ func TestListControllers_DefaultsToSummary(t *testing.T) {
 			t.Errorf("summary missing %q: %v", k, item)
 		}
 	}
-	// The heavyweight fields are exactly what #468 is about.
+	// The summary must never carry the heavyweight resource fields.
 	for _, k := range []string{"metadata", "spec", "status"} {
 		if _, present := item[k]; present {
 			t.Errorf("summary must not contain %q", k)
@@ -118,9 +118,8 @@ func TestListControllers_VerboseReturnsFullButSanitizedCRs(t *testing.T) {
 }
 
 // A declared outputSchema that cannot accept the tool's own output is worse
-// than none: strict clients reject the result outright. That is the failure PR
-// #466 fixed for structuredContent, so the schema is validated against real
-// output in both modes.
+// than none: strict clients reject the result outright. The schema is
+// validated against real structuredContent output in both modes.
 func TestListControllers_OutputMatchesDeclaredSchema(t *testing.T) {
 	var schemaDoc any
 	if err := json.Unmarshal(controllerListOutputSchema, &schemaDoc); err != nil {

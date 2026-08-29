@@ -278,8 +278,7 @@ func TestClusterDirectory(t *testing.T) {
 }
 
 // TestClusterDirectoryWatchMirror verifies the watch-backed mirror follows
-// puts and deletes, and that stale heartbeats are filtered at read time
-// (issue #280).
+// puts and deletes, and that stale heartbeats are filtered at read time.
 func TestClusterDirectoryWatchMirror(t *testing.T) {
 	s := startTestServer(t)
 	c := connectTest(t, s)

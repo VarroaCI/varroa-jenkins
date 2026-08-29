@@ -9,11 +9,9 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
 
-// #521: a Controller whose spec fields were claimed by another field manager
-// (the `kubectl patch` recipe the docs used to teach) became unreachable from
-// MCP. update_controller hardcoded force=false and rendered only the operator's
-// terse "field conflict", so the caller learned a write was refused but neither
-// which fields nor how to proceed. REST had had ?force=true the whole time.
+// These tests assert that update_controller surfaces an SSA field conflict
+// with the conflicting field and its owning manager, and that force=true
+// reaches the brood as an explicit opt-in rather than a hardcoded default.
 
 // conflictError is the BroodError the operator returns for an SSA conflict:
 // a bare message plus the actionable half in Conflicts.

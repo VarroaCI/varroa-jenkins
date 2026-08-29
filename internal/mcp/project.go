@@ -69,9 +69,8 @@ type schemaField struct {
 // The item schema must validate both shapes, so the branches are joined with
 // anyOf. oneOf is wrong here — a summary object also satisfies the open
 // {"type":"object"} verbose branch, and oneOf requires exactly one match, so it
-// would reject every default result. Emitting structuredContent that violates
-// the tool's own declared schema is the class of bug PR #466 fixed; declaring a
-// schema that cannot accept our own output would reintroduce it.
+// would reject every default result, making the tool's own structuredContent
+// violate its declared schema.
 //
 // Note that the server does not enforce this: handler.go enables input schema
 // validation only. It is a contract for clients, asserted in tests here.

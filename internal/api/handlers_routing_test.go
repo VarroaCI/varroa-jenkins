@@ -545,8 +545,8 @@ func (f *remoteRowBrood) ListAll(ctx context.Context, ns, filter string) ([]Clus
 	return cc, cs, err
 }
 
-// TestHandleControllersRemoteMiteFromStatus pins issue #279: remote rows must
-// surface mite fields from the remote CR's status.miteStatus instead of the
+// TestHandleControllersRemoteMiteFromStatus asserts that remote rows surface
+// mite fields from the remote CR's status.miteStatus instead of the
 // (guaranteed-miss) local KV merge.
 func TestHandleControllersRemoteMiteFromStatus(t *testing.T) {
 	srv, client := newRoutingTestServer()
@@ -646,10 +646,9 @@ func (f *remoteGetBrood) Get(ctx context.Context, cluster, ns, name string) (*v1
 	return f.Brood.Get(ctx, cluster, ns, name)
 }
 
-// TestHandleControllerDetailRemoteMiteFromStatus pins the detail-handler
-// sibling of issue #279: a remote-cluster row must surface mite telemetry
-// from the remote CR's status.miteStatus instead of the guaranteed-miss
-// local mite registry lookup.
+// TestHandleControllerDetailRemoteMiteFromStatus asserts that a remote-cluster
+// row surfaces mite telemetry from the remote CR's status.miteStatus instead
+// of the guaranteed-miss local mite registry lookup.
 func TestHandleControllerDetailRemoteMiteFromStatus(t *testing.T) {
 	srv, client := newRoutingTestServer()
 	lastSeen := metav1.NewTime(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
@@ -698,10 +697,10 @@ func TestHandleControllerDetailRemoteMiteFromStatus(t *testing.T) {
 	}
 }
 
-// TestCreateControllerRemoteBundleRefSkipsLocalValidation pins issue #282:
-// ComposedBundles are cluster-local, so a create targeting a remote cluster
-// must not validate spec.composedBundleRef against the core's API — the
-// target operator validates it. Local creates keep the core-side check.
+// TestCreateControllerRemoteBundleRefSkipsLocalValidation asserts that,
+// because ComposedBundles are cluster-local, a create targeting a remote
+// cluster must not validate spec.composedBundleRef against the core's API —
+// the target operator validates it. Local creates keep the core-side check.
 func TestCreateControllerRemoteBundleRefSkipsLocalValidation(t *testing.T) {
 	srv, client := newRoutingTestServer()
 	srv.deps.Brood = newFakeBrood(client)

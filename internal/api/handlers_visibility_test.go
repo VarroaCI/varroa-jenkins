@@ -15,7 +15,7 @@ func ctrl(ns, name string) *v1alpha1.Controller {
 	return &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}
 }
 
-// TestVisibleControllers covers the BOLA fix (#237): the controller collection endpoints
+// TestVisibleControllers asserts that the controller collection endpoints
 // must return only controllers the caller may read, must enforce ?namespace= against the
 // caller's grants (narrow, never widen), and must fail closed when no authorizer is wired.
 func TestVisibleControllers(t *testing.T) {

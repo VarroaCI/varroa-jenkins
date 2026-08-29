@@ -83,21 +83,9 @@ Gateway and BFF HPAs require the Kubernetes metrics API. Telemetry export remain
 
 ## Use an Image Mirror
 
-```yaml
-global:
-  imagePullSecrets:
-    - name: registry-credentials
-operator:
-  image: {repository: registry.example.com/varroa-jenkins, tag: "<version>"}
-gateway:
-  image: {repository: registry.example.com/varroa-jenkins, tag: "<version>"}
-bff:
-  image: {repository: registry.example.com/varroa-jenkins, tag: "<version>"}
-frontend:
-  image: {repository: registry.example.com/varroa-jenkins-frontend, tag: "<version>"}
-```
-
-Also mirror enabled dependencies, Jenkins images, agent images, and plugin artifacts. See [Air-gapped installation](air-gapped.md).
+Mirror the component images and configure pull secrets as described in
+[Configure Internal Images](air-gapped.md#configure-internal-images). Also mirror
+enabled dependencies, Jenkins images, agent images, and plugin artifacts.
 
 ## Upgrade
 

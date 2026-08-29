@@ -425,7 +425,7 @@ func (r *CatalogReconciler) reconcileUpdateCenterSource(ctx context.Context, src
 	// is hundreds of writes per sync, and it rewrites byte-identical items
 	// whenever nothing upstream moved. Skipping that is what keeps the catalog
 	// tick short enough that ComposedBundle reconciliation, which runs behind
-	// every source in the same tick, is not starved (#510).
+	// every source in the same tick, is not starved.
 	if r.ucSyncUnchanged(src, rev) {
 		r.markUCUnchanged(ctx, src, rev)
 		return

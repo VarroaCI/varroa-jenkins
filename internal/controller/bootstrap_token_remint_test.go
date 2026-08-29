@@ -7,13 +7,12 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/mite"
 )
 
-// TestTokenNeedsRemint_OldSignerRotated is the #302 regression on the operator
-// side: a bootstrap token that is structurally valid and unexpired but was
-// signed under a PREVIOUS HMAC key (as after a control-plane reinstall
-// regenerated the internal CA) must be re-minted. The old format-only gate
-// (IsCurrentTokenFormat) skips the signature check and would leave it in place,
-// so the gateway rejects every reconnect with "invalid or expired bootstrap
-// token".
+// TestTokenNeedsRemint_OldSignerRotated asserts that a bootstrap token that is
+// structurally valid and unexpired but was signed under a PREVIOUS HMAC key
+// (as after a control-plane reinstall regenerated the internal CA) must be
+// re-minted. A format-only gate (IsCurrentTokenFormat) that skips the
+// signature check would leave it in place, so the gateway rejects every
+// reconnect with "invalid or expired bootstrap token".
 func TestTokenNeedsRemint_OldSignerRotated(t *testing.T) {
 	oldSigner := mite.NewTokenSigner([]byte("old-ca-hmac-key"))
 	newSigner := mite.NewTokenSigner([]byte("new-ca-hmac-key"))

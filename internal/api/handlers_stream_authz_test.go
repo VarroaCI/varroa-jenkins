@@ -106,7 +106,7 @@ func newTicketIssuerForTest(t *testing.T) *auth.TicketIssuer {
 }
 
 // --------------------------------------------------------------------------
-// #404 — handleControllerLogs
+// handleControllerLogs
 // --------------------------------------------------------------------------
 
 func TestHandleControllerLogs_ForbiddenOutsideScope(t *testing.T) {
@@ -219,7 +219,7 @@ func TestHandleControllerLogs_TicketAuthed_AllowedViaPreferredUsernameBinding(t 
 }
 
 // --------------------------------------------------------------------------
-// #405 — handleControllerYAML
+// handleControllerYAML
 // --------------------------------------------------------------------------
 
 func TestHandleControllerYAML_ForbiddenOutsideScope(t *testing.T) {
@@ -275,7 +275,7 @@ func TestHandleControllerYAML_StripsWakeToken(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
-// #405 — handleCreateController local-fallback
+// handleCreateController local-fallback
 // --------------------------------------------------------------------------
 
 func TestHandleCreateController_BroodRoute_OmitsWakeTokenShape(t *testing.T) {
@@ -338,7 +338,7 @@ func TestHandleCreateController_BroodRoute_OmitsWakeTokenShape(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
-// #405 — handleUpdateController local-fallback
+// handleUpdateController local-fallback
 // --------------------------------------------------------------------------
 
 func TestHandleUpdateController_BroodRoute_StripsWakeToken(t *testing.T) {
@@ -393,7 +393,7 @@ func TestHandleUpdateController_BroodRoute_StripsWakeToken(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
-// #409 — handleMiteStreamSSE
+// handleMiteStreamSSE
 // --------------------------------------------------------------------------
 
 func TestHandleMiteStreamSSE_ForbiddenOutsideScope(t *testing.T) {
@@ -445,7 +445,7 @@ func TestHandleMiteStreamSSE_AllowedInScope(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
-// #408 — handleBroodStreamSSE (new wrapper)
+// handleBroodStreamSSE
 // --------------------------------------------------------------------------
 
 func TestHandleBroodStreamSSE_ForbiddenForNamespaceScopedUser(t *testing.T) {
@@ -513,7 +513,7 @@ func TestHandleBroodStreamSSE_NilAuthorizerDenies(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
-// #408 — handleStreamTicket mint-time authz
+// handleStreamTicket mint-time authz
 // --------------------------------------------------------------------------
 
 func TestHandleStreamTicket_BroodScope_ForbiddenWithoutClusterWideBinding(t *testing.T) {

@@ -185,10 +185,10 @@ func TestComposer_MultiplePodTemplates(t *testing.T) {
 }
 
 func TestComposer_PodTemplateWithJCasCCloud(t *testing.T) {
-	// Issue #221: a jcasc item defining a full kubernetes cloud (name/namespace/
-	// jenkinsUrl) must survive when a podtemplate item is composed alongside it.
-	// Previously the podtemplate wrapper's bare "clouds" list clobbered the
-	// jcasc item's cloud config during merge.
+	// A jcasc item defining a full kubernetes cloud (name/namespace/jenkinsUrl)
+	// must survive when a podtemplate item is composed alongside it: the
+	// podtemplate wrapper's bare "clouds" list must not clobber the jcasc
+	// item's cloud config during merge.
 	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
 		"ns/jcasc-cloud": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemJCasC}, Status: v1alpha1.CatalogItemStatus{
 			Content:     "jenkins:\n  clouds:\n  - name: kubernetes\n    kubernetes:\n      namespace: jenkins\n      jenkinsUrl: http://jenkins.jenkins.svc:8080\n",
@@ -421,7 +421,7 @@ func TestComposer_PluginDedup(t *testing.T) {
 }
 
 // A jcasc item may embed a top-level plugins: block (e.g. the varroa-theme
-// item bundling simple-theme-plugin, #263). The plugin must land in the plugin
+// item bundling simple-theme-plugin). The plugin must land in the plugin
 // set and must NOT leak into jenkins.yaml; the rest of the jcasc config stays.
 func TestComposer_JcascEmbeddedPlugins(t *testing.T) {
 	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{

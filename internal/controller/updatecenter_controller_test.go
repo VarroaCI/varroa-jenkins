@@ -1122,7 +1122,7 @@ func findUCCondition(conditions []v1alpha1.UpdateCenterCondition, condType strin
 }
 
 // ---------------------------------------------------------------------------
-// #494 — seed registry authentication
+// Seed registry authentication
 // ---------------------------------------------------------------------------
 
 // withSeedSecretRef sets spec.seed.secretRef.

@@ -364,7 +364,7 @@ func (a *Authorizer) clusterEffective(claims *auth.Claims) rbac.APICapabilitySet
 }
 
 // globalEffective returns the caller's capabilities from cluster-wide (nil-scope)
-// bindings only, via change 6's scope-partitioned resolver. Used to gate
+// bindings only, via the scope-partitioned resolver. It gates
 // cluster-scoped Varroa resources (roles, rolebindings, jenkinsroles,
 // jenkinsrolebindings, provisioningdefaults, and the admin wildcard) so a
 // namespace-scoped binding cannot satisfy them cluster-wide.

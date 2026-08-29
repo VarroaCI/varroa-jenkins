@@ -96,7 +96,7 @@ func addClusterFlag(cmd *cobra.Command) {
 // Varroa applies those writes as the field manager "varroa-ui", so changing a
 // field some other manager owns — a stray kubectl apply/patch, for instance —
 // is refused with a field conflict. Without this the conflict is a dead end
-// from the CLI, exactly as it was from MCP (#521).
+// from the CLI.
 func addForceFlag(cmd *cobra.Command) {
 	cmd.Flags().Bool("force", false,
 		"override field-ownership conflicts, taking ownership of the conflicting fields")

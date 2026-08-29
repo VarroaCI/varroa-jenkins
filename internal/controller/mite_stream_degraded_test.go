@@ -23,11 +23,11 @@ func (d *degradedTransport) StreamDegraded(_, _ string) (string, bool) {
 	return d.reason, d.degraded
 }
 
-// TestConnected_MiteStreamDegradedConditionSet is the operator half of #509:
-// when the gateway cannot bridge desired state to a connected mite, the
-// Controller must stop reporting unqualified health. Before the fix the CR sat
-// at Connected/Ready with no signal at all — the only evidence was one
-// controller-scoped gateway log line.
+// TestConnected_MiteStreamDegradedConditionSet asserts that when the gateway
+// cannot bridge desired state to a connected mite, the Controller must stop
+// reporting unqualified health — otherwise the CR sits at Connected/Ready
+// with no signal at all, and the only evidence is one controller-scoped
+// gateway log line.
 func TestConnected_MiteStreamDegradedConditionSet(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	rec, registry := newTestReconcilerForGate(client)

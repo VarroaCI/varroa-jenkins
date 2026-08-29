@@ -1330,8 +1330,8 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 	// Wait for Jenkins to be ready before applying any config. Managed plugins
 	// are installed out of band by the plugins-init init container before the
 	// Jenkins JVM starts, so they are already loaded here. The mite never installs
-	// plugins (the last Jenkins.ADMINISTER-gated path, #166) and never restarts
-	// Jenkins; first boot applies JCasC config and items directly.
+	// plugins (an ADMINISTER-gated path) and never restarts Jenkins; first boot
+	// applies JCasC config and items directly.
 	if err := a.waitForJenkinsWithFreshToken(ctx); err != nil {
 		return result
 	}
@@ -1357,11 +1357,11 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 	}
 
 	// 3. Apply JCasC + RBAC configuration via /configuration-as-code/reload.
-	//    #166: the mite always uses the MANAGE-gated reload path — write the
+	//    The mite always uses the MANAGE-gated reload path — write the
 	//    bundle file(s) into the CASC directory, then POST .../reload. The
-	//    admin-gated apply/check path has been removed so the mite needs no
-	//    Jenkins.ADMINISTER. rbac.yaml is written and reloaded together with
-	//    config in the same call.
+	//    mite has no path to the admin-gated apply/check endpoints, so it
+	//    needs no Jenkins.ADMINISTER. rbac.yaml is written and reloaded
+	//    together with config in the same call.
 	configChanged := cmd.JcascYaml != "" && !converged("config")
 	rbacChanged := cmd.RbacYaml != "" && !converged("rbac")
 
@@ -1562,7 +1562,7 @@ func (a *Agent) applyConfigViaReload(ctx context.Context, client *jenkins.Client
 		return false, fmt.Sprintf("mkdir casc dir: %v", err)
 	}
 
-	// #166: do NOT preflight with /configuration-as-code/check — it requires
+	// Do NOT preflight with /configuration-as-code/check — it requires
 	// Jenkins.ADMINISTER. The reload below re-parses the written bundle and
 	// fails on a bad config; the rollback path restores last-good. This keeps
 	// the mite's config push within the MANAGE permission tier.

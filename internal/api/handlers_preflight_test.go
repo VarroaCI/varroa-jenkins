@@ -15,11 +15,10 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/preflight"
 )
 
-// Regression for #528: a path-mode draft whose host does not equal the
-// dashboard host was rejected by create (ValidateIngress) while preflight
-// stayed all-green — the rule lives in the BFF, and the operator-side
-// preflight cannot see DashboardHost. The handler now mirrors it as the
-// "ingress-mode" check.
+// A path-mode draft whose host does not equal the dashboard host must fail
+// preflight the same way create (ValidateIngress) rejects it — the rule
+// lives in the BFF, and the operator-side preflight cannot see
+// DashboardHost, so the handler mirrors it as the "ingress-mode" check.
 func TestHandlePreflightController_PathModeIngressCheck(t *testing.T) {
 	role := &v1alpha1.VarroaRole{
 		ObjectMeta: metav1.ObjectMeta{Name: "creator"},

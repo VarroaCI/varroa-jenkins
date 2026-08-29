@@ -280,7 +280,7 @@ func TestReconcileComposedBundle_GitInputDriftReMaterializes(t *testing.T) {
 }
 
 func TestReconcileComposedBundle_ItemRefContentDriftReMaterializes(t *testing.T) {
-	// #314: an unpinned itemRef whose backing CatalogItem gets new content
+	// An unpinned itemRef whose backing CatalogItem gets new content
 	// from a CatalogSource resync (contentHash changes, no edit to the
 	// ComposedBundle spec itself) must trigger a recompose.
 	tc := newCatalogTestClient()
@@ -332,12 +332,11 @@ func TestReconcileComposedBundle_ItemRefContentDriftReMaterializes(t *testing.T)
 }
 
 func TestReconcileComposedBundle_ItemRefUpgradeBootstrapsBaseline(t *testing.T) {
-	// #314 upgrade path: a bundle that reached Ready *before* itemRef content
-	// hashes were tracked has an existing contentRef but no
-	// status.observedRevisions entry for the itemRef index. The first
-	// reconcile after this fix ships must not silently discard that gap via
-	// the early-return skip path — it must recompose once to persist a
-	// baseline hash, so subsequent catalog changes are actually detected.
+	// A bundle that reached Ready *before* itemRef content hashes were
+	// tracked has an existing contentRef but no status.observedRevisions
+	// entry for the itemRef index. Reconcile must not silently discard that
+	// gap via the early-return skip path — it must recompose once to persist
+	// a baseline hash, so subsequent catalog changes are actually detected.
 	tc := newCatalogTestClient()
 	item := jcascItem("jcasc-1", "jenkins:\n  systemMessage: \"v1\"\n")
 	item.Status.ContentHash = "hash-v1"
@@ -421,12 +420,11 @@ func TestReconcileComposedBundle_ItemRefStableContentSkipsRecompose(t *testing.T
 }
 
 // newComposedBundleReconcilerWithNS creates a CatalogReconciler with an operator namespace.
-// TestReconcileComposedBundle_ItemRefDisappearanceReMaterializes covers the
-// gap left by the #314 content-hash work: that fix reacted to an itemRef whose
-// content *changed*, but an itemRef that stops resolving at all was skipped
-// before any revision was recorded. With no observedRevisions entry there was
-// nothing to compare, so the skip gate saw no drift and the bundle went on
-// serving content for an input that no longer existed.
+// TestReconcileComposedBundle_ItemRefDisappearanceReMaterializes asserts that
+// an itemRef that stops resolving at all must still record a revision —
+// otherwise the skip gate sees no drift with no observedRevisions entry to
+// compare against, and the bundle keeps serving content for an input that no
+// longer exists.
 func TestReconcileComposedBundle_ItemRefDisappearanceReMaterializes(t *testing.T) {
 	ctx := context.Background()
 	tc := newCatalogTestClient()
@@ -975,7 +973,7 @@ func writeFile(t *testing.T, path, content string) {
 }
 
 // ---------------------------------------------------------------------------
-// #410 — Git secret host-scoping tests
+// Git secret host-scoping tests
 // ---------------------------------------------------------------------------
 
 func TestCatalogSource_GitSecretRefHostNotAllowed(t *testing.T) {

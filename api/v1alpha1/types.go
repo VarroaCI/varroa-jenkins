@@ -723,7 +723,7 @@ const (
 	// ReasonMiteSpecConverged is set when the mite sidecar's applied image,
 	// resources, and imagePullPolicy all equal their effective desired values.
 	ReasonMiteSpecConverged = "MiteSpecConverged"
-	// ReasonCoreOlderThanPluginBaseline is set when core(spec.version) < plugin-set baseline (the #185 crash class).
+	// ReasonCoreOlderThanPluginBaseline is set when core(spec.version) < plugin-set baseline (a crash-inducing mismatch).
 	ReasonCoreOlderThanPluginBaseline = "CoreOlderThanPluginBaseline"
 	// ReasonUnparseableVersion is set when spec.version is unparseable and no profile vouches for it.
 	ReasonUnparseableVersion = "UnparseableVersion"
@@ -2058,7 +2058,7 @@ type JenkinsVersionProfileSpec struct {
 	// resolved against (LTS line profiles only). The operator deploys the
 	// Jenkins core at this version rather than the bare line in Version, so the
 	// running core is never older than the core the pinned plugins require
-	// (see AggregatePluginPrerequisitesNotMetException / #185). Empty for
+	// (see AggregatePluginPrerequisitesNotMetException). Empty for
 	// weekly/exact-pin profiles, where Version is already deployable as-is.
 	ResolveVersion string `json:"resolveVersion,omitempty"`
 

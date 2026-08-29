@@ -183,7 +183,7 @@ func (c *Composer) Compose(ctx context.Context, ns string, spec *v1alpha1.Compos
 				content := item.Status.Content
 				// A jcasc item may embed a top-level `plugins:` block so it can
 				// ship the plugin its config depends on (e.g. varroa-theme
-				// bundling simple-theme-plugin, #263). Split it out to the
+				// bundling simple-theme-plugin). Split it out to the
 				// plugin set; the remaining jcasc config routes as usual.
 				if groupKey == "jcasc" {
 					jcascOnly, pluginsOnly := splitEmbeddedPlugins(content)
@@ -533,7 +533,7 @@ func injectPodTemplatesIntoJCasC(jcascYAML string, contents []string) (string, e
 // item's content so it can be routed to the plugin set rather than leaking
 // into jenkins.yaml. This lets a single jcasc catalog item ship the plugin its
 // configuration depends on (e.g. the varroa-theme item bundling
-// simple-theme-plugin, #263). It returns the content with the plugins key
+// simple-theme-plugin). It returns the content with the plugins key
 // removed and a standalone plugins document. When the content has no plugins
 // key (the common case for every other jcasc item) it is returned verbatim so
 // existing behavior is unchanged.
@@ -551,7 +551,7 @@ func splitEmbeddedPlugins(content string) (jcascYAML, pluginsYAML string) {
 	if err != nil {
 		// Never expected (raw came from a successful unmarshal), but on any
 		// failure return the content verbatim rather than silently dropping
-		// the embedded plugin — which would reintroduce the #263 crashloop.
+		// the embedded plugin, which would crashloop the controller.
 		return content, ""
 	}
 	if len(doc) == 0 {

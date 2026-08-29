@@ -251,9 +251,9 @@ func resolveFromBFF(cmd *cobra.Command, profile string, _ string) ([]resolvedEnt
 				entries = append(entries, resolvedEntry{Name: parts[0], Version: parts[1], ResolveVersion: item.ResolveVersion})
 			}
 			// Fail closed, regardless of the status that accompanied the empty
-			// resolution: a pack with no plugins is never a valid artifact, and
-			// publishing one silently is the #416 failure mode. The message must
-			// let an operator tell a mistyped --profile from a broken plugin set.
+			// resolution: a pack with no plugins is never a valid artifact. The
+			// message must let an operator tell a mistyped --profile from a
+			// broken plugin set.
 			if len(entries) == 0 {
 				return nil, "", fmt.Errorf(
 					"version profile %q resolved to no plugins: refusing to build an empty pack "+

@@ -85,7 +85,7 @@ func TestBootstrapTLSConfig_MalformedCAPEM(t *testing.T) {
 
 func TestBootstrapTLSConfig_CAPEMEmpty(t *testing.T) {
 	// Fail-closed: with no CA PEM, bootstrap must refuse rather than fall back to an
-	// insecure (unverified) connection — the #232 hole must stay closed.
+	// insecure (unverified) connection.
 	agent := &Agent{
 		cfg:    Config{CAPEM: ""},
 		Logger: slog.Default(),

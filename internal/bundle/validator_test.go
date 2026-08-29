@@ -489,7 +489,7 @@ func TestIsVarroaVar(t *testing.T) {
 		{"varroa_controller_endpoint", true},
 		{"varroa_oidc_issuer", true},
 		{"varroa_oidc_client_id", true},
-		{"varroa_oidc_client_secret", true}, // still varroa_-prefixed even after #411 removed it from InjectedVariableNames
+		{"varroa_oidc_client_secret", true}, // still varroa_-prefixed even though it is not in InjectedVariableNames
 		{"my_var", false},
 		{"not_varroa", false},
 		{"VARROA_controller", false}, // case-sensitive

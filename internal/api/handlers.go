@@ -1529,8 +1529,7 @@ func (s *Server) handleReprovision(w http.ResponseWriter, r *http.Request, clust
 
 // handleRestartController handles POST /controllers/{ns}/{name}/restart.
 // Restart = pod delete; the StatefulSet recreates the pod. Build draining is
-// the pod shutdown path's job, not this endpoint's — the former safe-restart
-// endpoint promised a drain it never performed and was removed (issue #275).
+// the pod shutdown path's job, not this endpoint's.
 func (s *Server) handleRestartController(w http.ResponseWriter, r *http.Request, cluster, ns, name string) {
 	if r.Method != http.MethodPost {
 		s.writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -2053,7 +2052,7 @@ func (s *Server) handlePreflightController(w http.ResponseWriter, r *http.Reques
 	// The ingress rules for create (path-mode locality and dashboard-host
 	// equality) live in the BFF's ValidateIngress — the operator-side preflight
 	// cannot see DashboardHost — so mirror them here as a check. Otherwise
-	// preflight passes green for a draft handleCreateController will 400 (#528).
+	// preflight passes green for a draft handleCreateController will 400.
 	// Only emitted when the draft configures ingress at all, so the check list
 	// reflects what was actually validated.
 	var ingressChecks []preflight.Check
@@ -2606,7 +2605,7 @@ func (s *Server) observabilityIntentAnnotations(ctx context.Context, cluster str
 // observabilityComposedBundle resolves a ComposedBundle for observability-intent
 // derivation. When ConfigBrood is wired it routes through it so a controller on
 // a remote (hive) cluster reads its bundle over the bus (the ConfigBrood local
-// branch still uses the typed core client), fixing #304. When ConfigBrood is nil
+// branch still uses the typed core client). When ConfigBrood is nil
 // (legacy/test setups) it falls back to the local typed client.
 func (s *Server) observabilityComposedBundle(ctx context.Context, cluster, ns, name string) (*v1alpha1.ComposedBundle, error) {
 	if s.deps.ConfigBrood == nil {
@@ -2628,7 +2627,7 @@ func (s *Server) observabilityComposedBundle(ctx context.Context, cluster, ns, n
 
 // observabilityCatalogItem resolves a CatalogItem for observability-intent
 // derivation, mirroring observabilityComposedBundle's ConfigBrood-or-local
-// routing so remote-cluster catalog items resolve over the bus (#304).
+// routing so remote-cluster catalog items resolve over the bus.
 func (s *Server) observabilityCatalogItem(ctx context.Context, cluster, ns, name string) (*v1alpha1.CatalogItem, error) {
 	if s.deps.ConfigBrood == nil {
 		return crdstore.Get[v1alpha1.CatalogItem](ctx, s.deps.Store, name, ns)
@@ -3405,24 +3404,20 @@ func diffYAML(base, merged string) string {
 	i, j := 0, 0
 	for i < len(baseLines) || j < len(mergedLines) {
 		if i < len(baseLines) && j < len(mergedLines) && baseLines[i] == mergedLines[j] {
-			// Common line.
 			if baseLines[i] != "" {
 				buf.WriteString(" " + baseLines[i] + "\n")
 			}
 			i++
 			j++
 		} else if j < len(mergedLines) && (i >= len(baseLines) || baseSet[mergedLines[j]] == 0) {
-			// Added line.
 			mergedSet[mergedLines[j]]--
 			buf.WriteString("+" + mergedLines[j] + "\n")
 			j++
 		} else if i < len(baseLines) && (j >= len(mergedLines) || mergedSet[baseLines[i]] == 0) {
-			// Removed line.
 			baseSet[baseLines[i]]--
 			buf.WriteString("-" + baseLines[i] + "\n")
 			i++
 		} else {
-			// Same line (counts allow it).
 			if baseLines[i] != "" {
 				buf.WriteString(" " + baseLines[i] + "\n")
 			}

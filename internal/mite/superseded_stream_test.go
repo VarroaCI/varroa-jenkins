@@ -17,12 +17,12 @@ import (
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
-// TestGatewayIntegration_SupersededStreamStopsDispatching pins the fix for
-// #514: a stream the mite has already replaced must stop feeding the handler.
-// The connection token added in #515 guarded teardown only, so the read loop
-// kept dispatching — a late snapshot from a dead connection landed in the
-// snapshot KV the live connection owns, and the controller reported a stale
-// Jenkins version with nothing marking it as stale.
+// TestGatewayIntegration_SupersededStreamStopsDispatching asserts that a
+// stream the mite has already replaced must stop feeding the handler: the
+// connection-token check must guard the read loop, not just teardown, or a
+// late snapshot from a dead connection lands in the snapshot KV the live
+// connection owns and the controller reports a stale Jenkins version with
+// nothing marking it as stale.
 func TestGatewayIntegration_SupersededStreamStopsDispatching(t *testing.T) {
 	natsSrv := startNATS(t)
 	busConn, lis, certAuth := startGatewayWithCA(t, natsSrv.ClientURL())

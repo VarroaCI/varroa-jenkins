@@ -193,8 +193,8 @@ func TestCreateStatefulSetImageUpdate(t *testing.T) {
 		// stamp) breaks on the very next reconcile: re-deriving the stamp from
 		// the post-preservation template would make prev == the preserved
 		// value, which no longer equals an unchanged desired value, and the
-		// override would get stomped back to desired on the following tick
-		// (PR #373 review finding). The live template (asserted above) is the
+		// override would get stomped back to desired on the following tick.
+		// The live template (asserted above) is the
 		// source of truth for "what's actually applied"; the stamp is the
 		// source of truth for "what did the operator last want."
 		stamp := parseComputedImagesAnnotation(got)
@@ -206,12 +206,12 @@ func TestCreateStatefulSetImageUpdate(t *testing.T) {
 		}
 
 		// Second tick, desired still unchanged: the override must stay
-		// preserved indefinitely, not just for one reconcile. This is the
-		// exact scenario a re-stamp-from-applied approach breaks (PR #373
-		// review): it would have turned the stamp into "custom/jenkins:override"
-		// after tick 1, making tick 2's prev==override != this tick's
-		// want==2.570.1, incorrectly treating the still-unchanged desired
-		// value as a delta and stomping the override.
+		// preserved indefinitely, not just for one reconcile. A
+		// re-stamp-from-applied approach breaks this: it would turn the stamp
+		// into "custom/jenkins:override" after tick 1, making tick 2's
+		// prev==override != this tick's want==2.570.1, incorrectly treating
+		// the still-unchanged desired value as a delta and stomping the
+		// override.
 		if err := c.CreateStatefulSet(ctx, spec); err != nil {
 			t.Fatalf("CreateStatefulSet (tick 2): %v", err)
 		}
@@ -237,12 +237,9 @@ func TestCreateStatefulSetImageUpdate(t *testing.T) {
 	})
 
 	t.Run("out-of-band override superseded when desired changes (fleet scenario)", func(t *testing.T) {
-		// Regression for a live-smoke incident on the core fleet: a manual
-		// out-of-band STS image patch (the #368 workaround) permanently wedged
-		// every subsequent spec-driven roll for that container, because the
-		// old preservation rule kept re-adopting the stale live image forever
-		// regardless of whether the operator's desired value had since
-		// changed. New spec/overlay intent must win over a stale hotfix.
+		// New spec/overlay intent must always win over a stale out-of-band
+		// image hotfix: the preservation rule must not re-adopt the stale
+		// live image once the operator's desired value has changed.
 		c, dyn := setup()
 		existing := stsObject(nil,
 			[]map[string]interface{}{simpleContainer("jenkins", "custom/jenkins:override", "Never"), simpleContainer("mite", "m:1")},
@@ -357,12 +354,11 @@ func TestCreateStatefulSetImageUpdate(t *testing.T) {
 	})
 
 	t.Run("mite out-of-band override superseded when class-resolved mite image changes (fleet scenario)", func(t *testing.T) {
-		// Exact reproduction of the reported core-fleet incident: the mite
-		// container was manually STS-patched to a hotfix image (the interim
-		// #368 workaround) at a moment when the operator's desired mite image
-		// (via class-resolved effectiveDesiredMiteImage) was "m:1". A later
-		// class-level mite image change to "m:2" must now win over the stale
-		// hotfix, and the stamp must reflect what was actually applied.
+		// The mite container was manually STS-patched to a hotfix image at a
+		// moment when the operator's desired mite image (via class-resolved
+		// effectiveDesiredMiteImage) was "m:1". A later class-level mite
+		// image change to "m:2" must win over the stale hotfix, and the
+		// stamp must advance to that new desired baseline.
 		c, dyn := setup()
 		existing := stsObject(nil,
 			[]map[string]interface{}{simpleContainer("jenkins", "jenkins/jenkins:2.570.1"), simpleContainer("mite", "hotfix/mite:6fb785d")},
@@ -406,8 +402,9 @@ func TestCreateStatefulSetImageUpdate(t *testing.T) {
 			t.Errorf("init-groovy image = %q, want %q (shares the mite image; also superseded)", img, "m:2")
 		}
 
-		// The stamp must match template reality for every container after the
-		// update, never a value that got vetoed by preservation.
+		// The stamp records the desired baseline for every container. Here
+		// desired intent changed, so preservation does not win and the
+		// baseline and the applied template agree.
 		stamp := parseComputedImagesAnnotation(got)
 		if stamp == nil {
 			t.Fatal("computed images annotation missing")
@@ -420,9 +417,8 @@ func TestCreateStatefulSetImageUpdate(t *testing.T) {
 		}
 	})
 
-	// Regression for PR #373 review: the image-preservation predicate used
-	// to also preserve the mite container's imagePullPolicy alongside the
-	// image, unconditionally. The class-resolved mite imagePullPolicy now
+	// The image-preservation predicate must not also preserve the mite
+	// container's imagePullPolicy: the class-resolved mite imagePullPolicy
 	// has its own independent drift check, so once a controller has a
 	// preserved out-of-band mite image override, a genuine desired pull-policy
 	// change must still win — piggybacking pull-policy preservation onto the

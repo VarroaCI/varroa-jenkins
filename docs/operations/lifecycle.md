@@ -44,7 +44,7 @@ For approval and drain behavior, see [Reconciliation](reconciliation.md).
 
 ## Resolve field conflicts
 
-Varroa writes controller specifications with server-side apply. A conflicting manager, such as a GitOps controller, can block a change. Change the other manager's desired state, or take ownership only when it will not immediately reapply the field.
+A conflicting field manager, such as a GitOps controller, can block a change. See [Manage field ownership](../agents/writing.md#manage-field-ownership) for the full procedure.
 
 ```bash
 varroactl patch controller <namespace>/<name> \

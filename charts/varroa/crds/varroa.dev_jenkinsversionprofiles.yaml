@@ -89,7 +89,7 @@ spec:
                   resolved against (LTS line profiles only). The operator deploys the
                   Jenkins core at this version rather than the bare line in Version, so the
                   running core is never older than the core the pinned plugins require
-                  (see AggregatePluginPrerequisitesNotMetException / #185). Empty for
+                  (see AggregatePluginPrerequisitesNotMetException). Empty for
                   weekly/exact-pin profiles, where Version is already deployable as-is.
                 type: string
               version:

@@ -390,10 +390,11 @@ func TestStarterSeededObjectsCompose(t *testing.T) {
 	}
 }
 
-// applyFilters previously read spec.composedBundleRef directly, so a
-// `bundle: varroa-starter` operation silently matched none of the controllers
-// actually running the starter — filters drop rather than report, so the
-// operation reported success over an empty target set.
+// applyFilters must resolve the effective bundle, not read
+// spec.composedBundleRef directly, or a `bundle: varroa-starter` operation
+// silently matches none of the controllers actually running the starter —
+// filters drop rather than report, so the operation reports success over an
+// empty target set.
 func TestBundleFilterMatchesZeroConfigControllers(t *testing.T) {
 	zeroConfig := &v1alpha1.Controller{
 		ObjectMeta: metav1.ObjectMeta{Name: "bare", Namespace: "team-a"},

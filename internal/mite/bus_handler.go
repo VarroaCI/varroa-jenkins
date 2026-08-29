@@ -138,7 +138,7 @@ const (
 	// defaultWatchBackoff is the first retry delay after a failed watch setup.
 	defaultWatchBackoff = 1 * time.Second
 	// maxWatchBackoff caps the exponential retry delay. Retries never stop
-	// while the mite is connected: giving up is what caused #509.
+	// while the mite is connected.
 	maxWatchBackoff = 30 * time.Second
 	// healthyWatchUptime is how long an established watch must survive before a
 	// later death is treated as a fresh incident rather than a flapping one.
@@ -539,9 +539,9 @@ func (h *BusHandler) OnDisconnect(name, ns string, token int64) {
 	// A superseded stream can tear down late — after the mite already
 	// reconnected. Without this check that teardown cancels the *live*
 	// connection's watch goroutines, leaving a Connected mite receiving no
-	// desired state at all: #509's symptom reached by another route. The check
-	// and the teardown share one critical section: releasing h.mu between them
-	// would let a reconnect land in the gap and be torn down anyway.
+	// desired state at all. The check and the teardown share one critical
+	// section: releasing h.mu between them would let a reconnect land in the
+	// gap and be torn down anyway.
 	h.mu.Lock()
 	if current, ok := h.connectEpoch[key]; ok && token != 0 && current != token {
 		h.mu.Unlock()
@@ -645,7 +645,7 @@ func (h *BusHandler) watchDesiredState(ctx context.Context, ns, name string, sen
 		}
 		// The watcher died while the mite is still connected. Without
 		// re-establishing here the connection is starved of desired state for
-		// the rest of the pod's life — the second half of #509.
+		// the rest of the pod's life.
 		h.markWatchDegraded(ctx, ns, name, "desired", "desired-state watch closed unexpectedly")
 		if !pacer.wait(ctx, time.Since(start)) {
 			return
@@ -655,9 +655,8 @@ func (h *BusHandler) watchDesiredState(ctx context.Context, ns, name string, sen
 
 // establishDesiredWatch retries the KV watch setup with capped exponential
 // backoff until it succeeds or ctx is cancelled. It never gives up while the
-// mite is connected: a single transient failure used to permanently starve the
-// connection of every desired-state push (#509). Returns ok=false only when
-// ctx is done.
+// mite is connected, so a transient failure cannot starve the connection of
+// every desired-state push. Returns ok=false only when ctx is done.
 func (h *BusHandler) establishDesiredWatch(ctx context.Context, ns, name, key string) (nats.KeyWatcher, bool) {
 	var w nats.KeyWatcher
 	ok := h.retryEstablish(ctx, ns, name, "desired", func() error {
@@ -671,8 +670,8 @@ func (h *BusHandler) establishDesiredWatch(ctx context.Context, ns, name, key st
 // retryEstablish runs setup until it succeeds or ctx is cancelled, backing off
 // exponentially between attempts and marking the controller degraded for as
 // long as it keeps failing. It is the shared guard for every bus→stream
-// bridge: returning after a single transient setup error is what silently
-// starved a connected mite of desired state for its whole lifetime (#509).
+// bridge: returning after a single transient setup error would silently
+// starve a connected mite of desired state for its whole lifetime.
 // Returns false only when ctx is done.
 func (h *BusHandler) retryEstablish(ctx context.Context, ns, name, watchKind string, setup func() error) bool {
 	delay := h.watchBackoff
@@ -882,8 +881,7 @@ func (h *BusHandler) watchImperative(ctx context.Context, ns, name string, send 
 
 	// Setup is retried with backoff rather than abandoned on first error: a
 	// permanent return here silently drops every imperative command (safe
-	// restart, brood ops) for the life of the connection — the same failure
-	// class as #509 on the desired-state watch.
+	// restart, brood ops) for the life of the connection.
 	pacer := h.newRebuildPacer()
 	for {
 		var sub *nats.Subscription
@@ -1062,7 +1060,7 @@ func (h *BusHandler) watchContent(ctx context.Context, ns, name string, send Sen
 	if h.conn == nil || h.conn.NATSConn() == nil {
 		return
 	}
-	// Retried for the same reason as the desired-state watch (#509): giving up
+	// Retried for the same reason as the desired-state watch: giving up
 	// after one setup error leaves the mite unable to serve content fetches for
 	// the rest of the connection, with no operator-visible signal.
 	pacer := h.newRebuildPacer()
@@ -1089,8 +1087,8 @@ func (h *BusHandler) watchContent(ctx context.Context, ns, name string, send Sen
 			return
 		}
 		// The subscription died while the mite is still connected. Returning
-		// here (the old behaviour) left it unable to serve any content fetch
-		// for the rest of the connection, with no signal — the #509 pattern.
+		// here would leave it unable to serve any content fetch for the rest
+		// of the connection, with no signal.
 		_ = sub.Unsubscribe()
 		h.markWatchDegraded(ctx, ns, name, "content", "content subscription lost; rebuilding")
 		if !pacer.wait(ctx, time.Since(start)) {

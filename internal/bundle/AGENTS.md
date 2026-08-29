@@ -36,7 +36,7 @@ pre-apply content validation.
     `ref.PinnedContentHash != item.Status.ContentHash`. `pipeline-template`
     routes into the `item` group. A `jcasc` item may embed a top-level
     `plugins:` block (`splitEmbeddedPlugins`) so config ships with its
-    dependent plugin (#263).
+    dependent plugin.
   - `gitSource`: requires `c.resolver != nil`; caller pre-resolves `GitAuth`
     into `resolvedAuth[i]` (Secrets are never read here). Each input clones
     into its own `os.MkdirTemp` under `c.workDir`, removed via `defer` after
@@ -77,7 +77,7 @@ pre-apply content validation.
   already a 40-hex SHA), locks per cache key, fetches on miss, then clones
   locally from the bare store into a private `refs/varroa/*` namespace — never
   `refs/heads/*` directly, since git refuses to fetch into a non-bare repo's
-  checked-out (even unborn) branch (#311). Nil `*CloneCache` = disabled;
+  checked-out (even unborn) branch. Nil `*CloneCache` = disabled;
   `Resolver.Materialize` falls back to `GitCloner.Clone` directly.
 - **`GitCloner`** (`git.go`) — `validateRepoURL` is the RCE defense: only
   `https://`, `ssh://`, scp-like `[user@]host:path`; any `"<transport>::"`

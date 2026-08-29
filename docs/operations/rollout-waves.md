@@ -10,7 +10,15 @@ spec:
 
 Each controller waits until earlier-wave controllers using the same bundle have applied the target successfully. Only Connected earlier-wave controllers gate later waves; a controller in any other phase is skipped and does not block them.
 
-A Connected earlier-wave controller clears the gate only when all of the following hold: its applied bundle hash matches the target, its last apply succeeded, and its mite is connected with a heartbeat newer than the stale threshold. A controller whose apply succeeded but whose mite has gone quiet still blocks the wave, so check heartbeat freshness before assuming a stalled rollout is an apply failure.
+A Connected earlier-wave controller clears the gate only when all three conditions hold.
+
+| Condition | Cleared when |
+|---|---|
+| Bundle hash | Applied hash matches the target. |
+| Apply result | Last apply succeeded. |
+| Mite heartbeat | Mite connected, heartbeat newer than the stale threshold. |
+
+A controller whose apply succeeded but whose mite has gone quiet still blocks the wave, so check heartbeat freshness before assuming a stalled rollout is an apply failure.
 
 ## Operate a rollout
 

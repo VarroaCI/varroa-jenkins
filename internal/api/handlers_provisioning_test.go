@@ -443,11 +443,9 @@ func TestHandleVersionProfiles(t *testing.T) {
 		}
 	})
 
-	// Issue #416: a profile whose contentRef is set but unreadable used to be
-	// reported as 200-with-plugins-absent, indistinguishable from a genuinely
-	// unmaterialized profile — which is how `varroactl export plugins`
-	// published an empty pack and exited 0. contentRef being set ASSERTS the
-	// plugin set exists, so failing to read it is a broken cluster state.
+	// contentRef being set ASSERTS the plugin set exists, so a profile whose
+	// contentRef is set but unreadable must be a 500, not an empty plugin set
+	// indistinguishable from a genuinely unmaterialized profile.
 	t.Run("unreadable plugin set is 500 naming the profile", func(t *testing.T) {
 		client := &fakeProvisioningClient{
 			fakeResourceClient: *newFakeResourceClient(),
@@ -656,8 +654,8 @@ plugins:
 }
 
 // TestVersionProfileDetail_JSONShapeUnchanged pins the wire shape of
-// VersionProfileDetail. The #416 diagnostic is carried by the HTTP status, NOT
-// by the body: VersionProfileDetail is part of the OpenAPI contract
+// VersionProfileDetail. The unreadable-plugin-set diagnostic is carried by
+// the HTTP status, NOT by the body: VersionProfileDetail is part of the OpenAPI contract
 // (api/openapi/components/schemas.yaml) and the generated client, so adding a
 // field here — or dropping the omitempty that hides the empty case — would drag
 // this change onto a regeneration surface it does not own.

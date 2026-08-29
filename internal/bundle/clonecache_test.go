@@ -28,7 +28,7 @@ func newBareFixture(t *testing.T) (bareURL string, commit func(name, content str
 
 // newBareFixtureBranch is newBareFixture with a caller-chosen default branch,
 // so tests can cover repos whose branch name collides with git's
-// init.defaultBranch (issue #311).
+// init.defaultBranch.
 func newBareFixtureBranch(t *testing.T, branch string) (bareURL string, commit func(name, content string) string) {
 	t.Helper()
 	fixtureDir := t.TempDir()
@@ -552,8 +552,8 @@ func TestEvictionDoesNotBreakCheckout(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Regression: issue #311 — repos whose branch name matches git's
-// init.defaultBranch must still materialize. localClone must never fetch
+// Repos whose branch name matches git's init.defaultBranch must still
+// materialize. localClone must never fetch
 // into refs/heads/* of the target working tree: git refuses to update the
 // checked-out (even unborn) branch of a fresh `git init`, wedging every
 // CatalogSource/gitSource tracking such a branch.

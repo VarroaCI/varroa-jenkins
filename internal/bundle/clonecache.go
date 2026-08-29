@@ -36,7 +36,7 @@ type repoMeta struct {
 	LastFetch int64  `json:"lastFetch"`
 	LastUsed  int64  `json:"lastUsed"`
 	// Size is the bare repo's on-disk size in bytes, measured after each
-	// fetch so eviction passes don't have to walk every repo (issue #280).
+	// fetch so eviction passes don't have to walk every repo.
 	Size int64 `json:"size,omitempty"`
 }
 
@@ -397,7 +397,7 @@ func (c *CloneCache) fetchBare(_ context.Context, bare, repoURL, sha, revision s
 // Refs are fetched into a private namespace, never refs/heads/*: git refuses
 // to fetch into the checked-out branch of a non-bare repo — including the
 // unborn init.defaultBranch of a fresh `git init` — so any repo tracking a
-// branch of that name would fail to materialize (issue #311). The SHA
+// branch of that name would fail to materialize. The SHA
 // checkout below detaches HEAD and only needs the objects, not branch refs.
 func (c *CloneCache) localClone(bare, targetDir, sha string) error {
 	gitEnv := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")

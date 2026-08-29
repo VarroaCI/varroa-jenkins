@@ -97,5 +97,5 @@ make build-cli                          # compiles bin/varroactl
 go test -race -count=1 ./cmd/varroactl/...
 ```
 
-Note: `TestLogin_BrowserDenied` is a known CI flake (browser-loopback timing),
+`TestLogin_BrowserDenied` is a known CI flake (browser-loopback timing),
 not a real regression signal by itself.
