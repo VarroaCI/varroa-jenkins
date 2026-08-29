@@ -1,0 +1,42 @@
+name: cla
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, closed, synchronize]
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+  statuses: write
+
+jobs:
+  cla-check:
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'pull_request_target' ||
+      (github.event.issue.pull_request &&
+       (github.event.comment.body == 'recheck' ||
+        github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA'))
+    steps:
+      - name: CLA assistant
+        uses: contributor-assistant/github-action@v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path-to-document: https://github.com/VarroaCI/varroa-jenkins/blob/main/CLA.md
+          # Signatures live on a dedicated branch so snapshot re-seeds of main
+          # never touch them.
+          branch: cla-signatures
+          path-to-signatures: signatures/version1/cla.json
+          allowlist: dependabot[bot],release-please[bot],github-actions[bot]
+          custom-notsigned-prcomment: >
+            Thanks for the contribution! Before we can merge, we need you to
+            sign the [Varroa Contributor License
+            Agreement](https://github.com/VarroaCI/varroa-jenkins/blob/main/CLA.md)
+            — it lets the project stay dual-licensed while you keep ownership
+            of your work. Please read it, then post the comment below.
+          custom-pr-sign-comment: I have read the CLA Document and I hereby sign the CLA
+          custom-allsigned-prcomment: All contributors have signed the CLA.

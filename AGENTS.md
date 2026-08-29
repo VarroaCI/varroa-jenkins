@@ -79,6 +79,7 @@ Copilot code review reads `.github/copilot-instructions.md` — and also ingests
 - `frontend/` — React/TypeScript/Vite dashboard.
 - `hack/` — dev-tooling scripts: plugin-lock generation, localdev (kind), mock OIDC, OpenAPI bundling.
 - `internal/` — Go backend packages: `controller`, `api`, `mite`, `bundle`, `rbac`, `bus`, and more.
+- `legal/` — the commercial license agreement template (see `COMMERCIAL-LICENSE.md`).
 - `pkg/` — the repo's public/consumable Go surface: generated OpenAPI client, stream helper, embedded templates.
 - `plugin/` — the `VarroaSecurityRealm` Jenkins plugin (Maven/HPI, JDK 21).
 - `scripts/` — small CI/dev helper scripts.
