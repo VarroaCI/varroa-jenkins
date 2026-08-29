@@ -424,21 +424,17 @@ operator and mite are written in Go, and the auth plugin is a Jenkins HPI under
 All contributions must be signed off under the
 [Developer Certificate of Origin](https://developercertificate.org/) using
 `git commit -s`, and are accepted under the
-[Varroa Contributor License Agreement](CLA.md) — you keep ownership of your work,
+[Varroa Contributor License Agreement](CLA.md). You keep ownership of your work,
 and a bot collects the signature once, on your first pull request.
 
 ## License
 
 Varroa is dual-licensed.
 
-- **[GNU Affero General Public License v3.0](LICENSE).** You are free to use, modify,
-  and self-host Varroa at no cost, at any scale. If you offer a modified version of
-  Varroa to others over a network, the AGPL requires you to make your modified source
-  available to those users.
+- **[GNU Affero General Public License v3.0](LICENSE).** Free to use, modify, and
+  self-host at any scale.
 - **[Commercial license](COMMERCIAL-LICENSE.md)** from SB Studio LLC, for organizations
-  whose policies exclude the AGPL or who need to keep modifications private while
-  offering Varroa to others. Same code, no feature gating — pricing is per managed
-  controller with unlimited users, agents, and builds; see
-  [varroa.dev/pricing](https://varroa.dev/pricing/).
+  that cannot accept the AGPL's terms. Same code, no feature gating, priced per managed
+  controller. See [varroa.dev/pricing](https://varroa.dev/pricing/).
 
 Copyright © 2026 SB Studio LLC and contributors.
