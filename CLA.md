@@ -1,6 +1,6 @@
 # Varroa Contributor License Agreement
 
-Version 1.0 — SB Studio LLC
+Version 1.0. SB Studio LLC.
 
 Thank you for your interest in contributing to Varroa. This Contributor
 License Agreement ("Agreement") documents the rights you grant to
@@ -24,8 +24,8 @@ present and future contributions to Varroa.
   Agreement. For legal entities, "You" includes any entity that
   controls, is controlled by, or is under common control with that
   entity.
-- **"Contribution"** means any original work of authorship — including
-  source code, documentation, configuration, and images — that You
+- **"Contribution"** means any original work of authorship, including
+  source code, documentation, configuration, and images, that You
   intentionally submit to the Varroa project for inclusion in any of its
   repositories, in any form (pull request, patch, issue attachment, or
   otherwise). It does not include work You clearly mark as "Not a

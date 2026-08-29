@@ -4,17 +4,17 @@ Thanks for your interest in contributing.
 
 ## Contributor License Agreement
 
-Varroa is dual-licensed (AGPL-3.0 and commercial — see
+Varroa is dual-licensed (AGPL-3.0 and commercial; see
 [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md)), so contributions are
 accepted under the [Varroa Contributor License Agreement](CLA.md). You
 keep ownership of your work; the CLA grants SB Studio LLC the license
 it needs to ship your contribution under both licenses. A bot checks
-signatures on every pull request — signing is a single PR comment, once,
+signatures on every pull request. Signing is a single PR comment, once,
 and it covers all future contributions.
 
 ## Development setup
 
-Start with `AGENTS.md` — it documents the build/test/lint commands, the
+Start with `AGENTS.md`. It documents the build/test/lint commands, the
 architecture map, and the non-obvious gotchas you'll want to know before
 touching `internal/mite/` or the reconcile loop.
 

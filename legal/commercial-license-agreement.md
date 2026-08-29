@@ -46,8 +46,8 @@ during the Term to:
 
 This license is granted under Licensor's rights in the Software and is
 independent of the GNU Affero General Public License v3.0. None of the
-AGPL's conditions — including its source-availability and network-use
-provisions — apply to Customer's exercise of the rights granted by this
+AGPL's conditions, including its source-availability and network-use
+provisions, apply to Customer's exercise of the rights granted by this
 Agreement.
 
 ## 3. Restrictions
@@ -143,7 +143,7 @@ Signature: ________________  Name/Title: ________________  Date: ______
 
 ---
 
-## Exhibit A — Support
+## Exhibit A: Support
 
 - **Channels:** email to support@varroa.dev; a private issue tracker on
   request.

@@ -14,7 +14,7 @@ license changes your legal obligations, not the binaries you run.
 You can use, modify, and self-host Varroa under the AGPL at no cost,
 at any scale, forever. The AGPL's obligations only bite when you
 **distribute** Varroa or **offer a modified Varroa to others over a
-network** — in those cases you must make your modified source available
+network**. In those cases you must make your modified source available
 to those users.
 
 Running unmodified Varroa for your own organization's CI, even a very
@@ -30,10 +30,10 @@ large installation, triggers no source-sharing obligation.
 
 ## Pricing
 
-Commercial licenses are priced per managed Jenkins controller — the one
+Commercial licenses are priced per managed Jenkins controller, the one
 number `kubectl get controllers -A` settles. Users, agents, and builds
 are unlimited under every license. While Varroa is early, rates are
-quoted directly rather than posted — see
+quoted directly rather than posted. See
 [varroa.dev/pricing](https://varroa.dev/pricing/) for how the model
 works; the agreement template is in
 [`legal/commercial-license-agreement.md`](legal/commercial-license-agreement.md).
