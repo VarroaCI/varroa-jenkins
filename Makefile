@@ -1,4 +1,4 @@
-.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller
+.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds check-comments generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller
 
 GIT_SHA=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
@@ -67,6 +67,9 @@ check-crds:
 	$(MAKE) generate-crds
 	git diff --exit-code charts/varroa/crds/ && \
 		{ test -z "$$(git status --porcelain charts/varroa/crds/)" || exit 1; }
+
+check-comments:
+	go run ./hack/checkcomments .
 
 generate-proto:
 	go generate ./internal/mite/proto/mitev1/

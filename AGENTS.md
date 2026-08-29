@@ -52,6 +52,8 @@ Backend components are split: `varroa-operator` reconciles controllers, `varroa-
 - **Waiting on cluster state**: a short retry/backoff loop beats a fixed sleep for anything waiting on reconciliation to converge: `for i in $(seq 1 30); do <check> && break; sleep 5; done`.
 - **Frontend commands**: always run `npm` commands from `frontend/`; don't assume the shell's cwd already points there.
 
+- **Comments carry constraints, not history.** A Go comment may state a constraint the code cannot show. It may not cite a GitHub issue or PR number, narrate the next line, or argue correctness at a reviewer; git history holds why a change was made. The **Check comments** job (`make check-comments`, `hack/checkcomments/`) blocks citations on every PR.
+
 ## Linting
 
 golangci-lint v2 (`revive`, `gofmt`, `goimports`). Local import prefix `github.com/varroaci/varroa-jenkins` goes **last** in import groups. Proto-generated code under `internal/mite/proto/mitev1/` is excluded.
