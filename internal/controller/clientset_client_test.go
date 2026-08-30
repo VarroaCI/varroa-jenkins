@@ -1905,10 +1905,8 @@ users:
 // dropped from a JSON merge patch and the stale prior value survives in etcd —
 // after which a ref re-added at the same content digest is skipped forever as
 // "already imported", even if the store was wiped in between. pluginCount is
-// supplied here to check that clearing seedImportedDigests does not disturb
-// another field carried by the same patch — not as evidence that pluginCount
-// retains by design; it carries the same latent defect for a genuinely zero
-// value, along with gaps and resolvedMetadataSources.
+// supplied here only to check that clearing seedImportedDigests does not
+// disturb another field carried by the same patch.
 func TestPatchUpdateCenterStatus_ClearsStaleSeedDigests(t *testing.T) {
 	scheme := runtime.NewScheme()
 	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "UpdateCenter"}
@@ -1949,6 +1947,271 @@ func TestPatchUpdateCenterStatus_ClearsStaleSeedDigests(t *testing.T) {
 		if s, ok := d.([]interface{}); !ok || len(s) > 0 {
 			t.Errorf("expected seedImportedDigests cleared, got: %v", d)
 		}
+	}
+	if pc, _, _ := unstructured.NestedInt64(status, "pluginCount"); pc != 72 {
+		t.Errorf("expected pluginCount=72 preserved, got: %d", pc)
+	}
+}
+
+// TestPatchUpdateCenterStatus_ClearsStaleGaps guards the regression where a
+// coverage gap persisted in status.gaps after the store caught up. The field
+// carries `omitempty`, so a patch with no gaps drops the key and the stale
+// prior list survives in etcd.
+func TestPatchUpdateCenterStatus_ClearsStaleGaps(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "UpdateCenter"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("UpdateCenterList"), &unstructured.UnstructuredList{})
+
+	existing := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "UpdateCenter",
+		"metadata":   map[string]interface{}{"name": "varroa-update-center"},
+		"status": map[string]interface{}{
+			"phase":       "Degraded",
+			"pluginCount": int64(72),
+			"gaps": []interface{}{
+				map[string]interface{}{"plugin": "git", "version": "5.0.0", "requiredBy": "profile/lts"},
+			},
+		},
+	}}
+
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{updateCentersGVR: "UpdateCenterList"},
+		existing,
+	)
+	c := &ClientsetClient{dynamic: dyn}
+
+	// Coverage caught up: the reconciler patches a status with no gaps left.
+	err := c.PatchObjectStatus(context.Background(), updateCentersGVR, "", "varroa-update-center",
+		&v1alpha1.UpdateCenterStatus{Phase: "Ready", PluginCount: 72})
+	if err != nil {
+		t.Fatalf("patch failed: %v", err)
+	}
+
+	got, err := dyn.Resource(updateCentersGVR).Get(context.Background(), "varroa-update-center", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get failed: %v", err)
+	}
+	status, _, _ := unstructured.NestedMap(got.Object, "status")
+
+	if g, found := status["gaps"]; found && g != nil {
+		if s, ok := g.([]interface{}); !ok || len(s) > 0 {
+			t.Errorf("expected gaps cleared, got: %v", g)
+		}
+	}
+	if pc, _, _ := unstructured.NestedInt64(status, "pluginCount"); pc != 72 {
+		t.Errorf("expected pluginCount=72 preserved, got: %d", pc)
+	}
+}
+
+// TestPatchUpdateCenterStatus_RetainsGapsOnPresentKey guards the retain-on-failure
+// path: on an inventory-fetch failure the reconciler returns before reassigning
+// gaps, so the deep-copied previous value is still marshaled and present in the
+// patch. clearStatusFields only fills in a zero value for a key *absent* from
+// the marshaled status; it must never disturb one that is present.
+func TestPatchUpdateCenterStatus_RetainsGapsOnPresentKey(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "UpdateCenter"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("UpdateCenterList"), &unstructured.UnstructuredList{})
+
+	existing := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "UpdateCenter",
+		"metadata":   map[string]interface{}{"name": "varroa-update-center"},
+		"status": map[string]interface{}{
+			"phase": "Ready",
+			"gaps": []interface{}{
+				map[string]interface{}{"plugin": "git", "version": "5.0.0", "requiredBy": "profile/lts"},
+			},
+		},
+	}}
+
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{updateCentersGVR: "UpdateCenterList"},
+		existing,
+	)
+	c := &ClientsetClient{dynamic: dyn}
+
+	// Inventory fetch failed: the reconciler carries the previous gaps value
+	// forward unchanged (a deep copy, not a reassignment).
+	err := c.PatchObjectStatus(context.Background(), updateCentersGVR, "", "varroa-update-center",
+		&v1alpha1.UpdateCenterStatus{
+			Phase: "Degraded",
+			Gaps: []v1alpha1.UpdateCenterGap{
+				{Plugin: "git", Version: "5.0.0", RequiredBy: "profile/lts"},
+			},
+		})
+	if err != nil {
+		t.Fatalf("patch failed: %v", err)
+	}
+
+	got, err := dyn.Resource(updateCentersGVR).Get(context.Background(), "varroa-update-center", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get failed: %v", err)
+	}
+	status, _, _ := unstructured.NestedMap(got.Object, "status")
+
+	gaps, found, _ := unstructured.NestedSlice(status, "gaps")
+	if !found || len(gaps) != 1 {
+		t.Fatalf("expected the previous gaps entry to survive, got: %v", status["gaps"])
+	}
+	entry, ok := gaps[0].(map[string]interface{})
+	if !ok || entry["plugin"] != "git" {
+		t.Errorf("expected gaps[0].plugin=git, got: %v", gaps[0])
+	}
+}
+
+// TestPatchUpdateCenterStatus_ClearsStaleResolvedMetadataSources guards the
+// regression where a pull-through metadata source list persisted in
+// status.resolvedMetadataSources after pull-through was disabled. The field
+// carries `omitempty`, so a patch with none dropped drops the key and the
+// stale prior list survives in etcd.
+func TestPatchUpdateCenterStatus_ClearsStaleResolvedMetadataSources(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "UpdateCenter"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("UpdateCenterList"), &unstructured.UnstructuredList{})
+
+	existing := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "UpdateCenter",
+		"metadata":   map[string]interface{}{"name": "varroa-update-center"},
+		"status": map[string]interface{}{
+			"phase":                   "Ready",
+			"pluginCount":             int64(72),
+			"resolvedMetadataSources": []interface{}{"https://updates.jenkins.io/update-center.json"},
+		},
+	}}
+
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{updateCentersGVR: "UpdateCenterList"},
+		existing,
+	)
+	c := &ClientsetClient{dynamic: dyn}
+
+	// Pull-through disabled: the reconciler patches a status with no sources.
+	err := c.PatchObjectStatus(context.Background(), updateCentersGVR, "", "varroa-update-center",
+		&v1alpha1.UpdateCenterStatus{Phase: "Ready", PluginCount: 72})
+	if err != nil {
+		t.Fatalf("patch failed: %v", err)
+	}
+
+	got, err := dyn.Resource(updateCentersGVR).Get(context.Background(), "varroa-update-center", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get failed: %v", err)
+	}
+	status, _, _ := unstructured.NestedMap(got.Object, "status")
+
+	if s, found := status["resolvedMetadataSources"]; found && s != nil {
+		if sl, ok := s.([]interface{}); !ok || len(sl) > 0 {
+			t.Errorf("expected resolvedMetadataSources cleared, got: %v", s)
+		}
+	}
+	if pc, _, _ := unstructured.NestedInt64(status, "pluginCount"); pc != 72 {
+		t.Errorf("expected pluginCount=72 preserved, got: %d", pc)
+	}
+}
+
+// TestPatchUpdateCenterStatus_ZeroesPluginCount guards the regression where an
+// emptied store kept reporting its last nonzero pluginCount. The field is an
+// int with `omitempty`, so a genuine zero is indistinguishable on the wire from
+// "absent" and a plain marshal drops the key entirely.
+func TestPatchUpdateCenterStatus_ZeroesPluginCount(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "UpdateCenter"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("UpdateCenterList"), &unstructured.UnstructuredList{})
+
+	existing := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "UpdateCenter",
+		"metadata":   map[string]interface{}{"name": "varroa-update-center"},
+		"status": map[string]interface{}{
+			"phase":                   "Ready",
+			"pluginCount":             int64(72),
+			"resolvedMetadataSources": []interface{}{"https://updates.jenkins.io/update-center.json"},
+		},
+	}}
+
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{updateCentersGVR: "UpdateCenterList"},
+		existing,
+	)
+	c := &ClientsetClient{dynamic: dyn}
+
+	// The store was emptied: the reconciler patches PluginCount=0.
+	err := c.PatchObjectStatus(context.Background(), updateCentersGVR, "", "varroa-update-center",
+		&v1alpha1.UpdateCenterStatus{
+			Phase:                   "Ready",
+			PluginCount:             0,
+			ResolvedMetadataSources: []string{"https://updates.jenkins.io/update-center.json"},
+		})
+	if err != nil {
+		t.Fatalf("patch failed: %v", err)
+	}
+
+	got, err := dyn.Resource(updateCentersGVR).Get(context.Background(), "varroa-update-center", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get failed: %v", err)
+	}
+	status, _, _ := unstructured.NestedMap(got.Object, "status")
+
+	pc, found, _ := unstructured.NestedInt64(status, "pluginCount")
+	if !found || pc != 0 {
+		t.Errorf("expected pluginCount=0 (found=%v), got: %d", found, pc)
+	}
+	sources, found, _ := unstructured.NestedStringSlice(status, "resolvedMetadataSources")
+	if !found || len(sources) != 1 || sources[0] != "https://updates.jenkins.io/update-center.json" {
+		t.Errorf("expected resolvedMetadataSources preserved, got: %v", sources)
+	}
+}
+
+// TestPatchUpdateCenterStatus_ZeroesStoreBytes guards the regression where an
+// emptied store kept reporting its last nonzero storeBytes. The field is an
+// int64 with `omitempty`, so a genuine zero is indistinguishable on the wire
+// from "absent" and a plain marshal drops the key entirely.
+func TestPatchUpdateCenterStatus_ZeroesStoreBytes(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "UpdateCenter"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("UpdateCenterList"), &unstructured.UnstructuredList{})
+
+	existing := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "UpdateCenter",
+		"metadata":   map[string]interface{}{"name": "varroa-update-center"},
+		"status": map[string]interface{}{
+			"phase":       "Ready",
+			"pluginCount": int64(72),
+			"storeBytes":  int64(104857600),
+		},
+	}}
+
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{updateCentersGVR: "UpdateCenterList"},
+		existing,
+	)
+	c := &ClientsetClient{dynamic: dyn}
+
+	// The store was emptied: the reconciler patches StoreBytes=0 alongside an
+	// unrelated field that must survive untouched.
+	err := c.PatchObjectStatus(context.Background(), updateCentersGVR, "", "varroa-update-center",
+		&v1alpha1.UpdateCenterStatus{Phase: "Ready", PluginCount: 72, StoreBytes: 0})
+	if err != nil {
+		t.Fatalf("patch failed: %v", err)
+	}
+
+	got, err := dyn.Resource(updateCentersGVR).Get(context.Background(), "varroa-update-center", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get failed: %v", err)
+	}
+	status, _, _ := unstructured.NestedMap(got.Object, "status")
+
+	sb, found, _ := unstructured.NestedInt64(status, "storeBytes")
+	if !found || sb != 0 {
+		t.Errorf("expected storeBytes=0 (found=%v), got: %d", found, sb)
 	}
 	if pc, _, _ := unstructured.NestedInt64(status, "pluginCount"); pc != 72 {
 		t.Errorf("expected pluginCount=72 preserved, got: %d", pc)

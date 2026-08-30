@@ -293,6 +293,9 @@ func (f *fakeResourceClient) ApplyControllerSpecSSA(_ context.Context, namespace
 	}
 	return nil, nil, nil
 }
+func (f *fakeResourceClient) ApplyControllerSpecSSAIfExists(_ context.Context, namespace, name string, spec map[string]any, _ string, _ bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error) {
+	return nil, nil, nil
+}
 func (f *fakeResourceClient) SetHibernated(_ context.Context, _, _ string, _ bool) (bool, error) {
 	return false, nil
 }

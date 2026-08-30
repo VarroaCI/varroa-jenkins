@@ -62,12 +62,25 @@ var clearStatusFields = map[schema.GroupVersionResource]map[string]any{
 	// digest is skipped forever as "already imported" even if the store was wiped
 	// in between.
 	//
-	// gaps (spec: patched to [] when coverage is complete) and
-	// resolvedMetadataSources (cleared when pull-through is disabled) have the
-	// same latent defect and are out of scope here. Both are omitempty and
-	// neither can currently reach empty on the server; gaps also has a
-	// retain-on-failure rule that needs its own reasoning.
-	updateCentersGVR: {"seedImportedDigests": nil},
+	// gaps (patched to [] when coverage is complete) and resolvedMetadataSources
+	// (cleared when pull-through is disabled) carry the same latent defect and
+	// clear to nil the same way. On a failed inventory fetch the reconciler
+	// returns before reassigning gaps, so the deep-copied previous value is still
+	// marshaled and present in the patch — this loop only fires for an absent
+	// key, so a present-but-unchanged gaps list is left alone.
+	//
+	// pluginCount and storeBytes are int/int64 fields whose true zero value is
+	// indistinguishable from omitempty's "absent" on the wire, so they need the
+	// same set-to-zero handling catalogSourceGVR's itemCount uses: an emptied
+	// store must be able to report zero plugins and zero bytes rather than the
+	// last nonzero reading forever.
+	updateCentersGVR: {
+		"seedImportedDigests":     nil,
+		"gaps":                    nil,
+		"resolvedMetadataSources": nil,
+		"pluginCount":             0,
+		"storeBytes":              0,
+	},
 }
 
 // ClearStatusFields returns, per status key, the explicit zero value a

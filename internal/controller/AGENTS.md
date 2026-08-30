@@ -51,6 +51,31 @@ sections describe.
   A failed read of the optional singleton **allows** — absence and a transient
   API error are indistinguishable here, and Varroa RBAC is the authorization
   boundary that has already run.
+- **`dispatchTarget`'s Stop/Start must use `ApplyControllerSpecSSAIfExists`,
+  never a separate `Get`-then-`ApplyControllerSpecSSA`.**
+  `ApplyControllerSpecSSAIfExists` never creates the target: each attempt
+  performs its own GET immediately before applying, fails terminally with
+  `apierrors.NotFound` when absent, and stamps that GET's resourceVersion
+  into the apply so the write conflicts if the object changed between the
+  GET and the apply. Only an optimistic-lock (stale-resourceVersion)
+  conflict retries (`retry.OnError`, `retry.DefaultRetry`, gated by
+  `!isFieldManagerConflict(err)`) — a live controller's reconciler patches
+  status continuously, which bumps resourceVersion on its own and would
+  otherwise make this window reject routinely on an unrelated write; each
+  retry re-GETs, so the existence guard is re-checked before every write.
+  An SSA field-manager ownership conflict (force=false, another manager owns
+  a touched field) surfaces immediately instead — identical retries can't
+  resolve an ownership dispute, so `isFieldManagerConflict` excludes it from
+  the retry budget. NotFound is never retried either. A caller with an
+  earlier, separately-obtained `Get` result must not reuse it — the
+  precondition is anchored to the GET this method performs, not an earlier
+  one from a different client. `ApplyControllerSpecSSA`'s own
+  create-on-absent behavior and existing call sites are unaffected. Each
+  retry attempt hands the completion pass a fresh `runtime.DeepCopyJSON` of
+  the caller's patch, never the shared map: `backfill` fills owned-leaf keys
+  into its patch argument in place, so a reused map would carry a prior
+  attempt's already-backfilled values into the next attempt and skip
+  re-backfilling them from that attempt's own (possibly newer) GET.
 - **executeGroovy audit carries a pointer, never a script body.**
   `groovyProvenance` puts `scriptSnapshotRef`/`scriptItemRef` (catalog) or
   `scriptSha256`/`scriptBytes` (inline) on `broodop.target.finished`. The
@@ -210,6 +235,20 @@ sections describe.
     independent check anywhere in the reconciler, so preserving their
     out-of-band pull-policy edits remains correct — nothing will ever try to
     converge them back.
+- **`varroa.dev/casc-content-hash`** is a deterministic hash of the CASC
+  ConfigMap payload (`cascContentHash`, `sha256Hex(json.Marshal(data))` — JSON
+  marshal of a `map[string]string` sorts keys and escapes values
+  unambiguously, avoiding the collision a delimiter-joined concatenation
+  would risk), stamped on the pod
+  **template** (not object metadata, unlike `varroa.dev/computed-images`) so a
+  content change rolls the pod even when the running Jenkins container never
+  reruns init to pick it up. `CreateStatefulSet` stamps it **after**
+  `PodOverrides`/`ResourceOverlay` are merged so a user overlay cannot
+  silently drop it — do not move the stamp before the overlay merge. The
+  automatic roll assumes the default `RollingUpdate` strategy; a
+  `resourceOverlay` setting `spec.updateStrategy: OnDelete` takes over pod
+  recycling and needs a manual pod delete to pick up the change, same as the
+  plugin-checksum roll.
 - **Immutable STS spec fields are preserved from live on update** —
   `CreateStatefulSet`'s update branch carries `volumeClaimTemplates`,
   `serviceName`, `selector`, and `podManagementPolicy` verbatim from the existing

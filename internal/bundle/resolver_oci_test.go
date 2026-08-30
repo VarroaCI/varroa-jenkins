@@ -285,6 +285,11 @@ func TestOCIAuthFromSecret_Malformed(t *testing.T) {
 			data:    map[string][]byte{".dockerconfigjson": []byte("{bad json")},
 			wantErr: "parse .dockerconfigjson",
 		},
+		{
+			name:    "zero auth entries",
+			data:    map[string][]byte{".dockerconfigjson": []byte(`{"auths":{}}`)},
+			wantErr: ".dockerconfigjson has no auth entries",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -296,6 +301,31 @@ func TestOCIAuthFromSecret_Malformed(t *testing.T) {
 				t.Errorf("expected error containing %q, got %q", tt.wantErr, err.Error())
 			}
 		})
+	}
+}
+
+// TestOCIAuthFromSecret_MultiEntryRejected guards against a non-deterministic
+// registry pick: ranging a Go map to select "the" auth entry from a
+// multi-entry .dockerconfigjson would return a different registry on
+// different runs. A multi-entry secret must be rejected outright rather than
+// silently picking one.
+func TestOCIAuthFromSecret_MultiEntryRejected(t *testing.T) {
+	data := map[string][]byte{
+		".dockerconfigjson": []byte(`{"auths":{
+			"registry-a.example.com":{"auth":"dXNlcjpwYXNz"},
+			"registry-b.example.com":{"auth":"dXNlcjpwYXNz"},
+			"registry-c.example.com":{"auth":"dXNlcjpwYXNz"}
+		}}`),
+	}
+	_, err := OCIAuthFromSecret(data)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "3 auth entries") {
+		t.Errorf("expected error naming the entry count (3 auth entries), got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "exactly one registry is supported") {
+		t.Errorf("expected error stating the one-registry contract, got %q", err.Error())
 	}
 }
 

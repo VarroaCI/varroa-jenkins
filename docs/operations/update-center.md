@@ -33,6 +33,8 @@ varroactl import --from <source> --to <destination>
 
 Enable pull-through only when the update center may reach its configured upstream and archive hosts. In an air-gapped environment, seed or import every required plugin before deploying controllers. See [Air-gapped installation](../install/air-gapped.md) and [Plugin packs](../config/plugin-packs.md).
 
+`seed.secretRef` names a `.dockerconfigjson` or `username`/`password` Secret in the operator namespace (`UpdateCenter` is cluster-scoped, so there is no "same namespace") holding pull credentials for every ref in `seed.refs`. The secret must contain exactly one registry entry; a `.dockerconfigjson` with more than one `auths` entry is rejected, since `seed.refs` entries must all resolve against the same registry.
+
 ## Check readiness
 
 ```bash

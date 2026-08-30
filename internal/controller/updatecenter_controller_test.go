@@ -193,7 +193,7 @@ func TestUpdateCenterReconciler(t *testing.T) {
 	t.Run("seed-credential-failure-attempts-no-ref", testSeedCredentialFailureAttemptsNoRef)
 	t.Run("seed-ref-failure-does-not-block-next-ref", testSeedRefFailureDoesNotBlockNextRef)
 	t.Run("seed-credentials-reach-every-store", testSeedCredentialsReachEveryStore)
-	t.Run("seed-multi-registry-secret-narrows-to-one", testSeedMultiRegistrySecretNarrowsToOne)
+	t.Run("seed-multi-registry-secret-rejected", testSeedMultiRegistrySecretRejected)
 	t.Run("seed-failed-import-is-retried-next-tick", testSeedFailedImportIsRetriedNextTick)
 }
 
@@ -1362,16 +1362,14 @@ func testSeedCredentialsReachEveryStore(t *testing.T) {
 	}
 }
 
-// testSeedMultiRegistrySecretNarrowsToOne: a multi-registry dockerconfigjson
-// is narrowed to a single registry entry. Which one is deliberately
-// unspecified, so this asserts cardinality only.
-func testSeedMultiRegistrySecretNarrowsToOne(t *testing.T) {
+// testSeedMultiRegistrySecretRejected: a multi-registry dockerconfigjson is
+// rejected outright rather than narrowed to a non-deterministic single entry.
+func testSeedMultiRegistrySecretRejected(t *testing.T) {
 	client := newTestClient()
 	importTokenSecret(client)
 
 	const secretName = "seed-creds-multi"
 	const ref = "registry.example.org/plugins/a:1.0"
-	const digest = "sha256:0000000000000000000000000000000000000000000000000000000000000004"
 
 	client.existingSecrets[secretName] = dockerConfigSecret(t, "registry.example.org", "ghcr.io", "quay.io")
 	client.updateCenter = updateCenter(updateCenterSingletonName,
@@ -1382,40 +1380,31 @@ func testSeedMultiRegistrySecretNarrowsToOne(t *testing.T) {
 	client.pvc = boundPVC()
 	ts := seedInventoryServer(t)
 
-	fbs := newFakeBlobStore(t, ref, digest)
-
-	var registryCounts []int
+	var stores int
 	rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
 	rec.newRegistryStore = func(_ string, opts oci.RegistryOptions) (oci.BlobStore, error) {
-		// The config file only exists while reconcileSeedImport is running, so
-		// it must be read here rather than after the reconcile returns.
-		raw, err := os.ReadFile(opts.CredentialConfigPath)
-		if err != nil {
-			t.Errorf("read generated docker config: %v", err)
-			return fbs, nil
-		}
-		var cfg struct {
-			Auths map[string]json.RawMessage `json:"auths"`
-		}
-		if err := json.Unmarshal(raw, &cfg); err != nil {
-			t.Errorf("parse generated docker config: %v", err)
-			return fbs, nil
-		}
-		registryCounts = append(registryCounts, len(cfg.Auths))
-		return fbs, nil
+		stores++
+		return nil, fmt.Errorf("should not be reached")
 	}
 
 	if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(registryCounts) == 0 {
-		t.Fatal("no registry store was built")
+	if stores != 0 {
+		t.Errorf("built %d registry stores for a rejected multi-registry secret, want 0", stores)
 	}
-	for i, n := range registryCounts {
-		if n != 1 {
-			t.Errorf("generated docker config %d has %d registry entries, want exactly 1", i, n)
-		}
+
+	status := lastUCStatus(t, client)
+	cond := findUCCondition(status.Conditions, condTypeSeedImported)
+	if cond == nil {
+		t.Fatal("missing SeedImported condition")
+	}
+	if cond.Status != metav1.ConditionFalse || cond.Reason != "ImportFailed" {
+		t.Errorf("expected SeedImported=False/ImportFailed, got %s/%s", cond.Status, cond.Reason)
+	}
+	if !strings.Contains(cond.Message, "3 auth entries") {
+		t.Errorf("condition message %q does not name the entry count", cond.Message)
 	}
 }
 

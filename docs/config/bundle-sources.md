@@ -92,7 +92,9 @@ spec:
 ```
 
 `path` and `secretRef` are optional. The same-namespace pull Secret must contain
-`.dockerconfigjson` or `username` and `password`.
+`.dockerconfigjson` or `username` and `password`. A `.dockerconfigjson` secret
+must contain exactly one registry entry; a secret with more than one `auths`
+entry is rejected.
 
 ## Size the Git cache
 

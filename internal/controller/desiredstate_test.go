@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -115,6 +117,75 @@ func TestResolveUpdateCenterGate(t *testing.T) {
 			got := resolveUpdateCenterGate(tt.defaults, tt.uc, tt.ucBaseURL)
 			if got.Outcome != tt.want {
 				t.Errorf("outcome = %d, want %d", got.Outcome, tt.want)
+			}
+		})
+	}
+}
+
+func TestUcBlockAirgapMessage(t *testing.T) {
+	tests := []struct {
+		name       string
+		uc         *v1alpha1.UpdateCenter
+		wantSubstr []string
+		notSubstr  []string
+	}{
+		{
+			name:       "uc absent points at the missing CR",
+			uc:         nil,
+			wantSubstr: []string{"varroa-update-center", "was not found"},
+			notSubstr:  []string{"seed.refs", "pullThrough"},
+		},
+		{
+			name: "storage not ready points at the CR, not coverage remedies",
+			uc: &v1alpha1.UpdateCenter{Status: v1alpha1.UpdateCenterStatus{
+				Conditions: []v1alpha1.UpdateCenterCondition{
+					{Type: condTypeReady, Status: metav1.ConditionFalse, Reason: reasonStorageUnavailable},
+				},
+			}},
+			wantSubstr: []string{"varroa-update-center", "Inspect"},
+			notSubstr:  []string{"seed.refs", "pullThrough"},
+		},
+		{
+			name: "coverage gaps list the actual remedies",
+			uc: &v1alpha1.UpdateCenter{
+				Status: v1alpha1.UpdateCenterStatus{
+					Conditions: []v1alpha1.UpdateCenterCondition{
+						{Type: condTypeReady, Status: metav1.ConditionFalse, Reason: reasonGapAnalysisComplete},
+					},
+					Gaps: []v1alpha1.UpdateCenterGap{
+						{Plugin: "git", Version: "5.0.0", RequiredBy: "profile/lts"},
+						{Plugin: "workflow-job", Version: "1300.v0", RequiredBy: "profile/lts"},
+					},
+				},
+			},
+			wantSubstr: []string{"2 plugin coverage gap", "spec.seed.refs", "spec.pullThrough", "ProvisioningDefaults"},
+			notSubstr:  []string{"capped"},
+		},
+		{
+			name: "gap count at the cap discloses truncation",
+			uc: &v1alpha1.UpdateCenter{
+				Status: v1alpha1.UpdateCenterStatus{
+					Conditions: []v1alpha1.UpdateCenterCondition{
+						{Type: condTypeReady, Status: metav1.ConditionFalse, Reason: reasonGapAnalysisComplete},
+					},
+					Gaps: make([]v1alpha1.UpdateCenterGap, maxGaps),
+				},
+			},
+			wantSubstr: []string{fmt.Sprintf("%d plugin coverage gap", maxGaps), "capped at 50"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ucBlockAirgapMessage(tt.uc)
+			for _, want := range tt.wantSubstr {
+				if !strings.Contains(got, want) {
+					t.Errorf("message %q missing substring %q", got, want)
+				}
+			}
+			for _, not := range tt.notSubstr {
+				if strings.Contains(got, not) {
+					t.Errorf("message %q unexpectedly contains %q", got, not)
+				}
 			}
 		})
 	}

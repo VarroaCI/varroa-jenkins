@@ -76,6 +76,14 @@ const computedImagesAnnotation = "varroa.dev/computed-images"
 // skip (provision-gated, D-6)".
 const resourcesSourceAnnotation = "varroa.dev/resources-source"
 
+// cascContentHashAnnotation stamps a hash of the CASC ConfigMap payload on
+// the pod template (not the object metadata), so a content change rolls the
+// pod: the init container that copies CASC content onto the PVC runs once at
+// pod creation and never reruns on a plain container restart, so a
+// crash-looping pod that never gets recreated would otherwise read the
+// stale copy forever.
+const cascContentHashAnnotation = "varroa.dev/casc-content-hash"
+
 // pluginsInitScript runs jenkins-plugin-cli with a bounded retry.
 //
 // jenkins-plugin-cli aborts the entire run on the first plugin it cannot download, and
@@ -1451,6 +1459,23 @@ func (c *ClientsetClient) CreateStatefulSet(ctx context.Context, spec StatefulSe
 		return fmt.Errorf("set computed-images annotation: %w", err)
 	}
 
+	// Stamp the CASC content hash on the pod template AFTER PodOverrides and
+	// ResourceOverlay are merged, so a user overlay cannot silently drop it
+	// and so it always reflects the exact content this reconcile computed.
+	// Pod-template (not object-metadata) placement is deliberate here, unlike
+	// the computed-images/resources-source stamps above: this annotation
+	// exists specifically to change the pod template and force a roll.
+	if spec.CascContentHash != "" {
+		podAnns, _, _ := unstructured.NestedStringMap(sts.Object, "spec", "template", "metadata", "annotations")
+		if podAnns == nil {
+			podAnns = map[string]string{}
+		}
+		podAnns[cascContentHashAnnotation] = spec.CascContentHash
+		if err := unstructured.SetNestedStringMap(sts.Object, podAnns, "spec", "template", "metadata", "annotations"); err != nil {
+			return fmt.Errorf("set casc-content-hash annotation: %w", err)
+		}
+	}
+
 	gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
 	_, err = c.dynamic.Resource(gvr).Namespace(spec.Namespace).Create(ctx, sts, metav1.CreateOptions{})
 	if err == nil {
@@ -2325,6 +2350,138 @@ func (c *ClientsetClient) ApplyControllerSpecSSA(
 		return nil, nil, fmt.Errorf("convert applied controller: %w", err)
 	}
 	return &out, unapplied, nil
+}
+
+// ApplyControllerSpecSSAIfExists is the existence-guarded sibling of
+// ApplyControllerSpecSSA: it never creates the target object. Unlike the
+// unguarded method, each attempt performs its own GET immediately before
+// applying, fails with the real apierrors NotFound when the object is
+// absent, and stamps that GET's resourceVersion into the applied object so
+// the server rejects the write if the object was deleted or changed between
+// the GET and the apply — a changed-but-still-present object surfaces as a
+// recognizable apierrors Conflict (stale resourceVersion on an update), but
+// a deletion takes the server down the create path instead, where the
+// stamped resourceVersion is simply invalid; that failure does not carry a
+// specific apierrors kind to match on, only the guarantee that it fails
+// rather than creating or resurrecting the object. A caller with an
+// earlier, separately-obtained Get result must not reuse it here — the GET
+// this method performs is what the resourceVersion precondition is
+// anchored to.
+//
+// An optimistic-lock conflict (a stale resourceVersion) is retried
+// (retry.DefaultRetry): on a live controller the reconciler patches status
+// continuously, which bumps resourceVersion on its own and would otherwise
+// make the GET-then-apply window here reject routinely on an unrelated
+// concurrent write. Each retry re-GETs, so the existence guard is
+// re-checked immediately before every write. An SSA field-manager ownership
+// conflict (force=false, another manager owns a field this apply touches)
+// is never retried — isFieldManagerConflict excludes it, since retrying the
+// identical apply cannot resolve an ownership dispute — and neither is
+// NotFound, since the retry predicate only ever matches apierrors.IsConflict.
+//
+// This does not change ApplyControllerSpecSSA's own behavior or its
+// existing call sites, which keep create-on-absent semantics.
+func (c *ClientsetClient) ApplyControllerSpecSSAIfExists(
+	ctx context.Context, namespace, name string, specPatch map[string]any,
+	fieldManager string, force bool,
+) (*v1alpha1.Controller, []bus.UnappliedRemoval, error) {
+	cleaned, removals, err := translateNulls(specPatch)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	retriable := func(err error) bool {
+		return apierrors.IsConflict(err) && !isFieldManagerConflict(err)
+	}
+
+	var out v1alpha1.Controller
+	var unapplied []bus.UnappliedRemoval
+	err = retry.OnError(retry.DefaultRetry, retriable, func() error {
+		// backfill (called inside applyControllerSpecSSAIfExistsOnce) fills
+		// owned-leaf keys into its patch argument in place and only fills keys
+		// absent from it. Hand each attempt a fresh copy of cleaned so a retry
+		// re-backfills from its own GET instead of seeing the prior attempt's
+		// backfilled values as already present and skipping them — which would
+		// keep a stale owned-leaf value even after a newer one was written
+		// between attempts.
+		attemptPatch := runtime.DeepCopyJSON(cleaned)
+		res, applyErr := c.applyControllerSpecSSAIfExistsOnce(ctx, namespace, name, attemptPatch, removals, fieldManager, force)
+		if applyErr != nil {
+			return applyErr
+		}
+		appliedSpec, _, _ := unstructured.NestedMap(res.Object, "spec")
+		unapplied = UnappliedRemovalsFromSpec(appliedSpec, removalPathsFromSet(removals))
+		if convErr := runtime.DefaultUnstructuredConverter.FromUnstructured(res.Object, &out); convErr != nil {
+			return fmt.Errorf("convert applied controller: %w", convErr)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return &out, unapplied, nil
+}
+
+// applyControllerSpecSSAIfExistsOnce performs a single GET-then-apply
+// attempt. See ApplyControllerSpecSSAIfExists for the retry contract.
+func (c *ClientsetClient) applyControllerSpecSSAIfExistsOnce(
+	ctx context.Context, namespace, name string, cleaned map[string]any,
+	removals map[string]bool, fieldManager string, force bool,
+) (*unstructured.Unstructured, error) {
+	cur, err := c.dynamic.Resource(controllerGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("get controller for spec completion: %w", err)
+	}
+
+	completed := cleaned
+	if owned := ownedLeaves(cur, fieldManager); owned != nil {
+		if curSpec, ok, nestedErr := unstructured.NestedMap(cur.Object, "spec"); nestedErr == nil && ok {
+			completed = backfill(cleaned, curSpec, owned, removals, "")
+		}
+	}
+
+	u := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "Controller",
+		"metadata": map[string]any{
+			"name":            name,
+			"namespace":       namespace,
+			"resourceVersion": cur.GetResourceVersion(),
+		},
+		"spec": completed,
+	}}
+	data, err := json.Marshal(u)
+	if err != nil {
+		return nil, fmt.Errorf("marshal partial controller: %w", err)
+	}
+	return c.dynamic.Resource(controllerGVR).Namespace(namespace).Patch(
+		ctx, name, types.ApplyPatchType, data,
+		metav1.PatchOptions{FieldManager: fieldManager, Force: &force},
+	)
+}
+
+// isFieldManagerConflict reports whether err is an SSA field-ownership
+// conflict (force=false, another manager already owns a field this apply
+// touches) rather than an optimistic-concurrency (stale resourceVersion)
+// conflict. Nil-safe on a StatusError with no Details.
+func isFieldManagerConflict(err error) bool {
+	statusErr, ok := err.(*apierrors.StatusError)
+	if !ok {
+		return false
+	}
+	details := statusErr.ErrStatus.Details
+	if details == nil {
+		return false
+	}
+	for _, cause := range details.Causes {
+		if cause.Type == metav1.CauseTypeFieldManagerConflict {
+			return true
+		}
+	}
+	return false
 }
 
 // PatchControllerStatus patches the status subresource of a Controller CRD.
