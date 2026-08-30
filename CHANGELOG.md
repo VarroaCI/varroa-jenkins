@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/VarroaCI/varroa-jenkins/compare/v0.1.0...v0.2.0) (2026-08-30)
+
+
+### Features
+
+* dual-license under AGPL-3.0 and commercial terms ([aea64fb](https://github.com/VarroaCI/varroa-jenkins/commit/aea64fb7662c5d10c7ea80a5b5e94de65da53872))
+
+
+### Bug Fixes
+
+* operator and update-center bug squash ([4484572](https://github.com/VarroaCI/varroa-jenkins/commit/4484572264ba908df5b83b308dae36e416b79d53))
+
 ## 0.1.0
 
 Initial public release.
