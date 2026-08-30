@@ -77,7 +77,9 @@ spec:
 ```
 
 User-created sources set exactly one of `repoURL` and `ociRef`. OCI credentials
-use `.dockerconfigjson` or `username` and `password` in a same-namespace Secret.
+use `.dockerconfigjson` or `username` and `password` in a same-namespace Secret;
+see [bundle source authentication](bundle-sources.md#reference-oci) for the
+one-registry-per-secret constraint.
 
 ## Consume an item
 

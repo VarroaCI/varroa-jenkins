@@ -117,7 +117,7 @@ Require `StorageReady=True`, `CoverageComplete=True`, and `Ready=True` before pr
 kubectl get updatecenter varroa-update-center -o yaml
 ```
 
-`status.gaps` lists missing plugin versions. With pull-through disabled, an affected controller reports `WaitingForUpdateCenter` and remains blocked until coverage is complete.
+`status.gaps` lists missing plugin versions. With pull-through disabled, an affected controller reports `WaitingForUpdateCenter` and remains blocked until coverage is complete. The condition message states the cause. A coverage gap points at seeding the missing plugins or setting an explicit `pluginUpdateCenterURL`/`pluginUpdateCenterDownloadURL` override in `ProvisioningDefaults`. Any other not-Ready cause points at the `varroa-update-center` resource itself.
 
 ## Enforce the Offline Boundary
 

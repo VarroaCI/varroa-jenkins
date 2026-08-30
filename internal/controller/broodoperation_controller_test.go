@@ -68,6 +68,20 @@ func (f *fakeBroodClient) ApplyControllerSpecSSA(_ context.Context, ns, name str
 	return nil, nil, nil
 }
 
+// ApplyControllerSpecSSAIfExists mirrors the real ClientsetClient method's
+// existence guard: it checks f.store immediately before recording the apply,
+// so a target absent from f.store fails with NotFound and is never recorded
+// in ssaApplies, exactly like a real deleted-between-GET-and-apply target.
+func (f *fakeBroodClient) ApplyControllerSpecSSAIfExists(ctx context.Context, ns, name string, spec map[string]any, fieldManager string, force bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error) {
+	if _, err := crdstore.Get[v1alpha1.Controller](ctx, f.store, name, ns); err != nil {
+		return nil, nil, err
+	}
+	f.ssaApplies = append(f.ssaApplies, ssaApplyCall{
+		namespace: ns, name: name, fieldManager: fieldManager, spec: spec, force: force,
+	})
+	return nil, nil, nil
+}
+
 func (f *fakeBroodClient) SetHibernated(_ context.Context, name, _ string, want bool) (bool, error) {
 	if !want {
 		f.hibernatedClears = append(f.hibernatedClears, name)

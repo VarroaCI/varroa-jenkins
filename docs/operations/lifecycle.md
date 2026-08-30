@@ -42,6 +42,18 @@ varroactl reprovision controller <namespace>/<name>
 
 For approval and drain behavior, see [Reconciliation](reconciliation.md).
 
+A CASC configuration change (JCasC content, the security realm, or Jenkins
+RBAC) made while a controller is still provisioning rolls the Jenkins pod
+automatically, even if the controller is crash-looping and never reaches
+`Running`. Manual `Restart` is not needed to pick up the change during
+provisioning.
+
+This automatic roll assumes the StatefulSet's default `RollingUpdate`
+strategy. A `resourceOverlay` that sets `spec.updateStrategy` to `OnDelete`
+takes ownership of pod recycling. This is the same limitation as the
+plugin-checksum roll. After such an overlay, deleting the Jenkins pod by hand
+is required to pick up a CASC or plugin change.
+
 ## Resolve field conflicts
 
 A conflicting field manager, such as a GitOps controller, can block a change. See [Manage field ownership](../agents/writing.md#manage-field-ownership) for the full procedure.

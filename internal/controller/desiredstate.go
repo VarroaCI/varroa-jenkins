@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -88,6 +89,34 @@ func resolveUpdateCenterGate(defaults *v1alpha1.ProvisioningDefaults, uc *v1alph
 	return res
 }
 
+// ucBlockAirgapMessage builds the WaitingForUpdateCenter condition message
+// for the ucGateBlockAirgap outcome. uc is nil when the UpdateCenter CR is
+// absent. When uc is present, its top-level "Ready" condition Reason
+// distinguishes a genuine plugin-coverage shortfall (remediable by seeding,
+// enabling pull-through, or an explicit ProvisioningDefaults override) from
+// every other not-Ready cause (remediable only by restoring the UpdateCenter
+// CR itself to Ready) — this only picks the wording, it never changes
+// whether the gate blocks.
+func ucBlockAirgapMessage(uc *v1alpha1.UpdateCenter) string {
+	const base = "update center is required in air-gap mode but not Ready; blocking provisioning."
+	if uc == nil {
+		return base + " The UpdateCenter resource (varroa-update-center) was not found. Create it and let it reach Ready before provisioning."
+	}
+	if ready := conditionPtr(uc.Status.Conditions, condTypeReady); ready != nil && ready.Reason == reasonGapAnalysisComplete {
+		msg := fmt.Sprintf(
+			"%s The update center has %d plugin coverage gap(s). Seed the missing plugins (spec.seed.refs or `varroactl export`/`import`), enable spec.pullThrough with working egress, or set explicit pluginUpdateCenterURL and pluginUpdateCenterDownloadURL in ProvisioningDefaults to bypass the in-cluster update center.",
+			base, len(uc.Status.Gaps),
+		)
+		// status.Gaps itself is truncated at maxGaps by the reconciler, so at
+		// the cap the count above may understate the true gap total.
+		if len(uc.Status.Gaps) >= maxGaps {
+			msg += fmt.Sprintf(" (gap list capped at %d; additional gaps may exist)", maxGaps)
+		}
+		return msg
+	}
+	return base + " Inspect the UpdateCenter resource (varroa-update-center) and restore it to Ready."
+}
+
 // computePluginRollGate decides whether the desired plugins checksum rolls
 // onto the StatefulSet. Pure: callers pass the raw applied checksum (from the
 // live StatefulSet), the approval recorded on status, the effective
@@ -142,6 +171,7 @@ type stsBuildInputs struct {
 	BootstrapSecret  string
 	InitConfigMap    string
 	CascConfigMap    string
+	CascContentHash  string
 	PluginsConfigMap string
 	PluginsChecksum  string
 	Policy           v1alpha1.ReconciliationPolicy
@@ -244,6 +274,7 @@ func (r *Reconciler) buildStatefulSetSpec(cr *v1alpha1.Controller, class *v1alph
 		BootstrapSecret:           in.BootstrapSecret,
 		InitConfigMap:             in.InitConfigMap,
 		CascConfigMap:             in.CascConfigMap,
+		CascContentHash:           in.CascContentHash,
 		PluginsConfigMap:          in.PluginsConfigMap,
 		PluginsChecksum:           in.PluginsChecksum,
 		TerminationGracePeriodSec: int64(in.Policy.DrainTimeoutSeconds) + restartHeadroomSec,

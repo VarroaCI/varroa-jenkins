@@ -470,6 +470,9 @@ func (t *testClient) ListOperatorPodIPs(_ context.Context, _ string) ([]string, 
 func (t *testClient) ApplyControllerSpecSSA(_ context.Context, _, _ string, _ map[string]any, _ string, _ bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error) {
 	return nil, nil, nil
 }
+func (t *testClient) ApplyControllerSpecSSAIfExists(_ context.Context, _, _ string, _ map[string]any, _ string, _ bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error) {
+	return nil, nil, nil
+}
 func (t *testClient) SetHibernated(_ context.Context, name, namespace string, want bool) (bool, error) {
 	t.hibernatedWrites = append(t.hibernatedWrites, struct {
 		name, namespace string

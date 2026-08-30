@@ -814,20 +814,20 @@ func (r *BroodOperationReconciler) dispatchTarget(ctx context.Context, op *v1alp
 		return nil
 
 	case v1alpha1.BroodVerbStop:
-		// Existence guard: ApplyControllerSpecSSA CREATES the object when it is
-		// absent, so a target deleted between ResolveTargets and dispatch must
-		// fail here rather than be resurrected as a phantom Controller carrying
-		// only spec.powerState. NotFound fails the dispatch cleanly, exactly as
-		// the pre-ownership-change dispatch did.
-		if _, err := crdstore.Get[v1alpha1.Controller](ctx, r.store, name, ns); err != nil {
-			return fmt.Errorf("get controller for stop: %w", err)
-		}
+		// ApplyControllerSpecSSAIfExists performs its own GET immediately before
+		// applying and never creates the object, so a target deleted between
+		// ResolveTargets and dispatch fails here (NotFound) rather than being
+		// resurrected as a phantom Controller carrying only spec.powerState. A
+		// separate Get-then-Apply here would reopen that race: the GET this
+		// existence guard relies on must be the one taken immediately before
+		// the write, not an earlier one from a different client.
+		//
 		// Apply ONLY spec.powerState via server-side apply as varroa-ui, then
 		// clear status.hibernated as part of the same dispatch. The two are
 		// separate writes — spec and status are different subresources — and
 		// the clear goes through SetHibernated because the flag is excluded
 		// from the end-of-reconcile status patch.
-		if _, _, err := r.resourceClient.ApplyControllerSpecSSA(ctx, ns, name, map[string]any{"powerState": "Stopped"}, "varroa-ui", false); err != nil {
+		if _, _, err := r.resourceClient.ApplyControllerSpecSSAIfExists(ctx, ns, name, map[string]any{"powerState": "Stopped"}, "varroa-ui", false); err != nil {
 			return fmt.Errorf("stop controller: %w", err)
 		}
 		if _, err := r.resourceClient.SetHibernated(ctx, name, ns, false); err != nil {
@@ -836,12 +836,9 @@ func (r *BroodOperationReconciler) dispatchTarget(ctx context.Context, op *v1alp
 		return nil
 
 	case v1alpha1.BroodVerbStart:
-		// Same existence guard as Stop: a missing controller must fail the
-		// dispatch, never be created by the SSA below.
-		if _, err := crdstore.Get[v1alpha1.Controller](ctx, r.store, name, ns); err != nil {
-			return fmt.Errorf("get controller for start: %w", err)
-		}
-		if _, _, err := r.resourceClient.ApplyControllerSpecSSA(ctx, ns, name, map[string]any{"powerState": "Running"}, "varroa-ui", false); err != nil {
+		// Same existence guard as Stop: a missing or concurrently-deleted
+		// controller must fail the dispatch, never be created by the SSA below.
+		if _, _, err := r.resourceClient.ApplyControllerSpecSSAIfExists(ctx, ns, name, map[string]any{"powerState": "Running"}, "varroa-ui", false); err != nil {
 			return fmt.Errorf("start controller: %w", err)
 		}
 		if _, err := r.resourceClient.SetHibernated(ctx, name, ns, false); err != nil {

@@ -50,6 +50,9 @@ func (f *fakeBroodClient) GetControllerCRD(_ context.Context, _, _ string) (*v1a
 func (f *fakeBroodClient) ApplyControllerSpecSSA(_ context.Context, _, _ string, _ map[string]any, _ string, _ bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error) {
 	return nil, nil, nil
 }
+func (f *fakeBroodClient) ApplyControllerSpecSSAIfExists(_ context.Context, _, _ string, _ map[string]any, _ string, _ bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error) {
+	return nil, nil, nil
+}
 func (f *fakeBroodClient) SetHibernated(_ context.Context, _, _ string, _ bool) (bool, error) {
 	return false, nil
 }

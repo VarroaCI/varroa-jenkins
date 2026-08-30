@@ -111,7 +111,11 @@ pre-apply content validation.
 - `MaterializeOCI` (`resolver.go`) uses `oci.RegistryStore` + `WriteDockerConfigJSON`
   (both in `oci.go`) to create a temp docker config.json from `OCIAuth`; the caller
   must clean up the temp directory. `OCIAuthFromSecret` snaps `.dockerconfigjson`
-  first, then falls back to `username`/`password` keys.
+  first, then falls back to `username`/`password` keys. A `.dockerconfigjson` with
+  more than one `auths` entry is rejected outright (map iteration order is
+  undefined, so picking one would be non-deterministic) — every consumer
+  (`UpdateCenter.spec.seed.secretRef`, `CatalogSource`/`ComposedInput` OCI
+  `secretRef`) requires a secret scoped to exactly one registry.
 - `computeResolvedHash` argument order `(jenkins, plugins, items, rbac, vars)`
   must stay stable — drift/recompose detection depends on it across releases.
 - Git URL validation lives solely in `validateRepoURL`; `GitCloner.Clone`,

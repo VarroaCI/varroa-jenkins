@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -536,15 +537,20 @@ func findUnresolvedVars(allowJcascSecretSources bool, contents ...string) []stri
 // lives on the CR's spec.persistence and is wired in at the provisioning
 // call site, not stored here as a nested type.
 type StatefulSetSpec struct {
-	Name                          string
-	Namespace                     string
-	ControllerName                string
-	ClusterName                   string
-	JenkinsImage                  string
-	MiteImage                     string
-	BootstrapSecret               string
-	InitConfigMap                 string
-	CascConfigMap                 string
+	Name            string
+	Namespace       string
+	ControllerName  string
+	ClusterName     string
+	JenkinsImage    string
+	MiteImage       string
+	BootstrapSecret string
+	InitConfigMap   string
+	CascConfigMap   string
+	// CascContentHash is a deterministic hash of the CASC ConfigMap payload
+	// (see cascContentHash), stamped as a pod-template annotation so a
+	// content change rolls the pod even when the running container never
+	// re-reads the ConfigMap on its own.
+	CascContentHash               string
 	PluginsConfigMap              string
 	StorageSize                   string
 	StorageClass                  string
@@ -669,6 +675,16 @@ type ResourceClient interface {
 	// applied object's unstructured spec. On a field-manager conflict, returns
 	// an error whose status causes are parseable via SSAConflicts.
 	ApplyControllerSpecSSA(ctx context.Context, namespace, name string, specPatch map[string]any, fieldManager string, force bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error)
+	// ApplyControllerSpecSSAIfExists is the existence-guarded sibling of
+	// ApplyControllerSpecSSA: it performs its own GET, fails with a
+	// recognizable apierrors NotFound rather than creating the object when
+	// absent, and stamps that GET's resourceVersion into the apply so a
+	// concurrent change between the GET and the apply surfaces as a
+	// recognizable apierrors Conflict, and a concurrent delete fails the
+	// apply rather than resurrecting the object (the stamped resourceVersion
+	// is invalid on the create path the server takes for a missing object).
+	// Existing ApplyControllerSpecSSA call sites are unaffected.
+	ApplyControllerSpecSSAIfExists(ctx context.Context, namespace, name string, specPatch map[string]any, fieldManager string, force bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error)
 	// SetHibernated is the single writer for status.hibernated and
 	// status.hibernatedAt. It reads the live object, returns (false, nil)
 	// when the flag already matches want, and otherwise writes the STATUS
@@ -2420,6 +2436,7 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 	} else {
 		cascData["rbac.yaml"] = rbacYAML
 	}
+	cascHash := cascContentHash(cascData)
 	{
 		_, span := tracer.Start(ctx, "provision.createConfigMap")
 		err := r.client.CreateOrUpdateConfigMap(ctx, cascCMName, cr.Namespace, cascData)
@@ -2483,6 +2500,7 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 		BootstrapSecret:  secretName,
 		InitConfigMap:    initCMName,
 		CascConfigMap:    cascCMName,
+		CascContentHash:  cascHash,
 		PluginsConfigMap: pluginsCMName,
 		PluginsChecksum:  stsPluginsChecksum,
 		Policy:           pol,
@@ -2520,7 +2538,7 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 			Type:    v1alpha1.ConditionWaitingForUpdateCenter,
 			Status:  metav1.ConditionTrue,
 			Reason:  "UpdateCenterUnavailable",
-			Message: "update center is required in air-gap mode but not Ready; blocking provisioning",
+			Message: ucBlockAirgapMessage(uc),
 		})
 		r.persistStatusDiagnostics(ctx, cr)
 		return fmt.Errorf("update center not ready in air-gap mode")
@@ -4817,6 +4835,22 @@ func sha256Hex(data []byte) string {
 	h := sha256.New()
 	h.Write(data)
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// cascContentHash returns a deterministic hash of the CASC ConfigMap payload
+// (the same key/value pairs written to the casc ConfigMap: realm.yaml,
+// config.yaml, and, when RBAC is federated, rbac.yaml). encoding/json sorts
+// map[string]string keys and escapes values unambiguously, so two distinct
+// payloads can never encode identically the way a delimiter-joined
+// concatenation could (e.g. {"a":"x\x00b\x00y"} vs {"a":"x","b":"y"}).
+func cascContentHash(data map[string]string) string {
+	b, err := json.Marshal(data)
+	if err != nil {
+		// Marshal of a map[string]string cannot fail; guarded only so a
+		// future change to data's type can't turn this into a panic.
+		return ""
+	}
+	return sha256Hex(b)
 }
 
 // bundleIdentOf returns the resolved bundle identity for a sibling controller.

@@ -93,6 +93,14 @@ func OCIAuthFromSecret(data map[string][]byte) (*OCIAuth, error) {
 		if err := json.Unmarshal(raw, &parsed); err != nil {
 			return nil, fmt.Errorf("parse .dockerconfigjson: %w", err)
 		}
+		if len(parsed.Auths) == 0 {
+			return nil, fmt.Errorf(".dockerconfigjson has no auth entries")
+		}
+		// A map has no defined iteration order, so more than one entry makes the
+		// selected registry non-deterministic. Reject rather than guess.
+		if len(parsed.Auths) > 1 {
+			return nil, fmt.Errorf("secret has %d auth entries; exactly one registry is supported", len(parsed.Auths))
+		}
 		for registry, entry := range parsed.Auths {
 			username := entry.Username
 			password := entry.Password
@@ -106,7 +114,6 @@ func OCIAuthFromSecret(data map[string][]byte) (*OCIAuth, error) {
 			}
 			return &OCIAuth{Username: username, Password: password, Registry: registry}, nil
 		}
-		return nil, fmt.Errorf(".dockerconfigjson has no auth entries")
 	}
 
 	// Fallback: username/password keys.
