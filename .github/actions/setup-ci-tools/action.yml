@@ -13,6 +13,10 @@ inputs:
     description: Install the GitHub CLI.
     required: false
     default: "false"
+  rg:
+    description: Install ripgrep.
+    required: false
+    default: "false"
   make:
     description: Install GNU make (apt).
     required: false
@@ -75,6 +79,24 @@ runs:
           "gh_${ver}_linux_amd64/bin/gh"
         rm -f /tmp/gh.tar.gz
         gh --version
+
+    - name: Install ripgrep
+      if: inputs.rg == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v rg >/dev/null 2>&1; then
+          echo "rg already present: $(rg --version | head -1)"
+          exit 0
+        fi
+        # Pinned release tarball, matching how yq/gh are installed above.
+        ver=14.1.1
+        curl -sSL -o /tmp/rg.tar.gz \
+          "https://github.com/BurntSushi/ripgrep/releases/download/${ver}/ripgrep-${ver}-x86_64-unknown-linux-musl.tar.gz"
+        sudo tar -xzf /tmp/rg.tar.gz -C /usr/local/bin --strip-components=1 \
+          "ripgrep-${ver}-x86_64-unknown-linux-musl/rg"
+        rm -f /tmp/rg.tar.gz
+        rg --version | head -1
 
     - name: Install make
       if: inputs.make == 'true'

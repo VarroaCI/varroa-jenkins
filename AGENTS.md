@@ -64,7 +64,7 @@ The golangci-lint version is pinned, and `.github/workflows/pr.yaml`, `.github/w
 
 GitHub Actions (`.github/workflows/`), running on GitHub-hosted `ubuntu-latest` runners: `pr.yaml` runs lint, check-crds, check-proto, check-client, govulncheck, race tests, and docker builds on every PR; `pr-frontend.yaml` covers frontend-only changes; `release.yaml` publishes images and the Helm chart on tag pushes.
 
-Never assume a CLI is preinstalled on the runner image without checking. Pull it in via `uses: ./.github/actions/setup-ci-tools` (inputs `yq`, `gh`, `make`, `helm`, `shellcheck`, `envsubst`; each no-ops when already on PATH) rather than adding another inline installer. There is no Jenkinsfile; CI runs on Actions.
+Never assume a CLI is preinstalled on the runner image without checking. Pull it in via `uses: ./.github/actions/setup-ci-tools` (inputs `yq`, `gh`, `rg`, `make`, `helm`, `shellcheck`, `envsubst`; each no-ops when already on PATH) rather than adding another inline installer. There is no Jenkinsfile; CI runs on Actions.
 
 Copilot code review reads `.github/copilot-instructions.md`, and also ingests `AGENTS.md` + `CLAUDE.md` as custom instructions. It loads all instruction files from the **base branch**, so edits only take effect once merged to `main`. When repo conventions change here, keep `copilot-instructions.md` aligned so review comments stay low-noise.
 
