@@ -448,6 +448,12 @@ func (f *fakeResourceClient) GetConfigMap(_ context.Context, name, _ string) (ma
 	}
 	return nil, nil
 }
+func (f *fakeResourceClient) RemoveConfigMapLabel(_ context.Context, _, _, _ string) error {
+	return nil
+}
+func (f *fakeResourceClient) UpdateConfigMapData(_ context.Context, _, _ string, _ map[string]string) error {
+	return nil
+}
 func (f *fakeResourceClient) CreateSecret(_ context.Context, _, _ string, _ map[string]string, _ map[string][]byte) error {
 	return nil
 }
@@ -552,6 +558,10 @@ func (f *fakeResourceClient) DeleteJenkinsVersionProfileCRD(_ context.Context, n
 
 func (f *fakeResourceClient) CreateOrUpdateConfigMapWithOwner(_ context.Context, name, namespace string, data map[string]string, owner metav1.OwnerReference) error {
 	return f.CreateOrUpdateConfigMap(context.Background(), name, namespace, data, owner)
+}
+
+func (f *fakeResourceClient) CreateOrUpdateOwnedConfigMap(_ context.Context, name, namespace string, data map[string]string, _ map[string]string) error {
+	return f.CreateOrUpdateConfigMap(context.Background(), name, namespace, data)
 }
 
 func (f *fakeResourceClient) PatchJenkinsVersionProfileStatus(_ context.Context, _ string, _ *v1alpha1.JenkinsVersionProfileStatus) error {

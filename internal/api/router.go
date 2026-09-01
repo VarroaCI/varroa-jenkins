@@ -78,6 +78,10 @@ func NewRouter(deps *Dependencies) http.Handler {
 	mux.HandleFunc("/fleet/plugins", srv.HandleFleetPlugins)
 	mux.HandleFunc("/fleet/plugins/", srv.HandleFleetPluginDetail)
 
+	// Upgrade tracking: clusterless ProfileCandidate list/get/promote.
+	mux.HandleFunc("/version-candidates", srv.HandleVersionCandidates)
+	mux.HandleFunc("/version-candidates/", srv.HandleVersionCandidateDispatch)
+
 	return http.StripPrefix("/api/v1", mux)
 }
 

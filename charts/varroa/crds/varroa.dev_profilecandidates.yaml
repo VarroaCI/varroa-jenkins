@@ -1,0 +1,178 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+  name: profilecandidates.varroa.dev
+spec:
+  group: varroa.dev
+  names:
+    kind: ProfileCandidate
+    listKind: ProfileCandidateList
+    plural: profilecandidates
+    singular: profilecandidate
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: PHASE
+      type: string
+    - jsonPath: .spec.profileRef
+      name: PROFILE
+      type: string
+    - jsonPath: .spec.resolveVersion
+      name: RESOLVE
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: AGE
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ProfileCandidate is a cluster-scoped, observation-produced candidate for promoting
+          a JenkinsVersionProfile onto a newer upstream patch. See
+          docs/operations/jenkins-upgrades.md.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              ProfileCandidateSpec references the profile a newer patch was observed against and
+              the resolved plugin closure produced for it.
+            properties:
+              closureContentRef:
+                description: |-
+                  ClosureContentRef names the owner-referenced ConfigMap holding the
+                  internal/pluginresolve-resolved closure for ResolveVersion, keyed the same way
+                  JenkinsVersionProfileStatus.ContentRef is.
+                type: string
+              observedVersion:
+                description: |-
+                  ObservedVersion is the profile's own Spec.ResolveVersion at discovery time —
+                  the exact patch promotion would be upgrading FROM (e.g. "2.555.3"), captured
+                  for audit/display so a later reader isn't forced to reconstruct "what was this
+                  profile pinned to before" from history.
+                type: string
+              profileRef:
+                description: ProfileRef names the JenkinsVersionProfile this candidate
+                  would promote into.
+                type: string
+              resolveVersion:
+                description: |-
+                  ResolveVersion is the newly discovered exact resolvable patch this candidate
+                  would promote the profile TO (e.g. "2.555.4") — the same value
+                  JenkinsVersionProfile.Spec.ResolveVersion would take on promotion.
+                type: string
+            required:
+            - observedVersion
+            - profileRef
+            - resolveVersion
+            type: object
+          status:
+            description: ProfileCandidateStatus defines the observed state of a ProfileCandidate.
+            properties:
+              conditions:
+                items:
+                  description: |-
+                    ProfileCandidateCondition follows the same five-field shape every other CRD's
+                    per-kind condition type uses in this codebase (ControllerCondition,
+                    JenkinsVersionProfileCondition, UpdateCenterCondition all carry
+                    LastTransitionTime; this is not a shortened four-field variant).
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
+              phase:
+                description: ProfileCandidatePhase is the lifecycle phase of a ProfileCandidate.
+                enum:
+                - Pending
+                - Ready
+                - Promoted
+                - Failed
+                - Superseded
+                type: string
+              preflight:
+                description: |-
+                  ProfileCandidatePreflightSummary is the advisory pre-flight result. It never
+                  blocks promotion — it is informational only.
+                properties:
+                  controllersChecked:
+                    description: |-
+                      ControllersChecked is the total count of controllers currently resolving to
+                      ProfileRef's line that the pre-flight ran CheckPluginPins against.
+                    type: integer
+                  controllersFailing:
+                    description: |-
+                      ControllersFailing is the TRUE total count of controllers with at least one
+                      conflict, even when FailingControllers below is truncated.
+                    type: integer
+                  failingControllers:
+                    description: |-
+                      FailingControllers lists failing-controllers-only (never a per-controller OK
+                      row), capped at maxPreflightFailures.
+                    items:
+                      description: |-
+                        ProfileCandidateFailingController is one controller the advisory fleet pre-flight
+                        found a pin conflict against. Deliberately minimal: a name/namespace + the conflict
+                        count and a truncated message, never the full internal/bundle.PinPreflightReport —
+                        keeping etcd size bounded the same way UpdateCenterStatus.Gaps is.
+                      properties:
+                        conflictCount:
+                          type: integer
+                        message:
+                          type: string
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                      required:
+                      - conflictCount
+                      - message
+                      - name
+                      - namespace
+                      type: object
+                    type: array
+                required:
+                - controllersChecked
+                - controllersFailing
+                type: object
+              promotedAt:
+                description: PromotedAt is set when Phase transitions to Promoted.
+                format: date-time
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

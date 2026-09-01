@@ -46,6 +46,7 @@ type testClient struct {
 	existingConfigMaps   map[string]bool
 	configMapData        map[string]map[string]string       // name -> data
 	configMapOwners      map[string][]metav1.OwnerReference // name -> owner refs
+	configMapLabels      map[string]map[string]string       // name -> labels
 	deleted              []struct{ kind, name string }
 	deletedSecrets       []string
 	statuses             map[string]string
@@ -388,6 +389,20 @@ func (t *testClient) GetConfigMap(_ context.Context, name, namespace string) (ma
 	}
 	return nil, fmt.Errorf("configmap %s not found", name)
 }
+func (t *testClient) RemoveConfigMapLabel(_ context.Context, name, _, labelKey string) error {
+	if t.configMapLabels == nil {
+		return nil
+	}
+	delete(t.configMapLabels[name], labelKey)
+	return nil
+}
+func (t *testClient) UpdateConfigMapData(_ context.Context, name, _ string, data map[string]string) error {
+	if t.configMapData == nil {
+		t.configMapData = make(map[string]map[string]string)
+	}
+	t.configMapData[name] = data
+	return nil
+}
 func (t *testClient) CreateSecret(_ context.Context, name, namespace string, _ map[string]string, data map[string][]byte) error {
 	t.secrets = append(t.secrets, name)
 	return nil
@@ -549,6 +564,10 @@ func (t *testClient) GetLiveResource(_ context.Context, _ schema.GroupVersionRes
 
 func (t *testClient) CreateOrUpdateConfigMapWithOwner(_ context.Context, name, namespace string, data map[string]string, owner metav1.OwnerReference) error {
 	return t.CreateOrUpdateConfigMap(context.Background(), name, namespace, data, owner)
+}
+
+func (t *testClient) CreateOrUpdateOwnedConfigMap(_ context.Context, name, namespace string, data map[string]string, _ map[string]string) error {
+	return t.CreateOrUpdateConfigMap(context.Background(), name, namespace, data)
 }
 
 // GetNamespace returns the namespace (not used by most testClient callers).
@@ -810,6 +829,156 @@ func TestProvisioningBlocksDirectPluginProfileConflict(t *testing.T) {
 	}
 	if cr.Status.LastReconcileError == "" {
 		t.Error("expected non-empty LastReconcileError")
+	}
+}
+
+// TestProvisioningPluginPinConflictNonBlockingAndIndependent proves
+// PluginPinConflict is advisory-only (unlike PluginConflict, it never blocks
+// provisioning) and independent of the legacy PluginConflict gate: an
+// unrelated cr.Spec.PluginSpec override decouples pluginVersionConflict
+// (which reads PluginSpec.Entries when set) from CheckPluginPins (which
+// always reads the bundle's raw plugins.yaml).
+func TestProvisioningPluginPinConflictNonBlockingAndIndependent(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.configMapData["test-bundle-content"]["plugins.yaml"] = "plugins:\n" +
+		"  - artifactId: git\n    version: 5.10.1\n"
+	client.profiles["jenkins-2-570"] = &v1alpha1.JenkinsVersionProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "jenkins-2-570"},
+		Spec:       v1alpha1.JenkinsVersionProfileSpec{Version: "2.570"},
+		Status: v1alpha1.JenkinsVersionProfileStatus{
+			ContentRef: "profile-content",
+			Conditions: []v1alpha1.JenkinsVersionProfileCondition{{
+				Type:   "PluginSetReady",
+				Status: metav1.ConditionTrue,
+			}},
+		},
+	}
+	client.configMapData["profile-content"] = map[string]string{
+		"plugins.yaml": "plugins:\n  - artifactId: git\n    version: 5.2.2\n",
+	}
+	rec := newTestReconciler(client)
+
+	cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+	cr.Spec.Version = "2.570"
+	cr.Spec.PluginSpec = &v1alpha1.PluginSpec{Entries: []v1alpha1.PluginEntry{
+		{ArtifactId: "other-plugin", Version: "1.0.0"},
+	}}
+
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("expected provisioning to proceed despite a pin conflict, got error: %v", err)
+	}
+	if len(client.statefulSets) == 0 {
+		t.Fatal("expected StatefulSet to be created; PluginPinConflict must not block provisioning")
+	}
+
+	pinCond := findCondition(cr.Status.Conditions, v1alpha1.ConditionPluginPinConflict)
+	if pinCond == nil {
+		t.Fatal("expected PluginPinConflict condition")
+	}
+	if pinCond.Status != metav1.ConditionTrue {
+		t.Fatalf("expected PluginPinConflict=True, got %s", pinCond.Status)
+	}
+	if pinCond.Reason != v1alpha1.ReasonPluginPinConflict {
+		t.Errorf("expected reason %s, got %s", v1alpha1.ReasonPluginPinConflict, pinCond.Reason)
+	}
+	if !strings.Contains(pinCond.Message, "git") || !strings.Contains(pinCond.Message, "5.10.1") || !strings.Contains(pinCond.Message, "5.2.2") {
+		t.Errorf("expected pin conflict message to mention plugin and versions, got %q", pinCond.Message)
+	}
+
+	conflictCond := findCondition(cr.Status.Conditions, v1alpha1.ConditionPluginConflict)
+	if conflictCond == nil || conflictCond.Status != metav1.ConditionFalse {
+		t.Fatalf("expected legacy PluginConflict=False (unaffected by the unrelated PluginSpec override), got %+v", conflictCond)
+	}
+	if blockedCond := findCondition(cr.Status.Conditions, v1alpha1.ConditionReconcileBlocked); blockedCond != nil && blockedCond.Status == metav1.ConditionTrue {
+		t.Fatalf("expected ReconcileBlocked to not be set by PluginPinConflict, got %+v", blockedCond)
+	}
+}
+
+// TestProvisioningPluginPinConflictSkippedOnParseError proves a
+// CheckPluginPins parse error leaves ConditionPluginPinConflict at its prior
+// value rather than clearing or flapping it.
+func TestProvisioningPluginPinConflictSkippedOnParseError(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.configMapData["test-bundle-content"]["plugins.yaml"] = "plugins:\n" +
+		"  - artifactId: git\n    version: 999.999\n"
+	rec := newTestReconciler(client)
+
+	cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+	cr.Spec.PluginSpec = &v1alpha1.PluginSpec{Entries: []v1alpha1.PluginEntry{
+		{ArtifactId: "other-plugin", Version: "1.0.0"},
+	}}
+
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("first reconcile: %v", err)
+	}
+	prior := findCondition(cr.Status.Conditions, v1alpha1.ConditionPluginPinConflict)
+	if prior == nil || prior.Status != metav1.ConditionTrue {
+		t.Fatalf("expected PluginPinConflict=True after first reconcile, got %+v", prior)
+	}
+	priorCopy := *prior
+
+	client.configMapData["test-bundle-content"]["plugins.yaml"] = "plugins: [this is not valid yaml"
+
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("second reconcile: %v", err)
+	}
+	after := findCondition(cr.Status.Conditions, v1alpha1.ConditionPluginPinConflict)
+	if after == nil {
+		t.Fatal("expected PluginPinConflict condition to still be present")
+	}
+	if *after != priorCopy {
+		t.Fatalf("expected PluginPinConflict condition unchanged on a CheckPluginPins parse error, before=%+v after=%+v", priorCopy, *after)
+	}
+}
+
+// TestConnectedPluginPinConflictDetectionOnly proves the Connected-phase
+// PluginPinConflict check is detection-only: it sets the condition without
+// disrupting the running controller (no phase change, PluginConflict and
+// PluginInstallRequired unaffected).
+func TestConnectedPluginPinConflictDetectionOnly(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconcilerWithTokenSigner(client)
+	rec.miteTransport = &captureTransport{}
+
+	cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+	cr.Spec.ReconciliationPolicy = &v1alpha1.ReconciliationPolicy{Mode: v1alpha1.ReconciliationModeManual}
+	cr.Spec.PluginSpec = &v1alpha1.PluginSpec{Entries: []v1alpha1.PluginEntry{
+		{ArtifactId: "other-plugin", Version: "1.0.0"},
+	}}
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("Provisioning reconcile: %v", err)
+	}
+
+	// Introduce a bundle pin conflict against the baked baseline. The
+	// PluginSpec override keeps the legacy PluginConflict/PluginInstallRequired
+	// checks (which read cr.Spec.PluginSpec.Entries) from reacting to it.
+	client.configMapData["test-bundle-content"]["plugins.yaml"] = "plugins:\n  - artifactId: git\n    version: 999.999\n"
+	cr.Status.Phase = v1alpha1.ControllerPhaseConnected
+	cr.Status.Conditions = []v1alpha1.ControllerCondition{{Type: v1alpha1.ConditionReady, Status: metav1.ConditionTrue, Reason: "MiteConnected"}}
+
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("Connected reconcile: %v", err)
+	}
+
+	pinCond := findCondition(cr.Status.Conditions, v1alpha1.ConditionPluginPinConflict)
+	if pinCond == nil {
+		t.Fatal("expected PluginPinConflict condition")
+	}
+	if pinCond.Status != metav1.ConditionTrue {
+		t.Fatalf("expected PluginPinConflict=True, got %s", pinCond.Status)
+	}
+	if !strings.Contains(pinCond.Message, "git") || !strings.Contains(pinCond.Message, "999.999") {
+		t.Errorf("expected message to mention plugin and version, got %q", pinCond.Message)
+	}
+
+	if conflictCond := findCondition(cr.Status.Conditions, v1alpha1.ConditionPluginConflict); conflictCond != nil && conflictCond.Status == metav1.ConditionTrue {
+		t.Fatalf("expected legacy PluginConflict to be unaffected by the PluginSpec-unrelated bundle pin conflict, got %+v", conflictCond)
+	}
+	if installCond := findCondition(cr.Status.Conditions, v1alpha1.ConditionPluginInstallRequired); installCond != nil && installCond.Status == metav1.ConditionTrue {
+		t.Fatalf("expected PluginInstallRequired to be unaffected (detection-only signal), got %+v", installCond)
+	}
+	if cr.Status.Phase != v1alpha1.ControllerPhaseConnected {
+		t.Errorf("expected phase to remain Connected (detection-only), got %s", cr.Status.Phase)
 	}
 }
 

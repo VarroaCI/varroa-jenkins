@@ -89,6 +89,8 @@ tags:
     description: Update center status and plugin inventory.
   - name: fleetplugins
     description: Fleet-wide installed-plugin inventory and version-range queries.
+  - name: upgrade-tracking
+    description: Upstream Jenkins version observation and upgrade candidate promotion.
 paths:
   /healthz:
     $ref: './paths/ops.yaml#/~1healthz'
@@ -280,6 +282,12 @@ paths:
     $ref: './paths/fleetplugins.yaml#/~1api~1v1~1fleet~1plugins'
   /api/v1/fleet/plugins/{name}:
     $ref: './paths/fleetplugins.yaml#/~1api~1v1~1fleet~1plugins~1{name}'
+  /api/v1/version-candidates:
+    $ref: './paths/version-candidates.yaml#/~1api~1v1~1version-candidates'
+  /api/v1/version-candidates/{name}:
+    $ref: './paths/version-candidates.yaml#/~1api~1v1~1version-candidates~1{name}'
+  /api/v1/version-candidates/{name}/promote:
+    $ref: './paths/version-candidates.yaml#/~1api~1v1~1version-candidates~1{name}~1promote'
 components:
   securitySchemes:
     bearerAuth:

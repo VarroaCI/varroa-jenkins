@@ -1055,6 +1055,90 @@ func TestComposeBundle_GitSecretRefHostNotAllowed(t *testing.T) {
 	}
 }
 
+func TestComposeBundle_PinPreflight(t *testing.T) {
+	// HandleBundlesPreview must populate Preview.PinPreflight from the
+	// composed unresolved plugins.yaml against the embedded baseline set.
+	fc := newFakeClient()
+	fc.items["ns/plugin-item"] = &v1alpha1.CatalogItem{
+		ObjectMeta: metav1.ObjectMeta{Name: "plugin-item", Namespace: "ns"},
+		Spec: v1alpha1.CatalogItemSpec{
+			SourceRef: "source-a",
+			Type:      v1alpha1.CatalogItemPlugin,
+		},
+		Status: v1alpha1.CatalogItemStatus{
+			Valid:   true,
+			Content: "plugins:\n  - artifactId: git\n    version: 999.999\n",
+		},
+	}
+	composer := bundle.NewComposer(fc, nil, t.TempDir(), "", "", "", "")
+	cr, crStore := newTestConfigCRUD(fc, "", composer)
+	_ = crStore
+
+	spec := v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{
+			{ItemRef: &v1alpha1.ComposedItemRef{Name: "plugin-item", Namespace: "ns"}},
+		},
+	}
+	specJSON := jsonMarshal(t, spec)
+	req := jsonMarshal(t, bus.BundleComposeRequest{Namespace: "ns", Spec: specJSON})
+	resp := cr.HandleBundlesPreview(req)
+	var compResp bus.BundleComposeResponse
+	jsonUnmarshal(t, resp, &compResp)
+	if compResp.Preview == nil {
+		t.Fatal("expected Preview in response, got nil")
+	}
+	if len(compResp.Preview.PinPreflight.Conflicts) != 1 {
+		t.Fatalf("expected 1 pin conflict, got %d: %+v", len(compResp.Preview.PinPreflight.Conflicts), compResp.Preview.PinPreflight.Conflicts)
+	}
+	conflict := compResp.Preview.PinPreflight.Conflicts[0]
+	if conflict.ArtifactID != "git" || conflict.BundleVersion != "999.999" {
+		t.Errorf("unexpected conflict: %+v", conflict)
+	}
+	if conflict.SetVersion == "" {
+		t.Error("expected non-empty SetVersion from the resolved baseline")
+	}
+}
+
+func TestComposeBundle_PinPreflightAllClear(t *testing.T) {
+	// A bundle whose pins all match the baseline set gets non-nil empty
+	// slices, not nil, so JSON marshals `[]` rather than `null`.
+	fc := newFakeClient()
+	fc.items["ns/plugin-item"] = &v1alpha1.CatalogItem{
+		ObjectMeta: metav1.ObjectMeta{Name: "plugin-item", Namespace: "ns"},
+		Spec: v1alpha1.CatalogItemSpec{
+			SourceRef: "source-a",
+			Type:      v1alpha1.CatalogItemPlugin,
+		},
+		Status: v1alpha1.CatalogItemStatus{
+			Valid:   true,
+			Content: "plugins:\n  - artifactId: git\n    version: 5.10.1\n",
+		},
+	}
+	composer := bundle.NewComposer(fc, nil, t.TempDir(), "", "", "", "")
+	cr, crStore := newTestConfigCRUD(fc, "", composer)
+	_ = crStore
+
+	spec := v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{
+			{ItemRef: &v1alpha1.ComposedItemRef{Name: "plugin-item", Namespace: "ns"}},
+		},
+	}
+	specJSON := jsonMarshal(t, spec)
+	req := jsonMarshal(t, bus.BundleComposeRequest{Namespace: "ns", Spec: specJSON})
+	resp := cr.HandleBundlesPreview(req)
+	var compResp bus.BundleComposeResponse
+	jsonUnmarshal(t, resp, &compResp)
+	if compResp.Preview == nil {
+		t.Fatal("expected Preview in response, got nil")
+	}
+	if compResp.Preview.PinPreflight.Conflicts == nil || len(compResp.Preview.PinPreflight.Conflicts) != 0 {
+		t.Errorf("expected non-nil empty Conflicts, got %#v", compResp.Preview.PinPreflight.Conflicts)
+	}
+	if compResp.Preview.PinPreflight.Missing == nil || len(compResp.Preview.PinPreflight.Missing) != 0 {
+		t.Errorf("expected non-nil empty Missing, got %#v", compResp.Preview.PinPreflight.Missing)
+	}
+}
+
 func TestComposeBundle_GitSecretRefAnnotationsErrorFailsClosed(t *testing.T) {
 	// Same fail-closed contract as the reconciler sites: an annotations read
 	// failure must surface as a host-scoping error, not skip the check.

@@ -820,8 +820,9 @@ func boundSources(sources []string) []string {
 	return out
 }
 
-// buildDeclaredSet reads all JenkinsVersionProfiles' materialized plugin sets
-// and all ComposedBundles' plugin lines to build the declared plugin union.
+// buildDeclaredSet reads all JenkinsVersionProfiles' materialized plugin sets,
+// all ComposedBundles' plugin lines, and every open ProfileCandidate's
+// resolved closure to build the declared plugin union.
 func (r *UpdateCenterReconciler) buildDeclaredSet(ctx context.Context, logger *slog.Logger) ([]declaredPlugin, error) {
 	var declared []declaredPlugin
 
@@ -881,6 +882,40 @@ func (r *UpdateCenterReconciler) buildDeclaredSet(ctx context.Context, logger *s
 				Name:       e.ArtifactId,
 				Version:    e.Version,
 				RequiredBy: fmt.Sprintf("bundle:%s/%s", cb.Namespace, cb.Name),
+			})
+		}
+	}
+
+	// 3. ProfileCandidates — read resolved closure ConfigMaps for open
+	// candidates only. A Superseded, Failed, or Promoted candidate's closure
+	// no longer represents anything pending servability, so it drops out of
+	// the declared set once closed.
+	candidates, err := crdstore.List[v1alpha1.ProfileCandidate](ctx, r.store, "", "")
+	if err != nil {
+		return nil, fmt.Errorf("list ProfileCandidates: %w", err)
+	}
+	for _, c := range candidates {
+		if c.Status.Phase != v1alpha1.ProfileCandidatePhasePending && c.Status.Phase != v1alpha1.ProfileCandidatePhaseReady {
+			continue
+		}
+		if c.Spec.ClosureContentRef == "" {
+			continue
+		}
+		cmData, cmErr := r.client.GetConfigMap(ctx, c.Spec.ClosureContentRef, r.operatorNamespace)
+		if cmErr != nil {
+			logger.Warn("failed to read candidate closure ConfigMap", "candidate", c.Name, "cm", c.Spec.ClosureContentRef, "error", cmErr)
+			continue
+		}
+		pluginsYAML := cmData["plugins.yaml"]
+		if pluginsYAML == "" {
+			continue
+		}
+		entries := parseProfilePluginEntries(pluginsYAML)
+		for _, e := range entries {
+			declared = append(declared, declaredPlugin{
+				Name:       e.ArtifactID,
+				Version:    e.Version,
+				RequiredBy: fmt.Sprintf("candidate:%s", c.Name),
 			})
 		}
 	}

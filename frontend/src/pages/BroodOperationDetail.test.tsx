@@ -353,4 +353,68 @@ describe("BroodOperationDetail", () => {
     expect(await screen.findByText("ctrl-a")).toBeInTheDocument();
     expect(screen.queryByText("Output")).not.toBeInTheDocument();
   });
+
+  describe("whole-operation failure reason", () => {
+    function withReason(reason?: string) {
+      return {
+        ...clusterOp,
+        clusters: [
+          {
+            ...clusterOp.clusters[0],
+            op: {
+              ...clusterOp.clusters[0].op!,
+              status: { ...clusterOp.clusters[0].op!.status, reason },
+            },
+          },
+        ],
+      };
+    }
+
+    it("renders TargetVersionUnresolved as friendly copy with the raw code in parentheses", async () => {
+      mockGet.mockResolvedValue(withReason("TargetVersionUnresolved"));
+      renderWithProviders(<BroodOperationDetail />);
+
+      expect(
+        await screen.findByText(/The target version or line for this upgrade could not be resolved/),
+      ).toBeInTheDocument();
+      expect(screen.getByText("(TargetVersionUnresolved)")).toBeInTheDocument();
+    });
+
+    it("falls back to the raw code alone for an unmapped reason, with no parenthetical", async () => {
+      mockGet.mockResolvedValue(withReason("SomeOtherReason"));
+      renderWithProviders(<BroodOperationDetail />);
+
+      expect(await screen.findByText("SomeOtherReason")).toBeInTheDocument();
+      expect(screen.queryByText("(SomeOtherReason)")).not.toBeInTheDocument();
+    });
+
+    it("renders no Reason line when status.reason is absent", async () => {
+      renderWithProviders(<BroodOperationDetail />);
+      expect(await screen.findByText("ctrl-a")).toBeInTheDocument();
+      expect(screen.queryByText(/Reason:/)).not.toBeInTheDocument();
+    });
+
+    it("leaves per-target reason rendering unaffected", async () => {
+      const opWithTargetReason = {
+        ...clusterOp,
+        clusters: [
+          {
+            ...clusterOp.clusters[0],
+            op: {
+              ...clusterOp.clusters[0].op!,
+              status: {
+                ...clusterOp.clusters[0].op!.status,
+                targets: [
+                  { namespace: "test-ns", name: "ctrl-a", wave: 0, state: "Failed" as const, reason: "plugin pin conflict: workflow-job" },
+                ],
+              },
+            },
+          },
+        ],
+      };
+      mockGet.mockResolvedValue(opWithTargetReason);
+      renderWithProviders(<BroodOperationDetail />);
+      expect(await screen.findByText("plugin pin conflict: workflow-job")).toBeInTheDocument();
+    });
+  });
 });

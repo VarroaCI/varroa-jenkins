@@ -5,10 +5,17 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
 func TestTickerRunnable_NeedLeaderElection(t *testing.T) {
@@ -112,6 +119,24 @@ func TestTickerRunnable_SetupError(t *testing.T) {
 	}
 }
 
+// TestMain_ProfileCandidateReconcilerRegistered guards against the operator
+// constructing a ProfileCandidateReconciler without ever running it (or vice
+// versa): with no runnable driving it, no candidate ever leaves Pending and
+// promotion can never succeed.
+func TestMain_ProfileCandidateReconcilerRegistered(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	text := string(src)
+	if !strings.Contains(text, "controller.NewProfileCandidateReconciler(") {
+		t.Fatal("main.go does not construct a ProfileCandidateReconciler")
+	}
+	if !strings.Contains(text, "reconcileAllProfileCandidates(") {
+		t.Fatal("main.go constructs a ProfileCandidateReconciler but never drives it from a registered runnable")
+	}
+}
+
 func TestTickerRunnable_SetupBeforeImmediateTick(t *testing.T) {
 	var setupRan bool
 	var tickRan bool
@@ -142,5 +167,115 @@ func TestTickerRunnable_SetupBeforeImmediateTick(t *testing.T) {
 	}
 	if !tickRan {
 		t.Error("immediate tick should have run")
+	}
+}
+
+// stubCandidateReconciler is a reconcile.Reconciler test double that lets a
+// test control, per candidate name, the Result and error
+// reconcileAllProfileCandidates observes, and records how many times each
+// name was actually reconciled.
+type stubCandidateReconciler struct {
+	results map[string]reconcile.Result
+	errs    map[string]error
+	calls   map[string]int
+}
+
+func newStubCandidateReconciler() *stubCandidateReconciler {
+	return &stubCandidateReconciler{
+		results: make(map[string]reconcile.Result),
+		errs:    make(map[string]error),
+		calls:   make(map[string]int),
+	}
+}
+
+func (s *stubCandidateReconciler) Reconcile(_ context.Context, req reconcile.Request) (reconcile.Result, error) {
+	s.calls[req.Name]++
+	return s.results[req.Name], s.errs[req.Name]
+}
+
+func seedProfileCandidate(t *testing.T, store crdstore.Backend, name string) {
+	t.Helper()
+	pc := &v1alpha1.ProfileCandidate{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	if err := crdstore.Create[v1alpha1.ProfileCandidate](context.Background(), store, pc); err != nil {
+		t.Fatalf("seed ProfileCandidate %s: %v", name, err)
+	}
+}
+
+func TestReconcileAllProfileCandidates_BackoffSkipsUntilDue(t *testing.T) {
+	ctx := context.Background()
+	store := crdstore.NewFake()
+	seedProfileCandidate(t, store, "cand-a")
+
+	rec := newStubCandidateReconciler()
+	rec.results["cand-a"] = reconcile.Result{RequeueAfter: 5 * time.Minute}
+
+	backoff := newProfileCandidateBackoff()
+	now := time.Now()
+	backoff.now = func() time.Time { return now }
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// First tick reconciles and records a 5-minute backoff.
+	reconcileAllProfileCandidates(ctx, store, rec, backoff, logger)
+	if rec.calls["cand-a"] != 1 {
+		t.Fatalf("expected 1 reconcile call after first tick, got %d", rec.calls["cand-a"])
+	}
+
+	// A tick that lands inside the backoff window is skipped.
+	now = now.Add(1 * time.Minute)
+	reconcileAllProfileCandidates(ctx, store, rec, backoff, logger)
+	if rec.calls["cand-a"] != 1 {
+		t.Fatalf("expected candidate skipped inside backoff window, got %d calls", rec.calls["cand-a"])
+	}
+
+	// A tick after the backoff window reconciles again.
+	now = now.Add(5 * time.Minute)
+	reconcileAllProfileCandidates(ctx, store, rec, backoff, logger)
+	if rec.calls["cand-a"] != 2 {
+		t.Fatalf("expected candidate reconciled again after backoff window, got %d calls", rec.calls["cand-a"])
+	}
+}
+
+func TestReconcileAllProfileCandidates_NoRequeueReconciledEveryTick(t *testing.T) {
+	ctx := context.Background()
+	store := crdstore.NewFake()
+	seedProfileCandidate(t, store, "cand-b")
+
+	rec := newStubCandidateReconciler() // zero-value Result: no RequeueAfter
+	backoff := newProfileCandidateBackoff()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	for i := 1; i <= 3; i++ {
+		reconcileAllProfileCandidates(ctx, store, rec, backoff, logger)
+		if rec.calls["cand-b"] != i {
+			t.Fatalf("tick %d: expected %d reconcile calls, got %d", i, i, rec.calls["cand-b"])
+		}
+	}
+}
+
+func TestReconcileAllProfileCandidates_PrunesDeletedCandidates(t *testing.T) {
+	ctx := context.Background()
+	store := crdstore.NewFake()
+	seedProfileCandidate(t, store, "cand-c")
+
+	rec := newStubCandidateReconciler()
+	rec.results["cand-c"] = reconcile.Result{RequeueAfter: 5 * time.Minute}
+	backoff := newProfileCandidateBackoff()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	reconcileAllProfileCandidates(ctx, store, rec, backoff, logger)
+	if _, tracked := backoff.next["cand-c"]; !tracked {
+		t.Fatal("expected cand-c to be tracked in the backoff map after reconciling")
+	}
+
+	if err := crdstore.Delete[v1alpha1.ProfileCandidate](ctx, store, "cand-c", ""); err != nil {
+		t.Fatalf("delete cand-c: %v", err)
+	}
+
+	reconcileAllProfileCandidates(ctx, store, rec, backoff, logger)
+	if _, tracked := backoff.next["cand-c"]; tracked {
+		t.Fatal("expected backoff entry for deleted candidate to be pruned")
+	}
+	if len(backoff.next) != 0 {
+		t.Fatalf("expected backoff map to be empty after pruning, got %d entries", len(backoff.next))
 	}
 }

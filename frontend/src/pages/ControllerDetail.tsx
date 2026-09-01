@@ -1603,6 +1603,11 @@ export function VersionCard({ ctrl, canUpdate }: { ctrl: NonNullable<ReturnType<
   // In-progress chip mirrors the async roll state (A's VersionRollStarted).
   const vs = ctrl.versionStatus;
   const rolling = vs?.rollPending === true && vs.rollReason === "VersionRollStarted";
+  // "Upgrade pending release" chip: a manual-policy candidate promotion is
+  // holding this controller. The upgradeBlocked guard keeps this mutually
+  // exclusive with VersionRollBanner's blocking banner — a block always wins.
+  const upgradePending = vs?.upgradeBlocked !== true && vs?.rollReason === "UpgradePending";
+  const upgradePendingNote = upgradePending ? vs?.rollMessage : undefined;
 
   // Plugin-count preview (only when both catalog entries carry a count).
   let pluginNote: string | null = null;
@@ -1654,7 +1659,14 @@ export function VersionCard({ ctrl, canUpdate }: { ctrl: NonNullable<ReturnType<
         {!info.managed && ctrl.version && (
           <div className={styles.versionMutedNote}>unmanaged version (no matching profile in the catalog)</div>
         )}
-        {rolling && <div className={styles.inProgressChip}>⟳ Upgrade in progress…</div>}
+        {rolling ? (
+          <div className={styles.inProgressChip}>⟳ Upgrade in progress…</div>
+        ) : upgradePending ? (
+          <div className={styles.pendingReleaseChip}>
+            Upgrade pending release
+            {upgradePendingNote && <div className={styles.pendingMeta}>{upgradePendingNote}</div>}
+          </div>
+        ) : null}
 
         {inert ? (
           <div className={styles.versionMutedNote}>
@@ -1662,7 +1674,13 @@ export function VersionCard({ ctrl, canUpdate }: { ctrl: NonNullable<ReturnType<
             <span className={styles.mono}>{inertImg}</span>). Edit the overlay to change the Jenkins image.
           </div>
         ) : upd ? (
-          <VersionPicker versions={versions} value={target} onChange={setTarget} disabled={inert} />
+          <VersionPicker
+            versions={versions}
+            value={target}
+            onChange={setTarget}
+            disabled={inert}
+            upgradePendingNote={upgradePendingNote}
+          />
         ) : (
           <div className={styles.versionMutedNote}>Version: {ctrl.version || "—"} (read-only)</div>
         )}
@@ -2090,7 +2108,7 @@ export function VersionRollBanner({
       </div>
     );
   }
-  if (vs.rollPending === true && vs.rollReason !== "VersionRollStarted") {
+  if (vs.rollPending === true && vs.rollReason !== "VersionRollStarted" && vs.rollReason !== "UpgradePending") {
     return (
       <div className={styles.versionBannerHeld}>
         <div className={styles.pendingIcon}>⚠</div>

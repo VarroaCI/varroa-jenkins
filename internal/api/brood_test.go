@@ -279,6 +279,12 @@ func (f *fakeBroodClient) CreateOrUpdateConfigMap(_ context.Context, _, _ string
 func (f *fakeBroodClient) GetConfigMap(_ context.Context, _, _ string) (map[string]string, error) {
 	return nil, nil
 }
+func (f *fakeBroodClient) RemoveConfigMapLabel(_ context.Context, _, _, _ string) error {
+	return nil
+}
+func (f *fakeBroodClient) UpdateConfigMapData(_ context.Context, _, _ string, _ map[string]string) error {
+	return nil
+}
 func (f *fakeBroodClient) DeleteResource(_ context.Context, _, _, _ string) error { return nil }
 func (f *fakeBroodClient) DeleteSecret(_ context.Context, _, _ string) error      { return nil }
 func (f *fakeBroodClient) EnsureWakeEndpointSlice(_ context.Context, _, _ string, _ []string, _ int32) error {
@@ -294,6 +300,9 @@ func (f *fakeBroodClient) GetLiveResource(_ context.Context, _ schema.GroupVersi
 	return nil, nil
 }
 func (f *fakeBroodClient) CreateOrUpdateConfigMapWithOwner(_ context.Context, _, _ string, _ map[string]string, _ metav1.OwnerReference) error {
+	return nil
+}
+func (f *fakeBroodClient) CreateOrUpdateOwnedConfigMap(_ context.Context, _, _ string, _ map[string]string, _ map[string]string) error {
 	return nil
 }
 func (f *fakeBroodClient) RESTConfig() *rest.Config         { return nil }

@@ -14,6 +14,22 @@ The controller list replaces the bundle list. It does not merge with it. Core
 pins always win. A conflicting non-core pin sets `PluginConflict=True` and
 blocks provisioning.
 
+## Preflight bundle pins before they block anything
+
+`PluginPinConflict` is a separate, advisory check: it compares the composed
+bundle's own `plugins.yaml` against the resolved plugin set and reports what
+it finds as a condition on both the controller and the bundle, without ever
+blocking provisioning. It runs at the same points `PluginConflict` does, but
+the two are independent: a bundle can carry a pin problem while
+`PluginConflict` stays clear, and vice versa.
+
+A conflict means the bundle pins a non-core artifact to a version that
+differs from the resolved set. A missing entry means the bundle pins an
+artifact the resolved set does not carry at all; that case is reported the
+same way but is never treated as a conflict. Either way, `PluginPinConflict`
+only tells you something worth checking before you attach the bundle to a
+controller. It doesn't change what gets installed.
+
 ## Add bundle plugins
 
 ```yaml
@@ -68,5 +84,6 @@ kubectl get controller demo -n teams-platform \
 |---|---|
 | Bundle plugin is missing | Controller entries replacing the bundle list |
 | `PluginConflict=True` | Pin conflicts with the core lock |
+| `PluginPinConflict=True` | Bundle pin vs. resolved plugin set; advisory, provisioning proceeds |
 | Roll is pending | Reconciliation mode and approval |
 | Prerequisite failure | Dependency closure and Jenkins core |

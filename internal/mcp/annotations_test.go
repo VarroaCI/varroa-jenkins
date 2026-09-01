@@ -84,6 +84,9 @@ var expectedToolKinds = map[string]toolKind{
 	"create_jenkins_version_profile": kindCreateStrict,
 	"update_jenkins_version_profile": kindUpdate,
 	"delete_jenkins_version_profile": kindDelete,
+	"list_version_candidates":        kindRead,
+	"get_version_candidate":          kindRead,
+	"promote_version_candidate":      kindAction,
 
 	// Users
 	"list_users":  kindRead,

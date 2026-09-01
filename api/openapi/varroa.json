@@ -437,6 +437,15 @@
                     },
                     "type": "object"
                   },
+                  "upgrade": {
+                    "description": "Granularity selection for verb=upgrade. An absent targetVersion releases each target's own held promoted revision; a set targetVersion bulk-writes that version to every target.",
+                    "properties": {
+                      "targetVersion": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
                   "verb": {
                     "enum": [
                       "restart",
@@ -444,7 +453,8 @@
                       "reconcile",
                       "stop",
                       "start",
-                      "executeGroovy"
+                      "executeGroovy",
+                      "upgrade"
                     ],
                     "type": "string"
                   }
@@ -1095,6 +1105,9 @@
             },
             "type": "array"
           },
+          "pinPreflight": {
+            "$ref": "#/components/schemas/components_schemas_PinPreflightReport"
+          },
           "pluginsYaml": {
             "type": "string"
           },
@@ -1123,7 +1136,8 @@
           "missing",
           "drifted",
           "warnings",
-          "unresolvedVariables"
+          "unresolvedVariables",
+          "pinPreflight"
         ],
         "type": "object"
       },
@@ -1189,6 +1203,9 @@
             },
             "type": "array"
           },
+          "pinPreflight": {
+            "$ref": "#/components/schemas/components_schemas_PinPreflightReport"
+          },
           "unresolvedVariables": {
             "items": {
               "type": "string"
@@ -1207,7 +1224,8 @@
         },
         "required": [
           "valid",
-          "unresolvedVariables"
+          "unresolvedVariables",
+          "pinPreflight"
         ],
         "type": "object"
       },
@@ -3589,6 +3607,15 @@
                     },
                     "type": "object"
                   },
+                  "upgrade": {
+                    "description": "Granularity selection for verb=upgrade. An absent targetVersion releases each target's own held promoted revision; a set targetVersion bulk-writes that version to every target.",
+                    "properties": {
+                      "targetVersion": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
                   "verb": {
                     "enum": [
                       "restart",
@@ -3596,7 +3623,8 @@
                       "reconcile",
                       "stop",
                       "start",
-                      "executeGroovy"
+                      "executeGroovy",
+                      "upgrade"
                     ],
                     "type": "string"
                   }
@@ -3907,7 +3935,8 @@
               "reconcile",
               "stop",
               "start",
-              "executeGroovy"
+              "executeGroovy",
+              "upgrade"
             ],
             "type": "string"
           }
@@ -4024,7 +4053,8 @@
               "reconcile",
               "stop",
               "start",
-              "executeGroovy"
+              "executeGroovy",
+              "upgrade"
             ],
             "type": "string"
           }
@@ -4883,6 +4913,9 @@
             },
             "type": "array"
           },
+          "pinPreflight": {
+            "$ref": "#/components/schemas/components_schemas_PinPreflightReport"
+          },
           "pluginsYaml": {
             "type": "string"
           },
@@ -4911,7 +4944,8 @@
           "missing",
           "drifted",
           "warnings",
-          "unresolvedVariables"
+          "unresolvedVariables",
+          "pinPreflight"
         ],
         "type": "object"
       },
@@ -5050,6 +5084,9 @@
             },
             "type": "array"
           },
+          "pinPreflight": {
+            "$ref": "#/components/schemas/components_schemas_PinPreflightReport"
+          },
           "unresolvedVariables": {
             "items": {
               "type": "string"
@@ -5068,7 +5105,8 @@
         },
         "required": [
           "valid",
-          "unresolvedVariables"
+          "unresolvedVariables",
+          "pinPreflight"
         ],
         "type": "object"
       },
@@ -6645,6 +6683,23 @@
         ],
         "type": "object"
       },
+      "components_schemas_MissingPlugin": {
+        "additionalProperties": false,
+        "description": "A composed bundle's plugin pin absent from the resolved plugin set.",
+        "properties": {
+          "artifactId": {
+            "type": "string"
+          },
+          "bundleVersion": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifactId",
+          "bundleVersion"
+        ],
+        "type": "object"
+      },
       "components_schemas_MiteImageStatus": {
         "additionalProperties": false,
         "description": "Read-only projection of mite image staleness.",
@@ -6824,6 +6879,50 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "components_schemas_PinConflict": {
+        "additionalProperties": false,
+        "description": "A composed bundle's plugin pin whose version conflicts with the resolved plugin set.",
+        "properties": {
+          "artifactId": {
+            "type": "string"
+          },
+          "bundleVersion": {
+            "type": "string"
+          },
+          "setVersion": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifactId",
+          "bundleVersion",
+          "setVersion"
+        ],
+        "type": "object"
+      },
+      "components_schemas_PinPreflightReport": {
+        "additionalProperties": false,
+        "description": "Plugin-pin preflight result comparing a composed bundle's pins against the resolved plugin set.",
+        "properties": {
+          "conflicts": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_PinConflict"
+            },
+            "type": "array"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_MissingPlugin"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "conflicts",
+          "missing"
+        ],
         "type": "object"
       },
       "components_schemas_PluginAdvisory": {
@@ -7221,6 +7320,37 @@
             "$ref": "#/components/schemas/components_schemas_ProbeSpec"
           }
         },
+        "type": "object"
+      },
+      "components_schemas_ProfileCandidate": {
+        "additionalProperties": true,
+        "description": "A ProfileCandidate CRD (cluster-scoped) — a discovered upstream patch/LTS-line candidate for a JenkinsVersionProfile, pending validation and promotion.",
+        "properties": {
+          "apiVersion": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "spec": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "required": [
+          "apiVersion",
+          "kind",
+          "metadata",
+          "spec"
+        ],
         "type": "object"
       },
       "components_schemas_ProvisioningConfig": {
@@ -14715,6 +14845,131 @@
         ]
       }
     },
+    "/api/v1/version-candidates": {
+      "get": {
+        "description": "Lists ProfileCandidate resources across every JenkinsVersionProfile. Clusterless — resolved directly against the CRD store.\n",
+        "operationId": "listVersionCandidates",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/components_schemas_ProfileCandidate"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Candidates listed."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/components_responses_MethodNotAllowed"
+          }
+        },
+        "summary": "List upgrade candidates.",
+        "tags": [
+          "upgrade-tracking"
+        ]
+      }
+    },
+    "/api/v1/version-candidates/{name}": {
+      "get": {
+        "operationId": "getVersionCandidate",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/components_parameters_name"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_ProfileCandidate"
+                }
+              }
+            },
+            "description": "Candidate found."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/components_responses_MethodNotAllowed"
+          }
+        },
+        "summary": "Get an upgrade candidate.",
+        "tags": [
+          "upgrade-tracking"
+        ]
+      }
+    },
+    "/api/v1/version-candidates/{name}/promote": {
+      "post": {
+        "description": "Advances the candidate's JenkinsVersionProfile to the candidate's resolved version and closure content, then supersedes every other open candidate for the same profile. Requires the candidate to be in the Ready phase; every write in the sequence is resourceVersion-scoped, and a concurrent modification aborts the whole promotion with 409.\n",
+        "operationId": "promoteVersionCandidate",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/components_parameters_name"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_ProfileCandidate"
+                }
+              }
+            },
+            "description": "Candidate promoted."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/components_responses_MethodNotAllowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/components_responses_Internal"
+          }
+        },
+        "summary": "Promote an upgrade candidate.",
+        "tags": [
+          "upgrade-tracking"
+        ]
+      }
+    },
     "/healthz": {
       "get": {
         "operationId": "getHealthz",
@@ -14851,6 +15106,10 @@
     {
       "description": "Fleet-wide installed-plugin inventory and version-range queries.",
       "name": "fleetplugins"
+    },
+    {
+      "description": "Upstream Jenkins version observation and upgrade candidate promotion.",
+      "name": "upgrade-tracking"
     }
   ]
 }

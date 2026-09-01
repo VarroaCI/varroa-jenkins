@@ -497,11 +497,19 @@ func (s *Server) dispatchComposedBundles(w http.ResponseWriter, r *http.Request,
 		if uvars == nil {
 			uvars = []string{}
 		}
+		pinPreflight := preview.PinPreflight
+		if pinPreflight.Conflicts == nil {
+			pinPreflight.Conflicts = []bus.PinConflict{}
+		}
+		if pinPreflight.Missing == nil {
+			pinPreflight.Missing = []bus.MissingPlugin{}
+		}
 		resp := map[string]interface{}{
 			"valid":               valid,
 			"errors":              errs,
 			"warnings":            warns,
 			"unresolvedVariables": uvars,
+			"pinPreflight":        pinPreflight,
 		}
 		s.writeJSON(w, http.StatusOK, resp)
 		return
@@ -681,6 +689,7 @@ func (s *Server) dispatchComposedBundles(w http.ResponseWriter, r *http.Request,
 				"errors":              preview.Errors,
 				"warnings":            preview.Warnings,
 				"unresolvedVariables": preview.UnresolvedVariables,
+				"pinPreflight":        preview.PinPreflight,
 			}
 			s.writeJSON(w, http.StatusOK, resp)
 			return

@@ -1,0 +1,83 @@
+/api/v1/version-candidates:
+  get:
+    operationId: listVersionCandidates
+    summary: List upgrade candidates.
+    description: >
+      Lists ProfileCandidate resources across every JenkinsVersionProfile.
+      Clusterless — resolved directly against the CRD store.
+    tags: [upgrade-tracking]
+    responses:
+      "200":
+        description: Candidates listed.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/ProfileCandidate'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "405":
+        $ref: '../components/responses.yaml#/MethodNotAllowed'
+
+/api/v1/version-candidates/{name}:
+  get:
+    operationId: getVersionCandidate
+    summary: Get an upgrade candidate.
+    tags: [upgrade-tracking]
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Candidate found.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ProfileCandidate'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "405":
+        $ref: '../components/responses.yaml#/MethodNotAllowed'
+
+/api/v1/version-candidates/{name}/promote:
+  post:
+    operationId: promoteVersionCandidate
+    summary: Promote an upgrade candidate.
+    description: >
+      Advances the candidate's JenkinsVersionProfile to the candidate's
+      resolved version and closure content, then supersedes every other
+      open candidate for the same profile. Requires the candidate to be in
+      the Ready phase; every write in the sequence is resourceVersion-scoped,
+      and a concurrent modification aborts the whole promotion with 409.
+    tags: [upgrade-tracking]
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Candidate promoted.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ProfileCandidate'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "405":
+        $ref: '../components/responses.yaml#/MethodNotAllowed'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
+      "500":
+        $ref: '../components/responses.yaml#/Internal'

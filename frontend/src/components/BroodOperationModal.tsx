@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { previewBroodOperation, createBroodOperation } from "../api/client";
+import { useQuery } from "@tanstack/react-query";
+import { previewBroodOperation, createBroodOperation, getProvisioningConfig } from "../api/client";
 import { Button } from "./Button";
+import VersionPicker from "./VersionPicker";
 import { broodTargetShape } from "../lib/broodTargets";
 import { parseClearableInt, clampClearableInt } from "../lib/numericInput";
 import { useCatalogItems } from "../hooks/useCatalog";
@@ -34,6 +36,12 @@ export function BroodOperationModal({ targets, onClose, onSubmitted, embedded = 
   const [selectedItemKey, setSelectedItemKey] = useState(""); // "namespace/name"
   const [groovyVars, setGroovyVars] = useState<Record<string, string>>({}); // itemRef variable overrides
 
+  // ---- Upgrade state ----
+  const [upgradeMode, setUpgradeMode] = useState<"release" | "setVersion">("release");
+  const [upgradeLts, setUpgradeLts] = useState(false); // "Latest LTS" checkbox
+  const [upgradePicked, setUpgradePicked] = useState(""); // VersionPicker's exact-version value
+  const [upgradeLine, setUpgradeLine] = useState(""); // line-text-input override
+
   // Distinct target clusters
   const targetClusters = useMemo(
     () => Array.from(new Set(targets.map(t => t.split("/")[0]).filter(Boolean))),
@@ -59,6 +67,15 @@ export function BroodOperationModal({ targets, onClose, onSubmitted, embedded = 
     const seen = new Set<string>();
     return (selectedItem?.variables ?? []).filter(v => (seen.has(v.name) ? false : (seen.add(v.name), true)));
   }, [selectedItem]);
+
+  // Version catalog for the upgrade verb's "Move to version" picker — sourced from
+  // targetClusters[0] (a representative cluster; see the multi-cluster note rendered below).
+  const { data: upgradeProvisioningConfig } = useQuery({
+    queryKey: ["provisioning-config", targetClusters[0]],
+    queryFn: () => getProvisioningConfig(targetClusters[0]),
+    enabled: targetClusters.length >= 1 && upgradeMode === "setVersion",
+  });
+  const upgradeVersions = upgradeProvisioningConfig?.versions ?? [];
 
   // ---- Race-safe preview invalidation ----
   const invalidatePreview = useCallback(() => {
@@ -111,6 +128,11 @@ export function BroodOperationModal({ targets, onClose, onSubmitted, embedded = 
 
   // ---- Action builder (used by both preview & create) ----
   function buildAction(): BroodAction {
+    if (verb === "upgrade") {
+      if (upgradeMode === "release") return { verb, upgrade: {} };
+      const targetVersion = upgradeLts ? "lts" : (upgradeLine.trim() || upgradePicked);
+      return { verb, upgrade: { targetVersion } };
+    }
     if (verb !== "executeGroovy") return { verb };
     if (groovyMode === "script") return { verb, groovy: { script } };
     // itemRef mode. The Preview/Create buttons are disabled until an item is selected,
@@ -218,6 +240,10 @@ export function BroodOperationModal({ targets, onClose, onSubmitted, embedded = 
     setScript("");
     setSelectedItemKey("");
     setGroovyVars({});
+    setUpgradeMode("release");
+    setUpgradeLts(false);
+    setUpgradePicked("");
+    setUpgradeLine("");
     invalidatePreview();
   };
 
@@ -234,6 +260,7 @@ export function BroodOperationModal({ targets, onClose, onSubmitted, embedded = 
             <option value="stop">stop</option>
             <option value="start">start</option>
             <option value="executeGroovy">executeGroovy</option>
+            <option value="upgrade">upgrade</option>
           </select>
         </label>
         <label>Max parallel:
@@ -421,6 +448,86 @@ export function BroodOperationModal({ targets, onClose, onSubmitted, embedded = 
                 </>
               )}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* ---- Upgrade sub-form ---- */}
+      {verb === "upgrade" && (
+        <div className={styles.upgradeBlock} role="region" aria-label="Upgrade configuration">
+          <div className={styles.upgradeModeToggle} role="group" aria-label="Upgrade mode">
+            <button
+              type="button"
+              aria-pressed={upgradeMode === "release"}
+              onClick={() => {
+                if (upgradeMode !== "release") {
+                  setUpgradeMode("release");
+                  invalidatePreview();
+                }
+              }}
+            >
+              Release held upgrade
+            </button>
+            <button
+              type="button"
+              aria-pressed={upgradeMode === "setVersion"}
+              onClick={() => {
+                if (upgradeMode !== "setVersion") {
+                  setUpgradeMode("setVersion");
+                  invalidatePreview();
+                }
+              }}
+            >
+              Move to version
+            </button>
+          </div>
+
+          {upgradeMode === "release" ? (
+            <span className={styles.groovyMuted}>Releases each target's currently held promoted upgrade.</span>
+          ) : (
+            <>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={upgradeLts}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setUpgradeLts(checked);
+                    if (checked) {
+                      setUpgradePicked("");
+                      setUpgradeLine("");
+                    }
+                    invalidatePreview();
+                  }}
+                />{" "}
+                Latest LTS
+              </label>
+
+              <VersionPicker
+                versions={upgradeVersions}
+                value={upgradePicked}
+                onChange={(v) => { setUpgradePicked(v); invalidatePreview(); }}
+                disabled={upgradeLts}
+              />
+
+              <label>
+                or enter a line (e.g. 2.555)
+                <input
+                  type="text"
+                  value={upgradeLine}
+                  disabled={upgradeLts}
+                  onChange={(e) => { setUpgradeLine(e.target.value); invalidatePreview(); }}
+                />
+              </label>
+              <span className={styles.groovyMuted}>Leave blank to match the baseline pin.</span>
+
+              {targetClusters.length > 1 && (
+                <span className={styles.groovyMuted}>
+                  Versions shown are from {targetClusters[0]}'s catalog; the value you pick or enter is resolved
+                  against each target's own profile when the operation runs.
+                </span>
+              )}
+            </>
           )}
         </div>
       )}

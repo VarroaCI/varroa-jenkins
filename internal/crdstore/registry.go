@@ -38,6 +38,7 @@ var registry = map[reflect.Type]kindInfo{
 	reflect.TypeOf(v1alpha1.Group{}):                 {groupGVR, "Group", false},
 	reflect.TypeOf(v1alpha1.Team{}):                  {teamGVR, "Team", false},
 	reflect.TypeOf(v1alpha1.UpdateCenter{}):          {updateCentersGVR, "UpdateCenter", false},
+	reflect.TypeOf(v1alpha1.ProfileCandidate{}):      {profileCandidateGVR, "ProfileCandidate", false},
 }
 
 // clearStatusFields lists, per resource, the status keys a merge patch must
@@ -132,6 +133,7 @@ var (
 	jenkinsVersionProfileGVR = gvr("jenkinsversionprofiles")
 	controllerClassGVR       = gvr("controllerclasses")
 	updateCentersGVR         = gvr("updatecenters")
+	profileCandidateGVR      = gvr("profilecandidates")
 )
 
 func gvr(resource string) schema.GroupVersionResource {

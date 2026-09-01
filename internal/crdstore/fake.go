@@ -210,6 +210,34 @@ func (f *Fake) UpdateObject(_ context.Context, gvr schema.GroupVersionResource, 
 	return clone, nil
 }
 
+// UpdateObjectStatus replaces only the stored object's "status" field,
+// leaving spec/metadata untouched — mirroring the real ClientsetClient's
+// /status subresource semantics, where a plain UpdateObject leaves .status
+// unchanged. Uses the same optimistic-concurrency check as UpdateObject.
+func (f *Fake) UpdateObjectStatus(_ context.Context, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+	if err := f.inject("updatestatus", gvr); err != nil {
+		return nil, err
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	key := nsName(namespace, obj.GetName())
+	stored, ok := f.objects[gvr][key]
+	if !ok {
+		gr := schema.GroupResource{Group: gvr.Group, Resource: gvr.Resource}
+		return nil, apierrors.NewNotFound(gr, obj.GetName())
+	}
+	if obj.GetResourceVersion() != "" && obj.GetResourceVersion() != stored.GetResourceVersion() {
+		gr := schema.GroupResource{Group: gvr.Group, Resource: gvr.Resource}
+		return nil, apierrors.NewConflict(gr, obj.GetName(), fmt.Errorf("stale resourceVersion"))
+	}
+	clone := stored.DeepCopy()
+	clone.Object["status"] = obj.Object["status"]
+	f.objects[gvr][key] = clone
+	return clone, nil
+}
+
 // DeleteObject removes the object. A missing object is not an error.
 func (f *Fake) DeleteObject(_ context.Context, gvr schema.GroupVersionResource, namespace, name string) error {
 	if err := f.inject("delete", gvr); err != nil {
@@ -240,7 +268,13 @@ func (f *Fake) PatchObjectStatus(_ context.Context, gvr schema.GroupVersionResou
 	sp := StatusPatch{Namespace: namespace, Name: name, Status: status}
 	f.statusPatches[gvr] = append(f.statusPatches[gvr], sp)
 
-	// Apply: marshal the status value, unmarshal to map[string]any, set on obj.
+	// Apply as a JSON merge patch (RFC 7386), matching ClientsetClient's real
+	// merge-patch semantics: marshal the status value, unmarshal to
+	// map[string]any, and merge it onto the existing status rather than
+	// replacing the whole status, so omitempty fields the caller didn't set
+	// survive the patch. The merge recurses into nested objects and a null
+	// value deletes its key, as RFC 7386 requires; a non-object value replaces
+	// whatever it lands on, so a list is replaced wholesale rather than merged.
 	key := nsName(namespace, name)
 	obj := f.objects[gvr][key]
 	if obj == nil {
@@ -254,8 +288,32 @@ func (f *Fake) PatchObjectStatus(_ context.Context, gvr schema.GroupVersionResou
 	if err := json.Unmarshal(statusJSON, &statusMap); err != nil {
 		return fmt.Errorf("unmarshal status: %w", err)
 	}
-	obj.Object["status"] = statusMap
+	existing, _ := obj.Object["status"].(map[string]any)
+	if existing == nil {
+		existing = map[string]any{}
+	}
+	mergePatchMap(existing, statusMap)
+	obj.Object["status"] = existing
 	return nil
+}
+
+// mergePatchMap applies patch onto dst per RFC 7386: a null value deletes its
+// key, two objects merge recursively, and any other value replaces what it
+// lands on.
+func mergePatchMap(dst, patch map[string]any) {
+	for k, v := range patch {
+		if v == nil {
+			delete(dst, k)
+			continue
+		}
+		patchChild, patchIsMap := v.(map[string]any)
+		dstChild, dstIsMap := dst[k].(map[string]any)
+		if patchIsMap && dstIsMap {
+			mergePatchMap(dstChild, patchChild)
+			continue
+		}
+		dst[k] = v
+	}
 }
 
 // MetaPatch records one PatchObjectMeta call.

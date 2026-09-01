@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
 // TestPluginConflictActivityEvent exercises the activity-bus publish path for
@@ -408,5 +410,338 @@ func TestSurfaceAndClearPluginConflict(t *testing.T) {
 	}
 	if cond.Reason != "NoConflict" {
 		t.Errorf("expected Reason=NoConflict, got %s", cond.Reason)
+	}
+}
+
+// TestSurfacePluginPinConflictWithNATS mirrors TestSurfacePluginConflictWithNATS
+// for the independent PluginPinConflict signal: edge-triggered event, no
+// duplicate on a repeated True tick, and the ComposedBundle's own condition.
+func TestSurfacePluginPinConflictWithNATS(t *testing.T) {
+	if os.Getenv("NATS_TEST") == "" && os.Getenv("CI") == "" {
+		t.Skip("skipping NATS integration test; set NATS_TEST=1 to run")
+	}
+
+	opts := &server.Options{Port: -1, StoreDir: t.TempDir()}
+	s, err := server.NewServer(opts)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	s.Start()
+	if !s.ReadyForConnections(5 * time.Second) {
+		t.Fatal("server not ready")
+	}
+	defer s.Shutdown()
+
+	conn, err := bus.Connect(s.ClientURL())
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer conn.Close()
+
+	pub := activity.NewPublisher(bus.DefaultCluster, conn)
+	client := newTestClient()
+	bundleIdent := bundleIdentity{Name: "pin-bundle", Namespace: "test-ns"}
+	crdstore.MustSeed(client.store, &v1alpha1.ComposedBundle{
+		ObjectMeta: metav1.ObjectMeta{Name: bundleIdent.Name, Namespace: bundleIdent.Namespace},
+	})
+	rec := newTestReconciler(client)
+	rec.SetActivityPublisher(pub)
+
+	activitySubj := bus.ActivitySubject(bus.DefaultCluster, "test-ns", "test-ctrl")
+	received := make(chan activity.Event, 5)
+	sub, err := conn.SubscribeData(activitySubj, func(data []byte) {
+		var e activity.Event
+		if err := json.Unmarshal(data, &e); err != nil {
+			t.Logf("unmarshal event: %v", err)
+			return
+		}
+		received <- e
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer sub.Unsubscribe()
+
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-ctrl", Namespace: "test-ns"},
+	}
+	cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+		Type:   v1alpha1.ConditionPluginPinConflict,
+		Status: metav1.ConditionFalse,
+		Reason: "NoConflict",
+	})
+
+	ctx := context.Background()
+	conflictMsg := "plugin pin conflict: git (bundle pins 1.0.0, set has 2.0.0)"
+
+	rec.surfacePluginPinConflict(ctx, cr, bundleIdent, conflictMsg)
+
+	cond := findCondition(cr.Status.Conditions, v1alpha1.ConditionPluginPinConflict)
+	if cond == nil {
+		t.Fatal("surfacePluginPinConflict did not set ConditionPluginPinConflict")
+	}
+	if cond.Status != metav1.ConditionTrue {
+		t.Fatalf("expected ConditionPluginPinConflict=True, got %s", cond.Status)
+	}
+
+	select {
+	case e := <-received:
+		if e.Type != "pluginPinConflict.detected" {
+			t.Errorf("expected Type=pluginPinConflict.detected, got %q", e.Type)
+		}
+		if e.Severity != "warning" {
+			t.Errorf("expected Severity=warning, got %q", e.Severity)
+		}
+		if e.Message != conflictMsg {
+			t.Errorf("expected Message=%q, got %q", conflictMsg, e.Message)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for pluginPinConflict.detected event (False→True edge)")
+	}
+
+	select {
+	case <-received:
+		t.Error("unexpected duplicate event after False→True edge")
+	default:
+	}
+
+	// Second call with the condition already True: no duplicate event.
+	rec.surfacePluginPinConflict(ctx, cr, bundleIdent, "another conflict")
+	select {
+	case <-received:
+		t.Error("unexpected duplicate event on repeated True tick")
+	default:
+	}
+
+	// Verify the ComposedBundle's own condition was patched to True.
+	cb, err := crdstore.Get[v1alpha1.ComposedBundle](ctx, client.store, bundleIdent.Name, bundleIdent.Namespace)
+	if err != nil {
+		t.Fatalf("get composed bundle: %v", err)
+	}
+	var bundleCond *v1alpha1.TemplateCatalogCondition
+	for i := range cb.Status.Conditions {
+		if cb.Status.Conditions[i].Type == string(v1alpha1.ConditionPluginPinConflict) {
+			bundleCond = &cb.Status.Conditions[i]
+		}
+	}
+	if bundleCond == nil {
+		t.Fatal("expected ComposedBundle PluginPinConflict condition to be set")
+	}
+	if bundleCond.Status != metav1.ConditionTrue {
+		t.Fatalf("expected ComposedBundle PluginPinConflict=True, got %s", bundleCond.Status)
+	}
+	if !strings.Contains(bundleCond.Message, "test-ctrl") {
+		t.Errorf("expected ComposedBundle condition message to name the controller, got %q", bundleCond.Message)
+	}
+
+	// --- clearPluginPinConflict clears both sides. ---
+	rec.clearPluginPinConflict(ctx, cr, bundleIdent)
+	cond = findCondition(cr.Status.Conditions, v1alpha1.ConditionPluginPinConflict)
+	if cond == nil || cond.Status != metav1.ConditionFalse {
+		t.Fatalf("expected ConditionPluginPinConflict=False after clear, got %+v", cond)
+	}
+	cb, err = crdstore.Get[v1alpha1.ComposedBundle](ctx, client.store, bundleIdent.Name, bundleIdent.Namespace)
+	if err != nil {
+		t.Fatalf("get composed bundle: %v", err)
+	}
+	for i := range cb.Status.Conditions {
+		if cb.Status.Conditions[i].Type == string(v1alpha1.ConditionPluginPinConflict) {
+			if cb.Status.Conditions[i].Status != metav1.ConditionFalse {
+				t.Fatalf("expected ComposedBundle PluginPinConflict=False after clear, got %s", cb.Status.Conditions[i].Status)
+			}
+		}
+	}
+}
+
+// TestSurfaceAndClearPluginPinConflict exercises the detection-only methods
+// directly, including the no-panic case with a nil activityPublisher — the
+// common case in non-NATS tests.
+func TestSurfaceAndClearPluginPinConflict(t *testing.T) {
+	client := newTestClient()
+	bundleIdent := bundleIdentity{Name: "pin-bundle-2", Namespace: "test-ns"}
+	crdstore.MustSeed(client.store, &v1alpha1.ComposedBundle{
+		ObjectMeta: metav1.ObjectMeta{Name: bundleIdent.Name, Namespace: bundleIdent.Namespace},
+	})
+	rec := newTestReconciler(client)
+	// rec.activityPublisher is nil — surfacePluginPinConflict must not panic.
+
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-ctrl", Namespace: "test-ns"},
+	}
+	ctx := context.Background()
+
+	conflictMsg := "plugin pin conflict: git (bundle pins 1.0.0, set has 2.0.0)"
+	rec.surfacePluginPinConflict(ctx, cr, bundleIdent, conflictMsg)
+
+	cond := findCondition(cr.Status.Conditions, v1alpha1.ConditionPluginPinConflict)
+	if cond == nil {
+		t.Fatal("surfacePluginPinConflict did not set ConditionPluginPinConflict")
+	}
+	if cond.Status != metav1.ConditionTrue {
+		t.Fatalf("expected ConditionPluginPinConflict=True, got %s", cond.Status)
+	}
+	if cond.Reason != v1alpha1.ReasonPluginPinConflict {
+		t.Errorf("expected Reason=%s, got %s", v1alpha1.ReasonPluginPinConflict, cond.Reason)
+	}
+	if cond.Message != conflictMsg {
+		t.Errorf("expected Message=%q, got %q", conflictMsg, cond.Message)
+	}
+
+	// Must NOT set ReconcileBlocked (advisory only).
+	blocked := findCondition(cr.Status.Conditions, v1alpha1.ConditionReconcileBlocked)
+	if blocked != nil && blocked.Status == metav1.ConditionTrue {
+		t.Error("surfacePluginPinConflict must not set ConditionReconcileBlocked (advisory only)")
+	}
+	// Must NOT alias/overwrite the existing ConditionPluginConflict slot.
+	other := findCondition(cr.Status.Conditions, v1alpha1.ConditionPluginConflict)
+	if other != nil {
+		t.Error("surfacePluginPinConflict must not touch ConditionPluginConflict")
+	}
+
+	rec.clearPluginPinConflict(ctx, cr, bundleIdent)
+	cond = findCondition(cr.Status.Conditions, v1alpha1.ConditionPluginPinConflict)
+	if cond == nil {
+		t.Fatal("clearPluginPinConflict removed ConditionPluginPinConflict instead of clearing it")
+	}
+	if cond.Status != metav1.ConditionFalse {
+		t.Fatalf("expected ConditionPluginPinConflict=False, got %s", cond.Status)
+	}
+	if cond.Reason != "NoConflict" {
+		t.Errorf("expected Reason=NoConflict, got %s", cond.Reason)
+	}
+}
+
+// TestPluginPinConflictMultipleControllersLastWriterWins covers the shared
+// ComposedBundle scenario: two controllers reconciling the same bundle with
+// differing results leave the bundle's condition reflecting only the most
+// recently reconciling controller.
+func TestPluginPinConflictMultipleControllersLastWriterWins(t *testing.T) {
+	client := newTestClient()
+	bundleIdent := bundleIdentity{Name: "shared-bundle", Namespace: "test-ns"}
+	crdstore.MustSeed(client.store, &v1alpha1.ComposedBundle{
+		ObjectMeta: metav1.ObjectMeta{Name: bundleIdent.Name, Namespace: bundleIdent.Namespace},
+	})
+	rec := newTestReconciler(client)
+	ctx := context.Background()
+
+	crA := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}}
+	crB := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "ctrl-b", Namespace: "test-ns"}}
+
+	rec.surfacePluginPinConflict(ctx, crA, bundleIdent, "plugin pin conflict: git (bundle pins 1.0.0, set has 2.0.0)")
+	rec.clearPluginPinConflict(ctx, crB, bundleIdent)
+
+	cb, err := crdstore.Get[v1alpha1.ComposedBundle](ctx, client.store, bundleIdent.Name, bundleIdent.Namespace)
+	if err != nil {
+		t.Fatalf("get composed bundle: %v", err)
+	}
+	var bundleCond *v1alpha1.TemplateCatalogCondition
+	for i := range cb.Status.Conditions {
+		if cb.Status.Conditions[i].Type == string(v1alpha1.ConditionPluginPinConflict) {
+			bundleCond = &cb.Status.Conditions[i]
+		}
+	}
+	if bundleCond == nil {
+		t.Fatal("expected ComposedBundle PluginPinConflict condition to be set")
+	}
+	// ctrl-b reconciled last (clear) — its result wins, not an aggregate.
+	if bundleCond.Status != metav1.ConditionFalse {
+		t.Fatalf("expected the last writer's (ctrl-b, no conflict) result to win, got %s/%s", bundleCond.Status, bundleCond.Message)
+	}
+}
+
+// TestPluginPinConflictResolveThenRecur covers the spec scenario "Conflict
+// resolves and later recurs": a True→False→True condition cycle emits exactly
+// one new event for the recurrence, with the earlier resolved occurrence not
+// suppressing it.
+func TestPluginPinConflictResolveThenRecur(t *testing.T) {
+	if os.Getenv("NATS_TEST") == "" && os.Getenv("CI") == "" {
+		t.Skip("skipping NATS integration test; set NATS_TEST=1 to run")
+	}
+
+	opts := &server.Options{Port: -1, StoreDir: t.TempDir()}
+	s, err := server.NewServer(opts)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	s.Start()
+	if !s.ReadyForConnections(5 * time.Second) {
+		t.Fatal("server not ready")
+	}
+	defer s.Shutdown()
+
+	conn, err := bus.Connect(s.ClientURL())
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer conn.Close()
+
+	pub := activity.NewPublisher(bus.DefaultCluster, conn)
+	client := newTestClient()
+	bundleIdent := bundleIdentity{Name: "recur-bundle", Namespace: "test-ns"}
+	crdstore.MustSeed(client.store, &v1alpha1.ComposedBundle{
+		ObjectMeta: metav1.ObjectMeta{Name: bundleIdent.Name, Namespace: bundleIdent.Namespace},
+	})
+	rec := newTestReconciler(client)
+	rec.SetActivityPublisher(pub)
+
+	activitySubj := bus.ActivitySubject(bus.DefaultCluster, "test-ns", "test-ctrl")
+	received := make(chan activity.Event, 5)
+	sub, err := conn.SubscribeData(activitySubj, func(data []byte) {
+		var e activity.Event
+		if err := json.Unmarshal(data, &e); err != nil {
+			t.Logf("unmarshal event: %v", err)
+			return
+		}
+		received <- e
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer sub.Unsubscribe()
+
+	drainExtra := func() int {
+		n := 0
+		for {
+			select {
+			case <-received:
+				n++
+			default:
+				return n
+			}
+		}
+	}
+
+	cr := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "test-ctrl", Namespace: "test-ns"}}
+	ctx := context.Background()
+
+	// First episode: absent → True emits.
+	rec.surfacePluginPinConflict(ctx, cr, bundleIdent, "episode one")
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for first episode event")
+	}
+	if n := drainExtra(); n > 0 {
+		t.Errorf("expected 0 extra events after first episode, got %d", n)
+	}
+
+	// Resolves: True → False, no event.
+	rec.clearPluginPinConflict(ctx, cr, bundleIdent)
+	if n := drainExtra(); n > 0 {
+		t.Errorf("expected 0 events on the resolving tick, got %d", n)
+	}
+
+	// Recurs: False → True emits exactly one new event.
+	rec.surfacePluginPinConflict(ctx, cr, bundleIdent, "episode two")
+	select {
+	case e := <-received:
+		if e.Message != "episode two" {
+			t.Errorf("expected recurrence event message %q, got %q", "episode two", e.Message)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for recurrence event")
+	}
+	if n := drainExtra(); n > 0 {
+		t.Errorf("expected 0 extra events after recurrence, got %d", n)
 	}
 }

@@ -7,6 +7,7 @@ import { BroodOperationModal } from "./BroodOperationModal";
 const mockPreviewBroodOperation = vi.fn();
 const mockCreateBroodOperation = vi.fn();
 const mockListCatalogItems = vi.fn();
+const mockGetProvisioningConfig = vi.fn();
 vi.mock("../api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/client")>();
   return {
@@ -14,6 +15,7 @@ vi.mock("../api/client", async (importOriginal) => {
     previewBroodOperation: (...args: unknown[]) => mockPreviewBroodOperation(...args),
     createBroodOperation: (...args: unknown[]) => mockCreateBroodOperation(...args),
     listCatalogItems: (...args: unknown[]) => mockListCatalogItems(...args),
+    getProvisioningConfig: (...args: unknown[]) => mockGetProvisioningConfig(...args),
   };
 });
 
@@ -31,6 +33,12 @@ describe("BroodOperationModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockListCatalogItems.mockResolvedValue({ items: [] });
+    mockGetProvisioningConfig.mockResolvedValue({
+      versions: [
+        { version: "2.555", channel: "lts", name: "2.555" },
+        { version: "2.570", channel: "weekly", name: "2.570" },
+      ],
+    });
   });
 
   it("previews with bare names and the shared namespace (team tenancy shape)", async () => {
@@ -750,6 +758,112 @@ describe("BroodOperationModal", () => {
 
     // Edit the script → preview should clear
     await user.type(textarea, " more");
+    expect(screen.queryByText("ctrl-a")).not.toBeInTheDocument();
+  });
+
+  // ---- upgrade tests ----
+
+  it("shows upgrade as a selectable verb option", async () => {
+    renderModal();
+    const select = screen.getByLabelText(/Verb:/);
+    expect(select).toContainHTML("upgrade");
+  });
+
+  it("release mode (default) sends an empty upgrade action", async () => {
+    const user = userEvent.setup();
+    mockPreviewBroodOperation.mockResolvedValue({ clusters: [{ cluster: "core", ok: true, targets: [] }] });
+    renderModal();
+
+    await user.selectOptions(screen.getByLabelText(/Verb:/), "upgrade");
+    expect(screen.getByText("Releases each target's currently held promoted upgrade.")).toBeInTheDocument();
+    await user.click(screen.getByText("Preview"));
+
+    const body = mockPreviewBroodOperation.mock.calls[0][0];
+    expect(body.spec.action).toEqual({ verb: "upgrade", upgrade: {} });
+  });
+
+  it("set-version mode with an exact pick sends that version as targetVersion", async () => {
+    const user = userEvent.setup();
+    mockPreviewBroodOperation.mockResolvedValue({ clusters: [{ cluster: "core", ok: true, targets: [] }] });
+    renderModal();
+
+    await user.selectOptions(screen.getByLabelText(/Verb:/), "upgrade");
+    await user.click(screen.getByText("Move to version"));
+    const opt = await screen.findByText("2.555");
+    await user.click(opt);
+    await user.click(screen.getByText("Preview"));
+
+    const body = mockPreviewBroodOperation.mock.calls[0][0];
+    expect(body.spec.action).toEqual({ verb: "upgrade", upgrade: { targetVersion: "2.555" } });
+  });
+
+  it("set-version mode with a line override sends the line verbatim", async () => {
+    const user = userEvent.setup();
+    mockPreviewBroodOperation.mockResolvedValue({ clusters: [{ cluster: "core", ok: true, targets: [] }] });
+    renderModal();
+
+    await user.selectOptions(screen.getByLabelText(/Verb:/), "upgrade");
+    await user.click(screen.getByText("Move to version"));
+    const lineInput = screen.getByLabelText(/or enter a line/);
+    await user.type(lineInput, "2.555");
+    await user.click(screen.getByText("Preview"));
+
+    const body = mockPreviewBroodOperation.mock.calls[0][0];
+    expect(body.spec.action).toEqual({ verb: "upgrade", upgrade: { targetVersion: "2.555" } });
+  });
+
+  it("set-version mode with the Latest LTS checkbox sends \"lts\" and clears the picker/line", async () => {
+    const user = userEvent.setup();
+    mockPreviewBroodOperation.mockResolvedValue({ clusters: [{ cluster: "core", ok: true, targets: [] }] });
+    renderModal();
+
+    await user.selectOptions(screen.getByLabelText(/Verb:/), "upgrade");
+    await user.click(screen.getByText("Move to version"));
+    await user.click(screen.getByLabelText("Latest LTS"));
+    await user.click(screen.getByText("Preview"));
+
+    const body = mockPreviewBroodOperation.mock.calls[0][0];
+    expect(body.spec.action).toEqual({ verb: "upgrade", upgrade: { targetVersion: "lts" } });
+  });
+
+  it("set-version mode with nothing picked sends the blank baseline sentinel", async () => {
+    const user = userEvent.setup();
+    mockPreviewBroodOperation.mockResolvedValue({ clusters: [{ cluster: "core", ok: true, targets: [] }] });
+    renderModal();
+
+    await user.selectOptions(screen.getByLabelText(/Verb:/), "upgrade");
+    await user.click(screen.getByText("Move to version"));
+    await user.click(screen.getByText("Preview"));
+
+    const body = mockPreviewBroodOperation.mock.calls[0][0];
+    expect(body.spec.action).toEqual({ verb: "upgrade", upgrade: { targetVersion: "" } });
+  });
+
+  it("keeps the picker and line input enabled and shows the representative-cluster note across multiple target clusters", async () => {
+    const user = userEvent.setup();
+    renderModal({ targets: ["core/ns/a", "edge/ns/b"] });
+
+    await user.selectOptions(screen.getByLabelText(/Verb:/), "upgrade");
+    await user.click(screen.getByText("Move to version"));
+
+    expect(await screen.findByText(/core's catalog/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/or enter a line/)).not.toBeDisabled();
+  });
+
+  it("invalidates a shown preview when an upgrade control changes", async () => {
+    const user = userEvent.setup();
+    mockPreviewBroodOperation.mockResolvedValueOnce({
+      clusters: [{ cluster: "core", ok: true, targets: [
+        { namespace: "default", name: "ctrl-a", wave: 0, applicable: true },
+      ]}],
+    });
+    renderModal();
+
+    await user.selectOptions(screen.getByLabelText(/Verb:/), "upgrade");
+    await user.click(screen.getByText("Preview"));
+    expect(await screen.findByText("ctrl-a")).toBeInTheDocument();
+
+    await user.click(screen.getByText("Move to version"));
     expect(screen.queryByText("ctrl-a")).not.toBeInTheDocument();
   });
 });

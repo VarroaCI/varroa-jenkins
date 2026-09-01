@@ -189,6 +189,10 @@ var routeManifest = []route{
 	// Fleet plugin inventory
 	{Method: "GET", Path: "/api/v1/fleet/plugins"},
 	{Method: "GET", Path: "/api/v1/fleet/plugins/{name}"},
+	// Upgrade tracking
+	{Method: "GET", Path: "/api/v1/version-candidates"},
+	{Method: "GET", Path: "/api/v1/version-candidates/{name}"},
+	{Method: "POST", Path: "/api/v1/version-candidates/{name}/promote"},
 }
 
 // contractCase represents one golden exchange to validate against the spec.

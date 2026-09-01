@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -11,8 +12,29 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
+	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
+
+// sourceOverride pins the expected activity Source for mutating tools whose
+// underlying shared business logic stamps Source itself rather than
+// delegating to emitActivity's "mcp" default. promote_version_candidate calls
+// api.PromoteVersionCandidate — shared with the HTTP promote handler — which
+// stamps Source: "operator" per
+// specs/profile-candidate-promotion/spec.md: the event describes the
+// operator-owned CRD state transition, with the actor recorded in Message
+// instead, so an HTTP-triggered and an MCP-triggered promotion produce
+// byte-identical events.
+var sourceOverride = map[string]string{
+	"promote_version_candidate": "operator",
+}
+
+func expectedSourceFor(name string) string {
+	if s, ok := sourceOverride[name]; ok {
+		return s
+	}
+	return "mcp"
+}
 
 // guardConfigBrood implements the five ConfigBrood methods the mutating tools
 // reach. It embeds the interface so the other 28 need no body; an unexpected
@@ -62,12 +84,14 @@ func guardEmitDeps(t *testing.T, sink activity.EventSink) *api.Dependencies {
 	stub := newGuardStub()
 	seedGuardObjects(t, stub)
 	return &api.Dependencies{
-		Client:            stub,
-		Store:             stub,
-		Authorizer:        guardAuthorizer(),
-		Brood:             &recordingBrood{},
-		ConfigBrood:       &guardConfigBrood{},
-		Reconciler:        &guardReconciler{},
+		Client:      stub,
+		Store:       stub,
+		Authorizer:  guardAuthorizer(),
+		Brood:       &recordingBrood{},
+		ConfigBrood: &guardConfigBrood{},
+		Reconciler:  &guardReconciler{},
+		VersionProfileReconciler: controller.NewJenkinsVersionProfileReconciler(
+			stub, stub, "varroa-system", slog.New(slog.DiscardHandler)),
 		ActivityPublisher: sink,
 		OperatorNamespace: "varroa-system",
 	}
@@ -89,6 +113,36 @@ func seedGuardObjects(t *testing.T, stub *guardStub) {
 		&v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}},
 		&v1alpha1.VarroaRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: name}},
 		&v1alpha1.User{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}},
+	)
+
+	// promote_version_candidate additionally needs a Ready ProfileCandidate,
+	// its target JenkinsVersionProfile, and both ConfigMaps the promotion
+	// sequence reads/overwrites — none of which any other guarded tool touches.
+	const pluginSetName, closureName = "obj-pluginset", "obj-closure"
+	stub.configMaps[pluginSetName] = map[string]string{
+		"plugins.yaml": "core:\n  - \"2.500.1\"\nplugins:\n  - artifactId: git\n    version: \"5.0.0\"\n",
+	}
+	stub.configMaps[closureName] = map[string]string{
+		"plugins.yaml": "core:\n  - \"2.500.2\"\nplugins:\n  - artifactId: git\n    version: \"5.1.0\"\n",
+	}
+	crdstore.MustSeed(stub.Fake,
+		&v1alpha1.JenkinsVersionProfile{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: v1alpha1.JenkinsVersionProfileSpec{
+				ResolveVersion: "2.500.1",
+				PluginSetRef:   &v1alpha1.ConfigMapRef{Name: pluginSetName},
+			},
+		},
+		&v1alpha1.ProfileCandidate{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: v1alpha1.ProfileCandidateSpec{
+				ProfileRef:        name,
+				ObservedVersion:   "2.500.1",
+				ResolveVersion:    "2.500.2",
+				ClosureContentRef: closureName,
+			},
+			Status: v1alpha1.ProfileCandidateStatus{Phase: v1alpha1.ProfileCandidatePhaseReady},
+		},
 	)
 }
 
@@ -146,6 +200,8 @@ func guardArgsFor(name string) map[string]interface{} {
 		// Groups (cluster-scoped, admin-only)
 		"create_group": {"name": obj},
 		"delete_group": {"name": obj},
+		// ProfileCandidates (cluster-scoped, direct store)
+		"promote_version_candidate": {"name": obj},
 	}
 	args, ok := byName[name]
 	if !ok {
@@ -191,8 +247,8 @@ func TestEveryMutatingToolEmitsActivity(t *testing.T) {
 			if e.Message == "" {
 				t.Error("event Message is empty")
 			}
-			if e.Source != "mcp" {
-				t.Errorf("Source = %q, want mcp", e.Source)
+			if want := expectedSourceFor(name); e.Source != want {
+				t.Errorf("Source = %q, want %s", e.Source, want)
 			}
 			if e.Actor == "" {
 				t.Error("event Actor is empty")

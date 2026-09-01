@@ -252,11 +252,19 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		if uvars == nil {
 			uvars = []string{}
 		}
+		pinPreflight := preview.PinPreflight
+		if pinPreflight.Conflicts == nil {
+			pinPreflight.Conflicts = []bus.PinConflict{}
+		}
+		if pinPreflight.Missing == nil {
+			pinPreflight.Missing = []bus.MissingPlugin{}
+		}
 		return resultJSON(map[string]interface{}{
 			"valid":               valid,
 			"errors":              errs,
 			"warnings":            warns,
 			"unresolvedVariables": uvars,
+			"pinPreflight":        pinPreflight,
 		})
 	})
 
@@ -351,6 +359,12 @@ func normalizeComposePreview(p *bus.BundleComposePreview) {
 	}
 	if p.Errors == nil {
 		p.Errors = []string{}
+	}
+	if p.PinPreflight.Conflicts == nil {
+		p.PinPreflight.Conflicts = []bus.PinConflict{}
+	}
+	if p.PinPreflight.Missing == nil {
+		p.PinPreflight.Missing = []bus.MissingPlugin{}
 	}
 }
 

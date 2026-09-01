@@ -32,6 +32,13 @@ type Backend interface {
 	// UpdateObject updates an object. The caller must set resourceVersion on obj.
 	UpdateObject(ctx context.Context, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) (*unstructured.Unstructured, error)
 
+	// UpdateObjectStatus replaces the /status subresource. The caller must set
+	// resourceVersion on obj; a concurrent write since that resourceVersion was
+	// read surfaces as apierrors.IsConflict. Required for any kind registered
+	// with `subresources: {status: {}}`, whose .status a plain UpdateObject
+	// silently leaves unchanged.
+	UpdateObjectStatus(ctx context.Context, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) (*unstructured.Unstructured, error)
+
 	// DeleteObject deletes an object. A missing object is not an error.
 	DeleteObject(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) error
 
@@ -136,6 +143,30 @@ func Update[T any](ctx context.Context, b Backend, obj *T) error {
 		return fmt.Errorf("update %s: %w", info.gvr.Resource, err)
 	}
 	mergeCreateResult(obj, created)
+	return nil
+}
+
+// UpdateStatus persists a typed CRD's Status via the /status subresource,
+// resourceVersion-scoped: unlike Update, obj must already carry a valid
+// resourceVersion (as returned by Get) — there is no live-fetch fallback,
+// since every caller needing this on a status-subresource kind is racing a
+// concurrent writer and wants a stale resourceVersion to surface as a
+// conflict rather than be silently papered over.
+func UpdateStatus[T any](ctx context.Context, b Backend, obj *T) error {
+	info, err := gvrInfo[T]()
+	if err != nil {
+		return err
+	}
+	u, err := toUnstructured(obj, info)
+	if err != nil {
+		return err
+	}
+	ns := namespaceFromObj(u, info)
+	updated, err := b.UpdateObjectStatus(ctx, info.gvr, ns, u)
+	if err != nil {
+		return fmt.Errorf("update status %s: %w", info.gvr.Resource, err)
+	}
+	mergeCreateResult(obj, updated)
 	return nil
 }
 

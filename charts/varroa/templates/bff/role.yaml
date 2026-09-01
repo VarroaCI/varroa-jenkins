@@ -19,10 +19,13 @@ rules:
   # namespace, and the BFF reads them by (status.contentRef, OPERATOR_NAMESPACE)
   # — which is fixed to .Release.Namespace. Namespaced on purpose: a ClusterRole
   # rule would let the internet-facing BFF read every ConfigMap in the cluster
-  # to satisfy a read it only ever performs here.
+  # to satisfy a read it only ever performs here. Promotion's synchronous
+  # re-materialization step always attempts a create first on the derived
+  # pluginset ConfigMap, falling back to get+update only on AlreadyExists, so
+  # create is required even when the ConfigMap already exists.
   - apiGroups: [""]
     resources: ["configmaps"]
-    verbs: ["get"]
+    verbs: ["get", "update", "create"]
   {{- if .Values.managedNamespaces }}
   # Scoped mode: the cluster-wide pod-log/pod-delete/quota rules are gated off the BFF
   # ClusterRole, so controllers living in the release namespace need them here.

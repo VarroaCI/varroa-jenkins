@@ -77,6 +77,26 @@ spec:
                           clusters have must not change behaviour by its absence.
                         type: boolean
                     type: object
+                  upgrade:
+                    description: |-
+                      Upgrade governs the upgrade verb, which releases or bulk-moves targets'
+                      Jenkins version.
+                    properties:
+                      allowedNamespaces:
+                        description: |-
+                          AllowedNamespaces restricts which namespaces may host an upgrade
+                          BroodOperation. It is matched against the BroodOperation's OWN
+                          namespace, not its targets'.
+
+                          Empty means every namespace, when Enabled is not false.
+                        items:
+                          type: string
+                        type: array
+                      enabled:
+                        description: Enabled turns the verb on or off cluster-wide.
+                          Nil means enabled.
+                        type: boolean
+                    type: object
                 type: object
               commandDeadlineSec:
                 description: CommandDeadlineSec bounds each mite command (desired-state
@@ -220,6 +240,17 @@ spec:
                 type: string
               storageSizeGB:
                 type: integer
+              upgradePolicy:
+                description: |-
+                  UpgradePolicy governs whether a profile-driven version roll (a
+                  JenkinsVersionProfile.Spec.ResolveVersion advance) may proceed
+                  automatically. Empty/"auto" means proceed automatically; "manual" holds
+                  the roll until a human intervenes. It does not affect resourceOverlay-
+                  governed image changes or the underlying core-compat gate.
+                enum:
+                - auto
+                - manual
+                type: string
             type: object
           status:
             description: ProvisioningDefaultsStatus defines the observed state.

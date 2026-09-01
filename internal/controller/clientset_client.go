@@ -1801,6 +1801,41 @@ func (c *ClientsetClient) GetConfigMap(ctx context.Context, name, namespace stri
 	return cm.Data, nil
 }
 
+// RemoveConfigMapLabel deletes labelKey from a ConfigMap's labels via a
+// read-modify-write, leaving Data and every other label untouched. A no-op
+// success when the ConfigMap does not exist or does not carry the label.
+func (c *ClientsetClient) RemoveConfigMapLabel(ctx context.Context, name, namespace, labelKey string) error {
+	cm, err := c.clientset.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("get configmap %s/%s: %w", namespace, name, err)
+	}
+	if _, ok := cm.Labels[labelKey]; !ok {
+		return nil
+	}
+	delete(cm.Labels, labelKey)
+	if _, err := c.clientset.CoreV1().ConfigMaps(namespace).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("update configmap %s/%s: %w", namespace, name, err)
+	}
+	return nil
+}
+
+// UpdateConfigMapData replaces a ConfigMap's Data via a read-modify-write,
+// leaving Labels, Annotations, and OwnerReferences untouched.
+func (c *ClientsetClient) UpdateConfigMapData(ctx context.Context, name, namespace string, data map[string]string) error {
+	cm, err := c.clientset.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("get configmap %s/%s: %w", namespace, name, err)
+	}
+	cm.Data = data
+	if _, err := c.clientset.CoreV1().ConfigMaps(namespace).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("update configmap %s/%s: %w", namespace, name, err)
+	}
+	return nil
+}
+
 // GetLiveResource fetches a live Kubernetes resource by its GVR, name, and
 // namespace. Returns (nil, nil) when the resource does not exist. This is
 // used by the BFF preview endpoint to fetch the current live object.
@@ -3792,6 +3827,89 @@ func (c *ClientsetClient) GetControllerClassCRD(ctx context.Context, name string
 // owner reference set on its metadata.
 func (c *ClientsetClient) CreateOrUpdateConfigMapWithOwner(ctx context.Context, name, namespace string, data map[string]string, owner metav1.OwnerReference) error {
 	return c.CreateOrUpdateConfigMap(ctx, name, namespace, data, owner)
+}
+
+// ErrConfigMapNotOwned is returned by CreateOrUpdateOwnedConfigMap when a live
+// ConfigMap of that name exists (or, mid-retry, is found to exist) without
+// every label the caller intended to write.
+var ErrConfigMapNotOwned = errors.New("controller: configmap is owned by another writer")
+
+// CreateOrUpdateOwnedConfigMap creates a ConfigMap, or updates one only when a
+// live object of that name already carries every entry in labels. It exists
+// for callers (VersionProfileSeedReconciler) that must never overwrite a
+// same-named ConfigMap they do not own, mirroring crdstore.ApplyOwned's
+// contract for CRDs, which a plain ConfigMap cannot use directly since it is
+// not crdstore-registered.
+//
+// Semantics: Get; not found -> Create with labels; found and labels absent or
+// mismatched -> ErrConfigMapNotOwned without writing; found and owned ->
+// resourceVersion-scoped Update. A Conflict from that Update triggers one
+// bounded retry that re-Gets and re-checks ownership rather than blindly
+// retrying the write, so a concurrent writer that took over the object
+// (clearing its ownership label) is discovered rather than clobbered.
+func (c *ClientsetClient) CreateOrUpdateOwnedConfigMap(ctx context.Context, name, namespace string, data map[string]string, labels map[string]string) error {
+	const maxAttempts = 2
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		existing, getErr := c.clientset.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(getErr) {
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
+				Data:       data,
+			}
+			_, createErr := c.clientset.CoreV1().ConfigMaps(namespace).Create(ctx, cm, metav1.CreateOptions{})
+			if createErr == nil {
+				return nil
+			}
+			if apierrors.IsAlreadyExists(createErr) {
+				// Someone created it between the Get and the Create. Loop back
+				// so the ownership check runs against what is really there,
+				// rather than replacing it sight unseen.
+				continue
+			}
+			return fmt.Errorf("create configmap %s/%s: %w", namespace, name, createErr)
+		}
+		if getErr != nil {
+			return fmt.Errorf("get configmap %s/%s: %w", namespace, name, getErr)
+		}
+		if !configMapLabelsMatch(existing.Labels, labels) {
+			return fmt.Errorf("configmap %s/%s: %w", namespace, name, ErrConfigMapNotOwned)
+		}
+		if reflect.DeepEqual(existing.Data, data) {
+			// Already owned and byte-identical: skip the write. Every desired
+			// label is already present (configMapLabelsMatch above), so an
+			// Update here would change nothing.
+			return nil
+		}
+		updated := existing.DeepCopy()
+		updated.Data = data
+		if updated.Labels == nil {
+			updated.Labels = make(map[string]string, len(labels))
+		}
+		for k, v := range labels {
+			updated.Labels[k] = v
+		}
+		_, updErr := c.clientset.CoreV1().ConfigMaps(namespace).Update(ctx, updated, metav1.UpdateOptions{})
+		if updErr == nil {
+			return nil
+		}
+		if apierrors.IsConflict(updErr) {
+			continue
+		}
+		return fmt.Errorf("update configmap %s/%s: %w", namespace, name, updErr)
+	}
+	return fmt.Errorf("apply configmap %s/%s: exhausted retries", namespace, name)
+}
+
+// configMapLabelsMatch reports whether every key in want is present on live
+// with an equal value — the ownership check CreateOrUpdateOwnedConfigMap
+// applies before writing over an existing ConfigMap.
+func configMapLabelsMatch(live, want map[string]string) bool {
+	for k, v := range want {
+		if live[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 // PatchJenkinsVersionProfileStatus patches the status subresource of a

@@ -113,6 +113,18 @@ spec:
                         - message: exactly one of script or itemRef must be set
                           rule: '(has(self.script) ? 1 : 0) + (has(self.itemRef) ?
                             1 : 0) == 1'
+                      upgrade:
+                        description: |-
+                          Upgrade carries the target version for verb=upgrade. Required iff Verb ==
+                          upgrade; must be absent for every other verb.
+                        properties:
+                          targetVersion:
+                            description: |-
+                              TargetVersion is the Jenkins version to move targets to. Absent means
+                              release the promoted revision each target's version-roll gate is
+                              already holding, rather than moving to a new version.
+                            type: string
+                        type: object
                       verb:
                         allOf:
                         - enum:
@@ -122,6 +134,7 @@ spec:
                           - stop
                           - start
                           - executeGroovy
+                          - upgrade
                         - enum:
                           - restart
                           - reprovision
@@ -129,6 +142,7 @@ spec:
                           - stop
                           - start
                           - executeGroovy
+                          - upgrade
                         description: Verb is the operation to perform.
                         type: string
                     required:
@@ -137,6 +151,8 @@ spec:
                     x-kubernetes-validations:
                     - message: groovy is required iff verb is executeGroovy
                       rule: 'self.verb == ''executeGroovy'' ? has(self.groovy) : !has(self.groovy)'
+                    - message: upgrade is required iff verb is upgrade
+                      rule: 'self.verb == ''upgrade'' ? has(self.upgrade) : !has(self.upgrade)'
                   clusters:
                     description: Clusters is the list of clusters to target.
                     items:

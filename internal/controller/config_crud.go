@@ -14,6 +14,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/profileview"
 )
@@ -1186,6 +1187,24 @@ func (c *ConfigCRUD) composeBundle(data []byte, _ /* validateOnly — the BFF di
 		preview.PluginsYAML = composed.Materialized.PluginsYAML
 		preview.ItemsYAML = composed.Materialized.ItemsYAML
 		preview.RbacYAML = composed.Materialized.RbacYAML
+
+		baseline, _ := pluginlock.Resolve("")
+		if report, err := bundle.CheckPluginPins(preview.PluginsYAML, baseline); err == nil {
+			preview.PinPreflight = bus.PinPreflightReport{Conflicts: []bus.PinConflict{}, Missing: []bus.MissingPlugin{}}
+			for _, conflict := range report.Conflicts {
+				preview.PinPreflight.Conflicts = append(preview.PinPreflight.Conflicts, bus.PinConflict{
+					ArtifactID:    conflict.ArtifactID,
+					BundleVersion: conflict.BundleVersion,
+					SetVersion:    conflict.SetVersion,
+				})
+			}
+			for _, missing := range report.Missing {
+				preview.PinPreflight.Missing = append(preview.PinPreflight.Missing, bus.MissingPlugin{
+					ArtifactID:    missing.ArtifactID,
+					BundleVersion: missing.BundleVersion,
+				})
+			}
+		}
 	}
 
 	// Scan casc-applied sections (jenkins/rbac — JCasC resolves its own

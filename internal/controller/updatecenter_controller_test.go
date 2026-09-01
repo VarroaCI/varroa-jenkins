@@ -189,6 +189,9 @@ func TestUpdateCenterReconciler(t *testing.T) {
 	t.Run("declared-plugins-retained-when-lts-cleared", testDeclaredPluginsRetainedWhenLTSCleared)
 	t.Run("declared-plugins-no-rewrite-when-unchanged", testDeclaredPluginsNoRewriteWhenUnchanged)
 	t.Run("declared-plugins-untouched-on-build-failure", testDeclaredPluginsUntouchedOnBuildFailure)
+	t.Run("declared-plugins-includes-open-candidate", testDeclaredPluginsIncludesOpenCandidate)
+	t.Run("declared-plugins-excludes-closed-candidate", testDeclaredPluginsExcludesClosedCandidate)
+	t.Run("declared-plugins-candidate-unreadable-cm-warns", testDeclaredPluginsCandidateUnreadableCMWarns)
 	t.Run("seed-empty-refs-ignores-secret-ref", testSeedEmptyRefsIgnoresSecretRef)
 	t.Run("seed-credential-failure-attempts-no-ref", testSeedCredentialFailureAttemptsNoRef)
 	t.Run("seed-ref-failure-does-not-block-next-ref", testSeedRefFailureDoesNotBlockNextRef)
@@ -199,7 +202,8 @@ func TestUpdateCenterReconciler(t *testing.T) {
 
 // addProfileWithPlugins registers a JenkinsVersionProfile whose materialized
 // plugins.yaml declares real plugin pins.
-func addProfileWithPlugins(client *testClient, name, resolveVersion string, pins map[string]string) {
+func addProfileWithPlugins(client *testClient, pins map[string]string) {
+	const name, resolveVersion = "prof", "2.555.3"
 	client.profiles[name] = &v1alpha1.JenkinsVersionProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec:       v1alpha1.JenkinsVersionProfileSpec{ResolveVersion: resolveVersion},
@@ -227,7 +231,7 @@ func testDeclaredPluginsWrittenPullThroughDisabled(t *testing.T) {
 	crdstore.MustSeed(client.store, client.updateCenter)
 	client.pvc = boundPVC()
 	ts := emptyInventoryServer(t)
-	addProfileWithPlugins(client, "prof", "2.555.3", map[string]string{
+	addProfileWithPlugins(client, map[string]string{
 		"workflow-api": "1413.v2ff1a_5e720fa_",
 		"mailer":       "472.vf7c289a_4b_420",
 	})
@@ -252,7 +256,7 @@ func testDeclaredPluginsRetainedWhenLTSCleared(t *testing.T) {
 	crdstore.MustSeed(client.store, client.updateCenter)
 	client.pvc = boundPVC()
 	ts := emptyInventoryServer(t)
-	addProfileWithPlugins(client, "prof", "2.555.3", map[string]string{"mailer": "472"})
+	addProfileWithPlugins(client, map[string]string{"mailer": "472"})
 	client.configMapData[metadataConfigMapName] = map[string]string{
 		metadataConfigMapKey: "https://updates.jenkins.io/dynamic-stable-2.555.3/update-center.actual.json",
 	}
@@ -277,7 +281,7 @@ func testDeclaredPluginsNoRewriteWhenUnchanged(t *testing.T) {
 	crdstore.MustSeed(client.store, client.updateCenter)
 	client.pvc = boundPVC()
 	ts := emptyInventoryServer(t)
-	addProfileWithPlugins(client, "prof", "2.555.3", map[string]string{"mailer": "472"})
+	addProfileWithPlugins(client, map[string]string{"mailer": "472"})
 	client.configMapData[metadataConfigMapName] = map[string]string{
 		metadataConfigMapKey: "",
 		declaredPluginsKey:   "mailer@472",
@@ -324,6 +328,120 @@ func testDeclaredPluginsUntouchedOnBuildFailure(t *testing.T) {
 	}
 	if cm := client.configMapData[metadataConfigMapName]; cm[declaredPluginsKey] != "mailer@472" {
 		t.Fatalf("declared-plugins = %q, want the prior value", cm[declaredPluginsKey])
+	}
+}
+
+// addCandidateWithPlugins registers a ProfileCandidate whose resolved closure
+// ConfigMap declares real plugin pins.
+func addCandidateWithPlugins(client *testClient, name string, phase v1alpha1.ProfileCandidatePhase, pins map[string]string) {
+	closureRef := name + "-closure"
+	candidate := &v1alpha1.ProfileCandidate{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: v1alpha1.ProfileCandidateSpec{
+			ProfileRef:        "prof",
+			ResolveVersion:    "2.555.4",
+			ClosureContentRef: closureRef,
+		},
+		Status: v1alpha1.ProfileCandidateStatus{Phase: phase},
+	}
+	crdstore.MustSeed(client.store, candidate)
+	var b strings.Builder
+	b.WriteString("core:\n  - 2.479.1\nplugins:\n")
+	names := make([]string, 0, len(pins))
+	for n := range pins {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		fmt.Fprintf(&b, "  - artifactId: %s\n    version: %q\n", n, pins[n])
+	}
+	client.configMapData[closureRef] = map[string]string{"plugins.yaml": b.String()}
+}
+
+// testDeclaredPluginsIncludesOpenCandidate covers Finding 2: a Pending
+// candidate's resolved closure must contribute to the declared set, or its
+// new plugin versions never get requested from the update center and
+// PluginsServable can never clear.
+func testDeclaredPluginsIncludesOpenCandidate(t *testing.T) {
+	client := newTestClient()
+	client.updateCenter = ucWithPullThrough(false)
+	crdstore.MustSeed(client.store, client.updateCenter)
+	client.pvc = boundPVC()
+	ts := emptyInventoryServer(t)
+	addCandidateWithPlugins(client, "prof-2.555.4", v1alpha1.ProfileCandidatePhasePending, map[string]string{"git": "5.1.0"})
+
+	rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
+	if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	cm := client.configMapData[metadataConfigMapName]
+	if cm[declaredPluginsKey] != "git@5.1.0" {
+		t.Fatalf("declared-plugins = %q, want git@5.1.0", cm[declaredPluginsKey])
+	}
+}
+
+// testDeclaredPluginsExcludesClosedCandidate covers Finding 2's other half: a
+// candidate that is no longer open (Superseded, Failed, or Promoted) must not
+// keep pinning its plugins into the declared set.
+func testDeclaredPluginsExcludesClosedCandidate(t *testing.T) {
+	for _, phase := range []v1alpha1.ProfileCandidatePhase{
+		v1alpha1.ProfileCandidatePhaseSuperseded,
+		v1alpha1.ProfileCandidatePhaseFailed,
+		v1alpha1.ProfileCandidatePhasePromoted,
+	} {
+		t.Run(string(phase), func(t *testing.T) {
+			client := newTestClient()
+			client.updateCenter = ucWithPullThrough(false)
+			crdstore.MustSeed(client.store, client.updateCenter)
+			client.pvc = boundPVC()
+			ts := emptyInventoryServer(t)
+			addCandidateWithPlugins(client, "prof-2.555.4", phase, map[string]string{"git": "5.1.0"})
+
+			rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
+			if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+				t.Fatalf("reconcile: %v", err)
+			}
+
+			cm := client.configMapData[metadataConfigMapName]
+			if cm[declaredPluginsKey] != "" {
+				t.Fatalf("declared-plugins = %q, want empty for a %s candidate", cm[declaredPluginsKey], phase)
+			}
+		})
+	}
+}
+
+// testDeclaredPluginsCandidateUnreadableCMWarns covers the error-handling
+// contract: an unreadable candidate closure ConfigMap is skipped, and the
+// rest of the declared set still gets built.
+func testDeclaredPluginsCandidateUnreadableCMWarns(t *testing.T) {
+	client := newTestClient()
+	client.updateCenter = ucWithPullThrough(false)
+	crdstore.MustSeed(client.store, client.updateCenter)
+	client.pvc = boundPVC()
+	ts := emptyInventoryServer(t)
+	addProfileWithPlugins(client, map[string]string{"mailer": "472"})
+	candidate := &v1alpha1.ProfileCandidate{
+		ObjectMeta: metav1.ObjectMeta{Name: "prof-2.555.4"},
+		Spec: v1alpha1.ProfileCandidateSpec{
+			ProfileRef:        "prof",
+			ResolveVersion:    "2.555.4",
+			ClosureContentRef: "prof-2.555.4-closure",
+		},
+		Status: v1alpha1.ProfileCandidateStatus{Phase: v1alpha1.ProfileCandidatePhasePending},
+	}
+	crdstore.MustSeed(client.store, candidate)
+	// Deliberately no client.configMapData entry for "prof-2.555.4-closure":
+	// GetConfigMap returns an error, which must be logged and skipped.
+
+	rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
+	if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	cm := client.configMapData[metadataConfigMapName]
+	if cm[declaredPluginsKey] != "mailer@472" {
+		t.Fatalf("declared-plugins = %q, want mailer@472 (candidate skipped, rest still built)", cm[declaredPluginsKey])
 	}
 }
 

@@ -1,6 +1,6 @@
 # Install with Helm
 
-The OCI chart installs the operator, gateway, BFF, dashboard, NATS JetStream, CRDs, and default Jenkins version profiles. Dex is enabled by default. Network policies and the in-cluster update center are opt-in.
+The OCI chart installs the operator, gateway, BFF, dashboard, NATS JetStream, and CRDs. The operator seeds a set of default Jenkins version profiles itself on start. See [Jenkins Versions](../config/jenkins-versions.md#default-profiles). Dex is enabled by default. Network policies and the in-cluster update center are opt-in.
 
 Complete [Prerequisites](prerequisites.md) first.
 

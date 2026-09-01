@@ -47,6 +47,11 @@ type MaterializedBundle struct {
 	ItemsYAML   string
 	RbacYAML    string
 	Variables   Variables // from variable files only, not including varroa_*
+
+	// RawPluginsYAML is plugins.yaml as composed, captured before any
+	// variable substitution. PluginsYAML may be mutated in place by
+	// ResolveVars; this field never is.
+	RawPluginsYAML string
 }
 
 // Resolver orchestrates git clone → validate → variable resolution.
