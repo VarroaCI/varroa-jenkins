@@ -27,6 +27,11 @@ type guardStub struct {
 	controllers map[string]*v1alpha1.Controller
 	profiles    []*v1alpha1.JenkinsVersionProfile
 	namespaces  map[string]bool
+	// configMaps backs GetConfigMap/RemoveConfigMapLabel/UpdateConfigMapData
+	// for promote_version_candidate, the only guard-tested tool that reads or
+	// writes ConfigMap content rather than treating stubClient's no-op/empty
+	// defaults as sufficient.
+	configMaps map[string]map[string]string
 }
 
 func newGuardStub() *guardStub {
@@ -35,6 +40,7 @@ func newGuardStub() *guardStub {
 		Fake:        crdstore.NewFake(),
 		controllers: map[string]*v1alpha1.Controller{},
 		namespaces:  map[string]bool{},
+		configMaps:  map[string]map[string]string{},
 	}
 }
 
@@ -96,6 +102,22 @@ func (g *guardStub) DeleteJenkinsVersionProfileCRD(_ context.Context, name strin
 			return nil
 		}
 	}
+	return nil
+}
+
+func (g *guardStub) GetConfigMap(_ context.Context, name, _ string) (map[string]string, error) {
+	if data, ok := g.configMaps[name]; ok {
+		return data, nil
+	}
+	return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "configmaps"}, name)
+}
+
+func (g *guardStub) RemoveConfigMapLabel(_ context.Context, name, _, _ string) error {
+	return nil
+}
+
+func (g *guardStub) UpdateConfigMapData(_ context.Context, name, _ string, data map[string]string) error {
+	g.configMaps[name] = data
 	return nil
 }
 

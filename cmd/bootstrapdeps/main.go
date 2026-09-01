@@ -25,10 +25,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/varroaci/varroa-jenkins/internal/pluginresolve"
 )
 
 func main() {
@@ -60,12 +63,12 @@ func run(args []string, stdout io.Writer) error {
 		if *hpiPath == "" || *pluginsPath == "" {
 			return fmt.Errorf("--resolve requires --hpi and --plugins")
 		}
-		return runResolve(resolveOptions{
+		return runResolve(context.Background(), resolveOptions{
 			HPIPath:     *hpiPath,
 			PluginsPath: *pluginsPath,
 			DownloadURL: *downloadURL,
 			Indent:      *indent,
-			Fetch:       httpFetcher(*downloadURL),
+			Fetch:       pluginresolve.HTTPFetcher(*downloadURL),
 		}, stdout)
 	case *doCheck:
 		return runCheck(*lockPath, stdout)

@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,9 +31,11 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
+	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins"
 	"github.com/varroaci/varroa-jenkins/internal/mite"
+	"github.com/varroaci/varroa-jenkins/internal/overlay"
 )
 
 const (
@@ -53,7 +56,13 @@ var broodVerbTimeouts = map[v1alpha1.BroodVerb]time.Duration{
 	v1alpha1.BroodVerbStop:          10 * time.Minute,
 	v1alpha1.BroodVerbStart:         20 * time.Minute,
 	v1alpha1.BroodVerbExecuteGroovy: 5 * time.Minute,
+	v1alpha1.BroodVerbUpgrade:       30 * time.Minute,
 }
+
+// upgradeReleasedMarker is stored in a Dispatched upgrade target's Reason once
+// the release annotation is gone and the phase has left {Connected,Running};
+// success requires it before the phase returns to Connected.
+const upgradeReleasedMarker = "upgrade released"
 
 // reprovisionObserveWindow is the time within which a reprovision target's
 // phase must leave {Connected,Running} (3 minutes per D4).
@@ -411,6 +420,35 @@ func (r *BroodOperationReconciler) reconcilePending(ctx context.Context, op *v1a
 		return r.patchStatus(ctx, op)
 	}
 
+	// Admission-time targetVersion resolution (granularity A only). A
+	// targetVersion that resolves to neither an exact nor an LTS-line profile
+	// fails the whole operation before any target is touched, since every
+	// target would otherwise be dispatched against an unresolvable version.
+	if op.Spec.Action.Verb == v1alpha1.BroodVerbUpgrade && op.Spec.Action.Upgrade != nil && op.Spec.Action.Upgrade.TargetVersion != nil {
+		tv := strings.TrimSpace(*op.Spec.Action.Upgrade.TargetVersion)
+		if tv != "" && tv != "lts" {
+			profiles, err := crdstore.List[v1alpha1.JenkinsVersionProfile](ctx, r.store, "", "")
+			if err != nil {
+				op.Status.Phase = v1alpha1.BroodOperationPhaseFailed
+				op.Status.Reason = "TargetVersionUnresolved"
+				now := metav1.NewTime(r.now())
+				op.Status.FinishedAt = &now
+				r.updateSummary(op)
+				r.emitRunFinished(op)
+				return r.patchStatus(ctx, op)
+			}
+			if _, match := ResolveProfile(tv, profiles); match != MatchExact && match != MatchLine {
+				op.Status.Phase = v1alpha1.BroodOperationPhaseFailed
+				op.Status.Reason = "TargetVersionUnresolved"
+				now := metav1.NewTime(r.now())
+				op.Status.FinishedAt = &now
+				r.updateSummary(op)
+				r.emitRunFinished(op)
+				return r.patchStatus(ctx, op)
+			}
+		}
+	}
+
 	// Resolve targets.
 	targets, err := ResolveTargets(ctx, r.client, op.Spec, op.Namespace, r.operatorNamespace)
 	if err != nil {
@@ -675,6 +713,33 @@ func (r *BroodOperationReconciler) evaluateDispatchedTarget(
 			r.emitTargetFinished(op, t)
 		}
 
+	case v1alpha1.BroodVerbUpgrade:
+		// Two stages, sharing the single 30m verb timeout with no separate
+		// observe window. Stage 1: the release annotation must be gone AND the
+		// phase must have left {Connected,Running} in the SAME evaluation —
+		// an annotation still present, or a phase that never left, both leave
+		// the target Dispatched. Stage 2, once released: success requires the
+		// phase to come back to Connected specifically.
+		released := t.Reason == upgradeReleasedMarker
+		if !released {
+			_, stillHeld := ctrl.Annotations[annotationUpgradeRelease]
+			left := ctrl.Status.Phase != v1alpha1.ControllerPhaseConnected && ctrl.Status.Phase != v1alpha1.ControllerPhaseRunning
+			if !stillHeld && left {
+				t.Reason = upgradeReleasedMarker
+				released = true
+			}
+		}
+		if !released {
+			return
+		}
+		if ctrl.Status.Phase == v1alpha1.ControllerPhaseConnected {
+			t.State = v1alpha1.BroodTargetStateSucceeded
+			t.Reason = ""
+			finished := metav1.NewTime(now)
+			t.FinishedAt = &finished
+			r.emitTargetFinished(op, t)
+		}
+
 	case v1alpha1.BroodVerbExecuteGroovy:
 		key := groovyResultKey(op, t)
 		r.groovyResultsMu.Lock()
@@ -850,6 +915,9 @@ func (r *BroodOperationReconciler) dispatchTarget(ctx context.Context, op *v1alp
 		r.reprovisionTarget(ns, name)
 		return nil
 
+	case v1alpha1.BroodVerbUpgrade:
+		return r.dispatchUpgrade(ctx, op, t)
+
 	case v1alpha1.BroodVerbExecuteGroovy:
 		script, err := r.resolveGroovyScript(ctx, op, t)
 		if err != nil {
@@ -888,6 +956,231 @@ func (r *BroodOperationReconciler) dispatchTarget(ctx context.Context, op *v1alp
 		return nil
 	}
 	return nil
+}
+
+// dispatchUpgrade releases a target's held promoted revision (targetVersion
+// absent, granularity B) or moves it to a new pinned version (targetVersion
+// set, granularity A). Both granularities run the same authoritative
+// plugin-pin pre-flight before writing anything, and both hand the resolved
+// image to the version-roll gate through the release annotation; only
+// granularity A additionally writes spec.version.
+func (r *BroodOperationReconciler) dispatchUpgrade(ctx context.Context, op *v1alpha1.BroodOperation, t *v1alpha1.BroodTargetStatus) error {
+	ns, name := t.Namespace, t.Name
+	cr, err := crdstore.Get[v1alpha1.Controller](ctx, r.store, name, ns)
+	if err != nil {
+		return fmt.Errorf("get controller: %w", err)
+	}
+
+	profiles, err := crdstore.List[v1alpha1.JenkinsVersionProfile](ctx, r.store, "", "")
+	if err != nil {
+		return fmt.Errorf("list version profiles: %w", err)
+	}
+
+	upgrade := op.Spec.Action.Upgrade
+	granularityA := upgrade != nil && upgrade.TargetVersion != nil
+
+	pinVersion := cr.Spec.Version
+	if granularityA {
+		pinVersion = *upgrade.TargetVersion
+	}
+	pinProfile, _ := ResolveProfile(pinVersion, profiles)
+	targetImage := jenkinsImageForVersion(pinVersion, pinProfile)
+
+	if cr.Spec.ResourceOverlay != nil && cr.Spec.ResourceOverlay.StatefulSet != "" {
+		if img, ok, ovErr := overlay.ImageOverride([]byte(cr.Spec.ResourceOverlay.StatefulSet), "jenkins"); ovErr == nil && ok && img != "" {
+			targetImage = img
+		}
+	}
+
+	// The profile-servable and plugin-pin preflights gate every outcome below,
+	// including the already-at-target short-circuit: an unservable profile or
+	// a conflicting pin must fail the target whether or not the image already
+	// matches, because it is the reconcile after this dispatch, not this
+	// dispatch itself, that would actually consume the rejected plugin set.
+	// Running both checks once here, before the already-at-target branch is
+	// even evaluated, means the real-delta path below never re-runs them.
+	if pinProfile != nil {
+		if servable, message := r.upgradeProfileServable(ctx, pinProfile); !servable {
+			r.failUpgradeTarget(op, t, "target profile not servable: "+message)
+			return nil
+		}
+	}
+
+	pluginSet := r.upgradePluginSet(ctx, pinVersion, pinProfile)
+	if pluginsYAML, ok := r.upgradeTargetPluginsYAML(ctx, cr); ok {
+		report, checkErr := bundle.CheckPluginPins(pluginsYAML, pluginSet)
+		if checkErr == nil && len(report.Conflicts) > 0 {
+			message := pluginPinConflictMessage(report)
+			r.failUpgradeTarget(op, t, message)
+			r.emitPluginPinConflict(cr, message)
+			return nil
+		}
+	}
+
+	// A target already running the resolved image has nothing to release: the
+	// version-roll gate never sees a delta to hold or apply, the annotation it
+	// would otherwise consume never clears, and the phase never leaves
+	// Connected. Comparing against the same applied-image read
+	// reconcileVersionRoll uses keeps this decision and the gate's own delta
+	// check from ever disagreeing. An unreadable applied image falls through
+	// to the normal dispatch-and-wait path instead of risking a false match.
+	//
+	// Only the wait-for-the-roll behavior is unnecessary here: granularity A
+	// still has spec.version to write. A line-pinned controller can already be
+	// running the image the requested version resolves to while spec.version
+	// itself still names an older line; skipping the pin write in that case
+	// reports success for a move that never happened and leaves the
+	// controller to drift on its old line. The pin write happens before the
+	// target is marked Succeeded, and its error is handled exactly like the
+	// granularity-A write below: on failure the target is not reported
+	// Succeeded.
+	if applied, ok := r.upgradeAppliedImage(ctx, cr); ok && applied == targetImage {
+		if granularityA {
+			if _, _, err := r.resourceClient.ApplyControllerSpecSSAIfExists(ctx, ns, name, map[string]any{"version": pinVersion}, "varroa-ui", false); err != nil {
+				return fmt.Errorf("write target version: %w", err)
+			}
+		}
+		t.State = v1alpha1.BroodTargetStateSucceeded
+		finished := metav1.NewTime(r.now())
+		t.FinishedAt = &finished
+		r.emitTargetFinished(op, t)
+		return nil
+	}
+
+	if err := crdstore.PatchAnnotations[v1alpha1.Controller](ctx, r.store, name, ns, map[string]*string{
+		annotationUpgradeRelease: &targetImage,
+	}); err != nil {
+		return fmt.Errorf("write upgrade-release annotation: %w", err)
+	}
+
+	if !granularityA {
+		return nil
+	}
+	if _, _, err := r.resourceClient.ApplyControllerSpecSSAIfExists(ctx, ns, name, map[string]any{"version": pinVersion}, "varroa-ui", false); err != nil {
+		return fmt.Errorf("write target version: %w", err)
+	}
+	return nil
+}
+
+// failUpgradeTarget marks t Failed with a byte-capped reason and emits the
+// standard target-finished event.
+func (r *BroodOperationReconciler) failUpgradeTarget(op *v1alpha1.BroodOperation, t *v1alpha1.BroodTargetStatus, reason string) {
+	t.State = v1alpha1.BroodTargetStateFailed
+	t.Reason = truncateOutput(reason, groovyReasonCap)
+	finished := metav1.NewTime(r.now())
+	t.FinishedAt = &finished
+	r.emitTargetFinished(op, t)
+}
+
+// upgradeAppliedImage returns cr's currently applied jenkins image, the
+// varroa.dev/computed-images stamp preferred over the live StatefulSet spec
+// the same way reconcileVersionRoll reads it, or false when neither is
+// available (no StatefulSet yet, or a read error).
+func (r *BroodOperationReconciler) upgradeAppliedImage(ctx context.Context, cr *v1alpha1.Controller) (string, bool) {
+	computed, live, err := r.resourceClient.GetStatefulSetImages(ctx, controllerPrefix(cr), cr.Namespace)
+	if err != nil || live == nil {
+		return "", false
+	}
+	applied, ok := computed["jenkins"]
+	if !ok {
+		applied = live["jenkins"]
+	}
+	if applied == "" {
+		return "", false
+	}
+	return applied, true
+}
+
+// upgradeProfileServable reports whether profile is blocked by an existing
+// ProfileCandidate's PluginsServable=False condition. A profile with no
+// ProfileCandidate is always servable as far as this check is concerned.
+func (r *BroodOperationReconciler) upgradeProfileServable(ctx context.Context, profile *v1alpha1.JenkinsVersionProfile) (bool, string) {
+	candidates, err := crdstore.List[v1alpha1.ProfileCandidate](ctx, r.store, "", "")
+	if err != nil {
+		return true, ""
+	}
+	for _, c := range candidates {
+		if c.Spec.ProfileRef != profile.Name {
+			continue
+		}
+		// Only a candidate still open for promotion can gate a dispatch. A
+		// Superseded, Failed, or Promoted candidate's conditions describe a
+		// closed evaluation, not the profile's current servability.
+		if c.Status.Phase != v1alpha1.ProfileCandidatePhasePending && c.Status.Phase != v1alpha1.ProfileCandidatePhaseReady {
+			continue
+		}
+		for _, cond := range c.Status.Conditions {
+			if cond.Type == v1alpha1.ConditionCandidatePluginsServable && cond.Status == metav1.ConditionFalse {
+				return false, cond.Message
+			}
+		}
+	}
+	return true, ""
+}
+
+// upgradePluginSet resolves the plugin core set pinned to version, preferring
+// profile's materialized ContentRef and falling back to the embedded baseline
+// lock, the same ladder resolveCoreSet uses for the single-controller path.
+func (r *BroodOperationReconciler) upgradePluginSet(ctx context.Context, version string, profile *v1alpha1.JenkinsVersionProfile) []pluginlock.PluginEntry {
+	if profile != nil && profileIsPluginSetReady(profile) && profile.Status.ContentRef != "" {
+		cmData, err := r.resourceClient.GetConfigMap(ctx, profile.Status.ContentRef, r.operatorNamespace)
+		if err == nil {
+			if pluginsYAML, ok := cmData["plugins.yaml"]; ok && pluginsYAML != "" {
+				var lockSet struct {
+					Plugins []pluginlock.PluginEntry `yaml:"plugins"`
+				}
+				if unmarshalErr := yaml.Unmarshal([]byte(pluginsYAML), &lockSet); unmarshalErr == nil && len(lockSet.Plugins) > 0 {
+					return lockSet.Plugins
+				}
+			}
+		}
+	}
+	coreSet, _ := pluginlock.Resolve(version)
+	return coreSet
+}
+
+// upgradeTargetPluginsYAML reads cr's own effective ComposedBundle's
+// unresolved plugins.yaml, mirroring ProfileCandidateReconciler.rawPluginsYAML.
+func (r *BroodOperationReconciler) upgradeTargetPluginsYAML(ctx context.Context, cr *v1alpha1.Controller) (string, bool) {
+	name, namespace := v1alpha1.EffectiveBundleRef(cr, r.operatorNamespace)
+	if name == "" {
+		return "", false
+	}
+	cb, err := crdstore.Get[v1alpha1.ComposedBundle](ctx, r.store, name, namespace)
+	if err != nil || cb.Status.ContentRef == "" {
+		return "", false
+	}
+	data, err := r.resourceClient.GetConfigMap(ctx, cb.Status.ContentRef, cb.Namespace)
+	if err != nil {
+		return "", false
+	}
+	raw, ok := data["plugins.yaml"]
+	if !ok || raw == "" {
+		return "", false
+	}
+	return raw, true
+}
+
+// emitPluginPinConflict publishes pluginPinConflict.detected for a brood
+// upgrade dispatch's own pre-flight, distinct from the connected-phase and
+// profile-candidate call sites that publish the same event type.
+func (r *BroodOperationReconciler) emitPluginPinConflict(cr *v1alpha1.Controller, message string) {
+	e := activity.Event{
+		Type:       "pluginPinConflict.detected",
+		Source:     "operator",
+		Controller: cr.Name,
+		Namespace:  cr.Namespace,
+		Message:    message,
+		Reason:     v1alpha1.ReasonPluginPinConflict,
+		Severity:   "warning",
+	}
+	if r.eventSink != nil {
+		r.eventSink(e)
+		return
+	}
+	if r.activityPublisher != nil {
+		r.activityPublisher.Publish(e)
+	}
 }
 
 // reprovisionTarget calls the reprovision function or falls back to wakeFn.
@@ -1011,12 +1304,16 @@ func (r *BroodOperationReconciler) reconcileTerminal(ctx context.Context, op *v1
 // decision, not to be a second authorization layer — Varroa RBAC is that, and it
 // has already run by the time a BroodOperation object exists.
 func (r *BroodOperationReconciler) verbPolicyAllows(ctx context.Context, op *v1alpha1.BroodOperation) (bool, string) {
-	if op.Spec.Action.Verb != v1alpha1.BroodVerbExecuteGroovy {
+	verb := op.Spec.Action.Verb
+	if verb != v1alpha1.BroodVerbExecuteGroovy && verb != v1alpha1.BroodVerbUpgrade {
 		return true, ""
 	}
 	defaults, err := crdstore.Get[v1alpha1.ProvisioningDefaults](ctx, r.store, provisioningDefaultsName, "")
 	if err != nil || defaults == nil {
 		return true, ""
+	}
+	if verb == v1alpha1.BroodVerbUpgrade {
+		return defaults.Spec.BroodPolicy.UpgradeAllowed(op.Namespace)
 	}
 	return defaults.Spec.BroodPolicy.ExecuteGroovyAllowed(op.Namespace)
 }
@@ -1488,6 +1785,8 @@ func timeoutReason(verb v1alpha1.BroodVerb) string {
 		return "start timeout"
 	case v1alpha1.BroodVerbExecuteGroovy:
 		return "groovy script timeout"
+	case v1alpha1.BroodVerbUpgrade:
+		return "upgrade timeout"
 	}
 	return "operation timeout"
 }
@@ -1734,6 +2033,10 @@ func checkApplicability(verb v1alpha1.BroodVerb, ctrl *v1alpha1.Controller) stri
 		}
 
 	case v1alpha1.BroodVerbExecuteGroovy:
+		if ctrl.Status.Phase != v1alpha1.ControllerPhaseConnected {
+			return "not Connected"
+		}
+	case v1alpha1.BroodVerbUpgrade:
 		if ctrl.Status.Phase != v1alpha1.ControllerPhaseConnected {
 			return "not Connected"
 		}

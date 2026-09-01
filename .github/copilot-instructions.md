@@ -13,7 +13,7 @@ a React/TypeScript frontend, a Helm chart, and a Jenkins auth plugin under `plug
   not the break itself.
 - **Do not comment on generated code:** `api/v1alpha1/zz_generated.deepcopy.go`,
   `internal/mite/proto/mitev1/`, `pkg/client/`, `charts/varroa/crds/`, and
-  `charts/varroa/templates/version-profiles/` are all generated.
+  `internal/controller/pluginlock/seed/` are all generated.
 - **Style is linter-owned.** golangci-lint v2 (revive, gofmt, goimports) gates every
   PR; don't flag formatting, naming, or import ordering the linter accepts. Import
   groups intentionally place the local prefix `github.com/varroaci/varroa-jenkins` last.

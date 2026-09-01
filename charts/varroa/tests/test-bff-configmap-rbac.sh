@@ -18,11 +18,17 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 render="$(helm template t "$CHART_DIR" "${COMMON[@]}")"
 
-# The release-namespace BFF Role must grant get on core-group configmaps.
-echo "$render" | yq eval-all '
+# The release-namespace BFF Role must grant get/create/update on core-group
+# configmaps: promotion's synchronous re-materialization step always attempts
+# a create first on the derived pluginset ConfigMap (falling back to
+# get+update only on AlreadyExists), so create is required even when the
+# ConfigMap already exists.
+configmap_verbs="$(echo "$render" | yq eval-all '
   select(.kind=="Role" and .metadata.namespace=="default" and (.metadata.name|test("bff")))
-  | .rules[] | select(.apiGroups[]=="" and .resources[]=="configmaps") | .verbs[]' - \
-  | grep -qx get || fail "BFF release-namespace Role is missing get on configmaps"
+  | .rules[] | select(.apiGroups[]=="" and .resources[]=="configmaps") | .verbs[]' -)"
+for v in get create update; do
+  echo "$configmap_verbs" | grep -qx "$v" || fail "BFF release-namespace Role is missing $v on configmaps"
+done
 
 # A RoleBinding must bind that Role to the BFF ServiceAccount in the same namespace.
 role_name="$(echo "$render" | yq eval-all '

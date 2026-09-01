@@ -974,6 +974,11 @@ func (in *BroodPolicy) DeepCopyInto(out *BroodPolicy) {
 		*out = new(ExecuteGroovyPolicy)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Upgrade != nil {
+		in, out := &in.Upgrade, &out.Upgrade
+		*out = new(BroodUpgradePolicy)
+		(*in).DeepCopyInto(*out)
+	}
 }
 
 // DeepCopy for BroodPolicy.
@@ -1007,6 +1012,31 @@ func (in *ExecuteGroovyPolicy) DeepCopy() *ExecuteGroovyPolicy {
 		return nil
 	}
 	out := new(ExecuteGroovyPolicy)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for BroodUpgradePolicy.
+func (in *BroodUpgradePolicy) DeepCopyInto(out *BroodUpgradePolicy) {
+	*out = *in
+	if in.Enabled != nil {
+		in, out := &in.Enabled, &out.Enabled
+		*out = new(bool)
+		**out = **in
+	}
+	if in.AllowedNamespaces != nil {
+		in, out := &in.AllowedNamespaces, &out.AllowedNamespaces
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopy for BroodUpgradePolicy.
+func (in *BroodUpgradePolicy) DeepCopy() *BroodUpgradePolicy {
+	if in == nil {
+		return nil
+	}
+	out := new(BroodUpgradePolicy)
 	in.DeepCopyInto(out)
 	return out
 }
@@ -2136,6 +2166,164 @@ func (in *JenkinsVersionProfileCondition) DeepCopyInto(out *JenkinsVersionProfil
 	in.LastTransitionTime.DeepCopyInto(&out.LastTransitionTime)
 }
 
+// ---- ProfileCandidate ----
+
+// DeepCopyInto for ProfileCandidateSpec.
+func (in *ProfileCandidateSpec) DeepCopyInto(out *ProfileCandidateSpec) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of ProfileCandidateSpec.
+func (in *ProfileCandidateSpec) DeepCopy() *ProfileCandidateSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(ProfileCandidateSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for ProfileCandidateCondition.
+func (in *ProfileCandidateCondition) DeepCopyInto(out *ProfileCandidateCondition) {
+	*out = *in
+	in.LastTransitionTime.DeepCopyInto(&out.LastTransitionTime)
+}
+
+// DeepCopy creates a deep copy of ProfileCandidateCondition.
+func (in *ProfileCandidateCondition) DeepCopy() *ProfileCandidateCondition {
+	if in == nil {
+		return nil
+	}
+	out := new(ProfileCandidateCondition)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for ProfileCandidateFailingController.
+func (in *ProfileCandidateFailingController) DeepCopyInto(out *ProfileCandidateFailingController) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of ProfileCandidateFailingController.
+func (in *ProfileCandidateFailingController) DeepCopy() *ProfileCandidateFailingController {
+	if in == nil {
+		return nil
+	}
+	out := new(ProfileCandidateFailingController)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for ProfileCandidatePreflightSummary.
+func (in *ProfileCandidatePreflightSummary) DeepCopyInto(out *ProfileCandidatePreflightSummary) {
+	*out = *in
+	if in.FailingControllers != nil {
+		in, out := &in.FailingControllers, &out.FailingControllers
+		*out = make([]ProfileCandidateFailingController, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopy creates a deep copy of ProfileCandidatePreflightSummary.
+func (in *ProfileCandidatePreflightSummary) DeepCopy() *ProfileCandidatePreflightSummary {
+	if in == nil {
+		return nil
+	}
+	out := new(ProfileCandidatePreflightSummary)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for ProfileCandidateStatus.
+func (in *ProfileCandidateStatus) DeepCopyInto(out *ProfileCandidateStatus) {
+	*out = *in
+	if in.Conditions != nil {
+		in, out := &in.Conditions, &out.Conditions
+		*out = make([]ProfileCandidateCondition, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.Preflight != nil {
+		in, out := &in.Preflight, &out.Preflight
+		*out = new(ProfileCandidatePreflightSummary)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.PromotedAt != nil {
+		in, out := &in.PromotedAt, &out.PromotedAt
+		*out = (*in).DeepCopy()
+	}
+}
+
+// DeepCopy creates a deep copy of ProfileCandidateStatus.
+func (in *ProfileCandidateStatus) DeepCopy() *ProfileCandidateStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(ProfileCandidateStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for ProfileCandidate.
+func (in *ProfileCandidate) DeepCopyInto(out *ProfileCandidate) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+// DeepCopy creates a deep copy of ProfileCandidate.
+func (in *ProfileCandidate) DeepCopy() *ProfileCandidate {
+	if in == nil {
+		return nil
+	}
+	out := new(ProfileCandidate)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyObject implements runtime.Object.
+func (in *ProfileCandidate) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// DeepCopyInto for ProfileCandidateList.
+func (in *ProfileCandidateList) DeepCopyInto(out *ProfileCandidateList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]ProfileCandidate, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopy creates a deep copy of ProfileCandidateList.
+func (in *ProfileCandidateList) DeepCopy() *ProfileCandidateList {
+	if in == nil {
+		return nil
+	}
+	out := new(ProfileCandidateList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyObject implements runtime.Object.
+func (in *ProfileCandidateList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
 // ---- UpdateCenter ----
 
 func (in *UpdateCenter) DeepCopyInto(out *UpdateCenter) {
@@ -2436,6 +2624,11 @@ func (in *BroodAction) DeepCopyInto(out *BroodAction) {
 		*out = new(BroodGroovyAction)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Upgrade != nil {
+		in, out := &in.Upgrade, &out.Upgrade
+		*out = new(BroodUpgradeAction)
+		(*in).DeepCopyInto(*out)
+	}
 }
 
 func (in *BroodAction) DeepCopy() *BroodAction {
@@ -2461,6 +2654,24 @@ func (in *BroodGroovyAction) DeepCopy() *BroodGroovyAction {
 		return nil
 	}
 	out := new(BroodGroovyAction)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *BroodUpgradeAction) DeepCopyInto(out *BroodUpgradeAction) {
+	*out = *in
+	if in.TargetVersion != nil {
+		in, out := &in.TargetVersion, &out.TargetVersion
+		*out = new(string)
+		**out = **in
+	}
+}
+
+func (in *BroodUpgradeAction) DeepCopy() *BroodUpgradeAction {
+	if in == nil {
+		return nil
+	}
+	out := new(BroodUpgradeAction)
 	in.DeepCopyInto(out)
 	return out
 }

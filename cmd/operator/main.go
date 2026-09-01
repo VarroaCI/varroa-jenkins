@@ -314,6 +314,11 @@ func main() {
 	// Create JenkinsVersionProfile reconciler for plugin set materialization.
 	versionProfileReconciler := controller.NewJenkinsVersionProfileReconciler(clientsetClient, clientsetClient, operatorNamespace, logger)
 
+	// Create VersionProfileSeedReconciler to seed the ship-time default
+	// JenkinsVersionProfile CRs and their pluginset ConfigMaps from
+	// operator-embedded content (replaces the Helm-chart-templated versions).
+	versionProfileSeedReconciler := controller.NewVersionProfileSeedReconciler(clientsetClient, clientsetClient, operatorNamespace, logger)
+
 	// Create Team reconciler for composing Teams into Group + VarroaRoleBinding.
 	teamReconciler := controller.NewTeamReconciler(clientsetClient, clientsetClient, operatorNamespace, logger)
 
@@ -496,6 +501,15 @@ func main() {
 	// --- Activity publisher (mode-agnostic, publishes to activity.* subjects) ---
 	actPub := activity.NewPublisher(cluster, busConn)
 	reconciler.SetActivityPublisher(actPub)
+
+	upgradeTrackerReconciler := controller.NewUpgradeTrackerReconciler(clientsetClient, actPub, logger)
+
+	// Create ProfileCandidateReconciler to resolve, verify, and pre-flight
+	// ProfileCandidates the upgrade tracker creates. Without this nothing ever
+	// clears a candidate's Pending phase, so promotion can never succeed.
+	profileCandidateReconciler := controller.NewProfileCandidateReconciler(
+		clientsetClient, clientsetClient, operatorNamespace,
+		os.Getenv("VARROA_UPDATE_CENTER_URL"), actPub, logger)
 
 	// --- Controller-runtime manager ---
 	scheme := runtime.NewScheme()
@@ -777,6 +791,39 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 1c. Version profile seeder (60s, immediate). Wired like starter-bundle
+	// above: a periodic reseed is safe here because once a profile's
+	// ownership label is promoted away, the reconciler's ownership check
+	// permanently no-ops that entry instead of overwriting it.
+	if err := mgr.Add(&tickerRunnable{
+		name:      "version-profile-seed",
+		interval:  60 * time.Second,
+		immediate: true,
+		tick: func(ctx context.Context) {
+			versionProfileSeedReconciler.Reconcile(ctx)
+		},
+		logger: logger,
+	}); err != nil {
+		logger.Error("failed to add version-profile-seed runnable", "error", err)
+		os.Exit(1)
+	}
+
+	// 1d. Upgrade tracker (6h, immediate, leader-gated — everyReplica defaults
+	// to false). Discovers upstream Jenkins LTS patch/line movement and turns a
+	// same-line newer patch into a ProfileCandidate.
+	if err := mgr.Add(&tickerRunnable{
+		name:      "upgrade-tracker",
+		interval:  controller.UpgradeTrackerInterval,
+		immediate: true,
+		tick: func(ctx context.Context) {
+			upgradeTrackerReconciler.Reconcile(ctx)
+		},
+		logger: logger,
+	}); err != nil {
+		logger.Error("failed to add upgrade-tracker runnable", "error", err)
+		os.Exit(1)
+	}
+
 	// 2. JenkinsVersionProfile reconciler (30s, immediate).
 	if err := mgr.Add(&tickerRunnable{
 		name:      "version-profile",
@@ -788,6 +835,28 @@ func main() {
 		logger: logger,
 	}); err != nil {
 		logger.Error("failed to add version-profile runnable", "error", err)
+		os.Exit(1)
+	}
+
+	// 2b. ProfileCandidate reconciler (30s, immediate) — resolves each
+	// Pending candidate's closure and pre-flight status, keyed like the
+	// JenkinsVersionProfile reconciler above.
+	//
+	// profileCandidateBackoff is created once here, outside the tick closure,
+	// so it persists across ticks: a map declared inside
+	// reconcileAllProfileCandidates would reset on every call and the
+	// RequeueAfter a retryable Reconcile returns would never be honored.
+	profileCandidateBackoff := newProfileCandidateBackoff()
+	if err := mgr.Add(&tickerRunnable{
+		name:      "profile-candidate",
+		interval:  30 * time.Second,
+		immediate: true,
+		tick: func(ctx context.Context) {
+			reconcileAllProfileCandidates(ctx, clientsetClient, profileCandidateReconciler, profileCandidateBackoff, logger)
+		},
+		logger: logger,
+	}); err != nil {
+		logger.Error("failed to add profile-candidate runnable", "error", err)
 		os.Exit(1)
 	}
 
@@ -1405,6 +1474,75 @@ func reconcileAllVersionProfiles(ctx context.Context, store crdstore.Backend, re
 			logger.Warn("failed to reconcile JenkinsVersionProfile", "profile", p.Name, "error", err)
 		}
 	}
+}
+
+// profileCandidateBackoff tracks, per candidate name, the earliest time it
+// is next eligible for reconciliation. It survives across ticks by design:
+// reconcileAllProfileCandidates is called fresh on every tick, so any state
+// declared inside it would reset each call and could never honor a
+// RequeueAfter that ProfileCandidateReconciler.Reconcile asks for on a
+// retryable path. The profile-candidate ticker runs single-threaded (leader
+// gated, one tick at a time), so the map needs no synchronization.
+type profileCandidateBackoff struct {
+	next map[string]time.Time
+	now  func() time.Time
+}
+
+func newProfileCandidateBackoff() *profileCandidateBackoff {
+	return &profileCandidateBackoff{next: make(map[string]time.Time), now: time.Now}
+}
+
+// ready reports whether name is currently eligible for reconciliation.
+func (b *profileCandidateBackoff) ready(name string) bool {
+	until, backedOff := b.next[name]
+	return !backedOff || !b.now().Before(until)
+}
+
+// record applies the RequeueAfter from a Reconcile result: a positive value
+// defers the next attempt by that duration, and a zero value clears any
+// existing backoff so the candidate reconciles on every tick again.
+func (b *profileCandidateBackoff) record(name string, result reconcile.Result) {
+	if result.RequeueAfter > 0 {
+		b.next[name] = b.now().Add(result.RequeueAfter)
+		return
+	}
+	delete(b.next, name)
+}
+
+// prune drops entries for candidates that no longer exist, so the map
+// cannot grow without bound across a long-lived operator process.
+func (b *profileCandidateBackoff) prune(present map[string]struct{}) {
+	for name := range b.next {
+		if _, ok := present[name]; !ok {
+			delete(b.next, name)
+		}
+	}
+}
+
+// reconcileAllProfileCandidates lists all ProfileCandidate CRDs and
+// reconciles each one due for reconciliation via the candidate reconciler,
+// skipping any still inside a backoff window recorded from a prior
+// RequeueAfter.
+func reconcileAllProfileCandidates(ctx context.Context, store crdstore.Backend, rec reconcile.Reconciler, backoff *profileCandidateBackoff, logger *slog.Logger) {
+	candidates, err := crdstore.List[v1alpha1.ProfileCandidate](ctx, store, "", "")
+	if err != nil {
+		logger.Warn("failed to list ProfileCandidates", "error", err)
+		return
+	}
+	present := make(map[string]struct{}, len(candidates))
+	for _, c := range candidates {
+		present[c.Name] = struct{}{}
+		if !backoff.ready(c.Name) {
+			continue
+		}
+		req := reconcile.Request{NamespacedName: types.NamespacedName{Name: c.Name}}
+		result, err := rec.Reconcile(ctx, req)
+		if err != nil {
+			logger.Warn("failed to reconcile ProfileCandidate", "candidate", c.Name, "error", err)
+		}
+		backoff.record(c.Name, result)
+	}
+	backoff.prune(present)
 }
 
 // reconcileAllTeams lists all Team CRDs and reconciles each one via the

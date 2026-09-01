@@ -630,6 +630,85 @@ func TestPreviewComposedBundle_NormalizesNilSlices(t *testing.T) {
 	}
 }
 
+func TestValidateComposedBundle_PinPreflightConflict(t *testing.T) {
+	// The validate tool's result must carry the same pinPreflight shape and
+	// content the REST validate response reports for equivalent input.
+	cb := &composeRecordingConfigBrood{result: &bus.BundleComposePreview{
+		BundleYAML: "bundle: ok",
+		PinPreflight: bus.PinPreflightReport{
+			Conflicts: []bus.PinConflict{{ArtifactID: "git", BundleVersion: "999.999", SetVersion: "5.10.1"}},
+			Missing:   []bus.MissingPlugin{},
+		},
+	}}
+	got := composedBundleDryRunResult(t, composeDryRunDeps(cb), "validate_composed_bundle", map[string]interface{}{
+		"namespace": "ns",
+		"inputs": []interface{}{
+			map[string]interface{}{"itemRef": map[string]interface{}{"name": "item-1"}},
+		},
+	})
+
+	pinPreflight, ok := got["pinPreflight"].(map[string]any)
+	if !ok {
+		t.Fatalf("pinPreflight = %v, want a map", got["pinPreflight"])
+	}
+	conflicts, ok := pinPreflight["conflicts"].([]any)
+	if !ok || len(conflicts) != 1 {
+		t.Fatalf("pinPreflight.conflicts = %v, want one conflict", pinPreflight["conflicts"])
+	}
+	conflict, ok := conflicts[0].(map[string]any)
+	if !ok || conflict["artifactId"] != "git" {
+		t.Errorf("conflict = %v, want artifactId git", conflicts[0])
+	}
+}
+
+func TestPreviewComposedBundle_PinPreflightWithoutSeparateRequest(t *testing.T) {
+	// The preview tool must surface pinPreflight with no request field needed
+	// to opt in, using the same conflict data the validate call would report.
+	cb := &composeRecordingConfigBrood{result: &bus.BundleComposePreview{
+		BundleYAML: "bundle: ok",
+		PinPreflight: bus.PinPreflightReport{
+			Conflicts: []bus.PinConflict{{ArtifactID: "git", BundleVersion: "999.999", SetVersion: "5.10.1"}},
+			Missing:   []bus.MissingPlugin{},
+		},
+	}}
+	got := composedBundleDryRunResult(t, composeDryRunDeps(cb), "preview_composed_bundle", map[string]interface{}{
+		"namespace": "ns",
+		"inputs": []interface{}{
+			map[string]interface{}{"itemRef": map[string]interface{}{"name": "item-1"}},
+		},
+	})
+
+	pinPreflight, ok := got["pinPreflight"].(map[string]any)
+	if !ok {
+		t.Fatalf("pinPreflight = %v, want a map", got["pinPreflight"])
+	}
+	conflicts, ok := pinPreflight["conflicts"].([]any)
+	if !ok || len(conflicts) != 1 {
+		t.Fatalf("pinPreflight.conflicts = %v, want one conflict", pinPreflight["conflicts"])
+	}
+	conflict, ok := conflicts[0].(map[string]any)
+	if !ok || conflict["artifactId"] != "git" {
+		t.Errorf("conflict = %v, want artifactId git", conflicts[0])
+	}
+}
+
+func TestValidateComposedBundle_PinPreflightAllClear(t *testing.T) {
+	// A zero-value PinPreflight (the all-clear case) must still serialize as
+	// empty, non-null arrays rather than null.
+	cb := &composeRecordingConfigBrood{result: &bus.BundleComposePreview{BundleYAML: "bundle: ok"}}
+	got := composedBundleDryRunResult(t, composeDryRunDeps(cb), "validate_composed_bundle", map[string]interface{}{
+		"namespace": "ns",
+		"inputs": []interface{}{
+			map[string]interface{}{"itemRef": map[string]interface{}{"name": "item-1"}},
+		},
+	})
+
+	b, _ := json.Marshal(got)
+	if !strings.Contains(string(b), `"pinPreflight":{"conflicts":[],"missing":[]}`) {
+		t.Errorf("pinPreflight must be present with empty, non-null arrays: %s", b)
+	}
+}
+
 func TestComposedBundleDryRunTools_NilConfigBroodErrors(t *testing.T) {
 	// Authorizer wired so the handler clears the authz gate and reaches the
 	// ConfigBrood guard this test exists to exercise.

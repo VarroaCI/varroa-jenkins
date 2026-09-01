@@ -203,16 +203,40 @@ type BundleComposeResponse struct {
 // All YAML fields are rendered strings; Missing, Drifted, Warnings,
 // UnresolvedVariables, and Errors are informational lists.
 type BundleComposePreview struct {
-	BundleYAML          string   `json:"bundleYaml"`
-	JenkinsYAML         string   `json:"jenkinsYaml"`
-	PluginsYAML         string   `json:"pluginsYaml"`
-	ItemsYAML           string   `json:"itemsYaml"`
-	RbacYAML            string   `json:"rbacYaml"`
-	Missing             []string `json:"missing"`
-	Drifted             []string `json:"drifted"`
-	Warnings            []string `json:"warnings"`
-	UnresolvedVariables []string `json:"unresolvedVariables"`
-	Errors              []string `json:"errors,omitempty"`
+	BundleYAML          string             `json:"bundleYaml"`
+	JenkinsYAML         string             `json:"jenkinsYaml"`
+	PluginsYAML         string             `json:"pluginsYaml"`
+	ItemsYAML           string             `json:"itemsYaml"`
+	RbacYAML            string             `json:"rbacYaml"`
+	Missing             []string           `json:"missing"`
+	Drifted             []string           `json:"drifted"`
+	Warnings            []string           `json:"warnings"`
+	UnresolvedVariables []string           `json:"unresolvedVariables"`
+	Errors              []string           `json:"errors,omitempty"`
+	PinPreflight        PinPreflightReport `json:"pinPreflight"`
+}
+
+// PinConflict is a bundle-pinned plugin whose version differs from the
+// resolved set's version for the same artifact.
+type PinConflict struct {
+	ArtifactID    string `json:"artifactId"`
+	BundleVersion string `json:"bundleVersion"`
+	SetVersion    string `json:"setVersion"`
+}
+
+// MissingPlugin is a bundle-pinned plugin whose artifact ID is absent from
+// the resolved set. Advisory only — never a conflict.
+type MissingPlugin struct {
+	ArtifactID    string `json:"artifactId"`
+	BundleVersion string `json:"bundleVersion"`
+}
+
+// PinPreflightReport is the result of comparing a bundle's plugin pins
+// against a resolved plugin set. bus does not import internal/bundle, so this
+// mirrors bundle.PinPreflightReport as the wire shape.
+type PinPreflightReport struct {
+	Conflicts []PinConflict   `json:"conflicts"`
+	Missing   []MissingPlugin `json:"missing"`
 }
 
 // CatalogSyncRequest is the payload for catalog.sourcesync.

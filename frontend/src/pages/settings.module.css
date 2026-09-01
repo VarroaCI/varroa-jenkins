@@ -121,3 +121,15 @@
 .uploadSuccess { color: var(--ok-text); font-size: .85rem; margin-bottom: 8px; }
 .uploadRemediation { font-size: .8rem; color: var(--text-2); padding: 2px 0; }
 .uploadNote { font-size: .78rem; color: var(--text-2); margin-top: 8px; }
+
+/* --- Version candidates (patch-upgrade tracking) ------------------------- */
+.candidateTableWrap { overflow-x: auto; margin-bottom: 16px; }
+.candidateHistory { margin-bottom: 24px; color: var(--text-2); font-size: .82rem; }
+.conditionChip { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: .7rem; font-weight: 600; background: var(--surface-2); color: var(--text-2); }
+.conditionTrue { background: var(--ok-soft); color: var(--ok-text); }
+.conditionFalse { background: var(--bad-soft); color: var(--bad-text); }
+.conditionUnknown { background: var(--surface-2); color: var(--text-2); }
+.preflightList { margin: 4px 0 0; padding-left: 16px; }
+.preflightItem { font-size: .78rem; color: var(--text-2); }
+.candidateOverlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.candidateDialog { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 24px; max-width: 480px; width: 90%; }

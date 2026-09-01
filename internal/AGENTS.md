@@ -225,6 +225,17 @@ reading each package's entry point):
   opaque string, never normalized or decomposed — comparison is `pluginver`'s.
   Consumers: `internal/oci` (layer annotations), `cmd/bootstrapdeps` (closure
   walk), `internal/updatecenter` (upload PARSE).
+- **`pluginresolve/`** — pure plugin-dependency-closure library, no
+  filesystem/network I/O of its own: `Resolve` walks a worklist of
+  `(name, minVersion)` requirements against a caller-supplied `MetadataSource`
+  (`UpstreamSource` wraps `ucmeta.Resolver`; `InClusterSource` walks an
+  `oci.BlobStore`'s plugin packs with a version/completeness/manifest-digest
+  tie-break), raising minimums with `pluginver.AtLeast` — never `jenkinsver`,
+  which is reserved for the separate `checkCoreFloor`/`AssertCoreFloor` gate
+  against a plugin's/the root HPI's `RequiredCore` — capped at
+  `maxResolveDepth = 32`. Also holds the bootstrap-closure logic moved from
+  `cmd/bootstrapdeps` (`ResolveClosure`, `AssertBootstrapClosure`,
+  `HTTPFetcher`), presence-only with no version comparison.
 - **`ca/`** — internal certificate authority (ed25519 + x509) issuing mTLS
   certs for mite↔gateway `CommandStream` connections; bootstrap HMAC token
   verification also lives here.

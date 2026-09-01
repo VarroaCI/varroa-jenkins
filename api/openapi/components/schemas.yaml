@@ -1635,7 +1635,7 @@ ComposedBundleSpec:
 ComposedBundlePreview:
   type: object
   description: Response from a composed bundle preview.
-  required: [bundleYaml, jenkinsYaml, pluginsYaml, itemsYaml, rbacYaml, missing, drifted, warnings, unresolvedVariables]
+  required: [bundleYaml, jenkinsYaml, pluginsYaml, itemsYaml, rbacYaml, missing, drifted, warnings, unresolvedVariables, pinPreflight]
   properties:
     bundleYaml:
       type: string
@@ -1663,12 +1663,14 @@ ComposedBundlePreview:
       type: array
       items:
         type: string
+    pinPreflight:
+      $ref: '#/PinPreflightReport'
   additionalProperties: false
 
 ComposedBundleValidateResponse:
   type: object
   description: Response from a composed bundle validation.
-  required: [valid, unresolvedVariables]
+  required: [valid, unresolvedVariables, pinPreflight]
   properties:
     valid:
       type: boolean
@@ -1684,6 +1686,47 @@ ComposedBundleValidateResponse:
       type: array
       items:
         type: string
+    pinPreflight:
+      $ref: '#/PinPreflightReport'
+  additionalProperties: false
+
+PinConflict:
+  type: object
+  description: A composed bundle's plugin pin whose version conflicts with the resolved plugin set.
+  required: [artifactId, bundleVersion, setVersion]
+  properties:
+    artifactId:
+      type: string
+    bundleVersion:
+      type: string
+    setVersion:
+      type: string
+  additionalProperties: false
+
+MissingPlugin:
+  type: object
+  description: A composed bundle's plugin pin absent from the resolved plugin set.
+  required: [artifactId, bundleVersion]
+  properties:
+    artifactId:
+      type: string
+    bundleVersion:
+      type: string
+  additionalProperties: false
+
+PinPreflightReport:
+  type: object
+  description: Plugin-pin preflight result comparing a composed bundle's pins against the resolved plugin set.
+  required: [conflicts, missing]
+  properties:
+    conflicts:
+      type: array
+      items:
+        $ref: '#/PinConflict'
+    missing:
+      type: array
+      items:
+        $ref: '#/MissingPlugin'
   additionalProperties: false
 
 # --- 3.5 Provisioning schemas ---
@@ -1982,6 +2025,26 @@ ClassMiteSpec:
 JenkinsVersionProfile:
   type: object
   description: A JenkinsVersionProfile CRD (cluster-scoped).
+  required: [apiVersion, kind, metadata, spec]
+  properties:
+    apiVersion:
+      type: string
+    kind:
+      type: string
+    metadata:
+      type: object
+      additionalProperties: true
+    spec:
+      type: object
+      additionalProperties: true
+    status:
+      type: object
+      additionalProperties: true
+  additionalProperties: true
+
+ProfileCandidate:
+  type: object
+  description: A ProfileCandidate CRD (cluster-scoped) — a discovered upstream patch/LTS-line candidate for a JenkinsVersionProfile, pending validation and promotion.
   required: [apiVersion, kind, metadata, spec]
   properties:
     apiVersion:
@@ -2528,7 +2591,7 @@ BroodOperationDetail:
           properties:
             verb:
               type: string
-              enum: [restart, reprovision, reconcile, stop, start, executeGroovy]
+              enum: [restart, reprovision, reconcile, stop, start, executeGroovy, upgrade]
             groovy:
               type: object
               description: Script selection for verb=executeGroovy. Exactly one of script or itemRef.
@@ -2548,6 +2611,12 @@ BroodOperationDetail:
                       type: object
                       additionalProperties:
                         type: string
+            upgrade:
+              type: object
+              description: Granularity selection for verb=upgrade. An absent targetVersion releases each target's own held promoted revision; a set targetVersion bulk-writes that version to every target.
+              properties:
+                targetVersion:
+                  type: string
         targets:
           type: object
           properties:
@@ -2706,7 +2775,7 @@ BroodRun:
       type: string
     verb:
       type: string
-      enum: [restart, reprovision, reconcile, stop, start, executeGroovy]
+      enum: [restart, reprovision, reconcile, stop, start, executeGroovy, upgrade]
     phase:
       type: string
       enum: [Pending, Running, Suspended, Succeeded, Failed, Canceled]
@@ -2746,7 +2815,7 @@ BroodRunSummaryRow:
       type: string
     verb:
       type: string
-      enum: [restart, reprovision, reconcile, stop, start, executeGroovy]
+      enum: [restart, reprovision, reconcile, stop, start, executeGroovy, upgrade]
     phase:
       type: string
       enum: [Pending, Running, Suspended, Succeeded, Failed, Canceled]

@@ -39,6 +39,11 @@ func (a PreflightStore) UpdateObject(ctx context.Context, gvr schema.GroupVersio
 	return a.Store.UpdateObject(ctx, gvr, ns, obj)
 }
 
+// UpdateObjectStatus implements crdstore.Backend.
+func (a PreflightStore) UpdateObjectStatus(ctx context.Context, gvr schema.GroupVersionResource, ns string, obj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+	return a.Store.UpdateObjectStatus(ctx, gvr, ns, obj)
+}
+
 // DeleteObject implements crdstore.Backend.
 func (a PreflightStore) DeleteObject(ctx context.Context, gvr schema.GroupVersionResource, ns, name string) error {
 	return a.Store.DeleteObject(ctx, gvr, ns, name)

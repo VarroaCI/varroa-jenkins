@@ -644,6 +644,7 @@ func main() {
 		apiDeps.CRClient = crClient
 	}
 	apiDeps.ObsNormalizer = api.NewObservatoryNormalizer(apiDeps.MiteRegistry, apiDeps.ObsBackends)
+	apiDeps.VersionProfileReconciler = controller.NewJenkinsVersionProfileReconciler(client, clientsetClient, operatorNamespace, logger)
 	apiServer := api.NewServer(apiDeps)
 
 	// --- API key verifier (long-lived credentials) ---

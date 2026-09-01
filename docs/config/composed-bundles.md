@@ -95,6 +95,19 @@ kubectl annotate composedbundle platform-baseline -n teams-platform \
 Remove the annotation to resume. See [rollout waves](../operations/rollout-waves.md)
 for staged application.
 
+## Preflight plugin pins
+
+The validate and preview responses also include `pinPreflight`, computed
+against the same resolved plugin set a controller would apply. `conflicts`
+names any non-core artifact whose bundle-pinned version differs from that
+set; `missing` names any pinned artifact the set doesn't carry at all. Both
+arrays come back empty, never `null`, when nothing is amiss.
+
+`pinPreflight` is advisory: it exists so a conflict shows up while the bundle
+is still being authored, before it's ever attached to a controller. See
+[pin Jenkins plugins](plugin-pinning.md) for how the equivalent
+`PluginPinConflict` condition behaves once a bundle is in use.
+
 ## Troubleshoot
 
 | Symptom | Check |

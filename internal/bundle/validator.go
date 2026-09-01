@@ -17,6 +17,24 @@ type ValidateResult struct {
 	Warnings []string
 }
 
+// PluginPin is one entry of a bundle's plugins.yaml.
+type PluginPin struct {
+	ArtifactID string `yaml:"artifactId"`
+	Version    string `yaml:"version"`
+}
+
+// ParsePluginPins unmarshals a bundle's plugins.yaml content into its list of
+// plugin pins. It performs no validation of the entries themselves.
+func ParsePluginPins(pluginsYAML string) ([]PluginPin, error) {
+	var pc struct {
+		Plugins []PluginPin `yaml:"plugins"`
+	}
+	if err := yaml.Unmarshal([]byte(pluginsYAML), &pc); err != nil {
+		return nil, err
+	}
+	return pc.Plugins, nil
+}
+
 // varPattern matches ${VAR_NAME} placeholders.
 var varPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
 
@@ -174,17 +192,12 @@ func ValidateContent(jenkinsYAML, pluginsYAML, itemsYAML, rbacYAML string, defin
 
 	// Check plugins well-formedness.
 	if strings.TrimSpace(pluginsYAML) != "" {
-		var pc struct {
-			Plugins []struct {
-				ArtifactID string `yaml:"artifactId"`
-				Version    string `yaml:"version"`
-			} `yaml:"plugins"`
-		}
-		if err := yaml.Unmarshal([]byte(pluginsYAML), &pc); err != nil {
+		pins, err := ParsePluginPins(pluginsYAML)
+		if err != nil {
 			result.Valid = false
 			result.Errors = append(result.Errors, fmt.Sprintf("plugins: invalid YAML: %v", err))
 		} else {
-			for i, p := range pc.Plugins {
+			for i, p := range pins {
 				if p.ArtifactID == "" {
 					result.Valid = false
 					result.Errors = append(result.Errors, fmt.Sprintf("plugins[%d]: artifactId is required", i))

@@ -18,9 +18,11 @@ Choose exactly one target form: `--names` or `--selector`. A selector can be lim
 | `--failure-policy` | `FailTidy` | Stop new dispatch after a failure and wait for active targets. |
 | `--ttl` | seven days | Retain the completed operation. Use `0` to retain it. |
 
-`FailFast` stops at the first failure. `FailAtEnd` attempts every target. Supported actions are `restart`, `reprovision`, `reconcile`, `stop`, and `start`. `reconcile` skips stopped and hibernated controllers. `start` wakes either state.
+`FailFast` stops at the first failure. `FailAtEnd` attempts every target. Supported actions are `restart`, `reprovision`, `reconcile`, `stop`, `start`, and `upgrade`. `reconcile` skips stopped and hibernated controllers. `start` wakes either state.
 
 `executeGroovy` runs arbitrary Jenkins code. Configure and authorize it only through [executeGroovy security](../security/execute-groovy.md).
+
+`upgrade` applies only to `Connected` controllers; anything else is skipped, not failed. With `spec.action.upgrade.targetVersion` set, every target moves to that version; left unset, each target releases whatever version its own profile already resolves to, which is how a `manual` upgrade policy hold gets released without flipping the cluster-wide dial. See [Jenkins upgrades](jenkins-upgrades.md) for both granularities and the plugin-pin pre-flight that runs before either one writes anything.
 
 ## Monitor and control a run
 

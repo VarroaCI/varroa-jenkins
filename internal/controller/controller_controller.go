@@ -370,10 +370,11 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 
 	// Build MaterializedBundle from ConfigMap data.
 	mat := &bundle.MaterializedBundle{
-		JenkinsYAML: data["jenkins.yaml"],
-		PluginsYAML: data["plugins.yaml"],
-		ItemsYAML:   data["items.yaml"],
-		RbacYAML:    data["rbac.yaml"],
+		JenkinsYAML:    data["jenkins.yaml"],
+		PluginsYAML:    data["plugins.yaml"],
+		ItemsYAML:      data["items.yaml"],
+		RbacYAML:       data["rbac.yaml"],
+		RawPluginsYAML: data["plugins.yaml"],
 	}
 
 	if resolvedBundleEmpty(mat) {
@@ -657,6 +658,19 @@ type ResourceClient interface {
 	CreateIngress(ctx context.Context, name, namespace, host, pathPrefix, tlsSecret, ingressClass string, annotations map[string]string, overlayYAML string) error
 	CreateOrUpdateConfigMap(ctx context.Context, name, namespace string, data map[string]string, owners ...metav1.OwnerReference) error
 	GetConfigMap(ctx context.Context, name, namespace string) (map[string]string, error)
+	// RemoveConfigMapLabel deletes labelKey from a ConfigMap's labels, leaving
+	// its data untouched. A no-op success when the ConfigMap does not exist or
+	// does not carry the label — used by promotion to strip the
+	// version-profile-seed ownership label ahead of a content overwrite,
+	// closing the race with the periodic seed reconciler.
+	RemoveConfigMapLabel(ctx context.Context, name, namespace, labelKey string) error
+	// UpdateConfigMapData replaces a ConfigMap's Data via a read-modify-write,
+	// leaving Labels, Annotations, and OwnerReferences untouched — unlike
+	// CreateOrUpdateConfigMap, whose Update path replaces the whole object and
+	// would strip Helm's ownership metadata. Used by promotion to overwrite
+	// the Helm-owned "<profile>-pluginset" ConfigMap's plugin lock content
+	// without disturbing that metadata.
+	UpdateConfigMapData(ctx context.Context, name, namespace string, data map[string]string) error
 	DeleteResource(ctx context.Context, kind, name, namespace string) error
 	DeleteSecret(ctx context.Context, name, namespace string) error
 	EnsureWakeEndpointSlice(ctx context.Context, namespace, serviceName string, podIPs []string, port int32) error
@@ -696,6 +710,14 @@ type ResourceClient interface {
 	// CreateOrUpdateConfigMapWithOwner creates or updates a ConfigMap, setting
 	// the given owner reference on the ConfigMap's metadata.
 	CreateOrUpdateConfigMapWithOwner(ctx context.Context, name, namespace string, data map[string]string, owner metav1.OwnerReference) error
+
+	// CreateOrUpdateOwnedConfigMap creates a ConfigMap, or updates one only
+	// when a live object of that name already carries every entry in labels.
+	// Get; not found -> Create with labels; found and labels absent or
+	// mismatched -> ErrConfigMapNotOwned without writing; found and owned ->
+	// resourceVersion-scoped Update; on Conflict, one bounded retry that
+	// re-Gets and re-checks ownership rather than blindly retrying the write.
+	CreateOrUpdateOwnedConfigMap(ctx context.Context, name, namespace string, data map[string]string, labels map[string]string) error
 
 	ClearUserPassword(ctx context.Context, name, namespace string) error
 
@@ -752,10 +774,10 @@ func NewReconciler(r *bundle.Resolver, client ResourceClient, store crdstore.Bac
 		versionRollGate:         allowAllVersionRolls,
 		clusterName:             "core",
 	}
-	// Replace change A's default allow-all gate with change B's core↔plugin
-	// compat gate (guard-version-upgrade-path §6). Assigned post-construction
-	// because it is a method value bound to rec.
-	rec.versionRollGate = rec.evaluateVersionRollGate
+	// Replaces the default allow-all gate with the composed core↔plugin
+	// compat + upgradePolicy gate. Assigned post-construction because it is a
+	// method value bound to rec.
+	rec.versionRollGate = rec.upgradePolicyVersionRollGate
 
 	return rec
 }
@@ -2312,7 +2334,7 @@ func (r *Reconciler) handleProvisioning(ctx context.Context, cr *v1alpha1.Contro
 		oldLines = nil
 	}
 
-	resolved, _, _, resolveErr := r.resolveBundleForController(ctx, cr)
+	resolved, _, bundleIdent, resolveErr := r.resolveBundleForController(ctx, cr)
 	// Every Controller now has an effective bundle — a named one or the built-in
 	// starter — so a resolve failure is always worth blocking on. The former
 	// `&& ComposedBundleRef != nil` exemption existed only for the no-bundle
@@ -2350,6 +2372,16 @@ func (r *Reconciler) handleProvisioning(ctx context.Context, cr *v1alpha1.Contro
 		return fmt.Errorf("version upgrade blocked: %s", compat.Message)
 	}
 	coreSet := r.resolveCoreSet(ctx, cr, profile, r.Logger)
+	// PluginPinConflict runs before the blocking pluginVersionConflict gate below
+	// so it still fires on the same reconcile that gate blocks on — placing it
+	// after would skip this independent signal exactly when it's most relevant.
+	if report, pinErr := bundle.CheckPluginPins(resolved.RawPluginsYAML, coreSet); pinErr == nil {
+		if len(report.Conflicts) > 0 {
+			r.surfacePluginPinConflict(ctx, cr, bundleIdent, pluginPinConflictMessage(report))
+		} else {
+			r.clearPluginPinConflict(ctx, cr, bundleIdent)
+		}
+	}
 	if conflict := pluginVersionConflict(cr, resolved, coreSet); conflict != "" {
 		r.surfacePluginConflict(ctx, cr, conflict)
 		r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedPluginConflict, conflict)
@@ -2984,6 +3016,16 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 			r.surfacePluginConflict(ctx, cr, conflict)
 		} else {
 			r.clearPluginConflict(ctx, cr)
+		}
+
+		// PluginPinConflict (C1): same detection-only treatment as above, but an
+		// independent condition/event pair — see surfacePluginPinConflict.
+		if report, pinErr := bundle.CheckPluginPins(resolvedBundle.RawPluginsYAML, coreSet); pinErr == nil {
+			if len(report.Conflicts) > 0 {
+				r.surfacePluginPinConflict(ctx, cr, bundleIdent, pluginPinConflictMessage(report))
+			} else {
+				r.clearPluginPinConflict(ctx, cr, bundleIdent)
+			}
 		}
 
 		desiredChecksum := sha256Hex([]byte(strings.Join(desiredLines, "\n")))
@@ -3825,6 +3867,108 @@ func (r *Reconciler) clearPluginConflict(ctx context.Context, cr *v1alpha1.Contr
 	))
 }
 
+// pluginPinConflictMessage formats a PinPreflightReport's conflicts for
+// ConditionPluginPinConflict's message, naming each conflicting artifact.
+func pluginPinConflictMessage(report bundle.PinPreflightReport) string {
+	parts := make([]string, 0, len(report.Conflicts))
+	for _, c := range report.Conflicts {
+		parts = append(parts, fmt.Sprintf("%s (bundle pins %s, set has %s)", c.ArtifactID, c.BundleVersion, c.SetVersion))
+	}
+	return "plugin pin conflict: " + strings.Join(parts, ", ")
+}
+
+// surfacePluginPinConflict sets ConditionPluginPinConflict=True on cr, patches
+// the referenced ComposedBundle's own PluginPinConflict condition, and emits a
+// pluginPinConflict.detected activity event on the False/absent→True edge.
+// This is a distinct signal from ConditionPluginConflict — it does NOT
+// markReconcileBlocked and never blocks the calling phase.
+func (r *Reconciler) surfacePluginPinConflict(ctx context.Context, cr *v1alpha1.Controller, bundleIdent bundleIdentity, message string) {
+	// Read prior state BEFORE setCondition — findCondition returns a pointer
+	// into the slice, and setCondition overwrites the same memory location.
+	prior := findCondition(cr.Status.Conditions, v1alpha1.ConditionPluginPinConflict)
+	shouldEmit := shouldEmitPluginConflictEvent(prior, true)
+
+	cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+		Type:    v1alpha1.ConditionPluginPinConflict,
+		Status:  metav1.ConditionTrue,
+		Reason:  v1alpha1.ReasonPluginPinConflict,
+		Message: message,
+	})
+	r.patchBundlePluginPinConflict(ctx, cr, bundleIdent, true, message)
+	if shouldEmit && r.activityPublisher != nil {
+		r.activityPublisher.Publish(activity.Event{
+			Type:       "pluginPinConflict.detected",
+			Source:     "operator",
+			Controller: cr.Name,
+			Namespace:  cr.Namespace,
+			Message:    message,
+			Reason:     v1alpha1.ReasonPluginPinConflict,
+			Severity:   "warning",
+		})
+	}
+}
+
+// clearPluginPinConflict clears ConditionPluginPinConflict (False/NoConflict)
+// on cr and on the referenced ComposedBundle.
+func (r *Reconciler) clearPluginPinConflict(ctx context.Context, cr *v1alpha1.Controller, bundleIdent bundleIdentity) {
+	cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+		Type:   v1alpha1.ConditionPluginPinConflict,
+		Status: metav1.ConditionFalse,
+		Reason: "NoConflict",
+	})
+	r.patchBundlePluginPinConflict(ctx, cr, bundleIdent, false, "")
+}
+
+// patchBundlePluginPinConflict patches the referenced ComposedBundle's own
+// PluginPinConflict condition with a Conditions-only status merge, bypassing
+// CatalogReconciler.buildStatus/patchStatus entirely. Multiple controllers
+// reconciling the same ComposedBundle leave last-writer-wins semantics on this
+// condition — it is not an aggregate across referencing controllers, so the
+// message names which controller last set it.
+func (r *Reconciler) patchBundlePluginPinConflict(ctx context.Context, cr *v1alpha1.Controller, bundleIdent bundleIdentity, conflictNow bool, message string) {
+	cb, err := r.getComposedBundle(ctx, bundleIdent.Name, bundleIdent.Namespace)
+	if err != nil {
+		return
+	}
+	status, reason, msg := metav1.ConditionFalse, "NoConflict", ""
+	if conflictNow {
+		status = metav1.ConditionTrue
+		reason = v1alpha1.ReasonPluginPinConflict
+		msg = fmt.Sprintf("%s (controller %s/%s)", message, cr.Namespace, cr.Name)
+	}
+	conditions := setTemplateCatalogCondition(cb.Status.Conditions, v1alpha1.TemplateCatalogCondition{
+		Type:    string(v1alpha1.ConditionPluginPinConflict),
+		Status:  status,
+		Reason:  reason,
+		Message: msg,
+	})
+	if err := crdstore.PatchStatus[v1alpha1.ComposedBundle](ctx, r.store, cb.Name, cb.Namespace, &v1alpha1.ComposedBundleStatus{
+		Conditions: conditions,
+	}); err != nil {
+		r.Logger.Warn("failed to patch composed bundle PluginPinConflict condition", "name", cb.Name, "namespace", cb.Namespace, "error", err)
+	}
+}
+
+// setTemplateCatalogCondition upserts a condition by Type in a
+// []TemplateCatalogCondition slice — the ComposedBundle-status analogue of
+// setCondition, needed because TemplateCatalogCondition.Type is a plain string
+// rather than ControllerConditionType.
+func setTemplateCatalogCondition(conditions []v1alpha1.TemplateCatalogCondition, c v1alpha1.TemplateCatalogCondition) []v1alpha1.TemplateCatalogCondition {
+	for i, existing := range conditions {
+		if existing.Type == c.Type {
+			if existing.Status == c.Status && !existing.LastTransitionTime.IsZero() {
+				c.LastTransitionTime = existing.LastTransitionTime
+			} else {
+				c.LastTransitionTime = metav1Now()
+			}
+			conditions[i] = c
+			return conditions
+		}
+	}
+	c.LastTransitionTime = metav1Now()
+	return append(conditions, c)
+}
+
 func metav1Now() metav1.Time {
 	return metav1.Time{Time: time.Now()}
 }
@@ -3992,6 +4136,7 @@ func (r *Reconciler) reconcileVersionRoll(ctx context.Context, cr *v1alpha1.Cont
 			Reason:  v1alpha1.ReasonVersionConverged,
 			Message: msg,
 		})
+		clearUpgradePending(cr)
 		return false
 	}
 

@@ -470,6 +470,15 @@ html[data-theme="dark"] .note { color: var(--honey); }
   padding: 2px 9px;
   border-radius: 10px;
 }
+.pendingReleaseChip {
+  align-self: flex-start;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  padding: 2px 9px;
+  border-radius: 10px;
+}
 .eolChip {
   font-size: 11.5px;
   font-weight: 700;

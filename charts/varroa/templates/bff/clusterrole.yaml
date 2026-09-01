@@ -30,9 +30,22 @@ rules:
   - apiGroups: ["varroa.dev"]
     resources: ["provisioningdefaults", "provisioningdefaults/status"]
     verbs: ["get", "list", "watch", "update", "patch"]
+  # Promotion (PromoteVersionCandidate) advances Spec.ResolveVersion on the
+  # main resource directly — update, not patch.
   - apiGroups: ["varroa.dev"]
-    resources: ["jenkinsversionprofiles", "jenkinsversionprofiles/status"]
-    verbs: ["get", "list", "watch"]
+    resources: ["jenkinsversionprofiles"]
+    verbs: ["get", "list", "watch", "update"]
+  # The synchronous version-profile re-materialization promotion triggers
+  # in-process patches status — patch, not update.
+  - apiGroups: ["varroa.dev"]
+    resources: ["jenkinsversionprofiles/status"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["profilecandidates"]
+    verbs: ["get", "list"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["profilecandidates/status"]
+    verbs: ["update"]
   # BFF reads the singleton UpdateCenter CR for the update-center admin UI.
   - apiGroups: ["varroa.dev"]
     resources: ["updatecenters"]

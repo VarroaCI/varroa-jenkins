@@ -66,4 +66,38 @@ describe("VersionPicker", () => {
     fireEvent.change(input, { target: { value: "2.463.1" } });
     expect(onChange).toHaveBeenCalledWith("2.463.1");
   });
+
+  it("renders the upgradePendingNote above the grid when set", () => {
+    render(
+      <VersionPicker
+        versions={versions}
+        value="2.555"
+        onChange={() => {}}
+        upgradePendingNote="held for 2.555.4"
+      />,
+    );
+    expect(screen.getByText("held for 2.555.4")).toBeInTheDocument();
+  });
+
+  it("renders no note when upgradePendingNote is unset (grid branch)", () => {
+    const { container } = render(<VersionPicker versions={versions} value="2.555" onChange={() => {}} />);
+    expect(container.querySelector("p")).not.toBeInTheDocument();
+  });
+
+  it("renders the upgradePendingNote above the free-text input when the catalog is empty", () => {
+    render(
+      <VersionPicker
+        versions={[]}
+        value="2.462.1"
+        onChange={() => {}}
+        upgradePendingNote="held for 2.555.4"
+      />,
+    );
+    expect(screen.getByText("held for 2.555.4")).toBeInTheDocument();
+  });
+
+  it("renders no note when upgradePendingNote is unset (free-text branch)", () => {
+    const { container } = render(<VersionPicker versions={[]} value="2.462.1" onChange={() => {}} />);
+    expect(container.querySelector("p")).not.toBeInTheDocument();
+  });
 });

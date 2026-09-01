@@ -735,6 +735,9 @@ const (
 	ReasonPluginRollFailed = "PluginRollFailed"
 	// ReasonPluginConflict is set when a requested plugin version conflicts with the profile lock set.
 	ReasonPluginConflict = "PluginConflict"
+	// ReasonPluginPinConflict is set when a bundle-pinned plugin version conflicts with the
+	// resolved plugin set, independently of ReasonPluginConflict.
+	ReasonPluginPinConflict = "PluginPinConflict"
 	// ReasonPluginInstallRequired is set when the managed plugin set diverged from
 	// the baked set in manual/idle mode and the roll is not yet approved (it will
 	// not converge until the user approves the plugin-roll or sets mode: automatic).
@@ -977,6 +980,17 @@ const (
 	// creating no Ingress and saying nothing — is indistinguishable from a
 	// broken ingress controller.
 	ConditionNoExternalURL ControllerConditionType = "NoExternalURL"
+	// ConditionPluginPinConflict indicates a bundle-pinned plugin version
+	// conflicts with the controller's resolved plugin set. It is a distinct
+	// slot from ConditionPluginConflict: advisory only, never blocking, and
+	// never participates in markReconcileBlocked.
+	ConditionPluginPinConflict ControllerConditionType = "PluginPinConflict"
+	// ConditionUpgradePending indicates a profile-driven version roll is held
+	// because ProvisioningDefaults.Spec.UpgradePolicy is "manual". It is set by
+	// upgradePolicyVersionRollGate and cleared by reconcileVersionRoll once the
+	// controller's applied image converges with the desired image, regardless of
+	// what unblocked it.
+	ConditionUpgradePending ControllerConditionType = "UpgradePending"
 )
 
 // ControllerCondition contains details about the current condition of a controller.
@@ -1695,6 +1709,20 @@ type ProvisioningDefaultsSpec struct {
 	// must not disable functionality.
 	// +optional
 	BroodPolicy *BroodPolicy `json:"broodPolicy,omitempty"`
+	// UpgradePolicy governs whether a profile-driven version roll (a
+	// JenkinsVersionProfile.Spec.ResolveVersion advance) may proceed
+	// automatically. Empty/"auto" means proceed automatically; "manual" holds
+	// the roll until a human intervenes. It does not affect resourceOverlay-
+	// governed image changes or the underlying core-compat gate.
+	// +kubebuilder:validation:Enum=auto;manual
+	// +optional
+	UpgradePolicy string `json:"upgradePolicy,omitempty"`
+}
+
+// UpgradeIsManual reports whether UpgradePolicy is set to "manual". Empty and
+// "auto" both mean automatic.
+func (s ProvisioningDefaultsSpec) UpgradeIsManual() bool {
+	return s.UpgradePolicy == "manual"
 }
 
 // BroodPolicy constrains brood operations cluster-wide. It is enforced by the
@@ -1707,6 +1735,10 @@ type BroodPolicy struct {
 	// on a controller's script console with Administer rights.
 	// +optional
 	ExecuteGroovy *ExecuteGroovyPolicy `json:"executeGroovy,omitempty"`
+	// Upgrade governs the upgrade verb, which releases or bulk-moves targets'
+	// Jenkins version.
+	// +optional
+	Upgrade *BroodUpgradePolicy `json:"upgrade,omitempty"`
 }
 
 // ExecuteGroovyPolicy governs the executeGroovy brood verb.
@@ -1752,6 +1784,47 @@ func (p *BroodPolicy) ExecuteGroovyAllowed(opNamespace string) (bool, string) {
 	return false, fmt.Sprintf(
 		"executeGroovy is not permitted in namespace %s; ProvisioningDefaults.broodPolicy allows %s",
 		opNamespace, strings.Join(eg.AllowedNamespaces, ", "))
+}
+
+// BroodUpgradePolicy governs the upgrade brood verb, field-for-field
+// identical to ExecuteGroovyPolicy.
+type BroodUpgradePolicy struct {
+	// Enabled turns the verb on or off cluster-wide. Nil means enabled.
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+	// AllowedNamespaces restricts which namespaces may host an upgrade
+	// BroodOperation. It is matched against the BroodOperation's OWN
+	// namespace, not its targets'.
+	//
+	// Empty means every namespace, when Enabled is not false.
+	// +optional
+	AllowedNamespaces []string `json:"allowedNamespaces,omitempty"`
+}
+
+// UpgradeAllowed reports whether an upgrade BroodOperation in opNamespace is
+// permitted, and why not when it is not. Mirrors ExecuteGroovyAllowed's logic
+// exactly.
+//
+// A nil receiver, a nil Upgrade, and a nil Enabled all mean allowed.
+func (p *BroodPolicy) UpgradeAllowed(opNamespace string) (bool, string) {
+	if p == nil || p.Upgrade == nil {
+		return true, ""
+	}
+	up := p.Upgrade
+	if up.Enabled != nil && !*up.Enabled {
+		return false, "upgrade is disabled by ProvisioningDefaults.broodPolicy"
+	}
+	if len(up.AllowedNamespaces) == 0 {
+		return true, ""
+	}
+	for _, ns := range up.AllowedNamespaces {
+		if ns == opNamespace {
+			return true, ""
+		}
+	}
+	return false, fmt.Sprintf(
+		"upgrade is not permitted in namespace %s; ProvisioningDefaults.broodPolicy allows %s",
+		opNamespace, strings.Join(up.AllowedNamespaces, ", "))
 }
 
 // ProvisioningDefaultsStatus defines the observed state.
@@ -2116,6 +2189,129 @@ type JenkinsVersionProfileList struct {
 	Items           []JenkinsVersionProfile `json:"items"`
 }
 
+// ProfileCandidateSpec references the profile a newer patch was observed against and
+// the resolved plugin closure produced for it.
+type ProfileCandidateSpec struct {
+	// ProfileRef names the JenkinsVersionProfile this candidate would promote into.
+	ProfileRef string `json:"profileRef"`
+	// ObservedVersion is the profile's own Spec.ResolveVersion at discovery time —
+	// the exact patch promotion would be upgrading FROM (e.g. "2.555.3"), captured
+	// for audit/display so a later reader isn't forced to reconstruct "what was this
+	// profile pinned to before" from history.
+	ObservedVersion string `json:"observedVersion"`
+	// ResolveVersion is the newly discovered exact resolvable patch this candidate
+	// would promote the profile TO (e.g. "2.555.4") — the same value
+	// JenkinsVersionProfile.Spec.ResolveVersion would take on promotion.
+	ResolveVersion string `json:"resolveVersion"`
+	// ClosureContentRef names the owner-referenced ConfigMap holding the
+	// internal/pluginresolve-resolved closure for ResolveVersion, keyed the same way
+	// JenkinsVersionProfileStatus.ContentRef is.
+	// +optional
+	ClosureContentRef string `json:"closureContentRef,omitempty"`
+}
+
+// ProfileCandidatePhase is the lifecycle phase of a ProfileCandidate.
+// +kubebuilder:validation:Enum=Pending;Ready;Promoted;Failed;Superseded
+type ProfileCandidatePhase string
+
+// ProfileCandidatePhase values.
+const (
+	ProfileCandidatePhasePending    ProfileCandidatePhase = "Pending"
+	ProfileCandidatePhaseReady      ProfileCandidatePhase = "Ready"
+	ProfileCandidatePhasePromoted   ProfileCandidatePhase = "Promoted"
+	ProfileCandidatePhaseFailed     ProfileCandidatePhase = "Failed"
+	ProfileCandidatePhaseSuperseded ProfileCandidatePhase = "Superseded"
+)
+
+// ProfileCandidateCondition.Type values.
+const (
+	ConditionCandidateResolved         = "Resolved"
+	ConditionCandidateClosureClean     = "ClosureClean"
+	ConditionCandidateCoreCompatOK     = "CoreCompatOK"
+	ConditionCandidatePluginsServable  = "PluginsServable"
+	ConditionCandidatePreflightChecked = "PreflightChecked"
+	ConditionCandidatePromoted         = "Promoted"
+)
+
+// ProfileCandidateCondition follows the same five-field shape every other CRD's
+// per-kind condition type uses in this codebase (ControllerCondition,
+// JenkinsVersionProfileCondition, UpdateCenterCondition all carry
+// LastTransitionTime; this is not a shortened four-field variant).
+type ProfileCandidateCondition struct {
+	Type               string                 `json:"type"`
+	Status             metav1.ConditionStatus `json:"status"`
+	LastTransitionTime metav1.Time            `json:"lastTransitionTime,omitempty"`
+	Reason             string                 `json:"reason,omitempty"`
+	Message            string                 `json:"message,omitempty"`
+}
+
+// ProfileCandidateFailingController is one controller the advisory fleet pre-flight
+// found a pin conflict against. Deliberately minimal: a name/namespace + the conflict
+// count and a truncated message, never the full internal/bundle.PinPreflightReport —
+// keeping etcd size bounded the same way UpdateCenterStatus.Gaps is.
+type ProfileCandidateFailingController struct {
+	Namespace     string `json:"namespace"`
+	Name          string `json:"name"`
+	ConflictCount int    `json:"conflictCount"`
+	Message       string `json:"message"`
+}
+
+// ProfileCandidatePreflightSummary is the advisory pre-flight result. It never
+// blocks promotion — it is informational only.
+type ProfileCandidatePreflightSummary struct {
+	// ControllersChecked is the total count of controllers currently resolving to
+	// ProfileRef's line that the pre-flight ran CheckPluginPins against.
+	ControllersChecked int `json:"controllersChecked"`
+	// ControllersFailing is the TRUE total count of controllers with at least one
+	// conflict, even when FailingControllers below is truncated.
+	ControllersFailing int `json:"controllersFailing"`
+	// FailingControllers lists failing-controllers-only (never a per-controller OK
+	// row), capped at maxPreflightFailures.
+	// +optional
+	FailingControllers []ProfileCandidateFailingController `json:"failingControllers,omitempty"`
+}
+
+// ProfileCandidateStatus defines the observed state of a ProfileCandidate.
+type ProfileCandidateStatus struct {
+	// +optional
+	Phase ProfileCandidatePhase `json:"phase,omitempty"`
+	// +optional
+	Conditions []ProfileCandidateCondition `json:"conditions,omitempty"`
+	// +optional
+	Preflight *ProfileCandidatePreflightSummary `json:"preflight,omitempty"`
+	// PromotedAt is set when Phase transitions to Promoted.
+	// +optional
+	PromotedAt *metav1.Time `json:"promotedAt,omitempty"`
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:scope=Cluster
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="PHASE",type="string",JSONPath=".status.phase"
+// +kubebuilder:printcolumn:name="PROFILE",type="string",JSONPath=".spec.profileRef"
+// +kubebuilder:printcolumn:name="RESOLVE",type="string",JSONPath=".spec.resolveVersion"
+// +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
+
+// ProfileCandidate is a cluster-scoped, observation-produced candidate for promoting
+// a JenkinsVersionProfile onto a newer upstream patch. See
+// docs/operations/jenkins-upgrades.md.
+type ProfileCandidate struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec              ProfileCandidateSpec   `json:"spec,omitempty"`
+	Status            ProfileCandidateStatus `json:"status,omitempty"`
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// ProfileCandidateList is a list of ProfileCandidate.
+type ProfileCandidateList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []ProfileCandidate `json:"items"`
+}
+
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:resource:scope=Cluster
 // +kubebuilder:subresource:status
@@ -2284,7 +2480,7 @@ type UpdateCenterList struct {
 }
 
 // BroodVerb is the action verb for a brood operation.
-// +kubebuilder:validation:Enum=restart;reprovision;reconcile;stop;start;executeGroovy
+// +kubebuilder:validation:Enum=restart;reprovision;reconcile;stop;start;executeGroovy;upgrade
 type BroodVerb string
 
 // Brood operation verbs.
@@ -2295,6 +2491,7 @@ const (
 	BroodVerbStop          BroodVerb = "stop"
 	BroodVerbStart         BroodVerb = "start"
 	BroodVerbExecuteGroovy BroodVerb = "executeGroovy"
+	BroodVerbUpgrade       BroodVerb = "upgrade"
 )
 
 // BroodOrder controls the dispatch order of targets.
@@ -2391,14 +2588,19 @@ type BroodOperationSpec struct {
 
 // BroodAction defines the action to perform on each target.
 // +kubebuilder:validation:XValidation:rule="self.verb == 'executeGroovy' ? has(self.groovy) : !has(self.groovy)",message="groovy is required iff verb is executeGroovy"
+// +kubebuilder:validation:XValidation:rule="self.verb == 'upgrade' ? has(self.upgrade) : !has(self.upgrade)",message="upgrade is required iff verb is upgrade"
 type BroodAction struct {
 	// Verb is the operation to perform.
-	// +kubebuilder:validation:Enum=restart;reprovision;reconcile;stop;start;executeGroovy
+	// +kubebuilder:validation:Enum=restart;reprovision;reconcile;stop;start;executeGroovy;upgrade
 	Verb BroodVerb `json:"verb"`
 	// Groovy carries the script for verb=executeGroovy. Required iff Verb ==
 	// executeGroovy; must be absent for every other verb.
 	// +optional
 	Groovy *BroodGroovyAction `json:"groovy,omitempty"`
+	// Upgrade carries the target version for verb=upgrade. Required iff Verb ==
+	// upgrade; must be absent for every other verb.
+	// +optional
+	Upgrade *BroodUpgradeAction `json:"upgrade,omitempty"`
 }
 
 // BroodGroovyAction selects the script to run for verb=executeGroovy. Exactly
@@ -2413,6 +2615,18 @@ type BroodGroovyAction struct {
 	// ComposedBundle itemRef inputs.
 	// +optional
 	ItemRef *ComposedItemRef `json:"itemRef,omitempty"`
+}
+
+// BroodUpgradeAction selects the granularity of verb=upgrade. Absent
+// TargetVersion releases each target's currently-held promoted revision
+// (granularity B); a set TargetVersion bulk-writes it to every target's
+// spec.version (granularity A), after admission-time resolution.
+type BroodUpgradeAction struct {
+	// TargetVersion is the Jenkins version to move targets to. Absent means
+	// release the promoted revision each target's version-roll gate is
+	// already holding, rather than moving to a new version.
+	// +optional
+	TargetVersion *string `json:"targetVersion,omitempty"`
 }
 
 // BroodTargets defines which controllers to target.

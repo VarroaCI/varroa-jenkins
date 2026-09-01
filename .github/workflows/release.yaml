@@ -278,11 +278,12 @@ jobs:
           #
           # The upload branch is also the NORMAL path from 0.1.1 on, not just a
           # re-run guard: release-please creates the Release itself (with notes
-          # generated from CHANGELOG.md) and this job only attaches binaries to
-          # it. The --notes below therefore apply solely to a manually cut tag
-          # such as the initial v0.1.0, where no Release exists yet. Do not
-          # "fix" this by forcing --notes onto an existing Release: that would
-          # overwrite release-please's changelog notes with this boilerplate.
+          # generated from CHANGELOG.md) and this job only attaches binaries
+          # and appends the install section. Never replace an existing
+          # Release's notes wholesale — the changelog half belongs to
+          # release-please; append below it, gated on the invisible marker
+          # comment (or the section heading, for releases annotated before the
+          # marker existed) so a re-run cannot append twice.
           # Enumerate the exact expected assets, never `dist/*` — the same
           # no-glob rule the chart push follows. A stray file in dist/ must
           # fail the upload loudly, not ship as a release asset.
@@ -293,17 +294,24 @@ jobs:
           done
           assets+=(dist/SHA256SUMS)
 
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
-          else
-            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
-              --title "v${VERSION}" \
-              --notes "Container images, Helm chart, and \`varroactl\` binaries for v${VERSION}.
-
+          # Shared by both branches below: appended under release-please's
+          # changelog on an existing Release, and used as the body of a
+          # manually cut tag's fresh Release. The append guard matches the
+          # invisible marker comment (or, for releases annotated before the
+          # marker existed, the section heading), so a hand edit to the
+          # visible text cannot cause a duplicate append; keep the guard's
+          # patterns in step with this content.
+          cat > install-notes.md <<EOF
+          <!-- varroa-install-notes -->
           ## Install the chart
 
+          The chart is published as an OCI artifact, so there is no \`helm repo add\` step — Helm 3.8+ pulls it directly. Complete [Prerequisites](https://varroa.dev/docs/install/prerequisites/) first and create a \`values.yaml\` per the [Helm install guide](https://varroa.dev/docs/install/helm-install/) (auth, ingress, managed namespaces), then:
+
           \`\`\`bash
-          helm install varroa oci://ghcr.io/varroaci/charts/varroa --version ${VERSION}
+          helm install varroa oci://ghcr.io/varroaci/charts/varroa \\
+            --version ${VERSION} \\
+            -n varroa-system --create-namespace \\
+            -f values.yaml
           \`\`\`
 
           ## Install varroactl
@@ -315,7 +323,23 @@ jobs:
           install -m 0755 varroactl /usr/local/bin/varroactl
           \`\`\`
 
-          See [CHANGELOG.md](CHANGELOG.md) for the full list of changes."
+          See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/CHANGELOG.md) for the full list of changes.
+          EOF
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+            gh release view "$GITHUB_REF_NAME" --json body --jq .body > body.md
+            if ! grep -qE '<!-- varroa-install-notes -->|^## Install the chart' body.md; then
+              printf '\n---\n\n' >> body.md
+              cat install-notes.md >> body.md
+              gh release edit "$GITHUB_REF_NAME" --notes-file body.md
+            fi
+          else
+            { printf 'Container images, the Helm chart, and `varroactl` binaries for v%s.\n\n' "$VERSION"
+              cat install-notes.md; } > body.md
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+              --title "v${VERSION}" \
+              --notes-file body.md
           fi
 
           gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name'

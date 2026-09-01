@@ -62,6 +62,18 @@ func (c *ClientsetClient) UpdateObject(ctx context.Context, gvr schema.GroupVers
 	return c.dynamic.Resource(gvr).Namespace(namespace).Update(ctx, obj, metav1.UpdateOptions{})
 }
 
+// UpdateObjectStatus replaces the /status subresource. Like UpdateObject, obj
+// must carry a valid resourceVersion — a concurrent write since that
+// resourceVersion was read surfaces as apierrors.IsConflict. Required for any
+// kind registered with `subresources: {status: {}}` (e.g. ProfileCandidate),
+// whose .status a plain UpdateObject silently leaves unchanged.
+func (c *ClientsetClient) UpdateObjectStatus(ctx context.Context, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+	if namespace == "" {
+		return c.dynamic.Resource(gvr).UpdateStatus(ctx, obj, metav1.UpdateOptions{})
+	}
+	return c.dynamic.Resource(gvr).Namespace(namespace).UpdateStatus(ctx, obj, metav1.UpdateOptions{})
+}
+
 // DeleteObject deletes an object by name. A missing object is not an error.
 func (c *ClientsetClient) DeleteObject(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) error {
 	var err error

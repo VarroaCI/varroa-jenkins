@@ -15,6 +15,7 @@ import (
 	v1alpha1 "github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
@@ -122,17 +123,26 @@ func jcascItem(name, ns, content string) *v1alpha1.CatalogItem {
 	}
 }
 
+func pluginItem(name, content string) *v1alpha1.CatalogItem {
+	return &v1alpha1.CatalogItem{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "tenant-a"},
+		Spec:       v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPlugin},
+		Status:     v1alpha1.CatalogItemStatus{Content: content, Valid: true},
+	}
+}
+
 // testComposedBundlePreview mirrors the old ComposedBundlePreview for test use.
 type testComposedBundlePreview struct {
-	BundleYAML          string   `json:"bundleYaml"`
-	JenkinsYAML         string   `json:"jenkinsYaml"`
-	PluginsYAML         string   `json:"pluginsYaml"`
-	ItemsYAML           string   `json:"itemsYaml"`
-	RbacYAML            string   `json:"rbacYaml"`
-	Missing             []string `json:"missing"`
-	Drifted             []string `json:"drifted"`
-	Warnings            []string `json:"warnings"`
-	UnresolvedVariables []string `json:"unresolvedVariables"`
+	BundleYAML          string                 `json:"bundleYaml"`
+	JenkinsYAML         string                 `json:"jenkinsYaml"`
+	PluginsYAML         string                 `json:"pluginsYaml"`
+	ItemsYAML           string                 `json:"itemsYaml"`
+	RbacYAML            string                 `json:"rbacYaml"`
+	Missing             []string               `json:"missing"`
+	Drifted             []string               `json:"drifted"`
+	Warnings            []string               `json:"warnings"`
+	UnresolvedVariables []string               `json:"unresolvedVariables"`
+	PinPreflight        bus.PinPreflightReport `json:"pinPreflight"`
 }
 
 // newBundleParityServer builds a Server whose ConfigBrood is backed by
@@ -222,6 +232,23 @@ func (f *fakeConfigBroodForTest) ComposeBundle(ctx context.Context, cluster, ns 
 		preview.PluginsYAML = result.Materialized.PluginsYAML
 		preview.ItemsYAML = result.Materialized.ItemsYAML
 		preview.RbacYAML = result.Materialized.RbacYAML
+		baseline, _ := pluginlock.Resolve("")
+		if report, err := bundle.CheckPluginPins(preview.PluginsYAML, baseline); err == nil {
+			preview.PinPreflight = bus.PinPreflightReport{Conflicts: []bus.PinConflict{}, Missing: []bus.MissingPlugin{}}
+			for _, c := range report.Conflicts {
+				preview.PinPreflight.Conflicts = append(preview.PinPreflight.Conflicts, bus.PinConflict{
+					ArtifactID:    c.ArtifactID,
+					BundleVersion: c.BundleVersion,
+					SetVersion:    c.SetVersion,
+				})
+			}
+			for _, m := range report.Missing {
+				preview.PinPreflight.Missing = append(preview.PinPreflight.Missing, bus.MissingPlugin{
+					ArtifactID:    m.ArtifactID,
+					BundleVersion: m.BundleVersion,
+				})
+			}
+		}
 	}
 	return preview, nil
 }
@@ -380,6 +407,99 @@ func TestValidateComposedBundle_NamesMissingItems(t *testing.T) {
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode validate response: %v", err)
+	}
+}
+
+func TestValidateComposedBundle_PinPreflightConflict(t *testing.T) {
+	client := newBundleTestClient()
+	client.addItem(pluginItem("plugin-item", "plugins:\n  - artifactId: git\n    version: 999.999\n"))
+	srv := newBundleParityServer(client, "varroa-system")
+
+	spec := v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{
+			{ItemRef: &v1alpha1.ComposedItemRef{Name: "plugin-item"}},
+		},
+	}
+	body, _ := json.Marshal(spec)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/clusters/core/composedbundles/validate?namespace=tenant-a", strings.NewReader(string(body)))
+	srv.dispatchComposedBundles(w, req.WithContext(contextWithClaims(req.Context(), adminClaims)), "core", []string{"validate"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("validate: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		PinPreflight bus.PinPreflightReport `json:"pinPreflight"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode validate response: %v", err)
+	}
+	if len(resp.PinPreflight.Conflicts) != 1 || resp.PinPreflight.Conflicts[0].ArtifactID != "git" {
+		t.Fatalf("pinPreflight.conflicts = %+v, want one conflict naming git", resp.PinPreflight.Conflicts)
+	}
+}
+
+func TestValidateComposedBundle_PathSegmentRoute_PinPreflightConflict(t *testing.T) {
+	// The /{ns}/validate route variant must report pinPreflight identically to
+	// the /validate?namespace= variant covered above.
+	client := newBundleTestClient()
+	client.addItem(pluginItem("plugin-item", "plugins:\n  - artifactId: git\n    version: 999.999\n"))
+	srv := newBundleParityServer(client, "varroa-system")
+
+	spec := v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{
+			{ItemRef: &v1alpha1.ComposedItemRef{Name: "plugin-item"}},
+		},
+	}
+	body, _ := json.Marshal(spec)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/clusters/core/composedbundles/tenant-a/validate", strings.NewReader(string(body)))
+	srv.dispatchComposedBundles(w, req.WithContext(contextWithClaims(req.Context(), adminClaims)), "core", []string{"tenant-a", "validate"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("validate: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		PinPreflight bus.PinPreflightReport `json:"pinPreflight"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode validate response: %v", err)
+	}
+	if len(resp.PinPreflight.Conflicts) != 1 || resp.PinPreflight.Conflicts[0].ArtifactID != "git" {
+		t.Fatalf("pinPreflight.conflicts = %+v, want one conflict naming git", resp.PinPreflight.Conflicts)
+	}
+}
+
+func TestPreviewComposedBundle_PinPreflightWithoutSeparateRequest(t *testing.T) {
+	client := newBundleTestClient()
+	client.addItem(pluginItem("plugin-item", "plugins:\n  - artifactId: git\n    version: 999.999\n"))
+	srv := newBundleParityServer(client, "varroa-system")
+
+	spec := v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{
+			{ItemRef: &v1alpha1.ComposedItemRef{Name: "plugin-item"}},
+		},
+	}
+	resp := doPreview(t, srv, "tenant-a", spec)
+	if len(resp.PinPreflight.Conflicts) != 1 || resp.PinPreflight.Conflicts[0].ArtifactID != "git" {
+		t.Fatalf("pinPreflight.conflicts = %+v, want one conflict naming git, with no request field needed to opt in", resp.PinPreflight.Conflicts)
+	}
+}
+
+func TestPreviewComposedBundle_PinPreflightAllClear(t *testing.T) {
+	client := newBundleTestClient()
+	client.addItem(pluginItem("clean-plugin-item", "plugins:\n  - artifactId: git\n    version: 5.10.1\n"))
+	srv := newBundleParityServer(client, "varroa-system")
+
+	spec := v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{
+			{ItemRef: &v1alpha1.ComposedItemRef{Name: "clean-plugin-item"}},
+		},
+	}
+	resp := doPreview(t, srv, "tenant-a", spec)
+	if resp.PinPreflight.Conflicts == nil || len(resp.PinPreflight.Conflicts) != 0 {
+		t.Errorf("pinPreflight.conflicts = %#v, want non-nil empty array", resp.PinPreflight.Conflicts)
+	}
+	if resp.PinPreflight.Missing == nil || len(resp.PinPreflight.Missing) != 0 {
+		t.Errorf("pinPreflight.missing = %#v, want non-nil empty array", resp.PinPreflight.Missing)
 	}
 }
 

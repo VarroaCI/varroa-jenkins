@@ -49,6 +49,7 @@ const (
 	ComponentsSchemasBroodOperationDetailSpecActionVerbRestart       ComponentsSchemasBroodOperationDetailSpecActionVerb = "restart"
 	ComponentsSchemasBroodOperationDetailSpecActionVerbStart         ComponentsSchemasBroodOperationDetailSpecActionVerb = "start"
 	ComponentsSchemasBroodOperationDetailSpecActionVerbStop          ComponentsSchemasBroodOperationDetailSpecActionVerb = "stop"
+	ComponentsSchemasBroodOperationDetailSpecActionVerbUpgrade       ComponentsSchemasBroodOperationDetailSpecActionVerb = "upgrade"
 )
 
 // Defines values for ComponentsSchemasBroodOperationDetailSpecExecutionFailurePolicy.
@@ -101,6 +102,7 @@ const (
 	ComponentsSchemasBroodRunVerbRestart       ComponentsSchemasBroodRunVerb = "restart"
 	ComponentsSchemasBroodRunVerbStart         ComponentsSchemasBroodRunVerb = "start"
 	ComponentsSchemasBroodRunVerbStop          ComponentsSchemasBroodRunVerb = "stop"
+	ComponentsSchemasBroodRunVerbUpgrade       ComponentsSchemasBroodRunVerb = "upgrade"
 )
 
 // Defines values for ComponentsSchemasBroodRunSummaryRowPhase.
@@ -121,6 +123,7 @@ const (
 	ComponentsSchemasBroodRunSummaryRowVerbRestart       ComponentsSchemasBroodRunSummaryRowVerb = "restart"
 	ComponentsSchemasBroodRunSummaryRowVerbStart         ComponentsSchemasBroodRunSummaryRowVerb = "start"
 	ComponentsSchemasBroodRunSummaryRowVerbStop          ComponentsSchemasBroodRunSummaryRowVerb = "stop"
+	ComponentsSchemasBroodRunSummaryRowVerbUpgrade       ComponentsSchemasBroodRunSummaryRowVerb = "upgrade"
 )
 
 // Defines values for ComponentsSchemasBroodScheduleSpecConcurrencyPolicy.
@@ -440,6 +443,11 @@ type ComponentsSchemasBroodOperationDetail struct {
 				} `json:"itemRef,omitempty"`
 				Script *string `json:"script,omitempty"`
 			} `json:"groovy,omitempty"`
+
+			// Upgrade Granularity selection for verb=upgrade. An absent targetVersion releases each target's own held promoted revision; a set targetVersion bulk-writes that version to every target.
+			Upgrade *struct {
+				TargetVersion *string `json:"targetVersion,omitempty"`
+			} `json:"upgrade,omitempty"`
 			Verb *ComponentsSchemasBroodOperationDetailSpecActionVerb `json:"verb,omitempty"`
 		} `json:"action,omitempty"`
 		Execution *struct {
@@ -930,15 +938,18 @@ type ComponentsSchemasComposedBundle struct {
 
 // ComponentsSchemasComposedBundlePreview Response from a composed bundle preview.
 type ComponentsSchemasComposedBundlePreview struct {
-	BundleYaml          string   `json:"bundleYaml"`
-	Drifted             []string `json:"drifted"`
-	ItemsYaml           string   `json:"itemsYaml"`
-	JenkinsYaml         string   `json:"jenkinsYaml"`
-	Missing             []string `json:"missing"`
-	PluginsYaml         string   `json:"pluginsYaml"`
-	RbacYaml            string   `json:"rbacYaml"`
-	UnresolvedVariables []string `json:"unresolvedVariables"`
-	Warnings            []string `json:"warnings"`
+	BundleYaml  string   `json:"bundleYaml"`
+	Drifted     []string `json:"drifted"`
+	ItemsYaml   string   `json:"itemsYaml"`
+	JenkinsYaml string   `json:"jenkinsYaml"`
+	Missing     []string `json:"missing"`
+
+	// PinPreflight Plugin-pin preflight result comparing a composed bundle's pins against the resolved plugin set.
+	PinPreflight        ComponentsSchemasPinPreflightReport `json:"pinPreflight"`
+	PluginsYaml         string                              `json:"pluginsYaml"`
+	RbacYaml            string                              `json:"rbacYaml"`
+	UnresolvedVariables []string                            `json:"unresolvedVariables"`
+	Warnings            []string                            `json:"warnings"`
 }
 
 // ComponentsSchemasComposedBundleRef Reference to a ComposedBundle from a Controller.
@@ -983,10 +994,13 @@ type ComponentsSchemasComposedBundleStatusPhase string
 
 // ComponentsSchemasComposedBundleValidateResponse Response from a composed bundle validation.
 type ComponentsSchemasComposedBundleValidateResponse struct {
-	Errors              *[]string `json:"errors,omitempty"`
-	UnresolvedVariables []string  `json:"unresolvedVariables"`
-	Valid               bool      `json:"valid"`
-	Warnings            *[]string `json:"warnings,omitempty"`
+	Errors *[]string `json:"errors,omitempty"`
+
+	// PinPreflight Plugin-pin preflight result comparing a composed bundle's pins against the resolved plugin set.
+	PinPreflight        ComponentsSchemasPinPreflightReport `json:"pinPreflight"`
+	UnresolvedVariables []string                            `json:"unresolvedVariables"`
+	Valid               bool                                `json:"valid"`
+	Warnings            *[]string                           `json:"warnings,omitempty"`
 }
 
 // ComponentsSchemasComposedInput A single input to a composed bundle.
@@ -1693,6 +1707,12 @@ type ComponentsSchemasMe struct {
 // ComponentsSchemasMeAuthMode defines model for ComponentsSchemasMe.AuthMode.
 type ComponentsSchemasMeAuthMode string
 
+// ComponentsSchemasMissingPlugin A composed bundle's plugin pin absent from the resolved plugin set.
+type ComponentsSchemasMissingPlugin struct {
+	ArtifactId    string `json:"artifactId"`
+	BundleVersion string `json:"bundleVersion"`
+}
+
 // ComponentsSchemasMiteImageStatus Read-only projection of mite image staleness.
 type ComponentsSchemasMiteImageStatus struct {
 	Image *string `json:"image"`
@@ -1768,6 +1788,19 @@ type ComponentsSchemasPersistenceSpec struct {
 
 	// StorageClass Kubernetes StorageClass name for the persistent volume.
 	StorageClass *string `json:"storageClass,omitempty"`
+}
+
+// ComponentsSchemasPinConflict A composed bundle's plugin pin whose version conflicts with the resolved plugin set.
+type ComponentsSchemasPinConflict struct {
+	ArtifactId    string `json:"artifactId"`
+	BundleVersion string `json:"bundleVersion"`
+	SetVersion    string `json:"setVersion"`
+}
+
+// ComponentsSchemasPinPreflightReport Plugin-pin preflight result comparing a composed bundle's pins against the resolved plugin set.
+type ComponentsSchemasPinPreflightReport struct {
+	Conflicts []ComponentsSchemasPinConflict   `json:"conflicts"`
+	Missing   []ComponentsSchemasMissingPlugin `json:"missing"`
 }
 
 // ComponentsSchemasPluginAdvisory A non-classification finding (e.g. dependencyMinimumUnsatisfied).
@@ -1940,6 +1973,16 @@ type ComponentsSchemasProbesSpec struct {
 
 	// Startup Curated probe timing knobs (transcribed from corev1.Probe subset).
 	Startup *ComponentsSchemasProbeSpec `json:"startup,omitempty"`
+}
+
+// ComponentsSchemasProfileCandidate A ProfileCandidate CRD (cluster-scoped) — a discovered upstream patch/LTS-line candidate for a JenkinsVersionProfile, pending validation and promotion.
+type ComponentsSchemasProfileCandidate struct {
+	ApiVersion           string                  `json:"apiVersion"`
+	Kind                 string                  `json:"kind"`
+	Metadata             map[string]interface{}  `json:"metadata"`
+	Spec                 map[string]interface{}  `json:"spec"`
+	Status               *map[string]interface{} `json:"status,omitempty"`
+	AdditionalProperties map[string]interface{}  `json:"-"`
 }
 
 // ComponentsSchemasProvisioningConfig Aggregate provisioning read surface.
@@ -3186,6 +3229,126 @@ func (a ComponentsSchemasJenkinsVersionProfile) MarshalJSON() ([]byte, error) {
 	return json.Marshal(object)
 }
 
+// Getter for additional properties for ComponentsSchemasProfileCandidate. Returns the specified
+// element and whether it was found
+func (a ComponentsSchemasProfileCandidate) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for ComponentsSchemasProfileCandidate
+func (a *ComponentsSchemasProfileCandidate) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for ComponentsSchemasProfileCandidate to handle AdditionalProperties
+func (a *ComponentsSchemasProfileCandidate) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["apiVersion"]; found {
+		err = json.Unmarshal(raw, &a.ApiVersion)
+		if err != nil {
+			return fmt.Errorf("error reading 'apiVersion': %w", err)
+		}
+		delete(object, "apiVersion")
+	}
+
+	if raw, found := object["kind"]; found {
+		err = json.Unmarshal(raw, &a.Kind)
+		if err != nil {
+			return fmt.Errorf("error reading 'kind': %w", err)
+		}
+		delete(object, "kind")
+	}
+
+	if raw, found := object["metadata"]; found {
+		err = json.Unmarshal(raw, &a.Metadata)
+		if err != nil {
+			return fmt.Errorf("error reading 'metadata': %w", err)
+		}
+		delete(object, "metadata")
+	}
+
+	if raw, found := object["spec"]; found {
+		err = json.Unmarshal(raw, &a.Spec)
+		if err != nil {
+			return fmt.Errorf("error reading 'spec': %w", err)
+		}
+		delete(object, "spec")
+	}
+
+	if raw, found := object["status"]; found {
+		err = json.Unmarshal(raw, &a.Status)
+		if err != nil {
+			return fmt.Errorf("error reading 'status': %w", err)
+		}
+		delete(object, "status")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for ComponentsSchemasProfileCandidate to handle AdditionalProperties
+func (a ComponentsSchemasProfileCandidate) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["apiVersion"], err = json.Marshal(a.ApiVersion)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'apiVersion': %w", err)
+	}
+
+	object["kind"], err = json.Marshal(a.Kind)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'kind': %w", err)
+	}
+
+	object["metadata"], err = json.Marshal(a.Metadata)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'metadata': %w", err)
+	}
+
+	object["spec"], err = json.Marshal(a.Spec)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'spec': %w", err)
+	}
+
+	if a.Status != nil {
+		object["status"], err = json.Marshal(a.Status)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'status': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
 // RequestEditorFn  is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
 
@@ -3702,6 +3865,15 @@ type ClientInterface interface {
 	SetUserPasswordWithBody(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	SetUserPassword(ctx context.Context, name ComponentsParametersName, body SetUserPasswordJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListVersionCandidates request
+	ListVersionCandidates(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetVersionCandidate request
+	GetVersionCandidate(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PromoteVersionCandidate request
+	PromoteVersionCandidate(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetHealthz request
 	GetHealthz(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -5644,6 +5816,42 @@ func (c *Client) SetUserPasswordWithBody(ctx context.Context, name ComponentsPar
 
 func (c *Client) SetUserPassword(ctx context.Context, name ComponentsParametersName, body SetUserPasswordJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSetUserPasswordRequest(c.Server, name, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListVersionCandidates(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListVersionCandidatesRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetVersionCandidate(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetVersionCandidateRequest(c.Server, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PromoteVersionCandidate(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPromoteVersionCandidateRequest(c.Server, name)
 	if err != nil {
 		return nil, err
 	}
@@ -11317,6 +11525,101 @@ func NewSetUserPasswordRequestWithBody(server string, name ComponentsParametersN
 	return req, nil
 }
 
+// NewListVersionCandidatesRequest generates requests for ListVersionCandidates
+func NewListVersionCandidatesRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/version-candidates")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetVersionCandidateRequest generates requests for GetVersionCandidate
+func NewGetVersionCandidateRequest(server string, name ComponentsParametersName) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/version-candidates/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPromoteVersionCandidateRequest generates requests for PromoteVersionCandidate
+func NewPromoteVersionCandidateRequest(server string, name ComponentsParametersName) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/version-candidates/%s/promote", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetHealthzRequest generates requests for GetHealthz
 func NewGetHealthzRequest(server string) (*http.Request, error) {
 	var err error
@@ -11857,6 +12160,15 @@ type ClientWithResponsesInterface interface {
 	SetUserPasswordWithBodyWithResponse(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetUserPasswordResponse, error)
 
 	SetUserPasswordWithResponse(ctx context.Context, name ComponentsParametersName, body SetUserPasswordJSONRequestBody, reqEditors ...RequestEditorFn) (*SetUserPasswordResponse, error)
+
+	// ListVersionCandidatesWithResponse request
+	ListVersionCandidatesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListVersionCandidatesResponse, error)
+
+	// GetVersionCandidateWithResponse request
+	GetVersionCandidateWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*GetVersionCandidateResponse, error)
+
+	// PromoteVersionCandidateWithResponse request
+	PromoteVersionCandidateWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*PromoteVersionCandidateResponse, error)
 
 	// GetHealthzWithResponse request
 	GetHealthzWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetHealthzResponse, error)
@@ -14951,6 +15263,87 @@ func (r SetUserPasswordResponse) StatusCode() int {
 	return 0
 }
 
+type ListVersionCandidatesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		Items []ComponentsSchemasProfileCandidate `json:"items"`
+	}
+	JSON401 *ComponentsResponsesUnauthorized
+	JSON403 *ComponentsResponsesForbidden
+	JSON405 *ComponentsResponsesMethodNotAllowed
+}
+
+// Status returns HTTPResponse.Status
+func (r ListVersionCandidatesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListVersionCandidatesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetVersionCandidateResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasProfileCandidate
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+	JSON405      *ComponentsResponsesMethodNotAllowed
+}
+
+// Status returns HTTPResponse.Status
+func (r GetVersionCandidateResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetVersionCandidateResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PromoteVersionCandidateResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasProfileCandidate
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+	JSON405      *ComponentsResponsesMethodNotAllowed
+	JSON409      *ComponentsResponsesConflict
+	JSON500      *ComponentsResponsesInternal
+}
+
+// Status returns HTTPResponse.Status
+func (r PromoteVersionCandidateResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PromoteVersionCandidateResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type GetHealthzResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -16408,6 +16801,33 @@ func (c *ClientWithResponses) SetUserPasswordWithResponse(ctx context.Context, n
 		return nil, err
 	}
 	return ParseSetUserPasswordResponse(rsp)
+}
+
+// ListVersionCandidatesWithResponse request returning *ListVersionCandidatesResponse
+func (c *ClientWithResponses) ListVersionCandidatesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListVersionCandidatesResponse, error) {
+	rsp, err := c.ListVersionCandidates(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListVersionCandidatesResponse(rsp)
+}
+
+// GetVersionCandidateWithResponse request returning *GetVersionCandidateResponse
+func (c *ClientWithResponses) GetVersionCandidateWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*GetVersionCandidateResponse, error) {
+	rsp, err := c.GetVersionCandidate(ctx, name, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetVersionCandidateResponse(rsp)
+}
+
+// PromoteVersionCandidateWithResponse request returning *PromoteVersionCandidateResponse
+func (c *ClientWithResponses) PromoteVersionCandidateWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*PromoteVersionCandidateResponse, error) {
+	rsp, err := c.PromoteVersionCandidate(ctx, name, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePromoteVersionCandidateResponse(rsp)
 }
 
 // GetHealthzWithResponse request returning *GetHealthzResponse
@@ -21932,6 +22352,177 @@ func ParseSetUserPasswordResponse(rsp *http.Response) (*SetUserPasswordResponse,
 			return nil, err
 		}
 		response.JSON501 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListVersionCandidatesResponse parses an HTTP response from a ListVersionCandidatesWithResponse call
+func ParseListVersionCandidatesResponse(rsp *http.Response) (*ListVersionCandidatesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListVersionCandidatesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Items []ComponentsSchemasProfileCandidate `json:"items"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 405:
+		var dest ComponentsResponsesMethodNotAllowed
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON405 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetVersionCandidateResponse parses an HTTP response from a GetVersionCandidateWithResponse call
+func ParseGetVersionCandidateResponse(rsp *http.Response) (*GetVersionCandidateResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetVersionCandidateResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasProfileCandidate
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 405:
+		var dest ComponentsResponsesMethodNotAllowed
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON405 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePromoteVersionCandidateResponse parses an HTTP response from a PromoteVersionCandidateWithResponse call
+func ParsePromoteVersionCandidateResponse(rsp *http.Response) (*PromoteVersionCandidateResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PromoteVersionCandidateResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasProfileCandidate
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 405:
+		var dest ComponentsResponsesMethodNotAllowed
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON405 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ComponentsResponsesInternal
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
 
 	}
 

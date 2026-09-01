@@ -97,6 +97,12 @@ type Dependencies struct {
 	// center; may be nil in tests or when VARROA_UPDATE_CENTER_URL or
 	// VARROA_UPDATE_CENTER_IMPORT_TOKEN is unset.
 	UpdateCenterUploader UpdateCenterUploader
+
+	// VersionProfileReconciler re-materializes a JenkinsVersionProfile's
+	// derived plugin-set ConfigMap synchronously, in-request, during
+	// candidate promotion. May be nil in tests that don't exercise
+	// promotion.
+	VersionProfileReconciler *controller.JenkinsVersionProfileReconciler
 }
 
 // IdentityConfig holds the identity/OIDC configuration surfaced to the admin

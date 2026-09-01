@@ -180,6 +180,40 @@ spec:
     );
     expect(await screen.findByText(/Upgrade in progress/)).toBeInTheDocument();
   });
+
+  it("shows the pending-release chip and note when rollReason is UpgradePending", async () => {
+    renderCard(
+      makeCtrl({
+        version: "2.555",
+        versionStatus: { rollPending: true, rollReason: "UpgradePending", rollMessage: "held for 2.555.4" },
+      }),
+    );
+    expect(await screen.findByText("Upgrade pending release")).toBeInTheDocument();
+    // Rendered both beneath the chip (pendingMeta) and above the picker (VersionPicker's
+    // own upgradePendingNote prop) — both surfaces show the same held-reason message.
+    expect(screen.getAllByText("held for 2.555.4")).toHaveLength(2);
+    // Not the same chip as the async in-progress state.
+    expect(screen.queryByText(/Upgrade in progress/)).not.toBeInTheDocument();
+  });
+
+  it("does not show the pending-release chip or note when also upgradeBlocked", async () => {
+    renderCard(
+      makeCtrl({
+        version: "2.555",
+        versionStatus: {
+          upgradeBlocked: true,
+          blockedReason: "CoreOlderThanPluginBaseline",
+          blockedMessage: "core too old",
+          rollPending: true,
+          rollReason: "UpgradePending",
+          rollMessage: "held for 2.555.4",
+        },
+      }),
+    );
+    await screen.findByText("2.555");
+    expect(screen.queryByText("Upgrade pending release")).not.toBeInTheDocument();
+    expect(screen.queryByText("held for 2.555.4")).not.toBeInTheDocument();
+  });
 });
 
 describe("VersionRollBanner", () => {
@@ -220,6 +254,13 @@ describe("VersionRollBanner", () => {
   it("renders nothing for in-progress (VersionRollStarted)", () => {
     const { container } = render(
       <VersionRollBanner versionStatus={{ rollPending: true, rollReason: "VersionRollStarted" }} />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("renders nothing for UpgradePending (surfaced via the VersionCard chip instead)", () => {
+    const { container } = render(
+      <VersionRollBanner versionStatus={{ rollPending: true, rollReason: "UpgradePending", rollMessage: "held for 2.555.4" }} />,
     );
     expect(container).toBeEmptyDOMElement();
   });

@@ -185,6 +185,10 @@ export default function BroodOperationDetail() {
   );
 }
 
+const OPERATION_REASON_TEXT: Record<string, string> = {
+  TargetVersionUnresolved: "The target version or line for this upgrade could not be resolved against any version profile.",
+};
+
 function ClusterSection({ cluster }: { cluster: BroodRunCluster }) {
   const targets: BroodTargetStatus[] = cluster.op?.status?.targets ?? [];
 
@@ -199,6 +203,15 @@ function ClusterSection({ cluster }: { cluster: BroodRunCluster }) {
           <div className={`${styles.meta} ${styles.subMeta}`}>
             <div><strong>Phase:</strong> {cluster.op.status.phase ?? "—"}</div>
             <div><strong>Started by:</strong> {cluster.op.status.startedBy ?? "—"}</div>
+            {cluster.op.status.reason && (
+              <div>
+                <strong>Reason:</strong>{" "}
+                {OPERATION_REASON_TEXT[cluster.op.status.reason] ?? cluster.op.status.reason}
+                {OPERATION_REASON_TEXT[cluster.op.status.reason] && (
+                  <span className={styles.subMeta}> ({cluster.op.status.reason})</span>
+                )}
+              </div>
+            )}
           </div>
           {targets.length === 0 && <p>No targets resolved yet.</p>}
           {targets.length > 0 && (

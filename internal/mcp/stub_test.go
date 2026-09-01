@@ -73,6 +73,12 @@ func (s *stubClient) CreateOrUpdateConfigMap(ctx context.Context, name, namespac
 func (s *stubClient) GetConfigMap(ctx context.Context, name, namespace string) (map[string]string, error) {
 	return nil, nil
 }
+func (s *stubClient) RemoveConfigMapLabel(ctx context.Context, name, namespace, labelKey string) error {
+	return nil
+}
+func (s *stubClient) UpdateConfigMapData(ctx context.Context, name, namespace string, data map[string]string) error {
+	return nil
+}
 func (s *stubClient) DeleteResource(ctx context.Context, kind, name, namespace string) error {
 	return nil
 }
@@ -124,6 +130,10 @@ func (s *stubClient) GetLiveResource(_ context.Context, _ schema.GroupVersionRes
 }
 
 func (s *stubClient) CreateOrUpdateConfigMapWithOwner(_ context.Context, _, _ string, _ map[string]string, _ metav1.OwnerReference) error {
+	return nil
+}
+
+func (s *stubClient) CreateOrUpdateOwnedConfigMap(_ context.Context, _, _ string, _ map[string]string, _ map[string]string) error {
 	return nil
 }
 

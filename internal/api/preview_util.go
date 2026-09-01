@@ -22,4 +22,10 @@ func normalizePreview(p *bus.BundleComposePreview) {
 	if p.Errors == nil {
 		p.Errors = []string{}
 	}
+	if p.PinPreflight.Conflicts == nil {
+		p.PinPreflight.Conflicts = []bus.PinConflict{}
+	}
+	if p.PinPreflight.Missing == nil {
+		p.PinPreflight.Missing = []bus.MissingPlugin{}
+	}
 }

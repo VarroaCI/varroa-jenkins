@@ -13,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,10 +34,23 @@ type fakeBroodClient struct {
 	deletePodCalls   []string
 	pods             map[string]*corev1.Pod // "ns/name" -> controller pod (nil entry = no pod)
 	wakeCalls        []string
+	// configMaps holds fixture ConfigMap data keyed by key(namespace, name),
+	// for GetConfigMap call sites (e.g. dispatchUpgrade's plugin-set/plugins.yaml
+	// lookups).
+	configMaps map[string]map[string]string
+	// statefulSetImages holds fixture computed/live image maps keyed by
+	// key(namespace, name) (the StatefulSet name, i.e. controllerPrefix(cr)),
+	// for GetStatefulSetImages call sites (e.g. dispatchUpgrade's
+	// already-at-target check). An absent key means no StatefulSet yet.
+	statefulSetImages map[string]statefulSetImagesFixture
 
 	// ssaApplies records every ApplyControllerSpecSSA call so tests can assert
 	// a brood verb submits only the fields it intends to change.
 	ssaApplies []ssaApplyCall
+	// ssaApplyErr, when set, is returned by ApplyControllerSpecSSAIfExists
+	// instead of recording the call, for tests proving a pin-write failure is
+	// not swallowed.
+	ssaApplyErr error
 	// hibernatedClears records SetHibernated(false) calls (name).
 	hibernatedClears []string
 }
@@ -73,6 +87,9 @@ func (f *fakeBroodClient) ApplyControllerSpecSSA(_ context.Context, ns, name str
 // so a target absent from f.store fails with NotFound and is never recorded
 // in ssaApplies, exactly like a real deleted-between-GET-and-apply target.
 func (f *fakeBroodClient) ApplyControllerSpecSSAIfExists(ctx context.Context, ns, name string, spec map[string]any, fieldManager string, force bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error) {
+	if f.ssaApplyErr != nil {
+		return nil, nil, f.ssaApplyErr
+	}
 	if _, err := crdstore.Get[v1alpha1.Controller](ctx, f.store, name, ns); err != nil {
 		return nil, nil, err
 	}
@@ -91,6 +108,28 @@ func (f *fakeBroodClient) SetHibernated(_ context.Context, name, _ string, want 
 
 func (f *fakeBroodClient) Reprovision(ns, name string) {
 	f.reprovisionCalls = append(f.reprovisionCalls, ns+"/"+name)
+}
+
+func (f *fakeBroodClient) GetConfigMap(_ context.Context, name, namespace string) (map[string]string, error) {
+	cm, ok := f.configMaps[key(namespace, name)]
+	if !ok {
+		return nil, apierrors.NewNotFound(schema.GroupResource{Group: "", Resource: "configmaps"}, name)
+	}
+	return cm, nil
+}
+
+// statefulSetImagesFixture is the fixture shape for a GetStatefulSetImages
+// call site.
+type statefulSetImagesFixture struct {
+	computed, live map[string]string
+}
+
+func (f *fakeBroodClient) GetStatefulSetImages(_ context.Context, name, namespace string) (map[string]string, map[string]string, error) {
+	fixture, ok := f.statefulSetImages[key(namespace, name)]
+	if !ok {
+		return nil, nil, nil
+	}
+	return fixture.computed, fixture.live, nil
 }
 
 func init() { _ = v1alpha1.AddToScheme(scheme.Scheme) }

@@ -643,6 +643,7 @@ export interface ProvisioningDefaultsSpec {
   storageSizeGB?: number;
   provisioningTimeoutSec?: number;
   defaultReconciliationPolicy?: ReconciliationPolicy;
+  upgradePolicy?: "auto" | "manual";
 }
 
 export interface ClusterEntry {
@@ -809,6 +810,52 @@ export interface VersionProfileDetail {
   conditions: VersionProfileCondition[];
 }
 
+// ---- Version candidates (patch-upgrade tracking; ProfileCandidate CRD) ----
+// Mirrors the raw ProfileCandidate CRD JSON returned by
+// GET /api/v1/version-candidates, not a flattened BFF projection like
+// VersionProfileDetail above.
+
+export interface VersionCandidateCondition {
+  type: "Resolved" | "ClosureClean" | "CoreCompatOK" | "PluginsServable" | "PreflightChecked" | "Promoted";
+  status: "True" | "False" | "Unknown";
+  lastTransitionTime?: string;
+  reason?: string;
+  message?: string;
+}
+
+export interface VersionCandidateFailingController {
+  namespace: string;
+  name: string;
+  conflictCount: number;
+  message: string;
+}
+
+export interface VersionCandidatePreflightSummary {
+  controllersChecked: number;
+  controllersFailing: number;
+  failingControllers?: VersionCandidateFailingController[];
+}
+
+export interface VersionCandidateSpec {
+  profileRef: string;
+  observedVersion: string;
+  resolveVersion: string;
+  closureContentRef?: string;
+}
+
+export interface VersionCandidateStatus {
+  phase?: "Pending" | "Ready" | "Promoted" | "Failed" | "Superseded";
+  conditions?: VersionCandidateCondition[];
+  preflight?: VersionCandidatePreflightSummary;
+  promotedAt?: string;
+}
+
+export interface VersionCandidate {
+  metadata: ObjectMeta;
+  spec: VersionCandidateSpec;
+  status: VersionCandidateStatus;
+}
+
 export interface ClassMiteSpec {
   image?: string;
   imagePullPolicy?: string;
@@ -875,7 +922,7 @@ export interface InputSummaryEntry {
 
 // ---- Brood operations (cross-cluster logical-run DTOs per design §4) ----
 
-export type BroodVerb = "restart" | "reprovision" | "reconcile" | "stop" | "start" | "executeGroovy";
+export type BroodVerb = "restart" | "reprovision" | "reconcile" | "stop" | "start" | "executeGroovy" | "upgrade";
 export type BroodOrder = "rolloutWave" | "name";
 export type BroodFailurePolicy = "FailFast" | "FailTidy" | "FailAtEnd";
 export type BroodOperationPhase = "Pending" | "Running" | "Suspended" | "Succeeded" | "Failed" | "Canceled";
@@ -914,6 +961,7 @@ export interface BroodGroovyAction {
 export interface BroodAction {
   verb: BroodVerb;
   groovy?: BroodGroovyAction;
+  upgrade?: { targetVersion?: string };
 }
 
 export interface BroodTargetFilters {
