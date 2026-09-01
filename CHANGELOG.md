@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/VarroaCI/varroa-jenkins/compare/v0.2.0...v0.3.0) (2026-09-01)
+
+
+### Features
+
+* in-cluster Jenkins upgrade tracking, promotion, and rollout ([e1325e6](https://github.com/VarroaCI/varroa-jenkins/commit/e1325e63a8054582d30b45578551d2e58ec2dab6))
+
 ## [0.2.0](https://github.com/VarroaCI/varroa-jenkins/compare/v0.1.0...v0.2.0) (2026-08-30)
 
 
