@@ -22,7 +22,7 @@ RUN go mod download
 COPY . .
 
 RUN CGO_ENABLED=0 go build \
-    -ldflags="-s -w" \
+    -ldflags="-s -w -X main.version=${GIT_SHA}" \
     -o /build/bin/varroa-mite \
     ./cmd/mite/ && \
     CGO_ENABLED=0 go build \
@@ -30,7 +30,7 @@ RUN CGO_ENABLED=0 go build \
     -o /build/bin/varroa-gateway \
     ./cmd/gateway/ && \
     CGO_ENABLED=0 go build \
-    -ldflags="-s -w" \
+    -ldflags="-s -w -X main.version=${GIT_SHA}" \
     -o /build/bin/varroa-bff \
     ./cmd/bff/ && \
     CGO_ENABLED=0 go build \
@@ -38,7 +38,7 @@ RUN CGO_ENABLED=0 go build \
     -o /build/bin/varroa-operator \
     ./cmd/operator/ && \
     CGO_ENABLED=0 go build \
-    -ldflags="-s -w" \
+    -ldflags="-s -w -X main.version=${GIT_SHA}" \
     -o /build/bin/varroa-updatecenter \
     ./cmd/updatecenter/ && \
     CGO_ENABLED=0 go build \

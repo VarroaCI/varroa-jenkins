@@ -183,7 +183,7 @@ type identityState struct {
 
 // NewAgent creates a new mite agent with the given configuration.
 func NewAgent(cfg Config) *Agent {
-	return &Agent{cfg: cfg, version: "0.1.0", heartbeatInterval: 15 * time.Second, miteDir: varroaMiteDir, drainMarkerPath: defaultDrainMarkerPath}
+	return &Agent{cfg: cfg, version: version, heartbeatInterval: 15 * time.Second, miteDir: varroaMiteDir, drainMarkerPath: defaultDrainMarkerPath}
 }
 
 // lastAppliedHashPath returns the convergence-marker path rooted at miteDir.

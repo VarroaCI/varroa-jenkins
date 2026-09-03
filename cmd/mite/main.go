@@ -13,6 +13,8 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/telemetry"
 )
 
+var version = "dev"
+
 func main() {
 	logLevel := flag.String("log-level", "info", "Log level: debug, info, warn, error")
 	logFormat := flag.String("log-format", "text", "Log format: text, json")

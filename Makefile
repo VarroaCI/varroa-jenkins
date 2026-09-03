@@ -22,8 +22,8 @@ build:
 	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(shell git rev-parse --short HEAD)" -o bin/varroa-operator ./cmd/operator/
 	CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/varroa-gateway ./cmd/gateway/
 	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(shell git rev-parse --short HEAD)" -o bin/varroa-bff ./cmd/bff/
-	CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/varroa-mite ./cmd/mite/
-	CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/varroa-updatecenter ./cmd/updatecenter/
+	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(shell git rev-parse --short HEAD)" -o bin/varroa-mite ./cmd/mite/
+	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(shell git rev-parse --short HEAD)" -o bin/varroa-updatecenter ./cmd/updatecenter/
 
 build-cli:
 	go build -ldflags "-X main.version=$$(git describe --tags --always --dirty)" -o bin/varroactl ./cmd/varroactl
