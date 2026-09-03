@@ -330,6 +330,8 @@ components:
       $ref: './components/schemas.yaml#/ComposedInput'
     ComposedItemRef:
       $ref: './components/schemas.yaml#/ComposedItemRef'
+    ControllerAttention:
+      $ref: './components/schemas.yaml#/ControllerAttention'
     ControllerDetail:
       $ref: './components/schemas.yaml#/ControllerDetail'
     ControllerDiff:

@@ -40,3 +40,10 @@
 
 html[data-theme="dark"] .hibernated { background: #2d1b5e; color: #c4a7f3; }
 html[data-theme="dark"] .hibernated .pdot { background: #c4a7f3; }
+
+.attention {
+  margin-left: 6px;
+  padding-left: 6px;
+  border-left: 1px solid currentColor;
+  font-weight: 600;
+}

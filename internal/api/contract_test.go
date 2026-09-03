@@ -234,6 +234,21 @@ func newContractServer(t *testing.T) (*httptest.Server, *openapi3.T) {
 			Spec:       v1alpha1.ControllerSpec{Endpoint: "https://test.example.com"},
 			Status:     v1alpha1.ControllerStatus{Phase: "Connected"},
 		},
+		// A wedged controller so the list response's attention projection is
+		// validated against the schema.
+		"blocked-ctrl": {
+			ObjectMeta: metav1.ObjectMeta{Name: "blocked-ctrl", Namespace: "test-ns"},
+			Spec:       v1alpha1.ControllerSpec{Endpoint: "https://blocked.example.com"},
+			Status: v1alpha1.ControllerStatus{
+				Phase: v1alpha1.ControllerPhaseProvisioning,
+				Conditions: []v1alpha1.ControllerCondition{{
+					Type:    v1alpha1.ConditionReconcileBlocked,
+					Status:  metav1.ConditionTrue,
+					Reason:  "PluginConflict",
+					Message: "plugin kubernetes requested at A conflicts with profile lock B",
+				}},
+			},
+		},
 	}
 	// Initialize CRD maps for RBAC, catalog, composed bundles
 	client.roles = map[string]*v1alpha1.VarroaRole{}

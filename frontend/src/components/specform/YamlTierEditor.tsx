@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { yaml } from "@codemirror/lang-yaml";
@@ -34,9 +34,11 @@ function getValidator(schema?: Record<string, unknown>): ValidateFunction | null
   }
 }
 
-function yamlLinter(jsonSchema?: Record<string, unknown>) {
-  const validator = getValidator(jsonSchema);
+// getSchema is read per lint pass, not captured: the OpenAPI schema is fetched
+// asynchronously and can arrive after the editor is created.
+function yamlLinter(getSchema: () => Record<string, unknown> | undefined) {
   return (view: EditorView): Diagnostic[] => {
+    const validator = getValidator(getSchema());
     const text = view.state.doc.toString();
     if (!text.trim()) return [];
 
@@ -83,6 +85,17 @@ export default function YamlTierEditor({
   const viewRef = useRef<EditorView | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The editor is created once, so the schema reaches its update listener and
+  // its linter through this ref rather than a captured value.
+  const schemaRef = useRef(jsonSchema);
+  schemaRef.current = jsonSchema;
+
+  // Compared by value: the caller derives the schema on each render, so its
+  // identity changes even when the schema itself has not.
+  const schemaKey = useMemo(
+    () => (jsonSchema ? JSON.stringify(jsonSchema) : ""),
+    [jsonSchema],
+  );
 
   // Report validity changes
   const emitValidity = useCallback(
@@ -92,13 +105,20 @@ export default function YamlTierEditor({
     [onValidityChange],
   );
 
-  // Check initial validity on mount
+  // Emit validity on mount and again whenever the schema arrives or changes.
+  // An editor mounted before the schema resolves would otherwise validate
+  // syntax only, leaving Save enabled on schema-invalid content until the API
+  // rejects it. viewRef is null on the mount pass (the editor is created by a
+  // later effect), so the prop supplies the text then and the live document
+  // supplies it afterwards.
   useEffect(() => {
-    const text = value || "";
-    const v = text.trim() ? checkValidity(text, jsonSchema) : true;
-    emitValidity(v);
+    const text = viewRef.current?.state.doc.toString() ?? value ?? "";
+    emitValidity(text.trim() ? checkValidity(text, schemaRef.current) : true);
+    // A schema change also has to re-lint: the linter reads the schema per
+    // pass, but nothing has invalidated its last result.
+    viewRef.current?.dispatch({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [schemaKey]);
 
   // Create editor view
   useEffect(() => {
@@ -120,7 +140,7 @@ export default function YamlTierEditor({
         }
 
         // Validity check
-        const isValid = text.trim() ? checkValidity(text, jsonSchema) : true;
+        const isValid = text.trim() ? checkValidity(text, schemaRef.current) : true;
         emitValidity(isValid);
       }
     });
@@ -131,7 +151,7 @@ export default function YamlTierEditor({
         lineNumbers(),
         yaml(),
         keymap.of(defaultKeymap),
-        linter(yamlLinter(jsonSchema)),
+        linter(yamlLinter(() => schemaRef.current)),
         updateListener,
         EditorView.theme({
           "&": { fontFamily: "var(--mono)", fontSize: "13px", height: "100%" },

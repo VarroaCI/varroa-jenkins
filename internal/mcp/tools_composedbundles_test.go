@@ -257,9 +257,9 @@ func TestComposedBundleListSchema_UsesAnyOfNotOneOf(t *testing.T) {
 	}
 }
 
-// Both create and update must declare displayName in their input schema.
-// With WithInputSchemaValidation an undeclared argument is rejected before
-// the handler runs, so a handler that sets displayName from args while the
+// Both create and update must declare displayName and inputs in their input
+// schema. With WithInputSchemaValidation an undeclared argument is rejected
+// before the handler runs, so a handler that sets a field from args while the
 // schema omits it makes the field unreachable.
 func TestComposedBundleTools_DeclareDisplayName(t *testing.T) {
 	var missing []string
@@ -274,11 +274,19 @@ func TestComposedBundleTools_DeclareDisplayName(t *testing.T) {
 			t.Fatalf("unmarshal inputSchema for %s: %v", tool.Name, err)
 		}
 		if _, ok := schema.Properties["displayName"]; !ok {
-			missing = append(missing, tool.Name)
+			missing = append(missing, tool.Name+".displayName")
+		}
+		inputs, ok := schema.Properties["inputs"].(map[string]any)
+		if !ok {
+			missing = append(missing, tool.Name+".inputs")
+			continue
+		}
+		if inputs["type"] != "array" {
+			t.Errorf("%s inputs type = %v, want array", tool.Name, inputs["type"])
 		}
 	}
 	if len(missing) > 0 {
-		t.Errorf("composed bundle tools missing displayName in inputSchema: %v", missing)
+		t.Errorf("composed bundle tools missing properties in inputSchema: %v", missing)
 	}
 }
 
@@ -877,5 +885,212 @@ func TestComposedBundleDryRunTools_DeclareJcascMergeStrategyAndOciInputs(t *test
 		if !strings.Contains(desc, "ociSource") {
 			t.Errorf("%s inputs description must mention ociSource, got %q", tool.Name, desc)
 		}
+	}
+}
+
+// inputs is the merge order of a bundle, so a partial edit has no well-defined
+// meaning: the list is replaced wholesale like create_composed_bundle and REST
+// PUT do. Omitting the argument must leave the stored list alone, and every
+// other field must survive an inputs-only call.
+func TestUpdateComposedBundle_ReplacesInputs(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, &v1alpha1.ComposedBundle{
+		ObjectMeta: metav1.ObjectMeta{Name: "cb1", Namespace: "ns"},
+		Spec: v1alpha1.ComposedBundleSpec{
+			DisplayName: "Platform bundle",
+			Inputs: []v1alpha1.ComposedInput{
+				{ItemRef: &v1alpha1.ComposedItemRef{Name: "base"}},
+				{ItemRef: &v1alpha1.ComposedItemRef{Name: "broken"}},
+			},
+		},
+	})
+	handler := NewHandler(composedBundleAdminDeps(store))
+	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+		"name": "update_composed_bundle",
+		"arguments": map[string]interface{}{
+			"namespace": "ns",
+			"name":      "cb1",
+			"inputs": []interface{}{
+				map[string]interface{}{"itemRef": map[string]interface{}{"name": "base"}},
+			},
+		},
+	}, mcpAdminClaims)
+
+	tr := parseToolResult(t, resp.Result)
+	if tr.IsError {
+		t.Fatalf("update_composed_bundle returned error: %v", tr.Content)
+	}
+	updated, err := crdstore.Get[v1alpha1.ComposedBundle](context.Background(), store, "cb1", "ns")
+	if err != nil {
+		t.Fatalf("get updated bundle: %v", err)
+	}
+	if len(updated.Spec.Inputs) != 1 || updated.Spec.Inputs[0].ItemRef == nil || updated.Spec.Inputs[0].ItemRef.Name != "base" {
+		t.Fatalf("inputs = %+v, want the single base itemRef", updated.Spec.Inputs)
+	}
+	if updated.Spec.DisplayName != "Platform bundle" {
+		t.Fatalf("displayName must be preserved when omitted, got %q", updated.Spec.DisplayName)
+	}
+}
+
+func TestUpdateComposedBundle_OmittedInputsPreserved(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, &v1alpha1.ComposedBundle{
+		ObjectMeta: metav1.ObjectMeta{Name: "cb1", Namespace: "ns"},
+		Spec: v1alpha1.ComposedBundleSpec{
+			DisplayName: "Platform bundle",
+			Inputs: []v1alpha1.ComposedInput{
+				{ItemRef: &v1alpha1.ComposedItemRef{Name: "base"}},
+				{ItemRef: &v1alpha1.ComposedItemRef{Name: "extra"}},
+			},
+		},
+	})
+	handler := NewHandler(composedBundleAdminDeps(store))
+	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+		"name": "update_composed_bundle",
+		"arguments": map[string]interface{}{
+			"namespace":   "ns",
+			"name":        "cb1",
+			"displayName": "Renamed bundle",
+		},
+	}, mcpAdminClaims)
+
+	tr := parseToolResult(t, resp.Result)
+	if tr.IsError {
+		t.Fatalf("update_composed_bundle returned error: %v", tr.Content)
+	}
+	updated, err := crdstore.Get[v1alpha1.ComposedBundle](context.Background(), store, "cb1", "ns")
+	if err != nil {
+		t.Fatalf("get updated bundle: %v", err)
+	}
+	if len(updated.Spec.Inputs) != 2 {
+		t.Fatalf("inputs = %+v, want the two seeded entries preserved", updated.Spec.Inputs)
+	}
+	if updated.Spec.DisplayName != "Renamed bundle" {
+		t.Errorf("displayName = %q, want %q", updated.Spec.DisplayName, "Renamed bundle")
+	}
+}
+
+// An empty list is a caller mistake, not a request to empty the bundle: a
+// bundle with no inputs composes to nothing and wedges every controller using
+// it. Reject it before anything is written.
+func TestUpdateComposedBundle_EmptyInputsRejected(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, &v1alpha1.ComposedBundle{
+		ObjectMeta: metav1.ObjectMeta{Name: "cb1", Namespace: "ns"},
+		Spec: v1alpha1.ComposedBundleSpec{
+			DisplayName: "Platform bundle",
+			Inputs: []v1alpha1.ComposedInput{
+				{ItemRef: &v1alpha1.ComposedItemRef{Name: "base"}},
+				{ItemRef: &v1alpha1.ComposedItemRef{Name: "extra"}},
+			},
+		},
+	})
+	handler := NewHandler(composedBundleAdminDeps(store))
+	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+		"name": "update_composed_bundle",
+		"arguments": map[string]interface{}{
+			"namespace": "ns",
+			"name":      "cb1",
+			"inputs":    []interface{}{},
+		},
+	}, mcpAdminClaims)
+
+	tr := parseToolResult(t, resp.Result)
+	if !tr.IsError {
+		t.Fatal("empty inputs must be rejected")
+	}
+	if len(tr.Content) == 0 || !strings.Contains(tr.Content[0].Text, "at least one input") {
+		t.Errorf("error message = %v, want it to name the at-least-one-input rule", tr.Content)
+	}
+	stored, err := crdstore.Get[v1alpha1.ComposedBundle](context.Background(), store, "cb1", "ns")
+	if err != nil {
+		t.Fatalf("get bundle: %v", err)
+	}
+	if len(stored.Spec.Inputs) != 2 {
+		t.Errorf("inputs = %+v, want the seeded entries untouched", stored.Spec.Inputs)
+	}
+}
+
+// Malformed inputs are caught at two layers, and both must leave the stored
+// list untouched. A non-array never reaches the handler: the declared array
+// type makes input-schema validation reject it first. An array whose entries
+// are not input objects satisfies the schema (no items constraint) and is the
+// handler's own decode guard to catch.
+func TestUpdateComposedBundle_MalformedInputsRejected(t *testing.T) {
+	for name, tc := range map[string]struct {
+		inputs  interface{}
+		wantMsg string
+	}{
+		"non-array rejected by schema validation": {
+			inputs:  "not-an-array",
+			wantMsg: "/inputs",
+		},
+		"array of non-objects rejected by the handler": {
+			inputs:  []interface{}{float64(123)},
+			wantMsg: "invalid inputs",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := crdstore.NewFake()
+			crdstore.MustSeed(store, &v1alpha1.ComposedBundle{
+				ObjectMeta: metav1.ObjectMeta{Name: "cb1", Namespace: "ns"},
+				Spec: v1alpha1.ComposedBundleSpec{
+					DisplayName: "Platform bundle",
+					Inputs: []v1alpha1.ComposedInput{
+						{ItemRef: &v1alpha1.ComposedItemRef{Name: "base"}},
+						{ItemRef: &v1alpha1.ComposedItemRef{Name: "extra"}},
+					},
+				},
+			})
+			handler := NewHandler(composedBundleAdminDeps(store))
+			resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+				"name": "update_composed_bundle",
+				"arguments": map[string]interface{}{
+					"namespace": "ns",
+					"name":      "cb1",
+					"inputs":    tc.inputs,
+				},
+			}, mcpAdminClaims)
+
+			tr := parseToolResult(t, resp.Result)
+			if !tr.IsError {
+				t.Fatal("malformed inputs must be rejected")
+			}
+			if len(tr.Content) == 0 || !strings.Contains(tr.Content[0].Text, tc.wantMsg) {
+				t.Errorf("error message = %v, want it to contain %q", tr.Content, tc.wantMsg)
+			}
+			stored, err := crdstore.Get[v1alpha1.ComposedBundle](context.Background(), store, "cb1", "ns")
+			if err != nil {
+				t.Fatalf("get bundle: %v", err)
+			}
+			if len(stored.Spec.Inputs) != 2 {
+				t.Errorf("inputs = %+v, want the seeded entries untouched", stored.Spec.Inputs)
+			}
+		})
+	}
+}
+
+func TestCreateComposedBundle_EmptyInputsRejected(t *testing.T) {
+	store := crdstore.NewFake()
+	handler := NewHandler(composedBundleAdminDeps(store))
+	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+		"name": "create_composed_bundle",
+		"arguments": map[string]interface{}{
+			"namespace":   "ns",
+			"name":        "cb-empty",
+			"displayName": "Empty",
+			"inputs":      []interface{}{},
+		},
+	}, mcpAdminClaims)
+
+	tr := parseToolResult(t, resp.Result)
+	if !tr.IsError {
+		t.Fatal("empty inputs must be rejected on create, matching update")
+	}
+	if len(tr.Content) == 0 || !strings.Contains(tr.Content[0].Text, "at least one input") {
+		t.Errorf("error message = %v, want it to name the at-least-one-input rule", tr.Content)
+	}
+	if _, err := crdstore.Get[v1alpha1.ComposedBundle](context.Background(), store, "cb-empty", "ns"); err == nil {
+		t.Error("a rejected create must not persist the bundle")
 	}
 }

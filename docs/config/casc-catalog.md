@@ -59,7 +59,7 @@ spec:
   syncIntervalSeconds: 300
 ```
 
-`syncIntervalSeconds` defaults to 300 and must be at least 30. Private Git uses
+`syncIntervalSeconds` defaults to 300. A set value must be between 30 and 31536000 (one year); 0 or an omitted field means the default. The API, the MCP tools, and kubectl all reject any other value. Private Git uses
 a same-namespace `secretRef`; see [bundle source authentication](bundle-sources.md#reference-git).
 
 ## Publish from OCI
@@ -80,6 +80,13 @@ User-created sources set exactly one of `repoURL` and `ociRef`. OCI credentials
 use `.dockerconfigjson` or `username` and `password` in a same-namespace Secret;
 see [bundle source authentication](bundle-sources.md#reference-oci) for the
 one-registry-per-secret constraint.
+
+The `create_catalog_source` and `update_catalog_source` MCP tools accept
+`ociRef`, `trusted` and `syncIntervalSeconds` alongside the git fields, so an
+agent can manage either source kind. On update, a field is changed only when
+the argument is present: omit it to keep the stored value, pass an empty string
+to clear it. Setting `ociRef` clears `repoURL` and `revision`, and setting
+`repoURL` clears `ociRef`, keeping the exactly-one rule satisfied.
 
 ## Consume an item
 

@@ -118,7 +118,10 @@ function SourceForm({
         <input
           className={styles.formInput}
           type="number"
-          value={spec.syncIntervalSeconds ?? 300}
+          min={30}
+          max={31536000}
+          step={1}
+          value={spec.syncIntervalSeconds || 300}
           onChange={setField("syncIntervalSeconds", "number")}
         />
       </div>

@@ -467,13 +467,13 @@ describe("SpecEditorCard YAML formatting preservation", () => {
   // editor, which seeds itself from the current tier text (EditorState.create).
   it("keeps the user's comments when the response value matches the edit", async () => {
     mockUpdateController.mockResolvedValue({
-      spec: { podOverrides: { replicas: 4 } },
+      spec: { podOverrides: { jvmOpts: "-Xmx4g" } },
     });
-    renderCard({ initialPodOverrides: { replicas: 3 } });
+    renderCard({ initialPodOverrides: { jvmOpts: "-Xmx3g" } });
     await waitFor(() => expect(classNameInput().value).toBe(""));
 
     fireEvent.click(screen.getByText("Pod overrides"));
-    typeYaml("# keep me\nreplicas: 4");
+    typeYaml("# keep me\njvmOpts: -Xmx4g");
     fireEvent.click(screen.getByText("Save spec"));
     await waitFor(() => expect(mockUpdateController).toHaveBeenCalledTimes(1));
 
@@ -481,18 +481,18 @@ describe("SpecEditorCard YAML formatting preservation", () => {
     fireEvent.click(screen.getByText("Form"));
     fireEvent.click(screen.getByText("Pod overrides"));
     expect(yamlMountedDoc()).toContain("# keep me");
-    expect(yamlMountedDoc()).toContain("replicas: 4");
+    expect(yamlMountedDoc()).toContain("jvmOpts: -Xmx4g");
   });
 
   it("replaces the text when the response value differs from the edit", async () => {
     mockUpdateController.mockResolvedValue({
-      spec: { podOverrides: { replicas: 5 } },
+      spec: { podOverrides: { jvmOpts: "-Xmx5g" } },
     });
-    renderCard({ initialPodOverrides: { replicas: 3 } });
+    renderCard({ initialPodOverrides: { jvmOpts: "-Xmx3g" } });
     await waitFor(() => expect(classNameInput().value).toBe(""));
 
     fireEvent.click(screen.getByText("Pod overrides"));
-    typeYaml("# keep me\nreplicas: 4");
+    typeYaml("# keep me\njvmOpts: -Xmx4g");
     fireEvent.click(screen.getByText("Save spec"));
     await waitFor(() => expect(mockUpdateController).toHaveBeenCalledTimes(1));
 
@@ -501,7 +501,7 @@ describe("SpecEditorCard YAML formatting preservation", () => {
     // The server's value actually differs, so the tier converges to it —
     // the comment and the stale value are gone.
     expect(yamlMountedDoc()).not.toContain("# keep me");
-    expect(yamlMountedDoc().trim()).toBe("replicas: 5");
+    expect(yamlMountedDoc().trim()).toBe("jvmOpts: -Xmx5g");
   });
 });
 
@@ -970,6 +970,67 @@ describe("SpecEditorCard validation gate", () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByText("Save spec"));
     expect(mockUpdateController).not.toHaveBeenCalled();
+  });
+
+  it("routes overlay edits to the visible sub-tab, not the first one", async () => {
+    renderCard({ spec: { className: "a" } as unknown as ControllerSpec });
+    await waitFor(() => expect(classNameInput().value).toBe("a"));
+
+    fireEvent.click(screen.getByText("Resource overlay"));
+    fireEvent.click(screen.getByText("Service overlay"));
+    typeYaml("metadata:\n  labels:\n    tier: edge");
+
+    fireEvent.click(screen.getByText("Save spec"));
+    await waitFor(() => expect(mockUpdateController).toHaveBeenCalledTimes(1));
+    const [, , , patch] = mockUpdateController.mock.calls[0];
+    // Overlay tiers are carried as raw YAML text, not parsed objects.
+    expect(patch.spec.resourceOverlay?.service).toBe("metadata:\n  labels:\n    tier: edge");
+    expect(patch.spec.resourceOverlay?.statefulSet).toBeUndefined();
+  });
+
+  it("gates Save on the overlay sub-tab that is actually visible", async () => {
+    renderCard({ spec: { className: "a" } as unknown as ControllerSpec });
+    await waitFor(() => expect(classNameInput().value).toBe("a"));
+
+    fireEvent.click(screen.getByText("Resource overlay"));
+    fireEvent.click(screen.getByText("Service overlay"));
+    typeYaml("metadata: __INVALID__\n  bad: x");
+
+    await waitFor(() => expect(screen.getByText("Save spec")).toBeDisabled());
+    expect(
+      screen.getByText(/Cannot save: invalid YAML in resourceOverlay\.service/),
+    ).toBeInTheDocument();
+  });
+
+  it("clears a YAML tier's invalid verdict when the draft is re-hydrated for another controller", async () => {
+    const { rerender } = renderCard({ spec: { className: "a" } as unknown as ControllerSpec });
+    await waitFor(() => expect(classNameInput().value).toBe("a"));
+
+    fireEvent.click(screen.getByText("Pod overrides"));
+    typeYaml("env: __INVALID__");
+    await waitFor(() => expect(screen.getByText("Save spec")).toBeDisabled());
+
+    // Switching controllers re-hydrates every draft. A verdict recorded
+    // against the discarded text must not keep Save disabled for the
+    // controller now on screen.
+    rerender({ name: "ci-2", spec: { className: "a" } as unknown as ControllerSpec });
+    await waitFor(() => expect(screen.getByText("Save spec")).not.toBeDisabled());
+    expect(screen.queryByText(/Cannot save: invalid YAML/)).not.toBeInTheDocument();
+  });
+
+  it("disables Save while a YAML tier holds malformed YAML and re-enables when fixed", async () => {
+    renderCard({ spec: { className: "a" } as unknown as ControllerSpec });
+    await waitFor(() => expect(classNameInput().value).toBe("a"));
+
+    fireEvent.click(screen.getByText("Pod overrides"));
+    typeYaml("env: __INVALID__");
+
+    const save = await screen.findByRole("button", { name: /save spec/i });
+    await waitFor(() => expect(save).toBeDisabled());
+    expect(screen.getByText(/Cannot save: invalid YAML in podOverrides/)).toBeInTheDocument();
+
+    typeYaml("jvmOpts: -Xmx999m");
+    await waitFor(() => expect(save).not.toBeDisabled());
   });
 });
 

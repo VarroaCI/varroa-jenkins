@@ -843,6 +843,31 @@ ControllerSummary:
     rolloutWave:
       type: integer
       description: RolloutWave from the reconciliation policy.
+    attention:
+      $ref: '#/ControllerAttention'
+    lastSeen:
+      type: string
+      description: Last mite heartbeat, RFC3339 UTC. Absent when no mite has reported.
+  additionalProperties: false
+
+ControllerAttention:
+  type: object
+  description: >-
+    Why the controller needs an operator's attention, if it does. Exactly one kind is
+    reported, chosen by precedence failed > reconcileBlocked > bootFailed >
+    pluginRollFailed > applyFailed.
+  required: [kind]
+  properties:
+    kind:
+      type: string
+      enum: [failed, reconcileBlocked, bootFailed, pluginRollFailed, applyFailed]
+    reason:
+      type: string
+    message:
+      type: string
+    since:
+      type: string
+      format: date-time
   additionalProperties: false
 
 ReconciliationPolicy:
@@ -1201,6 +1226,8 @@ ControllerDetail:
       $ref: '#/MiteImageStatus'
     reconcileBlocked:
       $ref: '#/ReconcileBlocked'
+    attention:
+      $ref: '#/ControllerAttention'
     pluginConflict:
       $ref: '#/PluginConflict'
     pluginInventory:
@@ -1486,6 +1513,11 @@ CatalogSourceSpec:
       type: string
     syncIntervalSeconds:
       type: integer
+      description: Catalog poll cadence in seconds. 0 or an omitted field means the default (300); any other value must be between 30 and 31536000.
+      oneOf:
+        - enum: [0]
+        - minimum: 30
+          maximum: 31536000
     secretRef:
       type: string
     trusted:

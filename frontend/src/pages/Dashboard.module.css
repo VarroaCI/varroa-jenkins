@@ -71,11 +71,11 @@
   margin-bottom: 6px;
 }
 
-.healthStrip {
+.healthMeta {
   display: flex;
-  gap: 3px;
-  height: 42px;
-  align-items: flex-end;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-2);
 }
 
 .activityPlaceholder {

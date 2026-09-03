@@ -32,6 +32,11 @@ Each input sets exactly one of `itemRef`, `gitSource`, or `ociSource`. Inputs
 merge from top to bottom. `errorOnConflict` rejects conflicting scalar JCasC
 values. `override` lets a later input replace an earlier value.
 
+The `update_composed_bundle` MCP tool accepts `inputs` and replaces the whole
+list in the order given, the same way a REST `PUT` does. Omit the argument to
+leave the stored inputs alone. An empty list is rejected, because a bundle with
+no inputs composes to nothing.
+
 Attach the bundle:
 
 ```yaml

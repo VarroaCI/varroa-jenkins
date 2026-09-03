@@ -19,7 +19,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -40,6 +39,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/telemetry"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel"
 )
 
 func main() {
@@ -88,28 +88,29 @@ func main() {
 		}
 	}
 
-	// Resolve bus credentials.
-	busPassword := os.Getenv("BUS_PASSWORD")
-	if *busPassFile != "" {
-		passBytes, err := os.ReadFile(*busPassFile)
-		if err != nil {
-			logger.Error("failed to read bus password file", "path", *busPassFile, "error", err)
-			os.Exit(1)
-		}
-		busPassword = strings.TrimSpace(string(passBytes))
-	}
-
-	busConn, err := bus.Connect(*busURL, bus.Config{
+	// Bus credentials: the file path is the production form because it is
+	// re-read on every reconnect and so follows a rotated Secret; the env var
+	// is the fallback for local runs with no mounted file.
+	busCfg := bus.Config{
 		Username:    *busUser,
-		Password:    busPassword,
 		CAFile:      *busCAFile,
 		InboxPrefix: "_INBOX_gateway",
-	})
+		Logger:      logger,
+	}
+	if *busPassFile != "" {
+		busCfg.PasswordFile = *busPassFile
+	} else {
+		busCfg.Password = os.Getenv("BUS_PASSWORD")
+	}
+	busConn, err := bus.Connect(*busURL, busCfg)
 	if err != nil {
 		logger.Error("failed to connect to bus", "error", err)
 		os.Exit(1)
 	}
 	defer busConn.Close()
+	if err := busConn.RegisterMetrics(otel.Meter("varroa-gateway"), "gateway"); err != nil {
+		logger.Warn("failed to register bus connected gauge", "error", err)
+	}
 	// JetStream replica count for KV buckets and the imperative command stream
 	// (from the NATS cluster size, clamped 1..3 by the chart). Hive-mode
 	// gateways read the core's replica count via this env. Values < 1 are clamped
@@ -241,7 +242,7 @@ func main() {
 		} else {
 			metricsMux := http.NewServeMux()
 			metricsMux.Handle("/metrics", telemetry.MetricsAuthMiddleware(promhttp.Handler()))
-			metricsMux.Handle("/healthz", telemetry.HealthzHandler())
+			metricsMux.Handle("/healthz", telemetry.HealthzHandlerWithBus(busConn.Connected))
 			go func() {
 				_ = http.Serve(metricsListener, metricsMux)
 			}()

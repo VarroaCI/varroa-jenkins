@@ -3,7 +3,9 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -67,10 +69,13 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		mcp.WithDescription("Create a new catalog source"),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("Source namespace")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Source name")),
-		mcp.WithString("repoURL", mcp.Required(), mcp.Description("Git repository URL")),
+		mcp.WithString("repoURL", mcp.Description("Git repository URL (exactly one of repoURL or ociRef)")),
+		mcp.WithString("ociRef", mcp.Description("OCI artifact reference (exactly one of repoURL or ociRef)")),
 		mcp.WithString("revision", mcp.Description("Git revision")),
 		mcp.WithString("path", mcp.Description("Path within repo")),
-		mcp.WithString("secretRef", mcp.Description("Git auth secret name")),
+		mcp.WithString("secretRef", mcp.Description("Auth secret name (git credentials or registry pull secret)")),
+		mcp.WithBoolean("trusted", mcp.Description("Mark the source trusted")),
+		mcp.WithNumber("syncIntervalSeconds", mcp.Description("Sync interval in seconds: 0 (use the default, 300) or 30 to 31536000")),
 	)
 	addTool(mcpServer, kindCreate, createCS, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -85,14 +90,42 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		if !deps.Authorizer.CanManageCatalogSourcesInNamespace(claims, "create", ns) {
 			return mcp.NewToolResultError("access denied: missing catalogsources:create permission"), nil
 		}
+		spec := v1alpha1.CatalogSourceSpec{
+			RepoURL:   strArg(args, "repoURL"),
+			OCIRef:    strArg(args, "ociRef"),
+			Revision:  strArg(args, "revision"),
+			Path:      strArg(args, "path"),
+			SecretRef: strArg(args, "secretRef"),
+		}
+		if spec.OCIRef != "" && spec.RepoURL == "" {
+			// An OCI source has no git revision; drop one passed alongside
+			// so create and update store the same shape.
+			spec.Revision = ""
+		}
+		if v, ok := boolArg(args, "trusted"); ok {
+			spec.Trusted = v
+		}
+		if v, ok, err := intArg(args, "syncIntervalSeconds"); err != nil {
+			return mcp.NewToolResultError("invalid catalog source: " + err.Error()), nil
+		} else if ok {
+			if err := checkSyncInterval(v); err != nil {
+				return mcp.NewToolResultError("invalid catalog source: " + err.Error()), nil
+			}
+			spec.SyncIntervalSeconds = v
+		}
+		if strArg(args, "name") == v1alpha1.UpdateCenterCatalogSourceName {
+			// The reserved source is operator-created and namespace-bound;
+			// a create through the tool would persist an object the
+			// operator marks Error, and the operator re-asserts its spec, so
+			// neither create nor update goes through the tool.
+			return mcp.NewToolResultError("invalid catalog source: the reserved update-center source is created and reconciled by the operator"), nil
+		}
+		if err := validateCatalogSourceSpec(strArg(args, "name"), &spec); err != nil {
+			return mcp.NewToolResultError("invalid catalog source: " + err.Error()), nil
+		}
 		source := &v1alpha1.CatalogSource{
 			ObjectMeta: objMeta(args),
-			Spec: v1alpha1.CatalogSourceSpec{
-				RepoURL:   strArg(args, "repoURL"),
-				Revision:  strArg(args, "revision"),
-				Path:      strArg(args, "path"),
-				SecretRef: strArg(args, "secretRef"),
-			},
+			Spec:       spec,
 		}
 		source.Namespace = ns
 		if err := crdstore.Apply[v1alpha1.CatalogSource](ctx, deps.Store, source); err != nil {
@@ -110,10 +143,13 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		mcp.WithDescription("Update an existing catalog source"),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("Source namespace")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Source name")),
-		mcp.WithString("repoURL", mcp.Description("Git repository URL")),
+		mcp.WithString("repoURL", mcp.Description("Git repository URL (exactly one of repoURL or ociRef)")),
+		mcp.WithString("ociRef", mcp.Description("OCI artifact reference (exactly one of repoURL or ociRef)")),
 		mcp.WithString("revision", mcp.Description("Git revision")),
 		mcp.WithString("path", mcp.Description("Path within repo")),
-		mcp.WithString("secretRef", mcp.Description("Git auth secret name")),
+		mcp.WithString("secretRef", mcp.Description("Auth secret name (git credentials or registry pull secret)")),
+		mcp.WithBoolean("trusted", mcp.Description("Mark the source trusted")),
+		mcp.WithNumber("syncIntervalSeconds", mcp.Description("Sync interval in seconds: 0 (use the default, 300) or 30 to 31536000")),
 	)
 	addTool(mcpServer, kindUpdate, updateCS, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -128,21 +164,61 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		if !deps.Authorizer.CanManageCatalogSourcesInNamespace(claims, "update", ns) {
 			return mcp.NewToolResultError("access denied: missing catalogsources:update permission"), nil
 		}
+		if name == v1alpha1.UpdateCenterCatalogSourceName {
+			// The operator re-asserts this source's spec every tick, so an
+			// edit through the tool would only appear to take effect.
+			return mcp.NewToolResultError("invalid catalog source: the reserved update-center source is reconciled by the operator and cannot be edited"), nil
+		}
 		existing, err := crdstore.Get[v1alpha1.CatalogSource](ctx, deps.Store, name, ns)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("catalog source not found: %v", err)), nil
 		}
-		if v := strArg(args, "repoURL"); v != "" {
-			existing.Spec.RepoURL = v
+		// Key presence decides whether a field is touched (omit = preserve, "" =
+		// clear). Choosing a source kind clears the other kind's fields so the
+		// CRD's at-most-one rule holds; asking for both in one call is rejected
+		// before anything is mutated, like create.
+		if strArg(args, "repoURL") != "" && strArg(args, "ociRef") != "" {
+			return mcp.NewToolResultError("invalid catalog source: only one of repoURL or ociRef may be set"), nil
 		}
-		if v := strArg(args, "revision"); v != "" {
-			existing.Spec.Revision = v
+		for _, f := range []struct {
+			arg   string
+			field *string
+		}{
+			{"revision", &existing.Spec.Revision},
+			{"path", &existing.Spec.Path},
+			{"secretRef", &existing.Spec.SecretRef},
+		} {
+			if _, ok := args[f.arg]; ok {
+				*f.field = strArg(args, f.arg)
+			}
 		}
-		if v := strArg(args, "path"); v != "" {
-			existing.Spec.Path = v
+		if v, ok := boolArg(args, "trusted"); ok {
+			existing.Spec.Trusted = v
 		}
-		if v := strArg(args, "secretRef"); v != "" {
-			existing.Spec.SecretRef = v
+		// Source kind is settled after the plain string fields so a git field
+		// passed alongside ociRef cannot survive the clear below.
+		if _, ok := args["ociRef"]; ok {
+			existing.Spec.OCIRef = strArg(args, "ociRef")
+			if existing.Spec.OCIRef != "" {
+				existing.Spec.RepoURL, existing.Spec.Revision = "", ""
+			}
+		}
+		if _, ok := args["repoURL"]; ok {
+			existing.Spec.RepoURL = strArg(args, "repoURL")
+			if existing.Spec.RepoURL != "" {
+				existing.Spec.OCIRef = ""
+			}
+		}
+		if v, ok, err := intArg(args, "syncIntervalSeconds"); err != nil {
+			return mcp.NewToolResultError("invalid catalog source: " + err.Error()), nil
+		} else if ok {
+			if err := checkSyncInterval(v); err != nil {
+				return mcp.NewToolResultError("invalid catalog source: " + err.Error()), nil
+			}
+			existing.Spec.SyncIntervalSeconds = v
+		}
+		if err := validateCatalogSourceSpec(name, &existing.Spec); err != nil {
+			return mcp.NewToolResultError("invalid catalog source: " + err.Error()), nil
 		}
 		if err := crdstore.Apply[v1alpha1.CatalogSource](ctx, deps.Store, existing); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to update catalog source: %v", err)), nil
@@ -220,6 +296,42 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		})
 		return resultJSON(map[string]string{"status": "accepted"})
 	})
+}
+
+// validateCatalogSourceSpec mirrors the CRD's CEL rule so an agent gets a
+// readable error instead of an apply rejection: at most one of repoURL or
+// ociRef, and at least one unless the source is the reserved update-center
+// entry, which is the only source allowed with neither.
+// minSyncIntervalSeconds matches the floor the catalog controller clamps to.
+// Rejecting a lower value here keeps the stored spec honest about the cadence
+// the controller will actually run; zero means "use the default".
+const (
+	minSyncIntervalSeconds = 30
+	maxSyncIntervalSeconds = 31536000
+)
+
+func checkSyncInterval(v int) error {
+	if v != 0 && (v < minSyncIntervalSeconds || v > maxSyncIntervalSeconds) {
+		return fmt.Errorf("syncIntervalSeconds must be 0 (default) or between %d and %d, got %d", minSyncIntervalSeconds, maxSyncIntervalSeconds, v)
+	}
+	return nil
+}
+
+func validateCatalogSourceSpec(name string, spec *v1alpha1.CatalogSourceSpec) error {
+	switch {
+	case spec.RepoURL != "" && spec.OCIRef != "":
+		return errors.New("only one of repoURL or ociRef may be set")
+	case name == v1alpha1.UpdateCenterCatalogSourceName:
+		if spec.RepoURL != "" || spec.OCIRef != "" {
+			return errors.New("the reserved update-center source carries neither repoURL nor ociRef")
+		}
+	case spec.RepoURL == "" && spec.OCIRef == "":
+		return errors.New("exactly one of repoURL or ociRef is required")
+	case spec.RepoURL != "" && !strings.HasPrefix(spec.RepoURL, "https://") &&
+		!strings.HasPrefix(spec.RepoURL, "ssh://") && !strings.HasPrefix(spec.RepoURL, "git@"):
+		return errors.New("repoURL must start with https://, ssh://, or git@")
+	}
+	return nil
 }
 
 // catalogSourceSummary is the default projection for list_catalog_sources.

@@ -10,7 +10,7 @@ import type { UpdateCenterStatus } from "../types";
 import { MetricCard } from "../components/MetricCard";
 import { Card } from "../components/Card";
 import { Pulse } from "../components/Pulse";
-import { StatusPill } from "../components/StatusPill";
+import { StatusPill, ATTENTION_LABEL } from "../components/StatusPill";
 import { controllerRoute } from "../routing";
 import type { ControllerListItem } from "../hooks/useControllers";
 import type { ClusterEntry } from "../types";
@@ -24,7 +24,16 @@ export default function Dashboard() {
   const total = controllers.length;
   const connected = controllers.filter((c) => c.miteConnected).length;
   const provisioning = controllers.filter((c) => c.phase === "Provisioning").length;
-  const failed = controllers.filter((c) => c.phase === "Failed").length;
+  const attention = controllers.filter((c) => c.attention);
+  const attentionBreakdown = Object.entries(
+    attention.reduce<Record<string, number>>((acc, c) => {
+      const label = ATTENTION_LABEL[c.attention!.kind].toLowerCase();
+      acc[label] = (acc[label] ?? 0) + 1;
+      return acc;
+    }, {}),
+  )
+    .map(([label, n]) => `${n} ${label}`)
+    .join(" \u00b7 ");
   // Namespaces are only unique within a cluster — the same name exists in more
   // than one cluster, so count (cluster, namespace) identities.
   const namespaceCount = new Set(controllers.map((c) => `${c.cluster}/${c.namespace}`)).size;
@@ -103,17 +112,17 @@ export default function Dashboard() {
         />
         <MetricCard
           label="Needs attention"
-          value={failed}
-          sub={failed > 0 ? `${failed} failed` : "all clear"}
+          value={attention.length}
+          sub={attention.length > 0 ? attentionBreakdown : "all clear"}
           icon={<span>⚠</span>}
-          accent={failed > 0 ? "bad" : "ok"}
+          accent={attention.length > 0 ? "bad" : "ok"}
         />
       </div>
 
       <UpdateCenterGapsChip />
 
       <div className={styles.twoCol}>
-        <Card title="⬡ Brood health" headerRight={<span className={styles.muted}>last 24h</span>}>
+        <Card title="⬡ Brood health" headerRight={<span className={styles.muted}>{controllers.length} controller{controllers.length === 1 ? "" : "s"}</span>}>
           <div className={styles.healthGrid}>
             {controllers.map((c) => (
               <HealthBar key={`${c.namespace}/${c.name}`} controller={c} />
@@ -151,33 +160,20 @@ function ClusterStrip({ clusters, isLoading, error }: { clusters: ClusterEntry[]
 }
 
 function HealthBar({ controller }: { controller: ControllerListItem }) {
-  const bars = Array.from({ length: 48 }, () => {
-    const v = controller.miteConnected ? (Math.random() > 0.04 ? 1 : 0.4) : 0;
-    const col = v === 1 ? "var(--ok)" : "var(--bad)";
-    return (
-      <i
-        key={Math.random()}
-        style={{
-          height: `${22 + v * 20}%`,
-          background: col,
-          opacity: 0.55 + v * 0.45,
-          flex: 1,
-          borderRadius: 3,
-        }}
-      />
-    );
-  });
-
   return (
-    <div>
+    <div data-testid="health-row">
       <div className={styles.healthLabel}>
         <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <Pulse active={controller.miteConnected} size={8} />
           <Link to={controllerRoute(controller.cluster, controller.namespace, controller.name)} className={styles.healthLink} aria-label={`View details for ${controller.namespace}/${controller.name}`}>{controller.name}</Link>
         </span>
-        <StatusPill phase={controller.phase} size="sm" />
+        <StatusPill phase={controller.phase} attention={controller.attention} size="sm" />
       </div>
-      <div className={styles.healthStrip}>{bars}</div>
+      <div className={styles.healthMeta}>
+        <span>{controller.lastSeen ? `seen ${age(controller.lastSeen)}` : "never seen"}</span>
+        {controller.jenkinsHealth && <span>{controller.jenkinsHealth}</span>}
+        {controller.jenkinsVersion && <span>Jenkins {controller.jenkinsVersion}</span>}
+      </div>
     </div>
   );
 }

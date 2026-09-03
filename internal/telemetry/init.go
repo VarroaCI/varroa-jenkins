@@ -185,3 +185,20 @@ func HealthzHandler() http.Handler {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 }
+
+// HealthzHandlerWithBus is HealthzHandler plus a "bus" field. It stays 200
+// while the bus is down on purpose: the BFF still serves the dashboard and the
+// gateway's replicas share one credential, so evicting either from its Service
+// would help nothing. The field and the varroa.bus.connected gauge are the
+// visibility.
+func HealthzHandlerWithBus(connected func() bool) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		bus := "connected"
+		if !connected() {
+			bus = "disconnected"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "bus": bus})
+	})
+}

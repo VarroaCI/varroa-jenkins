@@ -4184,8 +4184,9 @@ spec:
                 format: date-time
                 type: string
               lastReconciledAt:
-                description: LastReconciledAt records the last time a full reconciliation
-                  completed.
+                description: |-
+                  LastReconciledAt records the last time a reconcile pass completed without
+                  error for this controller, in any phase.
                 format: date-time
                 type: string
               liveDrift:

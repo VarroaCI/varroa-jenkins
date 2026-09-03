@@ -56,6 +56,27 @@ describe("StatusPill", () => {
     expect(container.firstChild).toBeInTheDocument();
   });
 
+  it("appends an attention tag and exposes the message as a tooltip", () => {
+    render(
+      <StatusPill
+        phase="Provisioning"
+        attention={{ kind: "bootFailed", message: "jenkins container exited with code 5 (283 restarts): Error" }}
+      />,
+    );
+    expect(screen.getByText("Provisioning", { exact: false })).toBeInTheDocument();
+    const tag = screen.getByText("Boot failed");
+    expect(tag.className).toMatch(/attention/);
+    expect(tag.closest("span[title]")).toHaveAttribute(
+      "title",
+      expect.stringContaining("exited with code 5"),
+    );
+  });
+
+  it("renders no attention tag when nothing needs attention", () => {
+    render(<StatusPill phase="Connected" />);
+    expect(screen.queryByText(/Blocked|Boot failed|Apply failed|Plugin roll failed/)).toBeNull();
+  });
+
   it("handles undefined phase without crashing", () => {
     const { container } = render(<StatusPill phase={undefined as any} />);
     expect(container.firstChild).toBeInTheDocument();

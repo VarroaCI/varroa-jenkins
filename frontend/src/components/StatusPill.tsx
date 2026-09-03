@@ -1,8 +1,17 @@
-import type { ControllerPhase } from "../types";
+import type { ControllerAttention, ControllerAttentionKind, ControllerPhase } from "../types";
 import styles from "./StatusPill.module.css";
+
+export const ATTENTION_LABEL: Record<ControllerAttentionKind, string> = {
+  failed: "Failed",
+  reconcileBlocked: "Blocked",
+  bootFailed: "Boot failed",
+  pluginRollFailed: "Plugin roll failed",
+  applyFailed: "Apply failed",
+};
 
 interface StatusPillProps {
   phase: ControllerPhase | string;
+  attention?: ControllerAttention;
   size?: "default" | "sm";
 }
 
@@ -23,11 +32,16 @@ const phaseClass = (p: string): string => {
   }
 };
 
-export function StatusPill({ phase, size = "default" }: StatusPillProps) {
+export function StatusPill({ phase, attention, size = "default" }: StatusPillProps) {
+  const tone = attention ? styles.failed : phaseClass(phase);
   return (
-    <span className={`${styles.pill} ${phaseClass(phase)} ${size === "sm" ? styles.sm : ""}`}>
+    <span
+      className={`${styles.pill} ${tone} ${size === "sm" ? styles.sm : ""}`}
+      title={attention?.message}
+    >
       <span className={styles.pdot} />
       {phase}
+      {attention && <span className={styles.attention}>{ATTENTION_LABEL[attention.kind]}</span>}
     </span>
   );
 }

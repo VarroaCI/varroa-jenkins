@@ -102,6 +102,11 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 			if err := marshalUnmarshal(inputs, &bundle.Spec.Inputs); err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("invalid inputs: %v", err)), nil
 			}
+			// Same rule as update: a bundle with no inputs composes to nothing
+			// and wedges every controller using it.
+			if len(bundle.Spec.Inputs) == 0 {
+				return mcp.NewToolResultError("invalid inputs: a composed bundle needs at least one input"), nil
+			}
 		}
 		if vars := args["variables"]; vars != nil {
 			if err := marshalUnmarshal(vars, &bundle.Spec.Variables); err != nil {
@@ -127,6 +132,7 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		mcp.WithString("description", mcp.Description("Human-readable description")),
 		mcp.WithString("jcascMergeStrategy", mcp.Description("JCasC merge strategy")),
 		mcp.WithObject("variables", mcp.Description("Template variables")),
+		mcp.WithArray("inputs", mcp.Description("Bundle inputs (itemRef, gitSource or ociSource). When present, replaces the whole list in order; omit to leave inputs unchanged.")),
 	)
 	addTool(mcpServer, kindUpdate, updateCB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -166,6 +172,21 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 			if err := marshalUnmarshal(vars, &existing.Spec.Variables); err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("invalid variables: %v", err)), nil
 			}
+		}
+		// inputs replaces wholesale, like create_composed_bundle and REST PUT: the
+		// list is the merge order, so a partial edit has no well-defined meaning.
+		// A JSON null is "omitted", matching how variables is treated above. An
+		// empty list is rejected rather than applied — a bundle with no inputs
+		// composes to nothing and wedges every controller using it.
+		if raw, ok := args["inputs"]; ok && raw != nil {
+			var inputs []v1alpha1.ComposedInput
+			if err := marshalUnmarshal(raw, &inputs); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("invalid inputs: %v", err)), nil
+			}
+			if len(inputs) == 0 {
+				return mcp.NewToolResultError("invalid inputs: a composed bundle needs at least one input"), nil
+			}
+			existing.Spec.Inputs = inputs
 		}
 		if err := crdstore.Apply[v1alpha1.ComposedBundle](ctx, deps.Store, existing); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to update composed bundle: %v", err)), nil

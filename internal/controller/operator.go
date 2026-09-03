@@ -176,6 +176,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
+	// Stamped on every successful pass, not only Connected ones, so a healthy
+	// Provisioning controller does not look frozen. Error paths persist their
+	// diagnostics without this stamp: BroodVerbReconcile treats a fresh stamp
+	// as proof the pass succeeded.
+	now := metav1Now()
+	cr.Status.LastReconciledAt = &now
+
 	// Patch status on every successful reconcile. reconcileController mutates
 	// many status fields (MiteStatus, Conditions, hashes, timestamps, pending
 	// restart) in addition to Phase. The controller-runtime generation filter

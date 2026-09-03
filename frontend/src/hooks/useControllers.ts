@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { bffFetch } from "./useApi";
-import type { PendingRestart, ReconciliationPolicy, ControllerObservability, PendingDeletion, LiveDrift, ReconcileBlocked, RolloutStatus, ApplyResult, PodOverrides, ResourceOverlay, ProbesSpec, ControllerSpec } from "../types";
+import type { PendingRestart, ReconciliationPolicy, ControllerObservability, PendingDeletion, LiveDrift, ReconcileBlocked, RolloutStatus, ApplyResult, PodOverrides, ResourceOverlay, ProbesSpec, ControllerSpec, ControllerAttention } from "../types";
 
 const enc = (s: string) => encodeURIComponent(s);
 
@@ -28,6 +28,9 @@ export interface ControllerListItem {
   routingMode?: "subdomain" | "path";
   appliedBundleHash?: string;
   rolloutWave?: number;
+  attention?: ControllerAttention;
+  /** Last mite heartbeat, RFC3339 UTC. Absent when no mite has ever reported. */
+  lastSeen?: string;
 }
 
 export function useControllers() {
@@ -96,6 +99,7 @@ export interface ControllerDetail {
   // reconcileBlocked projects the ConditionReconcileBlocked condition (C3).
   // Always present on the detail contract (never nil server-side), so required.
   reconcileBlocked: ReconcileBlocked;
+  attention?: ControllerAttention;
   // versionStatus projects the version-roll (A) and upgrade-guard (B) conditions.
   versionStatus?: {
     rollPending?: boolean;

@@ -106,7 +106,13 @@ func seedGuardObjects(t *testing.T, stub *guardStub) {
 	t.Helper()
 	const ns, name = "team-a", "obj"
 	crdstore.MustSeed(stub.Fake,
-		&v1alpha1.CatalogSource{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}},
+		// A stored CatalogSource always carries one source kind; the CRD rejects
+		// a sourceless one under any name but the reserved update-center entry,
+		// and so does update_catalog_source.
+		&v1alpha1.CatalogSource{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+			Spec:       v1alpha1.CatalogSourceSpec{RepoURL: "https://example.com/repo.git"},
+		},
 		&v1alpha1.ComposedBundle{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}},
 		&v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{Name: name}},
 		&v1alpha1.JenkinsRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: name}},

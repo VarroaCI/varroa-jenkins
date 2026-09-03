@@ -35,6 +35,7 @@ spec:
           command: ["/app/varroa-operator"]
           args:
             - "-bus-ca-file=/etc/nats-creds/ca.crt"
+            - "-bus-pass-file=/etc/nats-creds/operator-password"
           ports:
             - name: metrics
               containerPort: {{ .Values.operator.service.port }}
@@ -63,11 +64,6 @@ spec:
               value: {{ .Values.cluster.name | quote }}
             - name: VARROA_JETSTREAM_REPLICAS
               value: {{ include "varroa.jetStreamReplicas" $ | quote }}
-            - name: BUS_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: varroa-nats-creds
-                  key: operator-password
             - name: VARROA_SHARD_COUNT
               value: {{ .Values.operator.shardCount | default 256 | quote }}
             - name: VARROA_MAX_CONCURRENT_RECONCILES
@@ -167,6 +163,12 @@ spec:
           {{- with .Values.operator.resources }}
           resources: {{- toYaml . | nindent 12 }}
           {{- end }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 10
+            failureThreshold: 24
           livenessProbe:
             httpGet:
               path: /healthz
@@ -175,7 +177,7 @@ spec:
             periodSeconds: 15
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /readyz
               port: health
             initialDelaySeconds: 5
             periodSeconds: 10

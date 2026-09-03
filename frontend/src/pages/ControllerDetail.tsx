@@ -23,6 +23,7 @@ import { KVGrid } from "../components/KVGrid";
 import { Button } from "../components/Button";
 import { BundleSelector, BundleHealthBadge } from "../components/BundleSelector";
 import { DeliveryPipeline, isAsleep } from "../components/DeliveryPipeline";
+import { ATTENTION_LABEL } from "../components/StatusPill";
 import { useControllerDiff } from "../hooks/useControllerDiff";
 import { useActivityFeed } from "../hooks/useActivityFeed";
 import { useAuth } from "../context/AuthContext";
@@ -34,6 +35,8 @@ import type {
   ProbeSpec,
   ProbesSpec,
   HibernationSpec,
+  ControllerAttention,
+  ControllerAttentionKind,
 } from "../types";
 import { PROBE_DEFAULTS } from "../types";
 import ConflictDialog from "../components/ConflictDialog";
@@ -385,6 +388,7 @@ export default function ControllerDetail() {
 
       <VersionRollBanner versionStatus={ctrl.versionStatus} />
       <ReconcileBlockedBanner reconcileBlocked={ctrl.reconcileBlocked} />
+      <AttentionBanner attention={ctrl.attention} />
       <PluginConflictBanner pluginConflict={ctrl.pluginConflict} />
       {ctrl.pendingRestart && (
         <PendingRestartBanner
@@ -467,13 +471,16 @@ type PillTone = "ok" | "warn" | "bad" | "asleep";
 function phasePill(ctrl: ControllerData): { label: string; tone: PillTone } {
   const p = ctrl.phase || "Pending";
   if (p === "Hibernated" || p === "Stopped") return { label: p, tone: "asleep" };
+  // An asleep controller shows its asleep state; the BFF never sets attention
+  // for those phases.
+  if (ctrl.attention) return { label: ATTENTION_LABEL[ctrl.attention.kind], tone: "bad" };
+  // A failed apply is the concrete outcome in every phase, not only Connected.
+  if (ctrl.lastApplyResult?.succeeded === false) return { label: "Apply failed", tone: "bad" };
   if (p === "Connected") {
     const hashMismatch =
       !!ctrl.desiredStateHash && !!ctrl.lastApplyResult?.hash && ctrl.lastApplyResult.hash !== ctrl.desiredStateHash;
     // Manual mode: a hash mismatch means the change is parked awaiting operator
-    // approval, not actively being applied. A real apply failure is the
-    // concrete outcome and takes precedence over both interpretations.
-    if (ctrl.lastApplyResult?.succeeded === false) return { label: "Apply failed", tone: "bad" };
+    // approval, not actively being applied.
     if (hashMismatch && ctrl.reconciliationPolicy?.mode === "manual") return { label: "Awaiting approval", tone: "warn" };
     if (hashMismatch) return { label: "Applying", tone: "warn" };
     return { label: "Connected", tone: "ok" };
@@ -2120,6 +2127,33 @@ export function VersionRollBanner({
     );
   }
   return null;
+}
+
+// AttentionBanner covers the attention kinds that have no dedicated banner.
+// reconcileBlocked keeps ReconcileBlockedBanner; applyFailed is shown by the
+// apply-result section below, so neither gets a hint here.
+const ATTENTION_HINT: Partial<Record<ControllerAttentionKind, string>> = {
+  bootFailed:
+    "Jenkins is not reaching a healthy boot. Read the Jenkins container logs (Logs tab): a JCasC error such as a cloud without a name, or a plugin dependency that cannot load, fails boot. Fixing the bundle rolls the pod automatically.",
+  pluginRollFailed:
+    "The plugins-init step failed. The message above names the plugin; check that its pin exists in the update center and matches the JenkinsVersionProfile lock.",
+  failed:
+    "Reconciliation gave up. Fix the cause named above, then edit the spec or trigger a reconcile to retry.",
+};
+
+export function AttentionBanner({ attention }: { attention?: ControllerAttention }) {
+  if (!attention || !(attention.kind in ATTENTION_HINT)) return null;
+  return (
+    <div className={styles.versionBannerBlocked} role="alert">
+      <span className={styles.pendingIcon}>⚠</span>
+      <div className={styles.pendingBody}>
+        <div className={styles.pendingTitle}>{ATTENTION_LABEL[attention.kind]}</div>
+        {attention.message && <div className={styles.pendingMeta}>{attention.message}</div>}
+        <div>{ATTENTION_HINT[attention.kind]}</div>
+        {attention.since && <div className={styles.pendingMeta}>since {new Date(attention.since).toLocaleString()}</div>}
+      </div>
+    </div>
+  );
 }
 
 // ReconcileBlockedBanner surfaces ConditionReconcileBlocked=True (C3). It is

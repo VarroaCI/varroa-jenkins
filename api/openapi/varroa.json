@@ -805,6 +805,18 @@
             "type": "string"
           },
           "syncIntervalSeconds": {
+            "description": "Catalog poll cadence in seconds. 0 or an omitted field means the default (300); any other value must be between 30 and 31536000.",
+            "oneOf": [
+              {
+                "enum": [
+                  0
+                ]
+              },
+              {
+                "maximum": 31536000,
+                "minimum": 30
+              }
+            ],
             "type": "integer"
           },
           "trusted": {
@@ -1270,6 +1282,36 @@
         ],
         "type": "object"
       },
+      "ControllerAttention": {
+        "additionalProperties": false,
+        "description": "Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed \u003e reconcileBlocked \u003e bootFailed \u003e pluginRollFailed \u003e applyFailed.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "failed",
+              "reconcileBlocked",
+              "bootFailed",
+              "pluginRollFailed",
+              "applyFailed"
+            ],
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
       "ControllerDetail": {
         "additionalProperties": false,
         "description": "Full controller detail including status and sub-resources.",
@@ -1282,6 +1324,9 @@
               "$ref": "#/components/schemas/components_schemas_ApplyResult"
             },
             "type": "array"
+          },
+          "attention": {
+            "$ref": "#/components/schemas/components_schemas_ControllerAttention"
           },
           "certExpiry": {
             "type": "string"
@@ -1613,6 +1658,9 @@
           "appliedBundleHash": {
             "type": "string"
           },
+          "attention": {
+            "$ref": "#/components/schemas/components_schemas_ControllerAttention"
+          },
           "cluster": {
             "type": "string"
           },
@@ -1629,6 +1677,10 @@
             "type": "string"
           },
           "jenkinsVersion": {
+            "type": "string"
+          },
+          "lastSeen": {
+            "description": "Last mite heartbeat, RFC3339 UTC. Absent when no mite has reported.",
             "type": "string"
           },
           "miteConnected": {
@@ -4544,6 +4596,18 @@
             "type": "string"
           },
           "syncIntervalSeconds": {
+            "description": "Catalog poll cadence in seconds. 0 or an omitted field means the default (300); any other value must be between 30 and 31536000.",
+            "oneOf": [
+              {
+                "enum": [
+                  0
+                ]
+              },
+              {
+                "maximum": 31536000,
+                "minimum": 30
+              }
+            ],
             "type": "integer"
           },
           "trusted": {
@@ -5196,6 +5260,36 @@
         ],
         "type": "object"
       },
+      "components_schemas_ControllerAttention": {
+        "additionalProperties": false,
+        "description": "Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed \u003e reconcileBlocked \u003e bootFailed \u003e pluginRollFailed \u003e applyFailed.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "failed",
+              "reconcileBlocked",
+              "bootFailed",
+              "pluginRollFailed",
+              "applyFailed"
+            ],
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
       "components_schemas_ControllerClass": {
         "additionalProperties": true,
         "description": "A ControllerClass CRD (cluster-scoped). Layers cluster-level defaults between ProvisioningDefaults and each Controller via spec.className.",
@@ -5326,6 +5420,9 @@
               "$ref": "#/components/schemas/components_schemas_ApplyResult"
             },
             "type": "array"
+          },
+          "attention": {
+            "$ref": "#/components/schemas/components_schemas_ControllerAttention"
           },
           "certExpiry": {
             "type": "string"
@@ -5657,6 +5754,9 @@
           "appliedBundleHash": {
             "type": "string"
           },
+          "attention": {
+            "$ref": "#/components/schemas/components_schemas_ControllerAttention"
+          },
           "cluster": {
             "type": "string"
           },
@@ -5673,6 +5773,10 @@
             "type": "string"
           },
           "jenkinsVersion": {
+            "type": "string"
+          },
+          "lastSeen": {
+            "description": "Last mite heartbeat, RFC3339 UTC. Absent when no mite has reported.",
             "type": "string"
           },
           "miteConnected": {

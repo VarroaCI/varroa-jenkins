@@ -203,6 +203,15 @@ const (
 	Ready   ComponentsSchemasComposedBundleStatusPhase = "Ready"
 )
 
+// Defines values for ComponentsSchemasControllerAttentionKind.
+const (
+	ApplyFailed      ComponentsSchemasControllerAttentionKind = "applyFailed"
+	BootFailed       ComponentsSchemasControllerAttentionKind = "bootFailed"
+	Failed           ComponentsSchemasControllerAttentionKind = "failed"
+	PluginRollFailed ComponentsSchemasControllerAttentionKind = "pluginRollFailed"
+	ReconcileBlocked ComponentsSchemasControllerAttentionKind = "reconcileBlocked"
+)
+
 // Defines values for ComponentsSchemasControllerSpecPowerState.
 const (
 	ComponentsSchemasControllerSpecPowerStateEmpty   ComponentsSchemasControllerSpecPowerState = ""
@@ -804,13 +813,15 @@ type ComponentsSchemasCatalogSource struct {
 // ComponentsSchemasCatalogSourceSpec Spec for a CatalogSource (bundle catalog repository).
 type ComponentsSchemasCatalogSourceSpec struct {
 	// OciRef OCI artifact reference; mutually exclusive with repoURL.
-	OciRef              *string `json:"ociRef,omitempty"`
-	Path                *string `json:"path,omitempty"`
-	RepoURL             *string `json:"repoURL,omitempty"`
-	Revision            *string `json:"revision,omitempty"`
-	SecretRef           *string `json:"secretRef,omitempty"`
-	SyncIntervalSeconds *int    `json:"syncIntervalSeconds,omitempty"`
-	Trusted             *bool   `json:"trusted,omitempty"`
+	OciRef    *string `json:"ociRef,omitempty"`
+	Path      *string `json:"path,omitempty"`
+	RepoURL   *string `json:"repoURL,omitempty"`
+	Revision  *string `json:"revision,omitempty"`
+	SecretRef *string `json:"secretRef,omitempty"`
+
+	// SyncIntervalSeconds Catalog poll cadence in seconds. 0 or an omitted field means the default (300); any other value must be between 30 and 31536000.
+	SyncIntervalSeconds *int  `json:"syncIntervalSeconds,omitempty"`
+	Trusted             *bool `json:"trusted,omitempty"`
 }
 
 // ComponentsSchemasCatalogSourceStatus Observed state of a CatalogSource.
@@ -1044,6 +1055,17 @@ type ComponentsSchemasConflictResponse struct {
 	Error string `json:"error"`
 }
 
+// ComponentsSchemasControllerAttention Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed > pluginRollFailed > applyFailed.
+type ComponentsSchemasControllerAttention struct {
+	Kind    ComponentsSchemasControllerAttentionKind `json:"kind"`
+	Message *string                                  `json:"message,omitempty"`
+	Reason  *string                                  `json:"reason,omitempty"`
+	Since   *time.Time                               `json:"since,omitempty"`
+}
+
+// ComponentsSchemasControllerAttentionKind defines model for ComponentsSchemasControllerAttention.Kind.
+type ComponentsSchemasControllerAttentionKind string
+
 // ComponentsSchemasControllerClass A ControllerClass CRD (cluster-scoped). Layers cluster-level defaults between ProvisioningDefaults and each Controller via spec.className.
 type ComponentsSchemasControllerClass struct {
 	ApiVersion string                 `json:"apiVersion"`
@@ -1113,8 +1135,11 @@ type ComponentsSchemasControllerClassSpec struct {
 type ComponentsSchemasControllerDetail struct {
 	AppliedBundleHash *string                         `json:"appliedBundleHash,omitempty"`
 	ApplyHistory      *[]ComponentsSchemasApplyResult `json:"applyHistory,omitempty"`
-	CertExpiry        *string                         `json:"certExpiry,omitempty"`
-	Cluster           string                          `json:"cluster"`
+
+	// Attention Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed > pluginRollFailed > applyFailed.
+	Attention  *ComponentsSchemasControllerAttention `json:"attention,omitempty"`
+	CertExpiry *string                               `json:"certExpiry,omitempty"`
+	Cluster    string                                `json:"cluster"`
 
 	// ComposedBundleRef Reference to a ComposedBundle from a Controller.
 	ComposedBundleRef *ComponentsSchemasComposedBundleRef `json:"composedBundleRef,omitempty"`
@@ -1295,7 +1320,10 @@ type ComponentsSchemasControllerSpecPowerState string
 // ComponentsSchemasControllerSummary Summary entry for each controller in the list.
 type ComponentsSchemasControllerSummary struct {
 	AppliedBundleHash *string `json:"appliedBundleHash,omitempty"`
-	Cluster           string  `json:"cluster"`
+
+	// Attention Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed > pluginRollFailed > applyFailed.
+	Attention *ComponentsSchemasControllerAttention `json:"attention,omitempty"`
+	Cluster   string                                `json:"cluster"`
 
 	// ComposedBundleRef Reference to a ComposedBundle from a Controller.
 	ComposedBundleRef *ComponentsSchemasComposedBundleRef `json:"composedBundleRef,omitempty"`
@@ -1305,11 +1333,14 @@ type ComponentsSchemasControllerSummary struct {
 	Endpoint        string                            `json:"endpoint"`
 	JenkinsHealth   *string                           `json:"jenkinsHealth,omitempty"`
 	JenkinsVersion  *string                           `json:"jenkinsVersion,omitempty"`
-	MiteConnected   bool                              `json:"miteConnected"`
-	MiteVersion     *string                           `json:"miteVersion,omitempty"`
-	Name            string                            `json:"name"`
-	Namespace       string                            `json:"namespace"`
-	Phase           string                            `json:"phase"`
+
+	// LastSeen Last mite heartbeat, RFC3339 UTC. Absent when no mite has reported.
+	LastSeen      *string `json:"lastSeen,omitempty"`
+	MiteConnected bool    `json:"miteConnected"`
+	MiteVersion   *string `json:"miteVersion,omitempty"`
+	Name          string  `json:"name"`
+	Namespace     string  `json:"namespace"`
+	Phase         string  `json:"phase"`
 
 	// RolloutWave RolloutWave from the reconciliation policy.
 	RolloutWave *int `json:"rolloutWave,omitempty"`

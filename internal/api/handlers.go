@@ -255,6 +255,14 @@ type controllerResponse struct {
 	AppliedBundleHash string `json:"appliedBundleHash,omitempty"`
 	// RolloutWave from the reconciliation policy (for fan-out grouping).
 	RolloutWave int `json:"rolloutWave,omitempty"`
+	// Attention is the single "why is this controller unhealthy" projection,
+	// carried on the summary so fleet views flag a wedged controller without
+	// fetching every detail. Nil when nothing needs attention.
+	Attention *AttentionJSON `json:"attention,omitempty"`
+	// LastSeen is the mite's last heartbeat, RFC3339 UTC. Empty means no mite
+	// has ever reported: the dashboard reads staleness off the listing, so
+	// omitting it here renders every row as never seen.
+	LastSeen string `json:"lastSeen,omitempty"`
 }
 
 // controllerDetailResponse is the JSON shape for a single controller.
@@ -329,6 +337,9 @@ type controllerDetailResponse struct {
 	// currently blocked by an unresolved error (C3). Always present (never nil),
 	// so it is a required field with no omitempty — matches the OpenAPI contract.
 	ReconcileBlocked *ReconcileBlockedJSON `json:"reconcileBlocked"`
+	// Attention is the same projection the list summary carries. Nil when
+	// nothing needs attention.
+	Attention *AttentionJSON `json:"attention,omitempty"`
 	// PluginConflict projects ConditionPluginConflict (C4) — an existing,
 	// general-purpose plugin-pin-vs-lock check surfaced here, not a new
 	// detection mechanism. Nil when the condition has never been recorded.
@@ -733,6 +744,7 @@ func (s *Server) handleControllersFiltered(w http.ResponseWriter, r *http.Reques
 			EffectiveBundle:   s.effectiveBundleFor(cr),
 			RoutingMode:       cr.Spec.IngressSpec.RoutingMode(),
 			AppliedBundleHash: cr.Status.AppliedBundleHash,
+			Attention:         buildAttentionJSON(cr),
 		}
 		if cr.Spec.ReconciliationPolicy != nil {
 			crResp.RolloutWave = cr.Spec.ReconciliationPolicy.RolloutWave
@@ -741,6 +753,7 @@ func (s *Server) handleControllersFiltered(w http.ResponseWriter, r *http.Reques
 		// remote row is a guaranteed-miss NATS round-trip. Remote rows use the
 		// remote operator's own view from the CR status instead.
 		if cluster == "" || s.deps.Brood == nil || cluster == s.deps.Brood.LocalCluster() {
+			seedPersistedMiteFacts(cr, &crResp.MiteVersion, &crResp.JenkinsVersion, &crResp.JenkinsHealth, &crResp.LastSeen)
 			s.mergeMiteStatus(cr.Name, cr.Namespace, &crResp)
 		} else if ms := cr.Status.MiteStatus; ms != nil {
 			crResp.MiteConnected = ms.Connected
@@ -749,6 +762,9 @@ func (s *Server) handleControllersFiltered(w http.ResponseWriter, r *http.Reques
 				crResp.JenkinsVersion = ms.JenkinsVersion
 			}
 			crResp.JenkinsHealth = ms.JenkinsHealth
+			if ms.LastSeen != nil {
+				crResp.LastSeen = ms.LastSeen.Format("2006-01-02T15:04:05Z")
+			}
 		}
 		out = append(out, crResp)
 	}
@@ -863,6 +879,10 @@ func (s *Server) handleControllerDetail(w http.ResponseWriter, r *http.Request, 
 	// controllers use the remote operator's own view from the CR status
 	// instead (mirrors the list handler's per-row merge above).
 	if cluster == "" || s.deps.Brood == nil || cluster == s.deps.Brood.LocalCluster() {
+		seedPersistedMiteFacts(cr, &resp.MiteVersion, &resp.JenkinsVersion, &resp.JenkinsHealth, &resp.LastSeen)
+		if ms := cr.Status.MiteStatus; ms != nil && ms.CertExpiry != nil {
+			resp.CertExpiry = ms.CertExpiry.Format("2006-01-02")
+		}
 		s.mergeMiteTelemetry(cr.Name, cr.Namespace, &resp)
 	} else if ms := cr.Status.MiteStatus; ms != nil {
 		resp.MiteConnected = ms.Connected
@@ -975,24 +995,49 @@ func (s *Server) getController(ctx context.Context, cluster, namespace, name str
 	return crdstore.Get[v1alpha1.Controller](ctx, s.deps.Store, name, namespace)
 }
 
+// seedPersistedMiteFacts copies the operator's persisted view of a local
+// controller's mite into a response before the live registry merge. The
+// registry forgets a mite the moment it disconnects, so without this seed a
+// controller that reported once reads as never seen, with no last-known
+// Jenkins health or version, while a remote row in the same state shows all
+// three. Liveness is deliberately not seeded: only the registry says whether
+// a mite is connected right now. A live heartbeat overwrites every field.
+func seedPersistedMiteFacts(cr *v1alpha1.Controller, miteVersion, jenkinsVersion, jenkinsHealth, lastSeen *string) {
+	ms := cr.Status.MiteStatus
+	if ms == nil {
+		return
+	}
+	*miteVersion = ms.Version
+	if ms.JenkinsVersion != "" && ms.JenkinsVersion != "NORMAL" {
+		*jenkinsVersion = ms.JenkinsVersion
+	}
+	*jenkinsHealth = ms.JenkinsHealth
+	if ms.LastSeen != nil {
+		*lastSeen = ms.LastSeen.Format("2006-01-02T15:04:05Z")
+	}
+}
+
 // mergeMiteStatus merges live mite data into a controllerResponse.
 func (s *Server) mergeMiteStatus(name, namespace string, cr *controllerResponse) {
 	if s.deps.MiteRegistry == nil {
 		return
 	}
-	miteVersion, _, _, ok := s.deps.MiteRegistry.Info(namespace, name)
+	miteVersion, lastHeartbeat, _, ok := s.deps.MiteRegistry.Info(namespace, name)
 	if !ok {
 		return
 	}
 	cr.MiteConnected = true
 	cr.MiteVersion = miteVersion
+	cr.LastSeen = lastHeartbeat.UTC().Format("2006-01-02T15:04:05Z")
 
 	if snap := s.deps.MiteRegistry.Snapshot(namespace, name); snap != nil {
 		// "NORMAL" is the Jenkins mode sentinel, never a valid version — drop it.
 		if snap.JenkinsVersion != "" && snap.JenkinsVersion != "NORMAL" {
 			cr.JenkinsVersion = snap.JenkinsVersion
 		}
-		cr.JenkinsHealth = snap.JenkinsHealth
+		if snap.JenkinsHealth != "" {
+			cr.JenkinsHealth = snap.JenkinsHealth
+		}
 	}
 }
 
@@ -1007,7 +1052,7 @@ func (s *Server) mergeMiteTelemetry(name, namespace string, cr *controllerDetail
 	}
 	cr.MiteConnected = true
 	cr.MiteVersion = miteVersion
-	cr.LastSeen = lastHeartbeat.Format("2006-01-02T15:04:05Z")
+	cr.LastSeen = lastHeartbeat.UTC().Format("2006-01-02T15:04:05Z")
 	cr.CertExpiry = certExpiry.Format("2006-01-02")
 
 	if snap := s.deps.MiteRegistry.Snapshot(namespace, name); snap != nil {
@@ -1015,7 +1060,9 @@ func (s *Server) mergeMiteTelemetry(name, namespace string, cr *controllerDetail
 		if snap.JenkinsVersion != "" && snap.JenkinsVersion != "NORMAL" {
 			cr.JenkinsVersion = snap.JenkinsVersion
 		}
-		cr.JenkinsHealth = snap.JenkinsHealth
+		if snap.JenkinsHealth != "" {
+			cr.JenkinsHealth = snap.JenkinsHealth
+		}
 	}
 }
 

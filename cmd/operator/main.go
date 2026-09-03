@@ -23,6 +23,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -129,17 +130,6 @@ func main() {
 		}
 	}
 
-	// Resolve bus credentials.
-	busPassword := os.Getenv("BUS_PASSWORD")
-	if *busPassFile != "" {
-		passBytes, err := os.ReadFile(*busPassFile)
-		if err != nil {
-			logger.Error("failed to read bus password file", "path", *busPassFile, "error", err)
-			os.Exit(1)
-		}
-		busPassword = strings.TrimSpace(string(passBytes))
-	}
-
 	operatorNamespace := controller.ResolveOperatorNamespace(logger)
 	gatewayEndpoint := os.Getenv("VARROA_OPERATOR_ENDPOINT")
 	if gatewayEndpoint == "" {
@@ -226,18 +216,29 @@ func main() {
 	}
 
 	// --- NATS bus ---
-	busConn, err := bus.Connect(*busURL, bus.Config{
+	// Bus credentials: the file path is the production form because it is
+	// re-read on every reconnect and so follows a rotated Secret; the env var
+	// is the fallback for local runs with no mounted file.
+	busCfg := bus.Config{
 		Username:    *busUser,
-		Password:    busPassword,
 		CAFile:      *busCAFile,
 		InboxPrefix: "_INBOX_operator",
-	})
+		Logger:      logger,
+	}
+	if *busPassFile != "" {
+		busCfg.PasswordFile = *busPassFile
+	} else {
+		busCfg.Password = os.Getenv("BUS_PASSWORD")
+	}
+	busConn, err := bus.Connect(*busURL, busCfg)
 	if err != nil {
 		logger.Error("failed to connect to bus", "url", *busURL, "error", err)
 		os.Exit(1)
 	}
 	defer busConn.Close()
-	busConn.Logger = logger
+	if err := busConn.RegisterMetrics(otel.Meter("varroa-operator"), "operator"); err != nil {
+		logger.Warn("failed to register bus connected gauge", "error", err)
+	}
 	// JetStream replica count for streams and KV buckets (from the NATS
 	// cluster size, clamped 1..3 by the chart). Streams/KV created below and by
 	// downstream consumers replicate to this count so they survive a single
@@ -711,7 +712,15 @@ func main() {
 		logger.Error("failed to add healthz check", "error", err)
 		os.Exit(1)
 	}
-	if err := mgr.AddReadyzCheck("readyz", func(_ *http.Request) error { return nil }); err != nil {
+	// Readiness follows the bus: an operator that cannot publish desired state
+	// must not look healthy. Liveness stays unconditional so a bus outage does
+	// not turn into a restart loop.
+	if err := mgr.AddReadyzCheck("readyz", func(_ *http.Request) error {
+		if !busConn.Connected() {
+			return errors.New("bus disconnected")
+		}
+		return nil
+	}); err != nil {
 		logger.Error("failed to add readyz check", "error", err)
 		os.Exit(1)
 	}

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import Dashboard from "./Dashboard";
 import { renderWithProviders } from "../test/render-utils";
+import { createControllerListItem } from "../test/factories";
 
 const mockUseControllers = vi.fn();
 vi.mock("../hooks/useControllers", () => ({
@@ -188,6 +189,47 @@ describe("Dashboard", () => {
       expect(link).toHaveAttribute("href", "/controllers/core/default/ctrl-a");
     });
 
+    it("renders real controller state instead of a synthetic history strip", () => {
+      mockUseControllers.mockReturnValue({
+        data: [
+          createControllerListItem({
+            name: "alpha",
+            phase: "Connected",
+            miteConnected: true,
+            jenkinsHealth: "healthy",
+            jenkinsVersion: "2.492.3",
+            lastSeen: new Date(Date.now() - 30_000).toISOString(),
+          }),
+          createControllerListItem({
+            name: "beta",
+            phase: "Provisioning",
+            miteConnected: false,
+            attention: { kind: "bootFailed", message: "exit 5" },
+          }),
+        ],
+        isLoading: false,
+        error: null,
+      });
+      renderWithProviders(<Dashboard />);
+
+      expect(screen.queryByText(/last 24h/)).toBeNull();
+      expect(screen.getByText("2 controllers")).toBeInTheDocument();
+
+      const alpha = screen.getByText("alpha").closest<HTMLElement>("[data-testid='health-row']")!;
+      // age() renders "just now" under a minute and "Nm ago"/"Nh ago" beyond.
+      expect(within(alpha).getByText(/^seen (just now|.* ago)$/)).toBeInTheDocument();
+      expect(within(alpha).getByText("healthy")).toBeInTheDocument();
+      expect(within(alpha).getByText("Jenkins 2.492.3")).toBeInTheDocument();
+
+      const beta = screen.getByText("beta").closest<HTMLElement>("[data-testid='health-row']")!;
+      expect(within(beta).getByText("Boot failed")).toBeInTheDocument();
+      expect(within(beta).getByText(/never seen/)).toBeInTheDocument();
+
+      // No synthetic strip: Pulse contributes one <i>; the 48-bar strip is gone.
+      expect(alpha.querySelector("[class*='healthStrip']")).toBeNull();
+      expect(alpha.querySelectorAll("i").length).toBeLessThanOrEqual(1);
+    });
+
     it("renders the 'New controller' link", () => {
       mockUseControllers.mockReturnValue({
         data: [],
@@ -298,5 +340,37 @@ describe("Dashboard", () => {
       // No dashboard-wide error banner should appear from the UC fetch failure
       expect(screen.queryByText(/Failed to load brood data/)).not.toBeInTheDocument();
     });
+  });
+});
+
+describe("Dashboard needs-attention metric", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const ctrl = (name: string) => ({
+    name,
+    namespace: "default",
+    cluster: "core",
+    phase: "Connected",
+    endpoint: `https://${name}.example.com`,
+    miteConnected: false,
+  });
+
+  it("counts every controller carrying attention, not only Failed phase", () => {
+    mockUseControllers.mockReturnValue({
+      data: [
+        { ...ctrl("a"), phase: "Provisioning", attention: { kind: "reconcileBlocked", message: "plugin kubernetes requested at A conflicts with profile lock B" } },
+        { ...ctrl("b"), phase: "Provisioning", attention: { kind: "bootFailed", message: "exit 5" } },
+        { ...ctrl("c"), phase: "Failed", attention: { kind: "failed" } },
+        { ...ctrl("d"), phase: "Connected", miteConnected: true },
+      ],
+      isLoading: false,
+      error: null,
+    });
+    renderWithProviders(<Dashboard />);
+    const card = screen.getByText("Needs attention").closest("div")!.parentElement!;
+    expect(within(card).getByText("3")).toBeInTheDocument();
+    expect(within(card).getByText("1 blocked \u00b7 1 boot failed \u00b7 1 failed")).toBeInTheDocument();
   });
 });
