@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterEach, afterAll } from "vitest";
-import { screen, fireEvent, waitFor } from "@testing-library/react";
+import { screen, fireEvent, waitFor, within } from "@testing-library/react";
 import FleetPlugins from "../pages/FleetPlugins";
 import { renderWithProviders } from "../test/render-utils";
 import { createHandlers, incompleteFleetPluginsRollup, rollupWithMissingControllers, rollupWithDetailStale, rollupWithUnknownClass, drilldownWithUnknownClass, drilldownWithBootstrapApproximate } from "../test/handlers";
@@ -87,6 +87,22 @@ describe("FleetPlugins", () => {
     await waitFor(() => {
       expect(screen.getByText("git-client")).toBeInTheDocument();
     });
+  });
+
+  it("keeps version and class breakdowns in their own table cells", async () => {
+    server.use(
+      http.get(`${BASE}/fleet/plugins`, () =>
+        HttpResponse.json(rollupWithDetailStale()),
+      ),
+    );
+    renderWithProviders(<FleetPlugins />);
+    const row = (await screen.findByText("git-client")).closest("tr")!;
+    const cells = within(row).getAllByRole("cell");
+    expect(cells).toHaveLength(4);
+    expect(within(cells[2]).getByText("4.0.0", { exact: false })).toBeInTheDocument();
+    expect(within(cells[3]).getByText("declared", { exact: false })).toBeInTheDocument();
+    expect(cells[2].className).not.toMatch(/breakdownCell/);
+    expect(cells[2].firstElementChild?.className).toMatch(/breakdownCell/);
   });
 
   it("renders rollup classes breakdown", async () => {

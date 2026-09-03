@@ -304,6 +304,24 @@ describe("ControllerDetail — header phase pill (8.2)", () => {
     renderWithProviders(<ControllerDetail />);
     expect(screen.getByText("Apply failed")).toBeInTheDocument();
   });
+
+  it("shows Boot failed on the phase pill and a banner while Provisioning", () => {
+    setCtrl({
+      phase: "Provisioning",
+      attention: {
+        kind: "bootFailed",
+        reason: "JenkinsBootFailed",
+        message: "jenkins container exited with code 5 (283 restarts): Error",
+        since: "2026-09-01T10:00:00Z",
+      },
+    });
+    renderWithProviders(<ControllerDetail />);
+    // "Boot failed" appears twice: on the phase pill and as the banner title.
+    // This describe block runs on fake timers, so queries must be synchronous.
+    expect(screen.getAllByText("Boot failed")).toHaveLength(2);
+    expect(screen.getByText(/exited with code 5 \(283 restarts\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Jenkins container logs/)).toBeInTheDocument();
+  });
 });
 
 describe("ControllerDetail — quiet hibernation (8.2)", () => {

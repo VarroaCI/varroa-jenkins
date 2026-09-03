@@ -24,11 +24,10 @@ import (
 
 const (
 	// updateCenterSourceName is the reserved CatalogSource name meaning "backed
-	// by the update-center plugin store". It is the only CatalogSource that
-	// carries neither repoURL nor ociRef, and it is valid only in the operator
+	// by the update-center plugin store". It is valid only in the operator
 	// namespace — CEL at the root schema cannot read metadata.namespace, so
 	// that half is enforced here.
-	updateCenterSourceName = "varroa-update-center"
+	updateCenterSourceName = v1alpha1.UpdateCenterCatalogSourceName
 
 	// managedByLabel marks objects whose lifecycle the operator owns.
 	managedByLabel = "varroa.dev/managed-by"

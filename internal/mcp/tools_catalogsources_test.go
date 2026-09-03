@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -118,6 +120,27 @@ func TestMCPUpdateCatalogSource_ScopedDeveloper(t *testing.T) {
 		},
 	}, mcpScopedDevClaims)
 	requireAccessDenied(t, parseToolResult(t, otherNs.Result))
+}
+
+func TestMCPUpdateCatalogSource_FractionalSyncIntervalIsRejected(t *testing.T) {
+	deps := scopedDeveloperDeps()
+	handler := NewHandler(deps)
+
+	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+		"name": "update_catalog_source",
+		"arguments": map[string]interface{}{
+			"namespace":           "team-a",
+			"name":                "src",
+			"syncIntervalSeconds": 60.5,
+		},
+	}, mcpScopedDevClaims)
+	tr := parseToolResult(t, resp.Result)
+	if !tr.IsError {
+		t.Fatalf("fractional syncIntervalSeconds must be rejected, got success: %v", tr.Content)
+	}
+	if !strings.Contains(fmt.Sprint(tr.Content), "whole number") {
+		t.Errorf("error should name the fractional value problem, got: %v", tr.Content)
+	}
 }
 
 func TestMCPDeleteCatalogSource_ScopedDeveloper(t *testing.T) {
@@ -475,5 +498,352 @@ func TestCatalogSourceListSchema_UsesAnyOfNotOneOf(t *testing.T) {
 	}
 	if !strings.Contains(string(catalogSourceListOutputSchema), `"anyOf"`) {
 		t.Error("item schema must declare anyOf over the summary and full-CR shapes")
+	}
+}
+
+// An OCI-backed source must be reachable from MCP: ociRef, trusted and
+// syncIntervalSeconds are all spec fields REST accepts, and a tool that cannot
+// name them leaves an agent unable to create anything but a plain git source.
+func TestCreateCatalogSource_OCI(t *testing.T) {
+	deps := scopedDeveloperDeps()
+	handler := NewHandler(deps)
+	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+		"name": "create_catalog_source",
+		"arguments": map[string]interface{}{
+			"namespace":           "team-a",
+			"name":                "team-catalog",
+			"ociRef":              "ghcr.io/example/team-catalog:v1",
+			"trusted":             true,
+			"syncIntervalSeconds": float64(120),
+			"secretRef":           "ghcr-pull",
+		},
+	}, mcpScopedDevClaims)
+
+	tr := parseToolResult(t, resp.Result)
+	if tr.IsError {
+		t.Fatalf("create returned error: %v", tr.Content)
+	}
+	got, err := crdstore.Get[v1alpha1.CatalogSource](context.Background(), deps.Store, "team-catalog", "team-a")
+	if err != nil {
+		t.Fatalf("get created source: %v", err)
+	}
+	want := v1alpha1.CatalogSourceSpec{
+		OCIRef:              "ghcr.io/example/team-catalog:v1",
+		Trusted:             true,
+		SyncIntervalSeconds: 120,
+		SecretRef:           "ghcr-pull",
+	}
+	if !reflect.DeepEqual(got.Spec, want) {
+		t.Fatalf("spec = %+v, want %+v", got.Spec, want)
+	}
+}
+
+// The CRD's CEL rule rejects both shapes, but an apply rejection reaches an
+// agent as an opaque admission error. Catch it in the tool and write nothing.
+func TestCreateCatalogSource_RequiresExactlyOneSource(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args    map[string]interface{}
+		wantMsg string
+	}{
+		"neither source": {
+			args:    map[string]interface{}{"namespace": "team-a", "name": "no-source"},
+			wantMsg: "exactly one of repoURL or ociRef",
+		},
+		"both sources": {
+			args: map[string]interface{}{
+				"namespace": "team-a", "name": "no-source",
+				"repoURL": "https://example.com/repo.git",
+				"ociRef":  "ghcr.io/example/team-catalog:v1",
+			},
+			wantMsg: "only one of repoURL or ociRef",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			deps := scopedDeveloperDeps()
+			handler := NewHandler(deps)
+			resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+				"name":      "create_catalog_source",
+				"arguments": tc.args,
+			}, mcpScopedDevClaims)
+
+			tr := parseToolResult(t, resp.Result)
+			if !tr.IsError {
+				t.Fatal("expected a validation error")
+			}
+			if len(tr.Content) == 0 || !strings.Contains(tr.Content[0].Text, tc.wantMsg) {
+				t.Errorf("error = %v, want it to contain %q", tr.Content, tc.wantMsg)
+			}
+			if _, err := crdstore.Get[v1alpha1.CatalogSource](context.Background(), deps.Store, "no-source", "team-a"); err == nil {
+				t.Error("a rejected create must write nothing")
+			}
+		})
+	}
+}
+
+// With WithInputSchemaValidation an undeclared argument never reaches the
+// handler, so a field the handler applies but the schema omits is unreachable.
+// repoURL must also stop being required, or an OCI-only create cannot be made.
+func TestCatalogSourceTools_DeclareOCIArgs(t *testing.T) {
+	wantTypes := map[string]string{
+		"ociRef":              "string",
+		"trusted":             "boolean",
+		"syncIntervalSeconds": "number",
+	}
+	seen := 0
+	for _, tool := range liveTools(t) {
+		if tool.Name != "create_catalog_source" && tool.Name != "update_catalog_source" {
+			continue
+		}
+		seen++
+		var schema struct {
+			Properties map[string]any `json:"properties"`
+			Required   []string       `json:"required"`
+		}
+		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
+			t.Fatalf("unmarshal inputSchema for %s: %v", tool.Name, err)
+		}
+		for arg, wantType := range wantTypes {
+			prop, ok := schema.Properties[arg].(map[string]any)
+			if !ok {
+				t.Errorf("%s does not declare %s", tool.Name, arg)
+				continue
+			}
+			if prop["type"] != wantType {
+				t.Errorf("%s.%s type = %v, want %s", tool.Name, arg, prop["type"], wantType)
+			}
+		}
+		if tool.Name == "create_catalog_source" {
+			for _, r := range schema.Required {
+				if r == "repoURL" {
+					t.Error("create_catalog_source must not require repoURL: an OCI source has none")
+				}
+			}
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("found %d catalog source write tools, want 2", seen)
+	}
+}
+
+// Switching kinds must clear the abandoned kind's fields, or the stored spec
+// violates the CRD's at-most-one rule and the next apply is rejected.
+func TestUpdateCatalogSource_SwitchesGitToOCI(t *testing.T) {
+	deps := scopedDeveloperDeps()
+	crdstore.MustSeed(deps.Store.(*crdstore.Fake), &v1alpha1.CatalogSource{
+		ObjectMeta: metav1.ObjectMeta{Name: "src", Namespace: "team-a"},
+		Spec: v1alpha1.CatalogSourceSpec{
+			RepoURL:   "https://example.com/repo.git",
+			Revision:  "main",
+			Path:      "catalog",
+			SecretRef: "git-creds",
+			Trusted:   true,
+		},
+	})
+	handler := NewHandler(deps)
+	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+		"name": "update_catalog_source",
+		"arguments": map[string]interface{}{
+			"namespace": "team-a",
+			"name":      "src",
+			"ociRef":    "ghcr.io/example/team-catalog:v1",
+		},
+	}, mcpScopedDevClaims)
+
+	tr := parseToolResult(t, resp.Result)
+	if tr.IsError {
+		t.Fatalf("update returned error: %v", tr.Content)
+	}
+	got, err := crdstore.Get[v1alpha1.CatalogSource](context.Background(), deps.Store, "src", "team-a")
+	if err != nil {
+		t.Fatalf("get updated source: %v", err)
+	}
+	want := v1alpha1.CatalogSourceSpec{
+		OCIRef:    "ghcr.io/example/team-catalog:v1",
+		Path:      "catalog",
+		SecretRef: "git-creds",
+		Trusted:   true,
+	}
+	if !reflect.DeepEqual(got.Spec, want) {
+		t.Fatalf("spec = %+v, want %+v", got.Spec, want)
+	}
+}
+
+func TestUpdateCatalogSource_RejectsBothSources(t *testing.T) {
+	deps := scopedDeveloperDeps()
+	handler := NewHandler(deps)
+	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+		"name": "update_catalog_source",
+		"arguments": map[string]interface{}{
+			"namespace": "team-a",
+			"name":      "src",
+			"repoURL":   "https://example.com/other.git",
+			"ociRef":    "ghcr.io/example/team-catalog:v1",
+		},
+	}, mcpScopedDevClaims)
+
+	tr := parseToolResult(t, resp.Result)
+	if !tr.IsError {
+		t.Fatal("expected a validation error")
+	}
+	if len(tr.Content) == 0 || !strings.Contains(tr.Content[0].Text, "only one of repoURL or ociRef") {
+		t.Errorf("error = %v, want it to name the one-source rule", tr.Content)
+	}
+	got, err := crdstore.Get[v1alpha1.CatalogSource](context.Background(), deps.Store, "src", "team-a")
+	if err != nil {
+		t.Fatalf("get source: %v", err)
+	}
+	if got.Spec.RepoURL != "https://example.com/repo.git" || got.Spec.OCIRef != "" {
+		t.Errorf("spec = %+v, want the seeded git source untouched", got.Spec)
+	}
+}
+
+// trusted and syncIntervalSeconds follow key presence, not truthiness: an
+// omitted flag preserves the stored value and an explicit false clears it.
+// Reading the value alone would make trusted a one-way door.
+func TestUpdateCatalogSource_TrustedAndIntervalByPresence(t *testing.T) {
+	newDeps := func(t *testing.T) *api.Dependencies {
+		t.Helper()
+		deps := scopedDeveloperDeps()
+		crdstore.MustSeed(deps.Store.(*crdstore.Fake), &v1alpha1.CatalogSource{
+			ObjectMeta: metav1.ObjectMeta{Name: "src", Namespace: "team-a"},
+			Spec: v1alpha1.CatalogSourceSpec{
+				RepoURL:             "https://example.com/repo.git",
+				Trusted:             true,
+				SyncIntervalSeconds: 600,
+			},
+		})
+		return deps
+	}
+
+	t.Run("omitted preserves both", func(t *testing.T) {
+		deps := newDeps(t)
+		resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
+			"name": "update_catalog_source",
+			"arguments": map[string]interface{}{
+				"namespace": "team-a", "name": "src", "path": "catalog",
+			},
+		}, mcpScopedDevClaims)
+		if tr := parseToolResult(t, resp.Result); tr.IsError {
+			t.Fatalf("update returned error: %v", tr.Content)
+		}
+		got, err := crdstore.Get[v1alpha1.CatalogSource](context.Background(), deps.Store, "src", "team-a")
+		if err != nil {
+			t.Fatalf("get source: %v", err)
+		}
+		if !got.Spec.Trusted || got.Spec.SyncIntervalSeconds != 600 {
+			t.Errorf("spec = %+v, want trusted and interval preserved", got.Spec)
+		}
+		if got.Spec.Path != "catalog" {
+			t.Errorf("path = %q, want catalog", got.Spec.Path)
+		}
+	})
+
+	t.Run("explicit false clears trusted", func(t *testing.T) {
+		deps := newDeps(t)
+		resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
+			"name": "update_catalog_source",
+			"arguments": map[string]interface{}{
+				"namespace": "team-a", "name": "src", "trusted": false,
+			},
+		}, mcpScopedDevClaims)
+		if tr := parseToolResult(t, resp.Result); tr.IsError {
+			t.Fatalf("update returned error: %v", tr.Content)
+		}
+		got, err := crdstore.Get[v1alpha1.CatalogSource](context.Background(), deps.Store, "src", "team-a")
+		if err != nil {
+			t.Fatalf("get source: %v", err)
+		}
+		if got.Spec.Trusted {
+			t.Error("trusted: false must clear the stored flag")
+		}
+		if got.Spec.SyncIntervalSeconds != 600 {
+			t.Errorf("syncIntervalSeconds = %d, want 600 preserved", got.Spec.SyncIntervalSeconds)
+		}
+	})
+}
+
+func TestMCPCreateCatalogSource_ReservedNameRejected(t *testing.T) {
+	deps := scopedDeveloperDeps()
+	handler := NewHandler(deps)
+	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+		"name": "create_catalog_source",
+		"arguments": map[string]interface{}{
+			"namespace": "team-a",
+			"name":      v1alpha1.UpdateCenterCatalogSourceName,
+		},
+	}, mcpScopedDevClaims)
+	tr := parseToolResult(t, resp.Result)
+	if !tr.IsError {
+		t.Fatalf("creating the reserved source must be rejected, got success: %v", tr.Content)
+	}
+	if !strings.Contains(fmt.Sprint(tr.Content), "reconciled by the operator") {
+		t.Errorf("error should say the operator owns the reserved source, got: %v", tr.Content)
+	}
+}
+
+func TestMCPUpdateCatalogSource_OCIRefClearsRevisionPassedAlongside(t *testing.T) {
+	deps := scopedDeveloperDeps()
+	handler := NewHandler(deps)
+	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+		"name": "update_catalog_source",
+		"arguments": map[string]interface{}{
+			"namespace": "team-a",
+			"name":      "src",
+			"ociRef":    "ghcr.io/acme/catalog:1.0.0",
+			"revision":  "main",
+		},
+	}, mcpScopedDevClaims)
+	tr := parseToolResult(t, resp.Result)
+	if tr.IsError {
+		t.Fatalf("update failed: %v", tr.Content)
+	}
+	got, err := crdstore.Get[v1alpha1.CatalogSource](context.Background(), deps.Store, "src", "team-a")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Spec.OCIRef != "ghcr.io/acme/catalog:1.0.0" || got.Spec.RepoURL != "" || got.Spec.Revision != "" {
+		t.Errorf("switching to ociRef must clear git fields even when revision rides along: %+v", got.Spec)
+	}
+}
+
+func TestMCPUpdateCatalogSource_ReservedNameRejected(t *testing.T) {
+	deps := scopedDeveloperDeps()
+	handler := NewHandler(deps)
+	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+		"name": "update_catalog_source",
+		"arguments": map[string]interface{}{
+			"namespace": "team-a",
+			"name":      v1alpha1.UpdateCenterCatalogSourceName,
+			"trusted":   true,
+		},
+	}, mcpScopedDevClaims)
+	tr := parseToolResult(t, resp.Result)
+	if !tr.IsError || !strings.Contains(fmt.Sprint(tr.Content), "cannot be edited") {
+		t.Fatalf("editing the reserved source must be rejected, got: %v", tr.Content)
+	}
+}
+
+func TestMCPCreateCatalogSource_OCIRefDropsRevision(t *testing.T) {
+	deps := scopedDeveloperDeps()
+	handler := NewHandler(deps)
+	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+		"name": "create_catalog_source",
+		"arguments": map[string]interface{}{
+			"namespace": "team-a",
+			"name":      "oci-src",
+			"ociRef":    "ghcr.io/acme/catalog:1.0.0",
+			"revision":  "main",
+		},
+	}, mcpScopedDevClaims)
+	tr := parseToolResult(t, resp.Result)
+	if tr.IsError {
+		t.Fatalf("create failed: %v", tr.Content)
+	}
+	got, err := crdstore.Get[v1alpha1.CatalogSource](context.Background(), deps.Store, "oci-src", "team-a")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Spec.Revision != "" {
+		t.Errorf("revision must not ride along with an OCI source on create: %+v", got.Spec)
 	}
 }

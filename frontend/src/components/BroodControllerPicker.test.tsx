@@ -706,5 +706,24 @@ describe("BroodControllerPicker", () => {
       expect(screen.getByText("ctrl-b")).toBeInTheDocument();
       expect(screen.queryByText("ctrl-a")).not.toBeInTheDocument();
     });
+
+    it("offers a Needs attention chip that filters to controllers with attention", async () => {
+      const user = userEvent.setup();
+      mockUseControllers.mockReturnValue({
+        data: [
+          ctrlFixture("ctrl-a", { phase: "Provisioning", attention: { kind: "reconcileBlocked", message: "m" } }),
+          ctrlFixture("ctrl-b", { phase: "Provisioning" }),
+        ],
+        isLoading: false,
+        error: null,
+      });
+      renderPicker();
+
+      await user.click(screen.getByRole("button", { name: /Needs attention/ }));
+
+      expect(screen.getByText("ctrl-a")).toBeInTheDocument();
+      expect(screen.queryByText("ctrl-b")).not.toBeInTheDocument();
+      expect(screen.getByText("Blocked")).toBeInTheDocument();
+    });
   });
 });

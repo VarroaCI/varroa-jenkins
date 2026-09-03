@@ -12,7 +12,7 @@ import (
 
 // updateCenterSourceRef is the reserved CatalogSource name. Only items derived
 // from it carry a closure worth joining lock pins against.
-const updateCenterSourceRef = "varroa-update-center"
+const updateCenterSourceRef = v1alpha1.UpdateCenterCatalogSourceName
 
 // CatalogItemDetailResponse is what the catalog-item get route returns.
 //

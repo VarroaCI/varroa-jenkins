@@ -45,7 +45,10 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   spec" instead of the intended message. CEL at the root schema can read
   `metadata.name`/`metadata.generateName` but **never** `metadata.namespace`,
   so "reserved name only in the operator namespace" is a runtime guard in
-  `CatalogReconciler`, not a validation guard.
+  `CatalogReconciler`, not a validation guard. The reserved name itself is
+  `UpdateCenterCatalogSourceName`; every Go site aliases that constant, but
+  the CEL rule spells the literal out because a rule cannot reference a Go
+  constant, so the two must be changed together.
   `CatalogItemStatus` carries three `omitempty` list fields — `closure`,
   `compat`, `conditions` — which means `internal/crdstore/registry.go` must
   clear each explicitly (`nil`, not `""`) or a merge patch leaves stale entries

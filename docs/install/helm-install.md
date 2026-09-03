@@ -102,6 +102,26 @@ helm upgrade varroa oci://ghcr.io/varroaci/charts/varroa \
 
 Verify the Helm revision, control-plane pods, and existing controllers. Upgrading the control plane does not change `Controller.spec.version`.
 
+### Bus credentials and GitOps renders
+
+The chart mints the NATS passwords and TLS material once. On `helm upgrade` it
+re-reads them from the existing `<release>-nats-creds` Secret. Renderers that
+cannot read the cluster mint fresh values on every render. This applies to
+`helm template`, ArgoCD, and Flux.
+
+Fresh values are safe. The control-plane components read their password from the
+mounted Secret on every reconnect. After a rotation they reconnect with no
+restart, once kubelet has synced the new Secret onto the pod. That sync takes
+about a minute.
+
+During that window the operator reports NotReady, because `/readyz` fails while
+the bus is down, and the `varroa.bus.connected` gauge drops to 0. Both recover on
+their own.
+
+Restarting a pod during that window is also safe. A component that starts before
+its Secret has synced waits for the credential rather than exiting, so it sits
+NotReady until the bus accepts it.
+
 ## Uninstall
 
 Delete controllers before removing the operator so finalizers can clean up managed resources:

@@ -46,6 +46,23 @@ the packaged CRDs. Does not own the Go source it packages
   (NATS TLS + per-service ACL creds); `examples-item-rbac.yaml` (off by default,
   `examples.itemRbac.enabled`).
 - KV watchers require `$JS.FC.KV_<bucket>.>` publish grants.
+- **Startup probes on operator/gateway/bff are load-bearing, not boilerplate.**
+  `bus.Connect` blocks for up to `bus.DefaultStartupTimeout` (3 minutes) waiting
+  out a bus outage or a rotated Secret that has not synced, and no probe port
+  listens until it returns. Each container therefore carries a `startupProbe` on
+  its own liveness target with a 240s window (`periodSeconds: 10` ×
+  `failureThreshold: 24`), which holds liveness and readiness off until it
+  passes. **That window and `DefaultStartupTimeout` move together** — raising the
+  Go budget without raising the probe window puts back the crash loop the retry
+  exists to prevent. Asserted by `tests/test-nats-bus-security.sh`.
+- **`varroa-nats-creds` is mounted whole-volume at `/etc/nats-creds`** on
+  operator/gateway/bff, and the bus password reaches each of them as
+  `-bus-pass-file=/etc/nats-creds/<component>-password`. Never a `subPath`
+  mount, never an env var: kubelet refreshes only whole-volume Secret mounts, so
+  either alternative freezes the credential at pod start and a rotation
+  disconnects the component until someone restarts it. The operator's readiness
+  probe hits `/readyz` (bus-aware) while liveness stays on `/healthz`. Asserted
+  by `tests/test-nats-bus-security.sh`.
 - **`nats.config.cluster.enabled`/`nats.config.cluster.replicas` are the ONLY real
   clustering knobs** for the vendored nats-1.2.0 subchart (its `stateful-set.yaml`
   hardcodes `replicas: 1` whenever `cluster.enabled` is false, ignoring `replicas`

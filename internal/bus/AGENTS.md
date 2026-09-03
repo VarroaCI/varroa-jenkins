@@ -69,6 +69,44 @@ control plane's async transport — no other package talks to NATS directly.
 - **Replicas** — `Conn.Replicas()` derives JetStream replica count from
   `VARROA_JETSTREAM_REPLICAS`, clamped via `clampReplicas`; used by every
   `EnsureStream`/KV bucket config so R1→R3 topology changes are a single knob.
+- **Credentials** — `Config.PasswordFile` is the production credential path:
+  it is re-read on every connect attempt through `nats.UserInfoHandler`, and
+  `Connect` always sets `nats.IgnoreAuthErrorAbort()`, so a client survives a
+  server-side password rotation until its mounted Secret catches up. `Password`
+  is the static fallback for tests and local runs only; the two are mutually
+  exclusive (nats.go rejects a static user/password alongside a handler).
+  `Connect` fails fast when `PasswordFile` is unreadable at startup; a read
+  failure during a later reconnect only logs.
+- **Logging** — a `Conn`'s logger is supplied only through `Config.Logger` and
+  is installed by `Connect` before any handler closure exists. There is no
+  exported logger field: the NATS callbacks read it from library goroutines and
+  the credential handler fires inside `nats.Connect`, so assigning one after
+  `Connect` returns was an unsynchronized write to a field already being read.
+  Nothing outside this package writes it. `Connect` sets
+  `nats.NoCallbacksAfterClientClose()`, so a graceful `Conn.Close()` logs only
+  its own line: the `nats connection closed permanently` error stays reserved
+  for a connection nats.go gave up on. With `IgnoreAuthErrorAbort` and
+  `MaxReconnects(-1)` that is rare by design, so it is a genuine alarm and never
+  a routine-shutdown or stale-credential artifact. A component holding a stale
+  password retries forever instead, which is why the runbook keys on the
+  recovery window rather than on any single log line.
+- **Startup** — `Connect` sets `nats.RetryOnFailedConnect(true)` and then blocks
+  until the connection is actually CONNECTED, bounded by
+  `Config.StartupTimeout` (`DefaultStartupTimeout`, 3 minutes). A process that
+  starts while the bus is down, or before a rotated password reaches its mounted
+  Secret, therefore waits instead of exiting into a crash loop, and callers never
+  receive a `Conn` whose JetStream/KV calls would fail. Config errors stay
+  fail-fast and are checked before any dial: an unreadable `PasswordFile`, and a
+  `PasswordFile` with no `Username`. No probe port listens while `Connect`
+  blocks, so `DefaultStartupTimeout` is paired with the 240s `startupProbe`
+  window on the operator/gateway/bff Deployments
+  (`charts/varroa/templates/*/deployment.yaml`). **Changing this constant means
+  changing that probe window in the same commit**, or kubelet kills the
+  container mid-wait.
+- **Bus state** — `Conn.Connected()` and `Conn.RegisterMetrics(meter, component)`
+  (the `varroa.bus.connected` gauge, 1/0, attribute `component`) are the only
+  bus-state surfaces. Readiness checks and gauges go through them; nothing
+  outside this package reaches into `nc` to ask whether the bus is up.
 - **ACLs** — gateway needs `$JS.ACK.varroa.>` publish permission to ack on
   the legacy `varroa` stream; BFF owns create/update/consumer/ack on
   `varroa_activity` and `varroa_webhooks`. Cross-check

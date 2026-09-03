@@ -126,6 +126,7 @@ func (s *Server) controllerDetail(cr *v1alpha1.Controller, cluster string) contr
 		Probes:            cr.Spec.Probes,
 		MiteImageStatus:   buildMiteImageStatus(cr.Status.MiteStatus, cr.Status.Conditions),
 		ReconcileBlocked:  buildReconcileBlockedJSON(cr),
+		Attention:         buildAttentionJSON(cr),
 		PluginConflict:    buildPluginConflict(cr.Status.Conditions),
 		PluginInventory:   buildPluginInventorySummary(cr.Status.PluginInventory),
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -145,6 +146,38 @@ func namespaceOrDefault(args map[string]any) string {
 func strArg(args map[string]any, key string) string {
 	v, _ := args[key].(string)
 	return v
+}
+
+// boolArg reports a boolean argument and whether the key was present as a
+// bool. Presence matters for write tools: an omitted flag preserves the
+// stored value, a present false clears it.
+func boolArg(args map[string]any, key string) (bool, bool) {
+	v, ok := args[key].(bool)
+	return v, ok
+}
+
+// intArg reads an integer argument. JSON numbers arrive as float64; a
+// fractional or non-numeric value is a caller error, returned so the tool can
+// reject it, never treated as absent (which would silently keep the old
+// value on an update).
+func intArg(args map[string]any, key string) (int, bool, error) {
+	raw, present := args[key]
+	if !present {
+		return 0, false, nil
+	}
+	switch v := raw.(type) {
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) || v != math.Trunc(v) {
+			return 0, true, fmt.Errorf("%s must be a whole number, got %v", key, v)
+		}
+		if v < math.MinInt32 || v > math.MaxInt32 {
+			return 0, true, fmt.Errorf("%s is out of range, got %v", key, v)
+		}
+		return int(v), true, nil
+	case int:
+		return v, true, nil
+	}
+	return 0, true, fmt.Errorf("%s must be a number", key)
 }
 
 // mapArg reads an object-valued argument. The second return distinguishes

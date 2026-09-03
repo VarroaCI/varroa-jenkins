@@ -2098,7 +2098,7 @@ func managedPluginLines(cr *v1alpha1.Controller, resolved *bundle.MaterializedBu
 		}
 	}
 
-	nonCore := nonCorePluginEntries(cr, resolved)
+	nonCore, _ := nonCorePluginEntries(cr, resolved)
 
 	for _, e := range nonCore {
 		if e.ArtifactId == "" {
@@ -2118,17 +2118,21 @@ func managedPluginLines(cr *v1alpha1.Controller, resolved *bundle.MaterializedBu
 	return lines
 }
 
-func nonCorePluginEntries(cr *v1alpha1.Controller, resolved *bundle.MaterializedBundle) []v1alpha1.PluginEntry {
+// nonCorePluginEntries returns the effective non-core plugin pins and the name
+// of the surface they came from. The source is part of the return value rather
+// than re-derived by callers: a second copy of this precedence would eventually
+// disagree and send an operator to edit a file that holds no pin.
+func nonCorePluginEntries(cr *v1alpha1.Controller, resolved *bundle.MaterializedBundle) ([]v1alpha1.PluginEntry, string) {
 	if cr.Spec.PluginSpec != nil && len(cr.Spec.PluginSpec.Entries) > 0 {
-		return append([]v1alpha1.PluginEntry(nil), cr.Spec.PluginSpec.Entries...)
+		return append([]v1alpha1.PluginEntry(nil), cr.Spec.PluginSpec.Entries...), "spec.pluginSpec"
 	}
 	if resolved != nil && resolved.PluginsYAML != "" {
 		entries, err := parsePluginEntries(resolved.PluginsYAML)
 		if err == nil {
-			return entries
+			return entries, "the bundle"
 		}
 	}
-	return nil
+	return nil, "the bundle"
 }
 
 func pluginVersionConflict(cr *v1alpha1.Controller, resolved *bundle.MaterializedBundle, coreSet []pluginlock.PluginEntry) string {
@@ -2138,12 +2142,13 @@ func pluginVersionConflict(cr *v1alpha1.Controller, resolved *bundle.Materialize
 			locked[e.ArtifactID] = e.Version
 		}
 	}
-	for _, e := range nonCorePluginEntries(cr, resolved) {
+	entries, pinSource := nonCorePluginEntries(cr, resolved)
+	for _, e := range entries {
 		if e.ArtifactId == "" || isUnpinnedPluginVersion(e.Version) {
 			continue
 		}
 		if lockedVersion, ok := locked[e.ArtifactId]; ok && lockedVersion != e.Version {
-			return fmt.Sprintf("plugin %s requested at %s conflicts with profile lock %s", e.ArtifactId, e.Version, lockedVersion)
+			return fmt.Sprintf("plugin %s requested at %s conflicts with profile lock %s; pin %s to %s (the JenkinsVersionProfile lock for this Jenkins version) or drop the pin to defer to the lock", e.ArtifactId, e.Version, lockedVersion, pinSource, lockedVersion)
 		}
 	}
 	return ""
@@ -2655,6 +2660,7 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 	// Surface plugins-init failures during initial provisioning. Without this, a
 	// bad plugin pin leaves the controller in Provisioning with no visible cause.
 	r.reconcileProvisioningPluginInitFailure(ctx, cr)
+	r.reconcileJenkinsBootFailure(ctx, cr)
 
 	// Only transition to Running when the StatefulSet is actually ready.
 	ready, err := r.client.IsStatefulSetReady(ctx, pre, cr.Namespace)
@@ -3123,12 +3129,12 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		cr.Status.AppliedBundleHash = targetBundleHash
 	}
 
-	// Set FirstConnectedAt on first handshake and LastReconciledAt on every tick.
+	// Set FirstConnectedAt on first handshake.
 	now := metav1Now()
 	if cr.Status.FirstConnectedAt == nil {
 		cr.Status.FirstConnectedAt = &now
 	}
-	cr.Status.LastReconciledAt = &now
+	r.reconcileConnectedJenkinsBoot(ctx, cr)
 
 	// Detect (re)connection via epoch change and force a push so the
 	// mite always gets a fresh token. Also clear the cached token so it
@@ -3526,6 +3532,127 @@ func pluginInitFailureMessage(pod *corev1.Pod) (string, bool) {
 	return "", false
 }
 
+// jenkinsBootFailureMessage reports whether the Jenkins main container is
+// failing to boot. Init-container failures are pluginInitFailureMessage's
+// domain; this looks only at the container Jenkins runs in.
+func jenkinsBootFailureMessage(pod *corev1.Pod) (string, bool) {
+	for _, s := range pod.Status.ContainerStatuses {
+		if s.Name != overlay.JenkinsContainerName {
+			continue
+		}
+		if w := s.State.Waiting; w != nil {
+			switch w.Reason {
+			case "ImagePullBackOff", "ErrImagePull":
+				if w.Message == "" {
+					return w.Reason, true
+				}
+				return w.Reason + ": " + w.Message, true
+			case "CrashLoopBackOff":
+				detail := w.Reason
+				if w.Message != "" {
+					detail += ": " + w.Message
+				}
+				if t := s.LastTerminationState.Terminated; t != nil {
+					return fmt.Sprintf("jenkins container exited with code %d (%d restarts): %s", t.ExitCode, s.RestartCount, detail), true
+				}
+				return detail, true
+			}
+		}
+		// LastTerminationState survives for the life of the pod, so it is
+		// history, not a verdict: ungated it would re-flag a container that
+		// crashed once and then stabilized, and no recovery could ever clear
+		// the condition. A Ready Jenkins is never a boot
+		// failure whatever its history; one that is restarting and not yet
+		// Ready still reports the exit that put it there.
+		if t := s.LastTerminationState.Terminated; t != nil && t.ExitCode != 0 && s.RestartCount > 0 && !s.Ready {
+			reason := t.Message
+			if reason == "" {
+				reason = t.Reason
+			}
+			return fmt.Sprintf("jenkins container exited with code %d (%d restarts): %s", t.ExitCode, s.RestartCount, reason), true
+		}
+		break
+	}
+	return "", false
+}
+
+// reconcileJenkinsBootFailure mirrors reconcileProvisioningPluginInitFailure
+// for the Jenkins container. It runs in Provisioning and Running so a
+// crash-loop after a plugin/CASC roll is surfaced the same way as at first boot.
+// miteJenkinsHealthy is the one MiteStatus.JenkinsHealth value that vouches for
+// the Jenkins process. Every other value ("unhealthy", "unreachable",
+// "unknown", "") withholds that verdict rather than contradicting it.
+const miteJenkinsHealthy = "healthy"
+
+// reconcileConnectedJenkinsBoot decides JenkinsBootFailed for a Connected
+// controller. A connected mite is NOT proof that Jenkins booted: the mite is a
+// sibling container, so it holds its stream while kubelet restarts only the
+// crash-looping Jenkins container next to it. The mite's own health verdict is
+// the proof, and it already rides the heartbeat, so the pod is fetched solely
+// when that verdict is missing or negative — a pod GET on every Connected tick
+// is the fleet-wide cost this gate exists to avoid.
+//
+// That verdict is a cache, not a live read: it is copied from the last snapshot
+// that carried one, so it lags the probe interval and survives untouched across
+// ticks where the mite reports no snapshot at all. Hence the asymmetry — a
+// cached "healthy" may KEEP the condition False, but it may never CLEAR a True.
+// Retiring a recorded boot failure costs one pod GET, on the few controllers
+// that carry one.
+func (r *Reconciler) reconcileConnectedJenkinsBoot(ctx context.Context, cr *v1alpha1.Controller) {
+	failed := findCondition(cr.Status.Conditions, v1alpha1.ConditionJenkinsBootFailed)
+	alreadyFailed := failed != nil && failed.Status == metav1.ConditionTrue
+	if !alreadyFailed && cr.Status.MiteStatus != nil && cr.Status.MiteStatus.JenkinsHealth == miteJenkinsHealthy {
+		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+			Type:   v1alpha1.ConditionJenkinsBootFailed,
+			Status: metav1.ConditionFalse,
+			Reason: "Booted",
+		})
+		return
+	}
+	r.reconcileJenkinsBootFailure(ctx, cr)
+}
+
+func (r *Reconciler) reconcileJenkinsBootFailure(ctx context.Context, cr *v1alpha1.Controller) {
+	pod, err := r.client.GetControllerPod(ctx, cr.Namespace, cr.Name)
+	if err != nil || pod == nil {
+		return
+	}
+	if msg, failed := jenkinsBootFailureMessage(pod); failed {
+		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+			Type:    v1alpha1.ConditionJenkinsBootFailed,
+			Status:  metav1.ConditionTrue,
+			Reason:  v1alpha1.ReasonJenkinsBootFailed,
+			Message: msg,
+		})
+		return
+	}
+	// Not failing is two different states, and the reason has to say which:
+	// a Ready container has booted, an unready one has not booted yet. Without
+	// the split a recovered controller reads "BootPending" until some later
+	// tick happens to take the mite-vouched path.
+	reason := "BootPending"
+	if jenkinsContainerReady(pod) {
+		reason = "Booted"
+	}
+	cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+		Type:   v1alpha1.ConditionJenkinsBootFailed,
+		Status: metav1.ConditionFalse,
+		Reason: reason,
+	})
+}
+
+// jenkinsContainerReady reports the Jenkins container's own readiness, which is
+// narrower than isPodReady: the pod's Ready condition also folds in the mite
+// sidecar, so it can be false while Jenkins itself is serving.
+func jenkinsContainerReady(pod *corev1.Pod) bool {
+	for _, s := range pod.Status.ContainerStatuses {
+		if s.Name == overlay.JenkinsContainerName {
+			return s.Ready
+		}
+	}
+	return false
+}
+
 func isPodReady(pod *corev1.Pod) bool {
 	for _, c := range pod.Status.Conditions {
 		if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue {
@@ -3553,6 +3680,10 @@ func (r *Reconciler) handleRunning(ctx context.Context, cr *v1alpha1.Controller)
 				"controller", cr.Namespace+"/"+cr.Name, "error", err)
 		}
 	}
+
+	// A controller that reached Running and then crash-loops must be flagged
+	// too, not only one that never booted.
+	r.reconcileJenkinsBootFailure(ctx, cr)
 
 	// Same timeout guard as handleProvisioning — use ProvisioningStartedAt
 	// so an operator restart doesn't immediately fail long-lived controllers.

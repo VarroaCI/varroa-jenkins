@@ -89,7 +89,10 @@ type testClient struct {
 	deleteControllerPodCalls int
 	controllerPod            *corev1.Pod
 	controllerPodErr         error // injected error for GetControllerPod
-	statefulSetReady         *bool
+	// getControllerPodCalls counts GetControllerPod calls, so tests can assert
+	// a hot path does NOT fetch the pod.
+	getControllerPodCalls int
+	statefulSetReady      *bool
 	// provisioningDefaults is used by seedClientCRDs to seed the crdstore.
 	provisioningDefaults *v1alpha1.ProvisioningDefaults
 	// controllerClass is used by seedClientCRDs to seed the crdstore.
@@ -552,6 +555,7 @@ func (t *testClient) GetStatefulSetContainerSpecs(_ context.Context, _, _ string
 	return t.stsComputedImages["mite"], t.stsLiveImages["mite"], t.stsMiteResources, t.stsJenkinsResources, t.stsMitePullPolicy, t.stsResourcesSource, t.stsMiteFound, nil
 }
 func (t *testClient) GetControllerPod(_ context.Context, _, _ string) (*corev1.Pod, error) {
+	t.getControllerPodCalls++
 	if t.controllerPodErr != nil {
 		return nil, t.controllerPodErr
 	}

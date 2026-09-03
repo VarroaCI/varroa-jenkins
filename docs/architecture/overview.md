@@ -25,7 +25,7 @@ flowchart LR
 | Gateway | Terminates mite mTLS. |
 | BFF | Serves APIs and activity. |
 | Dashboard | Provides the browser client. |
-| NATS JetStream | Carries messages and shared state. |
+| NATS JetStream | Carries messages and shared state. Components re-read their bus credential on every reconnect, so a rotated password needs no restart. |
 | mite | Observes and configures Jenkins. |
 | Dex | Brokers identity into OIDC. |
 | Update center | Serves pinned plugins. |
@@ -53,6 +53,18 @@ Read `status.phase` and `status.conditions` when operating a controller.
 | `Stopped` | `spec.powerState: Stopped` scaled the StatefulSet to zero. |
 | `Hibernated` | Inactivity policy parked the controller. |
 | `Failed` | A blocking provisioning or operation error occurred. |
+
+A phase says where the controller is in its lifecycle. It does not say whether the controller is stuck there. Varroa reports "needs attention" separately, on the dashboard, the controllers list, and the detail page. It is derived from these status signals, in precedence order.
+
+| Signal | Shown as | Meaning |
+|---|---|---|
+| `status.phase: Failed` | Failed | A blocking provisioning or operation error. See the `Failed` condition. |
+| `ReconcileBlocked` condition | Blocked | The operator cannot proceed. The bundle is unreadable, or a plugin pin conflicts with the version-profile lock. The message names the fix. |
+| `JenkinsBootFailed` condition | Boot failed | The Jenkins container is crash-looping, or its image cannot be pulled. The message carries the exit code and restart count. Read the container logs. |
+| `PluginRollFailed` condition | Plugin roll failed | The `plugins-init` step failed. |
+| `status.lastApplyResult.succeeded: false` | Apply failed | The mite could not apply the last desired state. |
+
+`status.lastReconciledAt` advances on every reconcile pass that completes without error, in every phase. Read the attention signal first, not this timestamp. Most wedged controllers still reconcile cleanly and so keep a fresh stamp: a Boot failed, Plugin roll failed, or Apply failed controller records the problem in its status and the pass still succeeds. The stamp goes stale only for a Blocked controller, whose pass ends in an error, and during a `Failed` phase dwell. Use `lastReconciledAt` for one distinction: a stale value with no attention signal means the operator is not reconciling this controller at all, rather than reconciling it and being blocked.
 
 Reloadable configuration can apply without replacing the pod. Changes to plugins, images, or other restart-class settings can return the controller to `Provisioning` while Varroa rolls it.
 

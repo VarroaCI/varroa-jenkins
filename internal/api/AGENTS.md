@@ -112,6 +112,16 @@ federation, activity persistence, and SSE fanout.
   provisioning, banner, builtin, identity, fleetplugins). `deprovision.go` and `preview_util.go`
   hold controller-deletion and overlay-preview-diff helpers; `observability.go`/
   `observability_backends.go` normalize a pluggable observability-links integration.
+- `attention` (`attention.go`) is the single "why is this controller unhealthy"
+  projection, carried on **both** the list summary (`controllerResponse`) and the
+  detail DTO (`controllerDetailResponse`). Exactly one kind is reported, by
+  precedence `failed > reconcileBlocked > bootFailed > pluginRollFailed >
+  applyFailed`; a `Hibernated`/`Stopped` controller reports none, because its
+  runtime conditions and `LastApplyResult` are stale until it wakes. Adding a
+  kind means extending `buildAttentionJSON`, the `ControllerAttention` enum in
+  `api/openapi/components/schemas.yaml`, and `ATTENTION_LABEL` in the frontend
+  together. `reconcileBlocked` stays on the detail DTO alongside it — the detail
+  banner still consumes it.
 - `FleetPluginInventory` (`fleetplugins_inventory.go`) is the reader seam for T2.2's
   fleet plugin inventory surface: it reads the classified per-controller inventory
   from T2.1's `invc/` read model via `Transport.PluginClassification`. The BFF never

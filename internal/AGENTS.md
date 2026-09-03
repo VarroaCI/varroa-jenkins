@@ -105,7 +105,19 @@ reading each package's entry point):
   alongside a valid field would succeed while discarding half the call. The
   named shorthands never zero a field (an empty `version` means "not supplied");
   `spec` is a literal merge patch, so an explicit `""`/`null` there clears,
-  matching the REST body; (7) activity reads go through
+  matching the REST body. Two update tools instead decide on **key presence**
+  (omit = preserve, present = set/replace/clear): `update_composed_bundle` and
+  `update_catalog_source`. Every other update tool still reads the value, so
+  `""` there means "not supplied" — do not generalize either rule across the
+  package. `update_composed_bundle` replaces `inputs` wholesale (the list is the
+  merge order, so a partial edit has no meaning) and rejects an empty one;
+  `update_catalog_source` clears the abandoned source kind's fields when the
+  other kind is set, mirroring the CRD's at-most-one rule via
+  `validateCatalogSourceSpec`. The catalog-source and composed-bundle tools read
+  non-string scalars only through `boolArg`/`intArg` (`tools.go`): both report
+  presence separately, and `intArg` rejects a fractional or out-of-range JSON
+  number rather than truncating it. Older tools still cast `float64` inline;
+  move them to `intArg` when touched; (7) activity reads go through
   `deps.Backfill` (the source the REST `/activity` handler uses), never
   `deps.ActivityStore` — the ring is only fed in retention-off mode, so a tool
   reading it directly returns an eternally empty feed on any stream-mode brood;

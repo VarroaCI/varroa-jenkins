@@ -573,6 +573,13 @@ components:
         secretRef:
           type: string
         syncIntervalSeconds:
+          description: Catalog poll cadence in seconds. 0 or an omitted field means
+            the default (300); any other value must be between 30 and 31536000.
+          oneOf:
+          - enum:
+            - 0
+          - maximum: 31536000
+            minimum: 30
           type: integer
         trusted:
           type: boolean
@@ -903,6 +910,30 @@ components:
       required:
       - name
       type: object
+    ControllerAttention:
+      additionalProperties: false
+      description: Why the controller needs an operator's attention, if it does. Exactly
+        one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed
+        > pluginRollFailed > applyFailed.
+      properties:
+        kind:
+          enum:
+          - failed
+          - reconcileBlocked
+          - bootFailed
+          - pluginRollFailed
+          - applyFailed
+          type: string
+        message:
+          type: string
+        reason:
+          type: string
+        since:
+          format: date-time
+          type: string
+      required:
+      - kind
+      type: object
     ControllerDetail:
       additionalProperties: false
       description: Full controller detail including status and sub-resources.
@@ -913,6 +944,8 @@ components:
           items:
             $ref: '#/components/schemas/components_schemas_ApplyResult'
           type: array
+        attention:
+          $ref: '#/components/schemas/components_schemas_ControllerAttention'
         certExpiry:
           type: string
         cluster:
@@ -1148,6 +1181,8 @@ components:
       properties:
         appliedBundleHash:
           type: string
+        attention:
+          $ref: '#/components/schemas/components_schemas_ControllerAttention'
         cluster:
           type: string
         composedBundleRef:
@@ -1159,6 +1194,9 @@ components:
         jenkinsHealth:
           type: string
         jenkinsVersion:
+          type: string
+        lastSeen:
+          description: Last mite heartbeat, RFC3339 UTC. Absent when no mite has reported.
           type: string
         miteConnected:
           type: boolean
@@ -3257,6 +3295,13 @@ components:
         secretRef:
           type: string
         syncIntervalSeconds:
+          description: Catalog poll cadence in seconds. 0 or an omitted field means
+            the default (300); any other value must be between 30 and 31536000.
+          oneOf:
+          - enum:
+            - 0
+          - maximum: 31536000
+            minimum: 30
           type: integer
         trusted:
           type: boolean
@@ -3719,6 +3764,30 @@ components:
       - error
       - conflicts
       type: object
+    components_schemas_ControllerAttention:
+      additionalProperties: false
+      description: Why the controller needs an operator's attention, if it does. Exactly
+        one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed
+        > pluginRollFailed > applyFailed.
+      properties:
+        kind:
+          enum:
+          - failed
+          - reconcileBlocked
+          - bootFailed
+          - pluginRollFailed
+          - applyFailed
+          type: string
+        message:
+          type: string
+        reason:
+          type: string
+        since:
+          format: date-time
+          type: string
+      required:
+      - kind
+      type: object
     components_schemas_ControllerClass:
       additionalProperties: true
       description: A ControllerClass CRD (cluster-scoped). Layers cluster-level defaults
@@ -3816,6 +3885,8 @@ components:
           items:
             $ref: '#/components/schemas/components_schemas_ApplyResult'
           type: array
+        attention:
+          $ref: '#/components/schemas/components_schemas_ControllerAttention'
         certExpiry:
           type: string
         cluster:
@@ -4051,6 +4122,8 @@ components:
       properties:
         appliedBundleHash:
           type: string
+        attention:
+          $ref: '#/components/schemas/components_schemas_ControllerAttention'
         cluster:
           type: string
         composedBundleRef:
@@ -4062,6 +4135,9 @@ components:
         jenkinsHealth:
           type: string
         jenkinsVersion:
+          type: string
+        lastSeen:
+          description: Last mite heartbeat, RFC3339 UTC. Absent when no mite has reported.
           type: string
         miteConnected:
           type: boolean

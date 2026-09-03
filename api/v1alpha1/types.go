@@ -499,7 +499,8 @@ type ControllerStatus struct {
 	// +optional
 	LiveDrift *LiveDriftStatus `json:"liveDrift,omitempty"`
 
-	// LastReconciledAt records the last time a full reconciliation completed.
+	// LastReconciledAt records the last time a reconcile pass completed without
+	// error for this controller, in any phase.
 	// +optional
 	LastReconciledAt *metav1.Time `json:"lastReconciledAt,omitempty"`
 	// LastDesiredPushAt records the last time a desired state was pushed to the mite.
@@ -733,6 +734,8 @@ const (
 	ReasonPluginRollApproved = "PluginRollApproved"
 	// ReasonPluginRollFailed is set when the plugins-init container fails to sync managed plugins.
 	ReasonPluginRollFailed = "PluginRollFailed"
+	// ReasonJenkinsBootFailed is set when the Jenkins container fails to reach Running.
+	ReasonJenkinsBootFailed = "JenkinsBootFailed"
 	// ReasonPluginConflict is set when a requested plugin version conflicts with the profile lock set.
 	ReasonPluginConflict = "PluginConflict"
 	// ReasonPluginPinConflict is set when a bundle-pinned plugin version conflicts with the
@@ -909,6 +912,16 @@ const (
 	// ConditionPluginRollFailed indicates the plugins-init container failed to
 	// sync the managed plugin set during a pod roll.
 	ConditionPluginRollFailed ControllerConditionType = "PluginRollFailed"
+	// ConditionJenkinsBootFailed is True while the Jenkins container itself is
+	// crash-looping or cannot be pulled; the message carries the exit code and
+	// restart count so a JCasC boot error is visible without reading pod status.
+	// It stays meaningful once the controller is Connected: the mite is a
+	// sibling container and keeps its stream while kubelet restarts only the
+	// Jenkins container beside it, so a Connected controller never clears this
+	// condition on connectivity alone. The mite's cached health verdict can
+	// hold it False, but only a live pod inspection can turn it back off once
+	// it is True.
+	ConditionJenkinsBootFailed ControllerConditionType = "JenkinsBootFailed"
 	// ConditionPluginConflict indicates the requested plugin set conflicts with
 	// the resolved JenkinsVersionProfile/core lock set.
 	ConditionPluginConflict ControllerConditionType = "PluginConflict"
@@ -1283,6 +1296,12 @@ type TemplateCatalogCondition struct {
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
+// UpdateCenterCatalogSourceName is the reserved CatalogSource name for the
+// update-center-backed variant: the only source allowed to carry neither
+// repoURL nor ociRef. The literal is also spelled out in the CEL rule below,
+// which cannot reference a Go constant, so the two must be changed together.
+const UpdateCenterCatalogSourceName = "varroa-update-center"
+
 // CatalogSource is the Schema for the catalogsources API.
 //
 // The object-level rule below binds the zero-source-field shape to the reserved
@@ -1309,12 +1328,17 @@ type CatalogSource struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.repoURL) || self.repoURL.startsWith('https://') || self.repoURL.startsWith('ssh://') || self.repoURL.startsWith('git@')",message="repoURL must start with https://, ssh://, or git@ (transport helpers like ext::/file:///fd:: are rejected)"
 // +kubebuilder:validation:XValidation:rule="(has(self.repoURL)?1:0)+(has(self.ociRef)?1:0)<=1",message="at most one of repoURL or ociRef may be set"
 type CatalogSourceSpec struct {
-	RepoURL             string `json:"repoURL,omitempty"`
-	OCIRef              string `json:"ociRef,omitempty"`
-	Revision            string `json:"revision,omitempty"`
-	Path                string `json:"path,omitempty"`                // catalog root; default "."
-	SyncIntervalSeconds int    `json:"syncIntervalSeconds,omitempty"` // min 30, default 300
-	SecretRef           string `json:"secretRef,omitempty"`           // git creds Secret (same ns)
+	RepoURL  string `json:"repoURL,omitempty"`
+	OCIRef   string `json:"ociRef,omitempty"`
+	Revision string `json:"revision,omitempty"`
+	Path     string `json:"path,omitempty"` // catalog root; default "."
+	// SyncIntervalSeconds is the catalog poll cadence. Zero means the
+	// default (300). The controller clamps anything lower than 30 up to 30,
+	// so a stored value under the floor would lie about its own behavior. The
+	// ceiling (one year) keeps the seconds-to-Duration conversion in range.
+	// +kubebuilder:validation:XValidation:rule="self == 0 || (self >= 30 && self <= 31536000)",message="syncIntervalSeconds must be 0 (default) or between 30 and 31536000"
+	SyncIntervalSeconds int    `json:"syncIntervalSeconds,omitempty"`
+	SecretRef           string `json:"secretRef,omitempty"` // git creds Secret (same ns)
 	Trusted             bool   `json:"trusted,omitempty"`
 }
 

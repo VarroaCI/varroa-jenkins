@@ -15,7 +15,8 @@ import type { ControllerListItem } from "../hooks/useControllers";
 import type { VersionCatalogEntry } from "../types";
 import styles from "./BroodControllerPicker.module.css";
 
-const PHASES = ["All", "Connected", "Running", "Provisioning", "Hibernated", "Failed"] as const;
+const ATTENTION_CHIP = "Needs attention";
+const PHASES = ["All", ATTENTION_CHIP, "Connected", "Running", "Provisioning", "Hibernated", "Failed"] as const;
 
 type SortKey = "name" | "cluster" | "phase" | "version" | "endpoint" | "mite";
 type SortDir = "asc" | "desc";
@@ -165,7 +166,9 @@ export function BroodControllerPicker({ selected, onSelectionChange, compact = f
 
   const allControllers = controllers ?? [];
   const filtered = allControllers.filter((c) => {
-    if (phaseFilter !== "All" && c.phase !== phaseFilter) return false;
+    if (phaseFilter === ATTENTION_CHIP) {
+      if (!c.attention) return false;
+    } else if (phaseFilter !== "All" && c.phase !== phaseFilter) return false;
     if (nameFilter && !c.name.toLowerCase().includes(nameFilter.toLowerCase())) return false;
     if (nsFilter && c.namespace !== nsFilter) return false;
     if (clusterFilter && c.cluster !== clusterFilter) return false;
@@ -196,6 +199,7 @@ export function BroodControllerPicker({ selected, onSelectionChange, compact = f
     counts[c.phase] = (counts[c.phase] ?? 0) + 1;
   }
   counts["All"] = allControllers.length;
+  counts[ATTENTION_CHIP] = allControllers.filter((c) => c.attention).length;
 
   const nsCounts: Record<string, number> = {};
   for (const c of allControllers) {
@@ -242,7 +246,7 @@ export function BroodControllerPicker({ selected, onSelectionChange, compact = f
         </div>
         <span className={styles.mono} data-label="Cluster">{c.cluster}</span>
         <span data-label="Phase">
-          <StatusPill phase={c.phase} />
+          <StatusPill phase={c.phase} attention={c.attention} />
         </span>
         <VersionCell c={c} versions={versions} />
         <span data-label="Endpoint">

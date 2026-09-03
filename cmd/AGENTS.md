@@ -74,6 +74,17 @@ repo-root `Dockerfile` into one image; `varroactl` ships as a separate
 standalone binary (not baked into that image). `protogen` and `bootstrapdeps`
 are repo tooling: `go run` only, no Makefile build target, no image stage.
 
+**Bus credentials and health, shared by `operator`/`gateway`/`bff`:** each takes
+`-bus-pass-file`, which `internal/bus` re-reads on every reconnect so a rotated
+NATS Secret is followed without a restart. The chart always passes it; the
+`BUS_PASSWORD` env is the no-file fallback for local runs. Each passes its
+logger in `bus.Config` (never assigned after `Connect`) and registers the
+`varroa.bus.connected` gauge. Operator
+readiness (`/readyz`) fails while the bus is down; operator liveness
+(`/healthz`) does not, so a bus outage never becomes a restart loop. Gateway and
+BFF `/healthz` report a `bus` field but always return 200, because the BFF still
+serves the dashboard and the gateway's replicas share one credential.
+
 ## Work Guidance
 
 - Keep each binary's top-of-file doc comment current when its responsibility

@@ -203,19 +203,23 @@ function RollupRow({ item, selected, onSelect }: { item: FleetPluginRollupItem; 
     >
       <td className={styles.nameCell}>{item.name}</td>
       <td className={styles.countCell}>{item.controllerCount}</td>
-      <td className={styles.breakdownCell}>
-        {item.versions.map((v) => (
-          <span key={v.version} className={styles.versionTag}>
-            {v.version} <span className={styles.countBadge}>{v.controllerCount}</span>
-          </span>
-        ))}
+      <td>
+        <div className={styles.breakdownCell}>
+          {item.versions.map((v) => (
+            <span key={v.version} className={styles.versionTag}>
+              {v.version} <span className={styles.countBadge}>{v.controllerCount}</span>
+            </span>
+          ))}
+        </div>
       </td>
-      <td className={styles.breakdownCell}>
-        {item.classes.map((c) => (
-          <span key={c.class} className={styles.classTag}>
-            {c.class} <span className={styles.countBadge}>{c.controllerCount}</span>
-          </span>
-        ))}
+      <td>
+        <div className={styles.breakdownCell}>
+          {item.classes.map((c) => (
+            <span key={c.class} className={styles.classTag}>
+              {c.class} <span className={styles.countBadge}>{c.controllerCount}</span>
+            </span>
+          ))}
+        </div>
       </td>
     </tr>
   );
@@ -233,13 +237,15 @@ function DrillRow({ item }: { item: FleetPluginDrillItem }) {
       <td>{item.cluster}</td>
       <td className={styles.mono}>{item.version}</td>
       <td className={styles.mono}>{item.class}</td>
-      <td className={styles.qualifiers}>
-        {item.stale && <span className={styles.qualifierBadge}>stale</span>}
-        {item.degraded && <span className={styles.qualifierBadge}>degraded</span>}
-        {item.truncated && <span className={styles.qualifierBadge}>truncated</span>}
-        {item.optionalEdgesDropped && <span className={styles.qualifierBadge}>edges dropped</span>}
-        {item.bootstrapApproximate && <span className={styles.qualifierBadgeApprox}>approx</span>}
-        {item.detailStale && <span className={styles.qualifierBadgeStale}>detail stale</span>}
+      <td>
+        <div className={styles.qualifiers}>
+          {item.stale && <span className={styles.qualifierBadge}>stale</span>}
+          {item.degraded && <span className={styles.qualifierBadge}>degraded</span>}
+          {item.truncated && <span className={styles.qualifierBadge}>truncated</span>}
+          {item.optionalEdgesDropped && <span className={styles.qualifierBadge}>edges dropped</span>}
+          {item.bootstrapApproximate && <span className={styles.qualifierBadgeApprox}>approx</span>}
+          {item.detailStale && <span className={styles.qualifierBadgeStale}>detail stale</span>}
+        </div>
       </td>
     </tr>
   );

@@ -87,6 +87,19 @@ TypeScript consumer of it.
   `-text` variant. None of the four checks has an allowlist or escape
   hatch; the orphan-class allowlist is empty and new entries are not
   permitted.
+- **Attention state**: `StatusPill` is the only renderer of a controller's
+  needs-attention state, and `ATTENTION_LABEL` (exported from
+  `src/components/StatusPill.tsx`) is the label source of truth. Fleet views
+  (Dashboard, `BroodControllerPicker`, `ControllerDetail`) pass the BFF's
+  `attention` field through; never re-derive it from `phase`.
+- **Fleet views render reported state only**: every value on a Dashboard
+  brood-health row (`data-testid="health-row"`) comes from a
+  `ControllerListItem` field the BFF sent (`miteConnected`, `phase`,
+  `attention`, `lastSeen`, `jenkinsHealth`, `jenkinsVersion`). Never
+  synthesize, sample, or extrapolate a value the API did not report, and
+  never label a view with a time window the data does not cover. Relative
+  ages use `age()` from `src/components/activityTimeline.util.ts`; it is the
+  single relative-time helper.
 - **Module ownership**: each page/component owns its own `.module.css` —
   no page imports another page's module. Small boilerplate (e.g. the
   `.page`/`.pageHead`/`.pageTitle`/`.pageDesc` header pattern) is

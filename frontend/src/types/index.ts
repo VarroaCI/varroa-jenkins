@@ -1,5 +1,20 @@
 export type ControllerPhase = "Pending" | "Provisioning" | "Running" | "Connected" | "Stopped" | "Failed" | "Hibernated";
 
+export type ControllerAttentionKind =
+  | "failed"
+  | "reconcileBlocked"
+  | "bootFailed"
+  | "pluginRollFailed"
+  | "applyFailed";
+
+/** Why a controller needs an operator's attention; absent when healthy. */
+export interface ControllerAttention {
+  kind: ControllerAttentionKind;
+  reason?: string;
+  message?: string;
+  since?: string;
+}
+
 // ---- K8s-style types (matches CRD structure) ----
 
 export interface ObjectMeta {

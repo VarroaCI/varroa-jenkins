@@ -180,3 +180,31 @@ func TestControllerUpdate_UnappliedRemovalsReportedViaBrood(t *testing.T) {
 		t.Fatalf("unappliedRemovals = %s, want %s", raw, `[{"field":"spec.version"}]`)
 	}
 }
+
+// TestControllerDetail_CarriesAttention pins the detail builder to the same
+// attention projection the list builder uses — they are separate code paths.
+func TestControllerDetail_CarriesAttention(t *testing.T) {
+	s := &Server{deps: &Dependencies{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Store:  crdstore.NewFake(),
+	}}
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "ns1"},
+		Status: v1alpha1.ControllerStatus{
+			Phase: v1alpha1.ControllerPhaseProvisioning,
+			Conditions: []v1alpha1.ControllerCondition{{
+				Type:    v1alpha1.ConditionReconcileBlocked,
+				Status:  metav1.ConditionTrue,
+				Reason:  "PluginConflict",
+				Message: "plugin kubernetes requested at A conflicts with profile lock B",
+			}},
+		},
+	}
+	resp := s.controllerDetail(cr, "core")
+	if resp.Attention == nil {
+		t.Fatal("detail response carries no attention")
+	}
+	if resp.Attention.Kind != AttentionReconcileBlocked {
+		t.Fatalf("Attention.Kind = %q, want %q", resp.Attention.Kind, AttentionReconcileBlocked)
+	}
+}

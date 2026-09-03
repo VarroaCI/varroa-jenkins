@@ -36,6 +36,7 @@ spec:
           args:
             - "-grpc-port={{ .Values.gateway.service.grpcPort }}"
             - "-bus-ca-file=/etc/nats-creds/ca.crt"
+            - "-bus-pass-file=/etc/nats-creds/gateway-password"
             {{- if .Values.gateway.busURL }}
             - "-bus-url={{ .Values.gateway.busURL }}"
             {{- end }}
@@ -73,11 +74,6 @@ spec:
               value: {{ .Values.cluster.name | quote }}
             - name: VARROA_JETSTREAM_REPLICAS
               value: {{ include "varroa.jetStreamReplicas" $ | quote }}
-            - name: BUS_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: varroa-nats-creds
-                  key: gateway-password
             - name: VARROA_GATEWAY_ENDPOINT
               value: {{ printf "%s.%s.svc.cluster.local:%d" (include "varroa.fullname" (dict "Release" .Release "name" "varroa-gateway")) .Release.Namespace (int .Values.gateway.service.grpcPort) | quote }}
             - name: VARROA_TELEMETRY_DISABLED
@@ -111,6 +107,11 @@ spec:
           {{- with .Values.gateway.resources }}
           resources: {{- toYaml . | nindent 12 }}
           {{- end }}
+          startupProbe:
+            tcpSocket:
+              port: grpc
+            periodSeconds: 10
+            failureThreshold: 24
           livenessProbe:
             tcpSocket:
               port: grpc

@@ -194,28 +194,29 @@ func main() {
 		*busURL = os.Getenv("VARROA_BUS_URL")
 	}
 
-	// Resolve bus credentials.
-	busPassword := os.Getenv("BUS_PASSWORD")
-	if *busPassFile != "" {
-		passBytes, err := os.ReadFile(*busPassFile)
-		if err != nil {
-			logger.Error("failed to read bus password file", "path", *busPassFile, "error", err)
-			os.Exit(1)
-		}
-		busPassword = strings.TrimSpace(string(passBytes))
-	}
-
-	busConn, err := bus.Connect(*busURL, bus.Config{
+	// Bus credentials: the file path is the production form because it is
+	// re-read on every reconnect and so follows a rotated Secret; the env var
+	// is the fallback for local runs with no mounted file.
+	busCfg := bus.Config{
 		Username:    *busUser,
-		Password:    busPassword,
 		CAFile:      *busCAFile,
 		InboxPrefix: "_INBOX_bff",
-	})
+		Logger:      logger,
+	}
+	if *busPassFile != "" {
+		busCfg.PasswordFile = *busPassFile
+	} else {
+		busCfg.Password = os.Getenv("BUS_PASSWORD")
+	}
+	busConn, err := bus.Connect(*busURL, busCfg)
 	if err != nil {
 		logger.Error("failed to connect to bus", "error", err)
 		os.Exit(1)
 	}
 	defer busConn.Close()
+	if err := busConn.RegisterMetrics(otel.Meter("varroa-bff"), "bff"); err != nil {
+		logger.Warn("failed to register bus connected gauge", "error", err)
+	}
 	// JetStream replica count for streams and KV buckets (from the NATS cluster
 	// size, clamped 1..3 by the chart). Even hive-mode BFFs read the core's
 	// replica count via this env. Values < 1 are clamped to 1 by SetReplicas.
@@ -654,7 +655,7 @@ func main() {
 	// --- HTTP routes ---
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", telemetry.MetricsAuthMiddleware(promhttp.Handler()))
-	mux.Handle("/healthz", telemetry.HealthzHandler())
+	mux.Handle("/healthz", telemetry.HealthzHandlerWithBus(busConn.Connected))
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "ok")

@@ -67,6 +67,18 @@ const DRAFT_TIERS = [
 ] as const;
 type DraftTier = (typeof DRAFT_TIERS)[number];
 
+// A tier's YAML validity is keyed by the editor that reports it: the three
+// standalone editors use the tier name, the overlay editors are namespaced by
+// resource kind. Tiers absent from this map have no YAML editor.
+const YAML_VALIDITY_KEY: Partial<Record<DraftTier, string>> = {
+  podOverrides: "podOverrides",
+  ingressSpec: "ingressSpec",
+  miteSpec: "miteSpec",
+  statefulSet: "resourceOverlay.statefulSet",
+  service: "resourceOverlay.service",
+  ingress: "resourceOverlay.ingress",
+};
+
 const ZERO_VERSIONS: Record<DraftTier, number> = {
   form: 0,
   podOverrides: 0,
@@ -542,6 +554,11 @@ export default function SpecEditorCard({
         setIngress(value as string);
         break;
     }
+    // The draft was replaced, so a validity verdict recorded against the old
+    // text no longer describes it. Dropping the entry restores the
+    // never-mounted state (valid); the editor re-emits when it next mounts.
+    const validityKey = YAML_VALIDITY_KEY[tier];
+    if (validityKey) clearYamlValidity(validityKey);
     setDraftVersion((v) => ({ ...v, [tier]: 0 }));
     setTierSnapshot((s) => ({ ...s, [tier]: tierBaseValue(tier, base) }));
   };
@@ -605,6 +622,28 @@ export default function SpecEditorCard({
     return blockingErrorPaths(formErrors, specValue, curatedPatch);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formErrors, specValue, tierSnapshot, specBaseline]);
+
+  // YAML tiers report schema/syntax validity themselves; the curated tier is
+  // covered by saveBlockedPaths. A tier that has never mounted is valid.
+  const [yamlInvalidTiers, setYamlInvalidTiers] = useState<Record<string, boolean>>({});
+  const setYamlValidity = useCallback((tier: string, valid: boolean) => {
+    setYamlInvalidTiers((prev) => {
+      if (!!prev[tier] === !valid) return prev;
+      return { ...prev, [tier]: !valid };
+    });
+  }, []);
+  const clearYamlValidity = useCallback((tier: string) => {
+    setYamlInvalidTiers((prev) => {
+      if (!(tier in prev)) return prev;
+      const next = { ...prev };
+      delete next[tier];
+      return next;
+    });
+  }, []);
+  const invalidYamlTiers = useMemo(
+    () => Object.keys(yamlInvalidTiers).filter((k) => yamlInvalidTiers[k]),
+    [yamlInvalidTiers],
+  );
 
   // ── Build preview body from all tiers ──
   const buildBody = useCallback(() => {
@@ -732,6 +771,7 @@ export default function SpecEditorCard({
   };
 
   const doSave = async (force: boolean) => {
+    if (invalidYamlTiers.length > 0) return;
     // Parse every YAML tier BEFORE touching the API. A tier that doesn't
     // parse must abort the save outright: silently omitting it from the
     // patch leaves the server value untouched while the user still gets a
@@ -888,6 +928,7 @@ export default function SpecEditorCard({
                 }}
                 jsonSchema={podOverridesSchema}
                 onDebouncedChange={debouncedPreview}
+                onValidityChange={(v) => setYamlValidity("podOverrides", v)}
               />
               {podOverridesSchema && (
                 <div className={styles.schemaNote}>
@@ -909,6 +950,7 @@ export default function SpecEditorCard({
                   setDraftVersion((p) => ({ ...p, ingressSpec: p.ingressSpec + 1 }));
                 }}
                 jsonSchema={ingressSpecSchema}
+                onValidityChange={(v) => setYamlValidity("ingressSpec", v)}
               />
               {ingressSpecSchema && (
                 <div className={styles.schemaNote}>
@@ -930,6 +972,7 @@ export default function SpecEditorCard({
                   setDraftVersion((p) => ({ ...p, miteSpec: p.miteSpec + 1 }));
                 }}
                 jsonSchema={miteSpecSchema}
+                onValidityChange={(v) => setYamlValidity("miteSpec", v)}
               />
               {miteSpecSchema && (
                 <div className={styles.schemaNote}>
@@ -949,6 +992,12 @@ export default function SpecEditorCard({
               />
               <div style={{ marginTop: 12 }}>
                 <YamlTierEditor
+                  // One editor serves all three overlay kinds. It builds its
+                  // document and its change listener once, at mount, so
+                  // without a per-kind key a sub-tab switch would leave the
+                  // previous kind's text on screen and route edits (and the
+                  // validity verdict) back to that kind.
+                  key={overlaySubTab}
                   value={overlayValues[overlaySubTab as OverlayResourceKind]}
                   onChange={(v: string) => {
                     const kind = overlaySubTab as OverlayResourceKind;
@@ -956,6 +1005,9 @@ export default function SpecEditorCard({
                     setDraftVersion((p) => ({ ...p, [kind]: p[kind] + 1 }));
                   }}
                   onDebouncedChange={debouncedPreview}
+                  onValidityChange={(v) =>
+                    setYamlValidity(`resourceOverlay.${overlaySubTab}`, v)
+                  }
                 />
               </div>
             </div>
@@ -999,6 +1051,12 @@ export default function SpecEditorCard({
         {/* Save button */}
         {canUpdate && (
           <div style={{ marginTop: 12 }}>
+            {invalidYamlTiers.length > 0 && (
+              <div className={styles.errorBanner}>
+                Cannot save: invalid YAML in {invalidYamlTiers.join(", ")}. Fix
+                the editor{invalidYamlTiers.length > 1 ? "s" : ""} to save.
+              </div>
+            )}
             {saveBlockedPaths.length > 0 && (
               <div className={styles.errorBanner}>
                 Cannot save: invalid value at {saveBlockedPaths.join(", ")}. Fix
@@ -1008,7 +1066,7 @@ export default function SpecEditorCard({
             <Button
               size="sm"
               variant="primary"
-              disabled={saving || saveBlockedPaths.length > 0}
+              disabled={saving || saveBlockedPaths.length > 0 || invalidYamlTiers.length > 0}
               onClick={handleSave}
             >
               {saving ? "Saving…" : "Save spec"}

@@ -677,6 +677,9 @@ func TestACLIntegration(t *testing.T) {
 		_, err := Connect(url, Config{
 			Username: "operator",
 			Password: "wrong_password",
+			// Connect retries a rejected credential by design, so bound the
+			// wait: this test asserts the denial, not the retry budget.
+			StartupTimeout: 2 * time.Second,
 		})
 		if err == nil {
 			t.Fatal("expected error connecting with wrong password, got nil")

@@ -41,6 +41,7 @@ spec:
           args:
             - "-port={{ .Values.bff.service.port }}"
             - "-bus-ca-file=/etc/nats-creds/ca.crt"
+            - "-bus-pass-file=/etc/nats-creds/bff-password"
             {{- if .Values.bff.busURL }}
             - "-bus-url={{ .Values.bff.busURL }}"
             {{- end }}
@@ -85,11 +86,6 @@ spec:
               value: {{ .Values.cluster.name | quote }}
             - name: VARROA_JETSTREAM_REPLICAS
               value: {{ include "varroa.jetStreamReplicas" $ | quote }}
-            - name: BUS_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: varroa-nats-creds
-                  key: bff-password
             - name: VARROA_TELEMETRY_DISABLED
               value: {{ .Values.telemetry.disabled | quote }}
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
@@ -156,6 +152,12 @@ spec:
           {{- with .Values.bff.resources }}
           resources: {{- toYaml . | nindent 12 }}
           {{- end }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 24
           livenessProbe:
             httpGet:
               path: /healthz

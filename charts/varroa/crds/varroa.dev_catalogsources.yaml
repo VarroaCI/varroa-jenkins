@@ -70,7 +70,16 @@ spec:
               secretRef:
                 type: string
               syncIntervalSeconds:
+                description: |-
+                  SyncIntervalSeconds is the catalog poll cadence. Zero means the
+                  default (300). The controller clamps anything lower than 30 up to 30,
+                  so a stored value under the floor would lie about its own behavior. The
+                  ceiling (one year) keeps the seconds-to-Duration conversion in range.
                 type: integer
+                x-kubernetes-validations:
+                - message: syncIntervalSeconds must be 0 (default) or between 30 and
+                    31536000
+                  rule: self == 0 || (self >= 30 && self <= 31536000)
               trusted:
                 type: boolean
             type: object

@@ -6,9 +6,13 @@ import (
 	"crypto/x509"
 	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // Config holds optional connection parameters for bus.Connect. An empty Config
@@ -23,27 +27,59 @@ type Config struct {
 	CABytes []byte
 
 	// Username for NATS user/password authentication.
-	// Empty means no credential is sent.
+	// Empty means no credential is sent, which is why it is required whenever
+	// PasswordFile is set: Connect rejects that combination rather than
+	// sending an empty user with a real password.
 	Username string
 
 	// Password for NATS user/password authentication.
 	Password string
 
+	// PasswordFile is a path whose contents (trimmed) are the password. It is
+	// re-read on every connect attempt, so a rotated credential that lands in a
+	// mounted Secret is picked up without a restart. Takes precedence over
+	// Password.
+	PasswordFile string
+
 	// InboxPrefix overrides the default _INBOX.> reply subject.
 	// Use per-service prefixes like _INBOX_operator for ACL isolation.
 	InboxPrefix string
+
+	// StartupTimeout bounds how long Connect waits for the first successful
+	// connection. Connect retries a failed initial dial or auth rather than
+	// giving up, so a process that starts while the bus is down or while a
+	// rotated password has not yet reached its mounted Secret waits instead of
+	// exiting. Zero means DefaultStartupTimeout.
+	StartupTimeout time.Duration
+
+	// Logger receives connection lifecycle events. It is the only way to give
+	// a Conn a logger: the NATS callbacks that read it run on library
+	// goroutines and the credential handler fires inside nats.Connect, so a
+	// logger assigned after Connect returns would be an unsynchronized write
+	// to a field already being read. Nil disables that logging.
+	Logger *slog.Logger
 }
 
 // IsZero returns true when no options are set (empty config).
 func (c Config) IsZero() bool {
-	return c.CAFile == "" && len(c.CABytes) == 0 && c.Username == "" && c.Password == "" && c.InboxPrefix == ""
+	return c.CAFile == "" && len(c.CABytes) == 0 && c.Username == "" && c.Password == "" &&
+		c.PasswordFile == "" && c.InboxPrefix == ""
 }
+
+// DefaultStartupTimeout bounds Connect's initial connection wait when
+// Config.StartupTimeout is unset. It is long enough to outlast a credential
+// rotation reaching a mounted Secret, and short enough that a permanently
+// broken configuration still surfaces as a failing process.
+const DefaultStartupTimeout = 3 * time.Minute
 
 // Conn wraps a NATS connection and its JetStream context.
 type Conn struct {
-	nc     *nats.Conn
-	js     nats.JetStreamContext
-	Logger *slog.Logger
+	nc *nats.Conn
+	js nats.JetStreamContext
+
+	// logger is written once, by Connect, before any handler that reads it can
+	// run. It is never assigned afterwards; see Config.Logger.
+	logger *slog.Logger
 
 	// replicas is the JetStream replica count applied to streams and KV
 	// buckets created via this connection (EnsureKV, and the *StreamConfig
@@ -82,18 +118,64 @@ func Connect(url string, cfg ...Config) (*Conn, error) {
 	}
 
 	c := &Conn{}
+	// Install the logger before any handler closure is built. This sits
+	// outside the IsZero gate below because a Config carrying nothing but a
+	// Logger is still worth honouring.
+	startupTimeout := DefaultStartupTimeout
+	if len(cfg) > 0 {
+		c.logger = cfg[0].Logger
+		if cfg[0].StartupTimeout > 0 {
+			startupTimeout = cfg[0].StartupTimeout
+		}
+	}
 	opts := []nats.Option{
 		nats.Name("varroa"),
 		nats.ReconnectWait(2 * time.Second),
 		nats.MaxReconnects(-1),
 		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
-			if c.Logger != nil {
-				c.Logger.Warn("nats disconnected", "error", err)
+			if c.logger != nil {
+				c.logger.Warn("nats disconnected", "error", err)
 			}
 		}),
 		nats.ReconnectHandler(func(_ *nats.Conn) {
-			if c.Logger != nil {
-				c.Logger.Info("nats reconnected")
+			if c.logger != nil {
+				c.logger.Info("nats reconnected")
+			}
+		}),
+		// Retry the initial dial instead of failing the process: a pod that
+		// starts while the bus is down, or inside the window before a rotated
+		// Secret reaches its mount, must wait rather than crash-loop. Connect
+		// blocks below until this succeeds or the startup budget runs out.
+		nats.RetryOnFailedConnect(true),
+		// A rotated server-side password produces repeated auth errors until
+		// the mounted Secret catches up; nats.go would otherwise stop
+		// reconnecting after the second one.
+		nats.IgnoreAuthErrorAbort(),
+		// ReconnectErrHandler only fires when the TCP dial itself fails; an
+		// "Authorization Violation" during reconnect is delivered as an async
+		// error, so both handlers are needed to make the outage window loud.
+		nats.ReconnectErrHandler(func(_ *nats.Conn, err error) {
+			if c.logger != nil {
+				c.logger.Warn("nats reconnect attempt failed", "error", err)
+			}
+		}),
+		nats.ErrorHandler(func(_ *nats.Conn, sub *nats.Subscription, err error) {
+			if c.logger == nil {
+				return
+			}
+			if sub != nil {
+				c.logger.Warn("nats async error", "subject", sub.Subject, "error", err)
+				return
+			}
+			c.logger.Warn("nats async error", "error", err)
+		}),
+		// Without this, nats.go fires the closed callback for a client-initiated
+		// Close too, so every graceful shutdown would log the permanent-close
+		// error that operators are told means an unrecoverable connection.
+		nats.NoCallbacksAfterClientClose(),
+		nats.ClosedHandler(func(nc *nats.Conn) {
+			if c.logger != nil {
+				c.logger.Error("nats connection closed permanently", "error", nc.LastError())
 			}
 		}),
 	}
@@ -117,8 +199,33 @@ func Connect(url string, cfg ...Config) (*Conn, error) {
 			opts = append(opts, nats.RootCAs(conf.CAFile))
 		}
 
-		// Credentials.
-		if conf.Username != "" {
+		// Credentials. A password file wins over a static password: the
+		// handler is consulted on every connect attempt, so the process
+		// follows a rotation without a restart.
+		switch {
+		case conf.PasswordFile != "":
+			// A handler is the only way to send a rotating password, and it
+			// must carry a username: without one the server receives an empty
+			// user alongside a real password and rejects it as an ordinary
+			// auth failure, hiding the misconfiguration.
+			if conf.Username == "" {
+				return nil, fmt.Errorf("nats connect: PasswordFile requires Username")
+			}
+			user, file := conf.Username, conf.PasswordFile
+			// Fail fast at startup on an unreadable file; a later read failure
+			// during reconnect only logs, so a transient kubelet resync gap
+			// does not turn into a fatal error.
+			if _, err := readPasswordFile(file); err != nil {
+				return nil, fmt.Errorf("nats connect: %w", err)
+			}
+			opts = append(opts, nats.UserInfoHandler(func() (string, string) {
+				pass, err := readPasswordFile(file)
+				if err != nil && c.logger != nil {
+					c.logger.Warn("nats password file unreadable; retrying with empty password", "path", file, "error", err)
+				}
+				return user, pass
+			}))
+		case conf.Username != "":
 			opts = append(opts, nats.UserInfo(conf.Username, conf.Password))
 		}
 
@@ -134,6 +241,15 @@ func Connect(url string, cfg ...Config) (*Conn, error) {
 	}
 	c.nc = nc
 
+	// RetryOnFailedConnect makes nats.Connect hand back a connection that is
+	// still only RECONNECTING, so callers would otherwise get a Conn whose
+	// JetStream and KV calls fail. Wait for a real connection here; the
+	// registered handlers log each failed attempt while this blocks.
+	if err := c.waitConnected(startupTimeout); err != nil {
+		nc.Close()
+		return nil, err
+	}
+
 	js, err := nc.JetStream()
 	if err != nil {
 		nc.Close()
@@ -142,6 +258,61 @@ func Connect(url string, cfg ...Config) (*Conn, error) {
 	c.js = js
 
 	return c, nil
+}
+
+// readPasswordFile reads and trims the credential stored at path.
+func readPasswordFile(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read bus password file %s: %w", path, err)
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+// waitConnected blocks until the connection reaches CONNECTED, the server
+// closes it for good, or the budget expires.
+func (c *Conn) waitConnected(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		switch c.nc.Status() {
+		case nats.CONNECTED:
+			return nil
+		case nats.CLOSED:
+			return fmt.Errorf("nats connect: connection closed before it was established: %w", c.nc.LastError())
+		}
+		if time.Now().After(deadline) {
+			if lastErr := c.nc.LastError(); lastErr != nil {
+				return fmt.Errorf("nats connect: not connected after %s: %w", timeout, lastErr)
+			}
+			return fmt.Errorf("nats connect: not connected after %s", timeout)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// Connected reports whether the underlying NATS connection is currently
+// established. It is the single source for readiness checks and the
+// connected gauge.
+func (c *Conn) Connected() bool {
+	return c.nc != nil && c.nc.IsConnected()
+}
+
+// RegisterMetrics exports varroa.bus.connected (1 while connected, 0
+// otherwise) on the given meter, tagged with the calling component.
+func (c *Conn) RegisterMetrics(meter metric.Meter, component string) error {
+	_, err := meter.Int64ObservableGauge(
+		"varroa.bus.connected",
+		metric.WithDescription("1 while the NATS bus connection is established, 0 otherwise"),
+		metric.WithInt64Callback(func(_ context.Context, obs metric.Int64Observer) error {
+			v := int64(0)
+			if c.Connected() {
+				v = 1
+			}
+			obs.Observe(v, metric.WithAttributes(attribute.String("component", component)))
+			return nil
+		}),
+	)
+	return err
 }
 
 // NATSConn returns the underlying *nats.Conn for advanced use.
@@ -259,8 +430,8 @@ func (c *Conn) SubscribeRequest(subject, queue string, handler RequestHandler) (
 
 // Close drains and closes the NATS connection.
 func (c *Conn) Close() {
-	if c.Logger != nil {
-		c.Logger.Info("connection closed")
+	if c.logger != nil {
+		c.logger.Info("connection closed")
 	}
 	c.nc.Close()
 }
