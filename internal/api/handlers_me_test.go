@@ -505,6 +505,9 @@ func (f *fakeResourceClient) ListIngressHosts(_ context.Context) (map[string][]s
 func (f *fakeResourceClient) GetStatefulSetPluginsChecksum(_ context.Context, _, _ string) (string, error) {
 	return "", nil
 }
+func (f *fakeResourceClient) GetStatefulSetRollout(_ context.Context, _, _ string) (controller.StatefulSetRollout, error) {
+	return controller.StatefulSetRollout{}, nil
+}
 func (f *fakeResourceClient) GetStatefulSetImages(_ context.Context, _, _ string) (map[string]string, map[string]string, error) {
 	return nil, nil, nil
 }

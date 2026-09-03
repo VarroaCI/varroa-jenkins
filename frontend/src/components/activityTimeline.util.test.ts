@@ -408,7 +408,7 @@ describe("age", () => {
 
 const MCP_EMITTED_TYPES = [
   "reconcile.triggered", "restart.approved", "catalogsource.synced",
-  "controller.created", "controller.updated", "controller.deleted",
+  "controller.created", "controller.updated", "controller.deleted", "pod.replaced",
   "catalogsource.created", "catalogsource.updated", "catalogsource.deleted",
   "composedbundle.created", "composedbundle.updated", "composedbundle.deleted",
   "jenkinsrole.created", "jenkinsrole.updated", "jenkinsrole.deleted",

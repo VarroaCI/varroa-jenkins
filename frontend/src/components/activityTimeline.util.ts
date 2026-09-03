@@ -250,6 +250,7 @@ export const ACTIVITY_TYPE_MAP: Record<string, { icon: string; style: string }> 
   "provisioning.started": { icon: "▶", style: "softInfo" },
   "provisioning.completed": { icon: "✔", style: "softOk" },
   "provisioning.failed": { icon: "✘", style: "softBad" },
+  "pod.replaced": { icon: "⟳", style: "softWarn" },
   "group.created": { icon: "➕", style: "softOk" },
   "group.updated": { icon: "✏", style: "softInfo" },
   "group.deleted": { icon: "✗", style: "softBad" },

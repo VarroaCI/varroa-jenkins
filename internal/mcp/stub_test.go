@@ -111,6 +111,9 @@ func (s *stubClient) ListIngressHosts(ctx context.Context) (map[string][]string,
 func (s *stubClient) GetStatefulSetPluginsChecksum(_ context.Context, _, _ string) (string, error) {
 	return "", nil
 }
+func (s *stubClient) GetStatefulSetRollout(_ context.Context, _, _ string) (controller.StatefulSetRollout, error) {
+	return controller.StatefulSetRollout{}, nil
+}
 func (s *stubClient) GetStatefulSetImages(_ context.Context, _, _ string) (map[string]string, map[string]string, error) {
 	return nil, nil, nil
 }

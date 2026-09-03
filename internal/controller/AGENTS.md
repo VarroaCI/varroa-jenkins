@@ -269,6 +269,10 @@ sections describe.
   `resourceOverlay` setting `spec.updateStrategy: OnDelete` takes over pod
   recycling and needs a manual pod delete to pick up the change, same as the
   plugin-checksum roll.
+  A boot-failed pod cannot roll on its own under `OrderedReady`.
+  `replaceStaleBootFailedPod` deletes it once when its `controller-revision-hash`
+  lags `status.updateRevision`. The guard requires `RollingUpdate` with no
+  partition and skips a terminating pod.
 - **Immutable STS spec fields are preserved from live on update** —
   `CreateStatefulSet`'s update branch carries `volumeClaimTemplates`,
   `serviceName`, `selector`, and `podManagementPolicy` verbatim from the existing

@@ -93,6 +93,10 @@ type testClient struct {
 	// a hot path does NOT fetch the pod.
 	getControllerPodCalls int
 	statefulSetReady      *bool
+	// statefulSetRollout and statefulSetRolloutErr are returned by
+	// GetStatefulSetRollout.
+	statefulSetRollout    StatefulSetRollout
+	statefulSetRolloutErr error
 	// provisioningDefaults is used by seedClientCRDs to seed the crdstore.
 	provisioningDefaults *v1alpha1.ProvisioningDefaults
 	// controllerClass is used by seedClientCRDs to seed the crdstore.
@@ -541,6 +545,12 @@ func (t *testClient) ListIngressHosts(_ context.Context) (map[string][]string, e
 }
 func (t *testClient) GetStatefulSetPluginsChecksum(_ context.Context, _, _ string) (string, error) {
 	return "", nil
+}
+func (t *testClient) GetStatefulSetRollout(_ context.Context, _, _ string) (StatefulSetRollout, error) {
+	if t.statefulSetRolloutErr != nil {
+		return StatefulSetRollout{}, t.statefulSetRolloutErr
+	}
+	return t.statefulSetRollout, nil
 }
 func (t *testClient) GetStatefulSetImages(_ context.Context, _, _ string) (map[string]string, map[string]string, error) {
 	return t.stsComputedImages, t.stsLiveImages, t.stsImagesErr
@@ -992,8 +1002,9 @@ func TestFinalize(t *testing.T) {
 
 	cr := &v1alpha1.Controller{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "test",
-			UID:  testUID,
+			Name:      "test",
+			Namespace: "ns1",
+			UID:       testUID,
 		},
 		Status: v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseRunning},
 	}
@@ -1001,6 +1012,23 @@ func TestFinalize(t *testing.T) {
 	err := rec.Finalize(context.Background(), cr)
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
+	}
+
+	pre := controllerPrefix(cr)
+	// Every ConfigMap the operator writes for a controller must go away with it.
+	// The literal suffixes are intentional: a rename of cascConfigMapName must
+	// not silently move the expectation with it.
+	for _, want := range []string{pre + "-init", pre + "-plugins", pre + "-casc"} {
+		found := false
+		for _, d := range client.deleted {
+			if d.kind == "ConfigMap" && d.name == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Finalize did not delete ConfigMap %q; deleted = %+v", want, client.deleted)
+		}
 	}
 }
 

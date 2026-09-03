@@ -27,6 +27,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"gopkg.in/yaml.v3"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -602,6 +603,18 @@ type StatefulSetSpec struct {
 	ResourcesSource map[string]string `json:"resourcesSource,omitempty"`
 }
 
+// StatefulSetRollout is the part of a StatefulSet that decides whether the
+// operator may replace a pod to advance a rollout.
+type StatefulSetRollout struct {
+	// UpdateRevision is status.updateRevision. It is "" when the
+	// StatefulSet does not exist.
+	UpdateRevision string
+	// RollingUpdate is true when spec.updateStrategy is RollingUpdate (or
+	// unset) and rollingUpdate.partition is nil or 0. Under OnDelete or a
+	// partition the user or the partition owns pod recycling.
+	RollingUpdate bool
+}
+
 // ResourceClient abstracts Kubernetes resource operations.
 type ResourceClient interface {
 	CreateService(ctx context.Context, name, namespace string, port int32, overlayYAML string) error
@@ -614,6 +627,9 @@ type ResourceClient interface {
 	// GetStatefulSetPluginsChecksum returns the plugins-checksum annotation from the
 	// live StatefulSet's pod template, or "" if the StatefulSet does not exist.
 	GetStatefulSetPluginsChecksum(ctx context.Context, name, namespace string) (string, error)
+	// GetStatefulSetRollout returns the update revision and rollout strategy
+	// of the named StatefulSet. A missing StatefulSet returns the zero value.
+	GetStatefulSetRollout(ctx context.Context, name, namespace string) (StatefulSetRollout, error)
 	// GetStatefulSetImages returns the varroa.dev/computed-images stamp (nil when
 	// absent/unparseable) and the live container images (containers + initContainers,
 	// by name) of the controller StatefulSet. A missing StatefulSet returns
@@ -3624,6 +3640,7 @@ func (r *Reconciler) reconcileJenkinsBootFailure(ctx context.Context, cr *v1alph
 			Reason:  v1alpha1.ReasonJenkinsBootFailed,
 			Message: msg,
 		})
+		r.replaceStaleBootFailedPod(ctx, cr, pod)
 		return
 	}
 	// Not failing is two different states, and the reason has to say which:
@@ -3639,6 +3656,41 @@ func (r *Reconciler) reconcileJenkinsBootFailure(ctx context.Context, cr *v1alph
 		Status: metav1.ConditionFalse,
 		Reason: reason,
 	})
+}
+
+// replaceStaleBootFailedPod deletes a boot-failed pod that runs an older
+// StatefulSet revision than status.updateRevision. Under OrderedReady the
+// StatefulSet controller waits for the pod to become Ready before it rolls
+// it. A crash-looping pod therefore blocks its own replacement. The
+// StatefulSet recreates the deleted pod at the update revision. A pod that
+// already runs the update revision is kept, which prevents a delete loop
+// when the new revision also fails to boot. A terminating pod is kept so
+// the delete and its event fire once. OnDelete and partitioned strategies
+// hand pod recycling to the user, so the helper does nothing for them.
+func (r *Reconciler) replaceStaleBootFailedPod(ctx context.Context, cr *v1alpha1.Controller, pod *corev1.Pod) {
+	if pod.DeletionTimestamp != nil {
+		return
+	}
+	podRevision := pod.Labels[appsv1.StatefulSetRevisionLabel]
+	if podRevision == "" {
+		return
+	}
+	rollout, err := r.client.GetStatefulSetRollout(ctx, controllerPrefix(cr), cr.Namespace)
+	if err != nil {
+		r.Logger.Warn("read statefulset rollout failed", "controller", cr.Namespace+"/"+cr.Name, "error", err)
+		return
+	}
+	if !rollout.RollingUpdate || rollout.UpdateRevision == "" || rollout.UpdateRevision == podRevision {
+		return
+	}
+	if err := r.client.DeleteControllerPod(ctx, cr.Namespace, cr.Name); err != nil {
+		r.Logger.Warn("delete stale boot-failed pod failed", "controller", cr.Namespace+"/"+cr.Name, "error", err)
+		return
+	}
+	r.Logger.Info("deleted boot-failed pod that lags the statefulset revision",
+		"controller", cr.Namespace+"/"+cr.Name, "podRevision", podRevision, "updateRevision", rollout.UpdateRevision)
+	r.emitOperatorEvent("pod.replaced", cr,
+		"deleted the boot-failed pod so the StatefulSet can roll the new revision", "")
 }
 
 // jenkinsContainerReady reports the Jenkins container's own readiness, which is
@@ -3807,9 +3859,9 @@ func (r *Reconciler) Finalize(ctx context.Context, cr *v1alpha1.Controller) erro
 	if err := r.client.DeleteResource(ctx, "StatefulSet", pre, cr.Namespace); err != nil {
 		return err
 	}
-	// Delete ConfigMaps
-	for _, suffix := range []string{"-init", "-plugins"} {
-		_ = r.client.DeleteResource(ctx, "ConfigMap", pre+suffix, cr.Namespace)
+	// Delete the init, plugins, and casc ConfigMaps.
+	for _, name := range []string{pre + "-init", pre + "-plugins", cascConfigMapName(pre)} {
+		_ = r.client.DeleteResource(ctx, "ConfigMap", name, cr.Namespace)
 	}
 	// Delete bootstrap Secret
 	_ = r.client.DeleteSecret(ctx, pre+"-bootstrap", cr.Namespace)

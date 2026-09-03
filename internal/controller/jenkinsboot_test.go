@@ -2,8 +2,10 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -356,4 +358,113 @@ func TestReconcileConnectedJenkinsBoot_CachedHealthyNeverClearsTrue(t *testing.T
 			t.Errorf("Reason = %q, want %q", cond.Reason, "Booted")
 		}
 	})
+}
+
+func TestReconcileJenkinsBootFailure_ReplacesStalePod(t *testing.T) {
+	crashLoop := func(revision string) *corev1.Pod {
+		pod := &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+			Name:                 overlay.JenkinsContainerName,
+			RestartCount:         3,
+			State:                corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff", Message: "back-off 1m0s"}},
+			LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 5, Reason: "Error"}},
+		}}}}
+		if revision != "" {
+			pod.Labels = map[string]string{appsv1.StatefulSetRevisionLabel: revision}
+		}
+		return pod
+	}
+	ready := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{appsv1.StatefulSetRevisionLabel: "rev-1"}},
+		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+			Name:  overlay.JenkinsContainerName,
+			Ready: true,
+			State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+		}}},
+	}
+	terminating := crashLoop("rev-1")
+	now := metav1.Now()
+	terminating.DeletionTimestamp = &now
+	rolling := func(rev string) StatefulSetRollout {
+		return StatefulSetRollout{UpdateRevision: rev, RollingUpdate: true}
+	}
+
+	cases := []struct {
+		name        string
+		pod         *corev1.Pod
+		rollout     StatefulSetRollout
+		rolloutErr  error
+		wantDeletes int
+	}{
+		// The StatefulSet holds a newer template than the crash-looping pod.
+		{"stale crash-looping pod is deleted", crashLoop("rev-1"), rolling("rev-2"), nil, 1},
+		// The pod already runs the newest template: a delete would only loop.
+		{"current crash-looping pod is kept", crashLoop("rev-2"), rolling("rev-2"), nil, 0},
+		// Missing data on either side means the operator cannot compare.
+		{"pod without revision label is kept", crashLoop(""), rolling("rev-2"), nil, 0},
+		{"missing StatefulSet is kept", crashLoop("rev-1"), StatefulSetRollout{}, nil, 0},
+		{"rollout read error keeps the pod", crashLoop("rev-1"), StatefulSetRollout{}, errors.New("boom"), 0},
+		// OnDelete or a partition hands pod recycling to the user.
+		{"OnDelete strategy keeps the pod", crashLoop("rev-1"), StatefulSetRollout{UpdateRevision: "rev-2", RollingUpdate: false}, nil, 0},
+		// A pod that is already terminating must not be deleted again.
+		{"terminating stale pod is kept", terminating, rolling("rev-2"), nil, 0},
+		// A healthy pod is never touched, even when it lags the revision.
+		{"ready stale pod is kept", ready, rolling("rev-2"), nil, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := newTestClientWithBundle()
+			client.controllerPod = tc.pod
+			client.statefulSetRollout = tc.rollout
+			client.statefulSetRolloutErr = tc.rolloutErr
+			rec := newTestReconciler(client)
+			cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+
+			rec.reconcileJenkinsBootFailure(context.Background(), cr)
+
+			if client.deleteControllerPodCalls != tc.wantDeletes {
+				t.Errorf("DeleteControllerPod calls = %d, want %d", client.deleteControllerPodCalls, tc.wantDeletes)
+			}
+			cond := findCondition(cr.Status.Conditions, v1alpha1.ConditionJenkinsBootFailed)
+			if cond == nil {
+				t.Fatal("ConditionJenkinsBootFailed absent")
+			}
+			if tc.pod == ready && cond.Status != metav1.ConditionFalse {
+				t.Errorf("ready pod: Status = %q, want False", cond.Status)
+			}
+			if tc.pod != ready && cond.Status != metav1.ConditionTrue {
+				t.Errorf("crash-looping pod: Status = %q, want True", cond.Status)
+			}
+		})
+	}
+}
+
+// A stale pod is deleted once. The next reconcile sees the same pod with a
+// DeletionTimestamp and must not delete it again.
+func TestReconcileJenkinsBootFailure_DeletesStalePodOnce(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{appsv1.StatefulSetRevisionLabel: "rev-1"}},
+		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+			Name:                 overlay.JenkinsContainerName,
+			RestartCount:         3,
+			State:                corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"}},
+			LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 5, Reason: "Error"}},
+		}}},
+	}
+	client := newTestClientWithBundle()
+	client.controllerPod = pod
+	client.statefulSetRollout = StatefulSetRollout{UpdateRevision: "rev-2", RollingUpdate: true}
+	rec := newTestReconciler(client)
+	cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+
+	rec.reconcileJenkinsBootFailure(context.Background(), cr)
+	if client.deleteControllerPodCalls != 1 {
+		t.Fatalf("first reconcile: DeleteControllerPod calls = %d, want 1", client.deleteControllerPodCalls)
+	}
+
+	now := metav1.Now()
+	pod.DeletionTimestamp = &now
+	rec.reconcileJenkinsBootFailure(context.Background(), cr)
+	if client.deleteControllerPodCalls != 1 {
+		t.Errorf("second reconcile on terminating pod: DeleteControllerPod calls = %d, want 1", client.deleteControllerPodCalls)
+	}
 }

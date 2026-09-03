@@ -360,6 +360,24 @@ func (c *ClientsetClient) GetStatefulSetPluginsChecksum(ctx context.Context, nam
 	return "", nil
 }
 
+// GetStatefulSetRollout returns the update revision and rollout strategy
+// of the named StatefulSet. A missing StatefulSet returns the zero value.
+func (c *ClientsetClient) GetStatefulSetRollout(ctx context.Context, name, namespace string) (StatefulSetRollout, error) {
+	sts, err := c.clientset.AppsV1().StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return StatefulSetRollout{}, nil
+		}
+		return StatefulSetRollout{}, err
+	}
+	strategy := sts.Spec.UpdateStrategy
+	rolling := strategy.Type == "" || strategy.Type == appsv1.RollingUpdateStatefulSetStrategyType
+	if rolling && strategy.RollingUpdate != nil && strategy.RollingUpdate.Partition != nil && *strategy.RollingUpdate.Partition > 0 {
+		rolling = false
+	}
+	return StatefulSetRollout{UpdateRevision: sts.Status.UpdateRevision, RollingUpdate: rolling}, nil
+}
+
 // GetStatefulSetImages returns the varroa.dev/computed-images stamp (nil when
 // absent/unparseable) and the live container images (containers + initContainers,
 // by name) of the controller StatefulSet. A missing StatefulSet returns

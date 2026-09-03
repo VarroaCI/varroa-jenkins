@@ -2134,7 +2134,7 @@ export function VersionRollBanner({
 // apply-result section below, so neither gets a hint here.
 const ATTENTION_HINT: Partial<Record<ControllerAttentionKind, string>> = {
   bootFailed:
-    "Jenkins is not reaching a healthy boot. Read the Jenkins container logs (Logs tab): a JCasC error such as a cloud without a name, or a plugin dependency that cannot load, fails boot. Fixing the bundle rolls the pod automatically.",
+    "Jenkins does not reach a healthy boot. Read the Jenkins container logs (Logs tab). A JCasC error such as a cloud without a name, or a plugin dependency that cannot load, fails boot. Fix the bundle. The operator then replaces the pod with the new revision. This applies to the default RollingUpdate strategy with no partition only. An OnDelete or partitioned overlay keeps the manual pod delete.",
   pluginRollFailed:
     "The plugins-init step failed. The message above names the plugin; check that its pin exists in the update center and matches the JenkinsVersionProfile lock.",
   failed:
