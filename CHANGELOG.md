@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/VarroaCI/varroa-jenkins/compare/v0.3.0...v0.4.0) (2026-09-03)
+
+
+### Features
+
+* fleet attention signals, NATS credential rotation, MCP catalog coverage ([#9](https://github.com/VarroaCI/varroa-jenkins/issues/9)) ([558b5c0](https://github.com/VarroaCI/varroa-jenkins/commit/558b5c093bb4821839f85864130ac8f1bd62120f))
+
 ## [0.3.0](https://github.com/VarroaCI/varroa-jenkins/compare/v0.2.0...v0.3.0) (2026-09-01)
 
 
