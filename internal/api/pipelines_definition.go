@@ -100,14 +100,52 @@ func (s *Server) teamPipelineBundleContent(ctx context.Context, ref TenantRef) (
 	return s.composedBundleContent(ctx, bundleRef.Name, bundleRef.Namespace)
 }
 
-// controllerItemManifest reads and parses ref's controller's composed
-// bundle items.yaml. It returns a nil manifest, with no error, when the
-// controller, its bundle, or an items.yaml key cannot be found: a tenant
-// with no catalog template still serves record-derived data alone.
+// tenantController returns ref's controller, or nil when it does not
+// exist. A read error other than not-found is returned.
+func (s *Server) tenantController(ctx context.Context, ref TenantRef) (*v1alpha1.Controller, error) {
+	if ref.Controller == "" {
+		return nil, nil
+	}
+	cr, err := crdstore.Get[v1alpha1.Controller](ctx, s.deps.Store, ref.Controller, ref.Namespace)
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return cr, nil
+}
+
+// controllerItemManifest reads and parses the items.yaml that declares
+// ref's jobs. A placed Team (ref.Folder set) reads its own tenant bundle
+// and re-roots the manifest under the Team folder, which is how the cell
+// assembles it; the cell's bundle never carries a tenant job. A synthetic
+// single-controller tenant (ref.Folder empty) reads its controller's
+// bundle. It returns a nil manifest, with no error, when the controller,
+// the bundle, or an items.yaml key cannot be found: a tenant with no
+// declared item still serves record-derived data alone.
 func (s *Server) controllerItemManifest(ctx context.Context, ref TenantRef) (*v1alpha1.Controller, *items.Manifest, error) {
-	cr, cm, err := s.controllerBundleContent(ctx, ref)
-	if err != nil || cm == nil {
+	var (
+		cr  *v1alpha1.Controller
+		cm  map[string]string
+		err error
+	)
+	if ref.Folder != "" {
+		// A placed Team never reads the cell's bundle; the controller is
+		// fetched only for its version.
+		cr, err = s.tenantController(ctx, ref)
+		if err != nil {
+			return nil, nil, err
+		}
+		cm, err = s.teamPipelineBundleContent(ctx, ref)
+	} else {
+		cr, cm, err = s.controllerBundleContent(ctx, ref)
+	}
+	if err != nil {
 		return cr, nil, err
+	}
+	if cm == nil {
+		return cr, nil, nil
 	}
 	content, ok := cm["items.yaml"]
 	if !ok || content == "" {
@@ -119,6 +157,12 @@ func (s *Server) controllerItemManifest(ctx context.Context, ref TenantRef) (*v1
 		// without a definition rather than failing the read: the
 		// bundle-validation gate is the place that rejects a bad manifest.
 		return cr, nil, nil //nolint:nilerr // best-effort enrichment, see comment above
+	}
+	if ref.Folder != "" {
+		manifest, err = items.ReRoot(manifest, ref.Folder)
+		if err != nil {
+			return cr, nil, nil //nolint:nilerr // a tenant manifest that names its own root is rejected upstream
+		}
 	}
 	return cr, manifest, nil
 }

@@ -177,12 +177,19 @@ federation, activity persistence, and SSE fanout.
   (`internal/mcp`'s non-HTTP entry point) wraps the same unexported handler logic —
   `listRunsMerged`, `resolveTeamTenants`, `createRun`, `runByID` — so the MCP tools and
   the REST paths share one implementation of every rule.
+- **Item manifest source** (`controllerItemManifest`) — a placed Team
+  (`TenantRef.Folder` set) reads its own tenant bundle's `items.yaml`
+  (`teamPipelineBundleContent`) and re-roots it under the Team folder with
+  `items.ReRoot`, which mirrors the cell's assembly; the cell's bundle holds
+  the cell's own items and never a tenant job, so reading it lists the starter
+  bundle's jobs under a tenant. A single-controller tenant (empty `Folder`)
+  reads its controller's bundle. Job paths on this surface are Jenkins full
+  names, the same shape the record store stores.
 - **Pipeline template resolution** (`pipelines_definition.go`) — the job detail's
   `template` row (`buildPipelineTemplateInfo`) picks one of three sources, never
   guessing: an items-declared job (`definition.varroaTemplate`) resolves its
   version constraint against the bundle's own delivered set
-  (`controllerPipelineTemplates`, reading `pipeline-templates.yaml` from the
-  same ConfigMap `controllerBundleContent` reads for `items.yaml`); a
+  (`controllerPipelineTemplates`, reading `pipeline-templates.yaml`); a
   marker-defined job reads the four template-resolution fields off its most
   recent run's payload (`runTemplatePayload`, set by C1/C2 from
   `BuildEvent.template_name`/`template_version`/`marker_path`/

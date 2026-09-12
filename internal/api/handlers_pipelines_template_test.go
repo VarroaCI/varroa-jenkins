@@ -215,22 +215,22 @@ func TestHandleGetPipelineJob_PlacedTeamTemplateFromTenantBundle(t *testing.T) {
 		},
 	}
 	client.configMaps = map[string]map[string]string{
-		// The cell's own composed items.yaml already carries the tenant's
-		// re-rooted items (design D7/C5); it never carries the tenant's
-		// pipeline-templates.yaml.
-		"bundle-cell-content": {"items.yaml": `
+		// The cell's own composed items.yaml carries the cell's items only.
+		// The tenant's items and templates come from the tenant bundle; the
+		// cell re-roots the items under the Team folder when it assembles.
+		"bundle-cell-content": {"items.yaml": "items:\n  - kind: pipeline\n    name: hello-varroa\n"},
+		"bundle-tenant-content": {
+			"items.yaml": `
 items:
-  - kind: folder
-    name: payments
-    items:
-      - kind: pipeline
-        name: svc-items
-        definition:
-          varroaTemplate:
-            template: payments-template
-            templateVersion: "1"
-`},
-		"bundle-tenant-content": {"pipeline-templates.yaml": placedTeamMarkerTemplatesYAML("payments-template", "1.4.0")},
+  - kind: pipeline
+    name: svc-items
+    definition:
+      varroaTemplate:
+        template: payments-template
+        templateVersion: "1"
+`,
+			"pipeline-templates.yaml": placedTeamMarkerTemplatesYAML("payments-template", "1.4.0"),
+		},
 	}
 	seedTeam(t, client.crdStore, placedTeamObjectWithBundle("payments", "core", "test-ns", "ctrl-a", "bundle-tenant", "test-ns"))
 
@@ -265,5 +265,66 @@ func TestHandleGetPipelineJob_JenkinsfileJobHasNoTemplate(t *testing.T) {
 	tmpl := getPipelineJobTemplate(t, client, reader, "svc-jenkinsfile")
 	if tmpl != nil {
 		t.Errorf("template = %+v, want nil for a Jenkinsfile job", tmpl)
+	}
+}
+
+// TestPlacedTeamListsTenantItemsNotCellItems asserts that a placed Team's
+// pipeline surface reads the tenant's own bundle items.yaml, re-rooted
+// under the Team folder, and never the cell's bundle: a warm cell carries
+// the starter bundle, whose root-level items belong to no tenant.
+func TestPlacedTeamListsTenantItemsNotCellItems(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"ctrl-a": {
+			ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"},
+			Spec:       v1alpha1.ControllerSpec{ComposedBundleRef: &v1alpha1.ComposedBundleRef{Name: "bundle-cell"}},
+		},
+	}
+	client.composedBundles = map[string]*v1alpha1.ComposedBundle{
+		"bundle-cell": {
+			ObjectMeta: metav1.ObjectMeta{Name: "bundle-cell", Namespace: "test-ns"},
+			Status:     v1alpha1.ComposedBundleStatus{ContentRef: "bundle-cell-content"},
+		},
+		"bundle-tenant": {
+			ObjectMeta: metav1.ObjectMeta{Name: "bundle-tenant", Namespace: "test-ns"},
+			Status:     v1alpha1.ComposedBundleStatus{ContentRef: "bundle-tenant-content"},
+		},
+	}
+	client.configMaps = map[string]map[string]string{
+		"bundle-cell-content":   {"items.yaml": "items:\n  - kind: pipeline\n    name: hello-varroa\n"},
+		"bundle-tenant-content": {"items.yaml": "items:\n  - kind: pipeline\n    name: app-x\n    definition:\n      script: \"pipeline {}\"\n    parameters:\n      - string:\n          name: ENV\n          defaultValue: staging\n"},
+	}
+	seedTeam(t, client.crdStore, placedTeamObjectWithBundle("payments", "core", "test-ns", "ctrl-a", "bundle-tenant", "test-ns"))
+	srv := pipelinesTestServer(client, resolverAuthorizer("payments"), newFakeRecordReader(), nil)
+
+	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/payments", map[string]string{"team": "payments"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var list struct {
+		Items []pipelineSummaryJSON `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	paths := make([]string, 0, len(list.Items))
+	for _, it := range list.Items {
+		paths = append(paths, it.JobPath)
+	}
+	if len(paths) != 1 || paths[0] != "payments/app-x" {
+		t.Fatalf("job paths = %v, want exactly [payments/app-x]", paths)
+	}
+
+	rec = doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/payments/jobs/payments%2Fapp-x",
+		map[string]string{"team": "payments", "job": "payments/app-x"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("detail status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var detail pipelineJobDetailJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(detail.Parameters) != 1 || detail.Parameters[0].Name != "ENV" {
+		t.Fatalf("parameters = %+v, want the tenant item's ENV parameter; the item was not found under its folder", detail.Parameters)
 	}
 }

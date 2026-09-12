@@ -302,14 +302,20 @@ func TestTailLeaseClearsOnEveryTerminalCondition(t *testing.T) {
 				return len(h.tailLeases) == 0
 			}, time.Second, "timed out waiting for the lease entry to be deleted")
 
-			var stopPushed bool
-			for _, m := range tailControlsSent(sender) {
-				if m.RunId == runID && m.Action == "stop" {
-					stopPushed = true
+			// The lease clears under the lock and the stop is pushed after
+			// the lock is released, so an expected stop is waited for.
+			stopPushed := func() bool {
+				for _, m := range tailControlsSent(sender) {
+					if m.RunId == runID && m.Action == "stop" {
+						return true
+					}
 				}
+				return false
 			}
-			if stopPushed != tc.wantStopPushed {
-				t.Fatalf("stop TailControl pushed = %v, want %v", stopPushed, tc.wantStopPushed)
+			if tc.wantStopPushed {
+				waitFor(t, stopPushed, time.Second, "timed out waiting for the stop TailControl")
+			} else if stopPushed() {
+				t.Fatal("stop TailControl pushed = true, want false")
 			}
 		})
 	}
