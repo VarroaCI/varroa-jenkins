@@ -3906,6 +3906,66 @@ func TestPluginInstallRequired(t *testing.T) {
 	})
 }
 
+// TestBundleFailedClearsOnEveryResolvingPhase asserts that a stale
+// BundleFailed condition retires in every phase that fully re-resolves the
+// bundle, and only there. Each case seeds a stale True BundleFailed
+// condition, then runs the phase handler against a bundle that resolves
+// cleanly.
+func TestBundleFailedClearsOnEveryResolvingPhase(t *testing.T) {
+	staleBundleFailed := func() v1alpha1.ControllerCondition {
+		return v1alpha1.ControllerCondition{
+			Type:    v1alpha1.ConditionBundleFailed,
+			Status:  metav1.ConditionTrue,
+			Reason:  "BundleResolutionFailed",
+			Message: "stale failure from an earlier reconcile",
+		}
+	}
+
+	t.Run("pending", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		rec := newTestReconciler(client)
+		cr := testController("test", "ns1", v1alpha1.ControllerPhasePending)
+		cr.Status.Conditions = []v1alpha1.ControllerCondition{staleBundleFailed()}
+
+		if err := rec.handlePending(context.Background(), cr); err != nil {
+			t.Fatalf("handlePending: %v", err)
+		}
+		// Pending checks only that the bundle exists. A stale failure set by a
+		// full resolve must survive until the Provisioning resolve confirms it.
+		if bf := findCondition(cr.Status.Conditions, v1alpha1.ConditionBundleFailed); bf == nil {
+			t.Fatal("expected BundleFailed to survive the Pending existence check")
+		}
+	})
+
+	t.Run("provisioning", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		rec := newTestReconciler(client)
+		cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+		cr.Status.Conditions = []v1alpha1.ControllerCondition{staleBundleFailed()}
+
+		if err := rec.handleProvisioning(context.Background(), cr); err != nil {
+			t.Fatalf("handleProvisioning: %v", err)
+		}
+		if bf := findCondition(cr.Status.Conditions, v1alpha1.ConditionBundleFailed); bf != nil {
+			t.Fatalf("expected BundleFailed to clear once Provisioning resolves the bundle again, got %+v", bf)
+		}
+	})
+
+	t.Run("running", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		rec := newTestReconciler(client)
+		cr := testController("test", "ns1", v1alpha1.ControllerPhaseRunning)
+		cr.Status.Conditions = []v1alpha1.ControllerCondition{staleBundleFailed()}
+
+		if err := rec.handleRunning(context.Background(), cr); err != nil {
+			t.Fatalf("handleRunning: %v", err)
+		}
+		if bf := findCondition(cr.Status.Conditions, v1alpha1.ConditionBundleFailed); bf != nil {
+			t.Fatalf("expected BundleFailed to clear once Running re-resolves the bundle via checkPluginRollFailed, got %+v", bf)
+		}
+	})
+}
+
 func TestConfigApplyFailed(t *testing.T) {
 	t.Run("config-failure-true-and-ready-unchanged", func(t *testing.T) {
 		client := newTestClientWithBundle()

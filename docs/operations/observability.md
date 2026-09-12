@@ -9,7 +9,8 @@ The chart exposes metrics for the operator, gateway, BFF, and enabled update cen
 The operator, gateway, and BFF export `varroa.bus.connected`, tagged with a `component`
 attribute. It reads 1 while the component holds a NATS connection and 0 while it
 does not. Alert on a sustained 0. A brief 0 is expected after a credential
-rotation and clears itself.
+rotation and clears itself. To inspect JetStream streams and consumers directly, see
+[Troubleshooting](troubleshooting.md).
 
 ## Use activity history
 

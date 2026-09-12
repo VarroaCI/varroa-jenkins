@@ -321,6 +321,12 @@ sections describe.
   `ResolveVars`, never before, because a template body holds its own
   `${...}` Groovy text that is not a catalog variable (design D7). Returns
   `(*bundle.MaterializedBundle, cb.Status.ResolvedHash, bundleIdentity, error)`.
+  On its one success return path it also calls `clearBundleFailed(cr)`, the
+  single seam every caller shares for retiring a stale `ConditionBundleFailed`.
+  A merge patch cannot clear a condition on its own, so a caller must never
+  add its own parallel `removeConditionByType` call for this condition.
+  `handlePending` checks only that the bundle exists and clears nothing; the
+  Provisioning resolve that follows retires the condition.
 - **Artifact-storage merge step** (`artifactcasc.go`) — the last content edit inside
   `resolveBundleForController`, after the version-profile JCasC overlay merge and still before
   `bundle.ResolveVars`. `applyArtifactStorage` calls `artifactStorageFragment`, which renders the

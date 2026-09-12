@@ -693,6 +693,8 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 		mat.JenkinsYAML = out
 	}
 
+	clearBundleFailed(cr)
+
 	return mat, cb.Status.ResolvedHash, ident, artifactCond, nil
 }
 
@@ -3459,9 +3461,6 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		logger.Warn("bundle resolution failed in connected phase", "error", bundleErr)
 		return nil //nolint:nilerr // non-fatal in Connected phase
 	}
-	// A bundle that resolves again retires the failure condition; a
-	// merge patch never clears it on its own.
-	cr.Status.Conditions = removeConditionByType(cr.Status.Conditions, v1alpha1.ConditionBundleFailed)
 
 	// Evaluate PluginInstallRequired: compare resolved managed plugin set against
 	// the baked plugins.txt ConfigMap. Skip on unusable baseline (ConfigMap read error
@@ -4431,6 +4430,16 @@ func removeConditionByType(conditions []v1alpha1.ControllerCondition, ctype v1al
 		result = append(result, c)
 	}
 	return result
+}
+
+// clearBundleFailed retires a stale BundleFailed condition. Bundle
+// resolution can fail on one reconcile pass and succeed on the next; a
+// status merge patch never clears a condition on its own, so every phase
+// or action that re-resolves the bundle must call this on success, before
+// the status patch goes out. Idempotent: a no-op when the condition is
+// already absent.
+func clearBundleFailed(cr *v1alpha1.Controller) {
+	cr.Status.Conditions = removeConditionByType(cr.Status.Conditions, v1alpha1.ConditionBundleFailed)
 }
 
 // setCondition upserts a condition by Type — only one entry per ConditionType.

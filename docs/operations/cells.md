@@ -6,25 +6,27 @@ Kubernetes agents.
 
 ## What a cell is
 
-A cell is a `Controller` with `spec.cell.enabled: true`. Its Jenkins home is an `emptyDir`, so a
-pod restart loses build history, script console state, and the mite's identity; the operator
-mints a fresh bootstrap token for every new pod. `spec.cell.enabled` cannot change after
-creation. `spec.cell.maxTenants` can: it only caps how many tenants the cell may host.
+A cell is a `Controller` with `spec.cell.enabled: true`. Its Jenkins home is an `emptyDir`. A pod
+roll loses the Jenkins local state and the mite's identity. The operator mints a fresh
+bootstrap token per pod. [Rehydration](#rehydration) restores build history. `spec.cell.enabled` cannot change after creation. `spec.cell.maxTenants` can change; it
+only caps how many tenants the cell may host.
 
-A cell hosts each tenant as a top-level folder named after its `Team`. It accepts no ingress host:
-tenant traffic reaches it only through the [tenant webhook door](#the-tenant-webhook-door) and
-through builds the plugin authenticates internally.
+A cell hosts each tenant as a top-level folder named after its `Team`. It accepts no ingress host.
+Tenant traffic reaches it through the [tenant webhook door](#the-tenant-webhook-door), or through
+builds the plugin authenticates internally.
 
-Five limitations apply:
+Six limitations apply:
 
 - A cell never auto-hibernates.
 - `powerState: Stopped` on a cell destroys every in-flight build.
-- A webhook delivered to a cell is visible to every branch source on that cell. Only the job whose
-  SCM matches the payload reacts.
-- A rehydrated run shows no stage view, no culprit list, and no test detail inside Jenkins. The
-  thin record it seeds holds core fields, the parameters, and the changesets only.
-- The Jenkins role-strategy admin screen reports a tenant's service identity as unknown until that
-  tenant's first build runs.
+- Every branch source on a cell sees each delivered webhook. Only the job whose SCM matches
+  the payload reacts.
+- A rehydrated run shows no stage view, culprit list, or test detail inside Jenkins. The thin
+  record holds core fields, parameters, and changesets only.
+- The role-strategy admin screen reports a tenant's service identity as unknown until its
+  first build runs.
+- An ad-hoc job made in the Jenkins UI or script console does not survive a pod roll. Only a
+  job in the tenant's [`items.yaml`](../config/items.md) bundle does.
 
 ## Prerequisites
 
@@ -79,9 +81,10 @@ cells:
 ```
 
 `warmPool.perProfile` sets how many empty, ready cells the operator keeps per profile that a
-pipelines tenant names. `maxTenantsPerCell` is the capacity a cell uses when its own
-`spec.cell.maxTenants` is `0`. `unreadyGracePeriod` is how long a cell may stay unready before
-the operator rolls its pod. See [Placement lifecycle](#placement-lifecycle).
+pipelines tenant names.
+`maxTenantsPerCell` caps a cell's tenants when `spec.cell.maxTenants` is `0`.
+`unreadyGracePeriod` sets how long a cell may stay unready before a roll.
+See [Placement lifecycle](#placement-lifecycle).
 
 A pool member is named `cell-<profile>-<ordinal>` and carries the labels
 `varroa.dev/cell-profile` and `varroa.dev/warm`.

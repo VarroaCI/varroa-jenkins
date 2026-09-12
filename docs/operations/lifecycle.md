@@ -28,6 +28,8 @@ Use Varroa's queue URL for supported SCM webhooks. Direct requests to sleeping J
 
 A [headless](../security/headless-controllers.md) controller hibernates the same way. Webhooks still queue and replay once it wakes. The human wake redirect page is not served for it. It answers `404` instead. A headless controller has no URL to redirect the browser to.
 
+Varroa usually wakes a controller within about 1 second of a wake request. Occasionally the operator drops the wake request because its event queue is full. The controller then wakes on the next periodic check. With the default 30-second reconciliation interval, that is up to about 36 seconds later. A configured `reconciliationPolicy.interval` raises the bound to about 120% of that interval. This delay is expected behavior, not a fault.
+
 ## Restart, reconcile, or reprovision
 
 ```bash
