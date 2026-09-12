@@ -17,6 +17,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -661,6 +662,181 @@ func (c *ClientsetClient) CreateAgentRBAC(ctx context.Context, name, namespace s
 		return fmt.Errorf("create rolebinding %s: %w", name, err)
 	}
 	return nil
+}
+
+// CreateOrUpdateContentReadGrant creates or updates the Role and RoleBinding
+// that let one ServiceAccount read exactly one ConfigMap by name.
+//
+// The update path replaces the whole Rules slice and the whole Subjects slice,
+// so a rule an administrator widened by hand converges back to the name-scoped
+// rule. roleRef is immutable in Kubernetes, so a binding whose live roleRef
+// differs is deleted under a UID precondition and created again.
+func (c *ClientsetClient) CreateOrUpdateContentReadGrant(ctx context.Context, g ContentReadGrant) error {
+	role := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            g.Name,
+			Namespace:       g.Namespace,
+			OwnerReferences: []metav1.OwnerReference{g.Owner},
+		},
+		Rules: []rbacv1.PolicyRule{{
+			APIGroups:     []string{""},
+			Resources:     []string{"configmaps"},
+			ResourceNames: []string{g.ConfigMapName},
+			Verbs:         []string{"get"},
+		}},
+	}
+	if err := c.applyRole(ctx, role); err != nil {
+		return fmt.Errorf("apply content read role %s/%s: %w", g.Namespace, g.Name, err)
+	}
+
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            g.Name,
+			Namespace:       g.Namespace,
+			OwnerReferences: []metav1.OwnerReference{g.Owner},
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "Role",
+			Name:     g.Name,
+		},
+		Subjects: []rbacv1.Subject{{
+			Kind:      "ServiceAccount",
+			Name:      g.SubjectName,
+			Namespace: g.SubjectNamespace,
+		}},
+	}
+	if err := c.applyRoleBinding(ctx, rb); err != nil {
+		return fmt.Errorf("apply content read rolebinding %s/%s: %w", g.Namespace, g.Name, err)
+	}
+	return nil
+}
+
+// applyRole creates a Role, or updates an existing one when a field the
+// operator owns has drifted.
+//
+// It owns Rules and OwnerReferences, and nothing else. An unchanged Role costs
+// one Get and no write, so a steady bundle adds no write load to the ticker. An
+// update keeps the live ObjectMeta, so a label or annotation another actor
+// added survives.
+func (c *ClientsetClient) applyRole(ctx context.Context, role *rbacv1.Role) error {
+	roles := c.clientset.RbacV1().Roles(role.Namespace)
+	existing, err := roles.Get(ctx, role.Name, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		_, createErr := roles.Create(ctx, role, metav1.CreateOptions{})
+		if createErr == nil {
+			return nil
+		}
+		if !apierrors.IsAlreadyExists(createErr) {
+			return createErr
+		}
+		// Another writer created the object between the read and the create.
+		// Read the winner and converge it in this call. Returning here would
+		// leave the BFF bound to whatever that writer granted until the next
+		// tick. One bounded retry, never a loop.
+		existing, err = roles.Get(ctx, role.Name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("get role after lost create: %w", err)
+		}
+	case err != nil:
+		return fmt.Errorf("get role: %w", err)
+	}
+	if equality.Semantic.DeepEqual(existing.Rules, role.Rules) &&
+		equality.Semantic.DeepEqual(existing.OwnerReferences, role.OwnerReferences) {
+		return nil
+	}
+	updated := existing.DeepCopy()
+	updated.Rules = role.Rules
+	updated.OwnerReferences = role.OwnerReferences
+	_, err = roles.Update(ctx, updated, metav1.UpdateOptions{})
+	return err
+}
+
+// applyRoleBinding creates a RoleBinding, or updates an existing one when a
+// field the operator owns has drifted.
+//
+// It owns RoleRef, Subjects, and OwnerReferences. RoleRef is immutable in
+// Kubernetes, so a difference there is repaired by a delete and a create
+// rather than an update. A lost create race, or a hand edit, can otherwise
+// leave a binding this method could never converge.
+func (c *ClientsetClient) applyRoleBinding(ctx context.Context, rb *rbacv1.RoleBinding) error {
+	bindings := c.clientset.RbacV1().RoleBindings(rb.Namespace)
+	existing, err := bindings.Get(ctx, rb.Name, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		_, createErr := bindings.Create(ctx, rb, metav1.CreateOptions{})
+		if createErr == nil {
+			return nil
+		}
+		if !apierrors.IsAlreadyExists(createErr) {
+			return createErr
+		}
+		// Another writer won the create. Converge its object now, for the same
+		// reason as the Role above.
+		existing, err = bindings.Get(ctx, rb.Name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("get rolebinding after lost create: %w", err)
+		}
+	case err != nil:
+		return fmt.Errorf("get rolebinding: %w", err)
+	}
+	if !equality.Semantic.DeepEqual(existing.RoleRef, rb.RoleRef) {
+		// roleRef is immutable, so an Update can never converge this object.
+		// Without a recreate the wrong binding survives every tick, which
+		// leaves the BFF bound to a Role the operator does not control.
+		//
+		// The precondition on the observed UID stops the delete from removing
+		// a replacement that another writer created after the read above.
+		err = bindings.Delete(ctx, rb.Name, metav1.DeleteOptions{
+			Preconditions: &metav1.Preconditions{UID: &existing.UID},
+		})
+		switch {
+		case apierrors.IsNotFound(err):
+			// Already gone. The create below takes the name.
+		case apierrors.IsConflict(err):
+			// The UID precondition failed, so another writer replaced the
+			// object after the read. That replacement is not the one this call
+			// observed, and deleting it blindly is what the precondition
+			// prevents. The next tick reads the new object and converges it.
+			return nil
+		case err != nil:
+			return fmt.Errorf("delete rolebinding with a different roleRef: %w", err)
+		default:
+			// The delete was accepted, which does not prove the object is
+			// gone. A finalizer holds it in a terminating state, where every
+			// create fails with AlreadyExists. Without this check the operator
+			// repeats delete and create on every tick and records nothing.
+			stale, getErr := bindings.Get(ctx, rb.Name, metav1.GetOptions{})
+			if getErr == nil && stale.DeletionTimestamp != nil {
+				return fmt.Errorf(
+					"rolebinding %s/%s is terminating and still holds a different roleRef; remove its finalizers",
+					rb.Namespace, rb.Name)
+			}
+		}
+		// The replacement keeps the labels and annotations the deleted object
+		// carried, for the same reason the update path preserves them. An
+		// admission policy that requires one would otherwise reject this
+		// create, and the BFF would stay unbound.
+		replacement := rb.DeepCopy()
+		replacement.Labels = existing.Labels
+		replacement.Annotations = existing.Annotations
+		_, err = bindings.Create(ctx, replacement, metav1.CreateOptions{})
+		if apierrors.IsAlreadyExists(err) {
+			// Another writer replaced it again. The next tick converges it.
+			return nil
+		}
+		return err
+	}
+	if equality.Semantic.DeepEqual(existing.Subjects, rb.Subjects) &&
+		equality.Semantic.DeepEqual(existing.OwnerReferences, rb.OwnerReferences) {
+		return nil
+	}
+	updated := existing.DeepCopy()
+	updated.Subjects = rb.Subjects
+	updated.OwnerReferences = rb.OwnerReferences
+	_, err = bindings.Update(ctx, updated, metav1.UpdateOptions{})
+	return err
 }
 
 // CreateServiceAccountTokenSecret creates a long-lived

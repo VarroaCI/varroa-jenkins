@@ -224,6 +224,9 @@ func (f *fakeBroodClient) CreateService(_ context.Context, _, _ string, _ int32,
 }
 func (f *fakeBroodClient) CreateServiceAccount(_ context.Context, _, _ string) error { return nil }
 func (f *fakeBroodClient) CreateAgentRBAC(_ context.Context, _, _ string) error      { return nil }
+func (f *fakeBroodClient) CreateOrUpdateContentReadGrant(_ context.Context, _ controller.ContentReadGrant) error {
+	return nil
+}
 func (f *fakeBroodClient) CreateServiceAccountTokenSecret(_ context.Context, _, _, _ string) error {
 	return nil
 }

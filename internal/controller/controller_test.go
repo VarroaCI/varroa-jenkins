@@ -177,6 +177,10 @@ type testClient struct {
 	saTokenSecrets []struct{ name, namespace, serviceAccount string }
 	// agentRBACCalls records every CreateAgentRBAC call.
 	agentRBACCalls []struct{ name, namespace string }
+	// contentGrants records every CreateOrUpdateContentReadGrant call.
+	contentGrants []ContentReadGrant
+	// contentGrantErr, when set, fails every content read grant write.
+	contentGrantErr error
 
 	// labeledSecrets backs ListSecrets: a fixture list of Secrets with their
 	// namespace and labels, filtered by namespace and label selector. Data
@@ -386,6 +390,13 @@ func (t *testClient) CreateServiceAccount(_ context.Context, name, namespace str
 }
 func (t *testClient) CreateAgentRBAC(_ context.Context, name, namespace string) error {
 	t.agentRBACCalls = append(t.agentRBACCalls, struct{ name, namespace string }{name, namespace})
+	return nil
+}
+func (t *testClient) CreateOrUpdateContentReadGrant(_ context.Context, g ContentReadGrant) error {
+	if t.contentGrantErr != nil {
+		return t.contentGrantErr
+	}
+	t.contentGrants = append(t.contentGrants, g)
 	return nil
 }
 func (t *testClient) CreateServiceAccountTokenSecret(_ context.Context, name, namespace, serviceAccount string) error {

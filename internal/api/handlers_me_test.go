@@ -424,6 +424,9 @@ func (f *fakeResourceClient) CreateService(_ context.Context, n, ns string, p in
 }
 func (f *fakeResourceClient) CreateServiceAccount(_ context.Context, n, ns string) error { return nil }
 func (f *fakeResourceClient) CreateAgentRBAC(_ context.Context, n, ns string) error      { return nil }
+func (f *fakeResourceClient) CreateOrUpdateContentReadGrant(_ context.Context, _ controller.ContentReadGrant) error {
+	return nil
+}
 func (f *fakeResourceClient) CreateServiceAccountTokenSecret(_ context.Context, n, ns, sa string) error {
 	return nil
 }

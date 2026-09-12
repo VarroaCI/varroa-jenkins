@@ -84,6 +84,29 @@ Wait for all control-plane pods to become `Ready`. NATS cannot start until its v
 
 Gateway and BFF HPAs require the Kubernetes metrics API. Telemetry export remains inactive until `telemetry.endpoint` is set.
 
+### BFF ConfigMap Access
+
+The BFF is the internet-facing component. Its ClusterRole grants no `configmaps` rule in any mode,
+so the BFF cannot read every ConfigMap in the cluster. It reaches a ConfigMap through two channels
+only.
+
+The first channel is a Role in the release namespace. It covers the plugin sets that version
+profiles materialize.
+
+The second channel is a per-bundle grant. The operator writes a `Role` and a `RoleBinding` named
+`<bundle>-content-reader` beside each composed bundle's content ConfigMap, in that bundle's own
+namespace. The Role grants `get` on that one ConfigMap by name. It grants no `list` and no `watch`.
+Both objects carry the bundle's owner reference, so Kubernetes removes them with the bundle.
+
+The operator learns the subject from the `VARROA_BFF_SERVICE_ACCOUNT` variable, which the chart
+sets on the operator deployment. A hive install deploys no BFF. The chart leaves the variable
+unset there, and the operator writes no grant.
+
+The operator needs `configmaps` `get` and `roles` write in each namespace where it reconciles a
+bundle. Kubernetes escalation prevention permits a Role write only for permissions the writer
+already holds. Scoped mode keeps both grants in the release namespace and in every listed
+namespace, so the grant still works.
+
 The build record store defaults to off (`recordStore.enabled: false`). When enabled,
 `recordStore.postgres.mode` defaults to `cnpg` and needs the CloudNativePG operator installed
 first; `recordStore.blobs.mode` defaults to `postgres`; and `recordStore.retention` defaults to

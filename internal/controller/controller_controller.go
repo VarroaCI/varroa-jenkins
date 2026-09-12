@@ -851,11 +851,28 @@ type StatefulSetRollout struct {
 	RollingUpdate bool
 }
 
+// ContentReadGrant describes one name-scoped ConfigMap read grant: the
+// permission for a single ServiceAccount to get a single ConfigMap.
+type ContentReadGrant struct {
+	// Name is shared by the Role and the RoleBinding.
+	Name             string
+	Namespace        string
+	ConfigMapName    string
+	SubjectName      string
+	SubjectNamespace string
+	Owner            metav1.OwnerReference
+}
+
 // ResourceClient abstracts Kubernetes resource operations.
 type ResourceClient interface {
 	CreateService(ctx context.Context, name, namespace string, port int32, overlayYAML string) error
 	CreateServiceAccount(ctx context.Context, name, namespace string) error
 	CreateAgentRBAC(ctx context.Context, name, namespace string) error
+	// CreateOrUpdateContentReadGrant creates or updates the Role and
+	// RoleBinding that let one ServiceAccount read exactly one ConfigMap by
+	// name. It replaces the Role rule and the RoleBinding subjects on every
+	// call, so an edit made by hand converges back.
+	CreateOrUpdateContentReadGrant(ctx context.Context, g ContentReadGrant) error
 	// CreateServiceAccountTokenSecret creates a long-lived
 	// kubernetes.io/service-account-token Secret bound to serviceAccount.
 	// Used to project a tenant agent's identity as a Jenkins credential

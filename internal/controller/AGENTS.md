@@ -44,6 +44,24 @@ sections describe.
   that would write identical bytes performs no write — the content hash is carried in the
   `varroa.dev/starter-hash` **annotation**, not a label; see
   [bundles/AGENTS.md](../../bundles/AGENTS.md) for why.
+- **The BFF's content read grant hangs off the status patch, never off the compose
+  branch.** `ReconcileComposedBundle` writes a `Role` + `RoleBinding`
+  (`<bundle>-content-reader`, `get` on `status.contentRef` alone, owner-referenced to the
+  bundle) so the BFF can read that ConfigMap outside the release namespace. The write goes
+  through `applyStatusAndGrant`, which wraps all nine `patchStatus` call sites, plus one
+  direct call on the recompose skip path. Putting it beside the content ConfigMap write
+  instead would miss eight exits: six pass a literal `""` contentRef that `omitempty` +
+  JSON merge patch never persists (so the **previous** contentRef stays live and readable),
+  and two deliberately retain `previousContentRef`. A bundle stuck on a bad git host would
+  then keep readable content with a grant that never heals. The effective contentRef is
+  `status.ContentRef` falling back to `cb.Status.ContentRef`, for that same reason.
+- **A failed grant write is a `status.warnings` entry — never `status.errors`, never a
+  phase change.** The bundle's content is still correct; only the BFF's read is blocked, and
+  a controller reads that ConfigMap with the operator's own permissions. `status.errors` and
+  the phase both describe content, and `ComposedBundleDetail` renders errors unconditionally,
+  so an entry there would show a healthy bundle as broken. An empty
+  `VARROA_BFF_SERVICE_ACCOUNT` disables the grant entirely and warns once per process
+  (`sync.Once`), which is the hive-mode case.
 - **Brood verb policy is enforced in `reconcilePending`, never in the BFF.**
   `verbPolicyAllows` (`broodoperation_controller.go`) reads
   `ProvisioningDefaults.broodPolicy` and denies with a terminal phase + reason

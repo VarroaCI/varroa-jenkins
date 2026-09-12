@@ -52,6 +52,14 @@ spec:
               value: {{ .Release.Namespace | quote }}
             - name: MANAGED_NAMESPACES
               value: {{ join " " .Values.managedNamespaces | quote }}
+            {{- if and (not (include "varroa.isHive" .)) .Values.bff.enabled }}
+            {{- /* The BFF reads each composed bundle's content ConfigMap outside
+                 the release namespace. The operator grants that read per bundle
+                 and binds this ServiceAccount. A deployment with no BFF leaves
+                 the variable unset, and the operator then writes no grant. */}}
+            - name: VARROA_BFF_SERVICE_ACCOUNT
+              value: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-bff") | quote }}
+            {{- end }}
             - name: HOME
               value: /tmp
             - name: TMPDIR

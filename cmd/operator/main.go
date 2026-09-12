@@ -313,6 +313,11 @@ func main() {
 		clientsetClient, clientsetClient, resolver.Cloner(), resolver, cloneCache,
 		"/tmp/varroa-catalogs", logger, operatorNamespace,
 		os.Getenv("VARROA_UPDATE_CENTER_URL"), &http.Client{Timeout: 30 * time.Second})
+	// The BFF reads each composed bundle's content ConfigMap outside the release
+	// namespace, where its ServiceAccount holds no permission. The operator
+	// grants that read per bundle. An empty name means this deployment runs no
+	// BFF, so it writes no grant.
+	catalogReconciler.SetBFFServiceAccount(os.Getenv("VARROA_BFF_SERVICE_ACCOUNT"))
 
 	// Create JenkinsVersionProfile reconciler for plugin set materialization.
 	versionProfileReconciler := controller.NewJenkinsVersionProfileReconciler(clientsetClient, clientsetClient, operatorNamespace, logger)

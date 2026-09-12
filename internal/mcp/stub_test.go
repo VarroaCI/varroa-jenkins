@@ -25,6 +25,9 @@ func (s *stubClient) CreateServiceAccount(ctx context.Context, name, namespace s
 	return nil
 }
 func (s *stubClient) CreateAgentRBAC(ctx context.Context, name, namespace string) error { return nil }
+func (s *stubClient) CreateOrUpdateContentReadGrant(ctx context.Context, g controller.ContentReadGrant) error {
+	return nil
+}
 func (s *stubClient) CreateServiceAccountTokenSecret(ctx context.Context, name, namespace, serviceAccount string) error {
 	return nil
 }

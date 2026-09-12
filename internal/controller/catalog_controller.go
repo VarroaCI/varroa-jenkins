@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -68,6 +69,12 @@ type CatalogReconciler struct {
 	logger            *slog.Logger
 	operatorNamespace string
 
+	// bffServiceAccount is VARROA_BFF_SERVICE_ACCOUNT, the name of the BFF
+	// ServiceAccount that reads composed-bundle content. It resolves in
+	// operatorNamespace. Empty means this deployment runs no BFF, so the
+	// reconciler writes no content read grant.
+	bffServiceAccount string
+
 	// ucBaseURL is VARROA_UPDATE_CENTER_URL. Empty means the update center is
 	// not enabled, which the reserved source reports as an error rather than
 	// deriving nothing silently.
@@ -116,6 +123,13 @@ func NewCatalogReconciler(client ResourceClient, store crdstore.Backend, cloner 
 		ucBaseURL:         strings.TrimRight(ucBaseURL, "/"),
 		ucHTTP:            ucHTTP,
 	}
+}
+
+// SetBFFServiceAccount sets VARROA_BFF_SERVICE_ACCOUNT, the name of the BFF
+// ServiceAccount that the content read grant binds. An empty name disables the
+// grant: a hive-mode deployment runs no BFF.
+func (r *CatalogReconciler) SetBFFServiceAccount(name string) {
+	r.bffServiceAccount = name
 }
 
 // Reconcile syncs a single CatalogSource: clones the repo, parses the index,
@@ -564,7 +578,7 @@ func (r *CatalogReconciler) ReconcileComposedBundle(ctx context.Context, cb *v1a
 						observedRevisions,
 						[]string{fmt.Sprintf("git input[%d]: read secret %s: %v", i, gs.SecretRef, err)},
 						nil, inputSummary)
-					r.patchStatus(ctx, cb, status)
+					r.applyStatusAndGrant(ctx, cb, status)
 					return
 				}
 				auth, err = bundle.GitAuthFromSecret(secData, "")
@@ -573,7 +587,7 @@ func (r *CatalogReconciler) ReconcileComposedBundle(ctx context.Context, cb *v1a
 						observedRevisions,
 						[]string{fmt.Sprintf("git input[%d]: bad secret %s: %v", i, gs.SecretRef, err)},
 						nil, inputSummary)
-					r.patchStatus(ctx, cb, status)
+					r.applyStatusAndGrant(ctx, cb, status)
 					return
 				}
 				resolvedAuth[i] = auth
@@ -591,7 +605,7 @@ func (r *CatalogReconciler) ReconcileComposedBundle(ctx context.Context, cb *v1a
 						observedRevisions,
 						[]string{fmt.Sprintf("git input[%d]: %v", i, hErr)},
 						nil, inputSummary)
-					r.patchStatus(ctx, cb, status)
+					r.applyStatusAndGrant(ctx, cb, status)
 					return
 				}
 			}
@@ -625,7 +639,7 @@ func (r *CatalogReconciler) ReconcileComposedBundle(ctx context.Context, cb *v1a
 						observedRevisions,
 						[]string{fmt.Sprintf("OCI input[%d]: read secret %s: %v", i, ocs.SecretRef, err)},
 						nil, inputSummary)
-					r.patchStatus(ctx, cb, status)
+					r.applyStatusAndGrant(ctx, cb, status)
 					return
 				}
 				auth, err = bundle.OCIAuthFromSecret(secData)
@@ -634,7 +648,7 @@ func (r *CatalogReconciler) ReconcileComposedBundle(ctx context.Context, cb *v1a
 						observedRevisions,
 						[]string{fmt.Sprintf("OCI input[%d]: bad secret %s: %v", i, ocs.SecretRef, err)},
 						nil, inputSummary)
-					r.patchStatus(ctx, cb, status)
+					r.applyStatusAndGrant(ctx, cb, status)
 					return
 				}
 				resolvedOCIAuth[i] = auth
@@ -651,7 +665,7 @@ func (r *CatalogReconciler) ReconcileComposedBundle(ctx context.Context, cb *v1a
 						observedRevisions,
 						[]string{fmt.Sprintf("OCI input[%d]: prepare auth: %v", i, err)},
 						nil, inputSummary)
-					r.patchStatus(ctx, cb, status)
+					r.applyStatusAndGrant(ctx, cb, status)
 					return
 				}
 				configDir = filepath.Dir(configPath)
@@ -696,6 +710,31 @@ func (r *CatalogReconciler) ReconcileComposedBundle(ctx context.Context, cb *v1a
 		!r.hasNewGitInputs(cb, observedRevisions) &&
 		!r.hasNewOCIInputs(cb, observedRevisions) {
 		if _, err := r.client.GetConfigMap(ctx, previousContentRef, cb.Namespace); err == nil {
+			// This tick patches no status, so the grant is reconciled here. A
+			// steady bundle takes this path on almost every tick, and a grant
+			// removed by hand must still converge.
+			//
+			// This path carries the previous warnings forward, because no
+			// compose ran to rebuild them. The grant entry is the exception:
+			// it is derived from this tick's write, so the old one is stripped
+			// first. Carrying it would grow the list on every failed tick.
+			grantErr := r.reconcileContentReadGrant(ctx, cb, previousContentRef)
+			carried := withoutContentGrantWarning(cb.Status.Warnings)
+			stale := len(carried) != len(cb.Status.Warnings)
+			// A write is needed only to add a new warning, or to clear one the
+			// last tick left behind. A healthy steady state writes nothing.
+			if grantErr == nil && !stale {
+				return
+			}
+			warnings := carried
+			if grantErr != nil {
+				logger.Warn("failed to write content read grant", "error", grantErr)
+				warnings = append(warnings, contentGrantWarning(grantErr))
+			}
+			status := r.buildStatus(cb, previousPhase, len(cb.Spec.Inputs), "",
+				previousContentRef, observedRevisions, cb.Status.Errors,
+				warnings, inputSummary)
+			r.patchStatus(ctx, cb, status)
 			return
 		}
 		logger.Info("content ConfigMap missing, re-materializing", "contentRef", previousContentRef)
@@ -709,7 +748,7 @@ func (r *CatalogReconciler) ReconcileComposedBundle(ctx context.Context, cb *v1a
 			previousContentRef, observedRevisions,
 			[]string{fmt.Sprintf("compose error: %v", err)}, nil, inputSummary)
 		// Last-good retention: keep previous content on re-materialization failure.
-		r.patchStatus(ctx, cb, status)
+		r.applyStatusAndGrant(ctx, cb, status)
 		return
 	}
 
@@ -756,7 +795,7 @@ func (r *CatalogReconciler) ReconcileComposedBundle(ctx context.Context, cb *v1a
 					previousContentRef, observedRevisions,
 					[]string{"content too large: merged bundle exceeds ConfigMap size limit"},
 					nil, inputSummary)
-				r.patchStatus(ctx, cb, status)
+				r.applyStatusAndGrant(ctx, cb, status)
 				return
 			}
 
@@ -783,7 +822,7 @@ func (r *CatalogReconciler) ReconcileComposedBundle(ctx context.Context, cb *v1a
 	}
 	status := r.buildStatus(cb, phase, len(cb.Spec.Inputs), resolvedHash, contentRef,
 		observedRevisions, allErrors, allWarnings, inputSummary)
-	r.patchStatus(ctx, cb, status)
+	r.applyStatusAndGrant(ctx, cb, status)
 }
 
 // hasNewGitInputs returns true if there are git inputs whose revision hasn't
@@ -858,6 +897,89 @@ func (r *CatalogReconciler) buildStatus(cb *v1alpha1.ComposedBundle, phase v1alp
 		InputSummary:       inputSummary,
 		ObservedGeneration: cb.Generation,
 	}
+}
+
+// missingBFFServiceAccountOnce keeps the unset-variable warning to one line per
+// process. An install with many bundles would otherwise repeat it on every
+// tick and hide real errors.
+var missingBFFServiceAccountOnce sync.Once
+
+// contentGrantWarningPrefix marks the status warning a failed grant write adds.
+const contentGrantWarningPrefix = "content read grant: "
+
+// contentGrantWarning renders the warning for one failed grant write.
+func contentGrantWarning(err error) string {
+	return contentGrantWarningPrefix + err.Error()
+}
+
+// withoutContentGrantWarning drops every grant warning from warnings.
+//
+// The grant warning is derived from the current write, never accumulated. A
+// caller that carries the previous warnings forward must strip the old entry
+// first, or a persistent denial grows the list on every tick. Stripping it also
+// clears the warning by itself once the write succeeds again.
+func withoutContentGrantWarning(warnings []string) []string {
+	var out []string
+	for _, w := range warnings {
+		if strings.HasPrefix(w, contentGrantWarningPrefix) {
+			continue
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+// contentReadGrantName returns the name shared by the Role and the RoleBinding
+// that let the BFF read one bundle's content ConfigMap.
+func contentReadGrantName(cb *v1alpha1.ComposedBundle) string {
+	return cb.Name + "-content-reader"
+}
+
+// reconcileContentReadGrant writes the Role and RoleBinding that let the BFF
+// read this bundle's content ConfigMap, and nothing else.
+//
+// contentRef is the name that stays live after this tick's status patch. An
+// empty name means the bundle exposes no content, so the grant is not written.
+func (r *CatalogReconciler) reconcileContentReadGrant(ctx context.Context, cb *v1alpha1.ComposedBundle, contentRef string) error {
+	if contentRef == "" {
+		return nil
+	}
+	if r.bffServiceAccount == "" {
+		missingBFFServiceAccountOnce.Do(func() {
+			r.logger.Warn("VARROA_BFF_SERVICE_ACCOUNT is not set, so no composed bundle gets a content read grant")
+		})
+		return nil
+	}
+	return r.client.CreateOrUpdateContentReadGrant(ctx, ContentReadGrant{
+		Name:             contentReadGrantName(cb),
+		Namespace:        cb.Namespace,
+		ConfigMapName:    contentRef,
+		SubjectName:      r.bffServiceAccount,
+		SubjectNamespace: r.operatorNamespace,
+		Owner:            composedBundleOwnerRef(cb),
+	})
+}
+
+// applyStatusAndGrant reconciles the content read grant, then patches the
+// status. The grant names the contentRef this tick's patch makes live.
+//
+// A JSON merge patch that carries no contentRef leaves the persisted value in
+// place, so an empty status.ContentRef falls back to the value already on the
+// object. A grant failure becomes a warning on the same patch: the bundle's
+// content is still correct, so the phase and status.Errors stay untouched.
+func (r *CatalogReconciler) applyStatusAndGrant(ctx context.Context, cb *v1alpha1.ComposedBundle, status *v1alpha1.ComposedBundleStatus) {
+	effective := status.ContentRef
+	if effective == "" {
+		effective = cb.Status.ContentRef
+	}
+	// Strip first, so the entry below is the only grant warning this status
+	// carries even if a caller passed the previous warnings forward.
+	status.Warnings = withoutContentGrantWarning(status.Warnings)
+	if err := r.reconcileContentReadGrant(ctx, cb, effective); err != nil {
+		r.logger.Warn("failed to write content read grant", "name", cb.Name, "namespace", cb.Namespace, "error", err)
+		status.Warnings = append(status.Warnings, contentGrantWarning(err))
+	}
+	r.patchStatus(ctx, cb, status)
 }
 
 // patchStatus patches the ComposedBundle status.

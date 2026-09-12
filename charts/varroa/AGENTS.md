@@ -26,7 +26,19 @@ the packaged CRDs. Does not own the Go source it packages
   ConfigMap read: its `configmaps` `get` (version-profile plugin sets, issue #416)
   lives on the release-namespace `Role` in `bff/role.yaml`, because
   `OPERATOR_NAMESPACE` is fixed to `.Release.Namespace`. Asserted by
-  `tests/test-bff-configmap-rbac.sh`.
+  `tests/test-bff-configmap-rbac.sh` (default mode) and
+  `tests/test-secret-rbac-scoping.sh` (scoped mode).
+  The BFF's **only** ConfigMap read outside the release namespace is a
+  name-scoped grant the operator materializes per composed bundle: a `Role` +
+  `RoleBinding` named `<bundle>-content-reader` in the bundle's own namespace,
+  granting `get` on `status.contentRef` alone, owner-referenced to the bundle.
+  The chart renders no part of it — the operator writes it against the live API
+  server — but the chart does supply the subject through
+  `VARROA_BFF_SERVICE_ACCOUNT` on the operator Deployment, rendered in core mode
+  only (`tests/test-operator-bff-sa-env.sh`). Hive mode deploys no BFF, leaves
+  the env unset, and gets no grant. Narrowing the operator's own `configmaps`
+  `get` or `roles`/`rolebindings` write in a namespace breaks the grant: the
+  Kubernetes escalation check refuses a `Role` the writer cannot itself hold.
 - **Root templates**: `_helpers.tpl` (`varroa.fullname`, `varroa.isHive`,
   `varroa.natsServerCount`, `varroa.jetStreamReplicas`, `varroa.podPlacement` —
   renders `nodeSelector`/`tolerations`/`affinity` from a component's values
@@ -272,6 +284,7 @@ bash charts/varroa/tests/test-updatecenter-seed-default.sh
 bash charts/varroa/tests/test-updatecenter-uploads-nil-guard.sh
 bash charts/varroa/tests/test-updatecenter-archive-url.sh
 bash charts/varroa/tests/test-bff-configmap-rbac.sh
+bash charts/varroa/tests/test-operator-bff-sa-env.sh
 bash charts/varroa/tests/test-recorder-netpol.sh
 bash charts/varroa/tests/test-recorder-chart.sh
 bash charts/varroa/tests/test-runner-door-nginx.sh
