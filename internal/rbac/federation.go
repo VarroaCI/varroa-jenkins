@@ -30,6 +30,14 @@ func DesiredFederatedCRs(
 		if vrb == nil {
 			continue
 		}
+		if vrb.Spec.Scope != nil && len(vrb.Spec.Scope.Tenants) > 0 {
+			// controllerScope on the federated JenkinsRoleBinding is copied
+			// verbatim from this scope, and a hive has no tenant resolution
+			// to evaluate a tenants entry with. A tenant grant stays core-only.
+			warnings = append(warnings, fmt.Sprintf("varroarolebinding %s scope carries tenants; skipped", vrb.Name))
+			continue
+		}
+
 		vr, ok := getVarroaRole(vrb.Spec.RoleRef)
 		if !ok || vr == nil {
 			continue

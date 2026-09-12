@@ -138,13 +138,54 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   matching `*.module.css` and `*.test.tsx` (e.g. `Controllers.tsx`,
   `ControllerDetail.tsx`, `CatalogBrowser.tsx`, `Roles.tsx`, `JenkinsRoles*`,
   `Teams*`, `PluginsTab.tsx`, `FleetPlugins.tsx`). Registered in `src/App.tsx` / `src/routing.ts`.
+  `TeamForm.tsx` carries an exports editor: each entry picks `job` or
+  `locks` (a select, mirroring the CRD's exactly-one-of rule), the matching
+  pattern input(s), and a `callers` list; client-side validation mirrors the
+  CRD's CEL rules (a caller required, a non-empty job/locks, `job` never
+  starting with `/`) so a bad entry is caught before submit. `Teams.tsx`
+  lists a team's exports as one summary line per entry, naming its kind,
+  pattern(s), and callers, with a dash for a team that exports nothing.
+- `src/pages/pipelines/` — the pipelines route tree: `PipelinesIndex.tsx`
+  (`/pipelines`, redirects when the caller's grants resolve to exactly one
+  team), `TeamHome.tsx` (`/pipelines/:team`, the jobs table plus a Running
+  now strip), `PipelinePage.tsx` (`/pipelines/:team/:job`, one job's health,
+  definition, and run list, and hosts `RunDrawer.tsx`'s parameter form),
+  `BuildPage.tsx` (`/pipelines/:team/:job/:run`, one run's detail; owns the
+  single `useEventStream` call for the run and passes `lastEvent` down to
+  `StageGraph.tsx` and `RunLogViewer.tsx` as a prop). `StageGraph.tsx` renders
+  a run's stages from `GetRun`'s stage list plus live `stage` frames.
+  `RunLogViewer.tsx` renders the log stream: search, virtualized scroll, and
+  ANSI colour via `ansi.ts`'s `parseAnsiLine`. `RunLogViewer` is a pure
+  renderer of the `lastEvent` prop; it never calls `useEventStream` itself.
+  `src/components/Console.tsx` is a different, generic log-line component and
+  is not the log viewer for this page — do not route pipeline log rendering
+  through it.
+- **Pipeline templates** — `CatalogItemDetail.tsx` renders a
+  `pipeline-template` item's `PipelineTemplateCard`: the template's
+  parameters/uiSchema form (`VarroaForm`, `src/components/specform/
+  VarroaFormTheme.tsx`) and a generated marker preview. It validates against
+  `templateValidator` (`src/components/specform/templateValidator.ts`, an
+  Ajv 2020-12 instance, separate from `ControllerSpecForm`'s draft-07
+  validator, because a PipelineTemplate document declares a JSON Schema
+  2020-12 subset). `templateValidatorCorpus.test.ts` reads
+  `internal/bundle/pipelinetemplate/testdata/schema-corpus/` directly by
+  relative path (no local mirror, unlike the plugin's Maven test, which
+  cannot see the Go module tree), so this suite and the Go package's own
+  `corpus_test.go` always run against the same fixture files.
 - `src/components/` (~87 files) — shared UI building blocks (`Button`,
   `Card`, `Layout`, `Console`, `KVGrid`, `MetricCard`, `ConfigPipeline`,
   `OverlayEditor`, `ActivityTimeline`, route guards `ProtectedRoute` /
   `PermissionRoute`), each paired with a `.module.css`.
 - `src/hooks/` — data-fetching hooks wrapping React Query
   (`useControllers`, `useCatalog`, `useClusters`, `useActivityFeed`,
-  `useEventStream` for SSE, `usePermissions`, `useFleetPlugins`). `useControllers.ts` carries
+  `useEventStream` for SSE, `usePermissions`, `useFleetPlugins`).
+  `useEventStream`'s optional `options.resumeUrl` callback is read on a
+  reconnect only, never the first connect: a returned URL replaces
+  `baseUrl` for that attempt, so a caller tracking a resume position (a
+  byte offset, a cursor) reconnects past what it already read instead of
+  replaying the stream from the start. `BuildPage.tsx` is the one caller
+  that passes it, to resume the run log stream past its last-read byte
+  offset. `useControllers.ts` carries
   the hand-maintained `ControllerDetail` TypeScript interface (not generated)
   — new backend fields such as `pluginInventory`, `PluginInventorySummary`,
   and `PluginInventoryDriftEntry` must be added here in the same change or
@@ -159,7 +200,11 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   to a disabled state — derivability blocks, compatibility only advises, and
   `CatalogBrowserUpdateCenter.test.tsx` asserts it), `broodTargets.ts`
   (`broodTargetShape`: maps `cluster/ns/name` picker keys to brood-API tenancy
-  shape; shared by the brood-operation modal and the brood-schedule form).
+  shape; shared by the brood-operation modal and the brood-schedule form),
+  `uuidv7.ts` (`uuidv7`: mints a UUID version 7 client token, layout matching
+  the server's own reader in `internal/api/handlers_pipelines_write.go`;
+  `RunDrawer.tsx` mints one token per drawer open, so a repeated submit
+  carries the same token and the BFF answers with one run).
 - `src/api/` — `client.ts`, the single hand-written fetch client typed
   against `src/types/index.ts` (mirrors CRD/API shapes: `Controller`,
   `ComposedBundle`, `VarroaRole`, `JenkinsRole`, `BroodRun`, etc.).

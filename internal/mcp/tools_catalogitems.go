@@ -21,7 +21,10 @@ func registerCatalogItemTools(mcpServer *server.MCPServer, deps *api.Dependencie
 	listCI := mcp.NewTool("list_catalog_items",
 		mcp.WithDescription("List all catalog items. Returns a flat projection per "+
 			"item (name, namespace, displayName, description, type, version, "+
-			"sourceRef, contentHash, valid) rather than raw CRs."),
+			"sourceRef, contentHash, valid) rather than raw CRs. For an item whose "+
+			"type is pipeline-template, the content this tool does not return is "+
+			"one PipelineTemplate document, not items YAML; this tool does not "+
+			"parse it."),
 		mcp.WithString("namespace", mcp.Description("Optional namespace to filter by")),
 		mcp.WithString("source", mcp.Description("Optional catalog source name filter")),
 		withListOutput(catalogItemListOutputSchema),
@@ -44,7 +47,9 @@ func registerCatalogItemTools(mcpServer *server.MCPServer, deps *api.Dependencie
 	})
 
 	getCI := mcp.NewTool("get_catalog_item",
-		mcp.WithDescription("Get a specific catalog item"),
+		mcp.WithDescription("Get a specific catalog item, as its raw CR. When "+
+			"spec.type is pipeline-template, status.content is one PipelineTemplate "+
+			"document, not items YAML; this tool does not parse it."),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("Item namespace")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Item name")),
 	)
@@ -71,7 +76,7 @@ var catalogItemListOutputSchema = listOutputSchema("Catalog item projection.", [
 	{Name: "namespace", Type: "string", Desc: "Item namespace."},
 	{Name: "displayName", Type: "string", Desc: "Human-readable name."},
 	{Name: "description", Type: "string", Desc: "Item description."},
-	{Name: "type", Type: "string", Desc: "Item type."},
+	{Name: "type", Type: "string", Desc: "Item type. For \"pipeline-template\", the item's content is one PipelineTemplate document, not items YAML."},
 	{Name: "version", Type: "string", Desc: "Item version."},
 	{Name: "sourceRef", Type: "string", Desc: "Owning CatalogSource."},
 	{Name: "contentHash", Type: "string", Desc: "Hash of the item content."},

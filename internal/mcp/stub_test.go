@@ -25,6 +25,9 @@ func (s *stubClient) CreateServiceAccount(ctx context.Context, name, namespace s
 	return nil
 }
 func (s *stubClient) CreateAgentRBAC(ctx context.Context, name, namespace string) error { return nil }
+func (s *stubClient) CreateServiceAccountTokenSecret(ctx context.Context, name, namespace, serviceAccount string) error {
+	return nil
+}
 func (s *stubClient) CreateStatefulSet(ctx context.Context, spec controller.StatefulSetSpec) error {
 	return nil
 }
@@ -83,6 +86,12 @@ func (s *stubClient) DeleteResource(ctx context.Context, kind, name, namespace s
 	return nil
 }
 func (s *stubClient) DeleteSecret(ctx context.Context, name, namespace string) error { return nil }
+func (s *stubClient) DeleteCellNetworkPolicy(ctx context.Context, name, namespace string) error {
+	return nil
+}
+func (s *stubClient) CreateCellNetworkPolicy(ctx context.Context, spec controller.CellPolicySpec) error {
+	return nil
+}
 func (s *stubClient) ApplyControllerSpecSSA(_ context.Context, _, _ string, _ map[string]any, _ string, _ bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error) {
 	return nil, nil, nil
 }
@@ -93,6 +102,9 @@ func (s *stubClient) SetHibernated(_ context.Context, _, _ string, _ bool) (bool
 	return false, nil
 }
 func (s *stubClient) PatchControllerStatus(ctx context.Context, name, namespace string, status *v1alpha1.ControllerStatus) error {
+	return nil
+}
+func (s *stubClient) PatchControllerCellStatus(ctx context.Context, name, namespace string, cell *v1alpha1.CellStatus) error {
 	return nil
 }
 func (s *stubClient) ClearUserPassword(ctx context.Context, name, namespace string) error { return nil }
@@ -116,6 +128,9 @@ func (s *stubClient) GetStatefulSetRollout(_ context.Context, _, _ string) (cont
 }
 func (s *stubClient) GetStatefulSetImages(_ context.Context, _, _ string) (map[string]string, map[string]string, error) {
 	return nil, nil, nil
+}
+func (s *stubClient) GetStatefulSetJenkinsEnv(_ context.Context, _, _ string) (map[string]string, bool, error) {
+	return nil, false, nil
 }
 func (s *stubClient) GetStatefulSetContainerSpecs(_ context.Context, _, _ string) (string, string, *corev1.ResourceRequirements, *corev1.ResourceRequirements, string, map[string]string, bool, error) {
 	return "", "", nil, nil, "", nil, false, nil

@@ -35,7 +35,7 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/nats-io/nats.go"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -59,6 +59,8 @@ import (
 	mcp "github.com/varroaci/varroa-jenkins/internal/mcp"
 	mitesrv "github.com/varroaci/varroa-jenkins/internal/mite"
 	rbac "github.com/varroaci/varroa-jenkins/internal/rbac"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 	"github.com/varroaci/varroa-jenkins/internal/signing"
 	"github.com/varroaci/varroa-jenkins/internal/telemetry"
 	"github.com/varroaci/varroa-jenkins/internal/transport"
@@ -303,81 +305,28 @@ func main() {
 	}()
 
 	// --- Activity stream lifecycle + persistence ---
-	// Read retention config from environment.
-	retentionStr := envDefault("VARROA_ACTIVITY_RETENTION", "7d")
-	maxMsgsStr := envDefault("VARROA_ACTIVITY_MAX_MSGS", "100000")
-	maxBytesStr := envDefault("VARROA_ACTIVITY_MAX_BYTES", "1073741824")
-
-	maxAge, off, fallback := activity.ParseRetention(retentionStr)
-	if fallback {
-		logger.Warn("unrecognized VARROA_ACTIVITY_RETENTION value, falling back to 7d",
-			"value", retentionStr)
+	// The recorder owns the varroa_activity stream's create/update
+	// lifecycle; the BFF creates and updates no JetStream stream for
+	// activity. History reads go through deps.Backfill, wired below from
+	// the record store when one is configured; the live feed stays on
+	// BusFanout's own activity.> subscription (started above), the BFF's
+	// only subscription to that subject.
+	if err := busConn.EnsureStream(bus.WebhookStreamConfig(
+		bus.WebhookStreamName, busConn.Replicas(),
+	)); err != nil {
+		logger.Error("failed to ensure webhook stream", "error", err)
+		os.Exit(1)
 	}
 
-	var maxMsgs, maxBytes int64
-	if _, err := fmt.Sscanf(maxMsgsStr, "%d", &maxMsgs); err != nil {
-		logger.Warn("invalid VARROA_ACTIVITY_MAX_MSGS, using default 100000", "value", maxMsgsStr)
-		maxMsgs = 100000
-	}
-	if _, err := fmt.Sscanf(maxBytesStr, "%d", &maxBytes); err != nil {
-		logger.Warn("invalid VARROA_ACTIVITY_MAX_BYTES, using default 1073741824", "value", maxBytesStr)
-		maxBytes = 1073741824
-	}
-
-	actStore := activity.New(200)
-	actStore.Logger = logger
-
-	var backfill activity.Backfill
-	if off {
-		logger.Info("activity retention is off; using in-memory ring with activity.> subscriber")
-
-		// Single ring-writer: subscribe to activity.> and append to the ring.
-		// This is the ONLY writer to the ring; user-action Notify sites route
-		// through the Publisher (above) and the bus echoes back here.
-		go func() {
-			sub, err := busConn.Subscribe(bus.ActivityWildcard, func(msg *nats.Msg) {
-				var e activity.Event
-				if err := json.Unmarshal(msg.Data, &e); err != nil {
-					return
-				}
-				actStore.Append(e)
-			})
-			if err != nil {
-				logger.Error("subscribe activity.> failed", "error", err)
-				return
-			}
-			defer func() { _ = sub.Unsubscribe() }()
-			<-ctx.Done()
-		}()
-
-		backfill = activity.NewRingBackfill(actStore)
-	} else {
-		logger.Info("ensuring activity JetStream stream",
-			"maxAge", maxAge, "maxMsgs", maxMsgs, "maxBytes", maxBytes)
-		if err := busConn.EnsureStream(bus.ActivityStreamConfig(
-			bus.ActivityStreamName, maxAge, maxMsgs, maxBytes, busConn.Replicas(),
-		)); err != nil {
-			logger.Error("failed to ensure activity stream", "error", err)
-			os.Exit(1)
-		}
-		// Ensure the webhook replay stream (idempotent).
-		if err := busConn.EnsureStream(bus.WebhookStreamConfig(
-			bus.WebhookStreamName, busConn.Replicas(),
-		)); err != nil {
-			logger.Error("failed to ensure webhook stream", "error", err)
-			os.Exit(1)
-		}
-		backfill = activity.NewJetStreamBackfill(cluster, busConn, bus.ActivityStreamName, 5000, int(maxAge.Hours()/24))
-	}
-
-	// Construct the activity Publisher (always present; publishes to bus regardless of mode).
+	// Construct the activity Publisher (always present; publishes to bus
+	// regardless of whether the record store is configured).
 	actPub := activity.NewPublisher(cluster, busConn)
 	actPub.Logger = logger
 	// Jenkins-source events are published by the gateway to the per-controller
 	// activity.<ns>.<controller> subjects (see internal/mite/bus_handler.go), so
-	// they are ingested by the activity.> ring subscriber (off mode) and the
-	// JetStream stream (retention mode) like every other activity event — no
-	// dedicated events.activity subscriber is needed here.
+	// they reach the recorder's activity consumer and BusFanout's live feed
+	// like every other activity event — no dedicated events.activity
+	// subscriber is needed here.
 
 	// --- RBAC informers and authorizer ---
 	dynamicClient := clientsetClient.DynamicClient()
@@ -526,9 +475,83 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Team informer, built like the five above. It feeds the Team-membership
+	// path of tenant capability resolution (internal/rbac EffectiveTenantCapabilities).
+	teamGVR := schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "teams"}
+	teamInformer := cache.NewSharedIndexInformer(
+		&cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				return dynamicClient.Resource(teamGVR).List(context.TODO(), options)
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				return dynamicClient.Resource(teamGVR).Watch(context.TODO(), options)
+			},
+		},
+		&unstructured.Unstructured{},
+		0,
+		cache.Indexers{},
+	)
+	if err := teamInformer.SetTransform(func(obj interface{}) (interface{}, error) {
+		u, ok := obj.(*unstructured.Unstructured)
+		if !ok {
+			return obj, nil
+		}
+		team := &v1alpha1.Team{}
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, team); err != nil {
+			return nil, err
+		}
+		return team, nil
+	}); err != nil {
+		logger.Error("failed to set transform on team informer", "error", err)
+		os.Exit(1)
+	}
+
+	// Runner informer feeds the agent WebSocket door's token index (design
+	// D7): every add or update event re-indexes the object's current
+	// status.token, and every delete event drops it.
+	runnerTokenIndex := api.NewRunnerTokenIndex()
+	runnerGVR := schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "runners"}
+	runnerInformer := cache.NewSharedIndexInformer(
+		&cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				return dynamicClient.Resource(runnerGVR).List(context.TODO(), options)
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				return dynamicClient.Resource(runnerGVR).Watch(context.TODO(), options)
+			},
+		},
+		&unstructured.Unstructured{},
+		0,
+		cache.Indexers{},
+	)
+	if err := runnerInformer.SetTransform(func(obj interface{}) (interface{}, error) {
+		u, ok := obj.(*unstructured.Unstructured)
+		if !ok {
+			return obj, nil
+		}
+		runner := &v1alpha1.Runner{}
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, runner); err != nil {
+			return nil, err
+		}
+		return runner, nil
+	}); err != nil {
+		logger.Error("failed to set transform on runner informer", "error", err)
+		os.Exit(1)
+	}
+	if _, err := runnerInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) { indexRunnerToken(runnerTokenIndex, obj) },
+		UpdateFunc: func(_, newObj interface{}) {
+			indexRunnerToken(runnerTokenIndex, newObj)
+		},
+		DeleteFunc: func(obj interface{}) { unindexRunnerToken(runnerTokenIndex, obj) },
+	}); err != nil {
+		logger.Error("failed to add event handler on runner informer", "error", err)
+		os.Exit(1)
+	}
+
 	userClaims := strings.Split(envDefault("VARROA_OIDC_USER_CLAIM", "preferred_username,sub"), ",")
 	groupClaims := strings.Split(envDefault("VARROA_OIDC_GROUP_CLAIM", "groups"), ",")
-	rbacResolver := rbac.NewResolver(roleInformer, roleBindingInformer, jenkinsRoleInformer, jenkinsRoleBindingInformer, controllerInformer, *defaultRead,
+	rbacResolver := rbac.NewResolver(roleInformer, roleBindingInformer, jenkinsRoleInformer, jenkinsRoleBindingInformer, controllerInformer, teamInformer, *defaultRead,
 		userClaims, groupClaims)
 	authorizer := api.NewAuthorizer(rbacResolver, *defaultRead)
 	configBrood := api.NewBusConfigBrood(cluster, busConn, client, clientsetClient, logger)
@@ -549,12 +572,16 @@ func main() {
 	go controllerInformer.Run(ctx.Done())
 	go jenkinsRoleInformer.Run(ctx.Done())
 	go jenkinsRoleBindingInformer.Run(ctx.Done())
+	go teamInformer.Run(ctx.Done())
+	go runnerInformer.Run(ctx.Done())
 	if !cache.WaitForCacheSync(ctx.Done(),
 		roleInformer.HasSynced,
 		roleBindingInformer.HasSynced,
 		controllerInformer.HasSynced,
 		jenkinsRoleInformer.HasSynced,
 		jenkinsRoleBindingInformer.HasSynced,
+		teamInformer.HasSynced,
+		runnerInformer.HasSynced,
 	) {
 		logger.Error("failed to sync RBAC informer caches")
 		os.Exit(1)
@@ -596,9 +623,7 @@ func main() {
 		Store:             clientsetClient, // *ClientsetClient implements crdstore.Backend
 		MiteRegistry:      miteTransport,
 		Broadcaster:       fanout, // bus-backed fanout replaces the in-process Broadcaster
-		ActivityStore:     actStore,
 		ActivityPublisher: actPub,
-		Backfill:          backfill,
 		OperatorNamespace: operatorNamespace,
 		ManagedNamespaces: managedNamespaces,
 		Logger:            logger,
@@ -611,10 +636,15 @@ func main() {
 		BroodOps:          api.NewBusBroodOps(cluster, busConn, clusterDir, client, clientsetClient, logger),
 		BroodSchedules:    api.NewBusBroodSchedules(cluster, busConn, clusterDir, logger),
 		ConfigBrood:       configBrood,
+		RunnerTokenIndex:  runnerTokenIndex,
 	}
 	// Fleet plugin inventory reader: the classified accessor T2.1 publishes
 	// through the transport. Always wired when the transport exists.
 	apiDeps.FleetPluginInventory = api.NewFleetInventoryReader(miteTransport)
+	// The pipelines tenant resolver needs no record store: it maps a
+	// {team} URL segment onto tenants through Team CRDs and the brood
+	// router, both already wired above.
+	apiDeps.TenantResolver = api.NewTeamTenantResolver(apiDeps.Store, apiDeps.Brood, apiDeps.Authorizer)
 	if ucURL := os.Getenv("VARROA_UPDATE_CENTER_URL"); ucURL != "" {
 		apiDeps.UpdateCenterInventory = api.NewUpdateCenterInventoryClient(ucURL, &http.Client{Timeout: 10 * time.Second})
 		// The BFF is the only component that authenticates a real user, so it is
@@ -627,6 +657,40 @@ func main() {
 		} else {
 			logger.Warn("VARROA_UPDATE_CENTER_IMPORT_TOKEN not set — plugin uploads will return update-center-unreachable")
 		}
+	}
+	if dsn := os.Getenv("VARROA_RECORDSTORE_DSN"); dsn != "" {
+		rsPool, err := pgxpool.New(context.Background(), dsn)
+		if err != nil {
+			logger.Error("failed to open record store pool", "error", err)
+		} else {
+			activityRetentionDays := 0
+			if raw := os.Getenv("VARROA_ACTIVITY_RETENTION_DAYS"); raw != "" {
+				if n, err := strconv.Atoi(raw); err == nil {
+					activityRetentionDays = n
+				} else {
+					logger.Warn("VARROA_ACTIVITY_RETENTION_DAYS is not a whole day count; activity cursors will never expire", "value", raw, "error", err)
+				}
+			}
+			reader := recordstore.NewReader(rsPool, activityRetentionDays)
+			if _, err := reader.SchemaVersion(context.Background()); err != nil {
+				logger.Warn("record store schema is older than this BFF requires; record-store reads will return an error", "error", err)
+			}
+			apiDeps.RecordStore = reader
+			apiDeps.Backfill = recordstore.NewActivityBackfill(reader)
+
+			if blobURL := os.Getenv("VARROA_BLOBSTORE_URL"); blobURL != "" {
+				store, err := blob.Open(context.Background(), blobURL, rsPool)
+				if err != nil {
+					logger.Error("failed to open blob store", "error", err)
+				} else {
+					apiDeps.BlobStore = store
+				}
+			} else {
+				logger.Warn("VARROA_BLOBSTORE_URL not set; the pipelines log and artifact paths will return 503")
+			}
+		}
+	} else {
+		logger.Warn("VARROA_RECORDSTORE_DSN not set; activity history reads are unavailable (deps.Backfill is nil)")
 	}
 	apiDeps.JenkinsTokenSigner = tokenSigner
 
@@ -701,6 +765,10 @@ func main() {
 	// Hibernation wake surface at the host root (unauthenticated, token-guarded;
 	// AuthMiddleware passes through non-/api/ paths).
 	mux.HandleFunc("/hibernation/", apiServer.HandleHibernationDispatch)
+	// Agent WebSocket door (design D7/D8) at the host root, beside the
+	// hibernation surface above: unauthenticated, token-guarded by the URL
+	// itself.
+	mux.HandleFunc("/runners/", apiServer.HandleRunnerDoor)
 
 	// --- Auth provider construction ---
 	var provider auth.Provider
@@ -923,6 +991,31 @@ func jetStreamReplicasFromEnv() int {
 		return 1
 	}
 	return n
+}
+
+// indexRunnerToken re-indexes a Runner informer object's current
+// status.token under its name (design D7). A non-Runner object, or one
+// with no minted token, is a no-op.
+func indexRunnerToken(idx *api.RunnerTokenIndex, obj interface{}) {
+	runner, ok := obj.(*v1alpha1.Runner)
+	if !ok {
+		return
+	}
+	idx.Put(runner.Name, runner.Status.Token)
+}
+
+// unindexRunnerToken drops a deleted Runner's index entry. It also
+// unwraps cache.DeletedFinalStateUnknown, the tombstone the informer
+// delivers when a delete event is missed and only later reconciled.
+func unindexRunnerToken(idx *api.RunnerTokenIndex, obj interface{}) {
+	if tomb, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+		obj = tomb.Obj
+	}
+	runner, ok := obj.(*v1alpha1.Runner)
+	if !ok {
+		return
+	}
+	idx.Remove(runner.Name)
 }
 
 func registerRBACFederationHandlers(roleInformer, bindingInformer cache.SharedIndexInformer, reconciler *api.RBACFederationReconciler, logger *slog.Logger) {

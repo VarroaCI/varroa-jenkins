@@ -76,6 +76,54 @@ func TestTeam_EditBufferExcludesStatus(t *testing.T) {
 	}
 }
 
+// TestTeam_ExportsRoundTrip asserts task 8.4: spec.pipelines.exports
+// survives the CLI's generic JSON pass-through on both the get path
+// (`-o json`) and the edit path (the writable "pipelines" projection
+// carries the nested exports list verbatim).
+func TestTeam_ExportsRoundTrip(t *testing.T) {
+	testSetup(t)
+	srv := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"name":       "payments",
+			"namespaces": []any{"ns1"},
+			"pipelines": map[string]any{
+				"profile":        "lts",
+				"agentNamespace": "ns1",
+				"exports": []any{
+					map[string]any{"job": "release/*", "callers": []any{"payments", "search"}},
+					map[string]any{"locks": []any{"deploy-prod"}, "callers": []any{"payments"}},
+				},
+			},
+		})
+	})
+	defer srv.Close()
+
+	root := newRootCmd()
+	root.SetArgs([]string{"get", "team", "payments", "-o", "json"})
+	out := captureStdout(t, func() {
+		if err := root.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("decode CLI output: %v; output=%s", err, out)
+	}
+	pipelines, ok := doc["pipelines"].(map[string]any)
+	if !ok {
+		t.Fatalf("output carries no pipelines object: %v", doc)
+	}
+	exports, ok := pipelines["exports"].([]any)
+	if !ok || len(exports) != 2 {
+		t.Fatalf("output pipelines.exports = %v, want 2 entries carried through unchanged", pipelines["exports"])
+	}
+	first, ok := exports[0].(map[string]any)
+	if !ok || first["job"] != "release/*" {
+		t.Fatalf("output exports[0] = %v, want the job grant carried through", exports[0])
+	}
+}
+
 // TestTeam_GetList tests listing teams
 func TestTeam_GetList(t *testing.T) {
 	testSetup(t)

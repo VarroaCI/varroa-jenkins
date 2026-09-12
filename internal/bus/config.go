@@ -203,17 +203,31 @@ type BundleComposeResponse struct {
 // All YAML fields are rendered strings; Missing, Drifted, Warnings,
 // UnresolvedVariables, and Errors are informational lists.
 type BundleComposePreview struct {
-	BundleYAML          string             `json:"bundleYaml"`
-	JenkinsYAML         string             `json:"jenkinsYaml"`
-	PluginsYAML         string             `json:"pluginsYaml"`
-	ItemsYAML           string             `json:"itemsYaml"`
-	RbacYAML            string             `json:"rbacYaml"`
-	Missing             []string           `json:"missing"`
-	Drifted             []string           `json:"drifted"`
-	Warnings            []string           `json:"warnings"`
-	UnresolvedVariables []string           `json:"unresolvedVariables"`
-	Errors              []string           `json:"errors,omitempty"`
-	PinPreflight        PinPreflightReport `json:"pinPreflight"`
+	BundleYAML            string                    `json:"bundleYaml"`
+	JenkinsYAML           string                    `json:"jenkinsYaml"`
+	PluginsYAML           string                    `json:"pluginsYaml"`
+	ItemsYAML             string                    `json:"itemsYaml"`
+	RbacYAML              string                    `json:"rbacYaml"`
+	PipelineTemplatesYAML string                    `json:"pipelineTemplatesYaml"`
+	Missing               []string                  `json:"missing"`
+	Drifted               []string                  `json:"drifted"`
+	Warnings              []string                  `json:"warnings"`
+	UnresolvedVariables   []string                  `json:"unresolvedVariables"`
+	Errors                []string                  `json:"errors,omitempty"`
+	PinPreflight          PinPreflightReport        `json:"pinPreflight"`
+	PipelineTemplates     []PipelineTemplateSummary `json:"pipelineTemplates"`
+}
+
+// PipelineTemplateSummary is one pipeline-template a composition
+// delivered, in the preview and validate responses' pipelineTemplates
+// array (design bundle-composition-surface delta). DisplayName and
+// Description mirror the delivered document's metadata and are empty
+// when the document sets none.
+type PipelineTemplateSummary struct {
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	DisplayName string `json:"displayName,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 // PinConflict is a bundle-pinned plugin whose version differs from the

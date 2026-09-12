@@ -56,7 +56,10 @@ ClusterUnreachable:
         $ref: './schemas.yaml#/Error'
 
 ServiceUnavailable:
-  description: Search sources are temporarily unavailable.
+  description: >
+    The upstream data source is temporarily unavailable (search sources,
+    or the build record store when it is disabled or its schema is too
+    old).
   content:
     application/json:
       schema:

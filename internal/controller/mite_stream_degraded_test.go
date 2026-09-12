@@ -8,6 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/controller/runners"
 	"github.com/varroaci/varroa-jenkins/internal/transport"
 )
 
@@ -40,7 +41,7 @@ func TestConnected_MiteStreamDegradedConditionSet(t *testing.T) {
 	cr := newGateCtrl("ctl", 0, "", nil)
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
 
-	_ = rec.handleConnected(context.Background(), cr)
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 
 	cond := findCondition(cr.Status.Conditions, v1alpha1.ConditionMiteStreamDegraded)
 	if cond == nil {
@@ -69,7 +70,7 @@ func TestConnected_MiteStreamDegradedConditionCleared(t *testing.T) {
 	})
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
 
-	_ = rec.handleConnected(context.Background(), cr)
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 
 	cond := findCondition(cr.Status.Conditions, v1alpha1.ConditionMiteStreamDegraded)
 	if cond == nil {
@@ -99,7 +100,7 @@ func TestDisconnected_MiteStreamDegradedConditionRemoved(t *testing.T) {
 	})
 
 	// No registry entry: the mite is disconnected.
-	_ = rec.handleConnected(context.Background(), cr)
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 
 	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionMiteStreamDegraded); c != nil {
 		t.Fatalf("MiteStreamDegraded survived disconnect: status=%s reason=%s", c.Status, c.Reason)

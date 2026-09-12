@@ -2,7 +2,7 @@ items:
   - kind: folder
     name: library-retriever-legacy
     displayName: "Folder with Legacy Library Retriever"
-    description: "Folder with folderLibraries using legacySCM retriever (known gap — silently dropped)"
+    description: "Folder with folderLibraries and a modern-SCM retriever carrying no traits"
     properties:
       - folderLibraries:
           libraries:

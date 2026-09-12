@@ -1,5 +1,5 @@
 cases:
-  # Breadth (15, supported)
+  # Breadth (20, supported)
   - name: freestyle-scm-extensions
     tier: breadth
     status: supported
@@ -7,6 +7,9 @@ cases:
     tier: breadth
     status: supported
   - name: freestyle-params-triggers
+    tier: breadth
+    status: supported
+  - name: freestyle-varroa-upstream-trigger
     tier: breadth
     status: supported
   - name: pipeline-scm-flow
@@ -18,6 +21,9 @@ cases:
   - name: pipeline-all-properties
     tier: breadth
     status: supported
+  - name: pipeline-varroa-template
+    tier: breadth
+    status: supported
   - name: multibranch-git-source
     tier: breadth
     status: supported
@@ -27,10 +33,16 @@ cases:
   - name: multibranch-legacy-source
     tier: breadth
     status: supported
+  - name: multibranch-varroa-marker
+    tier: breadth
+    status: supported
   - name: orgfolder-github-navigator
     tier: breadth
     status: supported
   - name: orgfolder-git-navigator
+    tier: breadth
+    status: supported
+  - name: orgfolder-buildstrategies
     tier: breadth
     status: supported
   - name: folder-envvars
@@ -43,6 +55,9 @@ cases:
     tier: breadth
     status: supported
   - name: item-rbac-groups
+    tier: breadth
+    status: supported
+  - name: folder-kubernetes-clouds
     tier: breadth
     status: supported
 
@@ -60,7 +75,7 @@ cases:
     tier: depth
     status: supported
 
-  # Negative (5 known-gap + 2 promoted supported)
+  # Negative (3 known-gap + 4 promoted supported)
   - name: multibranch-multiple-sources
     tier: negative
     status: supported
@@ -69,10 +84,10 @@ cases:
     status: supported
   - name: folder-libraries
     tier: negative
-    status: known-gap
+    status: supported
   - name: library-retriever-legacy
     tier: negative
-    status: known-gap
+    status: supported
   - name: unknown-kind
     tier: negative
     status: known-gap

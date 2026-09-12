@@ -98,6 +98,38 @@ spec:
             - name: {{ .name }}
               value: {{ .value | quote }}
             {{- end }}
+{{- if and .Values.recordStore.enabled (not (include "varroa.isHive" .)) }}
+            {{- if eq .Values.recordStore.blobs.mode "postgres" }}
+            - name: VARROA_RECORDSTORE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "varroa.recordStore.dsnSecretName" (dict "root" $ "role" "gateway") }}
+                  key: {{ include "varroa.recordStore.dsnSecretKey" $ }}
+            - name: VARROA_BLOBSTORE_URL
+              value: "pgblob:"
+            {{- else }}
+            - name: VARROA_BLOBSTORE_URL
+              value: {{ .Values.recordStore.blobs.s3.url | quote }}
+            {{- end }}
+            {{- if and (eq .Values.recordStore.blobs.mode "s3") .Values.recordStore.blobs.s3.existingSecret }}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.recordStore.blobs.s3.existingSecret }}
+                  key: access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.recordStore.blobs.s3.existingSecret }}
+                  key: secret-access-key
+            - name: AWS_SESSION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.recordStore.blobs.s3.existingSecret }}
+                  key: session-token
+                  optional: true
+            {{- end }}
+{{- end }}
           volumeMounts:
             - name: nats-creds
               mountPath: /etc/nats-creds

@@ -12,6 +12,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
@@ -31,7 +32,11 @@ const webhookReplayConsumer = "varroa-webhook-replay"
 const replayResultTimeout = 30 * time.Second
 
 // webhookEnvelope is the queued webhook shape the BFF writes to the
-// varroa_webhooks stream (see internal/api/handlers_hibernation.go).
+// varroa_webhooks stream (see internal/api/handlers_hibernation.go). It
+// carries either the controller shape (Namespace and Controller set) or
+// the tenant shape (Team set, Namespace and Controller both empty) —
+// design.md D13. isTenantEnvelope decides which, from these fields, never
+// from the subject.
 type webhookEnvelope struct {
 	Method     string            `json:"method"`
 	Path       string            `json:"path"`
@@ -42,6 +47,22 @@ type webhookEnvelope struct {
 	Cluster    string            `json:"cluster"`
 	Namespace  string            `json:"namespace"`
 	Controller string            `json:"controller"`
+
+	// Team, Forge, and DeliveryID are set only on a tenant envelope. Team
+	// is the Team name; Forge and DeliveryID are the door's own forge
+	// identification and derived delivery id, joined into
+	// ReplayWebhookPayload.delivery_id as "<forge>:<delivery-id>".
+	Team       string `json:"team,omitempty"`
+	Forge      string `json:"forge,omitempty"`
+	DeliveryID string `json:"deliveryId,omitempty"`
+}
+
+// isTenantEnvelope reports whether env is the tenant shape. The decision
+// reads only the envelope's own fields, never the subject, so a
+// Kubernetes namespace literally named "tenant" is never mistaken for the
+// tenant shape (design.md D13).
+func (env webhookEnvelope) isTenantEnvelope() bool {
+	return env.Controller == "" && env.Team != ""
 }
 
 // RunWebhookReplay drains the cluster's queued webhooks and replays them to
@@ -120,7 +141,9 @@ func (r *Reconciler) RunWebhookReplay(ctx context.Context, conn *bus.Conn, clust
 	}
 }
 
-// handleQueuedWebhook applies the decision table to a single queued webhook.
+// handleQueuedWebhook decodes the envelope and dispatches on its shape.
+// The shape comes from the envelope's own fields, never the subject
+// (design.md D13).
 func (r *Reconciler) handleQueuedWebhook(ctx context.Context, cluster string, msg *nats.Msg, waiters *replayWaiters) {
 	var env webhookEnvelope
 	if err := json.Unmarshal(msg.Data, &env); err != nil {
@@ -138,6 +161,16 @@ func (r *Reconciler) handleQueuedWebhook(ctx context.Context, cluster string, ms
 		return
 	}
 
+	if env.isTenantEnvelope() {
+		r.handleQueuedTenantWebhook(ctx, env, msg, waiters)
+		return
+	}
+	r.handleQueuedControllerWebhook(ctx, env, msg, waiters)
+}
+
+// handleQueuedControllerWebhook applies the decision table to a
+// controller-shape queued webhook. Unchanged by the tenant shape.
+func (r *Reconciler) handleQueuedControllerWebhook(ctx context.Context, env webhookEnvelope, msg *nats.Msg, waiters *replayWaiters) {
 	cr, err := crdstore.Get[v1alpha1.Controller](ctx, r.store, env.Controller, env.Namespace)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -200,6 +233,143 @@ func (r *Reconciler) handleQueuedWebhook(ctx context.Context, cluster string, ms
 	}
 }
 
+// handleQueuedTenantWebhook applies the decision table to a tenant-shape
+// queued webhook (design.md D13). The consumer resolves the target at
+// delivery time, from the Team's current placement, so a tenant that
+// moves between ingest and delivery lands on its new cell. It naks with
+// the standard delay in four cases — an empty placement, a moving tenant,
+// an absent or unreadable Controller, and a Controller that is not
+// Connected — and terms only when the Team no longer exists. A move
+// drains nothing. It re-reads the placement once more immediately before
+// the send and naks when that target changed since the checks ran, so a
+// move landing in that gap never dispatches to the cell the tenant left.
+func (r *Reconciler) handleQueuedTenantWebhook(ctx context.Context, env webhookEnvelope, msg *nats.Msg, waiters *replayWaiters) {
+	team, err := crdstore.Get[v1alpha1.Team](ctx, r.store, env.Team, "")
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			r.Logger.Info("dropping tenant webhook for deleted team", "team", env.Team)
+			r.publishReplayRejected(env, "team no longer exists")
+			_ = msg.Term()
+			return
+		}
+		// Transient read error: the Team owns this delivery, hold it.
+		_ = msg.NakWithDelay(replayResultTimeout)
+		return
+	}
+
+	placement := team.Status.Placement
+	if placement == nil || placement.Cell == "" || placement.CellNamespace == "" {
+		// Nak case 1: an empty placement.
+		_ = msg.NakWithDelay(replayResultTimeout)
+		return
+	}
+	if teamMoving(team) {
+		// Nak case 2: the Team reports Placed=False with reason
+		// TenantMoving.
+		_ = msg.NakWithDelay(replayResultTimeout)
+		return
+	}
+
+	cr, err := crdstore.Get[v1alpha1.Controller](ctx, r.store, placement.Cell, placement.CellNamespace)
+	if err != nil {
+		// Nak case 3: the named Controller is absent or unreadable. The
+		// Team, not the Controller, owns this delivery — it never terms
+		// here.
+		_ = msg.NakWithDelay(replayResultTimeout)
+		return
+	}
+	if cr.Status.Phase != v1alpha1.ControllerPhaseConnected {
+		// Nak case 4: the named Controller is not Connected.
+		_ = msg.NakWithDelay(replayResultTimeout)
+		return
+	}
+
+	body, err := base64.StdEncoding.DecodeString(env.BodyB64)
+	if err != nil {
+		r.Logger.Warn("dropping tenant webhook with bad body encoding", "team", env.Team, "error", err)
+		_ = msg.Term()
+		return
+	}
+
+	// command_id = the JetStream stream sequence (a stable, unique delivery id);
+	// correlation keeps using it, unchanged from the controller shape.
+	commandID := strconv.FormatUint(msgSequence(msg), 10)
+	cmd := &mitev1.ImperativeCommand{
+		CommandId: commandID,
+		Type:      mitev1.CommandTypeReplayWebhook,
+		ReplayWebhook: &mitev1.ReplayWebhookPayload{
+			Path:    env.Path,
+			Query:   env.Query,
+			Headers: env.Headers,
+			Body:    body,
+			// <forge>:<delivery-id>, joined from the envelope (design.md D13).
+			DeliveryId: env.Forge + ":" + env.DeliveryID,
+		},
+	}
+
+	// Re-read the Team immediately before the send. The nak checks above
+	// ran against the placement this handler read at the top, and a move
+	// can start or land in the gap between that read and this send.
+	// Sending against a stale decision would dispatch to a cell the
+	// tenant already left, or is leaving; nak instead so the redelivery
+	// re-evaluates the full decision table against the now-current Team.
+	// This checks both the placement target and the moving state,
+	// because a move sets Placed=False/TenantMoving while it still holds
+	// the old placement (design.md D13, D4 move order).
+	current, err := crdstore.Get[v1alpha1.Team](ctx, r.store, env.Team, "")
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			r.Logger.Info("dropping tenant webhook for deleted team", "team", env.Team)
+			r.publishReplayRejected(env, "team no longer exists")
+			_ = msg.Term()
+			return
+		}
+		_ = msg.NakWithDelay(replayResultTimeout)
+		return
+	}
+	currentPlacement := current.Status.Placement
+	if currentPlacement == nil ||
+		currentPlacement.Cell != placement.Cell ||
+		currentPlacement.CellNamespace != placement.CellNamespace ||
+		teamMoving(current) {
+		r.Logger.Info("tenant placement changed just before send, redelivering", "team", env.Team)
+		_ = msg.NakWithDelay(replayResultTimeout)
+		return
+	}
+
+	resultCh := waiters.register(commandID)
+	defer waiters.unregister(commandID)
+
+	if err := r.miteTransport.SendImperative(ctx, placement.CellNamespace, placement.Cell, cmd); err != nil {
+		r.Logger.Warn("send tenant replay command failed", "team", env.Team,
+			"cell", placement.CellNamespace+"/"+placement.Cell, "error", err)
+		_ = msg.NakWithDelay(replayResultTimeout)
+		return
+	}
+
+	select {
+	case <-ctx.Done():
+		_ = msg.NakWithDelay(replayResultTimeout)
+	case <-time.After(replayResultTimeout):
+		// No result in time — mite may be slow or gone. Redeliver.
+		_ = msg.NakWithDelay(replayResultTimeout)
+	case res := <-resultCh:
+		r.applyReplayResult(msg, env, res)
+	}
+}
+
+// teamMoving reports whether team's Placed condition is currently False
+// with reason TenantMoving. A tenant in that state holds its buffered
+// deliveries until the move completes.
+func teamMoving(team *v1alpha1.Team) bool {
+	for _, c := range team.Status.Conditions {
+		if c.Type == v1alpha1.TeamConditionPlaced {
+			return c.Status == metav1.ConditionFalse && c.Reason == v1alpha1.TeamReasonTenantMoving
+		}
+	}
+	return false
+}
+
 // replayAction is the JetStream disposition for a replayed webhook.
 type replayAction int
 
@@ -243,11 +413,17 @@ func (r *Reconciler) publishReplayRejected(env webhookEnvelope, reason string) {
 	if r.activityPublisher == nil {
 		return
 	}
+	message := reason
+	if env.isTenantEnvelope() {
+		// A tenant delivery names no controller or namespace to route the
+		// event by, so the team name goes into the message instead.
+		message = fmt.Sprintf("tenant %s: %s", env.Team, reason)
+	}
 	r.activityPublisher.Publish(activity.Event{
 		Type:       "webhook.replay.rejected",
 		Controller: env.Controller,
 		Namespace:  env.Namespace,
-		Message:    reason,
+		Message:    message,
 		Timestamp:  time.Now().UTC(),
 	})
 }

@@ -118,6 +118,9 @@ func TestSSEScope(t *testing.T) {
 		"/api/v1/brood-operations/preview":         "",
 		"/api/v1/brood-operations/ns/name":         "",
 		"/api/v1/brood-operations/ns/name/suspend": "",
+		"/api/v1/runs/run-123/log":                 "run:run-123",
+		"/api/v1/runs/run-123":                     "",
+		"/api/v1/runs/run-123/artifacts":           "",
 	}
 	for path, want := range cases {
 		if got := sseScope(path); got != want {

@@ -68,6 +68,8 @@ spec:
               value: {{ .Values.operator.shardCount | default 256 | quote }}
             - name: VARROA_MAX_CONCURRENT_RECONCILES
               value: {{ .Values.operator.maxConcurrentReconciles | quote }}
+            - name: VARROA_CLAIM_GATE
+              value: {{ .Values.recordStore.enabled | ternary "1" "0" | quote }}
             - name: VARROA_WAKE_PORT
               value: {{ .Values.operator.wake.port | quote }}
             - name: VARROA_WAKE_ENABLED
@@ -129,6 +131,33 @@ spec:
               value: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag }}"
             - name: VARROA_SCHEDULE_BFF_URL
               value: {{ printf "http://%s.%s.svc:%v" (include "varroa.fullname" (dict "Release" .Release "name" "varroa-bff")) .Release.Namespace .Values.bff.service.port | quote }}
+            - name: VARROA_CELLS_WARM_POOL_ENABLED
+              value: {{ .Values.cells.warmPool.enabled | quote }}
+            - name: VARROA_CELLS_WARM_POOL_PER_PROFILE
+              value: {{ .Values.cells.warmPool.perProfile | quote }}
+            - name: VARROA_CELLS_MAX_TENANTS
+              value: {{ .Values.cells.maxTenantsPerCell | quote }}
+            - name: VARROA_CELLS_UNREADY_GRACE
+              value: {{ .Values.cells.unreadyGracePeriod | quote }}
+            - name: VARROA_NETWORKPOLICY_ENABLED
+              value: {{ .Values.networkPolicy.enabled | quote }}
+            - name: VARROA_NETWORKPOLICY_APISERVER_EGRESS
+              value: {{ .Values.networkPolicy.apiServerEgress | toJson | quote }}
+            - name: VARROA_CELL_ISOLATION
+              value: {{ .Values.networkPolicy.cellIsolation | toJson | quote }}
+{{- if and .Values.recordStore.enabled (not (include "varroa.isHive" .)) }}
+            {{- if eq .Values.recordStore.blobs.mode "postgres" }}
+            - name: VARROA_BLOBSTORE_URL
+              value: "pgblob:"
+            {{- else }}
+            - name: VARROA_BLOBSTORE_URL
+              value: {{ .Values.recordStore.blobs.s3.url | quote }}
+            {{- end }}
+            {{- if .Values.recordStore.blobs.s3.artifactSecret }}
+            - name: VARROA_ARTIFACT_SECRET
+              value: {{ .Values.recordStore.blobs.s3.artifactSecret | quote }}
+            {{- end }}
+{{- end }}
 {{- if and .Values.updateCenter.enabled (not (include "varroa.isHive" .)) }}
             - name: VARROA_UPDATE_CENTER_URL
               value: {{ printf "http://varroa-updatecenter.%s.svc:8080" .Release.Namespace | quote }}

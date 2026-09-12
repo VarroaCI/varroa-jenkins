@@ -141,7 +141,7 @@ import (
 )
 
 // startACLTestServer starts an embedded nats-server with the same single-account,
-// three-user permission model the chart renders (design D3/D4).
+// four-user permission model the chart renders (design D3/D4).
 func startACLTestServer(t *testing.T) *server.Server {
 	t.Helper()
 
@@ -297,6 +297,32 @@ func startACLTestServer(t *testing.T) *server.Server {
 					},
 				),
 			},
+			{
+				// The recorder's grants, per design D3: it publishes its
+				// claim reply to the gateway's inbox and its own JetStream
+				// API calls on the build stream; it subscribes to its own
+				// inbox and the claim request subject only.
+				Username: "recorder",
+				Password: "rec_pass",
+				Permissions: makePerms(
+					[]string{
+						"$JS.API.INFO",
+						"_INBOX_gateway.>",
+						"$JS.API.STREAM.CREATE.varroa_builds",
+						"$JS.API.STREAM.UPDATE.varroa_builds",
+						"$JS.API.STREAM.INFO.varroa_builds",
+						"$JS.API.CONSUMER.CREATE.varroa_builds.>",
+						"$JS.API.CONSUMER.DURABLE.CREATE.varroa_builds.>",
+						"$JS.API.CONSUMER.INFO.varroa_builds.>",
+						"$JS.API.CONSUMER.MSG.NEXT.varroa_builds.>",
+						"$JS.ACK.varroa_builds.>",
+					},
+					[]string{
+						"varroa.ledger.claim",
+						"_INBOX_recorder.>",
+					},
+				),
+			},
 		},
 	}
 	s, err := server.NewServer(opts)
@@ -334,10 +360,11 @@ func TestACLIntegration(t *testing.T) {
 	srv := startACLTestServer(t)
 	url := srv.ClientURL()
 
-	// --- Connect all three identities ---
+	// --- Connect all four identities ---
 	op := connectACL(t, url, "operator", "op_pass", "_INBOX_operator")
 	gw := connectACL(t, url, "gateway", "gw_pass", "_INBOX_gateway")
 	bf := connectACL(t, url, "bff", "bff_pass", "_INBOX_bff")
+	_ = connectACL(t, url, "recorder", "rec_pass", "_INBOX_recorder")
 
 	// -----------------------------------------------------------------------
 	// ALLOW: operator can create and Put to mite_desired KV
@@ -668,6 +695,45 @@ func TestACLIntegration(t *testing.T) {
 			t.Fatal("expected async permissions violation for bff subscribe _INBOX_operator.>")
 		}
 		t.Logf("bff subscribe _INBOX_operator.> correctly denied: %v", got)
+	})
+
+	// -----------------------------------------------------------------------
+	// DENY: the recorder cannot read another service's inbox. It publishes
+	// its claim reply to _INBOX_gateway.>, but never subscribes there.
+	// -----------------------------------------------------------------------
+	t.Run("deny_recorder_sub_gateway_inbox", func(t *testing.T) {
+		var (
+			asyncMu  sync.Mutex
+			asyncErr error
+		)
+		nc, err := nats.Connect(url, nats.UserInfo("recorder", "rec_pass"),
+			nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
+				asyncMu.Lock()
+				asyncErr = err
+				asyncMu.Unlock()
+			}),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer nc.Close()
+
+		sub, err := nc.Subscribe("_INBOX_gateway.>", func(_ *nats.Msg) {})
+		if err != nil {
+			t.Fatalf("Subscribe itself must succeed (async denial): %v", err)
+		}
+		defer sub.Unsubscribe()
+
+		nc.Flush()
+		time.Sleep(200 * time.Millisecond)
+
+		asyncMu.Lock()
+		got := asyncErr
+		asyncMu.Unlock()
+		if got == nil {
+			t.Fatal("expected async permissions violation for recorder subscribe _INBOX_gateway.>")
+		}
+		t.Logf("recorder subscribe _INBOX_gateway.> correctly denied: %v", got)
 	})
 
 	// -----------------------------------------------------------------------

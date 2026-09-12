@@ -12,6 +12,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
+	"github.com/varroaci/varroa-jenkins/internal/controller/runners"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/mite"
 	"github.com/varroaci/varroa-jenkins/internal/rbac"
@@ -652,7 +653,7 @@ func TestGate_BypassWaveZero(t *testing.T) {
 	cr.Status.AppliedBundleHash = "" // first provision so no gate
 
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
-	err := rec.handleConnected(context.Background(), cr)
+	err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	// Gate bypass: Push attempts Send which fails (no real gRPC stream in test);
 	// the important assertion is that the gate did NOT block.
 	_ = err
@@ -686,7 +687,7 @@ func TestGate_BypassOverrideAnnotation(t *testing.T) {
 	}
 
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
-	_ = rec.handleConnected(context.Background(), cr) // Send fails (no real stream); gate assertion below
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}) // Send fails (no real stream); gate assertion below
 	if cr.Status.Rollout != nil {
 		t.Fatal("override annotation should bypass gate")
 	}
@@ -709,7 +710,7 @@ func TestGate_BypassOverrideAnnotationMixedCase(t *testing.T) {
 	}
 
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
-	_ = rec.handleConnected(context.Background(), cr) // Send fails (no real stream); gate assertion below
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}) // Send fails (no real stream); gate assertion below
 	if cr.Status.Rollout != nil {
 		t.Fatal("override annotation (mixed case) should bypass gate")
 	}
@@ -728,7 +729,7 @@ func TestGate_NonTrueOverrideIsNotHonored(t *testing.T) {
 	}
 
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
-	err := rec.handleConnected(context.Background(), cr)
+	err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -754,7 +755,7 @@ func TestGate_AlreadyOnTarget(t *testing.T) {
 	}
 
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
-	_ = rec.handleConnected(context.Background(), cr) // Send fails (no real stream); gate assertion below
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}) // Send fails (no real stream); gate assertion below
 	if cr.Status.Rollout != nil {
 		t.Fatal("already on target should bypass gate")
 	}
@@ -772,7 +773,7 @@ func TestGate_FirstProvisionEmptyAppliedHash(t *testing.T) {
 	}
 
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
-	_ = rec.handleConnected(context.Background(), cr) // Send fails (no real stream); gate assertion below
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}) // Send fails (no real stream); gate assertion below
 	if cr.Status.Rollout != nil {
 		t.Fatal("first provision should bypass gate")
 	}
@@ -792,7 +793,7 @@ func TestGate_BlockedSetsRolloutAndCondition(t *testing.T) {
 	}
 
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
-	err := rec.handleConnected(context.Background(), cr)
+	err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -860,7 +861,7 @@ func TestGate_ClearedClearsRolloutAndCondition(t *testing.T) {
 	}
 
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
-	_ = rec.handleConnected(context.Background(), cr) // Send fails (no real stream); gate assertion below
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}) // Send fails (no real stream); gate assertion below
 	if cr.Status.Rollout != nil {
 		t.Fatal("expected rollout cleared")
 	}
@@ -899,7 +900,7 @@ func TestGate_CascadeBlockedWave(t *testing.T) {
 	}
 
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
-	err := rec.handleConnected(context.Background(), cr)
+	err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -926,7 +927,7 @@ func TestGate_BlockedSincePreservedAndReset(t *testing.T) {
 
 	// First tick: block.
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
-	err := rec.handleConnected(context.Background(), cr)
+	err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -934,7 +935,7 @@ func TestGate_BlockedSincePreservedAndReset(t *testing.T) {
 
 	// Second tick: same target hash.
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
-	err = rec.handleConnected(context.Background(), cr)
+	err = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -946,7 +947,7 @@ func TestGate_BlockedSincePreservedAndReset(t *testing.T) {
 	bndl.Status.ResolvedHash = "hash-newer"
 	seedClientCRDs(client)
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
-	err = rec.handleConnected(context.Background(), cr)
+	err = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -971,7 +972,7 @@ func TestGate_DrainingCanaryHoldsLaterWaves(t *testing.T) {
 	}
 
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
-	err := rec.handleConnected(context.Background(), cr)
+	err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1012,7 +1013,7 @@ func TestGate_MiteStatusNilBlocksLaterWave(t *testing.T) {
 	}
 
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
-	err := rec.handleConnected(context.Background(), cr)
+	err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1035,7 +1036,7 @@ func TestGate_RolloutBlockedNeverFlipsPhase(t *testing.T) {
 	}
 
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
-	err := rec.handleConnected(context.Background(), cr)
+	err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1055,7 +1056,7 @@ func TestGate_AppliedBundleHashAdvanceOnSuccessMatch(t *testing.T) {
 
 	// Tick 1: first push — DesiredStateHash is set by handleConnected before Send.
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
-	_ = rec.handleConnected(context.Background(), cr) // Send fails (no real stream)
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}) // Send fails (no real stream)
 	desiredAfterTick1 := cr.Status.DesiredStateHash
 	if desiredAfterTick1 == "" {
 		t.Fatal("expected DesiredStateHash to be set on first tick")
@@ -1070,7 +1071,7 @@ func TestGate_AppliedBundleHashAdvanceOnSuccessMatch(t *testing.T) {
 		Hash:      desiredAfterTick1,
 		Succeeded: true,
 	}
-	_ = rec.handleConnected(context.Background(), cr) // Send fails
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}) // Send fails
 	if cr.Status.AppliedBundleHash != "hash-xyz" {
 		t.Fatalf("expected AppliedBundleHash=hash-xyz after successful apply, got %s", cr.Status.AppliedBundleHash)
 	}
@@ -1081,7 +1082,7 @@ func TestGate_AppliedBundleHashAdvanceOnSuccessMatch(t *testing.T) {
 		Hash:      "hash-xyz", // old desired hash, not the current one
 		Succeeded: true,
 	}
-	_ = rec.handleConnected(context.Background(), cr) // Send fails
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}) // Send fails
 	if cr.Status.AppliedBundleHash == "hash-newer" {
 		t.Fatal("AppliedBundleHash should NOT advance to newer hash without a matching apply result for it")
 	}
@@ -1105,7 +1106,7 @@ func TestGate_WaitingOnCappedAt10(t *testing.T) {
 	}
 
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
-	err := rec.handleConnected(context.Background(), cr)
+	err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -28,7 +28,6 @@ metadata:
   name: getting-started
   namespace: varroa
 spec:
-  namespace: varroa
   version: ""
   composedBundleRef:
     name: getting-started

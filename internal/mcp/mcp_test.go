@@ -287,7 +287,7 @@ func TestJenkinsProxyURLConstruction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := buildJenkinsServiceURL(&v1alpha1.Controller{
+			result := api.BuildJenkinsServiceURL(&v1alpha1.Controller{
 				ObjectMeta: metav1.ObjectMeta{
 					UID:       types.UID(tt.uid),
 					Name:      tt.crName,

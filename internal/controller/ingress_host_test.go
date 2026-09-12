@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -63,5 +64,88 @@ func TestReconcileIngressClearsNoExternalURLOnceHostResolves(t *testing.T) {
 	}
 	if !strings.Contains(c.Message, "test.example.com") {
 		t.Errorf("cleared message should name the host, got: %s", c.Message)
+	}
+}
+
+// A cell gets no per-cell Ingress, even when a ProvisioningDefaults
+// rootDomain would otherwise resolve a host (design D1).
+func TestReconcileIngressSkipsCell(t *testing.T) {
+	tc := newTestClient()
+	tc.provisioningDefaults = &v1alpha1.ProvisioningDefaults{
+		Spec: v1alpha1.ProvisioningDefaultsSpec{RootDomain: "example.com"},
+	}
+	rec := newTestReconciler(tc)
+
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"},
+		Spec:       v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true}},
+	}
+
+	if err := rec.reconcileIngress(context.Background(), cr); err != nil {
+		t.Fatalf("reconcileIngress on a cell must not error: %v", err)
+	}
+	if len(tc.ingressCalls) != 0 {
+		t.Errorf("expected no Ingress created for a cell, got %+v", tc.ingressCalls)
+	}
+}
+
+// A one-tenant controller that opts into spec.headless gets no Ingress even
+// when a host resolves, an Ingress an earlier reconcile created is deleted,
+// and the NoExternalURL condition carries reason Headless (design D4).
+func TestReconcileIngressHeadlessDeletesAndSetsCondition(t *testing.T) {
+	tc := newTestClient()
+	tc.provisioningDefaults = &v1alpha1.ProvisioningDefaults{
+		Spec: v1alpha1.ProvisioningDefaultsSpec{RootDomain: "example.com"},
+	}
+	rec := newTestReconciler(tc)
+
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"},
+		Spec:       v1alpha1.ControllerSpec{Headless: true},
+	}
+
+	if err := rec.reconcileIngress(context.Background(), cr); err != nil {
+		t.Fatalf("reconcileIngress on a headless controller must not error: %v", err)
+	}
+	if len(tc.ingressCalls) != 0 {
+		t.Errorf("expected no Ingress created for a headless controller, got %+v", tc.ingressCalls)
+	}
+
+	wantName := controllerPrefix(cr) + "-ingress"
+	found := false
+	for _, d := range tc.deleted {
+		if d.kind == "Ingress" && d.name == wantName {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected the Ingress %q to be deleted, got %+v", wantName, tc.deleted)
+	}
+
+	c := findCondition(cr.Status.Conditions, v1alpha1.ConditionNoExternalURL)
+	if c == nil || c.Status != metav1.ConditionTrue || c.Reason != "Headless" {
+		t.Fatalf("expected NoExternalURL=True with reason Headless, got %+v", c)
+	}
+}
+
+// A non-NotFound delete failure must reach the caller so the reconcile
+// retries. A silently-discarded error would report success while the old
+// Ingress still routes in.
+func TestReconcileIngressHeadlessReturnsDeleteError(t *testing.T) {
+	tc := newTestClient()
+	tc.deleteResourceErr = errors.New("delete rejected")
+	rec := newTestReconciler(tc)
+
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"},
+		Spec:       v1alpha1.ControllerSpec{Headless: true},
+	}
+
+	err := rec.reconcileIngress(context.Background(), cr)
+	if err == nil {
+		t.Fatal("expected reconcileIngress to return the delete error, got nil")
+	}
+	if !strings.Contains(err.Error(), "delete rejected") {
+		t.Errorf("expected the error to wrap the delete failure, got: %v", err)
 	}
 }

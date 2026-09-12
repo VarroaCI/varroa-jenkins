@@ -8,6 +8,26 @@ import { useAuth } from "../context/AuthContext";
 import { canDoGlobal } from "../hooks/usePermissions";
 import styles from "./Teams.module.css";
 
+/**
+ * exportSummaryRows renders one line per spec.pipelines.exports entry, its
+ * kind (job or locks), and its callers, so the list shows every grant a
+ * tenant makes without hiding which kind each entry is.
+ */
+function exportSummaryRows(team: TeamEntry) {
+  const exports = team.pipelines?.exports;
+  if (!exports || exports.length === 0) return "—";
+  return (
+    <ul className={styles.exportsList}>
+      {exports.map((exp, i) => (
+        <li key={i}>
+          <span className={styles.exportKind}>{exp.job ? "job" : "locks"}:</span>{" "}
+          {exp.job || (exp.locks ?? []).join(", ")} → {exp.callers.join(", ")}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default function Teams() {
   const navigate = useNavigate();
   const { permissions } = useAuth();
@@ -84,6 +104,9 @@ export default function Teams() {
                 <th>Namespaces</th>
                 <th>Role</th>
                 <th>Status</th>
+                <th>Placement</th>
+                <th>Rehydration</th>
+                <th>Exports</th>
                 {isAdmin && <th>Actions</th>}
               </tr>
             </thead>
@@ -91,6 +114,8 @@ export default function Teams() {
               {filtered.map((team) => {
                 const readyCond = team.conditions?.find((c) => c.type === "TeamReady");
                 const isReady = readyCond?.status === "True";
+                const placedCond = team.conditions?.find((c) => c.type === "Placed");
+                const rehydratedCond = team.conditions?.find((c) => c.type === "Rehydrated");
                 return (
                   <tr key={team.name}>
                     <td className={styles.nameCell}>
@@ -119,6 +144,21 @@ export default function Teams() {
                         {isReady ? "Ready" : readyCond?.reason || "Unknown"}
                       </span>
                     </td>
+                    <td>
+                      {team.placement?.cell
+                        ? `${team.placement.cluster}/${team.placement.cell}`
+                        : placedCond
+                        ? placedCond.reason || "Not placed"
+                        : "—"}
+                    </td>
+                    <td>
+                      {!team.pipelines
+                        ? "—"
+                        : rehydratedCond?.status === "True"
+                        ? "Rehydrated"
+                        : rehydratedCond?.reason || "Pending"}
+                    </td>
+                    <td>{exportSummaryRows(team)}</td>
                     {isAdmin && (
                       <td>
                         <button

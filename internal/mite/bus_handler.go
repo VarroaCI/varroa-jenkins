@@ -18,6 +18,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
 
 var (
@@ -47,6 +48,23 @@ func init() {
 // the retry path is exercisable without a live JetStream.
 type desiredWatcher interface {
 	Watch(key string) (nats.KeyWatcher, error)
+}
+
+// buildEventPublisher is the seam over the JetStream publish calls the
+// build-event worker uses. *bus.Conn satisfies it; tests substitute a fake
+// so a rejected publish, a retry, and a dropped heartbeat are exercisable
+// without a live NATS server.
+type buildEventPublisher interface {
+	PublishJetStream(subject string, data []byte) (*nats.PubAck, error)
+	PublishJetStreamAsync(subject string, data []byte) (nats.PubAckFuture, error)
+}
+
+// ledgerRequester is the seam over the core-NATS request-reply call the
+// claim bridge uses. *bus.Conn satisfies it; tests substitute a fake so the
+// granted, timeout, and unparsable-reply paths are exercisable without a
+// live NATS server.
+type ledgerRequester interface {
+	RequestWithContext(ctx context.Context, subject string, data []byte, timeout time.Duration) (*nats.Msg, error)
 }
 
 // BusHandler implements StreamHandler by bridging the mite gRPC stream to the
@@ -113,7 +131,7 @@ type BusHandler struct {
 
 	// watchDegraded records which of a controller's bus→stream watches are
 	// currently broken: "ns/name" -> watch kind -> reason. Tracked per kind
-	// because the three watchers are independent — a healthy content
+	// because the watchers are independent — a healthy content
 	// subscription must not clear a broken desired-state watch. Carried into
 	// the presence record so the operator can surface it as a Controller
 	// condition; a retry that keeps failing must not stay invisible.
@@ -127,9 +145,118 @@ type BusHandler struct {
 	// getting its liveness refreshed and staleMiteThreshold never fires.
 	lastHeartbeat map[string]time.Time
 
+	// cellInstances holds the pod unique identifier each controller's mite
+	// presented at registration ("ns/name" -> cell_instance), set by
+	// RecordCellInstance and read by OnBuildEvent. It is not cleared on
+	// OnDisconnect: the identity belongs to the mite's pod, not to one
+	// stream, and survives a reconnect on the same gateway replica.
+	cellInstances map[string]string
+
 	// watchBackoff is the initial retry delay for re-establishing a bus watch.
 	// Zero means defaultWatchBackoff; tests shrink it.
 	watchBackoff time.Duration
+
+	// buildMu guards buildWorkers, kept separate from mu so a build-event
+	// enqueue never contends with the heartbeat/presence path.
+	buildMu      sync.Mutex
+	buildWorkers map[string]*registeredBuildWorker // keyed "ns/name"
+
+	// claimMu guards claimCounts, kept separate from mu for the same reason.
+	claimMu     sync.Mutex
+	claimCounts map[string]int // keyed "ns/name#epoch"
+
+	// crossTenantMu guards crossTenantCounts, kept separate from mu for
+	// the same reason claimMu is.
+	crossTenantMu     sync.Mutex
+	crossTenantCounts map[string]int // keyed "ns/name#epoch"
+
+	// tenantResolver resolves a claim's or a job-schedule row's ledger
+	// tenant and placement generation. Nil means the single-tenant
+	// placeholder.
+	tenantResolver CellTenantResolver
+
+	// scheduleMu guards scheduleRetained and scheduleStreamMissingUntil,
+	// kept separate from mu for the same reason buildMu and claimMu are.
+	scheduleMu sync.Mutex
+	// scheduleRetained holds, per connection ("ns/name"), the job-schedule
+	// set the gateway has not yet published: a set OnSnapshot could not
+	// resolve every row of, or a set whose publish attempt failed.
+	// handleJobSchedules retries it on every snapshot tick until it
+	// publishes, and replaces it when a later snapshot carries a new set.
+	scheduleRetained map[string]*mitev1.JobScheduleSet
+	// scheduleStreamMissingUntil holds, per connection, when the gateway
+	// may next attempt a job.schedules publish after a publish failed. A
+	// snapshot tick before this time skips the attempt entirely, so a
+	// record-store-disabled install produces no round trip per snapshot.
+	scheduleStreamMissingUntil map[string]time.Time
+	// scheduleStreamMissingTTL overrides how long a publish failure
+	// suppresses the next attempt. Zero means
+	// defaultJobScheduleStreamMissingTTL; tests shrink it.
+	scheduleStreamMissingTTL time.Duration
+
+	// publisher is the build-event JetStream publish seam. Defaults to
+	// conn; tests substitute a fake.
+	publisher buildEventPublisher
+	// ledger is the claim request-reply seam. Defaults to conn; tests
+	// substitute a fake.
+	ledger ledgerRequester
+	// buildPublishRetryDelay is the starting retry delay for a rejected
+	// build-event publish. Zero means defaultPublishRetryDelay; tests
+	// shrink it.
+	buildPublishRetryDelay time.Duration
+
+	// logStore is the blob store the log writer appends console-log
+	// chunks and index entries to. Nil (the default) makes OnLogChunk a
+	// no-op: the record store is disabled. Wired by SetLogStore.
+	logStore blob.Store
+	// logPendingMaxBytes is the gateway-wide pending budget
+	// (VARROA_GATEWAY_LOG_PENDING_BYTES). <= 0 means the default.
+	logPendingMaxBytes int64
+	// logFinalizeWait is VARROA_RECORDSTORE_LOG_FINALIZE_WAIT, read on
+	// the gateway so the writer heartbeat and the abandon deadline use
+	// the same value the recorder's finalize sweep does. <= 0 means the
+	// default.
+	logFinalizeWait time.Duration
+	// ownerCache is the bounded run-ownership cache OnLogChunk consults
+	// before it writes one byte.
+	ownerCache *ownerCache
+
+	// tailMu guards tailLeases and tailErrors, kept separate from mu so a
+	// tail-control push never contends with the heartbeat/presence path.
+	// A terminal condition deletes a run's tailLeases entry outright
+	// rather than leaving it deactivated, so a long-lived gateway holds
+	// no lease past the run it belonged to. A lease timer validates its
+	// control_id and deletes the entry under one unbroken hold of
+	// tailMu (expireTailLeaseIfCurrent), so a renewal can never land in
+	// a window between that validation and the delete and lose the
+	// lease it just renewed. tailErrors holds a kept error
+	// independently of the lease, keyed by run_id, so a cleared lease
+	// still answers the next start request with the reason it failed
+	// (design.md D5); sweepExpiredTailErrors prunes every expired entry
+	// on each start/stop request and lease timer, not only the one
+	// run_id a caller happens to ask about, so a run that never asks
+	// again does not keep its entry forever.
+	tailMu     sync.Mutex
+	tailLeases map[string]*runTailLease
+	tailErrors map[string]tailErrorEntry
+	// tailLeaseTimeout, tailAckTimeout, and tailErrTTL override the
+	// live-tail durations (design.md D5: 90s, 10s, 5m). Zero means the
+	// package default; tests shrink them so a lease or ack timeout test
+	// does not have to wait tens of seconds.
+	tailLeaseTimeout time.Duration
+	tailAckTimeout   time.Duration
+	tailErrTTL       time.Duration
+
+	// logMu guards logRuns and the gateway-wide pending-bytes counter,
+	// kept separate from mu so a log append never contends with the
+	// heartbeat/presence path.
+	logMu                sync.Mutex
+	logRuns              map[string]*runLogState // keyed by run_id
+	logTotalPendingBytes int64
+	// logBudgetCrossedAt is when the gateway-wide pending budget was
+	// first found crossed, zeroed once it drops back under. It paces the
+	// BUSY pause_ms growth from 1000 ms to 8000 ms.
+	logBudgetCrossedAt time.Time
 
 	Logger *slog.Logger
 }
@@ -161,29 +288,44 @@ func (h *BusHandler) log() *slog.Logger {
 // events are not published).
 func NewBusHandler(cluster string, conn *bus.Conn, snapshotKV, presenceKV, desiredKV *bus.KV, activityPub *activity.Publisher) *BusHandler {
 	h := &BusHandler{
-		cluster:              cluster,
-		conn:                 conn,
-		kv:                   snapshotKV,
-		presenceKV:           presenceKV,
-		activityPub:          activityPub,
-		cancels:              make(map[string]context.CancelFunc),
-		certExpiry:           make(map[string]time.Time),
-		idleGauges:           make(map[string]string),
-		idleGaugesAt:         make(map[string]time.Time),
-		connectEpoch:         make(map[string]int64),
-		pendingAcks:          make(map[string]map[string]*nats.Msg),
-		replayCmds:           make(map[string]map[string]bool),
-		installedPluginsHash: make(map[string]string),
-		pendingContent:       make(map[string]*nats.Msg),
-		pendingContentNS:     make(map[string]string),
-		pendingContentTime:   make(map[string]time.Time),
-		contentTTL:           15 * time.Second,
-		contentDone:          make(chan struct{}),
-		presenceLocks:        make(map[string]*sync.Mutex),
-		lastHeartbeat:        make(map[string]time.Time),
-		watchDegraded:        make(map[string]map[string]string),
-		miteVersion:          make(map[string]string),
+		cluster:                    cluster,
+		conn:                       conn,
+		kv:                         snapshotKV,
+		presenceKV:                 presenceKV,
+		activityPub:                activityPub,
+		cancels:                    make(map[string]context.CancelFunc),
+		certExpiry:                 make(map[string]time.Time),
+		idleGauges:                 make(map[string]string),
+		idleGaugesAt:               make(map[string]time.Time),
+		connectEpoch:               make(map[string]int64),
+		pendingAcks:                make(map[string]map[string]*nats.Msg),
+		replayCmds:                 make(map[string]map[string]bool),
+		installedPluginsHash:       make(map[string]string),
+		pendingContent:             make(map[string]*nats.Msg),
+		pendingContentNS:           make(map[string]string),
+		pendingContentTime:         make(map[string]time.Time),
+		contentTTL:                 15 * time.Second,
+		contentDone:                make(chan struct{}),
+		presenceLocks:              make(map[string]*sync.Mutex),
+		lastHeartbeat:              make(map[string]time.Time),
+		watchDegraded:              make(map[string]map[string]string),
+		miteVersion:                make(map[string]string),
+		scheduleRetained:           make(map[string]*mitev1.JobScheduleSet),
+		scheduleStreamMissingUntil: make(map[string]time.Time),
+		cellInstances:              make(map[string]string),
+		buildWorkers:               make(map[string]*registeredBuildWorker),
+		claimCounts:                make(map[string]int),
+		crossTenantCounts:          make(map[string]int),
+		tenantResolver:             defaultCellTenantResolver{},
+		logRuns:                    make(map[string]*runLogState),
+		ownerCache:                 newOwnerCache(0),
+		tailLeases:                 make(map[string]*runTailLease),
+		tailErrors:                 make(map[string]tailErrorEntry),
 	}
+	// conn already satisfies both seams structurally; tests override these
+	// two fields directly with a fake.
+	h.publisher = conn
+	h.ledger = conn
 	// Guard the interface assignment: storing a typed nil *bus.KV would make
 	// h.desiredKV non-nil and send watchDesiredState into a nil-pointer call.
 	if desiredKV != nil {
@@ -308,6 +450,8 @@ func (h *BusHandler) OnConnect(name, ns, version string, certExpiry interface{},
 	go h.watchDesiredState(ctx, ns, name, send)
 	go h.watchImperative(ctx, ns, name, send)
 	go h.watchContent(ctx, ns, name, send)
+	go h.watchTail(ctx, ns, name, send)
+	h.startBuildEventWorker(ctx, ns, name, epoch, send)
 
 	h.publishBroodEvent("connected", ns, name, version)
 	h.putPresence(ns, name, version)
@@ -347,11 +491,26 @@ func (h *BusHandler) OnHeartbeat(name, ns string, hb *mitev1.Heartbeat) {
 	h.putPresence(ns, name, hb.Version)
 }
 
-// OnSnapshot publishes the snapshot to the bus, writes it to KV, refreshes presence.
+// OnSnapshot publishes the snapshot to the bus, writes it to KV, refreshes
+// presence, and bridges the job-schedule set, if any, to the record
+// store. design.md D8 "The gateway": the job-schedule field is stripped
+// from both the mite-inbound fan-out and the snapshot KV before either
+// publish, because those two paths carry one value every heartbeat
+// interval for every controller and a schedule set would multiply their
+// size.
 func (h *BusHandler) OnSnapshot(name, ns string, snap *mitev1.StateSnapshot) {
 	h.touchLiveness(ns, name)
+
+	schedules := snap.JobSchedules
+	fanout := snap
+	if schedules != nil {
+		clone := *snap
+		clone.JobSchedules = nil
+		fanout = &clone
+	}
+
 	data, err := json.Marshal(&mitev1.MiteMessage{
-		Message: &mitev1.MiteMessage_StateSnapshot{StateSnapshot: snap},
+		Message: &mitev1.MiteMessage_StateSnapshot{StateSnapshot: fanout},
 	})
 	if err != nil {
 		h.log().Error("marshal snapshot failed", "controller", ns+"/"+name, "error", err)
@@ -359,7 +518,7 @@ func (h *BusHandler) OnSnapshot(name, ns string, snap *mitev1.StateSnapshot) {
 	}
 	_ = h.conn.Publish(bus.MiteInSubject(h.cluster, ns, name), data)
 
-	snapData, err := json.Marshal(snap)
+	snapData, err := json.Marshal(fanout)
 	if err != nil {
 		h.log().Error("marshal snapshot KV failed", "controller", ns+"/"+name, "error", err)
 		return
@@ -368,6 +527,8 @@ func (h *BusHandler) OnSnapshot(name, ns string, snap *mitev1.StateSnapshot) {
 
 	h.publishBroodEvent("snapshot", ns, name, snap.JenkinsVersion)
 	h.putPresence(ns, name, snap.JenkinsVersion)
+
+	h.handleJobSchedules(ns, name, schedules)
 }
 
 // OnCommandResult publishes the result to the mite inbound subject — or, for a
@@ -523,6 +684,10 @@ func (h *BusHandler) IsCurrentConnection(name, ns string, token int64) bool {
 	return !ok || current == token
 }
 
+// OnLogChunk is implemented in log_writer.go.
+
+// OnTailAck is implemented in tail.go.
+
 // OnDisconnect stops the watch goroutine and clears volatile state. The desired
 // KV key is intentionally NOT deleted here — it is the persistent desired state
 // and must survive a mite/gateway reconnect. It is removed only on Controller
@@ -535,6 +700,13 @@ func (h *BusHandler) OnDisconnect(name, ns string, token int64) {
 	// active-connection gauge permanently over-counted.
 	miteStreamConnections.Add(context.Background(), -1)
 	miteStreamDisconnects.Add(context.Background(), 1)
+
+	// Scoped by token, so this is correct to run even for a superseded
+	// stream's late teardown: it can only ever remove its own epoch's
+	// entries, never a replacement connection's.
+	h.clearBuildWorker(ns, name, token)
+	h.clearClaimSlots(ns, name, token)
+	h.clearCrossTenantSlots(ns, name, token)
 
 	// A superseded stream can tear down late — after the mite already
 	// reconnected. Without this check that teardown cancels the *live*
@@ -550,6 +722,10 @@ func (h *BusHandler) OnDisconnect(name, ns string, token int64) {
 	}
 
 	h.log().Info("mite disconnected", "controller", key)
+
+	// tailMu is independent of h.mu, so this is safe to call while h.mu
+	// is held; it never blocks on anything else in this critical section.
+	h.clearTailLeasesForController(ns, name)
 
 	if cancel, ok := h.cancels[key]; ok {
 		cancel()
@@ -806,7 +982,7 @@ func (p *rebuildPacer) wait(ctx context.Context, uptime time.Duration) bool {
 // randomized map iteration. Caller must hold h.mu.
 func degradedReasonLocked(kinds map[string]string) string {
 	var reasons []string
-	for _, kind := range []string{"desired", "imperative", "content"} {
+	for _, kind := range []string{"desired", "imperative", "content", "tail"} {
 		if r, ok := kinds[kind]; ok {
 			reasons = append(reasons, r)
 		}

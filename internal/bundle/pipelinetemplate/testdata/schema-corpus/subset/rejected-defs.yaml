@@ -1,0 +1,8 @@
+type: object
+additionalProperties: false
+$defs:
+  x:
+    type: string
+properties:
+  name:
+    type: string

@@ -213,6 +213,11 @@ func (r *Reconciler) nextRequeueDuration(cr *v1alpha1.Controller) time.Duration 
 		} else {
 			base = minBackoff
 		}
+	case v1alpha1.ControllerPhaseHibernated, v1alpha1.ControllerPhaseStopped:
+		// An idle controller wakes on an annotation bump or a spec change,
+		// never on this tick. The tick only refreshes the wake
+		// EndpointSlice, so it runs at the regular interval.
+		base = r.effectiveInterval(cr)
 	default:
 		// Pending, Provisioning, Running: backoff instead of tight loop.
 		base = minBackoff

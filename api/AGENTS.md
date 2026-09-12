@@ -18,9 +18,20 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
 
 - `register.go` — `addKnownTypes` is the single registration list. Kinds:
   `Controller`, `VarroaRole`/`VarroaRoleBinding`, `JenkinsRole`/`JenkinsRoleBinding`,
-  `User`, `Group`, `PodTemplate`, `BuildMetric`, `CatalogSource`, `CatalogItem`,
+  `User`, `Group`, `PodTemplate`, `CatalogSource`, `CatalogItem`,
   `ComposedBundle`, `ProvisioningDefaults`, `JenkinsVersionProfile`, `Team`,
-  `BroodOperation`, `BroodSchedule`. New Kind → add here + `zz_generated.deepcopy.go`.
+  `BroodOperation`, `BroodSchedule`, `Runner`. New Kind → add here + `zz_generated.deepcopy.go`.
+  `BuildMetric` does not exist: build records live in the record store
+  (`internal/recordstore`), not a CRD.
+  `Runner` is cluster-scoped, like `Team`: it binds one external machine to one
+  pipelines tenant (`RunnerSpec.Team`), immutable `team` and `launcher`
+  (`ssh`/`inbound`), and six CEL `XValidation` rules. `RunnerSpec.Labels`
+  carries `+kubebuilder:validation:MaxItems=64` and
+  `+kubebuilder:validation:items:MaxLength=63` — a bound the label-token CEL
+  rule needs to stay under the apiserver's estimated cost budget; without it
+  the apiserver refuses the CRD outright. `RunnerStatus.Connected` carries no
+  `omitempty`, the same rule `Event.Cluster` uses, so a merge patch can clear
+  a `true` value back to `false`.
 - `types.go` — Spec/Status structs with kubebuilder markers. CEL
   `XValidation` rules embedding a regex with literal `\.` **must** use a raw
   CEL string (`r'...'`) — e.g. `types.go:346` (ingress annotation keys) and
@@ -66,6 +77,14 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   the disagreement is invisible until someone bypasses the BFF. Every such
   method must be nil-receiver safe: the CRDs carrying them are optional, and
   absence must mean the permissive default.
+  `TeamPipelinesSpec.Exports` (`[]TeamExport`, at most 64 entries) lists the
+  grants a pipelines tenant makes to other tenants: each entry names exactly
+  one of `job` (a folder-relative job glob) or `locks` (prefix-relative
+  lock-name globs), plus `callers` (at least one Team name). The CEL rules on
+  `TeamExport` enforce the exactly-one-of, the non-empty job/locks/caller
+  entries, and that `job` never starts with `/`; the matching OpenAPI schema
+  (`TeamExport` in `components/schemas.yaml`, referenced from
+  `TeamPipelines.exports`) mirrors the same shape and requires `callers`.
 - `zz_generated.deepcopy.go` — header claims controller-gen, but **never run
   `controller-gen object`** — nukes this file on this type set. Hand-add
   `DeepCopyInto`/`DeepCopy` for new types/fields.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -13,7 +14,14 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
-// teamEntry is the JSON shape for GET /teams entries.
+// teamEntry is the JSON shape for GET /teams entries. Pipelines carries
+// spec.pipelines; Placement carries status.placement; Rehydration carries
+// status.rehydration. Neither status.pipelines.webhookToken nor
+// status.pipelines.webhookSecret is ever mapped here: both are credentials
+// (specs/tenant-model/spec.md). Controller.status.cell.rehydration is never
+// mapped here either: it is the controller reconciler's own per-cell record,
+// and TeamReconciler's copy onto status.rehydration is the projection this
+// handler serves.
 type teamEntry struct {
 	Name                string                        `json:"name"`
 	DisplayName         string                        `json:"displayName,omitempty"`
@@ -22,11 +30,179 @@ type teamEntry struct {
 	Namespaces          []string                      `json:"namespaces"`
 	RoleRef             string                        `json:"roleRef,omitempty"`
 	ProvisionNamespaces bool                          `json:"provisionNamespaces,omitempty"`
+	Pipelines           *teamPipelinesEntry           `json:"pipelines,omitempty"`
 	ObservedGeneration  int64                         `json:"observedGeneration,omitempty"`
 	GroupRef            string                        `json:"groupRef,omitempty"`
 	BindingRef          string                        `json:"bindingRef,omitempty"`
 	NamespaceStates     []v1alpha1.TeamNamespaceState `json:"namespaceStates,omitempty"`
 	Conditions          []v1alpha1.TeamCondition      `json:"conditions,omitempty"`
+	Placement           *teamPlacementEntry           `json:"placement,omitempty"`
+	Rehydration         *teamRehydrationEntry         `json:"rehydration,omitempty"`
+}
+
+// teamPipelinesEntry is the JSON shape of spec.pipelines, carried on both
+// the request and the response. RehydrateDeadline and CronGrace keep the
+// *metav1.Duration type: it marshals to and parses from a plain duration
+// string on its own, so no hand-written conversion is needed here.
+type teamPipelinesEntry struct {
+	Profile           string                      `json:"profile,omitempty"`
+	Dedicated         bool                        `json:"dedicated,omitempty"`
+	AgentNamespace    string                      `json:"agentNamespace,omitempty"`
+	ComposedBundleRef *teamComposedBundleRefEntry `json:"composedBundleRef,omitempty"`
+
+	RehydrateBuilds   *int32           `json:"rehydrateBuilds,omitempty"`
+	RehydrateDeadline *metav1.Duration `json:"rehydrateDeadline,omitempty"`
+	InterruptedRetry  string           `json:"interruptedRetry,omitempty"`
+	Concurrency       string           `json:"concurrency,omitempty"`
+	CronBackstop      *bool            `json:"cronBackstop,omitempty"`
+	CronCatchUp       string           `json:"cronCatchUp,omitempty"`
+	CronGrace         *metav1.Duration `json:"cronGrace,omitempty"`
+
+	// Exports carries spec.pipelines.exports: the grants this tenant makes
+	// of its own jobs and locks to other tenants. Reading it needs
+	// CanReadPipeline on the owning tenant; writing it needs the tenant's
+	// pipelines:admin capability. Neither check is controller-scoped,
+	// because a grant belongs to a tenant, not to a cell.
+	Exports []teamExportEntry `json:"exports,omitempty"`
+}
+
+// teamExportEntry is the JSON shape of one spec.pipelines.exports entry.
+// Exactly one of Job or Locks is set; the CRD's CEL rules enforce it.
+type teamExportEntry struct {
+	Job     string   `json:"job,omitempty"`
+	Locks   []string `json:"locks,omitempty"`
+	Callers []string `json:"callers,omitempty"`
+}
+
+// teamComposedBundleRefEntry is the JSON shape of
+// spec.pipelines.composedBundleRef. A Team is cluster-scoped, so it
+// carries both name and namespace with no namespace to default to.
+type teamComposedBundleRefEntry struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+}
+
+// teamPlacementEntry is the JSON shape of status.placement, response-only:
+// the placement pass is its only writer.
+type teamPlacementEntry struct {
+	Cluster       string `json:"cluster,omitempty"`
+	Cell          string `json:"cell,omitempty"`
+	CellNamespace string `json:"cellNamespace,omitempty"`
+	Generation    int64  `json:"generation,omitempty"`
+}
+
+// teamRehydrationEntry is the JSON shape of status.rehydration,
+// response-only: TeamReconciler is its only writer.
+type teamRehydrationEntry struct {
+	Generation   int64        `json:"generation,omitempty"`
+	CellInstance string       `json:"cellInstance,omitempty"`
+	Records      int32        `json:"records,omitempty"`
+	Truncated    bool         `json:"truncated,omitempty"`
+	UnseededJobs int32        `json:"unseededJobs,omitempty"`
+	Deferred     []string     `json:"deferred,omitempty"`
+	Attempts     int32        `json:"attempts,omitempty"`
+	LastAttempt  *metav1.Time `json:"lastAttempt,omitempty"`
+}
+
+// teamPipelinesEntryFromSpec maps spec.pipelines onto the wire shape. It
+// returns nil for a Team that is not a pipelines tenant.
+func teamPipelinesEntryFromSpec(p *v1alpha1.TeamPipelinesSpec) *teamPipelinesEntry {
+	if p == nil {
+		return nil
+	}
+	e := &teamPipelinesEntry{
+		Profile:           p.Profile,
+		Dedicated:         p.Dedicated,
+		AgentNamespace:    p.AgentNamespace,
+		RehydrateBuilds:   p.RehydrateBuilds,
+		RehydrateDeadline: p.RehydrateDeadline,
+		InterruptedRetry:  p.InterruptedRetry,
+		Concurrency:       p.Concurrency,
+		CronBackstop:      p.CronBackstop,
+		CronCatchUp:       p.CronCatchUp,
+		CronGrace:         p.CronGrace,
+	}
+	if p.ComposedBundleRef != nil {
+		e.ComposedBundleRef = &teamComposedBundleRefEntry{
+			Name:      p.ComposedBundleRef.Name,
+			Namespace: p.ComposedBundleRef.Namespace,
+		}
+	}
+	for _, exp := range p.Exports {
+		e.Exports = append(e.Exports, teamExportEntry{
+			Job:     exp.Job,
+			Locks:   exp.Locks,
+			Callers: exp.Callers,
+		})
+	}
+	return e
+}
+
+// teamPipelinesSpecFromEntry maps the wire shape back onto spec.pipelines.
+// It returns nil when the request carries no pipelines object, so a Team
+// with no spec.pipelines round-trips as no spec.pipelines, not an empty
+// one.
+func teamPipelinesSpecFromEntry(e *teamPipelinesEntry) *v1alpha1.TeamPipelinesSpec {
+	if e == nil {
+		return nil
+	}
+	spec := &v1alpha1.TeamPipelinesSpec{
+		Profile:           e.Profile,
+		Dedicated:         e.Dedicated,
+		AgentNamespace:    e.AgentNamespace,
+		RehydrateBuilds:   e.RehydrateBuilds,
+		RehydrateDeadline: e.RehydrateDeadline,
+		InterruptedRetry:  e.InterruptedRetry,
+		Concurrency:       e.Concurrency,
+		CronBackstop:      e.CronBackstop,
+		CronCatchUp:       e.CronCatchUp,
+		CronGrace:         e.CronGrace,
+	}
+	if e.ComposedBundleRef != nil {
+		spec.ComposedBundleRef = &v1alpha1.ComposedBundleRef{
+			Name:      e.ComposedBundleRef.Name,
+			Namespace: e.ComposedBundleRef.Namespace,
+		}
+	}
+	for _, exp := range e.Exports {
+		spec.Exports = append(spec.Exports, v1alpha1.TeamExport{
+			Job:     exp.Job,
+			Locks:   exp.Locks,
+			Callers: exp.Callers,
+		})
+	}
+	return spec
+}
+
+// teamPlacementEntryFromStatus maps status.placement onto the wire shape.
+func teamPlacementEntryFromStatus(p *v1alpha1.TeamPlacementStatus) *teamPlacementEntry {
+	if p == nil {
+		return nil
+	}
+	return &teamPlacementEntry{
+		Cluster:       p.Cluster,
+		Cell:          p.Cell,
+		CellNamespace: p.CellNamespace,
+		Generation:    p.Generation,
+	}
+}
+
+// teamRehydrationEntryFromStatus maps status.rehydration onto the wire
+// shape.
+func teamRehydrationEntryFromStatus(r *v1alpha1.TeamRehydrationStatus) *teamRehydrationEntry {
+	if r == nil {
+		return nil
+	}
+	return &teamRehydrationEntry{
+		Generation:   r.Generation,
+		CellInstance: r.CellInstance,
+		Records:      r.Records,
+		Truncated:    r.Truncated,
+		UnseededJobs: r.UnseededJobs,
+		Deferred:     r.Deferred,
+		Attempts:     r.Attempts,
+		LastAttempt:  r.LastAttempt,
+	}
 }
 
 // teamFromCRD builds a teamEntry from a Team CRD.
@@ -39,11 +215,14 @@ func teamFromCRD(t *v1alpha1.Team) teamEntry {
 		Namespaces:          t.Spec.Namespaces,
 		RoleRef:             t.Spec.RoleRef,
 		ProvisionNamespaces: t.Spec.ProvisionNamespaces,
+		Pipelines:           teamPipelinesEntryFromSpec(t.Spec.Pipelines),
 		ObservedGeneration:  t.Status.ObservedGeneration,
 		GroupRef:            t.Status.GroupRef,
 		BindingRef:          t.Status.BindingRef,
 		NamespaceStates:     t.Status.NamespaceStates,
 		Conditions:          t.Status.Conditions,
+		Placement:           teamPlacementEntryFromStatus(t.Status.Placement),
+		Rehydration:         teamRehydrationEntryFromStatus(t.Status.Rehydration),
 	}
 }
 
@@ -83,7 +262,7 @@ func (s *Server) handleListTeams(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, itemsEnvelope(result))
 }
 
-// createTeamRequest is the JSON body for POST /teams.
+// createTeamRequest is the JSON body for POST /teams and PUT /teams/{name}.
 type createTeamRequest struct {
 	Name                string                `json:"name"`
 	DisplayName         string                `json:"displayName,omitempty"`
@@ -92,6 +271,7 @@ type createTeamRequest struct {
 	Namespaces          []string              `json:"namespaces"`
 	RoleRef             string                `json:"roleRef,omitempty"`
 	ProvisionNamespaces bool                  `json:"provisionNamespaces,omitempty"`
+	Pipelines           *teamPipelinesEntry   `json:"pipelines,omitempty"`
 }
 
 func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
@@ -141,6 +321,7 @@ func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 			Namespaces:          req.Namespaces,
 			RoleRef:             req.RoleRef,
 			ProvisionNamespaces: req.ProvisionNamespaces,
+			Pipelines:           teamPipelinesSpecFromEntry(req.Pipelines),
 		},
 	}
 
@@ -155,8 +336,8 @@ func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 
 // HandleTeamDispatch dispatches /teams/{name} requests:
 //
-//	GET    /teams/{name} — get team detail (admin)
-//	PUT    /teams/{name} — update team (admin)
+//	GET    /teams/{name} — get team detail (admin, or CanReadPipeline on the tenant)
+//	PUT    /teams/{name} — update team (admin, or the tenant's pipelines:admin capability)
 //	DELETE /teams/{name} — delete team (admin)
 func (s *Server) HandleTeamDispatch(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/teams/")
@@ -177,9 +358,41 @@ func (s *Server) HandleTeamDispatch(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// canReadTeam reports whether claims may read the Team named name: full
+// administrative access, or CanReadPipeline on the Team's own pipelines
+// tenant, with an empty job path (specs/tenant-model). A Team name never
+// contains "/", so TenantRefFromTenant always classifies it as a Team
+// tenant.
+func (s *Server) canReadTeam(claims *auth.Claims, name string) bool {
+	if s.deps.Authorizer.IsAdmin(claims) {
+		return true
+	}
+	ref, err := TenantRefFromTenant(name)
+	if err != nil {
+		return false
+	}
+	return s.deps.Authorizer.CanReadPipeline(claims, ref, "")
+}
+
+// canWriteTeam reports whether claims may write the Team named name: full
+// administrative access, or the tenant's pipelines:admin capability, which
+// add-tenant-authorization defines as a tenant-owned write of
+// Team.spec.pipelines.exports (specs/tenant-model). Neither check is
+// controller-scoped, because a grant belongs to a tenant, not to a cell.
+func (s *Server) canWriteTeam(claims *auth.Claims, name string) bool {
+	if s.deps.Authorizer.IsAdmin(claims) {
+		return true
+	}
+	ref, err := TenantRefFromTenant(name)
+	if err != nil {
+		return false
+	}
+	return s.deps.Authorizer.canAccessPipeline(claims, ref.Tenant, ref.Folder, "", "admin")
+}
+
 func (s *Server) handleGetTeam(w http.ResponseWriter, r *http.Request, name string) {
 	claims := auth.ClaimsFromContext(r.Context())
-	if s.deps.Authorizer == nil || !s.deps.Authorizer.IsAdmin(claims) {
+	if s.deps.Authorizer == nil || !s.canReadTeam(claims, name) {
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}
@@ -196,7 +409,7 @@ func (s *Server) handleGetTeam(w http.ResponseWriter, r *http.Request, name stri
 
 func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request, name string) {
 	claims := auth.ClaimsFromContext(r.Context())
-	if s.deps.Authorizer == nil || !s.deps.Authorizer.IsAdmin(claims) {
+	if s.deps.Authorizer == nil || !s.canWriteTeam(claims, name) {
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}
@@ -236,10 +449,26 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request, name s
 			Namespaces:          req.Namespaces,
 			RoleRef:             req.RoleRef,
 			ProvisionNamespaces: req.ProvisionNamespaces,
+			Pipelines:           teamPipelinesSpecFromEntry(req.Pipelines),
 		},
 	}
 
 	ctx := context.Background()
+	if !s.deps.Authorizer.IsAdmin(claims) {
+		// A tenant pipelines admin may change only spec.pipelines.exports.
+		// Every other field of the Team stays as stored, or the write is
+		// refused, so the tenant right never reaches members, roleRef,
+		// namespaces, or placement.
+		stored, err := crdstore.Get[v1alpha1.Team](ctx, s.deps.Store, name, "")
+		if err != nil || stored == nil {
+			s.writeJSONError(w, http.StatusNotFound, "team not found")
+			return
+		}
+		if !teamSpecEqualExceptExports(stored.Spec, team.Spec) {
+			s.writeJSONError(w, http.StatusForbidden, "a tenant pipelines admin may change only exports")
+			return
+		}
+	}
 	if err := crdstore.Apply[v1alpha1.Team](ctx, s.deps.Store, team); err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to update team")
 		return
@@ -262,4 +491,19 @@ func (s *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request, name s
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// teamSpecEqualExceptExports reports whether a and b differ only in
+// spec.pipelines.exports. Both specs are copied before the exports are
+// cleared, so neither argument changes.
+func teamSpecEqualExceptExports(a, b v1alpha1.TeamSpec) bool {
+	strip := func(in v1alpha1.TeamSpec) v1alpha1.TeamSpec {
+		var out v1alpha1.TeamSpec
+		in.DeepCopyInto(&out)
+		if out.Pipelines != nil {
+			out.Pipelines.Exports = nil
+		}
+		return out
+	}
+	return reflect.DeepEqual(strip(a), strip(b))
 }

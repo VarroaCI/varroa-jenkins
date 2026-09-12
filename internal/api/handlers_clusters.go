@@ -111,6 +111,7 @@ var controllerRoutes = map[string]controllerRoute{
 	"wake":             {http.MethodPost, (*Server).handleWake},
 	"approve":          {http.MethodPost, (*Server).handleApproveRestart},
 	"approve-deletion": {http.MethodPost, (*Server).handleApproveDeletion},
+	"break-glass":      {http.MethodPost, (*Server).handleBreakGlass},
 	"reprovision":      {http.MethodPost, (*Server).handleReprovision},
 	"restart":          {http.MethodPost, (*Server).handleRestartController},
 	"preview":          {http.MethodPost, (*Server).handlePreviewController},
@@ -504,12 +505,17 @@ func (s *Server) dispatchComposedBundles(w http.ResponseWriter, r *http.Request,
 		if pinPreflight.Missing == nil {
 			pinPreflight.Missing = []bus.MissingPlugin{}
 		}
+		pipelineTemplates := preview.PipelineTemplates
+		if pipelineTemplates == nil {
+			pipelineTemplates = []bus.PipelineTemplateSummary{}
+		}
 		resp := map[string]interface{}{
 			"valid":               valid,
 			"errors":              errs,
 			"warnings":            warns,
 			"unresolvedVariables": uvars,
 			"pinPreflight":        pinPreflight,
+			"pipelineTemplates":   pipelineTemplates,
 		}
 		s.writeJSON(w, http.StatusOK, resp)
 		return
@@ -684,12 +690,17 @@ func (s *Server) dispatchComposedBundles(w http.ResponseWriter, r *http.Request,
 				return
 			}
 			valid := len(preview.Errors) == 0 && len(preview.Missing) == 0
+			pipelineTemplates := preview.PipelineTemplates
+			if pipelineTemplates == nil {
+				pipelineTemplates = []bus.PipelineTemplateSummary{}
+			}
 			resp := map[string]interface{}{
 				"valid":               valid,
 				"errors":              preview.Errors,
 				"warnings":            preview.Warnings,
 				"unresolvedVariables": preview.UnresolvedVariables,
 				"pinPreflight":        preview.PinPreflight,
+				"pipelineTemplates":   pipelineTemplates,
 			}
 			s.writeJSON(w, http.StatusOK, resp)
 			return

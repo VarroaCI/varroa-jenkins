@@ -122,7 +122,7 @@ func TestRoutingVarsDerivation(t *testing.T) {
 			cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
 			cr.Spec.IngressSpec = tt.ingressSpec
 
-			mat, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+			mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 			if err != nil {
 				t.Fatalf("resolveBundleForController: %v", err)
 			}
@@ -144,6 +144,126 @@ func TestRoutingVarsDerivation(t *testing.T) {
 	}
 }
 
+// TestHeadlessRoutingVarsIgnoreResolvableHost covers design D4: a headless
+// controller's varroa_controller_external_url and varroa_controller_path_prefix
+// stay empty, and varroa_controller_endpoint stays unsuffixed, even when a
+// host resolves in path mode. All three variables stay defined, so the
+// bundle completeness check still passes.
+func TestHeadlessRoutingVarsIgnoreResolvableHost(t *testing.T) {
+	baseEndpoint := "http://" + testPrefixFor("test") + "-svc.ns1.svc.cluster.local:8080"
+
+	client := newTestClientWithBundle()
+	client.configMapData["test-bundle-content"]["jenkins.yaml"] = "ext: \"${varroa_controller_external_url}\"\nprefix: \"${varroa_controller_path_prefix}\"\nep: \"${varroa_controller_endpoint}\"\n"
+	rec := newTestReconciler(client)
+
+	cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+	cr.Spec.Headless = true
+	cr.Spec.IngressSpec = &v1alpha1.IngressSpec{Host: "varroa.example.com", Mode: v1alpha1.RoutingModePath}
+
+	mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	if err != nil {
+		t.Fatalf("resolveBundleForController: %v", err)
+	}
+
+	got := map[string]interface{}{}
+	if err := yaml.Unmarshal([]byte(mat.JenkinsYAML), &got); err != nil {
+		t.Fatalf("parse resolved jenkins.yaml: %v", err)
+	}
+	if got["ext"] != "" {
+		t.Errorf("varroa_controller_external_url = %v, want empty on a headless controller", got["ext"])
+	}
+	if got["prefix"] != "" {
+		t.Errorf("varroa_controller_path_prefix = %v, want empty on a headless controller", got["prefix"])
+	}
+	if got["ep"] != baseEndpoint {
+		t.Errorf("varroa_controller_endpoint = %v, want unsuffixed %q", got["ep"], baseEndpoint)
+	}
+}
+
+// TestLocationURLThreeWayRule covers design D4's three branches for the
+// location-URL injection site: a headless controller gets the in-cluster
+// endpoint, a non-headless controller with an external URL keeps today's
+// behavior, and a non-headless controller with no external URL gets no
+// injection at all.
+func TestLocationURLThreeWayRule(t *testing.T) {
+	t.Run("headless controller gets the in-cluster endpoint", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		rec := newTestReconciler(client)
+
+		cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+		cr.Spec.Headless = true
+		cr.Spec.IngressSpec = &v1alpha1.IngressSpec{Host: "varroa.example.com", Mode: v1alpha1.RoutingModePath}
+
+		mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+		if err != nil {
+			t.Fatalf("resolveBundleForController: %v", err)
+		}
+		got := map[string]interface{}{}
+		if err := yaml.Unmarshal([]byte(mat.JenkinsYAML), &got); err != nil {
+			t.Fatalf("parse resolved jenkins.yaml: %v", err)
+		}
+		unclassified, _ := got["unclassified"].(map[string]interface{})
+		if unclassified == nil {
+			t.Fatal("unclassified block not injected")
+		}
+		location, _ := unclassified["location"].(map[string]interface{})
+		if location == nil {
+			t.Fatal("unclassified.location not injected")
+		}
+		want := "http://" + testPrefixFor("test") + "-svc.ns1.svc.cluster.local:8080/"
+		if location["url"] != want {
+			t.Errorf("location.url = %v, want the in-cluster endpoint %q", location["url"], want)
+		}
+	})
+
+	t.Run("non-headless controller with an external URL keeps today's behavior", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		rec := newTestReconciler(client)
+
+		cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+		cr.Spec.IngressSpec = &v1alpha1.IngressSpec{Host: "ci.example.com"}
+
+		mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+		if err != nil {
+			t.Fatalf("resolveBundleForController: %v", err)
+		}
+		got := map[string]interface{}{}
+		if err := yaml.Unmarshal([]byte(mat.JenkinsYAML), &got); err != nil {
+			t.Fatalf("parse resolved jenkins.yaml: %v", err)
+		}
+		unclassified, _ := got["unclassified"].(map[string]interface{})
+		if unclassified == nil {
+			t.Fatal("unclassified block not injected")
+		}
+		location, _ := unclassified["location"].(map[string]interface{})
+		if location == nil {
+			t.Fatal("unclassified.location not injected")
+		}
+		if want := "https://ci.example.com/"; location["url"] != want {
+			t.Errorf("location.url = %v, want %q", location["url"], want)
+		}
+	})
+
+	t.Run("non-headless controller with no external URL gets no injection", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		rec := newTestReconciler(client)
+
+		cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+
+		mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+		if err != nil {
+			t.Fatalf("resolveBundleForController: %v", err)
+		}
+		got := map[string]interface{}{}
+		if err := yaml.Unmarshal([]byte(mat.JenkinsYAML), &got); err != nil {
+			t.Fatalf("parse resolved jenkins.yaml: %v", err)
+		}
+		if _, ok := got["unclassified"]; ok {
+			t.Errorf("expected no unclassified block injected, got %v", got["unclassified"])
+		}
+	})
+}
+
 func TestPathModeInjectsLocationURL(t *testing.T) {
 	client := newTestClientWithBundle()
 	rec := newTestReconciler(client)
@@ -151,7 +271,7 @@ func TestPathModeInjectsLocationURL(t *testing.T) {
 	cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
 	cr.Spec.IngressSpec = &v1alpha1.IngressSpec{Host: "varroa.example.com", Mode: v1alpha1.RoutingModePath}
 
-	mat, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err != nil {
 		t.Fatalf("resolveBundleForController: %v", err)
 	}
@@ -181,7 +301,7 @@ func TestSubdomainModeInjectsLocationURL(t *testing.T) {
 	cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
 	cr.Spec.IngressSpec = &v1alpha1.IngressSpec{Host: "ci.example.com"}
 
-	mat, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err != nil {
 		t.Fatalf("resolveBundleForController: %v", err)
 	}
@@ -323,6 +443,21 @@ func TestSharedHostMismatchCondition(t *testing.T) {
 		}
 		if cond := findCondition(cr); cond != nil {
 			t.Errorf("expected no SharedHostMismatch condition, got %+v", cond)
+		}
+	})
+
+	t.Run("headless path-mode controller never gets the condition", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		rec := newTestReconciler(client)
+		rec.SetVarroaRedirectURL("https://dash.example.com/auth/callback")
+
+		cr := pathModeController("other.example.com")
+		cr.Spec.Headless = true
+		if err := rec.reconcileController(context.Background(), cr); err != nil {
+			t.Fatalf("Reconcile: %v", err)
+		}
+		if cond := findCondition(cr); cond != nil {
+			t.Errorf("expected no SharedHostMismatch condition for a headless controller, got %+v", cond)
 		}
 	})
 }

@@ -156,6 +156,54 @@ func TestEnsureStream(t *testing.T) {
 	}
 }
 
+// TestStreamInfoAndConsumerInfo covers a missing stream (D2's ordered
+// ensure branches on this) and a stream that exists with a consumer
+// attached.
+func TestStreamInfoAndConsumerInfo(t *testing.T) {
+	s := startTestServer(t)
+	c := connectTest(t, s)
+
+	if _, err := c.StreamInfo("does-not-exist"); err == nil {
+		t.Fatal("want an error for a missing stream, got nil")
+	}
+
+	cfg := &nats.StreamConfig{
+		Name:     "infostream",
+		Subjects: []string{"info.>"},
+		Storage:  nats.MemoryStorage,
+	}
+	if err := c.EnsureStream(cfg); err != nil {
+		t.Fatalf("ensure stream: %v", err)
+	}
+
+	info, err := c.StreamInfo("infostream")
+	if err != nil {
+		t.Fatalf("stream info: %v", err)
+	}
+	if info.Config.Name != "infostream" {
+		t.Fatalf("want stream name infostream, got %q", info.Config.Name)
+	}
+
+	if _, err := c.ConsumerInfo("infostream", "no-such-consumer"); err == nil {
+		t.Fatal("want an error for a missing consumer, got nil")
+	}
+
+	consumerCfg := &nats.ConsumerConfig{
+		Durable:   "infoconsumer",
+		AckPolicy: nats.AckExplicitPolicy,
+	}
+	if err := c.EnsureConsumer("infostream", "infoconsumer", consumerCfg); err != nil {
+		t.Fatalf("ensure consumer: %v", err)
+	}
+	cinfo, err := c.ConsumerInfo("infostream", "infoconsumer")
+	if err != nil {
+		t.Fatalf("consumer info: %v", err)
+	}
+	if cinfo.Name != "infoconsumer" {
+		t.Fatalf("want consumer name infoconsumer, got %q", cinfo.Name)
+	}
+}
+
 func TestJetStreamPublishAndConsume(t *testing.T) {
 	s := startTestServer(t)
 	c := connectTest(t, s)
@@ -330,7 +378,7 @@ func TestStreamConfigDefaults(t *testing.T) {
 		t.Fatal("expected subjects [mite.*.*.*.out]")
 	}
 
-	actCfg := ActivityStreamConfig("varroa_activity", 168*time.Hour, 100000, 1<<30)
+	actCfg := ActivityStreamConfig("varroa_activity")
 	if actCfg.Name != "varroa_activity" {
 		t.Fatalf("expected name 'varroa_activity', got %q", actCfg.Name)
 	}
@@ -340,11 +388,11 @@ func TestStreamConfigDefaults(t *testing.T) {
 	if actCfg.Retention != nats.LimitsPolicy {
 		t.Fatalf("expected LimitsPolicy retention, got %v", actCfg.Retention)
 	}
-	if actCfg.MaxAge != 168*time.Hour {
-		t.Fatalf("expected MaxAge 168h, got %v", actCfg.MaxAge)
+	if actCfg.MaxAge != 72*time.Hour {
+		t.Fatalf("expected MaxAge 72h, got %v", actCfg.MaxAge)
 	}
-	if actCfg.MaxMsgs != 100000 {
-		t.Fatalf("expected MaxMsgs 100000, got %d", actCfg.MaxMsgs)
+	if actCfg.MaxMsgs != 1000000 {
+		t.Fatalf("expected MaxMsgs 1000000, got %d", actCfg.MaxMsgs)
 	}
 	if actCfg.MaxBytes != 1<<30 {
 		t.Fatalf("expected MaxBytes 1GiB, got %d", actCfg.MaxBytes)
@@ -357,5 +405,41 @@ func TestStreamConfigDefaults(t *testing.T) {
 	}
 	if actCfg.Replicas != 1 {
 		t.Fatalf("expected Replicas 1, got %d", actCfg.Replicas)
+	}
+}
+
+// TestBuildsStreamConfigDefaults asserts every field of BuildsStreamConfig
+// against design D3: builds.>, WorkQueuePolicy, DiscardNew, MaxAge 0,
+// MaxBytes 1 GiB, and FileStorage.
+func TestBuildsStreamConfigDefaults(t *testing.T) {
+	cfg := BuildsStreamConfig("varroa_builds")
+	if cfg.Name != "varroa_builds" {
+		t.Fatalf("expected name 'varroa_builds', got %q", cfg.Name)
+	}
+	if len(cfg.Subjects) != 1 || cfg.Subjects[0] != "builds.>" {
+		t.Fatalf("expected subjects [builds.>], got %v", cfg.Subjects)
+	}
+	if cfg.Retention != nats.WorkQueuePolicy {
+		t.Fatalf("expected WorkQueuePolicy retention, got %v", cfg.Retention)
+	}
+	if cfg.Discard != nats.DiscardNew {
+		t.Fatalf("expected DiscardNew, got %v", cfg.Discard)
+	}
+	if cfg.MaxAge != 0 {
+		t.Fatalf("expected MaxAge 0, got %v", cfg.MaxAge)
+	}
+	if cfg.MaxBytes != 1<<30 {
+		t.Fatalf("expected MaxBytes 1GiB, got %d", cfg.MaxBytes)
+	}
+	if cfg.Storage != nats.FileStorage {
+		t.Fatal("expected FileStorage")
+	}
+	if cfg.Replicas != 1 {
+		t.Fatalf("expected Replicas 1, got %d", cfg.Replicas)
+	}
+
+	replicated := BuildsStreamConfig("varroa_builds", 3)
+	if replicated.Replicas != 3 {
+		t.Fatalf("expected Replicas 3, got %d", replicated.Replicas)
 	}
 }

@@ -32,7 +32,7 @@
                 nextCursor: {type: string}
                 hasMore: {type: boolean}
                 retentionMode: {type: string, enum: [on, off]}
-                retentionDays: {type: integer, enum: [7, 30, 90]}
+                retentionDays: {type: integer}
               additionalProperties: false
       "400":
         description: Invalid filters, cursor, or range.

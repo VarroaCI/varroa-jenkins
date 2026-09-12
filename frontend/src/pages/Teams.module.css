@@ -165,3 +165,17 @@
   gap: 0.5rem;
   margin-top: 1rem;
 }
+
+.exportsList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.85rem;
+}
+
+.exportKind {
+  color: var(--text-2);
+}

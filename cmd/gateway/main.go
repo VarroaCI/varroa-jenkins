@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -225,6 +226,30 @@ func main() {
 	defer handler.Close()
 	logger.Info("gateway using bus transport for mite streams", "endpoint", endpoint)
 
+	// --- Blob store (build-log externalization) ---
+	// Opened unconditionally so a postgres-mode misconfiguration (a DSN
+	// with no blob URL) is caught at startup, not on the first log chunk.
+	recordStoreDSN := os.Getenv("VARROA_RECORDSTORE_DSN")
+	var recordStorePool *pgxpool.Pool
+	if recordStoreDSN != "" {
+		p, err := pgxpool.New(context.Background(), recordStoreDSN)
+		if err != nil {
+			logger.Error("failed to open record store pool", "error", err)
+			os.Exit(1)
+		}
+		recordStorePool = p
+		defer recordStorePool.Close()
+	}
+	logStore, err := openGatewayBlobStore(context.Background(), recordStoreDSN, os.Getenv("VARROA_BLOBSTORE_URL"), recordStorePool)
+	if err != nil {
+		logger.Error("failed to open blob store", "error", err)
+		os.Exit(1)
+	}
+	if logStore != nil {
+		handler.SetLogStore(logStore, logPendingBytesFromEnv(), logFinalizeWaitFromEnv(), runOwnerCacheSizeFromEnv())
+		logger.Info("gateway log writer enabled")
+	}
+
 	// --- Start gateway ---
 	port := flagOrEnv("VARROA_GATEWAY_PORT", fmt.Sprintf("%d", *grpcPort))
 	listener, err := net.Listen("tcp", net.JoinHostPort("", port))
@@ -256,6 +281,12 @@ func main() {
 	if err != nil {
 		logger.Warn("verify endpoint disabled: failed to create clientset", "error", err)
 	} else {
+		// *ClientsetClient implements crdstore.Backend, so the same client
+		// that backs the verify endpoint also backs the real CellTenantResolver
+		// (design.md D14) — replacing the single-tenant placeholder with one
+		// that reads Controller and Team placement.
+		handler.SetCellTenantResolver(mitesrv.NewCellTenantResolver(kclient))
+
 		verifier := apikey.NewVerifier(gatewayKeyStore{kclient, kclient}, operatorNamespace)
 		verifyMux := http.NewServeMux()
 		verifyMux.Handle("/v1/verify-apikey", apikey.VerifyHandler(verifier, logger))

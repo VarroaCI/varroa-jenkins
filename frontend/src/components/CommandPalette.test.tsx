@@ -98,6 +98,43 @@ describe("CommandPalette", () => {
     expect(screen.getByText("dev-team")).toBeInTheDocument();
   });
 
+  it("renders the job, run, and activity kinds with their own groups", async () => {
+    mockBffFetch.mockResolvedValue({items: [
+      { type: "job", name: "team-a/service", cluster: "core", namespace: "team-a", link: "/pipelines/team-a/service" },
+      { type: "run", name: "team-a/service", cluster: "core", namespace: "team-a", description: "#12 · main", link: "/pipelines/team-a/service/r-1" },
+      { type: "activity", name: "controller created", cluster: "core", namespace: "team-a", description: "controller.created", link: "/activity?namespace=team-a" },
+    ]});
+
+    renderPalette();
+    await userEvent.keyboard("{Meta>}k{/Meta}");
+
+    const input = screen.getByPlaceholderText("Search controllers, groups, templates...");
+    await userEvent.type(input, "service");
+
+    expect(await screen.findByText("jobs")).toBeInTheDocument();
+    expect(screen.getByText("runs")).toBeInTheDocument();
+    expect(screen.getByText("activity")).toBeInTheDocument();
+    expect(screen.getAllByText("team-a/service")).toHaveLength(2);
+    expect(screen.getByText("controller created")).toBeInTheDocument();
+  });
+
+  it("navigates to a job result's link", async () => {
+    mockBffFetch.mockResolvedValue({items: [
+      { type: "job", name: "team-a/service", cluster: "core", namespace: "team-a", link: "/pipelines/team-a/service" },
+    ]});
+
+    renderPalette();
+    await userEvent.keyboard("{Meta>}k{/Meta}");
+
+    const input = screen.getByPlaceholderText("Search controllers, groups, templates...");
+    await userEvent.type(input, "service");
+    await screen.findByText("team-a/service");
+
+    await userEvent.keyboard("{Enter}");
+
+    expect(mockNavigate).toHaveBeenCalledWith("/pipelines/team-a/service");
+  });
+
   it("shows empty state when no results match the query", async () => {
     mockBffFetch.mockResolvedValue({items: []});
 

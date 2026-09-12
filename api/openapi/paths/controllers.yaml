@@ -441,6 +441,44 @@
       "409":
         $ref: '../components/responses.yaml#/Conflict'
 
+/api/v1/clusters/{cluster}/controllers/{ns}/{name}/break-glass:
+  post:
+    operationId: breakGlassController
+    tags: [controllers]
+    summary: Grants a short-lived, per-caller Jenkins token for a headless controller's admin door.
+    description: >
+      Core-cluster only. Refused with 409 when the controller is not headless, and with
+      400 when the target cluster is not the core cluster.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/BreakGlassRequest'
+    responses:
+      "200":
+        description: Grant issued.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/BreakGlassResponse'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
 /api/v1/clusters/{cluster}/controllers/{ns}/{name}/reprovision:
   post:
     operationId: reprovisionController

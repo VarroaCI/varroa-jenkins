@@ -1,0 +1,94 @@
+# internal/recordstore/blob
+
+## Purpose
+
+The blob-storage abstraction for build logs and build artifacts, behind
+one `Store` interface. `pgblob` implements it over table
+`varroa.log_chunks`. A `gocloud.dev/blob` adapter implements it over S3,
+GCS, Azure Blob, and the local filesystem.
+
+## Ownership
+
+- Owns the `Store` interface, `ObjectOptions`, the six sentinel errors,
+  the `pgblob` driver, the `gocloud.dev` adapter, the `Open` URL opener,
+  and the `logs/<run_id>` / `logindex/<run_id>` key helpers.
+- Does NOT own the artifact key layout past its fixed prefix
+  (`artifact-manager-s3` owns it) and does NOT own `run_artifacts.blob_key`
+  (`internal/recordstore` owns that column).
+
+## Local Contracts
+
+- **Two read shapes** — `NewRangeReader` serves a chunked object Varroa
+  wrote itself, one part at a time (a log). `NewObjectReader` serves a
+  native object a foreign writer wrote whole (an artifact). The two never
+  share a key space: `pgblob` marks a native row with `chunk_seq = -1`;
+  the `gocloud.dev` adapter holds a native object at the bare key and a
+  chunked part at `<key>/<seq padded to 12 digits>`.
+- **`ObjectOptions.Validate`** — an empty `ObjectClass` or a zero
+  `CreatedAt` returns `ErrInvalidOptions`. `CreatedAt` must be the same
+  value for every part of one object, because `pgblob` uses it in the
+  `log_chunks` primary key.
+- **Append is write-once per `(key, seq)`** — an identical retry
+  succeeds; a retry with different bytes returns `ErrChunkConflict`.
+  `pgblob` checks this with `ON CONFLICT (created_at, object_key,
+  chunk_seq) DO NOTHING` plus a stored-digest comparison. The
+  `gocloud.dev` adapter checks it against the part's `digest` object
+  metadata.
+- **`Open`** (`open.go`) accepts `pgblob:`, `s3://`, `gs://`, `azblob://`,
+  and `file://`. `pgblob:` needs a non-nil `*pgxpool.Pool`; every other
+  scheme opens a `gocloud.dev/blob` bucket and ignores the pool. Every
+  other scheme returns an error naming the supported set. Driver
+  registration (`s3blob`, `gcsblob`, `azureblob`, `fileblob`) happens
+  through blank imports in `open.go`.
+- **`SignedURL`** — mints a read URL for the exact key it receives, for a
+  caller-supplied lifetime, with no derived key and no part suffix.
+  `pgblob` always returns `ErrUnsupported`: the Postgres tier stores
+  bytes in `log_chunks` and can sign no URL. The `gocloud.dev` adapter
+  delegates to the bucket's own signer, so its answer depends on how the
+  caller opened that bucket (an S3 bucket signs with no extra
+  configuration; a `file://` bucket needs an `Options.URLSigner`, which
+  `Open` never sets).
+- **Key helpers** (`keys.go`) — `LogKey` and `LogIndexKey` are the only
+  place a `logs/` or `logindex/` string appears outside their own tests.
+  This package adds no artifact-key helper: `artifact-manager-s3` owns
+  the layout after the fixed prefix, and `run_artifacts.blob_key` records
+  the exact key.
+- **No import of `internal/recordstore`** anywhere in package `blob`
+  (`testutil_test.go`, `pgblob_test.go`, `open_pgblob_test.go`)
+  imports it for `RunMigrations`, because `internal/recordstore`'s
+  production code imports `blob` for its retention key helpers. An
+  in-package test file cannot import a package that imports `blob` back
+  without a cycle; declaring these three `package blob_test` instead
+  keeps the database-backed harness out of that cycle. A test in package
+  `blob_test` reaches only exported `blob` identifiers, so
+  `pgblob_test.go` writes its native row through a plain `INSERT`
+  instead of the unexported `pgStore` type.
+- **Conformance suite** (`conformance_test.go`) — `RunConformance` runs
+  one behavior suite against any `Store`, and stays in package `blob` so
+  both test packages can call it. `pgblob_test.go` (package `blob_test`)
+  runs it over a fresh copy of schema `varroa` (skips without
+  `VARROA_TEST_DSN`). `bucketstore_test.go` (package `blob`) runs it over
+  a `file://` bucket in a temp directory (always runs). Each driver's
+  `writeNative` hook writes a native object the way a foreign writer
+  would: a direct `INSERT` with `chunk_seq = -1` for `pgblob`, a direct
+  `bucket.NewWriter` at the bare key for `gocloud.dev`.
+
+## Work Guidance
+
+- A new driver implements the full `Store` interface and passes
+  `RunConformance` before anything depends on it.
+- `Delete` and `DeletePrefix` report no error for a key or prefix that
+  matches nothing, so a retried retention round succeeds.
+
+## Verification
+
+```bash
+go build ./internal/recordstore/blob/...
+VARROA_TEST_DSN='postgres://user:pass@host:port/db?sslmode=disable' \
+  go test -race -count=1 ./internal/recordstore/blob/...
+go test -race -count=1 ./internal/recordstore/blob/...   # DSN unset: pgblob skips, file:// still runs
+```
+
+## Child DOX Index
+
+None.

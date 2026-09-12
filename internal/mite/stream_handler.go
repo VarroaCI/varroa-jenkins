@@ -64,6 +64,45 @@ type StreamHandler interface {
 	// token is the value OnConnect returned for *this* stream; handlers must
 	// ignore the call when a newer connection already owns the controller.
 	OnDisconnect(name, ns string, token int64)
+
+	// OnBuildEvent is called for each build event a mite forwards from the
+	// Jenkins plugin. It returns an error only when the handler cannot
+	// accept the event without delay; the CommandStream read loop then
+	// ends the stream, which is the back-pressure signal contract F
+	// relies on. token is the value OnConnect returned for this stream.
+	OnBuildEvent(name, ns string, connToken int64, evt *mitev1.BuildEvent) error
+
+	// OnClaimRequest is called for each claim request a mite forwards.
+	// send is the same stream-bound sender OnConnect received, so the
+	// handler can answer from a background goroutine with no new
+	// per-connection state in server.go. token is the value OnConnect
+	// returned for this stream.
+	OnClaimRequest(name, ns string, connToken int64, req *mitev1.ClaimRequest, send Sender)
+
+	// OnLogChunk is called for each console-log chunk a mite forwards from
+	// the Jenkins plugin. The handler stores the chunk and acknowledges it
+	// through OperatorMessage.log_ack on its own schedule, not from inside
+	// this call.
+	OnLogChunk(name, ns string, chunk *mitev1.LogChunk)
+
+	// OnTailAck is called when a mite confirms or clears a live-tail lease
+	// requested through OperatorMessage.tail_control.
+	OnTailAck(name, ns string, ack *mitev1.TailAck)
+
+	// OnCrossTenantRequest is called for each cross-tenant pipeline call a
+	// mite forwards (design.md D3). send is the same stream-bound sender
+	// OnConnect received, so the handler can answer from a background
+	// goroutine with no new per-connection state in server.go. token is
+	// the value OnConnect returned for this stream.
+	OnCrossTenantRequest(name, ns string, connToken int64, req *mitev1.CrossTenantRequest, send Sender)
+}
+
+// cellInstanceRecorder is an optional capability of a StreamHandler that
+// tracks the pod unique identifier a mite presents at registration, for
+// stamping onto that mite's later build-event envelopes. BusHandler
+// implements it; RegistryHandler and noopHandler do not.
+type cellInstanceRecorder interface {
+	RecordCellInstance(name, ns, cellInstance string)
 }
 
 // noopHandler is used when no StreamHandler is set (should not happen in
@@ -73,16 +112,22 @@ type noopHandler struct{}
 func (noopHandler) OnConnect(_, _, _ string, _ interface{}, _ Sender, _ interface{}) int64 {
 	return 0
 }
-func (noopHandler) OnHeartbeat(_, _ string, _ *mitev1.Heartbeat)                     {}
-func (noopHandler) OnSnapshot(_, _ string, _ *mitev1.StateSnapshot)                  {}
-func (noopHandler) OnCommandResult(_, _ string, _ *mitev1.CommandResult)             {}
-func (noopHandler) OnTokenRefreshRequest(_, _ string, _ *mitev1.TokenRefreshRequest) {}
-func (noopHandler) OnObservabilityReport(_, _ string, _ *mitev1.ObservabilityReport) {}
-func (noopHandler) OnContentResponse(_ string, _ *mitev1.ContentResponse)            {}
-func (noopHandler) OnJenkinsActivity(_, _ string, _ *mitev1.JenkinsActivityEvent)    {}
-func (noopHandler) OnPluginInventory(_, _ string, _ *mitev1.PluginInventory)         {}
-func (noopHandler) IsCurrentConnection(_, _ string, _ int64) bool                    { return true }
-func (noopHandler) OnDisconnect(_, _ string, _ int64)                                {}
+func (noopHandler) OnHeartbeat(_, _ string, _ *mitev1.Heartbeat)                          {}
+func (noopHandler) OnSnapshot(_, _ string, _ *mitev1.StateSnapshot)                       {}
+func (noopHandler) OnCommandResult(_, _ string, _ *mitev1.CommandResult)                  {}
+func (noopHandler) OnTokenRefreshRequest(_, _ string, _ *mitev1.TokenRefreshRequest)      {}
+func (noopHandler) OnObservabilityReport(_, _ string, _ *mitev1.ObservabilityReport)      {}
+func (noopHandler) OnContentResponse(_ string, _ *mitev1.ContentResponse)                 {}
+func (noopHandler) OnJenkinsActivity(_, _ string, _ *mitev1.JenkinsActivityEvent)         {}
+func (noopHandler) OnPluginInventory(_, _ string, _ *mitev1.PluginInventory)              {}
+func (noopHandler) IsCurrentConnection(_, _ string, _ int64) bool                         { return true }
+func (noopHandler) OnDisconnect(_, _ string, _ int64)                                     {}
+func (noopHandler) OnBuildEvent(_, _ string, _ int64, _ *mitev1.BuildEvent) error         { return nil }
+func (noopHandler) OnClaimRequest(_, _ string, _ int64, _ *mitev1.ClaimRequest, _ Sender) {}
+func (noopHandler) OnLogChunk(_, _ string, _ *mitev1.LogChunk)                            {}
+func (noopHandler) OnTailAck(_, _ string, _ *mitev1.TailAck)                              {}
+func (noopHandler) OnCrossTenantRequest(_, _ string, _ int64, _ *mitev1.CrossTenantRequest, _ Sender) {
+}
 
 // Ensure noopHandler implements StreamHandler.
 var _ StreamHandler = noopHandler{}

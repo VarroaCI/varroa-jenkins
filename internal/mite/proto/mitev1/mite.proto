@@ -24,6 +24,8 @@ message RegisterRequest {
   string namespace = 2;
   string bootstrap_token = 3;
   bytes public_key = 4;
+  // cell_instance is the calling pod's UID, read from VARROA_POD_UID.
+  string cell_instance = 5;
 }
 
 message RegisterResponse {
@@ -73,6 +75,32 @@ message StateSnapshot {
   string defer_reason = 10;
   string live_config_hash = 11;
   bool live_drift = 12;
+  JobScheduleSet job_schedules = 13;
+}
+
+// JobSchedule is one job/trigger row of the live job-schedule inventory.
+// The mite polls the plugin's schedules endpoint and carries the set on
+// StateSnapshot; it never contributes to any state hash.
+message JobSchedule {
+  string job_path = 1;
+  string trigger_type = 2;
+  string spec = 3;
+  string timezone = 4;
+  bool disabled = 5;
+  repeated string next_fire_times = 6;   // RFC3339, UTC
+  string upstream_tenant = 7;
+  string upstream_job = 8;
+  string upstream_result = 9;
+}
+
+// JobScheduleSet wraps the job-schedule rows with presence: an unset field
+// on StateSnapshot means "not carried this tick"; a set field with no rows
+// means "this cell has no jobs".
+message JobScheduleSet {
+  string hash = 1;
+  repeated JobSchedule items = 2;
+  bool truncated = 3;
+  int32 total = 4;
 }
 
 message DesiredStateCommand {
@@ -94,9 +122,32 @@ message DesiredStateCommand {
   int64 max_defer_sec = 14;
   int64 drain_timeout_sec = 15;
   int64 live_fingerprint_interval_sec = 16;
+  // rehydration carries the build-record rehydration bundle for every
+  // tenant on this cell whose seed is not yet applied. It stays out of the
+  // composite desired-state hash: the record set changes after every
+  // build, so hashing it would force a push after every build.
+  RehydrationBundle rehydration = 17;
 }
 
+// RehydrationBundle carries the build-record rehydration files for one
+// desired-state command.
+message RehydrationBundle {
+  string bundle_id = 1;
+  string content_hash = 2;
+  repeated RehydrationFile files = 3;
+  repeated string reload_items = 4;
+  bool truncated = 5;
+  int32 record_count = 6;
+  int32 job_count = 7;
+}
 
+// RehydrationFile is one file the mite writes under JENKINS_HOME to seed a
+// job's build history.
+message RehydrationFile {
+  string path = 1;
+  bytes gzip_content = 2;
+  int64 raw_size = 3;
+}
 
 message DesiredStateResult {
   // @required
@@ -115,6 +166,16 @@ message DesiredStateResult {
   reserved 10, 11, 13;
   reserved "restart_required", "plugin_results", "restart_requested";
   repeated DeferredDeletion deferred_item_deletions = 12;
+  // rehydration_success is true once the rehydration section applied with
+  // no error. Unset when the command carried no rehydration field.
+  bool rehydration_success = 14;
+  // rehydration_error is the whole-bundle rehydration failure, or empty.
+  string rehydration_error = 15;
+  // rehydration_deferred_jobs lists every job path the mite could not
+  // seed, because the job did not exist yet. A repeated job path, never a
+  // count: one command covers every tenant on a cell, so a count cannot
+  // attribute a deferral to one tenant.
+  repeated string rehydration_deferred_jobs = 16;
 }
 
 message DeferredDeletion {
@@ -210,6 +271,220 @@ message JenkinsActivityEvent {
   string timestamp    = 8;   // RFC3339; "" => mite fills time.Now()
 }
 
+message BuildChange {
+  string commit_id = 1;
+  string author_id = 2;
+  string author_display_name = 3;
+  string message = 4;
+  int64 timestamp_millis = 5;
+  int32 affected_path_count = 6;
+}
+
+message BuildStage {
+  // @required
+  string stage_id = 1;
+  string parent_id = 2;
+  repeated string parent_ids = 3;
+  string enclosing_id = 4;
+  string name = 5;
+  // @required
+  string node_type = 6;
+  string parallel_branch_name = 7;
+  // @required
+  string status = 8;
+  int64 started_at_millis = 9;
+  int64 ended_at_millis = 10;
+  int64 duration_millis = 11;
+  int64 pause_duration_millis = 12;
+  string node_name = 13;
+  string agent_label = 14;
+  string error = 15;
+}
+
+message BuildArtifact {
+  // @required
+  string path = 1;
+  string display_path = 2;
+  int64 size_bytes = 3;
+  // @required
+  string storage = 4;
+  // @required
+  string blob_key = 5;
+}
+
+message LogSummary {
+  // @required
+  int64 chunk_count = 1;
+  int64 dropped_bytes = 2;
+  // @required
+  bool incomplete = 3;
+  string incomplete_reason = 4;
+  // @required
+  bool finalized = 5;
+  int64 writer_heartbeat_unix_ms = 6;
+}
+
+message BuildEvent {
+  // @required
+  string phase = 1;
+  // @required
+  int64 seq = 2;
+  // @required
+  int64 emitted_at_millis = 3;
+  string run_id = 4;
+  string intent_key = 5;
+  // @required
+  string job_path = 6;
+  string job_display_name = 7;
+  // @required
+  int64 build_number = 8;
+  string build_display_name = 9;
+  string url = 10;
+  string result = 11;
+  string actor = 12;
+  repeated string cause_types = 13;
+  string cause_description = 14;
+  string upstream_job_path = 15;
+  int64 upstream_build_number = 16;
+  int64 queued_at_millis = 17;
+  int64 started_at_millis = 18;
+  int64 completed_at_millis = 19;
+  int64 duration_millis = 20;
+  int64 queue_wait_millis = 21;
+  int64 estimated_duration_millis = 22;
+  map<string, string> parameters = 23;
+  repeated string masked_parameter_names = 24;
+  string scm_url = 25;
+  string scm_head = 26;
+  string scm_revision = 27;
+  repeated BuildChange changes = 28;
+  int32 change_count = 29;
+  int32 test_total = 30;
+  int32 test_passed = 31;
+  int32 test_failed = 32;
+  int32 test_skipped = 33;
+  repeated BuildStage stages = 34;
+  string branch = 35;
+  repeated BuildArtifact artifacts = 36;
+  LogSummary log_summary = 37;
+  string template_name = 38;
+  string template_version = 39;
+  string marker_path = 40;
+  string marker_revision = 41;
+  string delivery_id = 42;
+}
+
+message ClaimRequest {
+  // @required
+  string request_id = 1;
+  // @required
+  string origin = 2;
+  // @required
+  string intent_key = 3;
+  // @required
+  string run_id = 4;
+  // @required
+  string job_path = 5;
+  string job_display_name = 6;
+  string branch = 7;
+  string actor = 8;
+  string cause = 9;
+  string params_digest = 10;
+  int32 attempt = 11;
+  int64 requested_at_millis = 12;
+  string cell_instance = 13;
+  int64 jenkins_next_build_number = 14;
+}
+
+message ClaimResponse {
+  // @required
+  string request_id = 1;
+  string decision = 2;
+  string run_id = 3;
+  int64 build_number = 4;
+  string reason_code = 5;
+  string message = 6;
+  string error = 7;
+  string code = 8;
+}
+
+message EventAck {
+  // @required
+  string run_id = 1;
+  // @required
+  int64 event_seq = 2;
+  // @required
+  string status = 3;
+  string reason = 4;
+}
+
+message LogChunk {
+  // @required
+  string run_id = 1;
+  // @required
+  string job_path = 2;
+  // @required
+  int64 build_number = 3;
+  // @required
+  int64 seq = 4;
+  string node_id = 5;
+  string stage_id = 6;
+  bytes data = 7;
+  int64 first_line_unix_ms = 8;
+  int64 dropped_bytes = 9;
+  // @required
+  bool final = 10;
+  // @required
+  string cell_instance = 11;
+}
+
+message TailControl {
+  // @required
+  string run_id = 1;
+  // @required
+  string job_path = 2;
+  // @required
+  int64 build_number = 3;
+  // @required
+  string action = 4;
+  int32 lease_seconds = 5;
+  // @required
+  string control_id = 6;
+}
+
+message TailAck {
+  // @required
+  string run_id = 1;
+  // @required
+  string control_id = 2;
+  // @required
+  bool active = 3;
+  string error = 4;
+}
+
+message LogAck {
+  // @required
+  string run_id = 1;
+  // @required
+  int64 ack_seq = 2;
+  // @required
+  string status = 3;
+  string reason = 4;
+  int32 pause_ms = 5;
+}
+
+message CrossTenantRequest {
+  uint64 request_id = 1;
+  string kind = 2;
+  string payload_json = 3;
+}
+
+message CrossTenantResponse {
+  uint64 request_id = 1;
+  string kind = 2;
+  string payload_json = 3;
+}
+
 message MiteMessage {
   oneof message {
     Hello hello = 1;
@@ -221,6 +496,11 @@ message MiteMessage {
     ContentResponse content_response = 23;
     JenkinsActivityEvent jenkins_activity = 24;
     PluginInventory plugin_inventory = 25;
+    BuildEvent build_event = 26;
+    ClaimRequest claim_request = 27;
+    LogChunk log_chunk = 28;
+    TailAck tail_ack = 29;
+    CrossTenantRequest cross_tenant_request = 30;
   }
 }
 
@@ -230,6 +510,11 @@ message OperatorMessage {
     ImperativeCommand   imperative     = 11;
     TokenGrant          token_grant    = 12;
     ContentRequest      content_request = 13;
+    ClaimResponse       claim_response  = 14;
+    TailControl         tail_control    = 15;
+    LogAck              log_ack         = 16;
+    CrossTenantResponse cross_tenant_response = 17;
+    EventAck            event_ack       = 18;
   }
 }
 
@@ -239,6 +524,8 @@ enum CommandType {
   DELETE_ITEM = 2;
   REPLAY_WEBHOOK = 3;
   COLLECT_PLUGIN_INVENTORY = 4;
+  TRIGGER_BUILD = 5;
+  CANCEL_BUILD = 6;
 }
 
 message ImperativeCommand {
@@ -250,6 +537,8 @@ message ImperativeCommand {
   int64       deadline_sec = 4;
   int64       drain_timeout_sec = 5;
   ReplayWebhookPayload replay_webhook = 6;
+  TriggerBuildPayload trigger_build = 7;
+  CancelBuildPayload cancel_build = 8;
 }
 
 message ReplayWebhookPayload {
@@ -258,6 +547,25 @@ message ReplayWebhookPayload {
   map<string, string> headers = 3;
   bytes body = 4;
   string delivery_id = 5;
+}
+
+message TriggerBuildPayload {
+  // @required
+  string run_id = 1;
+  // @required
+  string intent_key = 2;
+  // @required
+  string job_path = 3;
+  map<string, string> parameters = 4;
+  string actor = 5;
+}
+
+message CancelBuildPayload {
+  // @required
+  string run_id = 1;
+  // @required
+  string job_path = 2;
+  int64 build_number = 3;
 }
 
 message PluginInventory {

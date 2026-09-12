@@ -14,6 +14,14 @@ components:
       name: cluster
       schema:
         type: string
+    components_parameters_artifactPath:
+      description: |
+        Multi-segment artifact path, exactly as run_artifacts.path stored it.
+      in: path
+      name: path
+      required: true
+      schema:
+        type: string
     components_parameters_cluster:
       description: Cluster name (DNS-1123 label).
       in: path
@@ -34,6 +42,14 @@ components:
       name: force
       schema:
         type: boolean
+    components_parameters_job:
+      description: |
+        Percent-encoded job path, one path segment. The router reads it with PathValue, which returns the decoded value, so the job path's slashes reach the handler intact.
+      in: path
+      name: job
+      required: true
+      schema:
+        type: string
     components_parameters_name:
       description: Resource name.
       in: path
@@ -59,6 +75,28 @@ components:
       in: path
       name: prefix
       required: true
+      schema:
+        type: string
+    components_parameters_run:
+      description: Run identifier, a UUIDv7 string.
+      in: path
+      name: run
+      required: true
+      schema:
+        format: uuid
+        type: string
+    components_parameters_team:
+      description: |
+        Team or controller name that addresses one pipelines tenant.
+      in: path
+      name: team
+      required: true
+      schema:
+        type: string
+    components_parameters_teamQuery:
+      description: Team name filter for the runner list.
+      in: query
+      name: team
       schema:
         type: string
     name:
@@ -152,7 +190,8 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/components_schemas_Error'
-      description: Search sources are temporarily unavailable.
+      description: |
+        The upstream data source is temporarily unavailable (search sources, or the build record store when it is disabled or its schema is too old).
     components_responses_Unauthorized:
       content:
         application/json:
@@ -516,6 +555,17 @@ components:
       - jenkinsRoleRef
       - jenkinsPermissions
       type: object
+    CancelRunResponse:
+      additionalProperties: false
+      description: 202 response for a cancel request. Cancel is fire and forget.
+      properties:
+        state:
+          enum:
+          - requested
+          type: string
+      required:
+      - state
+      type: object
     CatalogItemSpec:
       additionalProperties: false
       description: Spec for a CatalogItem.
@@ -797,6 +847,16 @@ components:
           type: array
         pinPreflight:
           $ref: '#/components/schemas/components_schemas_PinPreflightReport'
+        pipelineTemplates:
+          description: One entry per template the composition delivered, in input
+            order.
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelineTemplateSummary'
+          type: array
+        pipelineTemplatesYaml:
+          description: |
+            The composed pipeline-template content, never resolved by ${var} substitution. Empty for a bundle with no pipeline-template input.
+          type: string
         pluginsYaml:
           type: string
         rbacYaml:
@@ -815,11 +875,13 @@ components:
       - pluginsYaml
       - itemsYaml
       - rbacYaml
+      - pipelineTemplatesYaml
       - missing
       - drifted
       - warnings
       - unresolvedVariables
       - pinPreflight
+      - pipelineTemplates
       type: object
     ComposedBundleRef:
       additionalProperties: false
@@ -867,6 +929,12 @@ components:
           type: array
         pinPreflight:
           $ref: '#/components/schemas/components_schemas_PinPreflightReport'
+        pipelineTemplates:
+          description: One entry per template the composition delivered, in input
+            order.
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelineTemplateSummary'
+          type: array
         unresolvedVariables:
           items:
             type: string
@@ -881,6 +949,7 @@ components:
       - valid
       - unresolvedVariables
       - pinPreflight
+      - pipelineTemplates
       type: object
     ComposedInput:
       additionalProperties: false
@@ -962,6 +1031,10 @@ components:
           type: string
         firstConnectedAt:
           type: string
+        headless:
+          description: Mirrors v1alpha1.IsHeadless. When true, endpoint is always
+            the empty string, whatever the controller's Status.Endpoint carries.
+          type: boolean
         hibernated:
           description: Whether the controller is currently hibernated (status.hibernated).
           type: boolean
@@ -1042,6 +1115,7 @@ components:
       - cluster
       - phase
       - endpoint
+      - headless
       - version
       - miteConnected
       - routingMode
@@ -1118,6 +1192,8 @@ components:
       properties:
         backupSpec:
           $ref: '#/components/schemas/components_schemas_BackupSpec'
+        cell:
+          $ref: '#/components/schemas/components_schemas_CellSpec'
         className:
           description: References a ControllerClass by name, layering its defaults
             between ProvisioningDefaults and the Controller's own spec.
@@ -1127,6 +1203,10 @@ components:
         endpoint:
           description: API endpoint URL for the controller.
           type: string
+        headless:
+          description: Blocks the Jenkins web UI for every non-admin caller. A cell
+            is always headless.
+          type: boolean
         hibernation:
           $ref: '#/components/schemas/components_schemas_HibernationSpec'
         ingressSpec:
@@ -1191,6 +1271,10 @@ components:
           $ref: '#/components/schemas/components_schemas_EffectiveBundle'
         endpoint:
           type: string
+        headless:
+          description: Mirrors v1alpha1.IsHeadless. When true, endpoint is always
+            the empty string, whatever the controller's Status.Endpoint carries.
+          type: boolean
         jenkinsHealth:
           type: string
         jenkinsVersion:
@@ -1223,6 +1307,7 @@ components:
       - cluster
       - phase
       - endpoint
+      - headless
       - miteConnected
       - routingMode
       type: object
@@ -1281,6 +1366,23 @@ components:
           description: Optional display name (≤128 chars). When rotating, an absent
             or empty name carries the old key's name forward.
           type: string
+      type: object
+    CreateRunRequest:
+      additionalProperties: false
+      description: |
+        POST /pipelines/{team}/jobs/{job}/runs. clientToken, a UUIDv7, makes the request idempotent: the BFF uses it as the run identifier. A request with no clientToken is not idempotent.
+      properties:
+        clientToken:
+          format: uuid
+          type: string
+        cluster:
+          description: |
+            Breaks a tie when the job path lies in more than one surviving tenant.
+          type: string
+        parameters:
+          additionalProperties:
+            type: string
+          type: object
       type: object
     CreateUserRequest:
       additionalProperties: false
@@ -1663,6 +1765,170 @@ components:
       - detectedAt
       - desiredStateHash
       type: object
+    PipelineDefinition:
+      additionalProperties: false
+      description: |
+        Where a job's Jenkinsfile comes from. The catalog template, when one exists, is reported separately on PipelineJobDetail.template — see PipelineTemplateInfo.
+      properties:
+        jenkinsfileCommit:
+          description: The last build's checked-out commit, from its run record.
+          type: string
+        jenkinsfileRepo:
+          type: string
+        profile:
+          description: The version profile in effect for this job's controller.
+          type: string
+      type: object
+    PipelineJobDetail:
+      additionalProperties: false
+      description: GET /pipelines/{team}/jobs/{job}.
+      properties:
+        definition:
+          $ref: '#/components/schemas/components_schemas_PipelineDefinition'
+        dependencies:
+          $ref: '#/components/schemas/components_schemas_PipelineDependencies'
+        durationTrendMs:
+          items:
+            format: int64
+            type: integer
+          type: array
+        health:
+          enum:
+          - clear
+          - cloudy
+          - rain
+          - unknown
+          type: string
+        jobPath:
+          type: string
+        last30Days:
+          allOf:
+          - $ref: '#/components/schemas/components_schemas_PipelineLast30Days'
+          description: |
+            Null when the record store could not answer the window query; the rest of the job page still renders.
+          nullable: true
+        lastBuild:
+          $ref: '#/components/schemas/components_schemas_RunSummary'
+        parameters:
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelineParameter'
+          type: array
+        template:
+          allOf:
+          - $ref: '#/components/schemas/components_schemas_PipelineTemplateInfo'
+          description: Absent for a job with no catalog template (a Jenkinsfile job).
+        tenant:
+          description: |
+            The tenant noun the server authorizes against, from TenantRef.Tenant: a Team name for a Team tenant, or "<namespace>/<controller>" for a synthetic tenant.
+          type: string
+        tenantFolder:
+          description: |
+            The tenant's Jenkins folder prefix, from TenantRef.Folder. Empty for a root-hosted tenant.
+          type: string
+        triggers:
+          $ref: '#/components/schemas/components_schemas_PipelineTriggers'
+      required:
+      - jobPath
+      - health
+      - last30Days
+      - tenantFolder
+      - tenant
+      - dependencies
+      type: object
+    PipelineListResponse:
+      additionalProperties: false
+      description: |
+        GET /pipelines/{team}: the job list, unioned with the catalog's declared jobs, plus the running-now strip.
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelineSummary'
+          type: array
+        runningNow:
+          items:
+            $ref: '#/components/schemas/components_schemas_RunningRun'
+          type: array
+        truncated:
+          description: |
+            True when any tenant's running-now page was full (50 rows), so the strip does not claim completeness.
+          type: boolean
+      required:
+      - items
+      - runningNow
+      - truncated
+      type: object
+    PipelineParameter:
+      additionalProperties: false
+      description: |
+        One declared build parameter, converted from the items engine's parameter kind into a JSON Schema fragment the frontend's form renders directly.
+      properties:
+        defaultValue:
+          type: string
+        description:
+          type: string
+        kind:
+          enum:
+          - string
+          - boolean
+          - choice
+          - text
+          - password
+          type: string
+        name:
+          type: string
+        schema:
+          description: A JSON Schema fragment for this one field.
+          type: object
+        uiWidget:
+          enum:
+          - textarea
+          - password
+          type: string
+      required:
+      - name
+      - kind
+      - schema
+      type: object
+    PipelineSummary:
+      additionalProperties: false
+      description: |
+        One job's run-history summary for the Pipelines table. A job that has never run carries no lastBuild.
+      properties:
+        durationTrendMs:
+          description: The most recent runs' duration, newest first.
+          items:
+            format: int64
+            type: integer
+          type: array
+        health:
+          description: |
+            The weather glyph, computed from the last five runs: clear when all passed, cloudy when one or two failed, rain when three or more failed, unknown for a job that has never run.
+          enum:
+          - clear
+          - cloudy
+          - rain
+          - unknown
+          type: string
+        jobPath:
+          type: string
+        lastBuild:
+          $ref: '#/components/schemas/components_schemas_RunSummary'
+      required:
+      - jobPath
+      - health
+      type: object
+    PipelineTriggers:
+      additionalProperties: false
+      properties:
+        concurrency:
+          type: integer
+        pullRequest:
+          type: boolean
+        push:
+          type: boolean
+        schedule:
+          type: string
+      type: object
     PluginAdvisory:
       additionalProperties: false
       description: A non-classification finding (e.g. dependencyMinimumUnsatisfied).
@@ -1988,6 +2254,294 @@ components:
       - error
       - newToken
       type: object
+    RunActionResponse:
+      additionalProperties: false
+      description: |
+        202 response for a run request or a rerun. The BFF does not wait for the cell's admission decision; the caller polls the run.
+      properties:
+        intentKey:
+          type: string
+        runId:
+          type: string
+        state:
+          enum:
+          - requested
+          type: string
+      required:
+      - runId
+      - intentKey
+      - state
+      type: object
+    RunArtifact:
+      additionalProperties: false
+      properties:
+        contentType:
+          type: string
+        digest:
+          type: string
+        downloadable:
+          description: |
+            False when the stored blob key is empty (local artifact mode); the download path then answers 409.
+          type: boolean
+        path:
+          type: string
+        sizeBytes:
+          format: int64
+          type: integer
+      required:
+      - path
+      - sizeBytes
+      - downloadable
+      type: object
+    RunArtifactListResponse:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/components_schemas_RunArtifact'
+          type: array
+      required:
+      - items
+      type: object
+    RunChange:
+      additionalProperties: true
+      description: One SCM change entry, passed through from the run's changes column.
+      type: object
+    RunChangeListResponse:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/components_schemas_RunChange'
+          type: array
+      required:
+      - items
+      type: object
+    RunDetail:
+      additionalProperties: false
+      description: GET /runs/{run}.
+      properties:
+        actor:
+          type: string
+        branch:
+          type: string
+        buildNumber:
+          format: int64
+          type: integer
+        cause:
+          type: string
+        durationMs:
+          format: int64
+          type: integer
+        endedAt:
+          format: date-time
+          type: string
+        interruptedReason:
+          description: Set only when result is INTERRUPTED.
+          type: string
+        jobPath:
+          type: string
+        logComplete:
+          description: The negation of LogSummary.incomplete.
+          type: boolean
+        logFinalized:
+          description: LogSummary.finalized, read from the run's payload column.
+          type: boolean
+        params:
+          additionalProperties:
+            type: string
+          type: object
+        queuedAt:
+          format: date-time
+          type: string
+        result:
+          type: string
+        retryRunId:
+          description: An existing retry's run id, when one already exists.
+          type: string
+        runId:
+          type: string
+        scmRevision:
+          type: string
+        stages:
+          items:
+            $ref: '#/components/schemas/components_schemas_RunStage'
+          type: array
+        startedAt:
+          format: date-time
+          type: string
+        status:
+          type: string
+        tenant:
+          description: |
+            The tenant noun the server authorizes against: the run row's stored tenant column. A Team name for a Team tenant, or "<namespace>/<controller>" for a synthetic tenant.
+          type: string
+        tenantFolder:
+          description: |
+            The tenant's Jenkins folder prefix, from TenantRef.Folder. Empty for a root-hosted tenant.
+          type: string
+        testsFailed:
+          type: integer
+        testsSkipped:
+          type: integer
+        testsTotal:
+          type: integer
+      required:
+      - runId
+      - jobPath
+      - status
+      - tenantFolder
+      - tenant
+      type: object
+    RunListResponse:
+      additionalProperties: false
+      description: GET /pipelines/{team}/jobs/{job}/runs, cross-tenant cursor-merged.
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/components_schemas_RunSummary'
+          type: array
+        nextCursor:
+          type: string
+      required:
+      - items
+      type: object
+    RunStage:
+      additionalProperties: false
+      properties:
+        durationMs:
+          format: int64
+          type: integer
+        endedAt:
+          format: date-time
+          type: string
+        error:
+          type: string
+        name:
+          type: string
+        nodeType:
+          type: string
+        parentId:
+          type: string
+        stageId:
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+        status:
+          type: string
+      required:
+      - stageId
+      - name
+      - status
+      type: object
+    RunSummary:
+      additionalProperties: false
+      description: One run, condensed for a list or a card.
+      properties:
+        actor:
+          type: string
+        branch:
+          type: string
+        buildNumber:
+          format: int64
+          type: integer
+        cause:
+          type: string
+        durationMs:
+          format: int64
+          type: integer
+        endedAt:
+          format: date-time
+          type: string
+        jobPath:
+          type: string
+        queuedAt:
+          format: date-time
+          type: string
+        result:
+          type: string
+        runId:
+          type: string
+        scmRevision:
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+        status:
+          type: string
+      required:
+      - runId
+      - status
+      type: object
+    RunTestListResponse:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/components_schemas_RunTestSuite'
+          type: array
+      required:
+      - items
+      type: object
+    RunTestSuite:
+      additionalProperties: false
+      properties:
+        durationMs:
+          format: int64
+          type: integer
+        failed:
+          type: integer
+        skipped:
+          type: integer
+        suite:
+          type: string
+        total:
+          type: integer
+      required:
+      - suite
+      - total
+      - failed
+      - skipped
+      type: object
+    RunningRun:
+      additionalProperties: false
+      description: |
+        One unfinished run for the team home's Running now card. currentStage names the stage in progress; it is absent for a run that is still queued.
+      properties:
+        branch:
+          type: string
+        buildNumber:
+          format: int64
+          type: integer
+        changeSummary:
+          description: The last commit's short message.
+          type: string
+        currentStage:
+          type: string
+        jobPath:
+          type: string
+        queuedAt:
+          format: date-time
+          type: string
+        runId:
+          type: string
+        scmRevision:
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+        status:
+          type: string
+        typicalDurationMs:
+          description: The job's usual duration, from its duration trend.
+          format: int64
+          type: integer
+      required:
+      - runId
+      - jobPath
+      - status
+      type: object
     SearchResult:
       additionalProperties: false
       description: A single search result entry.
@@ -2003,6 +2557,17 @@ components:
         namespace:
           type: string
         type:
+          description: controller, namespace, group, and catalogitem come from a live
+            Kubernetes read; job, run, and activity come from the record store and
+            are absent when it is not wired.
+          enum:
+          - controller
+          - namespace
+          - group
+          - catalogitem
+          - job
+          - run
+          - activity
           type: string
       required:
       - type
@@ -2148,8 +2713,14 @@ components:
         observedGeneration:
           format: int64
           type: integer
+        pipelines:
+          $ref: '#/components/schemas/components_schemas_TeamPipelines'
+        placement:
+          $ref: '#/components/schemas/components_schemas_TeamPlacement'
         provisionNamespaces:
           type: boolean
+        rehydration:
+          $ref: '#/components/schemas/components_schemas_TeamRehydration'
         roleRef:
           type: string
         subjects:
@@ -2191,6 +2762,8 @@ components:
           items:
             type: string
           type: array
+        pipelines:
+          $ref: '#/components/schemas/components_schemas_TeamPipelines'
         provisionNamespaces:
           description: Whether to auto-provision namespaces.
           type: boolean
@@ -2264,6 +2837,13 @@ components:
         namespaces:
           items:
             type: string
+          type: array
+        tenants:
+          description: An allow-list of pipelines tenants. A scope names one dimension;
+            tenants never combines with namespaces or controllerSelector.
+          items:
+            $ref: '#/components/schemas/components_schemas_TenantScope'
+          maxItems: 64
           type: array
       type: object
     VarroaRoleBindingSpec:
@@ -2428,6 +3008,13 @@ components:
       - path
       - message
       type: object
+    components_schemas_APICapabilitySet:
+      additionalProperties:
+        additionalProperties:
+          type: boolean
+        type: object
+      description: Resource-to-verb-to-allowed capability map.
+      type: object
     components_schemas_APIRule:
       additionalProperties: false
       description: An API rule defining resource access.
@@ -2560,6 +3147,60 @@ components:
         schedule:
           description: Cron expression for the backup schedule.
           type: string
+      type: object
+    components_schemas_BreakGlassRequest:
+      additionalProperties: false
+      description: Request body for a break-glass grant.
+      properties:
+        reason:
+          description: Required. At most 256 characters. Recorded on the audit event.
+          maxLength: 256
+          type: string
+        ttlSeconds:
+          description: Token lifetime in seconds. Defaults to 900. Must be between
+            300 and 3600.
+          maximum: 3600
+          minimum: 300
+          type: integer
+      required:
+      - reason
+      type: object
+    components_schemas_BreakGlassResponse:
+      additionalProperties: false
+      description: A granted break-glass session.
+      properties:
+        expiresAt:
+          format: date-time
+          type: string
+        locationUrl:
+          description: The in-cluster Service URL, with a trailing slash.
+          type: string
+        target:
+          $ref: '#/components/schemas/components_schemas_BreakGlassTarget'
+        token:
+          description: A short-lived Jenkins user token minted for the caller's own
+            identity.
+          type: string
+      required:
+      - token
+      - expiresAt
+      - target
+      - locationUrl
+      type: object
+    components_schemas_BreakGlassTarget:
+      additionalProperties: false
+      description: The in-cluster Service a break-glass token reaches.
+      properties:
+        namespace:
+          type: string
+        port:
+          type: integer
+        service:
+          type: string
+      required:
+      - service
+      - namespace
+      - port
       type: object
     components_schemas_BroodCreateFailure:
       description: Error body when zero clusters succeed on create.
@@ -3048,6 +3689,17 @@ components:
       - jenkinsRoleRef
       - jenkinsPermissions
       type: object
+    components_schemas_CancelRunResponse:
+      additionalProperties: false
+      description: 202 response for a cancel request. Cancel is fire and forget.
+      properties:
+        state:
+          enum:
+          - requested
+          type: string
+      required:
+      - state
+      type: object
     components_schemas_CatalogItem:
       description: A CatalogItem CRD.
       properties:
@@ -3358,6 +4010,19 @@ components:
       required:
       - name
       type: object
+    components_schemas_CellSpec:
+      additionalProperties: false
+      description: Marks a controller as a shared cell that hosts tenant pipelines.
+        enabled is immutable after creation; maxTenants bounds placement.
+      properties:
+        enabled:
+          type: boolean
+        maxTenants:
+          format: int32
+          type: integer
+      required:
+      - enabled
+      type: object
     components_schemas_Check:
       additionalProperties: false
       description: Result of a single preflight validation check.
@@ -3567,6 +4232,16 @@ components:
           type: array
         pinPreflight:
           $ref: '#/components/schemas/components_schemas_PinPreflightReport'
+        pipelineTemplates:
+          description: One entry per template the composition delivered, in input
+            order.
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelineTemplateSummary'
+          type: array
+        pipelineTemplatesYaml:
+          description: |
+            The composed pipeline-template content, never resolved by ${var} substitution. Empty for a bundle with no pipeline-template input.
+          type: string
         pluginsYaml:
           type: string
         rbacYaml:
@@ -3585,11 +4260,13 @@ components:
       - pluginsYaml
       - itemsYaml
       - rbacYaml
+      - pipelineTemplatesYaml
       - missing
       - drifted
       - warnings
       - unresolvedVariables
       - pinPreflight
+      - pipelineTemplates
       type: object
     components_schemas_ComposedBundleRef:
       additionalProperties: false
@@ -3687,6 +4364,12 @@ components:
           type: array
         pinPreflight:
           $ref: '#/components/schemas/components_schemas_PinPreflightReport'
+        pipelineTemplates:
+          description: One entry per template the composition delivered, in input
+            order.
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelineTemplateSummary'
+          type: array
         unresolvedVariables:
           items:
             type: string
@@ -3701,6 +4384,7 @@ components:
       - valid
       - unresolvedVariables
       - pinPreflight
+      - pipelineTemplates
       type: object
     components_schemas_ComposedInput:
       additionalProperties: false
@@ -3903,6 +4587,10 @@ components:
           type: string
         firstConnectedAt:
           type: string
+        headless:
+          description: Mirrors v1alpha1.IsHeadless. When true, endpoint is always
+            the empty string, whatever the controller's Status.Endpoint carries.
+          type: boolean
         hibernated:
           description: Whether the controller is currently hibernated (status.hibernated).
           type: boolean
@@ -3983,6 +4671,7 @@ components:
       - cluster
       - phase
       - endpoint
+      - headless
       - version
       - miteConnected
       - routingMode
@@ -4059,6 +4748,8 @@ components:
       properties:
         backupSpec:
           $ref: '#/components/schemas/components_schemas_BackupSpec'
+        cell:
+          $ref: '#/components/schemas/components_schemas_CellSpec'
         className:
           description: References a ControllerClass by name, layering its defaults
             between ProvisioningDefaults and the Controller's own spec.
@@ -4068,6 +4759,10 @@ components:
         endpoint:
           description: API endpoint URL for the controller.
           type: string
+        headless:
+          description: Blocks the Jenkins web UI for every non-admin caller. A cell
+            is always headless.
+          type: boolean
         hibernation:
           $ref: '#/components/schemas/components_schemas_HibernationSpec'
         ingressSpec:
@@ -4132,6 +4827,10 @@ components:
           $ref: '#/components/schemas/components_schemas_EffectiveBundle'
         endpoint:
           type: string
+        headless:
+          description: Mirrors v1alpha1.IsHeadless. When true, endpoint is always
+            the empty string, whatever the controller's Status.Endpoint carries.
+          type: boolean
         jenkinsHealth:
           type: string
         jenkinsVersion:
@@ -4164,6 +4863,7 @@ components:
       - cluster
       - phase
       - endpoint
+      - headless
       - miteConnected
       - routingMode
       type: object
@@ -4222,6 +4922,23 @@ components:
           description: Optional display name (≤128 chars). When rotating, an absent
             or empty name carries the old key's name forward.
           type: string
+      type: object
+    components_schemas_CreateRunRequest:
+      additionalProperties: false
+      description: |
+        POST /pipelines/{team}/jobs/{job}/runs. clientToken, a UUIDv7, makes the request idempotent: the BFF uses it as the run identifier. A request with no clientToken is not idempotent.
+      properties:
+        clientToken:
+          format: uuid
+          type: string
+        cluster:
+          description: |
+            Breaks a tie when the job path lies in more than one surviving tenant.
+          type: string
+        parameters:
+          additionalProperties:
+            type: string
+          type: object
       type: object
     components_schemas_CreateUserRequest:
       additionalProperties: false
@@ -5012,6 +5729,31 @@ components:
       - detectedAt
       - desiredStateHash
       type: object
+    components_schemas_PermissionScopes:
+      additionalProperties: false
+      description: Scope-aware introspection result for /me/permissions.
+      properties:
+        global:
+          allOf:
+          - $ref: '#/components/schemas/components_schemas_APICapabilitySet'
+          description: Capabilities from cluster-wide (nil-scope) bindings only.
+        scopes:
+          description: One entry per distinct scoped binding scope.
+          items:
+            $ref: '#/components/schemas/components_schemas_ScopedCapabilities'
+          nullable: true
+          type: array
+        tenants:
+          description: One entry per pipelines-tenant grant the caller holds. Always
+            an array, never null.
+          items:
+            $ref: '#/components/schemas/components_schemas_TenantCapabilities'
+          type: array
+      required:
+      - global
+      - scopes
+      - tenants
+      type: object
     components_schemas_PersistenceSpec:
       additionalProperties: false
       description: Persistent volume size/class (transcribed from v1alpha1.PersistenceSpec).
@@ -5055,6 +5797,343 @@ components:
       required:
       - conflicts
       - missing
+      type: object
+    components_schemas_PipelineDefinition:
+      additionalProperties: false
+      description: |
+        Where a job's Jenkinsfile comes from. The catalog template, when one exists, is reported separately on PipelineJobDetail.template — see PipelineTemplateInfo.
+      properties:
+        jenkinsfileCommit:
+          description: The last build's checked-out commit, from its run record.
+          type: string
+        jenkinsfileRepo:
+          type: string
+        profile:
+          description: The version profile in effect for this job's controller.
+          type: string
+      type: object
+    components_schemas_PipelineDependencies:
+      additionalProperties: false
+      description: |
+        The job's cross-tenant dependency edges (design D13). Both arrays are empty, never omitted, for a job that declares no cross-tenant trigger and has no subscriber.
+      properties:
+        downstream:
+          description: The varroa-upstream rows naming this job as their producer.
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelineDependencyEdge'
+          type: array
+        upstream:
+          description: The varroa-upstream trigger rows this job declares.
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelineDependencyEdge'
+          type: array
+      required:
+      - upstream
+      - downstream
+      type: object
+    components_schemas_PipelineDependencyEdge:
+      additionalProperties: false
+      description: |
+        One cross-tenant dependency edge: a producer tenant and job, the result threshold the edge fires on, and whether the producer's exports currently grant it. A declared edge whose grant is missing is not hidden; it appears with granted false.
+      properties:
+        granted:
+          description: |
+            The grant evaluator's fanout-path verdict, read from the producer's exports.
+          type: boolean
+        job:
+          description: The producer job's path, relative to the producer tenant's
+            folder.
+          type: string
+        result:
+          description: The result threshold the edge fires on.
+          enum:
+          - SUCCESS
+          - UNSTABLE
+          - FAILURE
+          type: string
+        tenant:
+          description: The producer tenant's identifier.
+          type: string
+      required:
+      - tenant
+      - job
+      - result
+      - granted
+      type: object
+    components_schemas_PipelineJobDetail:
+      additionalProperties: false
+      description: GET /pipelines/{team}/jobs/{job}.
+      properties:
+        definition:
+          $ref: '#/components/schemas/components_schemas_PipelineDefinition'
+        dependencies:
+          $ref: '#/components/schemas/components_schemas_PipelineDependencies'
+        durationTrendMs:
+          items:
+            format: int64
+            type: integer
+          type: array
+        health:
+          enum:
+          - clear
+          - cloudy
+          - rain
+          - unknown
+          type: string
+        jobPath:
+          type: string
+        last30Days:
+          allOf:
+          - $ref: '#/components/schemas/components_schemas_PipelineLast30Days'
+          description: |
+            Null when the record store could not answer the window query; the rest of the job page still renders.
+          nullable: true
+        lastBuild:
+          $ref: '#/components/schemas/components_schemas_RunSummary'
+        parameters:
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelineParameter'
+          type: array
+        template:
+          allOf:
+          - $ref: '#/components/schemas/components_schemas_PipelineTemplateInfo'
+          description: Absent for a job with no catalog template (a Jenkinsfile job).
+        tenant:
+          description: |
+            The tenant noun the server authorizes against, from TenantRef.Tenant: a Team name for a Team tenant, or "<namespace>/<controller>" for a synthetic tenant.
+          type: string
+        tenantFolder:
+          description: |
+            The tenant's Jenkins folder prefix, from TenantRef.Folder. Empty for a root-hosted tenant.
+          type: string
+        triggers:
+          $ref: '#/components/schemas/components_schemas_PipelineTriggers'
+      required:
+      - jobPath
+      - health
+      - last30Days
+      - tenantFolder
+      - tenant
+      - dependencies
+      type: object
+    components_schemas_PipelineLast30Days:
+      additionalProperties: false
+      description: The job's "Last 30 days" card, GET /pipelines/{team}/jobs/{job}.
+      properties:
+        builds:
+          description: Every run created in the window, whatever its status.
+          format: int64
+          type: integer
+        medianDurationMs:
+          description: The median duration_ms over finished runs. Null when the window
+            holds no finished run.
+          format: int64
+          nullable: true
+          type: integer
+        passRate:
+          description: The share of finished runs whose result is SUCCESS. Null when
+            the window holds no finished run.
+          format: double
+          nullable: true
+          type: number
+        slowestStage:
+          allOf:
+          - $ref: '#/components/schemas/components_schemas_PipelineSlowestStage'
+          description: Null when no run in the window carries a finished stage.
+          nullable: true
+      required:
+      - builds
+      type: object
+    components_schemas_PipelineListResponse:
+      additionalProperties: false
+      description: |
+        GET /pipelines/{team}: the job list, unioned with the catalog's declared jobs, plus the running-now strip.
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelineSummary'
+          type: array
+        runningNow:
+          items:
+            $ref: '#/components/schemas/components_schemas_RunningRun'
+          type: array
+        truncated:
+          description: |
+            True when any tenant's running-now page was full (50 rows), so the strip does not claim completeness.
+          type: boolean
+      required:
+      - items
+      - runningNow
+      - truncated
+      type: object
+    components_schemas_PipelineMarkerFinding:
+      additionalProperties: false
+      description: One line of the lint table's SEVERITY, PATH, and MESSAGE columns.
+      properties:
+        message:
+          type: string
+        path:
+          type: string
+        severity:
+          enum:
+          - error
+          type: string
+      required:
+      - severity
+      - message
+      type: object
+    components_schemas_PipelineMarkerValidateRequest:
+      additionalProperties: false
+      description: POST /pipelines/{team}/markers/validate.
+      properties:
+        marker:
+          description: The marker file's raw text, at most 64 KiB.
+          type: string
+      required:
+      - marker
+      type: object
+    components_schemas_PipelineMarkerValidateResponse:
+      additionalProperties: false
+      description: |
+        findings is empty when the marker resolved against the team's delivered set and its values validated; templateName and templateVersion are then present.
+      properties:
+        findings:
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelineMarkerFinding'
+          type: array
+        templateName:
+          type: string
+        templateVersion:
+          type: string
+      required:
+      - findings
+      type: object
+    components_schemas_PipelineParameter:
+      additionalProperties: false
+      description: |
+        One declared build parameter, converted from the items engine's parameter kind into a JSON Schema fragment the frontend's form renders directly.
+      properties:
+        defaultValue:
+          type: string
+        description:
+          type: string
+        kind:
+          enum:
+          - string
+          - boolean
+          - choice
+          - text
+          - password
+          type: string
+        name:
+          type: string
+        schema:
+          description: A JSON Schema fragment for this one field.
+          type: object
+        uiWidget:
+          enum:
+          - textarea
+          - password
+          type: string
+      required:
+      - name
+      - kind
+      - schema
+      type: object
+    components_schemas_PipelineSlowestStage:
+      additionalProperties: false
+      description: The stage with the greatest median duration across the window's
+        runs.
+      properties:
+        durationMs:
+          format: int64
+          type: integer
+        name:
+          type: string
+      required:
+      - name
+      - durationMs
+      type: object
+    components_schemas_PipelineSummary:
+      additionalProperties: false
+      description: |
+        One job's run-history summary for the Pipelines table. A job that has never run carries no lastBuild.
+      properties:
+        durationTrendMs:
+          description: The most recent runs' duration, newest first.
+          items:
+            format: int64
+            type: integer
+          type: array
+        health:
+          description: |
+            The weather glyph, computed from the last five runs: clear when all passed, cloudy when one or two failed, rain when three or more failed, unknown for a job that has never run.
+          enum:
+          - clear
+          - cloudy
+          - rain
+          - unknown
+          type: string
+        jobPath:
+          type: string
+        lastBuild:
+          $ref: '#/components/schemas/components_schemas_RunSummary'
+      required:
+      - jobPath
+      - health
+      type: object
+    components_schemas_PipelineTemplateInfo:
+      additionalProperties: false
+      description: |
+        The resolved catalog template for a job, read from the record store (marker-defined) or the items engine and catalog (items-declared). Absent from PipelineJobDetail for a job with no catalog template.
+        For source "marker": name, version, and asOfBuild are absent before the job's first run — markerPath and source are always present. markerRevision is the trusted revision the cell read the marker from, not the branch tip. For source "items": only name, version, and source are set.
+      properties:
+        asOfBuild:
+          format: int64
+          type: integer
+        markerPath:
+          type: string
+        markerRevision:
+          type: string
+        name:
+          type: string
+        source:
+          enum:
+          - marker
+          - items
+          type: string
+        version:
+          type: string
+      required:
+      - source
+      type: object
+    components_schemas_PipelineTemplateSummary:
+      additionalProperties: false
+      description: One pipeline-template a composition delivered.
+      properties:
+        description:
+          type: string
+        displayName:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+      required:
+      - name
+      - version
+      type: object
+    components_schemas_PipelineTriggers:
+      additionalProperties: false
+      properties:
+        concurrency:
+          type: integer
+        pullRequest:
+          type: boolean
+        push:
+          type: boolean
+        schedule:
+          type: string
       type: object
     components_schemas_PluginAdvisory:
       additionalProperties: false
@@ -5632,6 +6711,450 @@ components:
       - error
       - newToken
       type: object
+    components_schemas_RunActionResponse:
+      additionalProperties: false
+      description: |
+        202 response for a run request or a rerun. The BFF does not wait for the cell's admission decision; the caller polls the run.
+      properties:
+        intentKey:
+          type: string
+        runId:
+          type: string
+        state:
+          enum:
+          - requested
+          type: string
+      required:
+      - runId
+      - intentKey
+      - state
+      type: object
+    components_schemas_RunArtifact:
+      additionalProperties: false
+      properties:
+        contentType:
+          type: string
+        digest:
+          type: string
+        downloadable:
+          description: |
+            False when the stored blob key is empty (local artifact mode); the download path then answers 409.
+          type: boolean
+        path:
+          type: string
+        sizeBytes:
+          format: int64
+          type: integer
+      required:
+      - path
+      - sizeBytes
+      - downloadable
+      type: object
+    components_schemas_RunArtifactListResponse:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/components_schemas_RunArtifact'
+          type: array
+      required:
+      - items
+      type: object
+    components_schemas_RunChange:
+      additionalProperties: true
+      description: One SCM change entry, passed through from the run's changes column.
+      type: object
+    components_schemas_RunChangeListResponse:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/components_schemas_RunChange'
+          type: array
+      required:
+      - items
+      type: object
+    components_schemas_RunDetail:
+      additionalProperties: false
+      description: GET /runs/{run}.
+      properties:
+        actor:
+          type: string
+        branch:
+          type: string
+        buildNumber:
+          format: int64
+          type: integer
+        cause:
+          type: string
+        durationMs:
+          format: int64
+          type: integer
+        endedAt:
+          format: date-time
+          type: string
+        interruptedReason:
+          description: Set only when result is INTERRUPTED.
+          type: string
+        jobPath:
+          type: string
+        logComplete:
+          description: The negation of LogSummary.incomplete.
+          type: boolean
+        logFinalized:
+          description: LogSummary.finalized, read from the run's payload column.
+          type: boolean
+        params:
+          additionalProperties:
+            type: string
+          type: object
+        queuedAt:
+          format: date-time
+          type: string
+        result:
+          type: string
+        retryRunId:
+          description: An existing retry's run id, when one already exists.
+          type: string
+        runId:
+          type: string
+        scmRevision:
+          type: string
+        stages:
+          items:
+            $ref: '#/components/schemas/components_schemas_RunStage'
+          type: array
+        startedAt:
+          format: date-time
+          type: string
+        status:
+          type: string
+        tenant:
+          description: |
+            The tenant noun the server authorizes against: the run row's stored tenant column. A Team name for a Team tenant, or "<namespace>/<controller>" for a synthetic tenant.
+          type: string
+        tenantFolder:
+          description: |
+            The tenant's Jenkins folder prefix, from TenantRef.Folder. Empty for a root-hosted tenant.
+          type: string
+        testsFailed:
+          type: integer
+        testsSkipped:
+          type: integer
+        testsTotal:
+          type: integer
+      required:
+      - runId
+      - jobPath
+      - status
+      - tenantFolder
+      - tenant
+      type: object
+    components_schemas_RunListResponse:
+      additionalProperties: false
+      description: GET /pipelines/{team}/jobs/{job}/runs, cross-tenant cursor-merged.
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/components_schemas_RunSummary'
+          type: array
+        nextCursor:
+          type: string
+      required:
+      - items
+      type: object
+    components_schemas_RunStage:
+      additionalProperties: false
+      properties:
+        durationMs:
+          format: int64
+          type: integer
+        endedAt:
+          format: date-time
+          type: string
+        error:
+          type: string
+        name:
+          type: string
+        nodeType:
+          type: string
+        parentId:
+          type: string
+        stageId:
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+        status:
+          type: string
+      required:
+      - stageId
+      - name
+      - status
+      type: object
+    components_schemas_RunSummary:
+      additionalProperties: false
+      description: One run, condensed for a list or a card.
+      properties:
+        actor:
+          type: string
+        branch:
+          type: string
+        buildNumber:
+          format: int64
+          type: integer
+        cause:
+          type: string
+        durationMs:
+          format: int64
+          type: integer
+        endedAt:
+          format: date-time
+          type: string
+        jobPath:
+          type: string
+        queuedAt:
+          format: date-time
+          type: string
+        result:
+          type: string
+        runId:
+          type: string
+        scmRevision:
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+        status:
+          type: string
+      required:
+      - runId
+      - status
+      type: object
+    components_schemas_RunTestListResponse:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/components_schemas_RunTestSuite'
+          type: array
+      required:
+      - items
+      type: object
+    components_schemas_RunTestSuite:
+      additionalProperties: false
+      properties:
+        durationMs:
+          format: int64
+          type: integer
+        failed:
+          type: integer
+        skipped:
+          type: integer
+        suite:
+          type: string
+        total:
+          type: integer
+      required:
+      - suite
+      - total
+      - failed
+      - skipped
+      type: object
+    components_schemas_RunnerCondition:
+      additionalProperties: false
+      description: Status condition for a Runner. Type Ready.
+      properties:
+        lastTransitionTime:
+          description: ISO 8601 last transition time.
+          type: string
+        message:
+          type: string
+        reason:
+          type: string
+        status:
+          type: string
+        type:
+          type: string
+      required:
+      - type
+      - status
+      type: object
+    components_schemas_RunnerCreateRequest:
+      additionalProperties: false
+      description: Request body for POST /runners.
+      properties:
+        name:
+          description: 'metadata.name. Not generated: the operator names the machine,
+            and the rendered node is <team>-<name>.'
+          type: string
+        spec:
+          $ref: '#/components/schemas/components_schemas_RunnerSpec'
+      required:
+      - name
+      - spec
+      type: object
+    components_schemas_RunnerEntry:
+      additionalProperties: false
+      description: Full runner object returned from get/list operations.
+      properties:
+        name:
+          type: string
+        spec:
+          $ref: '#/components/schemas/components_schemas_RunnerSpec'
+        status:
+          $ref: '#/components/schemas/components_schemas_RunnerStatus'
+      required:
+      - name
+      - spec
+      - status
+      type: object
+    components_schemas_RunnerSpec:
+      additionalProperties: false
+      description: A Runner's mutable configuration (spec.*). team and launcher are
+        immutable after creation.
+      properties:
+        credentialRef:
+          description: Name of a Secret in the Team's agent namespace holding the
+            SSH credential. Required for launcher ssh; forbidden for inbound.
+          type: string
+        host:
+          description: The SSH target. Required for launcher ssh; forbidden for inbound.
+          type: string
+        javaPath:
+          description: An explicit java binary path for the ssh launcher.
+          type: string
+        labels:
+          description: Unprefixed label suffixes; the operator prefixes each one with
+            <team>-.
+          items:
+            type: string
+          type: array
+        launcher:
+          description: Connection direction. Immutable.
+          enum:
+          - ssh
+          - inbound
+          type: string
+        numExecutors:
+          description: The node's executor count. Defaults to 1.
+          type: integer
+        port:
+          description: The SSH port. Required for launcher ssh; forbidden for inbound.
+          type: integer
+        remoteFS:
+          description: The agent work directory on the node.
+          type: string
+        team:
+          description: The pipelines Team that owns this runner. Immutable.
+          type: string
+      required:
+      - team
+      - launcher
+      - remoteFS
+      type: object
+    components_schemas_RunnerStatus:
+      additionalProperties: false
+      description: A Runner's observed state (status.*). status.token is present only
+        for a caller holding runners:create; the BFF redacts it for every other caller
+        (design D12).
+      properties:
+        cell:
+          description: The Controller that hosts this runner's node.
+          type: string
+        cellNamespace:
+          type: string
+        conditions:
+          items:
+            $ref: '#/components/schemas/components_schemas_RunnerCondition'
+          type: array
+        connected:
+          description: The last liveness probe result for this runner's node.
+          type: boolean
+        lastSeen:
+          description: ISO 8601 time of the last online probe result.
+          type: string
+        nodeName:
+          description: The rendered Jenkins node name, <team>-<runner name>.
+          type: string
+        observedGeneration:
+          format: int64
+          type: integer
+        token:
+          description: The door bearer credential for an inbound runner. Minted once
+            by the operator; never set for an ssh runner.
+          type: string
+      required:
+      - connected
+      type: object
+    components_schemas_RunningRun:
+      additionalProperties: false
+      description: |
+        One unfinished run for the team home's Running now card. currentStage names the stage in progress; it is absent for a run that is still queued.
+      properties:
+        branch:
+          type: string
+        buildNumber:
+          format: int64
+          type: integer
+        changeSummary:
+          description: The last commit's short message.
+          type: string
+        currentStage:
+          type: string
+        jobPath:
+          type: string
+        queuedAt:
+          format: date-time
+          type: string
+        runId:
+          type: string
+        scmRevision:
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+        status:
+          type: string
+        typicalDurationMs:
+          description: The job's usual duration, from its duration trend.
+          format: int64
+          type: integer
+      required:
+      - runId
+      - jobPath
+      - status
+      type: object
+    components_schemas_ScopedCapabilities:
+      additionalProperties: false
+      description: The capability set granted by bindings that carry one scope, plus
+        the scope descriptor. Scoped grants are never flattened into the global partition.
+      properties:
+        capabilities:
+          $ref: '#/components/schemas/components_schemas_APICapabilitySet'
+        hasControllerSelector:
+          description: True when the scope carries a controller label selector, which
+            the client cannot evaluate.
+          type: boolean
+        namespaces:
+          description: The scope's namespace allowlist. Null or empty means the scope
+            is not namespace-bounded.
+          items:
+            type: string
+          nullable: true
+          type: array
+        tenants:
+          description: The scope's canonicalized pipelines-tenant allowlist. Null
+            or empty means the scope names no tenant.
+          items:
+            $ref: '#/components/schemas/components_schemas_TenantScope'
+          nullable: true
+          type: array
+      required:
+      - namespaces
+      - hasControllerSelector
+      - capabilities
+      type: object
     components_schemas_SearchResult:
       additionalProperties: false
       description: A single search result entry.
@@ -5647,6 +7170,17 @@ components:
         namespace:
           type: string
         type:
+          description: controller, namespace, group, and catalogitem come from a live
+            Kubernetes read; job, run, and activity come from the record store and
+            are absent when it is not wired.
+          enum:
+          - controller
+          - namespace
+          - group
+          - catalogitem
+          - job
+          - run
+          - activity
           type: string
       required:
       - type
@@ -5792,8 +7326,14 @@ components:
         observedGeneration:
           format: int64
           type: integer
+        pipelines:
+          $ref: '#/components/schemas/components_schemas_TeamPipelines'
+        placement:
+          $ref: '#/components/schemas/components_schemas_TeamPlacement'
         provisionNamespaces:
           type: boolean
+        rehydration:
+          $ref: '#/components/schemas/components_schemas_TeamRehydration'
         roleRef:
           type: string
         subjects:
@@ -5803,6 +7343,31 @@ components:
       required:
       - name
       - namespaces
+      type: object
+    components_schemas_TeamExport:
+      additionalProperties: false
+      description: 'One grant a pipelines tenant makes to other tenants: a job pattern
+        or a list of lock patterns, plus the callers allowed to use it. Exactly one
+        of job or locks is set.'
+      properties:
+        callers:
+          description: Team names allowed to use this export.
+          items:
+            type: string
+          minItems: 1
+          type: array
+        job:
+          description: Folder-relative job glob this tenant exports. Exactly one of
+            job or locks is set.
+          type: string
+        locks:
+          description: Prefix-relative lock-name globs this tenant exports. Exactly
+            one of job or locks is set.
+          items:
+            type: string
+          type: array
+      required:
+      - callers
       type: object
     components_schemas_TeamNamespaceState:
       additionalProperties: false
@@ -5815,6 +7380,132 @@ components:
       required:
       - name
       - state
+      type: object
+    components_schemas_TeamPipelines:
+      additionalProperties: false
+      description: 'A Team''s pipelines tenancy declaration (spec.pipelines). A Team
+        that sets this becomes a pipelines tenant: one top-level folder on exactly
+        one cell.'
+      properties:
+        agentNamespace:
+          description: Kubernetes namespace this tenant's agents run in. Must be one
+            of the team's own namespaces.
+          type: string
+        composedBundleRef:
+          $ref: '#/components/schemas/components_schemas_ComposedBundleRef'
+        concurrency:
+          description: This tenant's job concurrency policy. "allow" (default) runs
+            builds side by side. "cancelInProgress" cancels the running build of the
+            same job path when a new one starts.
+          enum:
+          - allow
+          - cancelInProgress
+          type: string
+        cronBackstop:
+          description: Turns the backstop cron scheduler on for this tenant. Default
+            true.
+          type: boolean
+        cronCatchUp:
+          description: How many missed cron occurrences the backstop fires on wake.
+            "one" (default) fires the newest missed occurrence. "none" fires nothing.
+          enum:
+          - one
+          - none
+          type: string
+        cronGrace:
+          description: How long the backstop waits past a missed cron occurrence before
+            it fires. Default 5m, range 1m to 60m.
+          type: string
+        dedicated:
+          description: When true, requires a cell that carries no other tenant.
+          type: boolean
+        exports:
+          description: Grants of this tenant's jobs and locks to other tenants. An
+            absent list exports nothing.
+          items:
+            $ref: '#/components/schemas/components_schemas_TeamExport'
+          type: array
+        interruptedRetry:
+          description: Whether an interrupted run retries on its own. "manual" (default)
+            leaves the retry to a user. "automatic" retries once.
+          enum:
+          - manual
+          - automatic
+          type: string
+        profile:
+          description: JenkinsVersionProfile the placement pass resolves a cell against.
+          type: string
+        rehydrateBuilds:
+          description: How many of a job's newest completed builds the operator seeds
+            when this tenant's cell changes. The newest successful build is always
+            seeded in addition. Default 10.
+          format: int32
+          maximum: 100
+          minimum: 0
+          type: integer
+        rehydrateDeadline:
+          description: How long the operator keeps retrying a deferred rehydration
+            seed before it stops and reports RehydrationFailed. Default 30m, range
+            1m to 24h.
+          type: string
+      type: object
+    components_schemas_TeamPlacement:
+      additionalProperties: false
+      description: 'The cell a pipelines tenant is bound to (status.placement). Response-only:
+        the placement pass is its only writer.'
+      properties:
+        cell:
+          description: Name of the bound cell Controller.
+          type: string
+        cellNamespace:
+          description: Namespace of the bound cell Controller.
+          type: string
+        cluster:
+          description: Cluster the bound cell runs in.
+          type: string
+        generation:
+          description: Increases only when the bound cell changes.
+          format: int64
+          type: integer
+      type: object
+    components_schemas_TeamRehydration:
+      additionalProperties: false
+      description: 'A pipelines tenant''s build-record rehydration state (status.rehydration).
+        Response-only: TeamReconciler is its only writer.'
+      properties:
+        attempts:
+          description: Rehydration retries since the last applied bundle.
+          format: int32
+          type: integer
+        cellInstance:
+          description: Cell pod UID this state was built for.
+          type: string
+        deferred:
+          description: Job paths the mite could not seed on the last apply, because
+            the job did not exist yet.
+          items:
+            type: string
+          type: array
+        generation:
+          description: Placement generation this state was built for.
+          format: int64
+          type: integer
+        lastAttempt:
+          description: When the operator last sent a rehydration bundle for this tenant.
+          format: date-time
+          type: string
+        records:
+          description: Number of thin build records the last bundle carried.
+          format: int32
+          type: integer
+        truncated:
+          description: True when the last bundle dropped changelogs or older records
+            to fit the byte budget.
+          type: boolean
+        unseededJobs:
+          description: Number of jobs no bundle has covered yet.
+          format: int32
+          type: integer
       type: object
     components_schemas_TeamRequest:
       additionalProperties: false
@@ -5835,6 +7526,8 @@ components:
           items:
             type: string
           type: array
+        pipelines:
+          $ref: '#/components/schemas/components_schemas_TeamPipelines'
         provisionNamespaces:
           description: Whether to auto-provision namespaces.
           type: boolean
@@ -5866,6 +7559,47 @@ components:
       required:
       - type
       - status
+      type: object
+    components_schemas_TenantCapabilities:
+      additionalProperties: false
+      description: One grant the caller holds on one pipelines tenant. A tenant name
+        may appear in more than one entry, because the caller can hold two grants
+        on it with different job globs; they are never merged.
+      properties:
+        capabilities:
+          $ref: '#/components/schemas/components_schemas_APICapabilitySet'
+        jobs:
+          description: Folder-relative job globs the grant covers. Always an array,
+            never null; an empty array means every job.
+          items:
+            type: string
+          type: array
+        tenant:
+          type: string
+      required:
+      - tenant
+      - jobs
+      - capabilities
+      type: object
+    components_schemas_TenantScope:
+      additionalProperties: false
+      description: One pipelines tenant name and the folder-relative job globs a binding
+        covers. An absent jobs list covers every job.
+      properties:
+        jobs:
+          description: Jobs are folder-relative globs. An absent jobs list covers
+            every job.
+          items:
+            maxLength: 512
+            type: string
+          maxItems: 64
+          type: array
+        name:
+          description: A tenant is a Team name.
+          maxLength: 253
+          type: string
+      required:
+      - name
       type: object
     components_schemas_TokenResponse:
       additionalProperties: false
@@ -6202,6 +7936,13 @@ components:
           items:
             type: string
           type: array
+        tenants:
+          description: An allow-list of pipelines tenants. A scope names one dimension;
+            tenants never combines with namespaces or controllerSelector.
+          items:
+            $ref: '#/components/schemas/components_schemas_TenantScope'
+          maxItems: 64
+          type: array
       type: object
     components_schemas_VarroaRoleBindingSpec:
       additionalProperties: false
@@ -6472,10 +8213,6 @@ paths:
                   nextCursor:
                     type: string
                   retentionDays:
-                    enum:
-                    - 7
-                    - 30
-                    - 90
                     type: integer
                   retentionMode:
                     enum:
@@ -7768,6 +9505,44 @@ paths:
         "409":
           $ref: '#/components/responses/components_responses_Conflict'
       summary: Approves a pending item deletion.
+      tags:
+      - controllers
+  /api/v1/clusters/{cluster}/controllers/{ns}/{name}/break-glass:
+    post:
+      description: |
+        Core-cluster only. Refused with 409 when the controller is not headless, and with 400 when the target cluster is not the core cluster.
+      operationId: breakGlassController
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_cluster'
+      - $ref: '#/components/parameters/components_parameters_ns'
+      - $ref: '#/components/parameters/components_parameters_name'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/components_schemas_BreakGlassRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_BreakGlassResponse'
+          description: Grant issued.
+        "400":
+          $ref: '#/components/responses/components_responses_BadRequest'
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+        "409":
+          $ref: '#/components/responses/components_responses_Conflict'
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Grants a short-lived, per-caller Jenkins token for a headless controller's
+        admin door.
       tags:
       - controllers
   /api/v1/clusters/{cluster}/controllers/{ns}/{name}/diff:
@@ -9290,7 +11065,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/components_schemas_PermissionScopes'
           description: Effective capabilities (Authorizer.EffectivePermissions DTO).
         "401":
           $ref: '#/components/responses/components_responses_Unauthorized'
@@ -9333,6 +11108,184 @@ paths:
       summary: Returns the bundled OpenAPI spec.
       tags:
       - ops
+  /api/v1/pipelines/{team}:
+    get:
+      description: |
+        Resolves {team} onto one or more record-store tenants, unions each tenant's job summaries with the catalog's declared jobs, and reads each tenant's unfinished runs for the Running now strip.
+      operationId: listPipelines
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_team'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_PipelineListResponse'
+          description: The team's pipelines and running-now strip.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The team name is ambiguous across clusters.
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The team resolves to more tenants than the fan-out ceiling.
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Lists a team's pipelines and its unfinished runs.
+      tags:
+      - Pipelines
+  /api/v1/pipelines/{team}/jobs/{job}:
+    get:
+      description: |
+        dependencies.upstream and dependencies.downstream carry the job's cross-tenant varroa-upstream trigger edges (design D13), each marked granted or not. The route authorizes with CanReadPipeline, never a controller-scoped check, because a cell hosts many tenants.
+      operationId: getPipelineJob
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_team'
+      - $ref: '#/components/parameters/components_parameters_job'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_PipelineJobDetail'
+          description: The job's detail.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Returns one job's summary, definition, triggers, parameters, and dependency
+        edges.
+      tags:
+      - Pipelines
+  /api/v1/pipelines/{team}/jobs/{job}/runs:
+    get:
+      operationId: listRuns
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_team'
+      - $ref: '#/components/parameters/components_parameters_job'
+      - in: query
+        name: branch
+        schema:
+          type: string
+      - in: query
+        name: result
+        schema:
+          type: string
+      - in: query
+        name: actor
+        schema:
+          type: string
+      - in: query
+        name: cause
+        schema:
+          type: string
+      - in: query
+        name: limit
+        schema:
+          default: 50
+          maximum: 200
+          minimum: 1
+          type: integer
+      - in: query
+        name: cursor
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_RunListResponse'
+          description: A page of the job's runs, newest first.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Lists a job's runs, filtered and paged across every tenant of the team.
+      tags:
+      - Pipelines
+    post:
+      operationId: createRun
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_team'
+      - $ref: '#/components/parameters/components_parameters_job'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/components_schemas_CreateRunRequest'
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_RunActionResponse'
+          description: The run was requested.
+        "400":
+          $ref: '#/components/responses/components_responses_BadRequest'
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The job path lies in two or more tenants and no cluster value
+            breaks the tie.
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Requests a new build. Fire and forget — the BFF does not claim the
+        build number.
+      tags:
+      - Pipelines
+  /api/v1/pipelines/{team}/markers/validate:
+    post:
+      description: |
+        Resolves {team} onto its delivered pipeline-template set (design pipeline-marker-file) and validates the posted marker text against it. Contacts no cell and no record store, so it works while a cell is down and while the record store is disabled.
+      operationId: validatePipelineMarker
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_team'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/components_schemas_PipelineMarkerValidateRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_PipelineMarkerValidateResponse'
+          description: The lint findings. An empty list means the marker is valid.
+        "400":
+          $ref: '#/components/responses/components_responses_BadRequest'
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Lints a marker file against the team's delivered pipeline templates.
+      tags:
+      - Pipelines
   /api/v1/rolebindings:
     get:
       operationId: listVarroaRoleBindings
@@ -9557,6 +11510,404 @@ paths:
       summary: Updates a VarroaRole.
       tags:
       - rbac
+  /api/v1/runners:
+    get:
+      operationId: listRunners
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_teamQuery'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  items:
+                    items:
+                      $ref: '#/components/schemas/components_schemas_RunnerEntry'
+                    type: array
+                required:
+                - items
+                type: object
+          description: Runner list (N6 envelope).
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+      summary: Lists runners the caller may read. A runner the caller cannot read
+        is omitted from the list rather than causing the whole request to be refused.
+      tags:
+      - runners
+    post:
+      operationId: createRunner
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/components_schemas_RunnerCreateRequest'
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  name:
+                    type: string
+                required:
+                - name
+                type: object
+          description: Runner created.
+        "400":
+          $ref: '#/components/responses/components_responses_BadRequest'
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+      summary: Registers a runner for a pipelines tenant. Requires the runners:create
+        verb and a write grant on spec.team; refuses a spec.team that names no Team
+        with 400.
+      tags:
+      - runners
+  /api/v1/runners/{name}:
+    delete:
+      operationId: deleteRunner
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_name'
+      responses:
+        "204":
+          description: Runner deleted.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+      summary: Deletes a runner.
+      tags:
+      - runners
+    get:
+      operationId: getRunner
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_name'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_RunnerEntry'
+          description: Runner details.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+      summary: Gets a runner's details. status.token is present only for a caller
+        holding runners:create.
+      tags:
+      - runners
+    patch:
+      operationId: patchRunner
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_name'
+      requestBody:
+        content:
+          application/merge-patch+json:
+            schema:
+              additionalProperties: false
+              description: An RFC 7386 JSON merge patch. The only accepted top-level
+                key is spec.
+              properties:
+                spec:
+                  additionalProperties: true
+                  type: object
+              type: object
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  name:
+                    type: string
+                required:
+                - name
+                type: object
+          description: Runner updated.
+        "400":
+          $ref: '#/components/responses/components_responses_BadRequest'
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+      summary: Merge-patches a runner's spec. spec.team and spec.launcher are immutable;
+        a patch that changes either is refused with 400.
+      tags:
+      - runners
+  /api/v1/runs/{run}:
+    get:
+      description: |
+        Authorizes with the run read check on the record's own tenant and job path, so a run whose cell was deleted still resolves for a permitted caller.
+      operationId: getRun
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_run'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_RunDetail'
+          description: The run record.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The run does not exist, or the caller may not read it.
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Returns one run's record and stage list.
+      tags:
+      - Pipelines
+  /api/v1/runs/{run}/artifacts:
+    get:
+      operationId: listRunArtifacts
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_run'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_RunArtifactListResponse'
+          description: The run's artifacts.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The run does not exist, or the caller may not read it.
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Lists one run's archived artifacts.
+      tags:
+      - Pipelines
+  /api/v1/runs/{run}/artifacts/{path}:
+    get:
+      description: |
+        path is a multi-segment artifact path, exactly as run_artifacts.path stored it. The handler opens the recorded blob_key with the blob store's native-object read — an artifact is one object, never a chunk sequence — and never derives a key from run or path.
+      operationId: downloadRunArtifact
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_run'
+      - $ref: '#/components/parameters/components_parameters_artifactPath'
+      - description: Byte range within the artifact.
+        in: header
+        name: Range
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/octet-stream:
+              schema:
+                format: binary
+                type: string
+          description: The complete artifact.
+        "206":
+          content:
+            application/octet-stream:
+              schema:
+                format: binary
+                type: string
+          description: The requested byte range.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The run or the artifact does not exist, or the caller may not
+            read the run.
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: |
+            The artifact row carries an empty blob key (Jenkins stored it locally). The message names the recordStore.blobs.mode chart value that selects the blob mode.
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Streams one artifact's bytes.
+      tags:
+      - Pipelines
+  /api/v1/runs/{run}/cancel:
+    post:
+      operationId: cancelRun
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_run'
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_CancelRunResponse'
+          description: The cancel was requested.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The run does not exist, or the caller may not read it.
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Requests that a queued or running build stop. Fire and forget.
+      tags:
+      - Pipelines
+  /api/v1/runs/{run}/changes:
+    get:
+      operationId: listRunChanges
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_run'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_RunChangeListResponse'
+          description: The run's SCM changes.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The run does not exist, or the caller may not read it.
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Lists one run's SCM changes.
+      tags:
+      - Pipelines
+  /api/v1/runs/{run}/log:
+    get:
+      description: |
+        Plays the stored log as Server-Sent Events, then attaches the live tail while the run is not terminal. raw=true returns the plain console text instead of an event stream, with no new path.
+      operationId: streamRunLog
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_run'
+      - description: Byte offset of the first unread byte.
+        in: query
+        name: from
+        schema:
+          default: 0
+          format: int64
+          type: integer
+      - description: 1-based line number starting at from.
+        in: query
+        name: fromLine
+        schema:
+          type: integer
+      - description: true returns text/plain with no SSE.
+        in: query
+        name: raw
+        schema:
+          default: false
+          type: boolean
+      responses:
+        "200":
+          content:
+            text/event-stream:
+              schema:
+                type: string
+            text/plain:
+              schema:
+                type: string
+          description: |
+            The event stream (event kinds meta, stage, line, gap, live, end) or, with raw=true, the plain console text.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The run does not exist, or the caller may not read it.
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Streams a run's console log, history then the live tail.
+      tags:
+      - Pipelines
+      x-sse: true
+  /api/v1/runs/{run}/rerun:
+    post:
+      description: |
+        Reads the ledger by the retry intent key first: when a retry already exists, its run id is returned and no command is published.
+      operationId: rerunRun
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_run'
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_RunActionResponse'
+          description: The retry was requested, or an existing retry's identifier
+            was returned.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The run does not exist, or the caller may not read it.
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Requests a retry of a finished run. One retry per source run, fleet-wide.
+      tags:
+      - Pipelines
+  /api/v1/runs/{run}/tests:
+    get:
+      description: |
+        One row per suite, plus the "_total" sentinel row. Carries no individual test case.
+      operationId: listRunTests
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_run'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_RunTestListResponse'
+          description: The run's test suite totals.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The run does not exist, or the caller may not read it.
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Lists one run's test suite totals.
+      tags:
+      - Pipelines
   /api/v1/search:
     get:
       operationId: search
@@ -10233,6 +12584,8 @@ tags:
   name: groups
 - description: Team management (admin).
   name: teams
+- description: External agent (runner) registration for a pipelines tenant.
+  name: runners
 - description: Identity settings and built-in roles (admin).
   name: identity
 - description: Full controller lifecycle management.
@@ -10263,3 +12616,5 @@ tags:
   name: fleetplugins
 - description: Upstream Jenkins version observation and upgrade candidate promotion.
   name: upgrade-tracking
+- description: Team-scoped pipeline, run, log, and artifact surfaces.
+  name: Pipelines

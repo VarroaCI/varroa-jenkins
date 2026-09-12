@@ -18,6 +18,11 @@ rules:
   - apiGroups: ["varroa.dev"]
     resources: ["teams", "teams/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # BFF serves the runner CRUD surface and keeps the door's token index from a
+  # Runner watch.
+  - apiGroups: ["varroa.dev"]
+    resources: ["runners"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["varroa.dev"]
     resources: ["podtemplates"]
     verbs: ["get", "list", "watch"]
@@ -56,9 +61,6 @@ rules:
   - apiGroups: ["varroa.dev"]
     resources: ["users", "users/status", "groups"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["varroa.dev"]
-    resources: ["buildmetrics"]
-    verbs: ["get", "list", "watch"]
   # Brood operations: BFF creates runs, toggles suspend, cancels (delete), and
   # stamps status.startedBy after create.
   - apiGroups: ["varroa.dev"]

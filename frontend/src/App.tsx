@@ -1,5 +1,5 @@
 import { useRef, useEffect } from "react";
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation, useParams } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { trace } from "@opentelemetry/api";
 import { ThemeProvider } from "./context/ThemeContext";
@@ -39,6 +39,20 @@ import BroodOperationDetail from "./pages/BroodOperationDetail";
 import BroodSchedules from "./pages/BroodSchedules";
 import BroodScheduleDetail from "./pages/BroodScheduleDetail";
 import FleetPlugins from "./pages/FleetPlugins";
+import PipelinesIndex from "./pages/pipelines/PipelinesIndex";
+import TeamHome from "./pages/pipelines/TeamHome";
+import PipelinePage from "./pages/pipelines/PipelinePage";
+import BuildPage from "./pages/pipelines/BuildPage";
+
+/**
+ * Remounts BuildPage per run id. React Router reuses one element when only
+ * the params change, and the page's log rows, terminal state, and resume
+ * watermark belong to a single run.
+ */
+function BuildPageRoute() {
+  const { run } = useParams<{ run: string }>();
+  return <BuildPage key={run} />;
+}
 import CliAuth from "./pages/CliAuth";
 import { LoginPage } from "./pages/LoginPage";
 import NoAccessibleClusters from "./components/NoAccessibleClusters";
@@ -151,6 +165,10 @@ function AppRoutes() {
                   <Route path="brood-schedules" element={<BroodSchedules />} />
                   <Route path="brood-schedules/:namespace/:name" element={<BroodScheduleDetail />} />
                   <Route path="plugins" element={<PermissionRoute resource="controllers" verb="read"><FleetPlugins /></PermissionRoute>} />
+                  <Route path="pipelines" element={<PipelinesIndex />} />
+                  <Route path="pipelines/:team" element={<TeamHome />} />
+                  <Route path="pipelines/:team/:job" element={<PipelinePage />} />
+                  <Route path="pipelines/:team/:job/:run" element={<BuildPageRoute />} />
                   <Route path="*" element={<NotFoundPage />} />
                 </Route>
               </Route>

@@ -4,9 +4,10 @@
 
 Implements the unified `ComposedBundle` model: composing a `ComposedBundleSpec`
 (ordered `inputs[]`, each an `itemRef`/`gitSource` union) into merged,
-still-**unresolved** JCasC content — plus bundle.yaml manifest parsing, git
-materialization with an on-disk clone cache, catalog index parsing, and
-pre-apply content validation.
+still-**unresolved** content — five keys: `jenkins.yaml`, `plugins.yaml`,
+`items.yaml`, `rbac.yaml`, and `pipeline-templates.yaml` — plus bundle.yaml
+manifest parsing, git materialization with an on-disk clone cache, catalog
+index parsing, and pre-apply content validation.
 
 ## Ownership
 
@@ -16,7 +17,10 @@ pre-apply content validation.
   (`catalog.go`, `catalog_validate.go`), the `${var}` substitution primitive
   `ResolveVars` + canonical `InjectedVariableNames` (`resolver.go`),
   unresolved-variable scanning (`unresolved.go`), `unclassified.location.url`
-  injection (`location.go`), and structural/content validation (`validator.go`).
+  injection (`location.go`), structural/content validation (`validator.go`),
+  the pipeline-template set (`pipelinetemplates.go`'s
+  `InjectPipelineTemplates`, package `pipelinetemplate/`), and tenant-cloud
+  injection for a cell (`tenant_clouds.go`).
 - Does not own: the `ComposedBundle` CRD reconcile loop, owner-referenced
   ConfigMap persistence (`status.contentRef`), or the completeness check —
   those live in `internal/controller/` (`catalog_controller.go` for
@@ -34,9 +38,12 @@ pre-apply content validation.
     shadowed by a same-named operator-namespace item emits a `Warnings` entry
     (never on a fallback hit). Drift recorded in `result.Drifted` when
     `ref.PinnedContentHash != item.Status.ContentHash`. `pipeline-template`
-    routes into the `item` group. A `jcasc` item may embed a top-level
-    `plugins:` block (`splitEmbeddedPlugins`) so config ships with its
-    dependent plugin.
+    does not route into any `groups` entry: its content is one
+    `pipelinetemplate.Document`, parsed and appended to a template list kept
+    outside `groups`, deduplicated by `name@version` — two refs at the same
+    `name@version` with differing content is a compose error naming both
+    refs. A `jcasc` item may embed a top-level `plugins:` block
+    (`splitEmbeddedPlugins`) so config ships with its dependent plugin.
   - `gitSource`: requires `c.resolver != nil`; caller pre-resolves `GitAuth`
     into `resolvedAuth[i]` (Secrets are never read here). Each input clones
     into its own `os.MkdirTemp` under `c.workDir`, removed via `defer` after
@@ -52,13 +59,68 @@ pre-apply content validation.
     `jenkins.clouds` is a list and `mergeMaps` replaces lists wholesale rather
     than deep-merging.
   - Output `ComposeResult{Materialized, ResolvedHash, BundleYAML, Missing,
-    Drifted, Warnings, Errors}`. `ResolvedHash` = SHA-256 over unresolved
-    content + sorted vars (`computeResolvedHash`) — the content-hash used to
-    detect itemRef catalog drift and trigger recompose. `varroa_*` auto-vars
-    are deliberately **not** injected here.
+    Drifted, Warnings, Errors}`. `Materialized.PipelineTemplatesYAML` holds
+    the collected `pipeline-template` list, serialized by
+    `composePipelineTemplates` (`pipelinetemplates.go`) as `templates: [...]`
+    — one `pipelinetemplate.Document` per entry. `ResolvedHash` = SHA-256
+    over unresolved content (jenkins, plugins, items, rbac,
+    `PipelineTemplatesYAML`) + sorted vars (`computeResolvedHash`) — the
+    content-hash used to detect itemRef catalog drift and trigger recompose.
+    `varroa_*` auto-vars are deliberately **not** injected here.
+    `validateItemTemplateValues` cross-checks every `items.yaml` job whose
+    `definition.varroaTemplate` names a delivered template: it resolves the
+    named template by version constraint (`pipelinetemplate.ResolveTemplate`)
+    and validates the job's declared `values` against that template's
+    parameter schema, appending a compose error per failure.
 - **`MergeJenkinsYAML(base, overlay)`** (`composer.go:351`) — merges a
   `JenkinsVersionProfile` JCasC overlay onto composed `jenkins.yaml`; overlay
   wins on scalar conflict, maps deep-merge. Empty side short-circuits.
+- **`InjectTenantClouds(jcascYAML, clouds)`** (`tenant_clouds.go`) — appends
+  one kubernetes cloud per placed tenant to `jenkins.clouds`, for a cell.
+  Modelled on `injectPodTemplatesIntoJCasC`: it edits the parsed document
+  rather than merging a separate document via `mergeMaps`, because
+  `mergeMaps` replaces a list instead of deep-merging it, which would drop
+  every cloud the bundle itself declares. It never replaces an existing
+  cloud and rejects a name collision, against an existing cloud or between
+  two tenant clouds in the same call.
+- **`InjectPipelineTemplates(jenkinsYAML, templatesYAML, folder)`**
+  (`pipelinetemplates.go`) — appends every document in `templatesYAML` to
+  `unclassified.varroaPipelineTemplates.templates` in `jenkinsYAML`, flattening
+  each document's `parameters`/`uiSchema`/`jenkinsfile` to strings so JCasC
+  never interprets a template's own YAML (design D7). It never replaces an
+  existing entry, so the controller's own bundle and each placed tenant's
+  fragment (`MaterializedBundle.CellTemplateFragments`, one entry per tenant,
+  `folder` stamped by the operator) can each call it once, in turn. Call this
+  only after `ResolveVars` and the unresolved-variable check — a template body
+  holds its own `${...}` Groovy text that is not a catalog variable and must
+  never pass through either step. A blank `templatesYAML` is a no-op.
+- **`pipelinetemplate/`** — the PipelineTemplate document, its JSON Schema
+  subset, and the marker file that selects one, all mirrored bit-for-bit by
+  the Jenkins plugin (`plugin/.../template/VarroaMarkerValidator.java`) and
+  the frontend (`frontend/src/components/specform/templateValidator.ts`)
+  against one shared golden corpus (`testdata/schema-corpus/`, read by
+  `corpus_test.go`; the plugin mirrors the same fixtures under its own
+  `src/test/resources/` because the Maven build cannot see the Go module
+  tree). `doc.go` defines `Document`/`Metadata`/`Spec`/`SCMDefinition` with
+  strict YAML decoding (unknown key = error). `schema.go` is the JSON Schema
+  subset checker (keyword allowlist, root rules, depth/property-count/enum/
+  size limits); `pattern.go` is the regex-pattern whitelist scanner
+  (`NormalizePattern` rewrites an unescaped `$` outside a character class to
+  `\z`, so `$` means end-of-string under Go's RE2 the same way it does under
+  the plugin's and the browser's engines); `uischema.go` checks a fixed
+  uiSchema subset against the schema's own properties. `version.go` parses
+  and compares strict `MAJOR.MINOR.PATCH` and evaluates the four constraint
+  forms a marker's `templateVersion` may use. `marker.go` parses
+  `.varroa/pipeline.yaml` (`MarkerPath`, fixed, no override) and resolves it
+  against a delivered template list. `values.go`'s `ValidateValues` applies
+  schema defaults then validates against the schema; it never opens a schema
+  or marker file itself — callers own I/O. This package composes documents,
+  it does not decide which items or markers use them; that lives in
+  `composer.go` (compose time) and `internal/controller`/`internal/jenkins/items`
+  (run time). Documented inline here rather than in its own AGENTS.md:
+  it has no CRD, no reconcile loop, and no consumer-facing HTTP surface of
+  its own — every entry point is a pure Go function this package's own
+  callers document at their call sites.
 - **`Resolver`** (`resolver.go`) — `Materialize` (git path: clone →
   `materializeDir`) returns a `MaterializedBundle` with `${var}` placeholders
   **retained**, reusable across controllers. `MaterializeOCI` (OCI path:
@@ -66,6 +128,9 @@ pre-apply content validation.
   shares the same parse/validate/merge pipeline via `materializeDir`.
   `materializeDir` is the shared seam (`ParseManifest` → `Validator.Validate`
   → merge jcasc → read plugins/items/rbac → parse variable files).
+  `MaterializedBundle.PipelineTemplatesYAML` carries the controller's own
+  delivered template set; `CellTemplateFragments` carries one entry per
+  placed tenant, for a cell — neither is ever subject to `ResolveVars`.
 - **`ResolveVars(content, vars)`** — plain `${name}` `strings.ReplaceAll`, no
   templating engine. `InjectedVariableNames` (resolver.go:288) is the
   authoritative list of injectable `varroa_*` names — keep in lockstep with
@@ -100,6 +165,13 @@ pre-apply content validation.
   `${var}` detection (skips `varroa_*` and `^${var}` JCasC escapes).
   `FindUnresolvedVariables` is the read-only sibling for callers wanting just
   the missing-var list.
+- **`catalog_validate.go`** — per-`CatalogItem.Spec.Type` content validation,
+  run at catalog sync time (`ValidateItemContent`, one case per type). The
+  `pipeline-template` case (`validatePipelineTemplateContent`) parses the
+  content as one `pipelinetemplate.Document` (design D2, L1 in D11) and
+  rejects a declared `spec.variables` entry outright: `pipeline-templates.yaml`
+  is never resolved by `${var}` substitution, so a variable declared on this
+  item type can never reach its body.
 
 ## Work Guidance
 
@@ -116,8 +188,9 @@ pre-apply content validation.
   undefined, so picking one would be non-deterministic) — every consumer
   (`UpdateCenter.spec.seed.secretRef`, `CatalogSource`/`ComposedInput` OCI
   `secretRef`) requires a secret scoped to exactly one registry.
-- `computeResolvedHash` argument order `(jenkins, plugins, items, rbac, vars)`
-  must stay stable — drift/recompose detection depends on it across releases.
+- `computeResolvedHash` argument order
+  `(jenkins, plugins, items, rbac, pipelineTemplates, vars)` must stay
+  stable — drift/recompose detection depends on it across releases.
 - Git URL validation lives solely in `validateRepoURL`; `GitCloner.Clone`,
   `GitCloner.RemoteSHA`, and `CloneCache.Checkout` all call the one function —
   don't add a second copy.
@@ -133,4 +206,7 @@ make lint
 Key tests: `composer_test.go`/`composer_namespace_test.go` (merge strategy,
 itemRef fallback/shadowing), `clonecache_test.go`, `git_test.go` (URL
 validation/RCE guard), `validator_test.go`, `unresolved_test.go`,
-`location_test.go`, `bundle_test.go`.
+`location_test.go`, `bundle_test.go`, `pipelinetemplates_test.go`
+(`InjectPipelineTemplates`), `pipelinetemplate/corpus_test.go` (the shared
+golden corpus, `testdata/schema-corpus/`, that the plugin and the frontend
+also read from their own test suites).

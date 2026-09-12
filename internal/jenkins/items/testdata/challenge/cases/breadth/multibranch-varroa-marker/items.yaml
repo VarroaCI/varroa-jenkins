@@ -1,0 +1,13 @@
+items:
+  - kind: multibranch
+    name: multibranch-varroa-marker
+    displayName: "Multibranch Marker Factory"
+    description: "Multibranch pipeline whose branches resolve a template through the marker file"
+    sourcesList:
+      - branchSource:
+          source:
+            git:
+              remote: https://github.com/fake-org/multibranch-marker.git
+              credentialsId: git-cred
+    projectFactory:
+      varroaMarkerProjectFactory: {}

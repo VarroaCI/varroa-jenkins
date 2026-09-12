@@ -1,0 +1,186 @@
+# Build Logs and Artifacts
+
+The build record store can hold a Pipeline build's console log and archived artifacts outside
+the controller. This needs the [build record store](build-records.md). A controller with the
+store disabled keeps its console log and artifacts on local disk, the way Jenkins always has.
+
+Log storage works under both blob tiers. Artifact storage needs the S3 tier and one more
+plugin, `artifact-manager-s3`, pinned in the controller's `JenkinsVersionProfile`.
+
+## The log path
+
+A Pipeline step writes a line of console output. The chain from there to durable storage:
+
+1. The Jenkins plugin buffers the line, assigns it a sequence number, and posts a chunk to the
+   mite's loopback listener at `http://127.0.0.1:9095/v1/log`. The operator sets this URL on the
+   Jenkins container only when the record store is enabled.
+2. The mite retains the chunk in memory and forwards it to the gateway over the mite stream. It
+   keeps the chunk until the gateway acknowledges it.
+3. The gateway stamps the chunk with the cluster, namespace, and controller name it read from
+   the mTLS connection. It checks that the run belongs to this controller, then appends the
+   chunk to the blob store and to a per-chunk index.
+4. The gateway acknowledges the chunk only after both writes land. The mite then drops it from
+   its retained buffer.
+
+A build that outruns this chain does not lose stored data. The retained buffer at the mite
+applies back pressure instead: once it reaches its bound, the mite answers `503` on the next
+chunk and the plugin retries with backoff. Only the plugin's own per-build cap discards incoming
+bytes, and it counts every byte it drops.
+
+If the mite process restarts, its retained buffer is lost. The gateway detects the resulting
+sequence gap and marks the run's log incomplete. See [Incomplete logs](#incomplete-logs) below.
+
+## Live tail
+
+A viewer watching a running build's console gets a live tail, not a poll:
+
+1. The dashboard asks the gateway to start a tail for the run. The gateway records a 90-second
+   lease and pushes a tail-start control message to the mite.
+2. The mite calls the Jenkins plugin's tail endpoint, which switches that build to a short flush
+   interval.
+3. While the lease is live, the gateway also publishes each stored chunk on a live subject, so
+   every attached viewer sees it without polling the blob store.
+4. The dashboard renews the lease every 30 seconds while a viewer stays attached. Renewal stops
+   when the last viewer detaches, and the lease then expires within 90 seconds. The mite tells
+   the plugin to stop, and the build reverts to its normal flush interval.
+
+A tail therefore never outlives its viewers, and no build runs at the fast flush interval with
+nobody watching.
+
+## Postgres and S3 tier behaviour
+
+`recordStore.blobs.mode` selects the tier for both logs and artifacts:
+
+| Mode | Log chunks | Artifacts |
+|---|---|---|
+| `postgres` | Rows in `varroa.log_chunks`, no external egress. | Not supported. The operator reports `ArtifactStorage` `False` with reason `LocalOnly`, and the controller keeps Jenkins' own local artifact manager. |
+| `s3` | Objects in the configured bucket. | Objects in the same bucket, under a per-cell prefix. |
+
+Artifact storage is S3-only because the Jenkins plugin that writes artifacts to object storage,
+`artifact-manager-s3`, has no Postgres-backed equivalent.
+
+## Retention
+
+Log and artifact retention follow the same `recordStore.retention.logs` and
+`recordStore.retention.artifacts` dials as every other record-store content. See
+[Retention](build-records.md#retention) in Build Records for the day-count format and the
+month-boundary rounding rule.
+
+## The per-cell artifact prefix
+
+Every object a cell writes, log or artifact, carries a prefix built from three identity tokens.
+The gateway or the operator reads them from the cell's own identity: the cluster name, the
+controller's namespace, and the controller name.
+
+Log chunks and their index live at fixed keys, `logs/<run id>` and `logindex/<run id>`, and need
+no prefix of their own: the run id already makes them unique.
+
+Artifacts live under:
+
+```
+artifacts/<cluster>/<namespace>/<cell>/<job full name>/<build number>/artifacts/<path>
+```
+
+A stash lands under the same prefix, at `<build number>/stashes/<name>.tgz`. Two controllers, or
+the same controller name on two clusters, therefore never write the same key.
+
+## The per-cell artifact Secret
+
+`recordStore.blobs.s3.artifactSecret` names a **base** Secret name in the release namespace. For
+each controller, the operator reads `<artifactSecret>-<controller>` and projects a copy named
+`<controller>-artifacts` into the controller's own namespace, owned by the `Controller`. The
+Jenkins container mounts that copy read-only. When the source Secret changes, the operator
+re-provisions the controller, so the pod restarts with the rotated credential.
+
+Add one Secret per cell, with keys `access-key-id`, `secret-access-key`, and an optional
+`session-token` (ignored, since the credential is a plain access-key pair). There is no
+fleet-wide fallback: a controller with no matching Secret gets no artifact fragment and reports
+`ArtifactStorage` `False` with reason `LocalOnly`. The condition message names the missing
+Secret.
+
+This Secret is never `recordStore.blobs.s3.existingSecret`. That one is the control-plane
+credential the recorder, the BFF, and the gateway use, and it can read the `logs/` prefix. The
+per-cell artifact Secret must not be able to.
+
+## The per-cell bucket policy
+
+Scope each cell's credential to its own prefix. Write `<p>` for
+`artifacts/<cluster>/<namespace>/<cell>/`:
+
+| Resource | Actions | Condition |
+|---|---|---|
+| the bucket | `s3:ListBucket` | `s3:prefix` starts with `<p>` |
+| the bucket | `s3:GetBucketLocation` | none |
+| `<p>*` | `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject` | none |
+
+Grant no `sts:*` action and no `s3:CreateBucket`. The `s3:prefix` condition on `ListBucket` keeps
+a cell's credential out of the `logs/` prefix and out of every other cell's prefix; an
+unconditioned `ListBucket` would expose every object's name in the bucket, logs included. One
+Secret and one policy exist per cell, generated from the same three identity tokens as the
+prefix above.
+
+## Incomplete logs
+
+A log's manifest can report `incomplete` true with a short reason token:
+
+| Token | Meaning |
+|---|---|
+| `plugin-drop` | The plugin discarded incoming bytes at its own cap before the build finished. |
+| `terminal-response` | A chunk post ended on a permanent HTTP error before the build finished. |
+| `rejected` | The gateway refused a chunk on the run-ownership check. |
+| `gateway-gap` | The gateway observed a sequence number it can never fill for the run. |
+| `finalize-deadline` | The finalization deadline passed with chunks still unstored. |
+| `not-finalized` | The recorder's sweep finalized a run that never produced a final chunk. |
+| `no-summary` | The run record carries no log summary at all, usually a lost cell. |
+
+A run with no summary is still incomplete, not complete: the read path serves every chunk it did
+store, but the manifest reports the gap.
+
+## Agent-namespace egress
+
+An agent uploads artifacts straight to the object store, not through the controller pod. An
+agent namespace therefore needs its own egress rule to the blob endpoint. `networkPolicy`
+templates in this chart cover only Varroa's own components in the release namespace; the agent
+namespace's egress is configured separately. See
+[Network policies](../install/network-policies.md).
+
+## Known limits
+
+- **Pipeline builds only.** The plugin's log-storage extension point applies to Pipeline builds.
+  Freestyle and matrix builds keep Jenkins' own local console log.
+- **A tenant move changes the prefix.** The artifact plugin holds one prefix per Jenkins
+  instance, so a per-tenant prefix inside one cell is not possible. After a tenant moves to
+  another cell, Jenkins' own artifact manager resolves only the runs the new cell wrote. The
+  Varroa read path still resolves every earlier run, because it opens the recorded object key
+  directly rather than recomputing one from the current prefix.
+- **No cross-cell log read-back inside Jenkins.** Jenkins' own log viewer reads from a cell-local
+  cache. A replaced pod loses that cache, and a build's log page inside Jenkins itself does not
+  reach across cells. The Varroa read path always serves the full log from the blob store,
+  regardless of which cell is live now.
+
+## Troubleshooting
+
+- Console output stops updating for a running build, and the dashboard tail shows no new lines:
+  confirm a viewer is still attached and the tail lease is renewing. A lease with no renewal
+  clears itself within 90 seconds and the build falls back to its normal flush interval, which is
+  expected once every viewer has left.
+- A build's log reads `incomplete` after it finished: read the manifest's `incompleteReason`.
+  Match it against the [Incomplete logs](#incomplete-logs) table above. `no-summary` usually means
+  the cell was lost before it could report a finish. `gateway-gap` or `rejected` point at the
+  gateway's own rejection counters.
+- Artifacts do not appear in object storage, and the controller shows `ArtifactStorage`
+  `LocalOnly`: read the condition message. It names either a disabled S3 blob tier, a missing
+  per-cell Secret, or a resolved plugin set that does not pin `artifact-manager-s3`. See
+  [Jenkins upgrades](jenkins-upgrades.md) and [Version profiles](../config/jenkins-versions.md)
+  for pinning a plugin into a profile.
+- The controller shows `ArtifactStorage` `PluginMissing` even though the bundle lists
+  `artifact-manager-s3`: the condition reads the resolved `JenkinsVersionProfile`'s plugin set,
+  not the bundle content. Pin the plugin in the profile that matches the controller's Jenkins
+  version.
+- An archived artifact cannot be resolved by `copyArtifacts` after a tenant moved to a new cell:
+  expected. See [A tenant move changes the prefix](#known-limits) above. Use the Varroa API to
+  read the artifact by its recorded key instead of a Jenkins-side copy.
+- A build cannot bind the artifact credential id in its own pipeline, or a pipeline step that
+  tries to read the `logs/` prefix or another cell's artifact prefix fails: expected. The
+  credential is system-scoped, so no build ever receives it, and its bucket policy limits it to
+  the one cell's own prefix.

@@ -89,6 +89,29 @@ describe("Teams", () => {
     expect(mockNavigate).toHaveBeenCalledWith("/access/teams/create");
   });
 
+  it("shows exports with their kind and callers, and a dash when there are none", async () => {
+    mockListTeams.mockResolvedValue([
+      team1,
+      {
+        ...team2,
+        pipelines: {
+          exports: [
+            { job: "release/*", callers: ["payments", "search"] },
+            { locks: ["deploy-prod"], callers: ["alpha"] },
+          ],
+        },
+      },
+    ]);
+    renderWithProviders(<Teams />);
+    await waitFor(() => {
+      expect(screen.getByText("beta-team")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/job:/)).toBeInTheDocument();
+    expect(screen.getByText(/release\/\* → payments, search/)).toBeInTheDocument();
+    expect(screen.getByText(/locks:/)).toBeInTheDocument();
+    expect(screen.getByText(/deploy-prod → alpha/)).toBeInTheDocument();
+  });
+
   it("can delete a team", async () => {
     mockDeleteTeam.mockResolvedValue(undefined);
     renderWithProviders(<Teams />);

@@ -33,7 +33,6 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&User{}, &UserList{},
 		&Group{}, &GroupList{},
 		&PodTemplate{}, &PodTemplateList{},
-		&BuildMetric{}, &BuildMetricList{},
 		&CatalogSource{}, &CatalogSourceList{},
 		&CatalogItem{}, &CatalogItemList{},
 		&ComposedBundle{}, &ComposedBundleList{},
@@ -42,6 +41,7 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&UpdateCenter{}, &UpdateCenterList{},
 		&ControllerClass{}, &ControllerClassList{},
 		&Team{}, &TeamList{},
+		&Runner{}, &RunnerList{},
 		&BroodOperation{}, &BroodOperationList{},
 		&BroodSchedule{}, &BroodScheduleList{},
 	)
@@ -101,6 +101,12 @@ type ControllerSpec struct {
 	// +kubebuilder:validation:Enum="";Running;Stopped
 	PowerState string `json:"powerState,omitempty"`
 
+	// Headless blocks the Jenkins web UI for every non-admin caller. A cell
+	// is always headless. Set this to true to headless a one-tenant
+	// controller too. Read this field only through v1alpha1.IsHeadless.
+	// +optional
+	Headless bool `json:"headless,omitempty"`
+
 	// Resources defines CPU/memory resource requests and limits for the Jenkins container.
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 	// Persistence configures the Jenkins home persistent volume claim.
@@ -143,6 +149,24 @@ type ControllerSpec struct {
 	// Probes tunes the Jenkins container health probes.
 	// +optional
 	Probes *ProbesSpec `json:"probes,omitempty"`
+
+	// Cell configures this Controller as a cell: a disposable Jenkins JVM
+	// with no durable state that hosts many tenants as top-level folders.
+	// Enabled is immutable after creation, because a live StatefulSet never
+	// changes its storage shape. MaxTenants stays mutable: it changes
+	// placement capacity, never the storage shape.
+	// +kubebuilder:validation:XValidation:rule="self.enabled == oldSelf.enabled",message="cell.enabled is immutable"
+	// +optional
+	Cell *CellSpec `json:"cell,omitempty"`
+}
+
+// CellSpec configures a Controller to run as a cell.
+type CellSpec struct {
+	// Enabled marks this Controller as a cell.
+	Enabled bool `json:"enabled,omitempty"`
+	// MaxTenants caps the number of tenants a placement pass may bind to
+	// this cell.
+	MaxTenants int32 `json:"maxTenants,omitempty"`
 }
 
 // ProbesSpec tunes the Jenkins container health probes. Each sub-probe is optional;
@@ -571,6 +595,135 @@ type ControllerStatus struct {
 	// The full inventory lives in the read model (invc/ KV key).
 	// +optional
 	PluginInventory *PluginInventoryStatus `json:"pluginInventory,omitempty"`
+
+	// Cell reports the placement and health of this Controller when it runs
+	// as a cell. The placement pass writes only Tenants; the controller
+	// reconciler writes the other fields. A merge patch that names only one
+	// side leaves the other untouched.
+	// +optional
+	Cell *CellStatus `json:"cell,omitempty"`
+}
+
+// CellStatus reports the placement and health of a Controller running as a
+// cell.
+type CellStatus struct {
+	// Tenants lists the Team names the placement pass has bound to this
+	// cell.
+	// +kubebuilder:validation:MaxItems=64
+	// +optional
+	Tenants []string `json:"tenants,omitempty"`
+
+	// Warm is true while this cell is a free member of the warm pool: it
+	// carries no tenant.
+	// +optional
+	Warm bool `json:"warm,omitempty"`
+
+	// Evacuate is true when the roll gate has given up on this cell; every
+	// tenant must move to another cell.
+	// +optional
+	Evacuate bool `json:"evacuate,omitempty"`
+
+	// UnreadySince is when CellReady first went False for a reason other
+	// than the three configuration gates. Cleared, together with RolledAt
+	// and Evacuate, on recovery.
+	// +optional
+	UnreadySince *metav1.Time `json:"unreadySince,omitempty"`
+
+	// RolledAt is when the operator last deleted this cell's pod to recover
+	// from an unready state. Compared against UnreadySince so a tick does
+	// not delete the pod again on every pass.
+	// +optional
+	RolledAt *metav1.Time `json:"rolledAt,omitempty"`
+
+	// AppliedTenants is the tenant set of the desired state whose apply
+	// last succeeded. A tenant absent here has no folder building on this
+	// cell.
+	// +kubebuilder:validation:MaxItems=64
+	// +optional
+	AppliedTenants []string `json:"appliedTenants,omitempty"`
+
+	// TenantWarnings lists non-blocking findings the controller reconciler
+	// records about a tenant during cell item assembly or the hibernation
+	// gate. Rebuilt each tick.
+	// +kubebuilder:validation:MaxItems=50
+	// +optional
+	TenantWarnings []TenantWarning `json:"tenantWarnings,omitempty"`
+
+	// Instance is the running Jenkins pod's metadata.uid. Empty when no
+	// pod runs. Written by the controller reconciler on every tick.
+	// +optional
+	Instance string `json:"instance,omitempty"`
+
+	// PreviousInstance is the pod uid Instance held before its last
+	// change. A controller with no cell role reports it as a dead
+	// instance in its own tenant.sync announcement, so the recorder's
+	// interrupted-run sweep can confirm a replaced pod is gone.
+	// +optional
+	PreviousInstance string `json:"previousInstance,omitempty"`
+
+	// PreviousInstanceLastSeen is the last mite heartbeat recorded while
+	// PreviousInstance was the running pod.
+	// +optional
+	PreviousInstanceLastSeen *metav1.Time `json:"previousInstanceLastSeen,omitempty"`
+
+	// Rehydration holds one build-record rehydration entry per tenant on
+	// this cell. The controller reconciler is its only writer.
+	// +kubebuilder:validation:MaxItems=64
+	// +optional
+	Rehydration []CellRehydrationEntry `json:"rehydration,omitempty"`
+}
+
+// CellRehydrationEntry tracks one tenant's build-record rehydration bundle
+// on a cell.
+type CellRehydrationEntry struct {
+	// Tenant is the Team name this entry belongs to.
+	Tenant string `json:"tenant"`
+	// CommandID correlates this entry with the desired-state command that
+	// carried its bundle. Persisting it survives a controller restart,
+	// which an in-memory map does not.
+	// +optional
+	CommandID string `json:"commandId,omitempty"`
+	// BundleID identifies the rehydration bundle this entry was built
+	// from.
+	// +optional
+	BundleID string `json:"bundleId,omitempty"`
+	// Generation is the placement generation this entry was built for.
+	Generation int64 `json:"generation,omitempty"`
+	// CellInstance is the cell pod UID this entry was built for.
+	CellInstance string `json:"cellInstance,omitempty"`
+	// Records is the number of thin build records the bundle carried.
+	Records int32 `json:"records,omitempty"`
+	// Truncated is true when the bundle dropped changelogs or older
+	// records to fit the byte budget.
+	Truncated bool `json:"truncated,omitempty"`
+	// UnseededJobs counts the jobs no bundle has covered yet.
+	UnseededJobs int32 `json:"unseededJobs,omitempty"`
+	// Applied is true once the mite reports this bundle applied with no
+	// error and no deferred job, on the generation and cell instance this
+	// entry names.
+	Applied bool `json:"applied,omitempty"`
+	// Deferred lists the job paths the mite could not seed, because the
+	// job did not exist yet.
+	// +kubebuilder:validation:MaxItems=50
+	// +optional
+	Deferred []string `json:"deferred,omitempty"`
+	// Error is the whole-bundle rehydration failure the mite reported, or
+	// empty.
+	// +optional
+	Error string `json:"error,omitempty"`
+	// At is when the controller reconciler last wrote this entry.
+	// +optional
+	At *metav1.Time `json:"at,omitempty"`
+}
+
+// TenantWarning records one non-blocking finding about a tenant on a cell.
+type TenantWarning struct {
+	// Tenant is the Team name the warning is about.
+	Tenant string `json:"tenant"`
+	// Reason names the warning class.
+	Reason string `json:"reason"`
+	// Message is a human-readable description of the finding.
+	Message string `json:"message"`
 }
 
 // OverlayWarning records a warn-but-allow guardrail hit where an overlay or podOverrides edit
@@ -1004,6 +1157,31 @@ const (
 	// controller's applied image converges with the desired image, regardless of
 	// what unblocked it.
 	ConditionUpgradePending ControllerConditionType = "UpgradePending"
+	// ConditionCellReady indicates a cell controller (spec.cell.enabled) can
+	// accept a tenant. See the CellReady reason constants below.
+	ConditionCellReady ControllerConditionType = "CellReady"
+	// ConditionWarmPool indicates whether a cell is a free member of the
+	// warm pool: it is Ready and carries no tenant.
+	ConditionWarmPool ControllerConditionType = "WarmPool"
+)
+
+// CellReady reasons.
+const (
+	// ReasonRecordStoreUnsupported is set when recordStore.enabled is false.
+	ReasonRecordStoreUnsupported = "RecordStoreUnsupported"
+	// ReasonBlobTierUnsupported is set when recordStore.blobs.mode is not s3.
+	ReasonBlobTierUnsupported = "BlobTierUnsupported"
+	// ReasonArtifactStorageLocal is set when the ArtifactStorage condition
+	// is not External.
+	ReasonArtifactStorageLocal = "ArtifactStorageLocal"
+	// ReasonNotProvisioned is set while the phase is below Connected.
+	ReasonNotProvisioned = "NotProvisioned"
+	// ReasonConnected is set when the phase is Connected.
+	ReasonConnected = "Connected"
+	// ReasonCellRolled is set when the operator deleted the cell pod to
+	// recover from an unready state. The original fault reason moves to
+	// Condition.Message.
+	ReasonCellRolled = "CellRolled"
 )
 
 // ControllerCondition contains details about the current condition of a controller.
@@ -1141,6 +1319,13 @@ type Team struct {
 }
 
 // TeamSpec defines the desired state of a Team.
+// +kubebuilder:validation:XValidation:rule="!has(self.pipelines) || size(self.pipelines.profile) > 0",message="pipelines.profile must be non-empty when pipelines is set"
+// +kubebuilder:validation:XValidation:rule="!has(self.pipelines) || size(self.pipelines.agentNamespace) > 0",message="pipelines.agentNamespace must be non-empty when pipelines is set"
+// +kubebuilder:validation:XValidation:rule="!has(self.pipelines) || self.pipelines.agentNamespace in self.namespaces",message="pipelines.agentNamespace must be one of namespaces"
+// +kubebuilder:validation:XValidation:rule="!has(self.pipelines) || !has(self.pipelines.composedBundleRef) || (has(self.pipelines.composedBundleRef.namespace) && size(self.pipelines.composedBundleRef.namespace) > 0)",message="pipelines.composedBundleRef.namespace must be non-empty when composedBundleRef is set"
+// +kubebuilder:validation:XValidation:rule="!has(self.pipelines) || !has(self.pipelines.composedBundleRef) || !has(self.pipelines.composedBundleRef.namespace) || self.pipelines.composedBundleRef.namespace in self.namespaces",message="pipelines.composedBundleRef.namespace must be one of namespaces"
+// +kubebuilder:validation:XValidation:rule="!has(self.pipelines) || !has(self.pipelines.rehydrateDeadline) || (duration(self.pipelines.rehydrateDeadline) >= duration('1m') && duration(self.pipelines.rehydrateDeadline) <= duration('24h'))",message="pipelines.rehydrateDeadline must be between 1m and 24h"
+// +kubebuilder:validation:XValidation:rule="!has(self.pipelines) || !has(self.pipelines.cronGrace) || (duration(self.pipelines.cronGrace) >= duration('1m') && duration(self.pipelines.cronGrace) <= duration('60m'))",message="pipelines.cronGrace must be between 1m and 60m"
 type TeamSpec struct {
 	// DisplayName is a human-readable display name.
 	DisplayName string `json:"displayName,omitempty"`
@@ -1156,6 +1341,119 @@ type TeamSpec struct {
 	// ProvisionNamespaces, when true, creates the team namespaces (via the
 	// tenancy helper) if they do not already exist.
 	ProvisionNamespaces bool `json:"provisionNamespaces,omitempty"`
+
+	// Pipelines, when set, makes this Team a pipelines tenant: a placement
+	// reconciler binds it to exactly one cell. A Team is cluster-scoped, so
+	// no namespace default exists for AgentNamespace or ComposedBundleRef.
+	// +optional
+	Pipelines *TeamPipelinesSpec `json:"pipelines,omitempty"`
+}
+
+// TeamPipelinesSpec declares a Team's pipelines tenancy.
+type TeamPipelinesSpec struct {
+	// Profile names the JenkinsVersionProfile the placement pass resolves a
+	// cell against.
+	Profile string `json:"profile,omitempty"`
+	// Dedicated, when true, requires a cell that carries no other tenant.
+	Dedicated bool `json:"dedicated,omitempty"`
+	// AgentNamespace is the Kubernetes namespace this tenant's agents run
+	// in. Must be one of spec.namespaces.
+	AgentNamespace string `json:"agentNamespace,omitempty"`
+	// ComposedBundleRef names the ComposedBundle this tenant's items come
+	// from. Only its items.yaml is used. When set, its namespace must be
+	// non-empty and one of spec.namespaces.
+	// +optional
+	ComposedBundleRef *ComposedBundleRef `json:"composedBundleRef,omitempty"`
+
+	// RehydrateBuilds sets how many of a job's newest completed builds the
+	// operator seeds when this tenant's cell changes. The newest
+	// successful build is always seeded in addition. Default 10.
+	// +kubebuilder:default=10
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	// +optional
+	RehydrateBuilds *int32 `json:"rehydrateBuilds,omitempty"`
+
+	// RehydrateDeadline bounds how long the operator keeps retrying a
+	// deferred rehydration seed before it stops and reports
+	// RehydrationFailed. Default 30m, range 1m to 24h.
+	// +kubebuilder:default="30m"
+	// +optional
+	RehydrateDeadline *metav1.Duration `json:"rehydrateDeadline,omitempty"`
+
+	// InterruptedRetry selects whether an interrupted run retries on its
+	// own. "manual" (default) leaves the retry to a user. "automatic"
+	// retries once.
+	// +kubebuilder:validation:Enum=manual;automatic
+	// +kubebuilder:default=manual
+	// +optional
+	InterruptedRetry string `json:"interruptedRetry,omitempty"`
+
+	// Concurrency selects this tenant's job concurrency policy. "allow"
+	// (default) runs builds side by side. "cancelInProgress" cancels the
+	// running build of the same job path when a new one starts.
+	// +kubebuilder:validation:Enum=allow;cancelInProgress
+	// +kubebuilder:default=allow
+	// +optional
+	Concurrency string `json:"concurrency,omitempty"`
+
+	// CronBackstop turns the backstop cron scheduler on for this tenant.
+	// Nil means on.
+	// +kubebuilder:default=true
+	// +optional
+	CronBackstop *bool `json:"cronBackstop,omitempty"`
+
+	// CronCatchUp selects how many missed cron occurrences the backstop
+	// fires on wake. "one" (default) fires the newest missed occurrence.
+	// "none" fires nothing.
+	// +kubebuilder:validation:Enum=one;none
+	// +kubebuilder:default=one
+	// +optional
+	CronCatchUp string `json:"cronCatchUp,omitempty"`
+
+	// CronGrace bounds how long the backstop waits past a missed cron
+	// occurrence before it fires. Default 5m, range 1m to 60m.
+	// +kubebuilder:default="5m"
+	// +optional
+	CronGrace *metav1.Duration `json:"cronGrace,omitempty"`
+
+	// Exports declares which of this tenant's jobs and locks it grants to
+	// other tenants, and who may use each grant. An absent list exports
+	// nothing.
+	// +kubebuilder:validation:MaxItems=64
+	// +optional
+	Exports []TeamExport `json:"exports,omitempty"`
+}
+
+// TeamExport is one grant a pipelines tenant makes to other tenants: a
+// folder-relative job glob, or a list of prefix-relative lock-name globs,
+// plus the Team names allowed to use it. Exactly one of Job or Locks must
+// be set.
+// +kubebuilder:validation:XValidation:rule="(has(self.job)?1:0)+(has(self.locks)?1:0)==1",message="exactly one of job or locks must be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.job) || size(self.job) > 0",message="job must be non-empty when set"
+// +kubebuilder:validation:XValidation:rule="!has(self.job) || !self.job.startsWith('/')",message="job must not start with /"
+// +kubebuilder:validation:XValidation:rule="!has(self.locks) || self.locks.all(l, size(l) > 0)",message="a locks entry must be non-empty"
+// +kubebuilder:validation:XValidation:rule="self.callers.all(c, size(c) > 0)",message="a callers entry must be non-empty"
+type TeamExport struct {
+	// Job is a folder-relative job glob this tenant exports. Exactly one of
+	// Job or Locks must be set.
+	// +kubebuilder:validation:MaxLength=512
+	// +optional
+	Job string `json:"job,omitempty"`
+
+	// Locks lists prefix-relative lock-name globs this tenant exports.
+	// Exactly one of Job or Locks must be set.
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MaxLength=512
+	// +optional
+	Locks []string `json:"locks,omitempty"`
+
+	// Callers lists the Team names allowed to use this export. At least
+	// one entry is required.
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MaxLength=253
+	Callers []string `json:"callers,omitempty"`
 }
 
 // TeamStatus defines the observed state of a Team.
@@ -1165,6 +1463,93 @@ type TeamStatus struct {
 	BindingRef         string               `json:"bindingRef,omitempty"`
 	NamespaceStates    []TeamNamespaceState `json:"namespaceStates,omitempty"`
 	Conditions         []TeamCondition      `json:"conditions,omitempty"`
+
+	// Placement reports the cell this tenant is bound to. Written only by
+	// the placement pass inside TeamReconciler.
+	// +optional
+	Placement *TeamPlacementStatus `json:"placement,omitempty"`
+
+	// Pipelines carries the pipelines tenancy's own status fields: the
+	// door credentials and the teardown-purge retry count.
+	// +optional
+	Pipelines *TeamPipelinesStatus `json:"pipelines,omitempty"`
+
+	// Rehydration reports this tenant's build-record rehydration state.
+	// TeamReconciler copies it from the bound cell's own
+	// Controller.status.cell.rehydration entry on the same tick that
+	// writes Placement.
+	// +optional
+	Rehydration *TeamRehydrationStatus `json:"rehydration,omitempty"`
+}
+
+// TeamRehydrationStatus reports a pipelines tenant's build-record
+// rehydration state.
+type TeamRehydrationStatus struct {
+	// Generation is the placement generation this state was built for.
+	Generation int64 `json:"generation,omitempty"`
+	// CellInstance is the cell pod UID this state was built for.
+	CellInstance string `json:"cellInstance,omitempty"`
+	// Records is the number of thin build records the last bundle
+	// carried.
+	Records int32 `json:"records,omitempty"`
+	// Truncated is true when the last bundle dropped changelogs or older
+	// records to fit the byte budget.
+	Truncated bool `json:"truncated,omitempty"`
+	// UnseededJobs counts the jobs no bundle has covered yet.
+	UnseededJobs int32 `json:"unseededJobs,omitempty"`
+	// Deferred lists the job paths the mite could not seed on the last
+	// apply, because the job did not exist yet.
+	// +kubebuilder:validation:MaxItems=50
+	// +optional
+	Deferred []string `json:"deferred,omitempty"`
+	// Attempts counts the rehydration retries since the last applied
+	// bundle.
+	Attempts int32 `json:"attempts,omitempty"`
+	// LastAttempt is when the operator last sent a rehydration bundle for
+	// this tenant.
+	// +optional
+	LastAttempt *metav1.Time `json:"lastAttempt,omitempty"`
+}
+
+// TeamPlacementStatus reports the cell a pipelines tenant is bound to.
+type TeamPlacementStatus struct {
+	// Cluster is the cluster the bound cell runs in.
+	Cluster string `json:"cluster,omitempty"`
+	// Cell is the name of the bound cell Controller.
+	Cell string `json:"cell,omitempty"`
+	// CellNamespace is the namespace of the bound cell Controller.
+	CellNamespace string `json:"cellNamespace,omitempty"`
+	// Generation increases only when the bound cell changes. The fence
+	// C6 owns rejects a claim carrying an older generation.
+	Generation int64 `json:"generation,omitempty"`
+}
+
+// TeamPipelinesStatus carries a pipelines tenant's door credentials and
+// teardown-purge retry count.
+type TeamPipelinesStatus struct {
+	// WebhookToken authenticates a webhook delivery against this tenant's
+	// door. Minted once, on the tick that first sees spec.pipelines; never
+	// regenerated.
+	WebhookToken string `json:"webhookToken,omitempty"`
+	// WebhookSecret verifies the forge signature on a webhook delivery.
+	// Minted once, on the tick that first sees spec.pipelines; never
+	// regenerated.
+	WebhookSecret string `json:"webhookSecret,omitempty"`
+	// PurgeAttempts counts retries of the teardown schedule purge, so a
+	// restart does not lose the count. Bounded at ten attempts.
+	PurgeAttempts int32 `json:"purgeAttempts,omitempty"`
+	// AgentNamespace mirrors spec.pipelines.agentNamespace while the tenant
+	// is placed. Teardown reads it to find the tenant ServiceAccount and its
+	// token Secret after spec.pipelines is gone, the same way Placement
+	// keeps naming a cell after the placement pass stops writing to it.
+	AgentNamespace string `json:"agentNamespace,omitempty"`
+	// PendingPurgeGeneration names the old placement generation a move
+	// still owes a schedule purge for. A move sets this field when it
+	// requests the purge and clears it once the purge succeeds. The
+	// placement pass retries every tick while it is set, so the retry
+	// survives a transient tick that changes the Placed reason for an
+	// unrelated cause.
+	PendingPurgeGeneration *int64 `json:"pendingPurgeGeneration,omitempty"`
 }
 
 // TeamNamespaceState reports the state of a single namespace for a Team.
@@ -1189,6 +1574,114 @@ type TeamList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Team `json:"items"`
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:resource:scope=Cluster
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="TEAM",type="string",JSONPath=".spec.team"
+// +kubebuilder:printcolumn:name="LAUNCHER",type="string",JSONPath=".spec.launcher"
+// +kubebuilder:printcolumn:name="CELL",type="string",JSONPath=".status.cell"
+// +kubebuilder:printcolumn:name="CONNECTED",type="boolean",JSONPath=".status.connected"
+// +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
+
+// Runner is the Schema for the runners API. It binds one external machine to
+// one pipelines tenant.
+type Runner struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec              RunnerSpec   `json:"spec,omitempty"`
+	Status            RunnerStatus `json:"status,omitempty"`
+}
+
+// RunnerSpec binds one external machine to one pipelines tenant.
+// +kubebuilder:validation:XValidation:rule="self.team == oldSelf.team",message="spec.team is immutable"
+// +kubebuilder:validation:XValidation:rule="self.launcher == oldSelf.launcher",message="spec.launcher is immutable"
+// +kubebuilder:validation:XValidation:rule="!self.remoteFS.contains('${') && (!has(self.host) || !self.host.contains('${')) && (!has(self.javaPath) || !self.javaPath.contains('${'))",message="remoteFS, host, and javaPath must not contain a ${ substitution token"
+// +kubebuilder:validation:XValidation:rule="self.launcher != 'ssh' || (has(self.host) && has(self.credentialRef))",message="an ssh runner requires host and credentialRef"
+// +kubebuilder:validation:XValidation:rule="self.launcher != 'inbound' || !(has(self.host) || has(self.port) || has(self.credentialRef) || has(self.javaPath))",message="an inbound runner must not carry host, port, credentialRef, or javaPath"
+// +kubebuilder:validation:XValidation:rule="!has(self.labels) || self.labels.all(l, l.matches(r'^[A-Za-z0-9_.-]+$'))",message="a labels entry must be a Jenkins label token"
+type RunnerSpec struct {
+	// Team names the pipelines Team that owns this runner. Immutable: the
+	// rendered node name and every label derive from it.
+	Team string `json:"team"`
+	// Launcher selects the connection direction. Immutable: a change would
+	// swap the Jenkins launcher class under a connected agent.
+	// +kubebuilder:validation:Enum=ssh;inbound
+	Launcher string `json:"launcher"`
+	// Labels lists unprefixed label suffixes. The operator prefixes each
+	// one with <team>-. Bounded so the label-token CEL rule stays under the
+	// apiserver's estimated cost budget.
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MaxLength=63
+	Labels []string `json:"labels,omitempty"`
+	// RemoteFS is the agent work directory on the node.
+	RemoteFS string `json:"remoteFS"`
+	// NumExecutors is the node's executor count.
+	// +kubebuilder:default=1
+	// +kubebuilder:validation:Minimum=1
+	NumExecutors int `json:"numExecutors,omitempty"`
+	// Host is the SSH target. Required for launcher ssh. Forbidden for
+	// launcher inbound.
+	Host string `json:"host,omitempty"`
+	// Port is a pointer with no CRD default. A default would make the field
+	// present on an inbound runner, which the inbound CEL rule forbids.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +optional
+	Port *int `json:"port,omitempty"`
+	// CredentialRef names a Secret in the Team's agent namespace. A flat name
+	// only: a namespace field would let one tenant read another's Secret.
+	CredentialRef string `json:"credentialRef,omitempty"`
+	// JavaPath is an explicit java binary path for the ssh launcher. A
+	// Windows OpenSSH session often omits the JDK from its default PATH.
+	JavaPath string `json:"javaPath,omitempty"`
+}
+
+// RunnerStatus reports where a runner's node is rendered and whether it is
+// online.
+type RunnerStatus struct {
+	// NodeName is the rendered Jenkins node name, <team>-<runner name>.
+	NodeName string `json:"nodeName,omitempty"`
+	// Cell names the Controller that hosts this runner's node. Written from
+	// the owning Team's status.placement.
+	Cell string `json:"cell,omitempty"`
+	// CellNamespace is the namespace of the cell named by Cell.
+	CellNamespace string `json:"cellNamespace,omitempty"`
+	// Token authenticates an inbound runner at the agent door. Minted once,
+	// launcher inbound only.
+	Token string `json:"token,omitempty"`
+	// Connected reports the last liveness probe of this runner's node. No
+	// omitempty: a merge patch must be able to clear a true value back to
+	// false.
+	Connected bool `json:"connected"`
+	// LastSeen is the last time the probe reported this runner online.
+	// +optional
+	LastSeen *metav1.Time `json:"lastSeen,omitempty"`
+	// ObservedGeneration is the metadata.generation the tick that last
+	// reached a delivery decision saw.
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+	// Conditions reports this runner's condition set. Type Ready.
+	// +optional
+	Conditions []RunnerCondition `json:"conditions,omitempty"`
+}
+
+// RunnerCondition is a status condition for a Runner.
+type RunnerCondition struct {
+	Type               string                 `json:"type"`
+	Status             metav1.ConditionStatus `json:"status"`
+	LastTransitionTime metav1.Time            `json:"lastTransitionTime,omitempty"`
+	Reason             string                 `json:"reason,omitempty"`
+	Message            string                 `json:"message,omitempty"`
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// RunnerList contains a list of Runner objects.
+type RunnerList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []Runner `json:"items"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -1248,41 +1741,6 @@ type PodTemplateList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []PodTemplate `json:"items"`
-}
-
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-
-// BuildMetric is the Schema for the buildmetrics API.
-// +kubebuilder:printcolumn:name="BUILD STATUS",type="string",JSONPath=".spec.buildStatus"
-// +kubebuilder:printcolumn:name="DURATION",type="integer",JSONPath=".spec.durationSeconds"
-// +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
-type BuildMetric struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-
-	Spec BuildMetricSpec `json:"spec,omitempty"`
-}
-
-// BuildMetricSpec defines the desired state of BuildMetric.
-type BuildMetricSpec struct {
-	// BuildId is the identifier of the build this metric belongs to.
-	BuildId string `json:"buildId"`
-	// BuildStatus is the outcome of the build.
-	// Valid values: Success, Failure, Aborted, Running.
-	BuildStatus string `json:"buildStatus,omitempty"`
-	// DurationSeconds is the wall-clock duration of the build in seconds.
-	DurationSeconds int `json:"durationSeconds,omitempty"`
-	// JobName is the Jenkins job name that produced this build.
-	JobName string `json:"jobName,omitempty"`
-}
-
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-
-// BuildMetricList contains a list of BuildMetric objects.
-type BuildMetricList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []BuildMetric `json:"items"`
 }
 
 // TemplateCatalogCondition is a generic status condition for catalogs and composed bundles.
@@ -1403,9 +1861,10 @@ const (
 	CatalogItemJCasC CatalogItemType = "jcasc"
 	// CatalogItemRBAC is an RBAC role definition (rbac.yaml).
 	CatalogItemRBAC CatalogItemType = "rbac"
-	// CatalogItemPipelineTemplate is a reusable pipeline/multibranch job template
-	// with typed parameters. Content uses the same item-YAML schema as
-	// CatalogItemItem — this is a discoverability tag, not a new content format.
+	// CatalogItemPipelineTemplate is a reusable, versioned pipeline template.
+	// Content is one PipelineTemplate document (internal/bundle/pipelinetemplate),
+	// not items YAML: a template's own schema and jenkinsfile or scmDefinition,
+	// not a job definition.
 	CatalogItemPipelineTemplate CatalogItemType = "pipeline-template"
 	// CatalogItemGroovy is an execution-only Groovy script for brood-operation
 	// executeGroovy dispatch. Not usable as a ComposedBundle input.
@@ -1933,9 +2392,20 @@ type VarroaRoleBinding struct {
 
 // VarroaRoleBindingSpec defines the desired state of VarroaRoleBinding.
 type VarroaRoleBindingSpec struct {
-	Subjects []SubjectRef            `json:"subjects"`
-	RoleRef  string                  `json:"roleRef"`
-	Scope    *VarroaRoleBindingScope `json:"scope,omitempty"`
+	Subjects []SubjectRef `json:"subjects"`
+	RoleRef  string       `json:"roleRef"`
+	// Scope restricts which namespaces, controllers, or pipelines tenants this
+	// binding applies to. A scope names one dimension: tenants, or
+	// namespaces/controllerSelector, never both.
+	// +kubebuilder:validation:XValidation:rule="!has(self.tenants) || (!has(self.namespaces) && !has(self.controllerSelector))",message="a scope names one dimension"
+	// +kubebuilder:validation:XValidation:rule="!has(self.tenants) || size(self.tenants) > 0",message="a scope that names no tenant grants nothing"
+	// +kubebuilder:validation:XValidation:rule="!has(self.tenants) || self.tenants.all(t, size(t.name) > 0)",message="a grant that names no tenant grants nothing"
+	// +kubebuilder:validation:XValidation:rule="!has(self.tenants) || self.tenants.all(t, !t.name.contains('/'))",message="a tenant name is a Team name"
+	// +kubebuilder:validation:XValidation:rule="!has(self.tenants) || self.tenants.all(t, !has(t.jobs) || size(t.jobs) > 0)",message="a grant that matches nothing reads as an oversight"
+	// +kubebuilder:validation:XValidation:rule="!has(self.tenants) || self.tenants.all(t, !has(t.jobs) || t.jobs.all(j, size(j) > 0))",message="a grant that matches nothing reads as an oversight"
+	// +kubebuilder:validation:XValidation:rule="!has(self.tenants) || self.tenants.all(t, !has(t.jobs) || t.jobs.all(j, !j.startsWith('/')))",message="a pattern is folder relative"
+	// +optional
+	Scope *VarroaRoleBindingScope `json:"scope,omitempty"`
 }
 
 // SubjectRef references a subject by kind and name.
@@ -1954,6 +2424,22 @@ type VarroaRoleBindingScope struct {
 	// ControllerSelector is an optional label selector over Controller CR labels.
 	// +optional
 	ControllerSelector *metav1.LabelSelector `json:"controllerSelector,omitempty"`
+	// Tenants is an optional allow-list of pipelines tenants.
+	// +kubebuilder:validation:MaxItems=64
+	// +optional
+	Tenants []TenantScope `json:"tenants,omitempty"`
+}
+
+// TenantScope names one pipelines tenant and the jobs of it the binding covers.
+type TenantScope struct {
+	// Name is a Team name.
+	// +kubebuilder:validation:MaxLength=253
+	Name string `json:"name"`
+	// Jobs is an optional list of folder-relative globs. An absent list covers every job.
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MaxLength=512
+	// +optional
+	Jobs []string `json:"jobs,omitempty"`
 }
 
 // VarroaRoleBindingList contains a list of VarroaRoleBinding objects.
@@ -2010,6 +2496,8 @@ type JenkinsRoleBindingSpec struct {
 	// RoleRef is the name of the JenkinsRole to bind.
 	RoleRef string `json:"roleRef"`
 	// ControllerScope restricts which controllers this binding applies to.
+	// A Jenkins role binding has no tenant meaning, so tenants is rejected here.
+	// +kubebuilder:validation:XValidation:rule="!has(self.tenants)",message="a Jenkins role binding has no tenant meaning"
 	// +optional
 	ControllerScope *VarroaRoleBindingScope `json:"controllerScope,omitempty"`
 	// JenkinsScope defines the in-Jenkins scope. nil means Global.

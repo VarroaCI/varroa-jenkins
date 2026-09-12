@@ -34,3 +34,79 @@ kubectl get team payments -o yaml
 Only configured deployable namespaces accept controller creation. Configure them through the installation values or a `Team`; then use [Varroa RBAC](../security/varroa-rbac.md) to grant API access and [Jenkins RBAC](../security/jenkins-rbac.md) to grant Jenkins permissions.
 
 Teams own their namespace membership and bindings. Do not manually edit generated access objects. If a user gets `403`, verify their identity, Team membership, namespace scope, and role binding. If creation is rejected, verify that the namespace is deployable.
+
+## Onboard a pipelines tenant
+
+A `Team` can also become a pipelines tenant: it shares a cell controller with other teams instead
+of running its own controller.
+
+```yaml
+apiVersion: varroa.dev/v1alpha1
+kind: Team
+metadata:
+  name: payments
+spec:
+  namespaces: ["team-payments"]
+  pipelines:
+    profile: jenkins-lts
+    agentNamespace: team-payments
+    composedBundleRef:
+      name: payments-pipelines
+      namespace: team-payments
+```
+
+`pipelines.agentNamespace` must be one of `spec.namespaces`. A placement reconciler binds the
+`Team` to a cell that matches `pipelines.profile`, and the `Team`'s `Placed` condition reports
+the result. See [Cells and pipelines tenants](cells.md) for the cell prerequisites, what a tenant
+gets, and how to troubleshoot a placement or a cell that will not accept it.
+
+A pipelines tenant can also register machines it owns as [external runners](runners.md), agents
+that connect over SSH or WebSocket instead of running as Kubernetes pods.
+
+`spec.pipelines` also carries seven settings for build-history rehydration, interrupted runs,
+job concurrency, and the backstop scheduler:
+
+| Setting | Default | Range |
+|---|---|---|
+| `rehydrateBuilds` | `10` | `0` to `100` |
+| `rehydrateDeadline` | `30m` | `1m` to `24h` |
+| `interruptedRetry` | `manual` | `manual` or `automatic` |
+| `concurrency` | `allow` | `allow` or `cancelInProgress` |
+| `cronBackstop` | `true` | `true` or `false` |
+| `cronCatchUp` | `one` | `one` or `none` |
+| `cronGrace` | `5m` | `1m` to `60m` |
+
+See [Cells and pipelines tenants](cells.md#rehydration) for what each setting controls.
+
+## Pipeline templates on a shared cell
+
+A cell delivers each placed tenant's [pipeline templates](../config/pipeline-templates.md) with
+that tenant's folder name attached. A job in one tenant's folder resolves only that tenant's
+templates and the operator's own fleet-wide templates, whose folder is empty. A job cannot resolve
+another tenant's template.
+
+A tenant's template naming a `spec.scmDefinition.credentialsId` resolves that credential in the
+tenant's own folder credential store only. A fleet-wide template, whose folder is empty, may
+resolve a system-store credential. This keeps a shared cell's per-tenant isolation: no tenant's
+template can reach another tenant's build, and no tenant's template can reach a credential the
+tenant does not own.
+
+## Export a job or a lock to another tenant
+
+A pipelines tenant grants another tenant access to one of its jobs or its fleet locks on its own
+`Team`, under `spec.pipelines.exports`:
+
+```yaml
+spec:
+  pipelines:
+    exports:
+      - job: "release/*"
+        callers: ["payments", "search"]
+      - locks: ["deploy-prod"]
+        callers: ["payments"]
+```
+
+Each entry sets exactly one of `job` or `locks`, plus `callers`, the list of Team names allowed
+to use it. An edit to `exports` takes one reconcile tick to reach the record store that enforces
+the grant. See [Cross-tenant pipelines](../config/cross-tenant-pipelines.md) for the caller-side
+`varroa` steps and the fleet lock.

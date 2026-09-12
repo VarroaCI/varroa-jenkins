@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -35,6 +36,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 
+	"github.com/varroaci/varroa-jenkins/internal/ca"
 	"github.com/varroaci/varroa-jenkins/internal/hibernation"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
@@ -68,6 +70,11 @@ type Config struct {
 	ControllerName string
 	Namespace      string
 	CAPEM          string
+
+	// CellInstance is the pod UID (VARROA_POD_UID). It rides RegisterRequest
+	// and every ClaimRequest, so the gateway's registration state and the
+	// mite's own claims name the same instance.
+	CellInstance string
 }
 
 // Agent is the mite sidecar agent that runs alongside a Jenkins instance.
@@ -89,6 +96,10 @@ type Agent struct {
 	// miteDir is the base directory for mite state markers (convergence hash,
 	// boot-restarted). Defaults to varroaMiteDir; overridable in tests.
 	miteDir string
+
+	// jenkinsHomeDir is the root the rehydration section writes under.
+	// Defaults to jenkinsHome; overridable in tests.
+	jenkinsHomeDir string
 
 	// Cached Jenkins health, updated by the health-probe goroutine and read
 	// by the heartbeat goroutine. Guarded by healthMu because the probe and
@@ -171,6 +182,77 @@ type Agent struct {
 	// pushOnCollect is set by the COLLECT_PLUGIN_INVENTORY command to force an
 	// unconditional push after the next collection.
 	pushOnCollect bool
+
+	// Job-schedule poll/send state (D8). jobScheduleSet is the last
+	// successfully polled set; a failed poll leaves it unchanged.
+	// jobScheduleLastSentHash and jobScheduleLastSendTime track what was
+	// last attached to an outgoing StateSnapshot. jobScheduleForceSend is
+	// set on every stream (re)connect and cleared by the next attach, so
+	// the first snapshot after a reconnect carries the set even when its
+	// hash is unchanged. jobScheduleInterval and jobScheduleResendAfter
+	// are the poll cadence and the send-timer, overridable in tests.
+	// Guarded by jobScheduleMu because the poller and the snapshot
+	// goroutines run concurrently.
+	jobScheduleMu           sync.Mutex
+	jobScheduleSet          *mitev1.JobScheduleSet
+	jobScheduleLastSentHash string
+	jobScheduleLastSendTime time.Time
+	jobScheduleForceSend    bool
+	jobScheduleInterval     time.Duration
+	jobScheduleResendAfter  time.Duration
+
+	// --- Loopback listener state (D7/D8): the co-located Jenkins plugin
+	// talks to the mite over 127.0.0.1 for build events and run claims.
+
+	// loopbackTokenDir is the directory that holds the loopback bearer
+	// token file. Defaults to loopbackTokenDirDefault; overridable in tests.
+	loopbackTokenDir string
+	// loopbackPort is the explicit listener port. A negative value (the
+	// NewAgent default) means "read MITE_LOOPBACK_PORT, else 9095"; zero
+	// asks the OS for a free port, which tests use to avoid collisions.
+	loopbackPort int
+	// loopbackToken is the random bearer token generated at start.
+	loopbackToken    string
+	loopbackServer   *http.Server
+	loopbackListener net.Listener
+
+	// claimTimeout is the mite's wait budget for a ClaimResponse. Read from
+	// MITE_CLAIM_TIMEOUT_MS at Run() time; overridable directly in tests.
+	claimTimeout time.Duration
+
+	// claimWaiters correlates an in-flight /v1/claim call with the
+	// ClaimResponse that arrives on the command stream.
+	claimWaiters *claimWaiterMap
+
+	// eventRetention holds every forwarded, unacknowledged build event so a
+	// reconnect can replay it. Bounded by VARROA_EVENT_RETAIN_BYTES.
+	eventRetention *eventRetentionStore
+
+	// eventAcks buffers EventAck values read from the stream since the last
+	// /v1/events response, so the plugin can release its spool.
+	eventAcks *ackBuffer
+
+	// logRetention holds every forwarded, unacknowledged console-log chunk
+	// so a reconnect can replay it. Bounded by VARROA_MITE_LOG_RETAIN_BYTES.
+	logRetention *logRetentionStore
+
+	// crossTenantTimeout is the mite's wait budget for a
+	// CrossTenantResponse (VARROA_CROSSTENANT_MITE_TIMEOUT_MS). NewAgent
+	// sets the bare default; startLoopback re-resolves it from the
+	// environment once a.Logger is set, so a malformed value, a clamp, or
+	// a nested-budget warning reaches the real logger.
+	crossTenantTimeout time.Duration
+
+	// crossTenantSeq allocates each cross-tenant request its own numeric
+	// id. The waiter map only needs uniqueness among currently open
+	// requests, never across a restart, so a process-local counter is
+	// enough.
+	crossTenantSeq atomic.Uint64
+
+	// crossTenantWaiters correlates an in-flight cross-tenant loopback
+	// call with the CrossTenantResponse that arrives on the command
+	// stream.
+	crossTenantWaiters *crossTenantWaiterMap
 }
 
 // identityState represents the agent's identity state during the bootstrap
@@ -183,7 +265,25 @@ type identityState struct {
 
 // NewAgent creates a new mite agent with the given configuration.
 func NewAgent(cfg Config) *Agent {
-	return &Agent{cfg: cfg, version: version, heartbeatInterval: 15 * time.Second, miteDir: varroaMiteDir, drainMarkerPath: defaultDrainMarkerPath}
+	return &Agent{
+		cfg:                    cfg,
+		version:                version,
+		heartbeatInterval:      15 * time.Second,
+		jobScheduleInterval:    jobSchedulePollInterval,
+		jobScheduleResendAfter: jobScheduleResendInterval,
+		miteDir:                varroaMiteDir,
+		jenkinsHomeDir:         jenkinsHome,
+		drainMarkerPath:        defaultDrainMarkerPath,
+		loopbackTokenDir:       loopbackTokenDirDefault,
+		loopbackPort:           -1, // sentinel: resolve from MITE_LOOPBACK_PORT/default at start
+		claimTimeout:           claimTimeoutFromEnv(),
+		claimWaiters:           newClaimWaiterMap(),
+		eventRetention:         newEventRetentionStore(eventRetainBytesFromEnv()),
+		eventAcks:              newAckBuffer(),
+		logRetention:           newLogRetentionStore(logRetainBytesFromEnv()),
+		crossTenantTimeout:     defaultCrossTenantMiteTimeoutMS * time.Millisecond,
+		crossTenantWaiters:     newCrossTenantWaiterMap(),
+	}
 }
 
 // lastAppliedHashPath returns the convergence-marker path rooted at miteDir.
@@ -255,6 +355,13 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.writeOperatorStatus(false)
 	a.removeDrainMarker()
 
+	// A failed loopback start (port in use, an unwritable token directory)
+	// does not stop the agent: the gRPC command stream is the mite's primary
+	// duty, and it keeps retrying below regardless.
+	if err := a.startLoopback(ctx); err != nil {
+		a.Logger.Error("loopback listener failed to start; build events and claims are unavailable", "error", err)
+	}
+
 	needsBootstrap := id.isBootstrap
 	backoff := 5 * time.Second
 	const maxBackoff = 2 * time.Minute
@@ -276,16 +383,18 @@ func (a *Agent) Run(ctx context.Context) error {
 		if needsBootstrap {
 			if err := a.register(ctx, id); err != nil {
 				retry := backoff
-				unauthenticated := status.Code(err) == codes.Unauthenticated
+				code := status.Code(err)
+				unauthenticated := code == codes.Unauthenticated || code == codes.PermissionDenied
 				if unauthenticated {
-					// An invalid or expired bootstrap token is remedied
-					// server-side: the operator remints the Secret on every
-					// not-yet-connected reconcile tick and kubelet refreshes
-					// the mounted file within about a minute. Poll on a short
-					// fixed cadence instead of escalating to the network
-					// backoff, and re-read the file so the retry presents the
-					// reminted token rather than replaying the stale one read
-					// at startup.
+					// An invalid, expired, or already-consumed bootstrap
+					// token is remedied server-side: the operator remints the
+					// Secret on every not-yet-connected reconcile tick, and
+					// for a replaced pod, and kubelet refreshes the mounted
+					// file within about a minute. Poll on a short fixed
+					// cadence instead of escalating to the network backoff,
+					// and re-read the file so the retry presents the reminted
+					// token rather than replaying the stale one read at
+					// startup.
 					retry = 30 * time.Second
 				}
 				a.Logger.Warn("register failed, retrying", "error", err, "retry", retry)
@@ -328,6 +437,15 @@ func (a *Agent) Run(ctx context.Context) error {
 		a.Logger.Info("stream connected")
 		a.writeOperatorStatus(true)
 
+		// Replay every retained build event and log chunk before anything
+		// else uses the new stream, so a reconnect never lets a fresh
+		// forward overtake one from before the disconnect.
+		a.replayRetainedEvents()
+		a.replayRetainedLogChunks()
+
+		// The stream just (re)connected: the next job-schedule attach must
+		// carry the last known set even if its hash is unchanged.
+		a.markStreamReconnected()
 		a.sendStateSnapshot(ctx)
 		a.resendInventoryIfStale(ctx)
 
@@ -338,6 +456,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		go a.startObservabilityProbe(streamCtx)
 		go a.startFingerprintTicker(streamCtx)
 		go a.startActivityPoller(streamCtx)
+		go a.startJobSchedulePoller(streamCtx)
 		go a.startPluginInventoryCollector(streamCtx)
 		go a.startCertRenewalLoop(streamCtx)
 		// Wire the reactive refresh path: on session loss + token expiry,
@@ -398,10 +517,20 @@ func (a *Agent) loadOrCreateIdentity(ctx context.Context) (*identityState, error
 			a.Logger.Warn("saved mite identity no longer trusted by current CA; discarding and re-bootstrapping")
 			a.discardSavedIdentity()
 		} else {
-			if a.cert.Leaf != nil && time.Now().Before(a.cert.Leaf.NotAfter) {
+			// The leaf names the pod instance the gateway stamps on every
+			// build event. A new pod is a new instance, so a leaf from the
+			// previous pod would mark every completion foreign to the claim:
+			// renew it with the existing keypair, which carries the current
+			// instance, the same way an expired leaf renews.
+			staleInstance := a.cfg.CellInstance != "" && a.cert.Leaf != nil &&
+				ca.CellInstanceFromCert(a.cert.Leaf) != a.cfg.CellInstance
+			if a.cert.Leaf != nil && time.Now().Before(a.cert.Leaf.NotAfter) && !staleInstance {
 				return &identityState{isBootstrap: false}, nil
 			}
-			// Certificate expired - attempt renewal with existing keypair.
+			if staleInstance {
+				a.Logger.Warn("saved mite identity names another pod instance; renewing with the existing keypair")
+			}
+			// Certificate expired or stale: attempt renewal with the existing keypair.
 			if err := a.connect(ctx); err == nil {
 				if err := a.renewWithExistingKeypair(ctx); err == nil {
 					a.saveIdentity()
@@ -557,6 +686,7 @@ func (a *Agent) renewWithExistingKeypair(ctx context.Context) error {
 		ControllerName: a.cfg.ControllerName,
 		Namespace:      a.cfg.Namespace,
 		PublicKey:      []byte(pub),
+		CellInstance:   a.cfg.CellInstance,
 	}
 	resp, err := a.client.Register(ctx, req)
 	if err != nil {
@@ -573,6 +703,7 @@ func (a *Agent) register(ctx context.Context, id *identityState) error {
 		Namespace:      a.cfg.Namespace,
 		BootstrapToken: id.bootstrapToken,
 		PublicKey:      []byte(id.pubkey),
+		CellInstance:   a.cfg.CellInstance,
 	}
 	resp, err := a.client.Register(ctx, req)
 	if err != nil {
@@ -705,7 +836,11 @@ func (a *Agent) openStream(ctx context.Context) error {
 	if err := stream.Send(hello); err != nil {
 		return err
 	}
+	// Guarded by sendMu: the loopback handlers read a.stream from their own
+	// goroutines, outside the connect/reconnect goroutine.
+	a.sendMu.Lock()
 	a.stream = stream
+	a.sendMu.Unlock()
 	return nil
 }
 
@@ -730,6 +865,7 @@ func (a *Agent) sendStateSnapshot(ctx context.Context) {
 	snap.ItemsHash = itemsHash
 	snap.ActualStateHash = computeStateHash(configHash, pluginsHash, rbacHash, itemsHash)
 	snap.Status = snap.JenkinsHealth
+	a.maybeAttachJobSchedules(snap)
 
 	msg := &mitev1.MiteMessage{
 		Message: &mitev1.MiteMessage_StateSnapshot{StateSnapshot: snap},
@@ -803,6 +939,9 @@ func (a *Agent) sendHeartbeats(ctx context.Context) {
 			snap.LiveConfigHash = a.liveConfigHash
 			snap.LiveDrift = a.liveDrift
 			a.deferMu.Unlock()
+
+			// Fill the job-schedule set only when the send gate opens.
+			a.maybeAttachJobSchedules(snap)
 
 			// Send state snapshot (carries health, version, hashes).
 			snapMsg := &mitev1.MiteMessage{
@@ -957,6 +1096,15 @@ func (mb *commandMailbox) notify() {
 func (a *Agent) processCommands(ctx context.Context) {
 	mb := newCommandMailbox()
 
+	// Stream teardown (context cancellation or a Recv error, both handled by
+	// every return below) releases every open claim waiter, so an HTTP
+	// handler blocked on /v1/claim never leaks a goroutine.
+	defer a.claimWaiters.releaseAll()
+	// The same rule applies to every open cross-tenant waiter (design.md
+	// D2): stream teardown must never leave an HTTP handler blocked on
+	// POST /v1/cross-tenant/*.
+	defer a.crossTenantWaiters.releaseAll()
+
 	go a.commandWorker(ctx, mb)
 
 	for {
@@ -1029,6 +1177,18 @@ func (a *Agent) processCommands(ctx context.Context) {
 				a.jenkinsTokenMu.Unlock()
 				a.wakeTokenWaiters()
 			}
+		case *mitev1.OperatorMessage_ClaimResponse:
+			a.claimWaiters.resolve(m.ClaimResponse)
+		case *mitev1.OperatorMessage_CrossTenantResponse:
+			a.crossTenantWaiters.resolve(m.CrossTenantResponse)
+		case *mitev1.OperatorMessage_EventAck:
+			a.handleEventAck(ctx, m.EventAck)
+		case *mitev1.OperatorMessage_TailControl:
+			// Runs in its own goroutine: the Jenkins call it makes must
+			// never block this loop from dispatching the next message.
+			go a.handleTailControl(ctx, m.TailControl)
+		case *mitev1.OperatorMessage_LogAck:
+			a.handleLogAck(ctx, m.LogAck)
 		case *mitev1.OperatorMessage_ContentRequest:
 			req := m.ContentRequest
 			if req != nil && req.RequestId != "" {
@@ -1235,6 +1395,12 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 			for k, v := range payload.Headers {
 				req.Header.Set(k, v)
 			}
+			// Set after the envelope headers, so a forged inbound
+			// X-Varroa-Delivery header cannot survive (design.md D13).
+			// Skipped when the operator sent no delivery id.
+			if payload.DeliveryId != "" {
+				req.Header.Set("X-Varroa-Delivery", payload.DeliveryId)
+			}
 			req.Header.Set("Authorization", "Bearer "+a.currentJenkinsToken())
 			// 15s timeout for the upstream call.
 			httpClient := &http.Client{Timeout: 15 * time.Second}
@@ -1254,6 +1420,42 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 			collErr := a.triggerCollectionAndPush(cctx)
 			if collErr != nil {
 				errStr = collErr.Error()
+			} else {
+				success = true
+			}
+		case mitev1.CommandTypeTriggerBuild:
+			payload := cmd.TriggerBuild
+			if payload == nil {
+				errStr = "trigger_build payload is nil"
+				break
+			}
+			jenkinsClient := a.getJenkinsClient()
+			triggerErr := jenkinsClient.TriggerBuild(cctx, jenkins.TriggerBuildRequest{
+				RunID:      payload.RunId,
+				IntentKey:  payload.IntentKey,
+				JobPath:    payload.JobPath,
+				Parameters: payload.Parameters,
+				Actor:      payload.Actor,
+			})
+			if triggerErr != nil {
+				errStr = triggerErr.Error()
+			} else {
+				success = true
+			}
+		case mitev1.CommandTypeCancelBuild:
+			payload := cmd.CancelBuild
+			if payload == nil {
+				errStr = "cancel_build payload is nil"
+				break
+			}
+			jenkinsClient := a.getJenkinsClient()
+			cancelErr := jenkinsClient.CancelBuild(cctx, jenkins.CancelBuildRequest{
+				RunID:       payload.RunId,
+				JobPath:     payload.JobPath,
+				BuildNumber: payload.BuildNumber,
+			})
+			if cancelErr != nil {
+				errStr = cancelErr.Error()
 			} else {
 				success = true
 			}
@@ -1317,6 +1519,7 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 				result.PluginsSuccess = true
 				result.RbacSuccess = true
 				result.ItemsSuccess = true
+				result.RehydrationSuccess = true
 				return result
 			case err == nil:
 				a.Logger.Info("jenkins boot session changed since last apply — re-applying desired state",
@@ -1400,6 +1603,29 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 		}
 	}
 
+	// 4. Apply the rehydration section: write every seeded build record
+	// under JENKINS_HOME. Runs after config/RBAC and before items, so a job
+	// the items section is about to touch is already seeded. See D5.
+	if cmd.Rehydration != nil {
+		if converged("rehydration") {
+			result.RehydrationSuccess = true
+		} else {
+			applyResult, err := applyRehydrationBundle(a.jenkinsHomeDir, cmd.Rehydration)
+			if err != nil {
+				a.Logger.Error("rehydration apply failed", "error", err)
+				result.RehydrationSuccess = false
+				result.RehydrationError = err.Error()
+			} else {
+				result.RehydrationSuccess = true
+				result.RehydrationDeferredJobs = applyResult.deferredJobs
+			}
+		}
+	} else {
+		// No rehydration payload requested: trivially converged, matching
+		// the existing rule for an absent items document.
+		result.RehydrationSuccess = true
+	}
+
 	// 5. Apply items configuration. Items authenticate through the same
 	// operator-JWT client as config/rbac/plugins; the declarative CASC boot
 	// apply secures the realm from t=0, so a transient early-boot auth failure
@@ -1432,6 +1658,35 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 		// controller_controller.go) and stamps a failed "items" section with no
 		// error message — surfacing as "items: rejected, no message returned".
 		result.ItemsSuccess = true
+	}
+
+	// 6. Reload every item the rehydration section named. Runs after the
+	// items apply, so a job the items section just created adopts its
+	// seeded records. A failed reload fails only the rehydration section;
+	// the items result stands on its own. An item Jenkins no longer holds
+	// is skipped, not failed: the record store keeps runs of a job the
+	// tenant has since removed, and a failure here would fence every
+	// other job of the tenant behind NOT_READY for good.
+	if cmd.Rehydration != nil {
+		var reloadErrs []string
+		for _, itemPath := range cmd.Rehydration.ReloadItems {
+			err := jenkinsClient.ReloadItem(ctx, itemPath)
+			if errors.Is(err, jenkins.ErrItemNotFound) {
+				a.Logger.Info("rehydration item absent, skipping reload", "item", itemPath)
+				continue
+			}
+			if err != nil {
+				a.Logger.Error("rehydration item reload failed", "item", itemPath, "error", err)
+				reloadErrs = append(reloadErrs, err.Error())
+			}
+		}
+		if len(reloadErrs) > 0 {
+			result.RehydrationSuccess = false
+			if result.RehydrationError != "" {
+				result.RehydrationError += "; "
+			}
+			result.RehydrationError += strings.Join(reloadErrs, "; ")
+		}
 	}
 
 	// Record convergence: persist the per-section marker only when all
@@ -1565,7 +1820,9 @@ func (a *Agent) applyConfigViaReload(ctx context.Context, client *jenkins.Client
 	// Do NOT preflight with /configuration-as-code/check — it requires
 	// Jenkins.ADMINISTER. The reload below re-parses the written bundle and
 	// fails on a bad config; the rollback path restores last-good. This keeps
-	// the mite's config push within the MANAGE permission tier.
+	// the mite's config push within the MANAGE permission tier. JCasC
+	// answers a failed reload with HTTP 200 and its error page, so the
+	// client's Reload reads the final request path, not the status code.
 
 	// Save last-good copies before overwriting.
 	if cmd.JcascYaml != "" {
@@ -1916,7 +2173,7 @@ type appliedMarker struct {
 	sections           map[string]string // "config"|"rbac"|"items" → hash
 }
 
-var markerSectionNames = []string{"config", "plugins", "rbac", "items"}
+var markerSectionNames = []string{"config", "plugins", "rbac", "items", "rehydration"}
 
 // readMarker reads the convergence marker file. Backward-compatible: legacy
 // single-line "hash [session]" form parses with sections == nil.
@@ -2048,7 +2305,7 @@ func (a *Agent) hasLastAppliedHash() bool {
 // desiredSectionHashes computes per-section content hashes from a command,
 // matching the operator-side computeChangedSections semantics.
 func (a *Agent) desiredSectionHashes(cmd *mitev1.DesiredStateCommand) map[string]string {
-	m := make(map[string]string, 4)
+	m := make(map[string]string, 5)
 	if cmd.JcascYaml != "" {
 		m["config"] = sha256hex([]byte(cmd.JcascYaml))
 	}
@@ -2057,6 +2314,9 @@ func (a *Agent) desiredSectionHashes(cmd *mitev1.DesiredStateCommand) map[string
 	}
 	if cmd.ItemsYaml != "" {
 		m["items"] = sha256hex([]byte(cmd.ItemsYaml))
+	}
+	if cmd.Rehydration != nil {
+		m["rehydration"] = cmd.Rehydration.ContentHash
 	}
 	return m
 }
@@ -2072,6 +2332,9 @@ func (a *Agent) allComponentsSucceeded(result *mitev1.DesiredStateResult, cmd *m
 		return false
 	}
 	if cmd.ItemsYaml != "" && !result.ItemsSuccess {
+		return false
+	}
+	if cmd.Rehydration != nil && !result.RehydrationSuccess {
 		return false
 	}
 	return true

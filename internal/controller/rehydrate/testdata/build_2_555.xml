@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<flow-build>
+  <actions>
+    <hudson.model.ParametersAction>
+      <safeParameters></safeParameters>
+      <parameters>
+        <hudson.model.StringParameterValue>
+          <name>BRANCH</name>
+          <value>main</value>
+        </hudson.model.StringParameterValue>
+      </parameters>
+      <parameterDefinitionNames>
+        <string>BRANCH</string>
+      </parameterDefinitionNames>
+    </hudson.model.ParametersAction>
+  </actions>
+  <queueId>-1</queueId>
+  <timestamp>1700000000000</timestamp>
+  <startTime>1700000005000</startTime>
+  <result>SUCCESS</result>
+  <description>Started by user ada</description>
+  <duration>45000</duration>
+  <charset>UTF-8</charset>
+  <keepLog>false</keepLog>
+  <artifactManager class="io.jenkins.plugins.artifact_manager_jclouds.JCloudsArtifactManager" plugin="artifact-manager-s3">
+    <provider class="io.jenkins.plugins.artifact_manager_jclouds.s3.S3BlobStore"></provider>
+  </artifactManager>
+  <checkouts class="hudson.util.PersistedList">
+    <org.jenkinsci.plugins.workflow.job.WorkflowRun_-SCMCheckout>
+      <scm class="org.jenkinsci.plugins.varroamiteauth.rehydrate.VarroaRehydratedSCM" plugin="varroa-mite-auth"></scm>
+      <node></node>
+      <workspace></workspace>
+      <changelogFile>/var/jenkins_home/jobs/team/jobs/api/builds/12/changelog0.xml</changelogFile>
+    </org.jenkinsci.plugins.workflow.job.WorkflowRun_-SCMCheckout>
+  </checkouts>
+  <completed>true</completed>
+</flow-build>

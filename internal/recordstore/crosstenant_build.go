@@ -1,0 +1,155 @@
+package recordstore
+
+import (
+	"context"
+	"fmt"
+	"regexp"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// crossTenantBuildSeqPattern matches design.md D6's build-kind seq
+// segment: a lowercase "s" and a 1-based ordinal with no leading zero.
+var crossTenantBuildSeqPattern = regexp.MustCompile(`^s[1-9][0-9]*$`)
+
+// handleCrossTenantBuild implements the build kind: design.md D6's
+// identity reservation. req.JobPath arrives folder relative to
+// req.TargetTenant, the documented wire form; this handler rejects a
+// malformed seq, then qualifies the job path once, before the grant
+// check and before the published action carries it. It runs the
+// request-path grant, then reserves the run identifier against the
+// ledger. It calls no identifier-deriving function; C4 withdrew it. It
+// writes no run_intents row of its own: the target cell's claim gate
+// creates the one row, so this responder only reads run_intents and
+// publishes a trigger_run action.
+func handleCrossTenantBuild(ctx context.Context, deps CrossTenantDeps, req CrossTenantRequest) (CrossTenantResponse, error) {
+	if !crossTenantBuildSeqPattern.MatchString(req.Seq) {
+		return CrossTenantResponse{Code: CodeInternal,
+			Error: fmt.Sprintf("seq %q must match s<n>, a 1-based ordinal", req.Seq)}, nil
+	}
+
+	qualifiedJobPath := qualifyCrossTenantJobPath(req.TargetTenant, req.JobPath)
+
+	grant, err := deps.Evaluator.Check(ctx, GrantInput{
+		PlacementInput: PlacementInput{
+			Path:                GrantPathRequest,
+			Cluster:             req.Cluster,
+			Namespace:           req.Namespace,
+			Cell:                req.Cell,
+			Tenant:              req.CallerTenant,
+			PlacementGeneration: req.PlacementGeneration,
+		},
+		CallerTenant:    req.CallerTenant,
+		TargetTenant:    req.TargetTenant,
+		ResourceKind:    GrantResourceJob,
+		Resource:        qualifiedJobPath,
+		IntentKeyScheme: IntentSchemeUpstream,
+	})
+	if err != nil {
+		return CrossTenantResponse{}, err
+	}
+	if !grant.Allow {
+		return CrossTenantResponse{ReasonCode: grant.ReasonCode, Message: grant.Message}, nil
+	}
+
+	intentKey := fmt.Sprintf("%s:%s:%s", IntentSchemeUpstream, req.CallerRunID, req.Seq)
+	intent, found, err := deps.Reader.GetIntentByKey(ctx, intentKey)
+	if err != nil {
+		return CrossTenantResponse{}, err
+	}
+	if found {
+		rec, recFound, err := readCrossTenantRunRecord(ctx, deps.Pool, intent.RunID)
+		if err != nil {
+			return CrossTenantResponse{}, err
+		}
+		resp := CrossTenantResponse{RunID: intent.RunID}
+		if recFound {
+			resp.State = crossTenantRunState(rec)
+			resp.BuildNumber = rec.buildNumber
+		} else {
+			resp.State = CrossTenantStateQueued
+		}
+		return resp, nil
+	}
+
+	runID, err := uuid.NewV7()
+	if err != nil {
+		return CrossTenantResponse{}, fmt.Errorf("mint reserved run id: %w", err)
+	}
+
+	target, err := resolveCrossTenantTargetPlacement(ctx, deps.Pool, req.Cluster, req.TargetTenant)
+	if err != nil {
+		return CrossTenantResponse{}, err
+	}
+
+	action := LedgerAction{
+		Kind:       LedgerActionTriggerRun,
+		Cluster:    target.cluster,
+		Namespace:  target.namespace,
+		Controller: target.cell,
+		Actor:      crossTenantActorPrefix + req.CallerTenant,
+		RunID:      runID.String(),
+		IntentKey:  intentKey,
+		JobPath:    qualifiedJobPath,
+		Parameters: req.Params,
+	}
+	if err := PublishLedgerAction(deps.Conn, action); err != nil {
+		return CrossTenantResponse{}, err
+	}
+
+	return CrossTenantResponse{State: CrossTenantStatePending}, nil
+}
+
+// crossTenantTargetPlacement is the subset of a target tenant's
+// tenant_placements row the trigger_run publisher needs to route the
+// action.
+type crossTenantTargetPlacement struct {
+	cluster   string
+	namespace string
+	cell      string
+}
+
+// resolveCrossTenantTargetPlacement answers target's tenant_placements
+// row, preferring callerCluster's own row when one exists there, and
+// the lone fleet-wide row otherwise. GrantEvaluator.Check has already
+// vetoed the ambiguous case, where two or more rows exist and neither
+// is the caller's own, before this function ever runs, so exactly one
+// candidate is always resolvable here. This mirrors
+// GrantEvaluator.resolveTargetPolicy's own resolution, duplicated
+// because that method is unexported in a file this batch does not
+// touch.
+func resolveCrossTenantTargetPlacement(ctx context.Context, pool *pgxpool.Pool, callerCluster, target string) (crossTenantTargetPlacement, error) {
+	rows, err := pool.Query(ctx, `SELECT cluster, namespace, cell FROM varroa.tenant_placements WHERE tenant = $1`, target)
+	if err != nil {
+		return crossTenantTargetPlacement{}, fmt.Errorf("select tenant placements for %s: %w", target, err)
+	}
+	defer rows.Close()
+
+	var (
+		all     []crossTenantTargetPlacement
+		matched crossTenantTargetPlacement
+		found   bool
+	)
+	for rows.Next() {
+		var p crossTenantTargetPlacement
+		if err := rows.Scan(&p.cluster, &p.namespace, &p.cell); err != nil {
+			return crossTenantTargetPlacement{}, fmt.Errorf("scan tenant placement for %s: %w", target, err)
+		}
+		all = append(all, p)
+		if p.cluster == callerCluster {
+			matched, found = p, true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return crossTenantTargetPlacement{}, fmt.Errorf("select tenant placements for %s: %w", target, err)
+	}
+
+	if found {
+		return matched, nil
+	}
+	if len(all) == 0 {
+		return crossTenantTargetPlacement{}, fmt.Errorf("no tenant placement for %s", target)
+	}
+	return all[0], nil
+}

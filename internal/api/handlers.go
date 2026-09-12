@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -39,22 +40,40 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/observability"
 	"github.com/varroaci/varroa-jenkins/internal/overlay"
 	"github.com/varroaci/varroa-jenkins/internal/preflight"
+	"github.com/varroaci/varroa-jenkins/internal/rbac"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
 // Server holds handler methods for the BFF API.
 type Server struct {
 	deps *Dependencies
+
+	// runLogTailReg is the run log stream's live-tail lease registry
+	// (design D5, log-live-tail): one per process, shared across every
+	// request, so many viewers of one run share one lease. Nil when
+	// deps.BusConn is nil.
+	runLogTailReg *runTailRegistry
+
+	// runnerDoorServiceURL overrides the cell Jenkins Service URL builder
+	// the agent WebSocket door uses for the agent-secret fetch, the
+	// agent.jar stream, and the websocket proxy target (design D7/D8). Nil
+	// means BuildJenkinsServiceURL, the production formula; a test
+	// substitutes an httptest server's URL.
+	runnerDoorServiceURL func(*v1alpha1.Controller) string
 }
 
 // NewServer creates a new API server with the given dependencies.
 func NewServer(deps *Dependencies) *Server {
-	return &Server{deps: deps}
+	s := &Server{deps: deps}
+	if deps != nil && deps.BusConn != nil {
+		s.runLogTailReg = newRunTailRegistry(deps.BusConn)
+	}
+	return s
 }
 
 // notifyActivity publishes a user-action activity event through the bus
-// Publisher (the single write path for user actions). The off-mode ring is
-// fed by the activity.> subscriber, not by direct store writes, per the
-// single-ring-writer rule.
+// Publisher, the single write path for user actions. Every reader — REST
+// and MCP alike — reads the published row back through deps.Backfill.
 func (s *Server) notifyActivity(e activity.Event) {
 	if s.deps.ActivityPublisher != nil {
 		s.deps.ActivityPublisher.Publish(e)
@@ -168,15 +187,13 @@ func (s *Server) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Emit logout event when an authenticated user logs out.
-	if s.deps.ActivityStore != nil {
-		if claims := auth.ClaimsFromContext(r.Context()); ActorFrom(claims) != "" {
-			s.notifyActivity(activity.Event{
-				Type:    "logout",
-				Source:  "user",
-				Actor:   ActorFrom(claims),
-				Message: ActorFrom(claims) + " logged out",
-			})
-		}
+	if claims := auth.ClaimsFromContext(r.Context()); ActorFrom(claims) != "" {
+		s.notifyActivity(activity.Event{
+			Type:    "logout",
+			Source:  "user",
+			Actor:   ActorFrom(claims),
+			Message: ActorFrom(claims) + " logged out",
+		})
 	}
 
 	cookieDomain := ""
@@ -233,6 +250,9 @@ type controllerResponse struct {
 	Cluster   string `json:"cluster"`
 	Phase     string `json:"phase"`
 	Endpoint  string `json:"endpoint"`
+	// Headless mirrors v1alpha1.IsHeadless. A headless controller's Endpoint
+	// is always the empty string, whatever Status.Endpoint carries.
+	Headless bool `json:"headless"`
 	// Version is the desired Jenkins version (from spec.version); the list row
 	// pairs it with the actual running JenkinsVersion to surface upgrade drift.
 	Version string `json:"version,omitempty"`
@@ -276,7 +296,10 @@ type controllerDetailResponse struct {
 	Cluster   string                  `json:"cluster"`
 	Phase     string                  `json:"phase"`
 	Endpoint  string                  `json:"endpoint"`
-	Version   string                  `json:"version"`
+	// Headless mirrors v1alpha1.IsHeadless. A headless controller's Endpoint
+	// is always the empty string, whatever Status.Endpoint carries.
+	Headless bool   `json:"headless"`
+	Version  string `json:"version"`
 	// MiteStatus fields.
 	// PowerState reflects spec.powerState (Running or Stopped).
 	PowerState string `json:"powerState,omitempty"`
@@ -622,7 +645,12 @@ type RolloutJSON struct {
 // controllerEndpoint returns the mode-aware external endpoint for a controller.
 // Status.Endpoint takes precedence; when empty the endpoint is derived from
 // IngressSpec: subdomain mode -> "https://<Host>", path mode -> "https://<Host>/jenkins/<ns>/<name>/".
+// A headless controller has no reachable external URL, so this always
+// returns the empty string for one, even when Status.Endpoint is set.
 func (s *Server) controllerEndpoint(cr *v1alpha1.Controller) string {
+	if v1alpha1.IsHeadless(cr) {
+		return ""
+	}
 	if cr.Status.Endpoint != "" {
 		return cr.Status.Endpoint
 	}
@@ -739,6 +767,7 @@ func (s *Server) handleControllersFiltered(w http.ResponseWriter, r *http.Reques
 			Cluster:           cluster,
 			Phase:             string(cr.Status.Phase),
 			Endpoint:          s.controllerEndpoint(cr),
+			Headless:          v1alpha1.IsHeadless(cr),
 			Version:           cr.Spec.Version,
 			ComposedBundleRef: cr.Spec.ComposedBundleRef,
 			EffectiveBundle:   s.effectiveBundleFor(cr),
@@ -1382,14 +1411,12 @@ func (s *Server) HandleUpdatePreferences(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Emit preferences update event.
-	if s.deps.ActivityStore != nil {
-		s.notifyActivity(activity.Event{
-			Type:    "preferences.updated",
-			Source:  "user",
-			Actor:   ActorFrom(claims),
-			Message: ActorFrom(claims) + " updated preferences",
-		})
-	}
+	s.notifyActivity(activity.Event{
+		Type:    "preferences.updated",
+		Source:  "user",
+		Actor:   ActorFrom(claims),
+		Message: ActorFrom(claims) + " updated preferences",
+	})
 
 	s.writeJSON(w, http.StatusOK, prefs)
 }
@@ -1414,17 +1441,15 @@ func (s *Server) handleReconcile(w http.ResponseWriter, r *http.Request, cluster
 	s.deps.Reconciler.TriggerReconcile(cluster, name, namespace)
 
 	// Emit reconcile trigger event when an authenticated user triggers it.
-	if s.deps.ActivityStore != nil {
-		if ActorFrom(claims) != "" {
-			s.notifyActivity(activity.Event{
-				Type:       "reconcile.triggered",
-				Source:     "operator",
-				Actor:      ActorFrom(claims),
-				Controller: name,
-				Namespace:  namespace,
-				Message:    "manual reconcile triggered by " + ActorFrom(claims),
-			})
-		}
+	if ActorFrom(claims) != "" {
+		s.notifyActivity(activity.Event{
+			Type:       "reconcile.triggered",
+			Source:     "operator",
+			Actor:      ActorFrom(claims),
+			Controller: name,
+			Namespace:  namespace,
+			Message:    "manual reconcile triggered by " + ActorFrom(claims),
+		})
 	}
 
 	s.writeJSON(w, http.StatusAccepted, map[string]string{"status": "triggered"})
@@ -1470,17 +1495,15 @@ func (s *Server) handleApproveRestart(w http.ResponseWriter, r *http.Request, cl
 	}
 
 	// Emit approve event.
-	if s.deps.ActivityStore != nil {
-		if ActorFrom(claims) != "" {
-			s.notifyActivity(activity.Event{
-				Type:       "restart.approved",
-				Source:     "user",
-				Actor:      ActorFrom(claims),
-				Controller: name,
-				Namespace:  namespace,
-				Message:    fmt.Sprintf("%s approved by %s", body.Action, ActorFrom(claims)),
-			})
-		}
+	if ActorFrom(claims) != "" {
+		s.notifyActivity(activity.Event{
+			Type:       "restart.approved",
+			Source:     "user",
+			Actor:      ActorFrom(claims),
+			Controller: name,
+			Namespace:  namespace,
+			Message:    fmt.Sprintf("%s approved by %s", body.Action, ActorFrom(claims)),
+		})
 	}
 
 	s.writeJSON(w, http.StatusAccepted, map[string]string{"status": "approved", "action": body.Action})
@@ -1525,20 +1548,164 @@ func (s *Server) handleApproveDeletion(w http.ResponseWriter, r *http.Request, c
 		return
 	}
 
-	if s.deps.ActivityStore != nil {
-		if ActorFrom(claims) != "" {
-			s.notifyActivity(activity.Event{
-				Type:       "deletion.approved",
-				Source:     "user",
-				Actor:      ActorFrom(claims),
-				Controller: name,
-				Namespace:  namespace,
-				Message:    fmt.Sprintf("item deletion of %s approved by %s", body.Path, ActorFrom(claims)),
-			})
-		}
+	if ActorFrom(claims) != "" {
+		s.notifyActivity(activity.Event{
+			Type:       "deletion.approved",
+			Source:     "user",
+			Actor:      ActorFrom(claims),
+			Controller: name,
+			Namespace:  namespace,
+			Message:    fmt.Sprintf("item deletion of %s approved by %s", body.Path, ActorFrom(claims)),
+		})
 	}
 
 	s.writeJSON(w, http.StatusAccepted, map[string]string{"status": "approved", "path": body.Path})
+}
+
+// breakGlassTTLDefaultSeconds and the bound constants below give an admin's
+// break-glass grant a bounded lifetime: long enough for one incident,
+// short enough that a leaked token expires soon.
+const (
+	breakGlassTTLDefaultSeconds = 900
+	breakGlassTTLMinSeconds     = 300
+	breakGlassTTLMaxSeconds     = 3600
+	breakGlassReasonMaxChars    = 256
+	// jenkinsContainerPort is the jenkins container's HTTP port inside the
+	// pod, the same value the operator's in-cluster Service URL uses.
+	jenkinsContainerPort = 8080
+)
+
+// breakGlassRequest is the JSON body for POST .../break-glass.
+type breakGlassRequest struct {
+	Reason     string `json:"reason"`
+	TTLSeconds *int   `json:"ttlSeconds,omitempty"`
+}
+
+// breakGlassTarget names the in-cluster Service a break-glass token reaches.
+type breakGlassTarget struct {
+	Service   string `json:"service"`
+	Namespace string `json:"namespace"`
+	Port      int    `json:"port"`
+}
+
+// breakGlassResponse is the JSON body for a granted break-glass session.
+type breakGlassResponse struct {
+	Token       string           `json:"token"`
+	ExpiresAt   string           `json:"expiresAt"`
+	Target      breakGlassTarget `json:"target"`
+	LocationURL string           `json:"locationUrl"`
+}
+
+// handleBreakGlass handles POST
+// /clusters/{cluster}/controllers/{ns}/{name}/break-glass. It mints a
+// short-lived, per-caller Jenkins token for a headless controller's admin
+// door, reachable only through a break-glass proxy, never through the
+// controller's own (absent) Ingress. Every grant is audited before it is
+// minted, so a missing audit path never mints a silent grant. The checks run
+// in a fixed order, and the first failure answers the request:
+//  1. method must be POST
+//  2. the caller must hold the break-glass verb
+//  3. a Jenkins token signer must be configured
+//  4. an activity publisher must be configured
+//  5. the target cluster must be the core cluster
+//  6. the controller must exist
+//  7. the controller must be headless
+//  8. reason must be present and at most 256 characters
+//  9. ttlSeconds, defaulted to 900, must fall between 300 and 3600
+func (s *Server) handleBreakGlass(w http.ResponseWriter, r *http.Request, cluster, ns, name string) {
+	if r.Method != http.MethodPost {
+		s.writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	claims := auth.ClaimsFromContext(r.Context())
+	if s.deps.Authorizer == nil || !s.deps.Authorizer.CanBreakGlass(claims, ns, name) {
+		s.writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+
+	if s.deps.JenkinsTokenSigner == nil {
+		s.writeJSONError(w, http.StatusServiceUnavailable, "per-caller identity unavailable: mite signing key not loaded")
+		return
+	}
+	if s.deps.ActivityPublisher == nil {
+		s.writeJSONError(w, http.StatusServiceUnavailable, "activity publisher not available")
+		return
+	}
+
+	isLocal := s.deps.Brood == nil || cluster == s.deps.Brood.LocalCluster()
+	if !isLocal {
+		s.writeJSONError(w, http.StatusBadRequest,
+			"break-glass reaches only the core cluster: the BFF signs a token with its own operator namespace's key, which a remote cluster's plugin cannot verify")
+		return
+	}
+
+	cr, err := crdstore.Get[v1alpha1.Controller](r.Context(), s.deps.Store, name, ns)
+	if err != nil {
+		s.writeJSONError(w, http.StatusNotFound, "controller not found")
+		return
+	}
+
+	if !v1alpha1.IsHeadless(cr) {
+		s.writeJSONError(w, http.StatusConflict,
+			fmt.Sprintf("controller is already reachable at %s; break-glass is only for a headless controller", s.controllerEndpoint(cr)))
+		return
+	}
+
+	var body breakGlassRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if body.Reason == "" || utf8.RuneCountInString(body.Reason) > breakGlassReasonMaxChars {
+		s.writeJSONError(w, http.StatusBadRequest,
+			fmt.Sprintf("reason is required and must be at most %d characters", breakGlassReasonMaxChars))
+		return
+	}
+
+	ttlSeconds := breakGlassTTLDefaultSeconds
+	if body.TTLSeconds != nil {
+		ttlSeconds = *body.TTLSeconds
+	}
+	if ttlSeconds < breakGlassTTLMinSeconds || ttlSeconds > breakGlassTTLMaxSeconds {
+		s.writeJSONError(w, http.StatusBadRequest,
+			fmt.Sprintf("ttlSeconds must be between %d and %d", breakGlassTTLMinSeconds, breakGlassTTLMaxSeconds))
+		return
+	}
+	ttl := time.Duration(ttlSeconds) * time.Second
+
+	// Publish the audit event before minting, so a token is never issued
+	// without a matching audit record.
+	s.notifyActivity(activity.Event{
+		Type:       "controller.breakglass.granted",
+		Source:     "user",
+		Severity:   "warning",
+		Actor:      ActorFrom(claims),
+		Cluster:    cluster,
+		Namespace:  ns,
+		Controller: name,
+		Reason:     body.Reason,
+		Message:    fmt.Sprintf("break-glass grant issued to %s: %s", ActorFrom(claims), body.Reason),
+	})
+
+	token, err := s.deps.JenkinsTokenSigner.GenerateUserJenkinsToken(name, ns, claims, ttl)
+	if err != nil {
+		s.writeJSONError(w, http.StatusInternalServerError, "failed to mint token")
+		return
+	}
+
+	svcName := strings.TrimSuffix(controller.PodName(cr, 0), "-0") + "-svc"
+	s.writeJSON(w, http.StatusOK, breakGlassResponse{
+		Token:     token,
+		ExpiresAt: time.Now().Add(ttl).Format(time.RFC3339),
+		Target: breakGlassTarget{
+			Service:   svcName,
+			Namespace: ns,
+			Port:      jenkinsContainerPort,
+		},
+		LocationURL: fmt.Sprintf("http://%s.%s.svc.cluster.local:%d/", svcName, ns, jenkinsContainerPort),
+	})
 }
 
 // handleReprovision handles POST /controllers/{ns}/{name}/reprovision.
@@ -1560,7 +1727,7 @@ func (s *Server) handleReprovision(w http.ResponseWriter, r *http.Request, clust
 	// convergence short-circuit) and wakes the controller immediately.
 	s.deps.Reconciler.Reprovision(cluster, ns, name)
 
-	if s.deps.ActivityStore != nil && ActorFrom(claims) != "" {
+	if ActorFrom(claims) != "" {
 		s.notifyActivity(activity.Event{
 			Type:       "controller.reprovisioned",
 			Source:     "user",
@@ -1601,7 +1768,7 @@ func (s *Server) handleRestartController(w http.ResponseWriter, r *http.Request,
 		}
 	}
 
-	if s.deps.ActivityStore != nil && ActorFrom(claims) != "" {
+	if ActorFrom(claims) != "" {
 		s.notifyActivity(activity.Event{
 			Type:       "controller.restarted",
 			Source:     "user",
@@ -1638,7 +1805,7 @@ func (s *Server) handleHibernate(w http.ResponseWriter, r *http.Request, cluster
 		s.writeActionError(w, err)
 		return
 	}
-	if s.deps.ActivityStore != nil && ActorFrom(claims) != "" {
+	if ActorFrom(claims) != "" {
 		s.notifyActivity(activity.Event{
 			Type:       "controller.hibernated",
 			Source:     "user",
@@ -1673,7 +1840,7 @@ func (s *Server) handleWake(w http.ResponseWriter, r *http.Request, cluster, ns,
 		s.writeActionError(w, err)
 		return
 	}
-	if s.deps.ActivityStore != nil && ActorFrom(claims) != "" {
+	if ActorFrom(claims) != "" {
 		s.notifyActivity(activity.Event{
 			Type:       "controller.woken",
 			Source:     "user",
@@ -1715,44 +1882,71 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		s.writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
-	if q == "" {
-		s.writeJSON(w, http.StatusOK, map[string]any{"items": []interface{}{}})
-		return
-	}
-
-	ctx := r.Context()
 	claims := auth.ClaimsFromContext(r.Context())
-	results := make([]searchResult, 0, 20)
-	if s.deps.Authorizer == nil {
-		s.writeJSON(w, http.StatusOK, itemsEnvelope(results))
-		return
-	}
-
-	controllers, statuses, err := s.deps.Brood.ListAll(ctx, "", "")
+	results, err := s.Search(r.Context(), claims, r.URL.Query().Get("q"), "")
 	if err != nil {
-		s.deps.Logger.Error("search controller fan-out failed", "error", err)
 		s.writeJSONError(w, http.StatusServiceUnavailable, "search unavailable")
 		return
+	}
+	s.writeJSON(w, http.StatusOK, itemsEnvelope(results))
+}
+
+// errSearchUnavailable means every search source failed: GET /search and
+// the MCP search tool both answer that with a hard failure rather than
+// an empty result, so a caller cannot mistake "nothing failed" for "no
+// source could be reached".
+var errSearchUnavailable = errors.New("search unavailable")
+
+// Search runs one query across every resource kind the caller may read:
+// the four live Kubernetes-backed kinds (controller, namespace, group,
+// catalogitem) and, when the record store is wired, the three
+// record-backed kinds (job, run, activity). It is the single
+// implementation behind both GET /search and the MCP search tool, so the
+// two surfaces cannot disagree about one caller's query.
+//
+// namespace, when set, narrows every kind that carries a namespace before
+// the per-kind response cap runs, not after: a caller that asks for one
+// namespace must not lose a match to five higher-ranked rows from another
+// namespace. The group kind carries no namespace, so it stays unfiltered.
+// GET /search passes the empty string; the MCP search tool passes its
+// optional namespace argument.
+//
+// A record-store failure is logged and the three record kinds are
+// omitted from the result; it never turns into errSearchUnavailable,
+// which stays reserved for a total live-source failure, matching the
+// rule before this change.
+func (s *Server) Search(ctx context.Context, claims *auth.Claims, rawQuery, namespace string) ([]SearchResult, error) {
+	q := strings.ToLower(strings.TrimSpace(rawQuery))
+	results := make([]SearchResult, 0, 20)
+	if q == "" {
+		return results, nil
+	}
+	if s.deps.Authorizer == nil {
+		return results, nil
+	}
+
+	controllers, statuses, err := s.deps.Brood.ListAll(ctx, namespace, "")
+	if err != nil {
+		s.deps.Logger.Error("search controller fan-out failed", "error", err)
+		return nil, errSearchUnavailable
 	}
 	for _, status := range statuses {
 		if !status.OK {
 			s.deps.Logger.Warn("search cluster unavailable", "cluster", status.Name, "error", status.Error)
 		}
 	}
-	namespaces := make(map[string]searchResult)
+	namespaces := make(map[string]SearchResult)
 	for _, row := range controllers {
 		c := row.CR
 		if c == nil || !s.deps.Authorizer.CanReadController(claims, c.Namespace, c.Name) {
 			continue
 		}
 		if searchMatch(q, c.Name, c.Namespace, row.Cluster, "") {
-			results = append(results, searchResult{Type: "controller", Cluster: row.Cluster, Namespace: c.Namespace, Name: c.Name, Link: searchControllerLink(row.Cluster, c.Namespace, c.Name)})
+			results = append(results, SearchResult{Type: "controller", Cluster: row.Cluster, Namespace: c.Namespace, Name: c.Name, Link: searchControllerLink(row.Cluster, c.Namespace, c.Name)})
 		}
 		if strings.Contains(strings.ToLower(c.Namespace), q) {
 			key := row.Cluster + "\x00" + c.Namespace
-			namespaces[key] = searchResult{Type: "namespace", Cluster: row.Cluster, Namespace: c.Namespace, Name: c.Namespace, Link: "/controllers?cluster=" + url.QueryEscape(row.Cluster) + "&namespace=" + url.QueryEscape(c.Namespace)}
+			namespaces[key] = SearchResult{Type: "namespace", Cluster: row.Cluster, Namespace: c.Namespace, Name: c.Namespace, Link: "/controllers?cluster=" + url.QueryEscape(row.Cluster) + "&namespace=" + url.QueryEscape(c.Namespace)}
 		}
 	}
 	results = append(results, mapSearchResults(namespaces)...)
@@ -1764,7 +1958,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		} else {
 			for _, group := range groups {
 				if searchMatch(q, group.Name, "", "", group.Spec.DisplayName) {
-					results = append(results, searchResult{Type: "group", Name: group.Name, Description: group.Spec.DisplayName, Link: "/access/groups?query=" + url.QueryEscape(group.Name)})
+					results = append(results, SearchResult{Type: "group", Name: group.Name, Description: group.Spec.DisplayName, Link: "/access/groups?query=" + url.QueryEscape(group.Name)})
 				}
 			}
 		}
@@ -1777,7 +1971,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		} else {
 			succeeded := 0
 			for _, cluster := range clusters {
-				rawItems, _, listErr := s.deps.ConfigBrood.ListCatalogItems(ctx, cluster.Name, "", CatalogItemFilter{})
+				rawItems, _, listErr := s.deps.ConfigBrood.ListCatalogItems(ctx, cluster.Name, namespace, CatalogItemFilter{})
 				if listErr != nil {
 					s.deps.Logger.Warn("search catalog cluster failed", "cluster", cluster.Name, "error", listErr)
 					continue
@@ -1788,20 +1982,26 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 					if json.Unmarshal(raw, &item) != nil || !searchMatch(q, item.Name, "", "", item.Description) {
 						continue
 					}
-					results = append(results, searchResult{Type: "catalogitem", Cluster: cluster.Name, Namespace: item.Namespace, Name: item.Name, Description: item.Description, Link: "/catalog/items/" + url.PathEscape(item.Namespace) + "/" + url.PathEscape(item.Name) + "?cluster=" + url.QueryEscape(cluster.Name)})
+					results = append(results, SearchResult{Type: "catalogitem", Cluster: cluster.Name, Namespace: item.Namespace, Name: item.Name, Description: item.Description, Link: "/catalog/items/" + url.PathEscape(item.Namespace) + "/" + url.PathEscape(item.Name) + "?cluster=" + url.QueryEscape(cluster.Name)})
 				}
 			}
 			if len(clusters) > 0 && succeeded == 0 {
-				s.writeJSONError(w, http.StatusServiceUnavailable, "search unavailable")
-				return
+				return nil, errSearchUnavailable
 			}
 		}
 	}
-	results = rankSearchResults(results, q)
-	s.writeJSON(w, http.StatusOK, itemsEnvelope(results))
+
+	if s.deps.RecordStore != nil {
+		results = append(results, s.searchRecords(ctx, claims, q, namespace)...)
+	}
+
+	return rankSearchResults(results, q), nil
 }
 
-type searchResult struct {
+// SearchResult is one row of a search response: GET /search's "items"
+// envelope and the MCP search tool's output share this shape, so the two
+// surfaces answer one query the same way.
+type SearchResult struct {
 	Type        string `json:"type"`
 	Cluster     string `json:"cluster,omitempty"`
 	Namespace   string `json:"namespace,omitempty"`
@@ -1814,21 +2014,202 @@ func searchControllerLink(cluster, namespace, name string) string {
 	return "/controllers/" + url.PathEscape(cluster) + "/" + url.PathEscape(namespace) + "/" + url.PathEscape(name)
 }
 
+// searchJobLink builds a "job" search result's link. team is the
+// resolved team segment TenantRefFromRow derives from the row's tenant
+// column, not the raw tenant value.
+func searchJobLink(team, jobPath string) string {
+	return "/pipelines/" + url.PathEscape(team) + "/" + url.PathEscape(jobPath)
+}
+
+// searchRunLink builds a "run" search result's link, the job link plus
+// the run identity.
+func searchRunLink(team, jobPath, runID string) string {
+	return searchJobLink(team, jobPath) + "/" + url.PathEscape(runID)
+}
+
+// searchActivityLink builds an "activity" search result's link: the
+// activity view, filtered to the fields that select the event.
+func searchActivityLink(e activity.Event) string {
+	v := url.Values{}
+	if e.Cluster != "" {
+		v.Set("cluster", e.Cluster)
+	}
+	if e.Controller != "" {
+		v.Set("controller", e.Namespace+"/"+e.Controller)
+	} else if e.Namespace != "" {
+		v.Set("namespace", e.Namespace)
+	}
+	if e.Type != "" {
+		v.Set("type", e.Type)
+	}
+	if e.Actor != "" {
+		v.Set("actor", e.Actor)
+	}
+	return "/activity?" + v.Encode()
+}
+
+// runSearchDescription summarizes a run search row's build number and
+// branch, when either is present, for the result's Description field.
+func runSearchDescription(run recordstore.RunSearchResult) string {
+	var parts []string
+	if run.BuildNumber != nil {
+		parts = append(parts, fmt.Sprintf("#%d", *run.BuildNumber))
+	}
+	if run.Branch != nil && *run.Branch != "" {
+		parts = append(parts, *run.Branch)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// searchRecords returns the three record-backed search results — job,
+// run, and activity — matching q. It logs and returns nil on a
+// record-store failure, which the caller appends as zero extra results
+// rather than treating as errSearchUnavailable.
+//
+// namespace, when set, reaches the record store as SearchQuery.Namespace:
+// every kind's SQL query ANDs an exact-namespace match onto its own
+// admission clause, so the per-kind row cap applies only to that
+// namespace's rows. A namespace filter applied after the query, instead
+// of inside it, would let rows from another namespace that a tenant
+// grant admits occupy the fetched-row slots a matching row for the
+// requested namespace needs.
+//
+// The "job" and "run" queries also carry the caller's tenant grants
+// (Tenants) and namespace grants (JobRunNamespaces): a tenant-scoped
+// pipelines:read grant carries no controllers:read, so the D5 scope
+// alone would never admit that row (ruling y). Tenants unions
+// Resolver.TenantGrants (which enumerates existing Team objects) with
+// every tenant name in the caller's scope-partitioned bindings, so a
+// tenant-scoped binding still contributes its tenant name even when the
+// Team it names has been deleted. A cluster-wide binding's role never
+// appears in either Tenants or the D5 scope (a cluster-wide binding
+// names no tenant, and the D5 scope reflects controllers:read, not
+// pipelines:read), so AllTenants carries that case directly from
+// perms.Global.
+func (s *Server) searchRecords(ctx context.Context, claims *auth.Claims, q, namespace string) []SearchResult {
+	perms := s.deps.Authorizer.EffectivePermissions(claims)
+	scope := activity.ScopeFromPermissions(perms, s.deps.Authorizer.CanReadGlobalActivity(claims))
+	query := recordstore.SearchQuery{
+		Query:            q,
+		Scope:            scope,
+		Tenants:          tenantGrantNames(perms),
+		Namespace:        namespace,
+		AllTenants:       rbac.GrantsPipelinesVerb(perms.Global),
+		JobRunNamespaces: jobRunNamespaces(scope, perms),
+	}
+	found, err := s.deps.RecordStore.SearchRecords(ctx, query)
+	if err != nil {
+		s.deps.Logger.Error("search record store failed", "error", err)
+		return nil
+	}
+
+	var out []SearchResult
+	for _, j := range found.Jobs {
+		ref, refErr := TenantRefFromRow(j.Cluster, j.Namespace, j.Cell, j.Tenant)
+		if refErr != nil || !s.deps.Authorizer.CanReadPipeline(claims, ref, j.JobPath) {
+			continue
+		}
+		out = append(out, SearchResult{Type: "job", Cluster: j.Cluster, Namespace: j.Namespace, Name: j.JobPath, Link: searchJobLink(ref.Team, j.JobPath)})
+	}
+	for _, run := range found.Runs {
+		if !s.deps.Authorizer.CanReadRun(claims, RunTenantRow{Tenant: run.Tenant, JobPath: run.JobPath}) {
+			continue
+		}
+		runRef, refErr := TenantRefFromRow(run.Cluster, run.Namespace, run.Cell, run.Tenant)
+		if refErr != nil {
+			continue
+		}
+		out = append(out, SearchResult{Type: "run", Cluster: run.Cluster, Namespace: run.Namespace, Name: run.JobPath, Description: runSearchDescription(run), Link: searchRunLink(runRef.Team, run.JobPath, run.RunID)})
+	}
+	for _, e := range found.Activity {
+		if !s.deps.Authorizer.CanReadActivityEvent(claims, e) {
+			continue
+		}
+		out = append(out, SearchResult{Type: "activity", Cluster: e.Cluster, Namespace: e.Namespace, Name: e.Message, Description: e.Type, Link: searchActivityLink(e)})
+	}
+	return out
+}
+
+// tenantGrantNames returns the deduped set of tenant names perms grants a
+// pipelines capability on. It unions two sources: perms.Tenants (every
+// grant Resolver.TenantGrants found by enumerating live Team objects),
+// and every tenant name named in perms.Scopes whose scope's capabilities
+// hold a pipelines verb. TenantGrants alone omits a tenant-scoped binding
+// whose Team has been deleted, even though CanReadRun's binding path
+// still authorizes the rows that binding grants; the second source keeps
+// that tenant name in the record-store pushdown (ruling y) regardless.
+func tenantGrantNames(perms rbac.PermissionScopes) []string {
+	seen := make(map[string]bool)
+	var out []string
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	for _, c := range perms.Tenants {
+		add(c.Tenant)
+	}
+	for _, sc := range perms.Scopes {
+		if !rbac.GrantsPipelinesVerb(sc.Capabilities) {
+			continue
+		}
+		for _, t := range sc.Tenants {
+			add(t.Name)
+		}
+	}
+	return out
+}
+
+// jobRunNamespaces returns the deduped namespace list the "job" and
+// "run" record-store queries push down (ruling y): scope's own
+// Namespaces (kept for parity with a controllers:read namespace grant,
+// a safe over-admission the caller's per-row check still gates), unioned
+// with every namespace in the caller's scope-partitioned bindings whose
+// capabilities hold a pipelines verb and whose Tenants list is empty. A
+// scope with a non-empty Tenants list is already carried through
+// tenantGrantNames, and a controllerSelector-scoped binding's Namespaces
+// list is always empty, so neither needs a separate exclusion check.
+func jobRunNamespaces(scope activity.Scope, perms rbac.PermissionScopes) []string {
+	seen := make(map[string]bool)
+	var out []string
+	add := func(ns string) {
+		if ns == "" || seen[ns] {
+			return
+		}
+		seen[ns] = true
+		out = append(out, ns)
+	}
+	for _, ns := range scope.Namespaces {
+		add(ns)
+	}
+	for _, sc := range perms.Scopes {
+		if len(sc.Tenants) > 0 || !rbac.GrantsPipelinesVerb(sc.Capabilities) {
+			continue
+		}
+		for _, ns := range sc.Namespaces {
+			add(ns)
+		}
+	}
+	return out
+}
+
 func searchMatch(q, name, namespace, cluster, description string) bool {
 	return strings.Contains(strings.ToLower(name), q) || strings.Contains(strings.ToLower(namespace), q) || strings.Contains(strings.ToLower(cluster), q) || strings.Contains(strings.ToLower(description), q)
 }
 
-func mapSearchResults(items map[string]searchResult) []searchResult {
-	results := make([]searchResult, 0, len(items))
+func mapSearchResults(items map[string]SearchResult) []SearchResult {
+	results := make([]SearchResult, 0, len(items))
 	for _, item := range items {
 		results = append(results, item)
 	}
 	return results
 }
 
-func rankSearchResults(items []searchResult, q string) []searchResult {
-	kindOrder := map[string]int{"controller": 0, "namespace": 1, "group": 2, "catalogitem": 3}
-	rank := func(item searchResult) int {
+func rankSearchResults(items []SearchResult, q string) []SearchResult {
+	kindOrder := map[string]int{"controller": 0, "namespace": 1, "group": 2, "catalogitem": 3, "job": 4, "run": 5, "activity": 6}
+	rank := func(item SearchResult) int {
 		name := strings.ToLower(item.Name)
 		switch {
 		case name == q:
@@ -1851,7 +2232,7 @@ func rankSearchResults(items []searchResult, q string) []searchResult {
 		return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
 	})
 	counts := make(map[string]int)
-	out := make([]searchResult, 0, 20)
+	out := make([]SearchResult, 0, 20)
 	for _, item := range items {
 		if counts[item.Type] < 5 {
 			out = append(out, item)
@@ -1883,6 +2264,7 @@ func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	claims := auth.ClaimsFromContext(r.Context())
+	query.Scope = activity.ScopeFromPermissions(s.deps.Authorizer.EffectivePermissions(claims), s.deps.Authorizer.CanReadGlobalActivity(claims))
 	query.Authorize = func(e activity.Event) bool { return s.deps.Authorizer.CanReadActivityEvent(claims, e) }
 	page, err := s.deps.Backfill.Query(r.Context(), query)
 	if err != nil {
@@ -2105,7 +2487,7 @@ func (s *Server) handlePreflightController(w http.ResponseWriter, r *http.Reques
 	var ingressChecks []preflight.Check
 	if req.Spec.IngressSpec != nil {
 		check := preflight.Check{ID: "ingress-mode", Status: "pass", Message: "ingress mode ok"}
-		if serr := s.controllerSvc().ValidateIngress(req.Spec.IngressSpec, true, cluster, req.Name); serr != nil {
+		if serr := s.controllerSvc().ValidateIngress(req.Spec.IngressSpec, true, cluster, req.Name, v1alpha1.IsHeadless(&req.Controller)); serr != nil {
 			check = preflight.Check{ID: "ingress-mode", Status: "fail", Message: serr.Message}
 		}
 		ingressChecks = append(ingressChecks, check)
@@ -2252,7 +2634,7 @@ func (s *Server) handleCreateController(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// Validate ingress rules — path mode only when creating on local cluster.
-	if serr := s.controllerSvc().ValidateIngress(cr.Spec.IngressSpec, true, cluster, cr.Name); serr != nil {
+	if serr := s.controllerSvc().ValidateIngress(cr.Spec.IngressSpec, true, cluster, cr.Name, v1alpha1.IsHeadless(cr)); serr != nil {
 		s.writeServiceError(w, serr)
 		return
 	}
@@ -2293,7 +2675,7 @@ func (s *Server) handleCreateController(w http.ResponseWriter, r *http.Request, 
 		writeBroodErrorChecks(w, err, checks)
 		return
 	}
-	if s.deps.ActivityStore != nil && ActorFrom(claims) != "" {
+	if ActorFrom(claims) != "" {
 		s.notifyActivity(activity.Event{
 			Type:       "controller.created",
 			Source:     "user",
@@ -2332,18 +2714,16 @@ func (s *Server) handleDeleteController(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// Emit activity event.
-	if s.deps.ActivityStore != nil {
-		if claims != nil {
-			s.notifyActivity(activity.Event{
-				Type:       "controller.deleted",
-				Source:     "user",
-				Actor:      ActorFrom(claims),
-				Controller: name,
-				Namespace:  namespace,
-				Cluster:    cluster,
-				Message:    fmt.Sprintf("controller %s/%s deleted by %s", namespace, name, ActorFrom(claims)),
-			})
-		}
+	if claims != nil {
+		s.notifyActivity(activity.Event{
+			Type:       "controller.deleted",
+			Source:     "user",
+			Actor:      ActorFrom(claims),
+			Controller: name,
+			Namespace:  namespace,
+			Cluster:    cluster,
+			Message:    fmt.Sprintf("controller %s/%s deleted by %s", namespace, name, ActorFrom(claims)),
+		})
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -2726,7 +3106,7 @@ func (s *Server) handleVarroaRoles(w http.ResponseWriter, r *http.Request) {
 			s.writeK8sError(w, err)
 			return
 		}
-		if s.deps.ActivityStore != nil && claims != nil {
+		if claims != nil {
 			s.notifyActivity(activity.Event{
 				Type:    "varroarole.created",
 				Source:  "user",
@@ -2786,7 +3166,7 @@ func (s *Server) handleVarroaRoleDispatch(w http.ResponseWriter, r *http.Request
 			s.writeK8sError(w, err)
 			return
 		}
-		if s.deps.ActivityStore != nil && claims != nil {
+		if claims != nil {
 			s.notifyActivity(activity.Event{
 				Type:    "varroarole.updated",
 				Source:  "user",
@@ -2805,7 +3185,7 @@ func (s *Server) handleVarroaRoleDispatch(w http.ResponseWriter, r *http.Request
 			s.writeK8sError(w, err)
 			return
 		}
-		if s.deps.ActivityStore != nil && claims != nil {
+		if claims != nil {
 			s.notifyActivity(activity.Event{
 				Type:    "varroarole.deleted",
 				Source:  "user",
@@ -2857,7 +3237,7 @@ func (s *Server) handleVarroaRoleBindings(w http.ResponseWriter, r *http.Request
 			s.writeK8sError(w, err)
 			return
 		}
-		if s.deps.ActivityStore != nil && claims != nil {
+		if claims != nil {
 			s.notifyActivity(activity.Event{
 				Type:    "varroarolebinding.created",
 				Source:  "user",
@@ -2917,7 +3297,7 @@ func (s *Server) handleVarroaRoleBindingDispatch(w http.ResponseWriter, r *http.
 			s.writeK8sError(w, err)
 			return
 		}
-		if s.deps.ActivityStore != nil && claims != nil {
+		if claims != nil {
 			s.notifyActivity(activity.Event{
 				Type:    "varroarolebinding.updated",
 				Source:  "user",
@@ -2936,7 +3316,7 @@ func (s *Server) handleVarroaRoleBindingDispatch(w http.ResponseWriter, r *http.
 			s.writeK8sError(w, err)
 			return
 		}
-		if s.deps.ActivityStore != nil && claims != nil {
+		if claims != nil {
 			s.notifyActivity(activity.Event{
 				Type:    "varroarolebinding.deleted",
 				Source:  "user",
@@ -3032,9 +3412,19 @@ func (s *Server) handleControllerDiff(w http.ResponseWriter, r *http.Request, cl
 				vars["varroa_controller_name"] = name
 				vars["varroa_controller_namespace"] = namespace
 				vars["varroa_controller_version"] = cr.Spec.Version
+				// The endpoint mirrors the operator's own baseEndpoint: the
+				// in-cluster Service URL, keyed off the UID-named prefix, not
+				// the bare CR name.
+				svcName := strings.TrimSuffix(controller.PodName(cr, 0), "-0") + "-svc"
+				endpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", svcName, namespace, jenkinsContainerPort)
+				vars["varroa_controller_endpoint"] = endpoint
+				// A headless controller has no external URL and no path
+				// prefix, whatever its ingressSpec says: the operator renders
+				// no Ingress for it, and the diff must mirror that.
+				headless := v1alpha1.IsHeadless(cr)
 				extURL := ""
 				pathPref := ""
-				if cr.Spec.IngressSpec != nil {
+				if cr.Spec.IngressSpec != nil && !headless {
 					host := cr.Spec.IngressSpec.Host
 					if host != "" {
 						if cr.Spec.IngressSpec.RoutingMode() == v1alpha1.RoutingModePath {
@@ -3050,8 +3440,20 @@ func (s *Server) handleControllerDiff(w http.ResponseWriter, r *http.Request, cl
 
 				if jcasc != "" {
 					jcasc = bundle.ResolveVars(jcasc, vars)
-					// Apply path-mode location URL injection mirroring the operator.
-					if pathPref != "" && extURL != "" {
+					// Inject the location URL under the same three-way rule
+					// provisioning applies: a headless controller always gets
+					// the in-cluster endpoint, since it has no external URL.
+					// A non-headless controller in path mode gets the
+					// external URL. A non-headless controller in subdomain
+					// mode gets no injection here — a pre-existing gap this
+					// diff site carries independently of the headless rule.
+					switch {
+					case headless:
+						injected, _, _ := bundle.InjectLocationURL(jcasc, endpoint+"/")
+						if injected != "" {
+							jcasc = injected
+						}
+					case pathPref != "" && extURL != "":
 						injected, _, _ := bundle.InjectLocationURL(jcasc, extURL+"/")
 						if injected != "" {
 							jcasc = injected

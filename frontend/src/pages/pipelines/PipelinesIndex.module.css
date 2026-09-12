@@ -1,0 +1,70 @@
+.page {
+  animation: fade 0.3s ease;
+  max-width: 640px;
+}
+
+@keyframes fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.pageHead {
+  margin-bottom: 1.25rem;
+}
+
+.pageTitle {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.pageDesc {
+  margin: 0.25rem 0 0;
+  color: var(--text-2);
+  font-size: 0.875rem;
+}
+
+.loading {
+  padding: 2rem 0;
+  color: var(--text-2);
+  text-align: center;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.list li + li {
+  border-top: 1px solid var(--border);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 0.25rem;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.item:hover {
+  color: var(--accent);
+}
+
+.itemIcon {
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+.itemLabel {
+  flex: 1;
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+.itemChevron {
+  color: var(--text-2);
+  flex-shrink: 0;
+}

@@ -26,6 +26,8 @@ The grace period defaults to 60 minutes and cannot be below 5. Automatic hiberna
 
 Use Varroa's queue URL for supported SCM webhooks. Direct requests to sleeping Jenkins can be lost. A hibernated controller cannot run timer-triggered jobs.
 
+A [headless](../security/headless-controllers.md) controller hibernates the same way. Webhooks still queue and replay once it wakes. The human wake redirect page is not served for it. It answers `404` instead. A headless controller has no URL to redirect the browser to.
+
 ## Restart, reconcile, or reprovision
 
 ```bash

@@ -9,11 +9,13 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1alpha1 "github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
+	"github.com/varroaci/varroa-jenkins/internal/bundle/pipelinetemplate"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
@@ -131,18 +133,31 @@ func pluginItem(name, content string) *v1alpha1.CatalogItem {
 	}
 }
 
+// pipelineTemplateItem builds a pipeline-template CatalogItem in
+// "tenant-a" whose content is one PipelineTemplate document, name and
+// version taken from the document itself (design D2).
+func pipelineTemplateItem(name, content string) *v1alpha1.CatalogItem {
+	return &v1alpha1.CatalogItem{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "tenant-a"},
+		Spec:       v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate},
+		Status:     v1alpha1.CatalogItemStatus{Content: content, Valid: true},
+	}
+}
+
 // testComposedBundlePreview mirrors the old ComposedBundlePreview for test use.
 type testComposedBundlePreview struct {
-	BundleYAML          string                 `json:"bundleYaml"`
-	JenkinsYAML         string                 `json:"jenkinsYaml"`
-	PluginsYAML         string                 `json:"pluginsYaml"`
-	ItemsYAML           string                 `json:"itemsYaml"`
-	RbacYAML            string                 `json:"rbacYaml"`
-	Missing             []string               `json:"missing"`
-	Drifted             []string               `json:"drifted"`
-	Warnings            []string               `json:"warnings"`
-	UnresolvedVariables []string               `json:"unresolvedVariables"`
-	PinPreflight        bus.PinPreflightReport `json:"pinPreflight"`
+	BundleYAML            string                        `json:"bundleYaml"`
+	JenkinsYAML           string                        `json:"jenkinsYaml"`
+	PluginsYAML           string                        `json:"pluginsYaml"`
+	ItemsYAML             string                        `json:"itemsYaml"`
+	RbacYAML              string                        `json:"rbacYaml"`
+	PipelineTemplatesYAML string                        `json:"pipelineTemplatesYaml"`
+	Missing               []string                      `json:"missing"`
+	Drifted               []string                      `json:"drifted"`
+	Warnings              []string                      `json:"warnings"`
+	UnresolvedVariables   []string                      `json:"unresolvedVariables"`
+	PinPreflight          bus.PinPreflightReport        `json:"pinPreflight"`
+	PipelineTemplates     []bus.PipelineTemplateSummary `json:"pipelineTemplates"`
 }
 
 // newBundleParityServer builds a Server whose ConfigBrood is backed by
@@ -232,6 +247,22 @@ func (f *fakeConfigBroodForTest) ComposeBundle(ctx context.Context, cluster, ns 
 		preview.PluginsYAML = result.Materialized.PluginsYAML
 		preview.ItemsYAML = result.Materialized.ItemsYAML
 		preview.RbacYAML = result.Materialized.RbacYAML
+		preview.PipelineTemplatesYAML = result.Materialized.PipelineTemplatesYAML
+		if preview.PipelineTemplatesYAML != "" {
+			var wrapper struct {
+				Templates []pipelinetemplate.Document `yaml:"templates"`
+			}
+			if err := yaml.Unmarshal([]byte(preview.PipelineTemplatesYAML), &wrapper); err == nil {
+				for _, doc := range wrapper.Templates {
+					preview.PipelineTemplates = append(preview.PipelineTemplates, bus.PipelineTemplateSummary{
+						Name:        doc.Metadata.Name,
+						Version:     doc.Spec.Version,
+						DisplayName: doc.Metadata.DisplayName,
+						Description: doc.Metadata.Description,
+					})
+				}
+			}
+		}
 		baseline, _ := pluginlock.Resolve("")
 		if report, err := bundle.CheckPluginPins(preview.PluginsYAML, baseline); err == nil {
 			preview.PinPreflight = bus.PinPreflightReport{Conflicts: []bus.PinConflict{}, Missing: []bus.MissingPlugin{}}
@@ -568,5 +599,144 @@ func TestGetComposedBundle_ProjectsSparseResolvedInputs(t *testing.T) {
 	}
 	if _, leaked := response.Status["resolvedInputs"]; leaked {
 		t.Fatal("resolvedInputs must remain a top-level BFF projection")
+	}
+}
+
+// --- Task 7.3c: pipelineTemplates on preview and validate ---
+
+const previewTemplateA = `apiVersion: varroa.dev/v1
+kind: PipelineTemplate
+metadata:
+  name: svc-a
+  displayName: Service A
+  description: Builds service A
+spec:
+  version: "1.0.0"
+  parameters: {}
+  jenkinsfile: "pipeline {}"
+`
+
+const previewTemplateB = `apiVersion: varroa.dev/v1
+kind: PipelineTemplate
+metadata:
+  name: svc-b
+  displayName: Service B
+  description: Builds service B
+spec:
+  version: "2.0.0"
+  parameters: {}
+  jenkinsfile: "pipeline {}"
+`
+
+// TestPreviewComposedBundle_PipelineTemplatesInInputOrder asserts the
+// bundle-composition-surface delta's "A preview lists the delivered
+// templates" scenario: two pipeline-template inputs surface as two
+// entries, in input order, with their names and versions.
+func TestPreviewComposedBundle_PipelineTemplatesInInputOrder(t *testing.T) {
+	client := newBundleTestClient()
+	client.addItem(pipelineTemplateItem("template-b", previewTemplateB))
+	client.addItem(pipelineTemplateItem("template-a", previewTemplateA))
+	srv := newBundleParityServer(client, "varroa-system")
+
+	spec := v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{
+			{ItemRef: &v1alpha1.ComposedItemRef{Name: "template-b"}},
+			{ItemRef: &v1alpha1.ComposedItemRef{Name: "template-a"}},
+		},
+	}
+	resp := doPreview(t, srv, "tenant-a", spec)
+	if len(resp.PipelineTemplates) != 2 {
+		t.Fatalf("pipelineTemplates = %+v, want two entries", resp.PipelineTemplates)
+	}
+	if resp.PipelineTemplates[0].Name != "svc-b" || resp.PipelineTemplates[0].Version != "2.0.0" {
+		t.Errorf("pipelineTemplates[0] = %+v, want svc-b@2.0.0 (input order)", resp.PipelineTemplates[0])
+	}
+	if resp.PipelineTemplates[1].Name != "svc-a" || resp.PipelineTemplates[1].Version != "1.0.0" {
+		t.Errorf("pipelineTemplates[1] = %+v, want svc-a@1.0.0 (input order)", resp.PipelineTemplates[1])
+	}
+	if resp.PipelineTemplatesYAML == "" {
+		t.Error("pipelineTemplatesYaml is empty, want the composed template content")
+	}
+}
+
+// TestPreviewComposedBundle_NoTemplateIsEmptyArray asserts a bundle with
+// no pipeline-template input answers pipelineTemplates: [], not null.
+func TestPreviewComposedBundle_NoTemplateIsEmptyArray(t *testing.T) {
+	client := newBundleTestClient()
+	client.addItem(jcascItem("theme", "varroa-system", "jenkins:\n  systemMessage: \"ok\"\n"))
+	srv := newBundleParityServer(client, "varroa-system")
+
+	spec := v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{
+			{ItemRef: &v1alpha1.ComposedItemRef{Name: "theme"}},
+		},
+	}
+	resp := doPreview(t, srv, "tenant-a", spec)
+	if resp.PipelineTemplates == nil || len(resp.PipelineTemplates) != 0 {
+		t.Errorf("pipelineTemplates = %#v, want a non-nil empty array", resp.PipelineTemplates)
+	}
+}
+
+// TestValidateComposedBundle_PipelineTemplatesInInputOrder asserts the
+// same ordering rule reaches the /validate response, which is a
+// hand-written map rather than bus.BundleComposePreview served directly.
+func TestValidateComposedBundle_PipelineTemplatesInInputOrder(t *testing.T) {
+	client := newBundleTestClient()
+	client.addItem(pipelineTemplateItem("template-b", previewTemplateB))
+	client.addItem(pipelineTemplateItem("template-a", previewTemplateA))
+	srv := newBundleParityServer(client, "varroa-system")
+
+	spec := v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{
+			{ItemRef: &v1alpha1.ComposedItemRef{Name: "template-b"}},
+			{ItemRef: &v1alpha1.ComposedItemRef{Name: "template-a"}},
+		},
+	}
+	body, _ := json.Marshal(spec)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/clusters/core/composedbundles/validate?namespace=tenant-a", strings.NewReader(string(body)))
+	srv.dispatchComposedBundles(w, req.WithContext(contextWithClaims(req.Context(), adminClaims)), "core", []string{"validate"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("validate: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		PipelineTemplates []bus.PipelineTemplateSummary `json:"pipelineTemplates"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode validate response: %v", err)
+	}
+	if len(resp.PipelineTemplates) != 2 || resp.PipelineTemplates[0].Name != "svc-b" || resp.PipelineTemplates[1].Name != "svc-a" {
+		t.Fatalf("pipelineTemplates = %+v, want [svc-b, svc-a] in input order", resp.PipelineTemplates)
+	}
+}
+
+// TestValidateComposedBundle_PathSegmentRoute_NoTemplateIsEmptyArray
+// asserts the /{ns}/validate route variant also answers pipelineTemplates:
+// [] for a bundle with no pipeline-template input.
+func TestValidateComposedBundle_PathSegmentRoute_NoTemplateIsEmptyArray(t *testing.T) {
+	client := newBundleTestClient()
+	client.addItem(jcascItem("theme", "varroa-system", "jenkins:\n  systemMessage: \"ok\"\n"))
+	srv := newBundleParityServer(client, "varroa-system")
+
+	spec := v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{
+			{ItemRef: &v1alpha1.ComposedItemRef{Name: "theme"}},
+		},
+	}
+	body, _ := json.Marshal(spec)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/clusters/core/composedbundles/tenant-a/validate", strings.NewReader(string(body)))
+	srv.dispatchComposedBundles(w, req.WithContext(contextWithClaims(req.Context(), adminClaims)), "core", []string{"tenant-a", "validate"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("validate: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		PipelineTemplates []bus.PipelineTemplateSummary `json:"pipelineTemplates"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode validate response: %v", err)
+	}
+	if resp.PipelineTemplates == nil || len(resp.PipelineTemplates) != 0 {
+		t.Errorf("pipelineTemplates = %#v, want a non-nil empty array", resp.PipelineTemplates)
 	}
 }

@@ -35,7 +35,9 @@ Jenkins controllers do not scale horizontally. Add controllers to isolate teams 
 
 The chart defaults to a three-server NATS cluster. `jetStreamReplicas` derives from the NATS cluster size and is capped at three unless explicitly set. The chart rejects a JetStream replica count larger than the NATS server count.
 
-Size NATS persistent storage for activity retention and control-plane state. Activity history defaults to seven days and is also bounded by `activity.maxMsgs` and `activity.maxBytes`. If NATS loses quorum, API reads that depend on shared state and controller convergence can stall even when Jenkins remains available.
+Size NATS persistent storage for control-plane state and the fixed activity transport buffer. That buffer is the `varroa_activity` JetStream stream. It holds at most 72 hours or 1 GiB, whichever it reaches first. The limit is fixed in code, not a chart value, because the buffer only hands events to the record-store recorder. It does not serve history.
+
+Durable activity history lives in Postgres, sized by `recordStore.retention.activity` (default `30d`), not by NATS. See [Build records](../operations/build-records.md#activity-history) for the retention arithmetic. If NATS loses quorum, API reads that depend on shared state and controller convergence can stall even when Jenkins remains available.
 
 ## Update-Center Availability
 

@@ -1,12 +1,12 @@
 import { useDeferredValue, useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Boxes, Folder, Server, UsersRound } from "lucide-react";
+import { Activity, Boxes, Folder, PlayCircle, Server, UsersRound, Workflow } from "lucide-react";
 import { bffFetch } from "../hooks/useApi";
 import styles from "./CommandPalette.module.css";
 
 interface SearchResult {
-  type: "controller" | "namespace" | "group" | "catalogitem";
+  type: "controller" | "namespace" | "group" | "catalogitem" | "job" | "run" | "activity";
   cluster?: string;
   name: string;
   namespace?: string;
@@ -21,8 +21,25 @@ interface CommandPaletteProps {
   onQueryChange?: (query: string) => void;
 }
 
-const categoryLabels = ["Controllers", "Namespaces", "Groups", "Catalog Items"];
-const icons = { controller: Server, namespace: Folder, group: UsersRound, catalogitem: Boxes };
+const categoryLabels = ["Controllers", "Namespaces", "Groups", "Catalog Items", "Jobs", "Runs", "Activity"];
+const groupLabels: Record<SearchResult["type"], string> = {
+  controller: "controllers",
+  namespace: "namespaces",
+  group: "groups",
+  catalogitem: "catalog items",
+  job: "jobs",
+  run: "runs",
+  activity: "activity",
+};
+const icons = {
+  controller: Server,
+  namespace: Folder,
+  group: UsersRound,
+  catalogitem: Boxes,
+  job: Workflow,
+  run: PlayCircle,
+  activity: Activity,
+};
 
 export function CommandPalette(props: CommandPaletteProps) {
   const [localOpen, setLocalOpen] = useState(false);
@@ -112,7 +129,7 @@ export function CommandPalette(props: CommandPaletteProps) {
           {error && <div className={styles.empty} role="alert">Search is unavailable. Try again.</div>}
           {Object.entries(byType).map(([type, items]) => (
             <div key={type} className={styles.group}>
-              <div className={styles.groupLabel}>{type}s</div>
+              <div className={styles.groupLabel}>{groupLabels[type as SearchResult["type"]] ?? type}</div>
               {items.map((r) => {
                 const idx = results.indexOf(r);
                 const Icon = icons[r.type];

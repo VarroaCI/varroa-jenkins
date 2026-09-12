@@ -1,0 +1,790 @@
+package api
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore"
+)
+
+const singlePipelineItemsYAML = `
+items:
+  - kind: folder
+    name: acme
+    items:
+      - kind: pipeline
+        name: app-a
+        definition:
+          script: "pipeline {}"
+      - kind: pipeline
+        name: app-b
+        definition:
+          script: "pipeline {}"
+`
+
+func testClaims() *auth.Claims { return &auth.Claims{Subject: "u"} }
+
+// newSingleControllerFixture seeds one controller, "ctrl-a" in
+// "test-ns", carrying a composed bundle whose items.yaml declares
+// acme/app-a and acme/app-b.
+func newSingleControllerFixture(t *testing.T) *fakeResourceClient {
+	t.Helper()
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"ctrl-a": {
+			ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"},
+			Spec:       v1alpha1.ControllerSpec{ComposedBundleRef: &v1alpha1.ComposedBundleRef{Name: "bundle-a"}},
+		},
+	}
+	client.composedBundles = map[string]*v1alpha1.ComposedBundle{
+		"bundle-a": {
+			ObjectMeta: metav1.ObjectMeta{Name: "bundle-a", Namespace: "test-ns"},
+			Status:     v1alpha1.ComposedBundleStatus{ContentRef: "bundle-a-content"},
+		},
+	}
+	client.configMaps = map[string]map[string]string{
+		"bundle-a-content": {"items.yaml": singlePipelineItemsYAML},
+	}
+	return client
+}
+
+func doPipelinesRequest(t *testing.T, handler func(http.ResponseWriter, *http.Request), path string, pathValues map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	for k, v := range pathValues {
+		req.SetPathValue(k, v)
+	}
+	req = req.WithContext(auth.ContextWithClaims(req.Context(), testClaims()))
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+	return rec
+}
+
+// TestComputeHealth asserts design D8's weather glyph rules over the
+// job's RecentResults window rather than its whole result history.
+func TestComputeHealth(t *testing.T) {
+	cases := []struct {
+		name   string
+		recent []string
+		want   string
+	}{
+		{"never run", nil, "unknown"},
+		{"all passed is clear", []string{"SUCCESS", "SUCCESS", "SUCCESS", "SUCCESS", "SUCCESS"}, "clear"},
+		{"one failure is cloudy", []string{"SUCCESS", "FAILURE"}, "cloudy"},
+		{"two failures is cloudy", []string{"FAILURE", "SUCCESS", "FAILURE"}, "cloudy"},
+		{"three failures is rain", []string{"FAILURE", "FAILURE", "FAILURE"}, "rain"},
+		{
+			// The job's fuller history holds three older failures, but
+			// the reader already trims RecentResults to the newest
+			// five finished runs, so those failures never reach this
+			// function: it sees only the recent success and reports
+			// clear.
+			"one recent success after three old failures reports clear",
+			[]string{"SUCCESS"},
+			"clear",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := computeHealth(recordstore.JobSummary{RecentResults: tc.recent})
+			if got != tc.want {
+				t.Fatalf("computeHealth(%v) = %q, want %q", tc.recent, got, tc.want)
+			}
+		})
+	}
+}
+
+// --- 3.5: GET /pipelines/{team} ---
+
+func TestHandleListPipelines_UnionsCatalogAndRecords_TruncatedFlag(t *testing.T) {
+	client := newSingleControllerFixture(t)
+	authz := pipelineGrantAuthorizer([]string{"read"}, "test-ns/ctrl-a")
+	reader := newFakeRecordReader()
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	lastRun := recordstore.Run{
+		RunID: "run-app-a-1", Cluster: "core", Namespace: "test-ns", Cell: "ctrl-a",
+		Tenant: "test-ns/ctrl-a", JobPath: "acme/app-a", Status: "COMPLETED", CreatedAt: base,
+	}
+	reader.jobSummaries["core/test-ns/ctrl-a"] = []recordstore.JobSummary{
+		{JobPath: "acme/app-a", RecentResults: []string{"SUCCESS"}, LastRun: &lastRun},
+	}
+	// 60 QUEUED runs so the running-now page for this tenant is full.
+	for i := 0; i < 60; i++ {
+		reader.addRun(recordstore.Run{
+			RunID: fmt.Sprintf("q-%02d", i), Cluster: "core", Namespace: "test-ns", Cell: "ctrl-a",
+			Tenant: "test-ns/ctrl-a", JobPath: "acme/app-a", Status: "QUEUED",
+			CreatedAt: base.Add(time.Duration(i) * time.Second),
+		})
+	}
+
+	srv := pipelinesTestServer(client, authz, reader, nil)
+	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/ctrl-a", map[string]string{"team": "ctrl-a"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp pipelineListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	byPath := map[string]pipelineSummaryJSON{}
+	for _, it := range resp.Items {
+		byPath[it.JobPath] = it
+	}
+	a, ok := byPath["acme/app-a"]
+	if !ok || a.LastBuild == nil {
+		t.Fatalf("expected acme/app-a with a lastBuild, got %+v", byPath)
+	}
+	b, ok := byPath["acme/app-b"]
+	if !ok {
+		t.Fatalf("expected acme/app-b (catalog-only, never run) in the union, got %+v", byPath)
+	}
+	if b.LastBuild != nil {
+		t.Fatalf("never-run job acme/app-b carries a lastBuild: %+v", b)
+	}
+	if b.Health != "unknown" {
+		t.Fatalf("never-run job health = %q, want unknown", b.Health)
+	}
+	if !resp.Truncated {
+		t.Fatalf("expected truncated=true with 60 queued runs on one tenant")
+	}
+}
+
+func TestHandleListPipelines_RunningRunSurvivesFinishedRunFlood(t *testing.T) {
+	client := newSingleControllerFixture(t)
+	authz := pipelineGrantAuthorizer([]string{"read"}, "test-ns/ctrl-a")
+	reader := newFakeRecordReader()
+
+	base := time.Now().Add(-2 * time.Hour)
+	running := recordstore.Run{
+		RunID: "running-1", Cluster: "core", Namespace: "test-ns", Cell: "ctrl-a",
+		Tenant: "test-ns/ctrl-a", JobPath: "acme/app-a", Status: "RUNNING", CreatedAt: base,
+	}
+	reader.addRun(running)
+	// 60 finished runs, all newer than the still-running one.
+	for i := 0; i < 60; i++ {
+		reader.addRun(recordstore.Run{
+			RunID: fmt.Sprintf("done-%02d", i), Cluster: "core", Namespace: "test-ns", Cell: "ctrl-a",
+			Tenant: "test-ns/ctrl-a", JobPath: "acme/app-a", Status: "COMPLETED",
+			CreatedAt: base.Add(time.Duration(i+1) * time.Minute),
+		})
+	}
+
+	srv := pipelinesTestServer(client, authz, reader, nil)
+	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/ctrl-a", map[string]string{"team": "ctrl-a"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp pipelineListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	found := false
+	for _, r := range resp.RunningNow {
+		if r.RunID == "running-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("running-1 missing from runningNow after 60 newer finished runs: %+v", resp.RunningNow)
+	}
+}
+
+// --- 3.6: GET /pipelines/{team}/jobs/{job} ---
+
+const parameterizedItemYAML = `
+items:
+  - kind: pipeline
+    name: app-a
+    definition:
+      script: "pipeline {}"
+    properties:
+      - parameters:
+          parameterDefinitions:
+            - string:
+                name: BRANCH
+                defaultValue: main
+            - choice:
+                name: ENV
+                choices: [dev, staging, prod]
+            - booleanParam:
+                name: SKIP_TESTS
+                defaultValue: false
+`
+
+func TestHandleGetPipelineJob_ParameterDefinitionsReachResponse(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"ctrl-a": {
+			ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"},
+			Spec:       v1alpha1.ControllerSpec{ComposedBundleRef: &v1alpha1.ComposedBundleRef{Name: "bundle-a"}},
+		},
+	}
+	client.composedBundles = map[string]*v1alpha1.ComposedBundle{
+		"bundle-a": {
+			ObjectMeta: metav1.ObjectMeta{Name: "bundle-a", Namespace: "test-ns"},
+			Status:     v1alpha1.ComposedBundleStatus{ContentRef: "bundle-a-content"},
+		},
+	}
+	client.configMaps = map[string]map[string]string{
+		"bundle-a-content": {"items.yaml": parameterizedItemYAML},
+	}
+
+	authz := pipelineGrantAuthorizer([]string{"read"}, "test-ns/ctrl-a")
+	reader := newFakeRecordReader()
+	srv := pipelinesTestServer(client, authz, reader, nil)
+
+	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/ctrl-a/jobs/app-a",
+		map[string]string{"team": "ctrl-a", "job": "app-a"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var detail pipelineJobDetailJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(detail.Parameters) != 3 {
+		t.Fatalf("got %d parameters, want 3: %+v", len(detail.Parameters), detail.Parameters)
+	}
+	byName := map[string]pipelineParameterJSON{}
+	for _, p := range detail.Parameters {
+		byName[p.Name] = p
+	}
+	if p, ok := byName["BRANCH"]; !ok || p.Kind != "string" || p.DefaultValue != "main" {
+		t.Errorf("BRANCH parameter = %+v", p)
+	}
+	if p, ok := byName["ENV"]; !ok || p.Kind != "choice" {
+		t.Errorf("ENV parameter = %+v", p)
+	}
+	if p, ok := byName["SKIP_TESTS"]; !ok || p.Kind != "boolean" {
+		t.Errorf("SKIP_TESTS parameter = %+v", p)
+	}
+	if detail.TenantFolder != "" {
+		t.Errorf("tenantFolder = %q, want empty for a root-hosted synthetic tenant", detail.TenantFolder)
+	}
+	if detail.Tenant != "test-ns/ctrl-a" {
+		t.Errorf("tenant = %q, want %q for a synthetic tenant", detail.Tenant, "test-ns/ctrl-a")
+	}
+}
+
+// TestHandleGetPipelineJob_TenantFolderForPlacedTeam asserts a placed
+// Team's job detail carries its Jenkins folder prefix, TenantRef.Folder,
+// which equals the Team name for design D1's placed-Team tenant kind.
+func TestHandleGetPipelineJob_TenantFolderForPlacedTeam(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}},
+	}
+	seedTeam(t, client.crdStore, placedTeamObject("payments", "core", "test-ns", "ctrl-a"))
+
+	authz := resolverAuthorizer("payments")
+	reader := newFakeRecordReader()
+	srv := pipelinesTestServer(client, authz, reader, nil)
+
+	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/payments/jobs/payments%2Fapp-a",
+		map[string]string{"team": "payments", "job": "payments/app-a"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var detail pipelineJobDetailJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if detail.TenantFolder != "payments" {
+		t.Errorf("tenantFolder = %q, want %q", detail.TenantFolder, "payments")
+	}
+	if detail.Tenant != "payments" {
+		t.Errorf("tenant = %q, want %q for a Team tenant", detail.Tenant, "payments")
+	}
+}
+
+// --- Task 11.1/11.2: the dependency edge (D13) ---
+
+// TestHandleGetPipelineJob_DependenciesBothDirections asserts the job
+// detail carries both an upstream and a downstream edge, each granted.
+func TestHandleGetPipelineJob_DependenciesBothDirections(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}},
+	}
+	seedTeam(t, client.crdStore, placedTeamObject("payments", "core", "test-ns", "ctrl-a"))
+
+	authz := resolverAuthorizer("payments")
+	reader := newFakeRecordReader()
+	reader.setJobDependencies("core", "payments", "payments/release", recordstore.JobDependencies{
+		Upstream:   []recordstore.DependencyEdge{{Tenant: "alpha", Job: "build", Result: "SUCCESS", Granted: true}},
+		Downstream: []recordstore.DependencyEdge{{Tenant: "search", Job: "rebuild", Result: "SUCCESS", Granted: true}},
+	})
+	srv := pipelinesTestServer(client, authz, reader, nil)
+
+	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/payments/jobs/payments%2Frelease",
+		map[string]string{"team": "payments", "job": "payments/release"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var detail pipelineJobDetailJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(detail.Dependencies.Upstream) != 1 || detail.Dependencies.Upstream[0] != (pipelineDependencyEdgeJSON{
+		Tenant: "alpha", Job: "build", Result: "SUCCESS", Granted: true,
+	}) {
+		t.Errorf("upstream = %+v, want one granted alpha/build edge", detail.Dependencies.Upstream)
+	}
+	if len(detail.Dependencies.Downstream) != 1 || detail.Dependencies.Downstream[0] != (pipelineDependencyEdgeJSON{
+		Tenant: "search", Job: "rebuild", Result: "SUCCESS", Granted: true,
+	}) {
+		t.Errorf("downstream = %+v, want one granted search/rebuild edge", detail.Dependencies.Downstream)
+	}
+}
+
+// TestHandleGetPipelineJob_DependenciesUngrantedEdgeVisible asserts an
+// edge whose producer grants nobody still appears, with granted false,
+// rather than disappearing from the list.
+func TestHandleGetPipelineJob_DependenciesUngrantedEdgeVisible(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}},
+	}
+	seedTeam(t, client.crdStore, placedTeamObject("payments", "core", "test-ns", "ctrl-a"))
+
+	authz := resolverAuthorizer("payments")
+	reader := newFakeRecordReader()
+	reader.setJobDependencies("core", "payments", "payments/release", recordstore.JobDependencies{
+		Upstream: []recordstore.DependencyEdge{{Tenant: "alpha", Job: "build", Result: "SUCCESS", Granted: false}},
+	})
+	srv := pipelinesTestServer(client, authz, reader, nil)
+
+	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/payments/jobs/payments%2Frelease",
+		map[string]string{"team": "payments", "job": "payments/release"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var detail pipelineJobDetailJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(detail.Dependencies.Upstream) != 1 || detail.Dependencies.Upstream[0].Granted {
+		t.Fatalf("upstream = %+v, want one ungranted edge, not hidden", detail.Dependencies.Upstream)
+	}
+}
+
+// TestHandleGetPipelineJob_DependenciesEmptyForNoEdge asserts a job with
+// no declared cross-tenant trigger and no subscriber reports both
+// dependency arrays as empty, present arrays, never omitted.
+func TestHandleGetPipelineJob_DependenciesEmptyForNoEdge(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}},
+	}
+	seedTeam(t, client.crdStore, placedTeamObject("payments", "core", "test-ns", "ctrl-a"))
+
+	authz := resolverAuthorizer("payments")
+	reader := newFakeRecordReader()
+	srv := pipelinesTestServer(client, authz, reader, nil)
+
+	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/payments/jobs/payments%2Flonely",
+		map[string]string{"team": "payments", "job": "payments/lonely"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var detail pipelineJobDetailJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if detail.Dependencies.Upstream == nil || len(detail.Dependencies.Upstream) != 0 {
+		t.Errorf("upstream = %+v, want an empty array", detail.Dependencies.Upstream)
+	}
+	if detail.Dependencies.Downstream == nil || len(detail.Dependencies.Downstream) != 0 {
+		t.Errorf("downstream = %+v, want an empty array", detail.Dependencies.Downstream)
+	}
+}
+
+// TestHandleGetPipelineJob_NoReadRightReturnsNoDependencyData asserts a
+// caller with no read right on the tenant reaches no dependency data.
+// The route answers the same 404 "job not found" that tenantForJob
+// already returns for any unauthorized job read (tenantresolver.go: "A
+// 403 would tell the caller a team it may not read exists"); this
+// dependency edge introduces no new authorization outcome.
+func TestHandleGetPipelineJob_NoReadRightReturnsNoDependencyData(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}},
+	}
+	seedTeam(t, client.crdStore, placedTeamObject("payments", "core", "test-ns", "ctrl-a"))
+
+	authz := resolverAuthorizer() // no tenant granted at all
+	reader := newFakeRecordReader()
+	reader.setJobDependencies("core", "payments", "payments/release", recordstore.JobDependencies{
+		Upstream: []recordstore.DependencyEdge{{Tenant: "alpha", Job: "build", Result: "SUCCESS", Granted: true}},
+	})
+	srv := pipelinesTestServer(client, authz, reader, nil)
+
+	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/payments/jobs/payments%2Frelease",
+		map[string]string{"team": "payments", "job": "payments/release"})
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "alpha") {
+		t.Fatalf("body leaked dependency data to an unauthorized caller: %s", rec.Body.String())
+	}
+}
+
+// --- Ruling (aa): the job page's "Last 30 days" card ---
+
+func TestHandleGetPipelineJob_Last30DaysCard(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"ctrl-a": {
+			ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"},
+			Spec:       v1alpha1.ControllerSpec{ComposedBundleRef: &v1alpha1.ComposedBundleRef{Name: "bundle-a"}},
+		},
+	}
+	client.composedBundles = map[string]*v1alpha1.ComposedBundle{
+		"bundle-a": {
+			ObjectMeta: metav1.ObjectMeta{Name: "bundle-a", Namespace: "test-ns"},
+			Status:     v1alpha1.ComposedBundleStatus{ContentRef: "bundle-a-content"},
+		},
+	}
+	client.configMaps = map[string]map[string]string{
+		"bundle-a-content": {"items.yaml": singlePipelineItemsYAML},
+	}
+	authz := pipelineGrantAuthorizer([]string{"read"}, "test-ns/ctrl-a")
+
+	rate := 0.75
+	median := int64(4200)
+	reader := newFakeRecordReader()
+	reader.setWindowStats("core", "test-ns/ctrl-a", "acme/app-a", recordstore.JobWindowStats{
+		Builds:           4,
+		PassRate:         &rate,
+		MedianDurationMs: &median,
+		SlowestStage:     &recordstore.StageStat{Name: "Deploy", DurationMs: 9000},
+	})
+
+	srv := pipelinesTestServer(client, authz, reader, nil)
+	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/ctrl-a/jobs/acme%2Fapp-a",
+		map[string]string{"team": "ctrl-a", "job": "acme/app-a"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var detail pipelineJobDetailJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if detail.Last30Days == nil {
+		t.Fatalf("last30Days missing, want the seeded card")
+	}
+	if detail.Last30Days.Builds != 4 {
+		t.Errorf("builds = %d, want 4", detail.Last30Days.Builds)
+	}
+	if detail.Last30Days.PassRate == nil || *detail.Last30Days.PassRate != rate {
+		t.Errorf("passRate = %v, want %v", detail.Last30Days.PassRate, rate)
+	}
+	if detail.Last30Days.MedianDurationMs == nil || *detail.Last30Days.MedianDurationMs != median {
+		t.Errorf("medianDurationMs = %v, want %v", detail.Last30Days.MedianDurationMs, median)
+	}
+	if detail.Last30Days.SlowestStage == nil || detail.Last30Days.SlowestStage.Name != "Deploy" ||
+		detail.Last30Days.SlowestStage.DurationMs != 9000 {
+		t.Errorf("slowestStage = %+v, want Deploy at 9000ms", detail.Last30Days.SlowestStage)
+	}
+}
+
+// TestHandleGetPipelineJob_Last30DaysDegradesToNullOnReaderError asserts
+// a JobWindowStats failure leaves the rest of the job page intact and
+// reports last30Days as null rather than failing the whole request.
+func TestHandleGetPipelineJob_Last30DaysDegradesToNullOnReaderError(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"ctrl-a": {
+			ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"},
+			Spec:       v1alpha1.ControllerSpec{ComposedBundleRef: &v1alpha1.ComposedBundleRef{Name: "bundle-a"}},
+		},
+	}
+	client.composedBundles = map[string]*v1alpha1.ComposedBundle{
+		"bundle-a": {
+			ObjectMeta: metav1.ObjectMeta{Name: "bundle-a", Namespace: "test-ns"},
+			Status:     v1alpha1.ComposedBundleStatus{ContentRef: "bundle-a-content"},
+		},
+	}
+	client.configMaps = map[string]map[string]string{
+		"bundle-a-content": {"items.yaml": singlePipelineItemsYAML},
+	}
+	authz := pipelineGrantAuthorizer([]string{"read"}, "test-ns/ctrl-a")
+
+	reader := newFakeRecordReader()
+	reader.windowStatsErr = fmt.Errorf("read timeout")
+
+	srv := pipelinesTestServer(client, authz, reader, nil)
+	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/ctrl-a/jobs/acme%2Fapp-a",
+		map[string]string{"team": "ctrl-a", "job": "acme/app-a"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	val, ok := raw["last30Days"]
+	if !ok {
+		t.Fatalf("last30Days key missing from response: %s", rec.Body.String())
+	}
+	if string(val) != "null" {
+		t.Fatalf("last30Days = %s, want null", val)
+	}
+}
+
+// --- 3.7: GET /pipelines/{team}/jobs/{job}/runs ---
+
+func TestHandleListRuns_CrossTenantMergeNoGapNoRepeat_RevokedTenantContinues(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "ns-a"}},
+		"ctrl-b": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-b", Namespace: "ns-b"}},
+	}
+	team := &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns-a", "ns-b"}},
+	}
+	crdstore.MustSeed(client.crdStore, team)
+
+	reader := newFakeRecordReader()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var wantIDs []string
+	for i := 0; i < 3; i++ {
+		a := recordstore.Run{RunID: fmt.Sprintf("a-%d", i), Cluster: "core", Tenant: "ns-a/ctrl-a", JobPath: "svc/main", Status: "COMPLETED", CreatedAt: base.Add(time.Duration(2*i) * time.Minute)}
+		b := recordstore.Run{RunID: fmt.Sprintf("b-%d", i), Cluster: "core", Tenant: "ns-b/ctrl-b", JobPath: "svc/main", Status: "COMPLETED", CreatedAt: base.Add(time.Duration(2*i+1) * time.Minute)}
+		reader.addRun(a)
+		reader.addRun(b)
+		wantIDs = append(wantIDs, a.RunID, b.RunID)
+	}
+
+	authz := pipelineGrantAuthorizer([]string{"read"}, "ns-a/ctrl-a", "ns-b/ctrl-b")
+	srv := pipelinesTestServer(client, authz, reader, nil)
+
+	var gotIDs []string
+	cursor := ""
+	for page := 0; page < 10; page++ {
+		q := url.Values{"limit": {"2"}}
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		rec := doPipelinesRequest(t, srv.handleListRuns, "/pipelines/payments/jobs/svc%2Fmain/runs?"+q.Encode(),
+			map[string]string{"team": "payments", "job": "svc/main"})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("page %d: status = %d, body = %s", page, rec.Code, rec.Body.String())
+		}
+		var resp runListResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("page %d: decode: %v", page, err)
+		}
+		for _, it := range resp.Items {
+			gotIDs = append(gotIDs, it.RunID)
+		}
+		cursor = resp.NextCursor
+		if cursor == "" {
+			break
+		}
+	}
+
+	if len(gotIDs) != len(wantIDs) {
+		t.Fatalf("got %d run ids %v, want %d %v", len(gotIDs), gotIDs, len(wantIDs), wantIDs)
+	}
+	seen := map[string]bool{}
+	for _, id := range gotIDs {
+		if seen[id] {
+			t.Fatalf("run %q repeated across pages: %v", id, gotIDs)
+		}
+		seen[id] = true
+	}
+	for _, id := range wantIDs {
+		if !seen[id] {
+			t.Fatalf("run %q missing across pages (a gap): %v", id, gotIDs)
+		}
+	}
+
+	// Revoke tenant b's read access; paging must continue on tenant a's
+	// rows rather than fail.
+	narrowed := pipelineGrantAuthorizer([]string{"read"}, "ns-a/ctrl-a")
+	srv2 := pipelinesTestServer(client, narrowed, reader, nil)
+	rec := doPipelinesRequest(t, srv2.handleListRuns, "/pipelines/payments/jobs/svc%2Fmain/runs?limit=10",
+		map[string]string{"team": "payments", "job": "svc/main"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("after revoke: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp2 runListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp2); err != nil {
+		t.Fatalf("after revoke: decode: %v", err)
+	}
+	if len(resp2.Items) != 3 {
+		t.Fatalf("after revoke: got %d items, want tenant a's 3 runs only: %+v", len(resp2.Items), resp2.Items)
+	}
+	for _, it := range resp2.Items {
+		if strings.HasPrefix(it.RunID, "b-") {
+			t.Fatalf("after revoke, still saw tenant b's run %q", it.RunID)
+		}
+	}
+}
+
+// tenant A monopolizes page 1 entirely; tenant B's rows
+// are all older and untouched on page 1. Verifies no gap, no repeat.
+func TestHandleListRuns_CrossTenantMerge_UntouchedTenantCursorNoRepeatNoGap(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "ns-a"}},
+		"ctrl-b": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-b", Namespace: "ns-b"}},
+	}
+	team := &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns-a", "ns-b"}},
+	}
+	crdstore.MustSeed(client.crdStore, team)
+
+	reader := newFakeRecordReader()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var wantIDs []string
+	// A: a0 newest .. a2 oldest-of-A, all newer than every B row.
+	for i := 0; i < 3; i++ {
+		a := recordstore.Run{RunID: fmt.Sprintf("a-%d", i), Cluster: "core", Tenant: "ns-a/ctrl-a", JobPath: "svc/main", Status: "COMPLETED", CreatedAt: base.Add(time.Duration(100-i) * time.Minute)}
+		reader.addRun(a)
+		wantIDs = append(wantIDs, a.RunID)
+	}
+	// B: b0..b1, all older than every A row.
+	for i := 0; i < 2; i++ {
+		b := recordstore.Run{RunID: fmt.Sprintf("b-%d", i), Cluster: "core", Tenant: "ns-b/ctrl-b", JobPath: "svc/main", Status: "COMPLETED", CreatedAt: base.Add(time.Duration(-i) * time.Minute)}
+		reader.addRun(b)
+		wantIDs = append(wantIDs, b.RunID)
+	}
+
+	authz := pipelineGrantAuthorizer([]string{"read"}, "ns-a/ctrl-a", "ns-b/ctrl-b")
+	srv := pipelinesTestServer(client, authz, reader, nil)
+
+	var gotIDs []string
+	cursor := ""
+	for page := 0; page < 10; page++ {
+		q := url.Values{"limit": {"2"}}
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		rec := doPipelinesRequest(t, srv.handleListRuns, "/pipelines/payments/jobs/svc%2Fmain/runs?"+q.Encode(),
+			map[string]string{"team": "payments", "job": "svc/main"})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("page %d: status = %d, body = %s", page, rec.Code, rec.Body.String())
+		}
+		var resp runListResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("page %d: decode: %v", page, err)
+		}
+		for _, it := range resp.Items {
+			gotIDs = append(gotIDs, it.RunID)
+		}
+		cursor = resp.NextCursor
+		if cursor == "" {
+			break
+		}
+	}
+
+	if len(gotIDs) != len(wantIDs) {
+		t.Fatalf("got %d run ids %v, want %d %v", len(gotIDs), gotIDs, len(wantIDs), wantIDs)
+	}
+	seen := map[string]bool{}
+	for _, id := range gotIDs {
+		if seen[id] {
+			t.Fatalf("run %q repeated across pages: %v", id, gotIDs)
+		}
+		seen[id] = true
+	}
+	for _, id := range wantIDs {
+		if !seen[id] {
+			t.Fatalf("run %q missing across pages (a gap): %v", id, gotIDs)
+		}
+	}
+}
+
+func TestHandleListRuns_CrossTenantMerge_ExhaustedTenantDoesNotRevive(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "ns-a"}},
+		"ctrl-b": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-b", Namespace: "ns-b"}},
+		"ctrl-c": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-c", Namespace: "ns-c"}},
+	}
+	team := &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns-a", "ns-b", "ns-c"}},
+	}
+	crdstore.MustSeed(client.crdStore, team)
+
+	reader := newFakeRecordReader()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	wantIDs := make([]string, 0, 8)
+	for i, m := range []int{100, 99} {
+		a := recordstore.Run{RunID: fmt.Sprintf("a-%d", i), Cluster: "core", Tenant: "ns-a/ctrl-a", JobPath: "svc/main", Status: "COMPLETED", CreatedAt: base.Add(time.Duration(m) * time.Minute)}
+		reader.addRun(a)
+		wantIDs = append(wantIDs, a.RunID)
+	}
+	for i, m := range []int{50, 49, 48} {
+		b := recordstore.Run{RunID: fmt.Sprintf("b-%d", i), Cluster: "core", Tenant: "ns-b/ctrl-b", JobPath: "svc/main", Status: "COMPLETED", CreatedAt: base.Add(time.Duration(m) * time.Minute)}
+		reader.addRun(b)
+		wantIDs = append(wantIDs, b.RunID)
+	}
+	for i, m := range []int{10, 9, 8} {
+		c := recordstore.Run{RunID: fmt.Sprintf("c-%d", i), Cluster: "core", Tenant: "ns-c/ctrl-c", JobPath: "svc/main", Status: "COMPLETED", CreatedAt: base.Add(time.Duration(m) * time.Minute)}
+		reader.addRun(c)
+		wantIDs = append(wantIDs, c.RunID)
+	}
+
+	authz := pipelineGrantAuthorizer([]string{"read"}, "ns-a/ctrl-a", "ns-b/ctrl-b", "ns-c/ctrl-c")
+	srv := pipelinesTestServer(client, authz, reader, nil)
+
+	var gotIDs []string
+	cursor := ""
+	for page := 0; page < 10; page++ {
+		q := url.Values{"limit": {"2"}}
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		rec := doPipelinesRequest(t, srv.handleListRuns, "/pipelines/payments/jobs/svc%2Fmain/runs?"+q.Encode(),
+			map[string]string{"team": "payments", "job": "svc/main"})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("page %d: status = %d, body = %s", page, rec.Code, rec.Body.String())
+		}
+		var resp runListResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("page %d: decode: %v", page, err)
+		}
+		for _, it := range resp.Items {
+			gotIDs = append(gotIDs, it.RunID)
+		}
+		cursor = resp.NextCursor
+		if cursor == "" {
+			break
+		}
+	}
+
+	if len(gotIDs) != len(wantIDs) {
+		t.Fatalf("got %d run ids %v, want %d %v", len(gotIDs), gotIDs, len(wantIDs), wantIDs)
+	}
+	seen := map[string]bool{}
+	for _, id := range gotIDs {
+		if seen[id] {
+			t.Fatalf("run %q repeated across pages: %v", id, gotIDs)
+		}
+		seen[id] = true
+	}
+	for _, id := range wantIDs {
+		if !seen[id] {
+			t.Fatalf("run %q missing across pages (a gap): %v", id, gotIDs)
+		}
+	}
+}

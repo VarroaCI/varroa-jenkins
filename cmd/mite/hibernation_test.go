@@ -282,6 +282,120 @@ func TestReplayWebhook200(t *testing.T) {
 	}
 }
 
+// TestReplayWebhookSetsDeliveryHeaderAfterOverwritingForgery asserts task
+// 11.2b: the mite sets X-Varroa-Delivery from payload.DeliveryId after it
+// copies the envelope's own headers, so a forged inbound X-Varroa-Delivery
+// header inside payload.Headers cannot survive the replay.
+func TestReplayWebhookSetsDeliveryHeaderAfterOverwritingForgery(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:8080")
+	if err != nil {
+		t.Skip("skipping: localhost:8080 not available:", err)
+	}
+	var gotDelivery string
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotDelivery = r.Header.Get("X-Varroa-Delivery")
+			w.WriteHeader(http.StatusOK)
+		}),
+	}
+	go func() { _ = srv.Serve(l) }()
+	t.Cleanup(func() { srv.Close() })
+	time.Sleep(10 * time.Millisecond)
+
+	stream, captured := testReplayStream(t)
+	agent := NewAgent(Config{
+		ControllerName: "test",
+		Namespace:      "ns",
+		JenkinsURL:     "http://localhost:1",
+	})
+	agent.Logger = slog.Default()
+	agent.stream = stream
+	agent.jenkinsTokenMu.Lock()
+	agent.jenkinsToken = "test-token"
+	agent.jenkinsTokenMu.Unlock()
+
+	cmd := &mitev1.ImperativeCommand{
+		CommandId: replayCmdID,
+		Type:      mitev1.CommandTypeReplayWebhook,
+		ReplayWebhook: &mitev1.ReplayWebhookPayload{
+			Path: "github-webhook/",
+			// A forged inbound header under the same name the buffered
+			// envelope carries. It must not survive.
+			Headers:    map[string]string{"X-Varroa-Delivery": "forged"},
+			Body:       []byte("payload-body"),
+			DeliveryId: "github:8f2c-real",
+		},
+	}
+
+	agent.runCommand(context.Background(), commandWork{
+		imperativeCmd: cmd,
+		ctx:           context.Background(),
+	})
+
+	result := captured.Load()
+	if result == nil || !result.Success {
+		t.Fatalf("expected a successful replay, got %+v", result)
+	}
+	if gotDelivery != "github:8f2c-real" {
+		t.Errorf("X-Varroa-Delivery = %q, want the overwrite github:8f2c-real, not the forged value", gotDelivery)
+	}
+}
+
+// TestReplayWebhookSkipsDeliveryHeaderWhenEmpty asserts task 11.2b's other
+// half: an empty payload.DeliveryId sets no X-Varroa-Delivery header at
+// all.
+func TestReplayWebhookSkipsDeliveryHeaderWhenEmpty(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:8080")
+	if err != nil {
+		t.Skip("skipping: localhost:8080 not available:", err)
+	}
+	var sawHeader bool
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, sawHeader = r.Header["X-Varroa-Delivery"]
+			w.WriteHeader(http.StatusOK)
+		}),
+	}
+	go func() { _ = srv.Serve(l) }()
+	t.Cleanup(func() { srv.Close() })
+	time.Sleep(10 * time.Millisecond)
+
+	stream, captured := testReplayStream(t)
+	agent := NewAgent(Config{
+		ControllerName: "test",
+		Namespace:      "ns",
+		JenkinsURL:     "http://localhost:1",
+	})
+	agent.Logger = slog.Default()
+	agent.stream = stream
+	agent.jenkinsTokenMu.Lock()
+	agent.jenkinsToken = "test-token"
+	agent.jenkinsTokenMu.Unlock()
+
+	cmd := &mitev1.ImperativeCommand{
+		CommandId: replayCmdID,
+		Type:      mitev1.CommandTypeReplayWebhook,
+		ReplayWebhook: &mitev1.ReplayWebhookPayload{
+			Path: "github-webhook/",
+			Body: []byte("payload-body"),
+			// DeliveryId left empty.
+		},
+	}
+
+	agent.runCommand(context.Background(), commandWork{
+		imperativeCmd: cmd,
+		ctx:           context.Background(),
+	})
+
+	result := captured.Load()
+	if result == nil || !result.Success {
+		t.Fatalf("expected a successful replay, got %+v", result)
+	}
+	if sawHeader {
+		t.Error("X-Varroa-Delivery header was set despite an empty delivery id")
+	}
+}
+
 // TestReplayWebhookAllowlist verifies that the handler checks the path
 // allowlist: allowlisted paths proceed, non-allowlisted paths are
 // rejected without any HTTP call.

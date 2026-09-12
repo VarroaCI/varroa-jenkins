@@ -2,7 +2,7 @@ items:
   - kind: folder
     name: folder-libraries
     displayName: "Folder with Libraries"
-    description: "Folder with folderLibraries property (known gap — silently dropped)"
+    description: "Folder with folderLibraries property and a modern-SCM retriever"
     properties:
       - folderLibraries:
           libraries:

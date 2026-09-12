@@ -46,6 +46,42 @@ the packaged CRDs. Does not own the Go source it packages
   (NATS TLS + per-service ACL creds); `examples-item-rbac.yaml` (off by default,
   `examples.itemRbac.enabled`).
 - KV watchers require `$JS.FC.KV_<bucket>.>` publish grants.
+- **`cells:`** (`values.yaml`) sizes the pipelines-tenant cell feature:
+  `warmPool.enabled`/`warmPool.perProfile` (off by default — no cell exists
+  until a `Controller` with `spec.cell.enabled` exists by hand or the pool
+  creates one), `maxTenantsPerCell` (the placement pass's default cap, a
+  cell's own `spec.cell.maxTenants` overrides it), and
+  `unreadyGracePeriod` (a Go duration string; how long a cell may stay
+  unready before the operator rolls its pod, then evacuates it). The
+  operator reads these through `ParseCellsConfigFromEnv`
+  (`internal/controller/cells_config.go`), see
+  [internal/controller/AGENTS.md](../../internal/controller/AGENTS.md).
+  **`networkPolicy.cellIsolation`** (`enabled`, `extraIngress`,
+  `extraEgress`) is the paired opt-in, honoured only when
+  `networkPolicy.enabled` is also true. **The chart renders no per-cell
+  NetworkPolicy template** — grep `templates/` and there is none. The
+  operator builds and applies one `<prefix>-cell` NetworkPolicy per cell
+  itself, every `Running`/`Connected` tick
+  (`internal/controller/cell_networkpolicy.go`), because a cell's ingress
+  and egress allow-list depends on live tenant placement
+  (`Controller.status.cell.tenants`) that only the operator's own
+  reconcile loop can see at render time. A tenant purge after a placement
+  move needs two additional NATS grants alongside the existing
+  `varroa.recordstore.*` set: the operator publishes
+  `varroa.recordstore.tenant.purge` and subscribes `_INBOX_operator.>`
+  (gated on `recordStore.enabled`); the recorder subscribes
+  `varroa.recordstore.tenant.purge` and answers on `_INBOX_recorder.>`.
+  Placement announcement and rehydration seeding need the matching pair for
+  `varroa.recordstore.tenant.sync`: the operator publishes that subject
+  alongside the tenant purge one, over the same `_INBOX_operator.>`
+  subscribe grant; the recorder adds a second subscribe grant on
+  `varroa.recordstore.tenant.sync` and answers through the
+  `_INBOX_operator.>` publish grant it already holds for the tenant purge
+  reply. Cross-tenant pipeline calls need one more request-reply pair,
+  gated the same way: the gateway publishes `varroa.ledger.crosstenant`
+  and the recorder subscribes it, queue group `recorder`, both only when
+  `recordStore.enabled` — no other identity (operator, BFF, or a mite
+  itself) holds a grant on this subject.
 - **Startup probes on operator/gateway/bff are load-bearing, not boilerplate.**
   `bus.Connect` blocks for up to `bus.DefaultStartupTimeout` (3 minutes) waiting
   out a bus outage or a rotated Secret that has not synced, and no probe port
@@ -79,6 +115,9 @@ the packaged CRDs. Does not own the Go source it packages
   `varroa.dev_updatecenters.yaml`). Generated from
   `api/v1alpha1/types.go` — never hand-edit. `make generate-crds` regenerates;
   `make check-crds` (CI `pr.yaml`) fails the build on drift.
+  `varroa.dev_teams.yaml` carries `spec.pipelines.exports`
+  (`TeamExport{Job, Locks, Callers}`, at most 64 entries), the tenant's
+  outward cross-tenant grants, with its CEL rules bundled in.
 - **`templates/updatecenter/`** — the opt-in update-center component (everything
   gated on `updateCenter.enabled` EXCEPT the CRD manifest, which always ships):
   deployment/svc/sa, `pvc.yaml` (local storage mode only; single replica,
@@ -135,9 +174,57 @@ the packaged CRDs. Does not own the Go source it packages
   pinned contract shared with `internal/updatecenter`; netpol
   shape asserted by `tests/test-updatecenter-netpol.sh` (hive mode stays exactly
   4 policies).
+- **`templates/recorder/`** — the opt-in build record store component
+  (`recordStore.enabled`): `deployment.yaml`/`service.yaml`/`serviceaccount.yaml`
+  for the `varroa-recorder` workload, plus `postgres-cluster.yaml` for the
+  `cnpg` Postgres mode. The recorder needs no Role or RoleBinding, because it
+  never calls the Kubernetes API. See `internal/recordstore/AGENTS.md` and
+  `docs/operations/build-records.md` for the values tree and the retained-data
+  removal procedure. `tests/test-recorder-netpol.sh` asserts the
+  `varroa-np-recorder` NetworkPolicy block; `tests/test-recorder-chart.sh`
+  asserts the recorder workload shape, the CNPG `Cluster` and role Secrets,
+  the DSN cross-references, the S3 credential mapping, the retention env
+  defaults (`runs`/`logs`/`artifacts`/`activity`), the recorder PDB, and every
+  `recordstore-guard.yaml` failure mode, including the retired `activity`
+  values block. `recordStore.retention.activity` (default `30d`) replaced the
+  old `activity.retention` dial: the recorder gets `VARROA_RETENTION_ACTIVITY`,
+  the BFF gets `VARROA_ACTIVITY_RETENTION_DAYS` (both gated on
+  `recordStore.enabled`), and `nats-auth-config.yaml` moved the
+  `varroa_activity` JetStream grants from the BFF to the recorder — the BFF
+  keeps only the core `activity.>` publish/subscribe grant.
+  `tests/test-activity-stream-acl.sh` asserts the moved grants.
+  In `cnpg` mode `postgres-cluster.yaml`'s `spec.managed.roles` carries three
+  roles, each with its own `varroa-recordstore-<role>` Secret from
+  `postgres-secrets.yaml`: `varroa_recorder` (the database owner),
+  `varroa_client` (read plus `INSERT` on `log_chunks`, the BFF), and
+  `varroa_gateway` (the same read-plus-log-chunks-insert shape, the gateway,
+  only reached in `recordStore.blobs.mode: postgres`). `external` mode
+  creates none of the three; every component shares the one `existingSecret`
+  DSN instead. `recordStore.blobs.s3.artifactSecret` names the **base**
+  per-cell artifact-credential Secret (`internal/controller/artifactcasc.go`
+  reads `<artifactSecret>-<controller>` and projects a copy into each
+  controller's own namespace; this chart mounts nothing itself). The operator
+  Deployment carries `VARROA_ARTIFACT_SECRET` (that base name, only when
+  non-empty) and `VARROA_BLOBSTORE_URL` set to the identical value the
+  gateway gets, both gated the same way as the gateway's own recordStore env
+  block (`recordStore.enabled` and not hive mode).
 - **`tests/*.sh`** — golden-render bash assertions over `helm template` output
-  (`test-hive-mode.sh`, `test-secret-rbac-scoping.sh`, `test-nats-bus-security.sh`); not
-  the `helm unittest` plugin.
+  (`test-hive-mode.sh`, `test-secret-rbac-scoping.sh`, `test-nats-bus-security.sh`,
+  `test-recorder-netpol.sh`, `test-recorder-chart.sh`, `test-activity-stream-acl.sh`,
+  `test-runner-door-nginx.sh`); not the `helm unittest` plugin.
+- **The agent WebSocket door needs one nginx block, no Ingress change.**
+  `frontend/nginx.conf`'s `location /runners/` block proxies to the BFF
+  (`VARROA_API_HOST:8080`) and forwards the WebSocket upgrade: `Upgrade`,
+  `Connection: upgrade`, `proxy_http_version 1.1`, and a 3600s read/send
+  timeout. It cannot share the `/api/` block, which sets an empty
+  `Connection` header and so suppresses the upgrade, or the `/hibernation/`
+  block, which sets neither. The chart's Ingress already routes the whole
+  host prefix `/` to the frontend Service, so no Ingress template changes.
+  `tests/test-runner-door-nginx.sh` asserts the nginx block's upgrade
+  contract, that `/api/` and `/hibernation/` stay unchanged, that
+  `nginx -t` accepts the rendered config (via `envsubst` + `nginx:alpine`,
+  since `nginx.conf` is a Docker `templates/` file, not a standalone
+  `conf.d` file), and that the rendered Ingress carries no `/runners/` path.
 - **`templates/frontend/configmap-telemetry.yaml`** — the static `window.__VARROA_TELEMETRY__`
   script the frontend reads at load. `tracesEnabled` is derived, not a direct passthrough of
   `telemetry.services.frontend.traces.enabled`: it also requires `telemetry.endpoint` be
@@ -185,4 +272,15 @@ bash charts/varroa/tests/test-updatecenter-seed-default.sh
 bash charts/varroa/tests/test-updatecenter-uploads-nil-guard.sh
 bash charts/varroa/tests/test-updatecenter-archive-url.sh
 bash charts/varroa/tests/test-bff-configmap-rbac.sh
+bash charts/varroa/tests/test-recorder-netpol.sh
+bash charts/varroa/tests/test-recorder-chart.sh
+bash charts/varroa/tests/test-runner-door-nginx.sh
 ```
+
+- **Record-store Postgres NetworkPolicy** — in `recordStore.postgres.mode: cnpg` the chart renders
+  `<release>-np-recordstore-db` for the CloudNativePG instance pods (`cnpg.io/cluster:
+  varroa-recordstore`): ingress 5432 from the recorder, the BFF, the gateway, and the other
+  instance pods; ingress 8000 from the operator namespace
+  `networkPolicy.recordStoreCNPGOperatorNamespaceSelector`; egress to the API server and to the
+  other instance pods. Without it the default-deny blocks initdb. `test-recorder-netpol.sh`
+  asserts it.

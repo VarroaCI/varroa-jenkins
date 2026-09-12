@@ -47,6 +47,47 @@ reading each package's entry point):
   (`lastused.go`).
 - **`jenkins/`** — HTTP client for the Jenkins REST API, used by mite
   sidecars to manage their local Jenkins instance (crumb handling, retries).
+  Its `items` subpackage models `items.yaml` (the manifest, `config.xml`
+  rendering, and the engine's incremental apply) and adds a tenant
+  composition seam for a cell: `ReRoot` wraps one tenant's items under a
+  single top-level folder, and `Merge` joins several tenants' manifests into
+  one, rejecting a duplicate top-level name and fixing the remove strategy to
+  `sync` — the only way a removed tenant's folder gets deleted. The sibling
+  `items/lint` package runs cell-only policy rules (`no-poll-scm`,
+  `no-global-credentials`, `no-controller-config-dependency`) over the merged,
+  flattened manifest before a push; `items.Parse` itself is unchanged and
+  still accepts every shape a non-cell controller accepts today. Two item
+  properties feed the cell's agent fence and shared-library support:
+  `KubernetesFolderProperty` (`kubernetes.permittedClouds`) restricts which
+  kubernetes-plugin clouds a folder's items may use — the cell assembly
+  pass sets it to the tenant's own cloud name. `FolderLibrariesProperty`
+  (`folderLibraries`) render was repaired: it used to emit the wrong
+  upstream XML class and no retriever, so it never actually worked; it now
+  renders `org.jenkinsci.plugins.workflow.libs.FolderLibraries` with a
+  GitHub modern-SCM retriever, the only retriever shape modeled today.
+  `configxml.go` also injects a fixed skip-initial-build `buildStrategies`
+  element onto every `multibranch` item and `organizationFolder` item, so a
+  branch scan starts no build; the element needs plugin
+  `basic-branch-build-strategies`, which `internal/controller`'s
+  `checkBranchBuildStrategiesPlugin` requires before it resolves a bundle
+  holding either item kind. A `triggers.varroaUpstream` block
+  (`VarroaUpstreamTrigger{Tenant, Job, Result}`) declares a job's upstream
+  producer for the cross-tenant fan-out: `Result` defaults to `SUCCESS` and
+  is otherwise restricted to `SUCCESS`/`UNSTABLE`/`FAILURE`, and `Job` names
+  the producer job relative to the producer tenant's own folder, with no
+  tenant prefix. Two item forms select a delivered pipeline
+  template: `definition.varroaTemplate`
+  (`VarroaTemplateDefinition{Template, TemplateVersion, Values}`) on a
+  regular job renders to
+  `org.jenkinsci.plugins.varroamiteauth.template.VarroaTemplateFlowDefinition`,
+  and `projectFactory.varroaMarkerProjectFactory`
+  (`VarroaMarkerProjectFactory`, no fields) on a `multibranch` item renders
+  to `...template.VarroaTemplateBranchProjectFactory`, which hands every
+  branch the marker-driven flow definition at run time instead of a fixed
+  Jenkinsfile path. `composer.go`'s `validateItemTemplateValues` validates
+  the first form's `values` against the named template's parameter schema
+  at compose time; the second form's marker is read and validated only at
+  branch-build time, in the plugin.
 - **`overlay/`** — strategic-merge-patch engine over StatefulSet/Service/
   Ingress for `Controller.spec.podOverrides`/`resourceOverlay`; shared by the
   operator's apply path and the BFF's live merge-preview endpoint.
@@ -118,10 +159,11 @@ reading each package's entry point):
   presence separately, and `intArg` rejects a fractional or out-of-range JSON
   number rather than truncating it. Older tools still cast `float64` inline;
   move them to `intArg` when touched; (7) activity reads go through
-  `deps.Backfill` (the source the REST `/activity` handler uses), never
-  `deps.ActivityStore` — the ring is only fed in retention-off mode, so a tool
-  reading it directly returns an eternally empty feed on any stream-mode brood;
-  and brood-path mutation errors must be built with `broodFailureToolError` so
+  `deps.Backfill` (the source the REST `/activity` handler uses; there is no
+  `deps.ActivityStore` and no ring) — `deps.Backfill` is nil when
+  `VARROA_RECORDSTORE_DSN` is unset, and a tool must treat that nil the same
+  way the REST handler does: an empty feed, not a panic; and brood-path
+  mutation errors must be built with `broodFailureToolError` so
   the operator's failing preflight checks survive into the tool error instead
   of collapsing to a bare "preflight failed".
   Listing tools return a projection (`project.go`), not full CRs; a declared
@@ -129,6 +171,14 @@ reading each package's entry point):
   `oneOf` requires exactly one match and the shapes overlap. Output schemas are
   **not** server-validated — `handler.go` enables input validation only — so
   they are asserted in tests.
+  `tools_pipelines.go` registers four pipeline tools: `run_pipeline` (action),
+  `list_runs`, `get_run`, and `get_run_log` (read). Each calls the same
+  `internal/api` service method (`pipelines_service.go`'s `RunPipeline`,
+  `ListRuns`, `GetRun`, `GetRunLog`) the matching HTTP handler calls, so the
+  MCP surface and the REST surface authorize and read identically; no tool
+  here issues an HTTP request to the BFF or calls a controller-scoped check.
+  `get_run_log` returns a bounded tail (`tailLines`, default 100, clamped 1
+  to 500) as plain text, never a stream, and starts no live tail.
 - **`preflight/`** — provisioning preflight `Check`s (pass/warn/fail) run
   before/alongside `handleProvisioning`, consuming `internal/tenancy` for
   namespace-state checks.
@@ -270,9 +320,10 @@ go test -race -count=1 ./internal/<pkg>/...        # single package
 
 ## Child DOX Index
 
-- [controller](controller/AGENTS.md) — controller reconciler: CR lifecycle, provisioning, StatefulSet/RBAC/ingress, version resolution
+- [controller](controller/AGENTS.md) — controller reconciler: CR lifecycle, provisioning, StatefulSet/RBAC/ingress, version resolution, pipelines-tenant cell placement and warm pool (`cells/`), external-runner status and node/credential/egress rendering (`runners/`)
 - [api](api/AGENTS.md) — BFF HTTP/SSE handlers and REST API surface
-- [mite](mite/AGENTS.md) — gateway gRPC server bridging mite sidecars to NATS/operator
-- [bundle](bundle/AGENTS.md) — ComposedBundle composition, git/catalog resolution, JCasC merge
+- [mite](mite/AGENTS.md) — gateway gRPC server bridging mite sidecars to NATS/operator; owns the build-event/claim bridge (`build_events.go`, `claim_bridge.go`)
+- [bundle](bundle/AGENTS.md) — ComposedBundle composition, git/catalog resolution, JCasC merge, and the delivered pipeline-template set (`pipelinetemplate/`)
 - [rbac](rbac/AGENTS.md) — VarroaRole/JenkinsRole resolution and role-strategy YAML generation
 - [bus](bus/AGENTS.md) — NATS/JetStream transport: subjects, streams, KV buckets, cluster directory
+- [recordstore](recordstore/AGENTS.md) — build-record Postgres store: schema, migrations, ledger, the placement fence, the cross-tenant grant evaluator, the fleet lock table, the tenant-sync responder, the backstop scheduler, blob abstraction

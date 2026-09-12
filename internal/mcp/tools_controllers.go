@@ -198,7 +198,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		// carry both of those fields now, so skipping this would let MCP create
 		// a controller REST rejects.
 		svc := controllerSvc(deps)
-		if serr := svc.ValidateIngress(cr.Spec.IngressSpec, true, cluster, name); serr != nil {
+		if serr := svc.ValidateIngress(cr.Spec.IngressSpec, true, cluster, name, v1alpha1.IsHeadless(cr)); serr != nil {
 			return mcp.NewToolResultError(serr.Message), nil
 		}
 		if cluster == deps.Brood.LocalCluster() {

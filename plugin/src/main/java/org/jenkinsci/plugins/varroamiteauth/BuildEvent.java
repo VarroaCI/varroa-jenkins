@@ -1,0 +1,705 @@
+package org.jenkinsci.plugins.varroamiteauth;
+
+import net.sf.json.JSONArray;
+import net.sf.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Immutable value object mirroring the {@code BuildEvent} proto message.
+ * Field names in {@link #toJson()} follow the proto JSON names exactly, so
+ * the mite loopback accepts the body with no translation.
+ *
+ * <p>The plugin never sets field 42, {@code delivery_id}, through this
+ * builder for a claim; {@link VarroaClaimQueue} carries it separately.
+ * Field 36, {@code artifacts}, and field 37, {@code log_summary}, are set
+ * only on the {@code COMPLETED} event. Fields 38 to 41 — {@code
+ * template_name}, {@code template_version}, {@code marker_path}, and
+ * {@code marker_revision} — are empty for a run with no template, and a
+ * {@code HEARTBEAT} event never sets them.
+ */
+public final class BuildEvent implements PostableEvent {
+
+    /** Phase values, a closed set: no proto enum backs {@code phase}. */
+    public static final String PHASE_STARTED = "STARTED";
+    public static final String PHASE_STAGE_STARTED = "STAGE_STARTED";
+    public static final String PHASE_STAGE = "STAGE";
+    public static final String PHASE_HEARTBEAT = "HEARTBEAT";
+    public static final String PHASE_COMPLETED = "COMPLETED";
+
+    private final String phase;
+    private final long seq;
+    private final long emittedAtMillis;
+    private final String runId;
+    private final String intentKey;
+    private final String jobPath;
+    private final String jobDisplayName;
+    private final long buildNumber;
+    private final String buildDisplayName;
+    private final String url;
+    private final String result;
+    private final String actor;
+    private final List<String> causeTypes;
+    private final String causeDescription;
+    private final String upstreamJobPath;
+    private final long upstreamBuildNumber;
+    private final long queuedAtMillis;
+    private final long startedAtMillis;
+    private final long completedAtMillis;
+    private final long durationMillis;
+    private final long queueWaitMillis;
+    private final long estimatedDurationMillis;
+    private final Map<String, String> parameters;
+    private final List<String> maskedParameterNames;
+    private final String scmUrl;
+    private final String scmHead;
+    private final String scmRevision;
+    private final List<BuildChange> changes;
+    private final int changeCount;
+    private final int testTotal;
+    private final int testPassed;
+    private final int testFailed;
+    private final int testSkipped;
+    private final List<BuildStage> stages;
+    private final String branch;
+    private final String deliveryId;
+    private final List<BuildArtifact> artifacts;
+    private final LogSummary logSummary;
+    private final String templateName;
+    private final String templateVersion;
+    private final String markerPath;
+    private final String markerRevision;
+
+    private BuildEvent(Builder b) {
+        this.phase = orEmpty(b.phase);
+        this.seq = b.seq;
+        this.emittedAtMillis = b.emittedAtMillis;
+        this.runId = orEmpty(b.runId);
+        this.intentKey = orEmpty(b.intentKey);
+        this.jobPath = orEmpty(b.jobPath);
+        this.jobDisplayName = orEmpty(b.jobDisplayName);
+        this.buildNumber = b.buildNumber;
+        this.buildDisplayName = orEmpty(b.buildDisplayName);
+        this.url = orEmpty(b.url);
+        this.result = orEmpty(b.result);
+        this.actor = orEmpty(b.actor);
+        this.causeTypes = List.copyOf(b.causeTypes);
+        this.causeDescription = orEmpty(b.causeDescription);
+        this.upstreamJobPath = orEmpty(b.upstreamJobPath);
+        this.upstreamBuildNumber = b.upstreamBuildNumber;
+        this.queuedAtMillis = b.queuedAtMillis;
+        this.startedAtMillis = b.startedAtMillis;
+        this.completedAtMillis = b.completedAtMillis;
+        this.durationMillis = b.durationMillis;
+        this.queueWaitMillis = b.queueWaitMillis;
+        this.estimatedDurationMillis = b.estimatedDurationMillis;
+        this.parameters = new LinkedHashMap<>(b.parameters);
+        this.maskedParameterNames = List.copyOf(b.maskedParameterNames);
+        this.scmUrl = orEmpty(b.scmUrl);
+        this.scmHead = orEmpty(b.scmHead);
+        this.scmRevision = orEmpty(b.scmRevision);
+        this.changes = List.copyOf(b.changes);
+        this.changeCount = b.changeCount;
+        this.testTotal = b.testTotal;
+        this.testPassed = b.testPassed;
+        this.testFailed = b.testFailed;
+        this.testSkipped = b.testSkipped;
+        this.stages = List.copyOf(b.stages);
+        this.branch = orEmpty(b.branch);
+        this.deliveryId = orEmpty(b.deliveryId);
+        this.artifacts = List.copyOf(b.artifacts);
+        this.logSummary = b.logSummary;
+        this.templateName = orEmpty(b.templateName);
+        this.templateVersion = orEmpty(b.templateVersion);
+        this.markerPath = orEmpty(b.markerPath);
+        this.markerRevision = orEmpty(b.markerRevision);
+    }
+
+    private static String orEmpty(String s) {
+        return s != null ? s : "";
+    }
+
+    /** Returns {@code true} when the phase is {@code HEARTBEAT}. */
+    @Override
+    public boolean isHeartbeat() {
+        return PHASE_HEARTBEAT.equals(phase);
+    }
+
+    @Override
+    public boolean isCompletedPhase() {
+        return PHASE_COMPLETED.equals(phase);
+    }
+
+    public String getPhase() {
+        return phase;
+    }
+
+    public long getSeq() {
+        return seq;
+    }
+
+    public String getRunId() {
+        return runId;
+    }
+
+    public String getJobPath() {
+        return jobPath;
+    }
+
+    public long getBuildNumber() {
+        return buildNumber;
+    }
+
+    public String getIntentKey() {
+        return intentKey;
+    }
+
+    public String getResult() {
+        return result;
+    }
+
+    public long getEmittedAtMillis() {
+        return emittedAtMillis;
+    }
+
+    public String getJobDisplayName() {
+        return jobDisplayName;
+    }
+
+    public String getBuildDisplayName() {
+        return buildDisplayName;
+    }
+
+    public String getUrl() {
+        return url;
+    }
+
+    public String getActor() {
+        return actor;
+    }
+
+    public List<String> getCauseTypes() {
+        return causeTypes;
+    }
+
+    public String getCauseDescription() {
+        return causeDescription;
+    }
+
+    public String getUpstreamJobPath() {
+        return upstreamJobPath;
+    }
+
+    public long getUpstreamBuildNumber() {
+        return upstreamBuildNumber;
+    }
+
+    public long getQueuedAtMillis() {
+        return queuedAtMillis;
+    }
+
+    public long getStartedAtMillis() {
+        return startedAtMillis;
+    }
+
+    public long getCompletedAtMillis() {
+        return completedAtMillis;
+    }
+
+    public long getDurationMillis() {
+        return durationMillis;
+    }
+
+    public long getQueueWaitMillis() {
+        return queueWaitMillis;
+    }
+
+    public long getEstimatedDurationMillis() {
+        return estimatedDurationMillis;
+    }
+
+    public Map<String, String> getParameters() {
+        return parameters;
+    }
+
+    public List<String> getMaskedParameterNames() {
+        return maskedParameterNames;
+    }
+
+    public String getScmUrl() {
+        return scmUrl;
+    }
+
+    public String getScmHead() {
+        return scmHead;
+    }
+
+    public String getScmRevision() {
+        return scmRevision;
+    }
+
+    public List<BuildChange> getChanges() {
+        return changes;
+    }
+
+    public int getChangeCount() {
+        return changeCount;
+    }
+
+    public int getTestTotal() {
+        return testTotal;
+    }
+
+    public int getTestPassed() {
+        return testPassed;
+    }
+
+    public int getTestFailed() {
+        return testFailed;
+    }
+
+    public int getTestSkipped() {
+        return testSkipped;
+    }
+
+    public List<BuildStage> getStages() {
+        return stages;
+    }
+
+    public String getBranch() {
+        return branch;
+    }
+
+    public String getDeliveryId() {
+        return deliveryId;
+    }
+
+    /** Field 36: one entry per artifact the run archived. Empty until {@code COMPLETED}. */
+    public List<BuildArtifact> getArtifacts() {
+        return artifacts;
+    }
+
+    /** Field 37: the run's log summary, or {@code null} before {@code COMPLETED}. */
+    public LogSummary getLogSummary() {
+        return logSummary;
+    }
+
+    /** Field 38: the resolved template's name. Empty for a run with no template. */
+    public String getTemplateName() {
+        return templateName;
+    }
+
+    /** Field 39: the resolved template's version. Empty for a run with no template. */
+    public String getTemplateVersion() {
+        return templateVersion;
+    }
+
+    /** Field 40: the marker file's path. Empty for a run with no template. */
+    public String getMarkerPath() {
+        return markerPath;
+    }
+
+    /** Field 41: the marker's trusted revision, never the branch tip. Empty for a run with no template. */
+    public String getMarkerRevision() {
+        return markerRevision;
+    }
+
+    /**
+     * Serializes the event to a {@link JSONObject} using proto JSON field
+     * names, ready to post to {@code /v1/events}.
+     */
+    public JSONObject toJson() {
+        JSONObject o = new JSONObject();
+        o.put("phase", phase);
+        o.put("seq", seq);
+        o.put("emitted_at_millis", emittedAtMillis);
+        o.put("run_id", runId);
+        o.put("intent_key", intentKey);
+        o.put("job_path", jobPath);
+        o.put("job_display_name", jobDisplayName);
+        o.put("build_number", buildNumber);
+        o.put("build_display_name", buildDisplayName);
+        o.put("url", url);
+        o.put("result", result);
+        o.put("actor", actor);
+        o.put("cause_types", stringArray(causeTypes));
+        o.put("cause_description", causeDescription);
+        o.put("upstream_job_path", upstreamJobPath);
+        o.put("upstream_build_number", upstreamBuildNumber);
+        o.put("queued_at_millis", queuedAtMillis);
+        o.put("started_at_millis", startedAtMillis);
+        o.put("completed_at_millis", completedAtMillis);
+        o.put("duration_millis", durationMillis);
+        o.put("queue_wait_millis", queueWaitMillis);
+        o.put("estimated_duration_millis", estimatedDurationMillis);
+        JSONObject params = new JSONObject();
+        for (Map.Entry<String, String> e : parameters.entrySet()) {
+            params.put(e.getKey(), e.getValue());
+        }
+        o.put("parameters", params);
+        o.put("masked_parameter_names", stringArray(maskedParameterNames));
+        o.put("scm_url", scmUrl);
+        o.put("scm_head", scmHead);
+        o.put("scm_revision", scmRevision);
+        JSONArray changesArr = new JSONArray();
+        for (BuildChange c : changes) {
+            changesArr.add(c.toJson());
+        }
+        o.put("changes", changesArr);
+        o.put("change_count", changeCount);
+        o.put("test_total", testTotal);
+        o.put("test_passed", testPassed);
+        o.put("test_failed", testFailed);
+        o.put("test_skipped", testSkipped);
+        JSONArray stagesArr = new JSONArray();
+        for (BuildStage s : stages) {
+            stagesArr.add(s.toJson());
+        }
+        o.put("stages", stagesArr);
+        o.put("branch", branch);
+        o.put("delivery_id", deliveryId);
+        JSONArray artifactsArr = new JSONArray();
+        for (BuildArtifact a : artifacts) {
+            artifactsArr.add(a.toJson());
+        }
+        o.put("artifacts", artifactsArr);
+        if (logSummary != null) {
+            o.put("log_summary", logSummary.toJson());
+        }
+        o.put("template_name", templateName);
+        o.put("template_version", templateVersion);
+        o.put("marker_path", markerPath);
+        o.put("marker_revision", markerRevision);
+        return o;
+    }
+
+    private static JSONArray stringArray(List<String> values) {
+        JSONArray arr = new JSONArray();
+        for (String v : values) {
+            arr.add(v);
+        }
+        return arr;
+    }
+
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    /** Returns a builder pre-populated with every field of {@code this}. */
+    public Builder toBuilder() {
+        return new Builder()
+                .phase(phase)
+                .seq(seq)
+                .emittedAtMillis(emittedAtMillis)
+                .runId(runId)
+                .intentKey(intentKey)
+                .jobPath(jobPath)
+                .jobDisplayName(jobDisplayName)
+                .buildNumber(buildNumber)
+                .buildDisplayName(buildDisplayName)
+                .url(url)
+                .result(result)
+                .actor(actor)
+                .causeTypes(causeTypes)
+                .causeDescription(causeDescription)
+                .upstreamJobPath(upstreamJobPath)
+                .upstreamBuildNumber(upstreamBuildNumber)
+                .queuedAtMillis(queuedAtMillis)
+                .startedAtMillis(startedAtMillis)
+                .completedAtMillis(completedAtMillis)
+                .durationMillis(durationMillis)
+                .queueWaitMillis(queueWaitMillis)
+                .estimatedDurationMillis(estimatedDurationMillis)
+                .parameters(parameters)
+                .maskedParameterNames(maskedParameterNames)
+                .scmUrl(scmUrl)
+                .scmHead(scmHead)
+                .scmRevision(scmRevision)
+                .changes(changes)
+                .changeCount(changeCount)
+                .testTotal(testTotal)
+                .testPassed(testPassed)
+                .testFailed(testFailed)
+                .testSkipped(testSkipped)
+                .stages(stages)
+                .branch(branch)
+                .deliveryId(deliveryId)
+                .artifacts(artifacts)
+                .logSummary(logSummary)
+                .templateName(templateName)
+                .templateVersion(templateVersion)
+                .markerPath(markerPath)
+                .markerRevision(markerRevision);
+    }
+
+    public static final class Builder {
+        private String phase;
+        private long seq;
+        private long emittedAtMillis;
+        private String runId;
+        private String intentKey;
+        private String jobPath;
+        private String jobDisplayName;
+        private long buildNumber;
+        private String buildDisplayName;
+        private String url;
+        private String result;
+        private String actor;
+        private List<String> causeTypes = new ArrayList<>();
+        private String causeDescription;
+        private String upstreamJobPath;
+        private long upstreamBuildNumber;
+        private long queuedAtMillis;
+        private long startedAtMillis;
+        private long completedAtMillis;
+        private long durationMillis;
+        private long queueWaitMillis;
+        private long estimatedDurationMillis;
+        private Map<String, String> parameters = new LinkedHashMap<>();
+        private List<String> maskedParameterNames = new ArrayList<>();
+        private String scmUrl;
+        private String scmHead;
+        private String scmRevision;
+        private List<BuildChange> changes = new ArrayList<>();
+        private int changeCount;
+        private int testTotal;
+        private int testPassed;
+        private int testFailed;
+        private int testSkipped;
+        private List<BuildStage> stages = new ArrayList<>();
+        private String branch;
+        private String deliveryId;
+        private List<BuildArtifact> artifacts = new ArrayList<>();
+        private LogSummary logSummary;
+        private String templateName;
+        private String templateVersion;
+        private String markerPath;
+        private String markerRevision;
+
+        private Builder() {
+        }
+
+        public Builder phase(String v) {
+            this.phase = v;
+            return this;
+        }
+
+        public Builder seq(long v) {
+            this.seq = v;
+            return this;
+        }
+
+        public Builder emittedAtMillis(long v) {
+            this.emittedAtMillis = v;
+            return this;
+        }
+
+        public Builder runId(String v) {
+            this.runId = v;
+            return this;
+        }
+
+        public Builder intentKey(String v) {
+            this.intentKey = v;
+            return this;
+        }
+
+        public Builder jobPath(String v) {
+            this.jobPath = v;
+            return this;
+        }
+
+        public Builder jobDisplayName(String v) {
+            this.jobDisplayName = v;
+            return this;
+        }
+
+        public Builder buildNumber(long v) {
+            this.buildNumber = v;
+            return this;
+        }
+
+        public Builder buildDisplayName(String v) {
+            this.buildDisplayName = v;
+            return this;
+        }
+
+        public Builder url(String v) {
+            this.url = v;
+            return this;
+        }
+
+        public Builder result(String v) {
+            this.result = v;
+            return this;
+        }
+
+        public Builder actor(String v) {
+            this.actor = v;
+            return this;
+        }
+
+        public Builder causeTypes(List<String> v) {
+            this.causeTypes = new ArrayList<>(v);
+            return this;
+        }
+
+        public Builder causeDescription(String v) {
+            this.causeDescription = v;
+            return this;
+        }
+
+        public Builder upstreamJobPath(String v) {
+            this.upstreamJobPath = v;
+            return this;
+        }
+
+        public Builder upstreamBuildNumber(long v) {
+            this.upstreamBuildNumber = v;
+            return this;
+        }
+
+        public Builder queuedAtMillis(long v) {
+            this.queuedAtMillis = v;
+            return this;
+        }
+
+        public Builder startedAtMillis(long v) {
+            this.startedAtMillis = v;
+            return this;
+        }
+
+        public Builder completedAtMillis(long v) {
+            this.completedAtMillis = v;
+            return this;
+        }
+
+        public Builder durationMillis(long v) {
+            this.durationMillis = v;
+            return this;
+        }
+
+        public Builder queueWaitMillis(long v) {
+            this.queueWaitMillis = v;
+            return this;
+        }
+
+        public Builder estimatedDurationMillis(long v) {
+            this.estimatedDurationMillis = v;
+            return this;
+        }
+
+        public Builder parameters(Map<String, String> v) {
+            this.parameters = new LinkedHashMap<>(v);
+            return this;
+        }
+
+        public Builder maskedParameterNames(List<String> v) {
+            this.maskedParameterNames = new ArrayList<>(v);
+            return this;
+        }
+
+        public Builder scmUrl(String v) {
+            this.scmUrl = v;
+            return this;
+        }
+
+        public Builder scmHead(String v) {
+            this.scmHead = v;
+            return this;
+        }
+
+        public Builder scmRevision(String v) {
+            this.scmRevision = v;
+            return this;
+        }
+
+        public Builder changes(List<BuildChange> v) {
+            this.changes = new ArrayList<>(v);
+            return this;
+        }
+
+        public Builder changeCount(int v) {
+            this.changeCount = v;
+            return this;
+        }
+
+        public Builder testTotal(int v) {
+            this.testTotal = v;
+            return this;
+        }
+
+        public Builder testPassed(int v) {
+            this.testPassed = v;
+            return this;
+        }
+
+        public Builder testFailed(int v) {
+            this.testFailed = v;
+            return this;
+        }
+
+        public Builder testSkipped(int v) {
+            this.testSkipped = v;
+            return this;
+        }
+
+        public Builder stages(List<BuildStage> v) {
+            this.stages = new ArrayList<>(v);
+            return this;
+        }
+
+        public Builder branch(String v) {
+            this.branch = v;
+            return this;
+        }
+
+        public Builder deliveryId(String v) {
+            this.deliveryId = v;
+            return this;
+        }
+
+        /** Field 36: one entry per artifact the run archived. */
+        public Builder artifacts(List<BuildArtifact> v) {
+            this.artifacts = v != null ? new ArrayList<>(v) : new ArrayList<>();
+            return this;
+        }
+
+        /** Field 37: the run's log summary. */
+        public Builder logSummary(LogSummary v) {
+            this.logSummary = v;
+            return this;
+        }
+
+        /** Field 38: the resolved template's name. */
+        public Builder templateName(String v) {
+            this.templateName = v;
+            return this;
+        }
+
+        /** Field 39: the resolved template's version. */
+        public Builder templateVersion(String v) {
+            this.templateVersion = v;
+            return this;
+        }
+
+        /** Field 40: the marker file's path. */
+        public Builder markerPath(String v) {
+            this.markerPath = v;
+            return this;
+        }
+
+        /** Field 41: the marker's trusted revision. */
+        public Builder markerRevision(String v) {
+            this.markerRevision = v;
+            return this;
+        }
+
+        public BuildEvent build() {
+            return new BuildEvent(this);
+        }
+    }
+}

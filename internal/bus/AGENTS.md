@@ -16,11 +16,12 @@ control plane's async transport — no other package talks to NATS directly.
   request/reply schemas (`operator.go`, `config.go`), the mite presence
   record (`presence.go`), and the `ActivityPayload` wire schema
   (`activity.go`).
-- Does NOT own: the JetStream-backed activity persistence/query API
-  (`internal/api/activity/` — retention dial, backfill reads) or the live
-  SSE fanout (`internal/api/sse/bus_fanout.go`, `BusFanout`) — those are
-  consumers of this package's `Conn`/`ActivityPayload`/subjects and belong
-  to `internal/api`.
+- Does NOT own: the Postgres activity read path (`internal/api/activity/`,
+  `internal/recordstore` — the durable table, the `ListActivity` reader) or
+  the live SSE fanout (`internal/api/sse/bus_fanout.go`, `BusFanout`) — those
+  are consumers of this package's `Conn`/`ActivityPayload`/subjects and
+  belong to `internal/api`/`internal/recordstore`. This package owns only
+  the `varroa_activity` transport buffer's fixed shape, not its retention.
 - NATS server-side ACLs live in `charts/varroa/templates/nats-auth-config.yaml`
   (Helm, not Go) — keep subject prefixes here and ACL subjects there in sync.
 
@@ -34,19 +35,58 @@ control plane's async transport — no other package talks to NATS directly.
   (mite command/telemetry/content channels), `activity.<cluster>.<ns>.<ctrl>`
   / `activity.<cluster>._global` (`ActivitySubject`/`ActivityGlobalSubject`,
   wildcard `ActivityWildcard = "activity.>"`), `events.brood.>`
-  (`WebhookSubject`/`WebhookWildcard`, hibernation webhook replay),
+  (`WebhookSubject`/`WebhookWildcard`, hibernation webhook replay;
+  `WebhookTenantSubject` is `webhook.<cluster>.tenant.<team>`, a pipelines
+  tenant's own webhook door — already captured by the same `webhook.>`
+  stream and `webhook.<cluster>.>` consumer filter, no new stream or
+  consumer needed),
   `wake.<cluster>.<ns>.<ctrl>` (hibernation wake), `operator.<cluster>.*`
-  (BFF→operator remote-cluster RPCs, see `config.go`).
+  (BFF→operator remote-cluster RPCs, see `config.go`),
+  `builds.<cluster>.<ns>.<cell>` (build event ingest into the
+  `varroa_builds` stream), `varroa.ledger.claim` (core NATS request-reply
+  build-number claim, queue group `recorder`),
+  `varroa.ledger.actions.<cluster>` (recorder-published actions: kinds
+  `cancel_run`, `retry_run`, `wake_cell`, `trigger_run`),
+  `varroa.ledger.crosstenant` (core NATS request-reply, gateway to
+  recorder, queue group `recorder`: a build trigger, a status poll, an
+  artifact read, or a fleet lock operation — the request body carries the
+  cluster field, so the subject needs no cluster token), and
+  `varroa.recordstore.tenant.purge` (core NATS request-reply, operator to
+  recorder, queue group `recorder`: delete a tenant's `job_schedules`
+  rows after it leaves a cell), and `varroa.recordstore.tenant.sync`
+  (core NATS request-reply, operator to recorder, queue group
+  `recorder`: announce a tenant's placement, or ask for a tenant's
+  build records to seed a cell).
 - **JetStream streams** (`jetstream.go`) — `ActivityStreamName` /
-  `ActivityStreamConfig`: subjects `activity.>`, `MaxAge=1h`,
-  `MaxMsgsPerSubject=1000`, `MaxBytes=64MiB`, `AckWait=60s` — this is the
-  *default* config; `internal/api/activity` overrides `MaxAge` per the
-  `off|7d|30d|90d` retention dial (`internal/api/activity/retention.go`) when
-  ensuring the stream. `WebhookStreamName = "varroa_webhooks"` backs
+  `ActivityStreamConfig`: subjects `activity.>`, `LimitsPolicy` +
+  `DiscardOld`, fixed limits `MaxAge=72h`, `MaxMsgs=1000000`,
+  `MaxBytes=1GiB` — a transport buffer between a publisher and the
+  recorder, not a retention tier, so the limits are fixed in code and
+  never come from chart values. `internal/recordstore` (the recorder) is
+  the stream's sole owner and calls `EnsureActivityStream`, which applies
+  the fixed limits only when the durable consumer `activity-recorder`
+  carries no pending or unacknowledged message; the BFF no longer creates
+  or updates this stream. The Postgres `activity` table
+  (`internal/recordstore`) is the durable copy, sized by
+  `recordStore.retention.activity`. `WebhookStreamName = "varroa_webhooks"` backs
   hibernation replay. The legacy `DefaultStreamName` (`"varroa"`,
   `mite.*.*.*.out`, `WorkQueuePolicy`) is retained for one-shot imperative
   commands but the operator→mite command path now runs over the
-  `mite_desired` last-value KV, not this stream.
+  `mite_desired` last-value KV, not this stream. `varroa_builds` (subjects
+  `builds.<cluster>.<ns>.<cell>`, `WorkQueuePolicy` + `DiscardNew`,
+  `MaxBytes=1GiB`) carries build events from the gateway to the recorder through a
+  durable pull consumer named `recorder`; `internal/recordstore` owns this
+  stream and is its only consumer.
+- **Build record store ownership** — `internal/recordstore` (the recorder)
+  is the sole owner of `varroa_builds` and `varroa_activity`: it creates
+  each stream, runs the durable `recorder` (builds) and `activity-recorder`
+  (activity) consumers, and is the only publisher on
+  `varroa.ledger.actions.<cluster>`. The recorder never publishes to
+  `mite.>` or `wake.>`, and holds no core `activity.>` subscription — a
+  pull consumer receives messages on the JetStream API subjects and its
+  own inbox. The operator subscribes to
+  `varroa.ledger.actions.<cluster>` (added by a later change); an action
+  published before that subscriber exists has no consumer and is lost.
 - **KV buckets** (`kv.go`, `subjects.go`) — `KVSnapshotBucket = "mite_snapshots"`
   (latest mite state, key `SnapshotKey(cluster, ns, name)`),
   `KVClustersBucket = "varroa_clusters"` (cluster directory, see below), plus
@@ -108,8 +148,20 @@ control plane's async transport — no other package talks to NATS directly.
   bus-state surfaces. Readiness checks and gauges go through them; nothing
   outside this package reaches into `nc` to ask whether the bus is up.
 - **ACLs** — gateway needs `$JS.ACK.varroa.>` publish permission to ack on
-  the legacy `varroa` stream; BFF owns create/update/consumer/ack on
-  `varroa_activity` and `varroa_webhooks`. Cross-check
+  the legacy `varroa` stream; the recorder owns create/update/info,
+  consumer, and ack on `varroa_activity` (JetStream API operations for its
+  `activity-recorder` consumer) as well as `varroa_builds`; the gateway
+  publishes and the recorder subscribes `varroa.ledger.crosstenant`, both
+  gated on `recordStore.enabled` — no other identity holds a grant on it,
+  since a mite never holds a NATS identity of its own; the BFF owns
+  `varroa_webhooks` only — it publishes and subscribes core `activity.>`
+  but holds no JetStream grant on `varroa_activity` at all. The operator
+  publishes `varroa.recordstore.tenant.purge` and `varroa.recordstore.tenant.sync`,
+  and subscribes its own reply inbox; the recorder subscribes to both
+  request subjects, both gated on `recordStore.enabled`; the recorder
+  also needs publish permission on `_INBOX_operator.>` to answer the
+  request, the same way it already answers the gateway's ledger calls on
+  `_INBOX_gateway.>`. Cross-check
   `charts/varroa/templates/nats-auth-config.yaml` when adding a new stream,
   subject prefix, or KV bucket — connections are denied by default.
 

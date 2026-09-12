@@ -37,6 +37,7 @@ var registry = map[reflect.Type]kindInfo{
 	reflect.TypeOf(v1alpha1.JenkinsVersionProfile{}): {jenkinsVersionProfileGVR, "JenkinsVersionProfile", false},
 	reflect.TypeOf(v1alpha1.Group{}):                 {groupGVR, "Group", false},
 	reflect.TypeOf(v1alpha1.Team{}):                  {teamGVR, "Team", false},
+	reflect.TypeOf(v1alpha1.Runner{}):                {runnerGVR, "Runner", false},
 	reflect.TypeOf(v1alpha1.UpdateCenter{}):          {updateCentersGVR, "UpdateCenter", false},
 	reflect.TypeOf(v1alpha1.ProfileCandidate{}):      {profileCandidateGVR, "ProfileCandidate", false},
 }
@@ -82,6 +83,19 @@ var clearStatusFields = map[schema.GroupVersionResource]map[string]any{
 		"pluginCount":             0,
 		"storeBytes":              0,
 	},
+	// placement, pipelines, and rehydration are all omitempty. A plain
+	// marshal leaves the stale cell binding, the door token and secret, or
+	// the stale rehydration state in etcd once a Team stops being a
+	// pipelines tenant. These three entries clear them, so a re-enabled
+	// tenant never revives credentials issued before the teardown.
+	// This map holds no controllerGVR entry for "cell". Such an entry
+	// would apply to every status patch for the kind and delete the tenant
+	// list on the controller reconciler's next full-status patch.
+	teamGVR: {"placement": nil, "pipelines": nil, "rehydration": nil},
+	// cell and cellNamespace are both omitempty. An unplaced runner must
+	// clear both, or a merge patch would leave the stale cell binding in
+	// etcd once the owning Team loses its placement.
+	runnerGVR: {"cell": "", "cellNamespace": ""},
 }
 
 // ClearStatusFields returns, per status key, the explicit zero value a
@@ -130,6 +144,7 @@ var (
 	userGVR                  = gvr("users")
 	groupGVR                 = gvr("groups")
 	teamGVR                  = gvr("teams")
+	runnerGVR                = gvr("runners")
 	jenkinsVersionProfileGVR = gvr("jenkinsversionprofiles")
 	controllerClassGVR       = gvr("controllerclasses")
 	updateCentersGVR         = gvr("updatecenters")

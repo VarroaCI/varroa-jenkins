@@ -38,6 +38,59 @@ Each desired-state command has a deadline. The default is 20 minutes. Set `Provi
 
 The effective reconciliation policy controls termination draining. The default drain timeout is 900 seconds. During termination the mite places Jenkins in quiet-down mode, waits for running builds, then exits when builds finish or the timeout expires.
 
+## Build Claims and Build Events
+
+The mite runs a second listener, bound to `127.0.0.1:9095` only, so nothing outside the pod can
+reach it. The Jenkins plugin is its only caller. Two routes serve it:
+
+| Route | Method | Purpose |
+|---|---|---|
+| `/v1/events` | POST | forward one or more build events toward the [build record store](../operations/build-records.md) |
+| `/v1/claim` | POST | ask the ledger for permission to run a queued build, see [Build claims](../operations/build-claims.md) |
+
+The mite writes a random bearer token to `/var/run/varroa/loopback-token`, on the `varroa-loopback`
+volume it shares with the Jenkins container. It writes the file before it opens the listener, so
+no request can arrive before the token exists. The plugin caches the token and re-reads the file
+after a `401`, at most once per second, so a mite restart heals after one failed request.
+
+Both routes carry a request further over the same `CommandStream` the mite already holds to the
+gateway: a build event becomes a `MiteMessage.build_event`, and a claim becomes a
+`MiteMessage.claim_request` that blocks until the gateway answers with a `claim_response`. The
+listener runs no matter whether the [build claim gate](../operations/build-claims.md#turn-on-the-gate)
+is on, and answers no request when the plugin never calls it.
+
+The claim path carries a shrinking timeout budget across all four hops:
+
+| Hop | Budget | Result on expiry |
+|---|---|---|
+| Plugin to mite, connect | 1 s | empty decision, code `UNAVAILABLE` |
+| Plugin to mite, read | 5 s | empty decision, code `UNAVAILABLE` |
+| Mite wait for the claim reply | 4.5 s | HTTP `504`, empty decision, code `UNAVAILABLE` |
+| Gateway request to the recorder | 4 s | claim reply with empty decision, code `UNAVAILABLE` |
+
+See [Build claims](../operations/build-claims.md) for the environment variables that override
+each budget, the retry schedule, and how to read a claim decision.
+
+## Build Events Are Durable
+
+A build event survives three tiers between the Jenkins plugin and the build record store, so a
+restart at any tier costs a delay and not a lost event.
+
+1. The plugin spools every event it sends under `$JENKINS_HOME/varroa/spool/`, bounded by
+   `VARROA_SPOOL_BYTES` (default 64 MiB), and keeps a spooled event until it is acknowledged.
+2. The mite retains every forwarded event in memory, keyed by run and sequence number, bounded
+   by `VARROA_EVENT_RETAIN_BYTES` (default 16 MiB). It releases an entry only when the gateway
+   acknowledges it. At the cap it stops reading `/v1/events` until room frees up.
+3. The gateway acknowledges an event back to the mite only after the JetStream publish for that
+   event's whole envelope group succeeds. `VARROA_EVENT_PUBLISH_WAIT` (default 10 s) bounds how
+   long the gateway's publish worker waits for queue room before it gives up and ends the
+   `CommandStream`, which makes the mite reconnect.
+
+After a reconnect the mite replays every retained event, in order, before it forwards anything
+new. A mite restart loses its own retention set, but not the event: the plugin's spool is the
+durable tier, and it keeps resending an unacknowledged event until the mite is back and
+acknowledges it.
+
 ## Diagnose a Mite
 
 Controller resources carry a short unique suffix derived from the controller UID. The StatefulSet is usually named `<name>-<uid8>`, but the name is adjusted to stay a valid Kubernetes object name. A controller whose name does not begin with a lowercase letter gains a `c-` prefix, so `1demo` becomes `c-1demo-<uid8>`, and a long name is truncated to fit. When either applies, list the StatefulSets in the namespace and use the name you find:

@@ -14,4 +14,7 @@
       <scriptPath>Jenkinsfile</scriptPath>
     </org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory>
   </projectFactories>
+  <buildStrategies>
+    <jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing plugin="basic-branch-build-strategies"></jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing>
+  </buildStrategies>
 </jenkins.branch.OrganizationFolder>

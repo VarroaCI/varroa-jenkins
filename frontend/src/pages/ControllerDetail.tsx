@@ -602,14 +602,14 @@ function ControllerHeader({
           {power.isPending || wake.isPending ? "Waking…" : hibernated ? "Wake" : "Power On"}
         </Button>
       )}
-      {!asleep && (ctrl.endpoint ? (
+      {!asleep && !ctrl.headless && (ctrl.endpoint ? (
         <a href={ctrl.endpoint} target="_blank" rel="noreferrer">
           <Button variant="primary" size="sm">Open Jenkins</Button>
         </a>
       ) : (
         <Button size="sm" disabled>Not ready</Button>
       ))}
-      {!asleep && isCore && ctrl.routingMode === "path" && (
+      {!asleep && !ctrl.headless && isCore && ctrl.routingMode === "path" && (
         <Link to={`${controllerRoute(cluster, namespace, name)}/jenkins`}>
           <Button variant="ghost" size="sm">View embedded</Button>
         </Link>
@@ -696,7 +696,7 @@ function OverviewTab({
           <Card title="Spec">
             <KVGrid
               items={[
-                { key: "Endpoint", value: ctrl.endpoint || "—" },
+                { key: "Endpoint", value: ctrl.headless ? "Headless — no external URL" : (ctrl.endpoint || "—") },
                 { key: "Namespace", value: ctrl.namespace },
                 { key: "Reconciliation", value: `${ctrl.reconciliationPolicy?.mode || "automatic"} · every ${ctrl.reconciliationPolicy?.interval || "30s"}` },
               ]}

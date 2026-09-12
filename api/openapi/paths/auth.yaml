@@ -226,6 +226,6 @@
         content:
           application/json:
             schema:
-              type: object
+              $ref: '../components/schemas.yaml#/PermissionScopes'
       "401":
         $ref: '../components/responses.yaml#/Unauthorized'

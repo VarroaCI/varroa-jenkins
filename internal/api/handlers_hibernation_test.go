@@ -1,15 +1,25 @@
 package api
 
 import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/nats-io/nats-server/v2/server"
+	"github.com/nats-io/nats.go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
 func TestHibernationRedirectUsesSharedInterstitial(t *testing.T) {
@@ -46,6 +56,37 @@ func TestHibernationRedirectUsesSharedInterstitial(t *testing.T) {
 	}
 }
 
+// TestHibernationQueueRejectsCell asserts task 5.7: the controller-shape
+// queue endpoint answers 401 for a cell. A cell never mints a wake token
+// (mintWakeToken's cell exclusion), so status.wakeToken stays empty even
+// though spec.hibernation.enabled is legally set and ignored — and
+// checkWakeToken already refuses any empty stored token.
+func TestHibernationQueueRejectsCell(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"cell1": {
+			ObjectMeta: metav1.ObjectMeta{Name: "cell1", Namespace: "ns1"},
+			Spec: v1alpha1.ControllerSpec{
+				Cell:        &v1alpha1.CellSpec{Enabled: true},
+				Hibernation: &v1alpha1.HibernationSpec{Enabled: true},
+			},
+			Status: v1alpha1.ControllerStatus{
+				WakeToken: "",
+				Phase:     v1alpha1.ControllerPhaseConnected,
+			},
+		},
+	}
+	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Logger: slog.Default()})
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/anything/clusters/core/ns/ns1/queue/cell1/github-webhook/", nil)
+	rec := httptest.NewRecorder()
+
+	srv.HandleHibernationDispatch(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestHibernationStatusIncludesWakeMarker(t *testing.T) {
 	client := newFakeResourceClient()
 	client.controllers = map[string]*v1alpha1.Controller{
@@ -65,5 +106,490 @@ func TestHibernationStatusIncludesWakeMarker(t *testing.T) {
 
 	if rec.Code != http.StatusOK || rec.Body.String() != `{"varroaWake":true,"phase":"Connected"}` {
 		t.Fatalf("status response = %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+// --- 10.1/10.3: a headless controller on the redirect and status surface ---
+
+// headlessHibernatedController builds a hibernated, headless Controller CRD
+// carrying a wake token, for the D5 redirect tests.
+func headlessHibernatedController(name, ns, token string) *v1alpha1.Controller {
+	return &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+		Spec:       v1alpha1.ControllerSpec{Headless: true},
+		Status: v1alpha1.ControllerStatus{
+			WakeToken: token,
+			Phase:     v1alpha1.ControllerPhaseHibernated,
+		},
+	}
+}
+
+// TestHibernationRedirectHeadlessValidTokenAnswers404NoWake asserts task
+// 10.1: a headless controller's redirect endpoint answers 404 after the
+// token guard passes, and publishes no wake command.
+func TestHibernationRedirectHeadlessValidTokenAnswers404NoWake(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"jenkins": headlessHibernatedController("jenkins", "team-a", "wake-token"),
+	}
+	conn := tenantQueueTestBus(t)
+	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), BusConn: conn, Logger: slog.Default()})
+
+	received := make(chan struct{}, 1)
+	sub, err := conn.Subscribe(bus.WakeSubject("core", "team-a", "jenkins"), func(*nats.Msg) {
+		received <- struct{}{}
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	req := httptest.NewRequest(http.MethodGet, "/hibernation/wake-token/clusters/core/ns/team-a/redirect/jenkins/job/example/", nil)
+	rec := httptest.NewRecorder()
+
+	srv.HandleHibernationDispatch(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	select {
+	case <-received:
+		t.Fatal("wake command published for a headless controller's redirect")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// TestHibernationRedirectHeadlessInvalidTokenAnswers401 asserts task 10.1's
+// other half: an invalid token still answers 401, matching any other
+// controller, and publishes no wake command either.
+func TestHibernationRedirectHeadlessInvalidTokenAnswers401(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"jenkins": headlessHibernatedController("jenkins", "team-a", "wake-token"),
+	}
+	conn := tenantQueueTestBus(t)
+	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), BusConn: conn, Logger: slog.Default()})
+
+	received := make(chan struct{}, 1)
+	sub, err := conn.Subscribe(bus.WakeSubject("core", "team-a", "jenkins"), func(*nats.Msg) {
+		received <- struct{}{}
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	req := httptest.NewRequest(http.MethodGet, "/hibernation/wrong-token/clusters/core/ns/team-a/redirect/jenkins/job/example/", nil)
+	rec := httptest.NewRecorder()
+
+	srv.HandleHibernationDispatch(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	select {
+	case <-received:
+		t.Fatal("wake command published for a headless controller's redirect with an invalid token")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// TestHibernationQueueHeadlessStillAccepts202 asserts task 10.2: the queue
+// endpoint stays unchanged for a headless, hibernated controller — a
+// webhook still returns 202 and is persisted for replay.
+func TestHibernationQueueHeadlessStillAccepts202(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"jenkins": headlessHibernatedController("jenkins", "team-a", "wake-token"),
+	}
+	conn := tenantQueueTestBus(t)
+	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), BusConn: conn, Logger: slog.Default()})
+
+	received := make(chan []byte, 1)
+	sub, err := conn.SubscribeData(bus.WebhookSubject("core", "team-a", "jenkins"), func(data []byte) {
+		received <- data
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	body := []byte(`{"ref":"refs/heads/main"}`)
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/wake-token/clusters/core/ns/team-a/queue/jenkins/github-webhook/", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	srv.HandleHibernationDispatch(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rec.Code, rec.Body.String())
+	}
+	select {
+	case data := <-received:
+		var env map[string]any
+		if err := json.Unmarshal(data, &env); err != nil {
+			t.Fatalf("unmarshal published envelope: %v", err)
+		}
+		if env["controller"] != "jenkins" || env["namespace"] != "team-a" {
+			t.Fatalf("envelope identity = %+v, want controller=jenkins namespace=team-a", env)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no envelope persisted within timeout")
+	}
+}
+
+// --- 11.1: the replaced guard routes both shapes ---
+
+// TestHibernationWebhookDispatch_ControllerShapeStillRoutesEveryURL is task 11.1's
+// table test: every previously valid controller-shape URL still routes to
+// the same action as before the switch replaced the single guard.
+func TestHibernationWebhookDispatch_ControllerShapeStillRoutesEveryURL(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"jenkins": {
+			ObjectMeta: metav1.ObjectMeta{Name: "jenkins", Namespace: "team-a"},
+			Status: v1alpha1.ControllerStatus{
+				WakeToken: "wake-token",
+				Endpoint:  "https://jenkins.example.com/",
+				Phase:     v1alpha1.ControllerPhaseConnected,
+			},
+		},
+	}
+	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Logger: slog.Default()})
+
+	cases := []struct {
+		name       string
+		method     string
+		path       string
+		wantStatus int
+	}{
+		{"status", http.MethodGet, "/hibernation/wake-token/clusters/core/ns/team-a/status/jenkins", http.StatusOK},
+		{"redirect", http.MethodGet, "/hibernation/wake-token/clusters/core/ns/team-a/redirect/jenkins/job/x/", http.StatusOK},
+		{"queue non-allowlisted path 404s past auth", http.MethodPost, "/hibernation/wake-token/clusters/core/ns/team-a/queue/jenkins/scriptText", http.StatusNotFound},
+		{"unknown action 404s", http.MethodGet, "/hibernation/wake-token/clusters/core/ns/team-a/bogus/jenkins", http.StatusNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			rec := httptest.NewRecorder()
+			srv.HandleHibernationDispatch(rec, req)
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.wantStatus)
+			}
+		})
+	}
+}
+
+// TestHibernationWebhookDispatch_FiveSegmentClustersPathRefused asserts task
+// 11.1's other half: a clusters-shape URL with only five segments (no
+// action) is refused, not routed with an arbitrary segment read as the
+// action.
+func TestHibernationWebhookDispatch_FiveSegmentClustersPathRefused(t *testing.T) {
+	srv := NewServer(&Dependencies{Logger: slog.Default()})
+	req := httptest.NewRequest(http.MethodGet, "/hibernation/token/clusters/core/ns/team-a", nil)
+	rec := httptest.NewRecorder()
+
+	srv.HandleHibernationDispatch(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 for a five-segment clusters path", rec.Code)
+	}
+}
+
+// --- 11.2: the tenant queue handler ---
+
+// tenantQueueTestBus starts an embedded JetStream-enabled NATS server and
+// returns a connected *bus.Conn with the varroa_webhooks stream ensured.
+func tenantQueueTestBus(t *testing.T) *bus.Conn {
+	t.Helper()
+	opts := &server.Options{Port: -1, StoreDir: t.TempDir(), JetStream: true}
+	s, err := server.NewServer(opts)
+	if err != nil {
+		t.Fatalf("new nats server: %v", err)
+	}
+	s.Start()
+	if !s.ReadyForConnections(5 * time.Second) {
+		t.Fatal("nats server not ready")
+	}
+	t.Cleanup(s.Shutdown)
+
+	conn, err := bus.Connect(s.ClientURL())
+	if err != nil {
+		t.Fatalf("bus connect: %v", err)
+	}
+	t.Cleanup(conn.Close)
+
+	if err := conn.EnsureStream(bus.WebhookStreamConfig(bus.WebhookStreamName, 1)); err != nil {
+		t.Fatalf("ensure webhook stream: %v", err)
+	}
+	return conn
+}
+
+// placedPipelinesTeam builds a Team CRD carrying a pipelines door token
+// and secret, for the tenant queue tests.
+func placedPipelinesTeam(name, token, secret string) *v1alpha1.Team {
+	return &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns1"}},
+		Status: v1alpha1.TeamStatus{
+			Pipelines: &v1alpha1.TeamPipelinesStatus{
+				WebhookToken:  token,
+				WebhookSecret: secret,
+			},
+		},
+	}
+}
+
+func githubSignature(secret string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
+}
+
+func TestTenantWebhookQueue_UnknownTeamAnswers401(t *testing.T) {
+	store := crdstore.NewFake()
+	client := newFakeResourceClient()
+	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, Logger: slog.Default()})
+
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/nosuchteam/queue/github-webhook/", bytes.NewReader([]byte("{}")))
+	rec := httptest.NewRecorder()
+
+	srv.HandleHibernationDispatch(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 for an unknown team", rec.Code)
+	}
+}
+
+func TestTenantWebhookQueue_CrossTenantTokenAnswers401(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, placedPipelinesTeam("payments", "payments-token", "payments-secret"))
+	crdstore.MustSeed(store, placedPipelinesTeam("search", "search-token", "search-secret"))
+	client := newFakeResourceClient()
+	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, Logger: slog.Default()})
+
+	// The request names the "payments" Team but carries "search"'s token.
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/search-token/teams/payments/queue/github-webhook/", bytes.NewReader([]byte("{}")))
+	rec := httptest.NewRecorder()
+
+	srv.HandleHibernationDispatch(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 for a cross-tenant token", rec.Code)
+	}
+}
+
+func TestTenantWebhookQueue_NonAllowlistedPathAnswers404(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	client := newFakeResourceClient()
+	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, Logger: slog.Default()})
+
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/scriptText", bytes.NewReader([]byte("{}")))
+	rec := httptest.NewRecorder()
+
+	srv.HandleHibernationDispatch(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 for a non-allowlisted path", rec.Code)
+	}
+}
+
+func TestTenantWebhookQueue_RedirectNotServed404(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	client := newFakeResourceClient()
+	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, Logger: slog.Default()})
+
+	req := httptest.NewRequest(http.MethodGet, "/hibernation/tok/teams/payments/redirect/", nil)
+	rec := httptest.NewRecorder()
+
+	srv.HandleHibernationDispatch(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404: redirect stays controller-only", rec.Code)
+	}
+}
+
+func TestTenantWebhookQueue_BodyTooLargeAnswers413(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	client := newFakeResourceClient()
+	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, Logger: slog.Default()})
+
+	big := bytes.Repeat([]byte("a"), maxWebhookBodyBytes+1)
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/github-webhook/", bytes.NewReader(big))
+	rec := httptest.NewRecorder()
+
+	srv.HandleHibernationDispatch(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", rec.Code)
+	}
+}
+
+func TestTenantWebhookQueue_MissingGitHubSignatureAnswers400(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	client := newFakeResourceClient()
+	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, Logger: slog.Default()})
+
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/github-webhook/", bytes.NewReader([]byte("{}")))
+	req.Header.Set("X-GitHub-Event", "push")
+	// No X-Hub-Signature-256.
+	rec := httptest.NewRecorder()
+
+	srv.HandleHibernationDispatch(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for an unsigned GitHub delivery", rec.Code)
+	}
+}
+
+func TestTenantWebhookQueue_WrongSecretSignatureAnswers400(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	client := newFakeResourceClient()
+	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, Logger: slog.Default()})
+
+	body := []byte(`{"ref":"refs/heads/main"}`)
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/github-webhook/", bytes.NewReader(body))
+	req.Header.Set("X-GitHub-Event", "push")
+	req.Header.Set("X-Hub-Signature-256", githubSignature("some-other-secret", body))
+	rec := httptest.NewRecorder()
+
+	srv.HandleHibernationDispatch(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for a mismatched signature", rec.Code)
+	}
+}
+
+func TestTenantWebhookQueue_EmptyStoredSecretAnswers503(t *testing.T) {
+	store := crdstore.NewFake()
+	// A token exists (so the request clears step 2), but the secret is
+	// still empty: the placement pass has not finished minting it.
+	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", ""))
+	client := newFakeResourceClient()
+	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, Logger: slog.Default()})
+
+	body := []byte(`{}`)
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/github-webhook/", bytes.NewReader(body))
+	req.Header.Set("X-GitHub-Event", "push")
+	req.Header.Set("X-Hub-Signature-256", githubSignature("whatever", body))
+	rec := httptest.NewRecorder()
+
+	srv.HandleHibernationDispatch(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 for an empty stored secret", rec.Code)
+	}
+}
+
+// TestTenantWebhookQueue_GitLabTokenPublishesTenantEnvelope covers the GitLab
+// token path end to end: a valid delivery is accepted, published on
+// webhook.<cluster>.tenant.<team>, and the envelope carries the request's
+// forge/team/delivery identity but neither secret header.
+func TestTenantWebhookQueue_GitLabTokenPublishesTenantEnvelope(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	client := newFakeResourceClient()
+	conn := tenantQueueTestBus(t)
+	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, BusConn: conn, Logger: slog.Default()})
+
+	received := make(chan []byte, 1)
+	sub, err := conn.SubscribeData(bus.WebhookTenantSubject("core", "payments"), func(data []byte) {
+		received <- data
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	body := []byte(`{"object_kind":"push"}`)
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/github-webhook/?x=1", bytes.NewReader(body))
+	req.Header.Set("X-Gitlab-Event", "Push Hook")
+	req.Header.Set("X-Gitlab-Token", "secret")
+	req.Header.Set("X-Gitlab-Event-UUID", "gl-uuid-1")
+	rec := httptest.NewRecorder()
+
+	srv.HandleHibernationDispatch(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case data := <-received:
+		var env map[string]any
+		if err := json.Unmarshal(data, &env); err != nil {
+			t.Fatalf("unmarshal published envelope: %v", err)
+		}
+		if env["team"] != "payments" || env["forge"] != "gitlab" || env["deliveryId"] != "gl-uuid-1" {
+			t.Fatalf("envelope identity = %+v, want team=payments forge=gitlab deliveryId=gl-uuid-1", env)
+		}
+		if _, hasNS := env["namespace"]; hasNS {
+			t.Errorf("tenant envelope carries a namespace: %+v", env)
+		}
+		if _, hasCtrl := env["controller"]; hasCtrl {
+			t.Errorf("tenant envelope carries a controller: %+v", env)
+		}
+		headers, _ := env["headers"].(map[string]any)
+		if _, ok := headers["X-Gitlab-Token"]; ok {
+			t.Errorf("tenant envelope carries X-Gitlab-Token: %+v", headers)
+		}
+		if _, ok := headers["X-Varroa-Token"]; ok {
+			t.Errorf("tenant envelope carries X-Varroa-Token: %+v", headers)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no envelope published within timeout")
+	}
+}
+
+func TestTenantWebhookQueue_UnverifiedHeaderIsReadFromRequestNotAllowlist(t *testing.T) {
+	// X-Varroa-Token is never in the header allowlist (verified against
+	// HeaderAllowlist directly), yet generic verification must still read
+	// it from the request.
+	for _, h := range HeaderAllowlist {
+		if h == "X-Varroa-Token" {
+			t.Fatal("X-Varroa-Token must not be in the header allowlist")
+		}
+	}
+
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	client := newFakeResourceClient()
+	conn := tenantQueueTestBus(t)
+	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, BusConn: conn, Logger: slog.Default()})
+
+	received := make(chan []byte, 1)
+	sub, err := conn.SubscribeData(bus.WebhookTenantSubject("core", "payments"), func(data []byte) {
+		received <- data
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	body := []byte(`{}`)
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/generic-webhook-trigger/invoke", bytes.NewReader(body))
+	req.Header.Set("X-Varroa-Token", "secret")
+	rec := httptest.NewRecorder()
+
+	srv.HandleHibernationDispatch(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rec.Code, rec.Body.String())
+	}
+	select {
+	case data := <-received:
+		var env map[string]any
+		if err := json.Unmarshal(data, &env); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if env["forge"] != "generic" {
+			t.Fatalf("forge = %v, want generic", env["forge"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no envelope published within timeout")
 	}
 }

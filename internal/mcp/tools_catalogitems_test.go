@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -107,5 +108,73 @@ func TestListCatalogItems_FiltersBySource(t *testing.T) {
 		if item["sourceRef"] != "platform-catalog" {
 			t.Errorf("item %v sourceRef = %v, want platform-catalog", item["name"], item["sourceRef"])
 		}
+	}
+}
+
+// --- Task 7.5a: pipeline-template wording pinned on the tool descriptions ---
+
+// catalogItemTool is the subset of a tools/list entry this test cares about.
+type catalogItemTool struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+func catalogItemToolDescriptions(t *testing.T) map[string]string {
+	t.Helper()
+	handler := NewHandler(catalogItemDeps())
+	resp := mcpRequest(t, handler, "tools/list", map[string]interface{}{}, nil)
+	b, err := json.Marshal(resp.Result)
+	if err != nil {
+		t.Fatalf("marshal tools/list: %v", err)
+	}
+	var payload struct {
+		Tools []catalogItemTool `json:"tools"`
+	}
+	if err := json.Unmarshal(b, &payload); err != nil {
+		t.Fatalf("unmarshal tools/list: %v", err)
+	}
+	out := map[string]string{}
+	for _, tool := range payload.Tools {
+		out[tool.Name] = tool.Description
+	}
+	return out
+}
+
+// TestListCatalogItems_DescriptionNamesPipelineTemplateShape pins the
+// list_catalog_items description's statement that a pipeline-template
+// item's content is a PipelineTemplate document, not items YAML, and that
+// the tool does not parse it — so the wording cannot silently drift back
+// to describing pipeline-template content as items YAML.
+func TestListCatalogItems_DescriptionNamesPipelineTemplateShape(t *testing.T) {
+	desc, ok := catalogItemToolDescriptions(t)["list_catalog_items"]
+	if !ok {
+		t.Fatal("list_catalog_items is not registered")
+	}
+	if !strings.Contains(desc, "PipelineTemplate document") {
+		t.Errorf("description = %q, want it to name the PipelineTemplate document shape", desc)
+	}
+	if !strings.Contains(desc, "not items YAML") {
+		t.Errorf("description = %q, want it to say pipeline-template content is not items YAML", desc)
+	}
+	if !strings.Contains(desc, "does not parse it") {
+		t.Errorf("description = %q, want it to say this tool does not parse the content", desc)
+	}
+}
+
+// TestGetCatalogItem_DescriptionNamesPipelineTemplateShape is the same
+// pin for get_catalog_item.
+func TestGetCatalogItem_DescriptionNamesPipelineTemplateShape(t *testing.T) {
+	desc, ok := catalogItemToolDescriptions(t)["get_catalog_item"]
+	if !ok {
+		t.Fatal("get_catalog_item is not registered")
+	}
+	if !strings.Contains(desc, "PipelineTemplate document") {
+		t.Errorf("description = %q, want it to name the PipelineTemplate document shape", desc)
+	}
+	if !strings.Contains(desc, "not items YAML") {
+		t.Errorf("description = %q, want it to say pipeline-template content is not items YAML", desc)
+	}
+	if !strings.Contains(desc, "does not parse it") {
+		t.Errorf("description = %q, want it to say this tool does not parse the content", desc)
 	}
 }

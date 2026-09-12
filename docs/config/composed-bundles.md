@@ -69,6 +69,11 @@ take precedence. Varroa also supplies:
 Unresolved required variables prevent a controller from applying the new
 content. The last valid configuration remains active.
 
+A `pipeline-template` input composes into its own content key,
+`pipeline-templates.yaml`, never into `jenkins.yaml`. Catalog variables never reach a template
+body: a template takes its input from its own parameter schema and a marker's `values`, not from
+`${var}` substitution. See [Pipeline templates](pipeline-templates.md).
+
 ## Pin catalog content
 
 ```yaml

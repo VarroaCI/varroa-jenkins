@@ -30,6 +30,23 @@
             },
             "type": "object"
           },
+          "cell": {
+            "additionalProperties": false,
+            "description": "Marks a controller as a shared cell that hosts tenant pipelines. enabled is immutable after creation; maxTenants bounds placement.",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "maxTenants": {
+                "format": "int32",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "enabled"
+            ],
+            "type": "object"
+          },
           "className": {
             "description": "References a ControllerClass by name, layering its defaults between ProvisioningDefaults and the Controller's own spec.",
             "type": "string"
@@ -54,6 +71,10 @@
           "endpoint": {
             "description": "API endpoint URL for the controller.",
             "type": "string"
+          },
+          "headless": {
+            "description": "Blocks the Jenkins web UI for every non-admin caller. A cell is always headless.",
+            "type": "boolean"
           },
           "hibernation": {
             "additionalProperties": false,

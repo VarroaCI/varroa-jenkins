@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -10,7 +11,9 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
+	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	"github.com/varroaci/varroa-jenkins/internal/rbac"
 )
 
 // varroaRoleBindingDeps seeds two bindings: one carrying every field whose
@@ -287,5 +290,162 @@ func TestVarroaRoleBindingListSchema_UsesAnyOfNotOneOf(t *testing.T) {
 	}
 	if !strings.Contains(string(varroaRoleBindingListOutputSchema), `"anyOf"`) {
 		t.Error("item schema must declare anyOf over the summary and full-CR shapes")
+	}
+}
+
+// varroaRoleBindingWriterDeps grants "writer-user" a cluster-wide
+// rolebindings create/update/delete binding, so create_varroa_role_binding
+// tests exercise the tool without a scope check getting in the way.
+func varroaRoleBindingWriterDeps(t *testing.T) *api.Dependencies {
+	t.Helper()
+	roles := []*v1alpha1.VarroaRole{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "rb-writer"},
+			Spec: v1alpha1.VarroaRoleSpec{APIRules: []v1alpha1.APIRule{
+				{Resources: []string{"rolebindings"}, Verbs: []string{"read", "create", "update", "delete"}},
+			}},
+		},
+	}
+	bindings := []*v1alpha1.VarroaRoleBinding{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "cluster-writer"},
+			Spec: v1alpha1.VarroaRoleBindingSpec{
+				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "writer-user"}},
+				RoleRef:  "rb-writer",
+			},
+		},
+	}
+	return &api.Dependencies{
+		Client:     &stubClient{},
+		Authorizer: api.NewAuthorizer(rbac.NewTestResolverWithRoles(roles, bindings), false),
+		Store:      crdstore.NewFake(),
+	}
+}
+
+var mcpRBWriterClaims = &auth.Claims{Subject: "writer-user"}
+
+// A tenants scope round-trips through create_varroa_role_binding: the args
+// hold a list of {name, jobs} objects, and the stored spec carries the same
+// TenantScope entries.
+func TestCreateVarroaRoleBinding_TenantsScopeRoundTrips(t *testing.T) {
+	deps := varroaRoleBindingWriterDeps(t)
+	handler := NewHandler(deps)
+	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+		"name": "create_varroa_role_binding",
+		"arguments": map[string]interface{}{
+			"name":     "vrb-tenants",
+			"roleRef":  "developer",
+			"subjects": []interface{}{map[string]interface{}{"kind": "User", "name": "alice"}},
+			"scope": map[string]interface{}{
+				"tenants": []interface{}{
+					map[string]interface{}{"name": "team-a", "jobs": []interface{}{"release/*"}},
+					map[string]interface{}{"name": "team-b"},
+				},
+			},
+		},
+	}, mcpRBWriterClaims)
+
+	tr := parseToolResult(t, resp.Result)
+	if tr.IsError {
+		t.Fatalf("create_varroa_role_binding returned error: %v", tr.Content)
+	}
+
+	stored, err := crdstore.Get[v1alpha1.VarroaRoleBinding](context.Background(), deps.Store, "vrb-tenants", "")
+	if err != nil {
+		t.Fatalf("get created binding: %v", err)
+	}
+	if stored.Spec.Scope == nil {
+		t.Fatalf("stored binding has no scope: %+v", stored.Spec)
+	}
+	want := []v1alpha1.TenantScope{
+		{Name: "team-a", Jobs: []string{"release/*"}},
+		{Name: "team-b"},
+	}
+	got := stored.Spec.Scope.Tenants
+	if len(got) != len(want) {
+		t.Fatalf("stored tenants = %+v, want %+v", got, want)
+	}
+	if got[0].Name != want[0].Name || len(got[0].Jobs) != 1 || got[0].Jobs[0] != "release/*" {
+		t.Errorf("stored tenants[0] = %+v, want %+v", got[0], want[0])
+	}
+	if got[1].Name != want[1].Name || len(got[1].Jobs) != 0 {
+		t.Errorf("stored tenants[1] = %+v, want %+v", got[1], want[1])
+	}
+}
+
+// TestCreateVarroaRoleBinding_InvalidTenantScopeRejected proves that
+// create_varroa_role_binding rejects, locally, every tenant scope shape
+// that the crdstore's omitempty round trip would otherwise turn into a
+// broader-than-written grant: a tenant entry with an empty name, a
+// present-and-empty tenants list, a present-and-empty jobs list, a
+// non-object tenant entry, and a "tenants" value that is not a list at
+// all. The CEL rules on
+// api/v1alpha1.VarroaRoleBindingScope remain the server-side guard for the
+// direct Kubernetes path; this test proves the MCP path never needs them,
+// because the request never reaches the apiserver.
+func TestCreateVarroaRoleBinding_InvalidTenantScopeRejected(t *testing.T) {
+	cases := []struct {
+		name  string
+		scope map[string]interface{}
+	}{
+		{
+			name: "empty tenant name",
+			scope: map[string]interface{}{
+				"tenants": []interface{}{
+					map[string]interface{}{"name": ""},
+				},
+			},
+		},
+		{
+			name: "empty tenants list",
+			scope: map[string]interface{}{
+				"tenants": []interface{}{},
+			},
+		},
+		{
+			name: "empty jobs list",
+			scope: map[string]interface{}{
+				"tenants": []interface{}{
+					map[string]interface{}{"name": "team-a", "jobs": []interface{}{}},
+				},
+			},
+		},
+		{
+			name: "non-object tenant entry",
+			scope: map[string]interface{}{
+				"tenants": []interface{}{7},
+			},
+		},
+		{
+			name: "non-array tenants value",
+			scope: map[string]interface{}{
+				"tenants": "team-a",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			deps := varroaRoleBindingWriterDeps(t)
+			handler := NewHandler(deps)
+			resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+				"name": "create_varroa_role_binding",
+				"arguments": map[string]interface{}{
+					"name":     "vrb-invalid-tenant-scope",
+					"roleRef":  "developer",
+					"subjects": []interface{}{map[string]interface{}{"kind": "User", "name": "alice"}},
+					"scope":    tc.scope,
+				},
+			}, mcpRBWriterClaims)
+
+			tr := parseToolResult(t, resp.Result)
+			if !tr.IsError {
+				t.Fatalf("create_varroa_role_binding did not reject scope %+v", tc.scope)
+			}
+
+			if _, err := crdstore.Get[v1alpha1.VarroaRoleBinding](context.Background(), deps.Store, "vrb-invalid-tenant-scope", ""); err == nil {
+				t.Fatalf("rejected scope must not create a binding")
+			}
+		})
 	}
 }

@@ -54,6 +54,9 @@ func init() {
 				if !follow {
 					return orig(cmd, args)
 				}
+				if len(args) > 0 && looksLikeRunID(args[0]) {
+					return runRunLogsFollow(cmd, args)
+				}
 				return runLogsFollow(cmd, args)
 			}
 		})

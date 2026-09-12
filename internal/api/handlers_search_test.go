@@ -19,7 +19,7 @@ func TestHandleSearchWithoutAuthorizerReturnsNoInventory(t *testing.T) {
 }
 
 func TestRankSearchResultsOrdersAndCapsEachKind(t *testing.T) {
-	items := []searchResult{{Type: "group", Name: "query-team"}, {Type: "controller", Name: "z-query"}, {Type: "controller", Name: "query"}, {Type: "controller", Name: "query-a"}, {Type: "controller", Name: "query-b"}, {Type: "controller", Name: "query-c"}, {Type: "controller", Name: "query-d"}, {Type: "controller", Name: "query-e"}, {Type: "namespace", Name: "query-ns"}}
+	items := []SearchResult{{Type: "group", Name: "query-team"}, {Type: "controller", Name: "z-query"}, {Type: "controller", Name: "query"}, {Type: "controller", Name: "query-a"}, {Type: "controller", Name: "query-b"}, {Type: "controller", Name: "query-c"}, {Type: "controller", Name: "query-d"}, {Type: "controller", Name: "query-e"}, {Type: "namespace", Name: "query-ns"}}
 	got := rankSearchResults(items, "query")
 	if len(got) != 7 {
 		t.Fatalf("got %d results, want 7", len(got))
@@ -41,7 +41,7 @@ func TestSearchControllerLinkEscapesIdentity(t *testing.T) {
 }
 
 func TestMapSearchResultsDeduplicatesIdentity(t *testing.T) {
-	items := map[string]searchResult{"core\x00team": {Type: "namespace", Cluster: "core", Name: "team"}, "edge\x00team": {Type: "namespace", Cluster: "edge", Name: "team"}}
+	items := map[string]SearchResult{"core\x00team": {Type: "namespace", Cluster: "core", Name: "team"}, "edge\x00team": {Type: "namespace", Cluster: "edge", Name: "team"}}
 	if got := len(mapSearchResults(items)); got != 2 {
 		t.Fatalf("got %d namespaces, want 2", got)
 	}

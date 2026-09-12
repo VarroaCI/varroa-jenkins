@@ -38,6 +38,21 @@ func TestItemValidate(t *testing.T) {
 		{"missing name", Item{Kind: "folder", Name: ""}, true},
 		{"unknown kind", Item{Kind: "widget", Name: "x"}, true},
 		{"empty kind", Item{Name: "x"}, true},
+		{"valid varroaUpstream trigger", Item{Kind: "freeStyle", Name: "my-job",
+			Triggers: []Trigger{{VarroaUpstream: &VarroaUpstreamTrigger{Tenant: "alpha", Job: "release", Result: "SUCCESS"}}},
+		}, false},
+		{"valid varroaUpstream trigger with default result", Item{Kind: "freeStyle", Name: "my-job",
+			Triggers: []Trigger{{VarroaUpstream: &VarroaUpstreamTrigger{Tenant: "alpha", Job: "release"}}},
+		}, false},
+		{"varroaUpstream trigger missing tenant", Item{Kind: "freeStyle", Name: "my-job",
+			Triggers: []Trigger{{VarroaUpstream: &VarroaUpstreamTrigger{Job: "release"}}},
+		}, true},
+		{"varroaUpstream trigger missing job", Item{Kind: "freeStyle", Name: "my-job",
+			Triggers: []Trigger{{VarroaUpstream: &VarroaUpstreamTrigger{Tenant: "alpha"}}},
+		}, true},
+		{"varroaUpstream trigger invalid result", Item{Kind: "freeStyle", Name: "my-job",
+			Triggers: []Trigger{{VarroaUpstream: &VarroaUpstreamTrigger{Tenant: "alpha", Job: "release", Result: "FLAKY"}}},
+		}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -336,6 +351,69 @@ func TestGenerateConfigXMLFreeStyleWithLabel(t *testing.T) {
 	}
 	if !strings.Contains(xml, "<assignedNode>agent</assignedNode>") {
 		t.Errorf("expected agent label in XML, got: %s", xml)
+	}
+}
+
+func TestGenerateConfigXMLFreeStyleWithVarroaUpstream(t *testing.T) {
+	item := Item{
+		Kind: "freeStyle",
+		Name: "rebuild",
+		Triggers: []Trigger{
+			{VarroaUpstream: &VarroaUpstreamTrigger{Tenant: "alpha", Job: "release", Result: "SUCCESS"}},
+		},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(xml, "<org.jenkinsci.plugins.varroamiteauth.VarroaUpstreamTrigger") {
+		t.Errorf("expected VarroaUpstreamTrigger element, got: %s", xml)
+	}
+	if !strings.Contains(xml, "<tenant>alpha</tenant>") {
+		t.Errorf("expected tenant element, got: %s", xml)
+	}
+	if !strings.Contains(xml, "<job>release</job>") {
+		t.Errorf("expected job element, got: %s", xml)
+	}
+	if !strings.Contains(xml, "<result>SUCCESS</result>") {
+		t.Errorf("expected result element, got: %s", xml)
+	}
+}
+
+func TestGenerateConfigXMLFreeStyleVarroaUpstreamDefaultsResult(t *testing.T) {
+	item := Item{
+		Kind: "freeStyle",
+		Name: "rebuild",
+		Triggers: []Trigger{
+			{VarroaUpstream: &VarroaUpstreamTrigger{Tenant: "alpha", Job: "release"}},
+		},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(xml, "<result>SUCCESS</result>") {
+		t.Errorf("expected the SUCCESS default, got: %s", xml)
+	}
+}
+
+func TestParseVarroaUpstreamInvalidResultFailsComposition(t *testing.T) {
+	yaml := `items:
+  - kind: freeStyle
+    name: rebuild
+    triggers:
+      - varroaUpstream:
+          tenant: alpha
+          job: release
+          result: FLAKY`
+	_, err := Parse(yaml)
+	if err == nil {
+		t.Fatal("expected error for invalid varroaUpstream result")
+	}
+	for _, want := range []string{"SUCCESS", "UNSTABLE", "FAILURE"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q must name %q", err.Error(), want)
+		}
 	}
 }
 

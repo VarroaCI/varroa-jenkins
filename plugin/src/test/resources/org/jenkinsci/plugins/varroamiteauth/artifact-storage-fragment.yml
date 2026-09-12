@@ -1,0 +1,23 @@
+# The artifact-storage JCasC fragment the operator renders for one cell
+# (D6, task 0.5 export against artifact-manager-s3 986.v7c9a_d15576b_b_).
+# This file is the round-trip fixture task 6.10 pins: an edit that drops
+# or renames one of the eleven key paths named in review-log.md's "Task
+# 0.5" section must fail ArtifactStorageFragmentCascTest.
+aws:
+  awsCredentials:
+    credentialsId: "varroa-artifact-store"
+    region: "us-east-1"
+  s3:
+    container: "spike-bucket"
+    customEndpoint: "minio.example:9000"
+    customSigningRegion: "us-east-1"
+    disableSessionToken: true
+    prefix: "artifacts/core/varroa/cell-a/"
+    useHttp: true
+    usePathStyleUrl: true
+    useTransferAcceleration: false
+unclassified:
+  artifactManager:
+    artifactManagerFactories:
+    - jclouds:
+        provider: "s3"

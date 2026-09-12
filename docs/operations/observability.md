@@ -13,14 +13,21 @@ rotation and clears itself.
 
 ## Use activity history
 
-Choose activity retention in chart values: `off`, `7d`, `30d`, or `90d`. With retention off, history is available only while the serving BFF remains available. Use a retained setting when audit history must survive restarts.
+Activity history needs the [build record store](build-records.md). Set `recordStore.enabled: true` and size `recordStore.retention.activity` (default `30d`) in chart values.
 
 ```bash
 varroactl activity --controller <name>
 varroactl activity --controller <name> --follow
 ```
 
+`varroactl activity` prints a backfill table, then, with `--follow`, streams new events live. Without the record store, the backfill table is always empty: `--follow` still shows events published after you start watching, but no history from before that moment. Enable the record store to get history back.
+
 The activity feed records lifecycle and audit events. It is not a substitute for Jenkins build logs. Use `varroactl logs <namespace>/<name> --follow` for controller logs.
+
+Two [cell](cells.md) pipelines events appear in the feed: `build.interrupted`, when the recorder
+marks a run interrupted, and `build.scheduled.backstop`, when the backstop scheduler fires a
+missed cron build. The recorder writes both directly to the store, so a live subscriber sees
+either event only on its next backfill, never on the live stream.
 
 ## Read brood health
 
@@ -42,7 +49,7 @@ Every element is a reported fact. The card holds no history: use the activity fe
 |---|---|
 | Metrics return `401` | Scraper bearer token and chart value. |
 | Metrics cannot connect | NetworkPolicy and ServiceMonitor or scrape target. |
-| Activity history is missing | Retention setting and BFF availability. |
+| Activity history is missing | `recordStore.enabled` and `VARROA_RECORDSTORE_DSN` on the BFF. |
 | Plugin inventory is incomplete | [Update Center](update-center.md) readiness and version profiles. |
 | `varroa.bus.connected` is 0 | NATS availability, then [Troubleshooting](troubleshooting.md) for credential rotation. |
 | A controller reads `never seen` | Mite registration and gateway connectivity for that controller. |

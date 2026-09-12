@@ -1,0 +1,9 @@
+items:
+  - kind: folder
+    name: folder-kubernetes-clouds
+    displayName: "Folder with Permitted Kubernetes Clouds"
+    description: "Folder restricted to one kubernetes cloud"
+    properties:
+      - kubernetes:
+          permittedClouds:
+            - team-a

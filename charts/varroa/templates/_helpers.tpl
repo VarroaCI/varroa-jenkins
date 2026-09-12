@@ -47,10 +47,20 @@ generates everything fresh.
   {{- $secretName := printf "%s-nats-creds" $.Release.Name -}}
   {{- $existing := lookup "v1" "Secret" $.Release.Namespace $secretName -}}
   {{- if $existing -}}
+    {{- /*
+      recorder-password is new. A release from before this change stores no
+      such key, so `index` would return an empty string. Reuse the stored
+      value when present, and generate one only the first time it appears.
+    */ -}}
+    {{- $recorderPass := randAlphaNum 32 -}}
+    {{- if hasKey $existing.data "recorder-password" -}}
+      {{- $recorderPass = index $existing.data "recorder-password" | b64dec -}}
+    {{- end -}}
     {{- $_ := set $ "natsCreds" (dict
           "operator" (index $existing.data "operator-password" | b64dec)
           "gateway"  (index $existing.data "gateway-password"  | b64dec)
           "bff"      (index $existing.data "bff-password"       | b64dec)
+          "recorder" $recorderPass
           "caCert"   (index $existing.data "ca.crt"   | b64dec)
           "caKey"    (index $existing.data "ca.key"   | b64dec)
           "tlsCert"  (index $existing.data "tls.crt"  | b64dec)
@@ -71,6 +81,7 @@ generates everything fresh.
           "operator" (randAlphaNum 32)
           "gateway"  (randAlphaNum 32)
           "bff"      (randAlphaNum 32)
+          "recorder" (randAlphaNum 32)
           "caCert"   $ca.Cert
           "caKey"    $ca.Key
           "tlsCert"  $cert.Cert
@@ -82,10 +93,114 @@ generates everything fresh.
 {{- define "varroa.nats.operatorPassword" -}}{{- include "varroa.nats.creds" $ -}}{{- $.natsCreds.operator -}}{{- end -}}
 {{- define "varroa.nats.gatewayPassword" -}}{{- include "varroa.nats.creds" $ -}}{{- $.natsCreds.gateway -}}{{- end -}}
 {{- define "varroa.nats.bffPassword"     -}}{{- include "varroa.nats.creds" $ -}}{{- $.natsCreds.bff     -}}{{- end -}}
+{{- define "varroa.nats.recorderPassword" -}}{{- include "varroa.nats.creds" $ -}}{{- $.natsCreds.recorder -}}{{- end -}}
 {{- define "varroa.nats.caCert"          -}}{{- include "varroa.nats.creds" $ -}}{{- $.natsCreds.caCert  -}}{{- end -}}
 {{- define "varroa.nats.caKey"           -}}{{- include "varroa.nats.creds" $ -}}{{- $.natsCreds.caKey   -}}{{- end -}}
 {{- define "varroa.nats.tlsCert"         -}}{{- include "varroa.nats.creds" $ -}}{{- $.natsCreds.tlsCert -}}{{- end -}}
 {{- define "varroa.nats.tlsKey"          -}}{{- include "varroa.nats.creds" $ -}}{{- $.natsCreds.tlsKey  -}}{{- end -}}
+
+{{/*
+Record-store Postgres role password — stable-lookup, mirroring
+varroa.nats.creds. Generates once per install and reuses the stored value
+across an upgrade, so the recorder and client roles never lose access to
+an existing database.
+Usage: {{ include "varroa.recordStore.password" (dict "root" $ "role" "recorder") }}
+*/}}
+{{- define "varroa.recordStore.password" -}}
+{{- $root := .root -}}
+{{- $role := .role -}}
+{{- $cacheKey := printf "recordStorePassword_%s" $role -}}
+{{- if not (hasKey $root $cacheKey) -}}
+  {{- $secretName := printf "varroa-recordstore-%s" $role -}}
+  {{- $existing := lookup "v1" "Secret" $root.Release.Namespace $secretName -}}
+  {{- if $existing -}}
+    {{- $_ := set $root $cacheKey (index $existing.data "password" | b64dec) -}}
+  {{- else -}}
+    {{- $_ := set $root $cacheKey (randAlphaNum 32) -}}
+  {{- end -}}
+{{- end -}}
+{{- index $root $cacheKey -}}
+{{- end -}}
+
+{{/*
+Record-store Postgres DSN secretKeyRef name, for role "recorder" or
+"client". cnpg mode uses the chart's own role Secret. External mode
+points every role at the operator's single existingSecret.
+Usage: {{ include "varroa.recordStore.dsnSecretName" (dict "root" $ "role" "recorder") }}
+*/}}
+{{- define "varroa.recordStore.dsnSecretName" -}}
+{{- if eq .root.Values.recordStore.postgres.mode "external" -}}
+{{- .root.Values.recordStore.postgres.external.existingSecret -}}
+{{- else -}}
+{{- printf "varroa-recordstore-%s" .role -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Record-store Postgres DSN secretKeyRef key, mirroring
+varroa.recordStore.dsnSecretName's mode split.
+Usage: {{ include "varroa.recordStore.dsnSecretKey" $ }}
+*/}}
+{{- define "varroa.recordStore.dsnSecretKey" -}}
+{{- if eq .Values.recordStore.postgres.mode "external" -}}
+{{- .Values.recordStore.postgres.external.dsnKey -}}
+{{- else -}}
+dsn
+{{- end -}}
+{{- end -}}
+
+{{/*
+Record-store Postgres egress rule body, shared by the recorder, bff, and
+gateway NetworkPolicy blocks. An empty cidrs list selects the in-cluster
+CNPG pods in cnpg mode, and fails the render in external mode because no
+selector can stand in for a pinned endpoint.
+Usage: {{ include "varroa.np.recordStorePostgresEgress" $ | nindent 4 }}
+*/}}
+{{- define "varroa.np.recordStorePostgresEgress" -}}
+{{- $toggle := .Values.networkPolicy.recordStorePostgresEgress -}}
+{{- if $toggle.enabled -}}
+- to:
+{{- if $toggle.cidrs }}
+{{- range $toggle.cidrs }}
+  - ipBlock:
+      cidr: {{ . }}
+{{- end }}
+{{- else if eq .Values.recordStore.postgres.mode "external" -}}
+{{- fail "networkPolicy.recordStorePostgresEgress.cidrs must be set when recordStore.postgres.mode is \"external\" — pin the Postgres endpoint." -}}
+{{- else }}
+  - podSelector:
+      matchLabels:
+        cnpg.io/cluster: varroa-recordstore
+{{- end }}
+  ports:
+{{- range $toggle.ports }}
+  - protocol: TCP
+    port: {{ . }}
+{{- end }}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Record-store blob egress rule body, shared by the recorder, bff, and
+gateway NetworkPolicy blocks. Renders nothing in postgres blob mode,
+because that path needs no external egress.
+Usage: {{ include "varroa.np.recordStoreBlobEgress" $ | nindent 4 }}
+*/}}
+{{- define "varroa.np.recordStoreBlobEgress" -}}
+{{- $toggle := .Values.networkPolicy.recordStoreBlobEgress -}}
+{{- if and $toggle.enabled (ne .Values.recordStore.blobs.mode "postgres") -}}
+- to:
+{{- range $toggle.cidrs }}
+  - ipBlock:
+      cidr: {{ . }}
+{{- end }}
+  ports:
+{{- range $toggle.ports }}
+  - protocol: TCP
+    port: {{ . }}
+{{- end }}
+{{- end -}}
+{{- end -}}
 
 {{/*
 Pod placement (nodeSelector/tolerations/affinity) for a component.

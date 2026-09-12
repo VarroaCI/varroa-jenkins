@@ -100,6 +100,16 @@ func (a *Authorizer) CanApproveDeletion(claims *auth.Claims, namespace, name str
 	return hasVerb(a.resolver.EffectiveAPICapabilities(claims, namespace, name), "controllers", "approve-deletion")
 }
 
+// CanBreakGlass checks if the caller can request a break-glass grant on a controller.
+// The verb is distinct from every other controllers verb: it grants and is granted
+// independently of approve-restart, approve-deletion, and every other action.
+func (a *Authorizer) CanBreakGlass(claims *auth.Claims, namespace, name string) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.resolver.EffectiveAPICapabilities(claims, namespace, name), "controllers", "break-glass")
+}
+
 // CanManageController checks if the caller can manage a controller (power, restart, reprovision, ingress).
 func (a *Authorizer) CanManageController(claims *auth.Claims, namespace, name string) bool {
 	if claims == nil {
@@ -279,6 +289,40 @@ func (a *Authorizer) CanDeleteVersionProfile(claims *auth.Claims) bool {
 	return hasVerb(a.globalEffective(claims), "version-profiles", "delete")
 }
 
+// CanReadRunners checks if the caller can read Runners. Runner is
+// cluster-scoped, so the check honors only cluster-wide (nil-scope)
+// bindings, matching CanReadJenkinsRoles.
+func (a *Authorizer) CanReadRunners(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "runners", "read")
+}
+
+// CanCreateRunners checks if the caller can create Runners.
+func (a *Authorizer) CanCreateRunners(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "runners", "create")
+}
+
+// CanUpdateRunners checks if the caller can update Runners.
+func (a *Authorizer) CanUpdateRunners(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "runners", "update")
+}
+
+// CanDeleteRunners checks if the caller can delete Runners.
+func (a *Authorizer) CanDeleteRunners(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "runners", "delete")
+}
+
 // CanReadCatalogSources checks if the caller can read CatalogSources.
 func (a *Authorizer) CanReadCatalogSources(claims *auth.Claims) bool {
 	if claims == nil {
@@ -393,8 +437,14 @@ func (a *Authorizer) CanReadActivityEvent(claims *auth.Claims, e activity.Event)
 
 // EffectivePermissions returns the caller's scope-partitioned capabilities for
 // /me/permissions. nil claims honor defaultRead in the Global partition.
+// Tenants is always a non-nil array, and so is each entry's Jobs.
 func (a *Authorizer) EffectivePermissions(claims *auth.Claims) rbac.PermissionScopes {
-	return a.resolver.EffectivePermissionScopes(claims)
+	perms := a.resolver.EffectivePermissionScopes(claims)
+	perms.Tenants = a.resolver.TenantGrants(claims)
+	if perms.Tenants == nil {
+		perms.Tenants = []rbac.TenantCapabilities{}
+	}
+	return perms
 }
 
 // DeployableNamespaces contains the set of namespaces the caller may deploy

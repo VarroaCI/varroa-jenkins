@@ -8,8 +8,11 @@ import (
 	"os"
 	"strings"
 
+	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
+
+	"github.com/varroaci/varroa-jenkins/pkg/client"
 )
 
 // crdNounOpts configures a generic CRD noun family (get/describe/create/edit/delete).
@@ -28,6 +31,18 @@ type crdNounOpts struct {
 	Headers []string
 	// DescribeFrom, when true, registers a "describe" subcommand.
 	DescribeFrom bool
+
+	// List, Get, Create, Patch, and Delete are optional typed callbacks over
+	// the generated client (pkg/client). When a noun supplies one, the
+	// matching verb uses the generated client instead of rawRequest. A noun
+	// that supplies none keeps calling rawRequest. Patch, when supplied,
+	// also registers a "patch" subcommand and routes "edit" through a merge
+	// patch instead of a full-replace PUT.
+	List   func(c *client.ClientWithResponses, cmd *cobra.Command) ([]map[string]any, error)
+	Get    func(c *client.ClientWithResponses, cmd *cobra.Command, name string) (map[string]any, error)
+	Create func(c *client.ClientWithResponses, cmd *cobra.Command, body map[string]any) (map[string]any, error)
+	Patch  func(c *client.ClientWithResponses, cmd *cobra.Command, name string, mergePatch []byte) (map[string]any, error)
+	Delete func(c *client.ClientWithResponses, cmd *cobra.Command, name string) error
 }
 
 // crdNounPath returns the API path for a noun, optionally prefixed with
@@ -111,6 +126,23 @@ func addCRDNoun(v *verbCommands, opts crdNounOpts) {
 		addClusterFlag(editCmd)
 	}
 	v.edit.AddCommand(editCmd)
+
+	// --- patch (only for a noun that supplies the Patch callback) ---
+	if opts.Patch != nil {
+		patchCmd := &cobra.Command{
+			Use:     opts.Noun + " NAME -p JSON",
+			Aliases: opts.Aliases,
+			Short:   fmt.Sprintf("Patch a %s", opts.Noun),
+			Args:    cobra.ExactArgs(1),
+			RunE:    makeRunPatch(opts),
+		}
+		patchCmd.Flags().StringP("patch", "p", "", "JSON merge patch body")
+		_ = patchCmd.MarkFlagRequired("patch")
+		if opts.ClusterScoped {
+			addClusterFlag(patchCmd)
+		}
+		v.patch.AddCommand(patchCmd)
+	}
 
 	// --- delete ---
 	deleteCmd := &cobra.Command{
@@ -217,6 +249,18 @@ func itemName(item map[string]any) string {
 // ---------------------------------------------------------------------------
 
 func listNoun(opts crdNounOpts, cmd *cobra.Command, format string, noHeaders bool) error {
+	if opts.List != nil {
+		c, err := apiClient(cmd)
+		if err != nil {
+			return err
+		}
+		items, err := opts.List(c, cmd)
+		if err != nil {
+			return err
+		}
+		return renderCRDItems(opts, items, format, noHeaders)
+	}
+
 	basePath := crdNounPath(opts, resolveCrdCluster(cmd))
 	url := basePath
 	if opts.Namespaced {
@@ -257,13 +301,19 @@ func listNoun(opts crdNounOpts, cmd *cobra.Command, format string, noHeaders boo
 		return fmt.Errorf("failed to decode list: %w", err)
 	}
 
+	return renderCRDItems(opts, envelope.Items, format, noHeaders)
+}
+
+// renderCRDItems renders a list of items in the requested output format.
+// Both the rawRequest list path and a noun's List callback converge here.
+func renderCRDItems(opts crdNounOpts, items []map[string]any, format string, noHeaders bool) error {
 	switch format {
 	case "json":
-		return printJSON(os.Stdout, envelope.Items)
+		return printJSON(os.Stdout, items)
 	case "yaml":
-		return printYAML(os.Stdout, envelope.Items)
+		return printYAML(os.Stdout, items)
 	case "name":
-		for _, item := range envelope.Items {
+		for _, item := range items {
 			n := itemName(item)
 			if opts.Namespaced {
 				if ns, ok := item["namespace"].(string); ok && ns != "" {
@@ -274,8 +324,8 @@ func listNoun(opts crdNounOpts, cmd *cobra.Command, format string, noHeaders boo
 		}
 		return nil
 	case "table", "wide":
-		rows := make([][]string, 0, len(envelope.Items))
-		for _, item := range envelope.Items {
+		rows := make([][]string, 0, len(items))
+		for _, item := range items {
 			rows = append(rows, opts.Columns(item))
 		}
 		printTable(os.Stdout, opts.Headers, rows, noHeaders)
@@ -292,6 +342,13 @@ func fetchSingle(opts crdNounOpts, cmd *cobra.Command, arg string) (map[string]a
 	ns, name, err := resolveNounArgs(opts, cmd, arg)
 	if err != nil {
 		return nil, err
+	}
+	if opts.Get != nil {
+		c, err := apiClient(cmd)
+		if err != nil {
+			return nil, err
+		}
+		return opts.Get(c, cmd, name)
 	}
 	basePath := crdNounPath(opts, resolveCrdCluster(cmd))
 	url := basePath + "/" + name
@@ -407,6 +464,25 @@ func makeRunCreate(opts crdNounOpts) func(*cobra.Command, []string) error {
 			return fmt.Errorf("failed to parse YAML: %w", err)
 		}
 
+		if opts.Create != nil {
+			c, err := apiClient(cmd)
+			if err != nil {
+				return err
+			}
+			doc, err := opts.Create(c, cmd, body)
+			if err != nil {
+				return err
+			}
+			if doc != nil {
+				b, err := json.Marshal(doc)
+				if err != nil {
+					return err
+				}
+				_, _ = fmt.Fprintln(os.Stdout, string(b))
+			}
+			return nil
+		}
+
 		// Build URL
 		basePath := crdNounPath(opts, resolveCrdCluster(cmd))
 		url := basePath
@@ -445,47 +521,97 @@ func makeRunEdit(opts crdNounOpts) func(*cobra.Command, []string) error {
 		}
 		basePath := crdNounPath(opts, resolveCrdCluster(cmd))
 
-		return editLoop(
-			func() (map[string]any, error) {
-				url := basePath + "/" + name
-				if ns != "" {
-					url = basePath + "/" + ns + "/" + name
-				}
-				httpResp, err := rawRequest(cmd, "GET", url, nil)
+		fetch := func() (map[string]any, error) {
+			if opts.Get != nil {
+				c, err := apiClient(cmd)
 				if err != nil {
 					return nil, err
 				}
-				defer func() { _ = httpResp.Body.Close() }()
-				if httpResp.StatusCode >= 400 {
-					b, _ := io.ReadAll(httpResp.Body)
-					return nil, errFromResponse(b, httpResp.StatusCode)
-				}
-				body, _ := io.ReadAll(httpResp.Body)
-				var doc map[string]any
-				if err := json.Unmarshal(body, &doc); err != nil {
-					return nil, fmt.Errorf("failed to decode: %w", err)
-				}
-				return doc, nil
-			},
-			func(doc map[string]any) error {
-				url := basePath + "/" + name
-				if ns != "" {
-					url = basePath + "/" + ns + "/" + name
-				}
-				jsonBody, _ := json.Marshal(doc)
-				httpResp, err := rawRequest(cmd, "PUT", url, jsonBody)
+				return opts.Get(c, cmd, name)
+			}
+			url := basePath + "/" + name
+			if ns != "" {
+				url = basePath + "/" + ns + "/" + name
+			}
+			httpResp, err := rawRequest(cmd, "GET", url, nil)
+			if err != nil {
+				return nil, err
+			}
+			defer func() { _ = httpResp.Body.Close() }()
+			if httpResp.StatusCode >= 400 {
+				b, _ := io.ReadAll(httpResp.Body)
+				return nil, errFromResponse(b, httpResp.StatusCode)
+			}
+			body, _ := io.ReadAll(httpResp.Body)
+			var doc map[string]any
+			if err := json.Unmarshal(body, &doc); err != nil {
+				return nil, fmt.Errorf("failed to decode: %w", err)
+			}
+			return doc, nil
+		}
+
+		put := func(orig, mod map[string]any) error {
+			if opts.Patch != nil {
+				origJSON, err := json.Marshal(orig)
 				if err != nil {
 					return err
 				}
-				defer func() { _ = httpResp.Body.Close() }()
-				if httpResp.StatusCode >= 400 {
-					b, _ := io.ReadAll(httpResp.Body)
-					return errFromResponse(b, httpResp.StatusCode)
+				modJSON, err := json.Marshal(mod)
+				if err != nil {
+					return err
 				}
-				return nil
-			},
-			opts.Noun, name,
-		)
+				mergePatch, err := jsonpatch.CreateMergePatch(origJSON, modJSON)
+				if err != nil {
+					return err
+				}
+				c, err := apiClient(cmd)
+				if err != nil {
+					return err
+				}
+				_, err = opts.Patch(c, cmd, name, mergePatch)
+				return err
+			}
+
+			url := basePath + "/" + name
+			if ns != "" {
+				url = basePath + "/" + ns + "/" + name
+			}
+			jsonBody, _ := json.Marshal(mod)
+			httpResp, err := rawRequest(cmd, "PUT", url, jsonBody)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = httpResp.Body.Close() }()
+			if httpResp.StatusCode >= 400 {
+				b, _ := io.ReadAll(httpResp.Body)
+				return errFromResponse(b, httpResp.StatusCode)
+			}
+			return nil
+		}
+
+		return editLoop(fetch, put, opts.Noun, name)
+	}
+}
+
+// makeRunPatch builds the RunE for a noun's "patch" subcommand. It is only
+// wired up by addCRDNoun when opts.Patch is non-nil.
+func makeRunPatch(opts crdNounOpts) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		_, name, err := resolveNounArgs(opts, cmd, args[0])
+		if err != nil {
+			return err
+		}
+		patchStr, _ := cmd.Flags().GetString("patch")
+
+		c, err := apiClient(cmd)
+		if err != nil {
+			return err
+		}
+		if _, err := opts.Patch(c, cmd, name, []byte(patchStr)); err != nil {
+			return err
+		}
+		fmt.Printf("%s %q patched\n", opts.Noun, name)
+		return nil
 	}
 }
 
@@ -495,6 +621,19 @@ func makeRunDelete(opts crdNounOpts) func(*cobra.Command, []string) error {
 		if err != nil {
 			return err
 		}
+
+		if opts.Delete != nil {
+			c, err := apiClient(cmd)
+			if err != nil {
+				return err
+			}
+			if err := opts.Delete(c, cmd, name); err != nil {
+				return err
+			}
+			fmt.Printf("%s %q deleted\n", opts.Noun, args[0])
+			return nil
+		}
+
 		basePath := crdNounPath(opts, resolveCrdCluster(cmd))
 		url := basePath + "/" + name
 		if ns != "" {

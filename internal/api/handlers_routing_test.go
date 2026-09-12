@@ -69,6 +69,15 @@ func TestControllerEndpoint(t *testing.T) {
 			},
 			want: "https://varroa.example.com/jenkins/team-a/ci/",
 		},
+		{
+			name: "headless overrides a non-empty status endpoint",
+			cr: &v1alpha1.Controller{
+				ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "team-a"},
+				Spec:       v1alpha1.ControllerSpec{IngressSpec: &v1alpha1.IngressSpec{Host: "x.example.com"}, Headless: true},
+				Status:     v1alpha1.ControllerStatus{Endpoint: "https://from-status.example.com"},
+			},
+			want: "",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -106,6 +115,12 @@ func TestRoutingModeInResponses(t *testing.T) {
 		Spec:       v1alpha1.ControllerSpec{IngressSpec: &v1alpha1.IngressSpec{Host: "ci.example.com"}},
 	}
 	crdstore.MustSeed(client.crdStore, client.controllers["sub-ctrl"])
+	client.controllers["headless-ctrl"] = &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "headless-ctrl", Namespace: "team-a"},
+		Spec:       v1alpha1.ControllerSpec{Headless: true, IngressSpec: &v1alpha1.IngressSpec{Host: "hl.example.com"}},
+		Status:     v1alpha1.ControllerStatus{Endpoint: "https://hl.example.com"},
+	}
+	crdstore.MustSeed(client.crdStore, client.controllers["headless-ctrl"])
 
 	// List: routingMode present and never empty.
 	w := httptest.NewRecorder()
@@ -122,18 +137,30 @@ func TestRoutingModeInResponses(t *testing.T) {
 	}
 	modes := map[string]string{}
 	endpoints := map[string]string{}
+	headless := map[string]bool{}
 	for _, item := range envelope.Items {
 		name, _ := item["name"].(string)
 		mode, _ := item["routingMode"].(string)
 		ep, _ := item["endpoint"].(string)
+		hl, _ := item["headless"].(bool)
 		modes[name] = mode
 		endpoints[name] = ep
+		headless[name] = hl
 	}
 	if modes["path-ctrl"] != "path" || modes["sub-ctrl"] != "subdomain" {
 		t.Errorf("list routingModes = %v, want path-ctrl:path sub-ctrl:subdomain", modes)
 	}
 	if endpoints["path-ctrl"] != "https://varroa.example.com/jenkins/team-a/path-ctrl/" {
 		t.Errorf("path endpoint = %q, want derived path URL with trailing slash", endpoints["path-ctrl"])
+	}
+	if headless["path-ctrl"] || headless["sub-ctrl"] {
+		t.Errorf("list headless = %v, want false for non-headless controllers", headless)
+	}
+	if !headless["headless-ctrl"] {
+		t.Error("list headless = false for headless-ctrl, want true")
+	}
+	if endpoints["headless-ctrl"] != "" {
+		t.Errorf("headless list endpoint = %q, want empty despite a non-empty Status.Endpoint", endpoints["headless-ctrl"])
 	}
 
 	// Detail: routingMode present.
@@ -149,6 +176,27 @@ func TestRoutingModeInResponses(t *testing.T) {
 	}
 	if detail["routingMode"] != "path" {
 		t.Errorf("detail routingMode = %v, want path", detail["routingMode"])
+	}
+	if hl, _ := detail["headless"].(bool); hl {
+		t.Errorf("detail headless = %v, want false for path-ctrl", detail["headless"])
+	}
+
+	// Detail: headless controller reports headless:true and endpoint:"".
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/controllers/team-a/headless-ctrl", nil)
+	srv.handleControllerDetail(w, req.WithContext(contextWithClaims(req.Context(), adminClaims)), "core", "team-a", "headless-ctrl")
+	if w.Code != http.StatusOK {
+		t.Fatalf("headless detail: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var headlessDetail map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &headlessDetail); err != nil {
+		t.Fatalf("decode headless detail: %v", err)
+	}
+	if hl, _ := headlessDetail["headless"].(bool); !hl {
+		t.Errorf("headless detail headless = %v, want true", headlessDetail["headless"])
+	}
+	if headlessDetail["endpoint"] != "" {
+		t.Errorf("headless detail endpoint = %v, want empty despite a non-empty Status.Endpoint", headlessDetail["endpoint"])
 	}
 }
 
@@ -208,6 +256,31 @@ func TestCreateControllerRoutingValidation(t *testing.T) {
 		}
 		if _, err := crdstore.Get[v1alpha1.Controller](context.Background(), client.crdStore, "ci", "team-a"); err != nil {
 			t.Error("controller should have been applied")
+		}
+	})
+
+	t.Run("path mode host mismatch skipped for a headless controller", func(t *testing.T) {
+		srv, client := newRoutingTestServer()
+		srv.deps.DashboardHost = "varroa.example.com"
+		w := postCreateController(t, srv,
+			`{"metadata":{"name":"ci"},"spec":{"headless":true,"ingressSpec":{"host":"other.example.com","mode":"path"}}}`)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201 (headless skips the shared-host check), got %d: %s", w.Code, w.Body.String())
+		}
+		if _, err := crdstore.Get[v1alpha1.Controller](context.Background(), client.crdStore, "ci", "team-a"); err != nil {
+			t.Error("controller should have been applied")
+		}
+	})
+
+	t.Run("invalid mode enum still rejected on a headless controller", func(t *testing.T) {
+		srv, _ := newRoutingTestServer()
+		w := postCreateController(t, srv,
+			`{"metadata":{"name":"ci"},"spec":{"headless":true,"ingressSpec":{"host":"x.example.com","mode":"proxy"}}}`)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 (rule 1 still fires), got %d: %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "ingressSpec.mode") {
+			t.Errorf("error body should name the rule, got %s", w.Body.String())
 		}
 	})
 
@@ -272,6 +345,30 @@ func TestUpdateControllerRoutingValidation(t *testing.T) {
 		w := patchController(t, srv, `{"spec":{"ingressSpec":{"mode":"subdomain","annotations":{"nginx.ingress.kubernetes.io/rewrite-target":"/"}}}}`)
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	// A headless controller adds no BFF-side bypass on the update path: the
+	// mode-changing patch below still reaches the bus verbatim, so the
+	// operator's mode-immutability rejection (rule 2, enforced there, not
+	// here) stays reachable exactly as it is for a non-headless controller.
+	t.Run("mode change on a headless controller still reaches the bus unchanged", func(t *testing.T) {
+		srv, client := newRoutingTestServer()
+		client.controllers["ci"] = &v1alpha1.Controller{
+			ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "team-a"},
+			Spec:       v1alpha1.ControllerSpec{Headless: true, IngressSpec: &v1alpha1.IngressSpec{Host: "ci.example.com", Mode: ""}},
+		}
+		crdstore.MustSeed(client.crdStore, client.controllers["ci"])
+		w := patchController(t, srv, `{"spec":{"ingressSpec":{"mode":"path"}}}`)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 (the fake bus applies any patch; only the real operator enforces rule 2), got %d: %s", w.Code, w.Body.String())
+		}
+		fb, ok := srv.deps.Brood.(*fakeBrood)
+		if !ok {
+			t.Fatal("expected *fakeBrood")
+		}
+		if !strings.Contains(string(fb.updatePatch), `"mode":"path"`) {
+			t.Errorf("update patch = %s, want the mode change forwarded verbatim", fb.updatePatch)
 		}
 	})
 }

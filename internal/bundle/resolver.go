@@ -52,6 +52,41 @@ type MaterializedBundle struct {
 	// variable substitution. PluginsYAML may be mutated in place by
 	// ResolveVars; this field never is.
 	RawPluginsYAML string
+
+	// CellCloudCredentials are a cell's SYSTEM-scope tenant-cloud
+	// credentials (design D8, D11). The caller that builds the desired-
+	// state command injects them into JcascYaml itself. No code path
+	// that writes a ConfigMap from MaterializedBundle reads this field,
+	// so a secret value carried here never enters a ConfigMap.
+	CellCloudCredentials []CellCloudCredential
+
+	// PipelineTemplatesYAML holds the templates the bundle's
+	// pipeline-template inputs carry, in input order. It is never subject
+	// to ResolveVars: a template body holds its own ${...} text that is
+	// not a catalog variable.
+	PipelineTemplatesYAML string
+
+	// CellTemplateFragments holds one placed tenant's pipeline-templates.yaml
+	// content per entry, for a cell. No entry is ever subject to
+	// ResolveVars, like PipelineTemplatesYAML. The caller merges each
+	// fragment into the final jenkins.yaml after the resolve step.
+	CellTemplateFragments []CellTemplateFragment
+}
+
+// CellTemplateFragment is one placed tenant's pipeline-templates.yaml
+// content, and the folder the operator stamps on every entry it carries. A
+// tenant document has no folder field of its own. The operator is the only
+// writer of folder.
+type CellTemplateFragment struct {
+	Folder        string
+	TemplatesYAML string
+}
+
+// CellCloudCredential is one SYSTEM-scope secret-text credential a cell
+// injects for one tenant's kubernetes cloud (design D11).
+type CellCloudCredential struct {
+	ID     string
+	Secret string
 }
 
 // Resolver orchestrates git clone → validate → variable resolution.

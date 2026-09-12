@@ -33,6 +33,10 @@ func NewRouter(deps *Dependencies) http.Handler {
 	// Teams list/create (admin) + detail dispatch (get/update/delete).
 	mux.HandleFunc("/teams", srv.HandleTeams)
 	mux.HandleFunc("/teams/", srv.HandleTeamDispatch)
+	// Runners: external agent registration (list/create) + detail dispatch
+	// (get/patch/delete). Runner is cluster-scoped, so no namespace segment.
+	mux.HandleFunc("/runners", srv.HandleRunners)
+	mux.HandleFunc("/runners/", srv.HandleRunnerDispatch)
 	// Controllers: GET list (creation is declarative via the Kubernetes API).
 	mux.HandleFunc("/controllers", srv.HandleControllers)
 	// Clusters: GET list, + cluster-scoped dispatch.
@@ -81,6 +85,22 @@ func NewRouter(deps *Dependencies) http.Handler {
 	// Upgrade tracking: clusterless ProfileCandidate list/get/promote.
 	mux.HandleFunc("/version-candidates", srv.HandleVersionCandidates)
 	mux.HandleFunc("/version-candidates/", srv.HandleVersionCandidateDispatch)
+
+	// Pipelines: team-scoped job listing, job detail, run list/create.
+	mux.HandleFunc("GET /pipelines/{team}", srv.handleListPipelines)
+	mux.HandleFunc("GET /pipelines/{team}/jobs/{job}", srv.handleGetPipelineJob)
+	mux.HandleFunc("GET /pipelines/{team}/jobs/{job}/runs", srv.handleListRuns)
+	mux.HandleFunc("POST /pipelines/{team}/jobs/{job}/runs", srv.handleCreateRun)
+	mux.HandleFunc("POST /pipelines/{team}/markers/validate", srv.handleValidatePipelineMarker)
+	// Runs: detail, log stream, artifacts, tests, changes, cancel, rerun.
+	mux.HandleFunc("GET /runs/{run}", srv.handleGetRun)
+	mux.HandleFunc("GET /runs/{run}/log", srv.handleStreamRunLog)
+	mux.HandleFunc("GET /runs/{run}/artifacts", srv.handleListRunArtifacts)
+	mux.HandleFunc("GET /runs/{run}/artifacts/{path...}", srv.handleDownloadRunArtifact)
+	mux.HandleFunc("GET /runs/{run}/tests", srv.handleListRunTests)
+	mux.HandleFunc("GET /runs/{run}/changes", srv.handleListRunChanges)
+	mux.HandleFunc("POST /runs/{run}/cancel", srv.handleCancelRun)
+	mux.HandleFunc("POST /runs/{run}/rerun", srv.handleRerunRun)
 
 	return http.StripPrefix("/api/v1", mux)
 }

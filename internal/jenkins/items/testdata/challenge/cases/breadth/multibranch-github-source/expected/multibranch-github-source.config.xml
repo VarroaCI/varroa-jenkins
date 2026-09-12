@@ -10,6 +10,9 @@
           <repoOwner>fake-org</repoOwner>
           <repository>fake-repo</repository>
         </source>
+        <buildStrategies>
+          <jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing plugin="basic-branch-build-strategies"></jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing>
+        </buildStrategies>
       </jenkins.branch.BranchSource>
     </data>
   </sources>

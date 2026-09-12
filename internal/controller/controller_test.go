@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -23,6 +25,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
+	"github.com/varroaci/varroa-jenkins/internal/controller/runners"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/mite"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
@@ -36,29 +39,32 @@ var testKey = []byte("test-key-32-bytes-long-xxxxx")
 
 // testClient is a fake ResourceClient for testing.
 type testClient struct {
-	listProfilesErr      error // when set, ListJenkinsVersionProfileCRDs returns it
-	services             []string
-	serviceAccounts      []string
-	statefulSets         []string
-	secrets              []string
-	ingress              []string
-	configMaps           []string
-	existingConfigMaps   map[string]bool
-	configMapData        map[string]map[string]string       // name -> data
-	configMapOwners      map[string][]metav1.OwnerReference // name -> owner refs
-	configMapLabels      map[string]map[string]string       // name -> labels
-	deleted              []struct{ kind, name string }
-	deletedSecrets       []string
-	statuses             map[string]string
-	oidcUpdateCalls      []struct{ name, namespace, oidcIssuer, loginURL, apikeyVerifyURL, caPEM string }
-	fleetPodLabel        string
-	fleetPodLabelPatches int
-	secretWrites         int
-	cmWrites             int
-	existingSecrets      map[string]map[string][]byte
-	secretAnnotations    map[string]map[string]string // name -> annotations, for host-scoping tests
-	secretAnnotationsErr error                        // injected GetSecretAnnotations failure (fail-closed tests)
-	getSecretCalls       map[string]int               // name -> GetSecret call count
+	listProfilesErr            error // when set, ListJenkinsVersionProfileCRDs returns it
+	services                   []string
+	serviceAccounts            []string
+	statefulSets               []string
+	secrets                    []string
+	ingress                    []string
+	configMaps                 []string
+	existingConfigMaps         map[string]bool
+	configMapData              map[string]map[string]string       // name -> data
+	configMapOwners            map[string][]metav1.OwnerReference // name -> owner refs
+	configMapLabels            map[string]map[string]string       // name -> labels
+	deleted                    []struct{ kind, name string }
+	deleteResourceErr          error // injected DeleteResource failure (non-NotFound)
+	deletedSecrets             []string
+	deletedCellNetworkPolicies []string
+	createdCellNetworkPolicies []CellPolicySpec
+	statuses                   map[string]string
+	oidcUpdateCalls            []struct{ name, namespace, oidcIssuer, loginURL, apikeyVerifyURL, caPEM string }
+	fleetPodLabel              string
+	fleetPodLabelPatches       int
+	secretWrites               int
+	cmWrites                   int
+	existingSecrets            map[string]map[string][]byte
+	secretAnnotations          map[string]map[string]string // name -> annotations, for host-scoping tests
+	secretAnnotationsErr       error                        // injected GetSecretAnnotations failure (fail-closed tests)
+	getSecretCalls             map[string]int               // name -> GetSecret call count
 
 	// hibernation CAS tracking (SetHibernated).
 	hibernatedWrites []struct {
@@ -72,6 +78,7 @@ type testClient struct {
 	users          map[string]*v1alpha1.User
 	passwordClears []string
 	createdSecrets map[string]map[string][]byte
+	secretOwners   map[string]metav1.OwnerReference
 	// scaleCalls records ScaleStatefulSet(name -> last requested replica count).
 	scaleCalls      map[string]int32
 	composedBundles map[string]*v1alpha1.ComposedBundle
@@ -106,11 +113,23 @@ type testClient struct {
 	// patchCount counts PatchControllerStatus calls, so tests can assert a
 	// single patch happened (guarding against a double-patch in one pass).
 	patchCount int
+	// cellStatusPatches records every PatchControllerCellStatus call.
+	cellStatusPatches []cellStatusPatch
 	// stsComputedImages and stsLiveImages back GetStatefulSetImages, and
 	// (via their "mite" entry) the image half of GetStatefulSetContainerSpecs.
 	stsComputedImages map[string]string
 	stsLiveImages     map[string]string
 	stsImagesErr      error
+	// stsJenkinsEnv, stsJenkinsEnvFound, and stsJenkinsEnvErr back
+	// GetStatefulSetJenkinsEnv.
+	stsJenkinsEnv      map[string]string
+	stsJenkinsEnvFound bool
+	stsJenkinsEnvErr   error
+	// stsArtifactSecretHash, stsArtifactSecretHashFound, and
+	// stsArtifactSecretHashErr back GetStatefulSetArtifactSecretHash.
+	stsArtifactSecretHash      string
+	stsArtifactSecretHashFound bool
+	stsArtifactSecretHashErr   error
 	// stsMite* back the resources/pullPolicy/found/err half of
 	// GetStatefulSetContainerSpecs; tests set images and mite fields together.
 	// stsMiteFound defaults to false (no StatefulSet yet); set it true to
@@ -153,6 +172,26 @@ type testClient struct {
 	imagePullSecretCopies []imagePullSecretCopy
 	// imagePullSecretCopyErr, when non-nil, is returned by CopyImagePullSecret.
 	imagePullSecretCopyErr error
+
+	// saTokenSecrets records every CreateServiceAccountTokenSecret call.
+	saTokenSecrets []struct{ name, namespace, serviceAccount string }
+	// agentRBACCalls records every CreateAgentRBAC call.
+	agentRBACCalls []struct{ name, namespace string }
+
+	// labeledSecrets backs ListSecrets: a fixture list of Secrets with their
+	// namespace and labels, filtered by namespace and label selector. Data
+	// and annotations for a returned name are read separately through
+	// existingSecrets/createdSecrets and secretAnnotations, matching how the
+	// real ClientsetClient separates List (data only) from GetSecretAnnotations.
+	labeledSecrets []labeledSecretFixture
+	listSecretsErr error
+}
+
+// labeledSecretFixture is one Secret ListSecrets' fake filters against.
+type labeledSecretFixture struct {
+	name      string
+	namespace string
+	labels    map[string]string
 }
 
 type imagePullSecretCopy struct {
@@ -346,6 +385,11 @@ func (t *testClient) CreateServiceAccount(_ context.Context, name, namespace str
 	return nil
 }
 func (t *testClient) CreateAgentRBAC(_ context.Context, name, namespace string) error {
+	t.agentRBACCalls = append(t.agentRBACCalls, struct{ name, namespace string }{name, namespace})
+	return nil
+}
+func (t *testClient) CreateServiceAccountTokenSecret(_ context.Context, name, namespace, serviceAccount string) error {
+	t.saTokenSecrets = append(t.saTokenSecrets, struct{ name, namespace, serviceAccount string }{name, namespace, serviceAccount})
 	return nil
 }
 func (t *testClient) CreateStatefulSet(_ context.Context, spec StatefulSetSpec) error {
@@ -424,6 +468,19 @@ func (t *testClient) CreateOrUpdateSecret(_ context.Context, name, namespace str
 	t.createdSecrets[name] = data
 	return nil
 }
+func (t *testClient) CreateOrUpdateSecretWithOwner(_ context.Context, name, namespace string, data map[string][]byte, owner metav1.OwnerReference) error {
+	t.secrets = append(t.secrets, name)
+	t.secretWrites++
+	if t.createdSecrets == nil {
+		t.createdSecrets = map[string]map[string][]byte{}
+	}
+	t.createdSecrets[name] = data
+	if t.secretOwners == nil {
+		t.secretOwners = map[string]metav1.OwnerReference{}
+	}
+	t.secretOwners[name] = owner
+	return nil
+}
 func (t *testClient) PatchSecretData(_ context.Context, name, namespace string, data map[string][]byte) error {
 	t.secretWrites++
 	if t.createdSecrets[name] == nil {
@@ -457,7 +514,33 @@ func (t *testClient) GetSecretAnnotations(_ context.Context, name, namespace str
 	return nil, nil
 }
 func (t *testClient) ListSecrets(_ context.Context, namespace, labelSelector string) ([]map[string][]byte, error) {
-	return nil, nil
+	if t.listSecretsErr != nil {
+		return nil, t.listSecretsErr
+	}
+	sel, err := labels.Parse(labelSelector)
+	if err != nil {
+		return nil, err
+	}
+	var out []map[string][]byte
+	for _, fx := range t.labeledSecrets {
+		if fx.namespace != namespace || !sel.Matches(labels.Set(fx.labels)) {
+			continue
+		}
+		data := map[string][]byte{}
+		if d, ok := t.existingSecrets[fx.name]; ok {
+			for k, v := range d {
+				data[k] = v
+			}
+		}
+		if d, ok := t.createdSecrets[fx.name]; ok {
+			for k, v := range d {
+				data[k] = v
+			}
+		}
+		data["_name"] = []byte(fx.name)
+		out = append(out, data)
+	}
+	return out, nil
 }
 func (t *testClient) CopyImagePullSecret(_ context.Context, srcNamespace, dstNamespace, name string) error {
 	t.imagePullSecretCopies = append(t.imagePullSecretCopies, imagePullSecretCopy{src: srcNamespace, dst: dstNamespace, name: name})
@@ -467,11 +550,22 @@ func (t *testClient) CopyImagePullSecret(_ context.Context, srcNamespace, dstNam
 	return nil
 }
 func (t *testClient) DeleteResource(_ context.Context, kind, name, namespace string) error {
+	if t.deleteResourceErr != nil {
+		return t.deleteResourceErr
+	}
 	t.deleted = append(t.deleted, struct{ kind, name string }{kind, name})
 	return nil
 }
 func (t *testClient) DeleteSecret(_ context.Context, name, namespace string) error {
 	t.deletedSecrets = append(t.deletedSecrets, name)
+	return nil
+}
+func (t *testClient) DeleteCellNetworkPolicy(_ context.Context, name, namespace string) error {
+	t.deletedCellNetworkPolicies = append(t.deletedCellNetworkPolicies, name)
+	return nil
+}
+func (t *testClient) CreateCellNetworkPolicy(_ context.Context, spec CellPolicySpec) error {
+	t.createdCellNetworkPolicies = append(t.createdCellNetworkPolicies, spec)
 	return nil
 }
 func (t *testClient) EnsureWakeEndpointSlice(_ context.Context, namespace, serviceName string, podIPs []string, port int32) error {
@@ -511,6 +605,18 @@ func (t *testClient) PatchControllerStatus(_ context.Context, name, namespace st
 	status.DeepCopyInto(cp)
 	t.lastPatchedStatus = cp
 	t.patchCount++
+	return nil
+}
+
+// cellStatusPatch records one PatchControllerCellStatus call.
+type cellStatusPatch struct {
+	name, namespace string
+	cell            *v1alpha1.CellStatus
+}
+
+func (t *testClient) PatchControllerCellStatus(_ context.Context, name, namespace string, cell *v1alpha1.CellStatus) error {
+	cp := cell.DeepCopy()
+	t.cellStatusPatches = append(t.cellStatusPatches, cellStatusPatch{name: name, namespace: namespace, cell: cp})
 	return nil
 }
 
@@ -554,6 +660,12 @@ func (t *testClient) GetStatefulSetRollout(_ context.Context, _, _ string) (Stat
 }
 func (t *testClient) GetStatefulSetImages(_ context.Context, _, _ string) (map[string]string, map[string]string, error) {
 	return t.stsComputedImages, t.stsLiveImages, t.stsImagesErr
+}
+func (t *testClient) GetStatefulSetJenkinsEnv(_ context.Context, _, _ string) (map[string]string, bool, error) {
+	return t.stsJenkinsEnv, t.stsJenkinsEnvFound, t.stsJenkinsEnvErr
+}
+func (t *testClient) GetStatefulSetArtifactSecretHash(_ context.Context, _, _ string) (string, bool, error) {
+	return t.stsArtifactSecretHash, t.stsArtifactSecretHashFound, t.stsArtifactSecretHashErr
 }
 func (t *testClient) GetStatefulSetContainerSpecs(_ context.Context, _, _ string) (computedMiteImage, liveMiteImage string, miteResources, jenkinsResources *corev1.ResourceRequirements, mitePullPolicy string, resourcesSource map[string]string, found bool, err error) {
 	if t.stsImagesErr != nil {
@@ -713,6 +825,28 @@ func TestProvisioningBlocksUntilBundleMaterializes(t *testing.T) {
 	}
 	if resolved == nil || resolved.Status != metav1.ConditionFalse {
 		t.Errorf("BundleResolved condition should be False while waiting, got %+v", resolved)
+	}
+}
+
+// TestProvisioningCellConfigGateCreatesNoStatefulSet is task 5.2's
+// handleProvisioning-level acceptance: a cell whose configuration gate
+// fails (design D6, task 5.1) must never reach the StatefulSet build,
+// unlike evaluateCellReadiness-level tests, which only assert the
+// CellReady condition and the roll rule.
+func TestProvisioningCellConfigGateCreatesNoStatefulSet(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+	// claimGate defaults to "" (not "1"), so cellConfigGateReason returns
+	// RecordStoreUnsupported before any StatefulSet work runs.
+
+	cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
+
+	if err := rec.handleProvisioning(context.Background(), cr); err != nil {
+		t.Fatalf("handleProvisioning: %v", err)
+	}
+	if len(client.statefulSets) != 0 {
+		t.Errorf("a configuration-gated cell must create no StatefulSet, got %v", client.statefulSets)
 	}
 }
 
@@ -1029,6 +1163,38 @@ func TestFinalize(t *testing.T) {
 		if !found {
 			t.Errorf("Finalize did not delete ConfigMap %q; deleted = %+v", want, client.deleted)
 		}
+	}
+}
+
+// Finalize deletes the cell NetworkPolicy by name and succeeds for a cell
+// that never had a PVC (design D1).
+func TestFinalizeCellDeletesNetworkPolicyAndToleratesMissingPVC(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test",
+			Namespace: "ns1",
+			UID:       testUID,
+		},
+		Spec:   v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true}},
+		Status: v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseRunning},
+	}
+
+	if err := rec.Finalize(context.Background(), cr); err != nil {
+		t.Fatalf("Finalize on a cell with no PVC must succeed: %v", err)
+	}
+
+	pre := controllerPrefix(cr)
+	found := false
+	for _, name := range client.deletedCellNetworkPolicies {
+		if name == pre+"-cell" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Finalize did not delete the cell NetworkPolicy %q; deleted = %v", pre+"-cell", client.deletedCellNetworkPolicies)
 	}
 }
 
@@ -1491,6 +1657,18 @@ func TestCreateOrUpdateConfigMapUpdatesOnSecondReconcile(t *testing.T) {
 	}
 }
 
+// mustBuildDesiredStateCommand calls buildDesiredStateCommand with an empty
+// runner contribution, for a test that does not exercise the cell runner
+// paths of design D3/D5, and fails the test on an unexpected error.
+func mustBuildDesiredStateCommand(t *testing.T, rec *Reconciler, cr *v1alpha1.Controller, resolved *bundle.MaterializedBundle) *mitev1.DesiredStateCommand {
+	t.Helper()
+	cmd, err := rec.buildDesiredStateCommand(cr, resolved, runners.RunnerContribution{})
+	if err != nil {
+		t.Fatalf("buildDesiredStateCommand: %v", err)
+	}
+	return cmd
+}
+
 // --- Task 7: buildDesiredStateCommand tests ---
 
 func TestBuildDesiredStateCommandIncludesJcascYaml(t *testing.T) {
@@ -1508,7 +1686,7 @@ func TestBuildDesiredStateCommandIncludesJcascYaml(t *testing.T) {
 		},
 	}
 
-	cmd := rec.buildDesiredStateCommand(cr, resolved)
+	cmd := mustBuildDesiredStateCommand(t, rec, cr, resolved)
 
 	// stripAuthorizationStrategy parses and re-marshals; Varroa also injects
 	// projectNamingStrategy. Compare semantic content rather than raw bytes.
@@ -1552,7 +1730,7 @@ func TestBuildDesiredStateCommandNilBundleYieldsEmptyJcascYaml(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"},
 	}
 
-	cmd := rec.buildDesiredStateCommand(cr, nil)
+	cmd := mustBuildDesiredStateCommand(t, rec, cr, nil)
 
 	if cmd.JcascYaml != "" {
 		t.Errorf("expected empty JcascYaml when no bundle, got %q", cmd.JcascYaml)
@@ -1571,7 +1749,7 @@ func TestBuildDesiredStateCommandAlwaysSetsReload(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"},
 	}
 
-	cmd := rec.buildDesiredStateCommand(cr, nil)
+	cmd := mustBuildDesiredStateCommand(t, rec, cr, nil)
 
 	if !cmd.Reload {
 		t.Error("buildDesiredStateCommand must always set Reload=true (config push goes through reload, not admin apply)")
@@ -1591,7 +1769,7 @@ func TestBuildDesiredStateCommandIncludesItemsYaml(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"},
 	}
 
-	cmd := rec.buildDesiredStateCommand(cr, resolved)
+	cmd := mustBuildDesiredStateCommand(t, rec, cr, resolved)
 
 	if cmd.ItemsYaml != resolved.ItemsYAML {
 		t.Errorf("expected ItemsYaml %q, got %q", resolved.ItemsYAML, cmd.ItemsYaml)
@@ -1611,11 +1789,11 @@ func TestBuildDesiredStateCommandHashIncludesItems(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"},
 	}
 
-	cmd1 := rec.buildDesiredStateCommand(cr, resolved)
+	cmd1 := mustBuildDesiredStateCommand(t, rec, cr, resolved)
 	hash1 := cmd1.DesiredStateHash
 
 	resolved.ItemsYAML = "items:\n  - kind: folder\n    name: b"
-	cmd2 := rec.buildDesiredStateCommand(cr, resolved)
+	cmd2 := mustBuildDesiredStateCommand(t, rec, cr, resolved)
 	hash2 := cmd2.DesiredStateHash
 
 	if hash1 == hash2 {
@@ -1634,10 +1812,180 @@ func TestBuildDesiredStateCommandDeadlineDefault(t *testing.T) {
 		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected},
 	}
 
-	cmd := rec.buildDesiredStateCommand(cr, nil)
+	cmd := mustBuildDesiredStateCommand(t, rec, cr, nil)
 
 	if cmd.CommandDeadlineSec != 0 {
 		t.Errorf("expected CommandDeadlineSec=0, got %d", cmd.CommandDeadlineSec)
+	}
+}
+
+// --- Task 4.4/5.3/5.4: runner node and credential injection tests ---
+
+func cellController() *v1alpha1.Controller {
+	return &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "cell-a", Namespace: "ns"},
+		Spec:       v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true}},
+	}
+}
+
+func fakeRunnerNode(name string) any {
+	return map[string]any{
+		"permanent": map[string]any{
+			"name":   name,
+			"labels": "varroa-tenant-payments payments-runner",
+		},
+	}
+}
+
+func fakeRunnerCredential(id, privateKey string) any {
+	return map[string]any{
+		"basicSSHUserPrivateKey": map[string]any{
+			"scope":    "SYSTEM",
+			"id":       id,
+			"username": "jenkins",
+			"privateKeySource": map[string]any{
+				"directEntry": map[string]any{"privateKey": privateKey},
+			},
+		},
+	}
+}
+
+// TestBuildDesiredStateCommand_RunnerNodesInjectedForCellOnly is task 4.4's
+// acceptance: the pushed JcascYaml carries the nodes, and the resolved
+// bundle's own JenkinsYAML — the string the ConfigMap write uses — does
+// not.
+func TestBuildDesiredStateCommand_RunnerNodesInjectedForCellOnly(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+
+	cr := cellController()
+	resolved := &bundle.MaterializedBundle{JenkinsYAML: "jenkins:\n  systemMessage: hello"}
+	originalYAML := resolved.JenkinsYAML
+
+	contrib := runners.RunnerContribution{Nodes: []any{fakeRunnerNode("payments-win-1")}}
+
+	cmd, err := rec.buildDesiredStateCommand(cr, resolved, contrib)
+	if err != nil {
+		t.Fatalf("buildDesiredStateCommand: %v", err)
+	}
+	if !strings.Contains(cmd.JcascYaml, "payments-win-1") {
+		t.Errorf("JcascYaml does not carry the runner node: %s", cmd.JcascYaml)
+	}
+	if resolved.JenkinsYAML != originalYAML {
+		t.Errorf("resolved.JenkinsYAML (the ConfigMap content) was mutated: %s", resolved.JenkinsYAML)
+	}
+	if strings.Contains(resolved.JenkinsYAML, "payments-win-1") {
+		t.Error("resolved.JenkinsYAML (the ConfigMap content) must not carry a runner node")
+	}
+}
+
+// TestBuildDesiredStateCommand_NonCellIgnoresRunnerContribution proves a
+// non-cell controller never injects a runner node even when contrib
+// carries one.
+func TestBuildDesiredStateCommand_NonCellIgnoresRunnerContribution(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+
+	cr := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"}}
+	resolved := &bundle.MaterializedBundle{JenkinsYAML: "jenkins:\n  systemMessage: hello"}
+	contrib := runners.RunnerContribution{Nodes: []any{fakeRunnerNode("payments-win-1")}}
+
+	cmd, err := rec.buildDesiredStateCommand(cr, resolved, contrib)
+	if err != nil {
+		t.Fatalf("buildDesiredStateCommand: %v", err)
+	}
+	if strings.Contains(cmd.JcascYaml, "payments-win-1") {
+		t.Error("a non-cell controller must not receive a runner node")
+	}
+}
+
+// TestBuildDesiredStateCommand_RunnerNodeCollisionFailsAssembly is task
+// 4.4's collision acceptance.
+func TestBuildDesiredStateCommand_RunnerNodeCollisionFailsAssembly(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+
+	cr := cellController()
+	resolved := &bundle.MaterializedBundle{
+		JenkinsYAML: "jenkins:\n  nodes:\n    - permanent:\n        name: \"payments-win-1\"\n",
+	}
+	contrib := runners.RunnerContribution{Nodes: []any{fakeRunnerNode("payments-win-1")}}
+
+	cmd, err := rec.buildDesiredStateCommand(cr, resolved, contrib)
+	if err == nil {
+		t.Fatalf("expected a collision error, got a command: %+v", cmd)
+	}
+	if !strings.Contains(err.Error(), "payments-win-1") {
+		t.Errorf("error %q does not name the colliding node", err.Error())
+	}
+}
+
+// TestBuildDesiredStateCommand_RunnerCredentialInjectedForCellOnly is task
+// 5.3's acceptance: the private key appears in JcascYaml and in no
+// ConfigMap the reconciler writes (resolved.JenkinsYAML).
+func TestBuildDesiredStateCommand_RunnerCredentialInjectedForCellOnly(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+
+	cr := cellController()
+	resolved := &bundle.MaterializedBundle{JenkinsYAML: "jenkins:\n  systemMessage: hello"}
+	contrib := runners.RunnerContribution{
+		Credentials: []any{fakeRunnerCredential("varroa-runner-win-1", "PEM-SECRET-VALUE")},
+	}
+
+	cmd, err := rec.buildDesiredStateCommand(cr, resolved, contrib)
+	if err != nil {
+		t.Fatalf("buildDesiredStateCommand: %v", err)
+	}
+	if !strings.Contains(cmd.JcascYaml, "PEM-SECRET-VALUE") {
+		t.Error("JcascYaml does not carry the runner private key")
+	}
+	if strings.Contains(resolved.JenkinsYAML, "PEM-SECRET-VALUE") {
+		t.Error("resolved.JenkinsYAML (the ConfigMap content) must not carry a runner private key")
+	}
+}
+
+// TestBuildDesiredStateCommand_RunnerCredentialRotationChangesHashNotStatefulSet
+// is task 5.4's rotation-contract acceptance: a Secret value change changes
+// the desired-state hash, and cr — the sole input the StatefulSet builder
+// reads — is left untouched by either build.
+func TestBuildDesiredStateCommand_RunnerCredentialRotationChangesHashNotStatefulSet(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+
+	cr := cellController()
+	crBefore := cr.DeepCopy()
+
+	contrib1 := runners.RunnerContribution{
+		Credentials: []any{fakeRunnerCredential("varroa-runner-win-1", "OLD-KEY")},
+	}
+	resolved1 := &bundle.MaterializedBundle{JenkinsYAML: "jenkins:\n  systemMessage: hello"}
+	cmd1, err := rec.buildDesiredStateCommand(cr, resolved1, contrib1)
+	if err != nil {
+		t.Fatalf("buildDesiredStateCommand (first): %v", err)
+	}
+
+	contrib2 := runners.RunnerContribution{
+		Credentials: []any{fakeRunnerCredential("varroa-runner-win-1", "ROTATED-KEY")},
+	}
+	resolved2 := &bundle.MaterializedBundle{JenkinsYAML: "jenkins:\n  systemMessage: hello"}
+	cmd2, err := rec.buildDesiredStateCommand(cr, resolved2, contrib2)
+	if err != nil {
+		t.Fatalf("buildDesiredStateCommand (second): %v", err)
+	}
+
+	if cmd1.DesiredStateHash == cmd2.DesiredStateHash {
+		t.Error("rotating the runner credential did not change the desired-state hash")
+	}
+	// buildDesiredStateCommand also sets a RBAC-lockout status condition on
+	// every call (unrelated to runner credentials), so compare only
+	// cr.Spec/cr.ObjectMeta — the fields the StatefulSet builder actually
+	// reads — rather than the whole object.
+	if !reflect.DeepEqual(cr.Spec, crBefore.Spec) {
+		t.Error("cr.Spec — a StatefulSet input — was mutated by credential injection")
+	}
+	if !reflect.DeepEqual(cr.ObjectMeta, crBefore.ObjectMeta) {
+		t.Error("cr.ObjectMeta — a StatefulSet input — was mutated by credential injection")
 	}
 }
 
@@ -1837,7 +2185,7 @@ func TestFleetPodLabelReconciliationInRunningAndConnected(t *testing.T) {
 			name:  "connected",
 			phase: v1alpha1.ControllerPhaseConnected,
 			reconcile: func(r *Reconciler, ctx context.Context, cr *v1alpha1.Controller) error {
-				return r.handleConnected(ctx, cr)
+				return r.handleConnected(ctx, cr, runners.RunnerContribution{})
 			},
 		},
 		{
@@ -1900,7 +2248,7 @@ func TestResolveBundleForController_ReadsConfigMap(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	mat, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err != nil {
 		t.Fatalf("resolveBundleForController: %v", err)
 	}
@@ -1931,7 +2279,7 @@ func TestResolveBundleForController_EndpointUsesUIDService(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	mat, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err != nil {
 		t.Fatalf("resolveBundleForController: %v", err)
 	}
@@ -1962,7 +2310,7 @@ func TestResolveBundleForController_FrontendURL(t *testing.T) {
 		rec.SetVarroaRedirectURL("https://varroa.example.com/callback")
 		cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-		mat, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+		mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 		if err != nil {
 			t.Fatalf("resolveBundleForController: %v", err)
 		}
@@ -1975,7 +2323,7 @@ func TestResolveBundleForController_FrontendURL(t *testing.T) {
 		rec := newTestReconciler(client)
 		cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-		mat, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+		mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 		if err != nil {
 			t.Fatalf("resolveBundleForController: %v", err)
 		}
@@ -2000,7 +2348,7 @@ func TestResolveBundleForController_WaitsOnPending(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	_, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	_, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err == nil {
 		t.Fatal("expected error waiting on Pending bundle")
 	}
@@ -2027,7 +2375,7 @@ func TestResolveBundleForController_CompletenessCheck(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	_, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	_, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err == nil {
 		t.Fatal("expected completeness check error")
 	}
@@ -2055,7 +2403,7 @@ func TestResolveBundleForController_EscapedVarAllowed(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	mat, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err != nil {
 		t.Fatalf("expected no completeness error for ^${} escape, got: %v", err)
 	}
@@ -2086,12 +2434,100 @@ func TestResolveBundleForController_JCascSecretSourceAllowed(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	mat, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err != nil {
 		t.Fatalf("expected no completeness error for ${readFile:...} secret source, got: %v", err)
 	}
 	if !strings.Contains(mat.JenkinsYAML, "${readFile:/run/secrets/ssh-privatekey}") {
 		t.Errorf("expected readFile secret source to be preserved verbatim, got: %q", mat.JenkinsYAML)
+	}
+}
+
+// pipelineTemplatesFixtureYAML is one pipeline-templates.yaml body, in the
+// shape composePipelineTemplates writes: a "go-service" template whose body
+// holds ${env.BRANCH_NAME}, which is a Groovy expression, not a catalog
+// variable.
+const pipelineTemplatesFixtureYAML = `templates:
+  - apiVersion: varroa.dev/v1
+    kind: PipelineTemplate
+    metadata:
+      name: go-service
+    spec:
+      version: 1.0.0
+      parameters:
+        type: object
+        additionalProperties: false
+      jenkinsfile: "pipeline { stages { stage('build') { steps { echo '${env.BRANCH_NAME}' } } } }"
+`
+
+// TestResolveBundleForController_PipelineTemplateBodySurvivesInjection is
+// design D15's first injection-order test: for a single-tenant controller, a
+// template body holding ${env.BRANCH_NAME} survives resolveBundleForController
+// and lands in the rendered jenkins.yaml (design D7).
+func TestResolveBundleForController_PipelineTemplateBodySurvivesInjection(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.configMapData["test-bundle-content"]["pipeline-templates.yaml"] = pipelineTemplatesFixtureYAML
+
+	rec := newTestReconciler(client)
+	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
+
+	mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	if err != nil {
+		t.Fatalf("resolveBundleForController: %v", err)
+	}
+	if !strings.Contains(mat.JenkinsYAML, "${env.BRANCH_NAME}") {
+		t.Errorf("expected the template body to survive injection, got: %s", mat.JenkinsYAML)
+	}
+
+	doc := unmarshalYAMLMap(t, mat.JenkinsYAML)
+	unclassified, _ := doc["unclassified"].(map[string]any)
+	store, _ := unclassified["varroaPipelineTemplates"].(map[string]any)
+	templates, _ := store["templates"].([]any)
+	if len(templates) != 1 {
+		t.Fatalf("expected exactly one delivered template, got %+v", templates)
+	}
+	entry, _ := templates[0].(map[string]any)
+	if entry["name"] != "go-service" {
+		t.Errorf("template name = %v, want go-service", entry["name"])
+	}
+	if entry["folder"] != "" {
+		t.Errorf("expected folder \"\" for a single-tenant controller, got %v", entry["folder"])
+	}
+}
+
+// TestResolveBundleForController_PipelineTemplateBodyNotFlaggedAsUnresolvedVar
+// is C8's owed acceptance test (design D7). findUnresolvedVars must not
+// report the ${env.BRANCH_NAME} Groovy text in
+// pipelineTemplatesFixtureYAML's jenkinsfile body. That text is not an
+// unresolved catalog variable. resolveBundleForController runs the
+// unresolved-variable check before InjectPipelineTemplates. The check never
+// sees a template body. findUnresolvedVars does not recognize and skip
+// template text on its own.
+//
+// A success (err == nil) proves the check passed. The template's
+// ${env.BRANCH_NAME} text was not visible to the check yet at that point.
+// The second half proves the text reaches the final jenkins.yaml under
+// the JCasC literal escape, which the scan skips by design.
+func TestResolveBundleForController_PipelineTemplateBodyNotFlaggedAsUnresolvedVar(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.configMapData["test-bundle-content"]["pipeline-templates.yaml"] = pipelineTemplatesFixtureYAML
+
+	rec := newTestReconciler(client)
+	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
+
+	mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	if err != nil {
+		t.Fatalf("resolveBundleForController reported an unresolved variable from a pipeline template body: %v", err)
+	}
+
+	// The final jenkins.yaml carries the body's ${env.BRANCH_NAME} under
+	// the JCasC literal escape (ruling (mm)), so the scan skips it and
+	// Jenkins receives the plain "${env.BRANCH_NAME}" back.
+	if !strings.Contains(mat.JenkinsYAML, "^${env.BRANCH_NAME}") {
+		t.Fatalf("final jenkins.yaml lacks the escaped template variable:\n%s", mat.JenkinsYAML)
+	}
+	if got := findUnresolvedVars(true, mat.JenkinsYAML); len(got) != 0 {
+		t.Fatalf("findUnresolvedVars on the final jenkins.yaml = %v, want none (the escape hides the body)", got)
 	}
 }
 
@@ -2109,7 +2545,7 @@ func TestResolveBundleForController_KeepsLastGood(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	_, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	_, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err == nil {
 		t.Fatal("expected error for Invalid bundle")
 	}
@@ -2129,7 +2565,7 @@ func TestResolveBundleForController_MissingBundle(t *testing.T) {
 		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected},
 	}
 
-	_, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	_, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err == nil {
 		t.Fatal("expected error for missing ComposedBundle")
 	}
@@ -2147,7 +2583,7 @@ func TestResolveBundleForController_NoContentRef(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	_, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	_, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err == nil {
 		t.Fatal("expected error for missing contentRef")
 	}
@@ -2168,7 +2604,7 @@ func TestResolveBundleForController_MissingConfigMap(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	_, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	_, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err == nil {
 		t.Fatal("expected error for missing ConfigMap")
 	}
@@ -2198,7 +2634,7 @@ func TestResolveBundleForController_OIDCClientSecretUnresolved(t *testing.T) {
 	rec.Resolver.SetOIDCConfig("https://dex.example.com", "varroa", "s3cret")
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	_, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	_, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err == nil {
 		t.Fatal("expected unresolved variables error for varroa_oidc_client_secret")
 	}
@@ -3439,6 +3875,33 @@ func TestPluginInstallRequired(t *testing.T) {
 		}
 		if c.Message != "preexisting" {
 			t.Errorf("expected message to be unchanged, got %q", c.Message)
+		}
+	})
+
+	t.Run("bundle-resolve-recovery-clears-bundle-failed", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		rec := newTestReconcilerWithTokenSigner(client)
+		rec.miteTransport = &captureTransport{}
+
+		cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+		if err := rec.reconcileController(context.Background(), cr); err != nil {
+			t.Fatalf("Provisioning reconcile: %v", err)
+		}
+		content := client.configMapData["test-bundle-content"]
+		delete(client.configMapData, "test-bundle-content")
+		cr.Status.Phase = v1alpha1.ControllerPhaseConnected
+		cr.Status.Conditions = []v1alpha1.ControllerCondition{
+			{Type: v1alpha1.ConditionReady, Status: metav1.ConditionTrue, Reason: "MiteConnected"},
+		}
+		_ = rec.reconcileController(context.Background(), cr)
+		if bf := findCondition(cr.Status.Conditions, v1alpha1.ConditionBundleFailed); bf == nil || bf.Status != metav1.ConditionTrue {
+			t.Fatalf("expected BundleFailed=True while the content ConfigMap is absent, got %+v", bf)
+		}
+
+		client.configMapData["test-bundle-content"] = content
+		_ = rec.reconcileController(context.Background(), cr)
+		if bf := findCondition(cr.Status.Conditions, v1alpha1.ConditionBundleFailed); bf != nil {
+			t.Fatalf("expected BundleFailed to clear once the bundle resolves again, got %+v", bf)
 		}
 	})
 }
@@ -6550,4 +7013,68 @@ func TestPluginDriftCondition(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestEnsureBootstrapToken_PodInstance covers the one-token-per-pod rule:
+// a token minted before any pod adopts the first pod it sees without a
+// re-mint, and a replaced pod gets a fresh token.
+func TestEnsureBootstrapToken_PodInstance(t *testing.T) {
+	ctx := context.Background()
+	validToken, err := mite.NewTokenSigner(testKey).GenerateToken("test", "ns", time.Hour)
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	newController := func(instance string) *v1alpha1.Controller {
+		cr := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns", UID: testUID}}
+		if instance != "" {
+			cr.Status.Cell = &v1alpha1.CellStatus{Instance: instance}
+		}
+		return cr
+	}
+	t.Run("no pod yet keeps the token untouched", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		client.existingSecrets[testPrefix+"-bootstrap"] = map[string][]byte{"token": []byte(validToken)}
+		rec := newTestReconciler(client)
+		if err := rec.ensureBootstrapToken(ctx, newController(""), testPrefix); err != nil {
+			t.Fatal(err)
+		}
+		if client.secretWrites != 0 {
+			t.Fatalf("secret writes = %d, want 0", client.secretWrites)
+		}
+	})
+	t.Run("first pod adopts the existing token", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		client.existingSecrets[testPrefix+"-bootstrap"] = map[string][]byte{"token": []byte(validToken)}
+		rec := newTestReconciler(client)
+		if err := rec.ensureBootstrapToken(ctx, newController("pod-1"), testPrefix); err != nil {
+			t.Fatal(err)
+		}
+		got := client.createdSecrets[testPrefix+"-bootstrap"]
+		if string(got["token"]) != validToken || string(got["instance"]) != "pod-1" {
+			t.Fatalf("secret = %q/%q, want the same token stamped with pod-1", got["token"], got["instance"])
+		}
+	})
+	t.Run("same pod is a no-op", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		client.existingSecrets[testPrefix+"-bootstrap"] = map[string][]byte{"token": []byte(validToken), "instance": []byte("pod-1")}
+		rec := newTestReconciler(client)
+		if err := rec.ensureBootstrapToken(ctx, newController("pod-1"), testPrefix); err != nil {
+			t.Fatal(err)
+		}
+		if client.secretWrites != 0 {
+			t.Fatalf("secret writes = %d, want 0", client.secretWrites)
+		}
+	})
+	t.Run("replaced pod gets a fresh token", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		client.existingSecrets[testPrefix+"-bootstrap"] = map[string][]byte{"token": []byte(validToken), "instance": []byte("pod-1")}
+		rec := newTestReconciler(client)
+		if err := rec.ensureBootstrapToken(ctx, newController("pod-2"), testPrefix); err != nil {
+			t.Fatal(err)
+		}
+		got := client.createdSecrets[testPrefix+"-bootstrap"]
+		if string(got["token"]) == validToken || string(got["token"]) == "" || string(got["instance"]) != "pod-2" {
+			t.Fatalf("secret = %q/%q, want a new token stamped with pod-2", got["token"], got["instance"])
+		}
+	})
 }

@@ -224,6 +224,9 @@ func (f *fakeBroodClient) CreateService(_ context.Context, _, _ string, _ int32,
 }
 func (f *fakeBroodClient) CreateServiceAccount(_ context.Context, _, _ string) error { return nil }
 func (f *fakeBroodClient) CreateAgentRBAC(_ context.Context, _, _ string) error      { return nil }
+func (f *fakeBroodClient) CreateServiceAccountTokenSecret(_ context.Context, _, _, _ string) error {
+	return nil
+}
 func (f *fakeBroodClient) CreateStatefulSet(_ context.Context, _ controller.StatefulSetSpec) error {
 	return nil
 }
@@ -244,6 +247,9 @@ func (f *fakeBroodClient) GetStatefulSetRollout(_ context.Context, _, _ string) 
 }
 func (f *fakeBroodClient) GetStatefulSetImages(_ context.Context, _, _ string) (map[string]string, map[string]string, error) {
 	return nil, nil, nil
+}
+func (f *fakeBroodClient) GetStatefulSetJenkinsEnv(_ context.Context, _, _ string) (map[string]string, bool, error) {
+	return nil, false, nil
 }
 func (f *fakeBroodClient) GetStatefulSetContainerSpecs(_ context.Context, _, _ string) (string, string, *corev1.ResourceRequirements, *corev1.ResourceRequirements, string, map[string]string, bool, error) {
 	return "", "", nil, nil, "", nil, false, nil
@@ -290,6 +296,12 @@ func (f *fakeBroodClient) UpdateConfigMapData(_ context.Context, _, _ string, _ 
 }
 func (f *fakeBroodClient) DeleteResource(_ context.Context, _, _, _ string) error { return nil }
 func (f *fakeBroodClient) DeleteSecret(_ context.Context, _, _ string) error      { return nil }
+func (f *fakeBroodClient) DeleteCellNetworkPolicy(_ context.Context, _, _ string) error {
+	return nil
+}
+func (f *fakeBroodClient) CreateCellNetworkPolicy(_ context.Context, _ controller.CellPolicySpec) error {
+	return nil
+}
 func (f *fakeBroodClient) EnsureWakeEndpointSlice(_ context.Context, _, _ string, _ []string, _ int32) error {
 	return nil
 }
@@ -314,6 +326,9 @@ func (f *fakeBroodClient) PatchControllerFinalizers(_ context.Context, _, _ stri
 	return nil
 }
 func (f *fakeBroodClient) PatchControllerStatus(_ context.Context, _, _ string, _ *v1alpha1.ControllerStatus) error {
+	return nil
+}
+func (f *fakeBroodClient) PatchControllerCellStatus(_ context.Context, _, _ string, _ *v1alpha1.CellStatus) error {
 	return nil
 }
 func (f *fakeBroodClient) PatchControllerAnnotations(_ context.Context, _, _ string, _ map[string]*string) error {

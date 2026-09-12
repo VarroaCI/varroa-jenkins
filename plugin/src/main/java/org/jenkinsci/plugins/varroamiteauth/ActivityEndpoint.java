@@ -6,13 +6,24 @@ import hudson.model.Executor;
 import hudson.model.Job;
 import hudson.model.Queue;
 import hudson.model.RootAction;
+import hudson.scheduler.CronTab;
+import hudson.scheduler.Hash;
 
 import java.io.StringWriter;
 import hudson.triggers.Trigger;
 import hudson.triggers.TriggerDescriptor;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Calendar;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -36,6 +47,11 @@ import org.springframework.security.core.GrantedAuthority;
  * <p>The response now includes an {@code idle} object with the hibernation gauges
  * (D1): {@code lastHttpActivityUnix}, {@code lastEventUnix}, {@code runningBuilds},
  * {@code queueLength}, and {@code timerTriggerJobs}.
+ *
+ * <p>This class also serves {@code GET /varroa-activity/schedules}, the live job-schedule
+ * export. It requires the same {@code ROLE:varroa:system-mite} authority and reports, for
+ * every job, every trigger's type, specification, time zone, disabled state, and next three
+ * scheduled occurrences, computed with Jenkins's own {@link CronTab}.
  */
 @Extension
 public class ActivityEndpoint implements RootAction {
@@ -45,6 +61,15 @@ public class ActivityEndpoint implements RootAction {
     private static final int DEFAULT_MAX_BATCH = 256;
     private static final int MAX_BATCH_CAP = 1024;
     private static final int MIN_BATCH = 1;
+
+    /** The schedule walk adds no row past this count. */
+    private static final int MAX_SCHEDULE_ROWS = 5000;
+
+    /** The schedule walk adds no row once the serialized rows reach this many bytes. */
+    private static final int MAX_SCHEDULE_BYTES = 700 * 1024;
+
+    /** The number of scheduled occurrences the endpoint reports per row. */
+    private static final int OCCURRENCES_PER_ROW = 3;
 
     // ---- Timer-triggered jobs cache (≤5 min lazy recompute) ----
 
@@ -115,6 +140,298 @@ public class ActivityEndpoint implements RootAction {
             } catch (Exception ignored) {
                 // Best-effort error response.
             }
+        }
+    }
+
+    /**
+     * Handles {@code GET /varroa-activity/schedules}. Walks every job, reports one row per
+     * trigger and one {@code none} row per untriggered job, and returns
+     * {@code { "schedules": [...], "total": N, "truncated": B }} as JSON.
+     */
+    public void doSchedules(StaplerRequest2 req, StaplerResponse2 rsp) {
+        try {
+            // Method gate: only GET.
+            if (!"GET".equalsIgnoreCase(req.getMethod())) {
+                rsp.sendError(405, "Method Not Allowed: only GET is served");
+                return; // Coordinator §9.1: return after sendError
+            }
+
+            // AuthZ: require ROLE:varroa:system-mite authority.
+            if (!isMitePrincipal()) {
+                rsp.sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                return; // Coordinator §9.1: return after sendError
+            }
+
+            Jenkins jenkins = Jenkins.getInstanceOrNull();
+            List<JSONObject> candidateRows = buildCandidateRows(jenkins);
+            JSONObject envelope = applyScheduleBounds(candidateRows);
+
+            rsp.setContentType("application/json");
+            rsp.setStatus(200);
+
+            StringWriter writer = new StringWriter();
+            envelope.write(writer);
+            rsp.getWriter().write(writer.toString());
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "ActivityEndpoint.doSchedules caught exception", e);
+            try {
+                rsp.sendError(500, "Internal server error");
+            } catch (Exception ignored) {
+                // Best-effort error response.
+            }
+        }
+    }
+
+    // ---- Job-schedule export (D8) ----
+
+    /**
+     * Walks every job in the instance and builds one candidate row per trigger, plus one
+     * {@code none} row for a job with no trigger. Package-private for testing.
+     */
+    static List<JSONObject> buildCandidateRows(Jenkins jenkins) {
+        List<JSONObject> rows = new ArrayList<>();
+        if (jenkins == null) {
+            return rows;
+        }
+        for (Job<?, ?> job : jenkins.getAllItems(Job.class)) {
+            boolean disabled = isDisabledByReflection(job);
+            List<Trigger<?>> triggers = getTriggersByReflection(job);
+            if (triggers.isEmpty()) {
+                rows.add(buildScheduleRow(job.getFullName(), "none", "", "", disabled,
+                        Collections.emptyList()));
+            } else {
+                for (Trigger<?> trigger : triggers) {
+                    rows.add(buildTriggerRow(job, trigger, disabled));
+                }
+            }
+        }
+        return rows;
+    }
+
+    /**
+     * Builds the row for one job's trigger: maps the trigger type, splits the {@code TZ=}
+     * line out of the specification, and computes the occurrences for a {@code cron} or
+     * {@code scm-poll} row.
+     */
+    static JSONObject buildTriggerRow(Job<?, ?> job, Trigger<?> trigger, boolean disabled) {
+        String jobPath = job.getFullName();
+        String triggerType = mapTriggerType(trigger.getClass().getSimpleName());
+        String rawSpec = trigger.getSpec();
+        String[] specAndZone = splitTimezone(rawSpec == null ? "" : rawSpec);
+        String spec = specAndZone[0];
+        String timezone = specAndZone[1];
+
+        List<String> occurrences = Collections.emptyList();
+        if ("cron".equals(triggerType) || "scm-poll".equals(triggerType)) {
+            occurrences = computeOccurrences(spec, jobPath, timezone, null);
+        }
+        if (trigger instanceof VarroaUpstreamTrigger) {
+            VarroaUpstreamTrigger upstream = (VarroaUpstreamTrigger) trigger;
+            return buildScheduleRow(jobPath, triggerType, spec, timezone, disabled, occurrences,
+                    upstream.getTenant(), upstream.getJob(), upstream.getResult());
+        }
+        return buildScheduleRow(jobPath, triggerType, spec, timezone, disabled, occurrences);
+    }
+
+    /**
+     * Maps a trigger's simple class name to the exported trigger type. Any class this table
+     * does not name maps to {@code other}. {@code none} is not a trigger class and is never
+     * produced by this method.
+     */
+    static String mapTriggerType(String simpleClassName) {
+        switch (simpleClassName) {
+            case "TimerTrigger":
+                return "cron";
+            case "SCMTrigger":
+                return "scm-poll";
+            case "ReverseBuildTrigger":
+                return "upstream";
+            case "VarroaUpstreamTrigger":
+                return "varroa-upstream";
+            default:
+                return "other";
+        }
+    }
+
+    /**
+     * Splits a leading {@code TZ=} line out of a trigger specification. Returns a two-element
+     * array: the remaining specification, and the time zone (empty when no {@code TZ=} line is
+     * present). Mirrors the first-line check in {@code hudson.scheduler.CronTabList.create}.
+     */
+    static String[] splitTimezone(String spec) {
+        if (spec == null || spec.isEmpty()) {
+            return new String[] {"", ""};
+        }
+        String[] lines = spec.split("\\r?\\n", -1);
+        String first = lines[0].trim();
+        if (first.startsWith("TZ=")) {
+            String timezone = first.substring("TZ=".length());
+            String remaining = String.join("\n", Arrays.asList(lines).subList(1, lines.length));
+            return new String[] {remaining, timezone};
+        }
+        return new String[] {spec, ""};
+    }
+
+    /**
+     * Computes the next three occurrences of a cron specification, using Jenkins's own
+     * {@link CronTab}. Builds one {@code CronTab} per specification line, skipping a blank
+     * line and a comment line, exactly as {@code CronTabList.create} does — the caller has
+     * already removed the leading {@code TZ=} line via {@link #splitTimezone}. Every
+     * {@code CronTab} is seeded with {@code Hash.from(jobFullName)}, the seed
+     * {@code Trigger.start} uses, so an {@code H} token resolves to the minute Jenkins fires.
+     *
+     * <p>{@code fixedNow} pins the start instant for a test. Production code passes
+     * {@code null}, which starts from the current time.
+     *
+     * <p>{@code CronTab.ceil} throws an unchecked exception, annotated for no external use,
+     * when a specification line reaches no date within two years. This method catches
+     * {@code RuntimeException} per line and reports whatever occurrences the row already
+     * holds, rather than naming that exception class.
+     */
+    static List<String> computeOccurrences(String specWithoutTz, String jobFullName, String timezone,
+            Instant fixedNow) {
+        List<Instant> candidates = new ArrayList<>();
+        Hash hash = Hash.from(jobFullName);
+        String timezoneArg = (timezone == null || timezone.isEmpty()) ? null : timezone;
+
+        int lineNumber = 0;
+        for (String rawLine : specWithoutTz.split("\\r?\\n", -1)) {
+            lineNumber++;
+            String line = rawLine.trim();
+            if (line.isEmpty() || line.startsWith("#")) {
+                continue; // ignorable line, same as CronTabList.create
+            }
+            try {
+                CronTab tab = new CronTab(line, lineNumber, hash, timezoneArg);
+                TimeZone tabZone = tab.getTimeZone();
+                Calendar seed = tabZone == null ? Calendar.getInstance() : Calendar.getInstance(tabZone);
+                if (fixedNow != null) {
+                    seed.setTimeInMillis(fixedNow.toEpochMilli());
+                }
+                for (int i = 0; i < OCCURRENCES_PER_ROW; i++) {
+                    Calendar candidate = (Calendar) seed.clone();
+                    Calendar result = tab.ceil(candidate); // mutates and returns the same object
+                    candidates.add(result.toInstant());
+                    seed = (Calendar) result.clone();
+                    seed.add(Calendar.MINUTE, 1);
+                }
+            } catch (RuntimeException e) {
+                // A line that reaches no date in two years throws here. Keep whatever
+                // occurrences this row already holds and move to the next line.
+                LOGGER.log(Level.FINE, "ActivityEndpoint: cron line failed for job " + jobFullName, e);
+            }
+        }
+
+        candidates.sort(Comparator.naturalOrder());
+        List<String> result = new ArrayList<>();
+        for (int i = 0; i < candidates.size() && i < OCCURRENCES_PER_ROW; i++) {
+            result.add(DateTimeFormatter.ISO_INSTANT.format(candidates.get(i)));
+        }
+        return result;
+    }
+
+    /**
+     * Applies the row bound and the byte bound to a candidate row list, keeping every row
+     * counted regardless of whether it was kept. Package-private for testing.
+     */
+    static JSONObject applyScheduleBounds(List<JSONObject> candidateRows) {
+        JSONArray kept = new JSONArray();
+        long bytes = 0;
+        int total = 0;
+        boolean truncated = false;
+
+        for (JSONObject row : candidateRows) {
+            total++;
+            if (kept.size() < MAX_SCHEDULE_ROWS && bytes < MAX_SCHEDULE_BYTES) {
+                byte[] encoded = row.toString().getBytes(StandardCharsets.UTF_8);
+                kept.add(row);
+                bytes += encoded.length;
+            } else {
+                truncated = true;
+            }
+        }
+
+        JSONObject envelope = new JSONObject();
+        envelope.put("schedules", kept);
+        envelope.put("total", total);
+        envelope.put("truncated", truncated);
+        return envelope;
+    }
+
+    /**
+     * Builds one schedule row as JSON, field by field, so field names stay pinned to the
+     * schema. Carries no upstream fields.
+     */
+    private static JSONObject buildScheduleRow(String jobPath, String triggerType, String spec,
+            String timezone, boolean disabled, List<String> nextFireTimes) {
+        return buildScheduleRow(jobPath, triggerType, spec, timezone, disabled, nextFireTimes,
+                null, null, null);
+    }
+
+    /**
+     * Builds one schedule row as JSON, field by field, so field names stay pinned to the
+     * schema. {@code upstreamTenant}, {@code upstreamJob}, and {@code upstreamResult} are
+     * omitted when {@code upstreamTenant} is {@code null} (design.md D9: every row but a
+     * {@code varroa-upstream} row carries none of the three).
+     */
+    private static JSONObject buildScheduleRow(String jobPath, String triggerType, String spec,
+            String timezone, boolean disabled, List<String> nextFireTimes,
+            String upstreamTenant, String upstreamJob, String upstreamResult) {
+        JSONObject row = new JSONObject();
+        row.put("jobPath", jobPath);
+        row.put("triggerType", triggerType);
+        row.put("spec", spec);
+        row.put("timezone", timezone);
+        row.put("disabled", disabled);
+        JSONArray occurrences = new JSONArray();
+        occurrences.addAll(nextFireTimes);
+        row.put("nextFireTimes", occurrences);
+        if (upstreamTenant != null) {
+            row.put("upstreamTenant", upstreamTenant);
+            row.put("upstreamJob", upstreamJob);
+            row.put("upstreamResult", upstreamResult);
+        }
+        return row;
+    }
+
+    /**
+     * Reads a job's trigger map by reflection, because {@code Job.getTriggers()} was removed
+     * in Jenkins 2.555.x. Reuses the pattern {@link #hasTriggerByReflection} applies to one
+     * trigger name, generalized to every configured trigger.
+     */
+    @SuppressWarnings("unchecked")
+    private static List<Trigger<?>> getTriggersByReflection(Job<?, ?> job) {
+        List<Trigger<?>> result = new ArrayList<>();
+        try {
+            java.lang.reflect.Method m = job.getClass().getMethod("getTriggers");
+            Object triggers = m.invoke(job);
+            if (triggers instanceof Map) {
+                for (Object value : ((Map<Object, Object>) triggers).values()) {
+                    if (value instanceof Trigger) {
+                        result.add((Trigger<?>) value);
+                    }
+                }
+            }
+        } catch (NoSuchMethodException e) {
+            LOGGER.log(Level.FINE, "ActivityEndpoint: getTriggers() not available on Job", e);
+        } catch (Exception e) {
+            LOGGER.log(Level.FINE, "ActivityEndpoint: reflection error reading job triggers", e);
+        }
+        return result;
+    }
+
+    /**
+     * Reads a job's disabled state by reflection, since {@code isDisabled()} is not declared
+     * on the {@code Job} base class.
+     */
+    private static boolean isDisabledByReflection(Job<?, ?> job) {
+        try {
+            java.lang.reflect.Method m = job.getClass().getMethod("isDisabled");
+            Object result = m.invoke(job);
+            return result instanceof Boolean && (Boolean) result;
+        } catch (Exception e) {
+            LOGGER.log(Level.FINE, "ActivityEndpoint: reflection error reading job disabled state", e);
+            return false;
         }
     }
 

@@ -175,6 +175,15 @@ type stsBuildInputs struct {
 	PluginsConfigMap string
 	PluginsChecksum  string
 	Policy           v1alpha1.ReconciliationPolicy
+	// ArtifactSecretName is the projected per-cell artifact Secret
+	// ("<controller>-artifacts"), or "" when resolveArtifactSecret found no
+	// source Secret. CreateStatefulSet mounts it only when non-empty.
+	ArtifactSecretName string
+	// ArtifactSecretHash is a content hash of ArtifactSecretName's data,
+	// stamped as a pod-template annotation so a rotation changes the
+	// desired-state hash even though the fragment's ${readFile:...}
+	// reference never changes.
+	ArtifactSecretHash string
 }
 
 // buildStatefulSetSpec derives the desired StatefulSet from the CR and its
@@ -304,6 +313,12 @@ func (r *Reconciler) buildStatefulSetSpec(cr *v1alpha1.Controller, class *v1alph
 		Probes:                    probes,
 		ResourceOverlay:           cr.Spec.ResourceOverlay,
 		ResourcesSource:           resourcesSource,
+		ClaimGate:                 r.claimGate,
+		ClaimTimeoutMS:            r.claimTimeoutMS,
+		ArtifactSecretName:        in.ArtifactSecretName,
+		ArtifactSecretHash:        in.ArtifactSecretHash,
+		Cell:                      cr.Spec.Cell != nil && cr.Spec.Cell.Enabled,
+		Headless:                  v1alpha1.IsHeadless(cr),
 	}
 }
 

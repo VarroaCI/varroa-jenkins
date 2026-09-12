@@ -308,6 +308,9 @@ func (f *fakeResourceClient) PatchControllerFinalizers(_ context.Context, name, 
 func (f *fakeResourceClient) PatchControllerStatus(_ context.Context, name, ns string, st *v1alpha1.ControllerStatus) error {
 	return nil
 }
+func (f *fakeResourceClient) PatchControllerCellStatus(_ context.Context, name, ns string, cell *v1alpha1.CellStatus) error {
+	return nil
+}
 func (f *fakeResourceClient) PatchControllerAnnotations(_ context.Context, name, namespace string, ann map[string]*string) error {
 	return nil
 }
@@ -421,6 +424,9 @@ func (f *fakeResourceClient) CreateService(_ context.Context, n, ns string, p in
 }
 func (f *fakeResourceClient) CreateServiceAccount(_ context.Context, n, ns string) error { return nil }
 func (f *fakeResourceClient) CreateAgentRBAC(_ context.Context, n, ns string) error      { return nil }
+func (f *fakeResourceClient) CreateServiceAccountTokenSecret(_ context.Context, n, ns, sa string) error {
+	return nil
+}
 func (f *fakeResourceClient) CreateStatefulSet(_ context.Context, _ controller.StatefulSetSpec) error {
 	return nil
 }
@@ -480,6 +486,12 @@ func (f *fakeResourceClient) CopyImagePullSecret(_ context.Context, _, _, _ stri
 }
 func (f *fakeResourceClient) DeleteResource(_ context.Context, _, _, _ string) error { return nil }
 func (f *fakeResourceClient) DeleteSecret(_ context.Context, _, _ string) error      { return nil }
+func (f *fakeResourceClient) DeleteCellNetworkPolicy(_ context.Context, _, _ string) error {
+	return nil
+}
+func (f *fakeResourceClient) CreateCellNetworkPolicy(_ context.Context, _ controller.CellPolicySpec) error {
+	return nil
+}
 func (f *fakeResourceClient) EnsureWakeEndpointSlice(_ context.Context, _, _ string, _ []string, _ int32) error {
 	return nil
 }
@@ -510,6 +522,9 @@ func (f *fakeResourceClient) GetStatefulSetRollout(_ context.Context, _, _ strin
 }
 func (f *fakeResourceClient) GetStatefulSetImages(_ context.Context, _, _ string) (map[string]string, map[string]string, error) {
 	return nil, nil, nil
+}
+func (f *fakeResourceClient) GetStatefulSetJenkinsEnv(_ context.Context, _, _ string) (map[string]string, bool, error) {
+	return nil, false, nil
 }
 func (f *fakeResourceClient) GetStatefulSetContainerSpecs(_ context.Context, _, _ string) (string, string, *corev1.ResourceRequirements, *corev1.ResourceRequirements, string, map[string]string, bool, error) {
 	return "", "", nil, nil, "", nil, false, nil
@@ -832,6 +847,7 @@ func TestHandleMePermissions_AuthenticatedScopedCaller(t *testing.T) {
 		&fakeInformer{indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
 		&fakeInformer{indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
 		&fakeInformer{indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
+		nil,
 		false, []string{"sub"}, []string{"groups"},
 	)
 
@@ -897,6 +913,104 @@ func TestHandleMePermissions_AuthenticatedScopedCaller(t *testing.T) {
 	}
 	if _, ok := global["controllers"]; ok {
 		t.Error("scoped-only caller must NOT have controllers in global")
+	}
+}
+
+// TestHandleMePermissions_TenantsFieldIsArray proves the HTTP response
+// carries a non-null "tenants" array, and that each entry's "jobs" is a
+// JSON array, for a caller holding a tenant-scoped pipelines grant.
+func TestHandleMePermissions_TenantsFieldIsArray(t *testing.T) {
+	roles := []*v1alpha1.VarroaRole{
+		{ObjectMeta: metav1.ObjectMeta{Name: "reader"}, Spec: v1alpha1.VarroaRoleSpec{
+			APIRules: []v1alpha1.APIRule{{Resources: []string{"pipelines"}, Verbs: []string{"read"}}},
+		}},
+	}
+	bindings := []*v1alpha1.VarroaRoleBinding{
+		{ObjectMeta: metav1.ObjectMeta{Name: "tenant-binding"}, Spec: v1alpha1.VarroaRoleBindingSpec{
+			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "tenant-user"}},
+			RoleRef:  "reader",
+			Scope: &v1alpha1.VarroaRoleBindingScope{
+				Tenants: []v1alpha1.TenantScope{{Name: "team-a", Jobs: []string{"release/*"}}},
+			},
+		}},
+	}
+	teams := []*v1alpha1.Team{
+		{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}, Spec: v1alpha1.TeamSpec{Namespaces: []string{"team-a"}}},
+	}
+
+	roleIdx := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+	for _, r := range roles {
+		_ = roleIdx.Add(r)
+	}
+	bindingIdx := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{rbac.BySubjectIndex: rbac.SubjectIndexFunc})
+	for _, b := range bindings {
+		_ = bindingIdx.Add(b)
+	}
+	teamIdx := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+	for _, tm := range teams {
+		_ = teamIdx.Add(tm)
+	}
+	resolver := rbac.NewResolver(
+		&fakeInformer{indexer: roleIdx},
+		&fakeInformer{indexer: bindingIdx},
+		&fakeInformer{indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
+		&fakeInformer{indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
+		&fakeInformer{indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
+		&fakeInformer{indexer: teamIdx},
+		false, []string{"sub"}, []string{"groups"},
+	)
+
+	client := newFakeResourceClient()
+	deps := &Dependencies{
+		Client:            client,
+		Store:             storeFromFake(client),
+		OperatorNamespace: "test-ns",
+		Logger:            slog.Default(),
+		IdentityConfig:    IdentityConfig{Mode: "local"},
+		Authorizer:        NewAuthorizer(resolver, false),
+	}
+	srv := NewServer(deps)
+
+	req := httptest.NewRequest(http.MethodGet, "/me/permissions", nil)
+	claims := &auth.Claims{Subject: "tenant-user"}
+	req = req.WithContext(contextWithClaims(req.Context(), claims))
+	w := httptest.NewRecorder()
+	srv.handleMePermissions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	tenantsRaw, ok := body["tenants"]
+	if !ok {
+		t.Fatal("response missing 'tenants' key")
+	}
+	tenants, ok := tenantsRaw.([]interface{})
+	if !ok {
+		t.Fatalf("'tenants' is not a JSON array, got %T", tenantsRaw)
+	}
+	if len(tenants) == 0 {
+		t.Fatal("expected at least one tenants entry for the tenant-scoped grant")
+	}
+	entry, ok := tenants[0].(map[string]interface{})
+	if !ok {
+		t.Fatal("tenants entry is not an object")
+	}
+	jobsRaw, ok := entry["jobs"]
+	if !ok {
+		t.Fatal("tenants entry missing 'jobs'")
+	}
+	jobs, ok := jobsRaw.([]interface{})
+	if !ok {
+		t.Fatalf("'jobs' is not a JSON array, got %T", jobsRaw)
+	}
+	if len(jobs) != 1 || jobs[0] != "release/*" {
+		t.Errorf("expected jobs [release/*], got %v", jobs)
 	}
 }
 

@@ -12,9 +12,40 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
+	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore"
+	"github.com/varroaci/varroa-jenkins/internal/transport"
 )
+
+// guardRecordReader is a non-nil recordstore.Reader that no guarded tool
+// calls a method on: run_pipeline only checks the field for nil, so an
+// unimplemented method (the embedded nil interface) never fires.
+type guardRecordReader struct{ recordstore.Reader }
+
+// guardTenantResolver is a fixed-answer api.TenantResolver for
+// run_pipeline: every team resolves to the one write-admitted tenant
+// guardAuthorizer's wildcard grant covers, and folder "" admits any job
+// path.
+type guardTenantResolver struct{ ref api.TenantRef }
+
+func (g *guardTenantResolver) Resolve(_ context.Context, _ *auth.Claims, _ string) ([]api.TenantRef, error) {
+	return []api.TenantRef{g.ref}, nil
+}
+
+func (g *guardTenantResolver) ResolveRun(_ context.Context, _ *auth.Claims, _ recordstore.Run) (api.TenantRef, error) {
+	return g.ref, nil
+}
+
+// guardTransport is a transport.Transport that accepts every
+// SendImperative call, so run_pipeline's publish step succeeds.
+type guardTransport struct{ transport.Transport }
+
+func (g *guardTransport) SendImperative(_ context.Context, _, _ string, _ *mitev1.ImperativeCommand) error {
+	return nil
+}
 
 // sourceOverride pins the expected activity Source for mutating tools whose
 // underlying shared business logic stamps Source itself rather than
@@ -94,6 +125,14 @@ func guardEmitDeps(t *testing.T, sink activity.EventSink) *api.Dependencies {
 			stub, stub, "varroa-system", slog.New(slog.DiscardHandler)),
 		ActivityPublisher: sink,
 		OperatorNamespace: "varroa-system",
+		// run_pipeline's dependencies: a non-nil RecordStore (checked but
+		// never called), a fixed tenant, and a transport that accepts the
+		// publish.
+		RecordStore: &guardRecordReader{},
+		TenantResolver: &guardTenantResolver{ref: api.TenantRef{
+			Tenant: "team-a/obj", Team: "obj", Namespace: "team-a", Controller: "obj",
+		}},
+		MiteRegistry: &guardTransport{},
 	}
 }
 
@@ -208,6 +247,8 @@ func guardArgsFor(name string) map[string]interface{} {
 		"delete_group": {"name": obj},
 		// ProfileCandidates (cluster-scoped, direct store)
 		"promote_version_candidate": {"name": obj},
+		// Pipelines (record store + tenant resolver + mite transport)
+		"run_pipeline": {"team": "team-a", "job": "build"},
 	}
 	args, ok := byName[name]
 	if !ok {

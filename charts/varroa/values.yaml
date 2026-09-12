@@ -45,6 +45,26 @@ cluster:
   name: core
 
 # ---------------------------------------------------------------------------
+# Cells — multi-tenant Jenkins controllers that host more than one team.
+# ---------------------------------------------------------------------------
+cells:
+  # Pre-provisioned cells the operator keeps ready for placement, so a new
+  # Team does not wait on a StatefulSet to boot.
+  warmPool:
+    # -- Enable the warm pool. Off by default: no cell exists until a
+    # Controller with spec.cell.enabled is created by hand.
+    enabled: false
+    # -- Number of ready, empty cells the operator keeps per Jenkins
+    # version profile.
+    perProfile: 1
+  # -- Maximum number of tenants the placement pass may put on one cell,
+  # unless the cell's own spec.cell.maxTenants overrides it.
+  maxTenantsPerCell: 10
+  # -- How long a cell may stay unready before the operator treats it as
+  # failed for placement purposes. Go duration string.
+  unreadyGracePeriod: 5m
+
+# ---------------------------------------------------------------------------
 # Telemetry — OpenTelemetry observability pipeline
 # ---------------------------------------------------------------------------
 telemetry:
@@ -188,6 +208,33 @@ networkPolicy:
   # still work). This is the chart's scrape path for an externally-managed
   # Prometheus — the chart ships no monitoring stack.
   metricsIngress: []
+  # Record-store Postgres egress (recorder/bff/gateway reach the database).
+  # An empty cidrs list selects the in-cluster CNPG pods in cnpg mode. Pin
+  # cidrs to the database endpoint when recordStore.postgres.mode=external.
+  recordStorePostgresEgress:
+    enabled: true
+    cidrs: []
+    ports: [5432]
+  # The namespace that runs the CloudNativePG operator. Its pods reach the
+  # record-store Postgres instance manager on port 8000 in cnpg mode.
+  recordStoreCNPGOperatorNamespaceSelector:
+    kubernetes.io/metadata.name: cnpg-system
+  # Record-store blob egress (recorder/bff/gateway reach S3-compatible blob
+  # storage). Renders nothing when recordStore.blobs.mode is postgres. Pin
+  # cidrs to your storage provider's address range.
+  recordStoreBlobEgress:
+    enabled: true
+    cidrs: ["0.0.0.0/0"]
+    ports: [443]
+  # Per-cell NetworkPolicy, one per Controller with spec.cell.enabled.
+  # Opt-in: honoured only when networkPolicy.enabled is also true.
+  cellIsolation:
+    # -- Enable the per-cell NetworkPolicy.
+    enabled: false
+    # -- Raw NetworkPolicyIngressRule entries, appended to the cell policy.
+    extraIngress: []
+    # -- Raw NetworkPolicyEgressRule entries, appended to the cell policy.
+    extraEgress: []
 
 # ---------------------------------------------------------------------------
 # Dex — OIDC federation broker (optional).
@@ -509,19 +556,6 @@ bff:
     readOnlyRootFilesystem: true
 
 # ---------------------------------------------------------------------------
-# Activity feed persistence — JetStream-backed, retention dial
-# ---------------------------------------------------------------------------
-activity:
-  # retention controls how long activity events are kept.
-  # Valid values: off | 7d | 30d | 90d  (default 7d)
-  # "off" = ephemeral in-memory (current behavior, no persistence).
-  retention: "7d"
-  # maxMsgs is the hard cap on the number of stored messages (DiscardOld).
-  maxMsgs: 100000
-  # maxBytes is the hard cap on storage bytes (1 GiB). DiscardOld when hit.
-  maxBytes: 1073741824
-
-# ---------------------------------------------------------------------------
 # JetStream replica count for every stream (activity, webhook replay, imperative
 # command) and KV bucket (snapshots, presence, desired state, clusters, consumed
 # tokens) that Varroa creates. Rendered into the operator/BFF/gateway as
@@ -782,6 +816,108 @@ updateCenter:
   resources: {}
   # -- Node selector for the update center pod.
   nodeSelector: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
+  # -- Extra environment variables (list of {name, value}).
+  env: []
+  # -- Extra volume mounts (list of corev1.VolumeMount).
+  extraVolumeMounts: []
+  # -- Extra volumes (list of corev1.Volume).
+  extraVolumes: []
+
+# ---------------------------------------------------------------------------
+# Build-record store — durable build/run records for Jenkins cells.
+# Off by default. The recorder component and its Postgres/blob storage
+# render only when recordStore.enabled is true.
+# ---------------------------------------------------------------------------
+recordStore:
+  # -- Enable the build-record store: the recorder component, its Postgres
+  # database, and the DSN/blob wiring on the recorder, BFF, and gateway.
+  enabled: false
+  postgres:
+    # -- Postgres provisioning mode: "cnpg" (chart-managed CloudNativePG
+    # Cluster) or "external" (bring your own Postgres, via existingSecret).
+    mode: cnpg
+    # -- Used when postgres.mode is "external".
+    external:
+      # -- Name of an existing Secret holding the connection string.
+      existingSecret: ""
+      # -- Key in existingSecret holding the DSN.
+      dsnKey: dsn
+    # -- Used when postgres.mode is "cnpg". Requires the CloudNativePG
+    # operator to be installed in the cluster; this chart does not install it.
+    cnpg:
+      # -- Number of Postgres instances (1 = no replica).
+      instances: 1
+      storage:
+        # -- Persistent volume size for each instance.
+        size: 20Gi
+        # -- Storage class name (empty = cluster default).
+        storageClassName: ""
+  blobs:
+    # -- Blob storage mode: "postgres" (store blobs in the same database,
+    # no extra egress) or "s3" (an S3-compatible object store).
+    mode: postgres
+    # -- Used when blobs.mode is "s3".
+    s3:
+      # -- Full blob store URL, including bucket and query parameters
+      # (e.g. region, endpoint) the s3blob opener needs.
+      url: ""
+      # -- Name of an existing Secret with access-key-id/secret-access-key
+      # and an optional session-token. Empty means ambient credentials
+      # (IRSA, Workload Identity).
+      existingSecret: ""
+      # -- Base name of the per-cell artifact credential Secret. The
+      # operator reads "<artifactSecret>-<controller>" in the release
+      # namespace and nothing else. Each per-cell Secret holds
+      # access-key-id/secret-access-key and an optional session-token,
+      # scoped to that cell's own artifact prefix. Empty means Varroa
+      # keeps build artifacts on the cell's local disk.
+      artifactSecret: ""
+  # -- Retention windows, each a whole day count with a "d" suffix
+  # (e.g. "365d"), from 1d to 3650d.
+  retention:
+    # -- How long a completed run's record is kept.
+    runs: 365d
+    # -- How long a run's stored log chunks are kept.
+    logs: 90d
+    # -- How long a run's stored artifacts are kept.
+    artifacts: 30d
+    # -- How long an activity event is kept.
+    activity: 30d
+
+# ---------------------------------------------------------------------------
+# Varroa Recorder — the only writer of the build-record store.
+# Deployed only when recordStore.enabled is true.
+# ---------------------------------------------------------------------------
+recorder:
+  image:
+    repository: ghcr.io/varroaci/varroa-jenkins
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  # -- Node selector for the recorder pod.
+  nodeSelector: {}
+  # -- Tolerations for the recorder pod.
+  tolerations: []
+  # -- Affinity rules for the recorder pod.
+  affinity: {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
   podSecurityContext:
     runAsNonRoot: true
     runAsUser: 1000

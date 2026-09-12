@@ -10,6 +10,9 @@
           <remote>https://github.com/fake-org/multibranch-git.git</remote>
           <credentialsId>git-cred</credentialsId>
         </source>
+        <buildStrategies>
+          <jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing plugin="basic-branch-build-strategies"></jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing>
+        </buildStrategies>
       </jenkins.branch.BranchSource>
     </data>
   </sources>

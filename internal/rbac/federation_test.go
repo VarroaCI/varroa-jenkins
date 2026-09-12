@@ -190,3 +190,79 @@ func TestDesiredFederatedCRsLabelIsDeterministic(t *testing.T) {
 		t.Fatalf("label not deterministic: %q vs %q", a[LabelFederatedFrom], b[LabelFederatedFrom])
 	}
 }
+
+// A VarroaRole whose only rule grants a pipelines verb and sets neither
+// jenkinsRoleRef nor jenkinsPermissions has no Jenkins projection: D12 states
+// spec.apiRules is never read by this function.
+func TestDesiredFederatedCRsPipelinesOnlyRoleFederatesNothing(t *testing.T) {
+	roles, bindings, _ := DesiredFederatedCRs(
+		[]*v1alpha1.VarroaRoleBinding{{
+			ObjectMeta: metav1.ObjectMeta{Name: "bind-pipelines"},
+			Spec:       v1alpha1.VarroaRoleBindingSpec{RoleRef: "pipelines-only", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}},
+		}},
+		func(name string) (*v1alpha1.VarroaRole, bool) {
+			return &v1alpha1.VarroaRole{
+				ObjectMeta: metav1.ObjectMeta{Name: name},
+				Spec:       v1alpha1.VarroaRoleSpec{APIRules: []v1alpha1.APIRule{{Resources: []string{"pipelines"}, Verbs: []string{"read"}}}},
+			}, true
+		},
+		func(string) (*v1alpha1.JenkinsRole, bool) { return nil, false },
+	)
+	if len(roles) != 0 || len(bindings) != 0 {
+		t.Fatalf("roles=%#v bindings=%#v, want no federated objects", roles, bindings)
+	}
+}
+
+// D12: the federation reconciler skips a VarroaRoleBinding whose scope
+// carries tenants and records a warning, matching the existing skip for a
+// non-Global referenced role. A sibling controller-scoped binding on the same
+// role still federates.
+func TestDesiredFederatedCRsSkipsTenantScopedBinding(t *testing.T) {
+	tenantScoped := &v1alpha1.VarroaRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "bind-tenant"},
+		Spec: v1alpha1.VarroaRoleBindingSpec{
+			RoleRef:  "team-admin",
+			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}},
+			Scope:    &v1alpha1.VarroaRoleBindingScope{Tenants: []v1alpha1.TenantScope{{Name: "team-a"}}},
+		},
+	}
+	controllerScoped := &v1alpha1.VarroaRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "bind-controller"},
+		Spec: v1alpha1.VarroaRoleBindingSpec{
+			RoleRef:  "team-admin",
+			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "bob"}},
+			Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"team-a"}},
+		},
+	}
+	roles, bindings, warnings := DesiredFederatedCRs(
+		[]*v1alpha1.VarroaRoleBinding{tenantScoped, controllerScoped},
+		func(name string) (*v1alpha1.VarroaRole, bool) {
+			return &v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.VarroaRoleSpec{JenkinsRoleRef: "jenkins-admin"}}, true
+		},
+		func(name string) (*v1alpha1.JenkinsRole, bool) {
+			return &v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.JenkinsRoleSpec{RoleType: "Global"}}, true
+		},
+	)
+	if len(roles) != 1 || roles[0].Name != "jenkins-admin" {
+		t.Fatalf("roles = %#v", roles)
+	}
+	if len(bindings) != 1 {
+		t.Fatalf("bindings = %#v, want exactly the controller-scoped binding", bindings)
+	}
+	for _, b := range bindings {
+		for _, s := range b.Spec.Subjects {
+			if s.Name == "alice" {
+				t.Fatalf("tenant-scoped binding was federated: %#v", b)
+			}
+		}
+	}
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "bind-tenant") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a warning naming bind-tenant, got %v", warnings)
+	}
+}

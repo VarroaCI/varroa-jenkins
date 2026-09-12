@@ -1,0 +1,189 @@
+package recordstore
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/varroaci/varroa-jenkins/internal/bus"
+)
+
+// backstopLockKey is the pg_try_advisory_lock key the backstop-and-sweep
+// round holds for its whole duration. migrateLockKey and
+// maintenanceLockKey are C1's two fixed keys; this is the third.
+const backstopLockKey = 8271340192837467
+
+// scheduleTriggerTypeCron is job_schedules.trigger_type's value for a
+// cron trigger. It is a separate vocabulary from IntentScheme, which
+// happens to allocate the same word for a different concept, an
+// intent-key scheme.
+const scheduleTriggerTypeCron = "cron"
+
+// BackstopConfig carries one backstop-and-sweep round's tunables.
+type BackstopConfig struct {
+	// MaxSweepPending is VARROA_SWEEP_MAX_PENDING, D9's interrupted-sweep
+	// gate.
+	MaxSweepPending uint64
+	// SweepMetrics counts D9's interrupted-run marking.
+	SweepMetrics *InterruptedMetrics
+	// BackstopMetrics counts D11's fires and misses.
+	BackstopMetrics *BackstopMetrics
+	// ActionMetrics counts every action this round publishes.
+	ActionMetrics *ActionMetrics
+	// Now returns the round's reference time. A nil Now defaults to
+	// time.Now in UTC, so a test can pin the round to a fixed instant.
+	Now func() time.Time
+	// Logger receives the round's own warnings. A nil Logger defaults to
+	// slog.Default.
+	Logger *slog.Logger
+}
+
+func (cfg BackstopConfig) now() time.Time {
+	if cfg.Now != nil {
+		return cfg.Now()
+	}
+	return time.Now().UTC()
+}
+
+func (cfg BackstopConfig) logger() *slog.Logger {
+	if cfg.Logger != nil {
+		return cfg.Logger
+	}
+	return slog.Default()
+}
+
+// RunBackstopRound tries the backstop advisory lock on one acquired
+// connection, and on success runs D9's interrupted sweep, then D11's
+// backstop cron round, before releasing it. It reports whether this
+// call took the lock; a replica that does not returns false, nil.
+func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, cfg BackstopConfig) (bool, error) {
+	pgConn, err := pool.Acquire(ctx)
+	if err != nil {
+		return false, fmt.Errorf("acquire backstop round connection: %w", err)
+	}
+	defer pgConn.Release()
+
+	var got bool
+	if err := pgConn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", backstopLockKey).Scan(&got); err != nil {
+		return false, fmt.Errorf("try backstop round lock: %w", err)
+	}
+	if !got {
+		return false, nil
+	}
+	defer func() {
+		_, _ = pgConn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", backstopLockKey)
+	}()
+
+	now := cfg.now()
+	logger := cfg.logger()
+
+	if _, err := SweepInterruptedRuns(ctx, pool, conn, cfg.SweepMetrics, cfg.ActionMetrics, cfg.MaxSweepPending, now, logger); err != nil {
+		logger.Warn("interrupted sweep failed", "error", err)
+	}
+
+	if err := runBackstopSchedule(ctx, pool, conn, cfg, now); err != nil {
+		logger.Warn("backstop schedule round failed", "error", err)
+	}
+
+	return true, nil
+}
+
+// runBackstopSchedule runs D11's whole backstop cron round: it lists
+// every distinct (cluster, tenant) pair job_schedules holds, reads each
+// pair's policy, drops a pair whose cronBackstop is off, applies D11's
+// candidate and fire-decision rules to every surviving cron row, then
+// fires the round's ready candidates, oldest occurrence first, bounded
+// at 100.
+func runBackstopSchedule(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, cfg BackstopConfig, now time.Time) error {
+	logger := cfg.logger()
+	reader := NewReader(pool)
+
+	pairs, err := listJobSchedulePairs(ctx, pool)
+	if err != nil {
+		return err
+	}
+
+	var fireCandidates []backstopFireCandidate
+	for _, pair := range pairs {
+		policy, err := readTenantSchedulePolicy(ctx, pool, pair.cluster, pair.tenant)
+		if err != nil {
+			logger.Warn("backstop round: read tenant policy failed", "cluster", pair.cluster, "tenant", pair.tenant, "error", err)
+			continue
+		}
+		if !policy.cronBackstop {
+			continue
+		}
+
+		rows, err := reader.ListJobSchedules(ctx, pair.cluster, pair.tenant)
+		if err != nil {
+			logger.Warn("backstop round: list job schedules failed", "cluster", pair.cluster, "tenant", pair.tenant, "error", err)
+			continue
+		}
+
+		for _, row := range rows {
+			if row.TriggerType != scheduleTriggerTypeCron || row.Disabled || len(row.NextFireTimes) == 0 {
+				continue
+			}
+			if row.PlacementGeneration < policy.generation {
+				continue
+			}
+
+			candidates, err := selectCandidateOccurrences(ctx, reader, pool, pair.cluster, row.JobPath, row.NextFireTimes, now, policy.cronGrace)
+			if err != nil {
+				logger.Warn("backstop round: select candidates failed", "job_path", row.JobPath, "error", err)
+				continue
+			}
+
+			fire, missed := selectFire(candidates, policy.cronCatchUp)
+			if missed > 0 {
+				cfg.BackstopMetrics.addMissed(ctx, int64(missed))
+			}
+			if fire == nil {
+				continue
+			}
+
+			fireCandidates = append(fireCandidates, backstopFireCandidate{
+				cluster:    pair.cluster,
+				tenant:     pair.tenant,
+				namespace:  row.Namespace,
+				cell:       row.Cell,
+				jobPath:    row.JobPath,
+				occurrence: *fire,
+				grace:      policy.cronGrace,
+			})
+		}
+	}
+
+	for _, c := range selectReadyFires(fireCandidates, now) {
+		fireOne(ctx, pool, conn, cfg.BackstopMetrics, cfg.ActionMetrics, c, now, logger)
+	}
+	return nil
+}
+
+// RunBackstopScheduler runs RunBackstopRound once a minute until ctx is
+// cancelled, logging every outcome.
+func RunBackstopScheduler(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, cfg BackstopConfig) {
+	logger := cfg.logger()
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		ran, err := RunBackstopRound(ctx, pool, conn, cfg)
+		switch {
+		case err != nil:
+			logger.Error("backstop round failed", "error", err)
+		case ran:
+			logger.Debug("backstop round completed")
+		default:
+			logger.Debug("backstop round skipped; another replica holds the lock")
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}

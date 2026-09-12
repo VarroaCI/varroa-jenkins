@@ -1,0 +1,39 @@
+{{- if and .Values.recordStore.enabled (not (include "varroa.isHive" .)) (eq .Values.recordStore.postgres.mode "cnpg") }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: varroa-recordstore
+  labels:
+    app.kubernetes.io/component: varroa-recordstore
+    {{- include "varroa.labels" . | nindent 4 }}
+  annotations:
+    # Disabling recordStore or uninstalling the release must not delete the
+    # database. A regenerated Secret would also lock the recorder out of
+    # its own data, so both role Secrets carry the same annotation.
+    helm.sh/resource-policy: keep
+spec:
+  instances: {{ .Values.recordStore.postgres.cnpg.instances }}
+  storage:
+    size: {{ .Values.recordStore.postgres.cnpg.storage.size }}
+    {{- with .Values.recordStore.postgres.cnpg.storage.storageClassName }}
+    storageClass: {{ . }}
+    {{- end }}
+  bootstrap:
+    initdb:
+      database: varroa
+      owner: varroa_recorder
+      secret:
+        name: varroa-recordstore-recorder
+  managed:
+    roles:
+      - name: varroa_client
+        ensure: present
+        login: true
+        passwordSecret:
+          name: varroa-recordstore-client
+      - name: varroa_gateway
+        ensure: present
+        login: true
+        passwordSecret:
+          name: varroa-recordstore-gateway
+{{- end }}

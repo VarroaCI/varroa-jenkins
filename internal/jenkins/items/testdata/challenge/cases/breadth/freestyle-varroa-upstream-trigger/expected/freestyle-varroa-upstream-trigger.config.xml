@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<project>
+  <displayName>FreeStyle Cross-Tenant Upstream Trigger</displayName>
+  <description>FreeStyle job that subscribes to another tenant&#39;s job</description>
+  <triggers>
+    <org.jenkinsci.plugins.varroamiteauth.VarroaUpstreamTrigger plugin="varroa-mite-auth">
+      <tenant>alpha</tenant>
+      <job>release</job>
+      <result>SUCCESS</result>
+    </org.jenkinsci.plugins.varroamiteauth.VarroaUpstreamTrigger>
+  </triggers>
+</project>

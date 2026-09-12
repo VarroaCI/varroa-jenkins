@@ -174,4 +174,50 @@ describe("useEventStream", () => {
     await waitFor(() => expect(result.current.error).toBeNull());
     expect(result.current.readyState).toBe("open");
   });
+
+  it("reconnects to the URL from options.resumeUrl() after an error, never on the first connect", async () => {
+    const resumeUrl = vi.fn(() => "/resume?from=999");
+    renderHook(() => useEventStream("/u", "brood", [], { resumeUrl }));
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    expect(resumeUrl).not.toHaveBeenCalled();
+    expect(MockEventSource.instances[0].url).toContain("/u?ticket=");
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      act(() => {
+        MockEventSource.instances[0].emitError();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+
+      expect(MockEventSource.instances).toHaveLength(2);
+      expect(resumeUrl).toHaveBeenCalledTimes(1);
+      expect(MockEventSource.instances[1].url).toContain("/resume?from=999&ticket=");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("falls back to baseUrl on reconnect when resumeUrl() returns null", async () => {
+    const resumeUrl = vi.fn(() => null);
+    renderHook(() => useEventStream("/u", "brood", [], { resumeUrl }));
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      act(() => {
+        MockEventSource.instances[0].emitError();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+
+      expect(MockEventSource.instances).toHaveLength(2);
+      expect(resumeUrl).toHaveBeenCalledTimes(1);
+      expect(MockEventSource.instances[1].url).toContain("/u?ticket=");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

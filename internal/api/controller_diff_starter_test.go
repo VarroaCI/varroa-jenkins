@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
@@ -118,5 +119,90 @@ func TestControllerDTO_EffectiveBundleIsSeparateFromSpecRef(t *testing.T) {
 	}
 	if eff.BuiltIn {
 		t.Error("builtIn must be false for a controller that names its own bundle")
+	}
+}
+
+// A headless controller gets no Ingress from the operator. The diff must
+// not show a host-based location.url or an external URL, even when
+// spec.ingressSpec.host is set. Instead it must show the in-cluster
+// Service URL, matching resolveBundleForController's own three-way rule
+// (internal/controller/controller_controller.go): a headless controller
+// always gets varroa_controller_endpoint injected as its location.url.
+func TestControllerDiff_HeadlessInjectsInClusterLocationURL(t *testing.T) {
+	client := newBundleTestClient()
+	client.configMaps = map[string]map[string]string{
+		"headless-content": {
+			"jenkins.yaml": "jenkins:\n  systemMessage: \"headless\"\n" +
+				"unclassified:\n  location:\n    url: \"${varroa_controller_external_url}\"\n",
+			"items.yaml":   "",
+			"plugins.yaml": "",
+		},
+	}
+	store := storeFromBundleClient(client)
+
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "cell", Namespace: "team-a", UID: "54c62aff-0000-0000-0000-000000000000"},
+		Spec: v1alpha1.ControllerSpec{
+			Headless: true,
+			ComposedBundleRef: &v1alpha1.ComposedBundleRef{
+				Name: "headless-bundle",
+			},
+			IngressSpec: &v1alpha1.IngressSpec{
+				Host: "varroa.example.com",
+				Mode: v1alpha1.RoutingModePath,
+			},
+		},
+	}
+	crdstore.MustSeed(store, cr)
+	crdstore.MustSeed(store, &v1alpha1.ComposedBundle{
+		ObjectMeta: metav1.ObjectMeta{Name: "headless-bundle", Namespace: "team-a"},
+		Status: v1alpha1.ComposedBundleStatus{
+			Phase:      v1alpha1.ComposedBundleReady,
+			ContentRef: "headless-content",
+		},
+	})
+
+	srv := NewServer(&Dependencies{
+		Client:            client,
+		Store:             store,
+		Authorizer:        adminTestAuthorizer(),
+		OperatorNamespace: "varroa-system",
+		Logger:            slog.Default(),
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/core/controllers/team-a/cell/diff", nil)
+	srv.handleControllerDiff(w, req.WithContext(contextWithClaims(req.Context(), adminClaims)),
+		"core", "team-a", "cell")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Incoming struct {
+			Jcasc string `json:"jcasc"`
+		} `json:"incoming"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v (body %s)", err, w.Body.String())
+	}
+
+	// A headless controller has no external URL, so the diff must inject
+	// the in-cluster Service URL as location.url, the same value
+	// provisioning applies — never the unresolved placeholder and never a
+	// host-based URL.
+	svcName := strings.TrimSuffix(controller.PodName(cr, 0), "-0") + "-svc"
+	wantURL := "http://" + svcName + ".team-a.svc.cluster.local:8080/"
+	if !strings.Contains(resp.Incoming.Jcasc, wantURL) {
+		t.Errorf("incoming jcasc should carry the in-cluster location url %q, got %q", wantURL, resp.Incoming.Jcasc)
+	}
+	if strings.Contains(resp.Incoming.Jcasc, "${varroa_controller_external_url}") {
+		t.Errorf("incoming jcasc should not leave the location-url placeholder unresolved on a headless controller, got %q", resp.Incoming.Jcasc)
+	}
+	if strings.Contains(resp.Incoming.Jcasc, "https://varroa.example.com") {
+		t.Errorf("incoming jcasc should carry no host-based URL for a headless controller, got %q", resp.Incoming.Jcasc)
+	}
+	if strings.Contains(resp.Incoming.Jcasc, v1alpha1.PathPrefix("team-a", "cell")) {
+		t.Errorf("incoming jcasc should carry no path prefix for a headless controller, got %q", resp.Incoming.Jcasc)
 	}
 }

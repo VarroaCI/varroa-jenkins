@@ -46,6 +46,7 @@ func main() {
 		ControllerName: os.Getenv("CONTROLLER_NAME"),
 		Namespace:      os.Getenv("NAMESPACE"),
 		CAPEM:          os.Getenv("VARROA_CA_PEM"),
+		CellInstance:   os.Getenv("VARROA_POD_UID"),
 	}
 
 	if cfg.VarroaEndpoint == "" {

@@ -1,0 +1,49 @@
+{{- /*
+recordstore-guard.yaml
+Fails the render when the retired "activity" values block is set, and
+validates recordStore.* values when the record store is enabled and the
+release is not hive mode. Renders no objects.
+*/}}
+
+{{- if hasKey .Values "activity" -}}
+{{- fail "the \"activity\" values block no longer exists; set recordStore.retention.activity instead" -}}
+{{- end -}}
+
+{{- if and .Values.recordStore.enabled (not (include "varroa.isHive" .)) }}
+
+{{- $validPostgresModes := list "cnpg" "external" -}}
+{{- if not (has .Values.recordStore.postgres.mode $validPostgresModes) -}}
+{{- fail (printf "recordStore.postgres.mode must be one of %v, got %q" $validPostgresModes .Values.recordStore.postgres.mode) -}}
+{{- end -}}
+
+{{- if eq .Values.recordStore.postgres.mode "external" -}}
+{{- if not .Values.recordStore.postgres.external.existingSecret -}}
+{{- fail "recordStore.postgres.external.existingSecret is required when recordStore.postgres.mode is \"external\"" -}}
+{{- end -}}
+{{- if not .Values.recordStore.postgres.external.dsnKey -}}
+{{- fail "recordStore.postgres.external.dsnKey is required when recordStore.postgres.mode is \"external\"" -}}
+{{- end -}}
+{{- end -}}
+
+{{- $validBlobModes := list "postgres" "s3" -}}
+{{- if not (has .Values.recordStore.blobs.mode $validBlobModes) -}}
+{{- fail (printf "recordStore.blobs.mode must be one of %v, got %q" $validBlobModes .Values.recordStore.blobs.mode) -}}
+{{- end -}}
+
+{{- if and (eq .Values.recordStore.blobs.mode "s3") (not .Values.recordStore.blobs.s3.url) -}}
+{{- fail "recordStore.blobs.s3.url is required when recordStore.blobs.mode is \"s3\"" -}}
+{{- end -}}
+
+{{- $retentionKeys := list "runs" "logs" "artifacts" "activity" -}}
+{{- range $key := $retentionKeys -}}
+{{- $val := index $.Values.recordStore.retention $key -}}
+{{- if not (regexMatch "^[1-9][0-9]{0,3}d$" $val) -}}
+{{- fail (printf "recordStore.retention.%s must match ^[1-9][0-9]{0,3}d$ (1 to 4 digits, a whole day count with a \"d\" suffix, at most 3650), got %q" $key $val) -}}
+{{- end -}}
+{{- $days := int (trimSuffix "d" $val) -}}
+{{- if gt $days 3650 -}}
+{{- fail (printf "recordStore.retention.%s must be at most 3650 days, got %q" $key $val) -}}
+{{- end -}}
+{{- end -}}
+
+{{- end -}}

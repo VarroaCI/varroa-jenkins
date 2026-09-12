@@ -68,13 +68,13 @@ func TestStreamConfigReplicas(t *testing.T) {
 // variadic replica count the same way as StreamConfig.
 func TestActivityStreamConfigReplicas(t *testing.T) {
 	const name = "varroa_activity"
-	if r := ActivityStreamConfig(name, time.Hour, 1, 1).Replicas; r != 1 {
+	if r := ActivityStreamConfig(name).Replicas; r != 1 {
 		t.Errorf("ActivityStreamConfig(...) default Replicas = %d, want 1", r)
 	}
-	if r := ActivityStreamConfig(name, time.Hour, 1, 1, 3).Replicas; r != 3 {
+	if r := ActivityStreamConfig(name, 3).Replicas; r != 3 {
 		t.Errorf("ActivityStreamConfig(..., 3) Replicas = %d, want 3", r)
 	}
-	if r := ActivityStreamConfig(name, time.Hour, 1, 1, 0).Replicas; r != 1 {
+	if r := ActivityStreamConfig(name, 0).Replicas; r != 1 {
 		t.Errorf("ActivityStreamConfig(..., 0) Replicas = %d, want 1 (clamped)", r)
 	}
 }

@@ -1,0 +1,32 @@
+unclassified:
+  varroaPipelineTemplates:
+    templates:
+      - name: "go-service"
+        version: "1.0.0"
+        folder: ""
+        parameters: |
+          type: object
+          additionalProperties: false
+          required: ["goVersion"]
+          properties:
+            goVersion:
+              type: string
+              enum: ["1.23", "1.24"]
+            message:
+              type: string
+        uiSchema: |
+          ui:order: ["*"]
+        jenkinsfile: |
+          node {
+            def message = varroaParams.message ?: ''
+            echo 'template ran goVersion=' + varroaParams.goVersion + ' message=' + message
+          }
+      - name: "team-a-only"
+        version: "1.0.0"
+        folder: "team-a"
+        parameters: |
+          type: object
+          additionalProperties: false
+        uiSchema: |
+          ui:order: ["*"]
+        jenkinsfile: "node { echo 'team-a template ran' }"

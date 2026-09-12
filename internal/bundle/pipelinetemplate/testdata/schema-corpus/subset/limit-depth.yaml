@@ -1,0 +1,17 @@
+type: object
+additionalProperties: false
+properties:
+  l2:
+    type: object
+    additionalProperties: false
+    properties:
+      l3:
+        type: object
+        additionalProperties: false
+        properties:
+          l4:
+            type: object
+            additionalProperties: false
+            properties:
+              leaf:
+                type: string

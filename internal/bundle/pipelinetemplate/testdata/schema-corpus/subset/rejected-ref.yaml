@@ -1,0 +1,6 @@
+type: object
+additionalProperties: false
+properties:
+  name:
+    $ref: '#/foo'
+    type: string

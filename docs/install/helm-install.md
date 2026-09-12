@@ -74,12 +74,34 @@ Wait for all control-plane pods to become `Ready`. NATS cannot start until its v
 | Dashboard routing | `global.domain`, `frontend.host`, `ingress.*` |
 | Control-plane capacity | `operator.*`, `gateway.hpa.*`, `bff.hpa.*` |
 | NATS durability | `nats.config.cluster.*`, `jetStreamReplicas` |
-| Activity retention | `activity.*` |
+| Activity retention | `recordStore.retention.activity` |
 | Network isolation | `networkPolicy.*` |
 | Plugin service | `updateCenter.*` |
+| Build record store | `recordStore.*` |
+| Build recorder component | `recorder.*` |
+| Build record store network isolation | `networkPolicy.recordStore*` |
 | Telemetry | `telemetry.*` |
 
 Gateway and BFF HPAs require the Kubernetes metrics API. Telemetry export remains inactive until `telemetry.endpoint` is set.
+
+The build record store defaults to off (`recordStore.enabled: false`). When enabled,
+`recordStore.postgres.mode` defaults to `cnpg` and needs the CloudNativePG operator installed
+first; `recordStore.blobs.mode` defaults to `postgres`; and `recordStore.retention` defaults to
+`runs: 365d`, `logs: 90d`, `artifacts: 30d`, `activity: 30d`. Each retention value takes the form
+`<n>d`, a whole number of days from `1` to `3650`. `recorder.replicas` defaults to `1`.
+`networkPolicy.recordStorePostgresEgress` and `networkPolicy.recordStoreBlobEgress` both default
+to `enabled: true`, on ports `5432` and `443`. See [Build records](../operations/build-records.md)
+for the CloudNativePG prerequisite and the full value tree.
+
+Set `recordStore.blobs.mode: s3` to store console logs and archived artifacts in an
+S3-compatible bucket instead of Postgres. Artifact storage needs this mode. Postgres mode keeps
+logs but leaves artifacts on the controller's local disk.
+
+The value `recordStore.blobs.s3.artifactSecret` names a base Secret the operator reads once per
+controller (`<artifactSecret>-<controller>`) and projects into that controller's namespace, so
+each cell writes with its own scoped credential. See
+[Build logs and artifacts](../operations/build-logs-and-artifacts.md) for the per-cell prefix,
+the required bucket policy, and the Secret shape.
 
 ## Use an Image Mirror
 

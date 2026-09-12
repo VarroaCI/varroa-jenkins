@@ -44,10 +44,24 @@ import type {
   UpdateCenterUploadResult,
   FleetPluginsRollup,
   FleetPluginDrilldown,
+  PipelineListResponse,
+  PipelineJobDetail,
+  RunListResponse,
+  CreateRunRequest,
+  RunActionResponse,
+  CancelRunResponse,
+  RunDetail,
+  RunArtifactListResponse,
+  RunTestListResponse,
+  RunChangeListResponse,
+  TeamPipelines,
+  TeamPlacement,
+  TeamRehydration,
+  RunnerEntry,
 } from "../types";
 import type { ControllerDetail } from "../hooks/useControllers";
 import type { Permissions } from "../types/auth";
-import { ApiError, bffFetch, bffFetchText, bffUpload } from "../hooks/useApi";
+import { ApiError, bffFetch, bffFetchText, bffUpload, getToken } from "../hooks/useApi";
 
 export const BFF_BASE = import.meta.env.VITE_VARROA_BFF_URL || "/api/v1";
 
@@ -823,6 +837,9 @@ export interface TeamEntry {
   bindingRef?: string;
   namespaceStates?: TeamNamespaceState[];
   conditions?: TeamCondition[];
+  pipelines?: TeamPipelines;
+  placement?: TeamPlacement;
+  rehydration?: TeamRehydration;
 }
 
 export interface CreateTeamBody {
@@ -833,6 +850,7 @@ export interface CreateTeamBody {
   namespaces: string[];
   roleRef?: string;
   provisionNamespaces?: boolean;
+  pipelines?: TeamPipelines;
 }
 
 export function listTeams(): Promise<TeamEntry[]> {
@@ -859,6 +877,18 @@ export function updateTeam(name: string, body: CreateTeamBody): Promise<{ name: 
 
 export function deleteTeam(name: string): Promise<void> {
   return bffFetch(`/teams/${encodeURIComponent(name)}`, { method: "DELETE" });
+}
+
+// --- Runners (external agents; design D1, D12) ---
+
+/**
+ * Lists Runner objects, narrowed to one team when given. status.token is
+ * present only for a caller holding runners:create; the dashboard never
+ * reads it.
+ */
+export function listRunners(team?: string): Promise<RunnerEntry[]> {
+  const qs = team ? `?team=${enc(team)}` : "";
+  return bffFetch<{ items: RunnerEntry[] }>(`/runners${qs}`).then((r) => r.items);
 }
 
 // ---- Brood operations (cross-cluster logical-run DTOs) ----
@@ -999,4 +1029,152 @@ export function listFleetPlugins(params?: FleetPluginsParams): Promise<FleetPlug
 
 export function getFleetPlugin(name: string, params?: FleetPluginsParams): Promise<FleetPluginDrilldown> {
   return bffFetch<FleetPluginDrilldown>(`/fleet/plugins/${encodeURIComponent(name)}${fleetPluginsQS(params)}`);
+}
+
+// ---- Pipelines ----
+//
+// The BFF answers a run request, a cancel, and a rerun with 202 and a JSON
+// body the caller needs (runId, intentKey, state) — unlike this file's other
+// 202 actions, whose body carries nothing the caller reads. bffFetch treats
+// every 202 as empty, so these three calls go through bffFetchText and parse
+// the body themselves instead.
+async function bffFetchJSON<T>(path: string, options?: RequestInit): Promise<T> {
+  const text = await bffFetchText(path, options);
+  return (text ? JSON.parse(text) : undefined) as T;
+}
+
+/**
+ * Fetches a binary response with the bearer token attached, mirroring
+ * useApi's request() but returning a Blob instead of decoding JSON. Kept
+ * local to the client: it is the pipelines client's one binary download.
+ */
+async function bffFetchBlob(path: string): Promise<Blob> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  let res: Response;
+  try {
+    res = await fetch(`${BFF_BASE}${path}`, { headers });
+  } catch {
+    throw new ApiError(0, "Varroa could not reach the server.");
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, "Varroa could not download this file.");
+  }
+  return res.blob();
+}
+
+const pipelinesBase = (team: string) => `/pipelines/${enc(team)}`;
+// {job} is one path segment holding the percent-encoded job path (D2): a job
+// path payments/checkout-api/main becomes payments%2Fcheckout-api%2Fmain.
+const jobBase = (team: string, jobPath: string) => `${pipelinesBase(team)}/jobs/${enc(jobPath)}`;
+const runBase = (runId: string) => `/runs/${enc(runId)}`;
+
+export function listPipelines(team: string): Promise<PipelineListResponse> {
+  return bffFetch<PipelineListResponse>(pipelinesBase(team));
+}
+
+export function getPipelineJob(team: string, jobPath: string): Promise<PipelineJobDetail> {
+  return bffFetch<PipelineJobDetail>(jobBase(team, jobPath));
+}
+
+export interface ListRunsParams {
+  branch?: string;
+  result?: string;
+  actor?: string;
+  cause?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+function listRunsQS(params?: ListRunsParams): string {
+  if (!params) return "";
+  const qs = new URLSearchParams();
+  if (params.branch) qs.set("branch", params.branch);
+  if (params.result) qs.set("result", params.result);
+  if (params.actor) qs.set("actor", params.actor);
+  if (params.cause) qs.set("cause", params.cause);
+  if (params.limit != null) qs.set("limit", String(params.limit));
+  if (params.cursor) qs.set("cursor", params.cursor);
+  const s = qs.toString();
+  return s ? `?${s}` : "";
+}
+
+export function listRuns(team: string, jobPath: string, params?: ListRunsParams): Promise<RunListResponse> {
+  return bffFetch<RunListResponse>(`${jobBase(team, jobPath)}/runs${listRunsQS(params)}`);
+}
+
+/**
+ * Requests a new build. Fire and forget: the BFF does not claim the build
+ * number, so the 202 body's runId is the caller's only handle on the run
+ * before it polls getRun.
+ */
+export function createRun(team: string, jobPath: string, body?: CreateRunRequest): Promise<RunActionResponse> {
+  return bffFetchJSON<RunActionResponse>(`${jobBase(team, jobPath)}/runs`, {
+    method: "POST",
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+}
+
+export function getRun(runId: string): Promise<RunDetail> {
+  return bffFetch<RunDetail>(runBase(runId));
+}
+
+export interface RunLogUrlParams {
+  /** Byte offset of the first unread byte. */
+  from?: number;
+  /** 1-based line number starting at from. */
+  fromLine?: number;
+  /** true returns text/plain with no SSE. */
+  raw?: boolean;
+}
+
+/**
+ * Builds the run log stream URL. Pass it as the baseUrl to useEventStream
+ * for the SSE mode (scope `run:<runId>`, event names "meta", "stage",
+ * "line", "gap", "live", "end"), or with raw:true for the plain-text link
+ * that opens in a new tab.
+ */
+export function runLogUrl(runId: string, params?: RunLogUrlParams): string {
+  const qs = new URLSearchParams();
+  if (params?.from != null) qs.set("from", String(params.from));
+  if (params?.fromLine != null) qs.set("fromLine", String(params.fromLine));
+  if (params?.raw) qs.set("raw", "true");
+  const s = qs.toString();
+  return `${BFF_BASE}${runBase(runId)}/log${s ? `?${s}` : ""}`;
+}
+
+export function listRunArtifacts(runId: string): Promise<RunArtifactListResponse> {
+  return bffFetch<RunArtifactListResponse>(`${runBase(runId)}/artifacts`);
+}
+
+/**
+ * Downloads one artifact's bytes. path is the multi-segment artifact path
+ * exactly as run_artifacts.path stored it; each segment is percent-encoded
+ * on its own so the slashes that separate segments survive.
+ */
+export function downloadRunArtifact(runId: string, path: string): Promise<Blob> {
+  const encodedPath = path.split("/").map(enc).join("/");
+  return bffFetchBlob(`${runBase(runId)}/artifacts/${encodedPath}`);
+}
+
+export function listRunTests(runId: string): Promise<RunTestListResponse> {
+  return bffFetch<RunTestListResponse>(`${runBase(runId)}/tests`);
+}
+
+export function listRunChanges(runId: string): Promise<RunChangeListResponse> {
+  return bffFetch<RunChangeListResponse>(`${runBase(runId)}/changes`);
+}
+
+/** Requests that a queued or running build stop. Fire and forget. */
+export function cancelRun(runId: string): Promise<CancelRunResponse> {
+  return bffFetchJSON<CancelRunResponse>(`${runBase(runId)}/cancel`, { method: "POST" });
+}
+
+/**
+ * Requests a retry of a finished run. One retry per source run, fleet-wide:
+ * a second rerun still answers 202, reusing the first retry's identifier.
+ */
+export function rerunRun(runId: string): Promise<RunActionResponse> {
+  return bffFetchJSON<RunActionResponse>(`${runBase(runId)}/rerun`, { method: "POST" });
 }

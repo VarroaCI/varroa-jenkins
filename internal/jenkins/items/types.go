@@ -73,8 +73,19 @@ type Item struct {
 
 // PipelineDefinition wraps the possible pipeline definition types.
 type PipelineDefinition struct {
-	CpsScmFlowDefinition *CpsScmFlowDefinition `yaml:"cpsScmFlowDefinition,omitempty"`
-	Script               string                `yaml:"script,omitempty"`
+	CpsScmFlowDefinition *CpsScmFlowDefinition     `yaml:"cpsScmFlowDefinition,omitempty"`
+	Script               string                    `yaml:"script,omitempty"`
+	VarroaTemplate       *VarroaTemplateDefinition `yaml:"varroaTemplate,omitempty"`
+}
+
+// VarroaTemplateDefinition selects a catalog-delivered pipeline template for
+// an items-declared pipeline job. The operator can see this content in
+// full, so a composer validates Values against the resolved template's
+// schema before the item reaches a controller.
+type VarroaTemplateDefinition struct {
+	Template        string         `yaml:"template"`
+	TemplateVersion string         `yaml:"templateVersion,omitempty"`
+	Values          map[string]any `yaml:"values,omitempty"`
 }
 
 // CpsScmFlowDefinition defines a pipeline from SCM with a Jenkinsfile.
@@ -266,8 +277,9 @@ type MailerPublisher struct {
 
 // Trigger defines a build trigger.
 type Trigger struct {
-	PollSCM *PollSCMTrigger `yaml:"pollSCM,omitempty"`
-	Cron    *CronTrigger    `yaml:"cron,omitempty"`
+	PollSCM        *PollSCMTrigger        `yaml:"pollSCM,omitempty"`
+	Cron           *CronTrigger           `yaml:"cron,omitempty"`
+	VarroaUpstream *VarroaUpstreamTrigger `yaml:"varroaUpstream,omitempty"`
 }
 
 // PollSCMTrigger polls SCM on a schedule.
@@ -279,6 +291,52 @@ type PollSCMTrigger struct {
 // CronTrigger triggers builds on a cron schedule.
 type CronTrigger struct {
 	Spec string `yaml:"spec"`
+}
+
+// varroaUpstreamResults holds the three thresholds a VarroaUpstreamTrigger
+// accepts, design.md D9. A threshold means "this result or better",
+// ReverseBuildTrigger's rule.
+var varroaUpstreamResults = map[string]bool{
+	"SUCCESS":  true,
+	"UNSTABLE": true,
+	"FAILURE":  true,
+}
+
+// varroaUpstreamDefaultResult is the threshold an item declares when it
+// omits result. The plugin's own trigger applies the same default.
+const varroaUpstreamDefaultResult = "SUCCESS"
+
+// VarroaUpstreamTrigger declares a subscription to another tenant's job.
+// The recorder, not the cell, matches it against a finished run; the
+// trigger itself starts no timer and polls nothing. Tenant and Job name
+// the producer; Job is relative to the producer's own folder. Result is
+// the threshold "this result or better" and defaults to SUCCESS.
+type VarroaUpstreamTrigger struct {
+	Tenant string `yaml:"tenant"`
+	Job    string `yaml:"job"`
+	Result string `yaml:"result,omitempty"`
+}
+
+// validateTriggers rejects a varroaUpstream trigger with an empty tenant,
+// an empty job, or a result outside SUCCESS, UNSTABLE, and FAILURE. An
+// empty result is not an error: the renderer applies the SUCCESS default.
+func validateTriggers(itemName string, triggers []Trigger) error {
+	for _, t := range triggers {
+		if t.VarroaUpstream == nil {
+			continue
+		}
+		vu := t.VarroaUpstream
+		if strings.TrimSpace(vu.Tenant) == "" {
+			return fmt.Errorf("item %q: varroaUpstream trigger requires tenant", itemName)
+		}
+		if strings.TrimSpace(vu.Job) == "" {
+			return fmt.Errorf("item %q: varroaUpstream trigger requires job", itemName)
+		}
+		if vu.Result != "" && !varroaUpstreamResults[vu.Result] {
+			return fmt.Errorf("item %q: varroaUpstream trigger result %q must be one of SUCCESS, UNSTABLE, FAILURE", itemName, vu.Result)
+		}
+	}
+	return nil
 }
 
 // ---- Parameters ----
@@ -331,6 +389,7 @@ type Property struct {
 	FolderCredentialsProperty *FolderCredentialsProperty `yaml:"folderCredentialsProperty,omitempty"`
 	FolderLibraries           *FolderLibrariesProperty   `yaml:"folderLibraries,omitempty"`
 	ItemRestrictions          *ItemRestrictionsProperty  `yaml:"itemRestrictions,omitempty"`
+	Kubernetes                *KubernetesFolderProperty  `yaml:"kubernetes,omitempty"`
 }
 
 // BuildDiscarderProperty for pipeline job properties format.
@@ -499,6 +558,12 @@ type ItemRestrictionsProperty struct {
 	Filter       bool     `yaml:"filter,omitempty"`
 }
 
+// KubernetesFolderProperty restricts which kubernetes-plugin clouds a
+// folder's items may use.
+type KubernetesFolderProperty struct {
+	PermittedClouds []string `yaml:"permittedClouds"`
+}
+
 // ---- Groups (item-level RBAC) ----
 
 // Group defines an RBAC group on an item.
@@ -615,7 +680,13 @@ type GitHubSshCheckout struct {
 type ProjectFactory struct {
 	MultiBranch    *MultiBranchProjectFactory    `yaml:"multiBranchProjectFactory,omitempty"`
 	WorkflowBranch *WorkflowBranchProjectFactory `yaml:"workflowBranchProjectFactory,omitempty"`
+	VarroaMarker   *VarroaMarkerProjectFactory   `yaml:"varroaMarkerProjectFactory,omitempty"`
 }
+
+// VarroaMarkerProjectFactory selects the plugin's branch project factory.
+// The factory reads the marker file at a fixed path on each branch, so this
+// type carries no field.
+type VarroaMarkerProjectFactory struct{}
 
 // MultiBranchProjectFactory configures the workflow factory script path.
 type MultiBranchProjectFactory struct {
@@ -668,14 +739,30 @@ func (i *Item) Validate() error {
 	if strings.TrimSpace(i.Name) == "" {
 		return fmt.Errorf("item missing name")
 	}
+	if err := validateTriggers(i.Name, i.Triggers); err != nil {
+		return err
+	}
 	switch i.Kind {
 	case "":
 		return fmt.Errorf("item %q: kind is required", i.Name)
 	case "folder", "freeStyle":
 		return nil
 	case "pipeline":
-		if i.Definition == nil || (i.Definition.CpsScmFlowDefinition == nil && i.Definition.Script == "") {
-			return fmt.Errorf("item %q: kind=pipeline requires definition.cpsScmFlowDefinition or definition.script", i.Name)
+		if i.Definition == nil {
+			return fmt.Errorf("item %q: kind=pipeline requires definition.cpsScmFlowDefinition, definition.script, or definition.varroaTemplate", i.Name)
+		}
+		set := 0
+		if i.Definition.CpsScmFlowDefinition != nil {
+			set++
+		}
+		if i.Definition.Script != "" {
+			set++
+		}
+		if i.Definition.VarroaTemplate != nil {
+			set++
+		}
+		if set != 1 {
+			return fmt.Errorf("item %q: kind=pipeline requires exactly one of definition.cpsScmFlowDefinition, definition.script, and definition.varroaTemplate", i.Name)
 		}
 		if i.Definition.CpsScmFlowDefinition != nil {
 			def := i.Definition.CpsScmFlowDefinition

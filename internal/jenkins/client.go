@@ -13,6 +13,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,7 +26,8 @@ import (
 // Retry-After response header, to bound server-requested delays.
 const retryAfterCap = 30 * time.Second
 
-// ErrItemNotFound is returned by DeleteItem when the item does not exist (404).
+// ErrItemNotFound is returned by DeleteItem and ReloadItem when the item does
+// not exist (404).
 // Callers can use errors.Is to distinguish not-found from other errors.
 var ErrItemNotFound = errors.New("jenkins: item not found")
 
@@ -159,8 +161,34 @@ func (c *Client) Reload(ctx context.Context) error {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("reload config: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
 	}
+	// JCasC answers a failed reload with HTTP 200 and its error page at the
+	// reload path itself, and a successful one with a redirect to the
+	// plugin's index. After the client follows that redirect, the final
+	// request path is the only signal that separates the two.
+	if resp.Request != nil && resp.Request.URL != nil && strings.HasSuffix(resp.Request.URL.Path, "/configuration-as-code/reload") {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
+		return fmt.Errorf("reload config: Jenkins answered its error page: %s", cascErrorSummary(body))
+	}
 	return nil
 }
+
+// cascErrorSummary reduces the JCasC error page to the text that follows
+// its "Error loading configuration" heading, with tags stripped and
+// whitespace collapsed, capped at 400 characters.
+func cascErrorSummary(page []byte) string {
+	text := strings.Join(strings.Fields(htmlTagPattern.ReplaceAllString(string(page), " ")), " ")
+	text = strings.NewReplacer("&quot;", "\"", "&#39;", "'", "&lt;", "<", "&gt;", ">", "&amp;", "&").Replace(text)
+	const marker = "Error loading configuration"
+	if i := strings.Index(text, marker); i >= 0 {
+		text = text[i:]
+	}
+	if len(text) > 400 {
+		text = text[:400]
+	}
+	return text
+}
+
+var htmlTagPattern = regexp.MustCompile(`<[^>]+>`)
 
 // CheckConfig validates a JCasC document against the live Jenkins instance
 // without applying it (dry-run, POST /configuration-as-code/check). Returns a
@@ -971,6 +999,25 @@ func (c *Client) UpdateItemConfig(ctx context.Context, itemPath, configXML strin
 	return nil
 }
 
+// ReloadItem reloads one item's config.xml from disk through the per-item
+// reload route. That route needs only Item.CONFIGURE, unlike the global
+// /reload route, which needs Jenkins.ADMINISTER.
+func (c *Client) ReloadItem(ctx context.Context, itemPath string) error {
+	resp, err := c.do(ctx, http.MethodPost, "/"+jobPath(itemPath)+"/reload", nil, "")
+	if err != nil {
+		return fmt.Errorf("reload item %s: %w", itemPath, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("reload item %s: %w", itemPath, ErrItemNotFound)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("reload item %s: HTTP %d: %s", itemPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+	}
+	return nil
+}
+
 // DeleteItem deletes a Jenkins item at the given path.
 func (c *Client) DeleteItem(ctx context.Context, itemPath string) error {
 	resp, err := c.do(ctx, http.MethodPost, "/"+jobPath(itemPath)+"/doDelete", nil, "")
@@ -984,6 +1031,67 @@ func (c *Client) DeleteItem(ctx context.Context, itemPath string) error {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("delete item %s: HTTP %d: %s", itemPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+	}
+	return nil
+}
+
+// TriggerBuildRequest is the body posted to the Varroa plugin's
+// /varroa-run/trigger route.
+type TriggerBuildRequest struct {
+	RunID      string            `json:"runId"`
+	IntentKey  string            `json:"intentKey"`
+	JobPath    string            `json:"jobPath"`
+	Parameters map[string]string `json:"parameters,omitempty"`
+	Actor      string            `json:"actor,omitempty"`
+}
+
+// TriggerBuild schedules a build on the local Jenkins through the Varroa
+// plugin's /varroa-run/trigger route. The plugin stamps the run identity
+// onto the queue item before it schedules, so the claim gate sees the
+// caller's key rather than a locally minted one.
+func (c *Client) TriggerBuild(ctx context.Context, req TriggerBuildRequest) error {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("trigger build %s: marshal request: %w", req.JobPath, err)
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/varroa-run/trigger", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return fmt.Errorf("trigger build %s: %w", req.JobPath, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("trigger build %s: HTTP %d: %s", req.JobPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+	}
+	return nil
+}
+
+// CancelBuildRequest is the body posted to the Varroa plugin's
+// /varroa-run/cancel route.
+type CancelBuildRequest struct {
+	RunID       string `json:"runId"`
+	JobPath     string `json:"jobPath"`
+	BuildNumber int64  `json:"buildNumber"`
+}
+
+// CancelBuild stops a running build or cancels a queued item on the local
+// Jenkins through the Varroa plugin's /varroa-run/cancel route. The plugin
+// resolves the target by run identifier, never by job path alone. Cancel is
+// best-effort: a run that already ended answers 404, which is not a
+// condition the caller needs to retry.
+func (c *Client) CancelBuild(ctx context.Context, req CancelBuildRequest) error {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("cancel build %s: marshal request: %w", req.JobPath, err)
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/varroa-run/cancel", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return fmt.Errorf("cancel build %s: %w", req.JobPath, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("cancel build %s: HTTP %d: %s", req.JobPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
 	}
 	return nil
 }

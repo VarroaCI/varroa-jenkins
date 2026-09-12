@@ -88,7 +88,7 @@ func ResourceAttributes() []attribute.KeyValue {
 func ServesPrometheusMetrics() bool {
 	name := os.Getenv("VARROA_SERVICE_NAME")
 	switch name {
-	case "varroa-bff", "varroa-operator", "varroa-gateway", "varroa-updatecenter":
+	case "varroa-bff", "varroa-operator", "varroa-gateway", "varroa-updatecenter", "varroa-recorder":
 		return true
 	}
 	return false

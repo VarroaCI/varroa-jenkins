@@ -87,6 +87,8 @@ spec:
 
 If no host can be resolved, Varroa creates no controller Ingress and sets the informational `NoExternalURL` condition. The in-cluster Service and port forwarding remain available.
 
+A [headless](../security/headless-controllers.md) controller receives no Ingress at all, whatever host would resolve. Use `spec.headless: true` for a one-tenant controller. A cell is always headless.
+
 ## Verify
 
 ```bash

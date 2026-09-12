@@ -401,7 +401,7 @@ func fakeJenkins(t *testing.T, session string) (*httptest.Server, *fakeJenkinsHi
 			hits.Applies.Add(1)
 		case r.URL.Path == "/configuration-as-code/reload":
 			hits.Reloads.Add(1)
-			w.WriteHeader(http.StatusOK)
+			http.Redirect(w, r, "/configuration-as-code/", http.StatusFound)
 		case r.URL.Path == "/safeRestart":
 			hits.SafeRestart.Add(1)
 			w.WriteHeader(http.StatusOK)
@@ -1142,6 +1142,11 @@ func cascReloadServer(t *testing.T, reloadFn func(int) (int, string)) *httptest.
 		case r.URL.Path == "/configuration-as-code/reload":
 			reloadCall++
 			code, body := reloadFn(reloadCall)
+			if code == http.StatusOK {
+				// JCasC redirects to its index on success.
+				http.Redirect(w, r, "/configuration-as-code/", http.StatusFound)
+				return
+			}
 			w.WriteHeader(code)
 			if body != "" {
 				fmt.Fprint(w, body)
@@ -1444,7 +1449,7 @@ func TestCertRenewalConcurrentAccess(t *testing.T) {
 	agent.miteDir = t.TempDir() // keep cert writes off the real shared path
 
 	newResp := func() *mitev1.RegisterResponse {
-		cert, err := certAuth.IssueMiteCert("test", "ns", pub)
+		cert, err := certAuth.IssueMiteCert("test", "ns", pub, "")
 		if err != nil {
 			t.Fatalf("issue cert: %v", err)
 		}

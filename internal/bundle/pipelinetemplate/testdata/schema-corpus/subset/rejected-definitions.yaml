@@ -1,0 +1,8 @@
+type: object
+additionalProperties: false
+definitions:
+  x:
+    type: string
+properties:
+  name:
+    type: string

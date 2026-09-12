@@ -32,6 +32,59 @@ flowchart LR
 
 Only the dashboard, BFF, and Jenkins routes need external HTTP access. The gateway remains a cluster-internal Service. The mite initiates its connection, so the control plane does not require inbound access to Jenkins.
 
+## Build Data Plane
+
+The Jenkins plugin, gated by the [build record store](../operations/build-records.md), sends
+three kinds of traffic to the mite over a localhost listener: build events, build claims, and
+console log chunks.
+
+```mermaid
+flowchart LR
+    PL[Jenkins plugin] -->|localhost| M[mite]
+    M <-->|gRPC mTLS| G[Gateway]
+    G -->|publish| S[(varroa_builds stream)]
+    G <-->|claim request/reply| L[Ledger]
+    G -->|append| B[(Blob store)]
+    S --> R[Recorder]
+    R --> L
+```
+
+Build events travel one way, from the plugin through the mite to the gateway, which publishes
+them onto the `varroa_builds` JetStream stream. The recorder consumes that stream and writes
+runs, stages, and test summaries.
+
+Build claims travel a round trip. A queued build asks the gateway, over the same mite stream,
+whether it may run. The gateway forwards the request to the recorder's ledger and returns the
+ledger's answer: a granted build number, a refusal, or a request to retry. See
+[Build claims](../operations/build-claims.md) for the claim decisions, the timeout budget, and
+how to turn the gate on.
+
+Console log chunks travel one way, from the plugin through the mite to the gateway, which
+appends each chunk straight to the blob store and acknowledges it once the write lands. This
+path never touches the `varroa_builds` stream: a chunk that entered JetStream would evict real
+audit history within days. Archived artifacts follow a separate path, straight from the
+uploading process to the blob store under the writing cell's own object prefix. See
+[Build logs and artifacts](../operations/build-logs-and-artifacts.md) for the full log path, the
+live-tail mechanism, and the per-cell artifact prefix.
+
+## Activity Path
+
+Activity events publish onto NATS subjects `activity.<cluster>.<ns>.<ctrl>` and
+`activity.<cluster>._global`. Events include lifecycle changes, user actions, and mite-observed
+changes. Two consumers read that traffic independently. `BusFanout` subscribes it for live SSE.
+The recorder's own JetStream stream, `varroa_activity`, holds a fixed 72-hour buffer that the
+recorder drains into the Postgres `activity` table. `GET /activity` and MCP `list_activity` read
+that table through `deps.Backfill`, whenever the
+[build record store](../operations/build-records.md) is enabled. Without it, they answer empty,
+and live SSE is all that remains.
+
+Job schedules travel the build data plane instead. The Jenkins plugin exports each job's trigger
+inventory. The mite polls it and attaches it to a heartbeat. The gateway republishes it as a
+`job.schedules` envelope on the same `varroa_builds` stream the recorder already consumes,
+landing in the `job_schedules` table. See
+[Build records](../operations/build-records.md#job-schedules) for the poll cadence and the
+watermark rule.
+
 ## Controller Configuration
 
 Varroa resolves a controller from installation defaults, an optional `ControllerClass`, and the `Controller` spec. The controller spec has the highest precedence.

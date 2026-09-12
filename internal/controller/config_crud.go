@@ -1187,6 +1187,8 @@ func (c *ConfigCRUD) composeBundle(data []byte, _ /* validateOnly — the BFF di
 		preview.PluginsYAML = composed.Materialized.PluginsYAML
 		preview.ItemsYAML = composed.Materialized.ItemsYAML
 		preview.RbacYAML = composed.Materialized.RbacYAML
+		preview.PipelineTemplatesYAML = composed.Materialized.PipelineTemplatesYAML
+		preview.PipelineTemplates = pipelineTemplateSummaries(composed.Materialized.PipelineTemplatesYAML)
 
 		baseline, _ := pluginlock.Resolve("")
 		if report, err := bundle.CheckPluginPins(preview.PluginsYAML, baseline); err == nil {
@@ -1209,6 +1211,9 @@ func (c *ConfigCRUD) composeBundle(data []byte, _ /* validateOnly — the BFF di
 
 	// Scan casc-applied sections (jenkins/rbac — JCasC resolves its own
 	// secret-source refs there) separately from the rest, then merge.
+	// composed.Materialized.PipelineTemplatesYAML must not join either
+	// scan. A template body holds its own ${...} Groovy text. That text is
+	// not a catalog variable (design D7, bundle-composition-surface).
 	var cascYAML, restYAML string
 	for _, s := range []string{preview.JenkinsYAML, preview.RbacYAML} {
 		if s != "" {

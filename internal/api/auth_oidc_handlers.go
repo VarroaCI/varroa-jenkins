@@ -326,14 +326,12 @@ func (s *Server) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Emit login event.
-	if s.deps.ActivityStore != nil {
-		s.deps.ActivityStore.Notify(activity.Event{
-			Type:    "login",
-			Source:  "user",
-			Actor:   ActorFrom(claims),
-			Message: ActorFrom(claims) + " logged in",
-		})
-	}
+	s.notifyActivity(activity.Event{
+		Type:    "login",
+		Source:  "user",
+		Actor:   ActorFrom(claims),
+		Message: ActorFrom(claims) + " logged in",
+	})
 
 	// Record the user in the directory.
 	if s.deps.Store != nil && s.deps.OperatorNamespace != "" {

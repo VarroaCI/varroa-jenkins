@@ -270,7 +270,7 @@ func runFakeMite(ctx context.Context, addr string, certAuth *ca.CA, name, ns str
 		return
 	}
 
-	cert, err := certAuth.IssueMiteCert(name, ns, pub)
+	cert, err := certAuth.IssueMiteCert(name, ns, pub, "")
 	if err != nil {
 		connectErrors.Add(1)
 		return

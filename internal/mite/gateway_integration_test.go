@@ -93,7 +93,7 @@ func dialWithMiteCert(t *testing.T, addr string, certAuth *ca.CA, name, ns strin
 		t.Fatalf("generate key: %v", err)
 	}
 
-	cert, err := certAuth.IssueMiteCert(name, ns, pub)
+	cert, err := certAuth.IssueMiteCert(name, ns, pub, "")
 	if err != nil {
 		t.Fatalf("issue cert: %v", err)
 	}

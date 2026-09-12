@@ -46,7 +46,7 @@ func TestHibernationIgnoreRegex_Set(t *testing.T) {
 
 func TestMintWakeToken_EnabledAndEmpty(t *testing.T) {
 	spec := &v1alpha1.HibernationSpec{Enabled: true}
-	token, err := mintWakeToken(spec, false, "")
+	token, err := mintWakeToken(spec, false, "", false)
 	if err != nil {
 		t.Fatalf("mintWakeToken failed: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestMintWakeToken_EnabledAndEmpty(t *testing.T) {
 }
 
 func TestMintWakeToken_HibernatedFlagAndEmpty(t *testing.T) {
-	token, err := mintWakeToken(nil, true, "")
+	token, err := mintWakeToken(nil, true, "", false)
 	if err != nil {
 		t.Fatalf("mintWakeToken failed: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestMintWakeToken_HibernatedFlagAndEmpty(t *testing.T) {
 
 func TestMintWakeToken_Idempotent(t *testing.T) {
 	spec := &v1alpha1.HibernationSpec{Enabled: true}
-	token, err := mintWakeToken(spec, false, "existing-token-123")
+	token, err := mintWakeToken(spec, false, "existing-token-123", false)
 	if err != nil {
 		t.Fatalf("mintWakeToken failed: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestMintWakeToken_Idempotent(t *testing.T) {
 
 func TestMintWakeToken_NotNeeded(t *testing.T) {
 	// Not enabled, not hibernated, no token.
-	token, err := mintWakeToken(nil, false, "")
+	token, err := mintWakeToken(nil, false, "", false)
 	if err != nil {
 		t.Fatalf("mintWakeToken failed: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestMintWakeToken_NotNeeded(t *testing.T) {
 func TestMintWakeToken_RotationOnClear(t *testing.T) {
 	spec := &v1alpha1.HibernationSpec{Enabled: true}
 	// First call: token created.
-	token1, err := mintWakeToken(spec, false, "")
+	token1, err := mintWakeToken(spec, false, "", false)
 	if err != nil {
 		t.Fatalf("first mintWakeToken failed: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestMintWakeToken_RotationOnClear(t *testing.T) {
 		t.Fatalf("expected 32-char token, got %q", token1)
 	}
 	// Token now exists: second call returns empty (no mint).
-	token2, err := mintWakeToken(spec, false, token1)
+	token2, err := mintWakeToken(spec, false, token1, false)
 	if err != nil {
 		t.Fatalf("second mintWakeToken failed: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestMintWakeToken_RotationOnClear(t *testing.T) {
 		t.Errorf("expected empty when token already exists, got %q", token2)
 	}
 	// Token cleared: third call creates a new token.
-	token3, err := mintWakeToken(spec, false, "")
+	token3, err := mintWakeToken(spec, false, "", false)
 	if err != nil {
 		t.Fatalf("third mintWakeToken failed: %v", err)
 	}
@@ -115,6 +115,30 @@ func TestMintWakeToken_RotationOnClear(t *testing.T) {
 	}
 	if token3 == token1 {
 		t.Errorf("expected different token after clear, got same: %q", token3)
+	}
+}
+
+// TestMintWakeToken_CellExcluded asserts task 5.7: a cell mints no wake
+// token even though it legally carries hibernation.enabled=true (which the
+// operator otherwise ignores) and an empty stored token.
+func TestMintWakeToken_CellExcluded(t *testing.T) {
+	spec := &v1alpha1.HibernationSpec{Enabled: true}
+	token, err := mintWakeToken(spec, false, "", true)
+	if err != nil {
+		t.Fatalf("mintWakeToken failed: %v", err)
+	}
+	if token != "" {
+		t.Errorf("expected empty token for a cell, got %q", token)
+	}
+
+	// Already hibernated (status.hibernated=true) is the other minting
+	// trigger; a cell excludes that path too.
+	token, err = mintWakeToken(nil, true, "", true)
+	if err != nil {
+		t.Fatalf("mintWakeToken failed: %v", err)
+	}
+	if token != "" {
+		t.Errorf("expected empty token for a hibernated cell, got %q", token)
 	}
 }
 
@@ -413,6 +437,21 @@ func TestShouldHibernate_Gate1_NilSpec(t *testing.T) {
 	ok, _ := shouldHibernate(cr, freshGauges(), time.Now(), time.Now())
 	if ok {
 		t.Error("gate 1: expected false when hibernation spec is nil")
+	}
+}
+
+// Gate 6: the controller is a cell. Every other gate passes (hibernation
+// enabled, idle past grace, no running or queued builds, fresh gauges), so
+// this isolates the cell exclusion (task 5.6).
+func TestShouldHibernate_Gate6_Cell(t *testing.T) {
+	cr := baseController()
+	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
+	ok, lastActivity := shouldHibernate(cr, freshGauges(), time.Now(), time.Now())
+	if ok {
+		t.Error("gate 6: expected false for a cell")
+	}
+	if !lastActivity.IsZero() {
+		t.Errorf("gate 6: expected zero lastActivity, got %v", lastActivity)
 	}
 }
 

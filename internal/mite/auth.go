@@ -17,8 +17,9 @@ import (
 type contextKey string
 
 const (
-	miteControllerKey contextKey = "mite-controller"
-	miteNamespaceKey  contextKey = "mite-namespace"
+	miteControllerKey   contextKey = "mite-controller"
+	miteNamespaceKey    contextKey = "mite-namespace"
+	miteCellInstanceKey contextKey = "mite-cell-instance"
 )
 
 // ControllerFromContext extracts the controller name from the context.
@@ -32,6 +33,14 @@ func ControllerFromContext(ctx context.Context) string {
 // Returns an empty string if not present.
 func NamespaceFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(miteNamespaceKey).(string)
+	return v
+}
+
+// CellInstanceFromContext extracts the mite's cell instance from the
+// context. Returns an empty string if not present, or if the certificate
+// carried no cell instance URI SAN.
+func CellInstanceFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(miteCellInstanceKey).(string)
 	return v
 }
 
@@ -79,6 +88,7 @@ func AuthInterceptor(certAuth *ca.CA) grpc.UnaryServerInterceptor {
 
 		ctx = context.WithValue(ctx, miteControllerKey, controllerName)
 		ctx = context.WithValue(ctx, miteNamespaceKey, namespace)
+		ctx = context.WithValue(ctx, miteCellInstanceKey, ca.CellInstanceFromCert(leaf))
 
 		return handler(ctx, req)
 	}

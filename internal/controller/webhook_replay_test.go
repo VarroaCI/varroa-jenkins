@@ -1,11 +1,22 @@
 package controller
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"sync"
 	"testing"
 
+	"github.com/nats-io/nats.go"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
+	"github.com/varroaci/varroa-jenkins/internal/transport"
 )
 
 func TestReplayAckDecision(t *testing.T) {
@@ -88,5 +99,415 @@ func TestWebhookEnvelope_MatchesBFFShape(t *testing.T) {
 	}
 	if env.Headers["X-GitHub-Event"] != "push" {
 		t.Errorf("headers not decoded: %+v", env.Headers)
+	}
+}
+
+// --- 11.2a: tenant envelope routing ---
+
+// recordingTransport decorates a Transport so a test can record every
+// SendImperative call and control its outcome, without standing up a real
+// mite connection.
+type recordingTransport struct {
+	transport.Transport
+	mu   sync.Mutex
+	sent []recordedSend
+	err  error
+}
+
+type recordedSend struct {
+	ns, name string
+	cmd      *mitev1.ImperativeCommand
+}
+
+func (rt *recordingTransport) SendImperative(_ context.Context, ns, name string, cmd *mitev1.ImperativeCommand) error {
+	rt.mu.Lock()
+	rt.sent = append(rt.sent, recordedSend{ns: ns, name: name, cmd: cmd})
+	rt.mu.Unlock()
+	return rt.err
+}
+
+func (rt *recordingTransport) calls() []recordedSend {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	out := make([]recordedSend, len(rt.sent))
+	copy(out, rt.sent)
+	return out
+}
+
+// newTenantWebhookTestReconciler builds a Reconciler whose SendImperative
+// always fails (no mite connected), so a test can assert routing —
+// whether SendImperative was called at all, and with which target —
+// without waiting on the 30s result timeout.
+func newTenantWebhookTestReconciler(t *testing.T) (*Reconciler, *crdstore.Fake, *recordingTransport) {
+	t.Helper()
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	rt := &recordingTransport{Transport: rec.miteTransport, err: errors.New("no mite connected")}
+	rec.miteTransport = rt
+	return rec, client.store, rt
+}
+
+func tenantEnvelopeMsg(t *testing.T, env webhookEnvelope) *nats.Msg {
+	t.Helper()
+	data, err := json.Marshal(env)
+	if err != nil {
+		t.Fatalf("marshal envelope: %v", err)
+	}
+	return &nats.Msg{Data: data}
+}
+
+func newReplayWaiters() *replayWaiters {
+	return &replayWaiters{chans: make(map[string]chan *mitev1.CommandResult)}
+}
+
+func TestHandleQueuedWebhook_TenantNakEmptyPlacement(t *testing.T) {
+	rec, store, rt := newTenantWebhookTestReconciler(t)
+	crdstore.MustSeed(store, &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns1"}},
+	})
+
+	env := webhookEnvelope{Cluster: "core", Team: "payments", Path: "github-webhook/", Forge: "github", DeliveryID: "d1"}
+	rec.handleQueuedWebhook(context.Background(), "core", tenantEnvelopeMsg(t, env), newReplayWaiters())
+
+	if len(rt.calls()) != 0 {
+		t.Fatalf("SendImperative called %d times, want 0 for an unplaced tenant", len(rt.calls()))
+	}
+}
+
+func TestHandleQueuedWebhook_TenantNakTenantMoving(t *testing.T) {
+	rec, store, rt := newTenantWebhookTestReconciler(t)
+	crdstore.MustSeed(store, &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns1"}},
+		Status: v1alpha1.TeamStatus{
+			Placement: &v1alpha1.TeamPlacementStatus{Cluster: "core", Cell: "cell-a", CellNamespace: "ns1"},
+			Conditions: []v1alpha1.TeamCondition{
+				{Type: v1alpha1.TeamConditionPlaced, Status: metav1.ConditionFalse, Reason: v1alpha1.TeamReasonTenantMoving},
+			},
+		},
+	})
+	crdstore.MustSeed(store, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "cell-a", Namespace: "ns1"},
+		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected},
+	})
+
+	env := webhookEnvelope{Cluster: "core", Team: "payments", Path: "github-webhook/", Forge: "github", DeliveryID: "d1"}
+	rec.handleQueuedWebhook(context.Background(), "core", tenantEnvelopeMsg(t, env), newReplayWaiters())
+
+	if len(rt.calls()) != 0 {
+		t.Fatalf("SendImperative called %d times, want 0 while the tenant is moving", len(rt.calls()))
+	}
+}
+
+func TestHandleQueuedWebhook_TenantNakUnreadableController(t *testing.T) {
+	rec, store, rt := newTenantWebhookTestReconciler(t)
+	crdstore.MustSeed(store, &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns1"}},
+		Status: v1alpha1.TeamStatus{
+			Placement: &v1alpha1.TeamPlacementStatus{Cluster: "core", Cell: "cell-a", CellNamespace: "ns1"},
+		},
+	})
+	// No Controller seeded at all: absent counts the same as unreadable.
+
+	env := webhookEnvelope{Cluster: "core", Team: "payments", Path: "github-webhook/", Forge: "github", DeliveryID: "d1"}
+	rec.handleQueuedWebhook(context.Background(), "core", tenantEnvelopeMsg(t, env), newReplayWaiters())
+
+	if len(rt.calls()) != 0 {
+		t.Fatalf("SendImperative called %d times, want 0 for an absent Controller", len(rt.calls()))
+	}
+}
+
+func TestHandleQueuedWebhook_TenantNakControllerNotConnected(t *testing.T) {
+	rec, store, rt := newTenantWebhookTestReconciler(t)
+	crdstore.MustSeed(store, &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns1"}},
+		Status: v1alpha1.TeamStatus{
+			Placement: &v1alpha1.TeamPlacementStatus{Cluster: "core", Cell: "cell-a", CellNamespace: "ns1"},
+		},
+	})
+	crdstore.MustSeed(store, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "cell-a", Namespace: "ns1"},
+		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseProvisioning},
+	})
+
+	env := webhookEnvelope{Cluster: "core", Team: "payments", Path: "github-webhook/", Forge: "github", DeliveryID: "d1"}
+	rec.handleQueuedWebhook(context.Background(), "core", tenantEnvelopeMsg(t, env), newReplayWaiters())
+
+	if len(rt.calls()) != 0 {
+		t.Fatalf("SendImperative called %d times, want 0 for a not-Connected Controller", len(rt.calls()))
+	}
+}
+
+func TestHandleQueuedWebhook_TenantTermDeletedTeam(t *testing.T) {
+	rec, _, rt := newTenantWebhookTestReconciler(t)
+	// No Team seeded at all.
+
+	env := webhookEnvelope{Cluster: "core", Team: "payments", Path: "github-webhook/", Forge: "github", DeliveryID: "d1"}
+	rec.handleQueuedWebhook(context.Background(), "core", tenantEnvelopeMsg(t, env), newReplayWaiters())
+
+	if len(rt.calls()) != 0 {
+		t.Fatalf("SendImperative called %d times, want 0 for a deleted Team", len(rt.calls()))
+	}
+}
+
+func TestHandleQueuedWebhook_TenantSendsToCurrentPlacementAndJoinsDeliveryID(t *testing.T) {
+	rec, store, rt := newTenantWebhookTestReconciler(t)
+	crdstore.MustSeed(store, &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns1"}},
+		Status: v1alpha1.TeamStatus{
+			Placement: &v1alpha1.TeamPlacementStatus{Cluster: "core", Cell: "cell-a", CellNamespace: "ns1"},
+		},
+	})
+	crdstore.MustSeed(store, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "cell-a", Namespace: "ns1"},
+		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected},
+	})
+
+	env := webhookEnvelope{
+		Cluster: "core", Team: "payments", Path: "github-webhook/",
+		BodyB64: base64.StdEncoding.EncodeToString([]byte("payload")),
+		Forge:   "github", DeliveryID: "8f2c",
+	}
+	rec.handleQueuedWebhook(context.Background(), "core", tenantEnvelopeMsg(t, env), newReplayWaiters())
+
+	calls := rt.calls()
+	if len(calls) != 1 {
+		t.Fatalf("SendImperative called %d times, want 1", len(calls))
+	}
+	if calls[0].ns != "ns1" || calls[0].name != "cell-a" {
+		t.Fatalf("target = %s/%s, want ns1/cell-a", calls[0].ns, calls[0].name)
+	}
+	if got := calls[0].cmd.ReplayWebhook.DeliveryId; got != "github:8f2c" {
+		t.Fatalf("ReplayWebhookPayload.delivery_id = %q, want github:8f2c", got)
+	}
+	if calls[0].cmd.CommandId == "" || calls[0].cmd.CommandId == calls[0].cmd.ReplayWebhook.DeliveryId {
+		t.Fatalf("command_id = %q, want a distinct correlation id (the JetStream sequence), not the forge-joined delivery id", calls[0].cmd.CommandId)
+	}
+}
+
+func TestHandleQueuedWebhook_TenantMoveRetargetsToCurrentPlacement(t *testing.T) {
+	rec, store, rt := newTenantWebhookTestReconciler(t)
+	crdstore.MustSeed(store, &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns1", "ns2"}},
+		Status: v1alpha1.TeamStatus{
+			Placement: &v1alpha1.TeamPlacementStatus{Cluster: "core", Cell: "cell-a", CellNamespace: "ns1"},
+		},
+	})
+	crdstore.MustSeed(store, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "cell-a", Namespace: "ns1"},
+		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected},
+	})
+	crdstore.MustSeed(store, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "cell-b", Namespace: "ns2"},
+		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected},
+	})
+
+	env := webhookEnvelope{Cluster: "core", Team: "payments", Path: "github-webhook/", Forge: "github", DeliveryID: "d1"}
+	rec.handleQueuedWebhook(context.Background(), "core", tenantEnvelopeMsg(t, env), newReplayWaiters())
+
+	// The tenant moves to cell-b before this delivery is retried.
+	crdstore.MustSeed(store, &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns1", "ns2"}},
+		Status: v1alpha1.TeamStatus{
+			Placement: &v1alpha1.TeamPlacementStatus{Cluster: "core", Cell: "cell-b", CellNamespace: "ns2"},
+		},
+	})
+	rec.handleQueuedWebhook(context.Background(), "core", tenantEnvelopeMsg(t, env), newReplayWaiters())
+
+	calls := rt.calls()
+	if len(calls) != 2 {
+		t.Fatalf("SendImperative called %d times, want 2", len(calls))
+	}
+	if calls[0].ns != "ns1" || calls[0].name != "cell-a" {
+		t.Fatalf("first delivery target = %s/%s, want ns1/cell-a", calls[0].ns, calls[0].name)
+	}
+	if calls[1].ns != "ns2" || calls[1].name != "cell-b" {
+		t.Fatalf("second delivery target = %s/%s, want the current placement ns2/cell-b", calls[1].ns, calls[1].name)
+	}
+}
+
+// moveOnSecondTeamRead wraps a crdstore.Backend and rewrites the named
+// Team's placement the second time its GetObject is called, so a test can
+// land a move inside a single handleQueuedTenantWebhook invocation — in
+// the gap between the checks-time read and the pre-send re-read — without
+// a second, separate delivery.
+type moveOnSecondTeamRead struct {
+	crdstore.Backend
+	store        *crdstore.Fake
+	teamName     string
+	newPlacement *v1alpha1.TeamPlacementStatus
+	calls        int
+}
+
+func newMoveOnSecondTeamRead(t *testing.T, store *crdstore.Fake, teamName string, newPlacement *v1alpha1.TeamPlacementStatus) *moveOnSecondTeamRead {
+	t.Helper()
+	if _, err := crdstore.GVRFor[v1alpha1.Team](); err != nil {
+		t.Fatalf("GVRFor[Team]: %v", err)
+	}
+	return &moveOnSecondTeamRead{
+		Backend:      store,
+		store:        store,
+		teamName:     teamName,
+		newPlacement: newPlacement,
+	}
+}
+
+func (m *moveOnSecondTeamRead) GetObject(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) (*unstructured.Unstructured, error) {
+	teamGVR, _ := crdstore.GVRFor[v1alpha1.Team]()
+	if gvr == teamGVR && name == m.teamName {
+		m.calls++
+		if m.calls == 2 {
+			team, err := crdstore.Get[v1alpha1.Team](ctx, m.store, m.teamName, "")
+			if err == nil {
+				team.Status.Placement = m.newPlacement
+				crdstore.MustSeed(m.store, team)
+			}
+		}
+	}
+	return m.Backend.GetObject(ctx, gvr, namespace, name)
+}
+
+// moveToTenantMovingOnSecondTeamRead wraps a crdstore.Backend and rewrites
+// the named Team's Placed condition to False/TenantMoving the second time
+// its GetObject is called, keeping the stored placement unchanged. It lets
+// a test land a voluntary-move drain start inside a single
+// handleQueuedWebhook invocation — in the gap between the checks-time read
+// and the pre-send re-read — without changing the placement target itself.
+type moveToTenantMovingOnSecondTeamRead struct {
+	crdstore.Backend
+	store    *crdstore.Fake
+	teamName string
+	calls    int
+}
+
+func newMoveToTenantMovingOnSecondTeamRead(t *testing.T, store *crdstore.Fake, teamName string) *moveToTenantMovingOnSecondTeamRead {
+	t.Helper()
+	if _, err := crdstore.GVRFor[v1alpha1.Team](); err != nil {
+		t.Fatalf("GVRFor[Team]: %v", err)
+	}
+	return &moveToTenantMovingOnSecondTeamRead{
+		Backend:  store,
+		store:    store,
+		teamName: teamName,
+	}
+}
+
+func (m *moveToTenantMovingOnSecondTeamRead) GetObject(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) (*unstructured.Unstructured, error) {
+	teamGVR, _ := crdstore.GVRFor[v1alpha1.Team]()
+	if gvr == teamGVR && name == m.teamName {
+		m.calls++
+		if m.calls == 2 {
+			team, err := crdstore.Get[v1alpha1.Team](ctx, m.store, m.teamName, "")
+			if err == nil {
+				team.Status.Conditions = []v1alpha1.TeamCondition{
+					{Type: v1alpha1.TeamConditionPlaced, Status: metav1.ConditionFalse, Reason: v1alpha1.TeamReasonTenantMoving},
+				}
+				crdstore.MustSeed(m.store, team)
+			}
+		}
+	}
+	return m.Backend.GetObject(ctx, gvr, namespace, name)
+}
+
+// TestHandleQueuedWebhook_TenantSendRacesTenantMovingNaksInsteadOfOldCell
+// proves the pre-send re-read also catches the earlier TenantMoving stage
+// of a voluntary move (design.md D4's three-step move order), not only a
+// later change of the placement target. The Team keeps the same Cell and
+// CellNamespace throughout — only the Placed condition changes — so a
+// re-read that compares Cell/CellNamespace alone would miss this race and
+// dispatch the delivery to the draining old cell.
+func TestHandleQueuedWebhook_TenantSendRacesTenantMovingNaksInsteadOfOldCell(t *testing.T) {
+	rec, store, rt := newTenantWebhookTestReconciler(t)
+	crdstore.MustSeed(store, &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns1"}},
+		Status: v1alpha1.TeamStatus{
+			Placement: &v1alpha1.TeamPlacementStatus{Cluster: "core", Cell: "cell-a", CellNamespace: "ns1"},
+		},
+	})
+	crdstore.MustSeed(store, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "cell-a", Namespace: "ns1"},
+		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected},
+	})
+
+	// The wrapped store sets Placed=False/TenantMoving on the Team the
+	// second time this handler reads it — the pre-send re-read — while
+	// leaving Cell and CellNamespace exactly as they were at the
+	// checks-time read.
+	racy := newMoveToTenantMovingOnSecondTeamRead(t, store, "payments")
+	rec.store = racy
+
+	env := webhookEnvelope{Cluster: "core", Team: "payments", Path: "github-webhook/", Forge: "github", DeliveryID: "d1"}
+	rec.handleQueuedWebhook(context.Background(), "core", tenantEnvelopeMsg(t, env), newReplayWaiters())
+
+	calls := rt.calls()
+	if len(calls) != 0 {
+		t.Fatalf("SendImperative called %d times, want 0: a mid-flight TenantMoving transition must nak, never dispatch to the draining cell (%s/%s)",
+			len(calls), calls[0].ns, calls[0].name)
+	}
+	if racy.calls < 2 {
+		t.Fatalf("Team was read %d times, want at least 2 (checks-time read + pre-send re-read) for this race to be exercised", racy.calls)
+	}
+}
+
+// TestHandleQueuedWebhook_TenantSendRacesMoveNaksInsteadOfOldCell proves
+// 11.2a's fix: when the Team's placement changes in the gap between the
+// checks-time read and the pre-send re-read — the exact race a single
+// stale read would miss — the delivery is nak'd for redelivery and never
+// reaches the cell the tenant already left.
+func TestHandleQueuedWebhook_TenantSendRacesMoveNaksInsteadOfOldCell(t *testing.T) {
+	rec, store, rt := newTenantWebhookTestReconciler(t)
+	crdstore.MustSeed(store, &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns1", "ns2"}},
+		Status: v1alpha1.TeamStatus{
+			Placement: &v1alpha1.TeamPlacementStatus{Cluster: "core", Cell: "cell-a", CellNamespace: "ns1"},
+		},
+	})
+	crdstore.MustSeed(store, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "cell-a", Namespace: "ns1"},
+		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected},
+	})
+	crdstore.MustSeed(store, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "cell-b", Namespace: "ns2"},
+		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected},
+	})
+
+	// The wrapped store moves the tenant to cell-b the second time this
+	// handler reads the Team — i.e. at the pre-send re-read — simulating
+	// a move that lands after the checks above already passed against
+	// cell-a.
+	racy := newMoveOnSecondTeamRead(t, store, "payments", &v1alpha1.TeamPlacementStatus{
+		Cluster: "core", Cell: "cell-b", CellNamespace: "ns2",
+	})
+	rec.store = racy
+
+	env := webhookEnvelope{Cluster: "core", Team: "payments", Path: "github-webhook/", Forge: "github", DeliveryID: "d1"}
+	rec.handleQueuedWebhook(context.Background(), "core", tenantEnvelopeMsg(t, env), newReplayWaiters())
+
+	calls := rt.calls()
+	if len(calls) != 0 {
+		t.Fatalf("SendImperative called %d times, want 0: a mid-flight move must nak, never dispatch to the cell (%s/%s) the tenant already left",
+			len(calls), calls[0].ns, calls[0].name)
+	}
+	if racy.calls < 2 {
+		t.Fatalf("Team was read %d times, want at least 2 (checks-time read + pre-send re-read) for this race to be exercised", racy.calls)
+	}
+
+	// The redelivery, with the store now settled on the new placement,
+	// reaches the new cell.
+	rec.handleQueuedWebhook(context.Background(), "core", tenantEnvelopeMsg(t, env), newReplayWaiters())
+	calls = rt.calls()
+	if len(calls) != 1 {
+		t.Fatalf("SendImperative called %d times on redelivery, want 1", len(calls))
+	}
+	if calls[0].ns != "ns2" || calls[0].name != "cell-b" {
+		t.Fatalf("redelivery target = %s/%s, want ns2/cell-b", calls[0].ns, calls[0].name)
 	}
 }

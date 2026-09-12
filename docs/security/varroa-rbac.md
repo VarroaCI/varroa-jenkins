@@ -55,6 +55,96 @@ spec:
 When both scope fields are set, a controller must match both. Namespace scope
 does not narrow cluster-scoped resources.
 
+## Grant pipelines access
+
+The `pipelines` resource controls Jenkins job and run access through Varroa.
+It has three verbs.
+
+| Verb | Grants |
+|---|---|
+| `read` | Read a tenant's jobs, runs, stages, logs, artifacts, tests, and changes |
+| `write` | Start, cancel, and rerun a tenant's builds |
+| `admin` | Write a tenant's `Team.spec.pipelines.exports` |
+
+A verb does not imply another verb. `write` does not grant `read`. List
+every verb a role needs.
+
+Built-in roles carry this `pipelines` matrix:
+
+| Role | `pipelines` verbs |
+|---|---|
+| `admin` | All verbs, through the wildcard rule |
+| `operator` | `read`, `write`, `admin` |
+| `developer` | `read`, `write` |
+| `viewer` | `read` |
+
+## Grant break-glass access
+
+`break-glass` is a `controllers` verb. It lets a caller request a temporary admin session on a
+[headless controller](headless-controllers.md).
+
+Only the built-in `admin` role holds `break-glass`, through its wildcard rule. No other
+built-in role holds it. Grant it to a custom role the same way as any other verb:
+
+```yaml
+apiVersion: varroa.dev/v1alpha1
+kind: VarroaRole
+metadata:
+  name: incident-responder
+spec:
+  apiRules:
+    - resources: [controllers]
+      verbs: [break-glass]
+```
+
+Holding `break-glass` grants a token. It does not grant Jenkins access on its own. The caller
+also needs the Jenkins permission `hudson.model.Hudson.Administer` on the target controller.
+Otherwise Jenkins denies the session. See [Headless controllers](headless-controllers.md) for
+the full runbook.
+
+## Scope a binding to a pipelines tenant
+
+A pipelines tenant is a `Team`. Scope a `VarroaRoleBinding` to one or more
+tenants:
+
+```yaml
+apiVersion: varroa.dev/v1alpha1
+kind: VarroaRoleBinding
+metadata:
+  name: checkout-developers
+spec:
+  roleRef: developer
+  subjects:
+    - kind: Group
+      name: checkout-team
+  scope:
+    tenants:
+      - name: checkout-team
+        jobs:
+          - "release/*"
+```
+
+`tenants[].name` names a `Team`. `tenants[].jobs` is an optional list of
+folder-relative glob patterns. An absent `jobs` list covers every job of the
+tenant. A pattern uses `*` for one path segment, `**` to cross a `/`, and
+`?` for one character.
+
+A scope names one dimension. The API server rejects a scope that sets
+`tenants` together with `namespaces` or `controllerSelector`. A
+`controllerSelector`-scoped binding grants no `pipelines` access. Scope the
+binding to `tenants` to grant `pipelines` access.
+
+## Reach a tenant through Team membership
+
+A `Team` member reaches the team's pipelines tenant through the `Team`. The
+member needs no separate `VarroaRoleBinding` for that tenant.
+
+## Jenkins role bindings carry no tenant scope
+
+A `JenkinsRoleBinding` accepts no tenant scope. Its `controllerScope` field
+rejects a `tenants` list. A `pipelines` verb produces no Jenkins
+role-strategy entry.
+
 ## Create a custom role
 
 ```yaml

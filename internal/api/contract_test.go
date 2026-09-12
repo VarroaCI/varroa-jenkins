@@ -62,6 +62,8 @@ var routeManifest = []route{
 	{Method: "POST", Path: "/api/v1/groups"},
 	{Method: "GET", Path: "/api/v1/teams"},
 	{Method: "POST", Path: "/api/v1/teams"},
+	{Method: "GET", Path: "/api/v1/runners"},
+	{Method: "POST", Path: "/api/v1/runners"},
 	{Method: "GET", Path: "/api/v1/controllers"},
 	{Method: "GET", Path: "/api/v1/clusters"},
 	{Method: "POST", Path: "/api/v1/clusters/{cluster}/controllers/{ns}"},
@@ -101,12 +103,16 @@ var routeManifest = []route{
 	{Method: "GET", Path: "/api/v1/teams/{name}"},
 	{Method: "PUT", Path: "/api/v1/teams/{name}"},
 	{Method: "DELETE", Path: "/api/v1/teams/{name}"},
+	{Method: "GET", Path: "/api/v1/runners/{name}"},
+	{Method: "PATCH", Path: "/api/v1/runners/{name}"},
+	{Method: "DELETE", Path: "/api/v1/runners/{name}"},
 	// Controller sub-routes (cluster-scoped)
 	{Method: "POST", Path: "/api/v1/clusters/{cluster}/controllers/{ns}/{name}/reconcile"},
 	{Method: "POST", Path: "/api/v1/clusters/{cluster}/controllers/{ns}/{name}/hibernate"},
 	{Method: "POST", Path: "/api/v1/clusters/{cluster}/controllers/{ns}/{name}/wake"},
 	{Method: "POST", Path: "/api/v1/clusters/{cluster}/controllers/{ns}/{name}/approve"},
 	{Method: "POST", Path: "/api/v1/clusters/{cluster}/controllers/{ns}/{name}/approve-deletion"},
+	{Method: "POST", Path: "/api/v1/clusters/{cluster}/controllers/{ns}/{name}/break-glass"},
 	{Method: "POST", Path: "/api/v1/clusters/{cluster}/controllers/{ns}/{name}/reprovision"},
 	{Method: "POST", Path: "/api/v1/clusters/{cluster}/controllers/{ns}/{name}/restart"},
 	{Method: "POST", Path: "/api/v1/clusters/{cluster}/controllers/{ns}/{name}/preview"},
@@ -193,6 +199,20 @@ var routeManifest = []route{
 	{Method: "GET", Path: "/api/v1/version-candidates"},
 	{Method: "GET", Path: "/api/v1/version-candidates/{name}"},
 	{Method: "POST", Path: "/api/v1/version-candidates/{name}/promote"},
+	// Pipelines
+	{Method: "GET", Path: "/api/v1/pipelines/{team}"},
+	{Method: "GET", Path: "/api/v1/pipelines/{team}/jobs/{job}"},
+	{Method: "GET", Path: "/api/v1/pipelines/{team}/jobs/{job}/runs"},
+	{Method: "POST", Path: "/api/v1/pipelines/{team}/jobs/{job}/runs"},
+	{Method: "POST", Path: "/api/v1/pipelines/{team}/markers/validate"},
+	{Method: "GET", Path: "/api/v1/runs/{run}"},
+	{Method: "GET", Path: "/api/v1/runs/{run}/log"},
+	{Method: "GET", Path: "/api/v1/runs/{run}/artifacts"},
+	{Method: "GET", Path: "/api/v1/runs/{run}/artifacts/{path}"},
+	{Method: "GET", Path: "/api/v1/runs/{run}/tests"},
+	{Method: "GET", Path: "/api/v1/runs/{run}/changes"},
+	{Method: "POST", Path: "/api/v1/runs/{run}/cancel"},
+	{Method: "POST", Path: "/api/v1/runs/{run}/rerun"},
 }
 
 // contractCase represents one golden exchange to validate against the spec.
@@ -313,6 +333,11 @@ func newContractServer(t *testing.T) (*httptest.Server, *openapi3.T) {
 		},
 	}
 	crdstore.MustSeed(client.crdStore, client.composedBundles["test-bundle"])
+	crdstore.MustSeed(client.crdStore, &v1alpha1.Runner{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-runner"},
+		Spec:       v1alpha1.RunnerSpec{Team: "test-team", Launcher: "inbound", RemoteFS: "/var/j"},
+		Status:     v1alpha1.RunnerStatus{Token: "deadbeefdeadbeefdeadbeefdeadbeef"},
+	})
 
 	// Create a KeyVerifier for API key operations.
 	keyStore := newFakeKeyStore()
@@ -754,6 +779,10 @@ func TestContract(t *testing.T) {
 			"getOpenAPISpec":         true,
 			"authLogin":              true,
 			"authCallback":           true,
+			// Registered here so the manifest gate passes, but it answers
+			// 501 until section 5 (the log stream) replaces the stub. A case
+			// belongs here only until that section replaces the stub.
+			"streamRunLog": true,
 		}
 
 		covered := make(map[string]bool)

@@ -21,6 +21,7 @@
   var rootUrl  = (script.getAttribute('data-root-url') || '').replace(/\/+$/, '');
   var crumbField = script.getAttribute('data-crumb-field') || '';
   var crumbValue = script.getAttribute('data-crumb-value') || '';
+  var headless = script.getAttribute('data-headless') === 'true';
 
   function miteChipHTML(connected) {
     if (connected) {
@@ -74,6 +75,16 @@
   // Append avatar element (built with textContent) to the banner bar
   if (avatarEl) {
     banner.firstChild.appendChild(avatarEl);
+  }
+
+  // Break-glass marker (built with textContent, never innerHTML): the marker
+  // carries no identity data, so it needs no escaping beyond textContent.
+  if (headless) {
+    var breakGlassEl = document.createElement('span');
+    breakGlassEl.id = 'varroa-breakglass-marker';
+    breakGlassEl.style.cssText = 'font-size:11px;font-weight:600;padding:3px 9px;border-radius:7px;background:rgba(255,255,255,.10);color:#EAD7B5';
+    breakGlassEl.textContent = 'Break-glass session — audited';
+    banner.firstChild.appendChild(breakGlassEl);
   }
 
   // Profile sub-menu panel (Task 6)

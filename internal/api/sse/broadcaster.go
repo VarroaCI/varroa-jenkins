@@ -11,12 +11,6 @@ type Record struct {
 	Data  interface{} // JSON-marshaled payload
 }
 
-// ActivityNotifier receives connect/disconnect events for the activity feed.
-type ActivityNotifier interface {
-	NotifyConnect(name, namespace, version string)
-	NotifyDisconnect(name, namespace string)
-}
-
 // EventSource is the interface satisfied by both Broadcaster (in-process) and
 // BusFanout (bus-backed). Handlers use this interface so the BFF can wire
 // in a BusFanout without the monolith's in-process Broadcaster.
@@ -30,7 +24,6 @@ type EventSource interface {
 type Broadcaster struct {
 	mu          sync.RWMutex
 	subscribers map[string]map[chan Record]struct{}
-	activity    ActivityNotifier
 	Logger      *slog.Logger
 }
 
@@ -39,11 +32,6 @@ func NewBroadcaster() *Broadcaster {
 	return &Broadcaster{
 		subscribers: make(map[string]map[chan Record]struct{}),
 	}
-}
-
-// SetActivityNotifier sets the activity store for connect/disconnect events.
-func (b *Broadcaster) SetActivityNotifier(a ActivityNotifier) {
-	b.activity = a
 }
 
 // Subscribe returns a buffered channel that receives events for the given key.
@@ -96,25 +84,6 @@ func (b *Broadcaster) Notify(key string, record Record) {
 	b.deliver(key, record)
 	if key != "*" {
 		b.deliver("*", record)
-	}
-
-	// Forward connect/disconnect to activity store.
-	if b.activity != nil {
-		switch record.Event {
-		case "connected":
-			if data, ok := record.Data.(map[string]interface{}); ok {
-				name, _ := data["name"].(string)
-				ns, _ := data["namespace"].(string)
-				version, _ := data["version"].(string)
-				b.activity.NotifyConnect(name, ns, version)
-			}
-		case "disconnected":
-			if data, ok := record.Data.(map[string]interface{}); ok {
-				name, _ := data["name"].(string)
-				ns, _ := data["namespace"].(string)
-				b.activity.NotifyDisconnect(name, ns)
-			}
-		}
 	}
 }
 

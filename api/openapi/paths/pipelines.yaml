@@ -1,0 +1,163 @@
+# pipelines - team-scoped job listing, job detail, and the run list/create.
+/api/v1/pipelines/{team}:
+  get:
+    operationId: listPipelines
+    tags: [Pipelines]
+    summary: Lists a team's pipelines and its unfinished runs.
+    description: >
+      Resolves {team} onto one or more record-store tenants, unions each
+      tenant's job summaries with the catalog's declared jobs, and reads
+      each tenant's unfinished runs for the Running now strip.
+    parameters:
+      - $ref: '../components/parameters.yaml#/team'
+    responses:
+      "200":
+        description: The team's pipelines and running-now strip.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/PipelineListResponse'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        description: The team name is ambiguous across clusters.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "422":
+        description: The team resolves to more tenants than the fan-out ceiling.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/pipelines/{team}/jobs/{job}:
+  get:
+    operationId: getPipelineJob
+    tags: [Pipelines]
+    summary: Returns one job's summary, definition, triggers, parameters, and dependency edges.
+    description: >
+      dependencies.upstream and dependencies.downstream carry the job's
+      cross-tenant varroa-upstream trigger edges (design D13), each
+      marked granted or not. The route authorizes with CanReadPipeline,
+      never a controller-scoped check, because a cell hosts many
+      tenants.
+    parameters:
+      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/job'
+    responses:
+      "200":
+        description: The job's detail.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/PipelineJobDetail'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/pipelines/{team}/jobs/{job}/runs:
+  get:
+    operationId: listRuns
+    tags: [Pipelines]
+    summary: Lists a job's runs, filtered and paged across every tenant of the team.
+    parameters:
+      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/job'
+      - {name: branch, in: query, schema: {type: string}}
+      - {name: result, in: query, schema: {type: string}}
+      - {name: actor, in: query, schema: {type: string}}
+      - {name: cause, in: query, schema: {type: string}}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      - {name: cursor, in: query, schema: {type: string}}
+    responses:
+      "200":
+        description: A page of the job's runs, newest first.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunListResponse'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+  post:
+    operationId: createRun
+    tags: [Pipelines]
+    summary: Requests a new build. Fire and forget — the BFF does not claim the build number.
+    parameters:
+      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/job'
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/CreateRunRequest'
+    responses:
+      "202":
+        description: The run was requested.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunActionResponse'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        description: The job path lies in two or more tenants and no cluster value breaks the tie.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/pipelines/{team}/markers/validate:
+  post:
+    operationId: validatePipelineMarker
+    tags: [Pipelines]
+    summary: Lints a marker file against the team's delivered pipeline templates.
+    description: >
+      Resolves {team} onto its delivered pipeline-template set (design
+      pipeline-marker-file) and validates the posted marker text against
+      it. Contacts no cell and no record store, so it works while a cell
+      is down and while the record store is disabled.
+    parameters:
+      - $ref: '../components/parameters.yaml#/team'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/PipelineMarkerValidateRequest'
+    responses:
+      "200":
+        description: The lint findings. An empty list means the marker is valid.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/PipelineMarkerValidateResponse'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'

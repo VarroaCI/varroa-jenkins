@@ -1,0 +1,163 @@
+cases:
+- id: values-pass
+  schema: values-pass.schema.yaml
+  values: values-pass.values.yaml
+  verdict: accept
+- id: values-type-mismatch
+  schema: values-type-mismatch.schema.yaml
+  values: values-type-mismatch.values.yaml
+  verdict: reject
+  contains: want string
+  message: 'name: got number, want string'
+- id: values-failed-enum
+  schema: values-failed-enum.schema.yaml
+  values: values-failed-enum.values.yaml
+  verdict: reject
+  contains: one of
+  message: 'env: value must be one of [dev, prod]'
+- id: values-failed-pattern
+  schema: values-failed-pattern.schema.yaml
+  values: values-failed-pattern.values.yaml
+  verdict: reject
+  contains: pattern
+  message: 'name: value does not match pattern "^[a-z][a-z0-9-]*$"'
+- id: values-missing-required
+  schema: values-missing-required.schema.yaml
+  values: values-missing-required.values.yaml
+  verdict: reject
+  contains: missing property
+  message: 'missing property "name"'
+- id: values-unexpected-property
+  schema: values-unexpected-property.schema.yaml
+  values: values-unexpected-property.values.yaml
+  verdict: reject
+  contains: additional
+  message: 'additional property "extra" is not allowed'
+- id: values-defaulted-property
+  schema: values-defaulted-property.schema.yaml
+  values: values-defaulted-property.values.yaml
+  verdict: accept
+  expectDefaults:
+    publishImage: false
+- id: cross-literal-match
+  schema: cross-literal-match.schema.yaml
+  values: cross-literal-match.values.yaml
+  verdict: accept
+- id: cross-literal-nomatch
+  schema: cross-literal-nomatch.schema.yaml
+  values: cross-literal-nomatch.values.yaml
+  verdict: reject
+  contains: pattern
+  message: 'value: value does not match pattern "^abc$"'
+- id: cross-digit-class-match
+  schema: cross-digit-class-match.schema.yaml
+  values: cross-digit-class-match.values.yaml
+  verdict: accept
+- id: cross-digit-class-nomatch
+  schema: cross-digit-class-nomatch.schema.yaml
+  values: cross-digit-class-nomatch.values.yaml
+  verdict: reject
+  contains: pattern
+  message: 'value: value does not match pattern "^\d+$"'
+- id: cross-word-class-match
+  schema: cross-word-class-match.schema.yaml
+  values: cross-word-class-match.values.yaml
+  verdict: accept
+- id: cross-word-class-nomatch
+  schema: cross-word-class-nomatch.schema.yaml
+  values: cross-word-class-nomatch.values.yaml
+  verdict: reject
+  contains: pattern
+  message: 'value: value does not match pattern "^\w+$"'
+- id: cross-character-class-range-match
+  schema: cross-character-class-range-match.schema.yaml
+  values: cross-character-class-range-match.values.yaml
+  verdict: accept
+- id: cross-character-class-range-nomatch
+  schema: cross-character-class-range-nomatch.schema.yaml
+  values: cross-character-class-range-nomatch.values.yaml
+  verdict: reject
+  contains: pattern
+  message: 'value: value does not match pattern "^[a-z0-9]+$"'
+- id: cross-range-repeat-match
+  schema: cross-range-repeat-match.schema.yaml
+  values: cross-range-repeat-match.values.yaml
+  verdict: accept
+- id: cross-range-repeat-nomatch
+  schema: cross-range-repeat-nomatch.schema.yaml
+  values: cross-range-repeat-nomatch.values.yaml
+  verdict: reject
+  contains: pattern
+  message: 'value: value does not match pattern "^a{2,5}$"'
+- id: cross-alternation-match
+  schema: cross-alternation-match.schema.yaml
+  values: cross-alternation-match.values.yaml
+  verdict: accept
+- id: cross-alternation-nomatch
+  schema: cross-alternation-nomatch.schema.yaml
+  values: cross-alternation-nomatch.values.yaml
+  verdict: reject
+  contains: pattern
+  message: 'value: value does not match pattern "^(a|b)$"'
+- id: cross-capturing-group-match
+  schema: cross-capturing-group-match.schema.yaml
+  values: cross-capturing-group-match.values.yaml
+  verdict: accept
+- id: cross-capturing-group-nomatch
+  schema: cross-capturing-group-nomatch.schema.yaml
+  values: cross-capturing-group-nomatch.values.yaml
+  verdict: reject
+  contains: pattern
+  message: 'value: value does not match pattern "^(ab)$"'
+- id: cross-non-capturing-group-match
+  schema: cross-non-capturing-group-match.schema.yaml
+  values: cross-non-capturing-group-match.values.yaml
+  verdict: accept
+- id: cross-non-capturing-group-nomatch
+  schema: cross-non-capturing-group-nomatch.schema.yaml
+  values: cross-non-capturing-group-nomatch.values.yaml
+  verdict: reject
+  contains: pattern
+  message: 'value: value does not match pattern "^(?:ab)$"'
+- id: cross-end-anchor-trailing-newline
+  schema: cross-end-anchor-trailing-newline.schema.yaml
+  values: cross-end-anchor-trailing-newline.values.yaml
+  verdict: reject
+  contains: pattern
+  message: 'value: value does not match pattern "^a$"'
+- id: cross-end-anchor-non-trailing
+  schema: cross-end-anchor-non-trailing.schema.yaml
+  values: cross-end-anchor-non-trailing.values.yaml
+  verdict: reject
+  contains: pattern
+  message: 'value: value does not match pattern "^(?:a$|b)"'
+- id: values-failed-minlength-float
+  schema: values-failed-minlength-float.schema.yaml
+  values: values-failed-minlength-float.values.yaml
+  verdict: reject
+  contains: minimum
+  message: 'name: length is less than the minimum of 1'
+- id: values-failed-minitems-float
+  schema: values-failed-minitems-float.schema.yaml
+  values: values-failed-minitems-float.values.yaml
+  verdict: reject
+  contains: minimum
+  message: 'tags: holds fewer than the minimum of 2 items'
+- id: values-failed-minimum-float
+  schema: values-failed-minimum-float.schema.yaml
+  values: values-failed-minimum-float.values.yaml
+  verdict: reject
+  contains: minimum
+  message: 'count: value violates minimum 3'
+- id: values-failed-maximum-nonintegral
+  schema: values-failed-maximum-nonintegral.schema.yaml
+  values: values-failed-maximum-nonintegral.values.yaml
+  verdict: reject
+  contains: maximum
+  message: 'ratio: value violates maximum 2.5'
+- id: values-failed-minimum-large
+  schema: values-failed-minimum-large.schema.yaml
+  values: values-failed-minimum-large.values.yaml
+  verdict: reject
+  contains: minimum
+  message: 'count: value violates minimum 100000000000000000000'

@@ -1481,6 +1481,187 @@ func TestPatchControllerStatus_ClearsLastReconcileErrorAt(t *testing.T) {
 	}
 }
 
+// TestPatchControllerStatus_CellPatchShape asserts task 5.3a: the
+// end-of-reconcile status patch builds status.cell as an explicit partial
+// map carrying only the controller reconciler's own fields — warm,
+// appliedTenants, evacuate, unreadySince, rolledAt, and tenantWarnings —
+// and never tenants, the placement pass's own field. Sending the whole
+// in-memory CellStatus would carry a stale tenants list and clobber a
+// placement change a narrower patch would leave untouched.
+func TestPatchControllerStatus_CellPatchShape(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "Controller"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("ControllerList"), &unstructured.UnstructuredList{})
+
+	existing := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "Controller",
+		"metadata":   map[string]interface{}{"name": "cell1", "namespace": "ns"},
+		"status": map[string]interface{}{
+			"phase": "Connected",
+			"cell": map[string]interface{}{
+				"tenants": []interface{}{"payments", "search"},
+			},
+		},
+	}}
+
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{controllerGVR: "ControllerList"},
+		existing,
+	)
+	var capturedPatch []byte
+	dyn.PrependReactor("patch", "controllers", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		pa := action.(clienttesting.PatchActionImpl)
+		capturedPatch = pa.GetPatch()
+		return false, nil, nil
+	})
+	c := &ClientsetClient{dynamic: dyn}
+
+	unreadySince := metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	prevSeen := metav1.NewTime(time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC))
+	err := c.PatchControllerStatus(context.Background(), "cell1", "ns", &v1alpha1.ControllerStatus{
+		Phase: v1alpha1.ControllerPhaseConnected,
+		Cell: &v1alpha1.CellStatus{
+			AppliedTenants:           []string{"payments"},
+			Evacuate:                 true,
+			UnreadySince:             &unreadySince,
+			TenantWarnings:           []v1alpha1.TenantWarning{{Tenant: "payments", Reason: "HibernationIgnored", Message: "ignored"}},
+			Instance:                 "pod-uid-new",
+			PreviousInstance:         "pod-uid-old",
+			PreviousInstanceLastSeen: &prevSeen,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PatchControllerStatus failed: %v", err)
+	}
+	if capturedPatch == nil {
+		t.Fatal("expected the status subresource patch to be captured")
+	}
+
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(capturedPatch, &decoded); err != nil {
+		t.Fatalf("decode captured patch: %v", err)
+	}
+	status, _ := decoded["status"].(map[string]interface{})
+	cell, ok := status["cell"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("patch body carries no status.cell: %v", decoded)
+	}
+	for _, key := range []string{
+		"warm", "appliedTenants", "evacuate", "unreadySince", "rolledAt", "tenantWarnings",
+		"instance", "previousInstance", "previousInstanceLastSeen", "rehydration",
+	} {
+		if _, present := cell[key]; !present {
+			t.Errorf("patch body's status.cell missing key %q: %v", key, cell)
+		}
+	}
+	if _, present := cell["tenants"]; present {
+		t.Errorf("patch body's status.cell must never carry tenants, got %v", cell["tenants"])
+	}
+
+	// The pre-existing tenants list — the placement pass's own field — must
+	// survive untouched, proving the merge patch never sent that key.
+	got, err := dyn.Resource(controllerGVR).Namespace("ns").Get(context.Background(), "cell1", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get failed: %v", err)
+	}
+	tenants, _, _ := unstructured.NestedStringSlice(got.Object, "status", "cell", "tenants")
+	want := []string{"payments", "search"}
+	if len(tenants) != len(want) || tenants[0] != want[0] || tenants[1] != want[1] {
+		t.Errorf("status.cell.tenants = %v, want unchanged %v", tenants, want)
+	}
+
+	// previousInstance/previousInstanceLastSeen must persist — omitting
+	// them from the merge patch drops the replaced pod's dead-instance
+	// report for good the moment the next tenant.sync announce misses it.
+	prevInstance, _, _ := unstructured.NestedString(got.Object, "status", "cell", "previousInstance")
+	if prevInstance != "pod-uid-old" {
+		t.Errorf("status.cell.previousInstance = %q, want pod-uid-old", prevInstance)
+	}
+	prevSeenGot, _, _ := unstructured.NestedString(got.Object, "status", "cell", "previousInstanceLastSeen")
+	if prevSeenGot == "" {
+		t.Error("status.cell.previousInstanceLastSeen did not persist")
+	}
+}
+
+// TestPatchControllerCellStatus_TenantsOnlyPatchShape asserts task 6.6: the
+// placement pass's PatchControllerCellStatus sends exactly
+// {"status":{"cell":{"tenants":[...]}}}, and a cell carrying evacuate (the
+// controller reconciler's own half of status.cell) keeps it after the
+// patch.
+func TestPatchControllerCellStatus_TenantsOnlyPatchShape(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "Controller"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("ControllerList"), &unstructured.UnstructuredList{})
+
+	existing := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "Controller",
+		"metadata":   map[string]interface{}{"name": "cell1", "namespace": "ns"},
+		"status": map[string]interface{}{
+			"phase": "Connected",
+			"cell": map[string]interface{}{
+				"tenants":  []interface{}{"payments"},
+				"evacuate": true,
+				"warm":     false,
+			},
+		},
+	}}
+
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{controllerGVR: "ControllerList"},
+		existing,
+	)
+	var capturedPatch []byte
+	dyn.PrependReactor("patch", "controllers", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		pa := action.(clienttesting.PatchActionImpl)
+		capturedPatch = pa.GetPatch()
+		return false, nil, nil
+	})
+	c := &ClientsetClient{dynamic: dyn}
+
+	err := c.PatchControllerCellStatus(context.Background(), "cell1", "ns", &v1alpha1.CellStatus{
+		Tenants: []string{"payments", "search"},
+	})
+	if err != nil {
+		t.Fatalf("PatchControllerCellStatus failed: %v", err)
+	}
+	if capturedPatch == nil {
+		t.Fatal("expected the status subresource patch to be captured")
+	}
+
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(capturedPatch, &decoded); err != nil {
+		t.Fatalf("decode captured patch: %v", err)
+	}
+	if len(decoded) != 1 {
+		t.Fatalf("patch body carries more than status: %v", decoded)
+	}
+	status, _ := decoded["status"].(map[string]interface{})
+	if len(status) != 1 {
+		t.Fatalf("patch body's status carries more than cell: %v", status)
+	}
+	cell, ok := status["cell"].(map[string]interface{})
+	if !ok || len(cell) != 1 {
+		t.Fatalf("patch body's status.cell must carry only tenants: %v", status["cell"])
+	}
+	tenants, _ := cell["tenants"].([]interface{})
+	if len(tenants) != 2 || tenants[0] != "payments" || tenants[1] != "search" {
+		t.Fatalf("patch body's status.cell.tenants = %v, want [payments search]", cell["tenants"])
+	}
+
+	got, err := dyn.Resource(controllerGVR).Namespace("ns").Get(context.Background(), "cell1", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get failed: %v", err)
+	}
+	evacuate, _, _ := unstructured.NestedBool(got.Object, "status", "cell", "evacuate")
+	if !evacuate {
+		t.Error("status.cell.evacuate did not survive the narrow tenants patch")
+	}
+}
+
 // TestPatchCatalogItemStatus_ClearsStaleContent mirrors
 // TestPatchComposedBundleStatus_ClearsStaleErrors: content carries
 // `omitempty`, so a merge patch that omits it would leave stale bytes in

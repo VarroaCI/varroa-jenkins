@@ -10,6 +10,15 @@
 // Webhook subjects:           webhook.<cluster>.<ns>.<ctrl> (JetStream)
 // Wake subjects:              wake.<cluster>.<ns>.<ctrl> (core NATS, at-most-once)
 // Operator subjects:          operator.<cluster>.<action>
+// Ledger claim subject:       varroa.ledger.claim (core NATS, request-reply)
+// Ledger owner subject:       varroa.ledger.owner (core NATS, request-reply)
+// Ledger cross-tenant subject: varroa.ledger.crosstenant (core NATS, request-reply)
+// Ledger action subjects:     varroa.ledger.actions.<cluster> (core NATS, at-most-once)
+// Build subjects:             builds.<cluster>.<ns>.<cell> (JetStream)
+// Log subjects:                logs.<cluster>.<ns>.<cell>.<runid> (core NATS, gateway to BFF SSE)
+// Tail subjects:               varroa.tail.<cluster>.<ns>.<cell> (core NATS, request-reply)
+// Tenant purge subject:        varroa.recordstore.tenant.purge (core NATS, request-reply)
+// Tenant sync subject:          varroa.recordstore.tenant.sync (core NATS, request-reply)
 // KV keys:                    <cluster>/<ns>/<name>
 package bus
 
@@ -67,6 +76,56 @@ const (
 
 	// DefaultStreamName is the JetStream stream name for ordered command/reply.
 	DefaultStreamName = "varroa"
+
+	// LedgerClaimSubject is the core-NATS request-reply subject the
+	// varroa-recorder answers a build claim on. ClaimRequest carries the
+	// cluster field, so the subject needs no cluster token.
+	LedgerClaimSubject = "varroa.ledger.claim"
+
+	// LedgerOwnerSubject is the core-NATS request-reply subject a gateway
+	// asks for a run's current owner on, to authorize a console-log chunk
+	// before it writes one byte. The gateway is the requester and the
+	// recorder is the responder. The request body carries the run id, so
+	// the subject needs no cluster token.
+	LedgerOwnerSubject = "varroa.ledger.owner"
+
+	// LedgerCrossTenantSubject is the core-NATS request-reply subject the
+	// varroa-recorder answers a cross-tenant pipeline call on: a build
+	// trigger, a status poll, an artifact read, or a fleet lock
+	// operation (design.md D4). The gateway is the requester and the
+	// recorder is the responder, queue group "recorder". The request
+	// body carries the cluster field, so the subject needs no cluster
+	// token.
+	LedgerCrossTenantSubject = "varroa.ledger.crosstenant"
+
+	// TenantPurgeSubject is the core-NATS request-reply subject the
+	// operator asks the recorder to purge a tenant's job_schedules rows
+	// on, whenever the tenant leaves a cell (a move, a teardown, or the
+	// deletion of the owning cell). The operator is the requester and
+	// the recorder is the responder. The request body carries the
+	// cluster and the tenant, so the subject needs no cluster token.
+	TenantPurgeSubject = "varroa.recordstore.tenant.purge"
+
+	// TenantSyncSubject is the core-NATS request-reply subject the
+	// operator announces a tenant's placement on, and asks the recorder
+	// for a tenant's build records on. Two request kinds, "announce" and
+	// "records", share the subject. The operator is the requester and
+	// the recorder is the responder. The request body carries the
+	// cluster and the tenant, so the subject needs no cluster token.
+	TenantSyncSubject = "varroa.recordstore.tenant.sync"
+
+	// LedgerActionsWildcard is the wildcard subject an operator leader
+	// subscribes to for every cluster's ledger actions, then filters on
+	// the action's own cluster field.
+	LedgerActionsWildcard = "varroa.ledger.actions.>"
+
+	// BuildsStreamName is the JetStream stream name for the build-event
+	// work queue.
+	BuildsStreamName = "varroa_builds"
+
+	// BuildsWildcard is the wildcard subject capturing every build event
+	// for the varroa_builds stream.
+	BuildsWildcard = "builds.>"
 )
 
 // MiteInSubject returns the subject for mite→operator messages.
@@ -114,6 +173,16 @@ func WebhookSubject(cluster, ns, ctrl string) string {
 	return fmt.Sprintf("webhook.%s.%s.%s", cluster, ns, ctrl)
 }
 
+// WebhookTenantSubject returns the subject for webhook replay payloads
+// targeting a pipelines tenant (design.md D13). WebhookWildcard
+// ("webhook.>") and WebhookClusterWildcard ("webhook.<cluster>.>") already
+// capture this subject, so no stream or consumer change is needed to add
+// it.
+// Format: webhook.<cluster>.tenant.<team>
+func WebhookTenantSubject(cluster, team string) string {
+	return fmt.Sprintf("webhook.%s.tenant.%s", cluster, team)
+}
+
 // WebhookClusterWildcard returns the subject an operator leader filters its
 // replay consumer on so it drains only its own cluster's queued webhooks — the
 // varroa_webhooks stream is shared across clusters, so the bare webhook.>
@@ -154,6 +223,35 @@ func WebhookResultWildcard(cluster string) string {
 // Format: wake.<cluster>.>
 func WakeSubjectWildcard(cluster string) string {
 	return fmt.Sprintf("wake.%s.>", cluster)
+}
+
+// LedgerActionSubject returns the core-NATS subject the recorder publishes
+// a ledger action on for one cluster. The operator subscribes to
+// LedgerActionsWildcard and filters each action's cluster field.
+// Format: varroa.ledger.actions.<cluster>
+func LedgerActionSubject(cluster string) string {
+	return fmt.Sprintf("varroa.ledger.actions.%s", cluster)
+}
+
+// BuildSubject returns the JetStream subject a gateway publishes one
+// cell's build events on.
+// Format: builds.<cluster>.<ns>.<cell>
+func BuildSubject(cluster, ns, cell string) string {
+	return fmt.Sprintf("builds.%s.%s.%s", cluster, ns, cell)
+}
+
+// LogSubject returns the core-NATS subject a gateway relays one run's
+// console-log chunks on while a live tail lease is active.
+// Format: logs.<cluster>.<ns>.<cell>.<runid>
+func LogSubject(cluster, ns, cell, runID string) string {
+	return fmt.Sprintf("logs.%s.%s.%s.%s", cluster, ns, cell, runID)
+}
+
+// TailSubject returns the core-NATS request-reply subject the BFF uses to
+// start or stop a live-tail lease with the cell's gateway.
+// Format: varroa.tail.<cluster>.<ns>.<cell>
+func TailSubject(cluster, ns, cell string) string {
+	return fmt.Sprintf("varroa.tail.%s.%s.%s", cluster, ns, cell)
 }
 
 // ParseWakeSubject extracts the namespace and controller name from a wake

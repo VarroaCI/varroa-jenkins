@@ -338,7 +338,7 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, src *v1alpha1.Catalog
 		}
 		contentStr := string(content)
 		hash := sha256Hex([]byte(contentStr))
-		valid, msg := bundle.ValidateCatalogItem(entry.Type, content, entry.Variables)
+		valid, msg := bundle.ValidateCatalogItem(entry.Type, content, entry.Variables, entry.Version)
 
 		status := v1alpha1.CatalogItemStatus{
 			ContentHash:      hash,
@@ -740,11 +740,12 @@ func (r *CatalogReconciler) ReconcileComposedBundle(ctx context.Context, cb *v1a
 				varLines = append(varLines, k+": "+v)
 			}
 			contentData := map[string]string{
-				"jenkins.yaml":   result.Materialized.JenkinsYAML,
-				"plugins.yaml":   result.Materialized.PluginsYAML,
-				"items.yaml":     result.Materialized.ItemsYAML,
-				"rbac.yaml":      result.Materialized.RbacYAML,
-				"variables.yaml": strings.Join(varLines, "\n"),
+				"jenkins.yaml":            result.Materialized.JenkinsYAML,
+				"plugins.yaml":            result.Materialized.PluginsYAML,
+				"items.yaml":              result.Materialized.ItemsYAML,
+				"rbac.yaml":               result.Materialized.RbacYAML,
+				"variables.yaml":          strings.Join(varLines, "\n"),
+				"pipeline-templates.yaml": result.Materialized.PipelineTemplatesYAML,
 			}
 			totalSize := 0
 			for _, v := range contentData {

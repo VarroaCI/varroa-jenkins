@@ -15,8 +15,11 @@ sections describe.
   RBAC-CRD reconciliation (built-in role seeding, JenkinsRole/JenkinsRoleBinding→mite
   push), Group/Team/User CRD reconciliation, fleet-wide BroodOperation/BroodSchedule
   reconcilers, webhook replay, seeding of the built-in starter bundle (`starter.go`),
-  and the K8s resource builders (StatefulSet/Service/Ingress/ConfigMap/Secret) in
-  `clientset_client.go`.
+  the K8s resource builders (StatefulSet/Service/Ingress/ConfigMap/Secret) in
+  `clientset_client.go`, the pipelines-tenant cell machinery (`cells/`,
+  `cell_*.go`, `cells_config.go`) that binds a `Team` to a shared,
+  multi-tenant Jenkins cell, and build-record rehydration rendering
+  (`rehydrate/`).
 - Does not own: the mite gRPC server/transport (`internal/mite`), JCasC composition
   logic itself (`internal/bundle` — this package only reads the already-materialized
   ConfigMap and resolves vars), RBAC YAML generation (`internal/rbac` — this package
@@ -126,7 +129,10 @@ sections describe.
     post-provisioning path so desired-Service derivation lives in one place),
     agent ServiceAccount+RBAC, bootstrap-token Secret (`ensureBootstrapToken`:
     re-minted only via `tokenNeedsRemint` — a still-valid token is never rotated,
-    since the Secret takes up to ~60s to propagate to mounted volumes; also
+    since the Secret takes up to ~60s to propagate to mounted volumes — or when
+    the pod instance changed: the Secret's `instance` key names the pod that
+    first ran with the token, and a replaced pod re-mints, since a cell's
+    emptyDir home keeps no mite identity across pods; also
     called on every not-connected `handleRunning` tick, because the 15-min TTL
     routinely expires during long plugins-init and waiting for the Pending
     reset wedges the mite for minutes), the `<prefix>-plugins` ConfigMap
@@ -148,7 +154,10 @@ sections describe.
     annotation.
   - Before dispatching to `handleRunning`/`handleConnected`, `reconcileController`
     runs `reconcileVersionRoll` then (if it didn't already transition)
-    `reconcileContainerSpecRoll` — the jenkins-image check compares an effective
+    `reconcileContainerSpecRoll`, then `reconcileHeadlessRoll` and
+    `reconcileArtifactSecretRoll` (Connected only; the latter compares the per-cell
+    artifact Secret's content hash with the `varroa.dev/artifact-secret-hash`
+    pod-template annotation, `artifactcasc.go`) — the jenkins-image check compares an effective
     desired image (`effectiveDesiredJenkinsImage`) against the
     `varroa.dev/computed-images`-stamped container image on the live StatefulSet
     (`GetStatefulSetImages`, keyed by container name); `reconcileContainerSpecRoll`
@@ -296,9 +305,50 @@ sections describe.
   (subdomain vs path); merges the resolved `JenkinsVersionProfile`'s
   `spec.jcasc.content` via `bundle.MergeJenkinsYAML` **before** calling
   `bundle.ResolveVars`, so `${varroa_controller_*}` placeholders inside the overlay
-  also resolve; then resolves all vars and runs `findUnresolvedVars` as the
-  completeness check — any leftover `${...}` fails resolution. Returns
+  also resolve; after a cell's own tenant merge (`applyCellContent`) and still
+  before `ResolveVars`, calls `checkBranchBuildStrategiesPlugin`
+  (`items_engine_safety.go`, design D12) and fails the resolve when the items
+  content holds a `multibranch` or `organizationFolder` item and the resolved
+  plugin set omits `basic-branch-build-strategies` — a missing class would
+  make XStream drop the rendered `buildStrategies` element or fail the item
+  create, so a silent omission would produce an initial-index build storm
+  with no warning; then resolves all vars and runs `findUnresolvedVars` as the
+  completeness check — any leftover `${...}` fails resolution. After that
+  check, `bundle.InjectPipelineTemplates` merges the controller's own
+  delivered pipeline-template set (`mat.PipelineTemplatesYAML`, folder `""`),
+  then once per entry in `mat.CellTemplateFragments` (a cell only, one entry
+  per placed tenant, `frag.Folder` stamped by `applyCellContent`) — after
+  `ResolveVars`, never before, because a template body holds its own
+  `${...}` Groovy text that is not a catalog variable (design D7). Returns
   `(*bundle.MaterializedBundle, cb.Status.ResolvedHash, bundleIdentity, error)`.
+- **Artifact-storage merge step** (`artifactcasc.go`) — the last content edit inside
+  `resolveBundleForController`, after the version-profile JCasC overlay merge and still before
+  `bundle.ResolveVars`. `applyArtifactStorage` calls `artifactStorageFragment`, which renders the
+  operator's own `artifact-manager-s3` JCasC fragment (jclouds/s3 factory selection, the `aws`
+  root's credential and bucket settings — task 0.5's export puts these under `aws`, not
+  `unclassified`) and a `Controller` condition `ArtifactStorage`, together. The fragment emits,
+  and the condition reports `True`/`External`, only when all four hold: `VARROA_BLOBSTORE_URL`
+  parses to an `s3://` URL (`parseBlobstoreURL`; a `pgblob:` URL or a parse failure yields
+  `False`/`LocalOnly`), the per-cell Secret `<VARROA_ARTIFACT_SECRET>-<controller>` exists in the
+  release namespace (`resolveArtifactSecret` projects it into the controller's own namespace as
+  `<controller>-artifacts`, owned by the `Controller`, mounted at
+  `/run/secrets/varroa-artifacts`), and `coreSetForCr` resolves a plugin set that pins
+  `artifact-manager-s3` (else `False`/`PluginMissing`). Otherwise it is a no-op: no strip, no
+  merge, `mat.JenkinsYAML` passes through unchanged. When it does emit, `stripArtifactManager`
+  first removes any bundle- or profile-overlay-authored key from the same three subtrees
+  (`artifactManagerStripPaths`), `bundle.MergeJenkinsYAML` merges the fragment, then
+  `injectArtifactCredential` appends a system-scoped `${readFile:...}` credential reference (never
+  a secret value) to the global credentials domain. `ConditionArtifactStorage` is defined here
+  rather than alongside the other `ControllerConditionType` constants in `api/v1alpha1/types.go`,
+  because this batch's file scope excludes that package; flagged for the coordinator to relocate
+  it.
+- `pipeline_templates_preview.go`'s `pipelineTemplateSummaries` lists the
+  templates a composed bundle delivers (name, version, display name,
+  description), reading only the composer's own `PipelineTemplatesYAML`
+  output — an unreadable or blank value lists nothing, since the composer
+  already reported any parse error on the bundle itself. Called from
+  `config_crud.go`'s preview/validate NATS replies onto
+  `bus.BundleComposePreview.PipelineTemplates`.
 - Version profiles: `resolveProfileForCr` → `ResolveProfile` (`versionresolve.go`)
   matches **exact version → LTS line (`lineKey`, `major.minor`) →
   `pluginlock.Baseline()`** (embedded fallback, no profile). `resolveCoreSet` /
@@ -333,6 +383,24 @@ sections describe.
   `reconcileIngress` (`controller_controller.go:3268`) runs `CreateIngress` every tick
   for `Running`/`Connected` so Ingress spec/TLS changes converge without a
   re-provision.
+- **Headless controllers** — `v1alpha1.IsHeadless(cr)` is the only decision point; no
+  other read of `Spec.Headless`/`Spec.Cell.Enabled` may drive this behavior.
+  `desiredstate.go` sets `StatefulSetSpec.Headless` from it, and `buildStatefulSet`
+  (`clientset_client.go`) appends `VARROA_HEADLESS=true` to the jenkins container's env
+  only when true, so a non-headless pod template stays byte-identical.
+  `reconcileHeadlessRoll` (`controller_controller.go`), called from the `Connected`
+  branch, reads the live env through `GetStatefulSetJenkinsEnv` (a `ResourceClient`
+  method mirroring `GetStatefulSetImages`) and transitions to `Provisioning` on a
+  difference from the desired value; it skips the check when no StatefulSet exists yet
+  or the read errors, and treats an absent variable as `false`. `reconcileIngress`
+  deletes the controller's Ingress and sets `ConditionNoExternalURL`/`Headless` instead
+  of building one. The bundle-variable host branch and the location-URL injection both
+  gate on `!IsHeadless(cr)`: a headless controller keeps `varroa_controller_endpoint`
+  but gets no external URL or path prefix, and its injected `location.url` is the
+  in-cluster endpoint rather than the external URL. `reconcileSharedHostMismatch`
+  clears its condition for a headless controller, since it renders no Ingress to
+  mismatch. `internal/api`'s `handleControllerDiff` mirrors all of this so a headless
+  controller's diff matches what provisioning applies.
 - `SetProvisioningDefaults` and `RootDomain` share `provisioningDefaultsMu`; the
   every-replica defaults refresh feeds both reconcile policy and wake-server host
   resolution without racing HTTP requests.
@@ -346,6 +414,15 @@ sections describe.
   be cleared. When adding a status field, decide up front whether it must ever be
   cleared; if so it must be unconditional in `statusPatch`, not behind a non-empty
   guard.
+- **`status.cell.tenants` has exactly one writer: `PatchControllerCellStatus`**
+  (`clientset_client.go`). It sends a narrow merge patch carrying only
+  `status.cell.tenants`, never the whole `status.cell` object, and only the
+  placement pass (`TeamReconciler`, via `cells.Place`) calls it. The blind
+  end-of-reconcile `PatchControllerStatus` patch above deliberately omits
+  `tenants` from its own `cell` sub-map — it carries only `warm`,
+  `appliedTenants`, `evacuate`, `unreadySince`, `rolledAt`, and
+  `tenantWarnings` — or a stale in-memory tenant list would clobber a
+  placement change the two writers raced on.
 - **`ConditionReconcileBlocked`** (C3, `markReconcileBlocked` helper near
   `persistStatusDiagnostics`) is the standing pattern for surfacing a reconcile pass
   that hit an unresolved error: sets the condition `True` + `Reason` (one of 19
@@ -384,6 +461,17 @@ sections describe.
   interface (`reconciler_api.go`) as `*Reconciler`, but publishes over NATS instead of
   reconciling locally — it is what `internal/api` uses to trigger reconcile/
   reprovision/approve-restart/approve-deletion on a **remote** cluster's operator.
+- `SendImperativeCommand` (`imperative_send.go`) is the reconciler's public
+  door onto the private `miteTransport` field for a single imperative
+  command, mirroring `MintMiteToken`'s same role for tokens; the operator's
+  `varroa.ledger.actions.<cluster>` subscriber (`cmd/operator/ledger_action.go`)
+  is its first caller. That subscriber dispatches four action kinds —
+  `cancel_run`, `retry_run`, `wake_cell`, and `trigger_run` — filtered first
+  to actions naming this operator's own cluster. `trigger_run` calls
+  `WakeHibernatedController` before it sends the command, unconditionally,
+  the same call `wake_cell` makes on its own: the call is a no-op for a
+  controller that is not hibernated, so a `trigger_run` action needs no
+  separate power-state read before it reaches a running controller.
 - Other controller-runtime / ticker reconcilers in this package:
   - `CatalogReconciler` (`catalog_controller.go`) — `CatalogSource` +
     `ComposedBundle`; `Reconcile` is a **three-way** dispatch: `repoURL` (git
@@ -463,15 +551,146 @@ sections describe.
     and `EvaluateCoreCompat`/`pluginVersionConflict` remain the only gates.
   - `GroupReconciler`, `UserReconciler`, `TeamReconciler` (`group_controller.go`,
     `user_controller.go`, `team_controller.go`) — Group/User/Team CRDs; Team also
-    provisions/owns a namespace.
+    provisions/owns a namespace. A `Team` with `spec.pipelines` set is a
+    pipelines tenant: `TeamReconciler` calls `cells.Place` (below) once per
+    tick to bind, move, or tear the tenant down from a shared cell.
   - `BroodOperationReconciler` / `BroodScheduleReconciler`
     (`broodoperation_controller.go`, `broodschedule_controller.go`) — fleet-wide
     operation fan-out (dispatch, per-target tracking, timeout) and CronJob-backed
     scheduled brood operations.
+- **`cells/` package + the cell reconcilers** — a cell is a `Controller` with
+  `spec.cell.enabled`: a disposable Jenkins JVM holding no durable state,
+  hosting several `Team`s as top-level folders (design D4/D6). Two
+  reconcilers drive it:
+  - `TeamReconciler` (`team_controller.go`) is the placement reconciler. For
+    every pipelines `Team` it calls `cells.Place` (`cells/placement.go`) —
+    pure decision logic, no Kubernetes write of its own: it reads a
+    caller-gathered `[]CellCandidate` snapshot and the `Team`'s own status,
+    and returns an `Outcome` plus a mutated `TeamStatus` for the caller to
+    apply. `TeamReconciler` then writes `Team.status.placement.cluster` (and
+    the rest of `TeamStatus`) and calls `PatchControllerCellStatus` (above)
+    on the bound/vacated cells. **The placement pass never creates a
+    cell** — only the warm pool does. A voluntary move completes only once
+    `Controller.status.cell.appliedTenants` no longer holds the tenant; the
+    `Team` finalizer holds through teardown until the schedule purge
+    succeeds or `maxPurgeAttempts` (10) is spent, then a bounded
+    `teardownBoundedWait` (10 minutes) release, in both cases raising a
+    warning event before releasing — warnings order by tenant then reason.
+  - `cells.WarmPoolReconciler` (`cells/warmpool.go`) is a plain
+    `Reconcile(ctx) error` ticker reconciler (not controller-runtime,
+    interval 60s in `cmd/operator/main.go`), not a per-`Team` reconciler: it
+    lists every profile a pipelines `Team` requests, or a placed tenant's
+    live cell already runs, and fills or drains each profile's free-cell
+    count to `cells.warmPool.perProfile`. It writes no status — only
+    creates/deletes `Controller` CRDs labelled `varroa.dev/cell-profile`/
+    `varroa.dev/warm` — so it never races a status writer above.
+  - The Controller reconciler's own cell-specific logic lives beside it in
+    this package, one file per concern: `cell_readiness.go`
+    (`isCellController`; `cellConfigGateReason` checks, in fixed order, the
+    record store, the s3 blob tier, and C3's `ArtifactStorage=External`
+    condition before a cell may report `CellReady`; `evaluateCellRoll`
+    implements design D6's roll-then-evacuate rule off
+    `UnreadySince`/`cellsConfig.UnreadyGracePeriod` — `CellNotReady`
+    applies when the pass keeps a placement on a cell reporting
+    `CellReady=False` with no `evacuate`), `cell_networkpolicy.go`
+    (`reconcileCellNetworkPolicy` rebuilds the `<prefix>-cell`
+    NetworkPolicy on every `Running`/`Connected` tick — never provisioning
+    — so a tenant add/remove converges without a re-provision; ingress
+    admits the BFF and the operator, never the gateway; egress reaches the
+    gateway's gRPC and API-key-verify ports, each placed tenant's agent
+    namespace, kube-dns, and the configured API-server CIDRs), `cell_jcasc.go`
+    (the fixed cell JCasC fragment — `numExecutors: 0`,
+    `PERFORMANCE_OPTIMIZED` flow durability — and `tenantCloudFor`, the
+    operator's constant agent pod template per tenant), `cell_items_assembly.go`
+    (`assembleCellContent` runs the tenant items pipeline — `items.ReRoot`
+    then `items.Merge` per tenant, `lint.Run` against `cellLintRules`
+    (`NoPollSCMRule`, `NoGlobalCredentialsRule`,
+    `NoControllerConfigDependencyRule`) before a push — plus tenant cloud,
+    credential, and pipeline-template fragment assembly: a non-draining
+    tenant's own materialized `PipelineTemplatesYAML`, when non-blank, becomes
+    one `bundle.CellTemplateFragment{Folder: team.Name, ...}` entry, returned
+    on `assembleCellState.TemplateFragments` for the caller to merge via
+    `bundle.InjectPipelineTemplates`), `cell_team_access.go` (`listPlacedTeams`
+    reads each `Team` named in `cr.Status.Cell.Tenants`, skipping and
+    logging one that is gone rather than failing the tick), and
+    `cell_tenant_credentials.go` (`projectTenantCredentials` projects a
+    tenant's `varroa.dev/tenant-credential=true` Secrets into its re-rooted
+    folder's credentials at `GLOBAL` scope, skipping and warning on a
+    malformed, unknown-kind, or duplicate-id Secret).
+  - `cells_config.go`'s `ParseCellsConfigFromEnv` reads the operator's seven
+    cell-related environment variables into `CellsConfig` (warm-pool
+    enable/per-profile, `MaxTenantsPerCell`, `UnreadyGracePeriod`,
+    `NetworkPolicyEnabled`, `APIServerEgress`, `CellIsolation`), mirroring
+    chart values `cells.*` and `networkPolicy.cellIsolation`. A missing or
+    unparsable variable falls back to its documented default and only logs
+    a warning — this function never fails the boot.
+- **Tenant-sync announcement** (`cell_instance.go`, `single_tenant_announce.go`,
+  `team_sync.go`, `internal/controller/cells/sync.go`) — the placement-fencing
+  capability's write side: it keeps `varroa.tenant_placements` current for
+  every controller, cell or not. `updateCellInstance` writes
+  `Controller.status.cell.instance` from the running pod's `metadata.uid` on
+  every controller-reconciler tick; it clears the field only on a confirmed
+  absence, never on a transient pod-read error. A controller that carries no
+  cell role is its own tenant and its own cell, so
+  `announceSingleTenantPlacement` sends a generation-zero `tenant.sync`
+  "announce" request for it on every tick — the fence needs a row for every
+  claim, with no exemption. A cell's own tenant announcements instead ride
+  `cells.Announcer` through `TeamReconciler`'s placement pass
+  (`cells.Place`, `cells/placement.go`). `NewNATSSyncAnnouncer` and
+  `NewNATSSyncRecordsRequester` (`team_sync.go`) wire that seam and the
+  rehydration `records` request over `bus.TenantSyncSubject`, encoding
+  `cells.SyncPolicy` (`cells/sync.go`, `Team.spec.pipelines`'s seven
+  ledger/rehydration settings) the same way `api/v1alpha1`'s `Effective*`
+  accessors compute it, plus `Team.spec.pipelines.exports` (the tenant's
+  outward pipelines grants) carried verbatim. `SyncPolicy` holds a slice
+  field, so a caller compares two values with `SyncPolicy.Equal`, never
+  `==`. An exports-only edit reaches the recorder on the next tick through
+  the same-generation reannounce path (`cells/placement.go`'s
+  `maybeReannounce`) and never raises the placement generation.
+- **Cell rehydration send and apply** (`cell_rehydration.go`,
+  `cell_rehydration_adapt.go`, `cell_rehydration_applied.go`,
+  `cell_rehydration_entry.go`, `cell_rehydration_fetch.go`,
+  `internal/controller/cells/rehydration_pass.go`) — the operational half of
+  `rehydrate/` below. `attachCellRehydration` runs once per cell reconcile
+  tick: for each placed `Team` it checks `rehydrationApplied` against the
+  tenant's current placement generation and cell instance, gives up past
+  `Team.spec.pipelines.rehydrateDeadline` (`rehydrationExpired`,
+  `deadlineEntry`), else fetches the tenant's build records over the
+  `records` tenant-sync request (`fetchTenantJobRecords`, enumerate then page
+  at 32 job paths) and builds one `rehydrate.JobSeed` per job.
+  `rehydrate.SelectForBundle` combines every pending tenant's seeds into one
+  cell-wide bundle, falling back to `AdvanceNumberOnlyRound` when the full
+  selection cannot fit; `attachCellRehydration` writes the result onto
+  `desired.Rehydration` and `Controller.status.cell.rehydration`
+  (`preSendEntry` before the send, `applyRehydrationResult` after the mite's
+  `DesiredStateResult` returns, attributing `rehydration_deferred_jobs` back
+  to each tenant by job-path prefix with `partitionDeferredJobs`).
+  **A number-only block never joins the process-local seeded-job cache on
+  send.** `AdvanceNumberOnlyRound` runs against a copy of
+  `numberSeededJobsFor`'s set, and `attachCellRehydration` records the sent
+  block (command ID + job paths) in `numberOnlyPending`. `handleConnected`'s
+  result-drain calls `commitNumberOnlyProgress`, which copies the block's
+  paths into the real seeded set only once a `DesiredStateResult` with a
+  matching `CommandId` reports `rehydration_success` with no error, minus any
+  path the mite deferred. A failed or unmatched block is never committed, so
+  the next tick's selection naturally recomputes and resends it.
+  `cells.RehydrationPass`, called from `TeamReconciler.Reconcile` inside the
+  same status patch, derives `Team.status.rehydration` and the `Rehydrated`
+  condition from the tenant's own entry on the bound cell by comparing
+  generation and cell instance — it never computes a deadline of its own,
+  since `attachCellRehydration` already wrote the give-up as the entry's own
+  `Error`.
 - `bootstrap.go` — `BootstrapLocalAdmin` seeds the local-mode admin user/password on
   first boot.
 - `webhook_replay.go` — drains a NATS queue of webhook deliveries received while a
-  controller was hibernated, replaying them once the mite reconnects.
+  controller was hibernated, replaying them once the mite reconnects. It routes two
+  envelope shapes on one filter, chosen from the envelope's own fields, never the
+  subject: the controller shape (unchanged) and the tenant shape (`Team` set,
+  `Namespace`/`Controller` both empty), whose target it re-resolves from
+  `Team.status.placement` at delivery time — a move between ingest and delivery lands
+  on the new cell. A tenant delivery naks on an empty placement, a moving tenant
+  (`Placed=False`/`TenantMoving`), or an absent/not-`Connected` target `Controller`;
+  it terms only when the `Team` itself is gone.
 - `sharding/` (`ring.go`, `manager.go`) — consistent-hash shard ownership so multiple
   operator replicas split the `Controller` watch set; `SetShardOwnership`/
   `ownsController`/`EnqueueShards` on `*Reconciler` consume it.
@@ -485,6 +704,21 @@ sections describe.
   the runtime consumer: it applies each seed as an owner-labeled
   `JenkinsVersionProfile` CR plus a paired pluginset ConfigMap, skipping any
   object a hand-authored or promoted CR/ConfigMap already owns.
+- `rehydrate/` — build-record rehydration rendering (design D1/D1a/D2/D4). Pure
+  functions, no Kubernetes or NATS I/O: `RenderBuildXML`/`RenderChangelog` render
+  one run's `build.xml`/`changelog0.xml`; `BuildJobSeed` selects one job's records
+  (`Team.spec.pipelines.rehydrateBuilds` newest, plus the newest successful run,
+  always); `SelectWithinBudget` truncates a tenant's seeds to the 256 KiB
+  `mitev1.RehydrationBundle` cap; `BuildBundle` gzips, hashes, and mints the
+  bundle's UUIDv7 id. Its `Record`/`Change` input type mirrors
+  `recordstore.RehydrationRecord`'s field names but does not import that
+  package — a caller adapts whatever wire type it holds
+  (`recordstore.TenantSyncRecord`) into a `Record`. `Options.HasArtifactManagerS3`
+  comes from `coreSetForCr`; `rehydrate` never calls it directly. `testdata/`
+  holds one golden `build.xml` per `pluginlock.Seeds()` entry (`UPDATE_GOLDEN=1`
+  regenerates them) — the renderer's own output, not a live-Jenkins capture.
+  A live capture may still close three gaps: no queue id, no commit author
+  email, no affected paths anywhere upstream.
 
 ## Work Guidance
 

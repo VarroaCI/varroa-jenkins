@@ -41,6 +41,27 @@ func StreamConfig(name string, replicas ...int) *nats.StreamConfig {
 	}
 }
 
+// BuildsStreamConfig returns a JetStream stream config for the build-event
+// work queue. It captures builds.> with WorkQueuePolicy, so an
+// acknowledged message leaves the stream and only one non-overlapping
+// consumer may read it. Discard is DiscardNew and MaxAge is zero: a build
+// event is the only durable copy of that build's record, so a full
+// stream rejects a publish instead of evicting an unconsumed one.
+// MaxBytes is fixed at 1 GiB. The optional replicas argument sets the
+// JetStream replica count (default 1).
+func BuildsStreamConfig(name string, replicas ...int) *nats.StreamConfig {
+	return &nats.StreamConfig{
+		Name:      name,
+		Subjects:  []string{BuildsWildcard},
+		Retention: nats.WorkQueuePolicy,
+		Discard:   nats.DiscardNew,
+		MaxAge:    0,
+		MaxBytes:  1 << 30, // 1 GiB
+		Storage:   nats.FileStorage,
+		Replicas:  replicaArg(replicas),
+	}
+}
+
 // EnsureStream creates the stream if it does not already exist, or updates
 // an existing stream's subjects if they differ.
 func (c *Conn) EnsureStream(cfg *nats.StreamConfig) error {
@@ -107,25 +128,56 @@ func (c *Conn) DeleteConsumer(stream, name string) error {
 	return c.js.DeleteConsumer(stream, name)
 }
 
-// ActivityStreamConfig returns a JetStream stream config for the bounded
-// activity event stream. It captures activity.> with LimitsPolicy so that
-// multiple independent readers can each read the full retained history.
-// maxAge comes from the retention dial; maxMsgs and maxBytes provide hard
-// caps (DiscardOld when any cap is hit). The optional replicas argument sets
-// the JetStream replica count (default 1); pass the NATS cluster size
-// (Conn.Replicas()) so retained activity history survives a single NATS pod loss.
-func ActivityStreamConfig(name string, maxAge time.Duration, maxMsgs, maxBytes int64, replicas ...int) *nats.StreamConfig {
+// activityStreamMaxAge, activityStreamMaxMsgs, and activityStreamMaxBytes
+// are the varroa_activity stream's fixed limits. The stream is a
+// transport buffer between a publisher and the recorder, not a retention
+// tier, so these values are fixed in code and do not come from chart
+// values. The Postgres "activity" table is the durable copy.
+const (
+	activityStreamMaxAge   = 72 * time.Hour
+	activityStreamMaxMsgs  = 1000000
+	activityStreamMaxBytes = 1 << 30 // 1 GiB
+)
+
+// ActivityStreamConfig returns a JetStream stream config for the
+// varroa_activity transport buffer. It captures activity.> with
+// LimitsPolicy and DiscardOld, at the fixed limits above. The optional
+// replicas argument sets the JetStream replica count (default 1); pass
+// the NATS cluster size (Conn.Replicas()) so the buffer survives a
+// single NATS pod loss.
+func ActivityStreamConfig(name string, replicas ...int) *nats.StreamConfig {
 	return &nats.StreamConfig{
 		Name:      name,
 		Subjects:  []string{ActivityWildcard},
 		Retention: nats.LimitsPolicy,
-		MaxAge:    maxAge,
-		MaxMsgs:   maxMsgs,
-		MaxBytes:  maxBytes,
+		MaxAge:    activityStreamMaxAge,
+		MaxMsgs:   activityStreamMaxMsgs,
+		MaxBytes:  activityStreamMaxBytes,
 		Discard:   nats.DiscardOld,
 		Storage:   nats.FileStorage,
 		Replicas:  replicaArg(replicas),
 	}
+}
+
+// StreamInfo reads the current state of a JetStream stream. It returns
+// the same error nats.go returns when the stream is absent
+// (nats.ErrStreamNotFound), so a caller can branch on that case.
+func (c *Conn) StreamInfo(name string) (*nats.StreamInfo, error) {
+	info, err := c.js.StreamInfo(name)
+	if err != nil {
+		return nil, fmt.Errorf("stream info %s: %w", name, err)
+	}
+	return info, nil
+}
+
+// ConsumerInfo reads the current state of a durable or ephemeral
+// JetStream consumer.
+func (c *Conn) ConsumerInfo(stream, name string) (*nats.ConsumerInfo, error) {
+	info, err := c.js.ConsumerInfo(stream, name)
+	if err != nil {
+		return nil, fmt.Errorf("consumer info %s/%s: %w", stream, name, err)
+	}
+	return info, nil
 }
 
 // WebhookStreamConfig returns a JetStream stream config for the bounded

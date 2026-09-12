@@ -109,6 +109,12 @@ var expectedToolKinds = map[string]toolKind{
 	// Jenkins MCP proxy
 	"list_jenkins_controllers": kindRead,
 	"call_jenkins_tool":        kindProxy,
+
+	// Pipelines
+	"run_pipeline": kindAction,
+	"list_runs":    kindRead,
+	"get_run":      kindRead,
+	"get_run_log":  kindRead,
 }
 
 // listedTool is the subset of a tools/list entry this test cares about.

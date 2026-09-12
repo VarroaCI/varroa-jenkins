@@ -1,14 +1,20 @@
 package org.jenkinsci.plugins.varroamiteauth;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
+import hudson.ExtensionList;
 import hudson.model.User;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
 import jenkins.model.Jenkins;
 import java.util.ArrayList;
 import java.util.List;
+import org.htmlunit.html.DomElement;
+import org.htmlunit.html.HtmlPage;
 import org.junit.Rule;
 import org.junit.Test;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -141,6 +147,94 @@ public class VarroaBannerDecoratorTest {
         VarroaBannerDecorator decorator = new VarroaBannerDecorator();
         try (ACLContext ignored = ACL.as2(authFor("alice", "authenticated"))) {
             assertEquals("Admin", decorator.getCurrentUserRole());
+        }
+    }
+
+    /**
+     * isHeadless() reads the same environment variable, with the same "true"
+     * comparison, as {@link VarroaHeadlessFilter} (task 6.1). VARROA_HEADLESS
+     * is unset in the test process, so the unoverridden read matches the
+     * filter's default of "not headless".
+     */
+    @Test
+    public void isHeadlessReadsSameEnvVarAsHeadlessFilter() {
+        VarroaBannerDecorator decorator = new VarroaBannerDecorator();
+        assertFalse(decorator.isHeadless());
+
+        decorator.headlessForTest = Boolean.TRUE;
+        assertTrue(decorator.isHeadless());
+
+        decorator.headlessForTest = Boolean.FALSE;
+        assertFalse(decorator.isHeadless());
+    }
+
+    /**
+     * header.jelly emits data-headless beside the existing data-user-*
+     * attributes, and the value survives the page's escape-by-default rule
+     * (task 6.2).
+     */
+    @Test
+    public void headerJellyEmitsAndEscapesDataHeadlessAttribute() throws Exception {
+        VarroaBannerDecorator decorator = ExtensionList.lookupSingleton(VarroaBannerDecorator.class);
+        decorator.bannerConfigURLForTest = "?controller=c1&namespace=ns1";
+        decorator.headlessForTest = Boolean.TRUE;
+        try {
+            JenkinsRule.WebClient wc = j.createWebClient();
+            HtmlPage page = wc.goTo("");
+            DomElement script = page.querySelector("script[data-varroa-config]");
+            assertNotNull("the banner script element must render", script);
+            assertEquals("true", script.getAttribute("data-headless"));
+        } finally {
+            decorator.bannerConfigURLForTest = null;
+            decorator.headlessForTest = null;
+        }
+    }
+
+    /**
+     * header.jelly renders data-headless="false" for an ordinary controller,
+     * and the value round-trips through the same escape-by-default rule.
+     */
+    @Test
+    public void headerJellyEmitsDataHeadlessFalseForOrdinaryController() throws Exception {
+        VarroaBannerDecorator decorator = ExtensionList.lookupSingleton(VarroaBannerDecorator.class);
+        decorator.bannerConfigURLForTest = "?controller=c1&namespace=ns1";
+        decorator.headlessForTest = Boolean.FALSE;
+        try {
+            JenkinsRule.WebClient wc = j.createWebClient();
+            HtmlPage page = wc.goTo("");
+            DomElement script = page.querySelector("script[data-varroa-config]");
+            assertNotNull("the banner script element must render", script);
+            assertEquals("false", script.getAttribute("data-headless"));
+        } finally {
+            decorator.bannerConfigURLForTest = null;
+            decorator.headlessForTest = null;
+        }
+    }
+
+    /**
+     * banner.js renders the audited break-glass marker when data-headless is
+     * "true", and renders nothing extra otherwise (task 6.3).
+     */
+    @Test
+    public void bannerJsRendersBreakGlassMarkerOnlyWhenHeadless() throws Exception {
+        VarroaBannerDecorator decorator = ExtensionList.lookupSingleton(VarroaBannerDecorator.class);
+        decorator.bannerConfigURLForTest = "?controller=c1&namespace=ns1";
+        try {
+            decorator.headlessForTest = Boolean.TRUE;
+            JenkinsRule.WebClient wc = j.createWebClient();
+            HtmlPage page = wc.goTo("");
+            DomElement marker = page.getElementById("varroa-breakglass-marker");
+            assertNotNull("the break-glass marker must render for a headless controller", marker);
+            assertEquals("Break-glass session — audited", marker.getTextContent());
+
+            decorator.headlessForTest = Boolean.FALSE;
+            JenkinsRule.WebClient wc2 = j.createWebClient();
+            HtmlPage page2 = wc2.goTo("");
+            assertNull("the marker must not render for an ordinary controller",
+                    page2.getElementById("varroa-breakglass-marker"));
+        } finally {
+            decorator.bannerConfigURLForTest = null;
+            decorator.headlessForTest = null;
         }
     }
 }

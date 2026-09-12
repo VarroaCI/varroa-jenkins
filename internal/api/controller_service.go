@@ -45,7 +45,11 @@ func (e *ServiceError) Error() string { return e.Message }
 // ValidateIngress enforces the ingress rules shared by create and update:
 // mode enum, path-mode locality and dashboard-host equality (create only),
 // and annotation safety. controllerName is used only for log context.
-func (svc *ControllerService) ValidateIngress(spec *v1alpha1.IngressSpec, forCreate bool, cluster, controllerName string) *ServiceError {
+// headless skips only the dashboard-host-equality check, with one WARN log
+// instead of a rejection: a headless controller renders no Ingress, so its
+// host never reaches an ingress controller and a mismatch has no effect.
+// The mode-enum check above and path-mode locality below still apply.
+func (svc *ControllerService) ValidateIngress(spec *v1alpha1.IngressSpec, forCreate bool, cluster, controllerName string, headless bool) *ServiceError {
 	if spec == nil {
 		return nil
 	}
@@ -56,10 +60,12 @@ func (svc *ControllerService) ValidateIngress(spec *v1alpha1.IngressSpec, forCre
 		if svc.LocalCluster != "" && cluster != svc.LocalCluster {
 			return &ServiceError{Status: http.StatusBadRequest, Message: "path mode is only supported on the local cluster"}
 		}
-		if svc.DashboardHost != "" && spec.Host != svc.DashboardHost {
+		switch {
+		case headless:
+			svc.Logger.Warn("controller is headless; skipping path-mode shared-host check", "host", spec.Host, "controller", controllerName)
+		case svc.DashboardHost != "" && spec.Host != svc.DashboardHost:
 			return &ServiceError{Status: http.StatusBadRequest, Message: fmt.Sprintf("path mode requires ingressSpec.host to equal the dashboard host %q", svc.DashboardHost)}
-		}
-		if svc.DashboardHost == "" {
+		case svc.DashboardHost == "":
 			svc.Logger.Warn("dashboard host unknown; skipping path-mode host check", "host", spec.Host, "controller", controllerName)
 		}
 	}
@@ -117,6 +123,7 @@ func (s *Server) controllerDetail(cr *v1alpha1.Controller, cluster string) contr
 		Cluster:           cluster,
 		Phase:             string(cr.Status.Phase),
 		Endpoint:          s.controllerEndpoint(cr),
+		Headless:          v1alpha1.IsHeadless(cr),
 		Version:           cr.Spec.Version,
 		PowerState:        cr.Spec.PowerState,
 		Hibernated:        cr.Status.Hibernated,

@@ -32,6 +32,7 @@ func TestControllerService_ValidateIngress(t *testing.T) {
 		forCreate  bool
 		cluster    string
 		dashboard  string
+		headless   bool
 		wantStatus int // 0 = accepted
 	}{
 		{name: "nil spec accepted"},
@@ -55,12 +56,22 @@ func TestControllerService_ValidateIngress(t *testing.T) {
 			name: "path mode not gated on update",
 			spec: &v1alpha1.IngressSpec{Mode: "path", Host: "anything.example.org"}, forCreate: false, cluster: "member", dashboard: "dash.example.org",
 		},
+		{
+			name: "headless skips the shared-host check",
+			spec: &v1alpha1.IngressSpec{Mode: "path", Host: "other.example.org"}, forCreate: true, cluster: "core", dashboard: "dash.example.org",
+			headless: true,
+		},
+		{
+			name: "headless still rejects a bad mode",
+			spec: &v1alpha1.IngressSpec{Mode: "wildcard"}, headless: true,
+			wantStatus: http.StatusBadRequest,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			svc := testSvc(crdstore.NewFake())
 			svc.DashboardHost = tt.dashboard
-			serr := svc.ValidateIngress(tt.spec, tt.forCreate, tt.cluster, "ctl")
+			serr := svc.ValidateIngress(tt.spec, tt.forCreate, tt.cluster, "ctl", tt.headless)
 			if tt.wantStatus == 0 && serr != nil {
 				t.Fatalf("unexpected rejection: %v", serr)
 			}

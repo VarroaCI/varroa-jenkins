@@ -2,6 +2,7 @@ package jenkins
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -957,5 +958,104 @@ func TestScriptConsoleOnce_RespectsContextDeadlineBeyond30s(t *testing.T) {
 	}
 	if result != "ok" {
 		t.Errorf("expected body 'ok', got %q", result)
+	}
+}
+
+// TestReloadItem asserts ReloadItem posts to the per-item reload route, not
+// the global admin-gated /reload route.
+func TestReloadItem(t *testing.T) {
+	var gotMethod, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/crumbIssuer/api/json" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"crumb":"c","crumbRequestField":"Jenkins-Crumb"}`)
+			return
+		}
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewClient(srv.URL, "user", "token")
+	if err := c.ReloadItem(context.Background(), "team/pipeline"); err != nil {
+		t.Fatalf("ReloadItem: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/job/team/job/pipeline/reload" {
+		t.Errorf("path = %q, want /job/team/job/pipeline/reload", gotPath)
+	}
+}
+
+// TestReloadItemNon2xx asserts a non-2xx response surfaces as an error.
+func TestReloadItemNon2xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/crumbIssuer/api/json" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"crumb":"c","crumbRequestField":"Jenkins-Crumb"}`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewClient(srv.URL, "user", "token")
+	err := c.ReloadItem(context.Background(), "team/pipeline")
+	if err == nil {
+		t.Fatal("expected error for 404 response")
+	}
+	if !errors.Is(err, ErrItemNotFound) {
+		t.Errorf("expected ErrItemNotFound for a 404, got: %v", err)
+	}
+}
+
+// TestReload_ErrorPageIsAFailure asserts the two shapes JCasC answers a
+// reload with: a redirect to its index on success, and HTTP 200 with its
+// error page at the reload path on failure. The client must report the
+// second as an error that names the rejected attribute.
+func TestReload_ErrorPageIsAFailure(t *testing.T) {
+	const errorPage = `<html><body><h1>
+        Error loading configuration
+        </h1><p>Invalid configuration elements for type: <pre><code></code></pre><p>Attribute was: <pre><code>labels</code></pre></body></html>`
+	for _, tc := range []struct {
+		name    string
+		fail    bool
+		wantErr string
+	}{
+		{name: "redirect is success", fail: false},
+		{name: "error page is failure", fail: true, wantErr: "Attribute was: labels"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.HasPrefix(r.URL.Path, "/crumbIssuer"):
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprint(w, `{"crumb":"c","crumbRequestField":"Jenkins-Crumb"}`)
+				case r.URL.Path == "/configuration-as-code/reload":
+					if tc.fail {
+						w.Header().Set("Content-Type", "text/html")
+						fmt.Fprint(w, errorPage)
+						return
+					}
+					http.Redirect(w, r, "/configuration-as-code/", http.StatusFound)
+				default:
+					w.WriteHeader(http.StatusOK)
+				}
+			}))
+			defer srv.Close()
+			c := NewClient(srv.URL, "user", "token")
+			err := c.Reload(context.Background())
+			if !tc.fail {
+				if err != nil {
+					t.Fatalf("Reload: %v, want success on a redirect", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Reload err = %v, want it to contain %q", err, tc.wantErr)
+			}
+		})
 	}
 }

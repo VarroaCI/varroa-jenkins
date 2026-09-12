@@ -1,0 +1,163 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  color: var(--text-2);
+}
+
+.searchBox input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 13px;
+  min-width: 140px;
+}
+
+.errorJump {
+  color: var(--bad-text);
+  background: var(--bad-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.toggle {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.toggle[aria-pressed="true"] {
+  color: var(--on-accent);
+  background: var(--accent-fill);
+  border-color: transparent;
+}
+
+.rawLink {
+  font-size: 12.5px;
+  color: var(--accent-strong);
+  margin-left: auto;
+}
+
+.liveBadge {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ok-text);
+  background: var(--ok-soft);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+}
+
+.notice {
+  color: var(--text-2);
+  font-size: 13px;
+  margin: 0;
+}
+
+.incompleteBanner {
+  background: var(--warn-soft);
+  color: var(--warn-text);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.stickyHeader {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .3px;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.scroll {
+  background: var(--code-bg);
+  color: var(--code-text);
+  border: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  height: 480px;
+  overflow: auto;
+}
+
+.header {
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+  padding: 6px 12px;
+}
+
+.gap {
+  color: var(--warn-text);
+  padding: 2px 12px;
+  font-style: italic;
+}
+
+.line {
+  display: flex;
+  gap: 10px;
+  padding: 0 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.highlighted {
+  background: var(--accent-soft);
+}
+
+/*
+ * .code-bg / .code-text are fixed regardless of theme (AGENTS.md), so these
+ * secondary marks inside the console use a literal grey rather than a
+ * theme token, matching Console.module.css's own .ts colour.
+ */
+.ts {
+  color: #6E7681;
+  flex-shrink: 0;
+}
+
+.lineNo {
+  color: #6E7681;
+  flex-shrink: 0;
+  min-width: 44px;
+  text-align: right;
+  user-select: none;
+}
+
+.text {
+  flex: 1;
+}

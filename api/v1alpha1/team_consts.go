@@ -37,3 +37,48 @@ const (
 	TeamNamespaceStateUnmanaged = "Unmanaged"
 	TeamNamespaceStateCreated   = "Created"
 )
+
+// Team condition types for pipelines tenancy.
+const (
+	TeamConditionPlaced         = "Placed"
+	TeamConditionTenantWarnings = "TenantWarnings"
+)
+
+// Placed reasons.
+const (
+	TeamReasonTenantPlaced            = "TenantPlaced"
+	TeamReasonTenantMoved             = "TenantMoved"
+	TeamReasonTenantMoving            = "TenantMoving"
+	TeamReasonAwaitingCell            = "AwaitingCell"
+	TeamReasonProfileNotFound         = "ProfileNotFound"
+	TeamReasonAgentNamespaceUnmanaged = "AgentNamespaceUnmanaged"
+	TeamReasonRecordStoreUnsupported  = "RecordStoreUnsupported"
+	TeamReasonBlobTierUnsupported     = "BlobTierUnsupported"
+	TeamReasonCellNotReady            = "CellNotReady"
+	TeamReasonTenantTeardownPending   = "TenantTeardownPending"
+)
+
+// TenantWarnings reasons.
+const (
+	TeamReasonBundleKeysIgnored  = "BundleKeysIgnored"
+	TeamReasonCredentialSkipped  = "CredentialSkipped"
+	TeamReasonHibernationIgnored = "HibernationIgnored"
+)
+
+// Team condition type for build-record rehydration.
+const (
+	TeamConditionRehydrated = "Rehydrated"
+)
+
+// Rehydrated reasons.
+const (
+	TeamReasonTenantRehydrated     = "TenantRehydrated"
+	TeamReasonRehydrationPending   = "RehydrationPending"
+	TeamReasonRehydrationTruncated = "RehydrationTruncated"
+	TeamReasonRehydrationFailed    = "RehydrationFailed"
+)
+
+// TeamFinalizerTenantPlacement is held by a pipelines tenant until the
+// teardown schedule purge succeeds (design D4, "Teardown when the cell is
+// gone").
+const TeamFinalizerTenantPlacement = "varroa.dev/tenant-placement"

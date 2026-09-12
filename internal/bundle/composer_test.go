@@ -2,6 +2,7 @@ package bundle
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -323,13 +324,30 @@ func TestComposer_VariablePrecedence(t *testing.T) {
 	}
 }
 
-// TestComposer_PipelineTemplateReachesItemsYAML is a regression test for the
-// silent-drop bug found during explore: Compose's groups map is a hardcoded
-// 5-key map, so a pipeline-template item's content would be silently dropped
-// from every composed bundle without the groupKey alias in Compose.
-func TestComposer_PipelineTemplateReachesItemsYAML(t *testing.T) {
+// pipelineTemplateDoc builds a minimal, valid PipelineTemplate document with
+// the given name and version, for composer fixtures.
+func pipelineTemplateDoc(name, version string) string {
+	return fmt.Sprintf(`
+apiVersion: varroa.dev/v1
+kind: PipelineTemplate
+metadata:
+  name: %s
+spec:
+  version: %s
+  parameters:
+    type: object
+    additionalProperties: false
+  jenkinsfile: "pipeline {}"
+`, name, version)
+}
+
+// TestComposer_PipelineTemplateReachesTemplateSet proves the ADDED
+// "pipeline-template content composes into the template set" requirement: a
+// pipeline-template item's content lands in PipelineTemplatesYAML, never in
+// ItemsYAML, while a plain item still reaches ItemsYAML alongside it.
+func TestComposer_PipelineTemplateReachesTemplateSet(t *testing.T) {
 	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
-		"ns/pt-1":   {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: "items:\n- name: templated-job\n  kind: pipeline\n", ContentHash: "pt1", Valid: true}},
+		"ns/pt-1":   {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: pipelineTemplateDoc("go-service", "1.0.0"), ContentHash: "pt1", Valid: true}},
 		"ns/item-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem}, Status: v1alpha1.CatalogItemStatus{Content: "items:\n- name: plain-job\n", ContentHash: "i1", Valid: true}},
 	}}
 
@@ -344,31 +362,58 @@ func TestComposer_PipelineTemplateReachesItemsYAML(t *testing.T) {
 	if result.Materialized == nil {
 		t.Fatal("expected Materialized bundle, got nil")
 	}
-	if !strings.Contains(result.Materialized.ItemsYAML, "templated-job") {
-		t.Errorf("expected pipeline-template content to reach ItemsYAML (silent-drop regression), got: %s", result.Materialized.ItemsYAML)
+	if strings.Contains(result.Materialized.ItemsYAML, "go-service") {
+		t.Errorf("expected pipeline-template content NOT to reach ItemsYAML, got: %s", result.Materialized.ItemsYAML)
+	}
+	if !strings.Contains(result.Materialized.PipelineTemplatesYAML, "go-service") {
+		t.Errorf("expected pipeline-template content to reach PipelineTemplatesYAML, got: %s", result.Materialized.PipelineTemplatesYAML)
 	}
 	if !strings.Contains(result.Materialized.ItemsYAML, "plain-job") {
-		t.Errorf("expected plain item content to still reach ItemsYAML alongside it, got: %s", result.Materialized.ItemsYAML)
+		t.Errorf("expected plain item content to still reach ItemsYAML, got: %s", result.Materialized.ItemsYAML)
 	}
 }
 
-// TestComposer_PipelineTemplateVariablePrecedence proves a pipeline-template
-// item's declared variables participate in the normal item-default <
-// spec-wide < per-ref precedence chain, identically to plain item-type
-// content.
-func TestComposer_PipelineTemplateVariablePrecedence(t *testing.T) {
+// TestComposer_PipelineTemplateOnlyBundleEmitsNoItems proves the ADDED
+// "A bundle with only templates emits no items" scenario.
+func TestComposer_PipelineTemplateOnlyBundleEmitsNoItems(t *testing.T) {
+	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
+		"ns/pt-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: pipelineTemplateDoc("go-service", "1.0.0"), ContentHash: "pt1", Valid: true}},
+		"ns/pt-2": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: pipelineTemplateDoc("node-service", "2.0.0"), ContentHash: "pt2", Valid: true}},
+	}}
+
+	c := NewComposer(f, nil, "", "", "", "", "")
+	spec := &v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("pt-2")},
+	}
+	result, err := c.Compose(context.Background(), "ns", spec, nil, nil)
+	if err != nil {
+		t.Fatalf("Compose error: %v", err)
+	}
+	if result.Materialized.ItemsYAML != "" {
+		t.Errorf("expected no items output, got: %s", result.Materialized.ItemsYAML)
+	}
+	if !strings.Contains(result.Materialized.PipelineTemplatesYAML, "go-service") || !strings.Contains(result.Materialized.PipelineTemplatesYAML, "node-service") {
+		t.Errorf("expected both templates in PipelineTemplatesYAML, got: %s", result.Materialized.PipelineTemplatesYAML)
+	}
+}
+
+// TestComposer_PipelineTemplateVariablesDoNotResolve proves a
+// pipeline-template item's declared CatalogVariable never parameterizes the
+// template body: pipeline-templates.yaml never passes through ResolveVars,
+// so neither the item's default nor a per-ref override reaches rawVars
+// through this input.
+func TestComposer_PipelineTemplateVariablesDoNotResolve(t *testing.T) {
 	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
 		"ns/pt-1": {Spec: v1alpha1.CatalogItemSpec{
 			Type: v1alpha1.CatalogItemPipelineTemplate,
 			Variables: []v1alpha1.CatalogVariable{
 				{Name: "environment", Default: "default-val"},
 			},
-		}, Status: v1alpha1.CatalogItemStatus{Content: "items:\n- name: templated-job\n  kind: pipeline\n  env: ${environment}\n", ContentHash: "pt1", Valid: true}},
+		}, Status: v1alpha1.CatalogItemStatus{Content: pipelineTemplateDoc("go-service", "1.0.0"), ContentHash: "pt1", Valid: true}},
 	}}
 
 	c := NewComposer(f, nil, "", "", "", "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
-		Variables: map[string]string{"environment": "spec-val"},
 		Inputs: []v1alpha1.ComposedInput{
 			{ItemRef: &v1alpha1.ComposedItemRef{Name: "pt-1", Variables: map[string]string{"environment": "ref-val"}}},
 		},
@@ -377,9 +422,235 @@ func TestComposer_PipelineTemplateVariablePrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compose error: %v", err)
 	}
-	// ref.Variables overrides everything else → environment=ref-val.
-	if result.Materialized.Variables["environment"] != "ref-val" {
-		t.Errorf("expected environment=ref-val (per-ref precedence), got: %s", result.Materialized.Variables["environment"])
+	if _, present := result.Materialized.Variables["environment"]; present {
+		t.Errorf("expected a pipeline-template item's variables not to reach rawVars, got: %q", result.Materialized.Variables["environment"])
+	}
+}
+
+// TestComposer_PipelineTemplateIdentityCollision_DifferingContentIsError
+// proves the D5 identity-collision rule: the same name and version with
+// different content is an error naming both itemRefs.
+func TestComposer_PipelineTemplateIdentityCollision_DifferingContentIsError(t *testing.T) {
+	docA := pipelineTemplateDoc("go-service", "1.0.0")
+	docB := strings.Replace(docA, "pipeline {}", "pipeline { echo 'different' }", 1)
+	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
+		"ns/pt-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: docA, ContentHash: "a", Valid: true}},
+		"ns/pt-2": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: docB, ContentHash: "b", Valid: true}},
+	}}
+
+	c := NewComposer(f, nil, "", "", "", "", "")
+	spec := &v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("pt-2")},
+	}
+	result, err := c.Compose(context.Background(), "ns", spec, nil, nil)
+	if err != nil {
+		t.Fatalf("Compose error: %v", err)
+	}
+	found := false
+	for _, e := range result.Errors {
+		if strings.Contains(e, "pt-1") && strings.Contains(e, "pt-2") && strings.Contains(e, "go-service") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected an identity-collision error naming both itemRefs, got: %v", result.Errors)
+	}
+}
+
+// TestComposer_PipelineTemplateIdentityCollision_IdenticalContentDeduplicates
+// proves the D5 rule's other half: the same name, version, and content is
+// de-duplicated silently, with no error and no warning.
+func TestComposer_PipelineTemplateIdentityCollision_IdenticalContentDeduplicates(t *testing.T) {
+	doc := pipelineTemplateDoc("go-service", "1.0.0")
+	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
+		"ns/pt-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: doc, ContentHash: "a", Valid: true}},
+		"ns/pt-2": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: doc, ContentHash: "a", Valid: true}},
+	}}
+
+	c := NewComposer(f, nil, "", "", "", "", "")
+	spec := &v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("pt-2")},
+	}
+	result, err := c.Compose(context.Background(), "ns", spec, nil, nil)
+	if err != nil {
+		t.Fatalf("Compose error: %v", err)
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("expected no errors for an identical duplicate, got: %v", result.Errors)
+	}
+	if len(result.Warnings) != 0 {
+		t.Errorf("expected no warnings for an identical duplicate, got: %v", result.Warnings)
+	}
+	count := strings.Count(result.Materialized.PipelineTemplatesYAML, "name: go-service")
+	if count != 1 {
+		t.Errorf("expected the template to appear exactly once, got %d: %s", count, result.Materialized.PipelineTemplatesYAML)
+	}
+}
+
+// templateWithRequiredGoVersion is a PipelineTemplate document whose schema
+// requires a "goVersion" string property, used by the
+// items-declared-template-values tests below.
+const templateWithRequiredGoVersion = `
+apiVersion: varroa.dev/v1
+kind: PipelineTemplate
+metadata:
+  name: go-service
+spec:
+  version: 1.0.0
+  parameters:
+    type: object
+    properties:
+      goVersion:
+        type: string
+    required: [goVersion]
+    additionalProperties: false
+  jenkinsfile: "pipeline {}"
+`
+
+// TestComposer_ItemDeclaredTemplateValues_Valid proves task 2.7: an
+// items-declared definition.varroaTemplate whose values satisfy the
+// resolved template's schema produces no composition error.
+func TestComposer_ItemDeclaredTemplateValues_Valid(t *testing.T) {
+	itemsContent := `
+items:
+- name: my-job
+  kind: pipeline
+  definition:
+    varroaTemplate:
+      template: go-service
+      templateVersion: "1.0.0"
+      values:
+        goVersion: "1.24"
+`
+	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
+		"ns/pt-1":   {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: templateWithRequiredGoVersion, ContentHash: "a", Valid: true}},
+		"ns/item-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem}, Status: v1alpha1.CatalogItemStatus{Content: itemsContent, ContentHash: "b", Valid: true}},
+	}}
+
+	c := NewComposer(f, nil, "", "", "", "", "")
+	spec := &v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("item-1")},
+	}
+	result, err := c.Compose(context.Background(), "ns", spec, nil, nil)
+	if err != nil {
+		t.Fatalf("Compose error: %v", err)
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("expected valid values to produce no errors, got: %v", result.Errors)
+	}
+}
+
+// TestComposer_ItemDeclaredTemplateValues_MissingRequiredIsError proves the
+// values-against-schema half of task 2.7 on the failing path.
+func TestComposer_ItemDeclaredTemplateValues_MissingRequiredIsError(t *testing.T) {
+	itemsContent := `
+items:
+- name: my-job
+  kind: pipeline
+  definition:
+    varroaTemplate:
+      template: go-service
+      templateVersion: "1.0.0"
+      values: {}
+`
+	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
+		"ns/pt-1":   {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: templateWithRequiredGoVersion, ContentHash: "a", Valid: true}},
+		"ns/item-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem}, Status: v1alpha1.CatalogItemStatus{Content: itemsContent, ContentHash: "b", Valid: true}},
+	}}
+
+	c := NewComposer(f, nil, "", "", "", "", "")
+	spec := &v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("item-1")},
+	}
+	result, err := c.Compose(context.Background(), "ns", spec, nil, nil)
+	if err != nil {
+		t.Fatalf("Compose error: %v", err)
+	}
+	found := false
+	for _, e := range result.Errors {
+		if strings.Contains(e, "my-job") && strings.Contains(e, "goVersion") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected an error naming the item and the missing property, got: %v", result.Errors)
+	}
+}
+
+// TestComposer_ItemDeclaredTemplateValues_UnresolvedTemplateIsError proves
+// an items-declared template that names an undelivered template is a
+// composition error, not a silent no-op.
+func TestComposer_ItemDeclaredTemplateValues_UnresolvedTemplateIsError(t *testing.T) {
+	itemsContent := `
+items:
+- name: my-job
+  kind: pipeline
+  definition:
+    varroaTemplate:
+      template: does-not-exist
+`
+	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
+		"ns/pt-1":   {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: templateWithRequiredGoVersion, ContentHash: "a", Valid: true}},
+		"ns/item-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem}, Status: v1alpha1.CatalogItemStatus{Content: itemsContent, ContentHash: "b", Valid: true}},
+	}}
+
+	c := NewComposer(f, nil, "", "", "", "", "")
+	spec := &v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("item-1")},
+	}
+	result, err := c.Compose(context.Background(), "ns", spec, nil, nil)
+	if err != nil {
+		t.Fatalf("Compose error: %v", err)
+	}
+	found := false
+	for _, e := range result.Errors {
+		if strings.Contains(e, "my-job") && strings.Contains(e, "does-not-exist") && strings.Contains(e, "not delivered") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected an error naming the item and the undelivered template, got: %v", result.Errors)
+	}
+}
+
+// TestComposer_ItemDeclaredTemplateValues_NestedFolderIsValidated proves
+// 🔴2 of review round 1: a folder-nested pipeline's
+// definition.varroaTemplate values are validated at composition time,
+// the same as a root-level item's (design D10).
+func TestComposer_ItemDeclaredTemplateValues_NestedFolderIsValidated(t *testing.T) {
+	itemsContent := `
+items:
+- name: my-folder
+  kind: folder
+  items:
+  - name: my-job
+    kind: pipeline
+    definition:
+      varroaTemplate:
+        template: go-service
+        templateVersion: "1.0.0"
+`
+	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
+		"ns/pt-1":   {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: templateWithRequiredGoVersion, ContentHash: "a", Valid: true}},
+		"ns/item-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem}, Status: v1alpha1.CatalogItemStatus{Content: itemsContent, ContentHash: "b", Valid: true}},
+	}}
+
+	c := NewComposer(f, nil, "", "", "", "", "")
+	spec := &v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("item-1")},
+	}
+	result, err := c.Compose(context.Background(), "ns", spec, nil, nil)
+	if err != nil {
+		t.Fatalf("Compose error: %v", err)
+	}
+	found := false
+	for _, e := range result.Errors {
+		if strings.Contains(e, "my-folder/my-job") && strings.Contains(e, "goVersion") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected an error naming the nested item's path and the missing property, got: %v", result.Errors)
 	}
 }
 

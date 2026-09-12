@@ -1,0 +1,8 @@
+type: object
+additionalProperties: false
+dependentSchemas:
+  name:
+    type: object
+properties:
+  name:
+    type: string

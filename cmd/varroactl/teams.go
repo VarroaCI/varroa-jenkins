@@ -123,8 +123,10 @@ func runEditTeam(cmd *cobra.Command, args []string) error {
 	}
 	name := args[0]
 
-	// Writable fields projected from the teamEntry
-	writableFields := []string{"name", "displayName", "members", "subjects", "namespaces", "roleRef", "provisionNamespaces"}
+	// Writable fields projected from the teamEntry. "pipelines" carries the
+	// pipelines tenancy declaration, including the seven ledger and
+	// rehydration settings; it round-trips as one nested object.
+	writableFields := []string{"name", "displayName", "members", "subjects", "namespaces", "roleRef", "provisionNamespaces", "pipelines"}
 
 	return editLoop(
 		func() (map[string]any, error) {
@@ -153,7 +155,7 @@ func runEditTeam(cmd *cobra.Command, args []string) error {
 			}
 			return projected, nil
 		},
-		func(doc map[string]any) error {
+		func(_, doc map[string]any) error {
 			return putClusterScoped(cmd, "/teams/"+name, doc)
 		},
 		"team", name,
@@ -189,7 +191,7 @@ func listTeams(cmd *cobra.Command, format string, noHeaders bool) error {
 	if err := json.Unmarshal(body, &env); err != nil {
 		return fmt.Errorf("failed to decode: %w", err)
 	}
-	return renderList(env.Items, format, noHeaders, teamColumns, []string{"NAME", "ROLE", "MEMBERS", "NAMESPACES", "PROVISION"})
+	return renderList(env.Items, format, noHeaders, teamColumns, teamTableHeaders)
 }
 
 func getTeamSingle(cmd *cobra.Command, name, format string) error {
@@ -197,8 +199,14 @@ func getTeamSingle(cmd *cobra.Command, name, format string) error {
 	if err != nil {
 		return err
 	}
-	return renderSingle(doc, format, teamColumns, []string{"NAME", "ROLE", "MEMBERS", "NAMESPACES", "PROVISION"})
+	return renderSingle(doc, format, teamColumns, teamTableHeaders)
 }
+
+// teamTableHeaders are the `get team`/`get teams` table columns. PIPELINES
+// and CONCURRENCY summarize spec.pipelines; REHYDRATED summarizes the
+// Rehydrated condition. The full pipelines settings and rehydration status
+// are available via `-o json`/`-o yaml` or `describe team`.
+var teamTableHeaders = []string{"NAME", "ROLE", "MEMBERS", "NAMESPACES", "PROVISION", "PIPELINES", "CONCURRENCY", "REHYDRATED"}
 
 func teamGET(cmd *cobra.Command, name string) (map[string]any, error) {
 	httpResp, err := rawRequest(cmd, "GET", "/teams/"+name, nil)
@@ -262,7 +270,49 @@ func teamColumns(item map[string]any) []string {
 		}
 	}
 
-	return []string{name, roleRef, members, namespaces, provision}
+	pipelines := "-"
+	concurrency := "-"
+	if p, ok := item["pipelines"].(map[string]any); ok {
+		pipelines = "true"
+		if c, ok := p["concurrency"].(string); ok && c != "" {
+			concurrency = c
+		} else {
+			concurrency = "allow"
+		}
+	}
+
+	rehydrated := teamConditionSummary(item, "Rehydrated")
+
+	return []string{name, roleRef, members, namespaces, provision, pipelines, concurrency, rehydrated}
+}
+
+// teamConditionSummary reports the status of one named condition from a
+// teamEntry's conditions array as "True", "False (<reason>)", or "-" when
+// the condition is absent.
+func teamConditionSummary(item map[string]any, conditionType string) string {
+	conditions, ok := item["conditions"].([]any)
+	if !ok {
+		return "-"
+	}
+	for _, c := range conditions {
+		cond, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		if t, _ := cond["type"].(string); t != conditionType {
+			continue
+		}
+		status, _ := cond["status"].(string)
+		if status == "True" {
+			return "True"
+		}
+		reason, _ := cond["reason"].(string)
+		if reason != "" {
+			return fmt.Sprintf("%s (%s)", status, reason)
+		}
+		return status
+	}
+	return "-"
 }
 
 // ---------------------------------------------------------------------------

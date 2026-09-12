@@ -1,0 +1,8 @@
+type: object
+additionalProperties: false
+properties:
+  name:
+    type: string
+    oneOf:
+    - type: string
+    - type: integer

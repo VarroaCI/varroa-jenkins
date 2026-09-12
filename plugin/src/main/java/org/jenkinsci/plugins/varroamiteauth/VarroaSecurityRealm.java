@@ -620,7 +620,13 @@ public class VarroaSecurityRealm extends SecurityRealm {
             authorities[i + 1] = new GrantedAuthorityImpl(groups.get(i));
         }
 
-        return new UsernamePasswordAuthenticationToken(user.impersonate2(), null, authorities);
+        // The principal is the user id string. The role strategy matches a
+
+        // user entry on Authentication.getName(), and a nested Authentication
+
+        // as principal never matches, so the key would hold no role.
+
+        return new UsernamePasswordAuthenticationToken(user.getId(), null, authorities);
     }
 
     public ApiKeyValidator getApiKeyValidator() {
@@ -705,7 +711,7 @@ public class VarroaSecurityRealm extends SecurityRealm {
                         span.setAttribute("auth.outcome", "jwt_cookie");
                         span.setAttribute("auth.subject", userId);
                         return new UsernamePasswordAuthenticationToken(
-                                user.impersonate2(), null, authoritiesFor(claims));
+                                user.getId(), null, authoritiesFor(claims));
                     }
                     LOGGER.info("varroa-mite-auth: cookie JWT validation failed");
                 }
@@ -740,7 +746,7 @@ public class VarroaSecurityRealm extends SecurityRealm {
                         for (int i = 0; i < groups.size(); i++) {
                             authorities[i + 1] = new GrantedAuthorityImpl(groups.get(i));
                         }
-                        return new UsernamePasswordAuthenticationToken(user.impersonate2(), null, authorities);
+                        return new UsernamePasswordAuthenticationToken(user.getId(), null, authorities);
                     }
                     LOGGER.info("varroa-mite-auth: vk_ Bearer validation failed");
                     throw new BadCredentialsException("Invalid vk_ token");
@@ -823,6 +829,23 @@ public class VarroaSecurityRealm extends SecurityRealm {
                 if (u != null) {
                     GrantedAuthority[] authorities = new GrantedAuthority[]{
                         new GrantedAuthorityImpl("authenticated")
+                    };
+                    return new org.acegisecurity.userdetails.User(
+                        username, "", true, true, true, true, authorities);
+                }
+            }
+
+            // Tenant service identity. The authority set is synthesized
+            // from the cell's applied role-strategy document, so it needs
+            // no persisted User record and it never varies between
+            // reloads. An unhosted tenant falls through to the
+            // UsernameNotFoundException below, unchanged.
+            if (username != null && username.startsWith("svc-")) {
+                String tenant = username.substring("svc-".length());
+                if (VarroaTenantResolver.hostsTenant(tenant)) {
+                    GrantedAuthority[] authorities = new GrantedAuthority[]{
+                        new GrantedAuthorityImpl("authenticated"),
+                        new GrantedAuthorityImpl("ROLE:varroa:tenant:" + tenant)
                     };
                     return new org.acegisecurity.userdetails.User(
                         username, "", true, true, true, true, authorities);

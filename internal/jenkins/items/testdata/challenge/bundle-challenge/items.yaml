@@ -74,6 +74,18 @@ items:
                 name: DRY_RUN
                 description: Dry run only
     - kind: folder
+      name: challenge-freestyle-varroa-upstream-trigger
+      items:
+        - kind: freeStyle
+          name: freestyle-varroa-upstream-trigger
+          displayName: FreeStyle Cross-Tenant Upstream Trigger
+          description: FreeStyle job that subscribes to another tenant's job
+          triggers:
+            - varroaUpstream:
+                tenant: alpha
+                job: release
+                result: SUCCESS
+    - kind: folder
       name: challenge-pipeline-scm-flow
       items:
         - kind: pipeline
@@ -143,6 +155,21 @@ items:
           resumeBlocked: true
           quietPeriod: 5
     - kind: folder
+      name: challenge-pipeline-varroa-template
+      items:
+        - kind: pipeline
+          name: pipeline-varroa-template
+          displayName: Pipeline From Template
+          description: Pipeline job bound to a catalog-delivered template
+          definition:
+            varroaTemplate:
+                template: golang-service
+                templateVersion: 2.1.0
+                values:
+                    goVersion: "1.22"
+                    replicas: 3
+                    runTests: true
+    - kind: folder
       name: challenge-multibranch-git-source
       items:
         - kind: multibranch
@@ -195,6 +222,21 @@ items:
             multiBranchProjectFactory:
                 scriptPath: Jenkinsfile
     - kind: folder
+      name: challenge-multibranch-varroa-marker
+      items:
+        - kind: multibranch
+          name: multibranch-varroa-marker
+          displayName: Multibranch Marker Factory
+          description: Multibranch pipeline whose branches resolve a template through the marker file
+          sourcesList:
+            - branchSource:
+                source:
+                    git:
+                        remote: https://github.com/fake-org/multibranch-marker.git
+                        credentialsId: git-cred
+          projectFactory:
+            varroaMarkerProjectFactory: {}
+    - kind: folder
       name: challenge-orgfolder-github-navigator
       items:
         - kind: organizationFolder
@@ -219,6 +261,20 @@ items:
             - gitNavigator:
                 remote: https://github.com/fake-org
                 credentialsId: git-cred
+          projectFactories:
+            - multiBranchProjectFactory:
+                scriptPath: Jenkinsfile
+    - kind: folder
+      name: challenge-orgfolder-buildstrategies
+      items:
+        - kind: organizationFolder
+          name: orgfolder-buildstrategies
+          displayName: Org Folder Build Strategies
+          description: Organization folder asserting the unconditional skip-initial-build strategy
+          navigators:
+            - githubNavigator:
+                repoOwner: fake-org
+                credentialsId: github-cred
           projectFactories:
             - multiBranchProjectFactory:
                 scriptPath: Jenkinsfile
@@ -288,6 +344,17 @@ items:
                     - charlie
               roles:
                 - name: viewer
+    - kind: folder
+      name: challenge-folder-kubernetes-clouds
+      items:
+        - kind: folder
+          name: folder-kubernetes-clouds
+          displayName: Folder with Permitted Kubernetes Clouds
+          description: Folder restricted to one kubernetes cloud
+          properties:
+            - kubernetes:
+                permittedClouds:
+                    - team-a
     - kind: folder
       name: challenge-deep-nested-folders
       items:
@@ -449,3 +516,43 @@ items:
                             scope: GLOBAL
                             description: API token
                             secret: super-secret-token
+    - kind: folder
+      name: challenge-folder-libraries
+      items:
+        - kind: folder
+          name: folder-libraries
+          displayName: Folder with Libraries
+          description: Folder with folderLibraries property and a modern-SCM retriever
+          properties:
+            - folderLibraries:
+                libraries:
+                    - libraryConfiguration:
+                        allowVersionOverride: true
+                        retriever:
+                            modernSCM:
+                                scm:
+                                    github:
+                                        repoOwner: fake-org
+                                        repository: shared-library
+                                        traits:
+                                            - gitHubBranchDiscovery:
+                                                strategyId: 3
+                        name: my-shared-lib
+    - kind: folder
+      name: challenge-library-retriever-legacy
+      items:
+        - kind: folder
+          name: library-retriever-legacy
+          displayName: Folder with Legacy Library Retriever
+          description: Folder with folderLibraries and a modern-SCM retriever carrying no traits
+          properties:
+            - folderLibraries:
+                libraries:
+                    - libraryConfiguration:
+                        retriever:
+                            modernSCM:
+                                scm:
+                                    github:
+                                        repoOwner: fake-org
+                                        repository: legacy-lib-repo
+                        name: legacy-lib

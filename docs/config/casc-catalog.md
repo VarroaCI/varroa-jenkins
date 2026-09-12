@@ -12,7 +12,7 @@ A `CatalogSource` turns reusable Git or OCI content into read-only
 | `item` | Jobs and folders |
 | `rbac` | Jenkins role definitions |
 | `podtemplate` | Jenkins agent pod templates |
-| `pipeline-template` | Parameterized pipeline or multibranch item |
+| `pipeline-template` | A `PipelineTemplate` document: a parameterized pipeline body, its schema, and its version |
 | `groovy` | Script for `executeGroovy` only |
 
 `groovy` items cannot enter a `ComposedBundle`. Their controls are documented
@@ -21,7 +21,21 @@ in [executeGroovy security](../security/execute-groovy.md).
 ## Describe catalog content
 
 Use conventional directories for simple catalogs, or add `catalog.yaml` for
-metadata and variables:
+metadata and variables. With no `catalog.yaml`, a source scans its root for these directory
+names:
+
+| Directory | Type |
+|---|---|
+| `jcasc/` | `jcasc` |
+| `plugins/` | `plugin` |
+| `items/` | `item` |
+| `rbac/` | `rbac` |
+| `pod-templates/` | `podtemplate` |
+| `pipeline-templates/` | `pipeline-template` |
+
+A `pipeline-templates/` file is a `PipelineTemplate` document, not items YAML. See
+[Pipeline templates](pipeline-templates.md) for the document's fields, its parameter schema, and
+the marker file that selects it.
 
 ```yaml
 apiVersion: "1"

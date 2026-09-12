@@ -1,0 +1,140 @@
+# runners — external agent registration for a pipelines tenant (design D12,
+# specs/runner-registration). Runner is cluster-scoped, so no namespace
+# segment appears in any path.
+/api/v1/runners:
+  get:
+    operationId: listRunners
+    tags: [runners]
+    summary: >-
+      Lists runners the caller may read. A runner the caller cannot read is
+      omitted from the list rather than causing the whole request to be
+      refused.
+    parameters:
+      - $ref: '../components/parameters.yaml#/teamQuery'
+    responses:
+      "200":
+        description: Runner list (N6 envelope).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/RunnerEntry'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+  post:
+    operationId: createRunner
+    tags: [runners]
+    summary: >-
+      Registers a runner for a pipelines tenant. Requires the runners:create
+      verb and a write grant on spec.team; refuses a spec.team that names no
+      Team with 400.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/RunnerCreateRequest'
+    responses:
+      "201":
+        description: Runner created.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+              additionalProperties: false
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+
+/api/v1/runners/{name}:
+  get:
+    operationId: getRunner
+    tags: [runners]
+    summary: >-
+      Gets a runner's details. status.token is present only for a caller
+      holding runners:create.
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Runner details.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunnerEntry'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  patch:
+    operationId: patchRunner
+    tags: [runners]
+    summary: >-
+      Merge-patches a runner's spec. spec.team and spec.launcher are
+      immutable; a patch that changes either is refused with 400.
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/merge-patch+json:
+          schema:
+            type: object
+            description: >-
+              An RFC 7386 JSON merge patch. The only accepted top-level key
+              is spec.
+            properties:
+              spec:
+                type: object
+                additionalProperties: true
+            additionalProperties: false
+    responses:
+      "200":
+        description: Runner updated.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+              additionalProperties: false
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  delete:
+    operationId: deleteRunner
+    tags: [runners]
+    summary: Deletes a runner.
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "204":
+        description: Runner deleted.
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'

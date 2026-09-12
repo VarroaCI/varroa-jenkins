@@ -26,6 +26,8 @@ export interface ControllerListItem {
    */
   effectiveBundle?: { name: string; namespace: string; builtIn: boolean };
   routingMode?: "subdomain" | "path";
+  /** Mirrors v1alpha1.IsHeadless. When true, endpoint is always the empty string. */
+  headless?: boolean;
   appliedBundleHash?: string;
   rolloutWave?: number;
   attention?: ControllerAttention;
@@ -91,6 +93,8 @@ export interface ControllerDetail {
   resourceOverlay?: ResourceOverlay;
   observability?: ControllerObservability;
   routingMode?: "subdomain" | "path";
+  /** Mirrors v1alpha1.IsHeadless. When true, endpoint is always the empty string. */
+  headless?: boolean;
   lastApplyResult?: ApplyResult;
   applyHistory?: ApplyResult[];
   liveDrift?: LiveDrift;

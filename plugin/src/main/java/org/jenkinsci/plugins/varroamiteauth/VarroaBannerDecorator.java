@@ -21,8 +21,26 @@ public class VarroaBannerDecorator extends PageDecorator {
     private static final Logger LOGGER = Logger.getLogger(VarroaBannerDecorator.class.getName());
     private static final AtomicBoolean ROLE_FAILURE_LOGGED = new AtomicBoolean();
 
+    /** Test-only override for {@link #getBannerConfigURL()}; null means read the environment. */
+    String bannerConfigURLForTest;
+
+    /** Test-only override for {@link #isHeadless()}; null means read the environment. */
+    Boolean headlessForTest;
+
     public String getBannerConfigURL() {
-        return System.getenv("VARROA_BANNER_URL");
+        return bannerConfigURLForTest != null ? bannerConfigURLForTest : System.getenv("VARROA_BANNER_URL");
+    }
+
+    /**
+     * Reports whether this controller is headless, so the banner can mark a
+     * break-glass session. Sources the value from the same environment
+     * variable that gates {@link VarroaHeadlessFilter}, with the same read.
+     */
+    public boolean isHeadless() {
+        if (headlessForTest != null) {
+            return headlessForTest;
+        }
+        return "true".equals(System.getenv(VarroaHeadlessFilter.HEADLESS_ENV));
     }
 
     /**

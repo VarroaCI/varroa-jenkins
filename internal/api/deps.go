@@ -16,6 +16,8 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	mitesrv "github.com/varroaci/varroa-jenkins/internal/mite"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 	"github.com/varroaci/varroa-jenkins/internal/transport"
 )
 
@@ -42,7 +44,6 @@ type Dependencies struct {
 	Logger            *slog.Logger
 	OperatorNamespace string
 	ManagedNamespaces string // raw MANAGED_NAMESPACES value; "" ⇒ cluster-wide mode
-	ActivityStore     *activity.Store
 	ActivityPublisher activity.EventSink
 	Backfill          activity.Backfill
 	Reconciler        controller.ReconcilerAPI
@@ -103,6 +104,26 @@ type Dependencies struct {
 	// candidate promotion. May be nil in tests that don't exercise
 	// promotion.
 	VersionProfileReconciler *controller.JenkinsVersionProfileReconciler
+
+	// RecordStore reads build records the recorder wrote. Nil when
+	// VARROA_RECORDSTORE_DSN is unset, so a handler on this surface must
+	// check for nil before use.
+	RecordStore recordstore.Reader
+
+	// BlobStore reads a run's console log and artifact bytes. Nil when
+	// VARROA_BLOBSTORE_URL is unset, so a handler on the log or artifact
+	// path must check for nil before use.
+	BlobStore blob.Store
+
+	// TenantResolver maps a pipelines {team} URL segment onto record-store
+	// tenants. Nil in tests that do not exercise the pipelines surface.
+	TenantResolver TenantResolver
+
+	// RunnerTokenIndex resolves a runner door token to its Runner name
+	// (design D7). Rebuilt from the BFF's own Runner watch. Nil in tests
+	// that do not exercise the agent WebSocket door; the door answers 401
+	// for every token when it is nil.
+	RunnerTokenIndex *RunnerTokenIndex
 }
 
 // IdentityConfig holds the identity/OIDC configuration surfaced to the admin

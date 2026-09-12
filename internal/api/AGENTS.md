@@ -12,11 +12,12 @@ federation, activity persistence, and SSE fanout.
 - Owns: HTTP handler implementations for every BFF resource (controllers, groups,
   teams, users, VarroaRole/VarroaRoleBinding, apikeys, brood operations/schedules,
   activity feed + SSE, provisioning defaults/version profiles/catalog/composed-bundles
-  under `/clusters/{cluster}/...`, observability, hibernation), the `Authorizer`
+  under `/clusters/{cluster}/...`, observability, hibernation, pipelines and runs under
+  `/pipelines/{team}/...` and `/runs/{run}/...`), the `Authorizer`
   (per-request RBAC capability checks), the `Brood`/`BroodOps`/`ConfigBrood`/
-  `RBACFederationReconciler` multi-cluster abstractions, activity JetStream backfill +
-  in-memory ring fallback (`internal/api/activity/`), and SSE fanout
-  (`internal/api/sse/`).
+  `RBACFederationReconciler` multi-cluster abstractions, the activity read/publish
+  seam (`internal/api/activity/`) over `internal/recordstore`, the pipelines
+  `TenantResolver` seam over the same package, and SSE fanout (`internal/api/sse/`).
 - Does not own: the OpenAPI contract itself (`api/openapi/` at repo root —
   `varroa.root.yaml` + `paths/` + `components/`, bundled by `hack/openapi-bundle` into
   `varroa.json`/`varroa.yaml`); the generated Go client SDK (`pkg/client/gen.go`, via
@@ -47,9 +48,16 @@ federation, activity persistence, and SSE fanout.
   `Server.deps`: `ResourceClient` (deep ops) + `Store` (`crdstore.Backend`, all CRD
   reads/writes), a read-only controller-runtime `client.Client`,
   `Authorizer`, mite `transport.Transport`, `auth.Provider` (+ optional `Local`/
-  `LDAP`), `KeyVerifier`, `TicketIssuer`, SSE `Broadcaster`, `ActivityStore`/
-  `Publisher`/`Backfill`, `ReconcilerAPI`, and the nil-checkable `Brood`/`BroodOps`/
-  `BroodSchedules`/`ConfigBrood` (tests may omit multi-cluster wiring).
+  `LDAP`), `KeyVerifier`, `TicketIssuer`, SSE `Broadcaster`, `ActivityPublisher`/
+  `Backfill`, `RecordStore`, `ReconcilerAPI`, and the nil-checkable `Brood`/`BroodOps`/
+  `BroodSchedules`/`ConfigBrood` (tests may omit multi-cluster wiring). There is no
+  `ActivityStore` field: the in-memory ring is gone, and `Backfill` is nil, not a ring
+  fallback, when `VARROA_RECORDSTORE_DSN` is unset. `BlobStore` (`blob.Store`) reads a
+  run's console log and artifact bytes, nil when `VARROA_BLOBSTORE_URL` is unset.
+  `TenantResolver` maps a pipelines `{team}` URL segment onto record-store tenants, nil
+  in tests that do not exercise the pipelines surface. A handler on the log, artifact,
+  or pipelines path must check its dependency for nil before use, matching every other
+  optional field on `Dependencies`.
 - **Auth is not middleware in this package.** `internal/auth.AuthMiddleware`
   (`internal/auth/middleware.go`) wraps the entire mux in `cmd/bff/main.go`: it gates
   every `/api/` path, allow-lists `POST /login`, `/auth-config`, `/otel/*`,
@@ -79,20 +87,128 @@ federation, activity persistence, and SSE fanout.
   cluster via `ConfigBrood`. This is BFF-owned cross-cluster federation — distinct
   from `role_controller.go`'s single-cluster built-in-role reconciliation in
   `internal/controller`.
-- Activity (`internal/api/activity/`): `Store` is the in-memory ring buffer used only
-  when retention is `off` (fed by an `activity.>` bus subscriber — never written to
-  directly; see the "single-ring-writer rule" on `notifyActivity` in `handlers.go`).
-  `Publisher.Publish` is the single write path for user-action events, routed onto the
-  NATS bus by `routeSubject`. `jetstreamBackfill.Recent`/`Query` read the bounded
-  JetStream stream (`varroa_activity`, subjects `activity.<cluster>.<ns>.<ctrl>` /
-  `activity.<cluster>._global`) via an **ephemeral, end-anchored consumer**; backfill is
-  pull/paginated (cursor-based `Query`) — live tailing is a separate path. Every
-  reader — REST handler and MCP `list_activity` alike — consumes `deps.Backfill`
-  (jetstream in stream mode, `NewRingBackfill(Store)` in off mode), never the ring
-  directly. Only audit-worthy events belong on `activity.*`: mite heartbeat/snapshot
+- Activity (`internal/api/activity/`): there is no in-memory ring and no retention
+  dial. `deps.ActivityPublisher.Publish` (`notifyActivity` in `handlers.go`) is the
+  single write path for user-action events, routed onto the NATS bus by
+  `routeSubject`; the gateway publishes mite-observed events onto the same bus
+  subjects. `deps.Backfill` is `internal/recordstore`'s `pgBackfill`, reading the
+  Postgres `activity` table through `Reader.ListActivity` (keyset paging on
+  `(ts, event_key)`, D5's scope pushed into SQL); it is nil when
+  `VARROA_RECORDSTORE_DSN` is unset, and both readers — the REST handler and MCP
+  `list_activity` — already branch on that nil rather than falling back to
+  anything in-process. `Scope`/`ScopeFromPermissions`/`Admits` (`scope.go`) build
+  and apply D5's sound-superset read scope; the per-event predicate
+  (`Authorizer.CanReadActivityEvent`) stays authoritative on every returned row.
+  Only audit-worthy events belong on `activity.*`: mite heartbeat/snapshot
   telemetry stays on `events.brood.>` (see `activityMessageForBroodEvent` in
-  `internal/mite`), or it floods the bounded stream and evicts real audit history.
-  `ParseRetention` (`retention.go`) parses the `off|7d|30d|90d` dial.
+  `internal/mite`), or it would flood the recorder's bounded transport buffer and
+  evict real audit history. Live tailing (`GET /activity/stream`) is a separate
+  path over `sse.BusFanout`, unaffected by `deps.Backfill` being nil.
+- **Break-glass** (`handleBreakGlass`, `handlers.go`) is `POST
+  /clusters/{cluster}/controllers/{ns}/{name}/break-glass` (route key `break-glass` in
+  `controllerRoutes`, `handlers_clusters.go`, bare — no trailing slash). It mints a
+  short-lived Jenkins admin token for a headless controller only, gated on the
+  `controllers`/`break-glass` verb (`Authorizer.CanBreakGlass`, independent of
+  `approve-restart`/`approve-deletion`), local-cluster only, and a required
+  `reason` (capped, never truncated). It publishes
+  `controller.breakglass.granted` through `deps.ActivityPublisher` before it mints,
+  and answers `503` when the signer or the publisher is unavailable, so a grant is
+  never issued unaudited. `internal/mcp`'s `call_jenkins_tool` gate reaches the same
+  `CanBreakGlass` check and publishes the same event with `Source: "mcp"`.
+  `controllerResponse`/`controllerDetailResponse` carry `headless bool`
+  (`v1alpha1.IsHeadless(cr)`); `controllerEndpoint` returns `""` for a headless
+  controller before it reads `Status.Endpoint`, and the create/update handlers skip
+  the path-mode shared-host check for one. The hibernation redirect endpoint
+  (`handlers_hibernation.go`) answers `404` for a headless controller, after the
+  token guard and before any wake publish — a headless controller has no
+  interstitial page to send a browser to.
+- Hibernation and the webhook door (`handlers_hibernation.go`): `HandleHibernationDispatch`
+  serves two shapes at the host root, outside `/api/v1` and outside auth. The controller shape
+  (`/hibernation/{token}/clusters/{cluster}/ns/{ns}/{queue,redirect,status}/{ctrl}/...`) wakes a
+  hibernated controller and buffers its webhook on `webhook.<cluster>.<ns>.<ctrl>`. The tenant
+  shape (`/hibernation/{token}/teams/{team}/queue/{path...}`) is the pipelines tenant's own door:
+  it verifies the token against `Team.status.pipelines.webhookToken`, verifies the forge signature
+  against `Team.status.pipelines.webhookSecret` (`identifyForge`/`verifyForgeSignature`), strips
+  `X-Gitlab-Token` from the envelope, and buffers on `webhook.<cluster>.tenant.<team>` — a cell
+  never hibernates, so it publishes no wake. Both shapes share the JetStream `varroa_webhooks`
+  stream and its existing `webhook.>` capture; the door never resolves placement, only the
+  operator's replay consumer does, at delivery time.
+- The agent WebSocket door (`handlers_runner_door.go`, design `add-external-runners`
+  D7/D8): `HandleRunnerDoor` serves `/runners/{token}/{login,jnlpJars/agent.jar,wsagents/}`
+  at the host root, outside `/api/v1` and outside auth — the URL's token is the only
+  credential, the same property the hibernation door relies on. `RunnerTokenIndex`
+  (`runner_token_index.go`) narrows a token to a candidate `Runner` by SHA-256 digest;
+  the door still re-fetches that CRD and re-verifies `status.token` with
+  `constantTimeEqual` before trusting it. The door resolves a `Runner`'s cell through
+  its `Team.status.placement` and `deps.Brood.Get(ctx, placement.cluster, ...)` — never
+  the local store by name/namespace alone, since a cell name is unique only within one
+  cluster. It answers 503 on an empty placement (including an empty
+  `placement.cluster`) so the agent's own retry loop backs off. The websocket upgrade
+  goes through `httputil.ReverseProxy` with `Rewrite`/`ModifyResponse` (not a hand-
+  rolled hijack): `Rewrite` rebuilds the outbound header set from nothing, so a header
+  not named in the design's contract is dropped by construction; `ModifyResponse`
+  applies the same allowlist to the response, since `Rewrite` cannot touch it. The door
+  never trusts a client-supplied `Node-Name`; it always sets the runner's own
+  `status.nodeName` and a freshly-fetched Jenkins agent secret toward the cell.
+  `cmd/bff/main.go` feeds `RunnerTokenIndex` from a `runners` informer built the same
+  way as the existing RBAC/Team informers.
+- Pipelines and runs (`handlers_pipelines.go`, `handlers_pipelines_write.go`,
+  `handlers_pipelines_auth.go`, `handlers_runs.go`, `handlers_runlog.go`,
+  `runlog_events.go`, `runlog_manifest.go`, `runlog_live.go`, `runlog_poll.go`,
+  `runlog_tail.go`, `runlog_notes.go`, `tenantresolver.go`, `pipelines_service.go`):
+  serves the `/pipelines/{team}/...` and `/runs/{run}/...` paths over
+  `internal/recordstore`. `TenantResolver` (`tenantresolver.go`, `deps.TenantResolver`)
+  is the one seam that maps a `{team}` URL segment onto record-store tenants: a placed
+  Team resolves to one tenant, an unplaced Team fans out over its namespaces, and a
+  name matching no Team falls back to a same-named controller as a synthetic
+  single-controller tenant, ambiguous across clusters. Every pipelines path narrows
+  through it, then calls one of three checks in `handlers_pipelines_auth.go` —
+  `canReadPipeline`, `canWritePipeline`, `canReadRun` — never a controller-scoped
+  check. `canReadRun` builds its `RunTenantRow` from the run row's own `tenant` and
+  `job_path` columns, so a run whose cell was deleted still resolves for a permitted
+  caller. Every handler on this surface answers `503` when `deps.RecordStore` is nil,
+  through `pipelinesUnavailable`; a handler that also reads console log or artifact
+  bytes answers the same `503` when `deps.BlobStore` is nil. The live log tail
+  (`GET /runs/{run}/log`) authenticates over SSE's `?ticket=` query param with scope
+  `run:<run_id>`, minted by `POST /stream/ticket`, never a bearer token. `runTailRegistry`
+  (`runlog_tail.go`) is this BFF replica's shared lease table: at most one lease and one
+  bus subscription per run per replica, reference-counted across every local viewer,
+  renewed every 30 seconds, released on every disconnect. `pipelines_service.go`
+  (`internal/mcp`'s non-HTTP entry point) wraps the same unexported handler logic —
+  `listRunsMerged`, `resolveTeamTenants`, `createRun`, `runByID` — so the MCP tools and
+  the REST paths share one implementation of every rule.
+- **Pipeline template resolution** (`pipelines_definition.go`) — the job detail's
+  `template` row (`buildPipelineTemplateInfo`) picks one of three sources, never
+  guessing: an items-declared job (`definition.varroaTemplate`) resolves its
+  version constraint against the bundle's own delivered set
+  (`controllerPipelineTemplates`, reading `pipeline-templates.yaml` from the
+  same ConfigMap `controllerBundleContent` reads for `items.yaml`); a
+  marker-defined job reads the four template-resolution fields off its most
+  recent run's payload (`runTemplatePayload`, set by C1/C2 from
+  `BuildEvent.template_name`/`template_version`/`marker_path`/
+  `marker_revision`); a marker-defined job with no run yet
+  (`markerContainerPath`) reports only the fixed marker path, no resolved
+  template. Every read here is best-effort: an unreadable or malformed
+  bundle, item, or run answers nil/empty rather than an error, because the
+  bundle-validation gate is the place that already rejects bad content.
+- The job detail (`GET /pipelines/{team}/jobs/{job}`) carries a `dependencies` object
+  (`upstream`/`downstream` edge lists, `buildPipelineDependencies` in
+  `handlers_pipelines.go`), read from `RecordStore.JobDependencies` and always present
+  as `[]`/`[]` for a job with no edge, never omitted. Each edge names the other
+  tenant, its job, the result threshold, and whether an export currently grants it
+  (`granted`); an ungranted edge stays visible rather than being dropped. It uses the
+  same `tenantForJob` authorization gate every other pipelines path uses — no separate
+  check for this field.
+- **Marker lint** (`handlers_pipelines_markers.go`, design D13) — `POST
+  /pipelines/{team}/markers/validate` resolves the team's delivered
+  templates through the same `TenantResolver`/authorization seam as every
+  other pipelines path, parses the posted marker with
+  `pipelinetemplate.ParseMarker`, resolves and validates its values with the
+  same Go validator the bundle composer and `varroactl lint marker` use, and
+  always answers `200` with a findings list — even a rejection is data, per
+  D11's L4 layer, never a transport error. It contacts no cell and reads no
+  record-store data, so it works while a cell is down and while the record
+  store is disabled.
 - SSE (`internal/api/sse/`): `Broadcaster` is process-local pub/sub for
   handler-driven events; `BusFanout` (`bus_fanout.go`) additionally subscribes
   `activity.>` and generic bus subjects and redelivers them as `Record`s to per-key
@@ -112,6 +228,9 @@ federation, activity persistence, and SSE fanout.
   provisioning, banner, builtin, identity, fleetplugins). `deprovision.go` and `preview_util.go`
   hold controller-deletion and overlay-preview-diff helpers; `observability.go`/
   `observability_backends.go` normalize a pluggable observability-links integration.
+  `handlers_teams.go` maps `spec.pipelines` and `status.placement` by hand, in both
+  directions; it never maps `status.pipelines.webhookToken` or `.webhookSecret` on any
+  read path, because both are the tenant webhook door's credentials.
 - `attention` (`attention.go`) is the single "why is this controller unhealthy"
   projection, carried on **both** the list summary (`controllerResponse`) and the
   detail DTO (`controllerDetailResponse`). Exactly one kind is reported, by

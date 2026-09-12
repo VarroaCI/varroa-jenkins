@@ -1,0 +1,327 @@
+package org.jenkinsci.plugins.varroamiteauth;
+
+import net.sf.json.JSONObject;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+/**
+ * HTTP client for the mite loopback (D6, D7): {@code POST /v1/claim} and
+ * {@code POST /v1/events} against {@code http://127.0.0.1:9095}. D2 adds
+ * four cross-tenant routes, reusing the same token file and the same
+ * {@code 401} retry.
+ *
+ * <p>The bearer token comes from {@link LoopbackTokenFile}. A {@code 401}
+ * triggers one retry with a freshly re-read token.
+ */
+public class MiteLoopbackClient {
+
+    private static final Logger LOGGER = Logger.getLogger(MiteLoopbackClient.class.getName());
+
+    static final String DEFAULT_BASE_URL = "http://127.0.0.1:9095";
+
+    /** Connect budget (D6): 1 s, fixed for the claim and events routes. */
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(1);
+
+    /** Read budget (D6): 5 s by default, overridden by {@code VARROA_CLAIM_TIMEOUT_MS}. */
+    private static final long DEFAULT_READ_TIMEOUT_MILLIS = 5000L;
+
+    /** Cross-tenant connect budget (D14): 1 s by default. */
+    private static final long DEFAULT_CROSSTENANT_CONNECT_TIMEOUT_MILLIS = 1000L;
+
+    /** Cross-tenant read budget (D14): 10 s by default. */
+    private static final long DEFAULT_CROSSTENANT_READ_TIMEOUT_MILLIS = 10_000L;
+
+    /**
+     * The mite's own wait-for-response budget (D14), 9.5 s by default. The
+     * plugin cannot read the mite process's own environment, so the
+     * nesting check below compares against this documented default, never
+     * a live value.
+     */
+    private static final long CROSSTENANT_MITE_HOP_DEFAULT_MILLIS = 9500L;
+
+    private static final String CROSSTENANT_BUILD_PATH = "/v1/cross-tenant/build";
+    private static final String CROSSTENANT_STATUS_PATH = "/v1/cross-tenant/status";
+    private static final String CROSSTENANT_ARTIFACT_PATH = "/v1/cross-tenant/artifact";
+    private static final String CROSSTENANT_LOCK_PATH = "/v1/cross-tenant/lock";
+
+    private final String baseUrl;
+    private final LoopbackTokenFile tokenFile;
+    private final Duration connectTimeout;
+    private final Duration readTimeout;
+    private volatile HttpClient httpClient;
+
+    public MiteLoopbackClient() {
+        this(DEFAULT_BASE_URL, new LoopbackTokenFile(), CONNECT_TIMEOUT,
+                Duration.ofMillis(readTimeoutMillisFromEnv()));
+    }
+
+    /** Package-private constructor for testing: injects the base URL, token source, and read timeout. */
+    MiteLoopbackClient(String baseUrl, LoopbackTokenFile tokenFile, Duration readTimeout) {
+        this(baseUrl, tokenFile, CONNECT_TIMEOUT, readTimeout);
+    }
+
+    /** Package-private constructor for testing: injects every timeout as well. */
+    MiteLoopbackClient(String baseUrl, LoopbackTokenFile tokenFile, Duration connectTimeout, Duration readTimeout) {
+        this.baseUrl = baseUrl;
+        this.tokenFile = tokenFile;
+        this.connectTimeout = connectTimeout;
+        this.readTimeout = readTimeout;
+    }
+
+    /**
+     * Builds a client configured for the cross-tenant routes (D2, D14):
+     * {@code VARROA_CROSSTENANT_CONNECT_TIMEOUT_MS} (default 1000) and
+     * {@code VARROA_CROSSTENANT_READ_TIMEOUT_MS} (default 10000), both
+     * whole-number milliseconds.
+     */
+    public static MiteLoopbackClient forCrossTenant() {
+        return new MiteLoopbackClient(DEFAULT_BASE_URL, new LoopbackTokenFile(),
+                Duration.ofMillis(crossTenantConnectTimeoutMillis(
+                        System.getenv("VARROA_CROSSTENANT_CONNECT_TIMEOUT_MS"))),
+                Duration.ofMillis(crossTenantReadTimeoutMillis(
+                        System.getenv("VARROA_CROSSTENANT_READ_TIMEOUT_MS"))));
+    }
+
+    private HttpClient client() {
+        HttpClient c = httpClient;
+        if (c == null) {
+            synchronized (this) {
+                c = httpClient;
+                if (c == null) {
+                    c = HttpClient.newBuilder().connectTimeout(connectTimeout).build();
+                    httpClient = c;
+                }
+            }
+        }
+        return c;
+    }
+
+    /**
+     * Posts {@code jsonBody} to {@code path} on the loopback. Retries once,
+     * with a re-read token, when the first attempt answers {@code 401}.
+     */
+    public Response post(String path, String jsonBody) {
+        Response first = attempt(path, jsonBody, tokenFile.token());
+        if (first.statusCode == 401) {
+            String refreshed = tokenFile.onUnauthorized();
+            return attempt(path, jsonBody, refreshed);
+        }
+        return first;
+    }
+
+    private Response attempt(String path, String jsonBody, String token) {
+        try {
+            HttpRequest.Builder builder = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + path))
+                    .timeout(readTimeout)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8));
+            if (token != null) {
+                builder.header("Authorization", "Bearer " + token);
+            }
+            HttpResponse<String> resp = client().send(builder.build(), HttpResponse.BodyHandlers.ofString());
+            return new Response(resp.statusCode(), resp.body(), null);
+        } catch (HttpTimeoutException e) {
+            LOGGER.log(Level.FINE, "MiteLoopbackClient: timeout posting to " + path, e);
+            return new Response(0, null, "timeout");
+        } catch (Exception e) {
+            LOGGER.log(Level.FINE, "MiteLoopbackClient: failed to post to " + path, e);
+            return new Response(0, null, e.getMessage() != null ? e.getMessage() : "transport error");
+        }
+    }
+
+    // ---- Cross-tenant routes (D2, D3, D4): one method per kind ----
+
+    /**
+     * Kind {@code build}, route {@code /v1/cross-tenant/build}. {@code seq}
+     * is a 1-based ordinal; the wire field carries it as the string
+     * {@code "s" + seq} (design.md D6), never a JSON number.
+     */
+    public Response crossTenantBuild(String callerJobPath, String callerRunId, int seq,
+            String targetTenant, String jobPath, Map<String, Object> params) {
+        JSONObject body = new JSONObject();
+        body.put("kind", "build");
+        body.put("caller_job_path", callerJobPath);
+        body.put("caller_run_id", callerRunId);
+        body.put("seq", "s" + seq);
+        body.put("target_tenant", targetTenant);
+        body.put("job_path", jobPath);
+        body.put("params", params != null ? params : Map.of());
+        return post(CROSSTENANT_BUILD_PATH, body.toString());
+    }
+
+    /** Kind {@code status}, route {@code /v1/cross-tenant/status}, resolved by run id. */
+    public Response crossTenantStatus(String callerJobPath, String runId) {
+        JSONObject body = new JSONObject();
+        body.put("kind", "status");
+        body.put("caller_job_path", callerJobPath);
+        body.put("run_id", runId);
+        return post(CROSSTENANT_STATUS_PATH, body.toString());
+    }
+
+    /**
+     * Kind {@code status}, route {@code /v1/cross-tenant/status}, resolved
+     * by intent key: the poll names the intent key while a run id is not
+     * yet known (D8).
+     */
+    public Response crossTenantStatusByIntentKey(String callerJobPath, String intentKey) {
+        JSONObject body = new JSONObject();
+        body.put("kind", "status");
+        body.put("caller_job_path", callerJobPath);
+        body.put("intent_key", intentKey);
+        return post(CROSSTENANT_STATUS_PATH, body.toString());
+    }
+
+    /** Kind {@code last_successful}, route {@code /v1/cross-tenant/status}. */
+    public Response crossTenantLastSuccessful(String callerJobPath, String targetTenant, String jobPath) {
+        JSONObject body = new JSONObject();
+        body.put("kind", "last_successful");
+        body.put("caller_job_path", callerJobPath);
+        body.put("target_tenant", targetTenant);
+        body.put("job_path", jobPath);
+        return post(CROSSTENANT_STATUS_PATH, body.toString());
+    }
+
+    /** Kind {@code artifact_list}, route {@code /v1/cross-tenant/artifact}. */
+    public Response crossTenantArtifactList(String callerJobPath, String runId) {
+        JSONObject body = new JSONObject();
+        body.put("kind", "artifact_list");
+        body.put("caller_job_path", callerJobPath);
+        body.put("run_id", runId);
+        return post(CROSSTENANT_ARTIFACT_PATH, body.toString());
+    }
+
+    /** Kind {@code artifact_url}, route {@code /v1/cross-tenant/artifact}. */
+    public Response crossTenantArtifactUrl(String callerJobPath, String runId, String path) {
+        JSONObject body = new JSONObject();
+        body.put("kind", "artifact_url");
+        body.put("caller_job_path", callerJobPath);
+        body.put("run_id", runId);
+        body.put("path", path);
+        return post(CROSSTENANT_ARTIFACT_PATH, body.toString());
+    }
+
+    /** Kind {@code lock_acquire}, route {@code /v1/cross-tenant/lock}. */
+    public Response crossTenantLockAcquire(String callerJobPath, String name, String runId,
+            long leaseSeconds, String waitingSince) {
+        JSONObject body = new JSONObject();
+        body.put("kind", "lock_acquire");
+        body.put("caller_job_path", callerJobPath);
+        body.put("name", name);
+        body.put("run_id", runId);
+        body.put("lease_seconds", leaseSeconds);
+        body.put("waiting_since", waitingSince);
+        return post(CROSSTENANT_LOCK_PATH, body.toString());
+    }
+
+    /** Kind {@code lock_renew}, route {@code /v1/cross-tenant/lock}. */
+    public Response crossTenantLockRenew(String callerJobPath, String name, String runId, long leaseSeconds) {
+        JSONObject body = new JSONObject();
+        body.put("kind", "lock_renew");
+        body.put("caller_job_path", callerJobPath);
+        body.put("name", name);
+        body.put("run_id", runId);
+        body.put("lease_seconds", leaseSeconds);
+        return post(CROSSTENANT_LOCK_PATH, body.toString());
+    }
+
+    /** Kind {@code lock_release}, route {@code /v1/cross-tenant/lock}. */
+    public Response crossTenantLockRelease(String callerJobPath, String name, String runId) {
+        JSONObject body = new JSONObject();
+        body.put("kind", "lock_release");
+        body.put("caller_job_path", callerJobPath);
+        body.put("name", name);
+        body.put("run_id", runId);
+        return post(CROSSTENANT_LOCK_PATH, body.toString());
+    }
+
+    // ---- Timeout env parsing ----
+
+    private static long readTimeoutMillisFromEnv() {
+        String raw = System.getenv("VARROA_CLAIM_TIMEOUT_MS");
+        if (raw == null || raw.isEmpty()) {
+            return DEFAULT_READ_TIMEOUT_MILLIS;
+        }
+        try {
+            long parsed = Long.parseLong(raw);
+            return parsed > 0 ? parsed : DEFAULT_READ_TIMEOUT_MILLIS;
+        } catch (NumberFormatException e) {
+            return DEFAULT_READ_TIMEOUT_MILLIS;
+        }
+    }
+
+    /**
+     * Parses {@code VARROA_CROSSTENANT_CONNECT_TIMEOUT_MS} from its raw
+     * value. Package-private, and takes the raw value rather than reading
+     * the environment itself, so a test can drive every input without
+     * mutating the process environment.
+     */
+    static long crossTenantConnectTimeoutMillis(String raw) {
+        return wholeMillisOrDefault(raw, DEFAULT_CROSSTENANT_CONNECT_TIMEOUT_MILLIS);
+    }
+
+    /**
+     * Parses {@code VARROA_CROSSTENANT_READ_TIMEOUT_MS} from its raw value,
+     * and logs one {@code WARNING} when the resolved budget is at most the
+     * mite hop's own 9500 ms default (D14): the plugin's read budget is the
+     * outermost budget in the chain, and must stay longer than every hop it
+     * wraps.
+     */
+    static long crossTenantReadTimeoutMillis(String raw) {
+        long resolved = wholeMillisOrDefault(raw, DEFAULT_CROSSTENANT_READ_TIMEOUT_MILLIS);
+        if (resolved <= CROSSTENANT_MITE_HOP_DEFAULT_MILLIS) {
+            LOGGER.log(Level.WARNING,
+                    "MiteLoopbackClient: VARROA_CROSSTENANT_READ_TIMEOUT_MS ({0} ms) is at or below "
+                            + "the mite hop''s own {1} ms default; raise the outer budget before the inner one.",
+                    new Object[] {resolved, CROSSTENANT_MITE_HOP_DEFAULT_MILLIS});
+        }
+        return resolved;
+    }
+
+    /**
+     * Whole-number milliseconds only: an absent, empty, non-integer, or
+     * non-positive value keeps {@code def}.
+     */
+    private static long wholeMillisOrDefault(String raw, long def) {
+        if (raw == null || raw.isEmpty()) {
+            return def;
+        }
+        try {
+            long parsed = Long.parseLong(raw);
+            return parsed > 0 ? parsed : def;
+        } catch (NumberFormatException e) {
+            return def;
+        }
+    }
+
+    /** Result of a loopback POST: a status code and a body, or a transport failure. */
+    public static final class Response {
+        public final int statusCode;
+        public final String body;
+        /** Non-null when the request never reached the server, or timed out. */
+        public final String error;
+
+        public Response(int statusCode, String body, String error) {
+            this.statusCode = statusCode;
+            this.body = body;
+            this.error = error;
+        }
+
+        public boolean isTransportFailure() {
+            return error != null;
+        }
+
+        public boolean isSuccess(int expectedStatus) {
+            return error == null && statusCode == expectedStatus;
+        }
+    }
+}

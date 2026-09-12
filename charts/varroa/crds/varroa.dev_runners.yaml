@@ -1,0 +1,203 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+  name: runners.varroa.dev
+spec:
+  group: varroa.dev
+  names:
+    kind: Runner
+    listKind: RunnerList
+    plural: runners
+    singular: runner
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.team
+      name: TEAM
+      type: string
+    - jsonPath: .spec.launcher
+      name: LAUNCHER
+      type: string
+    - jsonPath: .status.cell
+      name: CELL
+      type: string
+    - jsonPath: .status.connected
+      name: CONNECTED
+      type: boolean
+    - jsonPath: .metadata.creationTimestamp
+      name: AGE
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Runner is the Schema for the runners API. It binds one external machine to
+          one pipelines tenant.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: RunnerSpec binds one external machine to one pipelines tenant.
+            properties:
+              credentialRef:
+                description: |-
+                  CredentialRef names a Secret in the Team's agent namespace. A flat name
+                  only: a namespace field would let one tenant read another's Secret.
+                type: string
+              host:
+                description: |-
+                  Host is the SSH target. Required for launcher ssh. Forbidden for
+                  launcher inbound.
+                type: string
+              javaPath:
+                description: |-
+                  JavaPath is an explicit java binary path for the ssh launcher. A
+                  Windows OpenSSH session often omits the JDK from its default PATH.
+                type: string
+              labels:
+                description: |-
+                  Labels lists unprefixed label suffixes. The operator prefixes each
+                  one with <team>-. Bounded so the label-token CEL rule stays under the
+                  apiserver's estimated cost budget.
+                items:
+                  maxLength: 63
+                  type: string
+                maxItems: 64
+                type: array
+              launcher:
+                description: |-
+                  Launcher selects the connection direction. Immutable: a change would
+                  swap the Jenkins launcher class under a connected agent.
+                enum:
+                - ssh
+                - inbound
+                type: string
+              numExecutors:
+                default: 1
+                description: NumExecutors is the node's executor count.
+                minimum: 1
+                type: integer
+              port:
+                description: |-
+                  Port is a pointer with no CRD default. A default would make the field
+                  present on an inbound runner, which the inbound CEL rule forbids.
+                maximum: 65535
+                minimum: 1
+                type: integer
+              remoteFS:
+                description: RemoteFS is the agent work directory on the node.
+                type: string
+              team:
+                description: |-
+                  Team names the pipelines Team that owns this runner. Immutable: the
+                  rendered node name and every label derive from it.
+                type: string
+            required:
+            - launcher
+            - remoteFS
+            - team
+            type: object
+            x-kubernetes-validations:
+            - message: spec.team is immutable
+              rule: self.team == oldSelf.team
+            - message: spec.launcher is immutable
+              rule: self.launcher == oldSelf.launcher
+            - message: remoteFS, host, and javaPath must not contain a ${ substitution
+                token
+              rule: '!self.remoteFS.contains(''${'') && (!has(self.host) || !self.host.contains(''${''))
+                && (!has(self.javaPath) || !self.javaPath.contains(''${''))'
+            - message: an ssh runner requires host and credentialRef
+              rule: self.launcher != 'ssh' || (has(self.host) && has(self.credentialRef))
+            - message: an inbound runner must not carry host, port, credentialRef,
+                or javaPath
+              rule: self.launcher != 'inbound' || !(has(self.host) || has(self.port)
+                || has(self.credentialRef) || has(self.javaPath))
+            - message: a labels entry must be a Jenkins label token
+              rule: '!has(self.labels) || self.labels.all(l, l.matches(r''^[A-Za-z0-9_.-]+$''))'
+          status:
+            description: |-
+              RunnerStatus reports where a runner's node is rendered and whether it is
+              online.
+            properties:
+              cell:
+                description: |-
+                  Cell names the Controller that hosts this runner's node. Written from
+                  the owning Team's status.placement.
+                type: string
+              cellNamespace:
+                description: CellNamespace is the namespace of the cell named by Cell.
+                type: string
+              conditions:
+                description: Conditions reports this runner's condition set. Type
+                  Ready.
+                items:
+                  description: RunnerCondition is a status condition for a Runner.
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
+              connected:
+                description: |-
+                  Connected reports the last liveness probe of this runner's node. No
+                  omitempty: a merge patch must be able to clear a true value back to
+                  false.
+                type: boolean
+              lastSeen:
+                description: LastSeen is the last time the probe reported this runner
+                  online.
+                format: date-time
+                type: string
+              nodeName:
+                description: NodeName is the rendered Jenkins node name, <team>-<runner
+                  name>.
+                type: string
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the metadata.generation the tick that last
+                  reached a delivery decision saw.
+                format: int64
+                type: integer
+              token:
+                description: |-
+                  Token authenticates an inbound runner at the agent door. Minted once,
+                  launcher inbound only.
+                type: string
+            required:
+            - connected
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -581,6 +581,26 @@ describe("ControllerDetail — Routing-mode links", () => {
     expect(screen.queryByText(/Managed view/)).not.toBeInTheDocument();
     expect(screen.getByText(/Open Jenkins/)).toBeInTheDocument();
   });
+
+  it("renders neither Open Jenkins nor View embedded for a headless controller", () => {
+    setControllerData({
+      routingMode: "path",
+      endpoint: "",
+      headless: true,
+    } as Partial<typeof mockControllerData>);
+    renderWithProviders(<ControllerDetail />);
+
+    expect(screen.queryByText(/Open Jenkins/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/View embedded/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Not ready/)).not.toBeInTheDocument();
+  });
+
+  it("reports the endpoint row as headless for a headless controller", () => {
+    setControllerData({ endpoint: "", headless: true } as Partial<typeof mockControllerData>);
+    renderWithProviders(<ControllerDetail />);
+
+    expect(screen.getByText("Headless — no external URL")).toBeInTheDocument();
+  });
 });
 
 describe("ControllerDetail — Health probes", () => {

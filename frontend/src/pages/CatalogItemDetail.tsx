@@ -1,9 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { parse as parseYAML, stringify as stringifyYAML } from "yaml";
+import type { RJSFSchema, UiSchema } from "@rjsf/utils";
 import { getCatalogItem } from "../api/client";
 import { clusterQuery } from "../routing";
 import NoAccessibleClusters from "../components/NoAccessibleClusters";
 import { useConfigurationCluster } from "../hooks/useConfigurationCluster";
+import { VarroaForm } from "../components/specform/VarroaFormTheme";
+import { templateValidator } from "../components/specform/templateValidator";
 import type {
   CatalogItem,
   CatalogItemLockPins,
@@ -295,13 +299,151 @@ export default function CatalogItemDetail() {
         </div>
       )}
 
-      {/* YAML content preview */}
-      {status?.content && (
-        <div className={styles.section}>
-          <h3 className={styles.sectionTitle}>Content</h3>
-          <pre className={styles.yamlBlock}>{status.content}</pre>
-        </div>
+      {/* A pipeline-template item's content is a PipelineTemplate document,
+          not items YAML (pipeline-template-catalog-items). Its dedicated
+          card below replaces the generic raw-content preview. */}
+      {spec.type === "pipeline-template" ? (
+        <PipelineTemplateCard content={status?.content} />
+      ) : (
+        status?.content && (
+          <div className={styles.section}>
+            <h3 className={styles.sectionTitle}>Content</h3>
+            <pre className={styles.yamlBlock}>{status.content}</pre>
+          </div>
+        )
       )}
+    </div>
+  );
+}
+
+/** The subset of a PipelineTemplate document (design D2) this page renders:
+ * the header, the parameter form, and the marker YAML the form state
+ * produces. Fields this page does not read (jenkinsfile, scmDefinition) are
+ * left untyped here. */
+interface PipelineTemplateDocument {
+  metadata?: {
+    name?: string;
+    displayName?: string;
+    description?: string;
+  };
+  spec?: {
+    version?: string;
+    parameters?: Record<string, unknown>;
+    uiSchema?: Record<string, unknown>;
+  };
+}
+
+/** parseTemplateDocument reads a pipeline-template item's raw YAML content
+ * into a PipelineTemplateDocument, or null when the content is missing or
+ * does not parse as a YAML mapping. */
+function parseTemplateDocument(content: string | undefined): PipelineTemplateDocument | null {
+  if (!content) return null;
+  try {
+    const parsed: unknown = parseYAML(content);
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed as PipelineTemplateDocument;
+  } catch {
+    return null;
+  }
+}
+
+/** buildMarkerYaml renders the marker document (design D6) the current form
+ * values produce for this template: the fixed apiVersion and kind, the
+ * template's own name and version, and the entered values. `values` is
+ * omitted from the document entirely when the form holds none, matching a
+ * marker with no `values` key. */
+function buildMarkerYaml(doc: PipelineTemplateDocument, values: Record<string, unknown>): string {
+  const marker: Record<string, unknown> = {
+    apiVersion: "varroa.dev/v1",
+    kind: "Pipeline",
+    template: doc.metadata?.name ?? "",
+  };
+  if (doc.spec?.version) marker.templateVersion = doc.spec.version;
+  if (Object.keys(values).length > 0) marker.values = values;
+  return stringifyYAML(marker);
+}
+
+/**
+ * PipelineTemplateCard renders a pipeline-template item's detail: the
+ * template header (metadata.displayName, spec.version,
+ * metadata.description), a live form built from spec.parameters and
+ * spec.uiSchema with the dedicated 2020-12 validator, and the marker YAML
+ * the current form state produces, with a copy control (design D12).
+ */
+function PipelineTemplateCard({ content }: { content?: string }) {
+  const doc = useMemo(() => parseTemplateDocument(content), [content]);
+  const [values, setValues] = useState<Record<string, unknown>>({});
+  const [copied, setCopied] = useState(false);
+
+  // A different item's content replaces this one's entered values rather
+  // than carrying them over.
+  useEffect(() => {
+    setValues({});
+    setCopied(false);
+  }, [content]);
+
+  if (!doc) {
+    return (
+      <div className={styles.section}>
+        <h3 className={styles.sectionTitle}>Template</h3>
+        <div className={styles.errorBanner}>Unable to read the template document.</div>
+      </div>
+    );
+  }
+
+  const schema = (doc.spec?.parameters ?? {}) as RJSFSchema;
+  const uiSchema = doc.spec?.uiSchema as UiSchema | undefined;
+  const markerYaml = buildMarkerYaml(doc, values);
+
+  async function copyMarker() {
+    try {
+      await navigator.clipboard.writeText(markerYaml);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // The browser can deny clipboard access; the YAML stays on screen for
+      // a manual copy.
+    }
+  }
+
+  return (
+    <div className={styles.section}>
+      <h3 className={styles.sectionTitle}>Template</h3>
+      <div className={styles.detailGrid}>
+        <span className={styles.detailLabel}>Name</span>
+        <span>{doc.metadata?.displayName || doc.metadata?.name}</span>
+        {doc.spec?.version && (
+          <>
+            <span className={styles.detailLabel}>Version</span>
+            <span className={styles.mono}>{doc.spec.version}</span>
+          </>
+        )}
+      </div>
+      {doc.metadata?.description && (
+        <p style={{ fontSize: "0.92rem", lineHeight: 1.6, color: "var(--text-2)", marginTop: 8 }}>
+          {doc.metadata.description}
+        </p>
+      )}
+
+      <VarroaForm
+        schema={schema}
+        uiSchema={uiSchema}
+        validator={templateValidator}
+        formData={values}
+        liveValidate
+        onChange={(e) => setValues((e.formData as Record<string, unknown>) ?? {})}
+      >
+        {/* No submit button — the page has nothing to submit the form to. */}
+        <div />
+      </VarroaForm>
+
+      <div className={styles.markerHeader}>
+        <span className={styles.detailLabel}>.varroa/pipeline.yaml</span>
+        <button type="button" className={styles.copyBtn} onClick={copyMarker}>
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <pre className={styles.yamlBlock}>{markerYaml}</pre>
     </div>
   );
 }

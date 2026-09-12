@@ -35,6 +35,23 @@ the root AGENTS.md greenfield rule.
   JCasC symbol `varroaMiteAuth` (fields `oidcIssuer`/`userClaimNames`/`groupClaimName`,
   falling back to `VARROA_OIDC_ISSUER`/`_USER_CLAIM`/`_GROUP_CLAIM`); round-trip fixtures
   `src/test/resources/.../realm-{minimal,explicit}.yml`.
+- **`VarroaHeadlessFilter.java`** blocks the Jenkins web UI on a headless controller
+  (`VARROA_HEADLESS=true`, read once into a volatile flag; a value change needs a pod
+  restart). It registers with `PluginServletFilter.addFilter` from an `@Initializer`,
+  the same pattern `HttpActivityFilter` uses. It denies with `503` before
+  `InitMilestone.COMPLETED` and with `403` after `COMPLETED` for every caller except
+  an exact `ROLE:varroa:system-mite`/`ROLE:varroa:system-operator` authority, an admin
+  holding `Jenkins.ADMINISTER`, or a path on the fixed infrastructure allowlist
+  (`/login`, `/crumbIssuer/`, `/wsagents/`, `/tcpSlaveAgentListener/`, `/jnlpJars/`,
+  `/instance-identity/`, `/varroa-run`, agent JNLP descriptors, webhook paths, static
+  assets, and a few more — the class holds the complete list). **The filter only
+  denies.** It never grants a permission and never authenticates a request; the
+  active authorization strategy still guards every allowlisted path. Any exception
+  raised while evaluating a denial test counts as a denial, never a pass. An admin
+  request that passes is audited by `VarroaBreakGlassAudit.java`
+  (`controller.breakglass.session`, plus `controller.breakglass.script` on a
+  sensitive path such as `/script` or `/manage`), both deduplicated per principal in a
+  capped, self-clearing `ConcurrentHashMap`.
 - **Activity emitters** (feed the push-based Activity page): `ActivitySink.java`
   (bounded, non-blocking, in-memory), `ActivityEvent.java` (normalized shape — actor,
   itemPath, buildNumber, result, url, message; `controller`/`namespace`/`phase`/`reason`
@@ -44,7 +61,259 @@ the root AGENTS.md greenfield rule.
   `VARROA_ACTIVITY_SAVEABLE=1`), `HttpActivityFilter.java` (last-HTTP-activity timestamp
   for hibernation idle gauges). `ActivityEndpoint.java` — `RootAction` at
   `/varroa-activity/events` (GET, requires `ROLE:varroa:system-mite`), drains
-  `ActivitySink`, returns events + `idle` gauges.
+  `ActivitySink`, returns events + `idle` gauges. The same class's `doSchedules`
+  serves `GET /varroa-activity/schedules`, reusing its method gate and
+  `Items.getAllItems(Job.class)` walk: one row per job trigger, plus one `none`
+  row for a job with no trigger, so the response is the cell's whole job
+  inventory. `triggerType` maps from the trigger's simple class name
+  (`TimerTrigger` → `cron`, `SCMTrigger` → `scm-poll`, `ReverseBuildTrigger` →
+  `upstream`, `VarroaUpstreamTrigger` → `varroa-upstream`, else `other`); a
+  `varroa-upstream` row carries `upstreamTenant`, `upstreamJob`, and
+  `upstreamResult` (camelCase, this endpoint's own convention); every other
+  row omits all three keys rather than sending them empty. A `cron` row
+  carries the next three fire times,
+  computed by mirroring `hudson.scheduler.CronTabList.create` — split the
+  spec, skip the `TZ=` line, and seed each `CronTab` with
+  `Hash.from(job.getFullName())`, the same hash Jenkins itself uses to fire —
+  never derived in Go, which has no access to that hash seed. The walk stops
+  adding rows past `MAX_SCHEDULE_ROWS` (5000) or `MAX_SCHEDULE_BYTES` (700
+  KiB, whichever a `none`-heavy or a `cron`-heavy set hits first) and reports
+  `truncated`, but keeps counting for an exact `total`; both bounds keep the
+  set under the 1 MB NATS message limit the gateway republishes it inside.
+- **Pipeline templates** (a consumer repository selects an operator-delivered pipeline
+  template with a marker file; `add-pipeline-template-marker`): package
+  `org.jenkinsci.plugins.varroamiteauth.template`, compile-scope `workflow-multibranch`,
+  `workflow-cps` (also supplies `GlobalVariable`), `branch-api`, `scm-api`, and
+  `snakeyaml-api`. `VarroaPipelineTemplateStore.java` (`GlobalConfiguration`, JCasC symbol
+  `varroaPipelineTemplates`) holds the delivered template set; `resolve(folder, name,
+  constraint)` picks the highest version matching a marker's constraint, scoped to the
+  requesting job's tenant folder (a template resolves only when its own `folder` is empty
+  or equals the requester's). `resolveCredentialScope` applies the same folder rule to
+  `scmDefinition.credentialsId`: a tenant template resolves its credential in that tenant
+  folder's own credential store only, an operator template (`folder` empty) may use the
+  system store, and the lookup fails rather than widening to an ancestor store —
+  `TemplateCredentialResolver.java` does this reflectively, because the credentials plugin
+  is not a compile dependency here, the way `role-strategy` is not one for
+  `VarroaTenantResolver`. `TemplateVersion.java` is the strict `MAJOR.MINOR.PATCH` parser
+  and the four-constraint-form matcher. `VarroaMarkerValidator.java` is the Java subset
+  checker and values validator mirroring `internal/bundle/pipelinetemplate` — not an
+  extension point — plus the marker YAML parser (SnakeYAML's safe constructor, a 64 KiB
+  cap before parsing); a shared golden corpus (mirrored under
+  `src/test/resources/.../template/schema-corpus/` because the Maven build cannot see the
+  Go module tree) proves the two sides agree. `VarroaTemplateValuesAction.java`
+  (`InvisibleAction` + `RunAction2`) carries the resolved or rejected outcome on the `Run`;
+  its `onAttached` callback releases `VarroaRunRecorder`'s held `STARTED` event the moment a
+  flow definition attaches it. `VarroaTemplateParams.java` (`GlobalVariable`) exposes the
+  values as `varroaParams`, never substituted into Groovy source text. `cloudbees-folder` is
+  compile scope, not test: `WorkflowMultiBranchProject` extends branch-api's
+  `MultiBranchProject`, which extends `ComputedFolder`, so any compile-time reference to the
+  multibranch project type needs the whole chain resolvable.
+  `VarroaMarkerFlowDefinition.java` (`FlowDefinition`) runs at branch build start: it reads
+  the marker at the branch's trusted revision (`SCMSource.getTrustedRevision`, never the
+  tip), resolves and validates it against the store, attaches a `VarroaTemplateValuesAction`,
+  and builds the execution from the resolved template's `spec.jenkinsfile` or
+  `spec.scmDefinition`. A read failure falls back from `SCMFileSystem` to a checkout in a
+  temporary workspace, mirroring `workflow-multibranch`'s own `SCMBinder` fallback. It builds
+  an `scmDefinition`'s `hudson.plugins.git.GitSCM` reflectively, the same reason
+  `TemplateCredentialResolver` reaches the credentials plugin reflectively: git-plugin is a
+  test-only dependency here, added solely to exercise this path with a real local
+  repository. Any failure attaches a rejected `VarroaTemplateValuesAction`, fails the build,
+  and emits activity `pipeline.marker.rejected`. `VarroaTemplateFlowDefinition.java`
+  (`FlowDefinition`) is the items-declared form: `template`, `templateVersion`, and `values`
+  come from the item's own `config.xml`, already validated at composition time, so it emits
+  no activity event on a run-time resolution failure. Both flow definitions share step 6
+  (building the execution) and the tenant-folder and schema-parsing helpers, all
+  package-private statics on `VarroaMarkerFlowDefinition`.
+  `VarroaTemplateBranchProjectFactory.java` (`AbstractWorkflowBranchProjectFactory`) tests
+  only that the marker path exists during branch indexing and hands every branch a
+  `VarroaMarkerFlowDefinition`.
+- **Build event capture** (feeds the `varroa_builds` stream through the mite loopback;
+  gated end to end by `VARROA_CLAIM_GATE`): compile-scope `workflow-api`, `workflow-job`,
+  `pipeline-graph-analysis`, and `workflow-cps` (the last compile-scope only because
+  `VarroaTemplateParams` needs its `GlobalVariable`; test-scope `workflow-basic-steps`
+  exercises the pipeline graph in tests only). `VarroaRunRecorder.java` is an outer class
+  with three static `@Extension` nested classes, because `RunListener` and
+  `FlowExecutionListener` are abstract classes: `Runs` (`RunListener`) emits `STARTED`
+  and `COMPLETED`; `Flows` (`FlowExecutionListener`) attaches and detaches `Graph` on a
+  running pipeline; `Graph` (`GraphListener`) emits `STAGE_STARTED` on a labelled block
+  start and `STAGE` on its end, with the stage status derived from node actions, not from
+  a chunk-status call. A per-run state map (bounded 512 entries, keyed by `<job full
+  name>#<build number>`) holds each run's identity and sequence counter; a daemon timer
+  emits one `HEARTBEAT` event per live run every `VARROA_RUN_HEARTBEAT_SECONDS` (default
+  60 s), identity fields only. The wire model is `BuildEvent.java`/`BuildStage.java`/
+  `BuildChange.java`; size caps and an oversize ladder keep one serialized event under
+  512 KiB, and never truncate an identifier field. `BuildEvent` fields 38 to 41
+  (`template_name`, `template_version`, `marker_path`, `marker_revision`) come from the
+  run's `template.VarroaTemplateValuesAction`, empty for a run with no template; a
+  `HEARTBEAT` event never carries them. `RunListener.onStarted` can fire before a Varroa
+  template flow definition attaches that action, so `Runs` holds the `STARTED` event for
+  such a run (named by `FlowDefinition` class, since this package holds no compile
+  dependency on `template`'s flow definitions) until the action attaches, in either state,
+  or the run completes with none.
+- **Claim gate** (admits a queue item and claims a run id before dispatch, with no I/O
+  under the Jenkins queue lock): `VarroaQueueDecisionHandler.java`
+  (`Queue.QueueDecisionHandler`, stamps `VarroaIntentAction.java`), `IntentKey.java`
+  (helper: origin and intent-key derivation, the params digest, the revision wait),
+  `VarroaClaimDispatcher.java` (`QueueTaskDispatcher`, blocks the item until granted),
+  `VarroaClaimQueue.java` (bounded work queue, four daemon threads, a retry ladder),
+  `DuplicateRegistry.java`, `ClaimRegistry.java`, and `VarroaDeliveryFilter.java` +
+  `DeliveryRegistry.java` (records `X-Varroa-Delivery` for the claimer). Every class in
+  this group is a no-op unless `VARROA_CLAIM_GATE=1` (stamped by the operator from
+  `recordStore.enabled`). `VarroaIntentAction.actor` carries the calling identity a claim
+  reports to the ledger: `VarroaRunTriggerAction` stamps a caller-supplied value on a
+  cross-tenant trigger, and `VarroaQueueDecisionHandler` derives one from the scheduling
+  authentication (`Jenkins.getAuthentication2().getName()`, `anonymous` and
+  `ACL.SYSTEM2` normalized to empty) when the action carries none; `VarroaClaimQueue`
+  sends `action.getActor()` as the claim's `actor` field.
+- **Cross-tenant pipeline API** (the `varroa` global variable; D1, D2, D11, D12):
+  `VarroaGlobalVariable.java` compiles `varroa/Varroa.groovy` and
+  `varroa/VarroaRunHandle.groovy` (plugin resources, not classpath `.class` files) into
+  the pipeline's own `GroovyClassLoader` on first use — that shell's `loadClass` cannot
+  find these resources on its own source path, so the source text is read via this
+  plugin's own classloader and handed to `GroovyClassLoader.parseClass(String, String)`
+  directly. `Varroa.groovy` exposes `build`, `lastSuccessful`, `lock`, and the read-only
+  `lock.token` property (backed by `VarroaCrossTenantBridge.currentLockToken`, `@Whitelisted`
+  for sandboxed pipelines); `VarroaRunHandle.groovy` is the returned run handle, plus
+  `refresh()` (backed by `VarroaCrossTenantBridge.refresh`, since D1 lists no public status
+  step) and `copyArtifact` (calls the `varroaArtifact` step). `VarroaBuildStep.java`
+  (`varroaBuild`) and `VarroaLockStep.java`'s waiting phase (`varroaLock`) hold no CPS
+  thread while waiting: both reschedule themselves on `jenkins.util.Timer` between polls,
+  on the shared cadence in `VarroaPollPolicy.java`. `VarroaLastSuccessfulStep.java` and
+  `VarroaArtifactStep.java` are synchronous steps (`SynchronousNonBlockingStepExecution`);
+  `VarroaArtifactStep` downloads a signed URL through a `MasterToSlaveFileCallable` on the
+  agent's own workspace channel, so the artifact's bytes never transit the controller.
+  `VarroaLockStep.java` records the acquired lock on `VarroaActiveLocksAction.java` (a
+  transient, per-run stack, innermost lock last), and exposes the fence token as the
+  environment variable `VARROA_LOCK_TOKEN` through an `EnvironmentExpander`.
+  `VarroaCallSeqAction.java` is the run-scoped `s<n>` sequence `varroaBuild` uses for its
+  intent key. `MiteLoopbackClient.java` gained one method per cross-tenant kind, a
+  `forCrossTenant()` factory reading `VARROA_CROSSTENANT_CONNECT_TIMEOUT_MS` (default
+  1000) and `VARROA_CROSSTENANT_READ_TIMEOUT_MS` (default 10000, warns once at or below
+  the mite hop's 9500 ms default); `VarroaCrossTenantReply.java` parses a reply into a
+  failure code or fields, mapping a transport failure to the same `UNAVAILABLE` code a
+  structured reply carries. `Varroa.groovy` hands the lock step a closure of its own that
+  calls the caller's body, never the caller's closure itself; a nested `varroa.lock` block
+  resumes correctly only through that wrapper, the same shape docker-workflow uses for
+  `inside`. `VarroaUpstreamTrigger.java` (`Trigger<Job<?, ?>>`, `@Symbol("varroaUpstream")`)
+  declares a job's upstream producer (`tenant`, `job`, `result` defaulting to `SUCCESS` and
+  otherwise restricted to `SUCCESS`/`UNSTABLE`/`FAILURE`) for both a declarative `triggers`
+  block and the scripted `pipelineTriggers` step; it starts no timer and polls nothing —
+  `ActivityEndpoint.doSchedules` reports the declaration, and the recorder's fan-out reads it
+  from there. Compile-scope `workflow-step-api` supplies the four cross-tenant steps' base
+  classes; test-scope `pipeline-model-definition` runs `VarroaUpstreamTrigger`'s declarative-
+  syntax test through a real `pipeline { triggers { ... } }` block.
+- **Build-event durability chain** — `BuildEventSink.java` (bounded, non-blocking queue;
+  drops only a `HEARTBEAT` event when full) feeds `RunSpool.java`
+  (`$JENKINS_HOME/varroa/spool/<run_id>/`, one file per event, never drops a `COMPLETED`
+  file) feeds `BuildEventDispatcher.java` (one daemon thread, posts to the mite loopback,
+  retries a failed post forever). `MiteLoopbackClient.java` and `LoopbackTokenFile.java`
+  call `POST /v1/claim` and `POST /v1/events` against `http://127.0.0.1:9095`, bearer
+  token cached from `/var/run/varroa/loopback-token` and re-read after a `401`. The mite
+  retains each forwarded event until the gateway's JetStream publish acknowledgement, and
+  replays after a reconnect. `Uuid7.java` mints every run id. `VarroaBuildEventLifecycle.java`
+  starts `BuildEventDispatcher` from an `@Initializer(after = PLUGINS_STARTED)`, replaying
+  every run's spool backlog found on disk (oldest run first) before the dispatcher's thread
+  starts, and stops the dispatcher, the run-heartbeat timer, and `VarroaClaimQueue`'s
+  executor from a `@Terminator`. An event that stays above the loopback's 1 MiB body limit
+  even after the D11 oversize ladder reduces it to identity fields only is dropped, not
+  posted: the plugin logs a `WARNING` with the run id and the size and counts
+  `varroa.plugin.events.oversized`.
+- **Log and artifact storage** (feeds the mite's log and tail loopback
+  routes and the `run.artifacts`/`run.log` ingest kinds; D1, D6): compile-scope
+  `workflow-api` (C2-owned entry in `plugin/pom.xml`), `workflow-job`, and
+  `pipeline-graph-analysis`. `VarroaLogStorageFactory.java` is the `@Extension`
+  implementing `LogStorageFactory`; it hands a Pipeline build a
+  `VarroaLogStorage.java` (`LogStorage`) only when `VARROA_MITE_LOG_URL` is an
+  absolute `http://127.0.0.1` URL and the build carries a Varroa run id,
+  otherwise Jenkins keeps its own `FileLogStorage`. `VarroaLogStorage` builds
+  every listener stream with `LogStorage#wrapWithRemoteAutoFlushingListener`
+  and `#wrapWithAutoFlushingBuffer`, so every byte already passed the masking
+  `TaskListenerDecorator` chain — a bound credential never reaches a chunk —
+  before it reaches `LogChunkBuffer.java` (ordered chunks, a per-build cap,
+  node-id splitting). `LogChunkSender.java` posts each build's chunks one at
+  a time to the mite loopback with a jittered backoff. `LogReadCache.java`
+  serves `overallLog`/`stepLog` reads back from disk. `TailEndpoint.java` is
+  the `@Extension RootAction` at `/varroa-log/tail`, requiring
+  `ROLE:varroa:system-mite`; its request body is `{"runId", "jobPath",
+  "buildNumber", "action", "leaseSeconds"}` in camelCase, the shape the
+  shipped mite (`cmd/mite/loopback.go`) sends — the endpoint reads `runId`,
+  `action`, and `leaseSeconds` only. `TailEndpoint.doCounters` serves the
+  same root action's second route, `GET /varroa-log/counters`, under the
+  same authority: one JSON document with one integer per stable
+  snake_case counter name (`varroa_plugin_events_oversized`,
+  `varroa_plugin_events_dropped`, `varroa_plugin_spool_dropped`,
+  `varroa_plugin_log_chunks_dropped`, `varroa_plugin_log_queues_stuck`,
+  `varroa_plugin_claims_no_revision`). `PluginCounters.java` is the
+  process-wide, thread-safe registry: it owns four of the six counters
+  directly (incremented at each drop site in `BuildEventSink`,
+  `RunSpool`, `LogChunkBuffer`, and `IntentKey`) and reads the other two
+  live from `VarroaRunRecorder.oversizedDroppedCount()` and
+  `LogChunkBuffer.stuckQueueWarningCount()`, which already track their
+  own lifetime totals. `BuildArtifact.java` and
+  `LogSummary.java` are immutable value objects mirroring their proto
+  messages; `ArtifactCollector.java` walks `Run#getArtifacts()` into
+  `BuildArtifact` entries, called from C2's `VarroaRunRecorder.onCompleted`.
+  `artifact-manager-s3` is never a compile or runtime dependency: the
+  operator's rendered JCasC fragment configures it on a controller, and this
+  plugin reads its object prefix reflectively. `plugin/pom.xml` carries
+  `artifact-manager-s3` and `aws-global-configuration` at **test scope
+  only**, pinned to the versions task 0.5's compatibility spike verified
+  (`review-log.md` "Task 0.5"), so `ArtifactStorageFragmentCascTest` can
+  round-trip the fragment through the real configurators.
+- **Rehydrated changeset parsing** (feeds a rehydrated build's
+  `currentBuild.previousBuild.changeSets`; design D1a): package
+  `org.jenkinsci.plugins.varroamiteauth.rehydrate`, three classes, no new
+  compile dependency (`hudson.scm.SCM`/`ChangeLogParser`/`ChangeLogSet` are
+  jenkins-core). `VarroaRehydratedSCM` (`hudson.scm.SCM`) is the class the
+  operator names in a rehydrated `build.xml`'s `<checkouts>` element;
+  `createChangeLogParser()` returns `VarroaChangeLogParser`, and `checkout`
+  always throws — a rehydrated run is already terminal and never checks out.
+  `VarroaChangeLogParser` (`hudson.scm.ChangeLogParser`) reads the operator's
+  own `varroa-changelog` document (one `entry` per commit: `commitId`,
+  `author`, `authorEmail`, `timestamp`, `msg`) into a `VarroaChangeLogSet`; a
+  missing changelog file parses as an empty set instead of failing the load.
+  `VarroaChangeLogSet.Entry` resolves its author with `User.getById(id,
+  false)`, falling back to `User.getUnknown()`, and its
+  `getAffectedPaths()` always answers empty — the record store carries only
+  an affected-path count, never the paths themselves, so the operator never
+  has real paths to write into the document.
+- **Run trigger endpoint** (the mite's local call for a manual build trigger and
+  cancel; D3, D4, run-trigger-endpoint): `VarroaRunTriggerAction.java`, a protected
+  `RootAction` at `/varroa-run`, requires `ROLE:varroa:system-mite`. `POST
+  /varroa-run/trigger` reads `runId`, `intentKey`, `jobPath`, `parameters`, and
+  `actor`; stamps a `VarroaIntentAction` carrying the caller's run identifier, intent
+  key (origin `VARROA_INTENT`, so the claim gate reads the key straight off the
+  action instead of deriving one), and actor unchanged, plus a `ParametersAction` built from the
+  job's declared parameter definitions; an omitted value takes the declared
+  default and a supplied name the job does not declare is dropped and reported
+  back in `droppedParameters`. `POST /varroa-run/cancel` reads `runId`, `jobPath`,
+  and `buildNumber`; it resolves its target by run identifier, never by job path
+  alone, because one job can hold several queued items and several running
+  builds — a `buildNumber` greater than zero stops a running build whose
+  `VarroaIntentAction` carries the same run id, and zero searches the queue
+  instead.
+- **Build identity and the agent fence** (runs every tenant build as its own service
+  identity, and fences it to its own tenant's agents): `VarroaTenantResolver.java`
+  holds the one shared rule — `tenantOf(Queue.Task)` resolves a task to its owning
+  `hudson.model.Item` (the task itself, else `getOwnerTask()` when that is an `Item`
+  and not the task) and takes its `getFullName()` first path segment as the tenant;
+  `hostsTenant(String)` reads the cell's applied role-strategy document (reflective,
+  role-strategy is a test-only dependency) and reports true when it carries an
+  item-type role named `varroa:tenant:<team>`. `VarroaQueueItemAuthenticator`
+  (`QueueItemAuthenticator`, published by `VarroaQueueItemAuthenticatorProvider` at
+  `@Extension(ordinal = 1000)`, above core's ordinal 100 and the pinned
+  `workflow-durable-task-step`'s `AuthenticationFromBuild` at ordinal 959) answers
+  `svc-<team>` with authorities `authenticated` and `ROLE:varroa:tenant:<team>` for a
+  resolved tenant, else `null`. `VarroaQueueTaskDispatcher`
+  (`QueueTaskDispatcher.canTake`) blocks a build from a node that carries no reserved
+  `varroa-tenant-<team>` label (the fence fails closed) or carries another tenant's
+  label; it never parses the readability-only `<team>-` node-name prefix, and never
+  overrides `canRun`. `VarroaSecurityRealm.VarroaUserDetailsService.loadUserByUsername`
+  answers a `svc-<team>` identity the same way, with no persisted `User` record, so
+  the boundary holds on every `User.impersonate2()` reload path. The plugin carries no
+  `authorize-project` dependency: that plugin's global JCasC authenticator holds one
+  user id, and its per-job strategy falls back to the anonymous principal with no
+  error when a user record is absent, so it cannot serve many tenants.
 - **Banner/identity** — `VarroaBannerDecorator.java` (`PageDecorator`; user id/name/email,
   `VARROA_BANNER_URL`), rendered by
   `resources/.../VarroaBannerDecorator/header.jelly` + `webapp/banner.js` (feature-detects

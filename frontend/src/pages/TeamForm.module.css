@@ -126,3 +126,137 @@
   gap: 0.5rem;
   margin-top: 1rem;
 }
+
+
+
+.pipelinesSection {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 4px;
+}
+
+
+
+.bundlePicker {
+  display: flex;
+  gap: 0.5rem;
+}
+
+
+
+.bundlePicker select {
+  flex: 1;
+}
+
+
+
+.hint {
+  font-size: 0.8rem;
+  color: var(--text-2);
+}
+
+
+
+.statusGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+
+
+.statusLabel {
+  font-weight: 500;
+  font-size: 0.85rem;
+  margin-right: 0.5rem;
+}
+
+
+
+.statusMuted {
+  color: var(--text-2);
+  font-size: 0.85rem;
+}
+
+
+
+.statusBadge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+
+
+.statusReady {
+  background: var(--ok-soft);
+  color: var(--ok-text);
+}
+
+
+
+.statusNotReady {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+}
+
+
+
+.warningBox {
+  padding: 0.5rem;
+  border: 1px solid var(--warn);
+  border-radius: 4px;
+  background: var(--warn-soft);
+}
+
+
+
+.warningReason {
+  font-weight: 500;
+  color: var(--warn-text);
+}
+
+
+
+.warningMessage {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+}
+
+
+
+.exportEntry {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 4px;
+}
+
+
+
+.exportEntryHead {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+
+
+.exportEntryHead select {
+  flex: 1;
+}
+
+
+
+.exportSubLabel {
+  font-weight: 500;
+  font-size: 0.85rem;
+}

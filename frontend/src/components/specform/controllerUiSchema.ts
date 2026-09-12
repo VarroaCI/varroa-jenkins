@@ -25,6 +25,8 @@ export const CONTROLLER_SPEC_UI_SCHEMA: UiSchema = {
     "rbacSpec",
     "pluginSpec",
     "backupSpec",
+    "cell",
+    "headless",
   ],
   className: {
     "ui:title": "Controller class",
@@ -58,10 +60,24 @@ export const CONTROLLER_SPEC_UI_SCHEMA: UiSchema = {
     entries: { "ui:title": "Plugin entries" },
     policy: { "ui:title": "Policy" },
   },
+  cell: {
+    "ui:title": "Cell",
+    "ui:help":
+      "A cell hosts tenant pipelines for several Teams. cell.enabled cannot " +
+      "change after creation; maxTenants bounds placement.",
+    enabled: { "ui:title": "Enabled" },
+    maxTenants: { "ui:title": "Max tenants" },
+  },
   backupSpec: {
     "ui:title": "Backups",
     enabled: { "ui:title": "Enabled" },
     schedule: { "ui:title": "Schedule" },
     retentionDays: { "ui:title": "Retention (days)" },
+  },
+  headless: {
+    "ui:title": "Headless",
+    "ui:help":
+      "Blocks the Jenkins web UI for every non-admin caller. A cell is " +
+      "always headless, so this switch matters only for a one-tenant controller.",
   },
 };

@@ -154,7 +154,7 @@ func runEditUser(cmd *cobra.Command, args []string) error {
 			}
 			return nil, fmt.Errorf("error from server (404): user %q not found", name)
 		},
-		func(doc map[string]any) error {
+		func(_, doc map[string]any) error {
 			// PUT /users/{name} always sending both keys (email + displayName)
 			// Ensure both keys present (empty strings are valid — they clear fields)
 			if _, ok := doc["email"]; !ok {

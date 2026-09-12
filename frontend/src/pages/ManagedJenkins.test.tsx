@@ -29,9 +29,19 @@ vi.mock("../hooks/useControllers", () => ({
   useController: () => mockUseController(),
 }));
 
+// canDoInNamespace is a fn so tests can toggle the break-glass gate.
+const mockCanDo = vi.fn(
+  (_perms?: unknown, _ns?: string, _resource?: string, _verb?: string): boolean => true
+);
+vi.mock("../hooks/usePermissions", () => ({
+  usePermissions: () => ({ data: { global: {}, scopes: [] } }),
+  canDoInNamespace: (perms: unknown, ns: string, resource: string, verb: string) => mockCanDo(perms, ns, resource, verb),
+}));
+
 describe("ManagedJenkins", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCanDo.mockReturnValue(true);
   });
 
   describe("Loading state", () => {
@@ -204,6 +214,98 @@ describe("ManagedJenkins", () => {
       renderWithProviders(<ManagedJenkins />);
 
       expect(screen.getByText(/mite disconnected/)).toBeInTheDocument();
+    });
+  });
+
+  describe("Headless controller — headless card", () => {
+    it("renders the headless card, not an iframe or a link-out", () => {
+      mockUseController.mockReturnValue({
+        data: {
+          name: "my-ctrl",
+          namespace: "my-ns",
+          phase: "Running",
+          endpoint: "",
+          miteConnected: true,
+          routingMode: "path",
+          headless: true,
+        },
+        isLoading: false,
+        error: null,
+      });
+      renderWithProviders(<ManagedJenkins />);
+
+      expect(screen.getByText(/Headless controller/)).toBeInTheDocument();
+      expect(screen.getByText(/blocks the Jenkins web interface/)).toBeInTheDocument();
+      expect(document.querySelector("iframe")).not.toBeInTheDocument();
+      expect(screen.queryByText(/Cannot embed/)).not.toBeInTheDocument();
+    });
+
+    it("links to /pipelines/<name> when the DTO resolves a team", () => {
+      mockUseController.mockReturnValue({
+        data: { name: "my-ctrl", namespace: "my-ns", phase: "Running", endpoint: "", miteConnected: true, headless: true },
+        isLoading: false,
+        error: null,
+      });
+      renderWithProviders(<ManagedJenkins />);
+
+      const link = screen.getByTestId("pipelines-link");
+      expect(link).toHaveAttribute("href", "/pipelines/my-ctrl");
+    });
+
+    it("links to the pipelines index when the DTO resolves no team", () => {
+      mockUseController.mockReturnValue({
+        data: { name: "", namespace: "my-ns", phase: "Running", endpoint: "", miteConnected: true, headless: true },
+        isLoading: false,
+        error: null,
+      });
+      renderWithProviders(<ManagedJenkins />);
+
+      const link = screen.getByTestId("pipelines-link");
+      expect(link).toHaveAttribute("href", "/pipelines");
+    });
+
+    it("shows the break-glass runbook only when the caller holds the verb", () => {
+      mockCanDo.mockReturnValue(true);
+      mockUseController.mockReturnValue({
+        data: { name: "my-ctrl", namespace: "my-ns", phase: "Running", endpoint: "", miteConnected: true, headless: true },
+        isLoading: false,
+        error: null,
+      });
+      renderWithProviders(<ManagedJenkins />);
+
+      expect(screen.getByTestId("breakglass-runbook")).toBeInTheDocument();
+      expect(screen.getByText(/varroactl break-glass my-ctrl/)).toBeInTheDocument();
+      expect(mockCanDo).toHaveBeenCalledWith(expect.anything(), "my-ns", "controllers", "break-glass");
+    });
+
+    it("hides the break-glass runbook when the caller lacks the verb", () => {
+      mockCanDo.mockReturnValue(false);
+      mockUseController.mockReturnValue({
+        data: { name: "my-ctrl", namespace: "my-ns", phase: "Running", endpoint: "", miteConnected: true, headless: true },
+        isLoading: false,
+        error: null,
+      });
+      renderWithProviders(<ManagedJenkins />);
+
+      expect(screen.queryByTestId("breakglass-runbook")).not.toBeInTheDocument();
+      expect(screen.getByTestId("pipelines-link")).toBeInTheDocument();
+    });
+
+    it("never requests the break-glass grant endpoint", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+      mockUseController.mockReturnValue({
+        data: { name: "my-ctrl", namespace: "my-ns", phase: "Running", endpoint: "", miteConnected: true, headless: true },
+        isLoading: false,
+        error: null,
+      });
+      renderWithProviders(<ManagedJenkins />);
+
+      expect(screen.getByTestId("breakglass-runbook")).toBeInTheDocument();
+      for (const call of fetchMock.mock.calls) {
+        expect(String(call[0])).not.toContain("break-glass");
+      }
+      vi.unstubAllGlobals();
     });
   });
 });

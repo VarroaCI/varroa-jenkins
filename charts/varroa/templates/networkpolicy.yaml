@@ -264,6 +264,12 @@ spec:
 {{- end }}
 {{ include "varroa.np.apiServerEgress" . | nindent 4 }}
 {{ include "varroa.np.telemetryEgress" . | nindent 4 }}
+{{- if and $full .Values.recordStore.enabled }}
+{{ include "varroa.np.recordStoreBlobEgress" . | nindent 4 }}
+{{- if eq .Values.recordStore.blobs.mode "postgres" }}
+{{ include "varroa.np.recordStorePostgresEgress" . | nindent 4 }}
+{{- end }}
+{{- end }}
 {{- if not $full }}
     - to:
 {{- if .Values.networkPolicy.coreNatsEgress.cidrs }}
@@ -398,6 +404,10 @@ spec:
 {{- end }}
 {{- end }}
 {{ include "varroa.np.telemetryEgress" . | nindent 4 }}
+{{- if .Values.recordStore.enabled }}
+{{ include "varroa.np.recordStorePostgresEgress" . | nindent 4 }}
+{{ include "varroa.np.recordStoreBlobEgress" . | nindent 4 }}
+{{- end }}
 {{- end }}
 
 {{- if and $full .Values.frontend.enabled }}
@@ -525,6 +535,15 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: varroa-bff
+      ports:
+        - protocol: TCP
+          port: 4222
+{{- end }}
+{{- if .Values.recordStore.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-recorder
       ports:
         - protocol: TCP
           port: 4222
@@ -682,6 +701,97 @@ spec:
         - protocol: TCP
           port: {{ . }}
 {{- end }}
+{{- end }}
+{{- end }}
+
+{{- if and $full .Values.recordStore.enabled }}
+---
+# Policy: recorder
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-np-recorder
+  labels: {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: varroa-recorder
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+{{- if .Values.networkPolicy.metricsIngress }}
+    # The chart ships no monitoring workload of its own, so the configured
+    # scrapers are the recorder's only ingress source.
+    - from:
+{{ toYaml .Values.networkPolicy.metricsIngress | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: 8080
+{{- end }}
+  egress:
+{{- if .Values.nats.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: nats
+      ports:
+        - protocol: TCP
+          port: 4222
+{{- end }}
+{{ include "varroa.np.recordStorePostgresEgress" . | nindent 4 }}
+{{ include "varroa.np.recordStoreBlobEgress" . | nindent 4 }}
+{{- if eq .Values.recordStore.postgres.mode "cnpg" }}
+---
+# Policy: record-store Postgres (the CloudNativePG instance pods). The
+# default-deny above covers them too, so they need their own ingress from
+# the three record-store clients and the CloudNativePG operator, and their
+# own egress to the API server, which the instance manager watches.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-np-recordstore-db
+  labels: {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: varroa-recordstore
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-recorder
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-bff
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-gateway
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: varroa-recordstore
+      ports:
+        - protocol: TCP
+          port: 5432
+    - from:
+        - namespaceSelector:
+            matchLabels: {{- toYaml .Values.networkPolicy.recordStoreCNPGOperatorNamespaceSelector | nindent 14 }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cloudnative-pg
+      ports:
+        - protocol: TCP
+          port: 8000
+  egress:
+{{ include "varroa.np.apiServerEgress" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: varroa-recordstore
+      ports:
+        - protocol: TCP
+          port: 5432
 {{- end }}
 {{- end }}
 {{- end }}

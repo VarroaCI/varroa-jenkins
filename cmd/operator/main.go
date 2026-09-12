@@ -47,6 +47,8 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/ca"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
+	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
+	"github.com/varroaci/varroa-jenkins/internal/controller/runners"
 	"github.com/varroaci/varroa-jenkins/internal/controller/sharding"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/hibernation/wakeserver"
@@ -467,7 +469,10 @@ func main() {
 
 	userClaims := strings.Split(*oidcUserClaim, ",")
 	groupClaims := strings.Split(*oidcGroupClaim, ",")
-	rbacResolver := rbac.NewResolver(roleInformer, roleBindingInformer, jenkinsRoleInformer, jenkinsRoleBindingInformer, controllerInformer,
+	// The operator resolves Jenkins assignments, never HTTP capabilities,
+	// and has no Team informer today; a nil teamInformer leaves the
+	// Team-membership tenant path contributing nothing.
+	rbacResolver := rbac.NewResolver(roleInformer, roleBindingInformer, jenkinsRoleInformer, jenkinsRoleBindingInformer, controllerInformer, nil,
 		*defaultRead, userClaims, groupClaims)
 	rbacGen := rbac.NewGenerator(rbacResolver)
 	rbacGen.Logger = logger
@@ -491,17 +496,42 @@ func main() {
 	}
 	reconciler.SetVarroaEndpoint(gatewayEndpoint)
 	reconciler.SetOperatorNamespace(operatorNamespace)
+	reconciler.SetClaimGate(envDefault("VARROA_CLAIM_GATE", "0"))
+	reconciler.SetSyncAnnouncer(controller.NewNATSSyncAnnouncer(busConn))
+	reconciler.SetRecordsFunc(controller.NewNATSSyncRecordsRequester(busConn))
+	reconciler.SetBlobstoreURL(os.Getenv("VARROA_BLOBSTORE_URL"))
+	reconciler.SetArtifactSecretBase(os.Getenv("VARROA_ARTIFACT_SECRET"))
+	if raw := os.Getenv("VARROA_CLAIM_TIMEOUT_MS"); raw != "" {
+		if ms, err := strconv.Atoi(raw); err != nil {
+			logger.Warn("VARROA_CLAIM_TIMEOUT_MS: parse error, leaving claim timeouts unset", "value", raw, "error", err)
+		} else {
+			reconciler.SetClaimTimeoutMS(ms)
+		}
+	}
 	reconciler.SetWakeServerPort(int32(*wakePort), wakeEnabled)
 	managedNamespaces := os.Getenv("MANAGED_NAMESPACES")
 	set := tenancy.NewManagedSet(managedNamespaces, operatorNamespace)
 	reconciler.SetTenancy(tenancy.NewClassifier(clientsetClient, set))
 	teamReconciler.SetManagedSet(set)
 	reconciler.SetVarroaRedirectURL(*oidcRedirectURL)
+	cellsConfig := controller.ParseCellsConfigFromEnv(logger)
+	reconciler.SetCellsConfig(cellsConfig)
 	reconciler.Logger = logger
+
+	// --- Pipelines placement pass wiring (design D4): the Team reconciler
+	// needs its own cluster identity, gate values, and cells tunables before
+	// it can place a tenant. A Team with no spec.pipelines never reads any
+	// of these.
+	teamReconciler.SetClusterIdentity(cluster)
+	teamReconciler.SetPipelinesGates(envDefault("VARROA_CLAIM_GATE", "0"), os.Getenv("VARROA_BLOBSTORE_URL"))
+	teamReconciler.SetCellsConfig(cellsConfig)
+	teamReconciler.SetPurgeRequester(controller.NewNATSPurgeRequester(busConn))
+	teamReconciler.SetSyncAnnouncer(controller.NewNATSSyncAnnouncer(busConn))
 
 	// --- Activity publisher (mode-agnostic, publishes to activity.* subjects) ---
 	actPub := activity.NewPublisher(cluster, busConn)
 	reconciler.SetActivityPublisher(actPub)
+	teamReconciler.SetActivityPublisher(actPub)
 
 	upgradeTrackerReconciler := controller.NewUpgradeTrackerReconciler(clientsetClient, actPub, logger)
 
@@ -880,6 +910,63 @@ func main() {
 		logger: logger,
 	}); err != nil {
 		logger.Error("failed to add team runnable", "error", err)
+		os.Exit(1)
+	}
+
+	// 3b. Warm-pool reconciler (60s), keeping a pool of unassigned cells
+	// for every profile a pipelines Team requests (design D5). It writes
+	// no status, so it never races the Controller reconciler's own
+	// status.cell writes.
+	warmPoolReconciler := &cells.WarmPoolReconciler{
+		Store:             clientsetClient,
+		OperatorNamespace: operatorNamespace,
+		Config: cells.WarmPoolConfig{
+			Enabled:    cellsConfig.WarmPoolEnabled,
+			PerProfile: cellsConfig.WarmPoolPerProfile,
+		},
+		Logger: logger,
+	}
+	if err := mgr.Add(&tickerRunnable{
+		name:     "warm-pool",
+		interval: 60 * time.Second,
+		tick: func(ctx context.Context) {
+			if err := warmPoolReconciler.Reconcile(ctx); err != nil {
+				logger.Warn("warm-pool reconciler tick", "error", err)
+			}
+		},
+		logger: logger,
+	}); err != nil {
+		logger.Error("failed to add warm-pool runnable", "error", err)
+		os.Exit(1)
+	}
+
+	// 3c. Runner reconciler (60s, immediate, leader-elected — design D2). It
+	// is the only writer of Runner.status; no everyReplica, so it needs the
+	// lease. Each tick reports every cell that hosts a runner and every cell
+	// a runner left, and this closure wakes each one through the Controller
+	// reconciler's own reconcile-event channel so the next desired-state
+	// assembly picks up the change without waiting for that cell's own
+	// periodic tick.
+	runnerReconciler := &runners.Reconciler{
+		Backend:     clientsetClient,
+		Secrets:     clientsetClient,
+		HTTPClient:  &http.Client{Timeout: 10 * time.Second},
+		TokenSigner: miteTokenSigner,
+		Logger:      logger,
+	}
+	if err := mgr.Add(&tickerRunnable{
+		name:      "runner",
+		interval:  60 * time.Second,
+		immediate: true,
+		tick: func(ctx context.Context) {
+			result := runnerReconciler.Tick(ctx)
+			for _, cell := range result.TouchedCells {
+				reconciler.WakeController(cell.Cluster, cell.Namespace, cell.Name)
+			}
+		},
+		logger: logger,
+	}); err != nil {
+		logger.Error("failed to add runner runnable", "error", err)
 		os.Exit(1)
 	}
 
@@ -1383,6 +1470,25 @@ func (r *operatorCommandRunner) Start(ctx context.Context) error {
 	defer func() {
 		if err := wakeHibernateSub.Unsubscribe(); err != nil {
 			r.logger.Warn("unsubscribe hibernation wake failed", "error", err)
+		}
+	}()
+
+	// Ledger actions: the recorder publishes at-most-once on
+	// varroa.ledger.actions.<cluster> (design D8a, task 9.1a). One
+	// operator leader subscribes to the whole varroa.ledger.actions.>
+	// family and filters on the action's own cluster field, so a cluster
+	// added later needs no grant change. Queue-subscribed so a single
+	// leader replica services each action.
+	ledgerActionSub, err := r.busConn.QueueSubscribe(bus.LedgerActionsWildcard, operatorQueue,
+		func(msg *nats.Msg) {
+			handleLedgerAction(context.Background(), r.logger, r.cluster, r.reconciler, msg.Data)
+		})
+	if err != nil {
+		return fmt.Errorf("subscribe ledger actions: %w", err)
+	}
+	defer func() {
+		if err := ledgerActionSub.Unsubscribe(); err != nil {
+			r.logger.Warn("unsubscribe ledger actions failed", "error", err)
 		}
 	}()
 

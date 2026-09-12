@@ -1,0 +1,228 @@
+package controller
+
+import (
+	"context"
+	"testing"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/bundle"
+	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
+)
+
+// tenantCredentialTestNamespace is the fixed agentNamespace every test in
+// this file projects tenant credentials from.
+const tenantCredentialTestNamespace = "payments-ns"
+
+// seedTenantCredentialSecret registers a fixture Secret for ListSecrets,
+// GetSecretAnnotations, and GetSecret, matching the shape a real
+// varroa.dev/tenant-credential Secret carries.
+func seedTenantCredentialSecret(t *testing.T, client *testClient, name string, annotations map[string]string, data map[string][]byte) {
+	t.Helper()
+	client.labeledSecrets = append(client.labeledSecrets, labeledSecretFixture{
+		name: name, namespace: tenantCredentialTestNamespace,
+		labels: map[string]string{"varroa.dev/tenant-credential": "true"},
+	})
+	if client.secretAnnotations == nil {
+		client.secretAnnotations = map[string]map[string]string{}
+	}
+	client.secretAnnotations[name] = annotations
+	client.existingSecrets[name] = data
+}
+
+func newFolderItem(t *testing.T) *items.Item {
+	t.Helper()
+	return &items.Item{Kind: "folder", Name: "payments"}
+}
+
+// TestProjectTenantCredentials_HappyPath is task 8.11's happy-path
+// acceptance: a well-formed usernamePassword and a secretText Secret both
+// project as folder-credentials entries with scope GLOBAL.
+func TestProjectTenantCredentials_HappyPath(t *testing.T) {
+	client := newTestClient()
+	seedTenantCredentialSecret(t, client, "cred-up",
+		map[string]string{
+			"varroa.dev/credential-id":          "up-cred",
+			"varroa.dev/credential-kind":        "usernamePassword",
+			"varroa.dev/credential-description": "a username/password credential",
+		},
+		map[string][]byte{"username": []byte("bob"), "password": []byte("hunter2")},
+	)
+	seedTenantCredentialSecret(t, client, "cred-st",
+		map[string]string{
+			"varroa.dev/credential-id":   "st-cred",
+			"varroa.dev/credential-kind": "secretText",
+		},
+		map[string][]byte{"secret": []byte("shh")},
+	)
+	rec := newTestReconciler(client)
+	folder := newFolderItem(t)
+
+	warnings := rec.projectTenantCredentials(context.Background(), "payments", "payments-ns", folder)
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %+v", warnings)
+	}
+
+	var prop *items.FolderCredentialsProperty
+	for _, p := range folder.Properties {
+		if p.FolderCredentialsProperty != nil {
+			prop = p.FolderCredentialsProperty
+		}
+	}
+	if prop == nil || len(prop.FolderCredentials) != 1 || len(prop.FolderCredentials[0].Credentials) != 2 {
+		t.Fatalf("expected one folder-credentials entry with two credentials, got %+v", prop)
+	}
+	var sawUP, sawST bool
+	for _, c := range prop.FolderCredentials[0].Credentials {
+		if c.UsernamePassword != nil {
+			sawUP = true
+			if c.UsernamePassword.ID != "up-cred" || c.UsernamePassword.Scope != "GLOBAL" ||
+				c.UsernamePassword.Username != "bob" || c.UsernamePassword.Password != "hunter2" {
+				t.Errorf("unexpected usernamePassword credential: %+v", c.UsernamePassword)
+			}
+		}
+		if c.SecretText != nil {
+			sawST = true
+			if c.SecretText.ID != "st-cred" || c.SecretText.Scope != "GLOBAL" || c.SecretText.Secret != "shh" {
+				t.Errorf("unexpected secretText credential: %+v", c.SecretText)
+			}
+		}
+	}
+	if !sawUP || !sawST {
+		t.Errorf("expected both credential kinds projected, got %+v", prop.FolderCredentials[0].Credentials)
+	}
+}
+
+// TestProjectTenantCredentials_MalformedSecretSkipped is task 8.11's
+// malformed-secret acceptance: a secretText Secret with no secret data key
+// is skipped and warned, not fatal.
+func TestProjectTenantCredentials_MalformedSecretSkipped(t *testing.T) {
+	client := newTestClient()
+	seedTenantCredentialSecret(t, client, "cred-bad",
+		map[string]string{
+			"varroa.dev/credential-id":   "bad-cred",
+			"varroa.dev/credential-kind": "secretText",
+		},
+		map[string][]byte{}, // no "secret" key
+	)
+	rec := newTestReconciler(client)
+	folder := newFolderItem(t)
+
+	warnings := rec.projectTenantCredentials(context.Background(), "payments", "payments-ns", folder)
+	if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TeamReasonCredentialSkipped || warnings[0].Tenant != "payments" {
+		t.Fatalf("expected one CredentialSkipped warning, got %+v", warnings)
+	}
+	for _, p := range folder.Properties {
+		if p.FolderCredentialsProperty != nil {
+			t.Errorf("expected no folder-credentials property for an all-skipped tenant, got %+v", p.FolderCredentialsProperty)
+		}
+	}
+}
+
+// TestProjectTenantCredentials_UnknownKindSkipped is task 8.11's
+// unknown-kind acceptance.
+func TestProjectTenantCredentials_UnknownKindSkipped(t *testing.T) {
+	client := newTestClient()
+	seedTenantCredentialSecret(t, client, "cred-unknown",
+		map[string]string{
+			"varroa.dev/credential-id":   "unknown-cred",
+			"varroa.dev/credential-kind": "sshKey",
+		},
+		map[string][]byte{"key": []byte("...")},
+	)
+	rec := newTestReconciler(client)
+	folder := newFolderItem(t)
+
+	warnings := rec.projectTenantCredentials(context.Background(), "payments", "payments-ns", folder)
+	if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TeamReasonCredentialSkipped {
+		t.Fatalf("expected one CredentialSkipped warning, got %+v", warnings)
+	}
+}
+
+// TestProjectTenantCredentials_DuplicateIDSkipped is task 8.11's
+// duplicate-id acceptance: one of the two is projected, the other skipped
+// and warned, naming the duplicated id.
+func TestProjectTenantCredentials_DuplicateIDSkipped(t *testing.T) {
+	client := newTestClient()
+	seedTenantCredentialSecret(t, client, "cred-a",
+		map[string]string{"varroa.dev/credential-id": "dup", "varroa.dev/credential-kind": "secretText"},
+		map[string][]byte{"secret": []byte("one")},
+	)
+	seedTenantCredentialSecret(t, client, "cred-b",
+		map[string]string{"varroa.dev/credential-id": "dup", "varroa.dev/credential-kind": "secretText"},
+		map[string][]byte{"secret": []byte("two")},
+	)
+	rec := newTestReconciler(client)
+	folder := newFolderItem(t)
+
+	warnings := rec.projectTenantCredentials(context.Background(), "payments", "payments-ns", folder)
+	if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TeamReasonCredentialSkipped {
+		t.Fatalf("expected one CredentialSkipped warning, got %+v", warnings)
+	}
+	if !containsSubstr(warnings[0].Message, "dup") {
+		t.Errorf("expected the warning to name the duplicated id, got %q", warnings[0].Message)
+	}
+
+	var prop *items.FolderCredentialsProperty
+	for _, p := range folder.Properties {
+		if p.FolderCredentialsProperty != nil {
+			prop = p.FolderCredentialsProperty
+		}
+	}
+	if prop == nil || len(prop.FolderCredentials[0].Credentials) != 1 {
+		t.Fatalf("expected exactly one projected credential (the other is the duplicate), got %+v", prop)
+	}
+}
+
+func containsSubstr(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
+// TestApplyCellContent_TenantCredentialsNeverReachAConfigMap is task 8.11's
+// no-ConfigMap-leak acceptance: assembling a cell's desired state with
+// tenant credentials writes no credential value into any ConfigMap the
+// operator creates or updates.
+func TestApplyCellContent_TenantCredentialsNeverReachAConfigMap(t *testing.T) {
+	client := newTestClient()
+	crdstore.MustSeed(client.store, &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec: v1alpha1.TeamSpec{
+			Namespaces: []string{"payments-ns"},
+			Pipelines: &v1alpha1.TeamPipelinesSpec{
+				Profile:        "jenkins-lts",
+				AgentNamespace: "payments-ns",
+			},
+		},
+	})
+	const secretValue = "super-secret-value"
+	seedTenantCredentialSecret(t, client, "cred-st",
+		map[string]string{"varroa.dev/credential-id": "st-cred", "varroa.dev/credential-kind": "secretText"},
+		map[string][]byte{"secret": []byte(secretValue)},
+	)
+
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"payments"}}
+	mat := &bundle.MaterializedBundle{}
+
+	if err := rec.applyCellContent(context.Background(), cr, mat, "http://cell1-svc.ns1.svc.cluster.local:8080"); err != nil {
+		t.Fatalf("applyCellContent: %v", err)
+	}
+	if !containsSubstr(mat.ItemsYAML, secretValue) {
+		t.Fatalf("expected the credential value in items.yaml (transported over the mTLS mite stream), got:\n%s", mat.ItemsYAML)
+	}
+	for name, data := range client.configMapData {
+		for key, val := range data {
+			if containsSubstr(val, secretValue) {
+				t.Errorf("credential value leaked into ConfigMap %q key %q", name, key)
+			}
+		}
+	}
+}

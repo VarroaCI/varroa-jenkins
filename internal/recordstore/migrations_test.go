@@ -1,0 +1,33 @@
+package recordstore
+
+import "testing"
+
+// TestMigrationsFSListsEveryFile asserts the embedded filesystem ships
+// every migration file the package needs at runtime.
+func TestMigrationsFSListsEveryFile(t *testing.T) {
+	entries, err := migrationsFS.ReadDir(migrationsDir)
+	if err != nil {
+		t.Fatalf("read migrations dir: %v", err)
+	}
+
+	want := map[string]bool{
+		"00001_initial_schema.sql":        false,
+		"00002_activity.sql":              false,
+		"00003_job_schedules.sql":         false,
+		"00004_search_paths.sql":          false,
+		"00005_tenant_placements.sql":     false,
+		"00006_fleet_locks.sql":           false,
+		"00007_job_schedule_upstream.sql": false,
+	}
+	for _, entry := range entries {
+		if _, ok := want[entry.Name()]; !ok {
+			t.Fatalf("embedded filesystem lists unexpected file %q", entry.Name())
+		}
+		want[entry.Name()] = true
+	}
+	for name, found := range want {
+		if !found {
+			t.Fatalf("embedded filesystem is missing %q", name)
+		}
+	}
+}

@@ -1,0 +1,88 @@
+package recordstore
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+)
+
+// applyRunCompleted upserts the runs row for a run.completed envelope
+// under Contract G1's terminal-precedence rule. A real terminal event —
+// one whose cell_instance equals the intent's owning cell_instance —
+// always wins over a synthetic interruption C6's sweep wrote, and the
+// write records the moment of that replacement in
+// interrupted_superseded_at. It stores the complete envelope in
+// payload under the key "run.completed", so a later kind's write never
+// replaces it. A completion from any other instance is an audit fact:
+// it merges into payload under foreign_completion instead and changes
+// no terminal column.
+//
+// owner reports whether this write was the real terminal write: only
+// then does the caller run the fan-out round and release this run's
+// fleet locks. A foreign completion changes no terminal column, so it
+// is not "an ingested run.completed" in the sense the fleet-locks and
+// cross-tenant-upstream-trigger capabilities mean: it would double-fire
+// a downstream trigger or release a lock still protected by a live
+// deployment.
+func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) (owner bool, payload RunCompletedPayload, err error) {
+	if unmarshalErr := json.Unmarshal(env.Payload, &payload); unmarshalErr != nil {
+		return false, RunCompletedPayload{}, fmt.Errorf("%w: decode run.completed payload: %v", ErrMalformedEnvelope, unmarshalErr)
+	}
+
+	owner = intent.cellInstance != nil && *intent.cellInstance != "" && env.CellInstance == *intent.cellInstance
+
+	envelopeJSON, err := json.Marshal(env)
+	if err != nil {
+		return false, RunCompletedPayload{}, fmt.Errorf("marshal envelope: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO varroa.runs (
+			run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path,
+			status, result, ended_at, duration_ms, payload
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8,
+			CASE WHEN $13 THEN 'COMPLETED' ELSE 'QUEUED' END,
+			CASE WHEN $13 THEN $9::text ELSE NULL::text END,
+			CASE WHEN $13 THEN $10::timestamptz ELSE NULL::timestamptz END,
+			CASE WHEN $13 THEN $11::bigint ELSE NULL::bigint END,
+			CASE WHEN $13 THEN jsonb_build_object('run.completed', $12::jsonb) ELSE jsonb_build_object('foreign_completion', $12::jsonb) END
+		)
+		ON CONFLICT (created_at, run_id) DO UPDATE SET
+			status = `+runsStatusMergeSQL+`,
+			result = CASE WHEN $13 THEN EXCLUDED.result ELSE COALESCE(EXCLUDED.result, runs.result) END,
+			ended_at = CASE WHEN $13 THEN EXCLUDED.ended_at ELSE COALESCE(EXCLUDED.ended_at, runs.ended_at) END,
+			duration_ms = CASE WHEN $13 THEN EXCLUDED.duration_ms ELSE COALESCE(EXCLUDED.duration_ms, runs.duration_ms) END,
+			interrupted_superseded_at = CASE
+				WHEN $13 AND runs.result = 'INTERRUPTED' THEN now()
+				ELSE runs.interrupted_superseded_at
+			END,
+			payload = COALESCE(runs.payload, '{}'::jsonb) || EXCLUDED.payload
+	`,
+		intent.runID, intent.createdAt, intent.intentKey, intent.cluster, intent.namespace,
+		intent.cellValue(), intent.tenant, intent.jobPath,
+		payload.Result, payload.EndedAt, payload.DurationMs, string(envelopeJSON),
+		owner,
+	)
+	if err != nil {
+		return false, RunCompletedPayload{}, fmt.Errorf("upsert completed run: %w", err)
+	}
+
+	// The fleet lock's first release confirmation (design.md D11): a
+	// terminal run.completed for the holder deletes a held or a
+	// releasing row of this run, whichever it finds. It runs only for
+	// the real terminal write, in the same transaction as the runs row
+	// it confirms, so a crash after commit never strands a lock a
+	// finished run no longer protects.
+	if owner {
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM varroa.fleet_locks WHERE run_id = $1 AND state IN ('held', 'releasing')
+		`, intent.runID.String()); err != nil {
+			return false, RunCompletedPayload{}, fmt.Errorf("release fleet locks for terminal run: %w", err)
+		}
+	}
+
+	return owner, payload, nil
+}

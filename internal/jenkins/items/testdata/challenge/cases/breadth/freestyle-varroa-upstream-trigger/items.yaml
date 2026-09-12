@@ -1,0 +1,10 @@
+items:
+  - kind: freeStyle
+    name: freestyle-varroa-upstream-trigger
+    displayName: "FreeStyle Cross-Tenant Upstream Trigger"
+    description: "FreeStyle job that subscribes to another tenant's job"
+    triggers:
+      - varroaUpstream:
+          tenant: alpha
+          job: release
+          result: SUCCESS

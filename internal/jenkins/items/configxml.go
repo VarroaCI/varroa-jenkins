@@ -1,6 +1,7 @@
 package items
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"sort"
@@ -42,6 +43,25 @@ func GenerateConfigXML(item Item) (string, error) {
 }
 
 type xmlConfig interface{}
+
+// varroaMiteAuthPlugin is the short name of the plugin providing every
+// varroa-prefixed class this file renders.
+const varroaMiteAuthPlugin = "varroa-mite-auth"
+
+// varroaTemplateValuesJSON renders template values as compact JSON text for
+// the values element of a rendered VarroaTemplateFlowDefinition. Values
+// decodes from YAML into plain Go values, so it always encodes; a nil map
+// renders as an empty object.
+func varroaTemplateValuesJSON(values map[string]any) string {
+	if values == nil {
+		values = map[string]any{}
+	}
+	b, err := json.Marshal(values)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
 
 // ---- Folder ----
 
@@ -201,8 +221,9 @@ type jenkinsDiscarderXML struct {
 }
 
 type jenkinsTriggersXML struct {
-	PollSCM []*jenkinsPollSCMXML `xml:"hudson.triggers.SCMTrigger,omitempty"`
-	Cron    []*jenkinsCronXML    `xml:"hudson.triggers.TimerTrigger,omitempty"`
+	PollSCM        []*jenkinsPollSCMXML        `xml:"hudson.triggers.SCMTrigger,omitempty"`
+	Cron           []*jenkinsCronXML           `xml:"hudson.triggers.TimerTrigger,omitempty"`
+	VarroaUpstream []*jenkinsVarroaUpstreamXML `xml:"org.jenkinsci.plugins.varroamiteauth.VarroaUpstreamTrigger,omitempty"`
 }
 
 type jenkinsPollSCMXML struct {
@@ -211,6 +232,17 @@ type jenkinsPollSCMXML struct {
 
 type jenkinsCronXML struct {
 	Spec string `xml:"spec"`
+}
+
+// jenkinsVarroaUpstreamXML renders a varroaUpstream trigger. Its element
+// name is the trigger's full class name, design.md D9. Result always
+// carries an explicit value: the renderer applies the SUCCESS default
+// before it reaches this struct.
+type jenkinsVarroaUpstreamXML struct {
+	Plugin string `xml:"plugin,attr"`
+	Tenant string `xml:"tenant"`
+	Job    string `xml:"job"`
+	Result string `xml:"result"`
 }
 
 type jenkinsParamsPropXML struct {
@@ -312,6 +344,18 @@ func freeStyleConfigXML(item Item) xmlConfig {
 			if tr.Cron != nil {
 				t.Cron = append(t.Cron, &jenkinsCronXML{Spec: tr.Cron.Spec})
 			}
+			if tr.VarroaUpstream != nil {
+				result := tr.VarroaUpstream.Result
+				if result == "" {
+					result = varroaUpstreamDefaultResult
+				}
+				t.VarroaUpstream = append(t.VarroaUpstream, &jenkinsVarroaUpstreamXML{
+					Plugin: varroaMiteAuthPlugin,
+					Tenant: tr.VarroaUpstream.Tenant,
+					Job:    tr.VarroaUpstream.Job,
+					Result: result,
+				})
+			}
 		}
 		f.Triggers = t
 	}
@@ -398,13 +442,16 @@ type pipelineXML struct {
 }
 
 type cpsFlowDefXML struct {
-	Class       string         `xml:"class,attr"`
-	Plugin      string         `xml:"plugin,attr"`
-	SCM         *jenkinsScmXML `xml:"scm,omitempty"`
-	ScriptPath  string         `xml:"scriptPath,omitempty"`
-	Lightweight bool           `xml:"lightweight,omitempty"`
-	Script      string         `xml:"script,omitempty"`
-	Sandbox     bool           `xml:"sandbox,omitempty"`
+	Class           string         `xml:"class,attr"`
+	Plugin          string         `xml:"plugin,attr"`
+	SCM             *jenkinsScmXML `xml:"scm,omitempty"`
+	ScriptPath      string         `xml:"scriptPath,omitempty"`
+	Lightweight     bool           `xml:"lightweight,omitempty"`
+	Script          string         `xml:"script,omitempty"`
+	Sandbox         bool           `xml:"sandbox,omitempty"`
+	Template        string         `xml:"template,omitempty"`
+	TemplateVersion string         `xml:"templateVersion,omitempty"`
+	Values          string         `xml:"values,omitempty"`
 }
 
 type pipelinePropertiesXML struct {
@@ -462,6 +509,15 @@ func pipelineConfigXML(item Item) xmlConfig {
 				Plugin:  "workflow-cps",
 				Script:  item.Definition.Script,
 				Sandbox: true,
+			}
+		} else if item.Definition.VarroaTemplate != nil {
+			vt := item.Definition.VarroaTemplate
+			p.Definition = &cpsFlowDefXML{
+				Class:           "org.jenkinsci.plugins.varroamiteauth.template.VarroaTemplateFlowDefinition",
+				Plugin:          varroaMiteAuthPlugin,
+				Template:        vt.Template,
+				TemplateVersion: vt.TemplateVersion,
+				Values:          varroaTemplateValuesJSON(vt.Values),
 			}
 		}
 	}
@@ -523,7 +579,30 @@ type branchSourceData struct {
 }
 
 type branchSourceItemXML struct {
-	Source *branchSourceSourceXML `xml:"source"`
+	Source          *branchSourceSourceXML `xml:"source"`
+	BuildStrategies *buildStrategiesXML    `xml:"buildStrategies"`
+}
+
+// buildStrategiesXML renders the skip-initial-build strategy every
+// multibranch branch source and every organization folder carries (design
+// D12). The rendering does not depend on the item's own YAML: a scan
+// discovers a branch, a webhook builds it.
+type buildStrategiesXML struct {
+	SkipInitialBuildOnFirstBranchIndexing *skipInitialBuildStrategyXML `xml:"jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing"`
+}
+
+// skipInitialBuildStrategyXML has a no-argument data-bound constructor, so
+// it carries no child element.
+type skipInitialBuildStrategyXML struct {
+	Plugin string `xml:"plugin,attr,omitempty"`
+}
+
+func skipInitialBuildStrategies() *buildStrategiesXML {
+	return &buildStrategiesXML{
+		SkipInitialBuildOnFirstBranchIndexing: &skipInitialBuildStrategyXML{
+			Plugin: "basic-branch-build-strategies",
+		},
+	}
 }
 
 // branchSourceSourceXML holds either a git or github SCM source.
@@ -541,7 +620,8 @@ type branchSourceSourceXML struct {
 
 type mbFactoryXML struct {
 	Class      string `xml:"class,attr"`
-	ScriptPath string `xml:"scriptPath"`
+	Plugin     string `xml:"plugin,attr,omitempty"`
+	ScriptPath string `xml:"scriptPath,omitempty"`
 }
 
 func multibranchConfigXML(item Item) xmlConfig {
@@ -567,6 +647,7 @@ func multibranchConfigXML(item Item) xmlConfig {
 					RepositoryURL:   entry.BranchSource.Source.GitHub.RepositoryURL,
 					ConfiguredByURL: entry.BranchSource.Source.GitHub.ConfiguredByURL,
 				},
+				BuildStrategies: skipInitialBuildStrategies(),
 			})
 			continue
 		}
@@ -579,6 +660,7 @@ func multibranchConfigXML(item Item) xmlConfig {
 					Remote:        entry.BranchSource.Source.Git.Remote,
 					CredentialsID: entry.BranchSource.Source.Git.CredentialsID,
 				},
+				BuildStrategies: skipInitialBuildStrategies(),
 			})
 			continue
 		}
@@ -591,6 +673,7 @@ func multibranchConfigXML(item Item) xmlConfig {
 					Remote:        entry.Git.Remote,
 					CredentialsID: entry.Git.CredentialsID,
 				},
+				BuildStrategies: skipInitialBuildStrategies(),
 			})
 			continue
 		}
@@ -602,22 +685,31 @@ func multibranchConfigXML(item Item) xmlConfig {
 					Plugin:    "github-branch-source",
 					RepoOwner: entry.GitHub.RepoOwner,
 				},
+				BuildStrategies: skipInitialBuildStrategies(),
 			})
 			continue
 		}
 	}
-	// Project factory: WorkflowBranchProjectFactory (official spec name) or MultiBranchProjectFactory
+	// Project factory: WorkflowBranchProjectFactory (official spec name),
+	// MultiBranchProjectFactory, or the plugin's marker factory.
 	if item.ProjectFactory != nil {
-		sp := ""
-		if item.ProjectFactory.WorkflowBranch != nil {
-			sp = item.ProjectFactory.WorkflowBranch.ScriptPath
-		} else if item.ProjectFactory.MultiBranch != nil {
-			sp = item.ProjectFactory.MultiBranch.ScriptPath
-		}
-		if sp != "" {
+		if item.ProjectFactory.VarroaMarker != nil {
 			m.Factory = &mbFactoryXML{
-				Class:      "org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory",
-				ScriptPath: sp,
+				Class:  "org.jenkinsci.plugins.varroamiteauth.template.VarroaTemplateBranchProjectFactory",
+				Plugin: varroaMiteAuthPlugin,
+			}
+		} else {
+			sp := ""
+			if item.ProjectFactory.WorkflowBranch != nil {
+				sp = item.ProjectFactory.WorkflowBranch.ScriptPath
+			} else if item.ProjectFactory.MultiBranch != nil {
+				sp = item.ProjectFactory.MultiBranch.ScriptPath
+			}
+			if sp != "" {
+				m.Factory = &mbFactoryXML{
+					Class:      "org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory",
+					ScriptPath: sp,
+				}
 			}
 		}
 	}
@@ -628,9 +720,10 @@ func multibranchConfigXML(item Item) xmlConfig {
 
 type folderPropertiesXML struct {
 	EnvVars           *envVarsFolderXML     `xml:"org.jenkinsci.plugins.envinject.EnvInjectFolderProperty,omitempty"`
-	FolderCredentials *folderCredentialsXML `xml:"com.cloudbees.hudson.plugins.folder.properties.FolderCredentialsProperty,omitempty"`
-	FolderLibraries   *folderLibrariesXML   `xml:"org.jenkinsci.plugins.pipeline.modeldefinition.model.GlobalSharedLibraryFolderProperty,omitempty"`
+	FolderCredentials *folderCredentialsXML `xml:"com.cloudbees.hudson.plugins.folder.properties.FolderCredentialsProvider_-FolderCredentialsProperty,omitempty"`
+	FolderLibraries   *folderLibrariesXML   `xml:"org.jenkinsci.plugins.workflow.libs.FolderLibraries,omitempty"`
 	ItemRestrictions  *itemRestrictionsXML  `xml:"com.cloudbees.hudson.plugins.folder.properties.RestrictedProjectsProperty,omitempty"`
+	Kubernetes        *kubernetesFolderXML  `xml:"org.csanchez.jenkins.plugins.kubernetes.KubernetesFolderProperty,omitempty"`
 }
 
 type envVarsFolderXML struct {
@@ -678,19 +771,32 @@ type secretTextCredXML struct {
 }
 
 type folderLibrariesXML struct {
-	Libraries []libraryEntryXML `xml:"libraries>org.jenkinsci.plugins.pipeline.modeldefinition.model.LibraryConfiguration"`
+	Libraries []libraryEntryXML `xml:"libraries>org.jenkinsci.plugins.workflow.libs.LibraryConfiguration"`
 }
 
 type libraryEntryXML struct {
-	Name                 string `xml:"name"`
-	Implicit             bool   `xml:"implicit,omitempty"`
-	AllowVersionOverride bool   `xml:"allowVersionOverride,omitempty"`
-	IncludeInChangesets  bool   `xml:"includeInChangesets,omitempty"`
+	Name                 string        `xml:"name"`
+	Retriever            *retrieverXML `xml:"retriever,omitempty"`
+	Implicit             bool          `xml:"implicit,omitempty"`
+	AllowVersionOverride bool          `xml:"allowVersionOverride,omitempty"`
+	IncludeInChangesets  bool          `xml:"includeInChangesets,omitempty"`
+}
+
+// retrieverXML renders a shared-library retriever. Only the modern-SCM
+// retriever is modeled; its scm element reuses the same source shape as a
+// multibranch branch source.
+type retrieverXML struct {
+	Class string                 `xml:"class,attr"`
+	SCM   *branchSourceSourceXML `xml:"scm"`
 }
 
 type itemRestrictionsXML struct {
 	AllowedTypes []string `xml:"allowedTypes>string"`
 	Filter       bool     `xml:"filter"`
+}
+
+type kubernetesFolderXML struct {
+	PermittedClouds []string `xml:"permittedClouds>string"`
 }
 
 func buildFolderProperties(item Item) (*folderPropertiesXML, error) {
@@ -750,8 +856,54 @@ func buildFolderProperties(item Item) (*folderPropertiesXML, error) {
 			}
 			props.FolderCredentials = &folderCredentialsXML{DomainCredentials: entries}
 		}
+		if p.FolderLibraries != nil {
+			var entries []libraryEntryXML
+			for _, lc := range p.FolderLibraries.Libraries {
+				cfg := lc.LibraryConfiguration
+				retriever, err := libraryRetrieverXML(cfg.Retriever)
+				if err != nil {
+					return nil, fmt.Errorf("folder library %q: %w", cfg.Name, err)
+				}
+				entries = append(entries, libraryEntryXML{
+					Name:                 cfg.Name,
+					Retriever:            retriever,
+					Implicit:             cfg.Implicit,
+					AllowVersionOverride: cfg.AllowVersionOverride,
+					IncludeInChangesets:  cfg.IncludeInChangesets,
+				})
+			}
+			props.FolderLibraries = &folderLibrariesXML{Libraries: entries}
+		}
+		if p.Kubernetes != nil {
+			props.Kubernetes = &kubernetesFolderXML{PermittedClouds: p.Kubernetes.PermittedClouds}
+		}
 	}
 	return props, nil
+}
+
+// libraryRetrieverXML renders a shared-library retriever. Only the
+// modern-SCM retriever is modeled today, and only its GitHub source, which
+// mirrors the multibranch branch-source model already rendered elsewhere in
+// this file.
+func libraryRetrieverXML(r LibraryRetriever) (*retrieverXML, error) {
+	if r.ModernSCM == nil {
+		return nil, fmt.Errorf("retriever names no source (only modernSCM is supported)")
+	}
+	if r.ModernSCM.SCM.GitHub == nil {
+		return nil, fmt.Errorf("retriever modernSCM: only a github source is supported")
+	}
+	gh := r.ModernSCM.SCM.GitHub
+	return &retrieverXML{
+		Class: "org.jenkinsci.plugins.workflow.libs.SCMSourceRetriever",
+		SCM: &branchSourceSourceXML{
+			Class:           "org.jenkinsci.plugins.github_branch_source.GitHubSCMSource",
+			Plugin:          "github-branch-source",
+			RepoOwner:       gh.RepoOwner,
+			Repository:      gh.Repository,
+			RepositoryURL:   gh.RepositoryURL,
+			ConfiguredByURL: gh.ConfiguredByURL,
+		},
+	}, nil
 }
 
 // ---- Organization Folder ----
@@ -763,6 +915,7 @@ type orgFolderXML struct {
 	Description      string               `xml:"description,omitempty"`
 	Navigators       *navigatorsXML       `xml:"navigators"`
 	ProjectFactories *projectFactoriesXML `xml:"projectFactories"`
+	BuildStrategies  *buildStrategiesXML  `xml:"buildStrategies"`
 }
 
 type navigatorsXML struct {
@@ -788,9 +941,10 @@ type projectFactoriesXML struct {
 
 func orgFolderConfigXML(item Item) xmlConfig {
 	o := &orgFolderXML{
-		Plugin:      "branch-api",
-		DisplayName: item.DisplayName,
-		Description: item.Description,
+		Plugin:          "branch-api",
+		DisplayName:     item.DisplayName,
+		Description:     item.Description,
+		BuildStrategies: skipInitialBuildStrategies(),
 	}
 	if len(item.Navigators) > 0 {
 		o.Navigators = &navigatorsXML{}

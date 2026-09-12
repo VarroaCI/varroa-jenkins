@@ -187,6 +187,206 @@ else
   check "All passwords in auth Secret are bcrypt hashes (no plaintext)" 1
 fi
 
+# 11. A disabled record store defines exactly three identities and no
+# recorder user.
+disabled_user_count=$(grep -c 'user: "operator"\|user: "gateway"\|user: "bff"\|user: "recorder"' <<<"$RENDER")
+[[ "$disabled_user_count" -eq 3 ]]
+check "recordStore disabled: exactly three identities" $?
+
+grep -q 'user: "recorder"' <<<"$RENDER" && check "recordStore disabled: no recorder user" 1 || check "recordStore disabled: no recorder user" 0
+
+# 12. An enabled record store adds the recorder identity with exactly its
+# D3 publish/subscribe grants, and extends the operator and gateway grants.
+RS_RENDER=$(helm template "$ROOT" --set auth.oidc.clientSecret=test --set auth.dashboardUrl=https://varroa.test --set recordStore.enabled=true -s templates/nats-auth-config.yaml 2>/dev/null) || {
+  echo "FAIL: helm template (recordStore.enabled) failed"
+  exit 1
+}
+
+rs_user_count=$(grep -c 'user: "operator"\|user: "gateway"\|user: "bff"\|user: "recorder"' <<<"$RS_RENDER")
+[[ "$rs_user_count" -eq 4 ]]
+check "recordStore enabled: exactly four identities" $?
+
+recorder_block=$(awk 'index($0, "user: \"recorder\""){capture=1} capture{print} capture && $0 == "        }"{exit}' <<<"$RS_RENDER")
+
+for subj in \
+  'varroa.ledger.actions.core' \
+  '_INBOX_gateway.>' \
+  '\$JS.API.STREAM.CREATE.varroa_builds' \
+  '\$JS.API.STREAM.UPDATE.varroa_builds' \
+  '\$JS.API.STREAM.INFO.varroa_builds' \
+  '\$JS.API.CONSUMER.CREATE.varroa_builds.>' \
+  '\$JS.API.CONSUMER.DURABLE.CREATE.varroa_builds.>' \
+  '\$JS.API.CONSUMER.INFO.varroa_builds.>' \
+  '\$JS.API.CONSUMER.MSG.NEXT.varroa_builds.>' \
+  '\$JS.ACK.varroa_builds.>' \
+  '\$JS.API.STREAM.CREATE.varroa_activity' \
+  '\$JS.API.STREAM.UPDATE.varroa_activity' \
+  '\$JS.API.STREAM.INFO.varroa_activity' \
+  '\$JS.API.CONSUMER.CREATE.varroa_activity.>' \
+  '\$JS.API.CONSUMER.DURABLE.CREATE.varroa_activity.>' \
+  '\$JS.API.CONSUMER.INFO.varroa_activity.>' \
+  '\$JS.API.CONSUMER.MSG.NEXT.varroa_activity.>' \
+  '\$JS.ACK.varroa_activity.>'; do
+  grep -q "$subj" <<<"$recorder_block"
+  check "recorder publishes $subj" $?
+done
+
+for subj in 'varroa.ledger.claim' '_INBOX_recorder.>'; do
+  grep -q "$subj" <<<"$recorder_block"
+  check "recorder subscribes $subj" $?
+done
+
+# The recorder holds no core activity.> grant, no KV grant, no mite grant, and
+# no wake grant. The quoted form distinguishes the core "activity.>" subject
+# from the recorder's legitimate "varroa_activity" JetStream subjects, which
+# end in the same four characters.
+for forbidden in '"activity.>"' '\$KV.' 'mite.' 'wake.>'; do
+  if grep -q "$forbidden" <<<"$recorder_block"; then
+    check "recorder does NOT hold $forbidden" 1
+  else
+    check "recorder does NOT hold $forbidden" 0
+  fi
+done
+
+# The bff holds no JetStream operation on varroa_activity: it reads activity
+# through the record store's SQL reader, not the stream.
+bff_rs_block=$(awk 'index($0, "user: \"bff\""){capture=1} capture{print} capture && $0 == "        }"{exit}' <<<"$RS_RENDER")
+if grep -q 'varroa_activity' <<<"$bff_rs_block"; then
+  check "bff does NOT hold any varroa_activity JetStream operation" 1
+else
+  check "bff does NOT hold any varroa_activity JetStream operation" 0
+fi
+grep -q '"activity\.>"' <<<"$bff_rs_block"
+check "bff (recordStore enabled) keeps core activity.> access" $?
+
+gateway_rs_block=$(awk 'index($0, "user: \"gateway\""){capture=1} capture{print} capture && $0 == "        }"{exit}' <<<"$RS_RENDER")
+grep -q 'builds.>' <<<"$gateway_rs_block"
+check "gateway (recordStore enabled) publishes builds.>" $?
+grep -q 'varroa.ledger.claim' <<<"$gateway_rs_block"
+check "gateway (recordStore enabled) publishes varroa.ledger.claim" $?
+
+operator_rs_block=$(awk 'index($0, "user: \"operator\""){capture=1} capture{print} capture && $0 == "        }"{exit}' <<<"$RS_RENDER")
+grep -q 'varroa.ledger.actions.>' <<<"$operator_rs_block"
+check "operator (recordStore enabled) subscribes varroa.ledger.actions.>" $?
+
+# 13. Live tail (control-bus-security): the bff subscribes to logs.> and
+# publishes to varroa.tail.> only when the record store is enabled, and no
+# other identity gains either subject.
+bff_rs_publish=$(awk '/publish: \[/{p=1;next} p && /\]/{exit} p{print}' <<<"$bff_rs_block")
+bff_rs_subscribe=$(awk '/subscribe: \[/{p=1;next} p && /\]/{exit} p{print}' <<<"$bff_rs_block")
+grep -q '"varroa.tail.>"' <<<"$bff_rs_publish"
+check "bff (recordStore enabled) publishes varroa.tail.>" $?
+grep -q '"logs.>"' <<<"$bff_rs_subscribe"
+check "bff (recordStore enabled) subscribes logs.>" $?
+
+for identity_block in "operator_rs_block:$operator_rs_block" "recorder_block:$recorder_block"; do
+  name="${identity_block%%:*}"
+  block="${identity_block#*:}"
+  if grep -q '"logs.>"\|"varroa.tail.>"' <<<"$block"; then
+    check "$name holds NEITHER logs.> nor varroa.tail.>" 1
+  else
+    check "$name holds NEITHER logs.> nor varroa.tail.>" 0
+  fi
+done
+
+# A disabled record store withholds both grants from the bff: the tail
+# feature depends on the record store, so its subjects follow the same gate
+# as the gateway's own logs.>/varroa.tail.> grants.
+if grep -q '"logs.>"\|"varroa.tail.>"' <<<"$bff_block"; then
+  check "bff (recordStore disabled) holds NEITHER logs.> nor varroa.tail.>" 1
+else
+  check "bff (recordStore disabled) holds NEITHER logs.> nor varroa.tail.>" 0
+fi
+
+# 14. Pipeline trigger/cancel (control-bus-security): the bff publishes to
+# mite.*.*.*.out only when the record store is enabled, following the same
+# gate as the tail grants. The recorder never holds it.
+grep -q '"mite\.\*\.\*\.\*\.out"' <<<"$bff_rs_publish"
+check "bff (recordStore enabled) publishes mite.*.*.*.out" $?
+
+if grep -q 'mite\.\*\.\*\.\*\.out' <<<"$bff_block"; then
+  check "bff (recordStore disabled) does NOT hold mite.*.*.*.out" 1
+else
+  check "bff (recordStore disabled) does NOT hold mite.*.*.*.out" 0
+fi
+
+if grep -q 'mite\.\*\.\*\.\*\.out' <<<"$recorder_block"; then
+  check "recorder does NOT hold mite.*.*.*.out" 1
+else
+  check "recorder does NOT hold mite.*.*.*.out" 0
+fi
+
+# 15. Tenant schedule purge (tenant-placement): the operator requests
+# varroa.recordstore.tenant.purge only when the record store is enabled,
+# the recorder subscribes to it, and the recorder can reply into the
+# operator's own inbox.
+grep -q 'varroa.recordstore.tenant.purge' <<<"$operator_rs_block"
+check "operator (recordStore enabled) publishes varroa.recordstore.tenant.purge" $?
+
+if grep -q 'varroa.recordstore.tenant.purge' <<<"$operator_block"; then
+  check "operator (recordStore disabled) does NOT hold varroa.recordstore.tenant.purge" 1
+else
+  check "operator (recordStore disabled) does NOT hold varroa.recordstore.tenant.purge" 0
+fi
+
+grep -q 'varroa.recordstore.tenant.purge' <<<"$recorder_block"
+check "recorder subscribes varroa.recordstore.tenant.purge" $?
+
+grep -q '_INBOX_operator.>' <<<"$recorder_block"
+check "recorder publishes _INBOX_operator.>" $?
+
+# 16. Tenant sync (placement-fencing, build-record-store): the operator
+# requests varroa.recordstore.tenant.sync only when the record store is
+# enabled, and subscribes its own reply inbox; the recorder subscribes
+# to the request subject and can reply into the operator's own inbox.
+grep -q 'varroa.recordstore.tenant.sync' <<<"$operator_rs_block"
+check "operator (recordStore enabled) publishes varroa.recordstore.tenant.sync" $?
+
+if grep -q 'varroa.recordstore.tenant.sync' <<<"$operator_block"; then
+  check "operator (recordStore disabled) does NOT hold varroa.recordstore.tenant.sync" 1
+else
+  check "operator (recordStore disabled) does NOT hold varroa.recordstore.tenant.sync" 0
+fi
+
+grep -q '_INBOX_operator.>' <<<"$operator_block"
+check "operator subscribes its own reply inbox _INBOX_operator.>" $?
+
+grep -q 'varroa.recordstore.tenant.sync' <<<"$recorder_block"
+check "recorder subscribes varroa.recordstore.tenant.sync" $?
+
+# 17. Cross-tenant pipeline calls (control-bus-security, D16): the gateway
+# requests varroa.ledger.crosstenant only when the record store is
+# enabled, and the recorder answers it. No other identity holds it, and
+# no mite NATS identity exists at all in this chart — a mite only ever
+# reaches the recorder through the gateway's relay.
+grep -q 'varroa.ledger.crosstenant' <<<"$gateway_rs_block"
+check "gateway (recordStore enabled) publishes varroa.ledger.crosstenant" $?
+
+if grep -q 'varroa.ledger.crosstenant' <<<"$gateway_block"; then
+  check "gateway (recordStore disabled) does NOT hold varroa.ledger.crosstenant" 1
+else
+  check "gateway (recordStore disabled) does NOT hold varroa.ledger.crosstenant" 0
+fi
+
+grep -q 'varroa.ledger.crosstenant' <<<"$recorder_block"
+check "recorder subscribes varroa.ledger.crosstenant" $?
+
+for identity_block in "operator_rs_block:$operator_rs_block" "bff_rs_block:$bff_rs_block"; do
+  name="${identity_block%%:*}"
+  block="${identity_block#*:}"
+  if grep -q 'varroa.ledger.crosstenant' <<<"$block"; then
+    check "$name does NOT hold varroa.ledger.crosstenant" 1
+  else
+    check "$name does NOT hold varroa.ledger.crosstenant" 0
+  fi
+done
+
+if grep -q 'user: "mite"' <<<"$RS_RENDER"; then
+  check "no mite NATS identity exists" 1
+else
+  check "no mite NATS identity exists" 0
+fi
+
 echo ""
 if [[ "$failures" -eq 0 ]]; then
   echo "=== ALL ASSERTIONS PASSED ==="

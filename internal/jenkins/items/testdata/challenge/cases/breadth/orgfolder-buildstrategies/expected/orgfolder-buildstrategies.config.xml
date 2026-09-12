@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<jenkins.branch.OrganizationFolder plugin="branch-api">
+  <displayName>Org Folder Build Strategies</displayName>
+  <description>Organization folder asserting the unconditional skip-initial-build strategy</description>
+  <navigators>
+    <org.jenkinsci.plugins.github_branch_source.GitHubSCMNavigator plugin="github-branch-source">
+      <repoOwner>fake-org</repoOwner>
+      <credentialsId>github-cred</credentialsId>
+    </org.jenkinsci.plugins.github_branch_source.GitHubSCMNavigator>
+  </navigators>
+  <projectFactories>
+    <org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory class="org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory">
+      <scriptPath>Jenkinsfile</scriptPath>
+    </org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory>
+  </projectFactories>
+  <buildStrategies>
+    <jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing plugin="basic-branch-build-strategies"></jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing>
+  </buildStrategies>
+</jenkins.branch.OrganizationFolder>

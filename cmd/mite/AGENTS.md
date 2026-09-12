@@ -45,6 +45,12 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
     that must not silently drop — a full queue ends the stream session.
     `commandWorker` (`agent.go:994`) drains one command at a time so Jenkins
     writes never overlap desired-state and imperative work.
+  - **`REPLAY_WEBHOOK` delivery identity** — `runCommand`'s replay case
+    sets `X-Varroa-Delivery` from `ReplayWebhookPayload.delivery_id` after
+    it copies every header the envelope carries, so a forged inbound
+    header under that name cannot survive the replay; it sets nothing
+    when `delivery_id` is empty. Correlation with the operator's own
+    command tracking still rides `CommandId`, a separate field.
   - **gRPC keepalive** — `connect` (`agent.go:566`) dials with
     `grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: 30s, Timeout:
     10s})` (`agent.go:598-602`). Must stay compatible with the gateway's
@@ -81,6 +87,70 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
 - **`main.go`** — flag/env parsing, logger + telemetry init, `Agent`
   construction, and the SIGTERM/SIGINT→drain→cancel sequencing described
   above.
+- **`loopback.go`** — the HTTP listener the Jenkins plugin talks to,
+  `127.0.0.1:9095` (`MITE_LOOPBACK_PORT` overrides), started and stopped
+  alongside the agent run loop. Three core routes, plus four cross-tenant
+  routes below: `POST /v1/events` forwards one
+  or more `BuildEvent`s as `MiteMessage.build_event`, `POST /v1/claim`
+  forwards one `ClaimRequest` as `MiteMessage.claim_request` and blocks for
+  the reply, `POST /v1/log` (`handleLog`) reads nine `X-Varroa-*` headers
+  (`parseLogChunkHeaders`) plus the raw body, stamps the cell's own pod
+  identity onto `LogChunk.cell_instance` (the plugin never sends one), and
+  forwards it as `MiteMessage.log_chunk`. Every request carries
+  `Authorization: Bearer <token>`, checked
+  with `crypto/subtle.ConstantTimeCompare` against the token the mite wrote
+  to `/var/run/varroa/loopback-token` before the listener opened — the mite
+  never re-reads that file itself; it is a write-once token for the life of
+  the process, and the plugin is the side that re-reads on a `401`. The
+  waiter map (`claimWaiterMap`, at most 64 concurrent entries) resolves a
+  blocked `/v1/claim` call by `request_id` when `processCommands` reads the
+  matching `OperatorMessage.claim_response`; a 65th concurrent claim gets
+  `429` with no send, and stream teardown closes every open waiter so none
+  leaks. The retained-event map (keyed by `run_id`/`event_seq`, bounded by
+  `VARROA_EVENT_RETAIN_BYTES`) replays in order after every reconnect and
+  releases an entry only on a matching `event_ack`. Metrics:
+  `varroa.mite.claims.{granted,duplicate,vetoed,failed}` and
+  `varroa.mite.build_events.{forwarded,acked,rejected,retained_bytes}`.
+  - **The log retention buffer and `/v1/log` back pressure** — mirrors the
+    event retention pattern above, at `VARROA_MITE_LOG_RETAIN_BYTES`
+    (default 64 MiB, `logRetentionStore`). `handleLog` answers `503` once
+    the bound is reached, and again while a per-run `BUSY` pause window from
+    `handleLogAck` is open, so the plugin's own retry-with-backoff carries
+    the back pressure with no new plugin rule. `handleLogAck`
+    (`OperatorMessage.log_ack`) releases every retained chunk of a run at or
+    below `ack_seq` on `STORED` or `REJECTED`, and re-arms the pause window
+    on `BUSY`. Every retained chunk re-sends, in `seq` order, on the next
+    stream open — a mite restart loses the buffer, and the gateway detects
+    the resulting sequence gap.
+  - **Cross-tenant routes** — four more routes on the same listener, gated
+    by the same bearer token: `POST /v1/cross-tenant/build` accepts kind
+    `build`; `.../status` accepts `status` and `last_successful`;
+    `.../artifact` accepts `artifact_list` and `artifact_url`; `.../lock`
+    accepts `lock_acquire`, `lock_renew`, and `lock_release`. Each route
+    answers the response's `payload_json` as the HTTP body (the flat
+    recorder fields), never the transport envelope. A `kind`
+    outside a route's own set, or outside the eight allocated values, is
+    refused with `400` before the request forwards as
+    `MiteMessage.cross_tenant_request`. `crossTenantWaiterMap` is a
+    separate type from `claimWaiterMap` (they key on different id types)
+    but shares its shape and its 64-entry cap
+    (`maxCrossTenantWaiters = maxClaimWaiters`); a 65th concurrent request
+    gets `429` with no send, and stream teardown releases every open
+    waiter. Every mite-generated failure (400/401/413/429/503/504)
+    answers `{"code":"UNAVAILABLE"}` in `payload_json`, since
+    `CrossTenantResponse` carries no dedicated code field.
+    `crossTenantMiteTimeoutFromEnv` resolves
+    `VARROA_CROSSTENANT_MITE_TIMEOUT_MS` (default 9500ms, clamped to the
+    listener's own 10s write timeout) independently of
+    `internal/mite.CrossTenantTimeoutFromEnv` — `cmd/mite` does not import
+    `internal/mite`, so the two budgets are separate parsers with the same
+    rule, not one shared function.
+  - **`handleTailControl`** applies one `OperatorMessage.tail_control`: it
+    calls the Jenkins plugin's `/varroa-log/tail` root action with the
+    cached Jenkins bearer JWT, then answers `MiteMessage.tail_ack` with the
+    same `control_id`. It runs in its own goroutine so a slow local Jenkins
+    call never blocks `processCommands`' read loop from dispatching the next
+    message.
 - **`fingerprint.go`** — live-drift fingerprinting: hashes the currently
   applied JCasC/plugins/items/RBAC and compares against the last
   operator-issued desired-state hash, surfaced via `liveDrift` in heartbeats.
@@ -88,6 +158,22 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   `IdleGauges` (queue/build activity) on a ticker and caches the latest
   result for `sendHeartbeats` to attach; emits
   `varroa.mite.activity.events.{dropped,forwarded}` metrics.
+- **`job_schedule_poller.go`** — `startJobSchedulePoller` polls
+  `GET /varroa-activity/schedules` every `jobSchedulePollInterval` (10
+  minutes) and once immediately on every stream (re)connect, caching the
+  decoded set for `sendHeartbeats` to attach as `StateSnapshot.job_schedules`.
+  The hash gate: `sendHeartbeats` fills that field only when the cached
+  set's hash (`computeJobScheduleHash`, over `jobPath`/`triggerType`/
+  `spec`/`timezone`/`disabled`/`upstreamTenant`/`upstreamJob`/
+  `upstreamResult`, sorted, excluding the fire times) differs
+  from the hash of the last sent set, or the stream reconnected since the
+  last send, or `jobScheduleResendInterval` (30 minutes) has passed. Every
+  other heartbeat leaves the field unset. A poll failure keeps the last
+  known set and hash in place and retries on the next tick. A row's
+  `upstreamTenant`/`upstreamJob`/`upstreamResult` (empty for every row but
+  a `varroa-upstream` trigger) carry through to the matching
+  `mitev1.JobSchedule` fields unchanged, so an edit to just those three
+  values still reopens the send gate.
   - **Plugin inventory collector** — `startPluginInventoryCollector`
     (`agent.go`): runs on the heartbeat tick, with its own timeout so a wedged
     Jenkins never blocks the heartbeat send path. Collects via
@@ -99,6 +185,21 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
     command forces a fresh collection and unconditional push. A degradation
     ladder drops optional edges, then all edges, when the marshalled payload
     exceeds the NATS budget (~900 KiB).
+- **`rehydrate.go`** — applies an operator-sent `RehydrationBundle` under
+  `JENKINS_HOME`. `handleDesiredState` (`agent.go`) tracks it as the fourth
+  desired-state section, alongside `config`, `rbac`, and `items`: it runs
+  after config/RBAC and before items, so a job the items section is about to
+  touch is already seeded, and reloads every `ReloadItems` path after the
+  items apply completes. `checkRehydrationPath` accepts only the
+  `jobs/<seg>/.../builds/<n>/{build.xml,changelog0.xml}` and
+  `jobs/<seg>/.../nextBuildNumber` path shapes, confines the resolved path
+  under `JENKINS_HOME`, and refuses a symbolic link anywhere in its parent
+  chain. `applyRehydrationBundle` inflates each file's gzip content against
+  its declared `raw_size` with a bounded reader, so a mismatched size can
+  never force an unbounded inflation; it defers a job whose `config.xml`
+  does not exist yet, never overwrites an existing build directory, and
+  never lowers a stored `nextBuildNumber`. A deferred job's path returns in
+  `DesiredStateResult.RehydrationDeferredJobs` for the operator to retry.
 
 ## Verification
 

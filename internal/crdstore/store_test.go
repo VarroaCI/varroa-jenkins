@@ -33,6 +33,7 @@ func TestRegistry_AllTypesResolve(t *testing.T) {
 		{"JenkinsVersionProfile", GVRFor[v1alpha1.JenkinsVersionProfile]},
 		{"Group", GVRFor[v1alpha1.Group]},
 		{"Team", GVRFor[v1alpha1.Team]},
+		{"Runner", GVRFor[v1alpha1.Runner]},
 		{"UpdateCenter", GVRFor[v1alpha1.UpdateCenter]},
 	}
 	for _, tt := range tests {

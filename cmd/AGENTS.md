@@ -24,7 +24,13 @@ stating what it is/is not responsible for:
   reconciler for `Controller` CRDs; drives the `Pending→Provisioning→Running→
   Connected→Failed` phase state machine over NATS and serves the per-controller
   hibernation wake interstitial on `VARROA_WAKE_PORT` (default `8082`) from every
-  replica. No gRPC/OIDC.
+  replica. No gRPC/OIDC. One leader replica queue-subscribes
+  `varroa.ledger.actions.>` (`ledger_action.go`) and filters on each action's
+  own cluster field; `handleLedgerAction` maps `cancel_run`/`retry_run`/
+  `trigger_run` to the matching mite imperative command and `wake_cell` to a
+  direct hibernation wake, and counts an unknown kind rather than acting on
+  it. `trigger_run` wakes a hibernated target through the same hibernation
+  call before it sends the command; a connected target is not woken.
 - **`gateway/`** (`bin/varroa-gateway`) — terminates mTLS/gRPC from mite
   sidecars on `:9090` and bridges each `CommandStream` to NATS
   (`mite.<cluster>.<ns>.<name>.{in,out,content}`). Loads the shared CA from the `varroa-ca`
@@ -47,9 +53,31 @@ stating what it is/is not responsible for:
   `update-center.actual.json` + plugin `.hpi` blobs from an `internal/oci`
   BlobStore; local storage mode is single-replica (PVC), oci mode is stateless.
   Built by `make build` into the same product image as the other backends.
+- **`recorder/`** (`bin/varroa-recorder`) — the build-record store
+  recorder; HTTP on `:8080` with only `/healthz`, `/readyz`, `/metrics`.
+  The only writer of `internal/recordstore`'s Postgres tables, the only
+  owner of its migrations, and the only creator of the `varroa_builds`
+  and `varroa_activity` JetStream streams. Nine goroutines: the build
+  ingest pull consumer, the activity ingest pull consumer, the
+  `varroa.ledger.claim` responder, the owner responder, the tenant purge
+  responder, the tenant sync responder, the `varroa.ledger.crosstenant`
+  responder (dispatches eight request kinds: `build`, `status`,
+  `last_successful`, `artifact_list`, `artifact_url`, `lock_acquire`,
+  `lock_renew`, `lock_release`; an unknown kind is rejected before any
+  database read), the hourly retention/maintenance ticker, and the
+  once-a-minute backstop scheduler (D9's interrupted sweep and D11's
+  cron backstop, one leader-elected round under a third advisory-lock
+  key) (`runWorkers` in `run.go` takes a variadic `namedWorker` list, so
+  a worker's name travels with its function).
+  Needs no Kubernetes API access. `run(ctx, cfg)` in `run.go` holds the
+  whole wiring and shutdown sequence, so a test drives it without
+  `main`'s flag parsing. Does not serve any REST or MCP surface — that is
+  `bff/`, through `internal/recordstore.Reader`.
 - **`mite/`** (`bin/varroa-mite`) — sidecar injected into every Jenkins pod;
   own contract in `cmd/mite/AGENTS.md`. Reports health, state, observability,
   and full plugin inventories; applies desired-state and imperative commands.
+  Also runs a `127.0.0.1:9095` HTTP loopback listener for the co-located
+  Jenkins plugin's build-event and claim traffic.
 - **`varroactl/`** (`bin/varroactl`) — CLI + MCP surface; own contract in
   `cmd/varroactl/AGENTS.md`.
 - **`fakemite/`** — synthetic load generator: opens N real mTLS
@@ -69,12 +97,13 @@ stating what it is/is not responsible for:
   the committed block in `pr.yaml`. Presence-only — it records declared
   minimums verbatim and never compares versions.
 
-`operator`, `gateway`, `bff`, `mite` are all compiled from the single
-repo-root `Dockerfile` into one image; `varroactl` ships as a separate
-standalone binary (not baked into that image). `protogen` and `bootstrapdeps`
-are repo tooling: `go run` only, no Makefile build target, no image stage.
+`operator`, `gateway`, `bff`, `mite`, `updatecenter`, `recorder` are all
+compiled from the single repo-root `Dockerfile` into one image; `varroactl`
+ships as a separate standalone binary (not baked into that image). `protogen`
+and `bootstrapdeps` are repo tooling: `go run` only, no Makefile build target,
+no image stage.
 
-**Bus credentials and health, shared by `operator`/`gateway`/`bff`:** each takes
+**Bus credentials and health, shared by `operator`/`gateway`/`bff`/`recorder`:** each takes
 `-bus-pass-file`, which `internal/bus` re-reads on every reconnect so a rotated
 NATS Secret is followed without a restart. The chart always passes it; the
 `BUS_PASSWORD` env is the no-file fallback for local runs. Each passes its
@@ -96,7 +125,7 @@ serves the dashboard and the gateway's replicas share one credential.
 ## Verification
 
 ```bash
-make build       # compiles bin/varroa-operator, bin/varroa-gateway, bin/varroa-bff, bin/varroa-mite
+make build       # compiles bin/varroa-operator, bin/varroa-gateway, bin/varroa-bff, bin/varroa-mite, bin/varroa-updatecenter, bin/varroa-recorder
 make build-cli    # compiles bin/varroactl (separate target, not part of `make build`)
 make test         # all Go tests, race detector, repo-wide
 make lint         # golangci-lint, repo-wide
