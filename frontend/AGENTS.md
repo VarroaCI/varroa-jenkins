@@ -154,6 +154,9 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   single `useEventStream` call for the run and passes `lastEvent` down to
   `StageGraph.tsx` and `RunLogViewer.tsx` as a prop). `StageGraph.tsx` renders
   a run's stages from `GetRun`'s stage list plus live `stage` frames.
+  `BuildPage.tsx` also renders one terminal card, in its own early return
+  after the `!run` guard, for a run whose `result` is `TRIGGER_FAILED`: the
+  record exists, so the `requested` and `notStarted` blocks never run for it.
   `RunLogViewer.tsx` renders the log stream: search, virtualized scroll, and
   ANSI colour via `ansi.ts`'s `parseAnsiLine`. `RunLogViewer` is a pure
   renderer of the `lastEvent` prop; it never calls `useEventStream` itself.

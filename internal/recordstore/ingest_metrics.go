@@ -21,7 +21,7 @@ const (
 )
 
 // IngestMetrics holds the recorder's ingest instruments on the
-// "varroa-recorder" meter: five counters the disposition table drives,
+// "varroa-recorder" meter: six counters the disposition table drives,
 // and two observable gauges reporting the consumer's backlog.
 type IngestMetrics struct {
 	unknown           metric.Int64Counter
@@ -29,6 +29,7 @@ type IngestMetrics struct {
 	orphan            metric.Int64Counter
 	scheduleTruncated metric.Int64Counter
 	scheduleStale     metric.Int64Counter
+	triggerFailed     metric.Int64Counter
 	backlogMsgs       metric.Int64ObservableGauge
 	backlogBytes      metric.Int64ObservableGauge
 }
@@ -70,6 +71,12 @@ func NewIngestMetrics(conn *bus.Conn, streamName, consumerName string) (*IngestM
 		metric.WithDescription("job.schedules envelopes acknowledged with no change, because their time was not newer than the cell's stored watermark"))
 	if err != nil {
 		return nil, fmt.Errorf("register recorder_schedules_stale_total: %w", err)
+	}
+
+	m.triggerFailed, err = meter.Int64Counter("recorder_ingest_trigger_failed_total",
+		metric.WithDescription("run.trigger_failed envelopes the recorder stored, or skipped because a row already exists"))
+	if err != nil {
+		return nil, fmt.Errorf("register recorder_ingest_trigger_failed_total: %w", err)
 	}
 
 	m.backlogMsgs, err = meter.Int64ObservableGauge("recorder_ingest_backlog_msgs",
@@ -133,6 +140,15 @@ func (m *IngestMetrics) addScheduleTruncated(ctx context.Context) {
 		return
 	}
 	m.scheduleTruncated.Add(ctx, 1)
+}
+
+// addTriggerFailed counts one recorder_ingest_trigger_failed_total
+// event, labelled by reason code.
+func (m *IngestMetrics) addTriggerFailed(ctx context.Context, reasonCode string) {
+	if m == nil || m.triggerFailed == nil {
+		return
+	}
+	m.triggerFailed.Add(ctx, 1, metric.WithAttributes(attribute.String("reason_code", reasonCode)))
 }
 
 // addScheduleStale counts one recorder_schedules_stale_total event.

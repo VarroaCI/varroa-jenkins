@@ -77,6 +77,27 @@
   gap: 8px;
 }
 
+.triggerFailed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  font-size: 13.5px;
+}
+
+.triggerFailed h1 {
+  color: var(--bad-text);
+  font-size: 20px;
+  margin: 0;
+}
+
+.triggerFailed p {
+  margin: 0;
+}
+
 .interruptedBanner {
   display: flex;
   align-items: center;

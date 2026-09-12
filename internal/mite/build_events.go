@@ -37,7 +37,32 @@ const (
 	kindRunChanges   = "run.changes"
 	kindRunLog       = "run.log"
 	kindRunHeartbeat = "run.heartbeat"
+	// kindRunTriggerFailed records a build trigger Jenkins refused. The
+	// gateway publishes it from a failed TRIGGER_BUILD result, not from a
+	// BuildEvent.
+	kindRunTriggerFailed = "run.trigger_failed"
 )
+
+// Reason codes a run.trigger_failed envelope carries. The set is complete:
+// every status maps onto exactly one of them.
+const (
+	reasonJobNotFound     = "JOB_NOT_FOUND"
+	reasonJobNotBuildable = "JOB_NOT_BUILDABLE"
+	reasonTriggerRejected = "TRIGGER_REJECTED"
+)
+
+// reasonCodeForStatus maps the Jenkins HTTP status of a failed trigger onto
+// one reason code. The status 0 names a call that reached no Jenkins.
+func reasonCodeForStatus(status int) string {
+	switch status {
+	case 404:
+		return reasonJobNotFound
+	case 409:
+		return reasonJobNotBuildable
+	default:
+		return reasonTriggerRejected
+	}
+}
 
 // EventAck status values.
 const (
@@ -59,12 +84,16 @@ const errorTruncateChars = 512
 
 var (
 	buildEventsDropped metric.Int64Counter
+	triggerFailedTotal metric.Int64Counter
 )
 
 func init() {
 	meter := otel.Meter("varroa-gateway")
 	buildEventsDropped, _ = meter.Int64Counter("varroa.gateway.build_events.dropped",
 		metric.WithDescription("Build events and build event publishes the gateway dropped or rejected"),
+	)
+	triggerFailedTotal, _ = meter.Int64Counter("varroa.gateway.trigger_failed",
+		metric.WithDescription("Failed build triggers the gateway published as a record"),
 	)
 }
 

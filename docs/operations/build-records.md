@@ -111,6 +111,28 @@ days, depending on where in the month the build ran. `logs` and `artifacts` roun
 The build-number watermark is permanent. Retention never deletes it, even after every run of a
 job expires. A build number is never reused.
 
+## A trigger that fails
+
+Jenkins can refuse a build trigger. The record store then holds one run whose result is
+`TRIGGER_FAILED`, and the run page names the reason.
+
+| Reason code | What it means |
+|---|---|
+| `JOB_NOT_FOUND` | The job does not exist on the controller. |
+| `JOB_NOT_BUILDABLE` | The job exists, but it cannot start a build. |
+| `TRIGGER_REJECTED` | The controller refused the trigger for another reason. |
+
+The run page also shows the error text the controller reported.
+
+Such a run holds no build number, no log, and no stage. No build started, so there is nothing to
+show. `Re-run` starts a fresh run, with each parameter's declared default.
+
+A `TRIGGER_FAILED` run counts in no job statistic. It changes no pass rate, no result count, no
+median duration, and no last-build tile. It still appears in the job's run list, and a run list
+filtered on the result `TRIGGER_FAILED` returns it.
+
+Retention treats the run like every other run. The `runs` value above bounds it.
+
 ## Activity history
 
 Activity history rides two stores: a fixed transport buffer in NATS and a durable table in

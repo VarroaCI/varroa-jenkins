@@ -127,6 +127,16 @@ func handleIngestMessage(ctx context.Context, ingester *Ingester, metrics *Inges
 			logger.Warn("job schedule envelope truncated; stored every carried row and deleted none",
 				"cluster", env.Cluster, "namespace", env.Namespace, "cell", env.Cell)
 		}
+		if result.TriggerFailedReason != "" {
+			metrics.addTriggerFailed(ctx, result.TriggerFailedReason)
+			if result.TriggerFailedStored {
+				logger.Info("failed build trigger recorded",
+					"runID", env.RunID, "reasonCode", result.TriggerFailedReason)
+			} else {
+				logger.Info("failed build trigger skipped; a run already holds that run id",
+					"runID", env.RunID, "reasonCode", result.TriggerFailedReason)
+			}
+		}
 		if result.ScheduleStale {
 			metrics.addScheduleStale(ctx)
 			logger.Info("stale job schedule envelope acknowledged with no change",

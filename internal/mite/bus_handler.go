@@ -194,6 +194,16 @@ type BusHandler struct {
 	// defaultJobScheduleStreamMissingTTL; tests shrink it.
 	scheduleStreamMissingTTL time.Duration
 
+	// recordStoreEnabled reports whether this install configured a record
+	// store, so a builds stream exists to publish onto. cmd/gateway sets it
+	// from the opened blob store, never from VARROA_RECORDSTORE_DSN: the
+	// chart supplies that DSN only in postgres blob mode, and the blob URL
+	// in every mode. The failed-trigger path reads this flag instead of the
+	// schedule path's time-based cache: a cache cannot tell a missing
+	// stream from a transient publish failure, and a failed trigger must
+	// never be acknowledged without its record.
+	recordStoreEnabled bool
+
 	// publisher is the build-event JetStream publish seam. Defaults to
 	// conn; tests substitute a fake.
 	publisher buildEventPublisher
@@ -531,11 +541,119 @@ func (h *BusHandler) OnSnapshot(name, ns string, snap *mitev1.StateSnapshot) {
 	h.handleJobSchedules(ns, name, schedules)
 }
 
+// SetRecordStoreEnabled declares whether this install configured a record
+// store. cmd/gateway calls it once at startup. An install with no record store
+// publishes no run.trigger_failed envelope at all.
+func (h *BusHandler) SetRecordStoreEnabled(enabled bool) {
+	h.recordStoreEnabled = enabled
+}
+
+// recordFailedTrigger publishes the record of a failed TRIGGER_BUILD result,
+// and reports whether the pending imperative message may be acknowledged.
+//
+// The rule has two arms. With no record store the gateway publishes nothing,
+// counts nothing, and acknowledges: such an install has nothing to record.
+// With a record store the gateway publishes, and ANY publish error blocks the
+// acknowledgement. The stream then redelivers the command, the mite triggers
+// again, and the next result publishes. It consults no time-based cache here:
+// a cache cannot tell a missing stream from a transient failure, so an armed
+// cache would acknowledge the redelivery and lose the record.
+//
+// Every other outcome acknowledges, because a redelivery would trigger the
+// same build again and change nothing.
+func (h *BusHandler) recordFailedTrigger(ns, name string, pendingMsg *nats.Msg, result *mitev1.CommandResult) bool {
+	if result.Success || !h.recordStoreEnabled {
+		return true
+	}
+	payload := triggerBuildPayload(pendingMsg)
+	if payload == nil {
+		return true
+	}
+	return h.publishTriggerFailed(ns, name, payload, result)
+}
+
+// publishTriggerFailed publishes one run.trigger_failed envelope for a
+// TRIGGER_BUILD command Jenkins refused. It reports whether the pending
+// imperative message may be acknowledged. An unresolved tenant publishes
+// nothing and counts a rejection: a cell must not write a record under a tenant
+// it does not host.
+func (h *BusHandler) publishTriggerFailed(ns, name string, payload *mitev1.TriggerBuildPayload, result *mitev1.CommandResult) bool {
+	key := ns + "/" + name
+
+	tenant, _ := h.resolver().ResolveJobTenant(h.cluster, ns, name, payload.JobPath)
+	if tenant == "" {
+		buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("failed trigger unresolved, publishing no envelope",
+			"controller", key, "job_path", payload.JobPath)
+		return true
+	}
+
+	reasonCode := reasonCodeForStatus(result.HttpStatus)
+	env := ingestEnvelope{
+		SchemaVersion: 1,
+		Kind:          kindRunTriggerFailed,
+		RunID:         payload.RunId,
+		IntentKey:     payload.IntentKey,
+		Cluster:       h.cluster,
+		Namespace:     ns,
+		Cell:          name,
+		CellInstance:  h.lookupCellInstance(ns, name),
+		Tenant:        tenant,
+		JobPath:       payload.JobPath,
+		// A TriggerBuildPayload carries no timestamp, so the gateway clock
+		// is the only source.
+		OccurredAt: time.Now().UTC(),
+		Payload: map[string]interface{}{
+			"error":       truncateRunes(result.Error, errorTruncateChars),
+			"reason_code": reasonCode,
+			"http_status": result.HttpStatus,
+			"actor":       payload.Actor,
+		},
+	}
+
+	data, err := json.Marshal(env)
+	if err != nil {
+		h.log().Error("marshal trigger failure envelope failed", "controller", key, "error", err)
+		return true
+	}
+
+	if _, err := h.publisher.PublishJetStream(bus.BuildSubject(h.cluster, ns, name), data); err != nil {
+		buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("trigger failure publish failed, leaving the command unacknowledged",
+			"controller", key, "error", err)
+		return false
+	}
+
+	triggerFailedTotal.Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("reason_code", reasonCode)))
+	return true
+}
+
+// triggerBuildPayload returns the TriggerBuildPayload of a pending imperative
+// message, or nil when the message carries another command type. The pending
+// message's Data holds the marshaled OperatorMessage, so the gateway decodes it
+// again rather than keeping a second map.
+func triggerBuildPayload(msg *nats.Msg) *mitev1.TriggerBuildPayload {
+	var op mitev1.OperatorMessage
+	if err := json.Unmarshal(msg.Data, &op); err != nil {
+		return nil
+	}
+	imp := op.GetImperative()
+	if imp == nil || imp.Type != mitev1.CommandTypeTriggerBuild {
+		return nil
+	}
+	return imp.TriggerBuild
+}
+
 // OnCommandResult publishes the result to the mite inbound subject — or, for a
 // REPLAY_WEBHOOK command, to the dedicated whreply.* subject so it bypasses the
 // reconciler's shared command-result buffer. If the result matches a pending
 // imperative command, the JetStream msg is acked so it is not redelivered after
 // a gateway restart.
+//
+// A failed TRIGGER_BUILD result first publishes one run.trigger_failed
+// envelope. Its pending message waits for that publish, so a failed publish
+// leaves the stream to redeliver the command. Every other case acks at once.
 func (h *BusHandler) OnCommandResult(name, ns string, result *mitev1.CommandResult) {
 	key := ns + "/" + name
 
@@ -564,7 +682,7 @@ func (h *BusHandler) OnCommandResult(name, ns string, result *mitev1.CommandResu
 	}
 	h.mu.Unlock()
 
-	if pendingMsg != nil {
+	if pendingMsg != nil && h.recordFailedTrigger(ns, name, pendingMsg, result) {
 		_ = pendingMsg.Ack()
 	}
 

@@ -40,8 +40,11 @@ of the fleet's audit activity, once a controller becomes disposable.
   `dead_instances`) the interrupted-run sweep reads. `00006_fleet_locks.sql`
   adds `fleet_locks`, the fleet-lock authority (see the Fleet locks
   bullet), and the sequence `fleet_lock_fence_seq`. `00007_job_schedule_upstream.sql`
-  adds `job_schedules`'s three upstream columns. A later migration
-  never edits an applied one. `migrationsFS` (`migrations.go`) embeds
+  adds `job_schedules`'s three upstream columns.
+  `00008_trigger_failed_result.sql` widens `runs_result_check` so
+  `runs.result` accepts `TRIGGER_FAILED`; its down step deletes every
+  such row first, because a row left behind fails the narrower
+  constraint. A later migration never edits an applied one. `migrationsFS` (`migrations.go`) embeds
   every file under `migrations/` into the binary through `embed.FS`, so
   the recorder needs no separate deploy artifact. Monthly partition
   names on `runs`, `log_chunks`, and `activity` follow
@@ -215,11 +218,25 @@ of the fleet's audit activity, once a controller becomes disposable.
   that applies D4's disposition table; `EnsureBuildsStream`
   (`ingest_stream.go`) creates the `varroa_builds` stream, and
   `cmd/recorder` is the only caller. `IngestMetrics`
-  (`ingest_metrics.go`) holds the five `recorder_ingest_*` instruments on
+  (`ingest_metrics.go`) holds the six `recorder_ingest_*` instruments on
   `otel.Meter("varroa-recorder")`. The `job.schedules` kind rides the same
   `varroa_builds` stream and the same `recorder` consumer as every
   `run.*` kind; it carries an empty `run_id`, so `Ingester.Apply` skips
-  the intent lookup for it. `ingest_job_schedules.go` upserts every row
+  the intent lookup for it. The `run.trigger_failed` kind takes the same
+  early route, before `uuid.Parse` and before `loadIntent`: a failed
+  trigger writes the only record of its run, so no intent can exist
+  before it. `applyTriggerFailed` (`ingest_trigger_failed.go`) inserts
+  one `runs` row stamped with the UUIDv7 time of its own `run_id`, under
+  `ON CONFLICT (created_at, run_id) DO NOTHING`. That pinned
+  `created_at` gives a real row and a synthetic row one primary key, so
+  the conflict clause alone decides which write wins. A real event
+  supersedes a stored `TRIGGER_FAILED` row in place:
+  `supersedeTriggerFailedSQL` (`ingest_common.go`) is the predicate, and
+  `runsStatusMergeSQL` takes its second half as a parameter (`TRUE` in
+  `applyRunStarted`, the owner flag in `applyRunCompleted`, so a foreign
+  completion supersedes nothing). The recorder runs no separate delete,
+  because two statements cannot see each other's uncommitted work.
+  `ingest_job_schedules.go` upserts every row
   the envelope carries, row-locks the cell's `job_schedule_cells`
   watermark inside the same transaction, rejects an envelope whose
   `observed_at` is not newer than the stored value, and deletes every row
@@ -362,6 +379,33 @@ of the fleet's audit activity, once a controller becomes disposable.
   caller before the cancel's own database read and publish. Every action
   this bullet's code publishes counts in `recorder_actions_published_total`,
   labelled by kind, alongside the interrupted-run marking's own publishes.
+- **A `TRIGGER_FAILED` row is not a run record** — it records that no
+  build exists. Every query that asks about a **real run** excludes it
+  through `notTriggerFailedSQL` (or `notTriggerFailedRunSQL` for an
+  aliased join), both in `ingest_common.go` and both built from the
+  `ResultTriggerFailed` constant. The predicate says `IS DISTINCT FROM`,
+  never `<>`: a queued or running row holds a null `result`. The
+  excluding readers are the four job aggregates, both `rehydration.go`
+  queries, `runsRowExists` (`ledger.go`), `selectFinalizeCandidates`
+  (`retention_finalize.go`), `lookupOwner` (`ledger_owner.go`), the
+  orphan-intent `NOT EXISTS` (`retention_intents.go`), and
+  `readCrossTenantRunRecord` (`crosstenant_runrecord.go`). Each has its
+  own failure mode: a seed built from such a row renders build zero and
+  the mite fails the whole bundle; a counted row keeps the old owner on a
+  repeat claim and makes the real completion read as foreign; a written
+  log summary survives the supersede and mislabels the real run's log; a
+  joined `COMPLETED` status arms a log-finalization deadline that already
+  passed; an orphan intent never leaves the table; a cross-tenant poll
+  reads a starting run as completed.
+  **A reader that anchors on `run_intents` and joins `runs` needs the
+  predicate too.** A repeated client token reuses the run identifier, so
+  an intent row and a synthetic row can name one run with no real event
+  yet. The last three readers above are exactly that shape.
+  `ListRuns`, `SearchRecords`, and `GetRun` keep the row on purpose. A
+  query that already names a `status` the row does not hold (the
+  interruption sweep, the duplicate backstop, the concurrency cancel,
+  the fleet-lock move, the running-instance read) needs no predicate.
+  The complete reader survey is the change's design S14.
 - **Reader** (`reader*.go`) — `Reader` is the BFF's only read path onto
   the record tables; `NewReader` wraps a `*pgxpool.Pool`. Every method
   calls `checkSchema` first and returns `ErrSchemaTooOld` when the
@@ -372,6 +416,16 @@ of the fleet's audit activity, once a controller becomes disposable.
   Jenkins `Cause` object and `run_intents.cause` holds the plain-text
   classification a claim request carries. `GetRun` resolves `created_at`
   from `run_intents` first, so its `runs` query prunes to one partition.
+  A run that holds no intent row, which is what a failed trigger writes,
+  falls back to a bounded `runs` query over `runWindow`
+  (`runwindow.go`, 24 hours before the `run_id` time to 7 days after
+  it), then to an unbounded one. The bound is a fast path alone, and it
+  never decides whether a row is readable. Every job aggregate
+  (`JobWindowStats`, `addJobRecentResults`, `addJobLastRuns`,
+  `addJobDurationTrends`) carries
+  `AND result IS DISTINCT FROM 'TRIGGER_FAILED'`, never `<>`, because a
+  running row holds a null `result`. `ListRuns` and `SearchRecords`
+  carry no such predicate.
   `JobSummary` is record-derived only: no job definition, no trigger
   state, no job that has never run — the pipelines API supplies those
   from the catalog. `ListActivity` pages `activity` by keyset on

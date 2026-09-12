@@ -58,6 +58,10 @@ type finalizeCandidate struct {
 // It reads candidates in keyset batches of retentionBatchSize, ordered by
 // (created_at, run_id), so one hourly round never holds an unbounded
 // result set for an installation with years of run history.
+//
+// It skips a TRIGGER_FAILED row. Such a run holds no log at all, and a
+// summary marked incomplete would survive a later supersede and mislabel
+// the real run's log.
 func finalizeStaleLogs(ctx context.Context, db maintDB, liveness Liveness, wait time.Duration, now time.Time) (int, error) {
 	cutoff := now.Add(-wait)
 	finalized := 0
@@ -128,6 +132,7 @@ func selectFinalizeCandidates(ctx context.Context, db maintDB, cutoff time.Time,
 		FROM varroa.runs r
 		LEFT JOIN varroa.run_intents ri ON ri.run_id = r.run_id
 		WHERE (r.payload->'log_summary'->>'finalized') IS DISTINCT FROM 'true'
+		  AND `+notTriggerFailedRunSQL+`
 		  %s
 		  AND `+anchorExpr+` < $1
 		ORDER BY r.created_at, r.run_id

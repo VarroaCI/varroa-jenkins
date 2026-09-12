@@ -1049,21 +1049,25 @@ type TriggerBuildRequest struct {
 // plugin's /varroa-run/trigger route. The plugin stamps the run identity
 // onto the queue item before it schedules, so the claim gate sees the
 // caller's key rather than a locally minted one.
-func (c *Client) TriggerBuild(ctx context.Context, req TriggerBuildRequest) error {
+//
+// It returns the Jenkins HTTP status beside the error. The status is 0 when
+// the call reached no Jenkins, because no response exists then. The gateway
+// maps that status onto a reason code.
+func (c *Client) TriggerBuild(ctx context.Context, req TriggerBuildRequest) (int, error) {
 	payload, err := json.Marshal(req)
 	if err != nil {
-		return fmt.Errorf("trigger build %s: marshal request: %w", req.JobPath, err)
+		return 0, fmt.Errorf("trigger build %s: marshal request: %w", req.JobPath, err)
 	}
 	resp, err := c.do(ctx, http.MethodPost, "/varroa-run/trigger", bytes.NewReader(payload), "application/json")
 	if err != nil {
-		return fmt.Errorf("trigger build %s: %w", req.JobPath, err)
+		return 0, fmt.Errorf("trigger build %s: %w", req.JobPath, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("trigger build %s: HTTP %d: %s", req.JobPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return resp.StatusCode, fmt.Errorf("trigger build %s: HTTP %d: %s", req.JobPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
 	}
-	return nil
+	return resp.StatusCode, nil
 }
 
 // CancelBuildRequest is the body posted to the Varroa plugin's

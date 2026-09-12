@@ -245,6 +245,14 @@ func main() {
 		logger.Error("failed to open blob store", "error", err)
 		os.Exit(1)
 	}
+	// The failed-trigger record rides the builds stream, which exists only
+	// with a record store. The blob store is the one signal that is true
+	// exactly then: the chart gives the gateway VARROA_RECORDSTORE_DSN only
+	// in postgres blob mode, and VARROA_BLOBSTORE_URL in every mode. A
+	// discriminator read from the DSN is therefore false on an s3-mode
+	// install, which would acknowledge every failed trigger with no record.
+	// A hive-mode gateway gets neither variable, and records nothing.
+	handler.SetRecordStoreEnabled(logStore != nil)
 	if logStore != nil {
 		handler.SetLogStore(logStore, logPendingBytesFromEnv(), logFinalizeWaitFromEnv(), runOwnerCacheSizeFromEnv())
 		logger.Info("gateway log writer enabled")

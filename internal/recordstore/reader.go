@@ -176,9 +176,16 @@ func (r *pgReader) GetIntentByKey(ctx context.Context, intentKey string) (Intent
 
 // GetRun resolves created_at from run_intents first, using its unique
 // run_id index, then queries runs with that exact value, so Postgres
-// prunes to one partition. The run_id timestamp is never used to derive
-// the partition, because the caller mints the identifier and the
-// recorder writes created_at.
+// prunes to one partition. For a run that holds an intent, the run_id
+// timestamp is never used to derive the partition, because the caller
+// mints the identifier and the recorder writes created_at.
+//
+// A run may hold no intent. A failed trigger writes a runs row and no
+// run_intents row, so the first read finds nothing. GetRun then falls
+// back in two steps: a bounded query around the identifier's own UUIDv7
+// time, then an unbounded one. The bound is a fast path alone, and it
+// never decides whether a row is readable, because nothing bounds the
+// time from a command's delivery to its result.
 func (r *pgReader) GetRun(ctx context.Context, runID string) (Run, []Stage, error) {
 	if err := r.checkSchema(ctx); err != nil {
 		return Run{}, nil, err
@@ -188,7 +195,7 @@ func (r *pgReader) GetRun(ctx context.Context, runID string) (Run, []Stage, erro
 	err := r.pool.QueryRow(ctx, `SELECT created_at FROM varroa.run_intents WHERE run_id = $1`, runID).Scan(&createdAt)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		return Run{}, nil, ErrRunNotFound
+		return r.getRunWithoutIntent(ctx, runID)
 	case err != nil:
 		return Run{}, nil, fmt.Errorf("resolve run created_at: %w", err)
 	}
@@ -204,6 +211,51 @@ func (r *pgReader) GetRun(ctx context.Context, runID string) (Run, []Stage, erro
 		return Run{}, nil, fmt.Errorf("read run: %w", err)
 	}
 
+	stages, err := r.listStages(ctx, runID)
+	if err != nil {
+		return Run{}, nil, err
+	}
+	return run, stages, nil
+}
+
+// getRunWithoutIntent answers a run that holds no run_intents row. It runs
+// the bounded query first, and the unbounded one on a miss. An identifier
+// that is not a UUIDv7 skips the bounded step.
+func (r *pgReader) getRunWithoutIntent(ctx context.Context, runID string) (Run, []Stage, error) {
+	if from, to, ok := runWindow(runID); ok {
+		run, err := scanRun(r.pool.QueryRow(ctx, `
+			SELECT `+runColumns+`
+			FROM varroa.runs
+			WHERE run_id = $1 AND created_at >= $2 AND created_at <= $3
+			ORDER BY created_at DESC
+			LIMIT 1
+		`, runID, from, to))
+		switch {
+		case err == nil:
+			return r.runWithStages(ctx, runID, run)
+		case !errors.Is(err, pgx.ErrNoRows):
+			return Run{}, nil, fmt.Errorf("read run in window: %w", err)
+		}
+	}
+
+	run, err := scanRun(r.pool.QueryRow(ctx, `
+		SELECT `+runColumns+`
+		FROM varroa.runs
+		WHERE run_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, runID))
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return Run{}, nil, ErrRunNotFound
+	case err != nil:
+		return Run{}, nil, fmt.Errorf("read run: %w", err)
+	}
+	return r.runWithStages(ctx, runID, run)
+}
+
+// runWithStages returns run beside its stage list.
+func (r *pgReader) runWithStages(ctx context.Context, runID string, run Run) (Run, []Stage, error) {
 	stages, err := r.listStages(ctx, runID)
 	if err != nil {
 		return Run{}, nil, err

@@ -193,10 +193,11 @@ message CommandResult {
   string error = 3;
   bool deferred = 4;
   string defer_reason = 5;
-  // http_status carries the upstream HTTP status code for commands that make an
-  // HTTP call on the mite's behalf (currently REPLAY_WEBHOOK). Zero for commands
-  // that make no HTTP call. Lets the operator's webhook-replay consumer apply its
-  // ack/nak/term decision table on the real status code.
+  // http_status carries the upstream HTTP status code of every command that makes
+  // an HTTP call on the mite's behalf. Zero for a command that makes no HTTP call,
+  // and for a call that reached no server. The operator's webhook-replay consumer
+  // applies its ack/nak/term decision table on it. The gateway maps a failed
+  // TRIGGER_BUILD status onto a record-store reason code.
   int32 http_status = 6;
   oneof result {
     DesiredStateResult desired_state = 10;

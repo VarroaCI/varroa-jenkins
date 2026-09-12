@@ -93,12 +93,17 @@ func handleOwnerLookup(logger *slog.Logger, pool *pgxpool.Pool, data []byte) []b
 // answers found=true with an empty status and no anchor. anchorExpr is
 // the exact expression the log-finalization sweep uses, so the two
 // callers can never disagree about which moment gates the finalize wait.
+//
+// The join excludes a TRIGGER_FAILED row. Such a row records that no build
+// exists, and its COMPLETED status with its failure time would otherwise
+// become the real run's finalization anchor: the first log chunk of a
+// same-token retry could then miss a deadline that already passed.
 func lookupOwner(ctx context.Context, pool *pgxpool.Pool, runID string) (ownerLookupResponse, error) {
 	row := pool.QueryRow(ctx, `
 		SELECT ri.cluster, ri.namespace, ri.cell, ri.cell_instance, r.status,
 		       `+anchorExpr+`
 		FROM varroa.run_intents ri
-		LEFT JOIN varroa.runs r ON r.run_id = ri.run_id
+		LEFT JOIN varroa.runs r ON r.run_id = ri.run_id AND `+notTriggerFailedRunSQL+`
 		WHERE ri.run_id = $1
 	`, runID)
 

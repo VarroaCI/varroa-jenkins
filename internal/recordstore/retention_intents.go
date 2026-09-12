@@ -12,6 +12,11 @@ import (
 // reached the store through an out-of-order event.
 const orphanGrantedAge = 7 * 24 * time.Hour
 
+// The orphan rule asks whether a real build was recorded. A
+// TRIGGER_FAILED row records that no build exists, so it never answers
+// that question: an orphaned retry intent would otherwise outlive the
+// window forever.
+
 // sweepIntents runs steps 7 and 8 of the maintenance round. Step 7
 // deletes run_intents rows older than the lower bound of the oldest
 // surviving runs partition, so an intent always outlives its run. Step 8
@@ -33,7 +38,10 @@ func sweepIntents(ctx context.Context, db maintDB, now time.Time) (expiredByPart
 		DELETE FROM varroa.run_intents ri
 		WHERE ri.state = 'GRANTED'
 		  AND ri.created_at < $1
-		  AND NOT EXISTS (SELECT 1 FROM varroa.runs r WHERE r.run_id = ri.run_id)
+		  AND NOT EXISTS (
+			SELECT 1 FROM varroa.runs r
+			WHERE r.run_id = ri.run_id AND `+notTriggerFailedRunSQL+`
+		  )
 	`, now.Add(-orphanGrantedAge))
 	if err != nil {
 		return expiredByPartition, 0, fmt.Errorf("delete orphan granted intents: %w", err)

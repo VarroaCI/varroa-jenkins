@@ -39,3 +39,31 @@ func TestOpenGatewayBlobStoreOpensFileScheme(t *testing.T) {
 		t.Fatal("want a non-nil store for a configured blob URL")
 	}
 }
+
+// TestOpenGatewayBlobStoreSignalsTheRecordStoreInEveryMode asserts the blob
+// store answers true exactly when the record store is enabled, which is what
+// the failed-trigger record reads. The chart gives the gateway
+// VARROA_RECORDSTORE_DSN only in postgres blob mode, and VARROA_BLOBSTORE_URL
+// in every mode, so an s3-mode gateway carries a blob URL and no DSN.
+func TestOpenGatewayBlobStoreSignalsTheRecordStoreInEveryMode(t *testing.T) {
+	cases := []struct {
+		name      string
+		dsn       string
+		blobURL   string
+		wantStore bool
+	}{
+		{"s3 mode carries a blob url and no dsn", "", "file://" + t.TempDir(), true},
+		{"a disabled record store carries neither", "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store, err := openGatewayBlobStore(context.Background(), tc.dsn, tc.blobURL, nil)
+			if err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			if (store != nil) != tc.wantStore {
+				t.Fatalf("store != nil = %v, want %v", store != nil, tc.wantStore)
+			}
+		})
+	}
+}

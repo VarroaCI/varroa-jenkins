@@ -6,9 +6,11 @@ import (
 )
 
 // Ingest kind constants. The payload on builds.<cluster>.<ns>.<cell>
-// carries exactly one of these nine values in its "kind" field: eight
-// run.* kinds C2 maps its protobuf BuildEvent onto, and the cell-scoped
-// job.schedules kind C11's gateway publishes.
+// carries exactly one of these ten values in its "kind" field: nine
+// run.* kinds, and the cell-scoped job.schedules kind C11's gateway
+// publishes. C2 maps its protobuf BuildEvent onto eight of the run.*
+// kinds; the gateway publishes run.trigger_failed from a failed
+// TRIGGER_BUILD result instead.
 const (
 	KindRunStarted   = "run.started"
 	KindRunStage     = "run.stage"
@@ -18,24 +20,29 @@ const (
 	KindRunChanges   = "run.changes"
 	KindRunLog       = "run.log"
 	KindRunHeartbeat = "run.heartbeat"
-	KindJobSchedules = "job.schedules"
+	// KindRunTriggerFailed records a build trigger Jenkins refused. Such a
+	// run holds no intent row, so the recorder routes it before the intent
+	// read.
+	KindRunTriggerFailed = "run.trigger_failed"
+	KindJobSchedules     = "job.schedules"
 )
 
 // ingestKinds lists every kind the recorder accepts. A kind outside this
 // set is unknown.
 var ingestKinds = map[string]bool{
-	KindRunStarted:   true,
-	KindRunStage:     true,
-	KindRunCompleted: true,
-	KindRunTests:     true,
-	KindRunArtifacts: true,
-	KindRunChanges:   true,
-	KindRunLog:       true,
-	KindRunHeartbeat: true,
-	KindJobSchedules: true,
+	KindRunStarted:       true,
+	KindRunStage:         true,
+	KindRunCompleted:     true,
+	KindRunTests:         true,
+	KindRunArtifacts:     true,
+	KindRunChanges:       true,
+	KindRunLog:           true,
+	KindRunHeartbeat:     true,
+	KindRunTriggerFailed: true,
+	KindJobSchedules:     true,
 }
 
-// IsKnownKind reports whether kind is one of the nine ingest kinds.
+// IsKnownKind reports whether kind is one of the ten ingest kinds.
 func IsKnownKind(kind string) bool {
 	return ingestKinds[kind]
 }
@@ -91,6 +98,17 @@ type RunCompletedPayload struct {
 	Result     *string    `json:"result,omitempty"`
 	EndedAt    *time.Time `json:"ended_at,omitempty"`
 	DurationMs *int64     `json:"duration_ms,omitempty"`
+}
+
+// RunTriggerFailedPayload is the payload of a run.trigger_failed
+// envelope. The gateway maps the Jenkins HTTP status onto ReasonCode,
+// which holds exactly one of JOB_NOT_FOUND, JOB_NOT_BUILDABLE, and
+// TRIGGER_REJECTED.
+type RunTriggerFailedPayload struct {
+	Error      string `json:"error"`
+	ReasonCode string `json:"reason_code"`
+	HTTPStatus int    `json:"http_status"`
+	Actor      string `json:"actor,omitempty"`
 }
 
 // RunStagePayload is the payload of a run.stage envelope, mapped onto

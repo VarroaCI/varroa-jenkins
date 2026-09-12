@@ -53,8 +53,13 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 			actor        = COALESCE(EXCLUDED.actor, runs.actor),
 			cause        = COALESCE(EXCLUDED.cause, runs.cause),
 			params       = COALESCE(EXCLUDED.params, runs.params),
-			status       = `+runsStatusMergeSQL+`,
-			payload      = COALESCE(runs.payload, '{}'::jsonb) || EXCLUDED.payload
+			status       = `+runsStatusMergeSQL("TRUE")+`,
+			cell         = CASE WHEN `+supersedeTriggerFailedSQL("TRUE")+` THEN EXCLUDED.cell ELSE runs.cell END,
+			result       = CASE WHEN `+supersedeTriggerFailedSQL("TRUE")+` THEN NULL::text ELSE runs.result END,
+			ended_at     = CASE WHEN `+supersedeTriggerFailedSQL("TRUE")+` THEN NULL::timestamptz ELSE runs.ended_at END,
+			payload      = (CASE WHEN `+supersedeTriggerFailedSQL("TRUE")+`
+			                     THEN COALESCE(runs.payload, '{}'::jsonb) `+triggerPayloadKeysSQL+`
+			                     ELSE COALESCE(runs.payload, '{}'::jsonb) END) || EXCLUDED.payload
 		RETURNING status
 	`,
 		intent.runID, intent.createdAt, intent.intentKey, intent.cluster, intent.namespace,

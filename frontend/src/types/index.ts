@@ -1711,6 +1711,10 @@ export interface RunDetail {
   logComplete?: boolean;
   /** Set only when result is INTERRUPTED. */
   interruptedReason?: string;
+  /** The error text a refused build trigger reported. Set only when result is TRIGGER_FAILED. */
+  triggerError?: string;
+  /** Why the controller refused the build trigger. Set only when result is TRIGGER_FAILED. */
+  triggerReasonCode?: string;
   /** An existing retry's run id, when one already exists. */
   retryRunId?: string;
   stages?: RunStage[];

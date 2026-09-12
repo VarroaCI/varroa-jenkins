@@ -1430,13 +1430,14 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 				break
 			}
 			jenkinsClient := a.getJenkinsClient()
-			triggerErr := jenkinsClient.TriggerBuild(cctx, jenkins.TriggerBuildRequest{
+			triggerStatus, triggerErr := jenkinsClient.TriggerBuild(cctx, jenkins.TriggerBuildRequest{
 				RunID:      payload.RunId,
 				IntentKey:  payload.IntentKey,
 				JobPath:    payload.JobPath,
 				Parameters: payload.Parameters,
 				Actor:      payload.Actor,
 			})
+			httpStatus = triggerStatus
 			if triggerErr != nil {
 				errStr = triggerErr.Error()
 			} else {

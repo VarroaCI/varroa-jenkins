@@ -51,7 +51,11 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 			CASE WHEN $13 THEN jsonb_build_object('run.completed', $12::jsonb) ELSE jsonb_build_object('foreign_completion', $12::jsonb) END
 		)
 		ON CONFLICT (created_at, run_id) DO UPDATE SET
-			status = `+runsStatusMergeSQL+`,
+			status = `+runsStatusMergeSQL("$13")+`,
+			cell = CASE WHEN `+supersedeTriggerFailedSQL("$13")+` THEN EXCLUDED.cell ELSE runs.cell END,
+			-- The owner arm below already supplies the supersede value for
+			-- these three columns: a supersede needs $13, and $13 takes the
+			-- event's own value whatever the row holds.
 			result = CASE WHEN $13 THEN EXCLUDED.result ELSE COALESCE(EXCLUDED.result, runs.result) END,
 			ended_at = CASE WHEN $13 THEN EXCLUDED.ended_at ELSE COALESCE(EXCLUDED.ended_at, runs.ended_at) END,
 			duration_ms = CASE WHEN $13 THEN EXCLUDED.duration_ms ELSE COALESCE(EXCLUDED.duration_ms, runs.duration_ms) END,
@@ -59,7 +63,9 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 				WHEN $13 AND runs.result = 'INTERRUPTED' THEN now()
 				ELSE runs.interrupted_superseded_at
 			END,
-			payload = COALESCE(runs.payload, '{}'::jsonb) || EXCLUDED.payload
+			payload = (CASE WHEN `+supersedeTriggerFailedSQL("$13")+`
+			                THEN COALESCE(runs.payload, '{}'::jsonb) `+triggerPayloadKeysSQL+`
+			                ELSE COALESCE(runs.payload, '{}'::jsonb) END) || EXCLUDED.payload
 	`,
 		intent.runID, intent.createdAt, intent.intentKey, intent.cluster, intent.namespace,
 		intent.cellValue(), intent.tenant, intent.jobPath,

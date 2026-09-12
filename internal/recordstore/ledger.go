@@ -279,12 +279,15 @@ func transferIntent(ctx context.Context, tx pgx.Tx, req ClaimRequest, newRunID u
 	return ClaimResponse{Decision: DecisionGranted, RunID: newRunID.String(), BuildNumber: buildNumber}, nil
 }
 
-// runsRowExists reports whether a runs row already records runID. Its
-// absence proves no out-of-order run.completed recorded the build.
+// runsRowExists reports whether a runs row already records a build for
+// runID. Its absence proves no out-of-order run.completed recorded the
+// build. A TRIGGER_FAILED row records that no build exists, so it never
+// counts here: it would otherwise keep the old owner on a repeat claim,
+// and the real completion would then read as foreign.
 func runsRowExists(ctx context.Context, tx pgx.Tx, runID uuid.UUID) (bool, error) {
 	var exists bool
 	if err := tx.QueryRow(ctx, `
-		SELECT EXISTS (SELECT 1 FROM varroa.runs WHERE run_id = $1)
+		SELECT EXISTS (SELECT 1 FROM varroa.runs WHERE run_id = $1 AND `+notTriggerFailedSQL+`)
 	`, runID).Scan(&exists); err != nil {
 		return false, fmt.Errorf("check runs row: %w", err)
 	}

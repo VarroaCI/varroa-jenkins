@@ -2600,6 +2600,12 @@ type ComponentsSchemasRunDetail struct {
 	TestsFailed  *int   `json:"testsFailed,omitempty"`
 	TestsSkipped *int   `json:"testsSkipped,omitempty"`
 	TestsTotal   *int   `json:"testsTotal,omitempty"`
+
+	// TriggerError The error text a refused build trigger reported. Set only when result is TRIGGER_FAILED.
+	TriggerError *string `json:"triggerError,omitempty"`
+
+	// TriggerReasonCode Why the controller refused the build trigger. One of JOB_NOT_FOUND, JOB_NOT_BUILDABLE, and TRIGGER_REJECTED. Set only when result is TRIGGER_FAILED.
+	TriggerReasonCode *string `json:"triggerReasonCode,omitempty"`
 }
 
 // ComponentsSchemasRunListResponse GET /pipelines/{team}/jobs/{job}/runs, cross-tenant cursor-merged.

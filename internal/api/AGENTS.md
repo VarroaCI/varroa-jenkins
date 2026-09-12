@@ -177,6 +177,12 @@ federation, activity persistence, and SSE fanout.
   (`internal/mcp`'s non-HTTP entry point) wraps the same unexported handler logic —
   `listRunsMerged`, `resolveTeamTenants`, `createRun`, `runByID` — so the MCP tools and
   the REST paths share one implementation of every rule.
+  The run detail carries `triggerError` and `triggerReasonCode`, read out of
+  `runs.payload` in `buildRunDetail` alongside the log summary. The stored
+  `trigger_http_status` reaches no response field. `runDetailJSON`
+  (`handlers_runs.go`) and `RunDetail` (`pipelines_service.go`) must carry the
+  same JSON tags, because `convertJSON` matches them by tag. Do not copy
+  `InterruptedReason` as an example: no BFF code assigns it.
 - **Item manifest source** (`controllerItemManifest`) — a placed Team
   (`TenantRef.Folder` set) reads its own tenant bundle's `items.yaml`
   (`teamPipelineBundleContent`) and re-roots it under the Team folder with

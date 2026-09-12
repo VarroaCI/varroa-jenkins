@@ -45,6 +45,17 @@ type ApplyResult struct {
 	// newer than its cell's stored watermark. The write changed no row.
 	// The caller acknowledges the message and counts it.
 	ScheduleStale bool
+
+	// TriggerFailedReason holds the reason code of a run.trigger_failed
+	// envelope the recorder stored, or skipped because a row already
+	// exists. The caller acknowledges the message and counts
+	// recorder_ingest_trigger_failed_total with that reason code.
+	TriggerFailedReason string
+
+	// TriggerFailedStored reports whether that envelope's insert wrote a
+	// row. It is false when the conflict clause skipped the insert,
+	// because a redelivery or a real run already holds the run id.
+	TriggerFailedStored bool
 }
 
 // Ingester applies one IngestEnvelope to the record tables inside a
@@ -93,6 +104,12 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 	// through the run_intents-anchored path below.
 	if env.Kind == KindJobSchedules {
 		return g.applyJobSchedules(ctx, env)
+	}
+
+	// run.trigger_failed writes the only record of its run, so no intent
+	// can exist before it. It takes the same early route.
+	if env.Kind == KindRunTriggerFailed {
+		return g.applyTriggerFailed(ctx, env)
 	}
 
 	runID, err := uuid.Parse(env.RunID)

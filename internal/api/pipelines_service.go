@@ -96,6 +96,8 @@ type RunDetail struct {
 	LogFinalized      bool              `json:"logFinalized,omitempty"`
 	LogComplete       bool              `json:"logComplete,omitempty"`
 	InterruptedReason string            `json:"interruptedReason,omitempty"`
+	TriggerError      string            `json:"triggerError,omitempty"`
+	TriggerReasonCode string            `json:"triggerReasonCode,omitempty"`
 	RetryRunID        string            `json:"retryRunId,omitempty"`
 	Stages            []RunStage        `json:"stages,omitempty"`
 }

@@ -117,7 +117,7 @@ spec:
 
 `pipelines.agentNamespace` must be one of `spec.namespaces`, and Varroa must manage it.
 `pipelines.profile` must name an existing `JenkinsVersionProfile`. `pipelines.composedBundleRef`
-is optional; an unset reference still places the tenant, with an empty folder. Set
+is optional; an unset reference places the tenant with an empty folder. Set
 `pipelines.dedicated: true` to require a cell that carries no other tenant.
 
 **Verify:**
@@ -133,7 +133,8 @@ Expect `"status":"True","reason":"TenantPlaced"`.
 - **Folder.** The tenant's `items.yaml` is wrapped under one top-level folder named after the
   `Team`, then merged with every other tenant's folder into the cell's single manifest. The
   operator ignores `jenkins.yaml`, `plugins.yaml`, and `rbac.yaml` in a tenant's bundle: a tenant
-  cannot change controller configuration.
+  cannot change controller configuration. A job the bundle no longer declares leaves the folder,
+  and its next trigger fails with `JOB_NOT_FOUND`. See [Build records](build-records.md).
 - **Item role.** The operator synthesizes a role scoped to the folder's subtree, granting build,
   read, and replay permissions, bound to the tenant's own service identity.
 - **Service identity.** Every build in the folder runs as `svc-<team>`. The plugin synthesizes
@@ -175,8 +176,8 @@ Four controls confine a tenant to its own folder and its own agents:
    See [Isolate cells](../install/network-policies.md#isolate-cells).
 2. **Cloud restriction.** Each tenant's Kubernetes cloud is restricted to its own folder, so one
    tenant's builds cannot provision another tenant's agents.
-3. **Agent fence.** The plugin refuses a build on a node labelled for another tenant, and on
-   a node with no tenant label.
+3. **Agent fence.** The plugin refuses a build on a node labelled for another tenant, or on a
+   node with no tenant label.
 4. **Build identity.** The plugin authenticates every build, including a Pipeline `node` block, as
    `svc-<team>`. That identity reads only its own folder's credentials and items.
 
@@ -188,11 +189,10 @@ A tenant's webhook URL has the shape:
 /hibernation/<token>/teams/<team>/queue/<path>
 ```
 
-served from the BFF's public host, outside `/api/v1` and outside login. `<path>` must match
+served from the BFF's public host, outside `/api/v1` and login. `<path>` must match
 `github-webhook/` or `generic-webhook-trigger/invoke`; any other path answers `404`.
 
-Two credentials guard the door, minted once when `spec.pipelines` first appears and never
-regenerated:
+Two credentials guard the door. Varroa mints each once, and never regenerates them:
 
 - `status.pipelines.webhookToken` addresses the tenant and goes in the URL. Read it directly from
   the `Team` object; it is not exposed through the API or the dashboard:
@@ -208,9 +208,8 @@ The door verifies the delivery by forge: GitHub with an HMAC-SHA256 `X-Hub-Signa
 GitLab with `X-Gitlab-Token`, anything else with `X-Varroa-Token`. An unsigned or mismatched
 delivery answers `400`.
 
-A delivery buffers for at most one hour. If a tenant moves cells while a delivery is buffered, the
-replay still reaches the new cell, as long as the move lands inside that hour. Past that bound,
-the forge's own retry is the recovery path.
+A delivery buffers for at most one hour. A tenant that moves cells inside that hour still receives
+the replay. Past that bound, the forge's own retry is the recovery path.
 
 **Verify:**
 

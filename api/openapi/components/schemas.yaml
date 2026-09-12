@@ -4617,6 +4617,14 @@ RunDetail:
     interruptedReason:
       type: string
       description: Set only when result is INTERRUPTED.
+    triggerError:
+      type: string
+      description: The error text a refused build trigger reported. Set only when result is TRIGGER_FAILED.
+    triggerReasonCode:
+      type: string
+      description: >-
+        Why the controller refused the build trigger. One of JOB_NOT_FOUND,
+        JOB_NOT_BUILDABLE, and TRIGGER_REJECTED. Set only when result is TRIGGER_FAILED.
     retryRunId:
       type: string
       description: An existing retry's run id, when one already exists.

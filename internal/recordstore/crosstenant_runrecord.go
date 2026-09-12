@@ -33,6 +33,11 @@ type crossTenantRunRecord struct {
 // has not started yet still answers found=true with hasRuns false. It
 // answers found=false, with no error, when no run_intents row names
 // runID at all.
+//
+// The join excludes a TRIGGER_FAILED row, so a run whose only row is
+// synthetic reads as queued rather than completed. The operator can
+// redeliver one trigger action, so an intent can arrive after a refused
+// trigger under the same run identifier.
 func readCrossTenantRunRecord(ctx context.Context, pool *pgxpool.Pool, runID string) (crossTenantRunRecord, bool, error) {
 	var (
 		rec    crossTenantRunRecord
@@ -41,7 +46,7 @@ func readCrossTenantRunRecord(ctx context.Context, pool *pgxpool.Pool, runID str
 	err := pool.QueryRow(ctx, `
 		SELECT ri.tenant, ri.job_path, r.status, r.result, r.build_number, r.started_at, r.ended_at
 		FROM varroa.run_intents ri
-		LEFT JOIN varroa.runs r ON r.run_id = ri.run_id
+		LEFT JOIN varroa.runs r ON r.run_id = ri.run_id AND `+notTriggerFailedRunSQL+`
 		WHERE ri.run_id = $1
 	`, runID).Scan(&rec.tenant, &rec.jobPath, &status, &rec.result, &rec.buildNumber, &rec.startedAt, &rec.endedAt)
 	switch {

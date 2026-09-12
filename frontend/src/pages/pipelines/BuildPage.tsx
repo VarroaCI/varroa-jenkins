@@ -57,6 +57,15 @@ const COLD_LOAD_TIMEOUT_MS = 30_000;
 // stages it merged from live "stage" events.
 const EMPTY_STAGES: RunStage[] = [];
 
+// One sentence per reason code the record store carries. The set is
+// complete, and the fallback covers a code a newer recorder adds.
+const TRIGGER_REASON_SENTENCES: Record<string, string> = {
+  JOB_NOT_FOUND: "The job does not exist on the controller.",
+  JOB_NOT_BUILDABLE: "The job cannot start a build.",
+  TRIGGER_REJECTED: "The controller refused the trigger.",
+};
+const TRIGGER_REASON_FALLBACK = "The controller refused the trigger.";
+
 /**
  * Reads the run record, and — while no record exists yet — polls it under
  * one of two windows. A run this browser session just requested polls for
@@ -393,6 +402,35 @@ export default function BuildPage() {
     );
   }
   if (!run) return <GenericErrorPage onRetry={refetch} />;
+
+  // A refused trigger started no build, so the page shows a terminal card
+  // instead of the graph, the duration, and the build number. The card
+  // renders here, not inside the requested or the not-started block: a
+  // record now exists, so neither block runs.
+  if (run.result === "TRIGGER_FAILED") {
+    return (
+      <div className={styles.page}>
+        <div className={styles.triggerFailed} role="alert">
+          <h1>Build not started</h1>
+          <p>{TRIGGER_REASON_SENTENCES[run.triggerReasonCode ?? ""] ?? TRIGGER_REASON_FALLBACK}</p>
+          {run.triggerError && <p className={styles.mono}>{run.triggerError}</p>}
+          <p>Re-run starts with each parameter&apos;s declared default.</p>
+        </div>
+        {canWrite && (
+          <div className={styles.actions}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => rerunMutation.mutate()}
+              disabled={!!run.retryRunId || rerunMutation.isPending}
+            >
+              <RotateCcw size={14} aria-hidden="true" /> Re-run
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const desc = describeRunState(run);
   const interrupted = run.result === "INTERRUPTED";

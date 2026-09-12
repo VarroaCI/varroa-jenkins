@@ -61,6 +61,8 @@ type runDetailJSON struct {
 	LogFinalized      bool              `json:"logFinalized,omitempty"`
 	LogComplete       bool              `json:"logComplete,omitempty"`
 	InterruptedReason string            `json:"interruptedReason,omitempty"`
+	TriggerError      string            `json:"triggerError,omitempty"`
+	TriggerReasonCode string            `json:"triggerReasonCode,omitempty"`
 	RetryRunID        string            `json:"retryRunId,omitempty"`
 	Stages            []runStageJSON    `json:"stages,omitempty"`
 }
@@ -151,6 +153,15 @@ type runLogSummaryPayload struct {
 	} `json:"log_summary"`
 }
 
+// runTriggerFailedPayload reads the two reason fields the recorder writes
+// into Run.Payload for a refused build trigger. The stored
+// trigger_http_status reaches no response field: it is a diagnostic value
+// for an operator who reads the row directly.
+type runTriggerFailedPayload struct {
+	TriggerError      string `json:"trigger_error"`
+	TriggerReasonCode string `json:"trigger_reason_code"`
+}
+
 func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID, tenantFolder string) runDetailJSON {
 	d := runDetailJSON{RunID: run.RunID, JobPath: run.JobPath, TenantFolder: tenantFolder, Tenant: run.Tenant, Status: run.Status, RetryRunID: retryRunID}
 	if run.BuildNumber != nil {
@@ -195,6 +206,11 @@ func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID,
 		if json.Unmarshal(run.Payload, &payload) == nil {
 			d.LogFinalized = payload.LogSummary.Finalized
 			d.LogComplete = !payload.LogSummary.Incomplete
+		}
+		var trigger runTriggerFailedPayload
+		if json.Unmarshal(run.Payload, &trigger) == nil {
+			d.TriggerError = trigger.TriggerError
+			d.TriggerReasonCode = trigger.TriggerReasonCode
 		}
 	}
 	for _, st := range stages {

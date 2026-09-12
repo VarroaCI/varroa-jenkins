@@ -2386,6 +2386,14 @@ components:
           type: integer
         testsTotal:
           type: integer
+        triggerError:
+          description: The error text a refused build trigger reported. Set only when
+            result is TRIGGER_FAILED.
+          type: string
+        triggerReasonCode:
+          description: Why the controller refused the build trigger. One of JOB_NOT_FOUND,
+            JOB_NOT_BUILDABLE, and TRIGGER_REJECTED. Set only when result is TRIGGER_FAILED.
+          type: string
       required:
       - runId
       - jobPath
@@ -6843,6 +6851,14 @@ components:
           type: integer
         testsTotal:
           type: integer
+        triggerError:
+          description: The error text a refused build trigger reported. Set only when
+            result is TRIGGER_FAILED.
+          type: string
+        triggerReasonCode:
+          description: Why the controller refused the build trigger. One of JOB_NOT_FOUND,
+            JOB_NOT_BUILDABLE, and TRIGGER_REJECTED. Set only when result is TRIGGER_FAILED.
+          type: string
       required:
       - runId
       - jobPath

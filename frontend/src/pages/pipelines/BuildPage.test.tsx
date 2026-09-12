@@ -379,3 +379,59 @@ describe("BuildPage — folder-relative write authorization", () => {
     expect(screen.queryByRole("button", { name: /Re-run/ })).not.toBeInTheDocument();
   });
 });
+
+describe("BuildPage — a refused build trigger", () => {
+  function triggerFailedRun(reasonCode: string): RunDetail {
+    return baseRun({
+      result: "TRIGGER_FAILED",
+      buildNumber: undefined,
+      durationMs: undefined,
+      startedAt: undefined,
+      triggerError: "trigger build checkout-api/main: HTTP 404: no such job",
+      triggerReasonCode: reasonCode,
+    });
+  }
+
+  const sentences: Array<[string, string]> = [
+    ["JOB_NOT_FOUND", "The job does not exist on the controller."],
+    ["JOB_NOT_BUILDABLE", "The job cannot start a build."],
+    ["TRIGGER_REJECTED", "The controller refused the trigger."],
+  ];
+
+  it.each(sentences)("names the reason for %s", async (reasonCode, sentence) => {
+    mockGetRun.mockResolvedValue(triggerFailedRun(reasonCode));
+    renderPage();
+
+    expect(await screen.findByText(sentence)).toBeInTheDocument();
+    expect(
+      screen.getByText("trigger build checkout-api/main: HTTP 404: no such job"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Build #/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Pipeline")).not.toBeInTheDocument();
+  });
+
+  it("says that Re-run starts with each declared default", async () => {
+    mockGetRun.mockResolvedValue(triggerFailedRun("JOB_NOT_FOUND"));
+    renderPage();
+
+    expect(await screen.findByText(/declared default/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Re-run/ })).toBeInTheDocument();
+  });
+
+  it("replaces the requested state as soon as the record arrives", async () => {
+    mockGetRun.mockResolvedValue(triggerFailedRun("JOB_NOT_FOUND"));
+    renderPage({ pathname: "/pipelines/payments/checkout-api%2Fmain/run-1", state: { requested: true } });
+
+    expect(await screen.findByText("The job does not exist on the controller.")).toBeInTheDocument();
+    expect(screen.queryByText("Requested")).not.toBeInTheDocument();
+    expect(screen.queryByText("Not started")).not.toBeInTheDocument();
+  });
+
+  it("shows the same card on a cold load", async () => {
+    mockGetRun.mockResolvedValue(triggerFailedRun("TRIGGER_REJECTED"));
+    renderPage();
+
+    expect(await screen.findByText("The controller refused the trigger.")).toBeInTheDocument();
+    expect(screen.queryByText("Run not found")).not.toBeInTheDocument();
+  });
+});
