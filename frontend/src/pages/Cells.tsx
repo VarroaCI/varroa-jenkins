@@ -328,9 +328,13 @@ function ScaleControl({ pool }: { pool: CellPool }) {
         void queryClient.invalidateQueries({ queryKey: ["cellpools"] });
         return;
       }
-      // Every other refusal states its own message. A 400 names the dial
-      // rule the write broke, and a silent control leaves the caller with
-      // no way to correct it.
+      // Every other refusal states the server's own message. A 400 names
+      // the dial rule the write broke, and the fixed status copy would hide
+      // it, so the control leaves the caller with no way to correct it.
+      if (err instanceof ApiError && err.serverMessage) {
+        setRefusal(err.serverMessage);
+        return;
+      }
       setRefusal(err instanceof Error && err.message ? err.message : "The write was refused.");
     },
   });

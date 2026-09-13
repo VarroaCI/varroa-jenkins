@@ -462,8 +462,12 @@ describe("The scale control tracks what the user edited", () => {
 describe("The scale control reports every refusal", () => {
   it("renders the message of a 400", async () => {
     const user = userEvent.setup();
+    // The client puts the fixed status copy in message and the server's
+    // text in the body, as errorFromResponse does.
     mockPatchCellPool.mockRejectedValue(
-      new ApiError(400, "spec.maxCells must be 0 or at least spec.warm"),
+      new ApiError(400, "The request could not be completed.", {
+        error: "spec.maxCells must be 0 or at least spec.warm",
+      }),
     );
     renderPage();
     const maxCells = screen.getByLabelText("Max cells of lts-2-555");
@@ -490,7 +494,9 @@ describe("The scale control reports every refusal", () => {
 
   it("clears a refusal on the next apply", async () => {
     const user = userEvent.setup();
-    mockPatchCellPool.mockRejectedValueOnce(new ApiError(400, "bad dial"));
+    mockPatchCellPool.mockRejectedValueOnce(
+      new ApiError(400, "The request could not be completed.", { error: "bad dial" }),
+    );
     renderPage();
     const warm = screen.getByLabelText("Warm cells of lts-2-555");
     await user.clear(warm);

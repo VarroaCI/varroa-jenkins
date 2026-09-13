@@ -15,6 +15,20 @@ export class ApiError extends Error {
     super(message);
     this.name = "ApiError";
   }
+
+  /**
+   * serverMessage is the error text the BFF wrote in its JSON envelope,
+   * or an empty string when the response carried none. The message field
+   * holds the fixed copy for the status, so a control that must state the
+   * rule the server named reads this field.
+   */
+  get serverMessage(): string {
+    const body = this.body;
+    if (body && typeof body === "object" && "error" in body && typeof body.error === "string") {
+      return body.error;
+    }
+    return "";
+  }
 }
 
 function getToken(): string | null {
