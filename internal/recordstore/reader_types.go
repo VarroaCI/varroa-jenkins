@@ -164,3 +164,46 @@ type RunPage struct {
 	Runs       []Run
 	NextCursor string
 }
+
+// CellUsageCounts holds the four load counts of one tenant on one cell,
+// or the same four summed over the cell. RunningNow carries no time
+// bound: a build can run longer than the window, and a long build must
+// stay visible. RunsLast24h and FailedLast24h count inside the fixed
+// 24-hour window. Jobs counts distinct job paths, never job_schedules
+// rows. A run whose result is TRIGGER_FAILED counts in no value.
+type CellUsageCounts struct {
+	RunningNow    int64
+	RunsLast24h   int64
+	FailedLast24h int64
+	Jobs          int64
+}
+
+// CellJobUsage is one job's share of a tenant's load on a cell. Jobs is
+// one when job_schedules holds the path, and zero otherwise, so the sum
+// of a row set reports the same four counts the tenant-wide aggregate
+// reports for the same jobs. A caller that may read only part of a
+// tenant's jobs therefore sums the rows it may read.
+type CellJobUsage struct {
+	JobPath string
+	CellUsageCounts
+}
+
+// CellTenantUsage names one tenant on a cell and holds that tenant's
+// four counts.
+type CellTenantUsage struct {
+	Tenant string
+	CellUsageCounts
+}
+
+// CellUsage is one cell's load, tenant by tenant. Tenants comes from
+// varroa.tenant_placements, ordered by tenant name, so a response is
+// stable. A tenant that left the cell does not appear. WindowStart is
+// the start of the fixed 24-hour window the counts used.
+type CellUsage struct {
+	Cluster     string
+	Namespace   string
+	Cell        string
+	WindowStart time.Time
+	Tenants     []CellTenantUsage
+	Totals      CellUsageCounts
+}

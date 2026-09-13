@@ -161,3 +161,31 @@
         $ref: '../components/responses.yaml#/NotFound'
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/pipelines/{team}/cell:
+  get:
+    operationId: getTeamCell
+    tags: [Pipelines]
+    summary: Returns the tenant's own view of the cell that hosts it.
+    description: >
+      Reads the Team object first, so a pipelines team that waits for its
+      first cell answers 200 with the state unplaced. The body carries
+      this tenant's own counts and a neighbour count. It carries no other
+      tenant's name, job path, run, or count. canOpenCell is a hint that
+      gates no field: a caller the controller read check refuses still
+      receives the whole body.
+    parameters:
+      - $ref: '../components/parameters.yaml#/team'
+    responses:
+      "200":
+        description: The tenant's cell view.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/TeamCell'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'

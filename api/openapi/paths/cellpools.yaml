@@ -1,0 +1,84 @@
+# cellpools — the read and scale surface over the CellPool CRD. CellPool is
+# cluster-scoped, so no namespace segment appears in any path. There is no
+# POST and no DELETE: an operator creates and deletes a pool with kubectl or
+# through GitOps.
+/api/v1/cellpools:
+  get:
+    operationId: listCellPools
+    tags: [CellPools]
+    summary: >-
+      Lists every cell pool with its spec and status, sorted by name.
+      Requires the cellpools:read verb on a cluster-wide binding.
+    responses:
+      "200":
+        description: Cell-pool list (items envelope).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/CellPool'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+
+/api/v1/cellpools/{name}:
+  get:
+    operationId: getCellPool
+    tags: [CellPools]
+    summary: >-
+      Gets one cell pool's spec and status. Requires the cellpools:read verb
+      on a cluster-wide binding.
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    responses:
+      "200":
+        description: Cell-pool details.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/CellPool'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+  patch:
+    operationId: patchCellPool
+    tags: [CellPools]
+    summary: >-
+      Scales a cell pool. The body carries only the four scale dials; a body
+      naming profileRef or cellTemplate is refused with 400. Requires the
+      cellpools:update verb on a cluster-wide binding.
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/CellPoolScaleRequest'
+    responses:
+      "200":
+        description: Cell pool updated.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/CellPool'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'

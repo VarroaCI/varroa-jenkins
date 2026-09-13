@@ -58,16 +58,26 @@ the packaged CRDs. Does not own the Go source it packages
   (NATS TLS + per-service ACL creds); `examples-item-rbac.yaml` (off by default,
   `examples.itemRbac.enabled`).
 - KV watchers require `$JS.FC.KV_<bucket>.>` publish grants.
-- **`cells:`** (`values.yaml`) sizes the pipelines-tenant cell feature:
-  `warmPool.enabled`/`warmPool.perProfile` (off by default — no cell exists
-  until a `Controller` with `spec.cell.enabled` exists by hand or the pool
-  creates one), `maxTenantsPerCell` (the placement pass's default cap, a
-  cell's own `spec.cell.maxTenants` overrides it), and
-  `unreadyGracePeriod` (a Go duration string; how long a cell may stay
-  unready before the operator rolls its pod, then evacuates it). The
-  operator reads these through `ParseCellsConfigFromEnv`
+- **`cells:`** (`values.yaml`) **seeds a `CellPool`; it configures no live
+  pool.** Each of the four values populates a `CellPool` the operator creates
+  for a requested profile, and the operator never rewrites the spec of a pool
+  that already exists — so a Helm upgrade never rescales a running pool, and
+  an operator's `varroactl scale cellpool` / `kubectl patch` edit survives it.
+  `warmPool.enabled` gates **auto-creation only** (off by default; a
+  hand-applied `CellPool` still reconciles), `warmPool.perProfile` seeds
+  `spec.warm`, `maxTenantsPerCell` seeds `spec.maxTenantsPerCell`, and
+  `unreadyGracePeriod` seeds `spec.unreadyGracePeriod` (a Go duration string).
+  The last two stay live as the fallback for a cell with no owning pool. The
+  operator reads them through `ParseCellsConfigFromEnv`
   (`internal/controller/cells_config.go`), see
   [internal/controller/AGENTS.md](../../internal/controller/AGENTS.md).
+  RBAC: the operator ClusterRole holds `cellpools` + `cellpools/status` with
+  the full verb set (it creates, sizes, deletes, and holds the drain
+  finalizer); the BFF holds `cellpools` with `get`/`list`/`watch`/`update`/
+  `patch` and **neither `create` nor `delete`** — the API is a scale control,
+  and a pool is created and deleted with kubectl or GitOps. Asserted by
+  `tests/test-cellpool-rbac.sh`, which also asserts the packaged CRD and the
+  four `VARROA_CELLS_*` seed values.
   **`networkPolicy.cellIsolation`** (`enabled`, `extraIngress`,
   `extraEgress`) is the paired opt-in, honoured only when
   `networkPolicy.enabled` is also true. **The chart renders no per-cell
@@ -288,6 +298,7 @@ bash charts/varroa/tests/test-operator-bff-sa-env.sh
 bash charts/varroa/tests/test-recorder-netpol.sh
 bash charts/varroa/tests/test-recorder-chart.sh
 bash charts/varroa/tests/test-runner-door-nginx.sh
+bash charts/varroa/tests/test-cellpool-rbac.sh
 ```
 
 - **Record-store Postgres NetworkPolicy** — in `recordStore.postgres.mode: cnpg` the chart renders

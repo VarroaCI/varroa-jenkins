@@ -42,6 +42,14 @@ type Backend interface {
 	// DeleteObject deletes an object. A missing object is not an error.
 	DeleteObject(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) error
 
+	// DeleteObjectIfUnchanged deletes an object only while it still carries
+	// uid and resourceVersion. Any write since that read makes the apiserver
+	// answer Conflict instead of deleting, so a caller that decided from an
+	// earlier read cannot act on a stale view. A missing object is not an
+	// error. An empty uid or resourceVersion drops that half of the
+	// precondition.
+	DeleteObjectIfUnchanged(ctx context.Context, gvr schema.GroupVersionResource, namespace, name, uid, resourceVersion string) error
+
 	// PatchObjectStatus merge-patches the /status subresource with
 	// {"status": status}. The status value is marshalled to JSON as part of
 	// the patch body.
@@ -283,6 +291,21 @@ func Delete[T any](ctx context.Context, b Backend, name, namespace string) error
 		return err
 	}
 	if err := b.DeleteObject(ctx, info.gvr, namespace, name); err != nil {
+		return fmt.Errorf("delete %s: %w", info.gvr.Resource, err)
+	}
+	return nil
+}
+
+// DeleteIfUnchanged deletes a typed CRD only while it still carries uid and
+// resourceVersion. A write since that read answers Conflict, which the caller
+// treats as "the object changed, decide again" rather than as a failure. The
+// error is wrapped with %w, so apierrors.IsConflict still reads it.
+func DeleteIfUnchanged[T any](ctx context.Context, b Backend, name, namespace, uid, resourceVersion string) error {
+	info, err := gvrInfo[T]()
+	if err != nil {
+		return err
+	}
+	if err := b.DeleteObjectIfUnchanged(ctx, info.gvr, namespace, name, uid, resourceVersion); err != nil {
 		return fmt.Errorf("delete %s: %w", info.gvr.Resource, err)
 	}
 	return nil

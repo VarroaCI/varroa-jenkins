@@ -42,6 +42,7 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&ControllerClass{}, &ControllerClassList{},
 		&Team{}, &TeamList{},
 		&Runner{}, &RunnerList{},
+		&CellPool{}, &CellPoolList{},
 		&BroodOperation{}, &BroodOperationList{},
 		&BroodSchedule{}, &BroodScheduleList{},
 	)
@@ -671,6 +672,27 @@ type CellStatus struct {
 	// +kubebuilder:validation:MaxItems=64
 	// +optional
 	Rehydration []CellRehydrationEntry `json:"rehydration,omitempty"`
+
+	// PendingTenants holds one placement claim per tenant the placement
+	// pass has chosen this cell for and has not yet added to Tenants. The
+	// placement pass is its only writer. The pool drain skips a cell that
+	// carries a live claim.
+	// +kubebuilder:validation:MaxItems=64
+	// +optional
+	PendingTenants []CellPendingTenant `json:"pendingTenants,omitempty"`
+}
+
+// CellPendingTenant is one placement claim on a cell. The placement pass
+// writes it before it writes the Team fence, so a pool drain that re-read
+// the cell earlier cannot delete the cell the tenant is about to use.
+type CellPendingTenant struct {
+	// Tenant is the Team name this claim belongs to.
+	Tenant string `json:"tenant"`
+
+	// ClaimedAt is when the placement pass wrote the claim. A claim older
+	// than the claim window holds no cell, so a placement pass that stops
+	// between the claim and the tenant patch cannot pin a cell.
+	ClaimedAt metav1.Time `json:"claimedAt"`
 }
 
 // CellRehydrationEntry tracks one tenant's build-record rehydration bundle
@@ -1354,8 +1376,12 @@ type TeamPipelinesSpec struct {
 	// Profile names the JenkinsVersionProfile the placement pass resolves a
 	// cell against.
 	Profile string `json:"profile,omitempty"`
-	// Dedicated, when true, requires a cell that carries no other tenant.
-	Dedicated bool `json:"dedicated,omitempty"`
+	// CellPool names the CellPool the placement pass selects a cell from.
+	// An empty value resolves to the profile's default pool: the pool whose
+	// name equals Profile. A tenant that needs a cell of its own names a
+	// pool whose maxTenantsPerCell is 1.
+	// +optional
+	CellPool string `json:"cellPool,omitempty"`
 	// AgentNamespace is the Kubernetes namespace this tenant's agents run
 	// in. Must be one of spec.namespaces.
 	AgentNamespace string `json:"agentNamespace,omitempty"`
@@ -1682,6 +1708,106 @@ type RunnerList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Runner `json:"items"`
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:resource:scope=Cluster
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="PROFILE",type="string",JSONPath=".spec.profileRef"
+// +kubebuilder:printcolumn:name="WARM",type="integer",JSONPath=".status.warmCells"
+// +kubebuilder:printcolumn:name="PLACED",type="integer",JSONPath=".status.placedCells"
+// +kubebuilder:printcolumn:name="FREE",type="integer",JSONPath=".status.freeTenantSlots"
+// +kubebuilder:printcolumn:name="READY",type="string",JSONPath=".status.conditions[?(@.type=='PoolReady')].status"
+// +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
+
+// CellPool is the Schema for the cellpools API. It describes one pool of
+// cells that serve the pipelines tenants of a single version profile.
+type CellPool struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec              CellPoolSpec   `json:"spec,omitempty"`
+	Status            CellPoolStatus `json:"status,omitempty"`
+}
+
+// CellPoolSpec holds the size, the capacity, and the template of one pool.
+// +kubebuilder:validation:XValidation:rule="self.profileRef == oldSelf.profileRef",message="spec.profileRef is immutable"
+// +kubebuilder:validation:XValidation:rule="!has(self.maxCells) || !has(self.warm) || self.maxCells == 0 || self.maxCells >= self.warm",message="spec.maxCells must be 0 or at least spec.warm"
+type CellPoolSpec struct {
+	// ProfileRef names the JenkinsVersionProfile the pool's cells run.
+	// Immutable: the pass never restamps the profile label of a cell, so a
+	// change would orphan every cell the pool owns.
+	// +kubebuilder:validation:MinLength=1
+	ProfileRef string `json:"profileRef"`
+	// Warm is the target count of free cells the pool keeps ready.
+	// +kubebuilder:default=0
+	// +kubebuilder:validation:Minimum=0
+	Warm int32 `json:"warm"`
+	// MaxCells caps the pool's cells, placed cells included. Zero means
+	// unlimited.
+	// +kubebuilder:default=0
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MaxCells int32 `json:"maxCells,omitempty"`
+	// MaxTenantsPerCell is the capacity a pool cell uses when its own
+	// spec.cell.maxTenants is zero.
+	// +kubebuilder:default=10
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	MaxTenantsPerCell int32 `json:"maxTenantsPerCell,omitempty"`
+	// UnreadyGracePeriod is how long a pool cell may stay unready before
+	// the operator rolls its pod. An unset field falls back to the chart
+	// value.
+	// +optional
+	UnreadyGracePeriod *metav1.Duration `json:"unreadyGracePeriod,omitempty"`
+	// CellTemplate holds the shape of the cells the pool creates.
+	// +optional
+	CellTemplate *CellTemplate `json:"cellTemplate,omitempty"`
+}
+
+// CellTemplate is the shape a pool stamps on each cell it creates. It
+// carries no raw strategic-merge overlay: such content is hard to read and
+// hard to diff on a generated cell.
+type CellTemplate struct {
+	// Resources sets the Jenkins container's resource requirements.
+	// +optional
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+	// PodOverrides sets the pod-level overrides of each cell.
+	// +optional
+	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
+}
+
+// CellPoolStatus reports the pool's live cell and tenant counts. The four
+// counters carry no omitempty, so a merge patch writes a count that falls
+// to zero.
+type CellPoolStatus struct {
+	// ObservedGeneration is the pool generation the last pass saw.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+	// WarmCells counts the owned cells that hold no tenant.
+	WarmCells int32 `json:"warmCells"`
+	// PlacedCells counts the owned cells that hold at least one tenant.
+	PlacedCells int32 `json:"placedCells"`
+	// UnreadyCells counts the owned cells whose CellReady condition is not
+	// True.
+	UnreadyCells int32 `json:"unreadyCells"`
+	// FreeTenantSlots sums the spare capacity of the placed cells only.
+	// WarmCells already reports the empty ones.
+	FreeTenantSlots int32 `json:"freeTenantSlots"`
+	// Tenants lists every tenant on the pool, sorted.
+	// +optional
+	Tenants []string `json:"tenants,omitempty"`
+	// Conditions reports this pool's condition set. Type PoolReady.
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// CellPoolList contains a list of CellPool objects.
+type CellPoolList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []CellPool `json:"items"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

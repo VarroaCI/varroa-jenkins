@@ -16,7 +16,9 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
@@ -63,8 +65,12 @@ type runningRunJSON struct {
 }
 
 type pipelineSummaryJSON struct {
-	JobPath         string          `json:"jobPath"`
-	Health          string          `json:"health"`
+	JobPath string `json:"jobPath"`
+	Health  string `json:"health"`
+	// Kind is the item kind the tenant's bundle declares: "pipeline",
+	// "multibranch", or "unknown". It is set at assembly, never on the row,
+	// because a record summary replaces the whole row.
+	Kind            string          `json:"kind"`
 	LastBuild       *runSummaryJSON `json:"lastBuild,omitempty"`
 	DurationTrendMs []int64         `json:"durationTrendMs,omitempty"`
 }
@@ -72,7 +78,12 @@ type pipelineSummaryJSON struct {
 type pipelineListResponse struct {
 	Items      []pipelineSummaryJSON `json:"items"`
 	RunningNow []runningRunJSON      `json:"runningNow"`
-	Truncated  bool                  `json:"truncated"`
+	// TenantFolder is the Jenkins folder that prefixes every job path in
+	// the response. It is always present, and empty for a controller
+	// tenant. The response carries no count of the rows the caller's job
+	// globs removed: such a count is itself a disclosure.
+	TenantFolder string `json:"tenantFolder"`
+	Truncated    bool   `json:"truncated"`
 }
 
 type pipelineDefinitionJSON struct {
@@ -411,23 +422,52 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 
 	jobs := map[string]pipelineSummaryJSON{}
 	trendByJob := map[string][]int64{}
+	kindByJob := map[string]string{}
 	var runningRuns []recordstore.Run
 	truncated := false
 
+	// Every tenant one team resolves to shares one folder, so one envelope
+	// field describes the whole response. A ref that Resolve admitted still
+	// supplies the folder when the row filter below refuses every one of
+	// its rows.
+	tenantFolder := ""
+	if len(refs) > 0 {
+		tenantFolder = refs[0].Folder
+	}
+
 	for _, ref := range refs {
+		// The grants resolve once per tenant, never once per row. The row
+		// filter then runs before the rows of this ref reach the shared
+		// maps, so a refused row of one tenant cannot replace an admitted
+		// row of another tenant that carries the same job path.
+		grants, granted := s.deps.Authorizer.tenantGrants(claims, ref.Tenant, ref.Folder)
+
 		summaries, err := s.deps.RecordStore.ListJobSummaries(ctx, ref.Cluster, ref.Tenant)
 		if s.handleReaderError(w, err, "list job summaries") {
 			return
 		}
 		for _, js := range summaries {
+			if !granted || !grantsAllow(grants, ref.Folder, js.JobPath, "read") {
+				continue
+			}
 			jobs[js.JobPath] = buildPipelineSummary(js)
 			if len(js.DurationTrendMs) > 0 {
 				trendByJob[js.JobPath] = js.DurationTrendMs
 			}
 		}
-		for _, path := range s.catalogDeclaredJobPaths(ctx, ref) {
-			if _, ok := jobs[path]; !ok {
-				jobs[path] = pipelineSummaryJSON{JobPath: path, Health: "unknown"}
+		for _, dj := range s.catalogDeclaredJobPaths(ctx, ref) {
+			if !granted || !grantsAllow(grants, ref.Folder, dj.Path, "read") {
+				continue
+			}
+			if _, ok := jobs[dj.Path]; !ok {
+				jobs[dj.Path] = pipelineSummaryJSON{JobPath: dj.Path, Health: "unknown"}
+			}
+			// A record summary writes no kind. A declared item sets the
+			// kind when none is set, and "multibranch" replaces a stored
+			// "pipeline", so two tenants that declare one job path with
+			// different kinds agree whichever one the handler reads first.
+			if stored, ok := kindByJob[dj.Path]; !ok || (stored == "pipeline" && dj.Kind == "multibranch") {
+				kindByJob[dj.Path] = dj.Kind
 			}
 		}
 
@@ -435,12 +475,25 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 		if s.handleReaderError(w, err, "list running runs") {
 			return
 		}
-		runningRuns = append(runningRuns, runs...)
+		for _, run := range runs {
+			if !granted || !grantsAllow(grants, ref.Folder, run.JobPath, "read") {
+				continue
+			}
+			runningRuns = append(runningRuns, run)
+		}
+		// truncated reports the page the record store answered, not the
+		// filter above. A query matches one exact job path, so the filter
+		// cannot narrow the query, and a narrowed caller reads fewer tiles
+		// than the page held.
 		truncated = truncated || tenantTruncated
 	}
 
 	items := make([]pipelineSummaryJSON, 0, len(jobs))
 	for _, js := range jobs {
+		js.Kind = kindByJob[js.JobPath]
+		if js.Kind == "" {
+			js.Kind = "unknown"
+		}
 		items = append(items, js)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].JobPath < items[j].JobPath })
@@ -456,7 +509,12 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 		return runningOut[i].RunID < runningOut[j].RunID
 	})
 
-	s.writeJSON(w, http.StatusOK, pipelineListResponse{Items: items, RunningNow: runningOut, Truncated: truncated})
+	s.writeJSON(w, http.StatusOK, pipelineListResponse{
+		Items:        items,
+		RunningNow:   runningOut,
+		TenantFolder: tenantFolder,
+		Truncated:    truncated,
+	})
 }
 
 // --- GET /pipelines/{team}/jobs/{job} ---
@@ -788,4 +846,196 @@ func (s *Server) listRunsMerged(ctx context.Context, admitted []TenantRef, jobPa
 		resp.NextCursor = cur
 	}
 	return resp, nil, nil
+}
+
+// --- GET /pipelines/{team}/cell ---
+
+// Team cell states. The handler tests them in this order and stops at
+// the first match.
+const (
+	teamCellNotCellHosted = "notCellHosted"
+	teamCellUnplaced      = "unplaced"
+	teamCellMoving        = "moving"
+	teamCellRehydrating   = "rehydrating"
+	teamCellPlaced        = "placed"
+)
+
+// teamCellJSON is the tenant's own view of the cell that hosts it. An
+// absent field is absent from the object: it is never a null and never a
+// zero. The body carries no other tenant's name, job path, run, or
+// count.
+type teamCellJSON struct {
+	State            string `json:"state"`
+	Reason           string `json:"reason,omitempty"`
+	Cell             string `json:"cell,omitempty"`
+	Namespace        string `json:"namespace,omitempty"`
+	Cluster          string `json:"cluster,omitempty"`
+	CellPool         string `json:"cellPool,omitempty"`
+	Profile          string `json:"profile,omitempty"`
+	JenkinsVersion   string `json:"jenkinsVersion,omitempty"`
+	FreeSlots        *int32 `json:"freeSlots,omitempty"`
+	QueueLength      *int64 `json:"queueLength,omitempty"`
+	RunningNow       *int64 `json:"runningNow,omitempty"`
+	RunsLast24h      *int64 `json:"runsLast24h,omitempty"`
+	FailedLast24h    *int64 `json:"failedLast24h,omitempty"`
+	Jobs             *int64 `json:"jobs,omitempty"`
+	OtherTenantCount *int32 `json:"otherTenantCount,omitempty"`
+	CanOpenCell      bool   `json:"canOpenCell"`
+}
+
+// placedConditionReason returns the Team's Placed condition reason, or
+// the empty string when the Team carries no such condition.
+func placedConditionReason(team *v1alpha1.Team) string {
+	if team == nil {
+		return ""
+	}
+	for _, c := range team.Status.Conditions {
+		if c.Type == v1alpha1.TeamConditionPlaced {
+			return c.Reason
+		}
+	}
+	return ""
+}
+
+// handleGetTeamCell serves GET /pipelines/{team}/cell. It is the one
+// pipelines path whose subject is the placement, not the jobs, so it
+// resolves the Team object first and falls back to the tenant resolver.
+func (s *Server) handleGetTeamCell(w http.ResponseWriter, r *http.Request) {
+	if s.deps.RecordStore == nil {
+		s.pipelinesUnavailable(w)
+		return
+	}
+	ctx := r.Context()
+	claims := auth.ClaimsFromContext(ctx)
+	teamName := r.PathValue("team")
+
+	team, err := crdstore.Get[v1alpha1.Team](ctx, s.deps.Store, teamName, "")
+	if err != nil || team == nil || team.Spec.Pipelines == nil {
+		// Step 2: every surviving candidate is a single-controller
+		// tenant, so the answer is notCellHosted.
+		if _, serr := s.resolveTeamTenants(ctx, claims, teamName); serr != nil {
+			s.writeServiceError(w, serr)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, teamCellJSON{State: teamCellNotCellHosted})
+		return
+	}
+
+	// Step 1: a pipelines Team authorizes through the tenant read check
+	// with an empty job path. A refusal answers 404, so the surface does
+	// not confirm that the team exists.
+	ref := TenantRef{Tenant: team.Name, Team: team.Name, Folder: team.Name}
+	if p := team.Status.Placement; p != nil {
+		ref.Cluster = p.Cluster
+		ref.Namespace = p.CellNamespace
+		ref.Controller = p.Cell
+	}
+	if !s.canReadPipeline(claims, ref, "") {
+		s.writeJSONError(w, http.StatusNotFound, "team not found")
+		return
+	}
+
+	reason := placedConditionReason(team)
+	if ref.Controller == "" {
+		s.writeJSON(w, http.StatusOK, teamCellJSON{State: teamCellUnplaced, Reason: reason})
+		return
+	}
+
+	body, serr := s.buildTeamCell(ctx, claims, ref, reason)
+	if serr != nil {
+		s.writeServiceError(w, serr)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, body)
+}
+
+// buildTeamCell fills the placed, moving, and rehydrating body. Rule 4
+// reads status.cell.appliedTenants. It reads no status.cell.rehydration:
+// the cell-controllers capability keeps that key internal to the
+// operator.
+func (s *Server) buildTeamCell(ctx context.Context, claims *auth.Claims, ref TenantRef, reason string) (teamCellJSON, *ServiceError) {
+	cr, err := s.cellController(ctx, ref.Cluster, ref.Namespace, ref.Controller)
+	if err != nil {
+		s.deps.Logger.Error("read team cell", "team", ref.Team, "error", err)
+		return teamCellJSON{}, &ServiceError{Status: http.StatusInternalServerError, Message: "read team cell failed"}
+	}
+
+	jobRows, err := s.deps.RecordStore.CellTenantUsage(ctx, ref.Cluster, ref.Namespace, ref.Controller, ref.Tenant)
+	if serr := s.readerServiceError(err, "read team cell usage"); serr != nil {
+		return teamCellJSON{}, serr
+	}
+	counts := s.admittedJobCounts(claims, ref, jobRows)
+
+	presentation := s.cellPresentationFor(cr, ref.Cluster)
+	placed := cellPlacedTenants(cr)
+	freeSlots := cellFreeSlots(s.resolveCellCap(ctx, cr), placed)
+	others := placed - 1
+	if others < 0 {
+		others = 0
+	}
+
+	body := teamCellJSON{
+		State:            s.teamCellState(cr, ref, reason),
+		Reason:           reason,
+		Cell:             ref.Controller,
+		Namespace:        ref.Namespace,
+		Cluster:          ref.Cluster,
+		CellPool:         presentation.CellPool,
+		Profile:          presentation.Profile,
+		JenkinsVersion:   presentation.JenkinsVersion,
+		FreeSlots:        &freeSlots,
+		QueueLength:      presentation.QueueLength,
+		RunningNow:       &counts.RunningNow,
+		RunsLast24h:      &counts.RunsLast24h,
+		FailedLast24h:    &counts.FailedLast24h,
+		Jobs:             &counts.Jobs,
+		OtherTenantCount: &others,
+	}
+
+	// The hint grants nothing. It tells the card whether to render a
+	// link, and it decides no other field of this body.
+	if s.deps.Authorizer != nil {
+		body.CanOpenCell = s.deps.Authorizer.CanReadController(claims, ref.Namespace, ref.Controller)
+	}
+	return body, nil
+}
+
+// admittedJobCounts sums the counts of the jobs this caller may read.
+// The tenant read check admits the empty job path for a grant narrowed by
+// jobs globs, so the gate alone cannot scope the numbers; each job path
+// must meet the globs on its own, exactly as the team listing tests each
+// row. An unnarrowed grant admits every row and reports the tenant's
+// whole load.
+func (s *Server) admittedJobCounts(claims *auth.Claims, ref TenantRef, rows []recordstore.CellJobUsage) recordstore.CellUsageCounts {
+	var total recordstore.CellUsageCounts
+	grants, granted := s.deps.Authorizer.tenantGrants(claims, ref.Tenant, ref.Folder)
+	if !granted {
+		return total
+	}
+	for _, row := range rows {
+		if !grantsAllow(grants, ref.Folder, row.JobPath, "read") {
+			continue
+		}
+		total.RunningNow += row.RunningNow
+		total.RunsLast24h += row.RunsLast24h
+		total.FailedLast24h += row.FailedLast24h
+		total.Jobs += row.Jobs
+	}
+	return total
+}
+
+// teamCellState applies rules 3 to 5 of the state ladder.
+func (s *Server) teamCellState(cr *v1alpha1.Controller, ref TenantRef, reason string) string {
+	if reason == v1alpha1.TeamReasonTenantMoving {
+		return teamCellMoving
+	}
+	if cr == nil || cr.Status.Cell == nil {
+		return teamCellRehydrating
+	}
+	for _, applied := range cr.Status.Cell.AppliedTenants {
+		if applied == ref.Tenant {
+			return teamCellPlaced
+		}
+	}
+	return teamCellRehydrating
 }

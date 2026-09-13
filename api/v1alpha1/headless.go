@@ -10,7 +10,7 @@ func IsHeadless(cr *Controller) bool {
 	if cr == nil {
 		return false
 	}
-	if cr.Spec.Cell != nil && cr.Spec.Cell.Enabled {
+	if IsCell(cr) {
 		return true
 	}
 	return cr.Spec.Headless

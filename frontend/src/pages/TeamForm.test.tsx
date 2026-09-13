@@ -66,6 +66,7 @@ describe("TeamForm", () => {
 
     await user.click(screen.getByLabelText(/Pipelines tenant/));
     await user.type(screen.getByPlaceholderText("JenkinsVersionProfile name"), "lts-2.479");
+    await user.type(screen.getByPlaceholderText("CellPool name (optional)"), "solo");
 
     await user.selectOptions(screen.getByText("Select a namespace").closest("select")!, "team-alpha");
     await user.selectOptions(screen.getByText("Select a cluster").closest("select")!, "core");
@@ -88,7 +89,7 @@ describe("TeamForm", () => {
     const body = mockCreateTeam.mock.calls[0][0];
     expect(body.pipelines).toEqual({
       profile: "lts-2.479",
-      dedicated: false,
+      cellPool: "solo",
       agentNamespace: "team-alpha",
       composedBundleRef: { name: "starter", namespace: "team-alpha" },
       interruptedRetry: "manual",

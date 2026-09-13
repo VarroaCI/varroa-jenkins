@@ -317,7 +317,7 @@ func (r *Reconciler) buildStatefulSetSpec(cr *v1alpha1.Controller, class *v1alph
 		ClaimTimeoutMS:            r.claimTimeoutMS,
 		ArtifactSecretName:        in.ArtifactSecretName,
 		ArtifactSecretHash:        in.ArtifactSecretHash,
-		Cell:                      cr.Spec.Cell != nil && cr.Spec.Cell.Enabled,
+		Cell:                      v1alpha1.IsCell(cr),
 		Headless:                  v1alpha1.IsHeadless(cr),
 	}
 }

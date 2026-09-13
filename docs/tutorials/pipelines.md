@@ -17,21 +17,86 @@ of every [Team](../security/varroa-rbac.md#grant-pipelines-access) that grants y
 verb. `/pipelines` lists those teams and opens the one team you belong to automatically. When
 you belong to more than one team, pick one from the list.
 
-## Read the pipelines table
+## Your cell card
 
-The team page shows two cards.
+The team page heads with a **Your cell** card when the team runs on a
+[cell](../operations/cells.md). The card names the cell, its pool, its version profile, and its
+Jenkins version. It also reports the free tenant slots on the cell, the length of the cell's build
+queue, and your own running builds.
+
+One line counts the other teams on the cell. The card names none of them. It shows no other team's
+job, build, or count.
+
+**Cell details** opens the cell's controller page. The link appears only when your access covers
+that page. Without it you still read every field of the card.
+
+**Updated** states when the browser last read the record. The browser reads it again every 30
+seconds.
+
+The card reports one of five states.
+
+| State | What the card shows |
+|---|---|
+| Placed | the whole card |
+| Moving | the whole card, plus a note that Varroa is moving the team to another cell |
+| Rehydrating | the whole card, plus a note that the cell is rebuilding the team's folders |
+| Not placed | the badge and the reason only. The team waits for its first cell |
+| No card | the team runs on its own controller, so no cell hosts it |
+
+**Reason** carries the operator's own text for the placement, such as `TenantPlaced` or
+`CellNotReady`. Ask an operator what to do about a reason you do not recognize.
+
+A cell in another cluster reports no queue length. The **Queue** figure then reads `not reported`,
+which is not the same as an empty queue.
+
+**Free slots** counts the free tenant slots of this cell alone. The cell's pool can hold a lower
+cap, which stops a new team from landing on the cell even while the cell reports a free slot. An
+operator reads both numbers on the cell page.
+
+## Read the pipelines tree
+
+Below the cell card the team page shows two more cards.
 
 **Running now** holds one tile per build in progress: the job name, the build number, the
 current stage, the branch, the commit, and a progress bar against the job's usual duration.
 
-**Pipelines** holds one row per job: its health, its last build, its branch, its last eight
-build durations, and when it last ran. Health is a weather glyph: clear when the last five runs
-passed, cloudy when one or two failed, and rain when three or more failed. A job that has never
-run shows no glyph and an empty last build.
+**Pipelines** holds the team's folder tree. A job row carries its health, its last build, its
+branch, its last eight build durations, and when it last ran. Health is a weather glyph: clear
+when the last five runs passed, cloudy when one or two failed, and rain when three or more
+failed. A job that has never run shows no glyph and an empty last build.
+
+A folder row carries a fold control, the folder name, and two counts: the number of jobs below
+it, and the number of those jobs building now. A folder reports no health value of its own.
+
+A multibranch item is a folder row that counts branches instead of jobs. It offers no **Run**
+control, because a multibranch item does not build. Its branches sit below it.
+
+Row order is fixed. At each level the folders come first, then the jobs, each group in
+alphabetical order.
+
+A first load unfolds the top two levels and folds every deeper level.
+
+The fold state lives in the page URL, as one `open` value per unfolded folder:
+
+```text
+/pipelines/payments?open=release&open=release/eu
+```
+
+Copy that URL to share the same view. A reload keeps the folds. `?open=` with no value folds
+everything.
+
+A caller whose grant carries `jobs` globs reads only the matching jobs and only the matching
+running builds. A folder holding no readable job does not appear at all. See
+[Varroa RBAC](../security/varroa-rbac.md#scope-a-binding-to-a-pipelines-tenant) for how an
+administrator writes those globs.
 
 Select a job's name to open its pipeline page.
 
 ## Open a build
+
+The pipeline page carries a breadcrumb trail under the job name. The trail names the team, then
+each folder, then the job. Every crumb except the last is a link. Select a folder crumb to open
+the team page with that folder, and every folder above it, already unfolded.
 
 The pipeline page lists the job's builds in a table, with filters for branch, result, actor, and
 cause. Each filter you set stays in the page URL, so a filtered view is shareable and survives a

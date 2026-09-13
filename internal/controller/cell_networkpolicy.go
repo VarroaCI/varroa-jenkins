@@ -317,7 +317,7 @@ func (r *Reconciler) cellTenantAgentNamespaces(ctx context.Context, cr *v1alpha1
 // between the two reads render a NetworkPolicy and a pushed node list that
 // describe different runner sets.
 func (r *Reconciler) reconcileCellNetworkPolicy(ctx context.Context, cr *v1alpha1.Controller, contrib runners.RunnerContribution) error {
-	if cr.Spec.Cell == nil || !cr.Spec.Cell.Enabled {
+	if !v1alpha1.IsCell(cr) {
 		return nil
 	}
 	name := controllerPrefix(cr) + "-cell"

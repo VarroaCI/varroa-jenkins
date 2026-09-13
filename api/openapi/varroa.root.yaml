@@ -95,6 +95,10 @@ tags:
     description: Upstream Jenkins version observation and upgrade candidate promotion.
   - name: Pipelines
     description: Team-scoped pipeline, run, log, and artifact surfaces.
+  - name: CellPools
+    description: Cell-pool capacity read and scale control.
+  - name: Cells
+    description: Cell load, tenant by tenant, for the operator surfaces.
 paths:
   /healthz:
     $ref: './paths/ops.yaml#/~1healthz'
@@ -152,6 +156,10 @@ paths:
     $ref: './paths/runners.yaml#/~1api~1v1~1runners'
   /api/v1/runners/{name}:
     $ref: './paths/runners.yaml#/~1api~1v1~1runners~1{name}'
+  /api/v1/cellpools:
+    $ref: './paths/cellpools.yaml#/~1api~1v1~1cellpools'
+  /api/v1/cellpools/{name}:
+    $ref: './paths/cellpools.yaml#/~1api~1v1~1cellpools~1{name}'
   /api/v1/identity-settings:
     $ref: './paths/users.yaml#/~1api~1v1~1identity-settings'
   /api/v1/builtin-roles:
@@ -306,6 +314,14 @@ paths:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}~1runs'
   /api/v1/pipelines/{team}/markers/validate:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1markers~1validate'
+  /api/v1/pipelines/{team}/cell:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1cell'
+  /api/v1/cells/usage:
+    $ref: './paths/cells.yaml#/~1api~1v1~1cells~1usage'
+  /api/v1/cells/{namespace}/{name}/usage:
+    $ref: './paths/cells.yaml#/~1api~1v1~1cells~1{namespace}~1{name}~1usage'
+  /api/v1/cells/{namespace}/{name}/grants:
+    $ref: './paths/cells.yaml#/~1api~1v1~1cells~1{namespace}~1{name}~1grants'
   /api/v1/runs/{run}:
     $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}'
   /api/v1/runs/{run}/log:

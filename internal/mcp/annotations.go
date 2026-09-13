@@ -45,6 +45,13 @@ const (
 	// preserved. That is a destructive update under MCP's definition, where
 	// destructiveHint=false promises additive-only changes.
 	kindUpdate
+	// kindUpdatePartial writes a named subset of an object's fields and
+	// removes nothing. It is not Apply-backed, so a field absent from the
+	// request keeps its stored value. That is an additive change under MCP's
+	// definition, where destructiveHint=false promises exactly that, so
+	// kindUpdate would raise a false destructive hint. It is idempotent: a
+	// repeated call writes the same values.
+	kindUpdatePartial
 	// kindDelete removes an object. Destructive, but idempotent — deleting an
 	// already-deleted object converges.
 	kindDelete
@@ -76,6 +83,8 @@ func annotationsFor(kind toolKind) mcp.ToolAnnotation {
 		idempotent = true
 	case kindUpdate:
 		destructive, idempotent = true, true
+	case kindUpdatePartial:
+		idempotent = true
 	case kindDelete:
 		destructive, idempotent = true, true
 	case kindAction:
@@ -95,7 +104,7 @@ func annotationsFor(kind toolKind) mcp.ToolAnnotation {
 // therefore emit an activity event.
 func (k toolKind) mutates() bool {
 	switch k {
-	case kindCreate, kindCreateStrict, kindUpdate, kindDelete, kindAction:
+	case kindCreate, kindCreateStrict, kindUpdate, kindUpdatePartial, kindDelete, kindAction:
 		return true
 	default:
 		return false

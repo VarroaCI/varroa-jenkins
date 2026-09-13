@@ -127,6 +127,28 @@ varroactl logs 0192f0a1-1c2d-7abc-9def-0123456789ab -f
 
 `edit`, `patch`, and `power` can encounter field-ownership conflicts. Use `--force` only after reviewing [field conflict recovery](operations/lifecycle.md#resolve-field-conflicts). For plugin-pack and air-gap workflows, use [Plugin packs](config/plugin-packs.md) and [Air-gapped installation](install/air-gapped.md). Use `varroactl logout --revoke` when a stored key must be revoked.
 
+## Scale a cell pool
+
+`cellpool` is a cluster-scoped noun (alias `cellpools`) serving `get` and `describe`, plus the
+top-level verb `scale`:
+
+```bash
+varroactl get cellpools
+varroactl describe cellpool jenkins-lts
+varroactl scale cellpool jenkins-lts --warm 3 --max-cells 8
+```
+
+`get cellpools` prints `NAME`, `PROFILE`, `WARM`, `PLACED`, `FREE`, and `READY`. `describe` adds
+the tenant list and the `PoolReady` condition. Every cell-pool command refuses `--namespace` and
+`--all-namespaces`, because `CellPool` is cluster-scoped.
+
+`scale` sends only the flags you pass, so an unnamed dial keeps its stored value. A call with
+neither `--warm` nor `--max-cells` is a usage error, and so is a negative value; both are reported
+before any request.
+
+There is no `create cellpool` and no `delete cellpool`. Create and delete a pool with `kubectl` or
+through GitOps. See [Cells and pipelines tenants](operations/cells.md).
+
 ## Register an external runner
 
 `runners` is an ordinary cluster-scoped noun (alias `rnr`): `get`, `describe`, `create`,

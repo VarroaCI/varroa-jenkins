@@ -51,6 +51,8 @@ const (
 	TeamReasonTenantMoving            = "TenantMoving"
 	TeamReasonAwaitingCell            = "AwaitingCell"
 	TeamReasonProfileNotFound         = "ProfileNotFound"
+	TeamReasonCellPoolNotFound        = "CellPoolNotFound"
+	TeamReasonCellCapReached          = "CellCapReached"
 	TeamReasonAgentNamespaceUnmanaged = "AgentNamespaceUnmanaged"
 	TeamReasonRecordStoreUnsupported  = "RecordStoreUnsupported"
 	TeamReasonBlobTierUnsupported     = "BlobTierUnsupported"
@@ -82,3 +84,18 @@ const (
 // teardown schedule purge succeeds (design D4, "Teardown when the cell is
 // gone").
 const TeamFinalizerTenantPlacement = "varroa.dev/tenant-placement"
+
+// CellPool condition type.
+const (
+	CellPoolConditionPoolReady = "PoolReady"
+)
+
+// PoolReady reasons. The condition carries exactly these three.
+const (
+	CellPoolReasonReady          = "Ready"
+	CellPoolReasonCellCapReached = "CellCapReached"
+	CellPoolReasonProfileMissing = "ProfileMissing"
+)
+
+// CellPoolFinalizerDrain holds a deleted pool until its free cells are gone.
+const CellPoolFinalizerDrain = "varroa.dev/cellpool-drain"

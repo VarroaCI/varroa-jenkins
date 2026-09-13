@@ -209,6 +209,9 @@ func builtinRoles() []*v1alpha1.VarroaRole {
 				{Resources: []string{"catalogitems"}, Verbs: []string{"read"}},
 				{Resources: []string{"composedbundles"}, Verbs: []string{"read", "create", "update", "delete"}},
 				{Resources: []string{"runners"}, Verbs: []string{"read", "create", "update", "delete"}},
+				// A cell pool is read and scale only. Create and delete stay
+				// with kubectl and GitOps, so the role carries neither verb.
+				{Resources: []string{"cellpools"}, Verbs: []string{"read", "update"}},
 				{Resources: []string{"version-profiles"}, Verbs: []string{"read", "create", "update", "delete"}},
 				{Resources: []string{"updatecenter"}, Verbs: []string{"upload"}},
 				{Resources: []string{"pipelines"}, Verbs: []string{"read", "write", "admin"}},

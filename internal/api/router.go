@@ -37,6 +37,8 @@ func NewRouter(deps *Dependencies) http.Handler {
 	// (get/patch/delete). Runner is cluster-scoped, so no namespace segment.
 	mux.HandleFunc("/runners", srv.HandleRunners)
 	mux.HandleFunc("/runners/", srv.HandleRunnerDispatch)
+	mux.HandleFunc("/cellpools", srv.HandleCellPools)
+	mux.HandleFunc("/cellpools/", srv.HandleCellPoolDispatch)
 	// Controllers: GET list (creation is declarative via the Kubernetes API).
 	mux.HandleFunc("/controllers", srv.HandleControllers)
 	// Clusters: GET list, + cluster-scoped dispatch.
@@ -86,12 +88,19 @@ func NewRouter(deps *Dependencies) http.Handler {
 	mux.HandleFunc("/version-candidates", srv.HandleVersionCandidates)
 	mux.HandleFunc("/version-candidates/", srv.HandleVersionCandidateDispatch)
 
+	// Cells: the flat cell usage family. A cell usage row is a fleet
+	// view, so it does not live under /clusters/{cluster}/controllers/.
+	mux.HandleFunc("GET /cells/usage", srv.handleListCellUsage)
+	mux.HandleFunc("GET /cells/{namespace}/{name}/usage", srv.handleCellUsage)
+	mux.HandleFunc("GET /cells/{namespace}/{name}/grants", srv.handleCellGrants)
+
 	// Pipelines: team-scoped job listing, job detail, run list/create.
 	mux.HandleFunc("GET /pipelines/{team}", srv.handleListPipelines)
 	mux.HandleFunc("GET /pipelines/{team}/jobs/{job}", srv.handleGetPipelineJob)
 	mux.HandleFunc("GET /pipelines/{team}/jobs/{job}/runs", srv.handleListRuns)
 	mux.HandleFunc("POST /pipelines/{team}/jobs/{job}/runs", srv.handleCreateRun)
 	mux.HandleFunc("POST /pipelines/{team}/markers/validate", srv.handleValidatePipelineMarker)
+	mux.HandleFunc("GET /pipelines/{team}/cell", srv.handleGetTeamCell)
 	// Runs: detail, log stream, artifacts, tests, changes, cancel, rerun.
 	mux.HandleFunc("GET /runs/{run}", srv.handleGetRun)
 	mux.HandleFunc("GET /runs/{run}/log", srv.handleStreamRunLog)

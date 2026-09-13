@@ -447,6 +447,14 @@ sections describe.
   `appliedTenants`, `evacuate`, `unreadySince`, `rolledAt`, and
   `tenantWarnings` — or a stale in-memory tenant list would clobber a
   placement change the two writers raced on.
+- **`status.cell.pendingTenants` (the placement claim) is the second narrow
+  key on `status.cell`**, written only by `cells.WriteCellClaim` /
+  `ReleaseCellClaim` (`cells/claim.go`) from the same placement pass. They go
+  through `crdstore.PatchStatus[Controller]` with a **hand-built map** naming
+  `cell.pendingTenants` alone — never a typed status object, which would
+  marshal the whole status body. A claim expires after `cells.CellClaimTTL`
+  (10 minutes) and each write drops every expired entry. The BFF projection
+  (`CellStatusJSON`) carries neither this key nor `rehydration`.
 - **`ConditionReconcileBlocked`** (C3, `markReconcileBlocked` helper near
   `persistStatusDiagnostics`) is the standing pattern for surfacing a reconcile pass
   that hit an unresolved error: sets the condition `True` + `Reason` (one of 19
@@ -589,12 +597,30 @@ sections describe.
   - `TeamReconciler` (`team_controller.go`) is the placement reconciler. For
     every pipelines `Team` it calls `cells.Place` (`cells/placement.go`) —
     pure decision logic, no Kubernetes write of its own: it reads a
-    caller-gathered `[]CellCandidate` snapshot and the `Team`'s own status,
+    caller-gathered `[]CellCandidate` snapshot, a caller-gathered
+    `[]CellPoolSummary` (`Inputs.Pools`, listed once per tick beside the cell
+    list), and the `Team`'s own status,
     and returns an `Outcome` plus a mutated `TeamStatus` for the caller to
-    apply. `TeamReconciler` then writes `Team.status.placement.cluster` (and
-    the rest of `TeamStatus`) and calls `PatchControllerCellStatus` (above)
-    on the bound/vacated cells. **The placement pass never creates a
-    cell** — only the warm pool does. A voluntary move completes only once
+    apply. A tenant's **resolved pool** is `spec.pipelines.cellPool` when set,
+    else the pool named by `spec.pipelines.profile`; gate 4 refuses a named
+    pool that is absent or serves another profile with `CellPoolNotFound`,
+    while an uncreated **default** pool stays `AwaitingCell` because the pool
+    reconciler creates it within one tick. `TeamReconciler` then applies the
+    `Outcome` in a fixed order: **the claim first** (`cells.WriteCellClaim` on
+    the selected cell, and a failed claim ends the tick with no fence
+    written), then `Team.status.placement.cluster` (and the rest of
+    `TeamStatus`), then `PatchControllerCellStatus` (above) on the
+    bound/vacated cells, then `cells.ReleaseCellClaim` **only for a tenant
+    patch that succeeded**. `Place` also names the claim on the `moveNone`
+    path while the bound cell's tenant list does not carry the tenant, so a
+    refused tenant patch refreshes the claim every tick instead of letting it
+    expire. The claim exists
+    because the pool drain reads the fence set **before** it re-reads a free
+    cell: a fence written after that listing is invisible to the drain, and
+    without a write on the cell itself the drain's `DeleteIfUnchanged`
+    precondition still passes and deletes the cell the tenant is arriving on.
+    **The placement pass never creates a cell** — only the pool reconciler
+    does. A voluntary move completes only once
     `Controller.status.cell.appliedTenants` no longer holds the tenant; the
     `Team` finalizer holds through teardown until the schedule purge
     succeeds or `maxPurgeAttempts` (10) is spent, then a bounded
@@ -602,12 +628,50 @@ sections describe.
     warning event before releasing — warnings order by tenant then reason.
   - `cells.WarmPoolReconciler` (`cells/warmpool.go`) is a plain
     `Reconcile(ctx) error` ticker reconciler (not controller-runtime,
-    interval 60s in `cmd/operator/main.go`), not a per-`Team` reconciler: it
-    lists every profile a pipelines `Team` requests, or a placed tenant's
-    live cell already runs, and fills or drains each profile's free-cell
-    count to `cells.warmPool.perProfile`. It writes no status — only
-    creates/deletes `Controller` CRDs labelled `varroa.dev/cell-profile`/
-    `varroa.dev/warm` — so it never races a status writer above.
+    interval 60s in `cmd/operator/main.go`), not a per-`Team` reconciler. It
+    sizes every `CellPool` from **that pool's own spec**, never from the chart
+    values: `WarmPoolConfig` now only seeds a pool the operator creates, and
+    `Enabled` gates auto-creation alone — a hand-applied `CellPool` is
+    reconciled even with auto-creation off. It is the only creator of a cell
+    and the only writer of `CellPool.status`; it writes no `Controller`
+    status, so it never races a status writer above. Each pass, per pool:
+    resolve `spec.profileRef` (a missing profile sets `PoolReady=False` with
+    reason `ProfileMissing` and stops, creating and deleting nothing); adopt
+    unlabelled cells of the profile **only when the pool is that profile's
+    default pool** (its name equals its own `profileRef`); list cells by
+    `varroa.dev/cell-pool` and keep only those whose
+    `varroa.dev/cell-profile` matches (the second test keeps a stale label out
+    of a new pool of the same name); compute **one** target
+    (`desiredFree = max(warm, ceil(max(0, pending - placedSlots) /
+    maxTenantsPerCell))`) and either fill or drain, never both in a tick, so
+    the pass cannot oscillate; re-stamp `spec.version`/`resources`/
+    `podOverrides` on free cells only; write status. `placedSlots`
+    deliberately excludes free cells — `len(free)` already counts them, and
+    double-counting would stall a `warm: 0` pool. A created cell is named
+    `cell-<pool>-<ordinal>` where `<ordinal>` is scanned against **every
+    `Controller` name** in the operator namespace, not the pool's label list,
+    so two pools whose names share a prefix never collide. A `CellPool`
+    carries the finalizer `varroa.dev/cellpool-drain`: a delete drains the
+    pool's free cells, strips no label, and then releases the finalizer, so a
+    placed cell lives on as a cell with no effective owner. **Both drain
+    paths delete through `deleteFreeCell`, never from the pass's own free
+    snapshot**: a fresh read with no tenant, no live claim on that fresh read
+    (`status.cell.pendingTenants`), no fence in the pass's fence snapshot, no
+    fence in a **fresh** `fencedCells` read taken after the cell read, and a
+    `DeleteIfUnchanged` precondition on the uid and resourceVersion the fresh
+    read observed. A `Conflict` is a skip, not a failure. The fresh fence read
+    is what covers a tenant whose cell patch keeps failing past
+    `CellClaimTTL`.
+  - **Effective owner** (`cells/cellpool.go`) is the one rule every pool test
+    reads: the `CellPool` a cell's `varroa.dev/cell-pool` label names, **and
+    only while that pool exists**. A cell with no label, or with a label
+    naming a deleted pool, has none. `resolveCellCapacity` chains the cell's
+    own `spec.cell.maxTenants`, then the effective owner's
+    `maxTenantsPerCell`, then the chart value — never the minimum of two.
+    `cellUnreadyGrace` (`cell_readiness.go`) follows the same chain for the
+    roll and evacuate timers. Reading the raw label instead of the effective
+    owner reintroduces the drift the `effectiveBundleRef` rule already
+    forbids.
   - The Controller reconciler's own cell-specific logic lives beside it in
     this package, one file per concern: `cell_readiness.go`
     (`isCellController`; `cellConfigGateReason` checks, in fixed order, the
@@ -647,7 +711,12 @@ sections describe.
     `NetworkPolicyEnabled`, `APIServerEgress`, `CellIsolation`), mirroring
     chart values `cells.*` and `networkPolicy.cellIsolation`. A missing or
     unparsable variable falls back to its documented default and only logs
-    a warning — this function never fails the boot.
+    a warning — this function never fails the boot. The four `cells.*` values
+    are **pool seeds**, not live settings: they populate a `CellPool` the
+    operator creates, and the operator never rewrites the spec of a pool that
+    already exists, so an operator's scale edit survives every tick and every
+    restart. `MaxTenantsPerCell` and `UnreadyGracePeriod` stay live as the
+    fallback for a cell with no effective owner.
 - **Tenant-sync announcement** (`cell_instance.go`, `single_tenant_announce.go`,
   `team_sync.go`, `internal/controller/cells/sync.go`) — the placement-fencing
   capability's write side: it keeps `varroa.tenant_placements` current for

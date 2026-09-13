@@ -22,7 +22,21 @@ type tickerRunnable struct {
 	everyReplica bool                            // run on every replica, not just the leader
 	setup        func(ctx context.Context) error // optional one-shot; error fails manager start
 	tick         func(ctx context.Context)       // the loop body; must honor ctx
-	logger       *slog.Logger
+	// wake runs one tick at once, so an edit takes effect without waiting
+	// for the interval. The interval stays as the backstop, which also
+	// covers a dropped token and an informer restart. Nil for a runnable
+	// that no watch wakes.
+	wake   <-chan struct{}
+	logger *slog.Logger
+}
+
+// notifyWake sends a token without ever blocking. A full channel drops the
+// token, because the pending wake already covers it.
+func notifyWake(wake chan<- struct{}) {
+	select {
+	case wake <- struct{}{}:
+	default:
+	}
 }
 
 func (t *tickerRunnable) NeedLeaderElection() bool { return !t.everyReplica }
@@ -54,6 +68,18 @@ func (t *tickerRunnable) Start(ctx context.Context) error {
 			return nil
 		case <-timer.C:
 			t.tick(ctx)
+			timer.Reset(t.nextWait())
+		case <-t.wake:
+			t.tick(ctx)
+			if !timer.Stop() {
+				// The timer already fired and its value waits on the
+				// channel; drain it so the Reset below starts a full
+				// interval rather than firing at once.
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
 			timer.Reset(t.nextWait())
 		}
 	}

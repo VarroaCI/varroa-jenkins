@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useController } from "../hooks/useControllers";
 import type { PluginInventoryDriftEntry, ControllerDetail } from "../hooks/useControllers";
@@ -41,14 +41,28 @@ import type {
 import { PROBE_DEFAULTS } from "../types";
 import ConflictDialog from "../components/ConflictDialog";
 import SpecEditorCard from "../components/specform/SpecEditorCard";
+import { CellTab } from "./CellTab";
 import styles from "./ControllerDetail.module.css";
 
 const TABS = [
   { id: "overview", label: <>▦ Overview</> },
   { id: "configuration", label: <>⚯ Configuration</> },
+  { id: "cell", label: <>⬡ Cell</> },
   { id: "diagnostics", label: <>◷ Diagnostics</> },
 ];
+// The static tab id set holds every tab id, cell included. The mount-time
+// step tests against it while the detail read is in flight, so a cold load
+// of ?tab=cell keeps its parameter.
 const VALID_TABS = new Set(TABS.map((t) => t.id));
+
+// resolveActiveTab carries the two validation steps. An unknown value falls
+// back to Overview. The value "cell" falls back too, but only once the
+// detail read has answered and reported a controller that is not a cell.
+function resolveActiveTab(param: string, cellVisible: boolean, loaded: boolean): string {
+  if (!VALID_TABS.has(param)) return "overview";
+  if (param === "cell" && loaded && !cellVisible) return "overview";
+  return param;
+}
 
 type ControllerData = NonNullable<ReturnType<typeof useController>["data"]>;
 
@@ -240,7 +254,40 @@ export default function ControllerDetail() {
   const { data: clusters } = useClusters();
   const core = coreOf(clusters);
   const isCore = core != null && cluster === core.name;
-  const [activeTab, setActiveTab] = useState("overview");
+  // The query parameter is the single source of truth for the active tab,
+  // so a browser Back navigation changes the rendered tab. A user's click
+  // pushes a history entry; a correction replaces one, so a bad link leaves
+  // no trace in the history.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab") ?? "";
+  const setActiveTab = useCallback(
+    (id: string, replace = false) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("tab", id);
+          return next;
+        },
+        { replace },
+      );
+    },
+    [setSearchParams],
+  );
+  // The Cell tab renders for a cell alone.
+  const cellTabVisible = ctrl?.kind === "cell";
+  const active = resolveActiveTab(tabParam, cellTabVisible, !!ctrl);
+  useEffect(() => {
+    // A correction replaces the history entry. The step waits for the
+    // detail read, so a cold load of ?tab=cell keeps its parameter.
+    if (tabParam === "") return;
+    if (!VALID_TABS.has(tabParam)) {
+      setActiveTab("overview", true);
+      return;
+    }
+    if (tabParam === "cell" && ctrl && !cellTabVisible) {
+      setActiveTab("overview", true);
+    }
+  }, [tabParam, ctrl, cellTabVisible, setActiveTab]);
   const { permissions } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -333,10 +380,6 @@ export default function ControllerDetail() {
 
   const runningBuilds = ctrl.observability?.summary?.runningBuilds ?? 0;
 
-  // Stale persisted tab values ("plugins", "observability") fall back to
-  // overview instead of rendering a blank content area.
-  const active = VALID_TABS.has(activeTab) ? activeTab : "overview";
-
   const confirmBody: Record<string, string> = {
     restart: "Rolls the Jenkins pod. The controller is unreachable for roughly 40 seconds.",
     "power-off": "Stops the controller. Jenkins stops serving until powered back on.",
@@ -427,7 +470,11 @@ export default function ControllerDetail() {
         </div>
       )}
 
-      <Tabs tabs={TABS} activeTab={active} onSelect={setActiveTab} />
+      <Tabs
+        tabs={cellTabVisible ? TABS : TABS.filter((t) => t.id !== "cell")}
+        activeTab={active}
+        onSelect={setActiveTab}
+      />
 
       {active === "overview" && (
         <OverviewTab
@@ -447,6 +494,15 @@ export default function ControllerDetail() {
           namespace={namespace}
           name={name}
           canUpdate={canUpdate}
+        />
+      )}
+      {active === "cell" && cellTabVisible && (
+        <CellTab
+          ctrl={ctrl}
+          cluster={cluster}
+          namespace={namespace}
+          name={name}
+          active={active === "cell"}
         />
       )}
       {active === "diagnostics" && (

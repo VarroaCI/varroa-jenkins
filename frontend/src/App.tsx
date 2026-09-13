@@ -39,6 +39,7 @@ import BroodOperationDetail from "./pages/BroodOperationDetail";
 import BroodSchedules from "./pages/BroodSchedules";
 import BroodScheduleDetail from "./pages/BroodScheduleDetail";
 import FleetPlugins from "./pages/FleetPlugins";
+import Cells from "./pages/Cells";
 import PipelinesIndex from "./pages/pipelines/PipelinesIndex";
 import TeamHome from "./pages/pipelines/TeamHome";
 import PipelinePage from "./pages/pipelines/PipelinePage";
@@ -114,6 +115,14 @@ function AppRoutes() {
                   <Route path="controllers/create" element={<ControllerWizard />} />
                   <Route path="controllers/:cluster/:namespace/:name" element={<ControllerDetail />} />
                   <Route path="controllers/:cluster/:namespace/:name/jenkins" element={<ManagedJenkins />} />
+                  <Route
+                    path="cells"
+                    element={
+                      <PermissionRoute resource="cellpools" verb="read" globalOnly>
+                        <Cells />
+                      </PermissionRoute>
+                    }
+                  />
                   <Route path="clusters" element={<Clusters />} />
 
                   {/* Settings area shell — list routes only */}

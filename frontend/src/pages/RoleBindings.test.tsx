@@ -152,3 +152,48 @@ describe("RoleBindings", () => {
     expect(screen.getByText("ns-binding")).toBeInTheDocument();
   });
 });
+
+describe("RoleBindings — a tenant scope", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("names a tenant scope, and does not label it cluster-wide", async () => {
+    mockListRoleBindings.mockResolvedValue({
+      items: [
+        createRoleBinding({
+          metadata: { name: "tenant-binding" },
+          spec: {
+            subjects: [{ kind: "Group", name: "payments-devs" }],
+            roleRef: "varroa:developer",
+            scope: { tenants: [{ name: "payments" }] },
+          },
+        }),
+      ],
+    });
+    renderWithProviders(<RoleBindings />);
+    await waitFor(() => {
+      expect(screen.getByText("tenant:payments")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Cluster-wide", { selector: "td" })).not.toBeInTheDocument();
+  });
+
+  it("names the entry's job patterns in their stored order", async () => {
+    mockListRoleBindings.mockResolvedValue({
+      items: [
+        createRoleBinding({
+          metadata: { name: "tenant-binding" },
+          spec: {
+            subjects: [{ kind: "Group", name: "payments-devs" }],
+            roleRef: "varroa:developer",
+            scope: { tenants: [{ name: "payments", jobs: ["release/*", "build/**"] }] },
+          },
+        }),
+      ],
+    });
+    renderWithProviders(<RoleBindings />);
+    await waitFor(() => {
+      expect(screen.getByText("tenant:payments jobs:release/*,build/**")).toBeInTheDocument();
+    });
+  });
+});

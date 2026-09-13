@@ -415,9 +415,20 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 		if err != nil {
 			r.logger.Error("failed to list cell candidates", "team", team.Name, "error", err)
 		}
+		// A failed pool list must fail closed. An empty Pools slice makes
+		// every effective-owner lookup answer nil, so a cell owned by a live
+		// single-tenant pool reads as unowned and admits a tenant that names
+		// no pool. The tick therefore returns the error and requeues, and the
+		// tenant keeps the placement it already holds.
+		poolSummaries, err := r.listCellPools(ctx)
+		if err != nil {
+			r.logger.Error("failed to list cell pools", "team", team.Name, "error", err)
+			return reconcile.Result{}, err
+		}
 		placeInputs := cells.Inputs{
 			Now:                time.Now,
 			Cells:              cellCandidates,
+			Pools:              poolSummaries,
 			ProfileExists:      r.profileExists(ctx),
 			ManagedNamespaces:  r.managedSet,
 			RecordStoreEnabled: r.claimGate == "1",
@@ -448,6 +459,21 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 		r.setTenantWarningsCondition(status, team, cellsByKey)
 		r.runRehydrationPass(status, team.Name, cellsByKey)
 
+		// The claim is the first write of a new placement, before the
+		// fence below. The pool drain reads the fence set before it
+		// re-reads a free cell, so a fence alone leaves this interleaving
+		// open: the drain lists the cell, reads no fence, re-reads the
+		// cell, this pass writes the fence, and the conditional delete
+		// still succeeds over a tenant that is arriving. A failed claim
+		// therefore ends the tick with no fence written.
+		if claim := outcome.CellClaim; claim != nil {
+			if err := cells.WriteCellClaim(ctx, r.store, claim.Name, claim.Namespace, claim.Tenant, time.Now()); err != nil {
+				r.logger.Error("failed to claim the cell", "team", team.Name,
+					"cell", claim.Namespace+"/"+claim.Name, "error", err)
+				return reconcile.Result{}, err
+			}
+		}
+
 		if err := r.patchStatus(ctx, team.Name, status); err != nil {
 			r.logger.Error("failed to patch status", "team", team.Name, "error", err)
 			return reconcile.Result{}, err
@@ -459,10 +485,27 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 		// idempotent (a cell patch, a finalizer patch, the pipelines
 		// RoleBinding/agent-identity sync) or a best-effort side effect
 		// (the activity events).
+		claim := outcome.CellClaim
+		claimSettled := false
 		for _, cp := range outcome.CellPatches {
 			cellStatus := &v1alpha1.CellStatus{Tenants: cp.Tenants}
 			if err := r.client.PatchControllerCellStatus(ctx, cp.Name, cp.Namespace, cellStatus); err != nil {
 				r.logger.Error("failed to patch cell tenant list", "cell", cp.Namespace+"/"+cp.Name, "error", err)
+				continue
+			}
+			if claim != nil && cp.Name == claim.Name && cp.Namespace == claim.Namespace {
+				claimSettled = true
+			}
+		}
+		if claim != nil && claimSettled {
+			// Only a tenant patch that succeeded retires the claim: the
+			// tenant list is the durable record the claim stands in for. A
+			// refused patch keeps the claim, and the next tick writes it
+			// again. A failed release costs one claim window of drain
+			// protection on a cell the drain must skip anyway.
+			if err := cells.ReleaseCellClaim(ctx, r.store, claim.Name, claim.Namespace, claim.Tenant, time.Now()); err != nil {
+				r.logger.Error("failed to retire the cell claim", "team", team.Name,
+					"cell", claim.Namespace+"/"+claim.Name, "error", err)
 			}
 		}
 		if outcome.FinalizerAdd || outcome.FinalizerRelease {
@@ -763,7 +806,7 @@ func (r *TeamReconciler) listCellCandidates(ctx context.Context) ([]cells.CellCa
 	var out []cells.CellCandidate
 	byKey := make(map[string]*v1alpha1.Controller)
 	for _, cr := range all {
-		if cr.Spec.Cell == nil || !cr.Spec.Cell.Enabled {
+		if !v1alpha1.IsCell(cr) {
 			continue
 		}
 		byKey[teamCellKey(cr.Namespace, cr.Name)] = cr
@@ -772,11 +815,31 @@ func (r *TeamReconciler) listCellCandidates(ctx context.Context) ([]cells.CellCa
 	return out, byKey, nil
 }
 
+// listCellPools reads every live CellPool once per tick, beside the cell
+// list. Place resolves each cell's varroa.dev/cell-pool label against this
+// set, so a label naming a deleted pool gives no effective owner.
+func (r *TeamReconciler) listCellPools(ctx context.Context) ([]cells.CellPoolSummary, error) {
+	pools, err := crdstore.List[v1alpha1.CellPool](ctx, r.store, "", "")
+	if err != nil {
+		return nil, fmt.Errorf("list cell pools: %w", err)
+	}
+	out := make([]cells.CellPoolSummary, 0, len(pools))
+	for _, pool := range pools {
+		out = append(out, cells.SummarizeCellPool(pool))
+	}
+	return out, nil
+}
+
 // buildCellCandidate converts one cell Controller's live status into the
 // read-only snapshot cells.Place consumes. profiles resolves the cell's
 // spec.version to a profile name when the warm-pool label is absent.
 func buildCellCandidate(cr *v1alpha1.Controller, profiles []*v1alpha1.JenkinsVersionProfile) cells.CellCandidate {
-	cand := cells.CellCandidate{Name: cr.Name, Namespace: cr.Namespace, Enabled: true}
+	cand := cells.CellCandidate{
+		Name:      cr.Name,
+		Namespace: cr.Namespace,
+		Enabled:   true,
+		Pool:      cr.Labels[cells.LabelCellPool],
+	}
 	if cr.Spec.Cell != nil {
 		cand.MaxTenants = cr.Spec.Cell.MaxTenants
 	}

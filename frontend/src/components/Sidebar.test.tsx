@@ -134,7 +134,7 @@ describe("Sidebar", () => {
     expect(screen.queryByText("Brood Schedules")).not.toBeInTheDocument();
   });
 
-  it("renders all 10 nav rows when every permission is held", () => {
+  it("renders all 11 nav rows when every permission is held", () => {
     vi.mocked(usePermissions).mockReturnValue({
       data: { global: { "*": { "*": true } }, scopes: [] },
       isLoading: false,
@@ -163,10 +163,11 @@ describe("Sidebar", () => {
     } as unknown as ReturnType<typeof usePermissions>);
 
     renderSidebar("/");
-    // Exactly the 10 rows
+    // Exactly the 11 rows
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
     expect(screen.getByText("Pipelines")).toBeInTheDocument();
     expect(screen.getByText("Controllers")).toBeInTheDocument();
+    expect(screen.getByText("Cells")).toBeInTheDocument();
     expect(screen.getByText("Plugins")).toBeInTheDocument();
     expect(screen.getByText("Clusters")).toBeInTheDocument();
     expect(screen.getByText("Activity")).toBeInTheDocument();
@@ -788,6 +789,71 @@ describe("Sidebar", () => {
       const flyoutEl = container.querySelector('div[aria-hidden="true"]');
       expect(flyoutEl).toBeInTheDocument();
       expect(flyoutEl!.textContent).toBe("Dashboard");
+    });
+  });
+
+  describe("cells gate", () => {
+    function mockPerms(data: { global: object; scopes: unknown[]; tenants?: unknown[] }) {
+      vi.mocked(usePermissions).mockReturnValue({
+        data,
+        isLoading: false,
+        isError: false,
+        isSuccess: true,
+        status: "success",
+        isPending: false,
+        dataUpdatedAt: 0,
+        errorUpdatedAt: 0,
+        failureCount: 0,
+        failureReason: null,
+        errorUpdateCount: 0,
+        isFetched: true,
+        isFetchedAfterMount: true,
+        isFetching: false,
+        isPlaceholderData: false,
+        isPaused: false,
+        isRefetching: false,
+        isStale: false,
+        isInitialLoading: false,
+        isLoadingError: false,
+        isRefetchError: false,
+        fetchStatus: "idle",
+        promise: Promise.resolve(undefined),
+        refetch: vi.fn(),
+      } as unknown as ReturnType<typeof usePermissions>);
+    }
+
+    it("renders eleven rows for a full-permission caller", () => {
+      mockPerms({
+        global: { "*": { "*": true } },
+        scopes: [],
+        tenants: [{ tenant: "team-a", jobs: [], capabilities: { pipelines: { read: true } } }],
+      });
+      renderSidebar("/");
+      const labels = [
+        "Dashboard", "Pipelines", "Controllers", "Cells", "Plugins", "Clusters",
+        "Activity", "Operations", "Schedules", "Catalog", "Admin & access",
+      ];
+      for (const label of labels) {
+        expect(screen.getByText(label)).toBeInTheDocument();
+      }
+      expect(screen.getByRole("link", { name: "Cells" })).toHaveAttribute("href", "/cells");
+    });
+
+    it("hides the Cells row for a caller with no cluster-wide cellpools:read", () => {
+      mockPerms({ global: { controllers: { read: true } }, scopes: [], tenants: [] });
+      renderSidebar("/");
+      expect(screen.queryByText("Cells")).not.toBeInTheDocument();
+      expect(screen.getByText("Controllers")).toBeInTheDocument();
+    });
+
+    it("hides the Cells row for a namespace-scoped grant", () => {
+      mockPerms({
+        global: {},
+        scopes: [{ namespaces: ["ns-a"], capabilities: { cellpools: { read: true } } }],
+        tenants: [],
+      });
+      renderSidebar("/");
+      expect(screen.queryByText("Cells")).not.toBeInTheDocument();
     });
   });
 });

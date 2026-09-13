@@ -140,7 +140,7 @@ func (r *crdCellTenantResolver) isCell(ns, cell string) (isCell, resolved bool) 
 		return false, false
 	}
 
-	isCellFlag := cr.Spec.Cell != nil && cr.Spec.Cell.Enabled
+	isCellFlag := v1alpha1.IsCell(cr)
 	r.mu.Lock()
 	r.controllers[key] = cellFlagEntry{isCell: isCellFlag, expires: now.Add(cellTenantResolveTTL)}
 	r.mu.Unlock()

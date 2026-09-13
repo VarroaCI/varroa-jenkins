@@ -133,3 +133,130 @@ func TestClearStatusFields_TeamClearsPipelines(t *testing.T) {
 		t.Fatalf("status.pipelines = %+v, want nil after the clearing patch", got.Status.Pipelines)
 	}
 }
+
+// TestCellPoolRegistered proves the CellPool kind resolves through the
+// registry as a cluster-scoped kind.
+func TestCellPoolRegistered(t *testing.T) {
+	gvr, err := GVRFor[v1alpha1.CellPool]()
+	if err != nil {
+		t.Fatalf("GVRFor[CellPool]: %v", err)
+	}
+	if gvr.Group != "varroa.dev" || gvr.Version != "v1alpha1" || gvr.Resource != "cellpools" {
+		t.Errorf("unexpected GVR: %+v", gvr)
+	}
+
+	info, err := gvrInfo[v1alpha1.CellPool]()
+	if err != nil {
+		t.Fatalf("gvrInfo[CellPool]: %v", err)
+	}
+	if info.namespaced {
+		t.Error("CellPool must be cluster-scoped")
+	}
+	if info.kind != "CellPool" {
+		t.Errorf("kind = %q, want CellPool", info.kind)
+	}
+}
+
+// TestCellPoolRoundTrip covers the cluster-scoped create, get, list, and
+// status patch a pool reconciler performs each tick.
+func TestCellPoolRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+
+	pool := &v1alpha1.CellPool{
+		ObjectMeta: metav1.ObjectMeta{Name: "lts-2-555"},
+		Spec: v1alpha1.CellPoolSpec{
+			ProfileRef:        "lts-2-555",
+			Warm:              2,
+			MaxTenantsPerCell: 10,
+		},
+	}
+	if err := Create(ctx, f, pool); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, err := Get[v1alpha1.CellPool](ctx, f, "lts-2-555", "")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Spec.ProfileRef != "lts-2-555" || got.Spec.Warm != 2 {
+		t.Fatalf("spec after create = %+v", got.Spec)
+	}
+
+	pools, err := List[v1alpha1.CellPool](ctx, f, "", "")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(pools) != 1 {
+		t.Fatalf("List returned %d pools, want 1", len(pools))
+	}
+
+	if err := PatchStatus[v1alpha1.CellPool](ctx, f, "lts-2-555", "", &v1alpha1.CellPoolStatus{
+		WarmCells:       2,
+		PlacedCells:     1,
+		FreeTenantSlots: 8,
+		Tenants:         []string{"alpha", "beta"},
+	}); err != nil {
+		t.Fatalf("PatchStatus: %v", err)
+	}
+	got, err = Get[v1alpha1.CellPool](ctx, f, "lts-2-555", "")
+	if err != nil {
+		t.Fatalf("Get (after status): %v", err)
+	}
+	if got.Status.WarmCells != 2 || got.Status.PlacedCells != 1 || got.Status.FreeTenantSlots != 8 {
+		t.Fatalf("status after patch = %+v", got.Status)
+	}
+	if len(got.Status.Tenants) != 2 {
+		t.Fatalf("status.tenants = %v, want two entries", got.Status.Tenants)
+	}
+}
+
+// TestClearStatusFields_CellPoolClearsTenants asserts a status patch that
+// omits tenants force-nulls it. tenants is omitempty, so a merge patch would
+// otherwise leave the last tenant list in etcd after the pool empties.
+func TestClearStatusFields_CellPoolClearsTenants(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	gvr, err := GVRFor[v1alpha1.CellPool]()
+	if err != nil {
+		t.Fatalf("GVRFor[CellPool]: %v", err)
+	}
+
+	MustSeed(f, &v1alpha1.CellPool{
+		ObjectMeta: metav1.ObjectMeta{Name: "lts-2-555"},
+		Spec:       v1alpha1.CellPoolSpec{ProfileRef: "lts-2-555"},
+	})
+
+	if err := PatchStatus[v1alpha1.CellPool](ctx, f, "lts-2-555", "", &v1alpha1.CellPoolStatus{
+		PlacedCells: 1,
+		Tenants:     []string{"alpha"},
+	}); err != nil {
+		t.Fatalf("PatchStatus (set): %v", err)
+	}
+
+	empty := &v1alpha1.CellPoolStatus{}
+	statusJSON, err := json.Marshal(empty)
+	if err != nil {
+		t.Fatalf("marshal empty status: %v", err)
+	}
+	statusMap := map[string]any{}
+	if err := json.Unmarshal(statusJSON, &statusMap); err != nil {
+		t.Fatalf("unmarshal empty status: %v", err)
+	}
+	for key, zero := range ClearStatusFields(gvr) {
+		if _, ok := statusMap[key]; !ok {
+			statusMap[key] = zero
+		}
+	}
+	if err := f.PatchObjectStatus(ctx, gvr, "", "lts-2-555", statusMap); err != nil {
+		t.Fatalf("PatchObjectStatus (clear): %v", err)
+	}
+
+	got, err := Get[v1alpha1.CellPool](ctx, f, "lts-2-555", "")
+	if err != nil {
+		t.Fatalf("Get (after clear): %v", err)
+	}
+	if len(got.Status.Tenants) != 0 {
+		t.Errorf("status.tenants = %v, want empty", got.Status.Tenants)
+	}
+}

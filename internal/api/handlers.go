@@ -36,6 +36,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
+	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/observability"
 	"github.com/varroaci/varroa-jenkins/internal/overlay"
@@ -283,6 +284,67 @@ type controllerResponse struct {
 	// has ever reported: the dashboard reads staleness off the listing, so
 	// omitting it here renders every row as never seen.
 	LastSeen string `json:"lastSeen,omitempty"`
+	// Kind mirrors v1alpha1.IsCell: "cell" or "stateful". It is always
+	// present, so a client never reads the kind from an absent field.
+	Kind string `json:"kind"`
+	// CellPool is the varroa.dev/cell-pool label.
+	CellPool string `json:"cellPool,omitempty"`
+	// TenantCount is the length of Status.Cell.Tenants, never of
+	// AppliedTenants: the placement pass writes the first list, and the
+	// second one lags behind it.
+	//
+	// TenantCount, MaxTenants, and Warm are pointers because a zero count
+	// and a false warm flag are real states. An omitempty value type cannot
+	// tell such a state from an absent field.
+	TenantCount *int32 `json:"tenantCount,omitempty"`
+	// MaxTenants is the cap resolveCellCap resolves, the same helper the
+	// cell usage read calls.
+	MaxTenants *int32 `json:"maxTenants,omitempty"`
+	// Warm is Status.Cell.Warm.
+	Warm *bool `json:"warm,omitempty"`
+	// CreatedAt is metadata.creationTimestamp, RFC3339 UTC. It is present
+	// for every controller, not only for a cell.
+	CreatedAt string `json:"createdAt"`
+	// UnreadySince is Status.Cell.UnreadySince, RFC3339 UTC.
+	UnreadySince string `json:"unreadySince,omitempty"`
+}
+
+// fillCellSummary stamps the cell fields of a controllers-list row. Kind
+// and CreatedAt are always present. The other five stay absent for a
+// controller with no cell role, which carries no pool, no tenant, and no
+// cell readiness clock.
+func (s *Server) fillCellSummary(cr *v1alpha1.Controller, row *controllerResponse, caps *cellCapResolver) {
+	row.Kind = controllerKind(cr)
+	if cr == nil {
+		return
+	}
+	if !cr.CreationTimestamp.IsZero() {
+		row.CreatedAt = cr.CreationTimestamp.UTC().Format(time.RFC3339)
+	}
+	if !v1alpha1.IsCell(cr) {
+		return
+	}
+	row.CellPool = cr.Labels[cells.LabelCellPool]
+	tenants := cellPlacedTenants(cr)
+	row.TenantCount = &tenants
+	cap32 := caps.resolve(cr)
+	row.MaxTenants = &cap32
+	warm := false
+	if cr.Status.Cell != nil {
+		warm = cr.Status.Cell.Warm
+		if cr.Status.Cell.UnreadySince != nil {
+			row.UnreadySince = cr.Status.Cell.UnreadySince.UTC().Format(time.RFC3339)
+		}
+	}
+	row.Warm = &warm
+}
+
+// controllerKind names a controller's role on the wire.
+func controllerKind(cr *v1alpha1.Controller) string {
+	if v1alpha1.IsCell(cr) {
+		return "cell"
+	}
+	return "stateful"
 }
 
 // controllerDetailResponse is the JSON shape for a single controller.
@@ -376,6 +438,69 @@ type controllerDetailResponse struct {
 	// blocked — an empty or absent array leaves the ordinary success path
 	// unchanged.
 	UnappliedRemovals []bus.UnappliedRemoval `json:"unappliedRemovals,omitempty"`
+	// Kind mirrors v1alpha1.IsCell: "cell" or "stateful". Always present.
+	Kind string `json:"kind"`
+	// Cell projects Status.Cell. Nil for a controller with no cell role.
+	Cell *CellStatusJSON `json:"cell,omitempty"`
+}
+
+// CellStatusJSON projects Controller.status.cell for the detail DTO.
+//
+// It declares ten keys, and neither a rehydration nor a pendingTenants key.
+// The rehydration list and the placement claim list stay inside the
+// operator, so no projection and no user-interface surface may carry them.
+type CellStatusJSON struct {
+	Tenants                  []string                `json:"tenants,omitempty"`
+	Warm                     bool                    `json:"warm,omitempty"`
+	Evacuate                 bool                    `json:"evacuate,omitempty"`
+	UnreadySince             string                  `json:"unreadySince,omitempty"`
+	RolledAt                 string                  `json:"rolledAt,omitempty"`
+	AppliedTenants           []string                `json:"appliedTenants,omitempty"`
+	TenantWarnings           []CellTenantWarningJSON `json:"tenantWarnings,omitempty"`
+	Instance                 string                  `json:"instance,omitempty"`
+	PreviousInstance         string                  `json:"previousInstance,omitempty"`
+	PreviousInstanceLastSeen string                  `json:"previousInstanceLastSeen,omitempty"`
+}
+
+// CellTenantWarningJSON is one non-blocking finding about a tenant on a cell.
+type CellTenantWarningJSON struct {
+	Tenant  string `json:"tenant"`
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
+}
+
+// buildCellStatusJSON projects cr.Status.Cell. It returns nil for a
+// controller with no cell role and for a cell whose status is still empty.
+func buildCellStatusJSON(cr *v1alpha1.Controller) *CellStatusJSON {
+	if !v1alpha1.IsCell(cr) || cr.Status.Cell == nil {
+		return nil
+	}
+	sc := cr.Status.Cell
+	out := &CellStatusJSON{
+		Tenants:          sc.Tenants,
+		Warm:             sc.Warm,
+		Evacuate:         sc.Evacuate,
+		AppliedTenants:   sc.AppliedTenants,
+		Instance:         sc.Instance,
+		PreviousInstance: sc.PreviousInstance,
+	}
+	if sc.UnreadySince != nil {
+		out.UnreadySince = sc.UnreadySince.UTC().Format(time.RFC3339)
+	}
+	if sc.RolledAt != nil {
+		out.RolledAt = sc.RolledAt.UTC().Format(time.RFC3339)
+	}
+	if sc.PreviousInstanceLastSeen != nil {
+		out.PreviousInstanceLastSeen = sc.PreviousInstanceLastSeen.UTC().Format(time.RFC3339)
+	}
+	for _, w := range sc.TenantWarnings {
+		out.TenantWarnings = append(out.TenantWarnings, CellTenantWarningJSON{
+			Tenant:  w.Tenant,
+			Reason:  w.Reason,
+			Message: w.Message,
+		})
+	}
+	return out
 }
 
 // VersionStatusJSON is a read-only projection of the two version-related
@@ -756,6 +881,7 @@ func (s *Server) handleControllersFiltered(w http.ResponseWriter, r *http.Reques
 	}
 
 	out := make([]controllerResponse, 0, len(allControllers))
+	caps := s.cellCaps(r.Context())
 	for i, cr := range allControllers {
 		cluster := ""
 		if i < len(clusterLabels) {
@@ -775,6 +901,7 @@ func (s *Server) handleControllersFiltered(w http.ResponseWriter, r *http.Reques
 			AppliedBundleHash: cr.Status.AppliedBundleHash,
 			Attention:         buildAttentionJSON(cr),
 		}
+		s.fillCellSummary(cr, &crResp, caps)
 		if cr.Spec.ReconciliationPolicy != nil {
 			crResp.RolloutWave = cr.Spec.ReconciliationPolicy.RolloutWave
 		}

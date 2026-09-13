@@ -40,7 +40,7 @@ interface FormData {
   provisionNamespaces: boolean;
   pipelinesEnabled: boolean;
   pipelinesProfile: string;
-  pipelinesDedicated: boolean;
+  pipelinesCellPool: string;
   pipelinesAgentNamespace: string;
   pipelinesBundleName: string;
   pipelinesBundleNamespace: string;
@@ -65,7 +65,7 @@ function emptyForm(): FormData {
     provisionNamespaces: false,
     pipelinesEnabled: false,
     pipelinesProfile: "",
-    pipelinesDedicated: false,
+    pipelinesCellPool: "",
     pipelinesAgentNamespace: "",
     pipelinesBundleName: "",
     pipelinesBundleNamespace: "",
@@ -91,7 +91,7 @@ function formFromTeam(team: TeamEntry): FormData {
     provisionNamespaces: team.provisionNamespaces || false,
     pipelinesEnabled: !!team.pipelines,
     pipelinesProfile: team.pipelines?.profile || "",
-    pipelinesDedicated: team.pipelines?.dedicated || false,
+    pipelinesCellPool: team.pipelines?.cellPool || "",
     pipelinesAgentNamespace: team.pipelines?.agentNamespace || "",
     pipelinesBundleName: team.pipelines?.composedBundleRef?.name || "",
     pipelinesBundleNamespace: team.pipelines?.composedBundleRef?.namespace || "",
@@ -370,7 +370,7 @@ export default function TeamForm() {
         pipelines: form.pipelinesEnabled
           ? {
               profile: form.pipelinesProfile.trim() || undefined,
-              dedicated: form.pipelinesDedicated,
+              cellPool: form.pipelinesCellPool.trim() || undefined,
               agentNamespace: form.pipelinesAgentNamespace.trim() || undefined,
               composedBundleRef: form.pipelinesBundleName
                 ? { name: form.pipelinesBundleName, namespace: form.pipelinesBundleNamespace }
@@ -579,14 +579,18 @@ export default function TeamForm() {
               />
             </div>
 
-            <div className={styles.toggleRow}>
+            <div className={styles.field}>
+              <label>Cell pool</label>
               <input
-                type="checkbox"
-                id="pipelinesDedicated"
-                checked={form.pipelinesDedicated}
-                onChange={(e) => updateField("pipelinesDedicated", e.target.checked)}
+                type="text"
+                value={form.pipelinesCellPool}
+                onChange={(e) => updateField("pipelinesCellPool", e.target.value)}
+                placeholder="CellPool name (optional)"
               />
-              <label htmlFor="pipelinesDedicated">Dedicated cell (no other tenants)</label>
+              <div className={styles.hint}>
+                An empty value uses the profile's default pool. A team that needs a cell of its
+                own names a pool whose maxTenantsPerCell is 1.
+              </div>
             </div>
 
             <div className={styles.field}>

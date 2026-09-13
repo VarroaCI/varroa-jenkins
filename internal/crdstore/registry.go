@@ -15,8 +15,11 @@ type kindInfo struct {
 	namespaced bool
 }
 
-// registry maps Go CRD types to their GVR, kind, and scope. Every entry must
-// match a GVR variable declared at the top of internal/controller/clientset_client.go.
+// registry maps Go CRD types to their GVR, kind, and scope. It is the only
+// place a new kind registers. A kind that also needs a deep Kubernetes
+// operation carries a second GVR variable in
+// internal/controller/clientset_client.go; a kind this store alone serves
+// does not.
 var registry = map[reflect.Type]kindInfo{
 	// Namespaced kinds.
 	reflect.TypeOf(v1alpha1.Controller{}):     {controllerGVR, "Controller", true},
@@ -40,6 +43,7 @@ var registry = map[reflect.Type]kindInfo{
 	reflect.TypeOf(v1alpha1.Runner{}):                {runnerGVR, "Runner", false},
 	reflect.TypeOf(v1alpha1.UpdateCenter{}):          {updateCentersGVR, "UpdateCenter", false},
 	reflect.TypeOf(v1alpha1.ProfileCandidate{}):      {profileCandidateGVR, "ProfileCandidate", false},
+	reflect.TypeOf(v1alpha1.CellPool{}):              {cellPoolGVR, "CellPool", false},
 }
 
 // clearStatusFields lists, per resource, the status keys a merge patch must
@@ -96,6 +100,9 @@ var clearStatusFields = map[schema.GroupVersionResource]map[string]any{
 	// clear both, or a merge patch would leave the stale cell binding in
 	// etcd once the owning Team loses its placement.
 	runnerGVR: {"cell": "", "cellNamespace": ""},
+	// tenants is omitempty. A pool whose last tenant leaves must report an
+	// empty list, or a merge patch leaves the stale names in etcd.
+	cellPoolGVR: {"tenants": nil},
 }
 
 // ClearStatusFields returns, per status key, the explicit zero value a
@@ -127,8 +134,9 @@ func gvrInfo[T any]() (kindInfo, error) {
 	return info, nil
 }
 
-// GVR variables — mirrors the source-of-truth declarations in
-// internal/controller/clientset_client.go:36-52.
+// GVR variables. A name that also appears in
+// internal/controller/clientset_client.go must hold the same resource
+// string there.
 var (
 	controllerGVR            = gvr("controllers")
 	varroaRoleGVR            = gvr("varroaroles")
@@ -149,6 +157,7 @@ var (
 	controllerClassGVR       = gvr("controllerclasses")
 	updateCentersGVR         = gvr("updatecenters")
 	profileCandidateGVR      = gvr("profilecandidates")
+	cellPoolGVR              = gvr("cellpools")
 )
 
 func gvr(resource string) schema.GroupVersionResource {

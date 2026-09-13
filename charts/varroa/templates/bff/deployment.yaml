@@ -117,6 +117,11 @@ spec:
                   name: {{ printf "%s-oidc-state" $.Release.Name }}
                   key: secret
             {{- end }}
+            # One value renders this variable into the operator and into
+            # the BFF. The BFF resolves the effective tenant cap of a cell
+            # usage read from it, so both processes agree.
+            - name: VARROA_CELLS_MAX_TENANTS
+              value: {{ .Values.cells.maxTenantsPerCell | quote }}
             {{- range .Values.bff.env }}
             - name: {{ .name }}
               value: {{ .value | quote }}

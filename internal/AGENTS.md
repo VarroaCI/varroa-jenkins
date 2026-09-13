@@ -26,9 +26,13 @@ reading each package's entry point):
   `controller.ClientsetClient` and the in-memory `Fake`), package-level
   generic helpers (`Get[T]`/`List[T]`/`Apply[T]`/`ApplyOwned[T]`/`Create`/
   `Update`/`Delete`/`PatchStatus`/`PatchAnnotations`/`PatchFinalizers`), and a static
-  type→GVR registry covering all 17 kinds. Every CRD read/write in the
+  type→GVR registry covering all 18 kinds. Every CRD read/write in the
   operator, BFF, and MCP goes through it; new kinds register here instead
-  of adding interface methods. Tests seed `crdstore.Fake` (upsert
+  of adding interface methods. `registry.go` is the **only** place a kind
+  registers: a kind that also needs a deep Kubernetes operation carries a
+  second GVR variable in `internal/controller/clientset_client.go`, and a kind
+  this store alone serves (`runners`, `profilecandidates`, `cellpools`) does
+  not. Tests seed `crdstore.Fake` (upsert
   semantics; re-seed after mutating a seeded object) and assert on its
   `StatusPatches`/`MetaPatches` recorders. `ApplyOwned` is the guarded sibling
   of `Apply`: `Apply` is a full-object replace whose internal `Get` never
@@ -122,7 +126,14 @@ reading each package's entry point):
   with a `toolKind`, never `mcpServer.AddTool` — mcp-go's `NewTool` defaults
   every annotation to its most alarming value (`destructiveHint` and
   `openWorldHint` true), so an unclassified tool ships those. `openWorldHint`
-  must be set explicitly even when false. `expectedToolKinds` in
+  must be set explicitly even when false. `kindUpdate` is Apply-backed and so
+  genuinely destructive (an absent field is removed); `kindUpdatePartial`
+  writes a named subset and removes nothing, so it is non-destructive and
+  idempotent. Both mutate, so both emit an activity event — a new kind must
+  join **both** the `annotationsFor` and the `mutates` switch, and a mutating
+  tool also needs an entry in `guardArgsFor` (and often a seeded object in
+  `seedGuardObjects`) or `TestEveryMutatingToolEmitsActivity` panics.
+  `expectedToolKinds` in
   `annotations_test.go` is exhaustive and fails on any unlisted tool;
   (5) guard every optional `api.Dependencies` field before an *unconditional*
   dereference, returning a tool error the handler cannot work without it
@@ -179,6 +190,12 @@ reading each package's entry point):
   here issues an HTTP request to the BFF or calls a controller-scoped check.
   `get_run_log` returns a bounded tail (`tailLines`, default 100, clamped 1
   to 500) as plain text, never a stream, and starts no live tail.
+  `tools_cells.go` registers one read tool, `get_cell_usage`, over
+  `internal/api`'s `Server.CellUsage` — the same entry point the single-cell
+  HTTP path uses. It is a cell read, so it **does** call `CanReadController`,
+  unlike the four pipeline tools; a nil authorizer denies it outright, which
+  makes it stricter than `list_controllers`/`get_controller`/
+  `get_controller_logs`, which skip the check in that state.
 - **`preflight/`** — provisioning preflight `Check`s (pass/warn/fail) run
   before/alongside `handleProvisioning`, consuming `internal/tenancy` for
   namespace-state checks.

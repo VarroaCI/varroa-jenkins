@@ -46,7 +46,7 @@ type teamEntry struct {
 // string on its own, so no hand-written conversion is needed here.
 type teamPipelinesEntry struct {
 	Profile           string                      `json:"profile,omitempty"`
-	Dedicated         bool                        `json:"dedicated,omitempty"`
+	CellPool          string                      `json:"cellPool,omitempty"`
 	AgentNamespace    string                      `json:"agentNamespace,omitempty"`
 	ComposedBundleRef *teamComposedBundleRefEntry `json:"composedBundleRef,omitempty"`
 
@@ -112,7 +112,7 @@ func teamPipelinesEntryFromSpec(p *v1alpha1.TeamPipelinesSpec) *teamPipelinesEnt
 	}
 	e := &teamPipelinesEntry{
 		Profile:           p.Profile,
-		Dedicated:         p.Dedicated,
+		CellPool:          p.CellPool,
 		AgentNamespace:    p.AgentNamespace,
 		RehydrateBuilds:   p.RehydrateBuilds,
 		RehydrateDeadline: p.RehydrateDeadline,
@@ -148,7 +148,7 @@ func teamPipelinesSpecFromEntry(e *teamPipelinesEntry) *v1alpha1.TeamPipelinesSp
 	}
 	spec := &v1alpha1.TeamPipelinesSpec{
 		Profile:           e.Profile,
-		Dedicated:         e.Dedicated,
+		CellPool:          e.CellPool,
 		AgentNamespace:    e.AgentNamespace,
 		RehydrateBuilds:   e.RehydrateBuilds,
 		RehydrateDeadline: e.RehydrateDeadline,

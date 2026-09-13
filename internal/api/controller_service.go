@@ -136,6 +136,8 @@ func (s *Server) controllerDetail(cr *v1alpha1.Controller, cluster string) contr
 		Attention:         buildAttentionJSON(cr),
 		PluginConflict:    buildPluginConflict(cr.Status.Conditions),
 		PluginInventory:   buildPluginInventorySummary(cr.Status.PluginInventory),
+		Kind:              controllerKind(cr),
+		Cell:              buildCellStatusJSON(cr),
 	}
 	if cr.Status.HibernatedAt != nil {
 		resp.HibernatedAt = cr.Status.HibernatedAt.Format(time.RFC3339)

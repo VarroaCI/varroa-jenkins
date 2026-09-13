@@ -1,13 +1,20 @@
-import { useParams, Link } from "react-router-dom";
+import { useMemo } from "react";
+import { useParams, useSearchParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CloudRain, CloudSun, Sun, type LucideIcon } from "lucide-react";
 import { listPipelines, listRunners } from "../../api/client";
 import { ApiError } from "../../hooks/useApi";
 import { ForbiddenPage, GenericErrorPage, NotFoundPage, RecordStoreDisabledPage } from "../../components/RecoveryState";
 import { Card } from "../../components/Card";
 import { age } from "../../components/activityTimeline.util";
-import type { PipelineHealth, PipelineSummary, RunnerEntry, RunningRun } from "../../types";
+import type { RunnerEntry, RunningRun } from "../../types";
+import JobTree, { formatDuration } from "./JobTree";
+import TeamCellCard from "./TeamCellCard";
+import { buildJobTree, defaultOpenPaths, visibleRows } from "./jobTree";
 import styles from "./TeamHome.module.css";
+
+/** DEFAULT_OPEN_LEVELS is how many folder levels a first load unfolds. The
+ * value counts levels, so two means node depth 0 and node depth 1. */
+const DEFAULT_OPEN_LEVELS = 2;
 
 const enc = (s: string) => encodeURIComponent(s);
 
@@ -17,67 +24,6 @@ function jobHref(team: string, jobPath: string): string {
 
 function runHref(team: string, jobPath: string, runId: string): string {
   return `${jobHref(team, jobPath)}/${enc(runId)}`;
-}
-
-/** formatDuration renders a millisecond span the way the mockup does: the
- * two coarsest non-zero units, dropping finer ones. */
-function formatDuration(ms: number | undefined): string {
-  if (ms === undefined || ms < 0) return "—";
-  const totalSec = Math.round(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
-}
-
-const HEALTH_GLYPH: Record<"clear" | "cloudy" | "rain", { Icon: LucideIcon; label: string; cls: string }> = {
-  clear: { Icon: Sun, label: "Clear: none of the last five runs failed", cls: styles.healthClear },
-  cloudy: { Icon: CloudSun, label: "Cloudy: one or two of the last five runs failed", cls: styles.healthCloudy },
-  rain: { Icon: CloudRain, label: "Rain: three or more of the last five runs failed", cls: styles.healthRain },
-};
-
-/**
- * HealthGlyph renders the weather glyph naming its own state, so a screen
- * reader announces the state rather than the image (design D8). A job that
- * has never run carries health "unknown" and renders no glyph.
- */
-function HealthGlyph({ health }: { health: PipelineHealth }) {
-  if (health === "unknown") return null;
-  const { Icon, label, cls } = HEALTH_GLYPH[health];
-  return (
-    <span className={`${styles.healthCell} ${cls}`} role="img" aria-label={label} title={label}>
-      <Icon aria-hidden="true" size={18} />
-    </span>
-  );
-}
-
-/** Sparkline draws the last-8-durations trend as one inline SVG polyline. No
- * charting package is added for this (design D8, rejected alternative 9). */
-function Sparkline({ values }: { values: number[] }) {
-  if (values.length === 0) return null;
-  const w = 64;
-  const h = 20;
-  const max = Math.max(...values, 1);
-  const min = Math.min(...values, 0);
-  const range = max - min || 1;
-  const step = values.length > 1 ? w / (values.length - 1) : 0;
-  const points = values
-    .map((v, i) => `${(i * step).toFixed(1)},${(h - ((v - min) / range) * h).toFixed(1)}`)
-    .join(" ");
-  return (
-    <svg
-      className={styles.sparkline}
-      width={w}
-      height={h}
-      viewBox={`0 0 ${w} ${h}`}
-      role="img"
-      aria-label="Duration trend, last 8 builds"
-    >
-      <polyline points={points} fill="none" stroke="currentColor" strokeWidth={1.5} />
-    </svg>
-  );
 }
 
 function RunningTile({ team, run }: { team: string; run: RunningRun }) {
@@ -109,44 +55,6 @@ function RunningTile({ team, run }: { team: string; run: RunningRun }) {
   );
 }
 
-function PipelineRow({ team, item }: { team: string; item: PipelineSummary }) {
-  return (
-    <tr>
-      <td className={styles.nameCell}>
-        <Link to={jobHref(team, item.jobPath)}>{item.jobPath}</Link>
-      </td>
-      <td>
-        <HealthGlyph health={item.health} />
-      </td>
-      <td>
-        {item.lastBuild ? (
-          <Link to={runHref(team, item.jobPath, item.lastBuild.runId)}>
-            #{item.lastBuild.buildNumber ?? "—"}
-          </Link>
-        ) : (
-          <span className={styles.dim}>—</span>
-        )}
-      </td>
-      <td>{item.lastBuild?.branch ?? <span className={styles.dim}>—</span>}</td>
-      <td>
-        <div className={styles.durationCell}>
-          {item.durationTrendMs && item.durationTrendMs.length > 0 && <Sparkline values={item.durationTrendMs} />}
-          <span className={styles.lastDuration}>{formatDuration(item.lastBuild?.durationMs)}</span>
-        </div>
-      </td>
-      <td>
-        {item.lastBuild?.endedAt ? (
-          age(item.lastBuild.endedAt)
-        ) : item.lastBuild?.startedAt ? (
-          age(item.lastBuild.startedAt)
-        ) : (
-          <span className={styles.dim}>—</span>
-        )}
-      </td>
-    </tr>
-  );
-}
-
 /**
  * RunnerRow renders one external runner's inventory row. It never reads
  * status.token: the dashboard is not a place a door credential appears
@@ -173,6 +81,7 @@ function RunnerRow({ item }: { item: RunnerEntry }) {
 
 export default function TeamHome() {
   const { team } = useParams<{ team: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data, isLoading, error } = useQuery({
     queryKey: ["pipelines", team],
     queryFn: () => listPipelines(team!),
@@ -183,6 +92,44 @@ export default function TeamHome() {
     queryFn: () => listRunners(team!),
     enabled: !!team,
   });
+
+  const tree = useMemo(
+    () => buildJobTree(data?.items ?? [], data?.runningNow ?? [], data?.tenantFolder ?? ""),
+    [data],
+  );
+
+  // A URL that carries at least one "open" parameter, an empty one
+  // included, names the whole fold set. Only a URL carrying none at all
+  // falls back to the default, so a caller who folds everything writes
+  // "?open=" and the page obeys it.
+  const openPaths = useMemo(() => {
+    if (searchParams.has("open")) {
+      return new Set(searchParams.getAll("open").filter((value) => value !== ""));
+    }
+    return new Set(defaultOpenPaths(tree, DEFAULT_OPEN_LEVELS));
+  }, [searchParams, tree]);
+
+  const rows = useMemo(() => visibleRows(tree, openPaths), [tree, openPaths]);
+
+  // A fold is a view setting, not a navigation step, so it replaces the
+  // current history entry. The browser back button then leaves the page
+  // instead of stepping through every fold.
+  const toggleFold = (path: string, next: boolean) => {
+    const paths = new Set(openPaths);
+    if (next) {
+      paths.add(path);
+    } else {
+      paths.delete(path);
+    }
+    const params = new URLSearchParams(searchParams);
+    params.delete("open");
+    if (paths.size === 0) {
+      params.append("open", "");
+    } else {
+      for (const value of paths) params.append("open", value);
+    }
+    setSearchParams(params, { replace: true });
+  };
 
   if (isLoading) {
     return (
@@ -200,9 +147,12 @@ export default function TeamHome() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.pageHead}>
-        <div className={styles.pageTitle}>{team}</div>
-        <div className={styles.pageDesc}>Pipelines for this team</div>
+      <div className={styles.head}>
+        <div className={styles.pageHead}>
+          <h1 className={styles.pageTitle}>{team}</h1>
+          <div className={styles.pageDesc}>Pipelines for this team</div>
+        </div>
+        <TeamCellCard team={team!} />
       </div>
 
       <div className={styles.sectionTitle}>Running now</div>
@@ -222,8 +172,11 @@ export default function TeamHome() {
       )}
 
       <div className={styles.sectionTitle}>Pipelines</div>
-      {data.items.length === 0 ? (
-        <div className={styles.empty}>No pipelines yet.</div>
+      {rows.length === 0 ? (
+        <div className={styles.empty}>
+          <div>No pipelines yet.</div>
+          <div className={styles.emptyNote}>This list shows only the jobs your access covers.</div>
+        </div>
       ) : (
         <Card>
           <table className={styles.table}>
@@ -238,9 +191,7 @@ export default function TeamHome() {
               </tr>
             </thead>
             <tbody>
-              {data.items.map((item) => (
-                <PipelineRow key={item.jobPath} team={team!} item={item} />
-              ))}
+              <JobTree team={team!} rows={rows} openPaths={openPaths} onToggle={toggleFold} />
             </tbody>
           </table>
         </Card>

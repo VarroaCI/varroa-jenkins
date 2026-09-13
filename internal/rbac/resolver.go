@@ -1237,14 +1237,14 @@ func (r *Resolver) JenkinsRoleAssignments(controller *v1alpha1.Controller) ([]Ro
 	// refuses every node that does not carry the tenant's own label.
 	if controller.Status.Cell != nil {
 		for _, team := range controller.Status.Cell.Tenants {
-			escaped := regexp.QuoteMeta(team)
-			tenantSubj := SubjectAssignment{Kind: "Group", Name: "ROLE:varroa:tenant:" + team}
+			itemRole := TenantItemRoleName(team)
+			tenantSubj := SubjectAssignment{Kind: "Group", Name: "ROLE:" + itemRole}
 
-			itemKey := accKey{name: "varroa:tenant:" + team, scopeKey: ""}
+			itemKey := accKey{name: itemRole, scopeKey: ""}
 			acc[itemKey] = &RoleAssignment{
-				RoleName: "varroa:tenant:" + team,
+				RoleName: itemRole,
 				RoleType: "Item",
-				Pattern:  "^" + escaped + "($|/.*)$",
+				Pattern:  TenantItemRolePattern(team),
 				Permissions: []string{
 					"hudson.model.Item.Read",
 					"hudson.model.Item.Build",

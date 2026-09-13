@@ -43,6 +43,8 @@ const ctrlFixture = (name: string, overrides?: Record<string, unknown>) => ({
   phase: "Running",
   endpoint: `https://${name}.example.com`,
   miteConnected: true,
+  kind: "stateful",
+  createdAt: "2026-01-02T03:04:05Z",
   ...overrides,
 });
 
@@ -726,4 +728,127 @@ describe("BroodControllerPicker", () => {
       expect(screen.getByText("Blocked")).toBeInTheDocument();
     });
   });
+
+describe("Kind column and kind filter", () => {
+  const cellFixture = () =>
+    ctrlFixture("cell-a", {
+      kind: "cell",
+      cellPool: "lts-2-555",
+      tenantCount: 2,
+      maxTenants: 10,
+      warm: false,
+    });
+  const warmCellFixture = () =>
+    ctrlFixture("cell-warm", {
+      kind: "cell",
+      cellPool: "lts-2-555",
+      tenantCount: 0,
+      maxTenants: 10,
+      warm: true,
+    });
+
+  it("states a cell's pool and its fill", () => {
+    mockUseControllers.mockReturnValue({ data: [cellFixture()], isLoading: false, error: null });
+    renderPicker();
+    const row = screen.getByLabelText("Controller cell-a (default/core)");
+    expect(within(row).getByText("Cell")).toBeInTheDocument();
+    expect(within(row).getByText("lts-2-555")).toBeInTheDocument();
+    expect(within(row).getByText("2 / 10")).toBeInTheDocument();
+  });
+
+  it("carries a warm badge on a warm cell", () => {
+    mockUseControllers.mockReturnValue({ data: [warmCellFixture()], isLoading: false, error: null });
+    renderPicker();
+    const row = screen.getByLabelText("Controller cell-warm (default/core)");
+    expect(within(row).getByText("warm")).toBeInTheDocument();
+  });
+
+  it("carries the label alone on a stateful row", () => {
+    mockUseControllers.mockReturnValue({ data: [ctrlFixture("plain")], isLoading: false, error: null });
+    renderPicker();
+    const row = screen.getByLabelText("Controller plain (default/core)");
+    expect(within(row).getByText("Stateful")).toBeInTheDocument();
+    expect(within(row).queryByText("warm")).not.toBeInTheDocument();
+    expect(within(row).queryByText(/\d+ \/ \d+/)).not.toBeInTheDocument();
+  });
+
+  it("renders two kind chips with their counts and no All chip", () => {
+    mockUseControllers.mockReturnValue({
+      data: [cellFixture(), warmCellFixture(), ctrlFixture("plain")],
+      isLoading: false,
+      error: null,
+    });
+    renderPicker();
+    const cells = screen.getByRole("button", { name: /^Cells 2$/ });
+    const stateful = screen.getByRole("button", { name: /^Stateful 1$/ });
+    expect(cells).toHaveAttribute("aria-pressed", "false");
+    expect(stateful).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("lists every kind while both chips are off", () => {
+    mockUseControllers.mockReturnValue({
+      data: [cellFixture(), ctrlFixture("plain")],
+      isLoading: false,
+      error: null,
+    });
+    renderPicker();
+    expect(screen.getByLabelText("Controller cell-a (default/core)")).toBeInTheDocument();
+    expect(screen.getByLabelText("Controller plain (default/core)")).toBeInTheDocument();
+  });
+
+  it("narrows to cells when the Cells chip is selected", async () => {
+    const user = userEvent.setup();
+    mockUseControllers.mockReturnValue({
+      data: [cellFixture(), ctrlFixture("plain")],
+      isLoading: false,
+      error: null,
+    });
+    renderPicker();
+    await user.click(screen.getByRole("button", { name: /^Cells 1$/ }));
+    expect(screen.getByLabelText("Controller cell-a (default/core)")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Controller plain (default/core)")).not.toBeInTheDocument();
+  });
+
+  it("lists every kind again once the chip toggles off", async () => {
+    const user = userEvent.setup();
+    mockUseControllers.mockReturnValue({
+      data: [cellFixture(), ctrlFixture("plain")],
+      isLoading: false,
+      error: null,
+    });
+    renderPicker();
+    const chip = screen.getByRole("button", { name: /^Cells 1$/ });
+    await user.click(chip);
+    await user.click(chip);
+    expect(screen.getByLabelText("Controller plain (default/core)")).toBeInTheDocument();
+  });
+
+  it("combines the kind filter with the phase filter", async () => {
+    const user = userEvent.setup();
+    mockUseControllers.mockReturnValue({
+      data: [
+        cellFixture(),
+        ctrlFixture("cell-b", { kind: "cell", phase: "Failed", cellPool: "lts-2-555" }),
+        ctrlFixture("plain"),
+      ],
+      isLoading: false,
+      error: null,
+    });
+    renderPicker();
+    await user.click(screen.getByRole("button", { name: /^Cells 2$/ }));
+    await user.click(screen.getByRole("button", { name: /^Running 2$/ }));
+    expect(screen.getByLabelText("Controller cell-a (default/core)")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Controller cell-b (default/core)")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Controller plain (default/core)")).not.toBeInTheDocument();
+  });
+
+  it("renders the Kind column in compact mode too", () => {
+    mockUseControllers.mockReturnValue({ data: [cellFixture()], isLoading: false, error: null });
+    renderPicker(vi.fn(), true);
+    const row = screen.getByLabelText("Controller cell-a (default/core)");
+    expect(within(row).getByText("Cell")).toBeInTheDocument();
+    expect(within(row).getByText("2 / 10")).toBeInTheDocument();
+  });
+});
+
 });

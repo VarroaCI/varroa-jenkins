@@ -58,6 +58,15 @@ new capabilities are added to the BFF/OpenAPI spec first, then surfaced here.
     callbacks convert between the generated client's flat `{name, spec,
     status}` DTO and the `{metadata: {name}, spec, status}` document shape
     the shared machinery (`Columns`, `printDescribe`, `editLoop`) expects.
+  - **`cellpools.go`** — the `cellpool` noun (alias `cellpools`) serving
+    `get` and `describe` only, plus the top-level verb `scale`, registered
+    from this same file through `registerRootCommand` so no framework file
+    changes. Cluster-scoped: every command refuses `-n`/`-A` with a usage
+    error before any request. `scale cellpool <name> --warm N [--max-cells N]`
+    sends only the flags the caller actually passed (`Flags().Changed`), so an
+    unnamed dial keeps its stored value; no flag at all, and a negative value,
+    are usage errors raised before the request. There is deliberately no
+    `create` and no `delete`: the API serves no such route.
   - **`runner_register.go`** — the top-level `runner` command group:
     `register` (design D12 — validates the name locally as a DNS-1123 label
     before any request, creates the `Runner`, polls up to 60s for

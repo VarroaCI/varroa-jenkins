@@ -28,3 +28,11 @@ export function canAdminArea(perms: Permissions | undefined): boolean {
     canDoGlobal(perms, "provisioningdefaults", "update")
   );
 }
+
+/**
+ * Whether the user can see the Cells row. CellPool is cluster scoped, so a
+ * namespace-scoped grant admits nothing.
+ */
+export function canCellsRow(perms: Permissions | undefined): boolean {
+  return canDoGlobal(perms, "cellpools", "read");
+}

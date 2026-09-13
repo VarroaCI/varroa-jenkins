@@ -26,12 +26,6 @@
   overflow-wrap: anywhere;
 }
 
-.pageDesc {
-  margin: 0.25rem 0 0;
-  color: var(--text-2);
-  font-size: 0.875rem;
-}
-
 .runBtn {
   padding: 0.5rem 1rem;
   border: none;

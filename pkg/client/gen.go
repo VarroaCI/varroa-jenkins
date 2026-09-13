@@ -180,6 +180,13 @@ const (
 	ComponentsSchemasCatalogVariableTypeString      ComponentsSchemasCatalogVariableType = "string"
 )
 
+// Defines values for ComponentsSchemasCellGrantSource.
+const (
+	ClusterWideBinding  ComponentsSchemasCellGrantSource = "clusterWideBinding"
+	TeamMembership      ComponentsSchemasCellGrantSource = "teamMembership"
+	TenantScopedBinding ComponentsSchemasCellGrantSource = "tenantScopedBinding"
+)
+
 // Defines values for ComponentsSchemasCheckStatus.
 const (
 	Fail ComponentsSchemasCheckStatus = "fail"
@@ -217,11 +224,23 @@ const (
 	ReconcileBlocked ComponentsSchemasControllerAttentionKind = "reconcileBlocked"
 )
 
+// Defines values for ComponentsSchemasControllerDetailKind.
+const (
+	ComponentsSchemasControllerDetailKindCell     ComponentsSchemasControllerDetailKind = "cell"
+	ComponentsSchemasControllerDetailKindStateful ComponentsSchemasControllerDetailKind = "stateful"
+)
+
 // Defines values for ComponentsSchemasControllerSpecPowerState.
 const (
 	ComponentsSchemasControllerSpecPowerStateEmpty   ComponentsSchemasControllerSpecPowerState = ""
 	ComponentsSchemasControllerSpecPowerStateRunning ComponentsSchemasControllerSpecPowerState = "Running"
 	ComponentsSchemasControllerSpecPowerStateStopped ComponentsSchemasControllerSpecPowerState = "Stopped"
+)
+
+// Defines values for ComponentsSchemasControllerSummaryKind.
+const (
+	ComponentsSchemasControllerSummaryKindCell     ComponentsSchemasControllerSummaryKind = "cell"
+	ComponentsSchemasControllerSummaryKindStateful ComponentsSchemasControllerSummaryKind = "stateful"
 )
 
 // Defines values for ComponentsSchemasGroupEntrySource.
@@ -325,10 +344,17 @@ const (
 
 // Defines values for ComponentsSchemasPipelineSummaryHealth.
 const (
-	Clear   ComponentsSchemasPipelineSummaryHealth = "clear"
-	Cloudy  ComponentsSchemasPipelineSummaryHealth = "cloudy"
-	Rain    ComponentsSchemasPipelineSummaryHealth = "rain"
-	Unknown ComponentsSchemasPipelineSummaryHealth = "unknown"
+	ComponentsSchemasPipelineSummaryHealthClear   ComponentsSchemasPipelineSummaryHealth = "clear"
+	ComponentsSchemasPipelineSummaryHealthCloudy  ComponentsSchemasPipelineSummaryHealth = "cloudy"
+	ComponentsSchemasPipelineSummaryHealthRain    ComponentsSchemasPipelineSummaryHealth = "rain"
+	ComponentsSchemasPipelineSummaryHealthUnknown ComponentsSchemasPipelineSummaryHealth = "unknown"
+)
+
+// Defines values for ComponentsSchemasPipelineSummaryKind.
+const (
+	ComponentsSchemasPipelineSummaryKindMultibranch ComponentsSchemasPipelineSummaryKind = "multibranch"
+	ComponentsSchemasPipelineSummaryKindPipeline    ComponentsSchemasPipelineSummaryKind = "pipeline"
+	ComponentsSchemasPipelineSummaryKindUnknown     ComponentsSchemasPipelineSummaryKind = "unknown"
 )
 
 // Defines values for ComponentsSchemasPipelineTemplateInfoSource.
@@ -371,6 +397,15 @@ const (
 const (
 	ComponentsSchemasSubjectRefKindGroup ComponentsSchemasSubjectRefKind = "Group"
 	ComponentsSchemasSubjectRefKindUser  ComponentsSchemasSubjectRefKind = "User"
+)
+
+// Defines values for ComponentsSchemasTeamCellState.
+const (
+	Moving        ComponentsSchemasTeamCellState = "moving"
+	NotCellHosted ComponentsSchemasTeamCellState = "notCellHosted"
+	Placed        ComponentsSchemasTeamCellState = "placed"
+	Rehydrating   ComponentsSchemasTeamCellState = "rehydrating"
+	Unplaced      ComponentsSchemasTeamCellState = "unplaced"
 )
 
 // Defines values for ComponentsSchemasTeamPipelinesConcurrency.
@@ -988,10 +1023,199 @@ type ComponentsSchemasCatalogVariable struct {
 // ComponentsSchemasCatalogVariableType Parameter type. Omitting the field means "string".
 type ComponentsSchemasCatalogVariableType string
 
+// ComponentsSchemasCellGrant One grant that reaches a tenant. The jobs field is absent when the grant narrows nothing. An absent jobs and an empty jobs mean different things, so the field is never an empty array.
+type ComponentsSchemasCellGrant struct {
+	// Binding The VarroaRoleBinding name. Absent for the teamMembership source.
+	Binding  *string                             `json:"binding,omitempty"`
+	Jobs     *[]string                           `json:"jobs,omitempty"`
+	RoleRef  string                              `json:"roleRef"`
+	Source   ComponentsSchemasCellGrantSource    `json:"source"`
+	Subjects []ComponentsSchemasCellGrantSubject `json:"subjects"`
+
+	// Verbs The pipelines verbs of the grant's role, never the whole capability set.
+	Verbs []string `json:"verbs"`
+}
+
+// ComponentsSchemasCellGrantSource defines model for ComponentsSchemasCellGrant.Source.
+type ComponentsSchemasCellGrantSource string
+
+// ComponentsSchemasCellGrantSubject One subject of a grant.
+type ComponentsSchemasCellGrantSubject struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+}
+
+// ComponentsSchemasCellGrants One entry for each tenant of a cell, naming the subjects that may build on it.
+type ComponentsSchemasCellGrants struct {
+	Cell      string                              `json:"cell"`
+	Cluster   string                              `json:"cluster"`
+	Namespace string                              `json:"namespace"`
+	Tenants   []ComponentsSchemasCellTenantGrants `json:"tenants"`
+}
+
+// ComponentsSchemasCellPool Full cell-pool object returned from get and list operations.
+type ComponentsSchemasCellPool struct {
+	Name string `json:"name"`
+
+	// Spec A CellPool's configuration (spec.*). profileRef is immutable, because a pool's cells carry the profile label they were created with.
+	Spec ComponentsSchemasCellPoolSpec `json:"spec"`
+
+	// Status A CellPool's reported cell and tenant counts.
+	Status ComponentsSchemasCellPoolStatus `json:"status"`
+}
+
+// ComponentsSchemasCellPoolCondition Status condition for a CellPool. Type PoolReady, with exactly the reasons Ready, CellCapReached, and ProfileMissing.
+type ComponentsSchemasCellPoolCondition struct {
+	// LastTransitionTime ISO 8601 last transition time.
+	LastTransitionTime *string `json:"lastTransitionTime,omitempty"`
+	Message            *string `json:"message,omitempty"`
+	ObservedGeneration *int64  `json:"observedGeneration,omitempty"`
+	Reason             *string `json:"reason,omitempty"`
+	Status             string  `json:"status"`
+	Type               string  `json:"type"`
+}
+
+// ComponentsSchemasCellPoolScaleRequest Request body for PATCH /cellpools/{name}. It declares the four scale dials and nothing else, so the contract itself states that a structural edit is not an API operation.
+type ComponentsSchemasCellPoolScaleRequest struct {
+	Spec struct {
+		MaxCells           *int32  `json:"maxCells,omitempty"`
+		MaxTenantsPerCell  *int32  `json:"maxTenantsPerCell,omitempty"`
+		UnreadyGracePeriod *string `json:"unreadyGracePeriod,omitempty"`
+		Warm               *int32  `json:"warm,omitempty"`
+	} `json:"spec"`
+}
+
+// ComponentsSchemasCellPoolSpec A CellPool's configuration (spec.*). profileRef is immutable, because a pool's cells carry the profile label they were created with.
+type ComponentsSchemasCellPoolSpec struct {
+	// CellTemplate resources and podOverrides for the cells the pool creates. The pool exposes no raw strategic-merge overlay.
+	CellTemplate *map[string]interface{} `json:"cellTemplate,omitempty"`
+
+	// MaxCells Cap on the pool's cells, placed cells included. 0 means unlimited.
+	MaxCells *int32 `json:"maxCells,omitempty"`
+
+	// MaxTenantsPerCell Capacity a pool cell uses when its own spec.cell.maxTenants is zero.
+	MaxTenantsPerCell *int32 `json:"maxTenantsPerCell,omitempty"`
+
+	// ProfileRef The JenkinsVersionProfile the pool's cells run. Immutable.
+	ProfileRef string `json:"profileRef"`
+
+	// UnreadyGracePeriod How long a pool cell may stay unready before the operator rolls its pod. A Go duration string.
+	UnreadyGracePeriod *string `json:"unreadyGracePeriod,omitempty"`
+
+	// Warm Target count of free cells the pool keeps ready.
+	Warm *int32 `json:"warm,omitempty"`
+}
+
+// ComponentsSchemasCellPoolStatus A CellPool's reported cell and tenant counts.
+type ComponentsSchemasCellPoolStatus struct {
+	Conditions *[]ComponentsSchemasCellPoolCondition `json:"conditions,omitempty"`
+
+	// FreeTenantSlots Spare capacity of the placed cells only. warmCells already reports the empty ones.
+	FreeTenantSlots    int32  `json:"freeTenantSlots"`
+	ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
+
+	// PlacedCells Owned cells that hold at least one tenant.
+	PlacedCells int32 `json:"placedCells"`
+
+	// Tenants Every tenant on the pool, sorted.
+	Tenants *[]string `json:"tenants,omitempty"`
+
+	// UnreadyCells Owned cells whose CellReady condition is not True.
+	UnreadyCells int32 `json:"unreadyCells"`
+
+	// WarmCells Owned cells that hold no tenant.
+	WarmCells int32 `json:"warmCells"`
+}
+
 // ComponentsSchemasCellSpec Marks a controller as a shared cell that hosts tenant pipelines. enabled is immutable after creation; maxTenants bounds placement.
 type ComponentsSchemasCellSpec struct {
 	Enabled    bool   `json:"enabled"`
 	MaxTenants *int32 `json:"maxTenants,omitempty"`
+}
+
+// ComponentsSchemasCellStatusProjection The controller detail's projection of status.cell. It declares ten properties. It declares no rehydration property: the cell-controllers capability keeps that key inside the operator.
+type ComponentsSchemasCellStatusProjection struct {
+	// AppliedTenants The tenant set of the last apply that passed. A tenant named in tenants and absent here is still rehydrating.
+	AppliedTenants *[]string `json:"appliedTenants,omitempty"`
+
+	// Evacuate Operator-written state. No API accepts a write to it, so no surface offers an evacuate action.
+	Evacuate                 *bool                                 `json:"evacuate,omitempty"`
+	Instance                 *string                               `json:"instance,omitempty"`
+	PreviousInstance         *string                               `json:"previousInstance,omitempty"`
+	PreviousInstanceLastSeen *time.Time                            `json:"previousInstanceLastSeen,omitempty"`
+	RolledAt                 *time.Time                            `json:"rolledAt,omitempty"`
+	TenantWarnings           *[]ComponentsSchemasCellTenantWarning `json:"tenantWarnings,omitempty"`
+	Tenants                  *[]string                             `json:"tenants,omitempty"`
+	UnreadySince             *time.Time                            `json:"unreadySince,omitempty"`
+	Warm                     *bool                                 `json:"warm,omitempty"`
+}
+
+// ComponentsSchemasCellTenantGrants Every grant that reaches one tenant of a cell, with the tenant's generated Jenkins item role. The item role and its pattern come from the tenant name, so the read opens no JenkinsRole object.
+type ComponentsSchemasCellTenantGrants struct {
+	Grants      []ComponentsSchemasCellGrant `json:"grants"`
+	ItemPattern string                       `json:"itemPattern"`
+	ItemRole    string                       `json:"itemRole"`
+	Tenant      string                       `json:"tenant"`
+
+	// Truncated True only when the 50-grant cap dropped a grant of this tenant.
+	Truncated bool `json:"truncated"`
+}
+
+// ComponentsSchemasCellTenantUsage One tenant on a cell, with that tenant's four counts.
+type ComponentsSchemasCellTenantUsage struct {
+	FailedLast24h int64  `json:"failedLast24h"`
+	Jobs          int64  `json:"jobs"`
+	RunningNow    int64  `json:"runningNow"`
+	RunsLast24h   int64  `json:"runsLast24h"`
+	Tenant        string `json:"tenant"`
+}
+
+// ComponentsSchemasCellTenantWarning One non-blocking finding the reconciler recorded about a tenant.
+type ComponentsSchemasCellTenantWarning struct {
+	Message string `json:"message"`
+	Reason  string `json:"reason"`
+	Tenant  string `json:"tenant"`
+}
+
+// ComponentsSchemasCellUsage One cell's load, tenant by tenant. An absent optional field is absent from the object, never a null and never a zero: queueLength reads as zero only for an empty queue, and a cell in a remote cluster carries no queueLength at all.
+type ComponentsSchemasCellUsage struct {
+	// CellPool The cell's varroa.dev/cell-pool label. Absent while no label is set.
+	CellPool *string `json:"cellPool,omitempty"`
+	Cluster  string  `json:"cluster"`
+
+	// FreeSlots maxTenants minus the placed tenant count, never below zero.
+	FreeSlots      int32   `json:"freeSlots"`
+	JenkinsHealth  *string `json:"jenkinsHealth,omitempty"`
+	JenkinsVersion *string `json:"jenkinsVersion,omitempty"`
+
+	// MaxTenants The effective tenant cap this surface resolves: the cell's own spec.cell.maxTenants when that value is not zero, else the chart value, else ten. It is never a minimum over the tiers.
+	MaxTenants int32  `json:"maxTenants"`
+	Name       string `json:"name"`
+	Namespace  string `json:"namespace"`
+
+	// Profile The cell's varroa.dev/cell-profile label.
+	Profile *string `json:"profile,omitempty"`
+
+	// QueueLength The Jenkins queue length from the latest mite heartbeat. Absent for a remote cluster and absent while no heartbeat has arrived.
+	QueueLength *int64 `json:"queueLength,omitempty"`
+
+	// QueueLengthAt The heartbeat time the queue length came from.
+	QueueLengthAt *time.Time                         `json:"queueLengthAt,omitempty"`
+	Tenants       []ComponentsSchemasCellTenantUsage `json:"tenants"`
+
+	// Totals The four load counts of one tenant on a cell, or the same four summed over the cell. runningNow carries no time bound, so a build that runs longer than a day still counts. runsLast24h and failedLast24h count inside the fixed 24-hour window. jobs counts distinct job paths. A run whose result is TRIGGER_FAILED counts in no value.
+	Totals ComponentsSchemasCellUsageCounts `json:"totals"`
+
+	// WindowStart The start of the fixed 24-hour window the counts used.
+	WindowStart time.Time `json:"windowStart"`
+}
+
+// ComponentsSchemasCellUsageCounts The four load counts of one tenant on a cell, or the same four summed over the cell. runningNow carries no time bound, so a build that runs longer than a day still counts. runsLast24h and failedLast24h count inside the fixed 24-hour window. jobs counts distinct job paths. A run whose result is TRIGGER_FAILED counts in no value.
+type ComponentsSchemasCellUsageCounts struct {
+	FailedLast24h int64 `json:"failedLast24h"`
+	Jobs          int64 `json:"jobs"`
+	RunningNow    int64 `json:"runningNow"`
+	RunsLast24h   int64 `json:"runsLast24h"`
 }
 
 // ComponentsSchemasCheck Result of a single preflight validation check.
@@ -1287,9 +1511,12 @@ type ComponentsSchemasControllerDetail struct {
 	ApplyHistory      *[]ComponentsSchemasApplyResult `json:"applyHistory,omitempty"`
 
 	// Attention Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed > pluginRollFailed > applyFailed.
-	Attention  *ComponentsSchemasControllerAttention `json:"attention,omitempty"`
-	CertExpiry *string                               `json:"certExpiry,omitempty"`
-	Cluster    string                                `json:"cluster"`
+	Attention *ComponentsSchemasControllerAttention `json:"attention,omitempty"`
+
+	// Cell The controller detail's projection of status.cell. It declares ten properties. It declares no rehydration property: the cell-controllers capability keeps that key inside the operator.
+	Cell       *ComponentsSchemasCellStatusProjection `json:"cell,omitempty"`
+	CertExpiry *string                                `json:"certExpiry,omitempty"`
+	Cluster    string                                 `json:"cluster"`
 
 	// ComposedBundleRef Reference to a ComposedBundle from a Controller.
 	ComposedBundleRef *ComponentsSchemasComposedBundleRef `json:"composedBundleRef,omitempty"`
@@ -1311,6 +1538,9 @@ type ComponentsSchemasControllerDetail struct {
 	HibernatedAt   *string `json:"hibernatedAt,omitempty"`
 	JenkinsHealth  *string `json:"jenkinsHealth,omitempty"`
 	JenkinsVersion *string `json:"jenkinsVersion,omitempty"`
+
+	// Kind Mirrors v1alpha1.IsCell. Present for every controller.
+	Kind ComponentsSchemasControllerDetailKind `json:"kind"`
 
 	// LastApplyResult Result of an apply operation with RFC3339 timestamp.
 	LastApplyResult  *ComponentsSchemasApplyResult `json:"lastApplyResult,omitempty"`
@@ -1370,6 +1600,9 @@ type ComponentsSchemasControllerDetail struct {
 	// VersionStatus Read-only projection of version-related controller conditions.
 	VersionStatus *ComponentsSchemasVersionStatus `json:"versionStatus,omitempty"`
 }
+
+// ComponentsSchemasControllerDetailKind Mirrors v1alpha1.IsCell. Present for every controller.
+type ComponentsSchemasControllerDetailKind string
 
 // ComponentsSchemasControllerDiff Diff between incoming bundle content and last-applied content.
 type ComponentsSchemasControllerDiff struct {
@@ -1482,10 +1715,16 @@ type ComponentsSchemasControllerSummary struct {
 
 	// Attention Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed > pluginRollFailed > applyFailed.
 	Attention *ComponentsSchemasControllerAttention `json:"attention,omitempty"`
-	Cluster   string                                `json:"cluster"`
+
+	// CellPool The controller's varroa.dev/cell-pool label. Absent while no label is set.
+	CellPool *string `json:"cellPool,omitempty"`
+	Cluster  string  `json:"cluster"`
 
 	// ComposedBundleRef Reference to a ComposedBundle from a Controller.
 	ComposedBundleRef *ComponentsSchemasComposedBundleRef `json:"composedBundleRef,omitempty"`
+
+	// CreatedAt metadata.creationTimestamp, RFC 3339. Present for every controller.
+	CreatedAt time.Time `json:"createdAt"`
 
 	// EffectiveBundle The ComposedBundle a controller is actually using, resolved. Read-only, and deliberately separate from composedBundleRef: that field is the raw spec value the dashboard writes back, so resolving into it would materialize an explicit reference to the starter bundle on the next save.
 	EffectiveBundle *ComponentsSchemasEffectiveBundle `json:"effectiveBundle,omitempty"`
@@ -1496,8 +1735,14 @@ type ComponentsSchemasControllerSummary struct {
 	JenkinsHealth  *string `json:"jenkinsHealth,omitempty"`
 	JenkinsVersion *string `json:"jenkinsVersion,omitempty"`
 
+	// Kind Mirrors v1alpha1.IsCell. Always present, so a client never reads the kind from an absent field.
+	Kind ComponentsSchemasControllerSummaryKind `json:"kind"`
+
 	// LastSeen Last mite heartbeat, RFC3339 UTC. Absent when no mite has reported.
-	LastSeen      *string `json:"lastSeen,omitempty"`
+	LastSeen *string `json:"lastSeen,omitempty"`
+
+	// MaxTenants The same effective cap the cell usage read resolves. Absent for a controller that is not a cell.
+	MaxTenants    *int32  `json:"maxTenants,omitempty"`
 	MiteConnected bool    `json:"miteConnected"`
 	MiteVersion   *string `json:"miteVersion,omitempty"`
 	Name          string  `json:"name"`
@@ -1510,9 +1755,21 @@ type ComponentsSchemasControllerSummary struct {
 	// RoutingMode Either "subdomain" or "path".
 	RoutingMode string `json:"routingMode"`
 
+	// TenantCount The length of status.cell.tenants, never of status.cell.appliedTenants. Absent for a controller that is not a cell.
+	TenantCount *int32 `json:"tenantCount,omitempty"`
+
+	// UnreadySince status.cell.unreadySince, RFC 3339. Absent while the cell is ready.
+	UnreadySince *time.Time `json:"unreadySince,omitempty"`
+
 	// Version Desired Jenkins version (from spec.version).
 	Version *string `json:"version,omitempty"`
+
+	// Warm status.cell.warm. Absent for a controller that is not a cell.
+	Warm *bool `json:"warm,omitempty"`
 }
+
+// ComponentsSchemasControllerSummaryKind Mirrors v1alpha1.IsCell. Always present, so a client never reads the kind from an absent field.
+type ComponentsSchemasControllerSummaryKind string
 
 // ComponentsSchemasCreateBroodRequest Request body to create or preview a brood operation.
 type ComponentsSchemasCreateBroodRequest struct {
@@ -2106,6 +2363,9 @@ type ComponentsSchemasPipelineListResponse struct {
 	Items      []ComponentsSchemasPipelineSummary `json:"items"`
 	RunningNow []ComponentsSchemasRunningRun      `json:"runningNow"`
 
+	// TenantFolder The Jenkins folder that prefixes every job path in the response. It is the Team name for a placed pipelines tenant. It is the empty string for a controller tenant. The field is always present.
+	TenantFolder string `json:"tenantFolder"`
+
 	// Truncated True when any tenant's running-now page was full (50 rows), so the strip does not claim completeness.
 	Truncated bool `json:"truncated"`
 }
@@ -2166,12 +2426,18 @@ type ComponentsSchemasPipelineSummary struct {
 	Health  ComponentsSchemasPipelineSummaryHealth `json:"health"`
 	JobPath string                                 `json:"jobPath"`
 
+	// Kind The item kind the tenant's bundle declares. A job the record store alone holds reports unknown. A declared item of any other kind also reports unknown.
+	Kind ComponentsSchemasPipelineSummaryKind `json:"kind"`
+
 	// LastBuild One run, condensed for a list or a card.
 	LastBuild *ComponentsSchemasRunSummary `json:"lastBuild,omitempty"`
 }
 
 // ComponentsSchemasPipelineSummaryHealth The weather glyph, computed from the last five runs: clear when all passed, cloudy when one or two failed, rain when three or more failed, unknown for a job that has never run.
 type ComponentsSchemasPipelineSummaryHealth string
+
+// ComponentsSchemasPipelineSummaryKind The item kind the tenant's bundle declares. A job the record store alone holds reports unknown. A declared item of any other kind also reports unknown.
+type ComponentsSchemasPipelineSummaryKind string
 
 // ComponentsSchemasPipelineTemplateInfo The resolved catalog template for a job, read from the record store (marker-defined) or the items engine and catalog (items-declared). Absent from PipelineJobDetail for a job with no catalog template.
 // For source "marker": name, version, and asOfBuild are absent before the job's first run — markerPath and source are always present. markerRevision is the trusted revision the cell read the marker from, not the branch tip. For source "items": only name, version, and source are set.
@@ -2837,6 +3103,34 @@ type ComponentsSchemasSuspendBroodRequest struct {
 	Suspend bool `json:"suspend"`
 }
 
+// ComponentsSchemasTeamCell The tenant's own view of the cell that hosts it. For the states unplaced and notCellHosted every field other than state and reason is absent. The body carries no other tenant's name, job path, run, or count.
+type ComponentsSchemasTeamCell struct {
+	// CanOpenCell True when the caller also holds the controller read grant on the cell. The hint gates no other field of this body.
+	CanOpenCell    bool    `json:"canOpenCell"`
+	Cell           *string `json:"cell,omitempty"`
+	CellPool       *string `json:"cellPool,omitempty"`
+	Cluster        *string `json:"cluster,omitempty"`
+	FailedLast24h  *int64  `json:"failedLast24h,omitempty"`
+	FreeSlots      *int32  `json:"freeSlots,omitempty"`
+	JenkinsVersion *string `json:"jenkinsVersion,omitempty"`
+	Jobs           *int64  `json:"jobs,omitempty"`
+	Namespace      *string `json:"namespace,omitempty"`
+
+	// OtherTenantCount The number of other tenants on the cell. It is a count, never a list.
+	OtherTenantCount *int32  `json:"otherTenantCount,omitempty"`
+	Profile          *string `json:"profile,omitempty"`
+	QueueLength      *int64  `json:"queueLength,omitempty"`
+
+	// Reason The Team's Placed condition reason, verbatim.
+	Reason      *string                        `json:"reason,omitempty"`
+	RunningNow  *int64                         `json:"runningNow,omitempty"`
+	RunsLast24h *int64                         `json:"runsLast24h,omitempty"`
+	State       ComponentsSchemasTeamCellState `json:"state"`
+}
+
+// ComponentsSchemasTeamCellState defines model for ComponentsSchemasTeamCell.State.
+type ComponentsSchemasTeamCellState string
+
 // ComponentsSchemasTeamCondition Status condition for a Team.
 type ComponentsSchemasTeamCondition struct {
 	// LastTransitionTime ISO 8601 last transition time.
@@ -2898,6 +3192,9 @@ type ComponentsSchemasTeamPipelines struct {
 	// AgentNamespace Kubernetes namespace this tenant's agents run in. Must be one of the team's own namespaces.
 	AgentNamespace *string `json:"agentNamespace,omitempty"`
 
+	// CellPool The CellPool the placement pass selects a cell from. Empty means the profile's default pool: the pool whose name equals profile. A tenant that needs a cell of its own names a pool whose maxTenantsPerCell is 1.
+	CellPool *string `json:"cellPool,omitempty"`
+
 	// ComposedBundleRef Reference to a ComposedBundle from a Controller.
 	ComposedBundleRef *ComponentsSchemasComposedBundleRef `json:"composedBundleRef,omitempty"`
 
@@ -2912,9 +3209,6 @@ type ComponentsSchemasTeamPipelines struct {
 
 	// CronGrace How long the backstop waits past a missed cron occurrence before it fires. Default 5m, range 1m to 60m.
 	CronGrace *string `json:"cronGrace,omitempty"`
-
-	// Dedicated When true, requires a cell that carries no other tenant.
-	Dedicated *bool `json:"dedicated,omitempty"`
 
 	// Exports Grants of this tenant's jobs and locks to other tenants. An absent list exports nothing.
 	Exports *[]ComponentsSchemasTeamExport `json:"exports,omitempty"`
@@ -3459,6 +3753,27 @@ type AuthCallbackParams struct {
 	Error *string `form:"error,omitempty" json:"error,omitempty"`
 }
 
+// ListCellUsageParams defines parameters for ListCellUsage.
+type ListCellUsageParams struct {
+	// Cluster Cluster name filter for aggregated list.
+	Cluster *ComponentsParametersClusterQuery `form:"cluster,omitempty" json:"cluster,omitempty"`
+
+	// Namespace Namespace filter (optional).
+	Namespace *ComponentsParametersNamespace `form:"namespace,omitempty" json:"namespace,omitempty"`
+}
+
+// GetCellGrantsParams defines parameters for GetCellGrants.
+type GetCellGrantsParams struct {
+	// Cluster Cluster name filter for aggregated list.
+	Cluster *ComponentsParametersClusterQuery `form:"cluster,omitempty" json:"cluster,omitempty"`
+}
+
+// GetCellUsageParams defines parameters for GetCellUsage.
+type GetCellUsageParams struct {
+	// Cluster Cluster name filter for aggregated list.
+	Cluster *ComponentsParametersClusterQuery `form:"cluster,omitempty" json:"cluster,omitempty"`
+}
+
 // ListCatalogItemsParams defines parameters for ListCatalogItems.
 type ListCatalogItemsParams struct {
 	// Namespace Namespace filter (optional).
@@ -3647,6 +3962,9 @@ type CreateBroodScheduleJSONRequestBody CreateBroodScheduleJSONBody
 
 // SuspendBroodScheduleJSONRequestBody defines body for SuspendBroodSchedule for application/json ContentType.
 type SuspendBroodScheduleJSONRequestBody SuspendBroodScheduleJSONBody
+
+// PatchCellPoolJSONRequestBody defines body for PatchCellPool for application/json ContentType.
+type PatchCellPoolJSONRequestBody = ComponentsSchemasCellPoolScaleRequest
 
 // CreateCatalogSourceJSONRequestBody defines body for CreateCatalogSource for application/json ContentType.
 type CreateCatalogSourceJSONRequestBody = ComponentsSchemasCatalogSource
@@ -4341,6 +4659,26 @@ type ClientInterface interface {
 	// AuthCallback request
 	AuthCallback(ctx context.Context, params *AuthCallbackParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListCellPools request
+	ListCellPools(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetCellPool request
+	GetCellPool(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PatchCellPoolWithBody request with any body
+	PatchCellPoolWithBody(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PatchCellPool(ctx context.Context, name ComponentsParametersName, body PatchCellPoolJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListCellUsage request
+	ListCellUsage(ctx context.Context, params *ListCellUsageParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetCellGrants request
+	GetCellGrants(ctx context.Context, namespace string, name string, params *GetCellGrantsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetCellUsage request
+	GetCellUsage(ctx context.Context, namespace string, name string, params *GetCellUsageParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListClusters request
 	ListClusters(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -4630,6 +4968,9 @@ type ClientInterface interface {
 
 	// ListPipelines request
 	ListPipelines(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetTeamCell request
+	GetTeamCell(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetPipelineJob request
 	GetPipelineJob(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -5061,6 +5402,90 @@ func (c *Client) ListBuiltinRoles(ctx context.Context, reqEditors ...RequestEdit
 
 func (c *Client) AuthCallback(ctx context.Context, params *AuthCallbackParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewAuthCallbackRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListCellPools(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListCellPoolsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetCellPool(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetCellPoolRequest(c.Server, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PatchCellPoolWithBody(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchCellPoolRequestWithBody(c.Server, name, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PatchCellPool(ctx context.Context, name ComponentsParametersName, body PatchCellPoolJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchCellPoolRequest(c.Server, name, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListCellUsage(ctx context.Context, params *ListCellUsageParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListCellUsageRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetCellGrants(ctx context.Context, namespace string, name string, params *GetCellGrantsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetCellGrantsRequest(c.Server, namespace, name, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetCellUsage(ctx context.Context, namespace string, name string, params *GetCellUsageParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetCellUsageRequest(c.Server, namespace, name, params)
 	if err != nil {
 		return nil, err
 	}
@@ -6333,6 +6758,18 @@ func (c *Client) UpdateMyPreferences(ctx context.Context, body UpdateMyPreferenc
 
 func (c *Client) ListPipelines(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListPipelinesRequest(c.Server, team)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetTeamCell(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetTeamCellRequest(c.Server, team)
 	if err != nil {
 		return nil, err
 	}
@@ -8031,6 +8468,305 @@ func NewAuthCallbackRequest(server string, params *AuthCallbackParams) (*http.Re
 		if params.Error != nil {
 
 			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "error", runtime.ParamLocationQuery, *params.Error); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListCellPoolsRequest generates requests for ListCellPools
+func NewListCellPoolsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/cellpools")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetCellPoolRequest generates requests for GetCellPool
+func NewGetCellPoolRequest(server string, name ComponentsParametersName) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/cellpools/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPatchCellPoolRequest calls the generic PatchCellPool builder with application/json body
+func NewPatchCellPoolRequest(server string, name ComponentsParametersName, body PatchCellPoolJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPatchCellPoolRequestWithBody(server, name, "application/json", bodyReader)
+}
+
+// NewPatchCellPoolRequestWithBody generates requests for PatchCellPool with any type of body
+func NewPatchCellPoolRequestWithBody(server string, name ComponentsParametersName, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/cellpools/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PATCH", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListCellUsageRequest generates requests for ListCellUsage
+func NewListCellUsageRequest(server string, params *ListCellUsageParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/cells/usage")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cluster != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cluster", runtime.ParamLocationQuery, *params.Cluster); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Namespace != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "namespace", runtime.ParamLocationQuery, *params.Namespace); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetCellGrantsRequest generates requests for GetCellGrants
+func NewGetCellGrantsRequest(server string, namespace string, name string, params *GetCellGrantsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "namespace", runtime.ParamLocationPath, namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/cells/%s/%s/grants", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cluster != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cluster", runtime.ParamLocationQuery, *params.Cluster); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetCellUsageRequest generates requests for GetCellUsage
+func NewGetCellUsageRequest(server string, namespace string, name string, params *GetCellUsageParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "namespace", runtime.ParamLocationPath, namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/cells/%s/%s/usage", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cluster != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cluster", runtime.ParamLocationQuery, *params.Cluster); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err
@@ -11805,6 +12541,40 @@ func NewListPipelinesRequest(server string, team ComponentsParametersTeam) (*htt
 	return req, nil
 }
 
+// NewGetTeamCellRequest generates requests for GetTeamCell
+func NewGetTeamCellRequest(server string, team ComponentsParametersTeam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/cell", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetPipelineJobRequest generates requests for GetPipelineJob
 func NewGetPipelineJobRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob) (*http.Request, error) {
 	var err error
@@ -13923,6 +14693,26 @@ type ClientWithResponsesInterface interface {
 	// AuthCallbackWithResponse request
 	AuthCallbackWithResponse(ctx context.Context, params *AuthCallbackParams, reqEditors ...RequestEditorFn) (*AuthCallbackResponse, error)
 
+	// ListCellPoolsWithResponse request
+	ListCellPoolsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListCellPoolsResponse, error)
+
+	// GetCellPoolWithResponse request
+	GetCellPoolWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*GetCellPoolResponse, error)
+
+	// PatchCellPoolWithBodyWithResponse request with any body
+	PatchCellPoolWithBodyWithResponse(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchCellPoolResponse, error)
+
+	PatchCellPoolWithResponse(ctx context.Context, name ComponentsParametersName, body PatchCellPoolJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchCellPoolResponse, error)
+
+	// ListCellUsageWithResponse request
+	ListCellUsageWithResponse(ctx context.Context, params *ListCellUsageParams, reqEditors ...RequestEditorFn) (*ListCellUsageResponse, error)
+
+	// GetCellGrantsWithResponse request
+	GetCellGrantsWithResponse(ctx context.Context, namespace string, name string, params *GetCellGrantsParams, reqEditors ...RequestEditorFn) (*GetCellGrantsResponse, error)
+
+	// GetCellUsageWithResponse request
+	GetCellUsageWithResponse(ctx context.Context, namespace string, name string, params *GetCellUsageParams, reqEditors ...RequestEditorFn) (*GetCellUsageResponse, error)
+
 	// ListClustersWithResponse request
 	ListClustersWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListClustersResponse, error)
 
@@ -14212,6 +15002,9 @@ type ClientWithResponsesInterface interface {
 
 	// ListPipelinesWithResponse request
 	ListPipelinesWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*ListPipelinesResponse, error)
+
+	// GetTeamCellWithResponse request
+	GetTeamCellWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*GetTeamCellResponse, error)
 
 	// GetPipelineJobWithResponse request
 	GetPipelineJobWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*GetPipelineJobResponse, error)
@@ -14823,6 +15616,160 @@ func (r AuthCallbackResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r AuthCallbackResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListCellPoolsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		Items []ComponentsSchemasCellPool `json:"items"`
+	}
+	JSON401 *ComponentsResponsesUnauthorized
+	JSON403 *ComponentsResponsesForbidden
+}
+
+// Status returns HTTPResponse.Status
+func (r ListCellPoolsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListCellPoolsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetCellPoolResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasCellPool
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+}
+
+// Status returns HTTPResponse.Status
+func (r GetCellPoolResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetCellPoolResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PatchCellPoolResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasCellPool
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsResponsesConflict
+}
+
+// Status returns HTTPResponse.Status
+func (r PatchCellPoolResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PatchCellPoolResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListCellUsageResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		Items []ComponentsSchemasCellUsage `json:"items"`
+	}
+	JSON401 *ComponentsResponsesUnauthorized
+	JSON503 *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ListCellUsageResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListCellUsageResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetCellGrantsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasCellGrants
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+}
+
+// Status returns HTTPResponse.Status
+func (r GetCellGrantsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetCellGrantsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetCellUsageResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasCellUsage
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r GetCellUsageResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetCellUsageResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -16830,6 +17777,31 @@ func (r ListPipelinesResponse) StatusCode() int {
 	return 0
 }
 
+type GetTeamCellResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasTeamCell
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r GetTeamCellResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetTeamCellResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type GetPipelineJobResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -18280,6 +19252,68 @@ func (c *ClientWithResponses) AuthCallbackWithResponse(ctx context.Context, para
 	return ParseAuthCallbackResponse(rsp)
 }
 
+// ListCellPoolsWithResponse request returning *ListCellPoolsResponse
+func (c *ClientWithResponses) ListCellPoolsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListCellPoolsResponse, error) {
+	rsp, err := c.ListCellPools(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListCellPoolsResponse(rsp)
+}
+
+// GetCellPoolWithResponse request returning *GetCellPoolResponse
+func (c *ClientWithResponses) GetCellPoolWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*GetCellPoolResponse, error) {
+	rsp, err := c.GetCellPool(ctx, name, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetCellPoolResponse(rsp)
+}
+
+// PatchCellPoolWithBodyWithResponse request with arbitrary body returning *PatchCellPoolResponse
+func (c *ClientWithResponses) PatchCellPoolWithBodyWithResponse(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchCellPoolResponse, error) {
+	rsp, err := c.PatchCellPoolWithBody(ctx, name, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePatchCellPoolResponse(rsp)
+}
+
+func (c *ClientWithResponses) PatchCellPoolWithResponse(ctx context.Context, name ComponentsParametersName, body PatchCellPoolJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchCellPoolResponse, error) {
+	rsp, err := c.PatchCellPool(ctx, name, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePatchCellPoolResponse(rsp)
+}
+
+// ListCellUsageWithResponse request returning *ListCellUsageResponse
+func (c *ClientWithResponses) ListCellUsageWithResponse(ctx context.Context, params *ListCellUsageParams, reqEditors ...RequestEditorFn) (*ListCellUsageResponse, error) {
+	rsp, err := c.ListCellUsage(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListCellUsageResponse(rsp)
+}
+
+// GetCellGrantsWithResponse request returning *GetCellGrantsResponse
+func (c *ClientWithResponses) GetCellGrantsWithResponse(ctx context.Context, namespace string, name string, params *GetCellGrantsParams, reqEditors ...RequestEditorFn) (*GetCellGrantsResponse, error) {
+	rsp, err := c.GetCellGrants(ctx, namespace, name, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetCellGrantsResponse(rsp)
+}
+
+// GetCellUsageWithResponse request returning *GetCellUsageResponse
+func (c *ClientWithResponses) GetCellUsageWithResponse(ctx context.Context, namespace string, name string, params *GetCellUsageParams, reqEditors ...RequestEditorFn) (*GetCellUsageResponse, error) {
+	rsp, err := c.GetCellUsage(ctx, namespace, name, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetCellUsageResponse(rsp)
+}
+
 // ListClustersWithResponse request returning *ListClustersResponse
 func (c *ClientWithResponses) ListClustersWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListClustersResponse, error) {
 	rsp, err := c.ListClusters(ctx, reqEditors...)
@@ -19204,6 +20238,15 @@ func (c *ClientWithResponses) ListPipelinesWithResponse(ctx context.Context, tea
 		return nil, err
 	}
 	return ParseListPipelinesResponse(rsp)
+}
+
+// GetTeamCellWithResponse request returning *GetTeamCellResponse
+func (c *ClientWithResponses) GetTeamCellWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*GetTeamCellResponse, error) {
+	rsp, err := c.GetTeamCell(ctx, team, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetTeamCellResponse(rsp)
 }
 
 // GetPipelineJobWithResponse request returning *GetPipelineJobResponse
@@ -20505,6 +21548,292 @@ func ParseAuthCallbackResponse(rsp *http.Response) (*AuthCallbackResponse, error
 			return nil, err
 		}
 		response.JSON501 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListCellPoolsResponse parses an HTTP response from a ListCellPoolsWithResponse call
+func ParseListCellPoolsResponse(rsp *http.Response) (*ListCellPoolsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListCellPoolsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Items []ComponentsSchemasCellPool `json:"items"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetCellPoolResponse parses an HTTP response from a GetCellPoolWithResponse call
+func ParseGetCellPoolResponse(rsp *http.Response) (*GetCellPoolResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetCellPoolResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasCellPool
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePatchCellPoolResponse parses an HTTP response from a PatchCellPoolWithResponse call
+func ParsePatchCellPoolResponse(rsp *http.Response) (*PatchCellPoolResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PatchCellPoolResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasCellPool
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListCellUsageResponse parses an HTTP response from a ListCellUsageWithResponse call
+func ParseListCellUsageResponse(rsp *http.Response) (*ListCellUsageResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListCellUsageResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Items []ComponentsSchemasCellUsage `json:"items"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetCellGrantsResponse parses an HTTP response from a GetCellGrantsWithResponse call
+func ParseGetCellGrantsResponse(rsp *http.Response) (*GetCellGrantsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetCellGrantsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasCellGrants
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetCellUsageResponse parses an HTTP response from a GetCellUsageWithResponse call
+func ParseGetCellUsageResponse(rsp *http.Response) (*GetCellUsageResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetCellUsageResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasCellUsage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 
@@ -24080,6 +25409,53 @@ func ParseListPipelinesResponse(rsp *http.Response) (*ListPipelinesResponse, err
 			return nil, err
 		}
 		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetTeamCellResponse parses an HTTP response from a GetTeamCellWithResponse call
+func ParseGetTeamCellResponse(rsp *http.Response) (*GetTeamCellResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetTeamCellResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasTeamCell
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest ComponentsResponsesServiceUnavailable

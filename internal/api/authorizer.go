@@ -323,6 +323,24 @@ func (a *Authorizer) CanDeleteRunners(claims *auth.Claims) bool {
 	return hasVerb(a.globalEffective(claims), "runners", "delete")
 }
 
+// CanReadCellPools checks if the caller can read CellPools. CellPool is
+// cluster-scoped, so the decision reads the cluster-wide partition only.
+func (a *Authorizer) CanReadCellPools(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "cellpools", "read")
+}
+
+// CanUpdateCellPools checks if the caller can scale a CellPool. CellPool is
+// cluster-scoped, so the decision reads the cluster-wide partition only.
+func (a *Authorizer) CanUpdateCellPools(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "cellpools", "update")
+}
+
 // CanReadCatalogSources checks if the caller can read CatalogSources.
 func (a *Authorizer) CanReadCatalogSources(claims *auth.Claims) bool {
 	if claims == nil {

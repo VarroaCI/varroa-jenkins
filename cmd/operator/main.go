@@ -415,6 +415,33 @@ func main() {
 		os.Exit(1)
 	}
 
+	// CellPool informer. Its only job is to wake the pool ticker, so a
+	// scale edit takes effect at once rather than after the 60-second
+	// backstop. The channel holds one token and the send never blocks, so
+	// no writer can ever stall on it.
+	cellPoolWakeCh := make(chan struct{}, 1)
+	cellPoolWake := (<-chan struct{})(cellPoolWakeCh)
+	cellPoolGVR := schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "cellpools"}
+	cellPoolInformer := cache.NewSharedIndexInformer(
+		&cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				return dynamicClient.Resource(cellPoolGVR).List(context.TODO(), options)
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				return dynamicClient.Resource(cellPoolGVR).Watch(context.TODO(), options)
+			},
+		},
+		&unstructured.Unstructured{}, 0, cache.Indexers{},
+	)
+	if _, err := cellPoolInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    func(interface{}) { notifyWake(cellPoolWakeCh) },
+		UpdateFunc: func(interface{}, interface{}) { notifyWake(cellPoolWakeCh) },
+		DeleteFunc: func(interface{}) { notifyWake(cellPoolWakeCh) },
+	}); err != nil {
+		logger.Error("failed to add event handler on cell pool informer", "error", err)
+		os.Exit(1)
+	}
+
 	// JenkinsRole informer
 	jenkinsRoleGVR := schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "jenkinsroles"}
 	jenkinsRoleInformer := cache.NewSharedIndexInformer(
@@ -770,6 +797,9 @@ func main() {
 	go jenkinsRoleInformer.Run(ctx.Done())
 	go jenkinsRoleBindingInformer.Run(ctx.Done())
 	go controllerInformer.Run(ctx.Done())
+	// The cell-pool informer runs on every replica. The channel it feeds is
+	// in-process, so a non-leader replica's informer wakes nothing.
+	go cellPoolInformer.Run(ctx.Done())
 	if !cache.WaitForCacheSync(ctx.Done(),
 		roleInformer.HasSynced,
 		jenkinsRoleInformer.HasSynced,
@@ -918,16 +948,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 3b. Warm-pool reconciler (60s), keeping a pool of unassigned cells
-	// for every profile a pipelines Team requests (design D5). It writes
-	// no status, so it never races the Controller reconciler's own
-	// status.cell writes.
+	// 3b. Cell-pool reconciler (60s), sizing and reporting every CellPool
+	// (design D5). It is the only creator of a cell and the only writer of
+	// CellPool.status. It writes no Controller status, so it never races
+	// the Controller reconciler's own status.cell writes. The chart values
+	// below seed a pool the operator creates; they configure no live pool.
 	warmPoolReconciler := &cells.WarmPoolReconciler{
 		Store:             clientsetClient,
 		OperatorNamespace: operatorNamespace,
 		Config: cells.WarmPoolConfig{
-			Enabled:    cellsConfig.WarmPoolEnabled,
-			PerProfile: cellsConfig.WarmPoolPerProfile,
+			Enabled:            cellsConfig.WarmPoolEnabled,
+			PerProfile:         cellsConfig.WarmPoolPerProfile,
+			MaxTenantsPerCell:  cellsConfig.MaxTenantsPerCell,
+			UnreadyGracePeriod: cellsConfig.UnreadyGracePeriod,
 		},
 		Logger: logger,
 	}
@@ -936,9 +969,10 @@ func main() {
 		interval: 60 * time.Second,
 		tick: func(ctx context.Context) {
 			if err := warmPoolReconciler.Reconcile(ctx); err != nil {
-				logger.Warn("warm-pool reconciler tick", "error", err)
+				logger.Warn("cell-pool reconciler tick", "error", err)
 			}
 		},
+		wake:   cellPoolWake,
 		logger: logger,
 	}); err != nil {
 		logger.Error("failed to add warm-pool runnable", "error", err)

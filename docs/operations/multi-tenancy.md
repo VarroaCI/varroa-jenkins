@@ -78,6 +78,17 @@ job concurrency, and the backstop scheduler:
 
 See [Cells and pipelines tenants](cells.md#rehydration) for what each setting controls.
 
+## Narrow a tenant grant to some of its jobs
+
+A `VarroaRoleBinding` scoped to a tenant accepts an optional `jobs` list of
+folder-relative globs. See
+[Varroa RBAC](../security/varroa-rbac.md#scope-a-binding-to-a-pipelines-tenant) for the grammar
+and the dashboard editor.
+
+A `jobs` glob is a Varroa rule. It narrows what Varroa shows and what Varroa starts. It changes
+nothing inside Jenkins. Jenkins keeps one item role per tenant, which covers the tenant's whole
+folder. Varroa defines no folder-level Jenkins role.
+
 ## Pipeline templates on a shared cell
 
 A cell delivers each placed tenant's [pipeline templates](../config/pipeline-templates.md) with

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -821,6 +822,71 @@ func TestTeamReconciler_Pipelines_PlacesTenantAndAppliesRoleBinding(t *testing.T
 	}
 }
 
+// TestTeamReconciler_Pipelines_PoolListFailureFailsClosed asserts the pass
+// fails closed when the CellPool list fails. An empty pool set makes every
+// effective-owner lookup answer nil, so a cell owned by a live single-tenant
+// pool would look unowned and admit a default-pool tenant. The tick must
+// therefore write no placement and return the error for a requeue.
+func TestTeamReconciler_Pipelines_PoolListFailureFailsClosed(t *testing.T) {
+	client := newTeamTestClient()
+	client.namespaces["payments-ns"] = true
+	seedJenkinsVersionProfile(client)
+
+	// A free cell owned by a single-tenant pool. With the pool set intact it
+	// is no candidate for a tenant that names no pool.
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cell-solo-0",
+			Namespace: "cells-ns",
+			Labels: map[string]string{
+				cells.LabelCellProfile: "jenkins-lts",
+				cells.LabelCellPool:    "solo",
+			},
+		},
+		Spec: v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true}},
+		Status: v1alpha1.ControllerStatus{
+			Conditions: []v1alpha1.ControllerCondition{{Type: v1alpha1.ConditionCellReady, Status: metav1.ConditionTrue}},
+		},
+	}
+	crdstore.MustSeed(client.store, cr)
+	crdstore.MustSeed(client.store, &v1alpha1.CellPool{
+		ObjectMeta: metav1.ObjectMeta{Name: "solo"},
+		Spec:       v1alpha1.CellPoolSpec{ProfileRef: "jenkins-lts", MaxTenantsPerCell: 1},
+	})
+
+	uid := types.UID("10000000-0000-0000-0000-00000000000f")
+	teamWith(client, "payments", v1alpha1.TeamSpec{
+		Members:    []string{"alice"},
+		Namespaces: []string{"payments-ns"},
+		Pipelines: &v1alpha1.TeamPipelinesSpec{
+			Profile:        "jenkins-lts",
+			AgentNamespace: "payments-ns",
+		},
+	}, uid)
+
+	poolGVR, err := crdstore.GVRFor[v1alpha1.CellPool]()
+	if err != nil {
+		t.Fatalf("GVRFor[CellPool]: %v", err)
+	}
+	client.store.FailAlways("list", poolGVR, fmt.Errorf("apiserver unavailable"))
+
+	rec := newPipelinesTeamReconciler(client, nil)
+	_, err = rec.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "payments"}})
+	if err == nil {
+		t.Fatal("a CellPool list failure must return an error so the tick requeues")
+	}
+	if !strings.Contains(err.Error(), "apiserver unavailable") {
+		t.Errorf("error = %v, want the list failure", err)
+	}
+
+	if status := lastTeamStatus(client); status != nil && status.Placement != nil {
+		t.Fatalf("a failed pool list must write no placement, got %+v", status.Placement)
+	}
+	if len(client.cellStatusPatches) != 0 {
+		t.Errorf("a failed pool list must patch no cell, got %+v", client.cellStatusPatches)
+	}
+}
+
 // TestTeamReconciler_Pipelines_ManuallyCreatedCellResolvesProfileFromVersion
 // asserts buildCellCandidate's fallback: a ready cell with no warm-pool
 // label (cells.LabelCellProfile) still resolves a profile, through
@@ -1229,6 +1295,9 @@ func (b *callOrderBackend) PatchObjectStatus(ctx context.Context, gvr schema.Gro
 	if teamGVR, _ := crdstore.GVRFor[v1alpha1.Team](); gvr == teamGVR {
 		*b.calls = append(*b.calls, "team-status-patch")
 	}
+	if ctrlGVR, _ := crdstore.GVRFor[v1alpha1.Controller](); gvr == ctrlGVR {
+		*b.calls = append(*b.calls, "cell-claim-patch")
+	}
 	return b.Backend.PatchObjectStatus(ctx, gvr, namespace, name, status)
 }
 
@@ -1301,17 +1370,23 @@ func TestTeamReconciler_Pipelines_StatusPatchPrecedesCellPatchAndChildren(t *tes
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(calls) < 3 {
-		t.Fatalf("expected at least 3 recorded calls (status patch, cell patch, a child write), got %v", calls)
+	if len(calls) < 4 {
+		t.Fatalf("expected at least 4 recorded calls (claim, status patch, cell patch, a child write), got %v", calls)
 	}
-	// The status patch is the durable record of intent, and it must be the
-	// very first write: every cell patch and child write below it in
-	// TeamReconciler.Reconcile only runs once that patch has succeeded.
-	if calls[0] != "team-status-patch" {
-		t.Fatalf("expected the Team status patch first, got order %v", calls)
+	// The claim is the first write of a new placement. It must precede the
+	// Team status patch, or a pool drain can delete the chosen cell in the
+	// window between the two.
+	if calls[0] != "cell-claim-patch" {
+		t.Fatalf("expected the cell claim first, got order %v", calls)
+	}
+	// The status patch is the durable record of intent, and every cell
+	// tenant patch and child write below it in TeamReconciler.Reconcile
+	// only runs once that patch has succeeded.
+	if calls[1] != "team-status-patch" {
+		t.Fatalf("expected the Team status patch after the claim, got order %v", calls)
 	}
 	sawCellPatch, sawChildWrite := false, false
-	for _, c := range calls[1:] {
+	for _, c := range calls[2:] {
 		switch c {
 		case "cell-tenant-patch":
 			sawCellPatch = true
@@ -1326,6 +1401,122 @@ func TestTeamReconciler_Pipelines_StatusPatchPrecedesCellPatchAndChildren(t *tes
 	}
 	if !sawChildWrite {
 		t.Fatalf("expected at least one pipelines child write after the status patch, got order %v", calls)
+	}
+}
+
+// failingCellPatchClient refuses every cell tenant-list patch, the shape of
+// a cell whose status patch stays refused over several ticks.
+// failingCellPatchClient refuses the first refusals cell status patches
+// and records every later one on the embedded test client.
+type failingCellPatchClient struct {
+	*testClient
+	refusals int
+	calls    int
+}
+
+func (c *failingCellPatchClient) PatchControllerCellStatus(ctx context.Context, name, namespace string, cell *v1alpha1.CellStatus) error {
+	c.calls++
+	if c.calls <= c.refusals {
+		return fmt.Errorf("the cell status patch is refused")
+	}
+	return c.testClient.PatchControllerCellStatus(ctx, name, namespace, cell)
+}
+
+// countClaimPatches answers how many Controller status patches carried a
+// non-empty status.cell.pendingTenants list.
+func countClaimPatches(t *testing.T, client *testClient) int {
+	t.Helper()
+	gvr, err := crdstore.GVRFor[v1alpha1.Controller]()
+	if err != nil {
+		t.Fatalf("GVRFor[Controller]: %v", err)
+	}
+	n := 0
+	for _, patch := range client.store.StatusPatches(gvr) {
+		body, ok := patch.Status.(map[string]any)
+		if !ok {
+			continue
+		}
+		cell, ok := body["cell"].(map[string]any)
+		if !ok {
+			continue
+		}
+		claims, ok := cell["pendingTenants"].([]v1alpha1.CellPendingTenant)
+		if ok && len(claims) > 0 {
+			n++
+		}
+	}
+	return n
+}
+
+// TestTeamReconciler_Pipelines_ClaimSurvivesAFailingCellPatch covers the
+// second interleaving. A tenant whose cell tenant-list patch stays refused
+// holds a fence and no tenant entry. Every tick must write its claim again
+// and send the tenant patch again, or the claim expires and the pool drain
+// deletes the cell the tenant is fenced to. The tick whose patch lands
+// retires the claim.
+func TestTeamReconciler_Pipelines_ClaimSurvivesAFailingCellPatch(t *testing.T) {
+	base := newTeamTestClient()
+	base.namespaces["payments-ns"] = true
+	seedJenkinsVersionProfile(base)
+	seedCellController(base, nil)
+
+	uid := types.UID("10000000-0000-0000-0000-000000000009")
+	teamWith(base, "payments", v1alpha1.TeamSpec{
+		Namespaces: []string{"payments-ns"},
+		Pipelines: &v1alpha1.TeamPipelinesSpec{
+			Profile:        "jenkins-lts",
+			AgentNamespace: "payments-ns",
+		},
+	}, uid)
+
+	client := &failingCellPatchClient{testClient: base, refusals: 2}
+	rec := NewTeamReconciler(client, base.store, teamTestNS, slog.Default())
+	rec.SetCellsConfig(CellsConfig{MaxTenantsPerCell: 10})
+	rec.SetPipelinesGates("1", "s3://bucket/prefix")
+	rec.SetClusterIdentity("core")
+	rec.SetPurgeRequester(succeedingPurgeFunc)
+	rec.SetSyncAnnouncer(succeedingAnnounceFunc)
+
+	ctx := context.Background()
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "payments"}}
+	for tick := 1; tick <= 2; tick++ {
+		if _, err := rec.Reconcile(ctx, req); err != nil {
+			t.Fatalf("tick %d: unexpected error: %v", tick, err)
+		}
+	}
+
+	if n := countClaimPatches(t, base); n < 2 {
+		t.Fatalf("the pass wrote %d claims over two ticks, want one per tick", n)
+	}
+	cell, err := crdstore.Get[v1alpha1.Controller](ctx, base.store, "cell-a", "cells-ns")
+	if err != nil {
+		t.Fatalf("get cell: %v", err)
+	}
+	if !cells.HasLiveCellClaim(cell, time.Now()) {
+		t.Fatalf("the cell carries no live claim: %+v", cell.Status.Cell)
+	}
+	if client.calls != 2 {
+		t.Fatalf("the pass sent %d tenant patches over two ticks, want one per tick", client.calls)
+	}
+
+	// The third tick's patch lands: the tenant list carries the tenant and
+	// the claim retires.
+	if _, err := rec.Reconcile(ctx, req); err != nil {
+		t.Fatalf("tick 3: unexpected error: %v", err)
+	}
+	if len(base.cellStatusPatches) != 1 {
+		t.Fatalf("tick 3 recorded %d cell patches, want 1", len(base.cellStatusPatches))
+	}
+	landed := base.cellStatusPatches[0]
+	if landed.name != "cell-a" || !containsString(landed.cell.Tenants, "payments") {
+		t.Fatalf("tick 3 patched %s with %v, want cell-a listing payments", landed.name, landed.cell.Tenants)
+	}
+	cell, err = crdstore.Get[v1alpha1.Controller](ctx, base.store, "cell-a", "cells-ns")
+	if err != nil {
+		t.Fatalf("get cell: %v", err)
+	}
+	if cells.HasLiveCellClaim(cell, time.Now()) {
+		t.Fatalf("the landed patch must retire the claim: %+v", cell.Status.Cell)
 	}
 }
 

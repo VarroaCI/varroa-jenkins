@@ -658,6 +658,20 @@ func main() {
 			logger.Warn("VARROA_UPDATE_CENTER_IMPORT_TOKEN not set — plugin uploads will return update-center-unreachable")
 		}
 	}
+	// The chart renders cells.maxTenantsPerCell into the operator and into
+	// the BFF from one value. The BFF uses it as the second tier of the
+	// effective tenant cap on the cell usage reads.
+	if raw := os.Getenv("VARROA_CELLS_MAX_TENANTS"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		switch {
+		case err != nil:
+			logger.Warn("VARROA_CELLS_MAX_TENANTS is not a whole tenant count; the cell usage reads fall back to the compiled default", "value", raw, "error", err)
+		case n <= 0:
+			logger.Warn("VARROA_CELLS_MAX_TENANTS must be at least 1; the cell usage reads fall back to the compiled default", "value", raw)
+		default:
+			apiDeps.CellMaxTenants = n
+		}
+	}
 	if dsn := os.Getenv("VARROA_RECORDSTORE_DSN"); dsn != "" {
 		rsPool, err := pgxpool.New(context.Background(), dsn)
 		if err != nil {

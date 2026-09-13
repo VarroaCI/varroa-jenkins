@@ -88,6 +88,37 @@ func (c *ClientsetClient) DeleteObject(ctx context.Context, gvr schema.GroupVers
 	return err
 }
 
+// DeleteObjectIfUnchanged deletes an object only while it still carries uid
+// and resourceVersion. The apiserver answers Conflict when either has moved,
+// so a caller that decided from an earlier read never acts on a stale view.
+// A missing object is not an error.
+func (c *ClientsetClient) DeleteObjectIfUnchanged(ctx context.Context, gvr schema.GroupVersionResource, namespace, name, uid, resourceVersion string) error {
+	pre := &metav1.Preconditions{}
+	if uid != "" {
+		v := types.UID(uid)
+		pre.UID = &v
+	}
+	if resourceVersion != "" {
+		v := resourceVersion
+		pre.ResourceVersion = &v
+	}
+	opts := metav1.DeleteOptions{}
+	if pre.UID != nil || pre.ResourceVersion != nil {
+		opts.Preconditions = pre
+	}
+
+	var err error
+	if namespace == "" {
+		err = c.dynamic.Resource(gvr).Delete(ctx, name, opts)
+	} else {
+		err = c.dynamic.Resource(gvr).Namespace(namespace).Delete(ctx, name, opts)
+	}
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
 // PatchObjectStatus merge-patches the /status subresource.
 // Fields tagged with `json:"...,omitempty"` that are zero-valued in the Go
 // struct are dropped during json.Marshal, which means a JSON merge patch

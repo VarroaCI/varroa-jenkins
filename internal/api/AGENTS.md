@@ -68,6 +68,68 @@ federation, activity persistence, and SSE fanout.
   by `POST /stream/ticket` → `handleStreamTicket`) instead of a bearer token, since
   `EventSource` cannot set headers; `vk_`-prefixed tokens route to the API-key
   `Verifier`, everything else to the OIDC/local/ldap `Provider`.
+- **Cell pools** (`handlers_cellpools.go`) serve `GET /cellpools`,
+  `GET /cellpools/{name}`, and `PATCH /cellpools/{name}` over the
+  cluster-scoped `CellPool` CRD. There is deliberately **no `POST` and no
+  `DELETE`**: the surface is a scale control, and a pool is created and
+  deleted with kubectl or GitOps. The `PATCH` body is `{"spec": {…}}` holding
+  only the four dials (`warm`, `maxCells`, `maxTenantsPerCell`,
+  `unreadyGracePeriod`); `profileRef`, `cellTemplate`, an unknown key, or no
+  recognised key at all is a `400`. The write is read-modify-write, not SSA:
+  `crdstore` exposes no spec-level merge patch, and an SSA field manager would
+  fight the operator that writes the spec of an auto-created pool. A conflict
+  is retried three times (the pool reconciler writes the same object on its
+  own tick) and then answers `409`. The handler repeats the CRD's numeric
+  bounds before the write so a bad dial returns the uniform `400` envelope
+  rather than a raw apiserver `422`; the CRD schema stays the authority.
+- **Cell usage** (`handlers_cells.go`, `cells_service.go`) serves the flat
+  `GET /cells/usage` and `GET /cells/{namespace}/{name}/usage` family: a cell
+  usage row is a fleet view, never a controller sub-resource, so it does not
+  live under `/clusters/{cluster}/controllers/`. Both gate each cell with
+  `CanReadController`; the list drops a refused cell, and the single read
+  answers **404** for an unknown controller, a controller that is not a cell,
+  and a refused caller — deliberately unlike the neighbouring controller
+  reads, which answer 403. `Server.CellUsage` (`cells_service.go`) is the one
+  implementation the HTTP path and the `get_cell_usage` MCP tool both call.
+  The counts come from `recordstore.Reader`'s `CellUsage`/`CellUsageMany`;
+  the labels, the stored mite status, and `status.cell.tenants` come from the
+  cell `Controller`; `queueLength`/`queueLengthAt` come from
+  `MiteRegistry.IdleGauges` and are **absent, never zero**, for a remote
+  cluster. `cellCapResolver` (`resolveCellCap` for one cell) is the
+  first-match cap chain — the cell's `spec.cell.maxTenants` when non-zero,
+  else the owning `CellPool`'s `maxTenantsPerCell`, else `deps.CellMaxTenants`
+  (`VARROA_CELLS_MAX_TENANTS`, rendered from the same chart value as the
+  operator's), else ten. It is never a minimum. A listing holds one resolver
+  so the pools are listed once per request; a failed list skips the pool tier.
+- **Cell grants** (`handleCellGrants`, `handlers_cells.go`;
+  `Server.CellGrants`, `cells_service.go`) serves
+  `GET /cells/{namespace}/{name}/grants`: which subjects may build on each
+  tenant of a cell. It applies **two** gates in order — `CanReadController`
+  on the cell, then cluster-wide `CanReadRoleBindings` — because the body
+  carries subject names. `404` covers an unknown controller, a controller
+  that is not a cell, and a refused controller check; `403` covers a passed
+  cell check with no `rolebindings:read`, since that caller already knows the
+  cell exists. It is resolver backed (`Authorizer.TenantGrantSources` over
+  `rbac.TenantGrantSourcesTruncated`), reads no record store, and therefore
+  answers no `503`. `jobs` carries `omitempty` and is never an empty array:
+  an absent list narrows nothing.
+- **The team cell read** (`handleGetTeamCell`, `handlers_pipelines.go`) serves
+  `GET /pipelines/{team}/cell`. It reads the `Team` object first and falls
+  back to `TenantResolver`, so a pipelines Team awaiting its first cell
+  answers 200 with `unplaced` instead of 404. The state ladder is
+  `notCellHosted` → `unplaced` → `moving` → `rehydrating` → `placed`, tested in
+  that order; rule four reads `status.cell.appliedTenants` and never
+  `status.cell.rehydration`, which stays internal to the operator.
+  The four counts come from `CellTenantUsage`'s per-job rows, summed by
+  `admittedJobCounts` over the job paths `grantsAllow` admits for this
+  caller — the same helpers the team listing uses. The tenant check admits
+  the empty job path for a grant narrowed by `jobs` globs, so the gate
+  alone cannot scope a number; a whole-tenant count here would disclose
+  the load of jobs the caller may not see. Every other field stays
+  tenant-level. It is the
+  one pipelines path that calls a controller-scoped check, and only to set
+  `canOpenCell`: the hint gates no field, so a caller without
+  `controllers:read` still receives the whole body.
 - `Authorizer` (`authorizer.go`) wraps an `rbac.Resolver` + a `defaultRead` flag and
   exposes one `Can*(claims, ...) bool` method per capability (`CanReadController`,
   `CanApproveRestart`, `CanManageCatalogSourcesInNamespace`,
@@ -166,7 +228,22 @@ federation, activity persistence, and SSE fanout.
   `canReadPipeline`, `canWritePipeline`, `canReadRun` — never a controller-scoped
   check. `canReadRun` builds its `RunTenantRow` from the run row's own `tenant` and
   `job_path` columns, so a run whose cell was deleted still resolves for a permitted
-  caller. Every handler on this surface answers `503` when `deps.RecordStore` is nil,
+  caller. **`GET /pipelines/{team}` filters every row of its response by the
+  caller's `jobs` globs**: `handleListPipelines` calls
+  `(*Authorizer).tenantGrants` once per `TenantRef` and then `grantsAllow` per job
+  summary, per declared job path, and per running run, dropping a refused row
+  **before** it reaches the shared `jobs`/`trendByJob`/`kindByJob` maps, so a
+  refused row of one tenant never replaces an admitted row of another on the same
+  job path. `tenantGrants`/`grantsAllow` (`authorizer_tenant.go`) are the split
+  halves of `canAccessPipeline` and hold no second copy of the rule; `tenantGrants`
+  denies on a nil receiver, so the listing keeps the nil-authorizer rule. The
+  response reports no count of the removed rows, and `truncated` keeps reporting
+  the running-now page the store answered, not the filter. The envelope carries
+  `tenantFolder` (the first admitted ref's `Folder`; every ref of one team shares
+  it) and each item carries `kind`, merged through `kindByJob` rather than on the
+  row: a record summary writes no kind, a declared item sets it when unset,
+  `multibranch` replaces a stored `pipeline`, and the assembly loop defaults an
+  absent entry to `unknown`. Every handler on this surface answers `503` when `deps.RecordStore` is nil,
   through `pipelinesUnavailable`; a handler that also reads console log or artifact
   bytes answers the same `503` when `deps.BlobStore` is nil. The live log tail
   (`GET /runs/{run}/log`) authenticates over SSE's `?ticket=` query param with scope
@@ -244,6 +321,20 @@ federation, activity persistence, and SSE fanout.
   `handlers_teams.go` maps `spec.pipelines` and `status.placement` by hand, in both
   directions; it never maps `status.pipelines.webhookToken` or `.webhookSecret` on any
   read path, because both are the tenant webhook door's credentials.
+- **Cell fields on the controller DTOs** — `controllerResponse` carries seven
+  (`kind`, `cellPool`, `tenantCount`, `maxTenants`, `warm`, `createdAt`,
+  `unreadySince`), stamped by `fillCellSummary` (`handlers.go`). `kind` and
+  `createdAt` are always present; the other five are absent for a controller
+  that is not a cell. `tenantCount`, `maxTenants`, and `warm` are pointers,
+  because a zero count and a false warm flag are real states an `omitempty`
+  value type cannot tell from an absent field. `maxTenants` calls C2's
+  `resolveCellCap`, never a second copy of the rule. `tenantCount` counts
+  `status.cell.tenants`, never `appliedTenants`. The list carries no
+  free-slot field: the cell usage read owns that number.
+  `controllerDetailResponse` carries `kind` and a `CellStatusJSON`
+  projection of `status.cell` with **ten** keys and no `rehydration` key,
+  which `cell-controllers` keeps inside the operator; a contract test asserts
+  the absence.
 - `attention` (`attention.go`) is the single "why is this controller unhealthy"
   projection, carried on **both** the list summary (`controllerResponse`) and the
   detail DTO (`controllerDetailResponse`). Exactly one kind is reported, by

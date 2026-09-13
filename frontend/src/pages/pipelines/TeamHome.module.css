@@ -11,6 +11,24 @@
   to   { opacity: 1; transform: none; }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .page { animation: none; }
+}
+
+/* The title track is minmax(0, 1fr), never 1fr: a 1fr track has an auto
+   minimum, so one long team name would push the card out of the row. The
+   card track is fit-content, so a page whose card renders nothing keeps no
+   empty column. */
+.head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) fit-content(320px);
+  gap: 16px;
+}
+
+@media (max-width: 1080px) {
+  .head { grid-template-columns: 1fr; }
+}
+
 .pageHead {
   margin-bottom: 1.25rem;
 }
@@ -42,6 +60,11 @@
   padding: 2rem 0;
   color: var(--text-2);
   text-align: center;
+}
+
+.emptyNote {
+  margin-top: 0.35rem;
+  font-size: 0.8125rem;
 }
 
 .truncatedNote {
@@ -131,39 +154,12 @@
   color: var(--text-2);
 }
 
-/* ---- Pipelines table ---- */
-
-.healthCell {
-  display: flex;
-  align-items: center;
-}
-
-.healthClear { color: var(--ok-text); }
-.healthCloudy { color: var(--warn-text); }
-.healthRain { color: var(--bad-text); }
-
-.durationCell {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.sparkline {
-  color: var(--text-2);
-  flex-shrink: 0;
-}
-
-.lastDuration {
-  font-size: 0.8125rem;
-  color: var(--text-2);
-  white-space: nowrap;
-}
+/* ---- Runners table ---- */
 
 .dim {
   color: var(--text-2);
 }
 
-/* ---- Runners table ---- */
 
 .connectedYes {
   color: var(--ok-text);

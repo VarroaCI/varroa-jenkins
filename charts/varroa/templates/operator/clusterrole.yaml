@@ -82,6 +82,11 @@ rules:
   - apiGroups: ["varroa.dev"]
     resources: ["runners/status"]
     verbs: ["update", "patch"]
+  # The operator creates, sizes, deletes, and reports a cell pool, and it
+  # holds the pool's drain finalizer.
+  - apiGroups: ["varroa.dev"]
+    resources: ["cellpools", "cellpools/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["varroa.dev"]
     resources: ["broodoperations", "broodoperations/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

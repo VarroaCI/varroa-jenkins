@@ -30,6 +30,11 @@ function formatScope(binding: VarroaRoleBinding): string {
       .join(",");
     if (labels) parts.push(`sel:${labels}`);
   }
+  // A tenant-scoped binding is narrowed, so it never reads as cluster-wide.
+  for (const tenant of scope.tenants ?? []) {
+    const jobs = tenant.jobs && tenant.jobs.length > 0 ? ` jobs:${tenant.jobs.join(",")}` : "";
+    parts.push(`tenant:${tenant.name}${jobs}`);
+  }
   return parts.length > 0 ? parts.join(" ") : "Cluster-wide";
 }
 

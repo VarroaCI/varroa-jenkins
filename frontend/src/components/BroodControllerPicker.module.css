@@ -93,7 +93,7 @@
 .ctrlRow {
   display: grid;
   grid-template-columns:
-    40px minmax(0, 1.6fr) minmax(0, .8fr) minmax(0, 1fr)
+    40px minmax(0, 1.6fr) minmax(0, .8fr) minmax(0, 1fr) minmax(0, .9fr)
     minmax(0, .9fr) minmax(0, 1.1fr) minmax(0, .8fr) 40px;
   align-items: center;
   gap: 14px;
@@ -122,7 +122,7 @@
   display: grid;
   /* Must track .ctrlRow exactly, or grouped views drift out of line. */
   grid-template-columns:
-    40px minmax(0, 1.6fr) minmax(0, .8fr) minmax(0, 1fr)
+    40px minmax(0, 1.6fr) minmax(0, .8fr) minmax(0, 1fr) minmax(0, .9fr)
     minmax(0, .9fr) minmax(0, 1.1fr) minmax(0, .8fr) 40px;
   align-items: center;
   gap: 14px;
@@ -414,4 +414,55 @@
   .ctrlRow > .ctrlName::before {
     display: none;
   }
+}
+
+/* The Kind column. A cell row names its pool below the label and states
+   its fill as a ratio; a stateful row carries the label alone. */
+.kindCell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.kindLabel {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.kindPool {
+  font-size: 11px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kindRatio {
+  font-size: 11px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.warmBadge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .3px;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  color: var(--info-text);
+}
+
+/* The kind filter sits on its own row below the phase chips. */
+.kindChips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-basis: 100%;
 }

@@ -2,6 +2,7 @@ package cells
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,6 +70,13 @@ func readyCell(name string, tenants ...string) CellCandidate {
 		ResolvedProfile: "jenkins-lts",
 		Tenants:         tenants,
 	}
+}
+
+// poolCell is readyCell plus the varroa.dev/cell-pool label a pool stamps.
+func poolCell(name, pool string, tenants ...string) CellCandidate {
+	c := readyCell(name, tenants...)
+	c.Pool = pool
+	return c
 }
 
 func placedStatus(generation int64) *v1alpha1.TeamStatus {
@@ -158,10 +166,10 @@ func TestPlace_Refusal_LeavesExistingPlacementUntouched(t *testing.T) {
 
 func TestPlace_Keep_TransientNotReadyDoesNotMove(t *testing.T) {
 	in := testInputs()
-	notReady := readyCell("cell-a")
+	team := testTeam()
+	notReady := readyCell("cell-a", team.Name)
 	notReady.CellReady = false
 	in.Cells = []CellCandidate{notReady}
-	team := testTeam()
 	status := placedStatus(3)
 
 	out, err := Place(context.Background(), in, team, status)
@@ -177,6 +185,43 @@ func TestPlace_Keep_TransientNotReadyDoesNotMove(t *testing.T) {
 	cond := condition(status)
 	if cond == nil || cond.Reason != v1alpha1.TeamReasonCellNotReady {
 		t.Errorf("expected reason CellNotReady, got %+v", cond)
+	}
+}
+
+// TestPlace_Keep_MissingTenantEntryPatchesAndClaims asserts that a kept
+// placement whose cell does not yet list the tenant sends the tenant patch
+// again and names the claim, so a refused patch is retried every tick.
+func TestPlace_Keep_MissingTenantEntryPatchesAndClaims(t *testing.T) {
+	in := testInputs()
+	in.Cells = []CellCandidate{readyCell("cell-a")}
+	team := testTeam()
+	status := placedStatus(3)
+
+	out, err := Place(context.Background(), in, team, status)
+	if err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	if status.Placement.Generation != 3 || status.Placement.Cell != "cell-a" {
+		t.Errorf("a missing tenant entry must not move a tenant: %+v", status.Placement)
+	}
+	if out.CellClaim == nil || out.CellClaim.Name != "cell-a" || out.CellClaim.Tenant != team.Name {
+		t.Fatalf("expected a claim on cell-a for %s, got %+v", team.Name, out.CellClaim)
+	}
+	if len(out.CellPatches) != 1 || out.CellPatches[0].Name != "cell-a" {
+		t.Fatalf("expected one tenant patch on cell-a, got %+v", out.CellPatches)
+	}
+	if !containsString(out.CellPatches[0].Tenants, team.Name) {
+		t.Errorf("the tenant patch must add %s: %+v", team.Name, out.CellPatches[0].Tenants)
+	}
+
+	// A cell that already lists the tenant needs no patch and no claim.
+	in.Cells = []CellCandidate{readyCell("cell-a", team.Name)}
+	out, err = Place(context.Background(), in, team, placedStatus(3))
+	if err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	if out.CellClaim != nil || len(out.CellPatches) != 0 {
+		t.Errorf("a listed tenant must patch nothing: claim=%+v patches=%+v", out.CellClaim, out.CellPatches)
 	}
 }
 
@@ -203,13 +248,17 @@ func TestPlace_Keep_EvacuatingCellMoves(t *testing.T) {
 
 // --- selection (task 6.4) ---
 
-func TestPlace_Selection_Dedicated(t *testing.T) {
+// TestPlace_Selection_SingleTenantPool covers the restated scenario "A
+// dedicated tenant never shares a cell": a pool whose maxTenantsPerCell is 1
+// admits no second tenant, because capacity is a property of the cell.
+func TestPlace_Selection_SingleTenantPool(t *testing.T) {
 	in := testInputs()
-	occupied := readyCell("cell-a", "other-team")
-	empty := readyCell("cell-b")
+	in.Pools = []CellPoolSummary{{Name: "solo", ProfileRef: "jenkins-lts", MaxTenantsPerCell: 1}}
+	occupied := poolCell("cell-a", "solo", "other-team")
+	empty := poolCell("cell-b", "solo")
 	in.Cells = []CellCandidate{occupied, empty}
 	team := testTeam()
-	team.Spec.Pipelines.Dedicated = true
+	team.Spec.Pipelines.CellPool = "solo"
 	status := &v1alpha1.TeamStatus{}
 
 	out, err := Place(context.Background(), in, team, status)
@@ -217,10 +266,222 @@ func TestPlace_Selection_Dedicated(t *testing.T) {
 		t.Fatalf("Place returned error: %v", err)
 	}
 	if status.Placement == nil || status.Placement.Cell != "cell-b" {
-		t.Fatalf("dedicated placement must pick the empty cell, got %+v", status.Placement)
+		t.Fatalf("a single-tenant pool must pick the empty cell, got %+v", status.Placement)
 	}
 	if len(out.CellPatches) != 1 || out.CellPatches[0].Name != "cell-b" {
 		t.Errorf("unexpected cell patches: %+v", out.CellPatches)
+	}
+}
+
+// TestPlace_Selection_CellOfAnotherPoolNeverChosen covers "A cell of another
+// pool is never chosen".
+func TestPlace_Selection_CellOfAnotherPoolNeverChosen(t *testing.T) {
+	in := testInputs()
+	in.Pools = []CellPoolSummary{
+		{Name: "small", ProfileRef: "jenkins-lts", MaxTenantsPerCell: 1},
+		{Name: "big", ProfileRef: "jenkins-lts", MaxTenantsPerCell: 10},
+	}
+	in.Cells = []CellCandidate{poolCell("cell-a", "big")}
+	team := testTeam()
+	team.Spec.Pipelines.CellPool = "small"
+	status := &v1alpha1.TeamStatus{}
+
+	_, err := Place(context.Background(), in, team, status)
+	if err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	if status.Placement != nil {
+		t.Fatalf("a cell of another pool must never be chosen, got %+v", status.Placement)
+	}
+	cond := condition(status)
+	if cond == nil || cond.Status != metav1.ConditionFalse {
+		t.Fatalf("expected Placed=False, got %+v", cond)
+	}
+}
+
+// TestPlace_Selection_UnownedCellServesUnpooledTenant covers "An unowned cell
+// serves a tenant that names no pool".
+func TestPlace_Selection_UnownedCellServesUnpooledTenant(t *testing.T) {
+	in := testInputs()
+	in.Pools = []CellPoolSummary{{Name: "jenkins-lts", ProfileRef: "jenkins-lts", MaxTenantsPerCell: 10}}
+	in.Cells = []CellCandidate{readyCell("cell-hand")}
+	team := testTeam()
+	status := &v1alpha1.TeamStatus{}
+
+	if _, err := Place(context.Background(), in, team, status); err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	if status.Placement == nil || status.Placement.Cell != "cell-hand" {
+		t.Fatalf("an unowned cell must serve a tenant that names no pool, got %+v", status.Placement)
+	}
+}
+
+// TestPlace_Refusal_CellPoolNotFound covers "A named pool that does not exist
+// is refused", including the rule that a refusal leaves an existing
+// placement untouched.
+func TestPlace_Refusal_CellPoolNotFound(t *testing.T) {
+	in := testInputs()
+	in.Cells = []CellCandidate{readyCell("cell-a", "payments")}
+	team := testTeam()
+	team.Spec.Pipelines.CellPool = "nope"
+	status := placedStatus(3)
+
+	if _, err := Place(context.Background(), in, team, status); err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	cond := condition(status)
+	if cond == nil || cond.Reason != v1alpha1.TeamReasonCellPoolNotFound {
+		t.Fatalf("expected CellPoolNotFound, got %+v", cond)
+	}
+	if status.Placement == nil || status.Placement.Generation != 3 {
+		t.Fatalf("a refusal must leave the placement untouched, got %+v", status.Placement)
+	}
+}
+
+// TestPlace_Refusal_CellPoolServesAnotherProfile covers "A pool serving
+// another profile is refused": the message names the profile the pool
+// actually serves.
+func TestPlace_Refusal_CellPoolServesAnotherProfile(t *testing.T) {
+	in := testInputs()
+	in.Pools = []CellPoolSummary{{Name: "big", ProfileRef: "jenkins-lts-old", MaxTenantsPerCell: 10}}
+	team := testTeam()
+	team.Spec.Pipelines.CellPool = "big"
+	status := &v1alpha1.TeamStatus{}
+
+	if _, err := Place(context.Background(), in, team, status); err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	cond := condition(status)
+	if cond == nil || cond.Reason != v1alpha1.TeamReasonCellPoolNotFound {
+		t.Fatalf("expected CellPoolNotFound, got %+v", cond)
+	}
+	if !strings.Contains(cond.Message, "jenkins-lts-old") {
+		t.Errorf("message must name the profile the pool serves, got %q", cond.Message)
+	}
+}
+
+// TestPlace_AwaitingCell_DefaultPoolNotCreatedYet asserts a default pool the
+// operator has not created yet is not a refusal: the pool reconciler creates
+// it within one tick, so the tenant reports AwaitingCell.
+func TestPlace_AwaitingCell_DefaultPoolNotCreatedYet(t *testing.T) {
+	in := testInputs()
+	team := testTeam()
+	status := &v1alpha1.TeamStatus{}
+
+	if _, err := Place(context.Background(), in, team, status); err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	cond := condition(status)
+	if cond == nil || cond.Reason != v1alpha1.TeamReasonAwaitingCell {
+		t.Fatalf("expected AwaitingCell, got %+v", cond)
+	}
+}
+
+// TestPlace_CellCapReached covers "A capped pool reports the cap".
+func TestPlace_CellCapReached(t *testing.T) {
+	in := testInputs()
+	in.Pools = []CellPoolSummary{{
+		Name: "jenkins-lts", ProfileRef: "jenkins-lts", MaxTenantsPerCell: 1, CapReached: true,
+	}}
+	in.Cells = []CellCandidate{poolCell("cell-a", "jenkins-lts", "other-team")}
+	team := testTeam()
+	status := &v1alpha1.TeamStatus{}
+
+	if _, err := Place(context.Background(), in, team, status); err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	cond := condition(status)
+	if cond == nil || cond.Reason != v1alpha1.TeamReasonCellCapReached {
+		t.Fatalf("expected CellCapReached, got %+v", cond)
+	}
+	if status.Placement != nil {
+		t.Errorf("a capped pool must place nothing, got %+v", status.Placement)
+	}
+}
+
+// TestPlace_DeletedPoolKeepsPlacement covers "Deleting a pool does not move
+// its tenants": the bound cell loses its effective owner and the keep rule
+// still holds.
+func TestPlace_DeletedPoolKeepsPlacement(t *testing.T) {
+	in := testInputs()
+	bound := poolCell("cell-a", "gone", "payments")
+	in.Cells = []CellCandidate{bound}
+	team := testTeam()
+	status := placedStatus(3)
+
+	if _, err := Place(context.Background(), in, team, status); err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	if status.Placement == nil || status.Placement.Generation != 3 {
+		t.Fatalf("a deleted pool must move no tenant, got %+v", status.Placement)
+	}
+	cond := condition(status)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("expected the placement kept, got %+v", cond)
+	}
+}
+
+// TestPlace_ChangingCellPoolIsVoluntary covers "Moving a tenant to another
+// pool is a voluntary move": the pass waits for the drain signal.
+func TestPlace_ChangingCellPoolIsVoluntary(t *testing.T) {
+	in := testInputs()
+	in.Pools = []CellPoolSummary{
+		{Name: "small", ProfileRef: "jenkins-lts", MaxTenantsPerCell: 1},
+		{Name: "big", ProfileRef: "jenkins-lts", MaxTenantsPerCell: 10},
+	}
+	bound := poolCell("cell-a", "small", "payments")
+	bound.AppliedTenants = []string{"payments"}
+	in.Cells = []CellCandidate{bound, poolCell("cell-b", "big")}
+	team := testTeam()
+	team.Spec.Pipelines.CellPool = "big"
+	status := placedStatus(3)
+
+	if _, err := Place(context.Background(), in, team, status); err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	cond := condition(status)
+	if cond == nil || cond.Reason != v1alpha1.TeamReasonTenantMoving {
+		t.Fatalf("expected TenantMoving, got %+v", cond)
+	}
+	if status.Placement.Generation != 3 {
+		t.Errorf("a voluntary move must not bump the generation before the drain, got %d", status.Placement.Generation)
+	}
+}
+
+// TestPlace_Capacity_PoolCapAppliesToZeroMaxTenants covers task 4.8: a pool
+// cell declaring maxTenants 0 resolves its capacity through its pool.
+func TestPlace_Capacity_PoolCapAppliesToZeroMaxTenants(t *testing.T) {
+	in := testInputs()
+	in.Pools = []CellPoolSummary{{Name: "small", ProfileRef: "jenkins-lts", MaxTenantsPerCell: 2}}
+	full := poolCell("cell-a", "small", "t1", "t2")
+	in.Cells = []CellCandidate{full}
+	team := testTeam()
+	team.Spec.Pipelines.CellPool = "small"
+	status := &v1alpha1.TeamStatus{}
+
+	if _, err := Place(context.Background(), in, team, status); err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	if status.Placement != nil {
+		t.Fatalf("the pool cap of 2 must exclude a cell holding two tenants, got %+v", status.Placement)
+	}
+}
+
+// TestPlace_Capacity_DeletedPoolFallsBackToChartValue covers task 4.8's
+// second case: a cell whose pool was deleted uses the chart value.
+func TestPlace_Capacity_DeletedPoolFallsBackToChartValue(t *testing.T) {
+	in := testInputs()
+	in.MaxTenantsDefault = 3
+	orphan := poolCell("cell-a", "gone", "t1", "t2")
+	in.Cells = []CellCandidate{orphan}
+	team := testTeam()
+	status := &v1alpha1.TeamStatus{}
+
+	if _, err := Place(context.Background(), in, team, status); err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	if status.Placement == nil || status.Placement.Cell != "cell-a" {
+		t.Fatalf("the chart value of 3 must admit a third tenant, got %+v", status.Placement)
 	}
 }
 

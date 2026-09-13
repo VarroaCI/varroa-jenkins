@@ -25,6 +25,8 @@ import type {
   ObjectMeta,
   ComposedBundlePreview,
   ControllerCondition,
+  PipelineSummary,
+  RunningRun,
 } from "../types";
 import type { Permissions, MeResponse, AuthConfig } from "../types/auth";
 import type { ControllerListItem, ControllerDetail } from "../hooks/useControllers";
@@ -98,6 +100,8 @@ export function createControllerListItem(
     endpoint: "https://jenkins.example.com",
     miteConnected: true,
     composedBundleRef: { name: "base-bundle" },
+    kind: "stateful",
+    createdAt: "2026-01-02T03:04:05Z",
     ...overrides,
   };
 }
@@ -120,6 +124,8 @@ export function createControllerDetail(
     // reconcileBlocked is always present on the detail contract (never nil
     // server-side); default to the not-blocked shape.
     reconcileBlocked: { blocked: false },
+    // kind is always present on the detail contract; the Cell tab reads it.
+    kind: "stateful",
     ...overrides,
   };
 }
@@ -430,6 +436,32 @@ export function createActivityEvent(
     controller: "test-ctrl",
     namespace: "default",
     message: "Controller test-ctrl created",
+    ...overrides,
+  };
+}
+
+// ---- Pipelines ----
+
+/** createPipelineSummary sets every required field of PipelineSummary,
+ * including kind. */
+export function createPipelineSummary(
+  overrides?: Partial<PipelineSummary>,
+): PipelineSummary {
+  return {
+    jobPath: "payments/app-a",
+    health: "unknown",
+    kind: "pipeline",
+    ...overrides,
+  };
+}
+
+/** createRunningRun sets every required field of RunningRun, which carries
+ * no kind: a running build names a job, never an item declaration. */
+export function createRunningRun(overrides?: Partial<RunningRun>): RunningRun {
+  return {
+    runId: nextId("run"),
+    jobPath: "payments/app-a",
+    status: "RUNNING",
     ...overrides,
   };
 }

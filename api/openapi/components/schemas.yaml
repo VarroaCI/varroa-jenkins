@@ -282,9 +282,13 @@ TeamPipelines:
     profile:
       type: string
       description: JenkinsVersionProfile the placement pass resolves a cell against.
-    dedicated:
-      type: boolean
-      description: When true, requires a cell that carries no other tenant.
+    cellPool:
+      type: string
+      description: >-
+        The CellPool the placement pass selects a cell from. Empty means the
+        profile's default pool: the pool whose name equals profile. A tenant
+        that needs a cell of its own names a pool whose maxTenantsPerCell
+        is 1.
     agentNamespace:
       type: string
       description: >-
@@ -1130,7 +1134,7 @@ HibernationSpec:
 ControllerSummary:
   type: object
   description: Summary entry for each controller in the list.
-  required: [name, namespace, cluster, phase, endpoint, headless, miteConnected, routingMode]
+  required: [name, namespace, cluster, phase, endpoint, headless, miteConnected, routingMode, kind, createdAt]
   properties:
     name:
       type: string
@@ -1142,6 +1146,38 @@ ControllerSummary:
       type: string
     endpoint:
       type: string
+    kind:
+      type: string
+      enum: [cell, stateful]
+      description: >-
+        Mirrors v1alpha1.IsCell. Always present, so a client never reads the
+        kind from an absent field.
+    cellPool:
+      type: string
+      description: The controller's varroa.dev/cell-pool label. Absent while no label is set.
+    tenantCount:
+      type: integer
+      format: int32
+      description: >-
+        The length of status.cell.tenants, never of status.cell.appliedTenants.
+        Absent for a controller that is not a cell.
+    maxTenants:
+      type: integer
+      format: int32
+      description: >-
+        The same effective cap the cell usage read resolves. Absent for a
+        controller that is not a cell.
+    warm:
+      type: boolean
+      description: status.cell.warm. Absent for a controller that is not a cell.
+    createdAt:
+      type: string
+      format: date-time
+      description: metadata.creationTimestamp, RFC 3339. Present for every controller.
+    unreadySince:
+      type: string
+      format: date-time
+      description: status.cell.unreadySince, RFC 3339. Absent while the cell is ready.
     headless:
       type: boolean
       description: >-
@@ -1466,10 +1502,16 @@ ControllerObservability:
 ControllerDetail:
   type: object
   description: Full controller detail including status and sub-resources.
-  required: [name, namespace, cluster, phase, endpoint, headless, version, miteConnected, routingMode, reconcileBlocked, spec]
+  required: [name, namespace, cluster, phase, endpoint, headless, version, miteConnected, routingMode, reconcileBlocked, spec, kind]
   properties:
     spec:
       $ref: '#/ControllerSpec'
+    kind:
+      type: string
+      enum: [cell, stateful]
+      description: Mirrors v1alpha1.IsCell. Present for every controller.
+    cell:
+      $ref: '#/CellStatusProjection'
     name:
       type: string
     namespace:
@@ -4159,7 +4201,7 @@ PipelineSummary:
   description: >
     One job's run-history summary for the Pipelines table. A job that has
     never run carries no lastBuild.
-  required: [jobPath, health]
+  required: [jobPath, health, kind]
   properties:
     jobPath:
       type: string
@@ -4170,6 +4212,13 @@ PipelineSummary:
         The weather glyph, computed from the last five runs: clear when
         all passed, cloudy when one or two failed, rain when three or
         more failed, unknown for a job that has never run.
+    kind:
+      type: string
+      enum: [pipeline, multibranch, unknown]
+      description: >
+        The item kind the tenant's bundle declares. A job the record store
+        alone holds reports unknown. A declared item of any other kind also
+        reports unknown.
     lastBuild:
       $ref: '#/RunSummary'
     durationTrendMs:
@@ -4185,7 +4234,7 @@ PipelineListResponse:
   description: >
     GET /pipelines/{team}: the job list, unioned with the catalog's
     declared jobs, plus the running-now strip.
-  required: [items, runningNow, truncated]
+  required: [items, runningNow, truncated, tenantFolder]
   properties:
     items:
       type: array
@@ -4195,6 +4244,12 @@ PipelineListResponse:
       type: array
       items:
         $ref: '#/RunningRun'
+    tenantFolder:
+      type: string
+      description: >
+        The Jenkins folder that prefixes every job path in the response.
+        It is the Team name for a placed pipelines tenant. It is the empty
+        string for a controller tenant. The field is always present.
     truncated:
       type: boolean
       description: >
@@ -4751,4 +4806,447 @@ BreakGlassResponse:
     locationUrl:
       type: string
       description: The in-cluster Service URL, with a trailing slash.
+  additionalProperties: false
+
+CellPoolSpec:
+  type: object
+  description: >-
+    A CellPool's configuration (spec.*). profileRef is immutable, because a
+    pool's cells carry the profile label they were created with.
+  required: [profileRef]
+  properties:
+    profileRef:
+      type: string
+      minLength: 1
+      description: The JenkinsVersionProfile the pool's cells run. Immutable.
+    warm:
+      type: integer
+      format: int32
+      minimum: 0
+      description: Target count of free cells the pool keeps ready.
+    maxCells:
+      type: integer
+      format: int32
+      minimum: 0
+      description: >-
+        Cap on the pool's cells, placed cells included. 0 means unlimited.
+    maxTenantsPerCell:
+      type: integer
+      format: int32
+      minimum: 1
+      description: >-
+        Capacity a pool cell uses when its own spec.cell.maxTenants is zero.
+    unreadyGracePeriod:
+      type: string
+      description: >-
+        How long a pool cell may stay unready before the operator rolls its
+        pod. A Go duration string.
+    cellTemplate:
+      type: object
+      description: >-
+        resources and podOverrides for the cells the pool creates. The pool
+        exposes no raw strategic-merge overlay.
+      additionalProperties: true
+  additionalProperties: false
+
+CellPoolStatus:
+  type: object
+  description: A CellPool's reported cell and tenant counts.
+  required: [warmCells, placedCells, unreadyCells, freeTenantSlots]
+  properties:
+    observedGeneration:
+      type: integer
+      format: int64
+    warmCells:
+      type: integer
+      format: int32
+      description: Owned cells that hold no tenant.
+    placedCells:
+      type: integer
+      format: int32
+      description: Owned cells that hold at least one tenant.
+    unreadyCells:
+      type: integer
+      format: int32
+      description: Owned cells whose CellReady condition is not True.
+    freeTenantSlots:
+      type: integer
+      format: int32
+      description: >-
+        Spare capacity of the placed cells only. warmCells already reports
+        the empty ones.
+    tenants:
+      type: array
+      items:
+        type: string
+      description: Every tenant on the pool, sorted.
+    conditions:
+      type: array
+      items:
+        $ref: '#/CellPoolCondition'
+  additionalProperties: false
+
+CellPoolCondition:
+  type: object
+  description: >-
+    Status condition for a CellPool. Type PoolReady, with exactly the
+    reasons Ready, CellCapReached, and ProfileMissing.
+  required: [type, status]
+  properties:
+    type:
+      type: string
+    status:
+      type: string
+    lastTransitionTime:
+      type: string
+      description: ISO 8601 last transition time.
+    reason:
+      type: string
+    message:
+      type: string
+    observedGeneration:
+      type: integer
+      format: int64
+  additionalProperties: false
+
+CellPool:
+  type: object
+  description: Full cell-pool object returned from get and list operations.
+  required: [name, spec, status]
+  properties:
+    name:
+      type: string
+    spec:
+      $ref: '#/CellPoolSpec'
+    status:
+      $ref: '#/CellPoolStatus'
+  additionalProperties: false
+
+CellPoolScaleRequest:
+  type: object
+  description: >-
+    Request body for PATCH /cellpools/{name}. It declares the four scale
+    dials and nothing else, so the contract itself states that a structural
+    edit is not an API operation.
+  required: [spec]
+  properties:
+    spec:
+      type: object
+      properties:
+        warm:
+          type: integer
+          format: int32
+          minimum: 0
+        maxCells:
+          type: integer
+          format: int32
+          minimum: 0
+        maxTenantsPerCell:
+          type: integer
+          format: int32
+          minimum: 1
+        unreadyGracePeriod:
+          type: string
+      additionalProperties: false
+  additionalProperties: false
+
+CellStatusProjection:
+  type: object
+  description: >-
+    The controller detail's projection of status.cell. It declares ten
+    properties. It declares no rehydration property: the cell-controllers
+    capability keeps that key inside the operator.
+  properties:
+    tenants:
+      type: array
+      items:
+        type: string
+    warm:
+      type: boolean
+    evacuate:
+      type: boolean
+      description: >-
+        Operator-written state. No API accepts a write to it, so no surface
+        offers an evacuate action.
+    unreadySince:
+      type: string
+      format: date-time
+    rolledAt:
+      type: string
+      format: date-time
+    appliedTenants:
+      type: array
+      description: >-
+        The tenant set of the last apply that passed. A tenant named in
+        tenants and absent here is still rehydrating.
+      items:
+        type: string
+    tenantWarnings:
+      type: array
+      items:
+        $ref: '#/CellTenantWarning'
+    instance:
+      type: string
+    previousInstance:
+      type: string
+    previousInstanceLastSeen:
+      type: string
+      format: date-time
+  additionalProperties: false
+
+CellTenantWarning:
+  type: object
+  description: One non-blocking finding the reconciler recorded about a tenant.
+  required: [tenant, reason, message]
+  properties:
+    tenant:
+      type: string
+    reason:
+      type: string
+    message:
+      type: string
+  additionalProperties: false
+
+CellGrantSubject:
+  type: object
+  description: One subject of a grant.
+  required: [kind, name]
+  properties:
+    kind:
+      type: string
+    name:
+      type: string
+  additionalProperties: false
+
+CellGrant:
+  type: object
+  description: >-
+    One grant that reaches a tenant. The jobs field is absent when the grant
+    narrows nothing. An absent jobs and an empty jobs mean different things,
+    so the field is never an empty array.
+  required: [source, roleRef, subjects, verbs]
+  properties:
+    source:
+      type: string
+      enum: [teamMembership, tenantScopedBinding, clusterWideBinding]
+    binding:
+      type: string
+      description: The VarroaRoleBinding name. Absent for the teamMembership source.
+    roleRef:
+      type: string
+    subjects:
+      type: array
+      items:
+        $ref: '#/CellGrantSubject'
+    verbs:
+      type: array
+      description: The pipelines verbs of the grant's role, never the whole capability set.
+      items:
+        type: string
+    jobs:
+      type: array
+      minItems: 1
+      items:
+        type: string
+  additionalProperties: false
+
+CellTenantGrants:
+  type: object
+  description: >-
+    Every grant that reaches one tenant of a cell, with the tenant's
+    generated Jenkins item role. The item role and its pattern come from
+    the tenant name, so the read opens no JenkinsRole object.
+  required: [tenant, itemRole, itemPattern, truncated, grants]
+  properties:
+    tenant:
+      type: string
+    itemRole:
+      type: string
+    itemPattern:
+      type: string
+    truncated:
+      type: boolean
+      description: True only when the 50-grant cap dropped a grant of this tenant.
+    grants:
+      type: array
+      items:
+        $ref: '#/CellGrant'
+  additionalProperties: false
+
+CellGrants:
+  type: object
+  description: One entry for each tenant of a cell, naming the subjects that may build on it.
+  required: [cluster, namespace, cell, tenants]
+  properties:
+    cluster:
+      type: string
+    namespace:
+      type: string
+    cell:
+      type: string
+    tenants:
+      type: array
+      items:
+        $ref: '#/CellTenantGrants'
+  additionalProperties: false
+
+CellUsageCounts:
+  type: object
+  description: >-
+    The four load counts of one tenant on a cell, or the same four summed
+    over the cell. runningNow carries no time bound, so a build that runs
+    longer than a day still counts. runsLast24h and failedLast24h count
+    inside the fixed 24-hour window. jobs counts distinct job paths. A run
+    whose result is TRIGGER_FAILED counts in no value.
+  required: [runningNow, runsLast24h, failedLast24h, jobs]
+  properties:
+    runningNow:
+      type: integer
+      format: int64
+    runsLast24h:
+      type: integer
+      format: int64
+    failedLast24h:
+      type: integer
+      format: int64
+    jobs:
+      type: integer
+      format: int64
+  additionalProperties: false
+
+CellTenantUsage:
+  type: object
+  description: One tenant on a cell, with that tenant's four counts.
+  required: [tenant, runningNow, runsLast24h, failedLast24h, jobs]
+  properties:
+    tenant:
+      type: string
+    runningNow:
+      type: integer
+      format: int64
+    runsLast24h:
+      type: integer
+      format: int64
+    failedLast24h:
+      type: integer
+      format: int64
+    jobs:
+      type: integer
+      format: int64
+  additionalProperties: false
+
+CellUsage:
+  type: object
+  description: >-
+    One cell's load, tenant by tenant. An absent optional field is absent
+    from the object, never a null and never a zero: queueLength reads as
+    zero only for an empty queue, and a cell in a remote cluster carries
+    no queueLength at all.
+  required: [cluster, namespace, name, windowStart, tenants, totals, maxTenants, freeSlots]
+  properties:
+    cluster:
+      type: string
+    namespace:
+      type: string
+    name:
+      type: string
+    windowStart:
+      type: string
+      format: date-time
+      description: The start of the fixed 24-hour window the counts used.
+    cellPool:
+      type: string
+      description: The cell's varroa.dev/cell-pool label. Absent while no label is set.
+    profile:
+      type: string
+      description: The cell's varroa.dev/cell-profile label.
+    jenkinsVersion:
+      type: string
+    jenkinsHealth:
+      type: string
+    queueLength:
+      type: integer
+      format: int64
+      description: >-
+        The Jenkins queue length from the latest mite heartbeat. Absent for
+        a remote cluster and absent while no heartbeat has arrived.
+    queueLengthAt:
+      type: string
+      format: date-time
+      description: The heartbeat time the queue length came from.
+    tenants:
+      type: array
+      items:
+        $ref: '#/CellTenantUsage'
+    totals:
+      $ref: '#/CellUsageCounts'
+    maxTenants:
+      type: integer
+      format: int32
+      description: >-
+        The effective tenant cap this surface resolves: the cell's own
+        spec.cell.maxTenants when that value is not zero, else the chart
+        value, else ten. It is never a minimum over the tiers.
+    freeSlots:
+      type: integer
+      format: int32
+      description: maxTenants minus the placed tenant count, never below zero.
+  additionalProperties: false
+
+TeamCell:
+  type: object
+  description: >-
+    The tenant's own view of the cell that hosts it. For the states
+    unplaced and notCellHosted every field other than state and reason is
+    absent. The body carries no other tenant's name, job path, run, or
+    count.
+  required: [state, canOpenCell]
+  properties:
+    state:
+      type: string
+      enum: [placed, moving, rehydrating, unplaced, notCellHosted]
+    reason:
+      type: string
+      description: The Team's Placed condition reason, verbatim.
+    cell:
+      type: string
+    namespace:
+      type: string
+    cluster:
+      type: string
+    cellPool:
+      type: string
+    profile:
+      type: string
+    jenkinsVersion:
+      type: string
+    freeSlots:
+      type: integer
+      format: int32
+    queueLength:
+      type: integer
+      format: int64
+    runningNow:
+      type: integer
+      format: int64
+    runsLast24h:
+      type: integer
+      format: int64
+    failedLast24h:
+      type: integer
+      format: int64
+    jobs:
+      type: integer
+      format: int64
+    otherTenantCount:
+      type: integer
+      format: int32
+      description: >-
+        The number of other tenants on the cell. It is a count, never a
+        list.
+    canOpenCell:
+      type: boolean
+      description: >-
+        True when the caller also holds the controller read grant on the
+        cell. The hint gates no other field of this body.
   additionalProperties: false

@@ -242,22 +242,30 @@ func (s *Server) findDeclaredItem(ctx context.Context, ref TenantRef, jobPath st
 	return cr, nil, nil
 }
 
+// declaredJob is one job path a composed bundle declares, with the item
+// kind the manifest gives it. Only "pipeline" and "multibranch" reach a
+// caller. Every other declared kind is dropped before this value is built.
+type declaredJob struct {
+	Path string
+	Kind string
+}
+
 // catalogDeclaredJobPaths lists every pipeline and multibranch item path
 // ref's controller's composed bundle declares. Design D8: the job list is
 // the union of the record store's job summaries and the jobs the catalog
 // declares, because a job that has never run holds no record-store row.
-func (s *Server) catalogDeclaredJobPaths(ctx context.Context, ref TenantRef) []string {
+func (s *Server) catalogDeclaredJobPaths(ctx context.Context, ref TenantRef) []declaredJob {
 	_, manifest, err := s.controllerItemManifest(ctx, ref)
 	if err != nil || manifest == nil {
 		return nil
 	}
-	var paths []string
+	var jobs []declaredJob
 	for _, ip := range manifest.Flatten() {
 		if ip.Item.Kind == "pipeline" || ip.Item.Kind == "multibranch" {
-			paths = append(paths, ip.Path)
+			jobs = append(jobs, declaredJob{Path: ip.Path, Kind: ip.Item.Kind})
 		}
 	}
-	return paths
+	return jobs
 }
 
 // runTemplatePayload reads the four template-resolution keys design D14

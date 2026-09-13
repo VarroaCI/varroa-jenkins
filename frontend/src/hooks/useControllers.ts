@@ -33,6 +33,53 @@ export interface ControllerListItem {
   attention?: ControllerAttention;
   /** Last mite heartbeat, RFC3339 UTC. Absent when no mite has ever reported. */
   lastSeen?: string;
+  /** Mirrors v1alpha1.IsCell. Always present. */
+  kind: ControllerKind;
+  /** The varroa.dev/cell-pool label. Absent while no label is set. */
+  cellPool?: string;
+  /**
+   * The length of status.cell.tenants, never of appliedTenants. Absent for
+   * a controller that is not a cell. Zero is a real value, so the field is
+   * present for an empty cell.
+   */
+  tenantCount?: number;
+  /**
+   * The same effective cap the cell usage read resolves. Absent for a
+   * controller that is not a cell.
+   */
+  maxTenants?: number;
+  /** status.cell.warm. Absent for a controller that is not a cell. */
+  warm?: boolean;
+  /** metadata.creationTimestamp, RFC 3339. Present for every controller. */
+  createdAt: string;
+  /** status.cell.unreadySince, RFC 3339. Absent while the cell is ready. */
+  unreadySince?: string;
+}
+
+/** Whether a controller runs as a cell or as a stateful controller. */
+export type ControllerKind = "cell" | "stateful";
+
+/**
+ * The controller detail's projection of status.cell. It carries no
+ * rehydration key: the operator keeps that list internal, and no surface
+ * reads it.
+ */
+export interface CellStatusProjection {
+  tenants?: string[];
+  warm?: boolean;
+  /** Operator-written state. No API accepts a write to it. */
+  evacuate?: boolean;
+  unreadySince?: string;
+  rolledAt?: string;
+  /**
+   * The tenant set of the last apply that passed. A tenant named in
+   * tenants and absent here is still rehydrating.
+   */
+  appliedTenants?: string[];
+  tenantWarnings?: { tenant: string; reason: string; message: string }[];
+  instance?: string;
+  previousInstance?: string;
+  previousInstanceLastSeen?: string;
 }
 
 export function useControllers() {
@@ -131,6 +178,10 @@ export interface ControllerDetail {
   unappliedRemovals?: UnappliedRemoval[];
   // Controller conditions from the CRD status (e.g. HibernationCronTriggersSkipped).
   conditions?: Array<{ type: string; status: string; reason?: string; message?: string; lastTransitionTime?: string }>;
+  /** Mirrors v1alpha1.IsCell. Always present. The Cell tab reads this field. */
+  kind: ControllerKind;
+  /** status.cell, without the rehydration key. Absent for a stateful controller. */
+  cell?: CellStatusProjection;
 }
 
 export interface PluginInventorySummary {

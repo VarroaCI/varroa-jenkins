@@ -1015,6 +1015,8 @@ components:
           type: array
         attention:
           $ref: '#/components/schemas/components_schemas_ControllerAttention'
+        cell:
+          $ref: '#/components/schemas/components_schemas_CellStatusProjection'
         certExpiry:
           type: string
         cluster:
@@ -1045,6 +1047,12 @@ components:
         jenkinsHealth:
           type: string
         jenkinsVersion:
+          type: string
+        kind:
+          description: Mirrors v1alpha1.IsCell. Present for every controller.
+          enum:
+          - cell
+          - stateful
           type: string
         lastApplyResult:
           $ref: '#/components/schemas/components_schemas_ApplyResult'
@@ -1121,6 +1129,7 @@ components:
       - routingMode
       - reconcileBlocked
       - spec
+      - kind
       type: object
     ControllerDiff:
       additionalProperties: false
@@ -1263,10 +1272,18 @@ components:
           type: string
         attention:
           $ref: '#/components/schemas/components_schemas_ControllerAttention'
+        cellPool:
+          description: The controller's varroa.dev/cell-pool label. Absent while no
+            label is set.
+          type: string
         cluster:
           type: string
         composedBundleRef:
           $ref: '#/components/schemas/components_schemas_ComposedBundleRef'
+        createdAt:
+          description: metadata.creationTimestamp, RFC 3339. Present for every controller.
+          format: date-time
+          type: string
         effectiveBundle:
           $ref: '#/components/schemas/components_schemas_EffectiveBundle'
         endpoint:
@@ -1279,9 +1296,21 @@ components:
           type: string
         jenkinsVersion:
           type: string
+        kind:
+          description: Mirrors v1alpha1.IsCell. Always present, so a client never
+            reads the kind from an absent field.
+          enum:
+          - cell
+          - stateful
+          type: string
         lastSeen:
           description: Last mite heartbeat, RFC3339 UTC. Absent when no mite has reported.
           type: string
+        maxTenants:
+          description: The same effective cap the cell usage read resolves. Absent
+            for a controller that is not a cell.
+          format: int32
+          type: integer
         miteConnected:
           type: boolean
         miteVersion:
@@ -1298,9 +1327,22 @@ components:
         routingMode:
           description: Either "subdomain" or "path".
           type: string
+        tenantCount:
+          description: The length of status.cell.tenants, never of status.cell.appliedTenants.
+            Absent for a controller that is not a cell.
+          format: int32
+          type: integer
+        unreadySince:
+          description: status.cell.unreadySince, RFC 3339. Absent while the cell is
+            ready.
+          format: date-time
+          type: string
         version:
           description: Desired Jenkins version (from spec.version).
           type: string
+        warm:
+          description: status.cell.warm. Absent for a controller that is not a cell.
+          type: boolean
       required:
       - name
       - namespace
@@ -1310,6 +1352,8 @@ components:
       - headless
       - miteConnected
       - routingMode
+      - kind
+      - createdAt
       type: object
     CreateBroodRequest:
       additionalProperties: false
@@ -1848,6 +1892,10 @@ components:
           items:
             $ref: '#/components/schemas/components_schemas_RunningRun'
           type: array
+        tenantFolder:
+          description: |
+            The Jenkins folder that prefixes every job path in the response. It is the Team name for a placed pipelines tenant. It is the empty string for a controller tenant. The field is always present.
+          type: string
         truncated:
           description: |
             True when any tenant's running-now page was full (50 rows), so the strip does not claim completeness.
@@ -1856,6 +1904,7 @@ components:
       - items
       - runningNow
       - truncated
+      - tenantFolder
       type: object
     PipelineParameter:
       additionalProperties: false
@@ -1911,11 +1960,20 @@ components:
           type: string
         jobPath:
           type: string
+        kind:
+          description: |
+            The item kind the tenant's bundle declares. A job the record store alone holds reports unknown. A declared item of any other kind also reports unknown.
+          enum:
+          - pipeline
+          - multibranch
+          - unknown
+          type: string
         lastBuild:
           $ref: '#/components/schemas/components_schemas_RunSummary'
       required:
       - jobPath
       - health
+      - kind
       type: object
     PipelineTriggers:
       additionalProperties: false
@@ -4018,6 +4076,218 @@ components:
       required:
       - name
       type: object
+    components_schemas_CellGrant:
+      additionalProperties: false
+      description: One grant that reaches a tenant. The jobs field is absent when
+        the grant narrows nothing. An absent jobs and an empty jobs mean different
+        things, so the field is never an empty array.
+      properties:
+        binding:
+          description: The VarroaRoleBinding name. Absent for the teamMembership source.
+          type: string
+        jobs:
+          items:
+            type: string
+          minItems: 1
+          type: array
+        roleRef:
+          type: string
+        source:
+          enum:
+          - teamMembership
+          - tenantScopedBinding
+          - clusterWideBinding
+          type: string
+        subjects:
+          items:
+            $ref: '#/components/schemas/components_schemas_CellGrantSubject'
+          type: array
+        verbs:
+          description: The pipelines verbs of the grant's role, never the whole capability
+            set.
+          items:
+            type: string
+          type: array
+      required:
+      - source
+      - roleRef
+      - subjects
+      - verbs
+      type: object
+    components_schemas_CellGrantSubject:
+      additionalProperties: false
+      description: One subject of a grant.
+      properties:
+        kind:
+          type: string
+        name:
+          type: string
+      required:
+      - kind
+      - name
+      type: object
+    components_schemas_CellGrants:
+      additionalProperties: false
+      description: One entry for each tenant of a cell, naming the subjects that may
+        build on it.
+      properties:
+        cell:
+          type: string
+        cluster:
+          type: string
+        namespace:
+          type: string
+        tenants:
+          items:
+            $ref: '#/components/schemas/components_schemas_CellTenantGrants'
+          type: array
+      required:
+      - cluster
+      - namespace
+      - cell
+      - tenants
+      type: object
+    components_schemas_CellPool:
+      additionalProperties: false
+      description: Full cell-pool object returned from get and list operations.
+      properties:
+        name:
+          type: string
+        spec:
+          $ref: '#/components/schemas/components_schemas_CellPoolSpec'
+        status:
+          $ref: '#/components/schemas/components_schemas_CellPoolStatus'
+      required:
+      - name
+      - spec
+      - status
+      type: object
+    components_schemas_CellPoolCondition:
+      additionalProperties: false
+      description: Status condition for a CellPool. Type PoolReady, with exactly the
+        reasons Ready, CellCapReached, and ProfileMissing.
+      properties:
+        lastTransitionTime:
+          description: ISO 8601 last transition time.
+          type: string
+        message:
+          type: string
+        observedGeneration:
+          format: int64
+          type: integer
+        reason:
+          type: string
+        status:
+          type: string
+        type:
+          type: string
+      required:
+      - type
+      - status
+      type: object
+    components_schemas_CellPoolScaleRequest:
+      additionalProperties: false
+      description: Request body for PATCH /cellpools/{name}. It declares the four
+        scale dials and nothing else, so the contract itself states that a structural
+        edit is not an API operation.
+      properties:
+        spec:
+          additionalProperties: false
+          properties:
+            maxCells:
+              format: int32
+              minimum: 0
+              type: integer
+            maxTenantsPerCell:
+              format: int32
+              minimum: 1
+              type: integer
+            unreadyGracePeriod:
+              type: string
+            warm:
+              format: int32
+              minimum: 0
+              type: integer
+          type: object
+      required:
+      - spec
+      type: object
+    components_schemas_CellPoolSpec:
+      additionalProperties: false
+      description: A CellPool's configuration (spec.*). profileRef is immutable, because
+        a pool's cells carry the profile label they were created with.
+      properties:
+        cellTemplate:
+          additionalProperties: true
+          description: resources and podOverrides for the cells the pool creates.
+            The pool exposes no raw strategic-merge overlay.
+          type: object
+        maxCells:
+          description: Cap on the pool's cells, placed cells included. 0 means unlimited.
+          format: int32
+          minimum: 0
+          type: integer
+        maxTenantsPerCell:
+          description: Capacity a pool cell uses when its own spec.cell.maxTenants
+            is zero.
+          format: int32
+          minimum: 1
+          type: integer
+        profileRef:
+          description: The JenkinsVersionProfile the pool's cells run. Immutable.
+          minLength: 1
+          type: string
+        unreadyGracePeriod:
+          description: How long a pool cell may stay unready before the operator rolls
+            its pod. A Go duration string.
+          type: string
+        warm:
+          description: Target count of free cells the pool keeps ready.
+          format: int32
+          minimum: 0
+          type: integer
+      required:
+      - profileRef
+      type: object
+    components_schemas_CellPoolStatus:
+      additionalProperties: false
+      description: A CellPool's reported cell and tenant counts.
+      properties:
+        conditions:
+          items:
+            $ref: '#/components/schemas/components_schemas_CellPoolCondition'
+          type: array
+        freeTenantSlots:
+          description: Spare capacity of the placed cells only. warmCells already
+            reports the empty ones.
+          format: int32
+          type: integer
+        observedGeneration:
+          format: int64
+          type: integer
+        placedCells:
+          description: Owned cells that hold at least one tenant.
+          format: int32
+          type: integer
+        tenants:
+          description: Every tenant on the pool, sorted.
+          items:
+            type: string
+          type: array
+        unreadyCells:
+          description: Owned cells whose CellReady condition is not True.
+          format: int32
+          type: integer
+        warmCells:
+          description: Owned cells that hold no tenant.
+          format: int32
+          type: integer
+      required:
+      - warmCells
+      - placedCells
+      - unreadyCells
+      - freeTenantSlots
+      type: object
     components_schemas_CellSpec:
       additionalProperties: false
       description: Marks a controller as a shared cell that hosts tenant pipelines.
@@ -4030,6 +4300,201 @@ components:
           type: integer
       required:
       - enabled
+      type: object
+    components_schemas_CellStatusProjection:
+      additionalProperties: false
+      description: 'The controller detail''s projection of status.cell. It declares
+        ten properties. It declares no rehydration property: the cell-controllers
+        capability keeps that key inside the operator.'
+      properties:
+        appliedTenants:
+          description: The tenant set of the last apply that passed. A tenant named
+            in tenants and absent here is still rehydrating.
+          items:
+            type: string
+          type: array
+        evacuate:
+          description: Operator-written state. No API accepts a write to it, so no
+            surface offers an evacuate action.
+          type: boolean
+        instance:
+          type: string
+        previousInstance:
+          type: string
+        previousInstanceLastSeen:
+          format: date-time
+          type: string
+        rolledAt:
+          format: date-time
+          type: string
+        tenantWarnings:
+          items:
+            $ref: '#/components/schemas/components_schemas_CellTenantWarning'
+          type: array
+        tenants:
+          items:
+            type: string
+          type: array
+        unreadySince:
+          format: date-time
+          type: string
+        warm:
+          type: boolean
+      type: object
+    components_schemas_CellTenantGrants:
+      additionalProperties: false
+      description: Every grant that reaches one tenant of a cell, with the tenant's
+        generated Jenkins item role. The item role and its pattern come from the tenant
+        name, so the read opens no JenkinsRole object.
+      properties:
+        grants:
+          items:
+            $ref: '#/components/schemas/components_schemas_CellGrant'
+          type: array
+        itemPattern:
+          type: string
+        itemRole:
+          type: string
+        tenant:
+          type: string
+        truncated:
+          description: True only when the 50-grant cap dropped a grant of this tenant.
+          type: boolean
+      required:
+      - tenant
+      - itemRole
+      - itemPattern
+      - truncated
+      - grants
+      type: object
+    components_schemas_CellTenantUsage:
+      additionalProperties: false
+      description: One tenant on a cell, with that tenant's four counts.
+      properties:
+        failedLast24h:
+          format: int64
+          type: integer
+        jobs:
+          format: int64
+          type: integer
+        runningNow:
+          format: int64
+          type: integer
+        runsLast24h:
+          format: int64
+          type: integer
+        tenant:
+          type: string
+      required:
+      - tenant
+      - runningNow
+      - runsLast24h
+      - failedLast24h
+      - jobs
+      type: object
+    components_schemas_CellTenantWarning:
+      additionalProperties: false
+      description: One non-blocking finding the reconciler recorded about a tenant.
+      properties:
+        message:
+          type: string
+        reason:
+          type: string
+        tenant:
+          type: string
+      required:
+      - tenant
+      - reason
+      - message
+      type: object
+    components_schemas_CellUsage:
+      additionalProperties: false
+      description: 'One cell''s load, tenant by tenant. An absent optional field is
+        absent from the object, never a null and never a zero: queueLength reads as
+        zero only for an empty queue, and a cell in a remote cluster carries no queueLength
+        at all.'
+      properties:
+        cellPool:
+          description: The cell's varroa.dev/cell-pool label. Absent while no label
+            is set.
+          type: string
+        cluster:
+          type: string
+        freeSlots:
+          description: maxTenants minus the placed tenant count, never below zero.
+          format: int32
+          type: integer
+        jenkinsHealth:
+          type: string
+        jenkinsVersion:
+          type: string
+        maxTenants:
+          description: 'The effective tenant cap this surface resolves: the cell''s
+            own spec.cell.maxTenants when that value is not zero, else the chart value,
+            else ten. It is never a minimum over the tiers.'
+          format: int32
+          type: integer
+        name:
+          type: string
+        namespace:
+          type: string
+        profile:
+          description: The cell's varroa.dev/cell-profile label.
+          type: string
+        queueLength:
+          description: The Jenkins queue length from the latest mite heartbeat. Absent
+            for a remote cluster and absent while no heartbeat has arrived.
+          format: int64
+          type: integer
+        queueLengthAt:
+          description: The heartbeat time the queue length came from.
+          format: date-time
+          type: string
+        tenants:
+          items:
+            $ref: '#/components/schemas/components_schemas_CellTenantUsage'
+          type: array
+        totals:
+          $ref: '#/components/schemas/components_schemas_CellUsageCounts'
+        windowStart:
+          description: The start of the fixed 24-hour window the counts used.
+          format: date-time
+          type: string
+      required:
+      - cluster
+      - namespace
+      - name
+      - windowStart
+      - tenants
+      - totals
+      - maxTenants
+      - freeSlots
+      type: object
+    components_schemas_CellUsageCounts:
+      additionalProperties: false
+      description: The four load counts of one tenant on a cell, or the same four
+        summed over the cell. runningNow carries no time bound, so a build that runs
+        longer than a day still counts. runsLast24h and failedLast24h count inside
+        the fixed 24-hour window. jobs counts distinct job paths. A run whose result
+        is TRIGGER_FAILED counts in no value.
+      properties:
+        failedLast24h:
+          format: int64
+          type: integer
+        jobs:
+          format: int64
+          type: integer
+        runningNow:
+          format: int64
+          type: integer
+        runsLast24h:
+          format: int64
+          type: integer
+      required:
+      - runningNow
+      - runsLast24h
+      - failedLast24h
+      - jobs
       type: object
     components_schemas_Check:
       additionalProperties: false
@@ -4579,6 +5044,8 @@ components:
           type: array
         attention:
           $ref: '#/components/schemas/components_schemas_ControllerAttention'
+        cell:
+          $ref: '#/components/schemas/components_schemas_CellStatusProjection'
         certExpiry:
           type: string
         cluster:
@@ -4609,6 +5076,12 @@ components:
         jenkinsHealth:
           type: string
         jenkinsVersion:
+          type: string
+        kind:
+          description: Mirrors v1alpha1.IsCell. Present for every controller.
+          enum:
+          - cell
+          - stateful
           type: string
         lastApplyResult:
           $ref: '#/components/schemas/components_schemas_ApplyResult'
@@ -4685,6 +5158,7 @@ components:
       - routingMode
       - reconcileBlocked
       - spec
+      - kind
       type: object
     components_schemas_ControllerDiff:
       additionalProperties: false
@@ -4827,10 +5301,18 @@ components:
           type: string
         attention:
           $ref: '#/components/schemas/components_schemas_ControllerAttention'
+        cellPool:
+          description: The controller's varroa.dev/cell-pool label. Absent while no
+            label is set.
+          type: string
         cluster:
           type: string
         composedBundleRef:
           $ref: '#/components/schemas/components_schemas_ComposedBundleRef'
+        createdAt:
+          description: metadata.creationTimestamp, RFC 3339. Present for every controller.
+          format: date-time
+          type: string
         effectiveBundle:
           $ref: '#/components/schemas/components_schemas_EffectiveBundle'
         endpoint:
@@ -4843,9 +5325,21 @@ components:
           type: string
         jenkinsVersion:
           type: string
+        kind:
+          description: Mirrors v1alpha1.IsCell. Always present, so a client never
+            reads the kind from an absent field.
+          enum:
+          - cell
+          - stateful
+          type: string
         lastSeen:
           description: Last mite heartbeat, RFC3339 UTC. Absent when no mite has reported.
           type: string
+        maxTenants:
+          description: The same effective cap the cell usage read resolves. Absent
+            for a controller that is not a cell.
+          format: int32
+          type: integer
         miteConnected:
           type: boolean
         miteVersion:
@@ -4862,9 +5356,22 @@ components:
         routingMode:
           description: Either "subdomain" or "path".
           type: string
+        tenantCount:
+          description: The length of status.cell.tenants, never of status.cell.appliedTenants.
+            Absent for a controller that is not a cell.
+          format: int32
+          type: integer
+        unreadySince:
+          description: status.cell.unreadySince, RFC 3339. Absent while the cell is
+            ready.
+          format: date-time
+          type: string
         version:
           description: Desired Jenkins version (from spec.version).
           type: string
+        warm:
+          description: status.cell.warm. Absent for a controller that is not a cell.
+          type: boolean
       required:
       - name
       - namespace
@@ -4874,6 +5381,8 @@ components:
       - headless
       - miteConnected
       - routingMode
+      - kind
+      - createdAt
       type: object
     components_schemas_CreateBroodRequest:
       additionalProperties: false
@@ -5965,6 +6474,10 @@ components:
           items:
             $ref: '#/components/schemas/components_schemas_RunningRun'
           type: array
+        tenantFolder:
+          description: |
+            The Jenkins folder that prefixes every job path in the response. It is the Team name for a placed pipelines tenant. It is the empty string for a controller tenant. The field is always present.
+          type: string
         truncated:
           description: |
             True when any tenant's running-now page was full (50 rows), so the strip does not claim completeness.
@@ -5973,6 +6486,7 @@ components:
       - items
       - runningNow
       - truncated
+      - tenantFolder
       type: object
     components_schemas_PipelineMarkerFinding:
       additionalProperties: false
@@ -6084,11 +6598,20 @@ components:
           type: string
         jobPath:
           type: string
+        kind:
+          description: |
+            The item kind the tenant's bundle declares. A job the record store alone holds reports unknown. A declared item of any other kind also reports unknown.
+          enum:
+          - pipeline
+          - multibranch
+          - unknown
+          type: string
         lastBuild:
           $ref: '#/components/schemas/components_schemas_RunSummary'
       required:
       - jobPath
       - health
+      - kind
       type: object
     components_schemas_PipelineTemplateInfo:
       additionalProperties: false
@@ -7290,6 +7813,66 @@ components:
       required:
       - suspend
       type: object
+    components_schemas_TeamCell:
+      additionalProperties: false
+      description: The tenant's own view of the cell that hosts it. For the states
+        unplaced and notCellHosted every field other than state and reason is absent.
+        The body carries no other tenant's name, job path, run, or count.
+      properties:
+        canOpenCell:
+          description: True when the caller also holds the controller read grant on
+            the cell. The hint gates no other field of this body.
+          type: boolean
+        cell:
+          type: string
+        cellPool:
+          type: string
+        cluster:
+          type: string
+        failedLast24h:
+          format: int64
+          type: integer
+        freeSlots:
+          format: int32
+          type: integer
+        jenkinsVersion:
+          type: string
+        jobs:
+          format: int64
+          type: integer
+        namespace:
+          type: string
+        otherTenantCount:
+          description: The number of other tenants on the cell. It is a count, never
+            a list.
+          format: int32
+          type: integer
+        profile:
+          type: string
+        queueLength:
+          format: int64
+          type: integer
+        reason:
+          description: The Team's Placed condition reason, verbatim.
+          type: string
+        runningNow:
+          format: int64
+          type: integer
+        runsLast24h:
+          format: int64
+          type: integer
+        state:
+          enum:
+          - placed
+          - moving
+          - rehydrating
+          - unplaced
+          - notCellHosted
+          type: string
+      required:
+      - state
+      - canOpenCell
+      type: object
     components_schemas_TeamCondition:
       additionalProperties: false
       description: Status condition for a Team.
@@ -7407,6 +7990,12 @@ components:
           description: Kubernetes namespace this tenant's agents run in. Must be one
             of the team's own namespaces.
           type: string
+        cellPool:
+          description: 'The CellPool the placement pass selects a cell from. Empty
+            means the profile''s default pool: the pool whose name equals profile.
+            A tenant that needs a cell of its own names a pool whose maxTenantsPerCell
+            is 1.'
+          type: string
         composedBundleRef:
           $ref: '#/components/schemas/components_schemas_ComposedBundleRef'
         concurrency:
@@ -7432,9 +8021,6 @@ components:
           description: How long the backstop waits past a missed cron occurrence before
             it fires. Default 5m, range 1m to 60m.
           type: string
-        dedicated:
-          description: When true, requires a cell that carries no other tenant.
-          type: boolean
         exports:
           description: Grants of this tenant's jobs and locks to other tenants. An
             absent list exports nothing.
@@ -8781,6 +9367,186 @@ paths:
       summary: OIDC provider callback endpoint.
       tags:
       - auth
+  /api/v1/cellpools:
+    get:
+      operationId: listCellPools
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  items:
+                    items:
+                      $ref: '#/components/schemas/components_schemas_CellPool'
+                    type: array
+                required:
+                - items
+                type: object
+          description: Cell-pool list (items envelope).
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+      summary: Lists every cell pool with its spec and status, sorted by name. Requires
+        the cellpools:read verb on a cluster-wide binding.
+      tags:
+      - CellPools
+  /api/v1/cellpools/{name}:
+    get:
+      operationId: getCellPool
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_name'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_CellPool'
+          description: Cell-pool details.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+      summary: Gets one cell pool's spec and status. Requires the cellpools:read verb
+        on a cluster-wide binding.
+      tags:
+      - CellPools
+    patch:
+      operationId: patchCellPool
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_name'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/components_schemas_CellPoolScaleRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_CellPool'
+          description: Cell pool updated.
+        "400":
+          $ref: '#/components/responses/components_responses_BadRequest'
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+        "409":
+          $ref: '#/components/responses/components_responses_Conflict'
+      summary: Scales a cell pool. The body carries only the four scale dials; a body
+        naming profileRef or cellTemplate is refused with 400. Requires the cellpools:update
+        verb on a cluster-wide binding.
+      tags:
+      - CellPools
+  /api/v1/cells/{namespace}/{name}/grants:
+    get:
+      description: |
+        Applies two gates. It applies the controller read check on the cell, exactly as the usage reads do. It then applies rolebindings:read on the caller's cluster-wide capability partition. It answers 404 for an unknown controller, a controller that is not a cell, and a caller the controller read check refuses. It answers 403 when the controller check passes and the caller holds no rolebindings:read. The read is resolver backed, so it touches no record store and answers no 503.
+      operationId: getCellGrants
+      parameters:
+      - description: The cell's namespace.
+        in: path
+        name: namespace
+        required: true
+        schema:
+          type: string
+      - description: The cell's name.
+        in: path
+        name: name
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/components_parameters_clusterQuery'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_CellGrants'
+          description: The grants of each tenant.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+      summary: Returns the grants that reach each tenant of one cell.
+      tags:
+      - Cells
+  /api/v1/cells/{namespace}/{name}/usage:
+    get:
+      description: |
+        Answers 404 for an unknown controller, a controller that is not a cell, and a caller the controller read check refuses. One code for all three keeps the surface from confirming that a cell exists. maxTenants is a first-match chain: the cell's own spec.cell.maxTenants when that value is not zero, else the owning pool's maxTenantsPerCell, else the chart value, else ten. It is never a minimum over the tiers.
+      operationId: getCellUsage
+      parameters:
+      - description: The cell's namespace.
+        in: path
+        name: namespace
+        required: true
+        schema:
+          type: string
+      - description: The cell's name.
+        in: path
+        name: name
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/components_parameters_clusterQuery'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_CellUsage'
+          description: The cell's load.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Returns one cell's load, tenant by tenant.
+      tags:
+      - Cells
+  /api/v1/cells/usage:
+    get:
+      description: |
+        Gates each cell with the controller read check and drops a cell the check refuses. The counts come from the record store over a fixed 24-hour window. A run whose result is TRIGGER_FAILED counts in no value, and a tenant that left the cell contributes no count to it.
+      operationId: listCellUsage
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_clusterQuery'
+      - $ref: '#/components/parameters/components_parameters_namespace'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  items:
+                    items:
+                      $ref: '#/components/schemas/components_schemas_CellUsage'
+                    type: array
+                required:
+                - items
+                type: object
+          description: Cell usage list (items envelope).
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Lists the load of every cell the caller may read in one cluster.
+      tags:
+      - Cells
   /api/v1/clusters:
     get:
       operationId: listClusters
@@ -11159,6 +11925,29 @@ paths:
       summary: Lists a team's pipelines and its unfinished runs.
       tags:
       - Pipelines
+  /api/v1/pipelines/{team}/cell:
+    get:
+      description: |
+        Reads the Team object first, so a pipelines team that waits for its first cell answers 200 with the state unplaced. The body carries this tenant's own counts and a neighbour count. It carries no other tenant's name, job path, run, or count. canOpenCell is a hint that gates no field: a caller the controller read check refuses still receives the whole body.
+      operationId: getTeamCell
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_team'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_TeamCell'
+          description: The tenant's cell view.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Returns the tenant's own view of the cell that hosts it.
+      tags:
+      - Pipelines
   /api/v1/pipelines/{team}/jobs/{job}:
     get:
       description: |
@@ -12634,3 +13423,7 @@ tags:
   name: upgrade-tracking
 - description: Team-scoped pipeline, run, log, and artifact surfaces.
   name: Pipelines
+- description: Cell-pool capacity read and scale control.
+  name: CellPools
+- description: Cell load, tenant by tenant, for the operator surfaces.
+  name: Cells

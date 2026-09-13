@@ -80,9 +80,14 @@ Wait for all control-plane pods to become `Ready`. NATS cannot start until its v
 | Build record store | `recordStore.*` |
 | Build recorder component | `recorder.*` |
 | Build record store network isolation | `networkPolicy.recordStore*` |
+| Cell pools | `cells.*` |
 | Telemetry | `telemetry.*` |
 
 Gateway and BFF HPAs require the Kubernetes metrics API. Telemetry export remains inactive until `telemetry.endpoint` is set.
+
+Each `cells.*` value seeds a `CellPool` the operator creates. None of them configures a live pool,
+and an upgrade never rewrites the spec of a pool that already exists. Scale a live pool by editing
+the `CellPool` object. See [Cells and pipelines tenants](../operations/cells.md).
 
 ### BFF ConfigMap Access
 

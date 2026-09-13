@@ -6,9 +6,13 @@
 # VARROA_CELLS_MAX_TENANTS, VARROA_CELLS_UNREADY_GRACE,
 # VARROA_NETWORKPOLICY_ENABLED, VARROA_NETWORKPOLICY_APISERVER_EGRESS, and
 # VARROA_CELL_ISOLATION on the varroa-operator Deployment: the two JSON-valued
-# vars parse as valid JSON, the warm pool stays disabled on a default render,
+# vars parse as valid JSON, pool auto-creation stays off on a default render,
 # and the two NetworkPolicy vars flip on a render with
 # networkPolicy.enabled=true networkPolicy.cellIsolation.enabled=true.
+#
+# The four VARROA_CELLS_* values seed a CellPool the operator creates. They
+# configure no live pool: an operator scales a live pool by editing the
+# CellPool object.
 # =============================================================================
 set -euo pipefail
 
@@ -89,7 +93,7 @@ assert_valid_json() {
 echo "=== Cell operator env chart golden render assertions (D3, task 3.2) ==="
 
 # ---------------------------------------------------------------------------
-# (a) Default render: all seven vars present, warm pool disabled, JSON valid.
+# (a) Default render: all seven vars present, auto-creation off, JSON valid.
 # ---------------------------------------------------------------------------
 echo ""
 echo "--- (a) Default render ---"
@@ -104,19 +108,30 @@ check "operator Deployment renders" "$rc"
 
 WARM_ENABLED=$(unquoted_value "$(raw_value "$(env_block "VARROA_CELLS_WARM_POOL_ENABLED" "$OPERATOR_DEFAULT")")")
 [[ "$WARM_ENABLED" == "false" ]] && rc=0 || rc=1
-check "VARROA_CELLS_WARM_POOL_ENABLED defaults to false (warm pool disabled)" "$rc"
+check "VARROA_CELLS_WARM_POOL_ENABLED defaults to false (the operator auto-creates no pool)" "$rc"
 
 WARM_PER_PROFILE=$(unquoted_value "$(raw_value "$(env_block "VARROA_CELLS_WARM_POOL_PER_PROFILE" "$OPERATOR_DEFAULT")")")
 [[ "$WARM_PER_PROFILE" == "1" ]] && rc=0 || rc=1
-check "VARROA_CELLS_WARM_POOL_PER_PROFILE default is 1" "$rc"
+check "VARROA_CELLS_WARM_POOL_PER_PROFILE seeds a new pool with 1" "$rc"
 
 MAX_TENANTS=$(unquoted_value "$(raw_value "$(env_block "VARROA_CELLS_MAX_TENANTS" "$OPERATOR_DEFAULT")")")
 [[ "$MAX_TENANTS" == "10" ]] && rc=0 || rc=1
-check "VARROA_CELLS_MAX_TENANTS default is 10" "$rc"
+check "VARROA_CELLS_MAX_TENANTS seeds a new pool with 10" "$rc"
+
+# The BFF resolves the effective tenant cap of a cell usage read from the
+# same value. Both processes agree only while one chart value renders both
+# variables.
+BFF_DEFAULT=$(extract_doc "Deployment" "release-name-varroa-bff" "$RENDER_DEFAULT")
+[[ -n "$BFF_DEFAULT" ]] && rc=0 || rc=1
+check "bff Deployment renders" "$rc"
+
+BFF_MAX_TENANTS=$(unquoted_value "$(raw_value "$(env_block "VARROA_CELLS_MAX_TENANTS" "$BFF_DEFAULT")")")
+[[ "$BFF_MAX_TENANTS" == "10" ]] && rc=0 || rc=1
+check "the bff container carries VARROA_CELLS_MAX_TENANTS at 10" "$rc"
 
 UNREADY_GRACE=$(unquoted_value "$(raw_value "$(env_block "VARROA_CELLS_UNREADY_GRACE" "$OPERATOR_DEFAULT")")")
 [[ "$UNREADY_GRACE" == "5m" ]] && rc=0 || rc=1
-check "VARROA_CELLS_UNREADY_GRACE default is 5m" "$rc"
+check "VARROA_CELLS_UNREADY_GRACE seeds a new pool with 5m" "$rc"
 
 NETPOL_ENABLED_DEFAULT=$(unquoted_value "$(raw_value "$(env_block "VARROA_NETWORKPOLICY_ENABLED" "$OPERATOR_DEFAULT")")")
 [[ "$NETPOL_ENABLED_DEFAULT" == "false" ]] && rc=0 || rc=1
@@ -162,7 +177,7 @@ assert_valid_json "VARROA_CELL_ISOLATION is valid JSON (cellIsolation.enabled=tr
 grep -q '"enabled":true' <<< "$CELL_ISOLATION_JSON" && rc=0 || rc=1
 check "VARROA_CELL_ISOLATION reflects cellIsolation.enabled=true" "$rc"
 
-# The warm pool stays disabled: this render never touched cells.warmPool.
+# Pool auto-creation stays off: this render never touched cells.warmPool.
 WARM_ENABLED_NETPOL=$(unquoted_value "$(raw_value "$(env_block "VARROA_CELLS_WARM_POOL_ENABLED" "$OPERATOR_NETPOL")")")
 [[ "$WARM_ENABLED_NETPOL" == "false" ]] && rc=0 || rc=1
 check "VARROA_CELLS_WARM_POOL_ENABLED stays false when only networkPolicy flags change" "$rc"

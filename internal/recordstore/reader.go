@@ -70,6 +70,25 @@ type Reader interface {
 	// varroa-upstream row that names it as the producer. It backs the
 	// pipeline job page's dependency edge (design D13).
 	JobDependencies(ctx context.Context, cluster, tenant, jobPath string) (JobDependencies, error)
+
+	// CellUsage reports every tenant the placement table binds to cell,
+	// each tenant's four load counts, and the same four summed. The
+	// window is a fixed 24 hours. No caller chooses another window.
+	CellUsage(ctx context.Context, cluster, namespace, cell string) (CellUsage, error)
+
+	// CellUsageMany reports the same value for each of cells, in one
+	// statement. The map key is the cell name. A cell the placement
+	// table binds to no tenant still carries an entry, with no tenant
+	// and four zero totals.
+	CellUsageMany(ctx context.Context, cluster, namespace string, cells []string) (map[string]CellUsage, error)
+
+	// CellTenantUsage reports one row for each of a tenant's jobs on one
+	// cell. The row set is the tenant's job inventory plus every job the
+	// window's runs and the running runs name. It answers no row for a
+	// tenant the placement table does not bind to cell, never an error:
+	// the caller decides whether the tenant belongs there. A caller that
+	// may read only part of the tenant's jobs sums the rows it may read.
+	CellTenantUsage(ctx context.Context, cluster, namespace, cell, tenant string) ([]CellJobUsage, error)
 }
 
 // pgReader is the Postgres-backed Reader implementation.

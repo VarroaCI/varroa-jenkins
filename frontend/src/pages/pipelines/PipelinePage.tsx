@@ -8,6 +8,7 @@ import { Card } from "../../components/Card";
 import { usePermissions, canAccessTenantPipeline } from "../../hooks/usePermissions";
 import { age } from "../../components/activityTimeline.util";
 import { stripTenantFolder } from "./jobPath";
+import JobBreadcrumbs from "./JobBreadcrumbs";
 import { RunDrawer } from "./RunDrawer";
 import type { PipelineTemplateInfo, PipelineDependencyEdge } from "../../types";
 import styles from "./PipelinePage.module.css";
@@ -180,7 +181,7 @@ export default function PipelinePage() {
       <div className={styles.pageHead}>
         <div>
           <div className={styles.pageTitle}>{jobDetail.jobPath}</div>
-          <div className={styles.pageDesc}>{team}</div>
+          <JobBreadcrumbs team={team!} tenantFolder={jobDetail.tenantFolder} jobPath={jobDetail.jobPath} />
         </div>
         {canRun && (
           <button type="button" className={styles.runBtn} onClick={() => setDrawerOpen(true)}>

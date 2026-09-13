@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { canCatalogArea, canAdminArea } from "./navPermissions";
+import { canCatalogArea, canAdminArea, canCellsRow } from "./navPermissions";
 import type { Permissions } from "../types/auth";
 
 describe("canCatalogArea", () => {
@@ -99,5 +99,25 @@ describe("canAdminArea", () => {
 
   it("returns false when perms is undefined", () => {
     expect(canAdminArea(undefined)).toBe(false);
+  });
+});
+
+describe("canCellsRow", () => {
+  it("admits a cluster-wide cellpools:read grant", () => {
+    const perms: Permissions = { global: { cellpools: { read: true } }, scopes: [] };
+    expect(canCellsRow(perms)).toBe(true);
+  });
+
+  it("refuses a namespace-scoped grant alone", () => {
+    const perms: Permissions = {
+      global: {},
+      scopes: [{ namespaces: ["ns-a"], capabilities: { cellpools: { read: true } } }],
+    } as unknown as Permissions;
+    expect(canCellsRow(perms)).toBe(false);
+  });
+
+  it("refuses a caller with no grant", () => {
+    expect(canCellsRow({ global: {}, scopes: [] })).toBe(false);
+    expect(canCellsRow(undefined)).toBe(false);
   });
 });

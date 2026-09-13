@@ -115,6 +115,14 @@ var expectedToolKinds = map[string]toolKind{
 	"list_runs":    kindRead,
 	"get_run":      kindRead,
 	"get_run_log":  kindRead,
+
+	// Cell pools
+	"list_cell_pools":  kindRead,
+	"get_cell_pool":    kindRead,
+	"update_cell_pool": kindUpdatePartial,
+
+	// Cells
+	"get_cell_usage": kindRead,
 }
 
 // listedTool is the subset of a tools/list entry this test cares about.

@@ -243,7 +243,7 @@ func TestTeamHandlers_PipelinesFieldsStoredOnPUT(t *testing.T) {
 		"namespaces": ["ns1"],
 		"pipelines": {
 			"profile": "lts",
-			"dedicated": true,
+			"cellPool": "solo",
 			"agentNamespace": "ns1",
 			"composedBundleRef": {"name": "payments-bundle", "namespace": "ns1"}
 		}
@@ -263,7 +263,7 @@ func TestTeamHandlers_PipelinesFieldsStoredOnPUT(t *testing.T) {
 	if stored.Spec.Pipelines == nil {
 		t.Fatal("stored Team carries no spec.pipelines after PUT")
 	}
-	if stored.Spec.Pipelines.Profile != "lts" || !stored.Spec.Pipelines.Dedicated ||
+	if stored.Spec.Pipelines.Profile != "lts" || stored.Spec.Pipelines.CellPool != "solo" ||
 		stored.Spec.Pipelines.AgentNamespace != "ns1" ||
 		stored.Spec.Pipelines.ComposedBundleRef == nil ||
 		stored.Spec.Pipelines.ComposedBundleRef.Name != "payments-bundle" ||
@@ -285,7 +285,7 @@ func TestTeamHandlers_PipelinesAndPlacementReadOnGET(t *testing.T) {
 			Namespaces: []string{"ns1"},
 			Pipelines: &v1alpha1.TeamPipelinesSpec{
 				Profile:        "lts",
-				Dedicated:      true,
+				CellPool:       "solo",
 				AgentNamespace: "ns1",
 				ComposedBundleRef: &v1alpha1.ComposedBundleRef{
 					Name: "payments-bundle", Namespace: "ns1",
@@ -311,7 +311,7 @@ func TestTeamHandlers_PipelinesAndPlacementReadOnGET(t *testing.T) {
 	if err := json.Unmarshal(getW.Body.Bytes(), &got); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if got.Pipelines == nil || got.Pipelines.Profile != "lts" || !got.Pipelines.Dedicated ||
+	if got.Pipelines == nil || got.Pipelines.Profile != "lts" || got.Pipelines.CellPool != "solo" ||
 		got.Pipelines.AgentNamespace != "ns1" || got.Pipelines.ComposedBundleRef == nil ||
 		got.Pipelines.ComposedBundleRef.Name != "payments-bundle" || got.Pipelines.ComposedBundleRef.Namespace != "ns1" {
 		t.Fatalf("response pipelines = %+v, want spec.pipelines reported in full", got.Pipelines)

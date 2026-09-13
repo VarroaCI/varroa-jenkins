@@ -58,6 +58,13 @@ import type {
   TeamPlacement,
   TeamRehydration,
   RunnerEntry,
+  CellUsage,
+  CellUsageListResponse,
+  TeamCell,
+  CellPool,
+  CellPoolListResponse,
+  CellPoolScaleRequest,
+  CellGrants,
 } from "../types";
 import type { ControllerDetail } from "../hooks/useControllers";
 import type { Permissions } from "../types/auth";
@@ -1078,6 +1085,36 @@ export function getPipelineJob(team: string, jobPath: string): Promise<PipelineJ
   return bffFetch<PipelineJobDetail>(jobBase(team, jobPath));
 }
 
+/**
+ * Reads the team's own view of the cell that hosts its pipelines tenant.
+ * A team that waits for its first cell answers state "unplaced" rather
+ * than a 404.
+ */
+export function getTeamCell(team: string): Promise<TeamCell> {
+  return bffFetch<TeamCell>(`${pipelinesBase(team)}/cell`);
+}
+
+/**
+ * Lists the load of every cell the caller may read in one cluster. The
+ * cluster defaults to the local cluster; namespace narrows the list.
+ */
+export function listCellUsage(params?: { cluster?: string; namespace?: string }): Promise<CellUsageListResponse> {
+  const qs = new URLSearchParams();
+  if (params?.cluster) qs.set("cluster", params.cluster);
+  if (params?.namespace) qs.set("namespace", params.namespace);
+  const s = qs.toString();
+  return bffFetch<CellUsageListResponse>(`/cells/usage${s ? `?${s}` : ""}`);
+}
+
+/**
+ * Reads one cell's load, tenant by tenant. An unknown controller, a
+ * controller that is not a cell, and a refused caller all answer 404.
+ */
+export function getCellUsage(namespace: string, name: string, cluster?: string): Promise<CellUsage> {
+  const qs = cluster ? `?cluster=${encodeURIComponent(cluster)}` : "";
+  return bffFetch<CellUsage>(`/cells/${enc(namespace)}/${enc(name)}/usage${qs}`);
+}
+
 export interface ListRunsParams {
   branch?: string;
   result?: string;
@@ -1177,4 +1214,41 @@ export function cancelRun(runId: string): Promise<CancelRunResponse> {
  */
 export function rerunRun(runId: string): Promise<RunActionResponse> {
   return bffFetchJSON<RunActionResponse>(`${runBase(runId)}/rerun`, { method: "POST" });
+}
+
+/**
+ * Lists every cell pool. The surface needs the cellpools:read verb on a
+ * cluster-wide binding, because CellPool is cluster scoped.
+ */
+export function getCellPools(): Promise<CellPoolListResponse> {
+  return bffFetch<CellPoolListResponse>("/cellpools");
+}
+
+/** Reads one cell pool's spec and status. */
+export function getCellPool(name: string): Promise<CellPool> {
+  return bffFetch<CellPool>(`/cellpools/${enc(name)}`);
+}
+
+/**
+ * Scales one cell pool. The body carries the four scale dials only: a
+ * structural edit goes to kubectl or GitOps. The handler retries an
+ * internal conflict three times and then answers 409.
+ */
+export function patchCellPool(name: string, body: CellPoolScaleRequest): Promise<CellPool> {
+  return bffFetch<CellPool>(`/cellpools/${enc(name)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Reads which subjects may build on each tenant of a cell. The read
+ * answers 404 for an unknown controller, a controller that is not a cell,
+ * and a refused controller read. It answers 403 for a caller who holds no
+ * cluster-wide rolebindings:read.
+ */
+export function getCellGrants(namespace: string, name: string, cluster?: string): Promise<CellGrants> {
+  const qs = cluster ? `?cluster=${encodeURIComponent(cluster)}` : "";
+  return bffFetch<CellGrants>(`/cells/${enc(namespace)}/${enc(name)}/grants${qs}`);
 }

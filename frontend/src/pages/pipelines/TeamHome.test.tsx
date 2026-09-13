@@ -1,23 +1,37 @@
+import fs from "fs";
+import path from "path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createTestQueryClient } from "../../test/render-utils";
 import { ApiError } from "../../hooks/useApi";
+import { createPipelineSummary, createRunningRun } from "../../test/factories";
 import TeamHome from "./TeamHome";
 
 const mockListPipelines = vi.fn();
 const mockListRunners = vi.fn();
+const mockGetTeamCell = vi.fn();
 vi.mock("../../api/client", () => ({
   listPipelines: (...args: unknown[]) => mockListPipelines(...args),
   listRunners: (...args: unknown[]) => mockListRunners(...args),
+  getTeamCell: (...args: unknown[]) => mockGetTeamCell(...args),
 }));
+
+/** LocationSpy publishes the current search string, so a test can read the
+ * URL the page wrote. */
+function LocationSpy() {
+  const location = useLocation();
+  return <div data-testid="search">{location.search}</div>;
+}
 
 function renderPage(route = "/pipelines/acme") {
   const queryClient = createTestQueryClient();
   return render(
     <MemoryRouter initialEntries={[route]}>
       <QueryClientProvider client={queryClient}>
+        <LocationSpy />
         <Routes>
           <Route path="/pipelines/:team" element={<TeamHome />} />
         </Routes>
@@ -26,11 +40,60 @@ function renderPage(route = "/pipelines/acme") {
   );
 }
 
+/** BackControl steps the router's own history back, which is what the
+ * browser back button does. */
+function BackControl() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate(-1)}>
+      Step back
+    </button>
+  );
+}
+
+/** renderWithHistory renders the page with an earlier entry behind it, so a
+ * back step has somewhere to land. */
+function renderWithHistory(route: string) {
+  const queryClient = createTestQueryClient();
+  return render(
+    <MemoryRouter initialEntries={["/elsewhere", route]} initialIndex={1}>
+      <QueryClientProvider client={queryClient}>
+        <LocationSpy />
+        <BackControl />
+        <Routes>
+          <Route path="/elsewhere" element={<div>Somewhere else</div>} />
+          <Route path="/pipelines/:team" element={<TeamHome />} />
+        </Routes>
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+}
+
+/** pipelineList builds a listing response for the tenant folder named. */
+function pipelineList(
+  tenantFolder: string,
+  jobPaths: Array<string | { jobPath: string; kind?: "pipeline" | "multibranch" }>,
+  runningPaths: string[] = [],
+) {
+  return {
+    items: jobPaths.map((entry) =>
+      typeof entry === "string"
+        ? createPipelineSummary({ jobPath: entry })
+        : createPipelineSummary({ jobPath: entry.jobPath, kind: entry.kind ?? "pipeline" }),
+    ),
+    runningNow: runningPaths.map((jobPath) => createRunningRun({ jobPath })),
+    tenantFolder,
+    truncated: false,
+  };
+}
+
 describe("TeamHome", () => {
   beforeEach(() => {
     mockListPipelines.mockReset();
     mockListRunners.mockReset();
+    mockGetTeamCell.mockReset();
     mockListRunners.mockResolvedValue([]);
+    mockGetTeamCell.mockResolvedValue({ state: "notCellHosted", canOpenCell: false });
   });
 
   it("shows a loading state before the response arrives", () => {
@@ -111,11 +174,214 @@ describe("TeamHome", () => {
   });
 });
 
+describe("TeamHome — the folder tree", () => {
+  beforeEach(() => {
+    mockListPipelines.mockReset();
+    mockListRunners.mockReset();
+    mockGetTeamCell.mockReset();
+    mockListRunners.mockResolvedValue([]);
+    mockGetTeamCell.mockResolvedValue({ state: "notCellHosted", canOpenCell: false });
+  });
+
+  it("turns a nested job path into a folder row and a job row", async () => {
+    mockListPipelines.mockResolvedValue(pipelineList("payments", ["payments/release/eu"]));
+    renderPage("/pipelines/payments");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "release, 1 job" })).toBeInTheDocument();
+    });
+    expect(screen.getByRole("link", { name: "eu" })).toBeInTheDocument();
+  });
+
+  it("renders no row for an item whose path equals the tenant folder", async () => {
+    mockListPipelines.mockResolvedValue(pipelineList("payments", ["payments"]));
+    renderPage("/pipelines/payments");
+    await waitFor(() => {
+      expect(screen.getByText("No pipelines yet.")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("link", { name: "payments" })).not.toBeInTheDocument();
+  });
+
+  it("removes a folded folder's rows from the page, rather than hiding them", async () => {
+    const user = userEvent.setup();
+    mockListPipelines.mockResolvedValue(pipelineList("payments", ["payments/release/eu"]));
+    renderPage("/pipelines/payments");
+    await waitFor(() => expect(screen.getByRole("link", { name: "eu" })).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "release, 1 job" }));
+    await waitFor(() => expect(screen.queryByRole("link", { name: "eu" })).not.toBeInTheDocument());
+    expect(screen.queryByText("payments/release/eu")).not.toBeInTheDocument();
+  });
+
+  it("puts a folder row before a job row at the same level", async () => {
+    mockListPipelines.mockResolvedValue(
+      pipelineList("payments", ["payments/zeta", "payments/api", "payments/release/eu"]),
+    );
+    renderPage("/pipelines/payments");
+    await waitFor(() => expect(screen.getByRole("link", { name: "api" })).toBeInTheDocument());
+
+    const cells = screen.getAllByRole("cell").filter((cell) => cell.textContent !== "");
+    const names = cells.map((cell) => cell.textContent);
+    const releaseAt = names.findIndex((text) => text?.startsWith("release"));
+    const apiAt = names.findIndex((text) => text?.startsWith("api"));
+    const zetaAt = names.findIndex((text) => text?.startsWith("zeta"));
+    expect(releaseAt).toBeLessThan(apiAt);
+    expect(apiAt).toBeLessThan(zetaAt);
+  });
+
+  it("reports a folder's job count and running count, and renders no health glyph", async () => {
+    mockListPipelines.mockResolvedValue(
+      pipelineList(
+        "payments",
+        ["payments/release/eu", "payments/release/us"],
+        ["payments/release/eu", "payments/release/us"],
+      ),
+    );
+    renderPage("/pipelines/payments");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "release, 2 jobs" })).toBeInTheDocument();
+    });
+    expect(screen.getByText("2 running")).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /Clear|Cloudy|Rain/ })).not.toBeInTheDocument();
+  });
+
+  it("renders a multibranch item as a foldable row naming its branches", async () => {
+    mockListPipelines.mockResolvedValue(
+      pipelineList("payments", [
+        { jobPath: "payments/checkout-api", kind: "multibranch" },
+        { jobPath: "payments/checkout-api/main" },
+        { jobPath: "payments/checkout-api/dev" },
+      ]),
+    );
+    renderPage("/pipelines/payments");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "checkout-api, 2 branches" })).toBeInTheDocument();
+    });
+    expect(screen.getByText("2 branches")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Run/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("TeamHome — the fold state", () => {
+  beforeEach(() => {
+    mockListPipelines.mockReset();
+    mockListRunners.mockReset();
+    mockGetTeamCell.mockReset();
+    mockListRunners.mockResolvedValue([]);
+    mockGetTeamCell.mockResolvedValue({ state: "notCellHosted", canOpenCell: false });
+  });
+
+  it("writes the unfolded folders into the URL", async () => {
+    const user = userEvent.setup();
+    mockListPipelines.mockResolvedValue(pipelineList("payments", ["payments/release/eu/deploy"]));
+    renderPage("/pipelines/payments?open=release");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "release/eu, 1 job" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "release/eu, 1 job" }));
+    await waitFor(() => {
+      const search = screen.getByTestId("search").textContent ?? "";
+      expect(search).toContain("open=release");
+      expect(search).toContain("open=release%2Feu");
+    });
+  });
+
+  it("unfolds the top two levels on a first load, and folds a third level", async () => {
+    mockListPipelines.mockResolvedValue(pipelineList("payments", ["payments/a/b/c/job"]));
+    renderPage("/pipelines/payments");
+    await waitFor(() => expect(screen.getByRole("button", { name: "a, 1 job" })).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "a/b, 1 job" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "a/b/c, 1 job" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "job" })).not.toBeInTheDocument();
+  });
+
+  it("folds everything when the open parameter is present and empty", async () => {
+    mockListPipelines.mockResolvedValue(pipelineList("payments", ["payments/release/eu"]));
+    renderPage("/pipelines/payments?open=");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "release, 1 job" })).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "release, 1 job" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.queryByRole("link", { name: "eu" })).not.toBeInTheDocument();
+  });
+
+  it("leaves the page on a back step, rather than restoring an earlier fold", async () => {
+    const user = userEvent.setup();
+    mockListPipelines.mockResolvedValue(
+      pipelineList("payments", ["payments/a/x", "payments/b/x", "payments/c/x"]),
+    );
+    renderWithHistory("/pipelines/payments");
+    await waitFor(() => expect(screen.getByRole("button", { name: "a, 1 job" })).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "a, 1 job" }));
+    await user.click(screen.getByRole("button", { name: "b, 1 job" }));
+    await user.click(screen.getByRole("button", { name: "c, 1 job" }));
+
+    await user.click(screen.getByRole("button", { name: "Step back" }));
+    await waitFor(() => expect(screen.getByText("Somewhere else")).toBeInTheDocument());
+  });
+
+  it("folds and unfolds the focused node with the arrow keys", async () => {
+    const user = userEvent.setup();
+    mockListPipelines.mockResolvedValue(pipelineList("payments", ["payments/release/eu"]));
+    renderPage("/pipelines/payments?open=");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "release, 1 job" })).toBeInTheDocument();
+    });
+
+    screen.getByRole("button", { name: "release, 1 job" }).focus();
+    await user.keyboard("{ArrowRight}");
+    await waitFor(() => expect(screen.getByRole("link", { name: "eu" })).toBeInTheDocument());
+
+    screen.getByRole("button", { name: "release, 1 job" }).focus();
+    await user.keyboard("{ArrowLeft}");
+    await waitFor(() => expect(screen.queryByRole("link", { name: "eu" })).not.toBeInTheDocument());
+  });
+
+  it("changes the rows at once and moves no indicator for a reader who refuses motion", async () => {
+    const user = userEvent.setup();
+    mockListPipelines.mockResolvedValue(pipelineList("payments", ["payments/release/eu"]));
+    renderPage("/pipelines/payments");
+    await waitFor(() => expect(screen.getByRole("link", { name: "eu" })).toBeInTheDocument());
+
+    // The row set changes with the click, with no height animation between.
+    await user.click(screen.getByRole("button", { name: "release, 1 job" }));
+    expect(screen.queryByRole("link", { name: "eu" })).not.toBeInTheDocument();
+
+    const css = fs.readFileSync(path.join(__dirname, "JobTree.module.css"), "utf-8");
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*transition: none/);
+  });
+
+  it("tabs over the disclosure buttons in row order", async () => {
+    mockListPipelines.mockResolvedValue(
+      pipelineList("payments", ["payments/a/x", "payments/b/x"]),
+    );
+    renderPage("/pipelines/payments");
+    await waitFor(() => expect(screen.getByRole("button", { name: "a, 1 job" })).toBeInTheDocument());
+
+    const labels = screen.getAllByRole("button").map((button) => button.getAttribute("aria-label"));
+    expect(labels).toEqual(["a, 1 job", "b, 1 job"]);
+  });
+
+  it("states that the list shows only the jobs the caller's access covers", async () => {
+    mockListPipelines.mockResolvedValue(pipelineList("payments", []));
+    renderPage("/pipelines/payments");
+    await waitFor(() => {
+      expect(screen.getByText("This list shows only the jobs your access covers.")).toBeInTheDocument();
+    });
+  });
+});
+
 describe("TeamHome — Runners section", () => {
   beforeEach(() => {
     mockListPipelines.mockReset();
     mockListRunners.mockReset();
+    mockGetTeamCell.mockReset();
     mockListPipelines.mockResolvedValue({ items: [], runningNow: [], truncated: false });
+    mockGetTeamCell.mockResolvedValue({ state: "notCellHosted", canOpenCell: false });
   });
 
   it("shows the recovery state for a team with no registered runners", async () => {
@@ -181,5 +447,75 @@ describe("TeamHome — Runners section", () => {
     await waitFor(() => {
       expect(screen.getByText("Unable to load runners.")).toBeInTheDocument();
     });
+  });
+});
+
+describe("TeamHome — the cell card", () => {
+  beforeEach(() => {
+    mockListPipelines.mockReset();
+    mockListRunners.mockReset();
+    mockGetTeamCell.mockReset();
+    mockListRunners.mockResolvedValue([]);
+    mockListPipelines.mockResolvedValue(pipelineList("payments", ["payments/checkout-api"]));
+    mockGetTeamCell.mockResolvedValue({ state: "notCellHosted", canOpenCell: false });
+  });
+
+  it("puts the card in the page head, after the title and above Running now", async () => {
+    mockGetTeamCell.mockResolvedValue({
+      state: "placed",
+      reason: "TenantPlaced",
+      cell: "cell-a",
+      namespace: "varroa-system",
+      cluster: "core",
+      freeSlots: 4,
+      queueLength: 0,
+      runningNow: 1,
+      otherTenantCount: 2,
+      canOpenCell: false,
+    });
+    renderPage("/pipelines/payments");
+
+    const card = await screen.findByRole("region", { name: "Your cell" });
+    const title = screen.getByRole("heading", { level: 1, name: "payments" });
+    const running = screen.getByText("Running now");
+    expect(card.parentElement).toContainElement(title);
+    expect(title.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(card.compareDocumentPosition(running) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("heads the page with an h1 and the card with an h2", async () => {
+    mockGetTeamCell.mockResolvedValue({ state: "placed", cell: "cell-a", canOpenCell: false });
+    renderPage("/pipelines/payments");
+
+    await screen.findByRole("region", { name: "Your cell" });
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("payments");
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Your cell");
+  });
+
+  it("keeps the pipelines table when the cell read fails", async () => {
+    mockGetTeamCell.mockRejectedValue(new Error("boom"));
+    renderPage("/pipelines/payments");
+
+    await waitFor(() => expect(screen.getByText("checkout-api")).toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("Your cell")).not.toBeInTheDocument());
+  });
+
+  it("refreshes the cell read on its own interval and leaves the other reads alone", async () => {
+    mockGetTeamCell.mockClear();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderPage("/pipelines/payments");
+      await waitFor(() => expect(mockGetTeamCell).toHaveBeenCalledTimes(1));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+
+      expect(mockGetTeamCell).toHaveBeenCalledTimes(3);
+      expect(mockListPipelines).toHaveBeenCalledTimes(1);
+      expect(mockListRunners).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

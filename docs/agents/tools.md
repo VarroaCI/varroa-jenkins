@@ -14,9 +14,11 @@ the authoritative reference for available names and arguments.
 
 Varroa create and update tools are declarative. Many create tools apply a full
 desired object, so an existing object may be replaced. Updates for most
-resources also replace omitted fields. `update_controller` is a sparse patch
-with separate ownership rules. Read [Writing through MCP](writing.md) before
-using it.
+resources also replace omitted fields. Two tools are sparse instead.
+`update_controller` is a sparse patch with separate ownership rules. Read
+[Writing through MCP](writing.md) before using it. `update_cell_pool` writes
+only the dials the call names, which is why it alone among the write tools
+reports `destructiveHint: false`.
 
 `call_jenkins_tool` is open-world because the target Jenkins plugin defines the
 remote tool's effect. Review its discovered schema for every controller.
@@ -52,6 +54,48 @@ maximum of 200 as `list_activity`. The `get_run` tool returns one run's
 detail. The `get_run_log` tool returns a bounded tail of the run's console
 log, never a stream; `tailLines` defaults to 100 and clamps between 1 and
 500. An agent that needs live output calls `get_run_log` again.
+
+The server also exposes one cell read tool, `get_cell_usage`. It takes
+`namespace`, `name`, and an optional `cluster` that defaults to the local
+cluster. It returns the same value the REST path
+`GET /api/v1/cells/{namespace}/{name}/usage` returns: each tenant's four
+load counts, the totals, the tenant cap, the free slots, and the Jenkins
+queue length. The tool checks the `controllers:read` grant on the cell. A
+name that is not a cell, and a cell the caller may not read, both give a
+not-found error. Without the record store the tool gives an error that names
+it. See [Cell usage](../operations/cell-usage.md) for the count rules.
+
+The server exposes three cell-pool tools. A
+[cell pool](../operations/cell-pools.md) sizes the cells of one version
+profile.
+
+| Tool | Arguments | Verb |
+|---|---|---|
+| `list_cell_pools` | `verbose` (optional) | `cellpools:read` |
+| `get_cell_pool` | `name` | `cellpools:read` |
+| `update_cell_pool` | `name`, and at least one of `warm`, `maxCells`, `maxTenantsPerCell`, `unreadyGracePeriod` | `cellpools:update` |
+
+`list_cell_pools` returns a compact summary of each pool, sorted by name. The
+summary carries every spec dial and every status count. Pass `verbose: true`
+for the full resources, which add the cell template and the condition list.
+`get_cell_pool` returns one pool's full resource.
+
+`update_cell_pool` scales a pool. It writes only the dials the call names and
+removes nothing, so it is annotated `destructiveHint: false` and
+`idempotentHint: true`. `warm`, `maxCells`, and `maxTenantsPerCell` are whole
+numbers. A fractional value and a value outside the 32-bit signed range are
+both refused before the write. `unreadyGracePeriod` is a duration such as
+`5m`. The tool refuses a call that names no dial.
+
+`profileRef` and `cellTemplate` are not tool arguments. Edit those with
+`kubectl` or through GitOps. There is no tool to create a pool and none to
+delete one.
+
+`CellPool` is cluster-scoped, so both verbs read the caller's cluster-wide
+bindings only. A namespace-scoped binding satisfies neither. The built-in
+`varroa:operator` role holds both verbs, and `varroa:admin` holds them through
+its wildcard. `varroa:developer` and `varroa:viewer` hold neither, because a
+pool's status lists every tenant on it.
 
 Each tool applies the same authorization as its REST counterpart. Triggering
 a run checks the write grant on the resolved team and job. Listing runs

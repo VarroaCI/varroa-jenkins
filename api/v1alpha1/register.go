@@ -20,6 +20,7 @@ const (
 	UpdateCenterKind          = "UpdateCenter"
 	ControllerClassKind       = "ControllerClass"
 	TeamKind                  = "Team"
+	CellPoolKind              = "CellPool"
 )
 
 // GroupVersionKind instances for each CRD kind.
@@ -40,4 +41,5 @@ var (
 	UpdateCenterGVK          = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: UpdateCenterKind}
 	ControllerClassGVK       = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: ControllerClassKind}
 	TeamGVK                  = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: TeamKind}
+	CellPoolGVK              = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: CellPoolKind}
 )

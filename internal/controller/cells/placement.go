@@ -62,9 +62,13 @@ type CellCandidate struct {
 	// only the embedded baseline matched. A cell can never satisfy a named
 	// profile request through the baseline.
 	ResolvedProfile string
-	// MaxTenants mirrors spec.cell.maxTenants. 0 means the chart default,
-	// supplied by Inputs.MaxTenantsDefault.
+	// MaxTenants mirrors spec.cell.maxTenants. 0 resolves through the cell's
+	// effective owner, then through Inputs.MaxTenantsDefault.
 	MaxTenants int32
+	// Pool mirrors the varroa.dev/cell-pool label. It is the raw label, so
+	// every test resolves it against Inputs.Pools first: a label naming a
+	// deleted pool gives no effective owner.
+	Pool string
 
 	// Tenants mirrors status.cell.tenants.
 	Tenants []string
@@ -112,6 +116,11 @@ type Inputs struct {
 	// cluster. Cross-cluster placement is out of scope, so Place never
 	// needs to test cluster membership itself.
 	Cells []CellCandidate
+
+	// Pools lists every live CellPool. The caller gathers it once per tick,
+	// beside the cell list. A pool absent from this slice does not exist, so
+	// a cell labelled with its name has no effective owner.
+	Pools []CellPoolSummary
 
 	// ProfileExists reports whether the named JenkinsVersionProfile exists.
 	// A nil func is treated as "always exists" (used by tests that do not
@@ -174,6 +183,17 @@ type CellPatch struct {
 	Tenants   []string
 }
 
+// CellClaim names the cell one tenant's new placement selected. The caller
+// writes it with WriteCellClaim before it patches the Team status, and
+// retires it with ReleaseCellClaim after the tenant patch. The claim makes
+// the cell itself carry the intent the Team fence records, so a pool drain
+// cannot delete the chosen cell in the window between the two writes.
+type CellClaim struct {
+	Name      string
+	Namespace string
+	Tenant    string
+}
+
 // ActivityEvent is one activity-stream event Place decided to publish. The
 // caller publishes it through its own activity.EventSink.
 type ActivityEvent struct {
@@ -186,6 +206,12 @@ type ActivityEvent struct {
 type Outcome struct {
 	// CellPatches lists each affected cell's new tenant list.
 	CellPatches []CellPatch
+	// CellClaim names the cell this tenant needs held: the cell a new
+	// placement selected, or the bound cell whose tenant list does not name
+	// the tenant yet. It is nil once the tenant patch has landed. The
+	// caller writes it before the Team status patch, and retires it only
+	// after that cell's tenant patch succeeds.
+	CellClaim *CellClaim
 	// ActivityEvents lists the events to publish.
 	ActivityEvents []ActivityEvent
 	// FinalizerAdd is true when the caller must add
@@ -243,8 +269,8 @@ func Place(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1
 		retryMovePurge(ctx, in, team, status)
 	}
 
-	if reason, refused := refuse(in, team); refused {
-		setPlaced(status, metav1.ConditionFalse, reason, refusalMessage(reason), nowT)
+	if reason, message, refused := refuse(in, team); refused {
+		setPlaced(status, metav1.ConditionFalse, reason, message, nowT)
 		return out, nil
 	}
 
@@ -260,6 +286,25 @@ func Place(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1
 		} else {
 			setPlaced(status, metav1.ConditionFalse, v1alpha1.TeamReasonCellNotReady,
 				"the bound cell reports CellReady=False; this tenant's builds do not start", nowT)
+		}
+		// The fence names this cell, and the cell's own tenant list does
+		// not name the tenant yet, so the tenant patch has not landed. The
+		// pass sends the tenant patch again, and the claim must live again
+		// this tick: it expires after CellClaimTTL, and a drain would then
+		// find a cell with no tenant and no claim. The claim retires only
+		// when the patch lands, so the tenant list converges or the cell
+		// stays held.
+		if !containsString(cell.Tenants, team.Name) {
+			out.CellClaim = &CellClaim{
+				Name:      cell.Name,
+				Namespace: cell.Namespace,
+				Tenant:    team.Name,
+			}
+			out.CellPatches = append(out.CellPatches, CellPatch{
+				Name:      cell.Name,
+				Namespace: cell.Namespace,
+				Tenants:   appendUnique(cell.Tenants, team.Name),
+			})
 		}
 		maybeReannounce(ctx, in, team, status, *cell, nowT, &out)
 	case moveImmediate:
@@ -285,7 +330,8 @@ const (
 	// evacuating.
 	moveImmediate
 	// moveVoluntary means the bound cell exists and is not evacuating, but
-	// no longer satisfies the keep rule (profile, dedicated, or disabled).
+	// no longer satisfies the keep rule (profile, pool membership, or
+	// disabled).
 	// The move waits for the drain signal first.
 	moveVoluntary
 )
@@ -304,32 +350,61 @@ func evaluateKeep(in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus) (
 	if c.Evacuate {
 		return &c, moveImmediate
 	}
-	if !c.Enabled || c.ResolvedProfile != team.Spec.Pipelines.Profile ||
-		(team.Spec.Pipelines.Dedicated && len(c.Tenants) > 1) {
+	if !c.Enabled || c.ResolvedProfile != team.Spec.Pipelines.Profile || !keepsMembership(in, team, c) {
 		return &c, moveVoluntary
 	}
 	return &c, moveNone
 }
 
-// refuse applies the five refusal gates in order (tenant-placement spec).
-func refuse(in Inputs, team *v1alpha1.Team) (string, bool) {
+// keepsMembership answers the membership test for a bound cell: it holds
+// when the cell has no effective owner, or when its effective owner equals
+// the tenant's resolved pool. Deleting a pool therefore moves no tenant.
+func keepsMembership(in Inputs, team *v1alpha1.Team, c CellCandidate) bool {
+	owner := effectiveOwner(in.Pools, c.Pool)
+	return owner == nil || owner.Name == ResolvedPoolName(team.Spec.Pipelines)
+}
+
+// refuse applies the six refusal gates in order (tenant-placement spec). It
+// returns the reason and the message together, because gate 4 names the pool
+// and the profile that pool actually serves, values refusalMessage cannot
+// reach from a reason alone.
+func refuse(in Inputs, team *v1alpha1.Team) (string, string, bool) {
 	p := team.Spec.Pipelines
 	if !in.RecordStoreEnabled {
-		return v1alpha1.TeamReasonRecordStoreUnsupported, true
+		return refused(v1alpha1.TeamReasonRecordStoreUnsupported)
 	}
 	if !in.BlobsModeS3 {
-		return v1alpha1.TeamReasonBlobTierUnsupported, true
+		return refused(v1alpha1.TeamReasonBlobTierUnsupported)
 	}
 	if in.ProfileExists != nil && !in.ProfileExists(p.Profile) {
-		return v1alpha1.TeamReasonProfileNotFound, true
+		return refused(v1alpha1.TeamReasonProfileNotFound)
+	}
+	// A named pool must exist and must serve the named profile. A default
+	// pool the operator has not created yet is not a refusal: the pool
+	// reconciler creates it within one tick.
+	if p.CellPool != "" {
+		owner := effectiveOwner(in.Pools, p.CellPool)
+		switch {
+		case owner == nil:
+			return v1alpha1.TeamReasonCellPoolNotFound,
+				fmt.Sprintf("the CellPool %q does not exist", p.CellPool), true
+		case owner.ProfileRef != p.Profile:
+			return v1alpha1.TeamReasonCellPoolNotFound,
+				fmt.Sprintf("the CellPool %q serves profile %q, not %q", p.CellPool, owner.ProfileRef, p.Profile), true
+		}
 	}
 	if !containsString(team.Spec.Namespaces, p.AgentNamespace) {
-		return v1alpha1.TeamReasonAgentNamespaceUnmanaged, true
+		return refused(v1alpha1.TeamReasonAgentNamespaceUnmanaged)
 	}
 	if !in.ManagedNamespaces.Contains(p.AgentNamespace) {
-		return v1alpha1.TeamReasonAgentNamespaceUnmanaged, true
+		return refused(v1alpha1.TeamReasonAgentNamespaceUnmanaged)
 	}
-	return "", false
+	return "", "", false
+}
+
+// refused pairs a fixed reason with its fixed message.
+func refused(reason string) (string, string, bool) {
+	return reason, refusalMessage(reason), true
 }
 
 func refusalMessage(reason string) string {
@@ -375,9 +450,11 @@ func randHex(n int) string {
 
 // selectCandidate picks a cell for team, following the selection rule
 // (tenant-placement spec): enabled, CellReady, not evacuating, the resolved
-// profile matches; dedicated needs an empty cell (maxTenants treated as 1);
-// otherwise the fewest tenants below maxTenants, breaking a tie by name.
+// profile matches, the membership test holds, and the cell holds fewer
+// tenants than its resolved capacity. It takes the fewest tenants first and
+// breaks a tie by name.
 func selectCandidate(in Inputs, team *v1alpha1.Team) *CellCandidate {
+	resolvedPool := ResolvedPoolName(team.Spec.Pipelines)
 	var candidates []CellCandidate
 	for _, c := range in.Cells {
 		if !c.Enabled || !c.CellReady || c.Evacuate {
@@ -386,17 +463,19 @@ func selectCandidate(in Inputs, team *v1alpha1.Team) *CellCandidate {
 		if c.ResolvedProfile == "" || c.ResolvedProfile != team.Spec.Pipelines.Profile {
 			continue
 		}
-		maxTenants := c.MaxTenants
-		if maxTenants <= 0 {
-			maxTenants = in.MaxTenantsDefault
-		}
-		if team.Spec.Pipelines.Dedicated {
-			if len(c.Tenants) != 0 {
+		// The membership test for a candidate: the effective owner equals
+		// the resolved pool, or the cell has no effective owner and the
+		// tenant names no pool. A cell owned by another live pool is never
+		// a candidate, so a single-tenant pool cannot be poached.
+		owner := effectiveOwner(in.Pools, c.Pool)
+		if owner != nil {
+			if owner.Name != resolvedPool {
 				continue
 			}
-			maxTenants = 1
+		} else if team.Spec.Pipelines.CellPool != "" {
+			continue
 		}
-		if int32(len(c.Tenants)) >= maxTenants {
+		if int32(len(c.Tenants)) >= resolveCellCapacity(c.MaxTenants, owner, in.MaxTenantsDefault) {
 			continue
 		}
 		candidates = append(candidates, c)
@@ -413,13 +492,26 @@ func selectCandidate(in Inputs, team *v1alpha1.Team) *CellCandidate {
 	return &candidates[0]
 }
 
+// noCandidateReason answers the Placed reason for a tick that found no
+// candidate: CellCapReached when the tenant's resolved pool sits at its cap,
+// and AwaitingCell otherwise. The pass still creates no Controller.
+func noCandidateReason(in Inputs, team *v1alpha1.Team) (string, string) {
+	pool := effectiveOwner(in.Pools, ResolvedPoolName(team.Spec.Pipelines))
+	if pool != nil && pool.CapReached {
+		return v1alpha1.TeamReasonCellCapReached,
+			fmt.Sprintf("the CellPool %q holds maxCells cells and none has a free tenant slot", pool.Name)
+	}
+	return v1alpha1.TeamReasonAwaitingCell, ""
+}
+
 // performMove implements the involuntary move order (tenant-placement
 // spec): the fence (the new placement, with generation+1) is written before
 // either cell's tenant list is patched.
 func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus, oldCell *CellCandidate, nowT time.Time, out *Outcome) {
 	newCell := selectCandidate(in, team)
 	if newCell == nil {
-		setPlaced(status, metav1.ConditionFalse, v1alpha1.TeamReasonAwaitingCell, "", nowT)
+		reason, message := noCandidateReason(in, team)
+		setPlaced(status, metav1.ConditionFalse, reason, message, nowT)
 		return
 	}
 
@@ -474,6 +566,16 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 		Cell: newCell.Name, CellNamespace: newCell.Namespace,
 		Generation: newGeneration, CellInstance: newCell.Instance,
 		Policy: policy, CellLastSeenAt: newCell.MiteLastSeen, At: nowT,
+	}
+
+	// The claim: the caller writes it onto the new cell before the fence
+	// below reaches the Team. A pool drain that re-read the cell earlier
+	// then loses its delete precondition, and one that re-reads it later
+	// finds the claim.
+	out.CellClaim = &CellClaim{
+		Name:      newCell.Name,
+		Namespace: newCell.Namespace,
+		Tenant:    team.Name,
 	}
 
 	// The fence: write the placement before either cell's tenant list.

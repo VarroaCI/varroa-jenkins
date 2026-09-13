@@ -405,8 +405,12 @@ export interface JenkinsRoleBindingList {
 export interface TeamPipelines {
   /** JenkinsVersionProfile the placement pass resolves a cell against. */
   profile?: string;
-  /** When true, requires a cell that carries no other tenant. */
-  dedicated?: boolean;
+  /**
+   * The CellPool the placement pass selects a cell from. Empty means the
+   * profile's default pool: the pool whose name equals profile. A tenant
+   * that needs a cell of its own names a pool whose maxTenantsPerCell is 1.
+   */
+  cellPool?: string;
   /** Kubernetes namespace this tenant's agents run in. Must be one of the team's own namespaces. */
   agentNamespace?: string;
   /**
@@ -1495,12 +1499,20 @@ export interface RunningRun {
 }
 
 /**
+ * The item kind the tenant's composed bundle declares for a job. A job the
+ * record store alone holds reports "unknown", and so does a declared item
+ * of any other kind.
+ */
+export type PipelineItemKind = "pipeline" | "multibranch" | "unknown";
+
+/**
  * One job's run-history summary for the Pipelines table. A job that has
  * never run carries no lastBuild.
  */
 export interface PipelineSummary {
   jobPath: string;
   health: PipelineHealth;
+  kind: PipelineItemKind;
   lastBuild?: RunSummary;
   durationTrendMs?: number[];
 }
@@ -1509,6 +1521,10 @@ export interface PipelineSummary {
 export interface PipelineListResponse {
   items: PipelineSummary[];
   runningNow: RunningRun[];
+  /** The Jenkins folder that prefixes every job path in the response. It is
+   * the Team name for a placed pipelines tenant, and the empty string for a
+   * controller tenant. The field is always present. */
+  tenantFolder: string;
   truncated: boolean;
 }
 
@@ -1868,4 +1884,193 @@ export interface RunnerEntry {
 export interface RunnerCreateRequest {
   name: string;
   spec: RunnerSpec;
+}
+
+/**
+ * The four load counts of one tenant on a cell, or the same four summed
+ * over the cell. runningNow carries no time bound, so a build that runs
+ * longer than a day still counts. runsLast24h and failedLast24h count
+ * inside the fixed 24-hour window. jobs counts distinct job paths.
+ */
+export interface CellUsageCounts {
+  runningNow: number;
+  runsLast24h: number;
+  failedLast24h: number;
+  jobs: number;
+}
+
+/** One tenant on a cell, with that tenant's four counts. */
+export interface CellTenantUsage extends CellUsageCounts {
+  tenant: string;
+}
+
+/**
+ * One cell's load, tenant by tenant. An absent field is absent from the
+ * object: queueLength reads as zero only for an empty queue, and a cell in
+ * a remote cluster carries no queueLength at all.
+ */
+export interface CellUsage {
+  cluster: string;
+  namespace: string;
+  name: string;
+  windowStart: string;
+  cellPool?: string;
+  profile?: string;
+  jenkinsVersion?: string;
+  jenkinsHealth?: string;
+  queueLength?: number;
+  queueLengthAt?: string;
+  tenants: CellTenantUsage[];
+  totals: CellUsageCounts;
+  /**
+   * The effective tenant cap this surface resolves: the cell value when it
+   * is not zero, else the owning pool's maxTenantsPerCell, else the chart
+   * value, else ten. It is never a minimum over the tiers.
+   */
+  maxTenants: number;
+  freeSlots: number;
+}
+
+/** The items envelope of GET /cells/usage. */
+export interface CellUsageListResponse {
+  items: CellUsage[];
+}
+
+/** The placement state of a team's pipelines tenant. */
+export type TeamCellState = "placed" | "moving" | "rehydrating" | "unplaced" | "notCellHosted";
+
+/**
+ * The tenant's own view of the cell that hosts it. For the states unplaced
+ * and notCellHosted every field other than state and reason is absent. The
+ * body carries no other tenant's name, job path, run, or count.
+ */
+export interface TeamCell {
+  state: TeamCellState;
+  reason?: string;
+  cell?: string;
+  namespace?: string;
+  cluster?: string;
+  cellPool?: string;
+  profile?: string;
+  jenkinsVersion?: string;
+  freeSlots?: number;
+  queueLength?: number;
+  runningNow?: number;
+  runsLast24h?: number;
+  failedLast24h?: number;
+  jobs?: number;
+  /** The number of other tenants on the cell. A count, never a list. */
+  otherTenantCount?: number;
+  /**
+   * True when the caller also holds the controller read grant on the cell.
+   * The hint gates no other field of this body.
+   */
+  canOpenCell: boolean;
+}
+
+/** One status condition of a CellPool. The only type is PoolReady. */
+export interface CellPoolCondition {
+  type: string;
+  status: string;
+  lastTransitionTime?: string;
+  reason?: string;
+  message?: string;
+  observedGeneration?: number;
+}
+
+/**
+ * A CellPool's configuration. profileRef is immutable, because a pool's
+ * cells carry the profile label they were created with.
+ */
+export interface CellPoolSpec {
+  profileRef: string;
+  warm?: number;
+  /** The cap on the pool's cells, placed cells included. Zero is unlimited. */
+  maxCells?: number;
+  /**
+   * The capacity a pool cell uses when its own spec.cell.maxTenants is
+   * zero. A reported maxTenants differs from it only when the cell's own
+   * value wins.
+   */
+  maxTenantsPerCell?: number;
+  unreadyGracePeriod?: string;
+  cellTemplate?: Record<string, unknown>;
+}
+
+/** A CellPool's reported cell and tenant counts. */
+export interface CellPoolStatus {
+  observedGeneration?: number;
+  /** Owned cells that hold no tenant. */
+  warmCells: number;
+  /** Owned cells that hold at least one tenant. */
+  placedCells: number;
+  unreadyCells: number;
+  /** The spare capacity of the placed cells only. warmCells counts the empty ones. */
+  freeTenantSlots: number;
+  tenants?: string[];
+  conditions?: CellPoolCondition[];
+}
+
+/** One cell pool, as the read and scale surface returns it. */
+export interface CellPool {
+  name: string;
+  spec: CellPoolSpec;
+  status: CellPoolStatus;
+}
+
+/** The items envelope of GET /cellpools. */
+export interface CellPoolListResponse {
+  items: CellPool[];
+}
+
+/** The body of PATCH /cellpools/{name}. It carries the four scale dials only. */
+export interface CellPoolScaleRequest {
+  spec: {
+    warm?: number;
+    maxCells?: number;
+    maxTenantsPerCell?: number;
+    unreadyGracePeriod?: string;
+  };
+}
+
+/** Where a grant on a tenant comes from. */
+export type CellGrantSource = "teamMembership" | "tenantScopedBinding" | "clusterWideBinding";
+
+/** One subject of a grant. */
+export interface CellGrantSubject {
+  kind: string;
+  name: string;
+}
+
+/**
+ * One grant that reaches a tenant of a cell. An absent jobs field and an
+ * empty jobs field mean different things, so the field is never an empty
+ * array: an absent field narrows nothing.
+ */
+export interface CellGrant {
+  source: CellGrantSource;
+  /** The VarroaRoleBinding name. Absent for the teamMembership source. */
+  binding?: string;
+  roleRef: string;
+  subjects: CellGrantSubject[];
+  verbs: string[];
+  jobs?: string[];
+}
+
+/** Every grant that reaches one tenant, with its generated Jenkins item role. */
+export interface CellTenantGrants {
+  tenant: string;
+  itemRole: string;
+  itemPattern: string;
+  /** True only when the 50-grant cap dropped a grant of this tenant. */
+  truncated: boolean;
+  grants: CellGrant[];
+}
+
+/** One entry for each tenant of a cell, naming the subjects that may build on it. */
+export interface CellGrants {
+  cluster: string;
+  namespace: string;
+  cell: string;
+  tenants: CellTenantGrants[];
 }

@@ -120,6 +120,8 @@ func registerAllTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	registerActivitySearchMetaTools(mcpServer, deps)
 	registerProxyTools(mcpServer, deps)
 	registerPipelinesTools(mcpServer, deps)
+	registerCellPoolTools(mcpServer, deps)
+	registerCellTools(mcpServer, deps)
 }
 
 func requireClaims(ctx context.Context) (*auth.Claims, error) {

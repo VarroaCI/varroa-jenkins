@@ -78,6 +78,13 @@ spec:
                       AgentNamespace is the Kubernetes namespace this tenant's agents run
                       in. Must be one of spec.namespaces.
                     type: string
+                  cellPool:
+                    description: |-
+                      CellPool names the CellPool the placement pass selects a cell from.
+                      An empty value resolves to the profile's default pool: the pool whose
+                      name equals Profile. A tenant that needs a cell of its own names a
+                      pool whose maxTenantsPerCell is 1.
+                    type: string
                   composedBundleRef:
                     description: |-
                       ComposedBundleRef names the ComposedBundle this tenant's items come
@@ -125,10 +132,6 @@ spec:
                       CronGrace bounds how long the backstop waits past a missed cron
                       occurrence before it fires. Default 5m, range 1m to 60m.
                     type: string
-                  dedicated:
-                    description: Dedicated, when true, requires a cell that carries
-                      no other tenant.
-                    type: boolean
                   exports:
                     description: |-
                       Exports declares which of this tenant's jobs and locks it grants to

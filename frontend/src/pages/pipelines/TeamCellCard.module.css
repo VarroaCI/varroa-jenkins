@@ -1,0 +1,133 @@
+/* The card sizes its own column. The page head's card track is
+   fit-content, so a page whose card renders nothing keeps no empty
+   column. */
+.section {
+  min-width: 260px;
+  max-width: 320px;
+}
+
+.heading {
+  margin: 0 0 0.75rem;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.badgeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.badgeOk {
+  composes: badge;
+  background: var(--ok-soft);
+  color: var(--ok-text);
+}
+
+.badgeInfo {
+  composes: badge;
+  background: var(--info-soft);
+  color: var(--info-text);
+}
+
+.badgeWarn {
+  composes: badge;
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
+
+.reason {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.8125rem;
+}
+
+.reasonLabel {
+  color: var(--text-2);
+}
+
+.reasonValue {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.explain {
+  margin: 0 0 0.75rem;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+/* The figures read at body size. A large number with a small caption is a
+   hero metric, which this card does not use. */
+.load {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+  margin-top: 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.pair {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.pairLabel {
+  color: var(--text-2);
+}
+
+.pairValue {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.sharing {
+  margin: 0.6rem 0 0;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+  font-size: 0.75rem;
+}
+
+/* The underline carries the link, not a colour. An accent colour on a
+   surface drops under the 4.5:1 text floor in one theme or another, and
+   --text clears it in both. */
+.link {
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.link:hover {
+  text-decoration-thickness: 2px;
+}
+
+.updated {
+  color: var(--text-2);
+}
+
+.loading {
+  color: var(--text-2);
+  font-size: 0.8125rem;
+}

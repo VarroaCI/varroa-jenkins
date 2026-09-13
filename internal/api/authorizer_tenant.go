@@ -53,24 +53,48 @@ func (a *Authorizer) CanReadRun(claims *auth.Claims, row RunTenantRow) bool {
 //     either carries no globs, or jobPath is empty, or one glob matches the
 //     folder-relative job path. Grants are never unioned: the verb and the
 //     glob match must come from the same entry.
+//
+// tenantGrants holds steps 1, 2, and 4, and grantsAllow holds steps 3 and
+// 5. Step 4 therefore runs before step 3. The result is the same: steps 1,
+// 2, and 3 are pure denials with no side effect, and step 4 only reads
+// grants.
 func (a *Authorizer) canAccessPipeline(claims *auth.Claims, tenant, folder, jobPath, verb string) bool {
-	if a == nil {
+	grants, ok := a.tenantGrants(claims, tenant, folder)
+	if !ok {
 		return false
 	}
-	if claims == nil {
-		return false
-	}
+	return grantsAllow(grants, folder, jobPath, verb)
+}
 
+// tenantGrants carries decision steps 1, 2, and 4: nil claims deny, the
+// tenant value must parse, its parsed folder must equal folder, and the
+// resolver then answers every grant the caller holds on that tenant. The
+// bool is false when one of the three denies.
+//
+// A listing resolves the grants once per tenant and then tests each row
+// with grantsAllow, instead of resolving them once per row. A nil receiver
+// denies before this method reads a field, so the listing keeps the
+// nil-authorizer rule.
+func (a *Authorizer) tenantGrants(claims *auth.Claims, tenant, folder string) ([]rbac.TenantGrant, bool) {
+	if a == nil || claims == nil {
+		return nil, false
+	}
 	parsed, err := rbac.ParseTenant(tenant)
 	if err != nil || parsed.Folder != folder {
-		return false
+		return nil, false
 	}
+	return a.resolver.EffectiveTenantCapabilities(claims, parsed), true
+}
 
+// grantsAllow carries decision steps 3 and 5: a non-empty jobPath must lie
+// inside folder, and one grant, tested alone, must hold verb on "pipelines"
+// and either carry no globs, or meet an empty jobPath, or match the
+// folder-relative job path. Grants are never unioned: the verb and the glob
+// match must come from the same entry.
+func grantsAllow(grants []rbac.TenantGrant, folder, jobPath, verb string) bool {
 	if jobPath != "" && !withinFolder(folder, jobPath) {
 		return false
 	}
-
-	grants := a.resolver.EffectiveTenantCapabilities(claims, parsed)
 
 	relPath := stripFolder(folder, jobPath)
 	for _, grant := range grants {
@@ -106,4 +130,20 @@ func stripFolder(folder, jobPath string) string {
 		return strings.TrimPrefix(jobPath, folder)
 	}
 	return strings.TrimPrefix(jobPath, folder+"/")
+}
+
+// TenantGrantSources answers which grants reach a tenant. It is the reverse
+// of the tenant checks above: it names no caller, and it decides nothing.
+// The route that serves it applies its own two gates.
+//
+// The bool reports whether the grant cap dropped a grant of this tenant.
+func (a *Authorizer) TenantGrantSources(tenant string) ([]rbac.TenantGrantSource, bool) {
+	if a == nil || a.resolver == nil {
+		return nil, false
+	}
+	parsed, err := rbac.ParseTenant(tenant)
+	if err != nil {
+		return nil, false
+	}
+	return a.resolver.TenantGrantSourcesTruncated(parsed)
 }

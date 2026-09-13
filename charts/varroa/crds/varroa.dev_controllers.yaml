@@ -4077,6 +4077,35 @@ spec:
                       Instance is the running Jenkins pod's metadata.uid. Empty when no
                       pod runs. Written by the controller reconciler on every tick.
                     type: string
+                  pendingTenants:
+                    description: |-
+                      PendingTenants holds one placement claim per tenant the placement
+                      pass has chosen this cell for and has not yet added to Tenants. The
+                      placement pass is its only writer. The pool drain skips a cell that
+                      carries a live claim.
+                    items:
+                      description: |-
+                        CellPendingTenant is one placement claim on a cell. The placement pass
+                        writes it before it writes the Team fence, so a pool drain that re-read
+                        the cell earlier cannot delete the cell the tenant is about to use.
+                      properties:
+                        claimedAt:
+                          description: |-
+                            ClaimedAt is when the placement pass wrote the claim. A claim older
+                            than the claim window holds no cell, so a placement pass that stops
+                            between the claim and the tenant patch cannot pin a cell.
+                          format: date-time
+                          type: string
+                        tenant:
+                          description: Tenant is the Team name this claim belongs
+                            to.
+                          type: string
+                      required:
+                      - claimedAt
+                      - tenant
+                      type: object
+                    maxItems: 64
+                    type: array
                   previousInstance:
                     description: |-
                       PreviousInstance is the pod uid Instance held before its last

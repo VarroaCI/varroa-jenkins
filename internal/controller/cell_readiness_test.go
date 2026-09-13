@@ -13,6 +13,8 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
+	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
@@ -351,6 +353,52 @@ func TestCellRollAndEvacuate(t *testing.T) {
 	cond = findCondition(cr.Status.Conditions, v1alpha1.ConditionCellReady)
 	if cond.Status != metav1.ConditionTrue || cond.Reason != v1alpha1.ReasonConnected {
 		t.Fatalf("tick5: condition = %+v, want True/Connected", cond)
+	}
+}
+
+// TestCellUnreadyGraceFollowsThePool asserts the pool-aware grace period: a
+// cell that belongs to a pool setting unreadyGracePeriod uses that value,
+// and a cell with no pool, or one naming a deleted pool, keeps the chart
+// value.
+func TestCellUnreadyGraceFollowsThePool(t *testing.T) {
+	chart := 5 * time.Minute
+	pool := 20 * time.Minute
+
+	tests := []struct {
+		name      string
+		poolLabel string
+		seedPool  bool
+		want      time.Duration
+	}{
+		{name: "no pool label uses the chart value", want: chart},
+		{name: "a pool cell uses its pool", poolLabel: "big", seedPool: true, want: pool},
+		{name: "a deleted pool falls back to the chart value", poolLabel: "gone", want: chart},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := newTestClient()
+			rec := newTestReconciler(client)
+			rec.cellsConfig = CellsConfig{UnreadyGracePeriod: chart}
+			if tt.seedPool {
+				crdstore.MustSeed(client.store, &v1alpha1.CellPool{
+					ObjectMeta: metav1.ObjectMeta{Name: "big"},
+					Spec: v1alpha1.CellPoolSpec{
+						ProfileRef:         "lts-2-555",
+						UnreadyGracePeriod: &metav1.Duration{Duration: pool},
+					},
+				})
+			}
+			cr := &v1alpha1.Controller{
+				ObjectMeta: metav1.ObjectMeta{Name: "cell1", Namespace: "ns"},
+				Spec:       v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true}},
+			}
+			if tt.poolLabel != "" {
+				cr.Labels = map[string]string{cells.LabelCellPool: tt.poolLabel}
+			}
+			if got := rec.cellUnreadyGrace(context.Background(), cr); got != tt.want {
+				t.Errorf("cellUnreadyGrace() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

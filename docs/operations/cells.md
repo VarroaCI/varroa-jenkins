@@ -66,37 +66,10 @@ kubectl get controller cell-jenkins-lts -n varroa-system \
 
 Expect `"status":"True","reason":"Connected"`.
 
-## Configure the warm pool
+## Pools
 
-The warm pool pre-creates empty cells so a new tenant does not wait for a `Controller` to
-provision:
-
-```yaml
-cells:
-  warmPool:
-    enabled: true
-    perProfile: 1
-  maxTenantsPerCell: 10
-  unreadyGracePeriod: 5m
-```
-
-`warmPool.perProfile` sets how many empty, ready cells the operator keeps per profile that a
-pipelines tenant names.
-`maxTenantsPerCell` caps a cell's tenants when `spec.cell.maxTenants` is `0`.
-`unreadyGracePeriod` sets how long a cell may stay unready before a roll.
-See [Placement lifecycle](#placement-lifecycle).
-
-A pool member is named `cell-<profile>-<ordinal>` and carries the labels
-`varroa.dev/cell-profile` and `varroa.dev/warm`.
-
-**Verify:**
-
-```bash
-kubectl get controller -n varroa-system -l varroa.dev/warm=true
-```
-
-Expect one `Controller` per configured `perProfile` count for each requested profile, each
-reporting `WarmPool=True`.
+A `CellPool` sizes one pool of cells for a single version profile. See
+[Cell pools](cell-pools.md), [Cell views](cell-views.md).
 
 ## Make a Team a pipelines tenant
 
@@ -117,8 +90,10 @@ spec:
 
 `pipelines.agentNamespace` must be one of `spec.namespaces`, and Varroa must manage it.
 `pipelines.profile` must name an existing `JenkinsVersionProfile`. `pipelines.composedBundleRef`
-is optional; an unset reference places the tenant with an empty folder. Set
-`pipelines.dedicated: true` to require a cell that carries no other tenant.
+is optional; an unset reference places the tenant with an empty folder.
+
+`pipelines.cellPool` is optional and defaults to the profile's own pool. To give a team a cell of
+its own, name a pool whose `maxTenantsPerCell` is 1.
 
 **Verify:**
 
@@ -257,8 +232,10 @@ Every `Placed` reason on a `Team`:
 | `RecordStoreUnsupported` | False | `recordStore.enabled` is false. | Enable the record store. |
 | `BlobTierUnsupported` | False | `recordStore.blobs.mode` is not `s3`. | Set the blob tier to `s3`. |
 | `ProfileNotFound` | False | `spec.pipelines.profile` names no `JenkinsVersionProfile`. | Create the profile, or fix the name. |
+| `CellPoolNotFound` | False | `spec.pipelines.cellPool` names no pool, or names one serving another profile. The message names the profile the pool serves. | Create the pool, or fix the name. |
 | `AgentNamespaceUnmanaged` | False | `agentNamespace` is missing from `spec.namespaces`, or Varroa does not manage it. | Add it to `spec.namespaces` and confirm it is a managed namespace. |
-| `AwaitingCell` | False | No cell satisfies the selection rule: enabled, ready, not evacuating, matching profile, and under `maxTenants`. | Create or enable a cell for that profile, or raise its `maxTenants`. |
+| `AwaitingCell` | False | No cell of the tenant's pool is enabled, ready, not evacuating, and under its resolved capacity. | Wait for the pool to create a cell, or raise its `warm` or `maxTenantsPerCell`. |
+| `CellCapReached` | False | The tenant's pool sits at its `maxCells` and no cell is free. | Raise `maxCells`, or move the tenant to another pool. |
 | `TenantMoving` | False | A voluntary move is waiting for the old cell to finish draining the tenant's folder. | Wait. Check `status.pendingItemDeletions` for a stuck delete on the old cell. |
 | `CellNotReady` | False | The pass keeps the tenant on its current cell, but that cell reports `CellReady=False` with no `evacuate` signal yet. | Diagnose the cell's own `CellReady` reason below. |
 | `TenantTeardownPending` | False | Dropping `spec.pipelines` is tearing the tenant down, but the schedule purge or the old cell's drain has not confirmed yet. | Wait. The pass retries up to ten times, or up to a ten-minute bounded wait when the cell is unreachable. |

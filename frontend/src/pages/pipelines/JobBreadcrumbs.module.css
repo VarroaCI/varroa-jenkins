@@ -1,0 +1,36 @@
+/*
+ * The trail is one line that wraps rather than scrolling: a job path is
+ * short, and a sideways scroll would hide the job the reader came for.
+ */
+.trail {
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+  color: var(--text-2);
+}
+
+.list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* The separator matches the job path the reader already reads: a plain
+ * slash, never an icon. */
+.separator {
+  color: var(--text-2);
+}
+
+.current {
+  color: var(--text);
+  font-weight: 600;
+}

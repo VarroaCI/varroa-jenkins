@@ -371,18 +371,8 @@ describe("canAccessTenantPipeline", () => {
     expect(canAccessTenantPipeline(perms, "payments", "read", "build/nightly")).toBe(false);
   });
 
-  it("matches a single Unicode code point outside the Basic Multilingual Plane with a single '?'", () => {
-    const perms = {
-      global: {},
-      scopes: [],
-      tenants: [{ tenant: "payments", jobs: ["?"], capabilities: { pipelines: { read: true } } }],
-    };
-    // U+1F600 is a surrogate pair in UTF-16. A single "?" must match it as
-    // one code point, the same unit Go's regexp package matches with ".".
-    expect(canAccessTenantPipeline(perms, "payments", "read", "\u{1F600}")).toBe(true);
-    // Two code points must not match a pattern that names only one.
-    expect(canAccessTenantPipeline(perms, "payments", "read", "\u{1F600}\u{1F600}")).toBe(false);
-  });
+  // The glob grammar itself is covered once, in src/lib/jobglob.test.ts.
+  // That file holds the corpus the Go evaluator's own test mirrors.
 
   it("refuses a Team tenant with no matching entry (no fallback)", () => {
     const perms = {

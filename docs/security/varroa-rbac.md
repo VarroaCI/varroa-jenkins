@@ -78,6 +78,23 @@ Built-in roles carry this `pipelines` matrix:
 | `developer` | `read`, `write` |
 | `viewer` | `read` |
 
+## Read and scale a cell pool
+
+`cellpools` carries two verbs. `read` lists and gets a [cell pool](../operations/cells.md);
+`update` scales one. There is no create verb and no delete verb: an operator creates and deletes a
+pool with `kubectl` or through GitOps.
+
+| Role | `cellpools` verbs |
+|---|---|
+| `admin` | Both verbs, through the wildcard rule |
+| `operator` | `read`, `update` |
+| `developer` | None |
+| `viewer` | None |
+
+A pool's `status.tenants` lists every tenant on the pool, and the Teams API is admin-only. A read
+verb for a developer or a viewer would therefore disclose the tenant list to a caller who may not
+list Teams. `CellPool` is cluster-scoped, so a namespace-scoped binding satisfies neither verb.
+
 ## Grant break-glass access
 
 `break-glass` is a `controllers` verb. It lets a caller request a temporary admin session on a
@@ -133,6 +150,35 @@ A scope names one dimension. The API server rejects a scope that sets
 `tenants` together with `namespaces` or `controllerSelector`. A
 `controllerSelector`-scoped binding grants no `pipelines` access. Scope the
 binding to `tenants` to grant `pipelines` access.
+
+### Author the same scope in the dashboard
+
+Open **Access**, then **Role Bindings**, then the binding. Expand **Scope**
+and use the **Pipelines Tenants** editor.
+
+1. Select **+ Add tenant** and name the `Team`. The list offers the teams you
+   can read. A team that does not exist yet is accepted.
+2. Select **+ Narrow to job patterns** to add a `jobs` list. Leave the list
+   off to cover every job of the tenant.
+3. Select **+ Add pattern** and enter a folder-relative pattern. The editor
+   shows the grammar beside the list, and refuses an empty pattern, a
+   pattern starting with `/`, and an empty list.
+
+The editor shows a live count in the form `matches 3 of 10 jobs you can see`.
+The count reads the team's job list with **your** grants, not the subject's,
+so a narrower view of your own produces a smaller count. When the job list
+cannot be read the editor states so, and still accepts every pattern.
+
+The editor disables the **Namespaces** and **Controller Selector Labels**
+controls while a tenant entry exists, and disables the tenant controls while
+either of those holds a value. Each disabled control states the reason.
+
+### A jobs glob is a Varroa rule
+
+A `jobs` glob is a Varroa rule. It narrows what Varroa shows and what Varroa
+starts. It changes nothing inside Jenkins. Jenkins keeps one item role per
+tenant, which covers the tenant's whole folder. Varroa defines no
+folder-level Jenkins role.
 
 ## Reach a tenant through Team membership
 

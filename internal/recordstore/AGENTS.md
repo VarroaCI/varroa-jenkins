@@ -440,6 +440,30 @@ of the fleet's audit activity, once a controller becomes disposable.
   and `GET /search`. `ActivityRetentionDays` reports the parsed
   `recordStore.retention.activity` value the BFF passed to `NewReader`;
   a nil `Backfill` (no DSN configured) never reaches this method.
+  `CellUsage`, `CellUsageMany`, and `CellTenantUsage`
+  (`reader_cellusage.go`) report one cell's load. The first two answer
+  tenant by tenant; `CellUsage` calls `CellUsageMany` with one cell.
+  `CellTenantUsage` answers one row lower — **one row for each of one
+  tenant's jobs** — because the team cell read must sum only the jobs the
+  caller's `jobs` globs admit, and a tenant-wide number would leak the
+  rest. Its row set is the union of the tenant's `job_schedules` paths and
+  every job path the two `runs` aggregates name, and its `jobs` value is
+  one or zero per row, so summing a row set reproduces the cell-wide
+  aggregate for those jobs. The cell-wide
+  statement holds four subqueries: the `tenant_placements` rows, a
+  windowed `runs` aggregate, a status-only `runs` aggregate, and a
+  `job_schedules` aggregate. The two `runs` aggregates stay separate —
+  one scan carries one predicate, and the windowed one keeps the
+  `created_at` term that prunes the partitions while `runningNow` carries
+  no time bound at all. Neither `runs` aggregate carries a `namespace`
+  term: the ledger moves an intent's `cell` on an ownership transfer and
+  not its `namespace`, so the term would drop a run the cell did execute.
+  The tenant set always comes from `tenant_placements`, never from a scan
+  of `runs`, which carries no index on `cell`; a tenant that left the cell
+  therefore contributes no count to it. `jobs` counts
+  `DISTINCT job_path`, because `job_schedules` holds one row for each
+  trigger type. The window is a fixed 24 hours and no caller chooses
+  another. These methods add no migration and no index.
 
 ## Work Guidance
 

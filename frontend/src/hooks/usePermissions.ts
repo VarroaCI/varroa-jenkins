@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { getMyPermissions } from "../api/client";
+import { jobGlobMatches } from "../lib/jobglob";
 import type { Permissions, CapabilitySet, ScopedCapabilities, TenantCapabilities } from "../types/auth";
 
 export function usePermissions(enabled: boolean = true) {
@@ -79,40 +80,12 @@ export function canSeePipelines(perms: Permissions | undefined): boolean {
   return !!perms?.scopes?.some((s) => isNonTenantScope(s) && matchesAnyPipelinesVerb(s.capabilities));
 }
 
-/**
- * jobPatternMatches reports whether a folder-relative pattern matches a
- * folder-relative job path. The grammar is exactly "*", "**", and "?",
- * anchored at both ends: "*" matches a run holding no "/", "**" matches any
- * run, "?" matches one Unicode code point, and every other character
- * matches itself. It mirrors internal/rbac/jobglob.Match. The "u" flag on
- * the compiled RegExp makes "?" match one code point, the same unit Go's
- * `regexp` package matches with "." — without it a JavaScript "." matches
- * one UTF-16 code unit, splitting a character outside the Basic
- * Multilingual Plane in two.
- */
-function jobPatternMatches(pattern: string, path: string): boolean {
-  let re = "";
-  for (let i = 0; i < pattern.length; i++) {
-    if (pattern.startsWith("**", i)) {
-      re += ".*";
-      i += 1;
-    } else if (pattern[i] === "*") {
-      re += "[^/]*";
-    } else if (pattern[i] === "?") {
-      re += ".";
-    } else {
-      re += pattern[i].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    }
-  }
-  return new RegExp(`^${re}$`, "u").test(path);
-}
-
 /** tenantEntryGrants reports whether one `TenantCapabilities` entry, tested
  * alone, admits the verb and job path. */
 function tenantEntryGrants(entry: TenantCapabilities, verb: string, jobPath: string | undefined): boolean {
   if (!matches(entry.capabilities, "pipelines", verb)) return false;
   if (entry.jobs.length === 0 || jobPath === undefined) return true;
-  return entry.jobs.some((pattern) => jobPatternMatches(pattern, jobPath));
+  return entry.jobs.some((pattern) => jobGlobMatches(pattern, jobPath));
 }
 
 /**

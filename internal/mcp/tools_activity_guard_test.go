@@ -158,6 +158,10 @@ func seedGuardObjects(t *testing.T, stub *guardStub) {
 		&v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}},
 		&v1alpha1.VarroaRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: name}},
 		&v1alpha1.User{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}},
+		&v1alpha1.CellPool{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec:       v1alpha1.CellPoolSpec{ProfileRef: "lts-2-555", MaxTenantsPerCell: 10},
+		},
 	)
 
 	// promote_version_candidate additionally needs a Ready ProfileCandidate,
@@ -249,6 +253,8 @@ func guardArgsFor(name string) map[string]interface{} {
 		"promote_version_candidate": {"name": obj},
 		// Pipelines (record store + tenant resolver + mite transport)
 		"run_pipeline": {"team": "team-a", "job": "build"},
+		// CellPools (cluster-scoped, direct store)
+		"update_cell_pool": {"name": obj, "warm": 2},
 	}
 	args, ok := byName[name]
 	if !ok {

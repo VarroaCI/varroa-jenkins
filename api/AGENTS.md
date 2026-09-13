@@ -20,7 +20,7 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   `Controller`, `VarroaRole`/`VarroaRoleBinding`, `JenkinsRole`/`JenkinsRoleBinding`,
   `User`, `Group`, `PodTemplate`, `CatalogSource`, `CatalogItem`,
   `ComposedBundle`, `ProvisioningDefaults`, `JenkinsVersionProfile`, `Team`,
-  `BroodOperation`, `BroodSchedule`, `Runner`. New Kind → add here + `zz_generated.deepcopy.go`.
+  `BroodOperation`, `BroodSchedule`, `Runner`, `CellPool`. New Kind → add here + `zz_generated.deepcopy.go`.
   `BuildMetric` does not exist: build records live in the record store
   (`internal/recordstore`), not a CRD.
   `Runner` is cluster-scoped, like `Team`: it binds one external machine to one
@@ -32,6 +32,18 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   the apiserver refuses the CRD outright. `RunnerStatus.Connected` carries no
   `omitempty`, the same rule `Event.Cluster` uses, so a merge patch can clear
   a `true` value back to `false`.
+  `CellPool` is cluster-scoped too: it sizes one pool of cells for one
+  `JenkinsVersionProfile`. Two CEL `XValidation` rules guard it — `profileRef`
+  is immutable (a pool's cells carry the profile label they were created with,
+  and the pass never restamps it), and `maxCells` is 0 or at least `warm`. The
+  second rule guards **both** field reads with `has()`: a stored object written
+  before the defaults existed leaves a field absent, and a bare access raises
+  `no such key`. `CellPoolStatus`'s four counters (`warmCells`, `placedCells`,
+  `unreadyCells`, `freeTenantSlots`) carry no `omitempty`, so a merge patch
+  writes a count that falls to zero; `tenants` is `omitempty`, so
+  `internal/crdstore/registry.go` clears it explicitly. `CellTemplate` reuses
+  `ControllerSpec`'s own `resources` and `podOverrides` types and exposes no
+  raw strategic-merge overlay, which is why the generated CRD is large.
 - `types.go` — Spec/Status structs with kubebuilder markers. CEL
   `XValidation` rules embedding a regex with literal `\.` **must** use a raw
   CEL string (`r'...'`) — e.g. `types.go:346` (ingress annotation keys) and
@@ -47,6 +59,9 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   New/edited fields in batch W2-B1b: `CatalogSourceSpec.OCIRef` (string),
   `ComposedInput.OCISource` (`*OCIBundleSource`), and the new
   `OCIBundleSource` type. DeepCopy was hand-added (no controller-gen).
+  The five cell-pool types (`CellPool`, `CellPoolList`, `CellPoolSpec`,
+  `CellPoolStatus`, `CellTemplate`) carry hand-added DeepCopy for the same
+  reason.
   `CatalogSource` validation is split across **two** levels: the spec-level
   rule is at-most-one of `repoURL`/`ociRef`, and an **object-level** rule binds
   the zero-source-field shape to the reserved name `varroa-update-center`

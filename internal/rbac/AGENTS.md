@@ -45,6 +45,19 @@ with what this package generates.
     (`resolver.go:539`) for a given `*v1alpha1.Controller` — the generator
     input. `collectFromJenkinsRoleBindings`/`collectFromVarroaRoleBindings`
     dedupe/merge into an `accKey`-keyed map via `upsertAssignment`.
+  - `TenantGrantSources` / `TenantGrantSourcesTruncated`
+    (`tenant_grants.go`) walk the same three tenant paths
+    `EffectiveTenantCapabilities` walks, with the subject filter removed:
+    they answer **which grants reach a tenant**, so they take no claims and
+    decide nothing. The order is `teamMembership`, `tenantScopedBinding`,
+    `clusterWideBinding`, then binding name, and the list is capped at
+    `MaxTenantGrants` (50). The exported `TenantGrantSources` returns the
+    capped list; a caller that must tell a full list from a cut list calls
+    the `Truncated` sibling, because a list of exactly 50 is not proof of a
+    cut. `TenantItemRoleName` / `TenantItemRolePattern` are the single
+    source of the generated per-tenant Jenkins item role name and its folder
+    pattern; `JenkinsRoleAssignments` calls them, so the BFF's cell grants
+    read never opens a `JenkinsRole` object.
   - Scope matching (`scopeMatches`, `controllerScopeMatches`, `lowerScope`,
     `scopeSuffix`) implements namespace/controller-name/label scoping shared
     by both binding kinds.

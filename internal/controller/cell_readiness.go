@@ -9,13 +9,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
+	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
 // isCellController reports whether cr runs as a cell: a disposable Jenkins
 // JVM with no durable state that hosts many tenants as top-level folders
 // (design D4, D6).
 func isCellController(cr *v1alpha1.Controller) bool {
-	return cr.Spec.Cell != nil && cr.Spec.Cell.Enabled
+	return v1alpha1.IsCell(cr)
 }
 
 // cellConfigGateReason returns the CellReady refusal reason for a cell's
@@ -123,14 +125,36 @@ func evaluateCellRoll(cell *v1alpha1.CellStatus, baseReason string, now time.Tim
 	return result
 }
 
-// cellUnreadyGrace returns the operator's configured unready grace period,
-// falling back to the package default when a narrow test fixture leaves
-// cellsConfig at its zero value.
-func (r *Reconciler) cellUnreadyGrace() time.Duration {
+// cellUnreadyGrace returns the unready grace period for one cell: the
+// unreadyGracePeriod of the cell's effective owner, when the cell carries a
+// pool label and that pool sets the field, then the chart value. It falls
+// back to the package default when a narrow test fixture leaves cellsConfig
+// at its zero value. The doubled value that raises status.cell.evacuate
+// follows the same resolved number.
+func (r *Reconciler) cellUnreadyGrace(ctx context.Context, cr *v1alpha1.Controller) time.Duration {
+	if pool := r.cellPoolFor(ctx, cr); pool != nil && pool.Spec.UnreadyGracePeriod != nil &&
+		pool.Spec.UnreadyGracePeriod.Duration > 0 {
+		return pool.Spec.UnreadyGracePeriod.Duration
+	}
 	if r.cellsConfig.UnreadyGracePeriod > 0 {
 		return r.cellsConfig.UnreadyGracePeriod
 	}
 	return defaultCellsUnreadyGracePeriod
+}
+
+// cellPoolFor reads the CellPool a cell's varroa.dev/cell-pool label names.
+// It answers nil for an unlabelled cell and for a label naming a pool that
+// no longer exists, which is the effective-owner rule.
+func (r *Reconciler) cellPoolFor(ctx context.Context, cr *v1alpha1.Controller) *v1alpha1.CellPool {
+	name := cr.Labels[cells.LabelCellPool]
+	if name == "" || r.store == nil {
+		return nil
+	}
+	pool, err := crdstore.Get[v1alpha1.CellPool](ctx, r.store, name, "")
+	if err != nil {
+		return nil
+	}
+	return pool
 }
 
 // evaluateCellReadiness sets the CellReady and WarmPool conditions for cr
@@ -171,7 +195,7 @@ func (r *Reconciler) evaluateCellReadiness(ctx context.Context, cr *v1alpha1.Con
 			Type:   v1alpha1.ConditionCellReady,
 			Status: metav1.ConditionFalse,
 		}
-		grace := r.cellUnreadyGrace()
+		grace := r.cellUnreadyGrace(ctx, cr)
 		roll := evaluateCellRoll(cell, v1alpha1.ReasonNotProvisioned, now, grace)
 		cell.UnreadySince = &roll.UnreadySince
 		cell.Evacuate = roll.Evacuate

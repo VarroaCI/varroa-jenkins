@@ -430,6 +430,29 @@ func (in *CellStatus) DeepCopyInto(out *CellStatus) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.PendingTenants != nil {
+		in, out := &in.PendingTenants, &out.PendingTenants
+		*out = make([]CellPendingTenant, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopyInto copies the receiver into out.
+func (in *CellPendingTenant) DeepCopyInto(out *CellPendingTenant) {
+	*out = *in
+	in.ClaimedAt.DeepCopyInto(&out.ClaimedAt)
+}
+
+// DeepCopy creates a deep copy of CellPendingTenant.
+func (in *CellPendingTenant) DeepCopy() *CellPendingTenant {
+	if in == nil {
+		return nil
+	}
+	out := new(CellPendingTenant)
+	in.DeepCopyInto(out)
+	return out
 }
 
 // DeepCopy creates a deep copy of CellStatus.
@@ -1059,6 +1082,142 @@ func (in *RunnerStatus) DeepCopyInto(out *RunnerStatus) {
 func (in *RunnerCondition) DeepCopyInto(out *RunnerCondition) {
 	*out = *in
 	in.LastTransitionTime.DeepCopyInto(&out.LastTransitionTime)
+}
+
+// DeepCopyInto for CellPool.
+func (in *CellPool) DeepCopyInto(out *CellPool) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+// DeepCopy creates a deep copy of CellPool.
+func (in *CellPool) DeepCopy() *CellPool {
+	if in == nil {
+		return nil
+	}
+	out := new(CellPool)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyObject implements runtime.Object.
+func (in *CellPool) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// DeepCopyInto for CellPoolList.
+func (in *CellPoolList) DeepCopyInto(out *CellPoolList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]CellPool, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopy creates a deep copy of CellPoolList.
+func (in *CellPoolList) DeepCopy() *CellPoolList {
+	if in == nil {
+		return nil
+	}
+	out := new(CellPoolList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyObject implements runtime.Object.
+func (in *CellPoolList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// DeepCopyInto for CellPoolSpec.
+func (in *CellPoolSpec) DeepCopyInto(out *CellPoolSpec) {
+	*out = *in
+	if in.UnreadyGracePeriod != nil {
+		in, out := &in.UnreadyGracePeriod, &out.UnreadyGracePeriod
+		*out = new(metav1.Duration)
+		**out = **in
+	}
+	if in.CellTemplate != nil {
+		in, out := &in.CellTemplate, &out.CellTemplate
+		*out = new(CellTemplate)
+		(*in).DeepCopyInto(*out)
+	}
+}
+
+// DeepCopy creates a deep copy of CellPoolSpec.
+func (in *CellPoolSpec) DeepCopy() *CellPoolSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(CellPoolSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for CellTemplate.
+func (in *CellTemplate) DeepCopyInto(out *CellTemplate) {
+	*out = *in
+	if in.Resources != nil {
+		in, out := &in.Resources, &out.Resources
+		*out = new(corev1.ResourceRequirements)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.PodOverrides != nil {
+		in, out := &in.PodOverrides, &out.PodOverrides
+		*out = new(PodOverrides)
+		(*in).DeepCopyInto(*out)
+	}
+}
+
+// DeepCopy creates a deep copy of CellTemplate.
+func (in *CellTemplate) DeepCopy() *CellTemplate {
+	if in == nil {
+		return nil
+	}
+	out := new(CellTemplate)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for CellPoolStatus.
+func (in *CellPoolStatus) DeepCopyInto(out *CellPoolStatus) {
+	*out = *in
+	if in.Tenants != nil {
+		in, out := &in.Tenants, &out.Tenants
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Conditions != nil {
+		in, out := &in.Conditions, &out.Conditions
+		*out = make([]metav1.Condition, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopy creates a deep copy of CellPoolStatus.
+func (in *CellPoolStatus) DeepCopy() *CellPoolStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(CellPoolStatus)
+	in.DeepCopyInto(out)
+	return out
 }
 
 // DeepCopyInto for PodTemplate.

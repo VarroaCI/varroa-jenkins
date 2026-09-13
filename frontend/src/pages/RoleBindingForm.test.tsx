@@ -16,11 +16,20 @@ const mockListRoles = vi.fn();
 const mockGetRoleBinding = vi.fn();
 const mockCreateRoleBinding = vi.fn();
 const mockUpdateRoleBinding = vi.fn();
+const mockListTeams = vi.fn().mockResolvedValue([]);
+const mockListPipelines = vi.fn().mockResolvedValue({
+  items: [],
+  runningNow: [],
+  tenantFolder: "",
+  truncated: false,
+});
 vi.mock("../api/client", () => ({
   listRoles: (...args: unknown[]) => mockListRoles(...args),
   getRoleBinding: (...args: unknown[]) => mockGetRoleBinding(...args),
   createRoleBinding: (...args: unknown[]) => mockCreateRoleBinding(...args),
   updateRoleBinding: (...args: unknown[]) => mockUpdateRoleBinding(...args),
+  listTeams: (...args: unknown[]) => mockListTeams(...args),
+  listPipelines: (...args: unknown[]) => mockListPipelines(...args),
 }));
 
 vi.mock("../context/AuthContext", () => ({
@@ -242,5 +251,97 @@ describe("RoleBindingForm — edit mode", () => {
     await user.click(screen.getByText(/Scope/));
 
     expect(screen.getByDisplayValue("team-a")).toBeInTheDocument();
+  });
+});
+
+describe("RoleBindingForm — the tenants dimension", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockParams.name = "my-binding";
+    mockListRoles.mockResolvedValue({ items: availableRoles });
+    mockListTeams.mockResolvedValue([]);
+    mockListPipelines.mockResolvedValue({
+      items: [],
+      runningNow: [],
+      tenantFolder: "",
+      truncated: false,
+    });
+  });
+
+  it("disables the tenants control and states why while a namespace is set", async () => {
+    mockGetRoleBinding.mockResolvedValue(existingBinding);
+    const user = userEvent.setup();
+    renderWithProviders(<RoleBindingForm />);
+    await waitFor(() => {
+      expect(screen.getByText("Edit Role Binding: my-binding")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText(/Scope/));
+    expect(screen.getByRole("button", { name: "+ Add tenant" })).toBeDisabled();
+    expect(screen.getByText(/Clear the namespaces and the selector labels/)).toBeInTheDocument();
+  });
+
+  it("preserves a stored controllerSelector matchExpressions entry", async () => {
+    mockGetRoleBinding.mockResolvedValue(
+      createRoleBinding({
+        metadata: { name: "my-binding" },
+        spec: {
+          subjects: [{ kind: "User", name: "alice" }],
+          roleRef: "varroa:admin",
+          scope: {
+            controllerSelector: {
+              matchLabels: { team: "frontend" },
+              matchExpressions: [{ key: "tier", operator: "In", values: ["gold"] }],
+            },
+          },
+        },
+      }),
+    );
+    mockUpdateRoleBinding.mockResolvedValueOnce({});
+    const user = userEvent.setup();
+    renderWithProviders(<RoleBindingForm />);
+    await waitFor(() => {
+      expect(screen.getByText("Edit Role Binding: my-binding")).toBeInTheDocument();
+    });
+
+    await user.type(screen.getAllByPlaceholderText("Subject name")[0], "-2");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockUpdateRoleBinding).toHaveBeenCalled();
+    });
+    const sent = mockUpdateRoleBinding.mock.calls[0][1];
+    expect(sent.spec.scope.controllerSelector.matchExpressions).toEqual([
+      { key: "tier", operator: "In", values: ["gold"] },
+    ]);
+  });
+
+  it("preserves an untouched tenant scope across an edit", async () => {
+    mockGetRoleBinding.mockResolvedValue(
+      createRoleBinding({
+        metadata: { name: "my-binding" },
+        spec: {
+          subjects: [{ kind: "User", name: "alice" }],
+          roleRef: "varroa:admin",
+          scope: { tenants: [{ name: "payments", jobs: ["release/*"] }] },
+        },
+      }),
+    );
+    mockUpdateRoleBinding.mockResolvedValueOnce({});
+    const user = userEvent.setup();
+    renderWithProviders(<RoleBindingForm />);
+    await waitFor(() => {
+      expect(screen.getByText("Edit Role Binding: my-binding")).toBeInTheDocument();
+    });
+
+    await user.selectOptions(screen.getAllByRole("combobox")[1], "varroa:viewer");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockUpdateRoleBinding).toHaveBeenCalled();
+    });
+    const sent = mockUpdateRoleBinding.mock.calls[0][1];
+    expect(sent.spec.scope.tenants).toEqual([{ name: "payments", jobs: ["release/*"] }]);
+    expect(sent.spec.roleRef).toBe("varroa:viewer");
   });
 });

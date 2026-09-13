@@ -124,6 +124,12 @@ type Dependencies struct {
 	// that do not exercise the agent WebSocket door; the door answers 401
 	// for every token when it is nil.
 	RunnerTokenIndex *RunnerTokenIndex
+
+	// CellMaxTenants is the chart's cells.maxTenantsPerCell value, from
+	// VARROA_CELLS_MAX_TENANTS. It is the second tier of the effective
+	// tenant cap the cell usage reads report. Zero when the variable is
+	// missing or is not a whole number.
+	CellMaxTenants int
 }
 
 // IdentityConfig holds the identity/OIDC configuration surfaced to the admin

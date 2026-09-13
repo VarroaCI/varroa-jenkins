@@ -23,6 +23,11 @@ rules:
   - apiGroups: ["varroa.dev"]
     resources: ["runners"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # The BFF serves the cell-pool read and scale surface. It never creates or
+  # deletes a pool, so it holds neither verb.
+  - apiGroups: ["varroa.dev"]
+    resources: ["cellpools"]
+    verbs: ["get", "list", "watch", "update", "patch"]
   - apiGroups: ["varroa.dev"]
     resources: ["podtemplates"]
     verbs: ["get", "list", "watch"]

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useCallback } from "react";
 import { NavLink } from "react-router-dom";
-import { Boxes, CircleUserRound, Clock3, PlugZap, Shield, Waypoints, Workflow } from "lucide-react";
+import { Boxes, CircleUserRound, Clock3, Hexagon, PlugZap, Shield, Waypoints, Workflow } from "lucide-react";
 import { NavIcon } from "./NavIcon";
 import { usePermissions, canSeePipelines } from "../hooks/usePermissions";
-import { canCatalogArea, canAdminArea } from "../lib/navPermissions";
+import { canCatalogArea, canAdminArea, canCellsRow } from "../lib/navPermissions";
 import { canDoAnywhere } from "../hooks/usePermissions";
 import styles from "./MoreSheet.module.css";
 
@@ -15,7 +15,10 @@ export function MoreSheet({ onClose }: MoreSheetProps) {
   const { data: permissions } = usePermissions();
   const showPlugins = canDoAnywhere(permissions, "controllers", "read");
   const showPipelines = canSeePipelines(permissions);
-  const showOperate = showPlugins || showPipelines;
+  const showCells = canCellsRow(permissions);
+  // The group visibility is the union of its rows gates, or the Cells row
+  // stays hidden for a caller who holds that grant alone.
+  const showOperate = showPlugins || showPipelines || showCells;
   const showCatalog = canCatalogArea(permissions);
   const showAdmin = canAdminArea(permissions);
   const showManage = showCatalog || showAdmin;
@@ -83,6 +86,12 @@ export function MoreSheet({ onClose }: MoreSheetProps) {
               <NavLink to="/pipelines" className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label="Pipelines" onClick={handleNav}>
                 <span className={styles.rowIcon}><NavIcon icon={Waypoints} /></span>
                 <span className={styles.rowText}>Pipelines</span>
+              </NavLink>
+            )}
+            {showCells && (
+              <NavLink to="/cells" className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label="Cells" onClick={handleNav}>
+                <span className={styles.rowIcon}><NavIcon icon={Hexagon} /></span>
+                <span className={styles.rowText}>Cells</span>
               </NavLink>
             )}
             {showPlugins && (

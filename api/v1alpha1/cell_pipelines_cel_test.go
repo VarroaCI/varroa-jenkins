@@ -3,7 +3,7 @@ package v1alpha1
 import "testing"
 
 // The functions below mirror the literal XValidation rule text on
-// ControllerSpec.Cell and TeamSpec in types.go. Keep each function
+// ControllerSpec.Cell, TeamSpec, and CellPoolSpec in types.go. Keep each function
 // identical to its rule string. The apiserver evaluates the CEL text at
 // admission time; this package has no CEL evaluator, so these functions
 // are the only check that runs in `go test`. A live dry-run apply is the
@@ -215,6 +215,111 @@ func TestTeamPipelinesCEL(t *testing.T) {
 			got := tt.check(tt.spec)
 			if got != tt.wantAccepted {
 				t.Errorf("got %v, want %v", got, tt.wantAccepted)
+			}
+		})
+	}
+}
+
+// evalCellPoolCapAboveWarm mirrors:
+//
+//	!has(self.maxCells) || !has(self.warm) || self.maxCells == 0 ||
+//	  self.maxCells >= self.warm
+//
+// The two booleans carry the has() guards. A stored object written before
+// the defaults existed leaves a field absent.
+func evalCellPoolCapAboveWarm(hasMaxCells, hasWarm bool, self *CellPoolSpec) bool {
+	if !hasMaxCells || !hasWarm {
+		return true
+	}
+	return self.MaxCells == 0 || self.MaxCells >= self.Warm
+}
+
+// evalCellPoolProfileRefImmutable mirrors:
+//
+//	self.profileRef == oldSelf.profileRef
+func evalCellPoolProfileRefImmutable(oldSelf, self *CellPoolSpec) bool {
+	return self.ProfileRef == oldSelf.ProfileRef
+}
+
+func TestCellPoolCapAboveWarmCEL(t *testing.T) {
+	tests := []struct {
+		name         string
+		hasMaxCells  bool
+		hasWarm      bool
+		self         *CellPoolSpec
+		wantAccepted bool
+	}{
+		{
+			name:         "cap below warm refused",
+			hasMaxCells:  true,
+			hasWarm:      true,
+			self:         &CellPoolSpec{ProfileRef: "lts-2-555", Warm: 3, MaxCells: 2},
+			wantAccepted: false,
+		},
+		{
+			name:         "cap equal to warm accepted",
+			hasMaxCells:  true,
+			hasWarm:      true,
+			self:         &CellPoolSpec{ProfileRef: "lts-2-555", Warm: 3, MaxCells: 3},
+			wantAccepted: true,
+		},
+		{
+			name:         "unlimited cap accepted",
+			hasMaxCells:  true,
+			hasWarm:      true,
+			self:         &CellPoolSpec{ProfileRef: "lts-2-555", Warm: 3, MaxCells: 0},
+			wantAccepted: true,
+		},
+		{
+			name:         "absent cap accepted",
+			hasMaxCells:  false,
+			hasWarm:      true,
+			self:         &CellPoolSpec{ProfileRef: "lts-2-555", Warm: 3},
+			wantAccepted: true,
+		},
+		{
+			name:         "absent warm accepted",
+			hasMaxCells:  true,
+			hasWarm:      false,
+			self:         &CellPoolSpec{ProfileRef: "lts-2-555", MaxCells: 2},
+			wantAccepted: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := evalCellPoolCapAboveWarm(tt.hasMaxCells, tt.hasWarm, tt.self)
+			if got != tt.wantAccepted {
+				t.Errorf("evalCellPoolCapAboveWarm() = %v, want %v", got, tt.wantAccepted)
+			}
+		})
+	}
+}
+
+func TestCellPoolProfileRefImmutableCEL(t *testing.T) {
+	tests := []struct {
+		name         string
+		oldSelf      *CellPoolSpec
+		self         *CellPoolSpec
+		wantAccepted bool
+	}{
+		{
+			name:         "profileRef changed",
+			oldSelf:      &CellPoolSpec{ProfileRef: "lts-2-555"},
+			self:         &CellPoolSpec{ProfileRef: "lts-2-500"},
+			wantAccepted: false,
+		},
+		{
+			name:         "warm changed, profileRef unchanged",
+			oldSelf:      &CellPoolSpec{ProfileRef: "lts-2-555", Warm: 1},
+			self:         &CellPoolSpec{ProfileRef: "lts-2-555", Warm: 4},
+			wantAccepted: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := evalCellPoolProfileRefImmutable(tt.oldSelf, tt.self)
+			if got != tt.wantAccepted {
+				t.Errorf("evalCellPoolProfileRefImmutable() = %v, want %v", got, tt.wantAccepted)
 			}
 		})
 	}

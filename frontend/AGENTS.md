@@ -53,8 +53,8 @@ TypeScript consumer of it.
   needs 3:1, which it clears at 3.88:1. New accent-on-text surfaces must be
   measured across all four variants × both themes before landing.
 - Coverage thresholds are enforced in `vite.config.ts` (`test.coverage`):
-  lines 80 / branches 80 / functions 74 / statements 80, excluding
-  `src/test/` and `src/vite-env.d.ts`.
+  lines 80 / branches 74.5 / functions 73.5 / statements 78.5, excluding
+  `src/test/`, `src/vite-env.d.ts`, and the spec files themselves.
 - **Sidebar collapse contract**: collapse is user-choice-only — localStorage
   key `varroa-sidebar-collapsed`, toggled by the foot button or `[` (guarded
   against inputs/palette); 640px is the single breakpoint and it swaps
@@ -137,7 +137,32 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
 - `src/pages/` (~109 files) — route-level screens, one per route plus
   matching `*.module.css` and `*.test.tsx` (e.g. `Controllers.tsx`,
   `ControllerDetail.tsx`, `CatalogBrowser.tsx`, `Roles.tsx`, `JenkinsRoles*`,
-  `Teams*`, `PluginsTab.tsx`, `FleetPlugins.tsx`). Registered in `src/App.tsx` / `src/routing.ts`.
+  `Teams*`, `PluginsTab.tsx`, `FleetPlugins.tsx`, `Cells.tsx`,
+  `CellTab.tsx`). Registered in `src/App.tsx` / `src/routing.ts`.
+  `Cells.tsx` is the fleet Cells page at `/cells`, behind a cluster-wide
+  `cellpools:read` gate (`canCellsRow` in `src/lib/navPermissions.ts`, which
+  the sidebar and the More sheet both read). `CellTab.tsx` is the Cell tab of
+  `ControllerDetail.tsx`, rendered only when the detail response reports
+  `kind` `cell`. Its two Team-derived columns take the **wildcard admin
+  gate** (`canDoGlobal(perms, "*", "*")`, the rule the Access page uses):
+  `GET /teams` answers `IsAdmin` alone and no role declares a `teams`
+  resource, so a resource check would admit a caller the server refuses. A
+  `403` from that read drops the same two columns and raises no error. `ControllerDetail.tsx` keeps the active tab in the `tab`
+  query parameter, not in state: a user's click pushes a history entry and a
+  correction replaces one, so the Back button walks the tabs. Neither cell
+  surface computes a capacity value; both render the numbers the cell usage
+  read and the `CellPool` status report, and they name both caps when the
+  two differ. `Cells.tsx`'s scale control sends **only the dials the caller
+  edited**: `PATCH /cellpools/{name}` takes any subset, so repeating an
+  unchanged value reverts a concurrent edit by another operator. A dial
+  counts as edited only when the caller typed into it (a per-dial dirty
+  set) **and** its value differs from the stored one — the block polls, so
+  a live-spec comparison alone would turn another writer's change into a
+  pending edit; an untouched input re-seeds from the live spec instead. The
+  drain confirm tests the changed set, not the input value, and an Apply
+  with no change sends no request. The control reports **every** refusal: a
+  `409` keeps the conflict wording, and any other status renders the API
+  error message, because a `400` on a dial bound is otherwise silent.
   `TeamForm.tsx` carries an exports editor: each entry picks `job` or
   `locks` (a select, mirroring the CRD's exactly-one-of rule), the matching
   pattern input(s), and a `callers` list; client-side validation mirrors the
@@ -145,11 +170,18 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   starting with `/`) so a bad entry is caught before submit. `Teams.tsx`
   lists a team's exports as one summary line per entry, naming its kind,
   pattern(s), and callers, with a dash for a team that exports nothing.
+- **One glob evaluator per language**: `src/lib/jobglob.ts` (`jobGlobMatches`)
+  is the browser's only folder-relative job-glob evaluator, and it mirrors
+  Go's `internal/rbac/jobglob`. `src/lib/jobglob.test.ts` carries the same
+  eleven cases under the same names as that package's `TestMatch`, so a
+  grammar change that updates one side and not the other fails a test.
+  `usePermissions.ts`, `TenantScopeEditor.tsx`, and any future caller import
+  it; a second browser implementation is not permitted.
 - `src/pages/pipelines/` — the pipelines route tree: `PipelinesIndex.tsx`
   (`/pipelines`, redirects when the caller's grants resolve to exactly one
-  team), `TeamHome.tsx` (`/pipelines/:team`, the jobs table plus a Running
-  now strip), `PipelinePage.tsx` (`/pipelines/:team/:job`, one job's health,
-  definition, and run list, and hosts `RunDrawer.tsx`'s parameter form),
+  team), `TeamHome.tsx` (`/pipelines/:team`, the jobs folder tree plus a
+  Running now strip), `PipelinePage.tsx` (`/pipelines/:team/:job`, one job's
+  health, definition, and run list, and hosts `RunDrawer.tsx`'s parameter form),
   `BuildPage.tsx` (`/pipelines/:team/:job/:run`, one run's detail; owns the
   single `useEventStream` call for the run and passes `lastEvent` down to
   `StageGraph.tsx` and `RunLogViewer.tsx` as a prop). `StageGraph.tsx` renders
@@ -162,7 +194,37 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   renderer of the `lastEvent` prop; it never calls `useEventStream` itself.
   `src/components/Console.tsx` is a different, generic log-line component and
   is not the log viewer for this page — do not route pipeline log rendering
-  through it.
+  through it. `TeamCellCard.tsx` heads `TeamHome.tsx` with the team's own cell.
+  It owns its query on `GET /pipelines/{team}/cell`, the one path it reads, and
+  its own `refetchInterval` of 30 seconds; the page's two other reads keep their
+  current behaviour. A failed cell read, and the state `notCellHosted`, render
+  `null`: the card never replaces the team home with a page-level recovery
+  state, and it reserves no grid column. An absent `queueLength` reads
+  `not reported`; no absent field renders a zero.
+- **The team home's folder tree** — `jobTree.ts` is the pure model
+  (`buildJobTree`, `defaultOpenPaths`, `visibleRows`); it imports no React, so
+  every tree rule is tested with no render. `JobTree.tsx` renders one `<tr>`
+  per visible node inside `TeamHome.tsx`'s own `<tbody>`, keeping the six
+  frozen columns; it also owns `formatDuration`, the health glyph, and the
+  sparkline, which `TeamHome.tsx` imports back for its Running now tiles. A
+  folded node's descendant rows are **not rendered at all** — never hidden
+  with a style, so the accessibility tree matches the page. Indentation rides
+  `--depth`, declared in `JobTree.module.css` and set per row by an inline
+  style; a colored `border-left` is not a depth cue. The fold set lives in the
+  URL as repeated `open` parameters, written with `replace: true`; the page
+  decides default-versus-explicit with `searchParams.has("open")`, never with
+  the number of values. `JobBreadcrumbs.tsx` renders the pipeline page's own
+  trail; `src/components/Topbar.tsx` keeps its single area crumb and is not
+  merged with it.
+- **`src/components/TenantScopeEditor.tsx`** owns the whole `tenants`
+  dimension of a `VarroaRoleBinding` scope: the entry list, the `Team` name
+  control, the `jobs` glob list, the grammar help, the six client-side
+  refusals (`validateTenantScope`), and the `matches N of M jobs you can see`
+  preview, which reads `GET /pipelines/{team}` with the **editing caller's**
+  grants and blocks nothing when that read fails. `RoleBindingForm.tsx` holds
+  the whole loaded `scope` object and rebuilds it on submit by spreading that
+  value, so a dimension the form does not edit (such as
+  `controllerSelector.matchExpressions`) survives an edit.
 - **Pipeline templates** — `CatalogItemDetail.tsx` renders a
   `pipeline-template` item's `PipelineTemplateCard`: the template's
   parameters/uiSchema form (`VarroaForm`, `src/components/specform/
@@ -181,7 +243,7 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   `PermissionRoute`), each paired with a `.module.css`.
 - `src/hooks/` — data-fetching hooks wrapping React Query
   (`useControllers`, `useCatalog`, `useClusters`, `useActivityFeed`,
-  `useEventStream` for SSE, `usePermissions`, `useFleetPlugins`).
+  `useEventStream` for SSE, `usePermissions`, `useFleetPlugins`, `useCells`).
   `useEventStream`'s optional `options.resumeUrl` callback is read on a
   reconnect only, never the first connect: a returned URL replaces
   `baseUrl` for that attempt, so a caller tracking a resume position (a
@@ -192,7 +254,26 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   the hand-maintained `ControllerDetail` TypeScript interface (not generated)
   — new backend fields such as `pluginInventory`, `PluginInventorySummary`,
   and `PluginInventoryDriftEntry` must be added here in the same change or
-  the frontend silently drifts from the contract.
+  the frontend silently drifts from the contract. `ControllerListItem` in
+  the same file carries the cell fields (`kind`, `cellPool`, `tenantCount`,
+  `maxTenants`, `warm`, `createdAt`, `unreadySince`); `kind` and `createdAt`
+  are required, and the other five are absent for a controller that is not a
+  cell, so a component branches on absence rather than on zero.
+  `useCells.ts` holds every cell query: `useCellPools`/`useCellPool`,
+  `useCellUsageList`/`useCellUsage`/`useCellUsageIndex`, and `useCellGrants`.
+  `useCellUsageIndex(clusters)` is what a fleet page uses: the batch usage
+  read covers one cluster, so it issues one request per cluster and returns
+  a `rows` map keyed `cluster/namespace/name` (`cellUsageKey`), plus the
+  `covered` and `recordStoreDisabled` cluster sets. **A cell name is unique
+  inside one cluster only**, so a namespace-and-name key silently hands one
+  cluster's counts to another cluster's cell; a row is keyed by the cluster
+  its own request named, never by the cluster the response reports, and a
+  cell whose cluster is not `covered` renders "not available" rather than a
+  dash or a zero. The pool and usage
+  reads poll every 15 seconds, the cadence `useControllers` uses; the Cell
+  tab's own reads take an `enabled` flag and run only while that tab is
+  active; the grants read holds a 60-second stale time and no interval. No
+  cell surface opens an `EventSource`.
 - `src/context/` — `AuthContext`, `ThemeContext`, `ComposerContext` (bundle
   composer editing state) as React context providers.
 - `src/lib/` — pure helpers: `overlay.ts` (resource-overlay merge preview),

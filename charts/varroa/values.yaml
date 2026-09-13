@@ -47,21 +47,28 @@ cluster:
 # ---------------------------------------------------------------------------
 # Cells — multi-tenant Jenkins controllers that host more than one team.
 # ---------------------------------------------------------------------------
+# Each value below is the default of a CellPool the operator creates. It
+# configures no live pool. To change a live pool, edit the CellPool object
+# with kubectl, with varroactl scale, or through the dashboard. A Helm
+# upgrade never rewrites the spec of a pool that already exists.
 cells:
-  # Pre-provisioned cells the operator keeps ready for placement, so a new
-  # Team does not wait on a StatefulSet to boot.
+  # Cells the operator keeps ready for placement, so a new Team does not
+  # wait on a StatefulSet to boot.
   warmPool:
-    # -- Enable the warm pool. Off by default: no cell exists until a
-    # Controller with spec.cell.enabled is created by hand.
+    # -- Create a CellPool for each profile a pipelines Team requests. Off by
+    # default: no pool and no cell exist until an operator turns this on or
+    # applies a CellPool by hand.
     enabled: false
-    # -- Number of ready, empty cells the operator keeps per Jenkins
-    # version profile.
+    # -- Seeds CellPool.spec.warm: the number of ready, empty cells a new
+    # pool keeps.
     perProfile: 1
-  # -- Maximum number of tenants the placement pass may put on one cell,
-  # unless the cell's own spec.cell.maxTenants overrides it.
+  # -- Seeds CellPool.spec.maxTenantsPerCell: the capacity a pool cell uses
+  # when its own spec.cell.maxTenants is zero. It is also the fallback for a
+  # cell that belongs to no pool.
   maxTenantsPerCell: 10
-  # -- How long a cell may stay unready before the operator treats it as
-  # failed for placement purposes. Go duration string.
+  # -- Seeds CellPool.spec.unreadyGracePeriod: how long a pool cell may stay
+  # unready before the operator rolls its pod. It is also the fallback for a
+  # cell that belongs to no pool. Go duration string.
   unreadyGracePeriod: 5m
 
 # ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent, within, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import ControllerDetail from "./ControllerDetail";
 import { useEventStream } from "../hooks/useEventStream";
 import { restartController } from "../api/client";
@@ -114,6 +114,13 @@ vi.mock("../components/Toast", () => ({
   useToast: () => ({ toast: mockToast }),
 }));
 
+// The Cell tab's own panels are proved by CellTab.test.tsx. This file
+// proves the tab frame and the query parameter.
+vi.mock("./CellTab", () => ({
+  CellTab: () => <div data-testid="cell-tab">cell tab</div>,
+  default: () => <div data-testid="cell-tab">cell tab</div>,
+}));
+
 // Mock BundleSelector
 vi.mock("../components/BundleSelector", () => ({
   BundleSelector: ({
@@ -145,7 +152,14 @@ vi.mock("../components/BundleSelector", () => ({
 // Helpers
 function setControllerData(
   overrides: Partial<
-    typeof mockControllerData & { podOverrides?: PodOverrides; resourceOverlay?: ResourceOverlay; probes?: ProbesSpec; spec?: ControllerSpec }
+    typeof mockControllerData & {
+      podOverrides?: PodOverrides;
+      resourceOverlay?: ResourceOverlay;
+      probes?: ProbesSpec;
+      spec?: ControllerSpec;
+      kind?: string;
+      cell?: Record<string, unknown>;
+    }
   >,
 ) {
   mockUseController.mockReturnValue({
@@ -1333,5 +1347,76 @@ describe("ControllerDetail — Mutation refresh triggers invalidation", () => {
         expect.objectContaining({ queryKey: ["controllers"] })
       );
     });
+  });
+});
+
+describe("The tab query parameter", () => {
+  // BackButton drives the router's own history, which MemoryRouter keeps in
+  // memory. window.history is a different stack and does not reach it.
+  function BackButton() {
+    const navigate = useNavigate();
+    return <button onClick={() => navigate(-1)}>go back</button>;
+  }
+
+  function renderAt(entry: string) {
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[entry]}>
+          <BackButton />
+          <ControllerDetail />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("opens the Cell tab from a deep link", async () => {
+    setControllerData({ kind: "cell", cell: { tenants: ["acme"] } });
+    renderAt("/controllers/core/my-ns/my-ctrl?tab=cell");
+    await waitFor(() => expect(screen.getByTestId("cell-tab")).toBeInTheDocument());
+  });
+
+  it("keeps the parameter while the detail read is in flight", () => {
+    mockUseController.mockReturnValue({ data: undefined, isLoading: true, error: null });
+    renderAt("/controllers/core/my-ns/my-ctrl?tab=cell");
+    expect(screen.getByText("Loading controller...")).toBeInTheDocument();
+    expect(screen.queryByTestId("cell-tab")).not.toBeInTheDocument();
+  });
+
+  it("renders no Cell tab for a stateful controller", () => {
+    setControllerData({ kind: "stateful" });
+    renderAt("/controllers/core/my-ns/my-ctrl");
+    expect(screen.queryByRole("tab", { name: /Cell/ })).not.toBeInTheDocument();
+  });
+
+  it("falls back to Overview for a stateful controller deep link", async () => {
+    setControllerData({ kind: "stateful" });
+    renderAt("/controllers/core/my-ns/my-ctrl?tab=cell");
+    await waitFor(() => expect(screen.queryByTestId("cell-tab")).not.toBeInTheDocument());
+    expect(screen.getAllByText(/Overview/)[0]).toBeInTheDocument();
+  });
+
+  it("falls back to Overview for an unknown value", async () => {
+    setControllerData({ kind: "cell", cell: { tenants: [] } });
+    renderAt("/controllers/core/my-ns/my-ctrl?tab=nonsense");
+    await waitFor(() => expect(screen.queryByTestId("cell-tab")).not.toBeInTheDocument());
+  });
+
+  it("writes the parameter back on a tab click", async () => {
+    const user = userEvent.setup();
+    setControllerData({ kind: "cell", cell: { tenants: [] } });
+    renderAt("/controllers/core/my-ns/my-ctrl");
+    await user.click(screen.getAllByText(/Cell/)[0]);
+    await waitFor(() => expect(screen.getByTestId("cell-tab")).toBeInTheDocument());
+  });
+
+  it("walks the tabs on a Back navigation", async () => {
+    const user = userEvent.setup();
+    setControllerData({ kind: "cell", cell: { tenants: [] } });
+    renderAt("/controllers/core/my-ns/my-ctrl?tab=overview");
+    await user.click(screen.getAllByText(/Cell/)[0]);
+    await waitFor(() => expect(screen.getByTestId("cell-tab")).toBeInTheDocument());
+    // A user's click pushes an entry, so Back returns to Overview.
+    await user.click(screen.getByRole("button", { name: "go back" }));
+    await waitFor(() => expect(screen.queryByTestId("cell-tab")).not.toBeInTheDocument());
   });
 });

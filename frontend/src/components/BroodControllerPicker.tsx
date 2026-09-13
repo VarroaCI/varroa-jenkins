@@ -18,7 +18,39 @@ import styles from "./BroodControllerPicker.module.css";
 const ATTENTION_CHIP = "Needs attention";
 const PHASES = ["All", ATTENTION_CHIP, "Connected", "Running", "Provisioning", "Hibernated", "Failed"] as const;
 
-type SortKey = "name" | "cluster" | "phase" | "version" | "endpoint" | "mite";
+// The kind filter carries no All chip: a chip toggles off, and both chips
+// off means every kind.
+const KINDS = [
+  { value: "cell", label: "Cells" },
+  { value: "stateful", label: "Stateful" },
+] as const;
+
+// KindCell renders the controller's kind. A cell row also names its pool
+// and states its fill as a ratio of reported values. A stateful controller
+// holds no pool and no tenant, so its row carries the label alone.
+function KindCell({ c }: { c: ControllerListItem }) {
+  if (c.kind !== "cell") {
+    return (
+      <span className={styles.kindCell} data-label="Kind">
+        <span className={styles.kindLabel}>Stateful</span>
+      </span>
+    );
+  }
+  return (
+    <span className={styles.kindCell} data-label="Kind">
+      <span className={styles.kindLabel}>
+        Cell
+        {c.warm && <span className={styles.warmBadge}>warm</span>}
+      </span>
+      {c.cellPool && <span className={styles.kindPool}>{c.cellPool}</span>}
+      {c.tenantCount != null && c.maxTenants != null && (
+        <span className={styles.kindRatio}>{c.tenantCount} / {c.maxTenants}</span>
+      )}
+    </span>
+  );
+}
+
+type SortKey = "name" | "cluster" | "phase" | "kind" | "version" | "endpoint" | "mite";
 type SortDir = "asc" | "desc";
 
 function compareControllers(a: ControllerListItem, b: ControllerListItem, key: SortKey): number {
@@ -27,6 +59,8 @@ function compareControllers(a: ControllerListItem, b: ControllerListItem, key: S
       return a.cluster.localeCompare(b.cluster) || a.name.localeCompare(b.name);
     case "phase":
       return a.phase.localeCompare(b.phase) || a.name.localeCompare(b.name);
+    case "kind":
+      return a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name);
     case "version": {
       const av = a.jenkinsVersion || a.version || "";
       const bv = b.jenkinsVersion || b.version || "";
@@ -117,6 +151,7 @@ export function BroodControllerPicker({ selected, onSelectionChange, compact = f
   const { permissions } = useAuth();
   const canManage = canDoAnywhere(permissions, "controllers", "manage");
   const [phaseFilter, setPhaseFilter] = useState<string>("All");
+  const [kindFilter, setKindFilter] = useState<string[]>([]);
   const [nameFilter, setNameFilter] = useState("");
   const [nsFilter, setNsFilter] = useState<string>("");
   const [groupBy, setGroupBy] = useState<"none" | "namespace" | "cluster">("none");
@@ -172,6 +207,7 @@ export function BroodControllerPicker({ selected, onSelectionChange, compact = f
     if (nameFilter && !c.name.toLowerCase().includes(nameFilter.toLowerCase())) return false;
     if (nsFilter && c.namespace !== nsFilter) return false;
     if (clusterFilter && c.cluster !== clusterFilter) return false;
+    if (kindFilter.length > 0 && !kindFilter.includes(c.kind)) return false;
     return true;
   });
 
@@ -200,6 +236,14 @@ export function BroodControllerPicker({ selected, onSelectionChange, compact = f
   }
   counts["All"] = allControllers.length;
   counts[ATTENTION_CHIP] = allControllers.filter((c) => c.attention).length;
+
+  const kindCounts: Record<string, number> = { cell: 0, stateful: 0 };
+  for (const c of allControllers) {
+    kindCounts[c.kind] = (kindCounts[c.kind] ?? 0) + 1;
+  }
+  const toggleKind = (value: string) => {
+    setKindFilter((prev) => (prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]));
+  };
 
   const nsCounts: Record<string, number> = {};
   for (const c of allControllers) {
@@ -248,6 +292,7 @@ export function BroodControllerPicker({ selected, onSelectionChange, compact = f
         <span data-label="Phase">
           <StatusPill phase={c.phase} attention={c.attention} />
         </span>
+        <KindCell c={c} />
         <VersionCell c={c} versions={versions} />
         <span data-label="Endpoint">
           {c.endpoint ? (
@@ -288,6 +333,7 @@ export function BroodControllerPicker({ selected, onSelectionChange, compact = f
         <SortHeader label="Controller" sortKeyName="name" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
         <SortHeader label="Cluster" sortKeyName="cluster" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
         <SortHeader label="Phase" sortKeyName="phase" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
+        <SortHeader label="Kind" sortKeyName="kind" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
         <SortHeader label="Version" sortKeyName="version" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
         <SortHeader label="Endpoint" sortKeyName="endpoint" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
         <SortHeader label="Mite" sortKeyName="mite" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
@@ -345,6 +391,19 @@ export function BroodControllerPicker({ selected, onSelectionChange, compact = f
               onClick={() => setPhaseFilter(p)}
             >
               {p} <span className={styles.chipCount}>{counts[p] ?? 0}</span>
+            </button>
+          ))}
+        </div>
+        <div className={styles.kindChips}>
+          {KINDS.map((k) => (
+            <button
+              key={k.value}
+              type="button"
+              aria-pressed={kindFilter.includes(k.value)}
+              className={`${styles.chip} ${kindFilter.includes(k.value) ? styles.chipOn : ""}`}
+              onClick={() => toggleKind(k.value)}
+            >
+              {k.label} <span className={styles.chipCount}>{kindCounts[k.value] ?? 0}</span>
             </button>
           ))}
         </div>
