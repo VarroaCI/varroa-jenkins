@@ -323,7 +323,7 @@ func (s *Server) buildPipelineTemplateInfo(ctx context.Context, ref TenantRef, j
 
 // buildPipelineDefinition converts one declared item into the definition
 // row design D8's Defined by card shows. It returns nil when the item
-// declares no SCM source, so the Jenkinsfile row stays absent rather than
+// declares no SCM source, no inline script, and no template, so the row stays absent rather than
 // showing an empty repository.
 func buildPipelineDefinition(item *items.Item) *pipelineDefinitionJSON {
 	if item == nil {
@@ -336,10 +336,21 @@ func buildPipelineDefinition(item *items.Item) *pipelineDefinitionJSON {
 	if repo == "" && item.Kind == "multibranch" {
 		repo = multibranchRemoteURL(item.SourcesList)
 	}
-	if repo == "" {
-		return nil
+	if repo != "" {
+		return &pipelineDefinitionJSON{Source: "jenkinsfile", JenkinsfileRepo: repo}
 	}
-	return &pipelineDefinitionJSON{JenkinsfileRepo: repo}
+	// An item that carries its script inline has no repository to name.
+	// The card still states where the script lives, so the row never
+	// reads as missing data.
+	if item.Definition != nil && item.Definition.Script != "" {
+		return &pipelineDefinitionJSON{Source: "inline"}
+	}
+	// A template renders the script; the template row names it, and the
+	// definition still carries the profile the job runs on.
+	if item.Definition != nil && item.Definition.VarroaTemplate != nil {
+		return &pipelineDefinitionJSON{Source: "template"}
+	}
+	return nil
 }
 
 // gitRemoteURL returns the first configured remote URL of a GitSCM

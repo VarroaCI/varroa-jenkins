@@ -202,6 +202,12 @@ export default function PipelinePage() {
                 </dd>
               </>
             )}
+            {jobDetail.definition?.source === "inline" && (
+              <>
+                <dt>Script</dt>
+                <dd>Inline, declared by the bundle item.</dd>
+              </>
+            )}
             {jobDetail.template && (
               <>
                 <dt>Template</dt>
@@ -214,7 +220,9 @@ export default function PipelinePage() {
                 <dd>{jobDetail.definition.profile}</dd>
               </>
             )}
-            {!jobDetail.definition && <dd className={styles.dim}>Not available.</dd>}
+            {!jobDetail.definition && !jobDetail.template && (
+              <dd className={styles.dim}>Not available.</dd>
+            )}
           </dl>
         </Card>
 

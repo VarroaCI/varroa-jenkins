@@ -2502,7 +2502,7 @@
       },
       "PipelineDefinition": {
         "additionalProperties": false,
-        "description": "Where a job's Jenkinsfile comes from. The catalog template, when one exists, is reported separately on PipelineJobDetail.template — see PipelineTemplateInfo.\n",
+        "description": "Where a job's pipeline script comes from. The catalog template, when one exists, is reported separately on PipelineJobDetail.template — see PipelineTemplateInfo.\n",
         "properties": {
           "jenkinsfileCommit": {
             "description": "The last build's checked-out commit, from its run record.",
@@ -2514,8 +2514,20 @@
           "profile": {
             "description": "The version profile in effect for this job's controller.",
             "type": "string"
+          },
+          "source": {
+            "description": "jenkinsfile when the script is read from source control, inline when the bundle item carries the script itself, and template when the item's definition names a catalog template (varroaTemplate). A marker-defined multibranch job reads its marker from a repository, so it reports jenkinsfile; its template is on PipelineJobDetail.template.\n",
+            "enum": [
+              "jenkinsfile",
+              "inline",
+              "template"
+            ],
+            "type": "string"
           }
         },
+        "required": [
+          "source"
+        ],
         "type": "object"
       },
       "PipelineJobDetail": {
@@ -8640,7 +8652,7 @@
       },
       "components_schemas_PipelineDefinition": {
         "additionalProperties": false,
-        "description": "Where a job's Jenkinsfile comes from. The catalog template, when one exists, is reported separately on PipelineJobDetail.template — see PipelineTemplateInfo.\n",
+        "description": "Where a job's pipeline script comes from. The catalog template, when one exists, is reported separately on PipelineJobDetail.template — see PipelineTemplateInfo.\n",
         "properties": {
           "jenkinsfileCommit": {
             "description": "The last build's checked-out commit, from its run record.",
@@ -8652,8 +8664,20 @@
           "profile": {
             "description": "The version profile in effect for this job's controller.",
             "type": "string"
+          },
+          "source": {
+            "description": "jenkinsfile when the script is read from source control, inline when the bundle item carries the script itself, and template when the item's definition names a catalog template (varroaTemplate). A marker-defined multibranch job reads its marker from a repository, so it reports jenkinsfile; its template is on PipelineJobDetail.template.\n",
+            "enum": [
+              "jenkinsfile",
+              "inline",
+              "template"
+            ],
+            "type": "string"
           }
         },
+        "required": [
+          "source"
+        ],
         "type": "object"
       },
       "components_schemas_PipelineDependencies": {

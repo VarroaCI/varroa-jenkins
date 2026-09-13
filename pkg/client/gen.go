@@ -307,6 +307,13 @@ const (
 	Never        ComponentsSchemasMiteSpecImagePullPolicy = "Never"
 )
 
+// Defines values for ComponentsSchemasPipelineDefinitionSource.
+const (
+	Inline      ComponentsSchemasPipelineDefinitionSource = "inline"
+	Jenkinsfile ComponentsSchemasPipelineDefinitionSource = "jenkinsfile"
+	Template    ComponentsSchemasPipelineDefinitionSource = "template"
+)
+
 // Defines values for ComponentsSchemasPipelineDependencyEdgeResult.
 const (
 	FAILURE  ComponentsSchemasPipelineDependencyEdgeResult = "FAILURE"
@@ -2274,7 +2281,7 @@ type ComponentsSchemasPinPreflightReport struct {
 	Missing   []ComponentsSchemasMissingPlugin `json:"missing"`
 }
 
-// ComponentsSchemasPipelineDefinition Where a job's Jenkinsfile comes from. The catalog template, when one exists, is reported separately on PipelineJobDetail.template — see PipelineTemplateInfo.
+// ComponentsSchemasPipelineDefinition Where a job's pipeline script comes from. The catalog template, when one exists, is reported separately on PipelineJobDetail.template — see PipelineTemplateInfo.
 type ComponentsSchemasPipelineDefinition struct {
 	// JenkinsfileCommit The last build's checked-out commit, from its run record.
 	JenkinsfileCommit *string `json:"jenkinsfileCommit,omitempty"`
@@ -2282,7 +2289,13 @@ type ComponentsSchemasPipelineDefinition struct {
 
 	// Profile The version profile in effect for this job's controller.
 	Profile *string `json:"profile,omitempty"`
+
+	// Source jenkinsfile when the script is read from source control, inline when the bundle item carries the script itself, and template when the item's definition names a catalog template (varroaTemplate). A marker-defined multibranch job reads its marker from a repository, so it reports jenkinsfile; its template is on PipelineJobDetail.template.
+	Source ComponentsSchemasPipelineDefinitionSource `json:"source"`
 }
+
+// ComponentsSchemasPipelineDefinitionSource jenkinsfile when the script is read from source control, inline when the bundle item carries the script itself, and template when the item's definition names a catalog template (varroaTemplate). A marker-defined multibranch job reads its marker from a repository, so it reports jenkinsfile; its template is on PipelineJobDetail.template.
+type ComponentsSchemasPipelineDefinitionSource string
 
 // ComponentsSchemasPipelineDependencies The job's cross-tenant dependency edges (design D13). Both arrays are empty, never omitted, for a job that declares no cross-tenant trigger and has no subscriber.
 type ComponentsSchemasPipelineDependencies struct {
@@ -2313,7 +2326,7 @@ type ComponentsSchemasPipelineDependencyEdgeResult string
 
 // ComponentsSchemasPipelineJobDetail GET /pipelines/{team}/jobs/{job}.
 type ComponentsSchemasPipelineJobDetail struct {
-	// Definition Where a job's Jenkinsfile comes from. The catalog template, when one exists, is reported separately on PipelineJobDetail.template — see PipelineTemplateInfo.
+	// Definition Where a job's pipeline script comes from. The catalog template, when one exists, is reported separately on PipelineJobDetail.template — see PipelineTemplateInfo.
 	Definition *ComponentsSchemasPipelineDefinition `json:"definition,omitempty"`
 
 	// Dependencies The job's cross-tenant dependency edges (design D13). Both arrays are empty, never omitted, for a job that declares no cross-tenant trigger and has no subscriber.

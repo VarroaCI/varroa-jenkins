@@ -1533,7 +1533,11 @@ export interface PipelineListResponse {
  * exists, is reported separately on PipelineJobDetail.template — see
  * PipelineTemplateInfo.
  */
+/** Where a job's pipeline script comes from. */
+export type PipelineDefinitionSource = "jenkinsfile" | "inline" | "template";
+
 export interface PipelineDefinition {
+  source: PipelineDefinitionSource;
   jenkinsfileRepo?: string;
   jenkinsfileCommit?: string;
   profile?: string;

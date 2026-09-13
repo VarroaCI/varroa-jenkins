@@ -98,6 +98,11 @@ The pipeline page carries a breadcrumb trail under the job name. The trail names
 each folder, then the job. Every crumb except the last is a link. Select a folder crumb to open
 the team page with that folder, and every folder above it, already unfolded.
 
+The **Defined by** card states where the job's script comes from. A job that reads a Jenkinsfile
+from source control shows the repository and the last built commit. A job whose bundle item
+carries the script inline shows a **Script** row that says so. The card also names the catalog
+template, when the job has one, and the version profile of the controller.
+
 The pipeline page lists the job's builds in a table, with filters for branch, result, actor, and
 cause. Each filter you set stays in the page URL, so a filtered view is shareable and survives a
 reload.

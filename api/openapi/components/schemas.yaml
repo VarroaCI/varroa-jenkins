@@ -4260,10 +4260,21 @@ PipelineListResponse:
 PipelineDefinition:
   type: object
   description: >
-    Where a job's Jenkinsfile comes from. The catalog template, when one
+    Where a job's pipeline script comes from. The catalog template, when one
     exists, is reported separately on PipelineJobDetail.template — see
     PipelineTemplateInfo.
+  required: [source]
   properties:
+    source:
+      type: string
+      enum: [jenkinsfile, inline, template]
+      description: >
+        jenkinsfile when the script is read from source control, inline
+        when the bundle item carries the script itself, and template when
+        the item's definition names a catalog template (varroaTemplate).
+        A marker-defined multibranch job reads its marker from a
+        repository, so it reports jenkinsfile; its template is on
+        PipelineJobDetail.template.
     jenkinsfileRepo:
       type: string
     jenkinsfileCommit:

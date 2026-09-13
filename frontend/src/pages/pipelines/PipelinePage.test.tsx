@@ -288,6 +288,39 @@ describe("PipelinePage — Template row", () => {
     return dt.nextElementSibling as HTMLElement | null;
   }
 
+  it("names an inline script and drops Not available", async () => {
+    mockGetPipelineJob.mockResolvedValue(jobDetail({ definition: { source: "inline", profile: "2.570" } }));
+    renderPage();
+    await waitFor(() => expect(screen.getByText("Script")).toBeInTheDocument());
+    expect(definedByRow("Script")?.textContent).toBe("Inline, declared by the bundle item.");
+    expect(definedByRow("Profile")?.textContent).toBe("2.570");
+    expect(screen.queryByText("Jenkinsfile")).not.toBeInTheDocument();
+    const card = screen.getByText("Defined by").parentElement?.parentElement;
+    expect(within(card as HTMLElement).queryByText("Not available.")).not.toBeInTheDocument();
+  });
+
+  it("shows the profile for a template-declared job", async () => {
+    mockGetPipelineJob.mockResolvedValue(
+      jobDetail({
+        definition: { source: "template", profile: "2.570" },
+        template: { name: "go-service", version: "2.1.4", source: "items" },
+      }),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByText("Template")).toBeInTheDocument());
+    expect(definedByRow("Profile")?.textContent).toBe("2.570");
+    expect(screen.queryByText("Script")).not.toBeInTheDocument();
+    expect(screen.queryByText("Jenkinsfile")).not.toBeInTheDocument();
+  });
+
+  it("prints Not available only with no definition and no template", async () => {
+    mockGetPipelineJob.mockResolvedValue(jobDetail());
+    renderPage();
+    await waitFor(() => expect(screen.getByText("Defined by")).toBeInTheDocument());
+    const card = screen.getByText("Defined by").parentElement?.parentElement;
+    expect(within(card as HTMLElement).getByText("Not available.")).toBeInTheDocument();
+  });
+
   it("hides the Template row for a job with no catalog template", async () => {
     mockGetPipelineJob.mockResolvedValue(jobDetail());
     renderPage();

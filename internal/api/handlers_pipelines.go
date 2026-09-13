@@ -86,7 +86,14 @@ type pipelineListResponse struct {
 	Truncated    bool   `json:"truncated"`
 }
 
+// pipelineDefinitionJSON is the Defined by card's data. Source names
+// where the pipeline script comes from: "jenkinsfile" for a script read
+// from source control, "inline" for a script the bundle item carries,
+// "template" for an item whose definition names a catalog template. A
+// marker-defined multibranch job reads its marker from a repository, so
+// it stays "jenkinsfile"; the template row names its template.
 type pipelineDefinitionJSON struct {
+	Source            string `json:"source"`
 	JenkinsfileRepo   string `json:"jenkinsfileRepo,omitempty"`
 	JenkinsfileCommit string `json:"jenkinsfileCommit,omitempty"`
 	Profile           string `json:"profile,omitempty"`
@@ -561,7 +568,8 @@ func (s *Server) handleGetPipelineJob(w http.ResponseWriter, r *http.Request) {
 			if cr != nil {
 				detail.Definition.Profile = cr.Spec.Version
 			}
-			if summary.LastRun != nil && summary.LastRun.SCMRevision != nil {
+			// A checked-out commit belongs to a repository script only.
+			if detail.Definition.Source == "jenkinsfile" && summary.LastRun != nil && summary.LastRun.SCMRevision != nil {
 				detail.Definition.JenkinsfileCommit = *summary.LastRun.SCMRevision
 			}
 		}
