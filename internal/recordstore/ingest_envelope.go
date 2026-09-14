@@ -6,11 +6,12 @@ import (
 )
 
 // Ingest kind constants. The payload on builds.<cluster>.<ns>.<cell>
-// carries exactly one of these ten values in its "kind" field: nine
+// carries exactly one of these eleven values in its "kind" field: ten
 // run.* kinds, and the cell-scoped job.schedules kind C11's gateway
 // publishes. C2 maps its protobuf BuildEvent onto eight of the run.*
 // kinds; the gateway publishes run.trigger_failed from a failed
-// TRIGGER_BUILD result instead.
+// TRIGGER_BUILD result, and run.trigger_accepted from a successful one,
+// instead.
 const (
 	KindRunStarted   = "run.started"
 	KindRunStage     = "run.stage"
@@ -24,25 +25,31 @@ const (
 	// run holds no intent row, so the recorder routes it before the intent
 	// read.
 	KindRunTriggerFailed = "run.trigger_failed"
-	KindJobSchedules     = "job.schedules"
+	// KindRunTriggerAccepted records a build trigger Jenkins accepted onto
+	// its queue. No intent needs to exist for it: an accepted trigger can
+	// arrive before any claim, so the recorder routes it before the
+	// intent read, beside run.trigger_failed.
+	KindRunTriggerAccepted = "run.trigger_accepted"
+	KindJobSchedules       = "job.schedules"
 )
 
 // ingestKinds lists every kind the recorder accepts. A kind outside this
 // set is unknown.
 var ingestKinds = map[string]bool{
-	KindRunStarted:       true,
-	KindRunStage:         true,
-	KindRunCompleted:     true,
-	KindRunTests:         true,
-	KindRunArtifacts:     true,
-	KindRunChanges:       true,
-	KindRunLog:           true,
-	KindRunHeartbeat:     true,
-	KindRunTriggerFailed: true,
-	KindJobSchedules:     true,
+	KindRunStarted:         true,
+	KindRunStage:           true,
+	KindRunCompleted:       true,
+	KindRunTests:           true,
+	KindRunArtifacts:       true,
+	KindRunChanges:         true,
+	KindRunLog:             true,
+	KindRunHeartbeat:       true,
+	KindRunTriggerFailed:   true,
+	KindRunTriggerAccepted: true,
+	KindJobSchedules:       true,
 }
 
-// IsKnownKind reports whether kind is one of the ten ingest kinds.
+// IsKnownKind reports whether kind is one of the eleven ingest kinds.
 func IsKnownKind(kind string) bool {
 	return ingestKinds[kind]
 }

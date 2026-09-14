@@ -100,9 +100,10 @@ func (r *pgReader) jobSummaries(ctx context.Context, cluster, tenant, jobPath st
 // stays fixed no matter how many runs a job has, and a run with no
 // result yet (QUEUED or RUNNING) never enters it.
 //
-// A TRIGGER_FAILED run passes the result-is-not-null filter, so the
-// lateral subquery needs its own exclusion. Without it a mixed job shows a
-// false fail dot.
+// A row that records no build can still pass the result-is-not-null
+// filter — a TRIGGER_FAILED row always does — so the lateral subquery
+// needs its own exclusion. Without it a mixed job shows a false fail
+// dot.
 func addJobRecentResults(
 	ctx context.Context, db rowQuerier, args []any, jobFilter string, summaries map[string]JobSummary, getOrCreate func(string) JobSummary,
 ) error {
@@ -119,7 +120,7 @@ func addJobRecentResults(
 			SELECT result, created_at, run_id
 			FROM varroa.runs r
 			WHERE r.cluster = $1 AND r.tenant = $2 AND r.job_path = jobs.job_path AND r.result IS NOT NULL
-			  AND r.result IS DISTINCT FROM 'TRIGGER_FAILED'
+			  AND `+recordsBuildRunSQL+`
 			ORDER BY r.created_at DESC, r.run_id DESC
 			LIMIT $%[2]d
 		) recent
@@ -153,7 +154,7 @@ func addJobLastRuns(
 	rows, err := db.Query(ctx, fmt.Sprintf(`
 		SELECT DISTINCT ON (job_path) `+runColumns+`
 		FROM varroa.runs
-		WHERE cluster = $1 AND tenant = $2 AND result IS DISTINCT FROM 'TRIGGER_FAILED' %s
+		WHERE cluster = $1 AND tenant = $2 AND `+recordsBuildSQL+` %s
 		ORDER BY job_path, created_at DESC, run_id DESC
 	`, jobFilter), args...)
 	if err != nil {
@@ -184,8 +185,9 @@ func addJobLastRuns(
 // still occupies its rank and the trend never reaches past
 // jobSummaryTrendSize runs into older history to fill in a duration.
 //
-// The TRIGGER_FAILED exclusion belongs to the inner ranking subquery. A
-// failed trigger must consume no rank before the outer clause drops it.
+// The no-build-recorded exclusion belongs to the inner ranking subquery.
+// A failed trigger or an accepted-only row must consume no rank before
+// the outer clause drops it.
 func addJobDurationTrends(
 	ctx context.Context, db rowQuerier, args []any, jobFilter string, summaries map[string]JobSummary, getOrCreate func(string) JobSummary,
 ) error {
@@ -196,7 +198,7 @@ func addJobDurationTrends(
 			SELECT job_path, duration_ms,
 			       row_number() OVER (PARTITION BY job_path ORDER BY created_at DESC, run_id DESC) AS rn
 			FROM varroa.runs
-			WHERE cluster = $1 AND tenant = $2 AND result IS DISTINCT FROM 'TRIGGER_FAILED' %s
+			WHERE cluster = $1 AND tenant = $2 AND `+recordsBuildSQL+` %s
 		) ranked
 		WHERE rn <= $%d AND duration_ms IS NOT NULL
 		ORDER BY job_path, rn

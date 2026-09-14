@@ -37,7 +37,10 @@ type crossTenantRunRecord struct {
 // The join excludes a TRIGGER_FAILED row, so a run whose only row is
 // synthetic reads as queued rather than completed. The operator can
 // redeliver one trigger action, so an intent can arrive after a refused
-// trigger under the same run identifier.
+// trigger under the same run identifier. It keeps an accepted-only row on
+// purpose: a caller polling this run reads it as queued while it waits,
+// and as interrupted once the sweep marks it, through the ordinary
+// status mapping below.
 func readCrossTenantRunRecord(ctx context.Context, pool *pgxpool.Pool, runID string) (crossTenantRunRecord, bool, error) {
 	var (
 		rec    crossTenantRunRecord

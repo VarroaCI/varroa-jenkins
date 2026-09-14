@@ -30,16 +30,45 @@ const notTriggerFailedSQL = `result IS DISTINCT FROM '` + ResultTriggerFailed + 
 // every query that joins varroa.runs beside another table gives it.
 const notTriggerFailedRunSQL = `r.` + notTriggerFailedSQL
 
-// supersedeTriggerFailedSQL is the predicate a real write carries to
-// supersede a stored TRIGGER_FAILED row in place. realWrite is the half the
-// caller supplies: TRUE in applyRunStarted, which always establishes a real
+// acceptedPayloadKeysSQL removes the two accepted keys. Every real write
+// applies it before its own merge, so a row that holds a build event
+// never carries them.
+const acceptedPayloadKeysSQL = `- 'accepted_at' - 'accepted_instance'`
+
+// noBuildRecordedSQL matches a row that records no build: a refused
+// trigger, or an accepted trigger that no real event has yet followed.
+// The COALESCE keeps it false on a null payload, which a heartbeat-first
+// or tests-first placeholder holds; NOT NULL would otherwise drop a live
+// run.
+const noBuildRecordedSQL = `(result IS NOT DISTINCT FROM '` + ResultTriggerFailed + `' OR COALESCE(payload ? 'accepted_at', false))`
+
+// recordsBuildSQL is noBuildRecordedSQL's negation, for a query that asks
+// about a real run.
+const recordsBuildSQL = `NOT ` + noBuildRecordedSQL
+
+// recordsBuildRunSQL is recordsBuildSQL qualified by "r", the alias every
+// query that joins varroa.runs beside another table gives it.
+const recordsBuildRunSQL = `NOT (r.result IS NOT DISTINCT FROM '` + ResultTriggerFailed + `' OR COALESCE(r.payload ? 'accepted_at', false))`
+
+// acceptedSupersedeKeysSQL removes the accepted keys and the interrupted
+// sweep's own marking keys. A superseding write applies it to a row that
+// still holds the accepted keys, so a synthetic finalized log summary
+// never survives into the real run's log.
+const acceptedSupersedeKeysSQL = `- 'accepted_at' - 'accepted_instance' - 'interrupted_reason' - 'log_summary'`
+
+// supersedeSQL is the predicate a real write carries to supersede a
+// stored row that records no build: a TRIGGER_FAILED row, or a row that
+// still holds the accepted keys. realWrite is the half the caller
+// supplies: TRUE in applyRunStarted, which always establishes a real
 // run, and the owner flag in applyRunCompleted. A foreign completion
 // supersedes nothing, because it changes no terminal state.
 //
-// A TRIGGER_FAILED row is not a run record. It records that no build
-// exists, so a real event replaces it rather than merging with it.
-func supersedeTriggerFailedSQL(realWrite string) string {
-	return `runs.result = 'TRIGGER_FAILED' AND ` + realWrite
+// A row that records no build is not a run record. It records that
+// Jenkins refused the trigger, or that Jenkins accepted it and no real
+// event has yet followed, so a real event replaces the row rather than
+// merging with it.
+func supersedeSQL(realWrite string) string {
+	return `(runs.result IS NOT DISTINCT FROM '` + ResultTriggerFailed + `' OR COALESCE(runs.payload ? 'accepted_at', false)) AND ` + realWrite
 }
 
 // triggerPayloadKeysSQL removes the four trigger keys from a stored
@@ -57,11 +86,11 @@ const triggerPayloadKeysSQL = `- 'trigger_error' - 'trigger_reason_code' - 'trig
 //
 // realWrite is the second half of the supersede predicate. The supersede
 // arm comes first, and the monotonic rule does not apply to a superseded
-// row. A TRIGGER_FAILED row is never DUPLICATE, so the order changes no
-// other case.
+// row. Neither a TRIGGER_FAILED row nor an accepted-only row is ever
+// DUPLICATE, so the order changes no other case.
 func runsStatusMergeSQL(realWrite string) string {
 	return `CASE
-	WHEN ` + supersedeTriggerFailedSQL(realWrite) + ` THEN EXCLUDED.status
+	WHEN ` + supersedeSQL(realWrite) + ` THEN EXCLUDED.status
 	WHEN runs.status = 'DUPLICATE' THEN runs.status
 	WHEN (CASE EXCLUDED.status WHEN 'QUEUED' THEN 0 WHEN 'RUNNING' THEN 1 WHEN 'COMPLETED' THEN 2 ELSE -1 END)
 	   > (CASE runs.status WHEN 'QUEUED' THEN 0 WHEN 'RUNNING' THEN 1 WHEN 'COMPLETED' THEN 2 ELSE -1 END)

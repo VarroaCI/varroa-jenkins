@@ -12,7 +12,8 @@ import (
 // late arrival never clears a set value, following the same COALESCE
 // merge every other scalar column uses. It stores the complete
 // envelope in payload under the key "run.changes", so a later kind's
-// write never replaces it.
+// write never replaces it. It removes the accepted keys from a stored
+// row that still holds them, before its own merge.
 func applyRunChanges(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) error {
 	var payload RunChangesPayload
 	if err := json.Unmarshal(env.Payload, &payload); err != nil {
@@ -34,7 +35,7 @@ func applyRunChanges(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 		)
 		ON CONFLICT (created_at, run_id) DO UPDATE SET
 			changes = COALESCE(EXCLUDED.changes, runs.changes),
-			payload = COALESCE(runs.payload, '{}'::jsonb) || EXCLUDED.payload
+			payload = (COALESCE(runs.payload, '{}'::jsonb) `+acceptedPayloadKeysSQL+`) || EXCLUDED.payload
 	`,
 		intent.runID, intent.createdAt, intent.intentKey, intent.cluster, intent.namespace,
 		intent.cellValue(), intent.tenant, intent.jobPath,

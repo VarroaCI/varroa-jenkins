@@ -37,9 +37,9 @@ type JobWindowStats struct {
 // across the window's runs, not its single slowest run: a median
 // resists one outlier run inflating a stage that usually runs fast.
 //
-// A run whose result is TRIGGER_FAILED counts in no value here. It started
-// no build, so it is not a build outcome. The predicate says IS DISTINCT
-// FROM, never <>: a running run holds a null result, and <> would drop it.
+// A run that records no build counts in no value here: a run whose
+// result is TRIGGER_FAILED, or a run whose payload still holds
+// accepted_at. Neither started a build, so neither is a build outcome.
 func (r *pgReader) JobWindowStats(ctx context.Context, cluster, tenant, jobPath string, since time.Time) (JobWindowStats, error) {
 	if err := r.checkSchema(ctx); err != nil {
 		return JobWindowStats{}, err
@@ -55,7 +55,7 @@ func (r *pgReader) JobWindowStats(ctx context.Context, cluster, tenant, jobPath 
 			SELECT run_id, result, duration_ms
 			FROM varroa.runs
 			WHERE cluster = $1 AND tenant = $2 AND job_path = $3 AND created_at >= $4
-			  AND result IS DISTINCT FROM 'TRIGGER_FAILED'
+			  AND `+recordsBuildSQL+`
 		),
 		stage_medians AS (
 			SELECT rs.name AS stage_name,

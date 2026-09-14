@@ -133,6 +133,25 @@ filtered on the result `TRIGGER_FAILED` returns it.
 
 Retention treats the run like every other run. The `runs` value above bounds it.
 
+## A trigger that a cell loses
+
+A cell pod can roll before a build Jenkins accepted onto its queue starts. The record store then
+holds one run whose status is `QUEUED`, with no build number. The run page shows `Queued` as soon
+as the record exists.
+
+The recorder marks the run interrupted once its accepting cell instance is confirmed gone for
+five minutes, with reason `cell-rolled`. The run page names the reason and states that the build
+never started on the cell.
+
+The recorder publishes no automatic retry for a queued run: the record holds no build
+parameters. Use `Re-run` instead; it starts the build with each parameter's declared default.
+
+Counters: `varroa.gateway.trigger_accepted`, `recorder_ingest_trigger_accepted_total` (a
+`stored` attribute), and `recorder_interrupted_marked_total` (a `status` attribute, `queued` or
+`running`).
+
+Retention treats the run like every other run. The `runs` value above bounds it.
+
 ## Activity history
 
 Activity history rides two stores: a fixed transport buffer in NATS and a durable table in

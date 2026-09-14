@@ -19,6 +19,12 @@ import (
 // it merges into payload under foreign_completion instead and changes
 // no terminal column.
 //
+// The owner arm also supersedes a row that records no build: a
+// TRIGGER_FAILED row, or a row that still holds the accepted keys. It
+// removes the accepted keys from every owner write, whether or not the
+// stored row held them, because the owner arm is always a real write. A
+// foreign completion leaves every stored key in place.
+//
 // owner reports whether this write was the real terminal write: only
 // then does the caller run the fan-out round and release this run's
 // fleet locks. A foreign completion changes no terminal column, so it
@@ -52,7 +58,7 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 		)
 		ON CONFLICT (created_at, run_id) DO UPDATE SET
 			status = `+runsStatusMergeSQL("$13")+`,
-			cell = CASE WHEN `+supersedeTriggerFailedSQL("$13")+` THEN EXCLUDED.cell ELSE runs.cell END,
+			cell = CASE WHEN `+supersedeSQL("$13")+` THEN EXCLUDED.cell ELSE runs.cell END,
 			-- The owner arm below already supplies the supersede value for
 			-- these three columns: a supersede needs $13, and $13 takes the
 			-- event's own value whatever the row holds.
@@ -63,8 +69,10 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 				WHEN $13 AND runs.result = 'INTERRUPTED' THEN now()
 				ELSE runs.interrupted_superseded_at
 			END,
-			payload = (CASE WHEN `+supersedeTriggerFailedSQL("$13")+`
-			                THEN COALESCE(runs.payload, '{}'::jsonb) `+triggerPayloadKeysSQL+`
+			payload = (CASE
+			                WHEN runs.result IS NOT DISTINCT FROM '`+ResultTriggerFailed+`' AND $13 THEN COALESCE(runs.payload, '{}'::jsonb) `+triggerPayloadKeysSQL+`
+			                WHEN COALESCE(runs.payload ? 'accepted_at', false) AND $13 THEN COALESCE(runs.payload, '{}'::jsonb) `+acceptedSupersedeKeysSQL+`
+			                WHEN $13 THEN COALESCE(runs.payload, '{}'::jsonb) `+acceptedPayloadKeysSQL+`
 			                ELSE COALESCE(runs.payload, '{}'::jsonb) END) || EXCLUDED.payload
 	`,
 		intent.runID, intent.createdAt, intent.intentKey, intent.cluster, intent.namespace,

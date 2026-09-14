@@ -561,8 +561,8 @@ func (h *BusHandler) SetRecordStoreEnabled(enabled bool) {
 	h.recordStoreEnabled = enabled
 }
 
-// recordFailedTrigger publishes the record of a failed TRIGGER_BUILD result,
-// and reports whether the pending imperative message may be acknowledged.
+// recordTriggerOutcome publishes the record of a TRIGGER_BUILD result, and
+// reports whether the pending imperative message may be acknowledged.
 //
 // The rule has two arms. With no record store the gateway publishes nothing,
 // counts nothing, and acknowledges: such an install has nothing to record.
@@ -574,13 +574,16 @@ func (h *BusHandler) SetRecordStoreEnabled(enabled bool) {
 //
 // Every other outcome acknowledges, because a redelivery would trigger the
 // same build again and change nothing.
-func (h *BusHandler) recordFailedTrigger(ns, name string, pendingMsg *nats.Msg, result *mitev1.CommandResult) bool {
-	if result.Success || !h.recordStoreEnabled {
+func (h *BusHandler) recordTriggerOutcome(ns, name string, pendingMsg *nats.Msg, result *mitev1.CommandResult) bool {
+	if !h.recordStoreEnabled {
 		return true
 	}
 	payload := triggerBuildPayload(pendingMsg)
 	if payload == nil {
 		return true
+	}
+	if result.Success {
+		return h.publishTriggerAccepted(ns, name, payload, result)
 	}
 	return h.publishTriggerFailed(ns, name, payload, result)
 }
@@ -642,6 +645,59 @@ func (h *BusHandler) publishTriggerFailed(ns, name string, payload *mitev1.Trigg
 	return true
 }
 
+// publishTriggerAccepted publishes one run.trigger_accepted envelope for a
+// TRIGGER_BUILD command Jenkins accepted onto its queue. It reports whether
+// the pending imperative message may be acknowledged. An unresolved tenant
+// publishes nothing and counts a rejection: a cell must not write a record
+// under a tenant it does not host.
+func (h *BusHandler) publishTriggerAccepted(ns, name string, payload *mitev1.TriggerBuildPayload, result *mitev1.CommandResult) bool {
+	key := ns + "/" + name
+
+	tenant, _ := h.resolver().ResolveJobTenant(h.cluster, ns, name, payload.JobPath)
+	if tenant == "" {
+		buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("accepted trigger unresolved, publishing no envelope",
+			"controller", key, "job_path", payload.JobPath)
+		return true
+	}
+
+	env := ingestEnvelope{
+		SchemaVersion: 1,
+		Kind:          kindRunTriggerAccepted,
+		RunID:         payload.RunId,
+		IntentKey:     payload.IntentKey,
+		Cluster:       h.cluster,
+		Namespace:     ns,
+		Cell:          name,
+		CellInstance:  h.lookupCellInstance(ns, name),
+		Tenant:        tenant,
+		JobPath:       payload.JobPath,
+		// A TriggerBuildPayload carries no timestamp, so the gateway clock
+		// is the only source.
+		OccurredAt: time.Now().UTC(),
+		Payload: map[string]interface{}{
+			"http_status": result.HttpStatus,
+			"actor":       payload.Actor,
+		},
+	}
+
+	data, err := json.Marshal(env)
+	if err != nil {
+		h.log().Error("marshal trigger acceptance envelope failed", "controller", key, "error", err)
+		return true
+	}
+
+	if _, err := h.publisher.PublishJetStream(bus.BuildSubject(h.cluster, ns, name), data); err != nil {
+		buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("accepted trigger publish failed, leaving the command unacknowledged",
+			"controller", key, "error", err)
+		return false
+	}
+
+	triggerAcceptedTotal.Add(context.Background(), 1)
+	return true
+}
+
 // triggerBuildPayload returns the TriggerBuildPayload of a pending imperative
 // message, or nil when the message carries another command type. The pending
 // message's Data holds the marshaled OperatorMessage, so the gateway decodes it
@@ -664,8 +720,9 @@ func triggerBuildPayload(msg *nats.Msg) *mitev1.TriggerBuildPayload {
 // imperative command, the JetStream msg is acked so it is not redelivered after
 // a gateway restart.
 //
-// A failed TRIGGER_BUILD result first publishes one run.trigger_failed
-// envelope. Its pending message waits for that publish, so a failed publish
+// A TRIGGER_BUILD result first publishes one run record: run.trigger_failed
+// for a refused trigger, or run.trigger_accepted for an accepted one. Its
+// pending message waits for that publish, so either outcome's failed publish
 // leaves the stream to redeliver the command. Every other case acks at once.
 func (h *BusHandler) OnCommandResult(name, ns string, result *mitev1.CommandResult) {
 	key := ns + "/" + name
@@ -695,7 +752,7 @@ func (h *BusHandler) OnCommandResult(name, ns string, result *mitev1.CommandResu
 	}
 	h.mu.Unlock()
 
-	if pendingMsg != nil && h.recordFailedTrigger(ns, name, pendingMsg, result) {
+	if pendingMsg != nil && h.recordTriggerOutcome(ns, name, pendingMsg, result) {
 		_ = pendingMsg.Ack()
 	}
 

@@ -14,7 +14,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
 
-// ErrUnknownKind means an envelope's kind is outside the eight known
+// ErrUnknownKind means an envelope's kind is outside the eleven known
 // ingest kinds. The consumer acknowledges and drops such an event; it
 // can never become readable.
 var ErrUnknownKind = errors.New("unknown ingest kind")
@@ -56,6 +56,13 @@ type ApplyResult struct {
 	// row. It is false when the conflict clause skipped the insert,
 	// because a redelivery or a real run already holds the run id.
 	TriggerFailedStored bool
+
+	// TriggerAcceptedStored reports whether a run.trigger_accepted
+	// envelope's insert wrote a row. It is false when the conflict clause
+	// skipped the insert, because a redelivery or a real run already
+	// holds the run id. The caller acknowledges the message and counts
+	// recorder_ingest_trigger_accepted_total with a stored attribute.
+	TriggerAcceptedStored bool
 }
 
 // Ingester applies one IngestEnvelope to the record tables inside a
@@ -90,7 +97,7 @@ func (g *Ingester) SetUpstreamFanout(evaluator *GrantEvaluator, metrics *Upstrea
 
 // Apply writes env to the record tables. It returns ErrIntentMissing
 // when no run_intents row exists for env.RunID, ErrUnknownKind when
-// env.Kind is outside the eight known kinds, and ErrMalformedEnvelope
+// env.Kind is outside the eleven known kinds, and ErrMalformedEnvelope
 // when env.RunID is not a valid UUID or a typed payload does not
 // decode. Any other error is a retryable database failure. A nil error
 // and a false ApplyResult.Conflict mean the write committed cleanly.
@@ -106,10 +113,14 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 		return g.applyJobSchedules(ctx, env)
 	}
 
-	// run.trigger_failed writes the only record of its run, so no intent
-	// can exist before it. It takes the same early route.
+	// run.trigger_failed and run.trigger_accepted each write the only
+	// record of its run when no other event has arrived, so no intent
+	// needs to exist before either one. Both take the same early route.
 	if env.Kind == KindRunTriggerFailed {
 		return g.applyTriggerFailed(ctx, env)
+	}
+	if env.Kind == KindRunTriggerAccepted {
+		return g.applyTriggerAccepted(ctx, env)
 	}
 
 	runID, err := uuid.Parse(env.RunID)

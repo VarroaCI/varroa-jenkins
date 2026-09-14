@@ -237,6 +237,30 @@ describe("BuildPage — pending and not-found states", () => {
     await screen.findByText(/Build #42/);
     expect(screen.getByText("Interrupted: reason not available.")).toBeInTheDocument();
   });
+
+  it("names a build that never started when the interrupted run holds no start time", async () => {
+    mockGetRun.mockResolvedValue(
+      baseRun({ result: "INTERRUPTED", interruptedReason: "cell-rolled", buildNumber: undefined, startedAt: undefined }),
+    );
+    renderPage();
+    await screen.findByText(/Interrupted: cell-rolled/);
+    expect(screen.getByText("The build never started on the cell.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Re-run starts with each parameter's declared default."),
+    ).toBeInTheDocument();
+  });
+
+  it("says neither sentence for an interrupted run that started, even with no build number", async () => {
+    mockGetRun.mockResolvedValue(
+      baseRun({ result: "INTERRUPTED", interruptedReason: "no-heartbeat", buildNumber: undefined }),
+    );
+    renderPage();
+    await screen.findByText(/Interrupted: no-heartbeat/);
+    expect(screen.queryByText("The build never started on the cell.")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Re-run starts with each parameter's declared default."),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe("BuildPage — log stream resume", () => {

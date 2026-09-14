@@ -142,6 +142,15 @@ func handleIngestMessage(ctx context.Context, ingester *Ingester, metrics *Inges
 			logger.Info("stale job schedule envelope acknowledged with no change",
 				"cluster", env.Cluster, "namespace", env.Namespace, "cell", env.Cell)
 		}
+		if env.Kind == KindRunTriggerAccepted {
+			metrics.addTriggerAccepted(ctx, result.TriggerAcceptedStored)
+			if result.TriggerAcceptedStored {
+				logger.Info("accepted build trigger recorded", "runID", env.RunID)
+			} else {
+				logger.Info("accepted build trigger skipped; a run already holds that run id",
+					"runID", env.RunID)
+			}
+		}
 		_ = msg.Ack()
 	case errors.Is(err, ErrIntentMissing):
 		if time.Since(env.OccurredAt) > retentionRuns {

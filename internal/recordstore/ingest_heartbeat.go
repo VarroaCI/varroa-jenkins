@@ -9,9 +9,10 @@ import (
 
 // applyRunHeartbeat raises runs.last_heartbeat_at to the envelope's
 // occurred_at when that value is later than the stored one. It changes
-// no other column: no status, no result, and no payload merge, so a
-// heartbeat for a run with no runs row yet still creates only the base
-// row a later event needs.
+// no other column and no status, except that it removes the accepted
+// keys from a stored row that still holds them, so a heartbeat for a
+// run with no runs row yet still creates only the base row a later
+// event needs.
 func applyRunHeartbeat(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) error {
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO varroa.runs (
@@ -25,7 +26,8 @@ func applyRunHeartbeat(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 				WHEN runs.last_heartbeat_at IS NULL OR EXCLUDED.last_heartbeat_at > runs.last_heartbeat_at
 				THEN EXCLUDED.last_heartbeat_at
 				ELSE runs.last_heartbeat_at
-			END
+			END,
+			payload = runs.payload `+acceptedPayloadKeysSQL+`
 	`,
 		intent.runID, intent.createdAt, intent.intentKey, intent.cluster, intent.namespace,
 		intent.cellValue(), intent.tenant, intent.jobPath, env.OccurredAt,

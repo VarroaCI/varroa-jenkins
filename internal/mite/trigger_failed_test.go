@@ -237,24 +237,6 @@ func TestReasonCodeForStatus(t *testing.T) {
 	}
 }
 
-// TestSuccessfulTriggerPublishesNothing asserts a successful result writes no
-// record.
-func TestSuccessfulTriggerPublishesNothing(t *testing.T) {
-	pub := &fakePublisher{}
-	h, conn := newTriggerFailedHandler(t, pub, triggerFailedResolver())
-	stream, consumer, _ := seedPendingImperative(t, h, conn, triggerBuildCommand())
-
-	h.OnCommandResult(triggerFailedCell, triggerFailedNS, &mitev1.CommandResult{
-		CommandId: "cmd-1",
-		Success:   true,
-	})
-
-	if got := pub.publishedCount(); got != 0 {
-		t.Fatalf("published %d envelopes, want 0", got)
-	}
-	waitAckAll(t, conn, stream, consumer)
-}
-
 // TestFailedCancelPublishesNothing asserts the gateway keys on the command
 // type, so a failed CANCEL_BUILD writes no record.
 func TestFailedCancelPublishesNothing(t *testing.T) {

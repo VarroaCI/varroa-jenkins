@@ -45,7 +45,7 @@ const cellUsageQuery = `
 		       count(*) FILTER (WHERE r.result IS NOT NULL AND r.result <> 'SUCCESS') AS failed
 		FROM varroa.runs r
 		JOIN placed p ON p.tenant = r.tenant AND p.cell = r.cell
-		WHERE r.cluster = $1 AND r.created_at >= $4 AND ` + notTriggerFailedRunSQL + `
+		WHERE r.cluster = $1 AND r.created_at >= $4 AND ` + recordsBuildRunSQL + `
 		GROUP BY r.cell, r.tenant
 	),
 	running AS (
@@ -80,8 +80,9 @@ const cellUsageQuery = `
 //
 // The two runs aggregates keep the shape of cellUsageQuery: each leads
 // with cluster and joins the placement row on tenant, so Postgres still
-// uses runs_tenant_idx, and each carries notTriggerFailedRunSQL. Neither
-// carries a namespace term, for the reason cellUsageQuery states.
+// uses runs_tenant_idx, and each excludes a row that records no build.
+// Neither carries a namespace term, for the reason cellUsageQuery
+// states.
 //
 // The row set is the union of three job-path sources, so a job with a
 // schedule row and no run appears, and a job with a run and no schedule
@@ -100,7 +101,7 @@ const cellTenantJobQuery = `
 		       count(*) FILTER (WHERE r.result IS NOT NULL AND r.result <> 'SUCCESS') AS failed
 		FROM varroa.runs r
 		JOIN placed p ON p.tenant = r.tenant AND p.cell = r.cell
-		WHERE r.cluster = $1 AND r.created_at >= $5 AND ` + notTriggerFailedRunSQL + `
+		WHERE r.cluster = $1 AND r.created_at >= $5 AND ` + recordsBuildRunSQL + `
 		GROUP BY r.job_path
 	),
 	running AS (

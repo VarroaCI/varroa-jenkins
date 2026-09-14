@@ -39,8 +39,10 @@ const DefaultSweepMaxPending = 1000
 // uses it as the newest-processed-event bound.
 const pluginHeartbeatInterval = 60 * time.Second
 
-// runInterruptCandidate is one RUNNING run's data the interrupted-run
-// tests and the marking write need.
+// runInterruptCandidate is one QUEUED or RUNNING run's data the
+// interrupted-run tests and the marking write need. status is the
+// status the round observed, so the marking write can condition on it
+// rather than a literal.
 type runInterruptCandidate struct {
 	runID           uuid.UUID
 	createdAt       time.Time
@@ -49,19 +51,26 @@ type runInterruptCandidate struct {
 	cell            string
 	tenant          string
 	jobPath         string
+	status          string
 	buildNumber     *int64
 	actor           string
 	params          json.RawMessage
 	cellInstance    string
 	lastHeartbeatAt *time.Time
+	acceptedAt      *time.Time
 }
 
 // livenessBaseline is the moved and silent tests' anchor: the run's own
-// last heartbeat when it has sent one, else its creation time. A cell
-// that died before a run's first heartbeat is still measured.
+// last heartbeat when it has sent one, else its accepted_at payload
+// value when it has one, else its creation time. A cell that died
+// before a run's first heartbeat is still measured, and a queued run
+// that never started is measured from the moment Jenkins accepted it.
 func livenessBaseline(c runInterruptCandidate) time.Time {
 	if c.lastHeartbeatAt != nil {
 		return *c.lastHeartbeatAt
+	}
+	if c.acceptedAt != nil {
+		return *c.acceptedAt
 	}
 	return c.createdAt
 }
@@ -85,68 +94,76 @@ func evaluateInterruption(now time.Time, c runInterruptCandidate, row tenantPlac
 	return ReasonNoHeartbeat, true
 }
 
-// scanRunningCandidates reads the running-run columns evaluateInterruption
-// and markInterrupted need, shared by the periodic sweep's query and the
-// announce-triggered query.
-func scanRunningCandidates(rows pgx.Rows) ([]runInterruptCandidate, error) {
+// scanCandidates reads the QUEUED/RUNNING candidate columns
+// evaluateInterruption and markInterrupted need, shared by the periodic
+// sweep's query and the announce-triggered query.
+func scanCandidates(rows pgx.Rows) ([]runInterruptCandidate, error) {
 	defer rows.Close()
 
 	var out []runInterruptCandidate
 	for rows.Next() {
 		var (
-			c            runInterruptCandidate
-			cellInstance *string
-			actor        *string
+			c              runInterruptCandidate
+			owningInstance *string
+			actor          *string
 		)
 		if err := rows.Scan(&c.runID, &c.createdAt, &c.cluster, &c.namespace, &c.cell, &c.tenant, &c.jobPath,
-			&c.buildNumber, &actor, &c.params, &c.lastHeartbeatAt, &cellInstance); err != nil {
-			return nil, fmt.Errorf("scan running candidate: %w", err)
+			&c.status, &c.buildNumber, &actor, &c.params, &c.lastHeartbeatAt, &c.acceptedAt, &owningInstance); err != nil {
+			return nil, fmt.Errorf("scan interrupt candidate: %w", err)
 		}
-		c.cellInstance = derefString(cellInstance)
+		c.cellInstance = derefString(owningInstance)
 		c.actor = derefString(actor)
 		out = append(out, c)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("select running candidates: %w", err)
+		return nil, fmt.Errorf("select interrupt candidates: %w", err)
 	}
 	return out, nil
 }
 
-// runningCandidatesQuery is the column list scanRunningCandidates
-// expects, shared by every caller so the two never drift apart.
-const runningCandidatesQuery = `
+// candidatesQuery is the column list scanCandidates expects, shared by
+// every caller so the two never drift apart. The owning instance is the
+// ledger's cell_instance when an intent exists, else the accepted
+// trigger's own accepted_instance payload value: a QUEUED run can hold
+// no intent yet.
+const candidatesQuery = `
 	SELECT r.run_id, r.created_at, r.cluster, r.namespace, r.cell, r.tenant, r.job_path,
-	       r.build_number, r.actor, r.params, r.last_heartbeat_at, ri.cell_instance
+	       r.status, r.build_number, r.actor, r.params, r.last_heartbeat_at,
+	       (r.payload->>'accepted_at')::timestamptz,
+	       COALESCE(NULLIF(ri.cell_instance, ''), r.payload->>'accepted_instance')
 	FROM varroa.runs r
 	LEFT JOIN varroa.run_intents ri ON ri.run_id = r.run_id
-	WHERE r.status = 'RUNNING'`
+	WHERE r.status IN ('QUEUED', 'RUNNING')`
 
-// selectRunningCandidates reads every RUNNING run fleet-wide, for the
+// selectCandidates reads every QUEUED or RUNNING run fleet-wide, for the
 // periodic sweep.
-func selectRunningCandidates(ctx context.Context, pool *pgxpool.Pool) ([]runInterruptCandidate, error) {
-	rows, err := pool.Query(ctx, runningCandidatesQuery)
+func selectCandidates(ctx context.Context, pool *pgxpool.Pool) ([]runInterruptCandidate, error) {
+	rows, err := pool.Query(ctx, candidatesQuery)
 	if err != nil {
-		return nil, fmt.Errorf("select running candidates: %w", err)
+		return nil, fmt.Errorf("select interrupt candidates: %w", err)
 	}
-	return scanRunningCandidates(rows)
+	return scanCandidates(rows)
 }
 
-// selectRunningCandidatesForTenant reads every RUNNING run of one
+// selectCandidatesForTenant reads every QUEUED or RUNNING run of one
 // cluster and tenant, for the announce-triggered marking.
-func selectRunningCandidatesForTenant(ctx context.Context, pool *pgxpool.Pool, cluster, tenant string) ([]runInterruptCandidate, error) {
-	rows, err := pool.Query(ctx, runningCandidatesQuery+" AND r.cluster = $1 AND r.tenant = $2", cluster, tenant)
+func selectCandidatesForTenant(ctx context.Context, pool *pgxpool.Pool, cluster, tenant string) ([]runInterruptCandidate, error) {
+	rows, err := pool.Query(ctx, candidatesQuery+" AND r.cluster = $1 AND r.tenant = $2", cluster, tenant)
 	if err != nil {
-		return nil, fmt.Errorf("select running candidates for tenant: %w", err)
+		return nil, fmt.Errorf("select interrupt candidates for tenant: %w", err)
 	}
-	return scanRunningCandidates(rows)
+	return scanCandidates(rows)
 }
 
 // markInterrupted performs the whole marking transaction for one run:
-// the terminal write conditioned on status = 'RUNNING', the log-summary
-// finalize marker, and the build.interrupted activity row, all in one
-// transaction. It reports whether the conditional update changed the
-// row; a miss means a real terminal event already won the race, and the
-// caller counts it in recorder_interrupted_skipped_total.
+// the terminal write conditioned on status = the status the round
+// observed, the log-summary finalize marker, and the build.interrupted
+// activity row, all in one transaction. It reports whether the
+// conditional update changed the row; a miss means a real terminal
+// event already won the race, and the caller counts it in
+// recorder_interrupted_skipped_total. It leaves a QUEUED run's accepted
+// keys in place: a query that asks whether a real build was ever
+// recorded must still answer no for a marked queued run.
 func markInterrupted(ctx context.Context, pool *pgxpool.Pool, run runInterruptCandidate, reason string, now time.Time) (bool, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -166,8 +183,8 @@ func markInterrupted(ctx context.Context, pool *pgxpool.Pool, run runInterruptCa
 		                 THEN COALESCE(payload -> 'log_summary', '{}'::jsonb) || '{"finalized": true, "incomplete": true, "incomplete_reason": "not-finalized"}'::jsonb
 		                 ELSE '{"finalized": true, "incomplete": true, "incomplete_reason": "no-summary"}'::jsonb
 		             END)
-		WHERE run_id = $1 AND status = 'RUNNING'
-	`, run.runID, now, reason)
+		WHERE run_id = $1 AND status = $4
+	`, run.runID, now, reason, run.status)
 	if err != nil {
 		return false, fmt.Errorf("mark run interrupted: %w", err)
 	}
@@ -250,10 +267,17 @@ func decodeInterruptedRetry(policy json.RawMessage) string {
 // calls for it. Neither publish is transactional with markInterrupted's
 // write: a lost action produces no retry and no cancel, per design D14,
 // and the recorder never republishes.
+//
+// A marked QUEUED run publishes neither action: no build ever started,
+// so there is nothing to cancel, and the store holds no parameters to
+// retry with.
 func afterMark(ctx context.Context, conn *bus.Conn, metrics *InterruptedMetrics, actionMetrics *ActionMetrics,
 	run runInterruptCandidate, reason, interruptedRetry string, logger *slog.Logger) {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if run.status == StatusQueued {
+		return
 	}
 
 	if reason == ReasonNoHeartbeat {
@@ -301,20 +325,29 @@ func afterMark(ctx context.Context, conn *bus.Conn, metrics *InterruptedMetrics,
 	}
 }
 
-// MarkMovedRunsForTenant runs the moved test only, for every RUNNING run
-// of cluster/tenant, immediately after a tenant.sync announce changes
-// cell or cell_instance. row is the placement row the announce just
-// wrote. It answers how many runs it marked, for the TenantSyncResponse
-// InterruptedMarked field. The sweep marks the rest as their heartbeats
-// age: this is the fast path design D9 gives a cell roll, not a separate
-// rule, so the silent test never fires here.
+// markedStatusLabel maps a candidate's status to the "status" attribute
+// recorder_interrupted_marked_total carries: "queued" or "running".
+func markedStatusLabel(status string) string {
+	if status == StatusQueued {
+		return "queued"
+	}
+	return "running"
+}
+
+// MarkMovedRunsForTenant runs the moved test only, for every QUEUED or
+// RUNNING run of cluster/tenant, immediately after a tenant.sync
+// announce changes cell or cell_instance. row is the placement row the
+// announce just wrote. It answers how many runs it marked, for the
+// TenantSyncResponse InterruptedMarked field. The sweep marks the rest
+// as their heartbeats age: this is the fast path design D9 gives a cell
+// roll, not a separate rule, so the silent test never fires here.
 func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, metrics *InterruptedMetrics,
 	actionMetrics *ActionMetrics, cluster, tenant string, row tenantPlacementLivenessRow, now time.Time, logger *slog.Logger) (int, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
-	candidates, err := selectRunningCandidatesForTenant(ctx, pool, cluster, tenant)
+	candidates, err := selectCandidatesForTenant(ctx, pool, cluster, tenant)
 	if err != nil {
 		return 0, err
 	}
@@ -322,6 +355,10 @@ func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.C
 	interruptedRetry := decodeInterruptedRetry(row.policy)
 	marked := 0
 	for _, c := range candidates {
+		if c.cellInstance == "" {
+			metrics.addSweepSkipped(ctx, "no-owning-instance")
+			continue
+		}
 		reason, ok := evaluateInterruption(now, c, row, true)
 		if !ok || reason == ReasonNoHeartbeat {
 			continue
@@ -335,7 +372,7 @@ func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.C
 			metrics.addSkipped(ctx)
 			continue
 		}
-		metrics.addMarked(ctx, "announce")
+		metrics.addMarked(ctx, "announce", markedStatusLabel(c.status))
 		afterMark(ctx, conn, metrics, actionMetrics, c, reason, interruptedRetry, logger)
 		marked++
 	}
@@ -345,9 +382,9 @@ func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.C
 // SweepInterruptedRuns runs one round of the interrupted-run sweep
 // (design D9, task 9.6a's gate): it checks the recorder's own
 // varroa_builds consumer for freshness before it reads any run, then
-// applies the moved and silent tests to every RUNNING run fleet-wide,
-// marking and publishing for each one that qualifies. It answers how
-// many runs it marked.
+// applies the moved and silent tests to every QUEUED or RUNNING run
+// fleet-wide, marking and publishing for each one that qualifies. It
+// answers how many runs it marked.
 func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, metrics *InterruptedMetrics,
 	actionMetrics *ActionMetrics, maxPending uint64, now time.Time, logger *slog.Logger) (int, error) {
 	if logger == nil {
@@ -367,13 +404,17 @@ func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 		return 0, nil
 	}
 
-	candidates, err := selectRunningCandidates(ctx, pool)
+	candidates, err := selectCandidates(ctx, pool)
 	if err != nil {
 		return 0, err
 	}
 
 	marked := 0
 	for _, c := range candidates {
+		if c.cellInstance == "" {
+			metrics.addSweepSkipped(ctx, "no-owning-instance")
+			continue
+		}
 		row, exists, err := readTenantPlacementLivenessRow(ctx, pool, c.cluster, c.tenant)
 		if err != nil {
 			logger.Warn("interrupted sweep: read tenant placement failed", "run_id", c.runID, "error", err)
@@ -392,7 +433,7 @@ func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 			metrics.addSkipped(ctx)
 			continue
 		}
-		metrics.addMarked(ctx, "sweep")
+		metrics.addMarked(ctx, "sweep", markedStatusLabel(c.status))
 		afterMark(ctx, conn, metrics, actionMetrics, c, reason, decodeInterruptedRetry(row.policy), logger)
 		marked++
 	}

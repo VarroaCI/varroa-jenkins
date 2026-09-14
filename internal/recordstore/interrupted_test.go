@@ -42,7 +42,7 @@ func seedRunningRun(t *testing.T, pool *pgxpool.Pool, req ClaimRequest) uuid.UUI
 // through the same query the sweep uses.
 func fetchRunningCandidate(t *testing.T, pool *pgxpool.Pool, runID uuid.UUID) runInterruptCandidate {
 	t.Helper()
-	all, err := selectRunningCandidates(context.Background(), pool)
+	all, err := selectCandidates(context.Background(), pool)
 	if err != nil {
 		t.Fatalf("select running candidates: %v", err)
 	}
@@ -706,4 +706,332 @@ func sumCounterByAttr(t *testing.T, reader *sdkmetric.ManualReader, metricName, 
 		}
 	}
 	return total
+}
+
+// seedAcceptedOnlyRunRowInstance inserts one QUEUED runs row holding the
+// accepted keys, with the given accepting instance, so a sweep test can
+// control which instance the row names. The cell is fixed to "cell-a",
+// the tenant to testTenant, and the job path to testJobPath, since none
+// of these tests vary any of the three.
+func seedAcceptedOnlyRunRowInstance(t *testing.T, db *sql.DB, instance string, createdAt time.Time) uuid.UUID {
+	t.Helper()
+	runID := uuid.Must(uuid.NewV7())
+	if _, err := db.Exec(`
+		INSERT INTO varroa.runs (
+			run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path,
+			status, payload
+		) VALUES ($1, $2, $3, $4, $5, 'cell-a', $6, $7, 'QUEUED',
+			jsonb_build_object('accepted_at', $2::timestamptz, 'accepted_instance', $8::text))
+	`, runID, createdAt, "manual:"+runID.String(), testCluster, testNamespace, testTenant, testJobPath, instance); err != nil {
+		t.Fatalf("seed accepted-only run: %v", err)
+	}
+	return runID
+}
+
+// seedPlacementLivenessWithPolicy inserts one tenant_placements row with
+// full control over cell_instance, dead_instances, and policy, for a
+// sweep test that needs an automatic-retry policy the shared
+// seedTenantPlacementLiveness helper cannot express. The cell is fixed
+// to "cell-a", since none of these tests vary it.
+func seedPlacementLivenessWithPolicy(t *testing.T, db *sql.DB, cellInstance string, dead []TenantSyncDeadInstance, policy string) {
+	t.Helper()
+	deadJSON, err := json.Marshal(dead)
+	if err != nil {
+		t.Fatalf("marshal dead instances: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO varroa.tenant_placements (cluster, tenant, cell, cell_instance, cell_alive, dead_instances, policy)
+		VALUES ($1, $2, 'cell-a', $3, true, $4::jsonb, $5::jsonb)
+	`, testCluster, testTenant, cellInstance, string(deadJSON), policy); err != nil {
+		t.Fatalf("seed tenant placement liveness row: %v", err)
+	}
+}
+
+// TestSweepMarksQueuedRunWithDeadAcceptingInstance asserts the sweep
+// marks a QUEUED accepted-only run cell-rolled when its accepting
+// instance is listed dead older than five minutes, with the no-summary
+// finalizer, one build.interrupted row carrying a null build number, and
+// no cancel_run or retry_run even though the tenant's policy is
+// automatic.
+func TestSweepMarksQueuedRunWithDeadAcceptingInstance(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+
+	past := time.Now().UTC().Add(-6 * time.Minute)
+	runID := seedAcceptedOnlyRunRowInstance(t, db, "pod-old", past)
+	seedPlacementLivenessWithPolicy(t, db, "pod-new",
+		[]TenantSyncDeadInstance{{Instance: "pod-old", LastSeenAt: past}},
+		`{"interruptedRetry": "automatic"}`)
+
+	conn, cleanup := newSweepTestBus(t)
+	defer cleanup()
+	freshenSweepConsumer(t, conn)
+
+	received := make(chan LedgerAction, 4)
+	sub, err := conn.Subscribe(bus.LedgerActionSubject(testCluster), func(msg *nats.Msg) {
+		var a LedgerAction
+		_ = json.Unmarshal(msg.Data, &a)
+		received <- a
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	conn.NATSConn().Flush()
+
+	metrics, err := NewInterruptedMetrics()
+	if err != nil {
+		t.Fatalf("new interrupted metrics: %v", err)
+	}
+
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), nil)
+	if err != nil {
+		t.Fatalf("SweepInterruptedRuns: %v", err)
+	}
+	if marked != 1 {
+		t.Fatalf("marked = %d, want 1", marked)
+	}
+
+	var status, result, reason string
+	var buildNumber sql.NullInt64
+	var finalized bool
+	if err := db.QueryRow(`
+		SELECT status, result, payload->>'interrupted_reason', build_number,
+		       (payload->'log_summary'->>'finalized')::boolean
+		FROM varroa.runs WHERE run_id = $1
+	`, runID).Scan(&status, &result, &reason, &buildNumber, &finalized); err != nil {
+		t.Fatalf("read run: %v", err)
+	}
+	if status != StatusCompleted || result != "INTERRUPTED" || reason != ReasonCellRolled {
+		t.Fatalf("status=%q result=%q reason=%q, want COMPLETED/INTERRUPTED/%q", status, result, reason, ReasonCellRolled)
+	}
+	if buildNumber.Valid {
+		t.Fatal("build_number must stay null for a queued mark")
+	}
+	if !finalized {
+		t.Fatal("want the log summary finalized")
+	}
+
+	var activityCount int
+	if err := db.QueryRow(`
+		SELECT count(*) FROM varroa.activity WHERE type = 'build.interrupted' AND build_number IS NULL
+	`).Scan(&activityCount); err != nil {
+		t.Fatalf("count activity rows: %v", err)
+	}
+	if activityCount != 1 {
+		t.Fatalf("activity rows with a null build number = %d, want 1", activityCount)
+	}
+
+	select {
+	case a := <-received:
+		t.Fatalf("want no action published for a queued mark, got %+v", a)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// TestSweepLeavesQueuedRunWithLiveAcceptingInstanceAlone asserts a live
+// accepting instance marks nothing.
+func TestSweepLeavesQueuedRunWithLiveAcceptingInstanceAlone(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+
+	past := time.Now().UTC().Add(-time.Hour)
+	runID := seedAcceptedOnlyRunRowInstance(t, db, "pod-live", past)
+	seedPlacementLivenessWithPolicy(t, db, "pod-live", nil, `{}`)
+
+	conn, cleanup := newSweepTestBus(t)
+	defer cleanup()
+	freshenSweepConsumer(t, conn)
+
+	metrics, err := NewInterruptedMetrics()
+	if err != nil {
+		t.Fatalf("new interrupted metrics: %v", err)
+	}
+
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), nil)
+	if err != nil {
+		t.Fatalf("SweepInterruptedRuns: %v", err)
+	}
+	if marked != 0 {
+		t.Fatalf("marked = %d, want 0", marked)
+	}
+
+	var status string
+	if err := db.QueryRow(`SELECT status FROM varroa.runs WHERE run_id = $1`, runID).Scan(&status); err != nil {
+		t.Fatalf("read run: %v", err)
+	}
+	if status != StatusQueued {
+		t.Fatalf("status = %q, want QUEUED unchanged", status)
+	}
+}
+
+// TestSweepSkipsQueuedPlaceholderWithNoOwningInstance asserts a QUEUED
+// row with no run_intents row and no accepted_instance payload key is
+// skipped and counted, rather than evaluated with an empty instance.
+func TestSweepSkipsQueuedPlaceholderWithNoOwningInstance(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	runID := uuid.Must(uuid.NewV7())
+	if _, err := db.Exec(`
+		INSERT INTO varroa.runs (run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path, status)
+		VALUES ($1, now(), $2, $3, $4, 'cell-a', $5, $6, 'QUEUED')
+	`, runID, "manual:"+runID.String(), testCluster, testNamespace, testTenant, testJobPath); err != nil {
+		t.Fatalf("seed a bare queued placeholder: %v", err)
+	}
+
+	conn, cleanup := newSweepTestBus(t)
+	defer cleanup()
+	freshenSweepConsumer(t, conn)
+
+	reader, restore := swapMeterProvider(t)
+	defer restore()
+	metrics, err := NewInterruptedMetrics()
+	if err != nil {
+		t.Fatalf("new interrupted metrics: %v", err)
+	}
+
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), nil)
+	if err != nil {
+		t.Fatalf("SweepInterruptedRuns: %v", err)
+	}
+	if marked != 0 {
+		t.Fatalf("marked = %d, want 0", marked)
+	}
+	if got := sumCounterByAttr(t, reader, "recorder_sweep_skipped_total", "reason", "no-owning-instance"); got != 1 {
+		t.Fatalf("recorder_sweep_skipped_total{reason=no-owning-instance} = %d, want 1", got)
+	}
+
+	var status string
+	if err := db.QueryRow(`SELECT status FROM varroa.runs WHERE run_id = $1`, runID).Scan(&status); err != nil {
+		t.Fatalf("read run: %v", err)
+	}
+	if status != StatusQueued {
+		t.Fatalf("status = %q, want QUEUED unchanged", status)
+	}
+}
+
+// TestSweepMarksClaimedQueuedRunThroughIntentInstance asserts a QUEUED
+// run that holds a granted intent, but no accepted_instance payload key,
+// is marked through the intent's own cell_instance.
+func TestSweepMarksClaimedQueuedRunThroughIntentInstance(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ctx := context.Background()
+
+	req := newTestClaimRequest("manual:claimed-queued-1", 0)
+	req.Cell = "cell-a"
+	req.CellInstance = "pod-old"
+	granted := mustGrant(t, NewLedger(pool, nil), req)
+	runID := uuid.MustParse(granted.RunID)
+
+	// A plain QUEUED placeholder row for the granted intent, with no
+	// accepted_instance payload key: the intent's own cell_instance is
+	// this run's only owning-instance source. Its created_at is the
+	// liveness baseline, aged past the moved window.
+	past := time.Now().UTC().Add(-6 * time.Minute)
+	if _, err := db.Exec(`
+		INSERT INTO varroa.runs (run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path, status)
+		VALUES ($1, $2, $3, $4, $5, 'cell-a', $6, $7, 'QUEUED')
+	`, runID, past, req.IntentKey, testCluster, testNamespace, testTenant, testJobPath); err != nil {
+		t.Fatalf("seed a queued placeholder for the granted intent: %v", err)
+	}
+
+	seedPlacementLivenessWithPolicy(t, db, "pod-new",
+		[]TenantSyncDeadInstance{{Instance: "pod-old", LastSeenAt: past}}, `{}`)
+
+	conn, cleanup := newSweepTestBus(t)
+	defer cleanup()
+	freshenSweepConsumer(t, conn)
+	metrics, err := NewInterruptedMetrics()
+	if err != nil {
+		t.Fatalf("new interrupted metrics: %v", err)
+	}
+
+	marked, err := SweepInterruptedRuns(ctx, pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), nil)
+	if err != nil {
+		t.Fatalf("SweepInterruptedRuns: %v", err)
+	}
+	if marked != 1 {
+		t.Fatalf("marked = %d, want 1", marked)
+	}
+
+	var status, reason string
+	if err := db.QueryRow(`
+		SELECT status, payload->>'interrupted_reason' FROM varroa.runs WHERE run_id = $1
+	`, runID).Scan(&status, &reason); err != nil {
+		t.Fatalf("read run: %v", err)
+	}
+	if status != StatusCompleted || reason != ReasonCellRolled {
+		t.Fatalf("status=%q reason=%q, want COMPLETED/%q", status, reason, ReasonCellRolled)
+	}
+}
+
+// TestMarkMovedRunsForTenantMarksQueuedRunOfOldCell asserts the
+// announce-triggered fast path marks a queued run of the tenant's old
+// cell, through its accepted_instance.
+func TestMarkMovedRunsForTenantMarksQueuedRunOfOldCell(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+
+	past := time.Now().UTC().Add(-6 * time.Minute)
+	runID := seedAcceptedOnlyRunRowInstance(t, db, "pod-old", past)
+
+	resp := sendTenantSync(t, pool, conn, TenantSyncRequest{
+		Kind: TenantSyncKindAnnounce, Cluster: testCluster, Tenant: testTenant,
+		Namespace: testNamespace, Cell: "cell-a", Generation: 1, CellInstance: "pod-new",
+		DeadInstances: []TenantSyncDeadInstance{{Instance: "pod-old", LastSeenAt: past}},
+	})
+	if resp.InterruptedMarked != 1 {
+		t.Fatalf("InterruptedMarked = %d, want 1", resp.InterruptedMarked)
+	}
+
+	var status, result, reason string
+	if err := db.QueryRow(`
+		SELECT status, result, payload->>'interrupted_reason' FROM varroa.runs WHERE run_id = $1
+	`, runID).Scan(&status, &result, &reason); err != nil {
+		t.Fatalf("read run: %v", err)
+	}
+	if status != StatusCompleted || result != "INTERRUPTED" || reason != ReasonCellRolled {
+		t.Fatalf("status=%q result=%q reason=%q, want COMPLETED/INTERRUPTED/%q", status, result, reason, ReasonCellRolled)
+	}
+}
+
+// TestDeadInstancesTrimKeepsUnclaimedQueuedRunEntry asserts the trim
+// keeps a dead_instances entry an unclaimed queued run names through its
+// accepted_instance payload value.
+func TestDeadInstancesTrimKeepsUnclaimedQueuedRunEntry(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+
+	past := time.Now().UTC()
+	seedAcceptedOnlyRunRowInstance(t, db, "pod-referenced", past)
+
+	first := TenantSyncRequest{
+		Kind: TenantSyncKindAnnounce, Cluster: testCluster, Tenant: testTenant,
+		Generation: 1, CellInstance: "pod-current",
+		DeadInstances: []TenantSyncDeadInstance{{Instance: "pod-referenced", LastSeenAt: past.Add(-time.Hour)}},
+	}
+	sendTenantSync(t, pool, conn, first)
+
+	entries := make([]TenantSyncDeadInstance, 0, 12)
+	for i := 0; i < 12; i++ {
+		entries = append(entries, TenantSyncDeadInstance{
+			Instance: "pod-extra-" + string(rune('a'+i)), LastSeenAt: past.Add(-time.Duration(i) * time.Minute),
+		})
+	}
+	second := TenantSyncRequest{
+		Kind: TenantSyncKindAnnounce, Cluster: testCluster, Tenant: testTenant,
+		Generation: 1, CellInstance: "pod-current", DeadInstances: entries,
+	}
+	sendTenantSync(t, pool, conn, second)
+
+	stored := readTenantPlacement(t, db, testTenant)
+	var referencedKept bool
+	for _, d := range stored.deadInstances {
+		if d.Instance == "pod-referenced" {
+			referencedKept = true
+		}
+	}
+	if !referencedKept {
+		t.Fatalf("want pod-referenced kept because an unclaimed QUEUED run names it, got %v", stored.deadInstances)
+	}
+	if len(stored.deadInstances) != 11 {
+		t.Fatalf("want 1 kept entry plus 10 trimmed entries (11 total), got %d: %v", len(stored.deadInstances), stored.deadInstances)
+	}
 }

@@ -13,7 +13,8 @@ import (
 // tests_failed, and tests_skipped as the sum over every suite the run
 // has reported. Recomputing from run_tests, rather than accumulating in
 // place, keeps a replayed or redelivered run.tests envelope from double
-// counting one suite.
+// counting one suite. It also removes the accepted keys from a stored
+// row that still holds them.
 func applyRunTests(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) error {
 	var payload RunTestsPayload
 	if err := json.Unmarshal(env.Payload, &payload); err != nil {
@@ -50,7 +51,8 @@ func applyRunTests(ctx context.Context, tx pgx.Tx, intent *intentRow, env Ingest
 		ON CONFLICT (created_at, run_id) DO UPDATE SET
 			tests_total   = EXCLUDED.tests_total,
 			tests_failed  = EXCLUDED.tests_failed,
-			tests_skipped = EXCLUDED.tests_skipped
+			tests_skipped = EXCLUDED.tests_skipped,
+			payload       = runs.payload `+acceptedPayloadKeysSQL+`
 	`,
 		intent.runID, intent.createdAt, intent.intentKey, intent.cluster, intent.namespace,
 		intent.cellValue(), intent.tenant, intent.jobPath, total, failed, skipped,

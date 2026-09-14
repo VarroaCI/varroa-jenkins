@@ -8,9 +8,10 @@ import (
 )
 
 // applyRunLog merges a run.log envelope's payload into runs.payload
-// under the key log_summary, key by key, and changes no other column.
-// The merge never lowers a stored finalized true back to false: the
-// maintenance round's log-finalization sweep (task 6.6) sets that
+// under the key log_summary, key by key, and changes no other column
+// beyond removing the accepted keys when the stored row still holds
+// them. The merge never lowers a stored finalized true back to false:
+// the maintenance round's log-finalization sweep (task 6.6) sets that
 // marker, and a delayed writer heartbeat carrying finalized false must
 // not reopen a log the sweep already closed.
 func applyRunLog(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) error {
@@ -23,7 +24,7 @@ func applyRunLog(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEn
 			'QUEUED', jsonb_build_object('log_summary', $9::jsonb)
 		)
 		ON CONFLICT (created_at, run_id) DO UPDATE SET
-			payload = COALESCE(runs.payload, '{}'::jsonb) || jsonb_build_object(
+			payload = (COALESCE(runs.payload, '{}'::jsonb) `+acceptedPayloadKeysSQL+`) || jsonb_build_object(
 				'log_summary',
 				COALESCE(runs.payload->'log_summary', '{}'::jsonb) || EXCLUDED.payload->'log_summary'
 					|| CASE WHEN runs.payload->'log_summary'->>'finalized' = 'true'

@@ -344,16 +344,32 @@ of the fleet's audit activity, once a controller becomes disposable.
   history, so a staleness sweep would delete a row the fleet still needs.
 - **Interrupted-run marking** (`interrupted.go`, `cell_liveness.go`,
   `interrupted_metrics.go`) — design D9. `evaluateInterruption` applies
-  the moved test, then the silent test, to one `RUNNING` run;
-  `cellLivenessGone` is the one shared cell-liveness reading both this
-  package's sweep and `retention_finalize.go`'s log-finalization sweep
-  call, through `PlacementLiveness`. `MarkMovedRunsForTenant` is the fast
-  path a `tenant.sync` announce triggers when `cell` or `cell_instance`
-  changes; `SweepInterruptedRuns` is the periodic path, gated on the
-  recorder's own `varroa_builds` consumer staying fresh
-  (`VARROA_SWEEP_MAX_PENDING`, default 1000). Neither inserts an intent
-  or touches `fleet_locks`; `afterMark` publishes the `cancel_run` and
-  automatic `retry_run` actions a mark triggers.
+  the moved test, then the silent test, to one `QUEUED` or `RUNNING`
+  candidate; `cellLivenessGone` is the one shared cell-liveness reading
+  both this package's sweep and `retention_finalize.go`'s log-finalization
+  sweep call, through `PlacementLiveness`. `candidatesQuery` selects both
+  statuses in one query: a `QUEUED` candidate's owning instance is the
+  ledger's `cell_instance` when an intent exists, else its
+  `payload->>'accepted_instance'`, and its liveness baseline is its last
+  heartbeat, else that `accepted_at` payload value, else `created_at`
+  (`livenessBaseline`). A candidate with no owning instance from either
+  source is skipped and counted in `recorder_sweep_skipped_total` with
+  reason `no-owning-instance`, in both round loops. `markInterrupted`
+  conditions its update on the status the round observed, `QUEUED` or
+  `RUNNING`, never a literal, and leaves a `QUEUED` row's accepted keys in
+  place. `MarkMovedRunsForTenant` is the fast path a `tenant.sync` announce
+  triggers when `cell` or `cell_instance` changes; `SweepInterruptedRuns`
+  is the periodic path, gated on the recorder's own `varroa_builds`
+  consumer staying fresh (`VARROA_SWEEP_MAX_PENDING`, default 1000).
+  Neither inserts an intent or touches `fleet_locks`; `afterMark` returns
+  before either publish for a marked `QUEUED` run — no build ever started
+  to cancel, and the store holds no parameters to retry with — and
+  otherwise publishes the `cancel_run` and automatic `retry_run` actions a
+  mark triggers. `recorder_interrupted_marked_total` carries a `status`
+  attribute (`queued` or `running`) beside `path`. `liveCellInstances`
+  (`tenant_sync.go`) is the dead-instances trim's keep-set: the union of
+  every intent-joined `QUEUED`/`RUNNING` run's `cell_instance` and every
+  unclaimed `QUEUED` run's `accepted_instance` payload value.
 - **Backstop cron scheduler and the interrupted sweep's round**
   (`backstop_round.go`, `backstop_policy.go`, `backstop_candidates.go`,
   `backstop_fire.go`, `backstop_metrics.go`, `action_metrics.go`,
@@ -379,32 +395,48 @@ of the fleet's audit activity, once a controller becomes disposable.
   caller before the cancel's own database read and publish. Every action
   this bullet's code publishes counts in `recorder_actions_published_total`,
   labelled by kind, alongside the interrupted-run marking's own publishes.
-- **A `TRIGGER_FAILED` row is not a run record** — it records that no
-  build exists. Every query that asks about a **real run** excludes it
-  through `notTriggerFailedSQL` (or `notTriggerFailedRunSQL` for an
-  aliased join), both in `ingest_common.go` and both built from the
-  `ResultTriggerFailed` constant. The predicate says `IS DISTINCT FROM`,
+- **A row that records no build is not a run record** — a `TRIGGER_FAILED`
+  row records that no build exists, and a row that still holds the
+  payload key `accepted_at` records an accepted trigger no real event
+  has yet followed, including one the interruption sweep has since
+  marked interrupted. Every query that asks about a **real run** excludes
+  both through `recordsBuildSQL` (or `recordsBuildRunSQL` for an aliased
+  join), both in `ingest_common.go` and both the negation of
+  `noBuildRecordedSQL`. The `TRIGGER_FAILED` half says `IS DISTINCT FROM`,
   never `<>`: a queued or running row holds a null `result`. The
-  excluding readers are the four job aggregates, both `rehydration.go`
-  queries, `runsRowExists` (`ledger.go`), `selectFinalizeCandidates`
-  (`retention_finalize.go`), `lookupOwner` (`ledger_owner.go`), the
-  orphan-intent `NOT EXISTS` (`retention_intents.go`), and
-  `readCrossTenantRunRecord` (`crosstenant_runrecord.go`). Each has its
-  own failure mode: a seed built from such a row renders build zero and
-  the mite fails the whole bundle; a counted row keeps the old owner on a
-  repeat claim and makes the real completion read as foreign; a written
-  log summary survives the supersede and mislabels the real run's log; a
-  joined `COMPLETED` status arms a log-finalization deadline that already
-  passed; an orphan intent never leaves the table; a cross-tenant poll
-  reads a starting run as completed.
+  `accepted_at` half is `COALESCE`-guarded against a null `payload`, so a
+  heartbeat-first or tests-first placeholder is never excluded by
+  mistake. The excluding readers are the four job aggregates, the two
+  windowed cell-usage aggregates (`reader_cellusage.go`), both
+  `rehydration.go` queries, `runsRowExists` (`ledger.go`), `lookupOwner`
+  (`ledger_owner.go`), and the orphan-intent `NOT EXISTS`
+  (`retention_intents.go`). Each has its own failure mode: a seed built
+  from such a row renders build zero and the mite fails the whole bundle;
+  a counted row keeps the old owner on a repeat claim and makes the real
+  completion read as foreign; a joined `COMPLETED` status arms a
+  log-finalization deadline that already passed; an orphan intent never
+  leaves the table.
   **A reader that anchors on `run_intents` and joins `runs` needs the
   predicate too.** A repeated client token reuses the run identifier, so
   an intent row and a synthetic row can name one run with no real event
-  yet. The last three readers above are exactly that shape.
+  yet. `lookupOwner` is exactly that shape.
+  `selectFinalizeCandidates` (`retention_finalize.go`) and
+  `readCrossTenantRunRecord` (`crosstenant_runrecord.go`) keep the
+  narrower `notTriggerFailedSQL`/`notTriggerFailedRunSQL` on purpose: an
+  accepted-only row's finalization anchor is always null, so the sweep
+  never selects it, and a cross-tenant poll reads such a row as queued
+  while it waits and as interrupted once the sweep marks it, through the
+  ordinary status mapping. The two `status = 'RUNNING'`
+  cell-usage counts (`reader_cellusage.go`) also keep it: a running row
+  can hold neither a `TRIGGER_FAILED` result nor an `accepted_at` key, so
+  the narrower predicate already excludes everything the wider one would.
   `ListRuns`, `SearchRecords`, and `GetRun` keep the row on purpose. A
   query that already names a `status` the row does not hold (the
   interruption sweep, the duplicate backstop, the concurrency cancel,
   the fleet-lock move, the running-instance read) needs no predicate.
+  Every real write removes the payload keys `accepted_at` and
+  `accepted_instance` before its own merge, so a row that holds a build
+  event never carries them; the interruption mark leaves them in place.
   The complete reader survey is the change's design S14.
 - **Reader** (`reader*.go`) — `Reader` is the BFF's only read path onto
   the record tables; `NewReader` wraps a `*pgxpool.Pool`. Every method

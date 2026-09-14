@@ -28,7 +28,7 @@ func NewInterruptedMetrics() (*InterruptedMetrics, error) {
 	meter := otel.Meter("varroa-recorder")
 
 	marked, err := meter.Int64Counter("recorder_interrupted_marked_total",
-		metric.WithDescription("Runs marked interrupted, labelled by path (announce or sweep)"))
+		metric.WithDescription("Runs marked interrupted, labelled by path (announce or sweep) and status (queued or running)"))
 	if err != nil {
 		return nil, fmt.Errorf("register recorder_interrupted_marked_total: %w", err)
 	}
@@ -62,13 +62,13 @@ func NewInterruptedMetrics() (*InterruptedMetrics, error) {
 	}, nil
 }
 
-// addMarked counts one mark, labelled by path ("announce" or "sweep"). A
-// nil receiver is a no-op.
-func (m *InterruptedMetrics) addMarked(ctx context.Context, path string) {
+// addMarked counts one mark, labelled by path ("announce" or "sweep")
+// and by status ("queued" or "running"). A nil receiver is a no-op.
+func (m *InterruptedMetrics) addMarked(ctx context.Context, path, status string) {
 	if m == nil || m.marked == nil {
 		return
 	}
-	m.marked.Add(ctx, 1, metric.WithAttributes(attribute.String("path", path)))
+	m.marked.Add(ctx, 1, metric.WithAttributes(attribute.String("path", path), attribute.String("status", status)))
 }
 
 // addSkipped counts one row the conditional marking update did not

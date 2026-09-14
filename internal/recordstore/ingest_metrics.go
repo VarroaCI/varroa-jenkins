@@ -30,6 +30,7 @@ type IngestMetrics struct {
 	scheduleTruncated metric.Int64Counter
 	scheduleStale     metric.Int64Counter
 	triggerFailed     metric.Int64Counter
+	triggerAccepted   metric.Int64Counter
 	backlogMsgs       metric.Int64ObservableGauge
 	backlogBytes      metric.Int64ObservableGauge
 }
@@ -77,6 +78,12 @@ func NewIngestMetrics(conn *bus.Conn, streamName, consumerName string) (*IngestM
 		metric.WithDescription("run.trigger_failed envelopes the recorder stored, or skipped because a row already exists"))
 	if err != nil {
 		return nil, fmt.Errorf("register recorder_ingest_trigger_failed_total: %w", err)
+	}
+
+	m.triggerAccepted, err = meter.Int64Counter("recorder_ingest_trigger_accepted_total",
+		metric.WithDescription("run.trigger_accepted envelopes the recorder stored, or skipped because a row already exists"))
+	if err != nil {
+		return nil, fmt.Errorf("register recorder_ingest_trigger_accepted_total: %w", err)
 	}
 
 	m.backlogMsgs, err = meter.Int64ObservableGauge("recorder_ingest_backlog_msgs",
@@ -157,4 +164,13 @@ func (m *IngestMetrics) addScheduleStale(ctx context.Context) {
 		return
 	}
 	m.scheduleStale.Add(ctx, 1)
+}
+
+// addTriggerAccepted counts one recorder_ingest_trigger_accepted_total
+// event, labelled by whether the insert stored a row.
+func (m *IngestMetrics) addTriggerAccepted(ctx context.Context, stored bool) {
+	if m == nil || m.triggerAccepted == nil {
+		return
+	}
+	m.triggerAccepted.Add(ctx, 1, metric.WithAttributes(attribute.Bool("stored", stored)))
 }

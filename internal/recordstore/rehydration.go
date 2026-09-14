@@ -67,15 +67,17 @@ func ListRehydrationRecords(ctx context.Context, pool *pgxpool.Pool, cluster, te
 // lost before it completed holds a watermark above one and no completed
 // run, and a completed-run-only enumeration would miss it.
 //
-// A TRIGGER_FAILED row is no completed run. It records a build that never
-// started, it holds a null build number, and the mite refuses a seeded
-// build numbered zero, which fails the whole rehydration bundle.
+// A row that records no build is no completed run. A TRIGGER_FAILED row
+// records a build that never started; an accepted trigger no real event
+// has yet followed records one that has not started yet either. Either
+// row holds a null build number, and the mite refuses a seeded build
+// numbered zero, which fails the whole rehydration bundle.
 func enumerateRehydrationJobs(ctx context.Context, pool *pgxpool.Pool, cluster, tenant string) ([]RehydrationJobRecords, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT job_path FROM varroa.job_numbers WHERE cluster = $1 AND tenant = $2
 		UNION
 		SELECT job_path FROM varroa.runs
-		WHERE cluster = $1 AND tenant = $2 AND status = 'COMPLETED' AND `+notTriggerFailedSQL+`
+		WHERE cluster = $1 AND tenant = $2 AND status = 'COMPLETED' AND `+recordsBuildSQL+`
 		ORDER BY job_path
 	`, cluster, tenant)
 	if err != nil {
@@ -111,9 +113,9 @@ func enumerateRehydrationJobs(ctx context.Context, pool *pgxpool.Pool, cluster, 
 // NextBuildNumber, never from run_intents or runs, then runs one query
 // with a window function per job path to select each path's records.
 //
-// It excludes a TRIGGER_FAILED row, which seeds no build. Such a row is
-// always the newest record of its job, so it would otherwise take the
-// newest slot of every per-job budget.
+// It excludes a row that records no build, which seeds no build. Such a
+// row is always the newest record of its job, so it would otherwise
+// take the newest slot of every per-job budget.
 func rehydrationRecordsForPaths(ctx context.Context, pool *pgxpool.Pool, cluster, tenant string, jobPaths []string, perJob int) ([]RehydrationJobRecords, error) {
 	byPath := make(map[string]*RehydrationJobRecords, len(jobPaths))
 	order := make([]string, 0, len(jobPaths))
@@ -138,7 +140,7 @@ func rehydrationRecordsForPaths(ctx context.Context, pool *pgxpool.Pool, cluster
 				ROW_NUMBER() OVER (PARTITION BY job_path ORDER BY (result = 'SUCCESS') DESC, created_at DESC) AS success_rank
 			FROM varroa.runs
 			WHERE cluster = $1 AND tenant = $2 AND job_path = ANY($3) AND status = 'COMPLETED'
-			  AND `+notTriggerFailedSQL+`
+			  AND `+recordsBuildSQL+`
 		)
 		SELECT job_path, build_number, queued_at, started_at, ended_at, duration_ms, result, cause, params, changes, payload
 		FROM ranked

@@ -133,6 +133,9 @@ func selectFinalizeCandidates(ctx context.Context, db maintDB, cutoff time.Time,
 		LEFT JOIN varroa.run_intents ri ON ri.run_id = r.run_id
 		WHERE (r.payload->'log_summary'->>'finalized') IS DISTINCT FROM 'true'
 		  AND `+notTriggerFailedRunSQL+`
+		  -- An accepted-only row needs no separate exclusion here: its
+		  -- anchor is always null, so anchorExpr never selects it, and a
+		  -- row the sweep already marked is already finalized.
 		  %s
 		  AND `+anchorExpr+` < $1
 		ORDER BY r.created_at, r.run_id

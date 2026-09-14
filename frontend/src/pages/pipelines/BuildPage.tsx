@@ -480,9 +480,13 @@ export default function BuildPage() {
         )}
       </div>
 
+      {/* A missing start time is the never-started signal. A real run can
+          hold a null build number after a number conflict, but every real
+          run holds a start time. */}
       {interrupted && (
         <div className={styles.interruptedBanner} role="alert">
           <span>Interrupted{run.interruptedReason ? `: ${run.interruptedReason}` : ": reason not available"}.</span>
+          {!run.startedAt && <span> The build never started on the cell.</span>}
           {run.retryRunId && team && job && (
             <a
               href={`/pipelines/${encodeURIComponent(team)}/${encodeURIComponent(job)}/${encodeURIComponent(run.retryRunId)}`}
@@ -490,6 +494,7 @@ export default function BuildPage() {
               View retry
             </a>
           )}
+          {!run.startedAt && <p>Re-run starts with each parameter&apos;s declared default.</p>}
         </div>
       )}
 

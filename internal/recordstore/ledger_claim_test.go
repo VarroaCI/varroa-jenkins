@@ -269,6 +269,59 @@ func TestHigherGenerationTransfersOwnership(t *testing.T) {
 	}
 }
 
+// insertAcceptedOnlyRunsRow inserts one QUEUED runs row holding the
+// accepted keys, for runID, so a transfer test can assert the ledger
+// treats it the same way it treats an absent runs row.
+func insertAcceptedOnlyRunsRow(t *testing.T, db *sql.DB, runID string) {
+	t.Helper()
+	if _, err := db.Exec(`
+		INSERT INTO varroa.runs (run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path, status, payload)
+		VALUES ($1, now(), 'stub', $2, $3, 'cell-a', $4, $5, 'QUEUED',
+			jsonb_build_object('accepted_at', now(), 'accepted_instance', 'pod-a'))
+	`, runID, testCluster, testNamespace, testTenant, testJobPath); err != nil {
+		t.Fatalf("insert accepted-only runs row: %v", err)
+	}
+}
+
+// TestHigherGenerationTransfersAcceptedOnlyRun asserts a higher
+// generation still transfers an intent whose only runs row is
+// accepted-only: such a row records no build, so it must not block the
+// transfer the way a real runs row does.
+func TestHigherGenerationTransfersAcceptedOnlyRun(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ledger := NewLedger(pool, nil)
+
+	req := newTestClaimRequest("manual:x-transfer-accepted", 1)
+	req.Cell = "cell-a"
+	req.CellInstance = "pod-a"
+	first := mustGrant(t, ledger, req)
+	insertAcceptedOnlyRunsRow(t, db, first.RunID)
+
+	next := req
+	next.RunID = newTestUUIDv7String()
+	next.PlacementGeneration = 2
+	next.Cell = "cell-b"
+	next.CellInstance = "pod-b"
+
+	resp := ledger.Claim(context.Background(), next)
+	if resp.Decision != DecisionGranted {
+		t.Fatalf("want granted, got %+v", resp)
+	}
+	if resp.RunID != next.RunID {
+		t.Fatalf("want run_id %q, got %q", next.RunID, resp.RunID)
+	}
+
+	var cell, cellInstance string
+	if err := db.QueryRow(`
+		SELECT cell, cell_instance FROM varroa.run_intents WHERE intent_key = $1
+	`, req.IntentKey).Scan(&cell, &cellInstance); err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	if cell != "cell-b" || cellInstance != "pod-b" {
+		t.Fatalf("want moved ownership cell-b/pod-b, got %s/%s", cell, cellInstance)
+	}
+}
+
 // TestLowerGenerationFenced: row 1 of the decision table — a lower
 // generation answers vetoed with FENCED and leaves the row unchanged.
 func TestLowerGenerationFenced(t *testing.T) {

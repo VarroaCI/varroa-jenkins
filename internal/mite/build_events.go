@@ -41,6 +41,10 @@ const (
 	// gateway publishes it from a failed TRIGGER_BUILD result, not from a
 	// BuildEvent.
 	kindRunTriggerFailed = "run.trigger_failed"
+	// kindRunTriggerAccepted records a build trigger Jenkins accepted onto
+	// its queue. The gateway publishes it from a successful TRIGGER_BUILD
+	// result, not from a BuildEvent.
+	kindRunTriggerAccepted = "run.trigger_accepted"
 )
 
 // Reason codes a run.trigger_failed envelope carries. The set is complete:
@@ -83,8 +87,9 @@ const gatewayEnvelopeBudget = 900 * 1024
 const errorTruncateChars = 512
 
 var (
-	buildEventsDropped metric.Int64Counter
-	triggerFailedTotal metric.Int64Counter
+	buildEventsDropped   metric.Int64Counter
+	triggerFailedTotal   metric.Int64Counter
+	triggerAcceptedTotal metric.Int64Counter
 )
 
 func init() {
@@ -94,6 +99,9 @@ func init() {
 	)
 	triggerFailedTotal, _ = meter.Int64Counter("varroa.gateway.trigger_failed",
 		metric.WithDescription("Failed build triggers the gateway published as a record"),
+	)
+	triggerAcceptedTotal, _ = meter.Int64Counter("varroa.gateway.trigger_accepted",
+		metric.WithDescription("Accepted build triggers the gateway published as a record"),
 	)
 }
 

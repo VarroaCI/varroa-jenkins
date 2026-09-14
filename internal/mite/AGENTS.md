@@ -165,31 +165,35 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   onto the `run.started`/`run.completed` payload via `addTemplateFields`,
   omitting any field the event does not carry; a `HEARTBEAT` event never
   carries them.
-- **Failed build triggers** (`bus_handler.go`, `build_events.go`) — a
-  `CommandResult` that reports `success` false for a pending
-  `TRIGGER_BUILD` imperative publishes one `run.trigger_failed` envelope on
-  the same `builds.<cluster>.<ns>.<cell>` subject the build events use.
-  `recordFailedTrigger` decodes the pending message's own
-  `TriggerBuildPayload` (no second map), resolves the tenant through
-  `CellTenantResolver.ResolveJobTenant`, and maps `CommandResult.http_status`
-  onto a reason code with `reasonCodeForStatus` (`404` to `JOB_NOT_FOUND`,
-  `409` to `JOB_NOT_BUILDABLE`, everything else and `0` to
-  `TRIGGER_REJECTED`). **It must never consult `job_schedules.go`'s
-  stream-missing negative cache.** That cache is armed by a publish failure, so
-  it cannot tell a missing stream from a transient one; an armed cache would
-  acknowledge the redelivery of a command whose first publish failed and lose
-  the record. The gateway reads `recordStoreEnabled` instead, which
-  `cmd/gateway` sets once through `SetRecordStoreEnabled`, from the **opened
-  blob store** and never from `VARROA_RECORDSTORE_DSN`: the chart gives the
-  gateway that DSN only in postgres blob mode, and `VARROA_BLOBSTORE_URL` in
-  every mode, so a DSN-based flag is false on an s3-mode install whose record
-  store is enabled. With no record store the gateway publishes nothing,
-  counts nothing, and acknowledges. With one, **only this branch makes the
+- **Build trigger outcomes** (`bus_handler.go`, `build_events.go`) — a
+  `CommandResult` for a pending `TRIGGER_BUILD` imperative publishes one
+  envelope on the same `builds.<cluster>.<ns>.<cell>` subject the build
+  events use: `run.trigger_failed` when `success` is false, or
+  `run.trigger_accepted` when `success` is true. `recordTriggerOutcome`
+  decodes the pending message's own `TriggerBuildPayload` once (no second
+  map) and calls `publishTriggerFailed` or `publishTriggerAccepted`. Both
+  resolve the tenant through `CellTenantResolver.ResolveJobTenant`.
+  `publishTriggerFailed` maps `CommandResult.http_status` onto a reason code
+  with `reasonCodeForStatus` (`404` to `JOB_NOT_FOUND`, `409` to
+  `JOB_NOT_BUILDABLE`, everything else and `0` to `TRIGGER_REJECTED`);
+  `publishTriggerAccepted` carries no reason code and no error, only
+  `http_status` and `actor`, because Jenkins accepted the trigger. **Neither
+  publisher may consult `job_schedules.go`'s stream-missing negative
+  cache.** That cache is armed by a publish failure, so it cannot tell a
+  missing stream from a transient one; an armed cache would acknowledge the
+  redelivery of a command whose first publish failed and lose the record.
+  The gateway reads `recordStoreEnabled` instead, which `cmd/gateway` sets
+  once through `SetRecordStoreEnabled`, from the **opened blob store** and
+  never from `VARROA_RECORDSTORE_DSN`: the chart gives the gateway that DSN
+  only in postgres blob mode, and `VARROA_BLOBSTORE_URL` in every mode, so a
+  DSN-based flag is false on an s3-mode install whose record store is
+  enabled. With no record store the gateway publishes nothing, counts
+  nothing, and acknowledges. With one, **only the publish call makes the
   pending ack conditional**: any publish error leaves the imperative
-  unacknowledged, so the stream redelivers it and the next result publishes. An
-  unresolved tenant, an unparsable pending message, and a marshal fault all
-  still ack, because a redelivery would trigger the same build again and change
-  nothing.
+  unacknowledged, so the stream redelivers it and the next result publishes.
+  An unresolved tenant, an unparsable pending message, and a marshal fault
+  all still ack, because a redelivery would trigger the same build again and
+  change nothing.
 - **Cross-tenant bridge** (`crosstenant_bridge.go`, `crosstenant_timeout.go`) —
   `BusHandler.OnCrossTenantRequest` relays a `varroa.build`/`lastSuccessful`/
   `copyArtifact`/`lock` step call to the record store's

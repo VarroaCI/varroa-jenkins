@@ -18,6 +18,13 @@ import (
 // because a rejected number must not become the new floor. It stores
 // the complete envelope in runs.payload under the key "run.started", so
 // a later kind's write never replaces it.
+//
+// A run.started write always establishes a real run, so it supersedes a
+// stored row that records no build: a TRIGGER_FAILED row, or a row that
+// still holds the accepted keys. It removes the accepted keys from the
+// stored payload either way, and stamps interrupted_superseded_at when
+// the row it supersedes was marked INTERRUPTED. A late started write into
+// an interrupted real run supersedes nothing and leaves the stamp alone.
 func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope, nullBuildNumber bool) (*LedgerAction, error) {
 	var payload RunStartedPayload
 	if err := json.Unmarshal(env.Payload, &payload); err != nil {
@@ -54,12 +61,14 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 			cause        = COALESCE(EXCLUDED.cause, runs.cause),
 			params       = COALESCE(EXCLUDED.params, runs.params),
 			status       = `+runsStatusMergeSQL("TRUE")+`,
-			cell         = CASE WHEN `+supersedeTriggerFailedSQL("TRUE")+` THEN EXCLUDED.cell ELSE runs.cell END,
-			result       = CASE WHEN `+supersedeTriggerFailedSQL("TRUE")+` THEN NULL::text ELSE runs.result END,
-			ended_at     = CASE WHEN `+supersedeTriggerFailedSQL("TRUE")+` THEN NULL::timestamptz ELSE runs.ended_at END,
-			payload      = (CASE WHEN `+supersedeTriggerFailedSQL("TRUE")+`
-			                     THEN COALESCE(runs.payload, '{}'::jsonb) `+triggerPayloadKeysSQL+`
-			                     ELSE COALESCE(runs.payload, '{}'::jsonb) END) || EXCLUDED.payload
+			cell         = CASE WHEN `+supersedeSQL("TRUE")+` THEN EXCLUDED.cell ELSE runs.cell END,
+			result       = CASE WHEN `+supersedeSQL("TRUE")+` THEN NULL::text ELSE runs.result END,
+			ended_at     = CASE WHEN `+supersedeSQL("TRUE")+` THEN NULL::timestamptz ELSE runs.ended_at END,
+			interrupted_superseded_at = CASE WHEN `+supersedeSQL("TRUE")+` AND runs.result = 'INTERRUPTED' THEN now() ELSE runs.interrupted_superseded_at END,
+			payload      = (CASE
+			                     WHEN runs.result IS NOT DISTINCT FROM '`+ResultTriggerFailed+`' THEN COALESCE(runs.payload, '{}'::jsonb) `+triggerPayloadKeysSQL+`
+			                     WHEN COALESCE(runs.payload ? 'accepted_at', false) THEN COALESCE(runs.payload, '{}'::jsonb) `+acceptedSupersedeKeysSQL+`
+			                     ELSE COALESCE(runs.payload, '{}'::jsonb) END) `+acceptedPayloadKeysSQL+` || EXCLUDED.payload
 		RETURNING status
 	`,
 		intent.runID, intent.createdAt, intent.intentKey, intent.cluster, intent.namespace,

@@ -190,11 +190,11 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 		pendingJobs = req.PendingJobs
 	}
 
-	running, err := runningCellInstances(ctx, tx, req.Cluster, req.Tenant)
+	live, err := liveCellInstances(ctx, tx, req.Cluster, req.Tenant)
 	if err != nil {
 		return TenantSyncResponse{}, err
 	}
-	deadInstances := trimDeadInstances(mergeDeadInstances(old.deadInstances, req.DeadInstances), running, maxDeadInstances)
+	deadInstances := trimDeadInstances(mergeDeadInstances(old.deadInstances, req.DeadInstances), live, maxDeadInstances)
 
 	if err := writeTenantPlacement(ctx, tx, req, newGeneration, rehydratedInstance, pendingJobs, deadInstances); err != nil {
 		return TenantSyncResponse{}, err
@@ -274,20 +274,25 @@ func readTenantPlacementForUpdate(ctx context.Context, tx pgx.Tx, cluster, tenan
 	return tenantPlacementRow{generation: generation, cell: cell, cellInstance: cellInstance, deadInstances: dead}, nil
 }
 
-// runningCellInstances answers the set of cell instances a RUNNING run
-// of cluster/tenant names, through run_intents.cell_instance. The
-// dead-instances trim in writeTenantPlacement never drops an entry in
-// this set.
-func runningCellInstances(ctx context.Context, tx pgx.Tx, cluster, tenant string) (map[string]bool, error) {
+// liveCellInstances answers the set of cell instances a QUEUED or
+// RUNNING run of cluster/tenant names: an intent-joined RUNNING or
+// QUEUED run's own cell_instance, and an unclaimed QUEUED run's
+// accepted_instance payload value. The dead-instances trim in
+// writeTenantPlacement never drops an entry in this set.
+func liveCellInstances(ctx context.Context, tx pgx.Tx, cluster, tenant string) (map[string]bool, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT DISTINCT ri.cell_instance
 		FROM varroa.run_intents ri
 		JOIN varroa.runs r ON r.run_id = ri.run_id
-		WHERE ri.cluster = $1 AND ri.tenant = $2 AND r.status = 'RUNNING'
+		WHERE ri.cluster = $1 AND ri.tenant = $2 AND r.status IN ('QUEUED', 'RUNNING')
 		  AND ri.cell_instance IS NOT NULL AND ri.cell_instance <> ''
+		UNION
+		SELECT DISTINCT r.payload->>'accepted_instance'
+		FROM varroa.runs r
+		WHERE r.cluster = $1 AND r.tenant = $2 AND r.status = 'QUEUED' AND r.payload ? 'accepted_instance'
 	`, cluster, tenant)
 	if err != nil {
-		return nil, fmt.Errorf("list running cell instances: %w", err)
+		return nil, fmt.Errorf("list live cell instances: %w", err)
 	}
 	defer rows.Close()
 
@@ -295,12 +300,12 @@ func runningCellInstances(ctx context.Context, tx pgx.Tx, cluster, tenant string
 	for rows.Next() {
 		var instance string
 		if err := rows.Scan(&instance); err != nil {
-			return nil, fmt.Errorf("scan running cell instance: %w", err)
+			return nil, fmt.Errorf("scan live cell instance: %w", err)
 		}
 		out[instance] = true
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list running cell instances: %w", err)
+		return nil, fmt.Errorf("list live cell instances: %w", err)
 	}
 	return out, nil
 }
