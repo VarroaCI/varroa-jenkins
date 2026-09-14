@@ -83,7 +83,7 @@ func seedPendingImperative(t *testing.T, h *BusHandler, conn *bus.Conn, cmd *mit
 func filePendingImperative(h *BusHandler, commandID string, msg *nats.Msg) {
 	key := triggerFailedNS + "/" + triggerFailedCell
 	h.mu.Lock()
-	h.pendingAcks[key] = map[string]*nats.Msg{commandID: msg}
+	h.pendingAcks[key] = map[string]pendingImperative{commandID: {msg: msg}}
 	h.mu.Unlock()
 }
 
@@ -92,7 +92,7 @@ func filePendingImperative(h *BusHandler, commandID string, msg *nats.Msg) {
 func newTriggerFailedHandler(t *testing.T, pub buildEventPublisher, resolver CellTenantResolver) (*BusHandler, *bus.Conn) {
 	t.Helper()
 	h, conn := newJobScheduleTestHandler(t, pub, resolver)
-	h.pendingAcks = make(map[string]map[string]*nats.Msg)
+	h.pendingAcks = make(map[string]map[string]pendingImperative)
 	h.replayCmds = make(map[string]map[string]bool)
 	h.SetRecordStoreEnabled(true)
 	return h, conn

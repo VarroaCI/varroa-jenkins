@@ -80,9 +80,29 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   inbound dispatch through `IsCurrentConnection` (`Registry.IsCurrentEpoch` for
   `RegistryHandler`); both treat a zero token and an unclaimed key as current.
   Imperative one-shots (safe-restart, webhook
-  replay) instead ride a durable JetStream pull consumer
-  (`imp-<cluster>-<ns>-<name>`), acked only after a matching `CommandResult`
-  (`pendingAcks`) so a gateway restart redelivers unfinished ones.
+  replay, build trigger, build cancel) instead ride a durable JetStream pull
+  consumer (`imp-<cluster>-<ns>-<name>`), acked only after a matching
+  `CommandResult` (`pendingAcks`) so a gateway restart redelivers unfinished
+  ones. Each `pendingAcks` entry carries the connection token that received it,
+  and `OnDisconnect` **defers** `releasePendingImperatives` to nak that token's
+  entries. That release moves the bookkeeping under `h.mu` and naks after the
+  unlock, because `h.mu` is on every controller's heartbeat path; the ordering
+  survives, because the pump's cancel already ran under `h.mu`. Deferred, so it covers the superseded-stream path the early return
+  skips, and so the nak lands after this stream's pump is cancelled. A pod roll
+  often reconnects the mite before the old stream tears down, so a release
+  placed after the superseded check never runs and the command waits out the
+  consumer's 30-second ack timeout instead. The token scope is what makes the early
+  release safe: `pendingAcks` is keyed by controller, so an unscoped nak would
+  also redeliver a command the replacement connection already runs.
+  `forwardImperative` (one fetched message) refuses a cancelled context and
+  naks it, and it re-reads the context **under `h.mu`** before it files the
+  ack, because `OnConnect` and `OnDisconnect` both cancel a pump while they
+  hold that lock — the same rule `markWatchDegraded` follows. A nak makes the
+  message available at once, so the dying pump's own outstanding fetch can
+  receive back the command the disconnect just released; `server.go`'s deferred
+  `OnDisconnect` still holds an open gRPC transport, so that send can even
+  succeed. A redelivered trigger carries the same run id and
+  intent key, so the run claim keeps it to one build.
   `OnPluginInventory` publishes the inventory to `MiteInSubject` and writes it
   to KV under `bus.PluginInventoryKey`, mirroring `OnObservabilityReport`.
   `OnDisconnect` does **not** delete the desired-state KV key — only
@@ -330,4 +350,6 @@ including the idle-run case with no later chunk to trigger it),
 `tail_test.go` (lease table, renewal-versus-expiry races),
 `crosstenant_bridge_test.go` (identity overwrite, unhosted-caller and
 unknown-kind fail-closed paths, the 8 in-flight cap, the timeout budget
-and its warning).
+and its warning), `imperative_redelivery_test.go` (a pod roll in both
+orders — the old stream tears down first, and the replacement connects
+first — plus the cancelled pump's own nak, before and under `h.mu`).

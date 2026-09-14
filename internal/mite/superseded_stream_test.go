@@ -131,7 +131,7 @@ func TestBusHandler_IsCurrentConnection(t *testing.T) {
 		idleGauges:           make(map[string]string),
 		idleGaugesAt:         make(map[string]time.Time),
 		installedPluginsHash: make(map[string]string),
-		pendingAcks:          make(map[string]map[string]*nats.Msg),
+		pendingAcks:          make(map[string]map[string]pendingImperative),
 		replayCmds:           make(map[string]map[string]bool),
 		pendingContent:       make(map[string]*nats.Msg),
 		pendingContentNS:     make(map[string]string),

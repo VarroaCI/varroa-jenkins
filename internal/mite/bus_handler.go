@@ -67,6 +67,16 @@ type ledgerRequester interface {
 	RequestWithContext(ctx context.Context, subject string, data []byte, timeout time.Duration) (*nats.Msg, error)
 }
 
+// pendingImperative is one imperative JetStream message the gateway sent to a
+// mite and still waits on a CommandResult for. token names the connection that
+// received it. The gateway releases a delivery only on the teardown of that
+// same connection, so a superseded stream never naks a command the replacement
+// connection already runs.
+type pendingImperative struct {
+	msg   *nats.Msg
+	token int64
+}
+
 // BusHandler implements StreamHandler by bridging the mite gRPC stream to the
 // NATS bus. It replaces the in-memory Registry for the gateway tier.
 //
@@ -102,7 +112,10 @@ type BusHandler struct {
 	// pendingAcks holds un-acked imperative JetStream messages, keyed by
 	// controller ("ns/name") then command_id. Scoping by controller ensures a
 	// disconnect only naks that controller's in-flight commands, never another's.
-	pendingAcks map[string]map[string]*nats.Msg
+	// Each entry also carries the connection token that received the message, so
+	// a superseded stream's teardown releases its own deliveries and leaves the
+	// replacement connection's in-flight commands alone.
+	pendingAcks map[string]map[string]pendingImperative
 
 	// replayCmds records which in-flight imperative command_ids are
 	// REPLAY_WEBHOOK, keyed by controller ("ns/name") then command_id. Their
@@ -308,7 +321,7 @@ func NewBusHandler(cluster string, conn *bus.Conn, snapshotKV, presenceKV, desir
 		idleGauges:                 make(map[string]string),
 		idleGaugesAt:               make(map[string]time.Time),
 		connectEpoch:               make(map[string]int64),
-		pendingAcks:                make(map[string]map[string]*nats.Msg),
+		pendingAcks:                make(map[string]map[string]pendingImperative),
 		replayCmds:                 make(map[string]map[string]bool),
 		installedPluginsHash:       make(map[string]string),
 		pendingContent:             make(map[string]*nats.Msg),
@@ -458,7 +471,7 @@ func (h *BusHandler) OnConnect(name, ns, version string, certExpiry interface{},
 	h.mu.Unlock()
 
 	go h.watchDesiredState(ctx, ns, name, send)
-	go h.watchImperative(ctx, ns, name, send)
+	go h.watchImperative(ctx, ns, name, epoch, send)
 	go h.watchContent(ctx, ns, name, send)
 	go h.watchTail(ctx, ns, name, send)
 	h.startBuildEventWorker(ctx, ns, name, epoch, send)
@@ -663,8 +676,8 @@ func (h *BusHandler) OnCommandResult(name, ns string, result *mitev1.CommandResu
 	var isReplay bool
 	h.mu.Lock()
 	if byCmd := h.pendingAcks[key]; byCmd != nil {
-		if msg, ok := byCmd[result.CommandId]; ok {
-			pendingMsg = msg
+		if pending, ok := byCmd[result.CommandId]; ok {
+			pendingMsg = pending.msg
 			delete(byCmd, result.CommandId)
 			if len(byCmd) == 0 {
 				delete(h.pendingAcks, key)
@@ -806,6 +819,58 @@ func (h *BusHandler) IsCurrentConnection(name, ns string, token int64) bool {
 
 // OnTailAck is implemented in tail.go.
 
+// releasePendingImperatives naks the imperative messages this connection
+// received and never returned a result for, so the stream redelivers them at
+// once. OnDisconnect defers it, which keeps it on the superseded-stream path
+// too: a mite that reconnects before its old stream tears down still needs
+// those commands. A release the superseded check skips leaves the message to
+// wait out the JetStream ack timeout, and an operator sees a trigger vanish
+// for the length of that timeout.
+//
+// The token scope is what makes the early release safe: pendingAcks is keyed by
+// controller, so an unscoped nak from a superseded stream would also redeliver
+// a command the replacement connection already runs. A zero token releases
+// every entry, which matches the "a zero token is current" rule the rest of
+// this handler follows.
+//
+// The bookkeeping moves under h.mu and the naks go out after the unlock. A nak
+// is a buffered publish, but it can still wait on the outbound buffer, and h.mu
+// is on every controller's heartbeat path. Releasing the lock first costs the
+// caller no ordering: the cancel of this connection's pump already ran under
+// h.mu before this call, so every nak still lands after that cancel, and the
+// pump re-reads the cancelled context under h.mu before it files anything.
+func (h *BusHandler) releasePendingImperatives(ns, name string, token int64) {
+	key := ns + "/" + name
+	var release []*nats.Msg
+
+	h.mu.Lock()
+	if byCmd := h.pendingAcks[key]; byCmd != nil {
+		for cmdID, pending := range byCmd {
+			if token != 0 && pending.token != token {
+				continue
+			}
+			release = append(release, pending.msg)
+			delete(byCmd, cmdID)
+			// A redelivered command re-registers its replay flag on the next
+			// dispatch, so drop the stale one.
+			if flags := h.replayCmds[key]; flags != nil {
+				delete(flags, cmdID)
+				if len(flags) == 0 {
+					delete(h.replayCmds, key)
+				}
+			}
+		}
+		if len(byCmd) == 0 {
+			delete(h.pendingAcks, key)
+		}
+	}
+	h.mu.Unlock()
+
+	for _, msg := range release {
+		_ = msg.Nak()
+	}
+}
+
 // OnDisconnect stops the watch goroutine and clears volatile state. The desired
 // KV key is intentionally NOT deleted here — it is the persistent desired state
 // and must survive a mite/gateway reconnect. It is removed only on Controller
@@ -825,6 +890,13 @@ func (h *BusHandler) OnDisconnect(name, ns string, token int64) {
 	h.clearBuildWorker(ns, name, token)
 	h.clearClaimSlots(ns, name, token)
 	h.clearCrossTenantSlots(ns, name, token)
+
+	// Deferred, so the nak lands after this stream's watch goroutines are
+	// cancelled — the superseded branch below returns early, and the live
+	// branch cancels further down. A nak issued while this stream's own pump
+	// still runs is fetched straight back by that dying pump, which then only
+	// naks it again.
+	defer h.releasePendingImperatives(ns, name, token)
 
 	// A superseded stream can tear down late — after the mite already
 	// reconnected. Without this check that teardown cancels the *live*
@@ -850,19 +922,6 @@ func (h *BusHandler) OnDisconnect(name, ns string, token int64) {
 		delete(h.cancels, key)
 	}
 	delete(h.certExpiry, key)
-	// Nak only this controller's pending imperative acks so they can be
-	// redelivered on reconnect — other controllers' in-flight commands are
-	// untouched.
-	if byCmd := h.pendingAcks[key]; byCmd != nil {
-		for cmdID, msg := range byCmd {
-			_ = msg.Nak()
-			delete(byCmd, cmdID)
-		}
-		delete(h.pendingAcks, key)
-	}
-	// Redelivered imperative commands re-register their replay flags on the next
-	// dispatch, so drop this controller's stale replay tracking.
-	delete(h.replayCmds, key)
 	delete(h.idleGauges, key)
 	delete(h.idleGaugesAt, key)
 	delete(h.installedPluginsHash, key)
@@ -1166,7 +1225,7 @@ func (h *BusHandler) clearWatchDegraded(ctx context.Context, ns, name, watchKind
 // (e.g. "safe restart") — unlike desired state, they must NOT be replayed
 // on reconnect, so each message is acked only after the mite returns a
 // matching CommandResult.
-func (h *BusHandler) watchImperative(ctx context.Context, ns, name string, send Sender) {
+func (h *BusHandler) watchImperative(ctx context.Context, ns, name string, token int64, send Sender) {
 	if h.conn == nil {
 		return
 	}
@@ -1205,7 +1264,7 @@ func (h *BusHandler) watchImperative(ctx context.Context, ns, name string, send 
 			return // context cancelled: the mite disconnected
 		}
 		start := time.Now()
-		if reconnect := h.pumpImperative(ctx, sub, ns, name, send); !reconnect {
+		if reconnect := h.pumpImperative(ctx, sub, ns, name, token, send); !reconnect {
 			_ = sub.Unsubscribe()
 			return
 		}
@@ -1221,7 +1280,7 @@ func (h *BusHandler) watchImperative(ctx context.Context, ns, name string, send 
 
 // pumpImperative drains and forwards imperative commands. It returns true when
 // the subscription died and should be rebuilt, false when ctx was cancelled.
-func (h *BusHandler) pumpImperative(ctx context.Context, sub *nats.Subscription, ns, name string, send Sender) bool {
+func (h *BusHandler) pumpImperative(ctx context.Context, sub *nats.Subscription, ns, name string, token int64, send Sender) bool {
 	for {
 		select {
 		case <-ctx.Done():
@@ -1239,60 +1298,97 @@ func (h *BusHandler) pumpImperative(ctx context.Context, sub *nats.Subscription,
 				return true
 			}
 			for _, m := range msgs {
-				var op mitev1.OperatorMessage
-				if err := json.Unmarshal(m.Data, &op); err != nil {
-					h.log().Error("imperative unmarshal failed", "controller", ns+"/"+name, "error", err)
-					_ = m.Nak()
-					continue
-				}
-				imp := op.GetImperative()
-				if imp == nil {
-					// Non-imperative one-shots also flow on the out subject
-					// (e.g. a TokenGrant answering a mite's refresh request).
-					// They carry no CommandResult correlation, so forward to
-					// the mite and ack immediately — delivery is idempotent
-					// (the mite caches the newest token). Nak on send failure
-					// so a disconnected mite gets the grant on reconnect.
-					if op.GetTokenGrant() != nil {
-						if err := send(&op); err != nil {
-							h.log().Error("send token grant to mite failed", "controller", ns+"/"+name, "error", err)
-							_ = m.Nak()
-							continue
-						}
-					}
-					_ = m.Ack() // not an imperative; ack and skip
-					continue
-				}
-				// Track pending ack (scoped to this controller) — OnCommandResult
-				// will ack it once the mite reports completion.
-				key := ns + "/" + name
-				h.mu.Lock()
-				if h.pendingAcks[key] == nil {
-					h.pendingAcks[key] = make(map[string]*nats.Msg)
-				}
-				h.pendingAcks[key][imp.CommandId] = m
-				if imp.Type == mitev1.CommandTypeReplayWebhook {
-					if h.replayCmds[key] == nil {
-						h.replayCmds[key] = make(map[string]bool)
-					}
-					h.replayCmds[key][imp.CommandId] = true
-				}
-				h.mu.Unlock()
-
-				if err := send(&op); err != nil {
-					h.log().Error("send imperative to mite failed", "controller", ns+"/"+name, "cmdId", imp.CommandId, "error", err)
-					h.mu.Lock()
-					if byCmd := h.pendingAcks[key]; byCmd != nil {
-						delete(byCmd, imp.CommandId)
-						if len(byCmd) == 0 {
-							delete(h.pendingAcks, key)
-						}
-					}
-					h.mu.Unlock()
-					_ = m.Nak()
-				}
+				h.forwardImperative(ctx, m, ns, name, token, send)
 			}
 		}
+	}
+}
+
+// forwardImperative sends one fetched message to the mite and files the ack it
+// waits on.
+//
+// A cancelled context ends the message here, naked and unfiled. The gateway
+// cancels this pump before it naks the connection's pending imperatives, and a
+// nak makes the message available at once, so this pump's outstanding fetch can
+// receive back the very command the disconnect just released. Filing it again
+// would put it under a token no later teardown releases, and sending it would
+// hand it to a stream the mite no longer reads: the gRPC handler still holds an
+// open transport while its deferred OnDisconnect runs, so the send can even
+// succeed. Either way the replacement connection waits out the consumer's ack
+// timeout, which is the failure this pump exists to prevent.
+func (h *BusHandler) forwardImperative(ctx context.Context, m *nats.Msg, ns, name string, token int64, send Sender) {
+	// Fast path only. h.mu is where a cancel becomes visible, so the filing
+	// below re-reads it under that lock.
+	if ctx.Err() != nil {
+		_ = m.Nak()
+		return
+	}
+	var op mitev1.OperatorMessage
+	if err := json.Unmarshal(m.Data, &op); err != nil {
+		h.log().Error("imperative unmarshal failed", "controller", ns+"/"+name, "error", err)
+		_ = m.Nak()
+		return
+	}
+	imp := op.GetImperative()
+	if imp == nil {
+		// Non-imperative one-shots also flow on the out subject
+		// (e.g. a TokenGrant answering a mite's refresh request).
+		// They carry no CommandResult correlation, so forward to
+		// the mite and ack immediately — delivery is idempotent
+		// (the mite caches the newest token). Nak on send failure
+		// so a disconnected mite gets the grant on reconnect.
+		if op.GetTokenGrant() != nil {
+			if err := send(&op); err != nil {
+				h.log().Error("send token grant to mite failed", "controller", ns+"/"+name, "error", err)
+				_ = m.Nak()
+				return
+			}
+		}
+		_ = m.Ack() // not an imperative; ack and skip
+		return
+	}
+	// Track pending ack (scoped to this controller) — OnCommandResult
+	// will ack it once the mite reports completion.
+	key := ns + "/" + name
+	h.mu.Lock()
+	// OnConnect and OnDisconnect both cancel this pump while they hold h.mu, so
+	// this read is the consistent snapshot the fast path above is not. A
+	// supersede that lands in the gap between the two files the command under a
+	// token no teardown releases, and the replacement then waits out the
+	// consumer's ack timeout. markWatchDegraded reads the context under h.mu for
+	// the same reason.
+	if ctx.Err() != nil {
+		h.mu.Unlock()
+		_ = m.Nak()
+		return
+	}
+	if h.pendingAcks[key] == nil {
+		h.pendingAcks[key] = make(map[string]pendingImperative)
+	}
+	h.pendingAcks[key][imp.CommandId] = pendingImperative{msg: m, token: token}
+	if imp.Type == mitev1.CommandTypeReplayWebhook {
+		if h.replayCmds[key] == nil {
+			h.replayCmds[key] = make(map[string]bool)
+		}
+		h.replayCmds[key][imp.CommandId] = true
+	}
+	h.mu.Unlock()
+
+	if err := send(&op); err != nil {
+		h.log().Error("send imperative to mite failed", "controller", ns+"/"+name, "cmdId", imp.CommandId, "error", err)
+		h.mu.Lock()
+		if byCmd := h.pendingAcks[key]; byCmd != nil {
+			// Only this connection's own delivery is dropped: a
+			// replacement stream may already own the entry.
+			if pending, ok := byCmd[imp.CommandId]; ok && pending.token == token {
+				delete(byCmd, imp.CommandId)
+			}
+			if len(byCmd) == 0 {
+				delete(h.pendingAcks, key)
+			}
+		}
+		h.mu.Unlock()
+		_ = m.Nak()
 	}
 }
 
