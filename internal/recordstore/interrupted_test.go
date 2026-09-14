@@ -233,6 +233,43 @@ func TestMarkInterruptedSummaryDecodesAsAPIExpects(t *testing.T) {
 	}
 }
 
+// TestMarkInterruptedReasonReadableThroughGetRun asserts that the reason
+// markInterrupted stores survives the Reader.GetRun path the BFF uses:
+// the run's payload carries interrupted_reason after a mark, and a
+// fresh read of the run returns that same payload.
+func TestMarkInterruptedReasonReadableThroughGetRun(t *testing.T) {
+	pool, _ := setupLedgerPool(t)
+	reader := NewReader(pool)
+	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
+	c := fetchRunningCandidate(t, pool, runID)
+
+	changed, err := markInterrupted(context.Background(), pool, c, ReasonCellRolled, time.Now())
+	if err != nil {
+		t.Fatalf("markInterrupted: %v", err)
+	}
+	if !changed {
+		t.Fatal("want the row changed")
+	}
+
+	run, _, err := reader.GetRun(context.Background(), runID.String())
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if run.Result == nil || *run.Result != "INTERRUPTED" {
+		t.Fatalf("result = %v, want INTERRUPTED", run.Result)
+	}
+
+	var decoded struct {
+		InterruptedReason string `json:"interrupted_reason"`
+	}
+	if err := json.Unmarshal(run.Payload, &decoded); err != nil {
+		t.Fatalf("decode payload as the API's runInterruptedPayload shape: %v", err)
+	}
+	if decoded.InterruptedReason != ReasonCellRolled {
+		t.Fatalf("interrupted_reason = %q, want %q", decoded.InterruptedReason, ReasonCellRolled)
+	}
+}
+
 // TestMarkInterruptedSkipsAlreadyTerminalRun asserts the conditional
 // WHERE status = 'RUNNING' guard leaves a row a real completion already
 // won, and reports no change.

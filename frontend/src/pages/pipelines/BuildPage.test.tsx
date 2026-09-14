@@ -230,6 +230,13 @@ describe("BuildPage — pending and not-found states", () => {
     );
     expect(screen.getByRole("button", { name: /Re-run/ })).toBeDisabled();
   });
+
+  it("shows the interrupted banner's fallback text when the run carries no reason", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ result: "INTERRUPTED" }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+    expect(screen.getByText("Interrupted: reason not available.")).toBeInTheDocument();
+  });
 });
 
 describe("BuildPage — log stream resume", () => {

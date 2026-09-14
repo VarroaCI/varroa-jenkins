@@ -162,6 +162,13 @@ type runTriggerFailedPayload struct {
 	TriggerReasonCode string `json:"trigger_reason_code"`
 }
 
+// runInterruptedPayload reads the reason field the interruption sweep
+// writes into Run.Payload (internal/recordstore's markInterrupted) when
+// it marks a run INTERRUPTED.
+type runInterruptedPayload struct {
+	InterruptedReason string `json:"interrupted_reason"`
+}
+
 func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID, tenantFolder string) runDetailJSON {
 	d := runDetailJSON{RunID: run.RunID, JobPath: run.JobPath, TenantFolder: tenantFolder, Tenant: run.Tenant, Status: run.Status, RetryRunID: retryRunID}
 	if run.BuildNumber != nil {
@@ -211,6 +218,12 @@ func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID,
 		if json.Unmarshal(run.Payload, &trigger) == nil {
 			d.TriggerError = trigger.TriggerError
 			d.TriggerReasonCode = trigger.TriggerReasonCode
+		}
+		// A real terminal event that supersedes an interruption keeps the
+		// stored reason, so the result gates the field.
+		var interrupted runInterruptedPayload
+		if d.Result == "INTERRUPTED" && json.Unmarshal(run.Payload, &interrupted) == nil {
+			d.InterruptedReason = interrupted.InterruptedReason
 		}
 	}
 	for _, st := range stages {
