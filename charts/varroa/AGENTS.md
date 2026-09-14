@@ -71,6 +71,14 @@ the packaged CRDs. Does not own the Go source it packages
   operator reads them through `ParseCellsConfigFromEnv`
   (`internal/controller/cells_config.go`), see
   [internal/controller/AGENTS.md](../../internal/controller/AGENTS.md).
+  `templates/cells-guard.yaml` fails the render when `maxTenantsPerCell` is
+  below 1 or `warmPool.perProfile` is below 1, mirroring the CellPool CRD floor
+  and the operator seed floor (issue #628) instead of a silent fallback or a rejected
+  apiserver write. It also refuses a value that is not a whole number or that
+  exceeds int32. Both deployments render every cells value they seed through
+  the `varroa.cells.int` helper it defines (the BFF renders
+  `maxTenantsPerCell` only), so a values-file number never reaches the env
+  in exponent form. Asserted by `tests/test-cells-guard.sh`.
   RBAC: the operator ClusterRole holds `cellpools` + `cellpools/status` with
   the full verb set (it creates, sizes, deletes, and holds the drain
   finalizer); the BFF holds `cellpools` with `get`/`list`/`watch`/`update`/
@@ -233,7 +241,7 @@ the packaged CRDs. Does not own the Go source it packages
 - **`tests/*.sh`** — golden-render bash assertions over `helm template` output
   (`test-hive-mode.sh`, `test-secret-rbac-scoping.sh`, `test-nats-bus-security.sh`,
   `test-recorder-netpol.sh`, `test-recorder-chart.sh`, `test-activity-stream-acl.sh`,
-  `test-runner-door-nginx.sh`); not the `helm unittest` plugin.
+  `test-runner-door-nginx.sh`, `test-cells-guard.sh`); not the `helm unittest` plugin.
 - **The agent WebSocket door needs one nginx block, no Ingress change.**
   `frontend/nginx.conf`'s `location /runners/` block proxies to the BFF
   (`VARROA_API_HOST:8080`) and forwards the WebSocket upgrade: `Upgrade`,
@@ -291,6 +299,7 @@ bash charts/varroa/tests/test-nats-bus-security.sh
 bash charts/varroa/tests/test-mcp-netpol.sh
 bash charts/varroa/tests/test-dex-grpc-disabled.sh
 bash charts/varroa/tests/test-updatecenter-seed-default.sh
+bash charts/varroa/tests/test-cells-guard.sh
 bash charts/varroa/tests/test-updatecenter-uploads-nil-guard.sh
 bash charts/varroa/tests/test-updatecenter-archive-url.sh
 bash charts/varroa/tests/test-bff-configmap-rbac.sh

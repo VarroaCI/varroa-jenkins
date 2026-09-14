@@ -60,6 +60,11 @@ cells:
 Each value is the default of a pool the operator creates. It configures no live pool, and a Helm
 upgrade never rewrites the spec of a pool that already exists.
 
+The chart refuses a `cells.maxTenantsPerCell` below 1 and a `cells.warmPool.perProfile` below 1 at
+render time. The first floor matches the CellPool CRD. The second matches the operator, which seeds
+at least one warm cell so placement keeps the last free cell. Each of the two must be a whole
+number that fits a 32-bit integer.
+
 To create a second pool, apply one:
 
 ```yaml

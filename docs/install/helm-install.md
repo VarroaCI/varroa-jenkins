@@ -87,7 +87,9 @@ Gateway and BFF HPAs require the Kubernetes metrics API. Telemetry export remain
 
 Each `cells.*` value seeds a `CellPool` the operator creates. None of them configures a live pool,
 and an upgrade never rewrites the spec of a pool that already exists. Scale a live pool by editing
-the `CellPool` object. See [Cells and pipelines tenants](../operations/cells.md).
+the `CellPool` object. See [Cells and pipelines tenants](../operations/cells.md). Helm refuses a
+`cells.maxTenantsPerCell` below 1 and a `cells.warmPool.perProfile` below 1 at render time. Each
+of the two must be a whole number that fits a 32-bit integer.
 
 ### BFF ConfigMap Access
 

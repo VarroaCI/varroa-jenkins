@@ -142,9 +142,9 @@ spec:
             - name: VARROA_CELLS_WARM_POOL_ENABLED
               value: {{ .Values.cells.warmPool.enabled | quote }}
             - name: VARROA_CELLS_WARM_POOL_PER_PROFILE
-              value: {{ .Values.cells.warmPool.perProfile | quote }}
+              value: {{ include "varroa.cells.int" (dict "name" "cells.warmPool.perProfile" "value" .Values.cells.warmPool.perProfile) | quote }}
             - name: VARROA_CELLS_MAX_TENANTS
-              value: {{ .Values.cells.maxTenantsPerCell | quote }}
+              value: {{ include "varroa.cells.int" (dict "name" "cells.maxTenantsPerCell" "value" .Values.cells.maxTenantsPerCell) | quote }}
             - name: VARROA_CELLS_UNREADY_GRACE
               value: {{ .Values.cells.unreadyGracePeriod | quote }}
             - name: VARROA_NETWORKPOLICY_ENABLED
