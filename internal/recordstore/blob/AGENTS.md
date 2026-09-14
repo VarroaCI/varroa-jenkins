@@ -66,8 +66,13 @@ GCS, Azure Blob, and the local filesystem.
 - **Conformance suite** (`conformance_test.go`) — `RunConformance` runs
   one behavior suite against any `Store`, and stays in package `blob` so
   both test packages can call it. `pgblob_test.go` (package `blob_test`)
-  runs it over a fresh copy of schema `varroa` (skips without
-  `VARROA_TEST_DSN`). `bucketstore_test.go` (package `blob`) runs it over
+  runs it over schema `varroa` in this binary's own database, `<db>_blob`,
+  which `testutil_test.go` creates from the `VARROA_TEST_DSN` URL on first
+  use (skips without the DSN). The parent package drops schema `varroa` in
+  the DSN's database throughout its run, so a blob test never touches that
+  database. The harness drops and recreates schema `varroa` in the blob
+  database on every setup, so a run that starts months after the database
+  was created still holds partitions for the current month. `bucketstore_test.go` (package `blob`) runs it over
   a `file://` bucket in a temp directory (always runs). Each driver's
   `writeNative` hook writes a native object the way a foreign writer
   would: a direct `INSERT` with `chunk_seq = -1` for `pgblob`, a direct

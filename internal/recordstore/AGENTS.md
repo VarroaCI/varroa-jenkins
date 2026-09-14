@@ -65,7 +65,10 @@ of the fleet's audit activity, once a controller becomes disposable.
   live database reads this environment variable and calls `t.Skip` when it
   is unset, so `make test` stays green with no database present. Each such
   test drops and recreates schema `varroa` (and any role it created) during
-  setup, so a repeated run starts clean.
+  setup, so a repeated run starts clean. The `blob` test binary runs at the
+  same time and owns a sibling database, `<db>_blob`, that it creates on
+  first use; no other test binary may share the DSN's database with this
+  harness.
 - **`blob/`** — the storage abstraction for build logs and build
   artifacts, behind `gocloud.dev/blob`: the `pgblob` driver for tier one
   and S3/GCS/Azure/file wiring for tier two. See its own `AGENTS.md`.
@@ -511,13 +514,13 @@ of the fleet's audit activity, once a controller becomes disposable.
 
 ```bash
 VARROA_TEST_DSN='postgres://user:pass@host:port/db?sslmode=disable' \
-  go test -p 1 -race -count=1 ./internal/recordstore/...
+  go test -race -count=1 ./internal/recordstore/...
 go test -race -count=1 ./internal/recordstore/...   # DSN unset: tests skip
 ```
 
-`-p 1` is required with a DSN: every package under this tree shares schema
-`varroa`, and the `recordstore` harness drops it, so two packages running at
-the same time fail. The CI job uses the same flag.
+The DSN must be a URL and its role must hold `CREATEDB`: the `blob` test
+binary creates and uses `<db>_blob`, so the two packages run at the same
+time without `-p 1`.
 
 ## Child DOX Index
 
