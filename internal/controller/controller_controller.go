@@ -4367,6 +4367,16 @@ func (r *Reconciler) Finalize(ctx context.Context, cr *v1alpha1.Controller) erro
 	// self-cleans; a non-cell controller never had one — NotFound tolerates
 	// that.
 	_ = r.client.DeleteCellNetworkPolicy(ctx, pre+"-cell", cr.Namespace)
+	// Delete the agent RoleBinding, Role, and ServiceAccount. Provisioning
+	// creates all three under this same name; a controller that never left
+	// Pending has none, and NotFound tolerates that. Any other error keeps
+	// the finalizer so the next pass retries instead of leaking the objects.
+	agentName := pre + "-agent"
+	for _, kind := range []string{"RoleBinding", "Role", "ServiceAccount"} {
+		if err := r.client.DeleteResource(ctx, kind, agentName, cr.Namespace); err != nil {
+			return fmt.Errorf("delete agent %s %q: %w", kind, agentName, err)
+		}
+	}
 	return nil
 }
 

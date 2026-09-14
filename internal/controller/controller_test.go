@@ -51,7 +51,8 @@ type testClient struct {
 	configMapOwners            map[string][]metav1.OwnerReference // name -> owner refs
 	configMapLabels            map[string]map[string]string       // name -> labels
 	deleted                    []struct{ kind, name string }
-	deleteResourceErr          error // injected DeleteResource failure (non-NotFound)
+	deleteResourceErr          error  // injected DeleteResource failure (non-NotFound)
+	deleteResourceErrKind      string // limits deleteResourceErr to one kind; empty means every kind
 	deletedSecrets             []string
 	deletedCellNetworkPolicies []string
 	createdCellNetworkPolicies []CellPolicySpec
@@ -561,7 +562,7 @@ func (t *testClient) CopyImagePullSecret(_ context.Context, srcNamespace, dstNam
 	return nil
 }
 func (t *testClient) DeleteResource(_ context.Context, kind, name, namespace string) error {
-	if t.deleteResourceErr != nil {
+	if t.deleteResourceErr != nil && (t.deleteResourceErrKind == "" || t.deleteResourceErrKind == kind) {
 		return t.deleteResourceErr
 	}
 	t.deleted = append(t.deleted, struct{ kind, name string }{kind, name})
@@ -1174,6 +1175,42 @@ func TestFinalize(t *testing.T) {
 		if !found {
 			t.Errorf("Finalize did not delete ConfigMap %q; deleted = %+v", want, client.deleted)
 		}
+	}
+
+	// The agent ServiceAccount, Role, and RoleBinding must go away with the
+	// controller. Provisioning creates all three under the same name. The
+	// test client holds none of the three, so Finalize must still request
+	// their deletion and still succeed, the same way it already tolerates a
+	// missing PVC or bootstrap Secret.
+	agentName := pre + "-agent"
+	for _, wantKind := range []string{"ServiceAccount", "Role", "RoleBinding"} {
+		found := false
+		for _, d := range client.deleted {
+			if d.kind == wantKind && d.name == agentName {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Finalize did not delete %s %q; deleted = %+v", wantKind, agentName, client.deleted)
+		}
+	}
+}
+
+// Finalize returns the error of a failed agent RBAC delete so the finalizer
+// stays and the next pass retries.
+func TestFinalizeReturnsAgentRBACDeleteError(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.deleteResourceErr = fmt.Errorf("boom")
+	client.deleteResourceErrKind = "RoleBinding"
+	rec := newTestReconciler(client)
+
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns1", UID: testUID},
+		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseRunning},
+	}
+	if err := rec.Finalize(context.Background(), cr); err == nil {
+		t.Fatal("Finalize returned nil with a failing delete")
 	}
 }
 
