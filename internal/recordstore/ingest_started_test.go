@@ -2,8 +2,11 @@ package recordstore
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // TestApplyRunStartedWritesRun asserts a run.started envelope raises
@@ -273,5 +276,228 @@ func TestApplyRunHeartbeatTouchesOneColumn(t *testing.T) {
 	}
 	if !stillLatest.Equal(first.OccurredAt) {
 		t.Fatalf("last_heartbeat_at moved backward to %v, want %v", stillLatest, first.OccurredAt)
+	}
+}
+
+// refreshedIntent grants intentKey from pod-a with counter 1, then
+// repeats the claim from pod-b with a counter one past the grant, so the
+// intent is owned by pod-b under a fresh number. It returns the run id,
+// the old number, and the fresh number.
+func refreshedIntent(t *testing.T, ledger *Ledger, intentKey string) (runID uuid.UUID, old, fresh int64) {
+	t.Helper()
+	req := newTestClaimRequest(intentKey, 1)
+	req.JenkinsNextBuildNumber = 1
+	first := mustGrant(t, ledger, req)
+
+	repeat := req
+	repeat.Cell = "cell-b"
+	repeat.CellInstance = "pod-b"
+	repeat.PlacementGeneration = 2
+	repeat.JenkinsNextBuildNumber = first.BuildNumber + 1
+	second := mustGrant(t, ledger, repeat)
+	if second.BuildNumber != first.BuildNumber+1 {
+		t.Fatalf("want a refreshed number %d, got %+v", first.BuildNumber+1, second)
+	}
+	return uuid.MustParse(first.RunID), first.BuildNumber, second.BuildNumber
+}
+
+// readIntentStateAndNumber reads run_intents.state and build_number for
+// runID; number is nil for a null column.
+func readIntentStateAndNumber(t *testing.T, db *sql.DB, runID uuid.UUID) (state string, number *int64) {
+	t.Helper()
+	if err := db.QueryRow(`SELECT state, build_number FROM varroa.run_intents WHERE run_id = $1`, runID).
+		Scan(&state, &number); err != nil {
+		t.Fatalf("read intent: %v", err)
+	}
+	return state, number
+}
+
+// countRunsRows counts varroa.runs rows for runID.
+func countRunsRows(t *testing.T, db *sql.DB, runID uuid.UUID) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM varroa.runs WHERE run_id = $1`, runID).Scan(&n); err != nil {
+		t.Fatalf("count runs rows: %v", err)
+	}
+	return n
+}
+
+// TestSupersededStartWritesNothing asserts a run.started from the old
+// instance for the old number, arriving after a move and refresh, is
+// reported superseded and writes nothing; the new instance's start for
+// the fresh number then records the run and consumes the intent.
+func TestSupersededStartWritesNothing(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ledger := NewLedger(pool, nil)
+	g := NewIngester(pool, nil, nil)
+	const key = "manual:superseded-1"
+	runID, old, fresh := refreshedIntent(t, ledger, key)
+	before := readNextNumber(t, db)
+
+	stale := newTestEnvelope(t, runID, key, KindRunStarted, RunStartedPayload{BuildNumber: &old})
+	res, err := g.Apply(context.Background(), stale)
+	if err != nil {
+		t.Fatalf("apply stale run.started: %v", err)
+	}
+	if !res.SupersededStart || res.Conflict || res.SupersededReported != old || res.SupersededStored != fresh || res.SupersededOwner != "pod-b" {
+		t.Fatalf("want a superseded start (%d < %d, owner pod-b), got %+v", old, fresh, res)
+	}
+	if n := countRunsRows(t, db, runID); n != 0 {
+		t.Fatalf("want no runs row, got %d", n)
+	}
+	if state, number := readIntentStateAndNumber(t, db, runID); state != stateGranted || number == nil || *number != fresh {
+		t.Fatalf("want GRANTED at %d, got %s/%v", fresh, state, number)
+	}
+	if after := readNextNumber(t, db); after != before {
+		t.Fatalf("next_number moved from %d to %d", before, after)
+	}
+
+	owned := newTestEnvelope(t, runID, key, KindRunStarted, RunStartedPayload{BuildNumber: &fresh})
+	owned.CellInstance = "pod-b"
+	res, err = g.Apply(context.Background(), owned)
+	if err != nil {
+		t.Fatalf("apply real run.started: %v", err)
+	}
+	if res.SupersededStart || res.Conflict {
+		t.Fatalf("want an ordinary write, got %+v", res)
+	}
+	var recorded int64
+	if err := db.QueryRow(`SELECT build_number FROM varroa.runs WHERE run_id = $1`, runID).Scan(&recorded); err != nil {
+		t.Fatalf("read runs row: %v", err)
+	}
+	if recorded != fresh {
+		t.Fatalf("runs.build_number = %d, want %d", recorded, fresh)
+	}
+	if state, number := readIntentStateAndNumber(t, db, runID); state != stateConsumed || number == nil || *number != fresh {
+		t.Fatalf("want CONSUMED at %d, got %s/%v", fresh, state, number)
+	}
+}
+
+// TestSupersededStartAfterRealStartChangesNothing asserts a redelivered
+// old-instance start for the old number, arriving after the real start,
+// changes neither table.
+func TestSupersededStartAfterRealStartChangesNothing(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ledger := NewLedger(pool, nil)
+	g := NewIngester(pool, nil, nil)
+	const key = "manual:superseded-2"
+	runID, old, fresh := refreshedIntent(t, ledger, key)
+
+	owned := newTestEnvelope(t, runID, key, KindRunStarted, RunStartedPayload{BuildNumber: &fresh})
+	owned.CellInstance = "pod-b"
+	if _, err := g.Apply(context.Background(), owned); err != nil {
+		t.Fatalf("apply real run.started: %v", err)
+	}
+
+	stale := newTestEnvelope(t, runID, key, KindRunStarted, RunStartedPayload{BuildNumber: &old})
+	res, err := g.Apply(context.Background(), stale)
+	if err != nil {
+		t.Fatalf("apply stale run.started: %v", err)
+	}
+	if !res.SupersededStart {
+		t.Fatalf("want a superseded start, got %+v", res)
+	}
+	var recorded int64
+	if err := db.QueryRow(`SELECT build_number FROM varroa.runs WHERE run_id = $1`, runID).Scan(&recorded); err != nil {
+		t.Fatalf("read runs row: %v", err)
+	}
+	if recorded != fresh {
+		t.Fatalf("runs.build_number = %d, want %d unchanged", recorded, fresh)
+	}
+	if state, number := readIntentStateAndNumber(t, db, runID); state != stateConsumed || number == nil || *number != fresh {
+		t.Fatalf("want CONSUMED at %d unchanged, got %s/%v", fresh, state, number)
+	}
+}
+
+// TestEqualNumberFromForeignInstanceIsARealStart asserts a start from a
+// non-owning instance that reports the stored number is not superseded:
+// an ownership move without a refresh leaves the number as it was, and
+// the moved instance's own start must record the run.
+func TestEqualNumberFromForeignInstanceIsARealStart(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ledger := NewLedger(pool, nil)
+	g := NewIngester(pool, nil, nil)
+
+	req := newTestClaimRequest("manual:equal-foreign", 1)
+	req.JenkinsNextBuildNumber = 1
+	first := mustGrant(t, ledger, req)
+	moved := req
+	moved.CellInstance = "pod-b"
+	moved.JenkinsNextBuildNumber = first.BuildNumber
+	if resp := mustGrant(t, ledger, moved); resp.BuildNumber != first.BuildNumber {
+		t.Fatalf("want a move without a refresh at %d, got %+v", first.BuildNumber, resp)
+	}
+	runID := uuid.MustParse(first.RunID)
+
+	number := first.BuildNumber
+	env := newTestEnvelope(t, runID, req.IntentKey, KindRunStarted, RunStartedPayload{BuildNumber: &number})
+	env.CellInstance = "pod-c"
+	res, err := g.Apply(context.Background(), env)
+	if err != nil {
+		t.Fatalf("apply run.started: %v", err)
+	}
+	if res.SupersededStart || res.Conflict {
+		t.Fatalf("want an ordinary write for an equal number, got %+v", res)
+	}
+	if n := countRunsRows(t, db, runID); n != 1 {
+		t.Fatalf("want one runs row, got %d", n)
+	}
+	if state, stored := readIntentStateAndNumber(t, db, runID); state != stateConsumed || stored == nil || *stored != number {
+		t.Fatalf("want CONSUMED at %d, got %s/%v", number, state, stored)
+	}
+}
+
+// TestLowerNumberFromOwnerTakesOrdinaryPath asserts a lower number from
+// the owning instance is not superseded: it takes the ordinary write,
+// here the UNIQUE-conflict retry, because another intent of the job
+// holds that number.
+func TestLowerNumberFromOwnerTakesOrdinaryPath(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ledger := NewLedger(pool, nil)
+	g := NewIngester(pool, nil, nil)
+
+	reqA := newTestClaimRequest("manual:owner-lower-a", 1)
+	reqA.JenkinsNextBuildNumber = 1
+	a := mustGrant(t, ledger, reqA)
+	reqB := newTestClaimRequest("manual:owner-lower-b", 1)
+	reqB.JenkinsNextBuildNumber = 1
+	b := mustGrant(t, ledger, reqB)
+	if b.BuildNumber != a.BuildNumber+1 {
+		t.Fatalf("want B at %d, got %d", a.BuildNumber+1, b.BuildNumber)
+	}
+
+	repeatA := reqA
+	repeatA.Cell = "cell-b"
+	repeatA.CellInstance = "pod-b"
+	repeatA.PlacementGeneration = 2
+	repeatA.JenkinsNextBuildNumber = b.BuildNumber + 1
+	refreshed := mustGrant(t, ledger, repeatA)
+	if refreshed.BuildNumber != b.BuildNumber+1 {
+		t.Fatalf("want A refreshed to %d, got %d", b.BuildNumber+1, refreshed.BuildNumber)
+	}
+	runA := uuid.MustParse(a.RunID)
+
+	lower := b.BuildNumber
+	env := newTestEnvelope(t, runA, reqA.IntentKey, KindRunStarted, RunStartedPayload{BuildNumber: &lower})
+	env.CellInstance = "pod-b"
+	res, err := g.Apply(context.Background(), env)
+	if err != nil {
+		t.Fatalf("apply owner run.started: %v", err)
+	}
+	if res.SupersededStart || !res.Conflict {
+		t.Fatalf("want the conflict disposition and no superseded start, got %+v", res)
+	}
+	var recorded *int64
+	if err := db.QueryRow(`SELECT build_number FROM varroa.runs WHERE run_id = $1`, runA).Scan(&recorded); err != nil {
+		t.Fatalf("read runs row: %v", err)
+	}
+	if recorded != nil {
+		t.Fatalf("runs.build_number = %d, want null", *recorded)
+	}
+	if state, number := readIntentStateAndNumber(t, db, runA); state != stateConsumed || number != nil {
+		t.Fatalf("want CONSUMED with a null number, got %s/%v", state, number)
+	}
+	if next := readNextNumber(t, db); next != refreshed.BuildNumber+1 {
+		t.Fatalf("next_number = %d, want %d", next, refreshed.BuildNumber+1)
 	}
 }

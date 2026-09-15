@@ -2,6 +2,7 @@ package recordstore
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 )
 
@@ -221,4 +222,78 @@ func assertNextNumber(ctx context.Context, t *testing.T, db DBTX, jobPath string
 	if got != want {
 		t.Fatalf("next_number for %q: want %d, got %d", jobPath, want, got)
 	}
+}
+
+// seedJobNumbers inserts a job_numbers row for jobPath at next.
+func seedJobNumbers(t *testing.T, db *sql.DB, jobPath string, next int64) {
+	t.Helper()
+	if _, err := db.Exec(`
+		INSERT INTO varroa.job_numbers (cluster, tenant, job_path, next_number)
+		VALUES ($1, $2, $3, $4)
+	`, testCluster, testTenant, jobPath, next); err != nil {
+		t.Fatalf("seed job_numbers at %d: %v", next, err)
+	}
+}
+
+// TestStaleReanswerAdvancesWatermarkOnce asserts a re-answer from a new
+// instance whose counter passed the stored number reserves the next
+// number once, and a further re-answer with the same counter reserves
+// nothing.
+func TestStaleReanswerAdvancesWatermarkOnce(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ctx := context.Background()
+	jobPath := "acme/watermark-stale-once"
+	seedJobNumbers(t, db, jobPath, 7)
+
+	ledger := NewLedger(pool, nil)
+	req := newTestClaimRequest("manual:"+newTestUUIDv7String(), 0)
+	req.JobPath = jobPath
+
+	first := mustGrant(t, ledger, req)
+	if first.BuildNumber != 7 {
+		t.Fatalf("want build_number 7, got %d", first.BuildNumber)
+	}
+	assertNextNumber(ctx, t, pool, jobPath, 8)
+
+	stale := req
+	stale.CellInstance = "pod-b"
+	stale.JenkinsNextBuildNumber = 8
+	resp := ledger.Claim(ctx, stale)
+	if resp.Decision != DecisionGranted || resp.RunID != first.RunID || resp.BuildNumber != 8 {
+		t.Fatalf("want refreshed grant with build_number 8, got %+v", resp)
+	}
+	assertNextNumber(ctx, t, pool, jobPath, 9)
+
+	again := ledger.Claim(ctx, stale)
+	if again.Decision != DecisionGranted || again.BuildNumber != 8 {
+		t.Fatalf("want repeated grant with build_number 8, got %+v", again)
+	}
+	assertNextNumber(ctx, t, pool, jobPath, 9)
+}
+
+// TestStaleReanswerLiftsWatermarkToReported asserts a re-answer from a
+// new instance whose counter is far past the stored number grants the
+// reported counter and moves the watermark past it.
+func TestStaleReanswerLiftsWatermarkToReported(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ctx := context.Background()
+	jobPath := "acme/watermark-stale-lift"
+	seedJobNumbers(t, db, jobPath, 7)
+
+	ledger := NewLedger(pool, nil)
+	req := newTestClaimRequest("manual:"+newTestUUIDv7String(), 0)
+	req.JobPath = jobPath
+	first := mustGrant(t, ledger, req)
+	if first.BuildNumber != 7 {
+		t.Fatalf("want build_number 7, got %d", first.BuildNumber)
+	}
+
+	stale := req
+	stale.CellInstance = "pod-b"
+	stale.JenkinsNextBuildNumber = 20
+	resp := ledger.Claim(ctx, stale)
+	if resp.Decision != DecisionGranted || resp.BuildNumber != 20 {
+		t.Fatalf("want refreshed grant with build_number 20, got %+v", resp)
+	}
+	assertNextNumber(ctx, t, pool, jobPath, 21)
 }

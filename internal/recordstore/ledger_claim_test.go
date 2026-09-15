@@ -3,6 +3,7 @@ package recordstore
 import (
 	"context"
 	"database/sql"
+	"sync"
 	"testing"
 	"time"
 
@@ -465,5 +466,297 @@ func TestRepeatSameCellInstanceUnchanged(t *testing.T) {
 	}
 	if cell != "cell-a" || cellInstance != "pod-a" || generation != 1 {
 		t.Fatalf("want unchanged cell-a/pod-a/1, got %s/%s/%d", cell, cellInstance, generation)
+	}
+}
+
+// readIntentOwnerAndNumber reads the ownership columns and the build
+// number of the intent row for intentKey.
+func readIntentOwnerAndNumber(t *testing.T, db *sql.DB, intentKey string) (cell, cellInstance string, generation, buildNumber int64) {
+	t.Helper()
+	if err := db.QueryRow(`
+		SELECT cell, cell_instance, placement_generation, build_number
+		FROM varroa.run_intents WHERE intent_key = $1
+	`, intentKey).Scan(&cell, &cellInstance, &generation, &buildNumber); err != nil {
+		t.Fatalf("read intent row: %v", err)
+	}
+	return cell, cellInstance, generation, buildNumber
+}
+
+// readNextNumber reads job_numbers.next_number for the shared test job.
+func readNextNumber(t *testing.T, db *sql.DB) int64 {
+	t.Helper()
+	var next int64
+	if err := db.QueryRow(`
+		SELECT next_number FROM varroa.job_numbers
+		WHERE cluster = $1 AND tenant = $2 AND job_path = $3
+	`, testCluster, testTenant, testJobPath).Scan(&next); err != nil {
+		t.Fatalf("read next_number: %v", err)
+	}
+	return next
+}
+
+// TestRepeatStaleNumberDifferentInstanceRefreshesAndMoves: a repeat of
+// the same run from a new cell instance whose counter already passed the
+// stored number moves ownership and receives a fresh number.
+func TestRepeatStaleNumberDifferentInstanceRefreshesAndMoves(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ledger := NewLedger(pool, nil)
+
+	req := newTestClaimRequest("manual:x-stale-move", 1)
+	req.JenkinsNextBuildNumber = 1
+	first := mustGrant(t, ledger, req)
+
+	repeat := req
+	repeat.Cell = "cell-b"
+	repeat.CellInstance = "pod-b"
+	repeat.PlacementGeneration = 2
+	repeat.JenkinsNextBuildNumber = first.BuildNumber + 1
+
+	resp := ledger.Claim(context.Background(), repeat)
+	if resp.Decision != DecisionGranted || resp.RunID != first.RunID || resp.BuildNumber != first.BuildNumber+1 {
+		t.Fatalf("want granted run %q with build_number %d, got %+v", first.RunID, first.BuildNumber+1, resp)
+	}
+	cell, cellInstance, generation, number := readIntentOwnerAndNumber(t, db, req.IntentKey)
+	if cell != "cell-b" || cellInstance != "pod-b" || generation != 2 || number != first.BuildNumber+1 {
+		t.Fatalf("want cell-b/pod-b/2/%d, got %s/%s/%d/%d", first.BuildNumber+1, cell, cellInstance, generation, number)
+	}
+	assertIntentRowCount(t, db, req.IntentKey, 1)
+}
+
+// TestRepeatStaleNumberSameInstanceKeepsNumber: a repeat from the same
+// cell instance with a passed counter answers the stored number and
+// changes no column, because that counter passed the number by running
+// the build.
+func TestRepeatStaleNumberSameInstanceKeepsNumber(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ledger := NewLedger(pool, nil)
+
+	req := newTestClaimRequest("manual:x-stale-same", 1)
+	req.JenkinsNextBuildNumber = 1
+	first := mustGrant(t, ledger, req)
+	before := readNextNumber(t, db)
+
+	repeat := req
+	repeat.JenkinsNextBuildNumber = first.BuildNumber + 1
+
+	resp := ledger.Claim(context.Background(), repeat)
+	if resp.Decision != DecisionGranted || resp.RunID != first.RunID || resp.BuildNumber != first.BuildNumber {
+		t.Fatalf("want granted with stored build_number %d, got %+v", first.BuildNumber, resp)
+	}
+	cell, cellInstance, generation, number := readIntentOwnerAndNumber(t, db, req.IntentKey)
+	if cell != "cell-a" || cellInstance != "pod-a" || generation != 1 || number != first.BuildNumber {
+		t.Fatalf("want unchanged cell-a/pod-a/1/%d, got %s/%s/%d/%d", first.BuildNumber, cell, cellInstance, generation, number)
+	}
+	if after := readNextNumber(t, db); after != before {
+		t.Fatalf("next_number moved from %d to %d", before, after)
+	}
+}
+
+// TestRepeatStaleNumberMarkedAcceptedRowRefreshes: a runs row that holds
+// only the accepted keys and the sweep's INTERRUPTED mark records no
+// build, so it does not block the refresh.
+func TestRepeatStaleNumberMarkedAcceptedRowRefreshes(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ledger := NewLedger(pool, nil)
+
+	req := newTestClaimRequest("manual:x-stale-marked", 1)
+	req.JenkinsNextBuildNumber = 1
+	first := mustGrant(t, ledger, req)
+	insertAcceptedOnlyRunsRow(t, db, first.RunID)
+	if _, err := db.Exec(`
+		UPDATE varroa.runs SET status = 'COMPLETED', result = 'INTERRUPTED',
+		    payload = payload || '{"interrupted_reason":"cell-rolled"}'::jsonb
+		WHERE run_id = $1
+	`, first.RunID); err != nil {
+		t.Fatalf("mark the accepted row interrupted: %v", err)
+	}
+
+	repeat := req
+	repeat.CellInstance = "pod-b"
+	repeat.JenkinsNextBuildNumber = first.BuildNumber + 1
+
+	resp := ledger.Claim(context.Background(), repeat)
+	if resp.Decision != DecisionGranted || resp.RunID != first.RunID || resp.BuildNumber != first.BuildNumber+1 {
+		t.Fatalf("want granted with build_number %d, got %+v", first.BuildNumber+1, resp)
+	}
+	_, cellInstance, _, number := readIntentOwnerAndNumber(t, db, req.IntentKey)
+	if cellInstance != "pod-b" || number != first.BuildNumber+1 {
+		t.Fatalf("want pod-b/%d, got %s/%d", first.BuildNumber+1, cellInstance, number)
+	}
+}
+
+// TestRepeatCurrentNumberReservesNothing: a repeat whose counter equals
+// the stored number answers the stored number and reserves nothing.
+func TestRepeatCurrentNumberReservesNothing(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ledger := NewLedger(pool, nil)
+
+	req := newTestClaimRequest("manual:x-current", 1)
+	req.JenkinsNextBuildNumber = 1
+	first := mustGrant(t, ledger, req)
+	before := readNextNumber(t, db)
+
+	repeat := req
+	repeat.CellInstance = "pod-b"
+	repeat.JenkinsNextBuildNumber = first.BuildNumber
+
+	resp := ledger.Claim(context.Background(), repeat)
+	if resp.Decision != DecisionGranted || resp.BuildNumber != first.BuildNumber {
+		t.Fatalf("want unchanged build_number %d, got %+v", first.BuildNumber, resp)
+	}
+	if after := readNextNumber(t, db); after != before {
+		t.Fatalf("next_number moved from %d to %d", before, after)
+	}
+}
+
+// TestRepeatZeroNextNumberNeverRefreshes: a request that carries no
+// counter never refreshes, even when the stored number is stale.
+func TestRepeatZeroNextNumberNeverRefreshes(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ledger := NewLedger(pool, nil)
+
+	req := newTestClaimRequest("manual:x-zero", 1)
+	req.JenkinsNextBuildNumber = 1
+	first := mustGrant(t, ledger, req)
+	// A second key on the same job moves the watermark past the first
+	// number, so the stored number is stale by the watermark's account.
+	mustGrant(t, ledger, newTestClaimRequest("manual:x-zero-other", 1))
+	before := readNextNumber(t, db)
+
+	repeat := req
+	repeat.CellInstance = "pod-b"
+	repeat.JenkinsNextBuildNumber = 0
+
+	resp := ledger.Claim(context.Background(), repeat)
+	if resp.Decision != DecisionGranted || resp.BuildNumber != first.BuildNumber {
+		t.Fatalf("want unchanged build_number %d, got %+v", first.BuildNumber, resp)
+	}
+	if after := readNextNumber(t, db); after != before {
+		t.Fatalf("next_number moved from %d to %d", before, after)
+	}
+}
+
+// TestRepeatWithoutInstanceNeverRefreshes: a repeat that names no cell
+// instance keeps the stored number even with a passed counter, so every
+// refreshed intent names an owner.
+func TestRepeatWithoutInstanceNeverRefreshes(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ledger := NewLedger(pool, nil)
+
+	req := newTestClaimRequest("manual:x-no-instance", 1)
+	req.CellInstance = ""
+	req.JenkinsNextBuildNumber = 1
+	first := mustGrant(t, ledger, req)
+	before := readNextNumber(t, db)
+
+	repeat := req
+	repeat.JenkinsNextBuildNumber = first.BuildNumber + 1
+
+	resp := ledger.Claim(context.Background(), repeat)
+	if resp.Decision != DecisionGranted || resp.BuildNumber != first.BuildNumber {
+		t.Fatalf("want stored build_number %d, got %+v", first.BuildNumber, resp)
+	}
+	if after := readNextNumber(t, db); after != before {
+		t.Fatalf("next_number moved from %d to %d", before, after)
+	}
+}
+
+// TestRepeatConsumedIntentKeepsNumber: a consumed intent answers its
+// stored number whatever counter the repeat carries.
+func TestRepeatConsumedIntentKeepsNumber(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ledger := NewLedger(pool, nil)
+
+	req := newTestClaimRequest("manual:x-consumed", 1)
+	req.JenkinsNextBuildNumber = 1
+	first := mustGrant(t, ledger, req)
+	if _, err := db.Exec(`UPDATE varroa.run_intents SET state = 'CONSUMED' WHERE intent_key = $1`, req.IntentKey); err != nil {
+		t.Fatalf("consume intent: %v", err)
+	}
+	before := readNextNumber(t, db)
+
+	repeat := req
+	repeat.CellInstance = "pod-b"
+	repeat.JenkinsNextBuildNumber = first.BuildNumber + 5
+
+	resp := ledger.Claim(context.Background(), repeat)
+	if resp.Decision != DecisionGranted || resp.BuildNumber != first.BuildNumber {
+		t.Fatalf("want stored build_number %d, got %+v", first.BuildNumber, resp)
+	}
+	_, cellInstance, _, number := readIntentOwnerAndNumber(t, db, req.IntentKey)
+	if cellInstance != "pod-a" || number != first.BuildNumber {
+		t.Fatalf("want unchanged pod-a/%d, got %s/%d", first.BuildNumber, cellInstance, number)
+	}
+	if after := readNextNumber(t, db); after != before {
+		t.Fatalf("next_number moved from %d to %d", before, after)
+	}
+}
+
+// TestRepeatRecordedBuildKeepsNumber: a GRANTED intent whose runs row
+// records a build answers its stored number whatever counter the repeat
+// carries.
+func TestRepeatRecordedBuildKeepsNumber(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ledger := NewLedger(pool, nil)
+
+	req := newTestClaimRequest("manual:x-recorded", 1)
+	req.JenkinsNextBuildNumber = 1
+	first := mustGrant(t, ledger, req)
+	insertStubRunsRow(t, db, first.RunID)
+	if _, err := db.Exec(`UPDATE varroa.runs SET build_number = $1 WHERE run_id = $2`, first.BuildNumber, first.RunID); err != nil {
+		t.Fatalf("record the build: %v", err)
+	}
+	before := readNextNumber(t, db)
+
+	repeat := req
+	repeat.CellInstance = "pod-b"
+	repeat.JenkinsNextBuildNumber = first.BuildNumber + 5
+
+	resp := ledger.Claim(context.Background(), repeat)
+	if resp.Decision != DecisionGranted || resp.BuildNumber != first.BuildNumber {
+		t.Fatalf("want stored build_number %d, got %+v", first.BuildNumber, resp)
+	}
+	_, cellInstance, _, number := readIntentOwnerAndNumber(t, db, req.IntentKey)
+	if cellInstance != "pod-a" || number != first.BuildNumber {
+		t.Fatalf("want unchanged pod-a/%d, got %s/%d", first.BuildNumber, cellInstance, number)
+	}
+	if after := readNextNumber(t, db); after != before {
+		t.Fatalf("next_number moved from %d to %d", before, after)
+	}
+}
+
+// TestConcurrentRepeatClaimsRefreshOnce: two repeats with the same
+// passed counter serialize on the row lock, so one reservation serves
+// both answers.
+func TestConcurrentRepeatClaimsRefreshOnce(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ledger := NewLedger(pool, nil)
+
+	req := newTestClaimRequest("manual:x-concurrent", 1)
+	req.JenkinsNextBuildNumber = 1
+	first := mustGrant(t, ledger, req)
+
+	repeat := req
+	repeat.CellInstance = "pod-b"
+	repeat.JenkinsNextBuildNumber = first.BuildNumber + 1
+
+	var wg sync.WaitGroup
+	answers := make([]ClaimResponse, 2)
+	for i := range answers {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			answers[i] = ledger.Claim(context.Background(), repeat)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, resp := range answers {
+		if resp.Decision != DecisionGranted || resp.BuildNumber != first.BuildNumber+1 {
+			t.Fatalf("answer %d: want granted with build_number %d, got %+v", i, first.BuildNumber+1, resp)
+		}
+	}
+	if next := readNextNumber(t, db); next != first.BuildNumber+2 {
+		t.Fatalf("want next_number %d, got %d", first.BuildNumber+2, next)
 	}
 }

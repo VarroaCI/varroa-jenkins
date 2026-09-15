@@ -25,10 +25,23 @@ import (
 // stored payload either way, and stamps interrupted_superseded_at when
 // the row it supersedes was marked INTERRUPTED. A late started write into
 // an interrupted real run supersedes nothing and leaves the stamp alone.
-func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope, nullBuildNumber bool) (*LedgerAction, error) {
+//
+// A run.started that reports a number below the intent's stored number,
+// from an instance other than the intent's current owner, describes a
+// build of a superseded grant: the ledger moved and refreshed the intent
+// after that build was authorized. Such a write would set the stale
+// number back over the fresh one, and the owner's completion carries no
+// number to restore it, so the function writes nothing and reports the
+// superseded fields instead. An envelope that meets only one of the two
+// conditions takes the ordinary path.
+func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope, nullBuildNumber bool) (dispatchResult, error) {
 	var payload RunStartedPayload
 	if err := json.Unmarshal(env.Payload, &payload); err != nil {
-		return nil, fmt.Errorf("%w: decode run.started payload: %v", ErrMalformedEnvelope, err)
+		return dispatchResult{}, fmt.Errorf("%w: decode run.started payload: %v", ErrMalformedEnvelope, err)
+	}
+
+	if superseded, res := supersededStart(intent, env, payload); superseded {
+		return res, nil
 	}
 
 	buildNumber := payload.BuildNumber
@@ -38,7 +51,7 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 
 	envelopeJSON, err := json.Marshal(env)
 	if err != nil {
-		return nil, fmt.Errorf("marshal envelope: %w", err)
+		return dispatchResult{}, fmt.Errorf("marshal envelope: %w", err)
 	}
 
 	var status string
@@ -78,21 +91,21 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 		jsonArg(payload.Cause), jsonArg(payload.Params), string(envelopeJSON),
 	).Scan(&status)
 	if err != nil {
-		return nil, fmt.Errorf("upsert started run: %w", err)
+		return dispatchResult{}, fmt.Errorf("upsert started run: %w", err)
 	}
 
 	consumedAt := env.OccurredAt
 	if buildNumber == nil {
 		if err := consumeIntentNullBuildNumber(ctx, tx, intent.runID, consumedAt); err != nil {
-			return nil, err
+			return dispatchResult{}, err
 		}
 	} else {
 		if err := consumeIntent(ctx, tx, intent.runID, *buildNumber, consumedAt); err != nil {
-			return nil, err
+			return dispatchResult{}, err
 		}
 		if !nullBuildNumber {
 			if err := RaiseWatermarkForStartedBuild(ctx, tx, intent.cluster, intent.tenant, intent.jobPath, *buildNumber); err != nil {
-				return nil, err
+				return dispatchResult{}, err
 			}
 		}
 	}
@@ -100,14 +113,34 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 	if status != StatusQueued && status != StatusRunning {
 		// The arriving run is no longer live: an out-of-order run.completed
 		// already finished it. The duplicate backstop does not apply.
-		return nil, nil
+		return dispatchResult{}, nil
 	}
 
 	revision := ""
 	if payload.SCMRevision != nil {
 		revision = *payload.SCMRevision
 	}
-	return runDuplicateBackstop(ctx, tx, intent, revision)
+	action, err := runDuplicateBackstop(ctx, tx, intent, revision)
+	return dispatchResult{action: action}, err
+}
+
+// supersededStart reports whether env describes a build of a superseded
+// grant: its build number is below the intent's stored number and its
+// cell instance is not the intent's current owner. A null reported
+// number, a null stored number, or the owning instance never counts.
+func supersededStart(intent *intentRow, env IngestEnvelope, payload RunStartedPayload) (bool, dispatchResult) {
+	if payload.BuildNumber == nil || intent.buildNumber == nil || intent.cellInstance == nil {
+		return false, dispatchResult{}
+	}
+	if *payload.BuildNumber >= *intent.buildNumber || env.CellInstance == *intent.cellInstance {
+		return false, dispatchResult{}
+	}
+	return true, dispatchResult{
+		supersededStart:    true,
+		supersededReported: *payload.BuildNumber,
+		supersededStored:   *intent.buildNumber,
+		supersededOwner:    *intent.cellInstance,
+	}
 }
 
 // consumeIntentNullBuildNumber moves a GRANTED intent to CONSUMED with a

@@ -76,6 +76,16 @@ reads `granted` again when it carries the same `intent_key` and the same `run_id
 granted claim. The ledger recognizes its own retried request. `duplicate` means the intent key
 belongs to a different run entirely, for example two triggers racing on the same commit.
 
+A retried request from a new cell instance can carry a fresh build number. The ledger refreshes
+the number when the run never started, the repeat comes from a different cell instance, and the
+stored number is below that instance's next build number. A trigger lost to a cell roll
+therefore restarts under the same run identifier. The new cell reads its next build number from
+the ledger's watermark, and the repeat claim reports that number. The ledger then grants a
+number the cell can apply. The old number stays burned. A repeat from the same cell instance
+keeps its number: that instance's counter passes the stored number only by running the build.
+The recorder drops a late `run.started` from the old cell for the old number and counts it in
+`recorder_ingest_superseded_start_total`.
+
 Webhook and SCM-poll triggers use the intent key `scm:<job-path>:<revision>`, read from the
 revision Jenkins has recorded for the job at the moment the claim runs. A second delivery of the
 same revision reuses the same key and reads `granted` again on its own run, or `duplicate` if a
@@ -85,10 +95,17 @@ different run already claimed it.
 
 The ledger grants a build number that is not yet used locally. The claimer reads the number back
 from Jenkins right after applying it. `NUMBER_CONFLICT` means that read-back found Jenkins
-already past the granted number. A build ran on this Jenkins outside the claim path. A manual
-`Job.scheduleBuild2` call that bypassed the plugin is one cause. A restore from a backup that
-replayed old build history is another. Treat it as a sign the Jenkins instance and the ledger
-have diverged for that job. The retry schedule will not clear it.
+already past the granted number. The counter advanced between the claim request and the number
+apply. A manual `Job.scheduleBuild2` call that bypassed the plugin in that window is one cause. A
+restore from a backup that replayed old build history in that window is another. An advance
+before a first claim causes no conflict: the claim reports the counter as
+`jenkins_next_build_number`, and the ledger never grants a new number below it. Two repeat
+claims are the exceptions. One from the same cell instance answers the stored number, so a
+second queue item for a run that instance already built reads `NUMBER_CONFLICT` and is
+cancelled, which keeps that run from building twice. One that names no cell instance answers
+the stored number too, because the ledger cannot tell which instance owns the run; a real cell
+always names its instance. Treat any other `NUMBER_CONFLICT` as a sign the Jenkins instance
+and the ledger have diverged for that job. The retry schedule will not clear it.
 
 ## Symptoms of a recorder outage
 

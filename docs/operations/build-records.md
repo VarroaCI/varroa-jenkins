@@ -143,12 +143,13 @@ The recorder marks the run interrupted once its accepting cell instance is confi
 five minutes, with reason `cell-rolled`. The run page names the reason and states that the build
 never started on the cell.
 
-The recorder publishes no automatic retry for a queued run: the record holds no build
-parameters. Use `Re-run` instead; it starts the build with each parameter's declared default.
+The recorder publishes no automatic retry for a queued run, because the record holds no build
+parameters. `Re-run` starts the build with each parameter's declared default.
 
 Counters: `varroa.gateway.trigger_accepted`, `recorder_ingest_trigger_accepted_total` (a
 `stored` attribute), and `recorder_interrupted_marked_total` (a `status` attribute, `queued` or
-`running`).
+`running`). `recorder_ingest_superseded_start_total` counts a dropped late `run.started`; see
+[Build claims](build-claims.md).
 
 Retention treats the run like every other run. The `runs` value above bounds it.
 

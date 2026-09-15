@@ -44,6 +44,7 @@ func TestIngestMetricsRegisterAndRecord(t *testing.T) {
 	metrics.addOrphan(ctx)
 	metrics.addScheduleTruncated(ctx)
 	metrics.addScheduleStale(ctx)
+	metrics.addSupersededStart(ctx)
 
 	var rm metricdata.ResourceMetrics
 	if err := reader.Collect(ctx, &rm); err != nil {
@@ -63,6 +64,7 @@ func TestIngestMetricsRegisterAndRecord(t *testing.T) {
 		"recorder_ingest_orphan_total",
 		"recorder_schedules_truncated_total",
 		"recorder_schedules_stale_total",
+		"recorder_ingest_superseded_start_total",
 		"recorder_ingest_backlog_msgs",
 		"recorder_ingest_backlog_bytes",
 	}

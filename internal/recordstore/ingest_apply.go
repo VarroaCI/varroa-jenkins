@@ -63,6 +63,19 @@ type ApplyResult struct {
 	// holds the run id. The caller acknowledges the message and counts
 	// recorder_ingest_trigger_accepted_total with a stored attribute.
 	TriggerAcceptedStored bool
+
+	// SupersededStart is true when a run.started reported a build number
+	// below the intent's stored number from an instance other than the
+	// intent's current owner: the ledger moved and refreshed the intent
+	// after that build was authorized. The recorder wrote nothing. The
+	// caller acknowledges the message and counts
+	// recorder_ingest_superseded_start_total. SupersededReported,
+	// SupersededStored, and SupersededOwner carry the two numbers and
+	// the owning instance for the caller's log line.
+	SupersededStart    bool
+	SupersededReported int64
+	SupersededStored   int64
+	SupersededOwner    string
 }
 
 // Ingester applies one IngestEnvelope to the record tables inside a
@@ -138,9 +151,21 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 		if err != nil {
 			return result, err
 		}
-		result.Conflict = true
-		g.logger.Warn("run.started build number conflict; stored run with a null build number",
-			"runID", env.RunID)
+		// The retry can answer superseded on its own: the first attempt
+		// released the intent lock when it rolled back, and a claim can
+		// move and refresh the intent before the retry reads it. No
+		// null-number run was stored then, so Conflict stays false.
+		if !dispatched.supersededStart {
+			result.Conflict = true
+			g.logger.Warn("run.started build number conflict; stored run with a null build number",
+				"runID", env.RunID)
+		}
+	}
+	if dispatched.supersededStart {
+		result.SupersededStart = true
+		result.SupersededReported = dispatched.supersededReported
+		result.SupersededStored = dispatched.supersededStored
+		result.SupersededOwner = dispatched.supersededOwner
 	}
 
 	if dispatched.action != nil && g.conn != nil {
@@ -166,11 +191,18 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 
 // dispatchResult is what dispatch reports for one write, beyond a plain
 // error: a pending LedgerAction for run.started's duplicate backstop,
-// and, for a run.completed write that was this run's real terminal
-// write, the producer identity Apply feeds the fan-out round.
+// for a run.completed write that was this run's real terminal write,
+// the producer identity Apply feeds the fan-out round, and for a
+// run.started that described a superseded grant, the superseded fields
+// Apply copies onto its ApplyResult.
 type dispatchResult struct {
 	action *LedgerAction
 	fanout *FanoutProducer
+
+	supersededStart    bool
+	supersededReported int64
+	supersededStored   int64
+	supersededOwner    string
 }
 
 // applyOnce runs one attempt of env's write in its own transaction.
@@ -203,8 +235,7 @@ func (g *Ingester) applyOnce(ctx context.Context, runID uuid.UUID, env IngestEnv
 func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope, nullBuildNumber bool) (dispatchResult, error) {
 	switch env.Kind {
 	case KindRunStarted:
-		action, err := applyRunStarted(ctx, tx, intent, env, nullBuildNumber)
-		return dispatchResult{action: action}, err
+		return applyRunStarted(ctx, tx, intent, env, nullBuildNumber)
 	case KindRunStage:
 		return dispatchResult{}, applyRunStage(ctx, tx, intent, env)
 	case KindRunCompleted:

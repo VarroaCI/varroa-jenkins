@@ -215,7 +215,9 @@ func existingKeyDecision(ctx context.Context, tx pgx.Tx, req ClaimRequest, reqRu
 		return ClaimResponse{Decision: DecisionVetoed, ReasonCode: ReasonFenced, RunID: row.runID.String()}, nil
 	}
 
-	// Row 2: the stored run_id equals the request's run_id.
+	// Row 2: the stored run_id equals the request's run_id. The answer
+	// is granted; an unstarted intent moves to a new instance, and that
+	// move can refresh a stale build number.
 	if row.runID == reqRunID {
 		return reanswerSameRun(ctx, tx, req, row)
 	}
@@ -239,8 +241,18 @@ func existingKeyDecision(ctx context.Context, tx pgx.Tx, req ClaimRequest, reqRu
 // reanswerSameRun grants a repeat claim for the run_id the row already
 // holds. It moves the ownership columns only when the caller's cell
 // instance differs, the intent is still GRANTED, and no runs row has
-// recorded the build.
+// recorded the build. Inside that move it also refreshes the build
+// number when the new instance's counter already passed the stored
+// number, because a cell refuses a number below its own counter; the
+// old number stays burned, and a zero counter never refreshes. A request
+// that names no cell instance never refreshes either: the ingest path
+// tells a superseded start from a real one by the intent's owner, so a
+// refreshed intent must always name one. A repeat from the same instance
+// changes nothing: a pod keeps its Jenkins home across a container
+// restart, so its counter passes the stored number only by running the
+// build, and a refresh there would start that build a second time.
 func reanswerSameRun(ctx context.Context, tx pgx.Tx, req ClaimRequest, row storedIntent) (ClaimResponse, error) {
+	buildNumber := derefInt64(row.buildNumber)
 	sameInstance := row.cellInstance != nil && *row.cellInstance == req.CellInstance
 	if !sameInstance && row.state == stateGranted {
 		exists, err := runsRowExists(ctx, tx, row.runID)
@@ -255,9 +267,21 @@ func reanswerSameRun(ctx context.Context, tx pgx.Tx, req ClaimRequest, row store
 			`, nullableString(req.Cell), nullableString(req.CellInstance), req.PlacementGeneration, row.runID); err != nil {
 				return ClaimResponse{}, fmt.Errorf("move ownership: %w", err)
 			}
+			if req.CellInstance != "" && req.JenkinsNextBuildNumber > 0 && buildNumber < req.JenkinsNextBuildNumber {
+				fresh, err := reserveBuildNumber(ctx, tx, req.Cluster, req.Tenant, req.JobPath, req.JenkinsNextBuildNumber)
+				if err != nil {
+					return ClaimResponse{}, err
+				}
+				if _, err := tx.Exec(ctx, `
+					UPDATE varroa.run_intents SET build_number = $1 WHERE run_id = $2
+				`, fresh, row.runID); err != nil {
+					return ClaimResponse{}, fmt.Errorf("refresh stale build number: %w", err)
+				}
+				buildNumber = fresh
+			}
 		}
 	}
-	return ClaimResponse{Decision: DecisionGranted, RunID: row.runID.String(), BuildNumber: derefInt64(row.buildNumber)}, nil
+	return ClaimResponse{Decision: DecisionGranted, RunID: row.runID.String(), BuildNumber: buildNumber}, nil
 }
 
 // transferIntent moves an intent to a new run_id, reserving a new build

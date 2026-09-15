@@ -19,7 +19,10 @@ var ErrIntentMissing = errors.New("run_intents row is missing for this run_id")
 // intentRow is the subset of run_intents an ingest write needs. Every
 // ingest write reads cluster, namespace, tenant, job_path, cell, and
 // created_at from this row rather than the envelope, because the ledger
-// wrote them first (design commitment "store before cell").
+// wrote them first (design commitment "store before cell"). buildNumber
+// is the number the ledger currently grants the run; a run.started that
+// reports a lower number from another instance describes a superseded
+// grant.
 type intentRow struct {
 	runID        uuid.UUID
 	createdAt    time.Time
@@ -30,18 +33,26 @@ type intentRow struct {
 	jobPath      string
 	cell         *string
 	cellInstance *string
+	buildNumber  *int64
 }
 
-// loadIntent reads the run_intents row for runID inside tx. It returns
+// loadIntent reads the run_intents row for runID inside tx and locks
+// it for the rest of the transaction. The lock makes an ingest write
+// wait for a claim that refreshes the same intent, so the write compares
+// against the refreshed number and never writes a stale one back. A
+// claim locks the tenant's placement row first and the intent row
+// second; an ingest write locks the intent row first and never touches
+// the placement row, so the two orders cannot form a cycle. It returns
 // ErrIntentMissing when the row is absent.
 func loadIntent(ctx context.Context, tx pgx.Tx, runID uuid.UUID) (*intentRow, error) {
 	row := &intentRow{runID: runID}
 	err := tx.QueryRow(ctx, `
-		SELECT created_at, intent_key, cluster, namespace, tenant, job_path, cell, cell_instance
+		SELECT created_at, intent_key, cluster, namespace, tenant, job_path, cell, cell_instance, build_number
 		FROM varroa.run_intents
 		WHERE run_id = $1
+		FOR UPDATE
 	`, runID).Scan(&row.createdAt, &row.intentKey, &row.cluster, &row.namespace,
-		&row.tenant, &row.jobPath, &row.cell, &row.cellInstance)
+		&row.tenant, &row.jobPath, &row.cell, &row.cellInstance, &row.buildNumber)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return nil, ErrIntentMissing

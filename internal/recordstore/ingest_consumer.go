@@ -122,6 +122,12 @@ func handleIngestMessage(ctx context.Context, ingester *Ingester, metrics *Inges
 			logger.Warn("run.started build number conflict acknowledged",
 				"runID", env.RunID, "kind", env.Kind)
 		}
+		if result.SupersededStart {
+			metrics.addSupersededStart(ctx)
+			logger.Warn("run.started for a superseded grant acknowledged without a write",
+				"runID", env.RunID, "reported", result.SupersededReported, "stored", result.SupersededStored,
+				"instance", env.CellInstance, "owner", result.SupersededOwner)
+		}
 		if result.Truncated {
 			metrics.addScheduleTruncated(ctx)
 			logger.Warn("job schedule envelope truncated; stored every carried row and deleted none",

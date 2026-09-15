@@ -21,7 +21,7 @@ const (
 )
 
 // IngestMetrics holds the recorder's ingest instruments on the
-// "varroa-recorder" meter: six counters the disposition table drives,
+// "varroa-recorder" meter: the counters the disposition table drives,
 // and two observable gauges reporting the consumer's backlog.
 type IngestMetrics struct {
 	unknown           metric.Int64Counter
@@ -31,6 +31,7 @@ type IngestMetrics struct {
 	scheduleStale     metric.Int64Counter
 	triggerFailed     metric.Int64Counter
 	triggerAccepted   metric.Int64Counter
+	supersededStart   metric.Int64Counter
 	backlogMsgs       metric.Int64ObservableGauge
 	backlogBytes      metric.Int64ObservableGauge
 }
@@ -54,6 +55,12 @@ func NewIngestMetrics(conn *bus.Conn, streamName, consumerName string) (*IngestM
 		metric.WithDescription("run.started writes that hit the build-number UNIQUE constraint"))
 	if err != nil {
 		return nil, fmt.Errorf("register recorder_ingest_conflict_total: %w", err)
+	}
+
+	m.supersededStart, err = meter.Int64Counter("recorder_ingest_superseded_start_total",
+		metric.WithDescription("run.started events acknowledged because they reported a build number below the intent's stored number from an instance other than the intent's owner"))
+	if err != nil {
+		return nil, fmt.Errorf("register recorder_ingest_superseded_start_total: %w", err)
 	}
 
 	m.orphan, err = meter.Int64Counter("recorder_ingest_orphan_total",
@@ -164,6 +171,15 @@ func (m *IngestMetrics) addScheduleStale(ctx context.Context) {
 		return
 	}
 	m.scheduleStale.Add(ctx, 1)
+}
+
+// addSupersededStart counts one recorder_ingest_superseded_start_total
+// event.
+func (m *IngestMetrics) addSupersededStart(ctx context.Context) {
+	if m == nil || m.supersededStart == nil {
+		return
+	}
+	m.supersededStart.Add(ctx, 1)
 }
 
 // addTriggerAccepted counts one recorder_ingest_trigger_accepted_total
