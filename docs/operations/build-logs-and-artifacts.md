@@ -84,27 +84,64 @@ artifacts/<cluster>/<namespace>/<cell>/<job full name>/<build number>/artifacts/
 A stash lands under the same prefix, at `<build number>/stashes/<name>.tgz`. Two controllers, or
 the same controller name on two clusters, therefore never write the same key.
 
-## The per-cell artifact Secret
+## The artifact Secret
 
 `recordStore.blobs.s3.artifactSecret` names a **base** Secret name in the release namespace. For
-each controller, the operator reads `<artifactSecret>-<controller>` and projects a copy named
-`<controller>-artifacts` into the controller's own namespace, owned by the `Controller`. The
-Jenkins container mounts that copy read-only. When the source Secret changes, the operator
-re-provisions the controller, so the pod restarts with the rotated credential.
+each controller, the operator resolves the artifact Secret from an ordered candidate list, and
+uses the first candidate that exists with non-empty data:
 
-Add one Secret per cell, with keys `access-key-id`, `secret-access-key`, and an optional
-`session-token` (ignored, since the credential is a plain access-key pair). There is no
-fleet-wide fallback: a controller with no matching Secret gets no artifact fragment and reports
-`ArtifactStorage` `False` with reason `LocalOnly`. The condition message names the missing
-Secret.
+| Controller | Candidates, in order |
+|---|---|
+| a cell that carries the label `varroa.dev/cell-pool=<pool>` | `<artifactSecret>-<controller>`, then `<artifactSecret>-<pool>` |
+| a cell without that label | `<artifactSecret>-<controller>` |
+| a non-cell controller | `<artifactSecret>-<controller>` |
+
+The pool name comes from the label string alone. The `CellPool` object does not need to exist, so
+a cell that outlives its pool keeps its credential. The bare `<artifactSecret>` name is never a
+candidate.
+
+The operator projects the winning candidate into the controller's own namespace, as a copy named
+`<controller>-artifacts`, owned by the `Controller`. The Jenkins container mounts that copy
+read-only. When the source Secret changes, the operator re-provisions the controller, so the pod
+restarts with the rotated credential.
+
+Add one Secret with keys `access-key-id`, `secret-access-key`, and an optional `session-token`
+(ignored, since the credential is a plain access-key pair). There is no fleet-wide fallback: a
+controller with no matching candidate gets no artifact fragment and reports `ArtifactStorage`
+`False` with reason `LocalOnly`. The condition message names every candidate the operator tried:
+`artifact secret not found: tried "<a>", "<b>"`. A candidate read that fails for a reason other
+than the Secret being absent also reports `LocalOnly`, naming the failed candidate:
+`artifact secret "<name>" read failed: <error>`. When a candidate wins, the `External` message
+names it: `artifacts write to bucket "<bucket>" under prefix "<prefix>" with Secret "<name>"`.
 
 This Secret is never `recordStore.blobs.s3.existingSecret`. That one is the control-plane
 credential the recorder, the BFF, and the gateway use, and it can read the `logs/` prefix. The
-per-cell artifact Secret must not be able to.
+artifact Secret must not be able to.
 
-## The per-cell bucket policy
+## The bucket policy
 
-Scope each cell's credential to its own prefix. Write `<p>` for
+A pool Secret is the normal path: one Secret and one bucket policy serve every cell of a pool. A
+per-cell Secret is the override for tighter scoping inside a pool, or for a non-cell controller;
+when both exist, the per-cell Secret wins.
+
+### The per-pool bucket policy
+
+Scope a pool's credential to every cell of that pool. Write `<p>` for
+`artifacts/<cluster>/<namespace>/cell-<pool>-*`:
+
+| Resource | Actions | Condition |
+|---|---|---|
+| the bucket | `s3:ListBucket` | `s3:prefix` starts with `<p>` |
+| the bucket | `s3:GetBucketLocation` | none |
+| `<p>*` | `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject` | none |
+
+A pool name that is a prefix of another pool name (`a` and `a-b`) shares this match: a credential
+scoped to pool `a` also reaches pool `a-b`'s cells. Choose pool names that avoid this, or fall
+back to per-cell Secrets where it matters.
+
+### The per-cell bucket policy
+
+Scope one cell's credential to its own prefix. Write `<p>` for
 `artifacts/<cluster>/<namespace>/<cell>/`:
 
 | Resource | Actions | Condition |
@@ -113,11 +150,10 @@ Scope each cell's credential to its own prefix. Write `<p>` for
 | the bucket | `s3:GetBucketLocation` | none |
 | `<p>*` | `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject` | none |
 
-Grant no `sts:*` action and no `s3:CreateBucket`. The `s3:prefix` condition on `ListBucket` keeps
-a cell's credential out of the `logs/` prefix and out of every other cell's prefix; an
-unconditioned `ListBucket` would expose every object's name in the bucket, logs included. One
-Secret and one policy exist per cell, generated from the same three identity tokens as the
-prefix above.
+Both policy shapes grant no `sts:*` action and no `s3:CreateBucket`. The `s3:prefix` condition on
+`ListBucket` keeps a credential out of the `logs/` prefix and out of an object outside its own
+match; an unconditioned `ListBucket` would expose every object's name in the bucket, logs
+included.
 
 ## Incomplete logs
 
@@ -170,9 +206,9 @@ namespace's egress is configured separately. See
   gateway's own rejection counters.
 - Artifacts do not appear in object storage, and the controller shows `ArtifactStorage`
   `LocalOnly`: read the condition message. It names either a disabled S3 blob tier, a missing
-  per-cell Secret, or a resolved plugin set that does not pin `artifact-manager-s3`. See
-  [Jenkins upgrades](jenkins-upgrades.md) and [Version profiles](../config/jenkins-versions.md)
-  for pinning a plugin into a profile.
+  artifact Secret candidate, a failed candidate read, or a resolved plugin set that does not pin
+  `artifact-manager-s3`. See [Jenkins upgrades](jenkins-upgrades.md) and
+  [Version profiles](../config/jenkins-versions.md) for pinning a plugin into a profile.
 - The controller shows `ArtifactStorage` `PluginMissing` even though the bundle lists
   `artifact-manager-s3`: the condition reads the resolved `JenkinsVersionProfile`'s plugin set,
   not the bundle content. Pin the plugin in the profile that matches the controller's Jenkins
@@ -181,6 +217,6 @@ namespace's egress is configured separately. See
   expected. See [A tenant move changes the prefix](#known-limits) above. Use the Varroa API to
   read the artifact by its recorded key instead of a Jenkins-side copy.
 - A build cannot bind the artifact credential id in its own pipeline, or a pipeline step that
-  tries to read the `logs/` prefix or another cell's artifact prefix fails: expected. The
+  tries to read the `logs/` prefix or a prefix outside its own match fails: expected. The
   credential is system-scoped, so no build ever receives it, and its bucket policy limits it to
-  the one cell's own prefix.
+  its own cell's prefix, or to its pool's cells when the credential is pool-scoped.

@@ -997,6 +997,8 @@ const (
 	ReasonReconcileBlockedStatefulSetCreateFailed = "StatefulSetCreateFailed"
 	// ReasonReconcileBlockedIngressCreateFailed is set when the Ingress reconcile fails.
 	ReasonReconcileBlockedIngressCreateFailed = "IngressCreateFailed"
+	// ReasonReconcileBlockedArtifactSecretFailed is set when the artifact Secret lookup or projection fails.
+	ReasonReconcileBlockedArtifactSecretFailed = "ArtifactSecretFailed"
 	// ReasonReconcileBlockedMiteConnectTimeout is set when the mite connection times out.
 	ReasonReconcileBlockedMiteConnectTimeout = "MiteConnectTimeout"
 	// ReasonReconcileBlockedWaveGateCheckFailed is set when the wave-gate check fails.

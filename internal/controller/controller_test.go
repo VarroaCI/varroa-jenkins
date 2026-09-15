@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -66,6 +67,7 @@ type testClient struct {
 	secretAnnotations          map[string]map[string]string // name -> annotations, for host-scoping tests
 	secretAnnotationsErr       error                        // injected GetSecretAnnotations failure (fail-closed tests)
 	getSecretCalls             map[string]int               // name -> GetSecret call count
+	getSecretErrs              map[string]error             // name -> error GetSecret returns instead of a lookup
 
 	// hibernation CAS tracking (SetHibernated).
 	hibernatedWrites []struct {
@@ -76,10 +78,11 @@ type testClient struct {
 	hibernatedErr     error
 
 	// Users/Group tracking for local auth tests.
-	users          map[string]*v1alpha1.User
-	passwordClears []string
-	createdSecrets map[string]map[string][]byte
-	secretOwners   map[string]metav1.OwnerReference
+	users                            map[string]*v1alpha1.User
+	passwordClears                   []string
+	createdSecrets                   map[string]map[string][]byte
+	secretOwners                     map[string]metav1.OwnerReference
+	createOrUpdateSecretWithOwnerErr error // injected CreateOrUpdateSecretWithOwner failure
 	// scaleCalls records ScaleStatefulSet(name -> last requested replica count).
 	scaleCalls      map[string]int32
 	composedBundles map[string]*v1alpha1.ComposedBundle
@@ -481,6 +484,9 @@ func (t *testClient) CreateOrUpdateSecret(_ context.Context, name, namespace str
 	return nil
 }
 func (t *testClient) CreateOrUpdateSecretWithOwner(_ context.Context, name, namespace string, data map[string][]byte, owner metav1.OwnerReference) error {
+	if t.createOrUpdateSecretWithOwnerErr != nil {
+		return t.createOrUpdateSecretWithOwnerErr
+	}
 	t.secrets = append(t.secrets, name)
 	t.secretWrites++
 	if t.createdSecrets == nil {
@@ -508,6 +514,9 @@ func (t *testClient) GetSecret(_ context.Context, name, namespace string) (map[s
 		t.getSecretCalls = map[string]int{}
 	}
 	t.getSecretCalls[name]++
+	if err, ok := t.getSecretErrs[name]; ok {
+		return nil, err
+	}
 	if data, ok := t.existingSecrets[name]; ok {
 		return data, nil
 	}
@@ -2220,6 +2229,59 @@ func TestHandleConnectedOIDCEnvSync(t *testing.T) {
 	}
 	if call.caPEM != "" {
 		t.Errorf("caPEM: got %q, want empty (no CA PEM set)", call.caPEM)
+	}
+}
+
+// TestHandleConnected_ArtifactSecretReadFaultKeepsLastGood covers a
+// follow-on review fix: a Secret read fault in the Connected phase must not
+// report BundleFailed, because the bundle content itself resolved fine —
+// only the artifact-storage step's Secret read failed. It reports the
+// read-failed ArtifactStorage condition instead, and pushes no desired
+// state that tick: a push attempt that reached the Send call would have
+// failed against this test's unconnected stream and set
+// ReconcileBlocked/DesiredStatePushFailed, so its absence proves the push
+// never ran. It also asserts a stale BundleFailed=True from an earlier
+// tick is retired: this branch never reaches the success-path
+// clearBundleFailed call, so it must call that helper itself.
+func TestHandleConnected_ArtifactSecretReadFaultKeepsLastGood(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.getSecretErrs = map[string]error{"abase-cell-big-0": errors.New("etcd unavailable")}
+	reg := transport.NewLocalRegistry(mite.NewRegistry())
+	signer := mite.NewTokenSigner(testKey)
+	rec := NewReconciler(bundle.NewResolver("/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
+	rec.Logger = slog.Default()
+	rec.SetArtifactSecretBase("abase")
+	rec.SetBlobstoreURL("s3://my-bucket?region=us-east-1")
+
+	cr := artifactCellController("cell-big-0", "big")
+	cr.Status.Phase = v1alpha1.ControllerPhaseConnected
+	cr.Status.Conditions = []v1alpha1.ControllerCondition{
+		{Type: v1alpha1.ConditionReady, Status: metav1.ConditionTrue, Reason: "MiteConnected"},
+		{Type: v1alpha1.ConditionBundleFailed, Status: metav1.ConditionTrue, Reason: "BundleResolutionFailed", Message: "a prior tick's unrelated bundle fault"},
+	}
+
+	// Register a connected mite so handleConnected doesn't transition out
+	// before it ever reaches bundle resolution.
+	reg.Registry().Register(cr.Name, cr.Namespace, nil, nil, "v1.0.0", time.Now().Add(24*time.Hour))
+	reg.Registry().UpdateHeartbeat(cr.Name, cr.Namespace, "v1.0.0", &mitev1.StateSnapshot{JenkinsHealth: "healthy"}, nil, "")
+
+	if err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}); err != nil {
+		t.Fatalf("handleConnected: %v", err)
+	}
+
+	if bf := findCondition(cr.Status.Conditions, v1alpha1.ConditionBundleFailed); bf != nil {
+		t.Fatalf("expected the stale BundleFailed condition cleared, got %+v", bf)
+	}
+	artifactCond := findCondition(cr.Status.Conditions, ConditionArtifactStorage)
+	if artifactCond == nil || artifactCond.Status != metav1.ConditionFalse || artifactCond.Reason != "LocalOnly" {
+		t.Fatalf("ArtifactStorage condition = %+v, want False/LocalOnly", artifactCond)
+	}
+	wantMsg := `artifact secret "abase-cell-big-0" read failed: etcd unavailable`
+	if artifactCond.Message != wantMsg {
+		t.Errorf("ArtifactStorage message = %q, want %q", artifactCond.Message, wantMsg)
+	}
+	if blocked := findCondition(cr.Status.Conditions, v1alpha1.ConditionReconcileBlocked); blocked != nil && blocked.Status == metav1.ConditionTrue {
+		t.Fatalf("expected no ReconcileBlocked (a push attempt would have set it), got %+v", blocked)
 	}
 }
 

@@ -231,9 +231,11 @@ the packaged CRDs. Does not own the Go source it packages
   only reached in `recordStore.blobs.mode: postgres`). `external` mode
   creates none of the three; every component shares the one `existingSecret`
   DSN instead. `recordStore.blobs.s3.artifactSecret` names the **base**
-  per-cell artifact-credential Secret (`internal/controller/artifactcasc.go`
-  reads `<artifactSecret>-<controller>` and projects a copy into each
-  controller's own namespace; this chart mounts nothing itself). The operator
+  artifact-credential Secret (`internal/controller/artifactcasc.go` reads
+  `<artifactSecret>-<controller>` first, then `<artifactSecret>-<pool>` for a
+  cell that carries a `varroa.dev/cell-pool` label, and projects the winning
+  Secret into each controller's own namespace; this chart mounts nothing
+  itself). The operator
   Deployment carries `VARROA_ARTIFACT_SECRET` (that base name, only when
   non-empty) and `VARROA_BLOBSTORE_URL` set to the identical value the
   gateway gets, both gated the same way as the gateway's own recordStore env

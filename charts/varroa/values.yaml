@@ -888,12 +888,13 @@ recordStore:
       # and an optional session-token. Empty means ambient credentials
       # (IRSA, Workload Identity).
       existingSecret: ""
-      # -- Base name of the per-cell artifact credential Secret. The
-      # operator reads "<artifactSecret>-<controller>" in the release
-      # namespace and nothing else. Each per-cell Secret holds
-      # access-key-id/secret-access-key and an optional session-token,
-      # scoped to that cell's own artifact prefix. Empty means Varroa
-      # keeps build artifacts on the cell's local disk.
+      # -- Base name of the artifact credential Secret. The operator reads
+      # "<artifactSecret>-<controller>" in the release namespace first,
+      # then "<artifactSecret>-<pool>" for a cell of a pool. Each Secret
+      # holds access-key-id/secret-access-key and an optional
+      # session-token, scoped to that cell's or that pool's artifact
+      # prefix. Empty means Varroa keeps build artifacts on the cell's
+      # local disk.
       artifactSecret: ""
   # -- Retention windows, each a whole day count with a "d" suffix
   # (e.g. "365d"), from 1d to 3650d.

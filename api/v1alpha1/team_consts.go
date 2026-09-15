@@ -90,11 +90,17 @@ const (
 	CellPoolConditionPoolReady = "PoolReady"
 )
 
-// PoolReady reasons. The condition carries exactly these three.
+// PoolReady reasons. RecordStoreUnsupported and BlobTierUnsupported reuse
+// the Controller CellReady reason strings; ArtifactSecretMissing and
+// ArtifactPluginMissing are pool-only.
 const (
-	CellPoolReasonReady          = "Ready"
-	CellPoolReasonCellCapReached = "CellCapReached"
-	CellPoolReasonProfileMissing = "ProfileMissing"
+	CellPoolReasonReady                  = "Ready"
+	CellPoolReasonCellCapReached         = "CellCapReached"
+	CellPoolReasonProfileMissing         = "ProfileMissing"
+	CellPoolReasonRecordStoreUnsupported = "RecordStoreUnsupported"
+	CellPoolReasonBlobTierUnsupported    = "BlobTierUnsupported"
+	CellPoolReasonArtifactSecretMissing  = "ArtifactSecretMissing"
+	CellPoolReasonArtifactPluginMissing  = "ArtifactPluginMissing"
 )
 
 // CellPoolFinalizerDrain holds a deleted pool until its free cells are gone.

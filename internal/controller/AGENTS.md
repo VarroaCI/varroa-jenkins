@@ -353,12 +353,31 @@ sections describe.
   `unclassified`) and a `Controller` condition `ArtifactStorage`, together. The fragment emits,
   and the condition reports `True`/`External`, only when all four hold: `VARROA_BLOBSTORE_URL`
   parses to an `s3://` URL (`parseBlobstoreURL`; a `pgblob:` URL or a parse failure yields
-  `False`/`LocalOnly`), the per-cell Secret `<VARROA_ARTIFACT_SECRET>-<controller>` exists in the
-  release namespace (`resolveArtifactSecret` projects it into the controller's own namespace as
+  `False`/`LocalOnly`), a candidate artifact Secret exists in the release namespace, and
+  `coreSetForCr` resolves a plugin set that pins `artifact-manager-s3` (else
+  `False`/`PluginMissing`). The Secret lookup is one pair, shared by every reader:
+  `artifactSecretCandidates(cr)` returns `<VARROA_ARTIFACT_SECRET>-<cr.Name>` first, then
+  `<VARROA_ARTIFACT_SECRET>-<pool>` when `cr` is a cell carrying a `varroa.dev/cell-pool` label
+  (the pool name comes from the label string alone; the `CellPool` object need not exist).
+  `lookupArtifactSecret(ctx, candidates)` reads each in order through `ResourceClient.GetSecret`:
+  a `NotFound` or empty-data answer moves to the next candidate, any other error stops the lookup
+  at once, and an exhausted list returns no error. `artifactStorageFragment`,
+  `resolveArtifactSecret` (projects the winning candidate into the controller's own namespace as
   `<controller>-artifacts`, owned by the `Controller`, mounted at
-  `/run/secrets/varroa-artifacts`), and `coreSetForCr` resolves a plugin set that pins
-  `artifact-manager-s3` (else `False`/`PluginMissing`). Otherwise it is a no-op: no strip, no
-  merge, `mat.JenkinsYAML` passes through unchanged. When it does emit, `stripArtifactManager`
+  `/run/secrets/varroa-artifacts`; its third return is an error, not a `found` bool, and
+  `handleProvisioning` fails the tick on it rather than discarding it), and
+  `reconcileArtifactSecretRoll` (the Connected-phase rotation check) all call this pair, so a
+  read fault never hands a cell the pool credential while its own Secret exists, and a rotation
+  rolls a pool-scoped cell the same way it rolls a per-cell one. A read fault in
+  `artifactStorageFragment` travels up wrapped in the sentinel `errArtifactSecretRead`, through
+  `applyArtifactStorage` and `resolveBundleForController`, so `handleProvisioning` marks
+  `ReconcileBlocked`/`ArtifactSecretFailed` before the cell configuration gate runs; the Connected
+  path instead sets the read-failed `ArtifactStorage` condition, keeps the last pushed desired
+  state, and does not report `BundleFailed`; and the plugin-roll check
+  (`checkPluginRollFailed`) gives no verdict on that fault, because a verdict computed without
+  the bundle's own plugin pins would be wrong. When no candidate exists it is a
+  no-op: no strip, no merge, `mat.JenkinsYAML` passes through unchanged. When it does emit,
+  `stripArtifactManager`
   first removes any bundle- or profile-overlay-authored key from the same three subtrees
   (`artifactManagerStripPaths`), `bundle.MergeJenkinsYAML` merges the fragment, then
   `injectArtifactCredential` appends a system-scoped `${readFile:...}` credential reference (never
@@ -458,7 +477,9 @@ sections describe.
 - **`ConditionReconcileBlocked`** (C3, `markReconcileBlocked` helper near
   `persistStatusDiagnostics`) is the standing pattern for surfacing a reconcile pass
   that hit an unresolved error: sets the condition `True` + `Reason` (one of 19
-  site-specific reasons in `api/v1alpha1/types.go`), stamps
+  site-specific reasons in `api/v1alpha1/types.go`, including
+  `ArtifactSecretFailed` for a failed artifact Secret lookup or projection),
+  stamps
   `LastReconcileError`/`LastReconcileErrorAt`, records the
   `varroa.controller.reconcile.blocked` gauge at `1`. A guarded branch in
   `reconcileController`'s metrics `defer` clears it back to `False` on the next
@@ -645,7 +666,27 @@ sections describe.
     (`desiredFree = max(warm, ceil(max(0, pending - placedSlots) /
     maxTenantsPerCell))`) and either fill or drain, never both in a tick, so
     the pass cannot oscillate; re-stamp `spec.version`/`resources`/
-    `podOverrides` on free cells only; write status. `placedSlots`
+    `podOverrides` on free cells only; write status. A wanted fill first runs
+    `fillGateReason`, in this order: `ClaimGate != "1"` is
+    `RecordStoreUnsupported`; a blob URL that is not S3 is
+    `BlobTierUnsupported`; an empty `ArtifactSecretBase`, a nil `Secrets`, or
+    an absent, empty, or failed `Secrets.GetSecret(<base>-<pool>, ...)` read is
+    `ArtifactSecretMissing` (a non-`NotFound` error is logged and counted the
+    same); a nil `Plugins` or a false
+    `Plugins.VersionPinsPlugin(ctx, version, "artifact-manager-s3")` is
+    `ArtifactPluginMissing`. A non-empty reason skips the fill only. Drain and
+    restamp still run, and the reason feeds the status write, where it
+    outranks `CellCapReached`. `Secrets` (`cells.SecretReader`) and `Plugins`
+    (`cells.PluginPinReader`) are one-method seams, because `cells` cannot
+    import `internal/controller`. `main.go` sets them to `clientsetClient` and
+    to the `Reconciler` itself. `Reconciler.VersionPinsPlugin` resolves the
+    plugin set for a bare version the way a cell of that version would (exact
+    profile, then LTS line, then the embedded baseline), never through the
+    pool's own `profileRef` by name. `main.go` also seeds
+    `WarmPoolConfig.ClaimGate`, `BlobTierS3` (`controller.BlobstoreIsS3`,
+    exported because `cells` cannot import the URL parser), and
+    `ArtifactSecretBase` from the same three boot-time values the `Reconciler`
+    reads. `placedSlots`
     deliberately excludes free cells — `len(free)` already counts them, and
     double-counting would stall a `warm: 0` pool. A created cell is named
     `cell-<pool>-<ordinal>` where `<ordinal>` is scanned against **every

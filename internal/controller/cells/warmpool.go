@@ -50,6 +50,29 @@ type WarmPoolConfig struct {
 	MaxTenantsPerCell int
 	// UnreadyGracePeriod seeds CellPool.spec.unreadyGracePeriod.
 	UnreadyGracePeriod time.Duration
+	// ClaimGate is the operator's own VARROA_CLAIM_GATE. The fill gate
+	// refuses a fill unless this reads "1".
+	ClaimGate string
+	// BlobTierS3 reports whether VARROA_BLOBSTORE_URL parses to an s3 blob
+	// URL. cells cannot import the URL parser, so main.go computes this
+	// bool once at boot and passes it in.
+	BlobTierS3 bool
+	// ArtifactSecretBase is VARROA_ARTIFACT_SECRET, the base artifact
+	// Secret name. An empty value refuses every fill that needs a Secret.
+	ArtifactSecretBase string
+}
+
+// SecretReader reads a Secret's data. The fill gate uses it to check for
+// the pool's own artifact Secret without importing internal/controller.
+type SecretReader interface {
+	GetSecret(ctx context.Context, name, namespace string) (map[string][]byte, error)
+}
+
+// PluginPinReader reports whether the plugin set a controller running a
+// given version would resolve pins an artifact id. The fill gate uses it to
+// check the artifact-manager-s3 pin without resolving a plugin set itself.
+type PluginPinReader interface {
+	VersionPinsPlugin(ctx context.Context, version, artifactID string) bool
 }
 
 // WarmPoolReconciler sizes and reports every CellPool (design D5). It is the
@@ -63,6 +86,12 @@ type WarmPoolReconciler struct {
 	// Now returns the current time. Defaults to time.Now when nil; a test
 	// injects a fixed clock.
 	Now func() time.Time
+	// Secrets reads the pool's own artifact Secret before a fill. A nil
+	// value refuses every fill that needs one.
+	Secrets SecretReader
+	// Plugins checks the artifact-manager-s3 pin before a fill. A nil
+	// value refuses every fill that needs one.
+	Plugins PluginPinReader
 }
 
 func (r *WarmPoolReconciler) logger() *slog.Logger {
@@ -237,9 +266,10 @@ func (r *WarmPoolReconciler) reconcilePool(ctx context.Context, pool *v1alpha1.C
 		// A missing profile stops the pass for this pool. It creates and
 		// deletes nothing, because every cell it would create would run an
 		// unresolved version.
-		r.writeStatus(ctx, pool, nil, v1alpha1.CellPoolReasonProfileMissing)
+		r.writeStatus(ctx, pool, nil, v1alpha1.CellPoolReasonProfileMissing, "")
 		return
 	}
+	version := resolvedProfileVersion(versionProfile)
 
 	if pool.Name == pool.Spec.ProfileRef {
 		r.adoptUnlabelledCells(ctx, pool)
@@ -255,9 +285,16 @@ func (r *WarmPoolReconciler) reconcilePool(ctx context.Context, pool *v1alpha1.C
 	capPerCell := r.poolCapacity(pool)
 	desiredFree := r.desiredFreeCount(pool, owned, teams, capPerCell)
 
+	// gateReason holds the fill precondition's refusal, when the pass
+	// wanted to create at least one cell and a precondition refused it. It
+	// outranks CellCapReached in the status below (design D6).
+	gateReason := ""
 	switch {
 	case len(free) < desiredFree:
-		r.fill(ctx, pool, versionProfile, names, len(owned), desiredFree-len(free))
+		gateReason = r.fillGateReason(ctx, pool, version)
+		if gateReason == "" {
+			r.fill(ctx, pool, versionProfile, names, len(owned), desiredFree-len(free))
+		}
 	case len(free) > desiredFree:
 		r.drainSurplus(ctx, pool, free, len(free)-desiredFree)
 	}
@@ -272,10 +309,47 @@ func (r *WarmPoolReconciler) reconcilePool(ctx context.Context, pool *v1alpha1.C
 		return
 	}
 	reason := v1alpha1.CellPoolReasonReady
-	if pool.Spec.MaxCells > 0 && int32(len(after)) >= pool.Spec.MaxCells {
+	switch {
+	case gateReason != "":
+		reason = gateReason
+	case pool.Spec.MaxCells > 0 && int32(len(after)) >= pool.Spec.MaxCells:
 		reason = v1alpha1.CellPoolReasonCellCapReached
 	}
-	r.writeStatus(ctx, pool, after, reason)
+	r.writeStatus(ctx, pool, after, reason, version)
+}
+
+// fillGateReason tests, in the proposal's fixed order, whether a cell of
+// pool can become ready. It returns the first CellPoolReason that applies,
+// or "" when every test passes. Call this only when the pass wants to
+// create at least one cell.
+func (r *WarmPoolReconciler) fillGateReason(ctx context.Context, pool *v1alpha1.CellPool, version string) string {
+	if r.Config.ClaimGate != "1" {
+		return v1alpha1.CellPoolReasonRecordStoreUnsupported
+	}
+	if !r.Config.BlobTierS3 {
+		return v1alpha1.CellPoolReasonBlobTierUnsupported
+	}
+	if r.Config.ArtifactSecretBase == "" {
+		return v1alpha1.CellPoolReasonArtifactSecretMissing
+	}
+	if r.Secrets == nil {
+		return v1alpha1.CellPoolReasonArtifactSecretMissing
+	}
+	name := r.Config.ArtifactSecretBase + "-" + pool.Name
+	data, err := r.Secrets.GetSecret(ctx, name, r.OperatorNamespace)
+	if err != nil || len(data) == 0 {
+		if err != nil && !apierrors.IsNotFound(err) {
+			r.logger().Warn("cell pool: artifact secret read failed", "pool", pool.Name, "secret", name, "error", err)
+		}
+		return v1alpha1.CellPoolReasonArtifactSecretMissing
+	}
+	if r.Plugins == nil {
+		return v1alpha1.CellPoolReasonArtifactPluginMissing
+	}
+	if !r.Plugins.VersionPinsPlugin(ctx, version, "artifact-manager-s3") {
+		return v1alpha1.CellPoolReasonArtifactPluginMissing
+	}
+	return ""
 }
 
 // poolCapacity answers the pool's own maxTenantsPerCell, falling back to the
@@ -654,8 +728,10 @@ func (r *WarmPoolReconciler) deleteFreeCell(ctx context.Context, pool *v1alpha1.
 
 // writeStatus computes and patches the pool status (design D6). owned is nil
 // when the pass stopped before it listed anything, which happens only for a
-// missing profile.
-func (r *WarmPoolReconciler) writeStatus(ctx context.Context, pool *v1alpha1.CellPool, owned []*v1alpha1.Controller, reason string) {
+// missing profile. version is the version the pass tested against the fill
+// gate, empty on the missing-profile path, used only by the
+// ArtifactPluginMissing message.
+func (r *WarmPoolReconciler) writeStatus(ctx context.Context, pool *v1alpha1.CellPool, owned []*v1alpha1.Controller, reason, version string) {
 	status := &v1alpha1.CellPoolStatus{ObservedGeneration: pool.Generation}
 	summary := SummarizeCellPool(pool)
 	tenants := map[string]bool{}
@@ -693,6 +769,22 @@ func (r *WarmPoolReconciler) writeStatus(ctx context.Context, pool *v1alpha1.Cel
 	case v1alpha1.CellPoolReasonProfileMissing:
 		condStatus = metav1.ConditionFalse
 		message = fmt.Sprintf("the JenkinsVersionProfile %q does not exist", pool.Spec.ProfileRef)
+	case v1alpha1.CellPoolReasonRecordStoreUnsupported:
+		condStatus = metav1.ConditionFalse
+		message = "the pool needs the record store enabled (recordStore.enabled)"
+	case v1alpha1.CellPoolReasonBlobTierUnsupported:
+		condStatus = metav1.ConditionFalse
+		message = "the pool needs the s3 blob tier (recordStore.blobs.mode)"
+	case v1alpha1.CellPoolReasonArtifactSecretMissing:
+		condStatus = metav1.ConditionFalse
+		if r.Config.ArtifactSecretBase == "" {
+			message = "recordStore.blobs.s3.artifactSecret is not configured"
+		} else {
+			message = fmt.Sprintf("artifact secret %q not found", r.Config.ArtifactSecretBase+"-"+pool.Name)
+		}
+	case v1alpha1.CellPoolReasonArtifactPluginMissing:
+		condStatus = metav1.ConditionFalse
+		message = fmt.Sprintf("the plugin set for version %q does not pin artifact-manager-s3", version)
 	}
 	status.Conditions = []metav1.Condition{{
 		Type:               v1alpha1.CellPoolConditionPoolReady,

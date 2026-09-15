@@ -7,9 +7,12 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
 )
 
 // TestParseBlobstoreURL covers task 5.1's table: an AWS URL, an https custom
@@ -406,7 +409,7 @@ func TestArtifactStorageFragment_EmitAndSilentCases(t *testing.T) {
 		pinnedProfile(client, cr)
 		seedClientCRDs(client)
 
-		fragment, cond := rec.artifactStorageFragment(context.Background(), cr)
+		fragment, cond, _ := rec.artifactStorageFragment(context.Background(), cr)
 		if fragment == "" {
 			t.Fatal("expected a rendered fragment")
 		}
@@ -421,7 +424,7 @@ func TestArtifactStorageFragment_EmitAndSilentCases(t *testing.T) {
 		seedClientCRDs(client)
 		cr := testController("test", "ns", v1alpha1.ControllerPhaseProvisioning)
 
-		fragment, cond := rec.artifactStorageFragment(context.Background(), cr)
+		fragment, cond, _ := rec.artifactStorageFragment(context.Background(), cr)
 		if fragment != "" {
 			t.Errorf("expected no fragment for postgres blob mode, got %q", fragment)
 		}
@@ -437,7 +440,7 @@ func TestArtifactStorageFragment_EmitAndSilentCases(t *testing.T) {
 		cr := testController("test", "ns", v1alpha1.ControllerPhaseProvisioning)
 		cr.Spec.Version = "2.570"
 
-		fragment, cond := rec.artifactStorageFragment(context.Background(), cr)
+		fragment, cond, _ := rec.artifactStorageFragment(context.Background(), cr)
 		if fragment != "" {
 			t.Errorf("expected no fragment when the plugin isn't pinned, got %q", fragment)
 		}
@@ -456,7 +459,7 @@ func TestArtifactStorageFragment_EmitAndSilentCases(t *testing.T) {
 		unpinnedProfile(client, cr)
 		seedClientCRDs(client)
 
-		fragment, cond := rec.artifactStorageFragment(context.Background(), cr)
+		fragment, cond, _ := rec.artifactStorageFragment(context.Background(), cr)
 		if fragment != "" {
 			t.Errorf("expected no fragment when the resolved profile doesn't pin the plugin, got %q", fragment)
 		}
@@ -470,7 +473,7 @@ func TestArtifactStorageFragment_EmitAndSilentCases(t *testing.T) {
 		seedClientCRDs(client)
 		cr := testController("test", "ns", v1alpha1.ControllerPhaseProvisioning)
 
-		fragment, cond := rec.artifactStorageFragment(context.Background(), cr)
+		fragment, cond, _ := rec.artifactStorageFragment(context.Background(), cr)
 		if fragment != "" {
 			t.Errorf("expected no fragment when the per-cell secret is absent, got %q", fragment)
 		}
@@ -548,9 +551,12 @@ func TestResolveArtifactSecret(t *testing.T) {
 		seedClientCRDs(client)
 		cr := testController("test", "ns", v1alpha1.ControllerPhaseProvisioning)
 
-		name, hash, found := rec.resolveArtifactSecret(context.Background(), cr)
-		if found {
-			t.Fatalf("expected found=false, got name=%q hash=%q", name, hash)
+		name, hash, err := rec.resolveArtifactSecret(context.Background(), cr)
+		if err != nil {
+			t.Fatalf("resolveArtifactSecret: %v", err)
+		}
+		if name != "" || hash != "" {
+			t.Fatalf("expected an empty name and hash, got name=%q hash=%q", name, hash)
 		}
 	})
 
@@ -559,9 +565,9 @@ func TestResolveArtifactSecret(t *testing.T) {
 		seedClientCRDs(client)
 		cr := testController("test", "ns", v1alpha1.ControllerPhaseProvisioning)
 
-		name, hash, found := rec.resolveArtifactSecret(context.Background(), cr)
-		if !found {
-			t.Fatal("expected found=true")
+		name, hash, err := rec.resolveArtifactSecret(context.Background(), cr)
+		if err != nil {
+			t.Fatalf("resolveArtifactSecret: %v", err)
 		}
 		if name != "test-artifacts" {
 			t.Errorf("projected name = %q, want test-artifacts", name)
@@ -587,17 +593,17 @@ func TestResolveArtifactSecret(t *testing.T) {
 		seedClientCRDs(client)
 		cr := testController("test", "ns", v1alpha1.ControllerPhaseProvisioning)
 
-		_, hash1, found := rec.resolveArtifactSecret(context.Background(), cr)
-		if !found {
-			t.Fatal("expected found=true")
+		_, hash1, err := rec.resolveArtifactSecret(context.Background(), cr)
+		if err != nil {
+			t.Fatalf("resolveArtifactSecret: %v", err)
 		}
 		client.existingSecrets["abase-test"] = map[string][]byte{
 			"access-key-id":     []byte("AKIAROTATED"),
 			"secret-access-key": []byte("newsecret"),
 		}
-		_, hash2, found := rec.resolveArtifactSecret(context.Background(), cr)
-		if !found {
-			t.Fatal("expected found=true after rotation")
+		_, hash2, err := rec.resolveArtifactSecret(context.Background(), cr)
+		if err != nil {
+			t.Fatalf("resolveArtifactSecret (after rotation): %v", err)
 		}
 		if hash1 == hash2 {
 			t.Error("expected the hash to change after a rotation")
@@ -925,4 +931,482 @@ func TestReconcileArtifactSecretRoll(t *testing.T) {
 			t.Fatal("expected no transition on a read error")
 		}
 	})
+	t.Run("a lookup fault skips the tick without rolling", func(t *testing.T) {
+		rec, client := artifactTestReconciler(t, true)
+		client.getSecretErrs = map[string]error{"abase-test": errors.New("etcd unavailable")}
+		client.stsArtifactSecretHashFound = true
+		client.stsArtifactSecretHash = "stale"
+		cr := testController("test", "ns", v1alpha1.ControllerPhaseConnected)
+		if rec.reconcileArtifactSecretRoll(ctx, cr) {
+			t.Fatal("expected no transition on a lookup fault")
+		}
+		if cr.Status.Phase != v1alpha1.ControllerPhaseConnected {
+			t.Errorf("phase = %q, want unchanged Connected", cr.Status.Phase)
+		}
+	})
+	t.Run("a rotated pool secret moves a connected labelled cell to Provisioning", func(t *testing.T) {
+		rec, client := artifactTestReconciler(t, false)
+		client.existingSecrets["abase-big"] = map[string][]byte{
+			"access-key-id":     []byte("AKIAEXAMPLE"),
+			"secret-access-key": []byte("secretvalue"),
+		}
+		client.stsArtifactSecretHashFound = true
+		client.stsArtifactSecretHash = "stale"
+		cr := artifactCellController("cell-big-0", "big")
+		cr.Status.Phase = v1alpha1.ControllerPhaseConnected
+		if !rec.reconcileArtifactSecretRoll(ctx, cr) {
+			t.Fatal("expected a transition")
+		}
+		if cr.Status.Phase != v1alpha1.ControllerPhaseProvisioning {
+			t.Errorf("phase = %q, want Provisioning", cr.Status.Phase)
+		}
+	})
+}
+
+// artifactCellController returns a cell Controller named name in namespace
+// "ns", carrying varroa.dev/cell-pool=pool when pool is non-empty.
+func artifactCellController(name, pool string) *v1alpha1.Controller {
+	cr := testController(name, "ns", v1alpha1.ControllerPhaseProvisioning)
+	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
+	if pool != "" {
+		cr.Labels = map[string]string{cells.LabelCellPool: pool}
+	}
+	return cr
+}
+
+// TestArtifactSecretCandidates_Fragment covers task 1.9: the candidate
+// order, the per-cell/pool precedence, and the exhausted-list message.
+func TestArtifactSecretCandidates_Fragment(t *testing.T) {
+	t.Run("per-cell secret wins over the pool secret", func(t *testing.T) {
+		rec, client := artifactTestReconciler(t, false)
+		client.existingSecrets["abase-cell-big-0"] = map[string][]byte{
+			"access-key-id": []byte("a"), "secret-access-key": []byte("b"),
+		}
+		client.existingSecrets["abase-big"] = map[string][]byte{
+			"access-key-id": []byte("c"), "secret-access-key": []byte("d"),
+		}
+		cr := artifactCellController("cell-big-0", "big")
+		pinnedProfile(client, cr)
+		seedClientCRDs(client)
+
+		fragment, cond, _ := rec.artifactStorageFragment(context.Background(), cr)
+		if fragment == "" {
+			t.Fatal("expected a rendered fragment")
+		}
+		if cond.Status != metav1.ConditionTrue || cond.Reason != "External" {
+			t.Fatalf("condition = %+v, want True/External", cond)
+		}
+		if !strings.Contains(cond.Message, "abase-cell-big-0") {
+			t.Errorf("message must name the per-cell secret, got %q", cond.Message)
+		}
+	})
+
+	t.Run("the pool secret serves a pool-minted cell", func(t *testing.T) {
+		rec, client := artifactTestReconciler(t, false)
+		client.existingSecrets["abase-big"] = map[string][]byte{
+			"access-key-id": []byte("c"), "secret-access-key": []byte("d"),
+		}
+		cr := artifactCellController("cell-big-2", "big")
+		pinnedProfile(client, cr)
+		seedClientCRDs(client)
+
+		fragment, cond, _ := rec.artifactStorageFragment(context.Background(), cr)
+		if fragment == "" {
+			t.Fatal("expected a rendered fragment")
+		}
+		if cond.Status != metav1.ConditionTrue || cond.Reason != "External" {
+			t.Fatalf("condition = %+v, want True/External", cond)
+		}
+		if !strings.Contains(cond.Message, "abase-big") {
+			t.Errorf("message must name the pool secret, got %q", cond.Message)
+		}
+	})
+
+	t.Run("a deleted pool keeps the cell's credential", func(t *testing.T) {
+		// No CellPool object is seeded here: the pool name comes from the
+		// label string alone (design D2), not from a live CellPool.
+		rec, client := artifactTestReconciler(t, false)
+		client.existingSecrets["abase-big"] = map[string][]byte{
+			"access-key-id": []byte("c"), "secret-access-key": []byte("d"),
+		}
+		cr := artifactCellController("cell-big-2", "big")
+		pinnedProfile(client, cr)
+		seedClientCRDs(client)
+
+		fragment, cond, _ := rec.artifactStorageFragment(context.Background(), cr)
+		if fragment == "" || cond.Reason != "External" {
+			t.Fatalf("expected the pool secret to still resolve, cond=%+v", cond)
+		}
+	})
+
+	t.Run("no candidate lists both names in order", func(t *testing.T) {
+		rec, client := artifactTestReconciler(t, false)
+		cr := artifactCellController("cell-big-2", "big")
+		seedClientCRDs(client)
+
+		fragment, cond, _ := rec.artifactStorageFragment(context.Background(), cr)
+		if fragment != "" {
+			t.Errorf("expected no fragment, got %q", fragment)
+		}
+		want := `artifact secret not found: tried "abase-cell-big-2", "abase-big"`
+		if cond.Message != want {
+			t.Errorf("message = %q, want %q", cond.Message, want)
+		}
+	})
+
+	t.Run("an unlabelled cell tries only its own name", func(t *testing.T) {
+		rec, client := artifactTestReconciler(t, false)
+		cr := artifactCellController("cell-lonely", "")
+		seedClientCRDs(client)
+
+		_, cond, _ := rec.artifactStorageFragment(context.Background(), cr)
+		want := `artifact secret not found: tried "abase-cell-lonely"`
+		if cond.Message != want {
+			t.Errorf("message = %q, want %q", cond.Message, want)
+		}
+	})
+
+	t.Run("a non-cell controller tries only its own name", func(t *testing.T) {
+		rec, client := artifactTestReconciler(t, false)
+		cr := testController("test", "ns", v1alpha1.ControllerPhaseProvisioning)
+		seedClientCRDs(client)
+
+		_, cond, _ := rec.artifactStorageFragment(context.Background(), cr)
+		want := `artifact secret not found: tried "abase-test"`
+		if cond.Message != want {
+			t.Errorf("message = %q, want %q", cond.Message, want)
+		}
+	})
+
+	t.Run("the bare base alone resolves nothing", func(t *testing.T) {
+		rec, client := artifactTestReconciler(t, false)
+		client.existingSecrets["abase"] = map[string][]byte{
+			"access-key-id": []byte("a"), "secret-access-key": []byte("b"),
+		}
+		cr := testController("test", "ns", v1alpha1.ControllerPhaseProvisioning)
+		seedClientCRDs(client)
+
+		fragment, cond, _ := rec.artifactStorageFragment(context.Background(), cr)
+		if fragment != "" {
+			t.Errorf("expected no fragment from the bare base, got %q", fragment)
+		}
+		if cond.Reason != "LocalOnly" {
+			t.Errorf("cond = %+v, want LocalOnly", cond)
+		}
+	})
+}
+
+// TestArtifactStorageFragment_ReadFaultStopsBeforePool covers task 1.10: a
+// non-NotFound error on the per-cell candidate stops the lookup before the
+// pool candidate is ever read. It also asserts the review fix: the
+// returned error wraps errArtifactSecretRead, the sentinel
+// resolveBundleForController and handleProvisioning use to tell this fault
+// apart from an ordinary bundle-content fault.
+func TestArtifactStorageFragment_ReadFaultStopsBeforePool(t *testing.T) {
+	rec, client := artifactTestReconciler(t, false)
+	client.getSecretErrs = map[string]error{"abase-cell-big-0": errors.New("etcd unavailable")}
+	client.existingSecrets["abase-big"] = map[string][]byte{
+		"access-key-id": []byte("a"), "secret-access-key": []byte("b"),
+	}
+	cr := artifactCellController("cell-big-0", "big")
+	seedClientCRDs(client)
+
+	fragment, cond, err := rec.artifactStorageFragment(context.Background(), cr)
+	if fragment != "" {
+		t.Errorf("expected no fragment on a read fault, got %q", fragment)
+	}
+	if cond.Reason != "LocalOnly" {
+		t.Fatalf("cond.Reason = %q, want LocalOnly", cond.Reason)
+	}
+	want := `artifact secret "abase-cell-big-0" read failed: etcd unavailable`
+	if cond.Message != want {
+		t.Errorf("message = %q, want %q", cond.Message, want)
+	}
+	if !errors.Is(err, errArtifactSecretRead) {
+		t.Errorf("err = %v, want it to wrap errArtifactSecretRead", err)
+	}
+	if client.getSecretCalls["abase-big"] != 0 {
+		t.Error("expected the pool candidate never read after the per-cell fault")
+	}
+}
+
+// TestArtifactStorageFragment_NotFoundFallsThroughToPool asserts the
+// production path: a real apierrors.NewNotFound answer on the per-cell
+// candidate (not a bare nil,nil miss) moves the lookup to the pool
+// candidate, which resolves. The fake testClient.GetSecret answers a plain
+// nil,nil for an unseeded name, so without this explicit NotFound error the
+// apierrors.IsNotFound branch in lookupArtifactSecret is never exercised.
+func TestArtifactStorageFragment_NotFoundFallsThroughToPool(t *testing.T) {
+	rec, client := artifactTestReconciler(t, false)
+	client.getSecretErrs = map[string]error{
+		"abase-cell-big-0": apierrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, "abase-cell-big-0"),
+	}
+	client.existingSecrets["abase-big"] = map[string][]byte{
+		"access-key-id": []byte("a"), "secret-access-key": []byte("b"),
+	}
+	cr := artifactCellController("cell-big-0", "big")
+	pinnedProfile(client, cr)
+	seedClientCRDs(client)
+
+	fragment, cond, _ := rec.artifactStorageFragment(context.Background(), cr)
+	if fragment == "" {
+		t.Fatal("expected a rendered fragment: NotFound must fall through to the pool candidate")
+	}
+	if cond.Status != metav1.ConditionTrue || cond.Reason != "External" {
+		t.Fatalf("condition = %+v, want True/External", cond)
+	}
+	if !strings.Contains(cond.Message, "abase-big") {
+		t.Errorf("message must name the pool secret, got %q", cond.Message)
+	}
+	if client.getSecretCalls["abase-cell-big-0"] != 1 {
+		t.Errorf("expected exactly one read of the per-cell candidate, got %d", client.getSecretCalls["abase-cell-big-0"])
+	}
+	if client.getSecretCalls["abase-big"] != 1 {
+		t.Errorf("expected exactly one read of the pool candidate, got %d", client.getSecretCalls["abase-big"])
+	}
+}
+
+// TestResolveArtifactSecret_PoolCandidate covers task 1.10: the projected
+// copy carries the data of the Secret the lookup chose, here the pool one.
+func TestResolveArtifactSecret_PoolCandidate(t *testing.T) {
+	rec, client := artifactTestReconciler(t, false)
+	client.existingSecrets["abase-big"] = map[string][]byte{
+		"access-key-id": []byte("AKIAPOOL"), "secret-access-key": []byte("poolsecret"),
+	}
+	cr := artifactCellController("cell-big-2", "big")
+	seedClientCRDs(client)
+
+	name, hash, err := rec.resolveArtifactSecret(context.Background(), cr)
+	if err != nil {
+		t.Fatalf("resolveArtifactSecret: %v", err)
+	}
+	if name != "cell-big-2-artifacts" {
+		t.Errorf("projected name = %q, want cell-big-2-artifacts", name)
+	}
+	if hash == "" {
+		t.Error("expected a non-empty hash")
+	}
+	data := client.createdSecrets[name]
+	if string(data["access-key-id"]) != "AKIAPOOL" {
+		t.Errorf("projected data = %v, want the pool secret's data", data)
+	}
+}
+
+// TestResolveArtifactSecret_ProjectionWriteFailure covers task 1.10: a
+// projection write failure returns an error rather than a silent no-op.
+func TestResolveArtifactSecret_ProjectionWriteFailure(t *testing.T) {
+	rec, client := artifactTestReconciler(t, true)
+	client.createOrUpdateSecretWithOwnerErr = errors.New("apiserver unavailable")
+	cr := testController("test", "ns", v1alpha1.ControllerPhaseProvisioning)
+
+	name, hash, err := rec.resolveArtifactSecret(context.Background(), cr)
+	if err == nil {
+		t.Fatal("expected an error from a projection write failure")
+	}
+	if name != "" || hash != "" {
+		t.Errorf("expected empty name/hash on failure, got %q/%q", name, hash)
+	}
+}
+
+// TestBlobstoreIsS3 covers task 1.11: an S3 URL is true, a Postgres URL and
+// an unparsable URL are both false.
+func TestBlobstoreIsS3(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{name: "s3", url: "s3://my-bucket?region=us-east-1", want: true},
+		{name: "postgres", url: "pgblob:", want: false},
+		{name: "unparsable", url: "s3://bad host/path", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := BlobstoreIsS3(tc.url); got != tc.want {
+				t.Errorf("BlobstoreIsS3(%q) = %v, want %v", tc.url, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestVersionPinsPlugin covers task 1.11: resolution goes by version, not by
+// a profile named like the pool, so a profile matching the pool's name but
+// not its version never influences the answer.
+func TestVersionPinsPlugin(t *testing.T) {
+	rec, client := artifactTestReconciler(t, false)
+	// The exact profile for the tested version lacks the pin.
+	seedProfileWithoutArtifactManager(client)
+	// A differently-versioned profile, named like a pool, does pin it. It
+	// must never be consulted: coreSetForCr resolves by cr.Spec.Version.
+	client.profiles["big"] = &v1alpha1.JenkinsVersionProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "big"},
+		Spec:       v1alpha1.JenkinsVersionProfileSpec{Version: "2.999"},
+		Status: v1alpha1.JenkinsVersionProfileStatus{
+			ContentRef: "profile-content-big",
+			Conditions: []v1alpha1.JenkinsVersionProfileCondition{{
+				Type: "PluginSetReady", Status: metav1.ConditionTrue,
+			}},
+		},
+	}
+	client.configMapData["profile-content-big"] = map[string]string{
+		"plugins.yaml": "plugins:\n  - artifactId: artifact-manager-s3\n    version: \"986.v\"\n",
+	}
+	seedClientCRDs(client)
+
+	if got := rec.VersionPinsPlugin(context.Background(), "2.570", "artifact-manager-s3"); got {
+		t.Error("expected false: the version 2.570 profile does not pin the plugin")
+	}
+}
+
+// TestHandleProvisioning_ArtifactSecretReadFaultFailsTick covers task 1.12:
+// a non-NotFound error on the projection's read fails the provisioning
+// tick, persists status, and writes no StatefulSet. It also asserts the
+// review fix that routes this fault through markReconcileBlocked, the same
+// way every sibling provisioning-write failure does (CascConfigMapFailed,
+// StatefulSetCreateFailed, IngressCreateFailed): ConditionReconcileBlocked
+// reports True/ArtifactSecretFailed and status.lastReconcileError names the
+// fault, so the attention feed and the controller detail page surface it.
+func TestHandleProvisioning_ArtifactSecretReadFaultFailsTick(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.getSecretErrs = map[string]error{"abase-test": errors.New("etcd unavailable")}
+	rec := newTestReconciler(client)
+	rec.SetArtifactSecretBase("abase")
+	rec.SetBlobstoreURL("s3://my-bucket?region=us-east-1")
+
+	cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+
+	if err := rec.handleProvisioning(context.Background(), cr); err == nil {
+		t.Fatal("expected handleProvisioning to fail on a non-NotFound secret read error")
+	}
+	if len(client.statefulSets) != 0 {
+		t.Errorf("expected no StatefulSet, got %v", client.statefulSets)
+	}
+	if client.lastPatchedStatus == nil {
+		t.Error("expected the status to be persisted before the error return")
+	}
+	cond := findCondition(cr.Status.Conditions, v1alpha1.ConditionReconcileBlocked)
+	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != v1alpha1.ReasonReconcileBlockedArtifactSecretFailed {
+		t.Fatalf("ReconcileBlocked condition = %+v, want True/%s", cond, v1alpha1.ReasonReconcileBlockedArtifactSecretFailed)
+	}
+	if cr.Status.LastReconcileError == "" {
+		t.Error("expected status.lastReconcileError to name the fault")
+	}
+	if !strings.Contains(cr.Status.LastReconcileError, "abase-test") {
+		t.Errorf("expected status.lastReconcileError to name the candidate Secret, got %q", cr.Status.LastReconcileError)
+	}
+}
+
+// TestProvisioningCellExhaustedCandidatesReportsArtifactStorageLocal covers
+// task 1.12: a cell whose every candidate is absent (all NotFound) gets no
+// StatefulSet and reports CellReady=False/ArtifactStorageLocal, driven
+// through reconcileController so both handleProvisioning and
+// evaluateCellReadiness run on the same tick.
+func TestProvisioningCellExhaustedCandidatesReportsArtifactStorageLocal(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+	rec.SetClaimGate("1")
+	rec.SetArtifactSecretBase("abase")
+	rec.SetBlobstoreURL("s3://my-bucket?region=us-east-1")
+
+	cr := artifactCellController("cell-big-0", "big")
+	pinnedProfile(client, cr)
+	seedClientCRDs(client)
+
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("reconcileController: %v", err)
+	}
+	if len(client.stsSpecs) != 0 {
+		t.Errorf("expected no StatefulSet, got %d", len(client.stsSpecs))
+	}
+	cond := findCondition(cr.Status.Conditions, v1alpha1.ConditionCellReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.ReasonArtifactStorageLocal {
+		t.Fatalf("CellReady = %+v, want False/ArtifactStorageLocal", cond)
+	}
+}
+
+// TestHandleProvisioning_CellArtifactSecretReadFaultBlocksReconcile covers
+// the review fix: for a cell, cellConfigGateReason returns nil before
+// resolveArtifactSecret ever runs, so a Secret read fault used to leave the
+// cell sitting in Provisioning with no ReconcileBlocked and no
+// lastReconcileError. A labelled cell's per-cell read failing with a
+// non-NotFound error must now surface ReconcileBlocked/ArtifactSecretFailed
+// from handleProvisioning directly, before the cell gate ever runs, and
+// must never fall through to the pool candidate.
+func TestHandleProvisioning_CellArtifactSecretReadFaultBlocksReconcile(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.getSecretErrs = map[string]error{"abase-cell-big-0": errors.New("etcd unavailable")}
+	rec := newTestReconciler(client)
+	rec.SetClaimGate("1")
+	rec.SetArtifactSecretBase("abase")
+	rec.SetBlobstoreURL("s3://my-bucket?region=us-east-1")
+
+	cr := artifactCellController("cell-big-0", "big")
+
+	if err := rec.handleProvisioning(context.Background(), cr); err == nil {
+		t.Fatal("expected handleProvisioning to fail on a non-NotFound secret read error")
+	}
+	if len(client.statefulSets) != 0 {
+		t.Errorf("expected no StatefulSet, got %v", client.statefulSets)
+	}
+
+	artifactCond := findCondition(cr.Status.Conditions, ConditionArtifactStorage)
+	if artifactCond == nil || artifactCond.Status != metav1.ConditionFalse || artifactCond.Reason != "LocalOnly" {
+		t.Fatalf("ArtifactStorage condition = %+v, want False/LocalOnly", artifactCond)
+	}
+	wantMsg := `artifact secret "abase-cell-big-0" read failed: etcd unavailable`
+	if artifactCond.Message != wantMsg {
+		t.Errorf("ArtifactStorage message = %q, want %q", artifactCond.Message, wantMsg)
+	}
+
+	blockedCond := findCondition(cr.Status.Conditions, v1alpha1.ConditionReconcileBlocked)
+	if blockedCond == nil || blockedCond.Status != metav1.ConditionTrue || blockedCond.Reason != v1alpha1.ReasonReconcileBlockedArtifactSecretFailed {
+		t.Fatalf("ReconcileBlocked condition = %+v, want True/%s", blockedCond, v1alpha1.ReasonReconcileBlockedArtifactSecretFailed)
+	}
+	if cr.Status.LastReconcileError == "" {
+		t.Error("expected status.lastReconcileError to name the fault")
+	}
+	if client.getSecretCalls["abase-big"] != 0 {
+		t.Error("expected the pool candidate never read after the per-cell fault")
+	}
+}
+
+// TestCheckPluginRollFailed_ArtifactSecretReadFaultGivesNoVerdict covers a
+// follow-on review fix: checkPluginRollFailed must not compute a plugin-roll
+// verdict from a bundle whose artifact-storage step failed to read its
+// Secret, because that verdict would be missing the bundle's own plugin
+// pins. A pre-existing PluginRollFailed condition stays exactly as it was
+// while the fault lasts, and the check resumes its normal verdict once the
+// fault clears.
+func TestCheckPluginRollFailed_ArtifactSecretReadFaultGivesNoVerdict(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.configMapData["test-bundle-content"]["plugins.yaml"] = "plugins:\n  - artifactId: workflow-aggregator\n    version: latest\n"
+	client.getSecretErrs = map[string]error{"abase-test": errors.New("etcd unavailable")}
+	rec := newTestReconciler(client)
+	rec.SetArtifactSecretBase("abase")
+	rec.SetBlobstoreURL("s3://my-bucket?region=us-east-1")
+
+	cr := testController("test", "ns1", v1alpha1.ControllerPhaseRunning)
+	existing := v1alpha1.ControllerCondition{
+		Type:    v1alpha1.ConditionPluginRollFailed,
+		Status:  metav1.ConditionTrue,
+		Reason:  v1alpha1.ReasonPluginRollFailed,
+		Message: "a prior roll failed",
+	}
+	cr.Status.Conditions = []v1alpha1.ControllerCondition{existing}
+
+	rec.checkPluginRollFailed(context.Background(), cr, nil, testLogger())
+
+	got := findCondition(cr.Status.Conditions, v1alpha1.ConditionPluginRollFailed)
+	if got == nil || got.Status != existing.Status || got.Reason != existing.Reason || got.Message != existing.Message {
+		t.Fatalf("PluginRollFailed changed during a Secret read fault: got %+v, want unchanged %+v", got, existing)
+	}
+
+	// The fault is gone: the check runs its normal verdict again and
+	// clears the condition, the same way it did before this fix.
+	delete(client.getSecretErrs, "abase-test")
+	rec.checkPluginRollFailed(context.Background(), cr, nil, testLogger())
+	cleared := findCondition(cr.Status.Conditions, v1alpha1.ConditionPluginRollFailed)
+	if cleared == nil || cleared.Status != metav1.ConditionFalse || cleared.Reason != "RollComplete" {
+		t.Fatalf("expected PluginRollFailed to clear once the fault is gone, got %+v", cleared)
+	}
 }

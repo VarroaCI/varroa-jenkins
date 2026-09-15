@@ -42,6 +42,35 @@ func TestMain_CellPoolReconcilerRegisteredLeaderElected(t *testing.T) {
 	}
 }
 
+// TestMain_WarmPoolReconcilerCarriesGateWiring guards task 2.9: the
+// cells.WarmPoolReconciler literal must wire the fill-gate fields. The
+// bound is the literal itself, up to the next mgr.Add(, because the runner
+// reconciler literal later in the file also carries a Secrets: field, and a
+// whole-file search would pass on that literal instead of this one.
+func TestMain_WarmPoolReconcilerCarriesGateWiring(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	text := string(src)
+
+	const startMarker = "cells.WarmPoolReconciler{"
+	start := strings.Index(text, startMarker)
+	if start == -1 {
+		t.Fatal("main.go does not construct a cells.WarmPoolReconciler")
+	}
+	end := strings.Index(text[start:], "mgr.Add(")
+	if end == -1 {
+		t.Fatal("could not find the mgr.Add( that follows the cells.WarmPoolReconciler literal")
+	}
+	block := text[start : start+end]
+	for _, field := range []string{"ClaimGate:", "BlobTierS3:", "ArtifactSecretBase:", "Secrets:", "Plugins:"} {
+		if !strings.Contains(block, field) {
+			t.Errorf("the cells.WarmPoolReconciler literal is missing %s:\n%s", field, block)
+		}
+	}
+}
+
 // TestTickerRunnable_WakeChannelRunsATick asserts the wake case: a token on
 // the channel runs one tick without waiting for the interval.
 func TestTickerRunnable_WakeChannelRunsATick(t *testing.T) {

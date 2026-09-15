@@ -1,8 +1,11 @@
 package cells
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"sort"
 	"testing"
 	"time"
@@ -17,10 +20,45 @@ import (
 )
 
 const (
-	testOperatorNamespace = "varroa-system"
-	testProfileName       = "lts-2-555"
-	testResolveVersion    = "2.555.3"
+	testOperatorNamespace  = "varroa-system"
+	testProfileName        = "lts-2-555"
+	testResolveVersion     = "2.555.3"
+	testArtifactSecretBase = "varroa-cell-artifacts"
 )
+
+// fakeSecretReader is a map-backed cells.SecretReader test fake. A name
+// absent from both maps answers not-found (nil data, nil error).
+type fakeSecretReader struct {
+	data map[string]map[string][]byte
+	errs map[string]error
+}
+
+func (f *fakeSecretReader) GetSecret(_ context.Context, name, _ string) (map[string][]byte, error) {
+	if err, ok := f.errs[name]; ok {
+		return nil, err
+	}
+	return f.data[name], nil
+}
+
+// seededSecretReader answers non-empty data for <base>-<pool> for every
+// pool named in pools, the shape the fill gate's Secret read expects.
+func seededSecretReader(base string, pools ...string) *fakeSecretReader {
+	data := map[string]map[string][]byte{}
+	for _, pool := range pools {
+		data[base+"-"+pool] = map[string][]byte{"access-key-id": []byte("a"), "secret-access-key": []byte("b")}
+	}
+	return &fakeSecretReader{data: data}
+}
+
+// fakePluginPinReader is a cells.PluginPinReader test fake answering one
+// fixed bool for every version.
+type fakePluginPinReader struct {
+	pinned bool
+}
+
+func (f *fakePluginPinReader) VersionPinsPlugin(_ context.Context, _, _ string) bool {
+	return f.pinned
+}
 
 func newProfile() *v1alpha1.JenkinsVersionProfile {
 	return &v1alpha1.JenkinsVersionProfile{
@@ -90,12 +128,22 @@ func unlabelledCellNamed(name string, tenants []string) *v1alpha1.Controller {
 	return c
 }
 
+// newReconciler builds a WarmPoolReconciler whose fill gate passes for
+// every pool this file names ("lts-2-555" and "big"): ClaimGate "1",
+// BlobTierS3 true, an ArtifactSecretBase, a Secrets fake seeded for both
+// pools, and a Plugins fake that always answers true. A test of the gate
+// itself overrides these fields on the returned reconciler.
 func newReconciler(store *crdstore.Fake, cfg WarmPoolConfig) *WarmPoolReconciler {
+	cfg.ClaimGate = "1"
+	cfg.BlobTierS3 = true
+	cfg.ArtifactSecretBase = testArtifactSecretBase
 	return &WarmPoolReconciler{
 		Store:             store,
 		OperatorNamespace: testOperatorNamespace,
 		Config:            cfg,
 		Now:               func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
+		Secrets:           seededSecretReader(testArtifactSecretBase, testProfileName, "big"),
+		Plugins:           &fakePluginPinReader{pinned: true},
 	}
 }
 
@@ -917,5 +965,329 @@ func TestCellPool_DeletedPoolHoldsTheFinalizerWhileACellSurvives(t *testing.T) {
 	}
 	if !held {
 		t.Errorf("the finalizer must hold while a cell survives, got %v", pool.Finalizers)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fill precondition gate (design D3/D4, tasks 2.3, 2.7, 2.8)
+// ---------------------------------------------------------------------------
+
+// gatePool returns a pool named "big" for the test profile, used only by
+// the direct fillGateReason unit tests below.
+func gatePool() *v1alpha1.CellPool {
+	return &v1alpha1.CellPool{
+		ObjectMeta: metav1.ObjectMeta{Name: "big"},
+		Spec:       v1alpha1.CellPoolSpec{ProfileRef: testProfileName},
+	}
+}
+
+func TestFillGateReason_RecordStoreUnsupported(t *testing.T) {
+	r := newReconciler(crdstore.NewFake(), WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	r.Config.ClaimGate = "0"
+	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != v1alpha1.CellPoolReasonRecordStoreUnsupported {
+		t.Errorf("fillGateReason = %q, want %q", got, v1alpha1.CellPoolReasonRecordStoreUnsupported)
+	}
+}
+
+func TestFillGateReason_BlobTierUnsupported(t *testing.T) {
+	r := newReconciler(crdstore.NewFake(), WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	r.Config.BlobTierS3 = false
+	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != v1alpha1.CellPoolReasonBlobTierUnsupported {
+		t.Errorf("fillGateReason = %q, want %q", got, v1alpha1.CellPoolReasonBlobTierUnsupported)
+	}
+}
+
+func TestFillGateReason_ArtifactSecretBaseEmpty(t *testing.T) {
+	r := newReconciler(crdstore.NewFake(), WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	r.Config.ArtifactSecretBase = ""
+	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != v1alpha1.CellPoolReasonArtifactSecretMissing {
+		t.Errorf("fillGateReason = %q, want %q", got, v1alpha1.CellPoolReasonArtifactSecretMissing)
+	}
+}
+
+func TestFillGateReason_SecretAbsent(t *testing.T) {
+	r := newReconciler(crdstore.NewFake(), WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	r.Secrets = &fakeSecretReader{}
+	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != v1alpha1.CellPoolReasonArtifactSecretMissing {
+		t.Errorf("fillGateReason = %q, want %q", got, v1alpha1.CellPoolReasonArtifactSecretMissing)
+	}
+}
+
+func TestFillGateReason_SecretReadError(t *testing.T) {
+	r := newReconciler(crdstore.NewFake(), WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	r.Secrets = &fakeSecretReader{errs: map[string]error{testArtifactSecretBase + "-big": errors.New("etcd unavailable")}}
+	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != v1alpha1.CellPoolReasonArtifactSecretMissing {
+		t.Errorf("fillGateReason = %q, want %q", got, v1alpha1.CellPoolReasonArtifactSecretMissing)
+	}
+}
+
+// TestFillGateReason_SecretReadLogging contrasts the two Secret-read-error
+// paths the design distinguishes: a real apierrors.NotFound answer (the
+// ordinary "no pool Secret yet" case, the production shape ClientsetClient
+// returns) logs nothing, while any other error is unexpected and logs a
+// warning. Both still answer ArtifactSecretMissing.
+func TestFillGateReason_SecretReadLogging(t *testing.T) {
+	cases := []struct {
+		name    string
+		err     error
+		wantLog bool
+	}{
+		{
+			name:    "a NotFound answer logs nothing",
+			err:     apierrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, testArtifactSecretBase+"-big"),
+			wantLog: false,
+		},
+		{
+			name:    "a non-NotFound error logs a warning",
+			err:     errors.New("etcd unavailable"),
+			wantLog: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var logBuf bytes.Buffer
+			r := newReconciler(crdstore.NewFake(), WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+			r.Logger = slog.New(slog.NewTextHandler(&logBuf, nil))
+			r.Secrets = &fakeSecretReader{errs: map[string]error{testArtifactSecretBase + "-big": tc.err}}
+
+			if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != v1alpha1.CellPoolReasonArtifactSecretMissing {
+				t.Errorf("fillGateReason = %q, want %q", got, v1alpha1.CellPoolReasonArtifactSecretMissing)
+			}
+			if logged := logBuf.Len() != 0; logged != tc.wantLog {
+				t.Errorf("logged = %v, want %v (log content: %q)", logged, tc.wantLog, logBuf.String())
+			}
+		})
+	}
+}
+
+func TestFillGateReason_NilSecrets(t *testing.T) {
+	r := newReconciler(crdstore.NewFake(), WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	r.Secrets = nil
+	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != v1alpha1.CellPoolReasonArtifactSecretMissing {
+		t.Errorf("fillGateReason = %q, want %q", got, v1alpha1.CellPoolReasonArtifactSecretMissing)
+	}
+}
+
+func TestFillGateReason_PluginNotPinned(t *testing.T) {
+	r := newReconciler(crdstore.NewFake(), WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	r.Plugins = &fakePluginPinReader{pinned: false}
+	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != v1alpha1.CellPoolReasonArtifactPluginMissing {
+		t.Errorf("fillGateReason = %q, want %q", got, v1alpha1.CellPoolReasonArtifactPluginMissing)
+	}
+}
+
+func TestFillGateReason_NilPlugins(t *testing.T) {
+	r := newReconciler(crdstore.NewFake(), WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	r.Plugins = nil
+	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != v1alpha1.CellPoolReasonArtifactPluginMissing {
+		t.Errorf("fillGateReason = %q, want %q", got, v1alpha1.CellPoolReasonArtifactPluginMissing)
+	}
+}
+
+func TestFillGateReason_EveryTestPasses(t *testing.T) {
+	r := newReconciler(crdstore.NewFake(), WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != "" {
+		t.Errorf("fillGateReason = %q, want empty", got)
+	}
+}
+
+// TestCellPool_FillGateRefusals drives the gate through a full pass (task
+// 2.7): each row refuses the fill and writes its exact reason and message.
+func TestCellPool_FillGateRefusals(t *testing.T) {
+	cases := []struct {
+		name       string
+		mutate     func(r *WarmPoolReconciler)
+		wantReason string
+		wantMsg    string
+	}{
+		{
+			name:       "record store disabled",
+			mutate:     func(r *WarmPoolReconciler) { r.Config.ClaimGate = "0" },
+			wantReason: v1alpha1.CellPoolReasonRecordStoreUnsupported,
+			wantMsg:    "the pool needs the record store enabled (recordStore.enabled)",
+		},
+		{
+			name:       "blob tier not s3",
+			mutate:     func(r *WarmPoolReconciler) { r.Config.BlobTierS3 = false },
+			wantReason: v1alpha1.CellPoolReasonBlobTierUnsupported,
+			wantMsg:    "the pool needs the s3 blob tier (recordStore.blobs.mode)",
+		},
+		{
+			name:       "artifact secret base unset",
+			mutate:     func(r *WarmPoolReconciler) { r.Config.ArtifactSecretBase = "" },
+			wantReason: v1alpha1.CellPoolReasonArtifactSecretMissing,
+			wantMsg:    "recordStore.blobs.s3.artifactSecret is not configured",
+		},
+		{
+			name:       "pool secret absent",
+			mutate:     func(r *WarmPoolReconciler) { r.Secrets = &fakeSecretReader{} },
+			wantReason: v1alpha1.CellPoolReasonArtifactSecretMissing,
+			wantMsg:    fmt.Sprintf("artifact secret %q not found", testArtifactSecretBase+"-"+testProfileName),
+		},
+		{
+			name: "pool secret read error",
+			mutate: func(r *WarmPoolReconciler) {
+				r.Secrets = &fakeSecretReader{errs: map[string]error{
+					testArtifactSecretBase + "-" + testProfileName: errors.New("etcd unavailable"),
+				}}
+			},
+			wantReason: v1alpha1.CellPoolReasonArtifactSecretMissing,
+			wantMsg:    fmt.Sprintf("artifact secret %q not found", testArtifactSecretBase+"-"+testProfileName),
+		},
+		{
+			name:       "nil secrets reader",
+			mutate:     func(r *WarmPoolReconciler) { r.Secrets = nil },
+			wantReason: v1alpha1.CellPoolReasonArtifactSecretMissing,
+			wantMsg:    fmt.Sprintf("artifact secret %q not found", testArtifactSecretBase+"-"+testProfileName),
+		},
+		{
+			name:       "plugin not pinned",
+			mutate:     func(r *WarmPoolReconciler) { r.Plugins = &fakePluginPinReader{pinned: false} },
+			wantReason: v1alpha1.CellPoolReasonArtifactPluginMissing,
+			wantMsg:    fmt.Sprintf("the plugin set for version %q does not pin artifact-manager-s3", testResolveVersion),
+		},
+		{
+			name:       "nil plugins reader",
+			mutate:     func(r *WarmPoolReconciler) { r.Plugins = nil },
+			wantReason: v1alpha1.CellPoolReasonArtifactPluginMissing,
+			wantMsg:    fmt.Sprintf("the plugin set for version %q does not pin artifact-manager-s3", testResolveVersion),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := crdstore.NewFake()
+			crdstore.MustSeed(store, newProfile(), pipelinesTeam(), newPool(1))
+
+			r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+			tc.mutate(r)
+			if err := r.Reconcile(context.Background()); err != nil {
+				t.Fatalf("Reconcile: %v", err)
+			}
+			if got := listCells(t, store); len(got) != 0 {
+				t.Fatalf("a refused gate must create no cell, got %v", cellNames(got))
+			}
+			cond := poolReady(t, getPool(t, store, testProfileName))
+			if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != tc.wantReason {
+				t.Fatalf("PoolReady = %+v, want False/%s", cond, tc.wantReason)
+			}
+			if cond.Message != tc.wantMsg {
+				t.Errorf("message = %q, want %q", cond.Message, tc.wantMsg)
+			}
+		})
+	}
+}
+
+// TestCellPool_RefusedFillStillRestampsFreeCells covers task 2.8: a refused
+// fill still restamps the free cells that already exist.
+func TestCellPool_RefusedFillStillRestampsFreeCells(t *testing.T) {
+	store := crdstore.NewFake()
+	free := poolCellNamed("cell-lts-2-555-0", testProfileName, nil)
+	free.Spec.Version = "2.400"
+	crdstore.MustSeed(store, newProfile(), pipelinesTeam(), newPool(2), free)
+
+	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	r.Config.ClaimGate = "0"
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	got := listCells(t, store)
+	if len(got) != 1 {
+		t.Fatalf("the refused fill must create no cell, got %v", cellNames(got))
+	}
+	if got[0].Spec.Version != testResolveVersion {
+		t.Errorf("free cell version = %q, want restamped to %q", got[0].Spec.Version, testResolveVersion)
+	}
+}
+
+// TestCellPool_AtTargetIgnoresPreconditions covers task 2.8/the "A pool at
+// its target ignores the preconditions" scenario: a pool that wants no fill
+// reports Ready even while the pool Secret is absent.
+func TestCellPool_AtTargetIgnoresPreconditions(t *testing.T) {
+	store := crdstore.NewFake()
+	free := poolCellNamed("cell-lts-2-555-0", testProfileName, nil)
+	crdstore.MustSeed(store, newProfile(), newPool(1), free)
+
+	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	r.Secrets = &fakeSecretReader{}
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	cond := poolReady(t, getPool(t, store, testProfileName))
+	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != v1alpha1.CellPoolReasonReady {
+		t.Fatalf("PoolReady = %+v, want True/Ready", cond)
+	}
+}
+
+// TestCellPool_RefusedFillOutranksCap covers task 2.8/"A refused fill
+// outranks the cap": a pool at its cap that also wants a fill reports the
+// gate reason, not CellCapReached.
+func TestCellPool_RefusedFillOutranksCap(t *testing.T) {
+	store := crdstore.NewFake()
+	pool := newPool(3)
+	pool.Spec.MaxCells = 2
+	crdstore.MustSeed(store, newProfile(), pool,
+		poolCellNamed("cell-lts-2-555-0", testProfileName, nil),
+		poolCellNamed("cell-lts-2-555-1", testProfileName, nil),
+	)
+
+	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	r.Secrets = &fakeSecretReader{}
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	cond := poolReady(t, getPool(t, store, testProfileName))
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.CellPoolReasonArtifactSecretMissing {
+		t.Fatalf("PoolReady = %+v, want False/ArtifactSecretMissing", cond)
+	}
+}
+
+// TestCellPool_SecretCreatedAfterRefusalAdmitsFill covers task 2.8/"A pool
+// Secret admits the fill": the next pass creates the cell once the pool
+// Secret exists with non-empty data.
+func TestCellPool_SecretCreatedAfterRefusalAdmitsFill(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, newProfile(), pipelinesTeam(), newPool(1))
+
+	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	fake := &fakeSecretReader{}
+	r.Secrets = fake
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	if got := listCells(t, store); len(got) != 0 {
+		t.Fatalf("tick 1: expected no cell, got %v", cellNames(got))
+	}
+
+	fake.data = map[string]map[string][]byte{
+		testArtifactSecretBase + "-" + testProfileName: {"access-key-id": []byte("a"), "secret-access-key": []byte("b")},
+	}
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	if got := listCells(t, store); len(got) != 1 {
+		t.Fatalf("tick 2: expected the fill to proceed, got %v", cellNames(got))
+	}
+}
+
+// TestCellPool_WithoutArtifactSecretFillsNothing covers the warm-pool delta
+// scenario "A pool without its artifact Secret fills nothing": the pool is
+// created for the requested profile, and the fill creates no cell.
+func TestCellPool_WithoutArtifactSecretFillsNothing(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, newProfile(), pipelinesTeam())
+
+	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	r.Secrets = &fakeSecretReader{}
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	pool := getPool(t, store, testProfileName)
+	if got := listCells(t, store); len(got) != 0 {
+		t.Fatalf("expected no cell, got %v", cellNames(got))
+	}
+	cond := poolReady(t, pool)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.CellPoolReasonArtifactSecretMissing {
+		t.Fatalf("PoolReady = %+v, want False/ArtifactSecretMissing", cond)
 	}
 }

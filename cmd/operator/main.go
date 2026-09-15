@@ -528,11 +528,17 @@ func main() {
 	}
 	reconciler.SetVarroaEndpoint(gatewayEndpoint)
 	reconciler.SetOperatorNamespace(operatorNamespace)
-	reconciler.SetClaimGate(envDefault("VARROA_CLAIM_GATE", "0"))
+	// claimGate, blobstoreURL, and artifactSecretBase feed the reconciler,
+	// the team reconciler's pipelines gates, and the warm-pool reconciler's
+	// fill gate, so they are read once here (design D4).
+	claimGate := envDefault("VARROA_CLAIM_GATE", "0")
+	blobstoreURL := os.Getenv("VARROA_BLOBSTORE_URL")
+	artifactSecretBase := os.Getenv("VARROA_ARTIFACT_SECRET")
+	reconciler.SetClaimGate(claimGate)
 	reconciler.SetSyncAnnouncer(controller.NewNATSSyncAnnouncer(busConn))
 	reconciler.SetRecordsFunc(controller.NewNATSSyncRecordsRequester(busConn))
-	reconciler.SetBlobstoreURL(os.Getenv("VARROA_BLOBSTORE_URL"))
-	reconciler.SetArtifactSecretBase(os.Getenv("VARROA_ARTIFACT_SECRET"))
+	reconciler.SetBlobstoreURL(blobstoreURL)
+	reconciler.SetArtifactSecretBase(artifactSecretBase)
 	if raw := os.Getenv("VARROA_CLAIM_TIMEOUT_MS"); raw != "" {
 		if ms, err := strconv.Atoi(raw); err != nil {
 			logger.Warn("VARROA_CLAIM_TIMEOUT_MS: parse error, leaving claim timeouts unset", "value", raw, "error", err)
@@ -555,7 +561,7 @@ func main() {
 	// it can place a tenant. A Team with no spec.pipelines never reads any
 	// of these.
 	teamReconciler.SetClusterIdentity(cluster)
-	teamReconciler.SetPipelinesGates(envDefault("VARROA_CLAIM_GATE", "0"), os.Getenv("VARROA_BLOBSTORE_URL"))
+	teamReconciler.SetPipelinesGates(claimGate, blobstoreURL)
 	teamReconciler.SetCellsConfig(cellsConfig)
 	teamReconciler.SetPurgeRequester(controller.NewNATSPurgeRequester(busConn))
 	teamReconciler.SetSyncAnnouncer(controller.NewNATSSyncAnnouncer(busConn))
@@ -961,8 +967,13 @@ func main() {
 			PerProfile:         cellsConfig.WarmPoolPerProfile,
 			MaxTenantsPerCell:  cellsConfig.MaxTenantsPerCell,
 			UnreadyGracePeriod: cellsConfig.UnreadyGracePeriod,
+			ClaimGate:          claimGate,
+			BlobTierS3:         controller.BlobstoreIsS3(blobstoreURL),
+			ArtifactSecretBase: artifactSecretBase,
 		},
-		Logger: logger,
+		Logger:  logger,
+		Secrets: clientsetClient,
+		Plugins: reconciler,
 	}
 	if err := mgr.Add(&tickerRunnable{
 		name:     "warm-pool",

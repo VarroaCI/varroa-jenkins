@@ -9,7 +9,7 @@ Kubernetes agents.
 A cell is a `Controller` with `spec.cell.enabled: true`. Its Jenkins home is an `emptyDir`. A pod
 roll loses the Jenkins local state and the mite's identity. The operator mints a fresh
 bootstrap token per pod. [Rehydration](#rehydration) restores build history. `spec.cell.enabled` cannot change after creation. `spec.cell.maxTenants` can change; it
-only caps how many tenants the cell may host.
+only caps the cell's tenant count.
 
 A cell hosts each tenant as a top-level folder named after its `Team`. It accepts no ingress host.
 Tenant traffic reaches it through the [tenant webhook door](#the-tenant-webhook-door), or through
@@ -35,8 +35,8 @@ A cell needs:
 - The [build record store](build-records.md) enabled (`recordStore.enabled: true`).
 - The `s3` blob tier (`recordStore.blobs.mode: s3`). A cell refuses the `postgres` tier.
 - External artifact storage. Pin `artifact-manager-s3` in the cell's `JenkinsVersionProfile` and
-  add a per-cell artifact `Secret`. See
-  [The per-cell artifact Secret](build-logs-and-artifacts.md#the-per-cell-artifact-secret).
+  add a pool or per-cell artifact `Secret`. See
+  [The artifact Secret](build-logs-and-artifacts.md#the-artifact-secret).
 
 The operator reports `CellReady=False` until all three hold.
 
@@ -247,7 +247,7 @@ Every `CellReady` reason on a cell `Controller`:
 | `Connected` | True | The cell is provisioned and accepts tenants. | None. |
 | `RecordStoreUnsupported` | False | `recordStore.enabled` is false. | Enable the record store. |
 | `BlobTierUnsupported` | False | `recordStore.blobs.mode` is not `s3`. | Set the blob tier to `s3`. |
-| `ArtifactStorageLocal` | False | The `ArtifactStorage` condition is not `External`. | Pin `artifact-manager-s3` and add the per-cell artifact `Secret`. |
+| `ArtifactStorageLocal` | False | The `ArtifactStorage` condition is not `External`. | Pin `artifact-manager-s3` and add a pool or per-cell artifact `Secret`. |
 | `NotProvisioned` | False | The cell's phase has not reached `Connected` yet. | Wait, or check pod status if it stays stuck. |
 | `CellRolled` | False | The operator already deleted the pod once to recover. The condition message names the original fault. | Diagnose the reason in the message. If it recurs, that condition is not self-healing. |
 

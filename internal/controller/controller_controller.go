@@ -593,6 +593,15 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 		mat.JenkinsYAML = merged
 		return cond, aErr
 	}()
+	// A Secret read fault is not a bundle-content fault: handleProvisioning
+	// must mark the reconcile blocked instead of waiting on the bundle, so
+	// it needs this error, not a warning log. Every other artifact-storage
+	// fault (a merge or credential-injection failure) keeps the existing
+	// warn-and-continue behaviour, because the bundle content itself is
+	// still usable without the fragment.
+	if errors.Is(artifactErr, errArtifactSecretRead) {
+		return mat, cb.Status.ResolvedHash, ident, artifactCond, artifactErr
+	}
 	if artifactErr != nil && r.Logger != nil {
 		r.Logger.Warn("artifact-storage merge failed; using base bundle", "controller", cr.Namespace+"/"+cr.Name, "error", artifactErr)
 	}
@@ -2735,6 +2744,15 @@ func (r *Reconciler) handleProvisioning(ctx context.Context, cr *v1alpha1.Contro
 	}
 
 	resolved, _, bundleIdent, artifactCond, resolveErr := r.resolveBundleForController(ctx, cr)
+	// A Secret read fault surfaces as ReconcileBlocked, not as a bundle wait:
+	// the bundle itself resolved fine, and cellConfigGateReason below would
+	// otherwise return nil on this same tick, before resolveArtifactSecret
+	// ever runs, leaving the fault invisible on status.
+	if errors.Is(resolveErr, errArtifactSecretRead) {
+		cr.Status.Conditions = setCondition(cr.Status.Conditions, artifactCond)
+		r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedArtifactSecretFailed, resolveErr.Error())
+		return fmt.Errorf("resolve artifact secret: %w", resolveErr)
+	}
 	// Every Controller now has an effective bundle — a named one or the built-in
 	// starter — so a resolve failure is always worth blocking on. The former
 	// `&& ComposedBundleRef != nil` exemption existed only for the no-bundle
@@ -2943,11 +2961,16 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 		})
 	}
 
-	// Resolve and project the per-cell artifact Secret (tasks 5.1a, 5.1b).
-	// Independent of the artifact-storage condition computed above:
-	// CreateStatefulSet mounts whatever per-cell Secret exists, whether or
-	// not the fragment currently references it.
-	artifactSecretName, artifactSecretHash, _ := r.resolveArtifactSecret(ctx, cr)
+	// Resolve and project a cell's artifact Secret (tasks 5.1a, 5.1b, design
+	// D1). Independent of the artifact-storage condition computed above:
+	// CreateStatefulSet mounts whatever artifact Secret exists, whether or
+	// not the fragment currently references it. A read or projection fault
+	// must not build a pod on a stale or missing projection.
+	artifactSecretName, artifactSecretHash, artifactSecretErr := r.resolveArtifactSecret(ctx, cr)
+	if artifactSecretErr != nil {
+		r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedArtifactSecretFailed, artifactSecretErr.Error())
+		return fmt.Errorf("resolve artifact secret: %w", artifactSecretErr)
+	}
 
 	stsSpec := r.buildStatefulSetSpec(cr, class, defaults, profile, stsBuildInputs{
 		Name:               pre,
@@ -3454,18 +3477,31 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		resolvedBundle   *bundle.MaterializedBundle
 		targetBundleHash string
 		bundleIdent      bundleIdentity
+		artifactCond     v1alpha1.ControllerCondition
 		bundleErr        error
 	)
 	func() {
 		_, span := tracer.Start(ctx, "bundle.resolve")
 		defer span.End()
-		resolvedBundle, targetBundleHash, bundleIdent, _, bundleErr = r.resolveBundleForController(ctx, cr)
+		resolvedBundle, targetBundleHash, bundleIdent, artifactCond, bundleErr = r.resolveBundleForController(ctx, cr)
 		if bundleErr == nil && resolvedBundle != nil {
 			span.SetAttributes(
 				attribute.Int("variables_count", len(resolvedBundle.Variables)),
 			)
 		}
 	}()
+	if errors.Is(bundleErr, errArtifactSecretRead) {
+		// The bundle resolved; only the artifact Secret read failed. Retire
+		// a stale BundleFailed from an earlier tick — this path never
+		// reaches the success-path clearBundleFailed call. Report the
+		// read-failed ArtifactStorage condition instead, and keep serving
+		// the last pushed desired state instead of pushing an incomplete
+		// one this tick.
+		clearBundleFailed(cr)
+		cr.Status.Conditions = setCondition(cr.Status.Conditions, artifactCond)
+		logger.Warn("artifact secret read failed in connected phase; keeping last-good desired state", "error", bundleErr)
+		return nil //nolint:nilerr // non-fatal in Connected phase
+	}
 	if bundleErr != nil {
 		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
 			Type:    v1alpha1.ConditionBundleFailed,
@@ -3939,6 +3975,14 @@ func (r *Reconciler) checkPluginRollFailed(ctx context.Context, cr *v1alpha1.Con
 		var resolveErr error
 		resolved, _, _, _, resolveErr = r.resolveBundleForController(ctx, cr)
 		if resolveErr != nil {
+			// The bundle resolved; only the artifact Secret read failed. A
+			// verdict computed without the bundle's own plugin pins would
+			// be wrong, so the check gives no verdict and waits for the
+			// next tick instead of clearing or flagging PluginRollFailed
+			// on an incomplete plugin set.
+			if errors.Is(resolveErr, errArtifactSecretRead) {
+				return
+			}
 			resolved = nil
 		}
 	}

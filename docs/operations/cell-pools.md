@@ -35,13 +35,24 @@ serve another profile, create another pool.
 
 `freeTenantSlots` counts placed cells alone. `warmCells` already reports the empty ones.
 
-The `PoolReady` condition carries exactly three reasons.
+The `PoolReady` condition carries seven reasons.
 
-| Reason | Status | Holds when |
-|---|---|---|
-| `Ready` | `True` | the profile exists and the pool is below its cap |
-| `CellCapReached` | `False` | `maxCells` is above zero and the pool owns that many cells |
-| `ProfileMissing` | `False` | `profileRef` names no `JenkinsVersionProfile` |
+| Reason | Status | Holds when | Action |
+|---|---|---|---|
+| `Ready` | `True` | the profile exists, the pool is below its cap, and no fill precondition refused a fill | None. |
+| `CellCapReached` | `False` | `maxCells` is above zero and the pool owns that many cells | Raise `maxCells`, or leave it: the pool is working as configured. |
+| `ProfileMissing` | `False` | `profileRef` names no `JenkinsVersionProfile` | Create the `JenkinsVersionProfile`, or fix `profileRef`. |
+| `RecordStoreUnsupported` | `False` | `recordStore.enabled` is false | Enable the record store. |
+| `BlobTierUnsupported` | `False` | `recordStore.blobs.mode` is not `s3` | Set the blob tier to `s3`. |
+| `ArtifactSecretMissing` | `False` | `recordStore.blobs.s3.artifactSecret` is unset, or `<artifactSecret>-<pool>` does not exist with non-empty data | Set `recordStore.blobs.s3.artifactSecret`, and create `<artifactSecret>-<pool>`. |
+| `ArtifactPluginMissing` | `False` | the plugin set a cell of the pool's version resolves does not pin `artifact-manager-s3` | Pin `artifact-manager-s3` in the version profile. |
+
+The four precondition reasons report only when the pass wanted to create at least one cell. A
+pool whose free count already meets its target reports `CellCapReached` or `Ready`, even with a
+missing artifact Secret: the pass never tests a precondition it does not need. When more than one
+precondition would refuse, the reasons rank `ProfileMissing`, then `RecordStoreUnsupported`, then
+`BlobTierUnsupported`, then `ArtifactSecretMissing`, then `ArtifactPluginMissing`, then
+`CellCapReached`, then `Ready`; the status reports the highest that applies.
 
 ## Create a pool
 
@@ -103,6 +114,20 @@ keeps a cell that a tenant is being placed on, although that cell holds no tenan
 leaves the pool one cell above its target until the next pass, which is expected.
 Deleting a pool drains its free cells. A placed cell keeps every label and lives on as an ordinary
 cell, resolving its capacity from its own `spec.cell.maxTenants` or from `cells.maxTenantsPerCell`.
+
+### Scale up a pool
+
+A pool fill needs four install-wide gates to pass: the record store enabled, the `s3` blob tier,
+`recordStore.blobs.s3.artifactSecret` set to a base name, and the resolved plugin set pinning
+`artifact-manager-s3`. Once those hold fleet-wide, one Secret per pool,
+`<artifactSecret>-<pool name>` in the release namespace, is the only remaining credential
+prerequisite for a scale-up. See
+[The artifact Secret](build-logs-and-artifacts.md#the-artifact-secret) for its keys and the
+candidate lookup order.
+
+An install that predates pool-scoped credentials, and holds only per-cell Secrets, needs the pool
+Secret created once per pool before a scale-up mints new cells. Existing cells keep running on
+their per-cell Secret; only a newly minted cell needs the pool one.
 
 ## Cold start
 

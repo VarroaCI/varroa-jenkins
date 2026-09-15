@@ -203,7 +203,7 @@ var cellPoolListOutputSchema = listOutputSchema("Default summary projection.", [
 	{Name: "freeTenantSlots", Type: "integer", Desc: "Spare capacity of the placed cells only."},
 	{Name: "tenants", Type: "array", Desc: "Every tenant on the pool, sorted."},
 	{Name: "poolReady", Type: "string", Desc: "The PoolReady condition's status."},
-	{Name: "poolReadyReason", Type: "string", Desc: "Ready, CellCapReached, or ProfileMissing."},
+	{Name: "poolReadyReason", Type: "string", Desc: "Ready, CellCapReached, ProfileMissing, RecordStoreUnsupported, BlobTierUnsupported, ArtifactSecretMissing, or ArtifactPluginMissing."},
 })
 
 // cellPoolDialsFromArgs reads the four dials off the call arguments and
