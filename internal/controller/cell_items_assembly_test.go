@@ -381,3 +381,48 @@ func TestResolveBundleForController_CellTwoTenantsSameTemplateBothReachJenkinsYA
 		t.Errorf("expected exactly one entry each for team-a and team-b, got %+v", folders)
 	}
 }
+
+// TestAssembleCellContent_TenantCloudNamesTheAgentService asserts that each
+// tenant cloud of one cell names that tenant's own slot 0 agent Service in
+// the cell's namespace, and that webSocket stays true.
+func TestAssembleCellContent_TenantCloudNamesTheAgentService(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	teamA := &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "team-a"},
+		Spec: v1alpha1.TeamSpec{
+			Namespaces: []string{"team-a-ns"},
+			Pipelines:  &v1alpha1.TeamPipelinesSpec{Profile: "lts", AgentNamespace: "team-a-ns"},
+		},
+	}
+	teamB := &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "team-b"},
+		Spec: v1alpha1.TeamSpec{
+			Namespaces: []string{"team-b-ns"},
+			Pipelines:  &v1alpha1.TeamPipelinesSpec{Profile: "lts", AgentNamespace: "team-b-ns"},
+		},
+	}
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{teamA, teamB},
+		"http://cell1-svc.ns1.svc.cluster.local:8080")
+	if err != nil {
+		t.Fatalf("assembleCellContent: %v", err)
+	}
+	if len(state.Clouds) != 2 {
+		t.Fatalf("expected one cloud per tenant, got %d", len(state.Clouds))
+	}
+	want := map[string]string{
+		"team-a": "http://varroa-agents-team-a-0." + cr.Namespace + ".svc.cluster.local:8080",
+		"team-b": "http://varroa-agents-team-b-0." + cr.Namespace + ".svc.cluster.local:8080",
+	}
+	for _, cloud := range state.Clouds {
+		if cloud.JenkinsURL != want[cloud.Name] {
+			t.Errorf("%s jenkinsUrl = %q, want %q", cloud.Name, cloud.JenkinsURL, want[cloud.Name])
+		}
+		if !cloud.WebSocket {
+			t.Errorf("%s webSocket = false, want true", cloud.Name)
+		}
+	}
+}

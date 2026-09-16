@@ -40,8 +40,13 @@ var testKey = []byte("test-key-32-bytes-long-xxxxx")
 
 // testClient is a fake ResourceClient for testing.
 type testClient struct {
-	listProfilesErr            error // when set, ListJenkinsVersionProfileCRDs returns it
-	services                   []string
+	listProfilesErr error // when set, ListJenkinsVersionProfileCRDs returns it
+	services        []string
+	// tenantServices records every CreateOrUpdateTenantService call, and
+	// tenantServiceErr refuses the write when set.
+	tenantServices             []tenantServiceCall
+	tenantServiceErr           error
+	deletedWithNamespace       []deletedResource
 	serviceAccounts            []string
 	statefulSets               []string
 	secrets                    []string
@@ -388,6 +393,22 @@ func (t *testClient) CreateService(_ context.Context, name, namespace string, po
 	t.services = append(t.services, name)
 	return nil
 }
+
+// tenantServiceCall records one agent Service write.
+type tenantServiceCall struct {
+	name      string
+	namespace string
+	selector  string
+}
+
+func (t *testClient) CreateOrUpdateTenantService(_ context.Context, name, namespace, selectorApp string) error {
+	if t.tenantServiceErr != nil {
+		return t.tenantServiceErr
+	}
+	t.tenantServices = append(t.tenantServices, tenantServiceCall{name: name, namespace: namespace, selector: selectorApp})
+	return nil
+}
+
 func (t *testClient) CreateServiceAccount(_ context.Context, name, namespace string) error {
 	t.serviceAccounts = append(t.serviceAccounts, name)
 	return nil
@@ -575,8 +596,18 @@ func (t *testClient) DeleteResource(_ context.Context, kind, name, namespace str
 		return t.deleteResourceErr
 	}
 	t.deleted = append(t.deleted, struct{ kind, name string }{kind, name})
+	t.deletedWithNamespace = append(t.deletedWithNamespace, deletedResource{kind: kind, name: name, namespace: namespace})
 	return nil
 }
+
+// deletedResource records one DeleteResource call with its namespace, which
+// the anonymous struct of the deleted field cannot carry.
+type deletedResource struct {
+	kind      string
+	name      string
+	namespace string
+}
+
 func (t *testClient) DeleteSecret(_ context.Context, name, namespace string) error {
 	t.deletedSecrets = append(t.deletedSecrets, name)
 	return nil

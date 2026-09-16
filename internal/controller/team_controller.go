@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -395,7 +396,11 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 	// RoleBinding/agent-identity sync. Every ordinary (non-pipelines) Team
 	// on the fleet reconciles on the same periodic tick as a pipelines
 	// tenant, so this guard is what keeps that tick cheap.
+	// A tenant that owes an agent Service delete stays in this block even
+	// after it stops being a pipelines tenant, because the drain below is
+	// the only code that ends that debt.
 	pipelinesTenant := team.Spec.Pipelines != nil || status.Placement != nil ||
+		len(status.StaleAgentServiceNamespaces) > 0 ||
 		containsString(team.Finalizers, v1alpha1.TeamFinalizerTenantPlacement)
 	if pipelinesTenant {
 		// Captured before Place mutates status: teardown's final tick
@@ -409,6 +414,12 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 		}
 		if team.Spec.Pipelines != nil {
 			agentNamespace = team.Spec.Pipelines.AgentNamespace
+		}
+		// Captured for the same reason: teardown's final tick clears the
+		// placement in the call that deletes the tenant's agent Service.
+		priorCellNamespace := ""
+		if status.Placement != nil {
+			priorCellNamespace = status.Placement.CellNamespace
 		}
 
 		cellCandidates, cellsByKey, err := r.listCellCandidates(ctx)
@@ -459,6 +470,18 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 		r.setTenantWarningsCondition(status, team, cellsByKey)
 		r.runRehydrationPass(status, team.Name, cellsByKey)
 
+		// A move to a cell in another namespace leaves an agent Service
+		// behind, under the same name, still selecting the old cell. The
+		// move itself is not reversible here: the placement pass has already
+		// announced the new generation to the recorder and requested the
+		// purge of the old one. The pass therefore records the namespace to
+		// clean as a marker, in the same patch that commits the placement,
+		// and a later tick drains it.
+		if status.Placement != nil && priorCellNamespace != "" &&
+			priorCellNamespace != status.Placement.CellNamespace {
+			setStaleAgentServiceNamespace(status, priorCellNamespace)
+		}
+
 		// The claim is the first write of a new placement, before the
 		// fence below. The pool drain reads the fence set before it
 		// re-reads a free cell, so a fence alone leaves this interleaving
@@ -508,19 +531,54 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 					"cell", claim.Namespace+"/"+claim.Name, "error", err)
 			}
 		}
-		if outcome.FinalizerAdd || outcome.FinalizerRelease {
-			r.applyFinalizerChange(ctx, team, outcome.FinalizerAdd, outcome.FinalizerRelease)
+		// The children sync runs before the finalizer change, because the
+		// finalizer is what keeps this whole block reachable. A tenant whose
+		// agent Service delete is still owed, and whose finalizer went
+		// first, would never reach the drain again: its spec.pipelines and
+		// its placement are both gone by then.
+		staleBefore := len(status.StaleAgentServiceNamespaces)
+		childErr := r.syncPipelinesChildren(ctx, team, status, subjects, role, agentNamespace, priorCellNamespace, cellsByKey)
+		for _, ev := range outcome.ActivityEvents {
+			r.publishTenantEvent(ev)
 		}
-		if outcome.FinalizerRelease {
+		releaseFinalizer := outcome.FinalizerRelease && childErr == nil &&
+			len(status.StaleAgentServiceNamespaces) == 0
+		if outcome.FinalizerAdd || releaseFinalizer {
+			r.applyFinalizerChange(ctx, team, outcome.FinalizerAdd, releaseFinalizer)
+		}
+		if releaseFinalizer {
 			// Teardown converged: drop the dedup/resync clock so a Team
 			// name that is reused later starts with no stale cache entry.
 			r.syncCacheMu.Lock()
 			delete(r.syncCache, team.Name)
 			r.syncCacheMu.Unlock()
 		}
-		r.syncPipelinesChildren(ctx, team, status, subjects, role, agentNamespace)
-		for _, ev := range outcome.ActivityEvents {
-			r.publishTenantEvent(ev)
+		if childErr != nil {
+			// The failure leaves status.placement alone: the tenant keeps
+			// its cell and the next tick retries. The condition needs a
+			// second patch, because the status write above already ran. That
+			// patch also carries the namespaces the drain did clear. On a
+			// teardown tick the condition reappears on a Team that already
+			// dropped it, which is correct: teardown is not complete while a
+			// Service of this tenant still exists.
+			r.setCondition(status, v1alpha1.TeamCondition{
+				Type:    v1alpha1.TeamConditionPlaced,
+				Status:  metav1.ConditionFalse,
+				Reason:  v1alpha1.TeamReasonAgentServiceFailed,
+				Message: childErr.Error(),
+			})
+			if patchErr := r.patchStatus(ctx, team.Name, status); patchErr != nil {
+				r.logger.Error("failed to patch status", "team", team.Name, "error", patchErr)
+			}
+			return reconcile.Result{}, childErr
+		}
+		if staleBefore != len(status.StaleAgentServiceNamespaces) {
+			// The drain removed at least one namespace. Only this second
+			// patch makes that durable, so a later tick does not delete
+			// again.
+			if patchErr := r.patchStatus(ctx, team.Name, status); patchErr != nil {
+				r.logger.Error("failed to patch status", "team", team.Name, "error", patchErr)
+			}
 		}
 		return reconcile.Result{}, nil
 	}
@@ -992,13 +1050,62 @@ func tenantAgentServiceAccountName(team string) string { return "varroa-agent-" 
 func tenantAgentTokenSecretName(team string) string    { return "varroa-agent-" + team + "-token" }
 func tenantCloudCredentialID(team string) string       { return "varroa-cloud-" + team }
 
+// tenantAgentServiceName returns the agent Service of one slot of a tenant.
+// A tenant holds one slot for each active member, and a cell holds at most
+// one slot of a tenant. This release writes slot 0 only.
+func tenantAgentServiceName(team string, slot int32) string {
+	return fmt.Sprintf("varroa-agents-%s-%d", team, slot)
+}
+
+// tenantServiceWriter is implemented by ResourceClient backends that can
+// write a tenant's agent Service. It is checked with a type assertion rather
+// than added to the ResourceClient interface: that interface has
+// explicit-method fakes outside this package, and every one would need a new
+// stub the moment this package widened it.
+type tenantServiceWriter interface {
+	CreateOrUpdateTenantService(ctx context.Context, name, namespace, selectorApp string) error
+}
+
 // syncPipelinesChildren applies or deletes the objects task 9.2 and task
-// 6.9 name: the team-<team>-pipelines JenkinsRoleBinding while the tenant
-// is placed, and (during teardown) the tenant agent ServiceAccount and its
-// token Secret. Re-run every tick; every branch is idempotent.
-func (r *TeamReconciler) syncPipelinesChildren(ctx context.Context, team *v1alpha1.Team, status *v1alpha1.TeamStatus, subjects []v1alpha1.SubjectRef, role, agentNamespace string) {
+// 6.9 name: the team-<team>-pipelines JenkinsRoleBinding and the slot 0
+// agent Service while the tenant is placed, and (during teardown) the
+// tenant agent ServiceAccount and its token Secret. Re-run
+// every tick; every branch is idempotent. It also drains the list of agent
+// Services the tenant still owns, on both branches, and a teardown adds its
+// own cell namespace to that list first. priorCellNamespace is the
+// placement's cell namespace read before the placement pass mutated the
+// status, because teardown's final tick clears the placement in the same
+// call that needs the value. This function answers an error for a failed
+// drain and for a failed agent Service write, which the caller reports on
+// the Placed condition.
+func (r *TeamReconciler) syncPipelinesChildren(ctx context.Context, team *v1alpha1.Team, status *v1alpha1.TeamStatus, subjects []v1alpha1.SubjectRef, role, agentNamespace, priorCellNamespace string, cellsByKey map[string]*v1alpha1.Controller) error {
 	tearingDown := team.Spec.Pipelines == nil || (team.DeletionTimestamp != nil && !team.DeletionTimestamp.IsZero())
 	bindingName := pipelinesRoleBindingName(team.Name)
+	var serviceErr error
+
+	// A teardown owes the Service of the namespace the tenant is leaving,
+	// the same way a move owes the one it left. Both debts go on the one
+	// list, so the finalizer release waits for every delete and a refused
+	// one is retried rather than warned about.
+	if tearingDown {
+		namespace := priorCellNamespace
+		if status.Placement != nil {
+			namespace = status.Placement.CellNamespace
+		}
+		if namespace != "" {
+			setStaleAgentServiceNamespace(status, namespace)
+		}
+	}
+
+	// The drain runs on both branches, and before the slot 0 upsert: the
+	// Service of the namespace a move left carries the same name as the one
+	// this tick writes, so a failed drain must stop the upsert rather than
+	// race it.
+	if err := r.drainStaleAgentServices(ctx, team.Name, status); err != nil {
+		r.logger.Error("failed to delete an agent Service the tenant still owns",
+			"team", team.Name, "error", err)
+		return err
+	}
 
 	if !tearingDown && status.Placement != nil {
 		want := &v1alpha1.JenkinsRoleBinding{
@@ -1027,6 +1134,7 @@ func (r *TeamReconciler) syncPipelinesChildren(ctx context.Context, team *v1alph
 		if agentNamespace != "" {
 			r.ensureTenantAgentIdentity(ctx, team.Name, agentNamespace)
 		}
+		serviceErr = r.upsertTenantAgentService(ctx, team.Name, status.Placement, cellsByKey, tenantSlotZero)
 	} else {
 		if err := crdstore.Delete[v1alpha1.JenkinsRoleBinding](ctx, r.store, bindingName, ""); err != nil {
 			r.logger.Warn("failed to delete pipelines JenkinsRoleBinding", "team", team.Name, "error", err)
@@ -1049,6 +1157,73 @@ func (r *TeamReconciler) syncPipelinesChildren(ctx context.Context, team *v1alph
 			r.logger.Warn("failed to delete tenant agent RoleBinding", "team", team.Name, "error", err)
 		}
 	}
+	return serviceErr
+}
+
+// tenantSlotZero is the one slot this release writes. A later change loops
+// over the slots a tenant holds, through this same code path.
+const tenantSlotZero = int32(0)
+
+// setStaleAgentServiceNamespace records one more namespace the next tick
+// must clean. A namespace the list already names is not appended again, so a
+// move back to a namespace still owing a delete adds no duplicate.
+func setStaleAgentServiceNamespace(status *v1alpha1.TeamStatus, namespace string) {
+	if slices.Contains(status.StaleAgentServiceNamespaces, namespace) {
+		return
+	}
+	status.StaleAgentServiceNamespaces = append(status.StaleAgentServiceNamespaces, namespace)
+}
+
+// drainStaleAgentServices deletes the tenant's slot 0 agent Service from
+// every namespace the list names, and keeps only the entries that failed.
+// DeleteResource answers success for an absent Service, so a repeat costs
+// one call. The pass walks the whole list, so one refused namespace never
+// holds the others. It reports the first failure, and a later tick deletes
+// again.
+func (r *TeamReconciler) drainStaleAgentServices(ctx context.Context, team string, status *v1alpha1.TeamStatus) error {
+	if len(status.StaleAgentServiceNamespaces) == 0 {
+		return nil
+	}
+	name := tenantAgentServiceName(team, tenantSlotZero)
+	var kept []string
+	var first error
+	for _, namespace := range status.StaleAgentServiceNamespaces {
+		if err := r.client.DeleteResource(ctx, "Service", name, namespace); err != nil {
+			kept = append(kept, namespace)
+			if first == nil {
+				first = fmt.Errorf("delete the agent service %q in namespace %q: %w", name, namespace, err)
+			}
+			continue
+		}
+	}
+	status.StaleAgentServiceNamespaces = kept
+	return first
+}
+
+// upsertTenantAgentService converges one slot's agent Service. The Service
+// lives in the slot holder's namespace, and its selector names that
+// holder's pod label, so an agent pod dials an endpoint that follows the
+// tenant's placement rather than a dead Jenkins JVM.
+func (r *TeamReconciler) upsertTenantAgentService(ctx context.Context, team string, placement *v1alpha1.TeamPlacementStatus, cellsByKey map[string]*v1alpha1.Controller, slot int32) error {
+	if placement == nil {
+		return nil
+	}
+	writer, ok := r.client.(tenantServiceWriter)
+	if !ok {
+		return nil
+	}
+	holder := cellsByKey[teamCellKey(placement.CellNamespace, placement.Cell)]
+	if holder == nil {
+		// The pass holds no object for the cell, so it cannot derive the pod
+		// label. The next tick reads the cell again.
+		return nil
+	}
+	name := tenantAgentServiceName(team, slot)
+	if err := writer.CreateOrUpdateTenantService(ctx, name, placement.CellNamespace, controllerPrefix(holder)); err != nil {
+		r.logger.Error("failed to write the tenant agent Service", "team", team, "service", name, "error", err)
+		return fmt.Errorf("write the agent service %q: %w", name, err)
+	}
+	return nil
 }
 
 // ensureTenantAgentIdentity creates the per-tenant agent identity in

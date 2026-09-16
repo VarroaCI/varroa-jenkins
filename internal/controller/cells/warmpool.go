@@ -68,6 +68,14 @@ type SecretReader interface {
 	GetSecret(ctx context.Context, name, namespace string) (map[string][]byte, error)
 }
 
+// SecretWriter writes a Secret's labels and some of its keys. The pool mint
+// step uses it to write the pool's own confidential store without importing
+// internal/controller. The write adds or replaces each key of data and
+// leaves every other key of the live Secret unchanged.
+type SecretWriter interface {
+	CreateOrUpdateSecretWithLabels(ctx context.Context, name, namespace string, labels map[string]string, data map[string][]byte) error
+}
+
 // PluginPinReader reports whether the plugin set a controller running a
 // given version would resolve pins an artifact id. The fill gate uses it to
 // check the artifact-manager-s3 pin without resolving a plugin set itself.
@@ -92,6 +100,10 @@ type WarmPoolReconciler struct {
 	// Plugins checks the artifact-manager-s3 pin before a fill. A nil
 	// value refuses every fill that needs one.
 	Plugins PluginPinReader
+	// SecretWriter writes the pool's own confidential store. A nil value
+	// leaves every pool without a store, so every pool reports
+	// SecretsMissing.
+	SecretWriter SecretWriter
 }
 
 func (r *WarmPoolReconciler) logger() *slog.Logger {
@@ -271,6 +283,11 @@ func (r *WarmPoolReconciler) reconcilePool(ctx context.Context, pool *v1alpha1.C
 	}
 	version := resolvedProfileVersion(versionProfile)
 
+	// Step 1a: the pool's own confidential store. The mint cannot live
+	// inside fillGateReason, which runs only when the pass wants a cell: a
+	// pool at its target would then never mint.
+	secretsReady := r.ensurePoolSecrets(ctx, pool)
+
 	if pool.Name == pool.Spec.ProfileRef {
 		r.adoptUnlabelledCells(ctx, pool)
 	}
@@ -291,7 +308,7 @@ func (r *WarmPoolReconciler) reconcilePool(ctx context.Context, pool *v1alpha1.C
 	gateReason := ""
 	switch {
 	case len(free) < desiredFree:
-		gateReason = r.fillGateReason(ctx, pool, version)
+		gateReason = r.fillGateReason(ctx, pool, version, secretsReady)
 		if gateReason == "" {
 			r.fill(ctx, pool, versionProfile, names, len(owned), desiredFree-len(free))
 		}
@@ -312,6 +329,10 @@ func (r *WarmPoolReconciler) reconcilePool(ctx context.Context, pool *v1alpha1.C
 	switch {
 	case gateReason != "":
 		reason = gateReason
+	case !secretsReady:
+		// A pass that wanted no fill never reaches fillGateReason, and the
+		// store is a property of the pool rather than of a fill.
+		reason = v1alpha1.CellPoolReasonSecretsMissing
 	case pool.Spec.MaxCells > 0 && int32(len(after)) >= pool.Spec.MaxCells:
 		reason = v1alpha1.CellPoolReasonCellCapReached
 	}
@@ -322,7 +343,7 @@ func (r *WarmPoolReconciler) reconcilePool(ctx context.Context, pool *v1alpha1.C
 // pool can become ready. It returns the first CellPoolReason that applies,
 // or "" when every test passes. Call this only when the pass wants to
 // create at least one cell.
-func (r *WarmPoolReconciler) fillGateReason(ctx context.Context, pool *v1alpha1.CellPool, version string) string {
+func (r *WarmPoolReconciler) fillGateReason(ctx context.Context, pool *v1alpha1.CellPool, version string, secretsReady bool) string {
 	if r.Config.ClaimGate != "1" {
 		return v1alpha1.CellPoolReasonRecordStoreUnsupported
 	}
@@ -349,7 +370,81 @@ func (r *WarmPoolReconciler) fillGateReason(ctx context.Context, pool *v1alpha1.
 	if !r.Plugins.VersionPinsPlugin(ctx, version, "artifact-manager-s3") {
 		return v1alpha1.CellPoolReasonArtifactPluginMissing
 	}
+	if !secretsReady {
+		return v1alpha1.CellPoolReasonSecretsMissing
+	}
 	return ""
+}
+
+// ensurePoolSecrets runs step 1a of the pool pass: it reads the pool's own
+// confidential store and acts on the answer. It mints all four keys for an
+// absent Secret and for a Secret with empty data. It adds only the missing
+// keys to a repairable Secret. It writes nothing for a Secret that holds
+// another key and no master.key, because a new master.key would invalidate
+// the keys the operator cannot read. It answers whether the pool now holds a
+// usable store.
+func (r *WarmPoolReconciler) ensurePoolSecrets(ctx context.Context, pool *v1alpha1.CellPool) bool {
+	log := r.logger()
+	name := PoolSecretName(pool.Name)
+	if r.Secrets == nil || r.SecretWriter == nil {
+		log.Warn("cell pool: no secret seam, the pool gets no confidential store", "pool", pool.Name, "secret", name)
+		return false
+	}
+	data, err := r.Secrets.GetSecret(ctx, name, r.OperatorNamespace)
+	if err != nil && !apierrors.IsNotFound(err) {
+		log.Warn("cell pool: read the pool secret failed", "pool", pool.Name, "secret", name, "error", err)
+		return false
+	}
+	if err != nil || len(data) == 0 {
+		minted, mintErr := MintStore()
+		if mintErr != nil {
+			log.Warn("cell pool: mint the pool secret failed", "pool", pool.Name, "secret", name, "error", mintErr)
+			return false
+		}
+		return r.writePoolSecrets(ctx, pool, name, minted)
+	}
+	added, repairErr := RepairStore(data)
+	if repairErr != nil {
+		log.Warn("cell pool: the pool secret is not repairable", "pool", pool.Name, "secret", name, "error", repairErr)
+		return false
+	}
+	// A key that does not decrypt under the store's own master.key is a
+	// fault, not a gap: the operator cannot replace it without invalidating
+	// every value already encrypted under it, and Jenkins would give each
+	// cell its own fresh key instead. The pass therefore writes nothing, the
+	// same recovery as a store with no master.key.
+	if verifyErr := VerifyStore(mergeStore(data, added)); verifyErr != nil {
+		log.Warn("cell pool: the pool secret does not verify", "pool", pool.Name, "secret", name, "error", verifyErr)
+		return false
+	}
+	if len(added) == 0 {
+		return true
+	}
+	return r.writePoolSecrets(ctx, pool, name, added)
+}
+
+// mergeStore returns the store a write would leave behind: the live keys
+// plus the keys a repair adds.
+func mergeStore(existing, added map[string][]byte) map[string][]byte {
+	merged := make(map[string][]byte, len(existing)+len(added))
+	for key, value := range existing {
+		merged[key] = value
+	}
+	for key, value := range added {
+		merged[key] = value
+	}
+	return merged
+}
+
+// writePoolSecrets writes the given keys onto the pool's confidential store
+// and stamps the pool label. It answers whether the write succeeded.
+func (r *WarmPoolReconciler) writePoolSecrets(ctx context.Context, pool *v1alpha1.CellPool, name string, data map[string][]byte) bool {
+	labels := map[string]string{LabelCellPool: pool.Name}
+	if err := r.SecretWriter.CreateOrUpdateSecretWithLabels(ctx, name, r.OperatorNamespace, labels, data); err != nil {
+		r.logger().Warn("cell pool: write the pool secret failed", "pool", pool.Name, "secret", name, "error", err)
+		return false
+	}
+	return true
 }
 
 // poolCapacity answers the pool's own maxTenantsPerCell, falling back to the
@@ -785,6 +880,9 @@ func (r *WarmPoolReconciler) writeStatus(ctx context.Context, pool *v1alpha1.Cel
 	case v1alpha1.CellPoolReasonArtifactPluginMissing:
 		condStatus = metav1.ConditionFalse
 		message = fmt.Sprintf("the plugin set for version %q does not pin artifact-manager-s3", version)
+	case v1alpha1.CellPoolReasonSecretsMissing:
+		condStatus = metav1.ConditionFalse
+		message = fmt.Sprintf("the pool secret %q is not usable", PoolSecretName(pool.Name))
 	}
 	status.Conditions = []metav1.Condition{{
 		Type:               v1alpha1.CellPoolConditionPoolReady,

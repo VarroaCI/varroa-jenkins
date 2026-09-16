@@ -119,3 +119,50 @@ func TestInjectTenantClouds_NoTenantsReturnsInputUnchanged(t *testing.T) {
 		t.Errorf("expected the input returned unchanged, got %q", out)
 	}
 }
+
+// TestInjectTenantClouds_AgentServiceURL asserts that the injector renders
+// each tenant's own agent Service URL and keeps webSocket true. Two tenants
+// on one cell therefore get two different jenkinsUrl values.
+func TestInjectTenantClouds_AgentServiceURL(t *testing.T) {
+	out, err := InjectTenantClouds("", []TenantCloud{
+		{
+			Name:       "payments",
+			Namespace:  "payments-ns",
+			JenkinsURL: "http://varroa-agents-payments-0.varroa-system.svc.cluster.local:8080",
+			WebSocket:  true,
+		},
+		{
+			Name:       "search",
+			Namespace:  "search-ns",
+			JenkinsURL: "http://varroa-agents-search-0.varroa-system.svc.cluster.local:8080",
+			WebSocket:  true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("InjectTenantClouds: %v", err)
+	}
+
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	jenkinsSection, _ := doc["jenkins"].(map[string]any)
+	clouds, _ := jenkinsSection["clouds"].([]any)
+	if len(clouds) != 2 {
+		t.Fatalf("expected two clouds, got %d", len(clouds))
+	}
+	want := map[string]string{
+		"payments": "http://varroa-agents-payments-0.varroa-system.svc.cluster.local:8080",
+		"search":   "http://varroa-agents-search-0.varroa-system.svc.cluster.local:8080",
+	}
+	for _, entry := range clouds {
+		k8s := entry.(map[string]any)["kubernetes"].(map[string]any)
+		name, _ := k8s["name"].(string)
+		if got := k8s["jenkinsUrl"]; got != want[name] {
+			t.Errorf("%s jenkinsUrl = %v, want %v", name, got, want[name])
+		}
+		if k8s["webSocket"] != true {
+			t.Errorf("%s webSocket = %v, want true", name, k8s["webSocket"])
+		}
+	}
+}

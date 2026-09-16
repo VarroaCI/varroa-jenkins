@@ -64,7 +64,7 @@ func TestMain_WarmPoolReconcilerCarriesGateWiring(t *testing.T) {
 		t.Fatal("could not find the mgr.Add( that follows the cells.WarmPoolReconciler literal")
 	}
 	block := text[start : start+end]
-	for _, field := range []string{"ClaimGate:", "BlobTierS3:", "ArtifactSecretBase:", "Secrets:", "Plugins:"} {
+	for _, field := range []string{"ClaimGate:", "BlobTierS3:", "ArtifactSecretBase:", "Secrets:", "Plugins:", "SecretWriter:"} {
 		if !strings.Contains(block, field) {
 			t.Errorf("the cells.WarmPoolReconciler literal is missing %s:\n%s", field, block)
 		}

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -106,7 +107,18 @@ const artifactSecretHashAnnotation = "varroa.dev/artifact-secret-hash"
 // the work, and the backoff keeps a genuinely unreachable upstream from spinning. A real
 // failure still exits non-zero after the last attempt, so a broken plugin set surfaces
 // as a failed init container exactly as before, just later.
+// The script also seeds a pool cell's confidential store. A Secret volume
+// presents each key as a symlink into a ..data directory, so the copy needs
+// cp -L. DefaultConfidentialStore chmods the directory only when it creates
+// it, and never chmods a key file, so this container owns both modes. The
+// guard keeps the script correct for a pod that carries no such mount.
 const pluginsInitScript = `set -e
+if [ -d /run/secrets/varroa-cell-secrets ]; then
+  mkdir -p /var/jenkins_home/secrets
+  chmod 700 /var/jenkins_home/secrets
+  cp -L /run/secrets/varroa-cell-secrets/* /var/jenkins_home/secrets/
+  chmod 600 /var/jenkins_home/secrets/*
+fi
 attempt=1
 max_attempts=5
 while true; do
@@ -623,6 +635,59 @@ func (c *ClientsetClient) CreateService(ctx context.Context, name, namespace str
 	return nil
 }
 
+// CreateOrUpdateTenantService creates or converges a pipelines tenant's
+// agent Service. The Service carries the same two ports as a cell's own
+// Service, and the selector names the pod label of the slot holder.
+// CreateService cannot serve this call: it derives the selector by trimming
+// a "-svc" suffix off the name, and an agent Service name carries no such
+// suffix. The write is skipped when the live object already matches, so a
+// Team tick never bumps resourceVersion on a converged Service.
+func (c *ClientsetClient) CreateOrUpdateTenantService(ctx context.Context, name, namespace, selectorApp string) error {
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec: corev1.ServiceSpec{
+			Type: corev1.ServiceTypeClusterIP,
+			Ports: []corev1.ServicePort{{
+				Name:       "http",
+				Port:       8080,
+				Protocol:   corev1.ProtocolTCP,
+				TargetPort: intstr.FromInt(8080),
+			}, {
+				Name:       "agent",
+				Port:       50000,
+				Protocol:   corev1.ProtocolTCP,
+				TargetPort: intstr.FromInt(50000),
+			}},
+			Selector: map[string]string{"app": selectorApp},
+		},
+	}
+
+	services := c.clientset.CoreV1().Services(namespace)
+	_, err := services.Create(ctx, svc, metav1.CreateOptions{})
+	if !apierrors.IsAlreadyExists(err) {
+		return err
+	}
+	existing, getErr := services.Get(ctx, name, metav1.GetOptions{})
+	if getErr != nil {
+		return fmt.Errorf("get existing tenant service for update: %w", getErr)
+	}
+	if existing.Spec.Type == svc.Spec.Type &&
+		reflect.DeepEqual(existing.Spec.Ports, svc.Spec.Ports) &&
+		reflect.DeepEqual(existing.Spec.Selector, svc.Spec.Selector) {
+		return nil
+	}
+	desired := svc.Spec
+	desired.ClusterIP = existing.Spec.ClusterIP
+	desired.ClusterIPs = existing.Spec.ClusterIPs
+	desired.IPFamilies = existing.Spec.IPFamilies
+	desired.IPFamilyPolicy = existing.Spec.IPFamilyPolicy
+	existing.Spec = desired
+	if _, err := services.Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("update tenant service: %w", err)
+	}
+	return nil
+}
+
 // CreateServiceAccount creates a ServiceAccount.
 func (c *ClientsetClient) CreateServiceAccount(ctx context.Context, name, namespace string) error {
 	sa := &corev1.ServiceAccount{
@@ -1112,6 +1177,51 @@ func (c *ClientsetClient) CreateOrUpdateSecretWithOwner(ctx context.Context, nam
 	return err
 }
 
+// CreateOrUpdateSecretWithLabels creates a Secret carrying labels and data,
+// or merges both onto the live Secret. Each key of data is added or
+// replaced, and every other key of the live Secret stays. A converged Secret
+// gets no write, so a pool tick never bumps resourceVersion on its own.
+func (c *ClientsetClient) CreateOrUpdateSecretWithLabels(ctx context.Context, name, namespace string, labels map[string]string, data map[string][]byte) error {
+	secrets := c.clientset.CoreV1().Secrets(namespace)
+	existing, getErr := secrets.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(getErr) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
+			Data:       data,
+		}
+		_, err := secrets.Create(ctx, secret, metav1.CreateOptions{})
+		return err
+	}
+	if getErr != nil {
+		return fmt.Errorf("get existing secret for labelled update: %w", getErr)
+	}
+	updated := existing.DeepCopy()
+	if updated.Data == nil {
+		updated.Data = map[string][]byte{}
+	}
+	if updated.Labels == nil {
+		updated.Labels = map[string]string{}
+	}
+	changed := false
+	for k, v := range data {
+		if !bytes.Equal(updated.Data[k], v) {
+			updated.Data[k] = v
+			changed = true
+		}
+	}
+	for k, v := range labels {
+		if updated.Labels[k] != v {
+			updated.Labels[k] = v
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	_, err := secrets.Update(ctx, updated, metav1.UpdateOptions{})
+	return err
+}
+
 // CreateSecretExclusive creates an opaque Secret with the given labels and,
 // unlike CreateSecret, surfaces an AlreadyExists error instead of treating it
 // as an idempotent no-op. API-key generation relies on this to detect prefix
@@ -1312,10 +1422,18 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 									"allowPrivilegeEscalation": false,
 									"capabilities":             map[string]interface{}{"drop": []interface{}{"ALL"}},
 								},
-								"volumeMounts": []map[string]interface{}{
-									{"name": "jenkins-home", "mountPath": "/var/jenkins_home"},
-									{"name": "plugins", "mountPath": "/var/run/varroa/plugins"},
-								},
+								"volumeMounts": func() []map[string]interface{} {
+									mounts := []map[string]interface{}{
+										{"name": "jenkins-home", "mountPath": "/var/jenkins_home"},
+										{"name": "plugins", "mountPath": "/var/run/varroa/plugins"},
+									}
+									if spec.CellSecretsName != "" {
+										mounts = append(mounts, map[string]interface{}{
+											"name": cellSecretsVolumeName, "mountPath": cellSecretsMountPath, "readOnly": true,
+										})
+									}
+									return mounts
+								}(),
 							}
 							if spec.PluginUpdateCenterURL != "" || spec.PluginUpdateCenterDownloadURL != "" {
 								var env []map[string]interface{}
@@ -1591,6 +1709,14 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 									"name": "varroa-artifacts",
 									"secret": map[string]interface{}{
 										"secretName": spec.ArtifactSecretName,
+									},
+								})
+							}
+							if spec.CellSecretsName != "" {
+								vols = append(vols, map[string]interface{}{
+									"name": cellSecretsVolumeName,
+									"secret": map[string]interface{}{
+										"secretName": spec.CellSecretsName,
 									},
 								})
 							}

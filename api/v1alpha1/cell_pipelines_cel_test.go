@@ -1,6 +1,11 @@
 package v1alpha1
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
 
 // The functions below mirror the literal XValidation rule text on
 // ControllerSpec.Cell, TeamSpec, and CellPoolSpec in types.go. Keep each function
@@ -60,6 +65,21 @@ func evalComposedBundleRefNamespaceManaged(spec *TeamSpec) bool {
 		return true
 	}
 	return contains(spec.Namespaces, spec.Pipelines.ComposedBundleRef.Namespace)
+}
+
+// evalPipelinesTenantNameFitsService mirrors:
+//
+//	!has(self.spec) || !has(self.spec.pipelines) ||
+//	  (size(self.metadata.name) <= 47 && !self.metadata.name.contains('.'))
+//
+// The name of a pipelines tenant reaches a Service name as
+// "varroa-agents-<team>-<slot>". A Service name is an RFC 1035 label: at most
+// 63 characters and no dot. The prefix and the slot suffix leave 47.
+func evalPipelinesTenantNameFitsService(team *Team) bool {
+	if team.Spec.Pipelines == nil {
+		return true
+	}
+	return len(team.Name) <= 47 && !strings.Contains(team.Name, ".")
 }
 
 func contains(list []string, want string) bool {
@@ -320,6 +340,66 @@ func TestCellPoolProfileRefImmutableCEL(t *testing.T) {
 			got := evalCellPoolProfileRefImmutable(tt.oldSelf, tt.self)
 			if got != tt.wantAccepted {
 				t.Errorf("evalCellPoolProfileRefImmutable() = %v, want %v", got, tt.wantAccepted)
+			}
+		})
+	}
+}
+
+// TestTeamPipelinesNameFitsServiceCEL covers the root-type rule that keeps a
+// pipelines tenant's name usable as an agent Service name.
+func TestTeamPipelinesNameFitsServiceCEL(t *testing.T) {
+	pipelines := &TeamPipelinesSpec{Profile: "lts", AgentNamespace: "payments"}
+	tests := []struct {
+		name         string
+		team         *Team
+		wantAccepted bool
+	}{
+		{
+			name: "short name accepted",
+			team: &Team{
+				ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+				Spec:       TeamSpec{Namespaces: []string{"payments"}, Pipelines: pipelines},
+			},
+			wantAccepted: true,
+		},
+		{
+			name: "name of exactly 47 characters accepted",
+			team: &Team{
+				ObjectMeta: metav1.ObjectMeta{Name: strings.Repeat("a", 47)},
+				Spec:       TeamSpec{Namespaces: []string{"payments"}, Pipelines: pipelines},
+			},
+			wantAccepted: true,
+		},
+		{
+			name: "name of 48 characters refused",
+			team: &Team{
+				ObjectMeta: metav1.ObjectMeta{Name: strings.Repeat("a", 48)},
+				Spec:       TeamSpec{Namespaces: []string{"payments"}, Pipelines: pipelines},
+			},
+			wantAccepted: false,
+		},
+		{
+			name: "name with a dot refused",
+			team: &Team{
+				ObjectMeta: metav1.ObjectMeta{Name: "payments.core"},
+				Spec:       TeamSpec{Namespaces: []string{"payments"}, Pipelines: pipelines},
+			},
+			wantAccepted: false,
+		},
+		{
+			name: "long name accepted without pipelines",
+			team: &Team{
+				ObjectMeta: metav1.ObjectMeta{Name: strings.Repeat("a", 60) + ".core"},
+				Spec:       TeamSpec{Namespaces: []string{"payments"}},
+			},
+			wantAccepted: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := evalPipelinesTenantNameFitsService(tt.team)
+			if got != tt.wantAccepted {
+				t.Errorf("evalPipelinesTenantNameFitsService() = %v, want %v", got, tt.wantAccepted)
 			}
 		})
 	}

@@ -431,8 +431,27 @@ spec:
                     format: int32
                     type: integer
                 type: object
+              staleAgentServiceNamespaces:
+                description: |-
+                  StaleAgentServiceNamespaces names every namespace a move left an
+                  agent Service behind in. A move that crosses a namespace appends one,
+                  and the tick that deletes that Service removes it again. The list
+                  lives here, beside Placement, rather than on Pipelines: teardown
+                  clears Pipelines in the same call that still owes these deletes.
+
+                  The list is durable because a move is not reversible. The recorder
+                  already holds the new generation once the placement pass returns, so a
+                  failed cleanup must never roll the placement back.
+                items:
+                  type: string
+                type: array
             type: object
         type: object
+        x-kubernetes-validations:
+        - message: a pipelines tenant name is at most 47 characters and contains no
+            dot, because it names the agent Service
+          rule: '!has(self.spec) || !has(self.spec.pipelines) || (size(self.metadata.name)
+            <= 47 && !self.metadata.name.contains(''.''))'
     served: true
     storage: true
     subresources:

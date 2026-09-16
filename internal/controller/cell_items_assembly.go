@@ -36,9 +36,11 @@ type assembleCellState struct {
 // assembleCellContent runs the four-step tenant items pipeline (design D7)
 // plus tenant credential, folder, and cloud assembly (D8, D10, D11) for a
 // cell. teams is task 8.11a's placed-tenant listing, read once per tick.
-// controllerEndpoint is the cell's own resolved varroa_controller_endpoint,
-// used directly as every tenant cloud's jenkinsUrl.
+// controllerEndpoint is the cell's own resolved varroa_controller_endpoint.
+// A tenant cloud's jenkinsUrl no longer reads it: each cloud names the
+// tenant's own agent Service instead.
 func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Controller, teams []*v1alpha1.Team, controllerEndpoint string) (assembleCellState, error) {
+	_ = controllerEndpoint
 	var (
 		manifests []*items.Manifest
 		clouds    []bundle.TenantCloud
@@ -91,7 +93,10 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 			}
 		}
 
-		clouds = append(clouds, tenantCloudFor(team.Name, agentNamespace, controllerEndpoint))
+		// A cell holds slot 0 of every tenant it hosts until a later change
+		// adds further slots.
+		agentEndpoint := tenantAgentEndpoint(team.Name, cr.Namespace, tenantSlotZero)
+		clouds = append(clouds, tenantCloudFor(team.Name, agentNamespace, agentEndpoint))
 		if cred := r.tenantCloudCredentialFor(ctx, team.Name, agentNamespace); cred != nil {
 			creds = append(creds, *cred)
 		}

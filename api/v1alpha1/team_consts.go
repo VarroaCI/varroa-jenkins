@@ -58,6 +58,10 @@ const (
 	TeamReasonBlobTierUnsupported     = "BlobTierUnsupported"
 	TeamReasonCellNotReady            = "CellNotReady"
 	TeamReasonTenantTeardownPending   = "TenantTeardownPending"
+	// TeamReasonAgentServiceFailed reports a tenant whose slot 0 agent
+	// Service could not be written this tick. It leaves the placement
+	// unchanged.
+	TeamReasonAgentServiceFailed = "AgentServiceFailed"
 )
 
 // TenantWarnings reasons.
@@ -101,6 +105,10 @@ const (
 	CellPoolReasonBlobTierUnsupported    = "BlobTierUnsupported"
 	CellPoolReasonArtifactSecretMissing  = "ArtifactSecretMissing"
 	CellPoolReasonArtifactPluginMissing  = "ArtifactPluginMissing"
+	// CellPoolReasonSecretsMissing reports a pool with no usable
+	// confidential store. It applies whether or not the pass wanted a fill,
+	// because the store is a property of the pool.
+	CellPoolReasonSecretsMissing = "SecretsMissing"
 )
 
 // CellPoolFinalizerDrain holds a deleted pool until its free cells are gone.

@@ -184,6 +184,10 @@ type stsBuildInputs struct {
 	// desired-state hash even though the fragment's ${readFile:...}
 	// reference never changes.
 	ArtifactSecretHash string
+	// CellSecretsName is the pool confidential store
+	// ("varroa-cell-secrets-<pool>"), or "" when the controller is not a
+	// pool cell. CreateStatefulSet mounts it only when non-empty.
+	CellSecretsName string
 }
 
 // buildStatefulSetSpec derives the desired StatefulSet from the CR and its
@@ -317,6 +321,7 @@ func (r *Reconciler) buildStatefulSetSpec(cr *v1alpha1.Controller, class *v1alph
 		ClaimTimeoutMS:            r.claimTimeoutMS,
 		ArtifactSecretName:        in.ArtifactSecretName,
 		ArtifactSecretHash:        in.ArtifactSecretHash,
+		CellSecretsName:           in.CellSecretsName,
 		Cell:                      v1alpha1.IsCell(cr),
 		Headless:                  v1alpha1.IsHeadless(cr),
 	}

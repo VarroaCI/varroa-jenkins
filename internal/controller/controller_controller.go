@@ -802,6 +802,13 @@ type StatefulSetSpec struct {
 	// fragment's ${readFile:...} reference never changes.
 	ArtifactSecretHash string
 
+	// CellSecretsName is the pool confidential store
+	// ("varroa-cell-secrets-<pool>") a pool cell mounts as the
+	// varroa-cell-secrets volume. Empty means the controller is not a pool
+	// cell: no volume and no mount are added. The builder stamps no content
+	// hash for it, because the operator never rotates the Secret.
+	CellSecretsName string
+
 	// ClaimTimeoutMS is the operator's own VARROA_CLAIM_TIMEOUT_MS value, in
 	// milliseconds. Zero means unset: the builder stamps neither
 	// VARROA_CLAIM_TIMEOUT_MS on the Jenkins container nor
@@ -2972,6 +2979,15 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 		return fmt.Errorf("resolve artifact secret: %w", artifactSecretErr)
 	}
 
+	// Resolve the pool confidential store a pool cell mounts (design D5).
+	// Every fault blocks the reconcile: the operator never builds a pool
+	// cell on a private store.
+	cellSecretsName, cellSecretsErr := r.resolveCellSecretsName(ctx, cr)
+	if cellSecretsErr != nil {
+		r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedCellSecretsFailed, cellSecretsErr.Error())
+		return fmt.Errorf("resolve cell secrets: %w", cellSecretsErr)
+	}
+
 	stsSpec := r.buildStatefulSetSpec(cr, class, defaults, profile, stsBuildInputs{
 		Name:               pre,
 		BootstrapSecret:    secretName,
@@ -2983,6 +2999,7 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 		Policy:             pol,
 		ArtifactSecretName: artifactSecretName,
 		ArtifactSecretHash: artifactSecretHash,
+		CellSecretsName:    cellSecretsName,
 	})
 	// Resolve plugin update center URLs with 3-tier precedence.
 	// Fetch the UpdateCenter CR best-effort for UC readiness gating.

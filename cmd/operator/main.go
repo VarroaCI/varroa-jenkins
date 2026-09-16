@@ -987,9 +987,10 @@ func main() {
 			BlobTierS3:         controller.BlobstoreIsS3(blobstoreURL),
 			ArtifactSecretBase: artifactSecretBase,
 		},
-		Logger:  logger,
-		Secrets: clientsetClient,
-		Plugins: reconciler,
+		Logger:       logger,
+		Secrets:      clientsetClient,
+		Plugins:      reconciler,
+		SecretWriter: clientsetClient,
 	}
 	if err := mgr.Add(&tickerRunnable{
 		name:     "warm-pool",

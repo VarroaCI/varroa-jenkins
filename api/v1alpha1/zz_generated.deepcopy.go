@@ -916,6 +916,11 @@ func (in *TeamStatus) DeepCopyInto(out *TeamStatus) {
 		*out = new(TeamRehydrationStatus)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.StaleAgentServiceNamespaces != nil {
+		in, out := &in.StaleAgentServiceNamespaces, &out.StaleAgentServiceNamespaces
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 }
 
 // DeepCopyInto for TeamRehydrationStatus.

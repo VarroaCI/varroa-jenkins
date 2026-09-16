@@ -999,6 +999,9 @@ const (
 	ReasonReconcileBlockedIngressCreateFailed = "IngressCreateFailed"
 	// ReasonReconcileBlockedArtifactSecretFailed is set when the artifact Secret lookup or projection fails.
 	ReasonReconcileBlockedArtifactSecretFailed = "ArtifactSecretFailed"
+	// ReasonReconcileBlockedCellSecretsFailed is set when a pool cell's own
+	// pool Secret is absent, empty, incomplete, or unreadable.
+	ReasonReconcileBlockedCellSecretsFailed = "CellSecretsFailed"
 	// ReasonReconcileBlockedMiteConnectTimeout is set when the mite connection times out.
 	ReasonReconcileBlockedMiteConnectTimeout = "MiteConnectTimeout"
 	// ReasonReconcileBlockedWaveGateCheckFailed is set when the wave-gate check fails.
@@ -1332,6 +1335,7 @@ type GroupList struct {
 // +kubebuilder:printcolumn:name="NAMESPACES",type="string",JSONPath=".spec.namespaces"
 // +kubebuilder:printcolumn:name="ROLE",type="string",JSONPath=".spec.roleRef"
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:validation:XValidation:rule="!has(self.spec) || !has(self.spec.pipelines) || (size(self.metadata.name) <= 47 && !self.metadata.name.contains('.'))",message="a pipelines tenant name is at most 47 characters and contains no dot, because it names the agent Service"
 
 // Team is a cluster-scoped group of users with namespace-scoped role bindings.
 // The operator composes it into a Group + VarroaRoleBinding.
@@ -1508,6 +1512,18 @@ type TeamStatus struct {
 	// writes Placement.
 	// +optional
 	Rehydration *TeamRehydrationStatus `json:"rehydration,omitempty"`
+
+	// StaleAgentServiceNamespaces names every namespace a move left an
+	// agent Service behind in. A move that crosses a namespace appends one,
+	// and the tick that deletes that Service removes it again. The list
+	// lives here, beside Placement, rather than on Pipelines: teardown
+	// clears Pipelines in the same call that still owes these deletes.
+	//
+	// The list is durable because a move is not reversible. The recorder
+	// already holds the new generation once the placement pass returns, so a
+	// failed cleanup must never roll the placement back.
+	// +optional
+	StaleAgentServiceNamespaces []string `json:"staleAgentServiceNamespaces,omitempty"`
 }
 
 // TeamRehydrationStatus reports a pipelines tenant's build-record

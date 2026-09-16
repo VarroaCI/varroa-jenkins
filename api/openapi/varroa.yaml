@@ -4176,7 +4176,7 @@ components:
       additionalProperties: false
       description: Status condition for a CellPool. Type PoolReady, with exactly the
         reasons Ready, CellCapReached, ProfileMissing, RecordStoreUnsupported, BlobTierUnsupported,
-        ArtifactSecretMissing, and ArtifactPluginMissing.
+        ArtifactSecretMissing, ArtifactPluginMissing, and SecretsMissing.
       properties:
         lastTransitionTime:
           description: ISO 8601 last transition time.

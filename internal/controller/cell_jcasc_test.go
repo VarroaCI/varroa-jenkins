@@ -131,7 +131,7 @@ func TestApplyCellContent_TenantCloudRendering(t *testing.T) {
 	wantScalars := map[string]any{
 		"name":            "payments",
 		"namespace":       "payments-agents",
-		"jenkinsUrl":      endpoint,
+		"jenkinsUrl":      "http://varroa-agents-payments-0." + cr.Namespace + ".svc.cluster.local:8080",
 		"usageRestricted": true,
 		"credentialsId":   "varroa-cloud-payments",
 	}

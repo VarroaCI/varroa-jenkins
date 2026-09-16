@@ -476,9 +476,11 @@ sections describe.
   (`CellStatusJSON`) carries neither this key nor `rehydration`.
 - **`ConditionReconcileBlocked`** (C3, `markReconcileBlocked` helper near
   `persistStatusDiagnostics`) is the standing pattern for surfacing a reconcile pass
-  that hit an unresolved error: sets the condition `True` + `Reason` (one of 19
+  that hit an unresolved error: sets the condition `True` + `Reason` (one of 20
   site-specific reasons in `api/v1alpha1/types.go`, including
-  `ArtifactSecretFailed` for a failed artifact Secret lookup or projection),
+  `ArtifactSecretFailed` for a failed artifact Secret lookup or projection, and
+  `CellSecretsFailed` for a pool cell whose pool Secret is absent, empty,
+  incomplete, or unreadable),
   stamps
   `LastReconcileError`/`LastReconcileErrorAt`, records the
   `varroa.controller.reconcile.blocked` gauge at `1`. A guarded branch in
@@ -657,7 +659,10 @@ sections describe.
     and the only writer of `CellPool.status`; it writes no `Controller`
     status, so it never races a status writer above. Each pass, per pool:
     resolve `spec.profileRef` (a missing profile sets `PoolReady=False` with
-    reason `ProfileMissing` and stops, creating and deleting nothing); adopt
+    reason `ProfileMissing` and stops, creating and deleting nothing); ensure
+    the pool's own confidential store (`ensurePoolSecrets`, the Secret
+    `varroa-cell-secrets-<pool>` in the operator namespace — a different object
+    from the pool's artifact Secret `<base>-<pool>`); adopt
     unlabelled cells of the profile **only when the pool is that profile's
     default pool** (its name equals its own `profileRef`); list cells by
     `varroa.dev/cell-pool` and keep only those whose
@@ -674,12 +679,24 @@ sections describe.
     `ArtifactSecretMissing` (a non-`NotFound` error is logged and counted the
     same); a nil `Plugins` or a false
     `Plugins.VersionPinsPlugin(ctx, version, "artifact-manager-s3")` is
-    `ArtifactPluginMissing`. A non-empty reason skips the fill only. Drain and
+    `ArtifactPluginMissing`; a `secretsReady` of false is `SecretsMissing`, the
+    last row. A non-empty reason skips the fill only. Drain and
     restamp still run, and the reason feeds the status write, where it
-    outranks `CellCapReached`. `Secrets` (`cells.SecretReader`) and `Plugins`
+    outranks `CellCapReached`. **`SecretsMissing` is the one reason a pass with
+    no fill also reports**: `fillGateReason` runs only for a wanted fill, so
+    `reconcilePool`'s own reason switch carries a second `!secretsReady` case
+    ahead of `CellCapReached`. The store is a property of the pool, not of a
+    fill. `Secrets` (`cells.SecretReader`), `SecretWriter`
+    (`cells.SecretWriter`), and `Plugins`
     (`cells.PluginPinReader`) are one-method seams, because `cells` cannot
-    import `internal/controller`. `main.go` sets them to `clientsetClient` and
-    to the `Reconciler` itself. `Reconciler.VersionPinsPlugin` resolves the
+    import `internal/controller`. `main.go` sets `Secrets` and `SecretWriter`
+    to `clientsetClient`, and `Plugins` to the `Reconciler` itself.
+    `ensurePoolSecrets` mints all four keys for an absent Secret and for one
+    with empty data, adds only the missing keys to a Secret that holds
+    `master.key`, and writes nothing for a Secret with another key and no
+    `master.key`. `internal/controller/cells/confidentialstore.go` owns the
+    byte format; the operator never rotates the store, so a rotation is a hand
+    edit plus a hand roll of every cell of the pool. `Reconciler.VersionPinsPlugin` resolves the
     plugin set for a bare version the way a cell of that version would (exact
     profile, then LTS line, then the embedded baseline), never through the
     pool's own `profileRef` by name. `main.go` also seeds

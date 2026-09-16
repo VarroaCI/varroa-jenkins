@@ -35,16 +35,25 @@ const (
 	tenantAgentJnlpWorkingDir            = "/home/jenkins/agent"
 )
 
+// tenantAgentEndpoint returns the in-cluster URL of one slot's agent
+// Service. An agent pod outlives the Jenkins JVM that launched it, so its
+// URL names an endpoint the operator can repoint rather than the cell's own
+// Service.
+func tenantAgentEndpoint(team, namespace string, slot int32) string {
+	return fmt.Sprintf("http://%s.%s.svc.cluster.local:8080", tenantAgentServiceName(team, slot), namespace)
+}
+
 // tenantCloudFor builds the one kubernetes cloud a placed tenant gets
 // (design D11): usageRestricted, one jnlp pod template carrying the
 // tenant's ServiceAccount and the reserved node label the agent fence
 // reads. The "<team>-" template-name prefix is readability only and
-// carries no authorization meaning.
-func tenantCloudFor(team, agentNamespace, controllerEndpoint string) bundle.TenantCloud {
+// carries no authorization meaning. agentEndpoint is the tenant's own agent
+// Service, never the cell's own endpoint.
+func tenantCloudFor(team, agentNamespace, agentEndpoint string) bundle.TenantCloud {
 	return bundle.TenantCloud{
 		Name:            team,
 		Namespace:       agentNamespace,
-		JenkinsURL:      controllerEndpoint,
+		JenkinsURL:      agentEndpoint,
 		CredentialsID:   tenantCloudCredentialID(team),
 		UsageRestricted: true,
 		WebSocket:       true,

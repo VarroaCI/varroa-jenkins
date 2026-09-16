@@ -6,10 +6,11 @@ Kubernetes agents.
 
 ## What a cell is
 
-A cell is a `Controller` with `spec.cell.enabled: true`. Its Jenkins home is an `emptyDir`. A pod
-roll loses the Jenkins local state and the mite's identity. The operator mints a fresh
-bootstrap token per pod. [Rehydration](#rehydration) restores build history. `spec.cell.enabled` cannot change after creation. `spec.cell.maxTenants` can change; it
-only caps the cell's tenant count.
+A cell is a `Controller` with `spec.cell.enabled: true`. Its Jenkins home is an `emptyDir`, so a
+pod roll loses the Jenkins local state and the mite's identity. The operator mints a fresh
+bootstrap token per pod, and [rehydration](#rehydration) restores build history.
+`spec.cell.enabled` cannot change after creation. `spec.cell.maxTenants` can change, and only
+caps the cell's tenant count.
 
 A cell hosts each tenant as a top-level folder named after its `Team`. It accepts no ingress host.
 Tenant traffic reaches it through the [tenant webhook door](#the-tenant-webhook-door), or through
@@ -21,10 +22,10 @@ Six limitations apply:
 - `powerState: Stopped` on a cell destroys every in-flight build.
 - Every branch source on a cell sees each delivered webhook. Only the job whose SCM matches
   the payload reacts.
-- A rehydrated run shows no stage view, culprit list, or test detail inside Jenkins. The thin
-  record holds core fields, parameters, and changesets only.
+- A rehydrated run shows no stage view, culprit list, or test detail. The thin record holds core
+  fields, parameters, and changesets only.
 - The role-strategy admin screen reports a tenant's service identity as unknown until its
-  first build runs.
+  first build.
 - An ad-hoc job made in the Jenkins UI or script console does not survive a pod roll. Only a
   job in the tenant's [`items.yaml`](../config/items.md) bundle does.
 
@@ -89,11 +90,10 @@ spec:
 ```
 
 `pipelines.agentNamespace` must be one of `spec.namespaces`, and Varroa must manage it.
-`pipelines.profile` must name an existing `JenkinsVersionProfile`. `pipelines.composedBundleRef`
-is optional; an unset reference places the tenant with an empty folder.
-
-`pipelines.cellPool` is optional and defaults to the profile's own pool. To give a team a cell of
-its own, name a pool whose `maxTenantsPerCell` is 1.
+`pipelines.profile` must name an existing `JenkinsVersionProfile`. An unset
+`pipelines.composedBundleRef` places the tenant with an empty folder. An unset
+`pipelines.cellPool` resolves to the profile's own pool. To give a team a cell of its own, name a
+pool whose `maxTenantsPerCell` is 1.
 
 **Verify:**
 
@@ -111,9 +111,9 @@ Expect `"status":"True","reason":"TenantPlaced"`.
   cannot change controller configuration. A job the bundle no longer declares leaves the folder,
   and its next trigger fails with `JOB_NOT_FOUND`. See [Build records](build-records.md).
 - **Item role.** The operator synthesizes a role scoped to the folder's subtree, granting build,
-  read, and replay permissions, bound to the tenant's own service identity.
-- **Service identity.** Every build in the folder runs as `svc-<team>`. The plugin synthesizes
-  this identity; it holds no Jenkins user record.
+  read, and replay permissions, bound to the tenant's service identity.
+- **Service identity.** Every build in the folder runs as `svc-<team>`, an identity the plugin
+  synthesizes with no Jenkins user record.
 - **Cloud and agent namespace.** The tenant gets one restricted Kubernetes cloud pointed at
   `spec.pipelines.agentNamespace`. The folder's own permitted-clouds property names only that
   cloud. A pipeline selects it with `agent { label '<team>-default' }` or `cloud: '<team>'`;
@@ -139,7 +139,7 @@ Expect `"status":"True","reason":"TenantPlaced"`.
 
   `varroa.dev/credential-kind` is `usernamePassword` (data keys `username` and `password`) or
   `secretText` (data key `secret`). A `Secret` with a missing key, an unknown kind, or a
-  duplicate id is skipped, and the `Team`'s `TenantWarnings` condition records the skip.
+  duplicate id is skipped, and the `Team`'s `TenantWarnings` condition records it.
 - **Folder libraries.** A tenant bundle may declare `folderLibraries` on the folder item, with
   the source retriever pipeline-groovy-lib needs.
 
@@ -150,7 +150,7 @@ Four controls confine a tenant to its own folder and its own agents:
 1. **Network policy.** `networkPolicy.cellIsolation.enabled` renders one `NetworkPolicy` per cell.
    See [Isolate cells](../install/network-policies.md#isolate-cells).
 2. **Cloud restriction.** Each tenant's Kubernetes cloud is restricted to its own folder, so one
-   tenant's builds cannot provision another tenant's agents.
+   tenant cannot provision another tenant's agents.
 3. **Agent fence.** The plugin refuses a build on a node labelled for another tenant, or on a
    node with no tenant label.
 4. **Build identity.** The plugin authenticates every build, including a Pipeline `node` block, as
@@ -201,25 +201,25 @@ the wrong secret, or carrying no signature header, answers `400`.
 
 ## Placement lifecycle
 
-The placement pass binds one `Team` to one cell and records the binding in `Team.status.placement`
-(`cluster`, `cell`, `cellNamespace`, `generation`). `generation` increases only when the bound cell
+The placement pass binds one `Team` to one cell, and records it in `Team.status.placement`
+(`cluster`, `cell`, `cellNamespace`, `generation`). `generation` rises only when the bound cell
 changes.
 
 **Move.** An involuntary move happens when the bound cell reports `evacuate` or is gone. The pass
-writes the new placement first, then both cells' tenant lists. A claim with an older generation
-is refused, so a lost cell never grants a build after the move.
+writes the new placement first, then both cells' tenant lists. A claim carrying an older
+generation is refused, so a lost cell never grants a build after the move.
 
 A voluntary move (a rebalance, or a profile change) waits. The reconciler drops the tenant's
-folder from the old cell first (`Placed=False`, reason `TenantMoving`), then waits for the old
-cell to confirm the folder is idle. It then performs the same two-step move.
+folder from the old cell first (`Placed=False`, reason `TenantMoving`), waits for that cell to
+confirm the folder is idle, then performs the same two-step move.
 
-**Roll.** When a cell reports `CellReady=False` for a reason other than the three configuration
-gates, past `cells.unreadyGracePeriod`, the operator deletes its pod once and sets reason
-`CellRolled`. The original fault reason moves into the condition message.
+**Roll.** A cell that reports `CellReady=False` past `cells.unreadyGracePeriod`, for a reason
+other than the three configuration gates, gets its pod deleted once and the reason `CellRolled`.
+The original fault reason moves into the condition message.
 
-**Eviction.** Past twice the grace period, the operator sets `status.cell.evacuate`. Every tenant
-then moves off that cell on its next placement tick. Recovery clears `evacuate`, `unreadySince`,
-and `rolledAt` together.
+**Eviction.** Past twice that grace period, the operator sets `status.cell.evacuate`, and every
+tenant moves off on its next placement tick. Recovery clears `evacuate`, `unreadySince`, and
+`rolledAt` together.
 
 ## Troubleshoot placement
 
@@ -238,6 +238,7 @@ Every `Placed` reason on a `Team`:
 | `CellCapReached` | False | The tenant's pool sits at its `maxCells` and no cell is free. | Raise `maxCells`, or move the tenant to another pool. |
 | `TenantMoving` | False | A voluntary move is waiting for the old cell to finish draining the tenant's folder. | Wait. Check `status.pendingItemDeletions` for a stuck delete on the old cell. |
 | `CellNotReady` | False | The pass keeps the tenant on its current cell, but that cell reports `CellReady=False` with no `evacuate` signal yet. | Diagnose the cell's own `CellReady` reason below. |
+| `AgentServiceFailed` | False | An agent Service write or delete failed. The placement is kept. | See [Agent Services](agents.md). |
 | `TenantTeardownPending` | False | Dropping `spec.pipelines` is tearing the tenant down, but the schedule purge or the old cell's drain has not confirmed yet. | Wait. The pass retries up to ten times, or up to a ten-minute bounded wait when the cell is unreachable. |
 
 Every `CellReady` reason on a cell `Controller`:

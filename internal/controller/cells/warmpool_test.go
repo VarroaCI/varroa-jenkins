@@ -29,8 +29,11 @@ const (
 // fakeSecretReader is a map-backed cells.SecretReader test fake. A name
 // absent from both maps answers not-found (nil data, nil error).
 type fakeSecretReader struct {
-	data map[string]map[string][]byte
-	errs map[string]error
+	data      map[string]map[string][]byte
+	errs      map[string]error
+	labels    map[string]map[string]string
+	writeErrs map[string]error
+	writes    []string
 }
 
 func (f *fakeSecretReader) GetSecret(_ context.Context, name, _ string) (map[string][]byte, error) {
@@ -38,6 +41,35 @@ func (f *fakeSecretReader) GetSecret(_ context.Context, name, _ string) (map[str
 		return nil, err
 	}
 	return f.data[name], nil
+}
+
+// CreateOrUpdateSecretWithLabels makes the fake a cells.SecretWriter too. It
+// merges data and labels onto its own map, the way the live client merges
+// them onto a live Secret.
+func (f *fakeSecretReader) CreateOrUpdateSecretWithLabels(_ context.Context, name, _ string, labels map[string]string, data map[string][]byte) error {
+	if err, ok := f.writeErrs[name]; ok {
+		return err
+	}
+	if f.data == nil {
+		f.data = map[string]map[string][]byte{}
+	}
+	if f.labels == nil {
+		f.labels = map[string]map[string]string{}
+	}
+	if f.data[name] == nil {
+		f.data[name] = map[string][]byte{}
+	}
+	if f.labels[name] == nil {
+		f.labels[name] = map[string]string{}
+	}
+	for k, v := range data {
+		f.data[name][k] = v
+	}
+	for k, v := range labels {
+		f.labels[name][k] = v
+	}
+	f.writes = append(f.writes, name)
+	return nil
 }
 
 // seededSecretReader answers non-empty data for <base>-<pool> for every
@@ -137,12 +169,14 @@ func newReconciler(store *crdstore.Fake, cfg WarmPoolConfig) *WarmPoolReconciler
 	cfg.ClaimGate = "1"
 	cfg.BlobTierS3 = true
 	cfg.ArtifactSecretBase = testArtifactSecretBase
+	secrets := seededSecretReader(testArtifactSecretBase, testProfileName, "big")
 	return &WarmPoolReconciler{
 		Store:             store,
 		OperatorNamespace: testOperatorNamespace,
 		Config:            cfg,
 		Now:               func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
-		Secrets:           seededSecretReader(testArtifactSecretBase, testProfileName, "big"),
+		Secrets:           secrets,
+		SecretWriter:      secrets,
 		Plugins:           &fakePluginPinReader{pinned: true},
 	}
 }
@@ -984,7 +1018,7 @@ func gatePool() *v1alpha1.CellPool {
 func TestFillGateReason_RecordStoreUnsupported(t *testing.T) {
 	r := newReconciler(crdstore.NewFake(), WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
 	r.Config.ClaimGate = "0"
-	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != v1alpha1.CellPoolReasonRecordStoreUnsupported {
+	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion, true); got != v1alpha1.CellPoolReasonRecordStoreUnsupported {
 		t.Errorf("fillGateReason = %q, want %q", got, v1alpha1.CellPoolReasonRecordStoreUnsupported)
 	}
 }
@@ -992,7 +1026,7 @@ func TestFillGateReason_RecordStoreUnsupported(t *testing.T) {
 func TestFillGateReason_BlobTierUnsupported(t *testing.T) {
 	r := newReconciler(crdstore.NewFake(), WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
 	r.Config.BlobTierS3 = false
-	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != v1alpha1.CellPoolReasonBlobTierUnsupported {
+	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion, true); got != v1alpha1.CellPoolReasonBlobTierUnsupported {
 		t.Errorf("fillGateReason = %q, want %q", got, v1alpha1.CellPoolReasonBlobTierUnsupported)
 	}
 }
@@ -1000,7 +1034,7 @@ func TestFillGateReason_BlobTierUnsupported(t *testing.T) {
 func TestFillGateReason_ArtifactSecretBaseEmpty(t *testing.T) {
 	r := newReconciler(crdstore.NewFake(), WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
 	r.Config.ArtifactSecretBase = ""
-	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != v1alpha1.CellPoolReasonArtifactSecretMissing {
+	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion, true); got != v1alpha1.CellPoolReasonArtifactSecretMissing {
 		t.Errorf("fillGateReason = %q, want %q", got, v1alpha1.CellPoolReasonArtifactSecretMissing)
 	}
 }
@@ -1008,7 +1042,7 @@ func TestFillGateReason_ArtifactSecretBaseEmpty(t *testing.T) {
 func TestFillGateReason_SecretAbsent(t *testing.T) {
 	r := newReconciler(crdstore.NewFake(), WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
 	r.Secrets = &fakeSecretReader{}
-	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != v1alpha1.CellPoolReasonArtifactSecretMissing {
+	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion, true); got != v1alpha1.CellPoolReasonArtifactSecretMissing {
 		t.Errorf("fillGateReason = %q, want %q", got, v1alpha1.CellPoolReasonArtifactSecretMissing)
 	}
 }
@@ -1016,7 +1050,7 @@ func TestFillGateReason_SecretAbsent(t *testing.T) {
 func TestFillGateReason_SecretReadError(t *testing.T) {
 	r := newReconciler(crdstore.NewFake(), WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
 	r.Secrets = &fakeSecretReader{errs: map[string]error{testArtifactSecretBase + "-big": errors.New("etcd unavailable")}}
-	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != v1alpha1.CellPoolReasonArtifactSecretMissing {
+	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion, true); got != v1alpha1.CellPoolReasonArtifactSecretMissing {
 		t.Errorf("fillGateReason = %q, want %q", got, v1alpha1.CellPoolReasonArtifactSecretMissing)
 	}
 }
@@ -1050,7 +1084,7 @@ func TestFillGateReason_SecretReadLogging(t *testing.T) {
 			r.Logger = slog.New(slog.NewTextHandler(&logBuf, nil))
 			r.Secrets = &fakeSecretReader{errs: map[string]error{testArtifactSecretBase + "-big": tc.err}}
 
-			if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != v1alpha1.CellPoolReasonArtifactSecretMissing {
+			if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion, true); got != v1alpha1.CellPoolReasonArtifactSecretMissing {
 				t.Errorf("fillGateReason = %q, want %q", got, v1alpha1.CellPoolReasonArtifactSecretMissing)
 			}
 			if logged := logBuf.Len() != 0; logged != tc.wantLog {
@@ -1063,7 +1097,7 @@ func TestFillGateReason_SecretReadLogging(t *testing.T) {
 func TestFillGateReason_NilSecrets(t *testing.T) {
 	r := newReconciler(crdstore.NewFake(), WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
 	r.Secrets = nil
-	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != v1alpha1.CellPoolReasonArtifactSecretMissing {
+	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion, true); got != v1alpha1.CellPoolReasonArtifactSecretMissing {
 		t.Errorf("fillGateReason = %q, want %q", got, v1alpha1.CellPoolReasonArtifactSecretMissing)
 	}
 }
@@ -1071,7 +1105,7 @@ func TestFillGateReason_NilSecrets(t *testing.T) {
 func TestFillGateReason_PluginNotPinned(t *testing.T) {
 	r := newReconciler(crdstore.NewFake(), WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
 	r.Plugins = &fakePluginPinReader{pinned: false}
-	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != v1alpha1.CellPoolReasonArtifactPluginMissing {
+	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion, true); got != v1alpha1.CellPoolReasonArtifactPluginMissing {
 		t.Errorf("fillGateReason = %q, want %q", got, v1alpha1.CellPoolReasonArtifactPluginMissing)
 	}
 }
@@ -1079,14 +1113,14 @@ func TestFillGateReason_PluginNotPinned(t *testing.T) {
 func TestFillGateReason_NilPlugins(t *testing.T) {
 	r := newReconciler(crdstore.NewFake(), WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
 	r.Plugins = nil
-	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != v1alpha1.CellPoolReasonArtifactPluginMissing {
+	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion, true); got != v1alpha1.CellPoolReasonArtifactPluginMissing {
 		t.Errorf("fillGateReason = %q, want %q", got, v1alpha1.CellPoolReasonArtifactPluginMissing)
 	}
 }
 
 func TestFillGateReason_EveryTestPasses(t *testing.T) {
 	r := newReconciler(crdstore.NewFake(), WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
-	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion); got != "" {
+	if got := r.fillGateReason(context.Background(), gatePool(), testResolveVersion, true); got != "" {
 		t.Errorf("fillGateReason = %q, want empty", got)
 	}
 }
@@ -1289,5 +1323,318 @@ func TestCellPool_WithoutArtifactSecretFillsNothing(t *testing.T) {
 	cond := poolReady(t, pool)
 	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.CellPoolReasonArtifactSecretMissing {
 		t.Fatalf("PoolReady = %+v, want False/ArtifactSecretMissing", cond)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The pool confidential store (design D1, D2, D4, tasks 2.2 to 2.6)
+// ---------------------------------------------------------------------------
+
+// poolSecretFor returns the pool store the fake holds for the test pool.
+func poolSecretFor(fake *fakeSecretReader) map[string][]byte {
+	return fake.data[PoolSecretName(testProfileName)]
+}
+
+// TestEnsurePoolSecrets_FirstPassMints asserts that a pool with no store
+// gets all four keys and the pool label.
+func TestEnsurePoolSecrets_FirstPassMints(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, newProfile(), newPool(0))
+
+	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	fake := r.Secrets.(*fakeSecretReader)
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	data := poolSecretFor(fake)
+	if len(data) != len(StoreKeys()) {
+		t.Fatalf("the pool store holds %d keys, want %d", len(data), len(StoreKeys()))
+	}
+	for _, key := range StoreKeys() {
+		if len(data[key]) == 0 {
+			t.Errorf("the pool store lacks %q", key)
+		}
+	}
+	labels := fake.labels[PoolSecretName(testProfileName)]
+	if labels[LabelCellPool] != testProfileName {
+		t.Errorf("the pool label is %q, want %q", labels[LabelCellPool], testProfileName)
+	}
+	cond := poolReady(t, getPool(t, store, testProfileName))
+	if cond == nil || cond.Reason != v1alpha1.CellPoolReasonReady {
+		t.Fatalf("PoolReady = %+v, want Ready", cond)
+	}
+}
+
+// TestEnsurePoolSecrets_EmptyDataMints asserts that an existing store with
+// empty data counts as absent.
+func TestEnsurePoolSecrets_EmptyDataMints(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, newProfile(), newPool(0))
+
+	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	fake := r.Secrets.(*fakeSecretReader)
+	fake.data[PoolSecretName(testProfileName)] = map[string][]byte{}
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	for _, key := range StoreKeys() {
+		if len(poolSecretFor(fake)[key]) == 0 {
+			t.Errorf("the pool store lacks %q", key)
+		}
+	}
+}
+
+// TestEnsurePoolSecrets_SecondPassChangesNothing asserts the mint-once rule.
+func TestEnsurePoolSecrets_SecondPassChangesNothing(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, newProfile(), newPool(0))
+
+	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	fake := r.Secrets.(*fakeSecretReader)
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	first := map[string][]byte{}
+	for key, value := range poolSecretFor(fake) {
+		first[key] = append([]byte(nil), value...)
+	}
+	writes := len(fake.writes)
+
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	if len(fake.writes) != writes {
+		t.Error("the second pass wrote the store again")
+	}
+	for key, want := range first {
+		if !bytes.Equal(poolSecretFor(fake)[key], want) {
+			t.Errorf("the second pass changed %q", key)
+		}
+	}
+}
+
+// TestEnsurePoolSecrets_RepairsAMissingKey asserts that a repair adds only
+// the absent key.
+func TestEnsurePoolSecrets_RepairsAMissingKey(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, newProfile(), newPool(0))
+
+	minted, err := MintStore()
+	if err != nil {
+		t.Fatalf("MintStore: %v", err)
+	}
+	partial := map[string][]byte{}
+	for key, value := range minted {
+		if key == KeyInstanceIdentity {
+			continue
+		}
+		partial[key] = value
+	}
+	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	fake := r.Secrets.(*fakeSecretReader)
+	fake.data[PoolSecretName(testProfileName)] = partial
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	data := poolSecretFor(fake)
+	if len(data[KeyInstanceIdentity]) == 0 {
+		t.Fatal("the repair did not add the instance identity key")
+	}
+	for _, key := range []string{KeyMasterKey, KeyJnlpSecret, KeyHudsonUtilSecret} {
+		if !bytes.Equal(data[key], minted[key]) {
+			t.Errorf("the repair changed %q", key)
+		}
+	}
+	cond := poolReady(t, getPool(t, store, testProfileName))
+	if cond == nil || cond.Reason != v1alpha1.CellPoolReasonReady {
+		t.Fatalf("PoolReady = %+v, want Ready", cond)
+	}
+}
+
+// TestEnsurePoolSecrets_NoMasterKeyIsAFault asserts that a store with
+// another key and no master.key gets no write and reports SecretsMissing.
+func TestEnsurePoolSecrets_NoMasterKeyIsAFault(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, newProfile(), newPool(0))
+
+	minted, err := MintStore()
+	if err != nil {
+		t.Fatalf("MintStore: %v", err)
+	}
+	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	fake := r.Secrets.(*fakeSecretReader)
+	fake.data[PoolSecretName(testProfileName)] = map[string][]byte{KeyJnlpSecret: minted[KeyJnlpSecret]}
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	if len(fake.writes) != 0 {
+		t.Errorf("the pass wrote the store %v", fake.writes)
+	}
+	cond := poolReady(t, getPool(t, store, testProfileName))
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.CellPoolReasonSecretsMissing {
+		t.Fatalf("PoolReady = %+v, want False/SecretsMissing", cond)
+	}
+	want := fmt.Sprintf("the pool secret %q is not usable", PoolSecretName(testProfileName))
+	if cond.Message != want {
+		t.Errorf("message = %q, want %q", cond.Message, want)
+	}
+}
+
+// TestEnsurePoolSecrets_RefusesTheFill asserts that an unusable store stops
+// a wanted fill.
+func TestEnsurePoolSecrets_RefusesTheFill(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, newProfile(), pipelinesTeam(), newPool(1))
+
+	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	fake := r.Secrets.(*fakeSecretReader)
+	fake.writeErrs = map[string]error{PoolSecretName(testProfileName): errors.New("etcd unavailable")}
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	if got := listCells(t, store); len(got) != 0 {
+		t.Fatalf("expected no cell, got %v", cellNames(got))
+	}
+	cond := poolReady(t, getPool(t, store, testProfileName))
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.CellPoolReasonSecretsMissing {
+		t.Fatalf("PoolReady = %+v, want False/SecretsMissing", cond)
+	}
+}
+
+// TestEnsurePoolSecrets_AtTargetStillReports asserts that a pass with no
+// fill still reports an unusable store.
+func TestEnsurePoolSecrets_AtTargetStillReports(t *testing.T) {
+	store := crdstore.NewFake()
+	free := poolCellNamed("cell-lts-2-555-0", testProfileName, nil)
+	crdstore.MustSeed(store, newProfile(), newPool(1), free)
+
+	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	fake := r.Secrets.(*fakeSecretReader)
+	fake.errs = map[string]error{PoolSecretName(testProfileName): errors.New("etcd unavailable")}
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	cond := poolReady(t, getPool(t, store, testProfileName))
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.CellPoolReasonSecretsMissing {
+		t.Fatalf("PoolReady = %+v, want False/SecretsMissing", cond)
+	}
+}
+
+// TestEnsurePoolSecrets_OutranksTheCap asserts that an unusable store
+// outranks CellCapReached on a pass that wants no fill.
+func TestEnsurePoolSecrets_OutranksTheCap(t *testing.T) {
+	store := crdstore.NewFake()
+	pool := newPool(2)
+	pool.Spec.MaxCells = 2
+	crdstore.MustSeed(store, newProfile(), pool,
+		poolCellNamed("cell-lts-2-555-0", testProfileName, nil),
+		poolCellNamed("cell-lts-2-555-1", testProfileName, nil),
+	)
+
+	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	fake := r.Secrets.(*fakeSecretReader)
+	fake.errs = map[string]error{PoolSecretName(testProfileName): errors.New("etcd unavailable")}
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	cond := poolReady(t, getPool(t, store, testProfileName))
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.CellPoolReasonSecretsMissing {
+		t.Fatalf("PoolReady = %+v, want False/SecretsMissing", cond)
+	}
+}
+
+// TestEnsurePoolSecrets_UndecryptableKeyIsAFault asserts that a store whose
+// key does not decrypt under its own master.key gets no write and reports
+// SecretsMissing. The recovery is the same as for a store with no
+// master.key: delete the Secret.
+func TestEnsurePoolSecrets_UndecryptableKeyIsAFault(t *testing.T) {
+	cases := []struct {
+		name    string
+		corrupt func(store map[string][]byte)
+	}{
+		{
+			name: "a flipped byte in the last block",
+			corrupt: func(store map[string][]byte) {
+				value := store[KeyJnlpSecret]
+				value[len(value)-1] ^= 0xff
+			},
+		},
+		{
+			name: "a key of another store",
+			corrupt: func(store map[string][]byte) {
+				other, err := MintStore()
+				if err != nil {
+					t.Fatalf("MintStore: %v", err)
+				}
+				store[KeyHudsonUtilSecret] = other[KeyHudsonUtilSecret]
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := crdstore.NewFake()
+			crdstore.MustSeed(store, newProfile(), newPool(0))
+
+			minted, err := MintStore()
+			if err != nil {
+				t.Fatalf("MintStore: %v", err)
+			}
+			tc.corrupt(minted)
+
+			r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+			fake := r.Secrets.(*fakeSecretReader)
+			fake.data[PoolSecretName(testProfileName)] = minted
+			if err := r.Reconcile(context.Background()); err != nil {
+				t.Fatalf("Reconcile: %v", err)
+			}
+
+			if len(fake.writes) != 0 {
+				t.Errorf("the pass wrote the store %v", fake.writes)
+			}
+			cond := poolReady(t, getPool(t, store, testProfileName))
+			if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.CellPoolReasonSecretsMissing {
+				t.Fatalf("PoolReady = %+v, want False/SecretsMissing", cond)
+			}
+		})
+	}
+}
+
+// TestEnsurePoolSecrets_RepairVerifiesTheKeptKeys asserts that a repair of a
+// store whose kept key does not decrypt writes nothing, rather than adding
+// the missing key onto an unusable store.
+func TestEnsurePoolSecrets_RepairVerifiesTheKeptKeys(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, newProfile(), newPool(0))
+
+	minted, err := MintStore()
+	if err != nil {
+		t.Fatalf("MintStore: %v", err)
+	}
+	partial := map[string][]byte{
+		KeyMasterKey:        minted[KeyMasterKey],
+		KeyJnlpSecret:       minted[KeyJnlpSecret],
+		KeyHudsonUtilSecret: minted[KeyHudsonUtilSecret],
+	}
+	partial[KeyJnlpSecret][len(partial[KeyJnlpSecret])-1] ^= 0xff
+
+	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	fake := r.Secrets.(*fakeSecretReader)
+	fake.data[PoolSecretName(testProfileName)] = partial
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	if len(fake.writes) != 0 {
+		t.Errorf("the pass wrote the store %v", fake.writes)
+	}
+	cond := poolReady(t, getPool(t, store, testProfileName))
+	if cond == nil || cond.Reason != v1alpha1.CellPoolReasonSecretsMissing {
+		t.Fatalf("PoolReady = %+v, want False/SecretsMissing", cond)
 	}
 }

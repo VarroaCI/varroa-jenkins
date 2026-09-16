@@ -1071,7 +1071,7 @@ type ComponentsSchemasCellPool struct {
 	Status ComponentsSchemasCellPoolStatus `json:"status"`
 }
 
-// ComponentsSchemasCellPoolCondition Status condition for a CellPool. Type PoolReady, with exactly the reasons Ready, CellCapReached, ProfileMissing, RecordStoreUnsupported, BlobTierUnsupported, ArtifactSecretMissing, and ArtifactPluginMissing.
+// ComponentsSchemasCellPoolCondition Status condition for a CellPool. Type PoolReady, with exactly the reasons Ready, CellCapReached, ProfileMissing, RecordStoreUnsupported, BlobTierUnsupported, ArtifactSecretMissing, ArtifactPluginMissing, and SecretsMissing.
 type ComponentsSchemasCellPoolCondition struct {
 	// LastTransitionTime ISO 8601 last transition time.
 	LastTransitionTime *string `json:"lastTransitionTime,omitempty"`

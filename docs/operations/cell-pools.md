@@ -19,9 +19,8 @@ Read [Cells and pipelines tenants](cells.md) first. That page covers what a cell
 | `unreadyGracePeriod` | duration, optional | how long a pool cell may stay unready before the operator rolls its pod |
 | `cellTemplate` | object, optional | `resources` and `podOverrides` for the cells the pool creates |
 
-`profileRef` is immutable. A pool's cells carry the profile label they were created with, and the
-operator never restamps that label. A changed `profileRef` would orphan every cell of the pool. To
-serve another profile, create another pool.
+`profileRef` is immutable. A pool's cells carry the profile label they were created with, and a
+change would orphan every one of them. To serve another profile, create another pool.
 
 ## Status fields
 
@@ -35,7 +34,7 @@ serve another profile, create another pool.
 
 `freeTenantSlots` counts placed cells alone. `warmCells` already reports the empty ones.
 
-The `PoolReady` condition carries seven reasons.
+The `PoolReady` condition carries eight reasons.
 
 | Reason | Status | Holds when | Action |
 |---|---|---|---|
@@ -46,13 +45,15 @@ The `PoolReady` condition carries seven reasons.
 | `BlobTierUnsupported` | `False` | `recordStore.blobs.mode` is not `s3` | Set the blob tier to `s3`. |
 | `ArtifactSecretMissing` | `False` | `recordStore.blobs.s3.artifactSecret` is unset, or `<artifactSecret>-<pool>` does not exist with non-empty data | Set `recordStore.blobs.s3.artifactSecret`, and create `<artifactSecret>-<pool>`. |
 | `ArtifactPluginMissing` | `False` | the plugin set a cell of the pool's version resolves does not pin `artifact-manager-s3` | Pin `artifact-manager-s3` in the version profile. |
+| `SecretsMissing` | `False` | the pool holds no usable confidential store | Read [Pool secrets](#pool-secrets) below. |
 
-The four precondition reasons report only when the pass wanted to create at least one cell. A
-pool whose free count already meets its target reports `CellCapReached` or `Ready`, even with a
-missing artifact Secret: the pass never tests a precondition it does not need. When more than one
-precondition would refuse, the reasons rank `ProfileMissing`, then `RecordStoreUnsupported`, then
-`BlobTierUnsupported`, then `ArtifactSecretMissing`, then `ArtifactPluginMissing`, then
-`CellCapReached`, then `Ready`; the status reports the highest that applies.
+The first four precondition reasons report only on a pass that wanted a new cell. A pool at its
+target therefore reports `CellCapReached` or `Ready`, even with a missing artifact Secret.
+`SecretsMissing` is the exception: the store is a property of the pool, not of a fill.
+
+The reasons rank `ProfileMissing`, `RecordStoreUnsupported`, `BlobTierUnsupported`,
+`ArtifactSecretMissing`, `ArtifactPluginMissing`, `SecretsMissing`, `CellCapReached`, then `Ready`.
+The status reports the highest that applies.
 
 ## Create a pool
 
@@ -71,10 +72,10 @@ cells:
 Each value is the default of a pool the operator creates. It configures no live pool, and a Helm
 upgrade never rewrites the spec of a pool that already exists.
 
-The chart refuses a `cells.maxTenantsPerCell` below 1 and a `cells.warmPool.perProfile` below 1 at
-render time. The first floor matches the CellPool CRD. The second matches the operator, which seeds
-at least one warm cell so placement keeps the last free cell. Each of the two must be a whole
-number that fits a 32-bit integer.
+The chart refuses a `cells.maxTenantsPerCell` or `cells.warmPool.perProfile` below 1 at render
+time. The first floor matches the CellPool CRD. The second matches the operator, which seeds at
+least one warm cell so placement keeps the last free cell. Each must be a whole number that fits a
+32-bit integer.
 
 To create a second pool, apply one:
 
@@ -89,8 +90,8 @@ spec:
   maxTenantsPerCell: 1
 ```
 
-Creation and deletion are `kubectl` or GitOps operations. The API and the CLI read and scale a
-pool. Neither creates nor deletes one.
+Creation and deletion are `kubectl` or GitOps operations. The API and the CLI only read and scale
+a pool.
 
 ## Scale a pool
 
@@ -109,39 +110,72 @@ kubectl patch cellpool jenkins-lts --type=merge -p '{"spec":{"warm":3}}'
 A watch wakes the operator, so a scale edit takes effect within seconds rather than after the
 60-second backstop.
 
-Lowering `warm` drains free cells only. The pool never deletes a cell that holds a tenant. It also
-keeps a cell that a tenant is being placed on, although that cell holds no tenant yet. Such a cell
-leaves the pool one cell above its target until the next pass, which is expected.
+Lowering `warm` drains free cells only. The pool never deletes a cell that holds a tenant, nor one
+a tenant is being placed on. Such a cell leaves the pool one above its target until the next pass.
 Deleting a pool drains its free cells. A placed cell keeps every label and lives on as an ordinary
 cell, resolving its capacity from its own `spec.cell.maxTenants` or from `cells.maxTenantsPerCell`.
 
 ### Scale up a pool
 
-A pool fill needs four install-wide gates to pass: the record store enabled, the `s3` blob tier,
+A pool fill needs four install-wide gates: the record store enabled, the `s3` blob tier,
 `recordStore.blobs.s3.artifactSecret` set to a base name, and the resolved plugin set pinning
-`artifact-manager-s3`. Once those hold fleet-wide, one Secret per pool,
-`<artifactSecret>-<pool name>` in the release namespace, is the only remaining credential
-prerequisite for a scale-up. See
-[The artifact Secret](build-logs-and-artifacts.md#the-artifact-secret) for its keys and the
+`artifact-manager-s3`. Once those hold, one Secret per pool,
+`<artifactSecret>-<pool name>` in the release namespace, is the last credential a scale-up needs.
+See [The artifact Secret](build-logs-and-artifacts.md#the-artifact-secret) for its keys and the
 candidate lookup order.
 
-An install that predates pool-scoped credentials, and holds only per-cell Secrets, needs the pool
-Secret created once per pool before a scale-up mints new cells. Existing cells keep running on
-their per-cell Secret; only a newly minted cell needs the pool one.
+An install holding only per-cell Secrets needs the pool Secret created once before a scale-up
+mints new cells. Existing cells keep their per-cell Secret, and only a new cell needs the pool one.
 
 ## Cold start
 
-A pool with `warm: 0` holds no cell until a tenant of that pool waits for placement. The pass then
-creates one cell. The tenant reports `Placed=False` with reason `AwaitingCell` while that cell
-boots. A cell boots in the time a Jenkins `StatefulSet` needs to reach `Connected`, usually one to
-three minutes. Set `warm` to 1 or more to remove that wait.
+A pool with `warm: 0` holds no cell until a tenant waits for placement, and the pass then creates
+one. The tenant reports `Placed=False` with reason `AwaitingCell` while that cell boots, usually
+one to three minutes. Set `warm` to 1 or more to remove that wait.
 
 ## Template edits
 
 The pool re-stamps `spec.version`, `spec.resources`, and `spec.podOverrides` on each free cell
-every tick. It never edits a cell that holds a tenant. A `cellTemplate` edit therefore rolls the
-free cells at once, and reaches a placed cell only after that cell drains. To grow a placed
-tenant, move it to a pool whose template is larger.
+every tick, and never edits a cell that holds a tenant. A `cellTemplate` edit therefore rolls the
+free cells at once, and reaches a placed cell only after it drains. To grow a placed tenant, move
+it to a pool with a larger template.
+
+## Pool secrets
+
+A cell keeps `$JENKINS_HOME` on an `emptyDir`, so each instance would mint its own `secrets/`
+directory and reject the last one's agents. Each pool therefore owns one Jenkins confidential
+store: the Secret `varroa-cell-secrets-<pool>` in the operator namespace, labelled
+`varroa.dev/cell-pool: <pool>`. Every cell of the pool starts with it, and each key name is also
+the file name Jenkins reads.
+
+| Key | Protects |
+|---|---|
+| `master.key` | every other key of the store |
+| `jenkins.slaves.JnlpSlaveAgentProtocol.secret` | each inbound agent's own secret |
+| `hudson.util.Secret` | every `Secret` value in a config file |
+| `org.jenkinsci.main.modules.instance_identity.InstanceIdentity.KEY` | the instance identity |
+
+**The operator mints the store once for each pool, and never rotates it.** It never overwrites a
+key that holds a value, and builds a missing key under the existing `master.key`. A repaired key
+reaches only the cells that start after the repair, so deleting a key is never a rotation path.
+
+Two states never repair themselves: a store with no `master.key`, and a key that does not decrypt
+under it. The pass then writes nothing and reports `PoolReady=False` with `SecretsMissing`. Delete
+the Secret and roll the pool to recover. A pool cell that finds no usable store does not start:
+its reconcile blocks with `ReconcileBlocked=True` and the reason `CellSecretsFailed`.
+
+**Blast radius.** Every cell of a pool accepts every agent secret that pool minted, which is the
+point of the shared store. Set `maxTenantsPerCell: 1` to narrow the radius to one tenant. The
+operator holds each pool's master key, beside every bootstrap Secret and the mite CA.
+
+**Rotate a pool store by hand.**
+
+1. Delete the Secret: `kubectl delete secret varroa-cell-secrets-<pool> -n varroa-system`.
+2. Wait for the next pool tick, and confirm `PoolReady` reports `Ready`.
+3. Roll every cell: `kubectl delete pod -n varroa-system -l varroa.dev/cell-pool=<pool>`.
+
+The roll drops every running agent. Every value encrypted under the old `hudson.util.Secret`
+becomes unreadable, so re-apply those credentials.
 
 ## Cell labels
 

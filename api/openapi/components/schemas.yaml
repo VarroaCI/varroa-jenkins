@@ -4902,7 +4902,8 @@ CellPoolCondition:
   description: >-
     Status condition for a CellPool. Type PoolReady, with exactly the
     reasons Ready, CellCapReached, ProfileMissing, RecordStoreUnsupported,
-    BlobTierUnsupported, ArtifactSecretMissing, and ArtifactPluginMissing.
+    BlobTierUnsupported, ArtifactSecretMissing, ArtifactPluginMissing, and
+    SecretsMissing.
   required: [type, status]
   properties:
     type:

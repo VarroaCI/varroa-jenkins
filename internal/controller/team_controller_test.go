@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -1550,5 +1551,697 @@ func TestTeamReconciler_Rehydration_NoPipelinesWritesNothing(t *testing.T) {
 		if c.Type == v1alpha1.TeamConditionRehydrated {
 			t.Errorf("expected no Rehydrated condition, got %+v", c)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The slot 0 agent Service (design D7, tasks 4.2 to 4.6)
+// ---------------------------------------------------------------------------
+
+// seedAgentServiceTeam seeds the cell, the profile, and a placed pipelines
+// Team named "payments", the shape every agent Service test needs.
+func seedAgentServiceTeam(client *testClient) {
+	client.namespaces["payments-ns"] = true
+	seedJenkinsVersionProfile(client)
+	seedCellController(client, nil)
+	teamWith(client, "payments", v1alpha1.TeamSpec{
+		Members:    []string{"alice"},
+		Namespaces: []string{"payments-ns"},
+		Pipelines: &v1alpha1.TeamPipelinesSpec{
+			Profile:        "jenkins-lts",
+			AgentNamespace: "payments-ns",
+		},
+	}, types.UID("10000000-0000-0000-0000-000000000001"))
+}
+
+// reconcileTeam runs one tick for the Team every agent Service test seeds.
+func reconcileTeam(t *testing.T, rec *TeamReconciler) {
+	t.Helper()
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "payments"}}
+	if _, err := rec.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+}
+
+// TestTeamReconciler_AgentService_CreatedOnFirstPlacement asserts the name,
+// the namespace, and the selector of the Service a first placement writes.
+func TestTeamReconciler_AgentService_CreatedOnFirstPlacement(t *testing.T) {
+	client := newTeamTestClient()
+	seedAgentServiceTeam(client)
+
+	rec := newPipelinesTeamReconciler(client, nil)
+	reconcileTeam(t, rec)
+
+	if len(client.tenantServices) != 1 {
+		t.Fatalf("expected one agent Service write, got %+v", client.tenantServices)
+	}
+	got := client.tenantServices[0]
+	if got.name != "varroa-agents-payments-0" {
+		t.Errorf("name = %q, want varroa-agents-payments-0", got.name)
+	}
+	if got.namespace != "cells-ns" {
+		t.Errorf("namespace = %q, want cells-ns", got.namespace)
+	}
+	if got.selector != "cell-a-" {
+		t.Errorf("selector = %q, want the pod label of cell-a", got.selector)
+	}
+}
+
+// TestTeamReconciler_AgentService_ConvergesEveryTick asserts that a second
+// tick writes the Service again, so a deleted Service and a drifted
+// selector both repair themselves.
+func TestTeamReconciler_AgentService_ConvergesEveryTick(t *testing.T) {
+	client := newTeamTestClient()
+	seedAgentServiceTeam(client)
+
+	rec := newPipelinesTeamReconciler(client, nil)
+	reconcileTeam(t, rec)
+	seedCellController(client, []string{"payments"})
+	reconcileTeam(t, rec)
+
+	if len(client.tenantServices) != 2 {
+		t.Fatalf("expected the Service to converge every tick, got %+v", client.tenantServices)
+	}
+	for _, call := range client.tenantServices {
+		if call.name != "varroa-agents-payments-0" || call.namespace != "cells-ns" {
+			t.Errorf("unexpected write %+v", call)
+		}
+	}
+}
+
+// TestTeamReconciler_AgentService_FollowsTheSlotHolder asserts that the
+// selector names the cell the tenant is placed on, so a move repoints it.
+func TestTeamReconciler_AgentService_FollowsTheSlotHolder(t *testing.T) {
+	client := newTeamTestClient()
+	seedAgentServiceTeam(client)
+	// A second cell whose pod label differs from the first one's.
+	crdstore.MustSeed(client.store, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cell-b",
+			Namespace: "cells-ns",
+			UID:       types.UID("20000000-0000-0000-0000-000000000002"),
+			Labels:    map[string]string{cells.LabelCellProfile: "jenkins-lts"},
+		},
+		Spec: v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true, MaxTenants: 10}},
+		Status: v1alpha1.ControllerStatus{
+			Conditions: []v1alpha1.ControllerCondition{{Type: v1alpha1.ConditionCellReady, Status: metav1.ConditionTrue}},
+			Cell:       &v1alpha1.CellStatus{Tenants: []string{"payments"}, AppliedTenants: []string{"payments"}},
+		},
+	})
+
+	rec := newPipelinesTeamReconciler(client, nil)
+	reconcileTeam(t, rec)
+
+	if len(client.tenantServices) == 0 {
+		t.Fatal("expected an agent Service write")
+	}
+	status := lastTeamStatus(client)
+	if status == nil || status.Placement == nil {
+		t.Fatal("expected a placement")
+	}
+	holder, err := crdstore.Get[v1alpha1.Controller](context.Background(), client.store,
+		status.Placement.Cell, status.Placement.CellNamespace)
+	if err != nil {
+		t.Fatalf("read the placement cell: %v", err)
+	}
+	last := client.tenantServices[len(client.tenantServices)-1]
+	if last.selector != controllerPrefix(holder) {
+		t.Errorf("selector = %q, want %q", last.selector, controllerPrefix(holder))
+	}
+
+	// A move repoints the selector and keeps the name. The placement pass
+	// hands the new cell to the same writer.
+	_, cellsByKey, err := rec.listCellCandidates(context.Background())
+	if err != nil {
+		t.Fatalf("listCellCandidates: %v", err)
+	}
+	other := "cell-a"
+	if status.Placement.Cell == "cell-a" {
+		other = "cell-b"
+	}
+	moved := &v1alpha1.TeamPlacementStatus{Cell: other, CellNamespace: "cells-ns"}
+	if err := rec.upsertTenantAgentService(context.Background(), "payments", moved, cellsByKey, tenantSlotZero); err != nil {
+		t.Fatalf("upsertTenantAgentService: %v", err)
+	}
+	after := client.tenantServices[len(client.tenantServices)-1]
+	if after.name != last.name {
+		t.Errorf("the move changed the Service name to %q", after.name)
+	}
+	if after.selector == last.selector {
+		t.Errorf("the move did not repoint the selector, still %q", after.selector)
+	}
+	if after.selector != controllerPrefix(cellsByKey[teamCellKey("cells-ns", other)]) {
+		t.Errorf("selector = %q, want the pod label of %q", after.selector, other)
+	}
+}
+
+// TestTeamReconciler_AgentService_DeletedAtTeardown asserts the delete a
+// teardown performs, beside the ServiceAccount and the token Secret.
+func TestTeamReconciler_AgentService_DeletedAtTeardown(t *testing.T) {
+	client := newTeamTestClient()
+	seedAgentServiceTeam(client)
+
+	rec := newPipelinesTeamReconciler(client, nil)
+	reconcileTeam(t, rec)
+
+	// Drop spec.pipelines, which is what starts a teardown.
+	team, err := crdstore.Get[v1alpha1.Team](context.Background(), client.store, "payments", "")
+	if err != nil {
+		t.Fatalf("read the Team: %v", err)
+	}
+	team.Spec.Pipelines = nil
+	if err := crdstore.Update(context.Background(), client.store, team); err != nil {
+		t.Fatalf("update the Team: %v", err)
+	}
+	reconcileTeam(t, rec)
+
+	deleted := false
+	for _, d := range client.deleted {
+		if d.kind == "Service" && d.name == "varroa-agents-payments-0" {
+			deleted = true
+		}
+	}
+	if !deleted {
+		t.Fatalf("expected the agent Service to be deleted, got %+v", client.deleted)
+	}
+}
+
+// TestTeamReconciler_AgentService_FailureReportsAndKeepsThePlacement asserts
+// the failure path: Placed=False with AgentServiceFailed, a second status
+// patch in the same tick, and an unchanged placement.
+func TestTeamReconciler_AgentService_FailureReportsAndKeepsThePlacement(t *testing.T) {
+	client := newTeamTestClient()
+	seedAgentServiceTeam(client)
+	client.tenantServiceErr = errors.New("apiserver unavailable")
+
+	rec := newPipelinesTeamReconciler(client, nil)
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "payments"}}
+	if _, err := rec.Reconcile(context.Background(), req); err == nil {
+		t.Fatal("expected the tick to return the write failure, so it retries")
+	}
+
+	status := lastTeamStatus(client)
+	if status == nil || status.Placement == nil || status.Placement.Cell != "cell-a" {
+		t.Fatalf("expected the placement to survive, got %+v", status)
+	}
+	var placed *v1alpha1.TeamCondition
+	for i := range status.Conditions {
+		if status.Conditions[i].Type == v1alpha1.TeamConditionPlaced {
+			placed = &status.Conditions[i]
+		}
+	}
+	if placed == nil || placed.Status != metav1.ConditionFalse || placed.Reason != v1alpha1.TeamReasonAgentServiceFailed {
+		t.Fatalf("Placed = %+v, want False/AgentServiceFailed", placed)
+	}
+	gvr, err := crdstore.GVRFor[v1alpha1.Team]()
+	if err != nil {
+		t.Fatalf("GVRFor: %v", err)
+	}
+	if n := len(client.store.StatusPatches(gvr)); n != 2 {
+		t.Errorf("expected a second status patch on the failure path, got %d", n)
+	}
+}
+
+// staleMarkers answers the stale-agent-Service namespaces of the last
+// patched status.
+func staleMarkers(status *v1alpha1.TeamStatus) []string {
+	if status == nil {
+		return nil
+	}
+	return status.StaleAgentServiceNamespaces
+}
+
+// placedReasonOf answers the Placed condition reason of a status.
+func placedReasonOf(status *v1alpha1.TeamStatus) string {
+	if status == nil {
+		return ""
+	}
+	for _, c := range status.Conditions {
+		if c.Type == v1alpha1.TeamConditionPlaced {
+			return c.Reason
+		}
+	}
+	return ""
+}
+
+// serviceDeletedIn reports whether the agent Service of the tenant every
+// test of this file names was deleted from a namespace.
+func serviceDeletedIn(client *testClient, namespace string) bool {
+	name := tenantAgentServiceName("payments", tenantSlotZero)
+	for _, d := range client.deletedWithNamespace {
+		if d.kind == "Service" && d.name == name && d.namespace == namespace {
+			return true
+		}
+	}
+	return false
+}
+
+// seedEvacuatingMove seeds the two cells and the placed Team a
+// cross-namespace move needs: cell-a in cells-ns holds the tenant and
+// reports evacuate, and cell-b in other-cells-ns is free and ready.
+func seedEvacuatingMove(client *testClient) {
+	client.namespaces["payments-ns"] = true
+	seedJenkinsVersionProfile(client)
+	crdstore.MustSeed(client.store, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cell-a",
+			Namespace: "cells-ns",
+			UID:       types.UID("20000000-0000-0000-0000-000000000001"),
+			Labels:    map[string]string{cells.LabelCellProfile: "jenkins-lts"},
+		},
+		Spec: v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true, MaxTenants: 10}},
+		Status: v1alpha1.ControllerStatus{
+			Conditions: []v1alpha1.ControllerCondition{{Type: v1alpha1.ConditionCellReady, Status: metav1.ConditionTrue}},
+			Cell: &v1alpha1.CellStatus{
+				Tenants:        []string{"payments"},
+				AppliedTenants: []string{"payments"},
+				Evacuate:       true,
+			},
+		},
+	})
+	crdstore.MustSeed(client.store, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cell-b",
+			Namespace: "other-cells-ns",
+			UID:       types.UID("20000000-0000-0000-0000-000000000002"),
+			Labels:    map[string]string{cells.LabelCellProfile: "jenkins-lts"},
+		},
+		Spec: v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true, MaxTenants: 10}},
+		Status: v1alpha1.ControllerStatus{
+			Conditions: []v1alpha1.ControllerCondition{{Type: v1alpha1.ConditionCellReady, Status: metav1.ConditionTrue}},
+		},
+	})
+	seedPlacedPipelinesTeam(client, "cell-a", "cells-ns")
+}
+
+// seedPlacedPipelinesTeam seeds the tenant "payments", already placed on the
+// named cell.
+func seedPlacedPipelinesTeam(client *testClient, cell, cellNamespace string) {
+	team := &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "payments",
+			UID:        types.UID("10000000-0000-0000-0000-000000000003"),
+			Finalizers: []string{v1alpha1.TeamFinalizerTenantPlacement},
+		},
+		Spec: v1alpha1.TeamSpec{
+			Namespaces: []string{"payments-ns"},
+			Pipelines: &v1alpha1.TeamPipelinesSpec{
+				Profile:        "jenkins-lts",
+				AgentNamespace: "payments-ns",
+			},
+		},
+		Status: v1alpha1.TeamStatus{
+			Placement: &v1alpha1.TeamPlacementStatus{
+				Cluster: "core", Cell: cell, CellNamespace: cellNamespace, Generation: 1,
+			},
+			Pipelines: &v1alpha1.TeamPipelinesStatus{
+				WebhookToken: "tok", WebhookSecret: "sec", AgentNamespace: "payments-ns",
+			},
+		},
+	}
+	client.teams["payments"] = team
+	crdstore.MustSeed(client.store, team)
+}
+
+// TestTeamReconciler_AgentService_FailedMoveDeleteRetriesOnTheNextTick
+// asserts the durable marker. A move that crosses a namespace commits, and
+// the namespace it left is recorded. A refused delete keeps the marker and
+// reports AgentServiceFailed; a later tick deletes and clears it. The move
+// is never rolled back: the placement pass has already announced the new
+// generation to the recorder and requested the purge of the old one.
+func TestTeamReconciler_AgentService_FailedMoveDeleteRetriesOnTheNextTick(t *testing.T) {
+	client := newTeamTestClient()
+	seedEvacuatingMove(client)
+	client.deleteResourceErr = errors.New("apiserver unavailable")
+	client.deleteResourceErrKind = "Service"
+
+	rec := newPipelinesTeamReconciler(client, nil)
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "payments"}}
+
+	// Tick one: the move lands, the marker records the namespace it left,
+	// and the refused delete stops the new Service write.
+	if _, err := rec.Reconcile(context.Background(), req); err == nil {
+		t.Fatal("expected the tick to return the refused delete")
+	}
+	status := lastTeamStatus(client)
+	if status == nil || status.Placement == nil ||
+		status.Placement.Cell != "cell-b" || status.Placement.CellNamespace != "other-cells-ns" {
+		t.Fatalf("the move did not commit: %+v", status)
+	}
+	if got := staleMarkers(status); len(got) != 1 || got[0] != "cells-ns" {
+		t.Fatalf("the stale namespaces are %v, want [cells-ns]", got)
+	}
+	if got := placedReasonOf(status); got != v1alpha1.TeamReasonAgentServiceFailed {
+		t.Fatalf("Placed reason = %q, want AgentServiceFailed", got)
+	}
+	if len(client.tenantServices) != 0 {
+		t.Errorf("the failed tick wrote an agent Service: %+v", client.tenantServices)
+	}
+
+	// Tick two: the delete succeeds, the marker clears, and the new Service
+	// is written in the new namespace.
+	client.deleteResourceErr = nil
+	client.deleteResourceErrKind = ""
+	if _, err := rec.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	if !serviceDeletedIn(client, "cells-ns") {
+		t.Fatalf("the retry did not delete the old Service, got %+v", client.deletedWithNamespace)
+	}
+	status = lastTeamStatus(client)
+	if got := staleMarkers(status); len(got) != 0 {
+		t.Errorf("the stale namespaces are %v, want none", got)
+	}
+	if got := placedReasonOf(status); got != v1alpha1.TeamReasonTenantPlaced {
+		t.Errorf("Placed reason = %q, want TenantPlaced", got)
+	}
+	name := tenantAgentServiceName("payments", tenantSlotZero)
+	if len(client.tenantServices) != 1 {
+		t.Fatalf("expected one agent Service write, got %+v", client.tenantServices)
+	}
+	if got := client.tenantServices[0]; got.name != name || got.namespace != "other-cells-ns" {
+		t.Errorf("the write is %+v, want %q in other-cells-ns", got, name)
+	}
+}
+
+// TestTeamReconciler_AgentService_MoveInsideOneNamespaceSetsNoMarker asserts
+// that a move between two cells of one namespace only repoints the selector.
+func TestTeamReconciler_AgentService_MoveInsideOneNamespaceSetsNoMarker(t *testing.T) {
+	client := newTeamTestClient()
+	client.namespaces["payments-ns"] = true
+	seedJenkinsVersionProfile(client)
+	crdstore.MustSeed(client.store, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cell-a",
+			Namespace: "cells-ns",
+			UID:       types.UID("20000000-0000-0000-0000-000000000001"),
+			Labels:    map[string]string{cells.LabelCellProfile: "jenkins-lts"},
+		},
+		Spec: v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true, MaxTenants: 10}},
+		Status: v1alpha1.ControllerStatus{
+			Conditions: []v1alpha1.ControllerCondition{{Type: v1alpha1.ConditionCellReady, Status: metav1.ConditionTrue}},
+			Cell: &v1alpha1.CellStatus{
+				Tenants:        []string{"payments"},
+				AppliedTenants: []string{"payments"},
+				Evacuate:       true,
+			},
+		},
+	})
+	// The cell the tenant moves to shares the namespace of the one it leaves.
+	crdstore.MustSeed(client.store, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cell-b",
+			Namespace: "cells-ns",
+			UID:       types.UID("20000000-0000-0000-0000-000000000002"),
+			Labels:    map[string]string{cells.LabelCellProfile: "jenkins-lts"},
+		},
+		Spec: v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true, MaxTenants: 10}},
+		Status: v1alpha1.ControllerStatus{
+			Conditions: []v1alpha1.ControllerCondition{{Type: v1alpha1.ConditionCellReady, Status: metav1.ConditionTrue}},
+		},
+	})
+	seedPlacedPipelinesTeam(client, "cell-a", "cells-ns")
+
+	rec := newPipelinesTeamReconciler(client, nil)
+	reconcileTeam(t, rec)
+
+	status := lastTeamStatus(client)
+	if status == nil || status.Placement == nil || status.Placement.Cell != "cell-b" {
+		t.Fatalf("the move did not land on cell-b: %+v", status)
+	}
+	if got := staleMarkers(status); len(got) != 0 {
+		t.Errorf("the stale namespaces are %v, want none", got)
+	}
+	for _, d := range client.deletedWithNamespace {
+		if d.kind == "Service" {
+			t.Errorf("the pass deleted a Service: %+v", d)
+		}
+	}
+}
+
+// TestTeamReconciler_AgentService_TeardownDrainsTheMarker asserts that a
+// teardown tick drains a marker a move left, so the Service never outlives
+// the tenant.
+func TestTeamReconciler_AgentService_TeardownDrainsTheMarker(t *testing.T) {
+	client := newTeamTestClient()
+	client.namespaces["payments-ns"] = true
+	seedJenkinsVersionProfile(client)
+	seedCellController(client, []string{"payments"})
+
+	team := &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "payments",
+			UID:        types.UID("10000000-0000-0000-0000-000000000004"),
+			Finalizers: []string{v1alpha1.TeamFinalizerTenantPlacement},
+		},
+		Spec: v1alpha1.TeamSpec{
+			Namespaces: []string{"payments-ns"},
+			// spec.pipelines removed: teardown starts.
+		},
+		Status: v1alpha1.TeamStatus{
+			Placement: &v1alpha1.TeamPlacementStatus{
+				Cluster: "core", Cell: "cell-a", CellNamespace: "cells-ns", Generation: 2,
+			},
+			Pipelines: &v1alpha1.TeamPipelinesStatus{
+				WebhookToken: "tok", WebhookSecret: "sec", AgentNamespace: "payments-ns",
+			},
+			StaleAgentServiceNamespaces: []string{"old-cells-ns"},
+		},
+	}
+	client.teams["payments"] = team
+	crdstore.MustSeed(client.store, team)
+
+	rec := newPipelinesTeamReconciler(client, nil)
+	reconcileTeam(t, rec)
+
+	if !serviceDeletedIn(client, "old-cells-ns") {
+		t.Fatalf("teardown did not drain the marker, got %+v", client.deletedWithNamespace)
+	}
+	if !serviceDeletedIn(client, "cells-ns") {
+		t.Fatalf("teardown did not delete the current namespace's Service, got %+v", client.deletedWithNamespace)
+	}
+}
+
+// seedEvacuatingCell seeds one evacuating cell that holds the tenant.
+func seedEvacuatingCell(client *testClient, name, namespace, uid string) {
+	crdstore.MustSeed(client.store, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			UID:       types.UID(uid),
+			Labels:    map[string]string{cells.LabelCellProfile: "jenkins-lts"},
+		},
+		Spec: v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true, MaxTenants: 10}},
+		Status: v1alpha1.ControllerStatus{
+			Conditions: []v1alpha1.ControllerCondition{{Type: v1alpha1.ConditionCellReady, Status: metav1.ConditionTrue}},
+			Cell: &v1alpha1.CellStatus{
+				Tenants:        []string{"payments"},
+				AppliedTenants: []string{"payments"},
+				Evacuate:       true,
+			},
+		},
+	})
+}
+
+// seedFreeCell seeds one free, ready cell.
+func seedFreeCell(client *testClient, name, namespace, uid string) {
+	crdstore.MustSeed(client.store, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			UID:       types.UID(uid),
+			Labels:    map[string]string{cells.LabelCellProfile: "jenkins-lts"},
+		},
+		Spec: v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true, MaxTenants: 10}},
+		Status: v1alpha1.ControllerStatus{
+			Conditions: []v1alpha1.ControllerCondition{{Type: v1alpha1.ConditionCellReady, Status: metav1.ConditionTrue}},
+		},
+	})
+}
+
+// TestTeamReconciler_AgentService_TwoMovesKeepBothNamespaces asserts that a
+// second move across namespaces, before the first namespace drains, keeps
+// both namespaces and drains both once the deletes succeed. A single-valued
+// marker would forget the first one.
+func TestTeamReconciler_AgentService_TwoMovesKeepBothNamespaces(t *testing.T) {
+	client := newTeamTestClient()
+	client.namespaces["payments-ns"] = true
+	seedJenkinsVersionProfile(client)
+	seedEvacuatingCell(client, "cell-a", "ns-a", "20000000-0000-0000-0000-00000000000a")
+	seedFreeCell(client, "cell-b", "ns-b", "20000000-0000-0000-0000-00000000000b")
+	seedPlacedPipelinesTeam(client, "cell-a", "ns-a")
+	client.deleteResourceErr = errors.New("apiserver unavailable")
+	client.deleteResourceErrKind = "Service"
+
+	rec := newPipelinesTeamReconciler(client, nil)
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "payments"}}
+
+	// Move one: a to b. The delete of ns-a is refused.
+	if _, err := rec.Reconcile(context.Background(), req); err == nil {
+		t.Fatal("expected the tick to return the refused delete")
+	}
+	status := lastTeamStatus(client)
+	if status.Placement == nil || status.Placement.CellNamespace != "ns-b" {
+		t.Fatalf("move one did not land: %+v", status.Placement)
+	}
+	if got := staleMarkers(status); len(got) != 1 || got[0] != "ns-a" {
+		t.Fatalf("the stale namespaces are %v, want [ns-a]", got)
+	}
+
+	// Move two: b to c, while ns-a still owes a delete.
+	seedEvacuatingCell(client, "cell-b", "ns-b", "20000000-0000-0000-0000-00000000000b")
+	seedFreeCell(client, "cell-c", "ns-c", "20000000-0000-0000-0000-00000000000c")
+	if _, err := rec.Reconcile(context.Background(), req); err == nil {
+		t.Fatal("expected the tick to return the refused delete")
+	}
+	status = lastTeamStatus(client)
+	if status.Placement == nil || status.Placement.CellNamespace != "ns-c" {
+		t.Fatalf("move two did not land: %+v", status.Placement)
+	}
+	if got := staleMarkers(status); len(got) != 2 || got[0] != "ns-a" || got[1] != "ns-b" {
+		t.Fatalf("the stale namespaces are %v, want [ns-a ns-b]", got)
+	}
+
+	// Both deletes now succeed, and the list empties.
+	client.deleteResourceErr = nil
+	client.deleteResourceErrKind = ""
+	if _, err := rec.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("the draining tick failed: %v", err)
+	}
+	for _, namespace := range []string{"ns-a", "ns-b"} {
+		if !serviceDeletedIn(client, namespace) {
+			t.Errorf("the drain did not delete the Service in %q, got %+v", namespace, client.deletedWithNamespace)
+		}
+	}
+	if got := staleMarkers(lastTeamStatus(client)); len(got) != 0 {
+		t.Errorf("the stale namespaces are %v, want none", got)
+	}
+}
+
+// TestTeamReconciler_AgentService_TeardownWithNoCellDrainsTheMarker asserts
+// the teardown path that completes in one tick. An absent cell short-
+// circuits to the final teardown stage, which clears status.pipelines; the
+// list therefore lives on the status root, where that stage never reaches
+// it.
+func TestTeamReconciler_AgentService_TeardownWithNoCellDrainsTheMarker(t *testing.T) {
+	client := newTeamTestClient()
+	client.namespaces["payments-ns"] = true
+	seedJenkinsVersionProfile(client)
+
+	// No cell object exists, so teardown finishes on this tick.
+	team := &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "payments",
+			UID:        types.UID("10000000-0000-0000-0000-000000000005"),
+			Finalizers: []string{v1alpha1.TeamFinalizerTenantPlacement},
+		},
+		Spec: v1alpha1.TeamSpec{Namespaces: []string{"payments-ns"}},
+		Status: v1alpha1.TeamStatus{
+			Placement: &v1alpha1.TeamPlacementStatus{
+				Cluster: "core", Cell: "cell-gone", CellNamespace: "cells-ns", Generation: 3,
+			},
+			Pipelines: &v1alpha1.TeamPipelinesStatus{
+				WebhookToken: "tok", WebhookSecret: "sec", AgentNamespace: "payments-ns",
+			},
+			StaleAgentServiceNamespaces: []string{"old-cells-ns"},
+		},
+	}
+	client.teams["payments"] = team
+	crdstore.MustSeed(client.store, team)
+
+	rec := newPipelinesTeamReconciler(client, nil)
+	reconcileTeam(t, rec)
+
+	status := lastTeamStatus(client)
+	if status == nil || status.Placement != nil {
+		t.Fatalf("expected teardown to complete on this tick, got %+v", status)
+	}
+	if !serviceDeletedIn(client, "old-cells-ns") {
+		t.Fatalf("teardown did not drain the list, got %+v", client.deletedWithNamespace)
+	}
+	if got := staleMarkers(status); len(got) != 0 {
+		t.Errorf("the stale namespaces are %v, want none", got)
+	}
+}
+
+// teamFinalizers answers the placement finalizer state of the stored Team.
+func teamHoldsPlacementFinalizer(t *testing.T, client *testClient) bool {
+	t.Helper()
+	team, err := crdstore.Get[v1alpha1.Team](context.Background(), client.store, "payments", "")
+	if err != nil {
+		t.Fatalf("read the Team: %v", err)
+	}
+	return containsString(team.Finalizers, v1alpha1.TeamFinalizerTenantPlacement)
+}
+
+// TestTeamReconciler_AgentService_TeardownHoldsFinalizerUntilTheDrain
+// asserts that the placement finalizer releases only once every agent
+// Service of the tenant is gone. The finalizer is what keeps the pipelines
+// block reachable, so releasing it over an owed delete would strand the
+// Service for good.
+func TestTeamReconciler_AgentService_TeardownHoldsFinalizerUntilTheDrain(t *testing.T) {
+	client := newTeamTestClient()
+	client.namespaces["payments-ns"] = true
+	seedJenkinsVersionProfile(client)
+
+	// No cell object exists, so teardown asks to release the finalizer on
+	// the first tick.
+	team := &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "payments",
+			UID:        types.UID("10000000-0000-0000-0000-000000000006"),
+			Finalizers: []string{v1alpha1.TeamFinalizerTenantPlacement},
+		},
+		Spec: v1alpha1.TeamSpec{Namespaces: []string{"payments-ns"}},
+		Status: v1alpha1.TeamStatus{
+			Placement: &v1alpha1.TeamPlacementStatus{
+				Cluster: "core", Cell: "cell-gone", CellNamespace: "cells-ns", Generation: 3,
+			},
+			Pipelines: &v1alpha1.TeamPipelinesStatus{
+				WebhookToken: "tok", WebhookSecret: "sec", AgentNamespace: "payments-ns",
+			},
+		},
+	}
+	client.teams["payments"] = team
+	crdstore.MustSeed(client.store, team)
+	client.deleteResourceErr = errors.New("apiserver unavailable")
+	client.deleteResourceErrKind = "Service"
+
+	rec := newPipelinesTeamReconciler(client, nil)
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "payments"}}
+
+	// Tick one: the drain is refused, so the finalizer stays and the list
+	// names the namespace still owed.
+	if _, err := rec.Reconcile(context.Background(), req); err == nil {
+		t.Fatal("expected the tick to return the refused delete")
+	}
+	if !teamHoldsPlacementFinalizer(t, client) {
+		t.Fatal("the finalizer was released over an owed agent Service delete")
+	}
+	status := lastTeamStatus(client)
+	if got := staleMarkers(status); len(got) != 1 || got[0] != "cells-ns" {
+		t.Fatalf("the stale namespaces are %v, want [cells-ns]", got)
+	}
+	if got := placedReasonOf(status); got != v1alpha1.TeamReasonAgentServiceFailed {
+		t.Fatalf("Placed reason = %q, want AgentServiceFailed", got)
+	}
+
+	// Tick two: the delete succeeds, the list empties, and the finalizer
+	// releases. The stored Team still carries the list, and spec.pipelines
+	// and the placement are both gone, so this tick proves the guard lets a
+	// finalizer-only tenant reach the drain.
+	client.deleteResourceErr = nil
+	client.deleteResourceErrKind = ""
+	if _, err := rec.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	if !serviceDeletedIn(client, "cells-ns") {
+		t.Fatalf("the retry did not delete the Service, got %+v", client.deletedWithNamespace)
+	}
+	if teamHoldsPlacementFinalizer(t, client) {
+		t.Fatal("the finalizer was not released once the drain succeeded")
+	}
+	if got := staleMarkers(lastTeamStatus(client)); len(got) != 0 {
+		t.Errorf("the stale namespaces are %v, want none", got)
 	}
 }

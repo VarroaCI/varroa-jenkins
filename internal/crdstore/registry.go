@@ -95,7 +95,11 @@ var clearStatusFields = map[schema.GroupVersionResource]map[string]any{
 	// This map holds no controllerGVR entry for "cell". Such an entry
 	// would apply to every status patch for the kind and delete the tenant
 	// list on the controller reconciler's next full-status patch.
-	teamGVR: {"placement": nil, "pipelines": nil, "rehydration": nil},
+	// staleAgentServiceNamespaces is omitempty too. The tick that deletes
+	// the last agent Service a move left behind must be able to empty the
+	// list, or the merge patch drops the key, the server keeps the stale
+	// names, and every later tick deletes an absent Service again.
+	teamGVR: {"placement": nil, "pipelines": nil, "rehydration": nil, "staleAgentServiceNamespaces": nil},
 	// cell and cellNamespace are both omitempty. An unplaced runner must
 	// clear both, or a merge patch would leave the stale cell binding in
 	// etcd once the owning Team loses its placement.
