@@ -24,6 +24,24 @@ const (
 // counts as absent, so a stopped operator never interrupts a run.
 const cellAliveStaleAfter = 20 * time.Minute
 
+// DefaultConfirmedGoneGrace is the wait an entry with a pod-read
+// confirmation serves before it counts as gone. The operator can clear
+// its stored cell instance on the same tick a replacement pod appears,
+// and a zero grace would then mark a run the new pod is about to adopt.
+// The chart value recordStore.cellLoss.confirmedGoneGrace sets it.
+const DefaultConfirmedGoneGrace = 30 * time.Second
+
+// livenessReading names which cell-liveness test fired. The interrupted
+// reason depends on the test, so the reading carries more than a bool.
+type livenessReading int
+
+const (
+	livenessAlive livenessReading = iota
+	livenessConfirmedGone
+	livenessMoved
+	livenessSilent
+)
+
 // tenantPlacementLivenessRow is the subset of one tenant_placements row
 // the cell-liveness readings need. It is read fresh for the periodic
 // sweep, and built directly from an announce request's own fields for
@@ -73,18 +91,32 @@ func readTenantPlacementLivenessRow(ctx context.Context, db livenessQuerier, clu
 	return row, true, nil
 }
 
-// deadInstanceGone reports whether instance appears in dead, with a
-// LastSeenAt older than window. An empty instance never matches.
-func deadInstanceGone(dead []TenantSyncDeadInstance, instance string, now time.Time, window time.Duration) bool {
+// deadInstanceGone reports whether instance appears in dead and counts
+// as gone. The entry counts as gone on either of two arms: its
+// ConfirmedGoneAt is set and older than grace, which rests on the
+// operator's own pod read; or its LastSeenAt is older than window, the
+// heartbeat-absence arm. An empty instance never matches.
+func deadInstanceGone(dead []TenantSyncDeadInstance, instance string, now time.Time,
+	window, grace time.Duration) bool {
 	if instance == "" {
 		return false
 	}
 	for _, d := range dead {
-		if d.Instance == instance {
-			return d.LastSeenAt.Before(now.Add(-window))
+		if d.Instance != instance {
+			continue
 		}
+		if confirmedGone(d, now, grace) {
+			return true
+		}
+		return d.LastSeenAt.Before(now.Add(-window))
 	}
 	return false
+}
+
+// confirmedGone reports whether entry carries a pod-read confirmation
+// older than grace. An entry with no confirmation never counts here.
+func confirmedGone(entry TenantSyncDeadInstance, now time.Time, grace time.Duration) bool {
+	return entry.ConfirmedGoneAt != nil && entry.ConfirmedGoneAt.Before(now.Add(-grace))
 }
 
 // currentInstanceGone reports whether row's own cell-liveness signal
@@ -92,6 +124,10 @@ func deadInstanceGone(dead []TenantSyncDeadInstance, instance string, now time.T
 // cell_last_seen_at older than window. cell_alive_at older than twice
 // the announce interval counts the whole signal as absent, so a stopped
 // operator never interrupts a run.
+//
+// This reading tests no pod-read confirmation. It reads cell_alive,
+// cell_alive_at, and cell_last_seen_at only, and never dead_instances,
+// which is the one place a confirmation is stored.
 func currentInstanceGone(row tenantPlacementLivenessRow, now time.Time, window time.Duration) bool {
 	if row.cellAlive {
 		return false
@@ -106,21 +142,44 @@ func currentInstanceGone(row tenantPlacementLivenessRow, now time.Time, window t
 }
 
 // cellLivenessGone is the interrupted-runs spec's one shared reading
-// function: it answers whether cellInstance counts as gone from row,
-// given anchor (the caller's own liveness baseline) and now. It applies
-// the moved reading (dead_instances) when cellInstance differs from
-// row's own stored instance, and the silent reading (cell_alive) when it
-// matches. Neither reading fires unless anchor is already older than
-// that reading's own window. A missing row answers false: no reading is
-// possible. This is the "one piece of code" design D9 requires: both the
-// placement-aware Liveness seam and the interrupted-run sweep call it.
-func cellLivenessGone(now, anchor time.Time, cellInstance string, row tenantPlacementLivenessRow, exists bool) bool {
+// function: it answers which test proves cellInstance gone from row,
+// given anchor (the caller's own liveness baseline) and now. Three tests
+// apply in order, and the first match wins.
+//
+// The confirmed test holds when the entry for cellInstance carries a
+// ConfirmedGoneAt older than grace. It applies no anchor and no window:
+// a run's heartbeat age proves nothing once the operator has proved the
+// pod gone.
+//
+// The moved test applies the dead_instances reading when cellInstance
+// differs from row's own stored instance, and the silent test applies
+// the cell_alive reading when it matches. Neither fires unless anchor is
+// already older than that test's own window.
+//
+// A missing row answers livenessAlive: no reading is possible. This is
+// the "one piece of code" design D9 requires: both the placement-aware
+// Liveness seam and the interrupted-run sweep call it.
+func cellLivenessGone(now, anchor time.Time, cellInstance string, row tenantPlacementLivenessRow,
+	exists bool, grace time.Duration) livenessReading {
 	if !exists {
-		return false
+		return livenessAlive
+	}
+	if cellInstance != "" {
+		for _, d := range row.deadInstances {
+			if d.Instance == cellInstance && confirmedGone(d, now, grace) {
+				return livenessConfirmedGone
+			}
+		}
 	}
 	if cellInstance != row.cellInstance {
-		return anchor.Before(now.Add(-movedHeartbeatWindow)) &&
-			deadInstanceGone(row.deadInstances, cellInstance, now, movedHeartbeatWindow)
+		if anchor.Before(now.Add(-movedHeartbeatWindow)) &&
+			deadInstanceGone(row.deadInstances, cellInstance, now, movedHeartbeatWindow, grace) {
+			return livenessMoved
+		}
+		return livenessAlive
 	}
-	return anchor.Before(now.Add(-silentHeartbeatWindow)) && currentInstanceGone(row, now, silentHeartbeatWindow)
+	if anchor.Before(now.Add(-silentHeartbeatWindow)) && currentInstanceGone(row, now, silentHeartbeatWindow) {
+		return livenessSilent
+	}
+	return livenessAlive
 }

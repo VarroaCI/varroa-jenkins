@@ -22,14 +22,18 @@ import (
 // interrupted-runs capability's two shared cell-liveness readings
 // (cell_liveness.go) with no anchor test: a releasing row carries no
 // run heartbeat to anchor against, only the placement's own state.
-func fleetLockOwnerConfirmedGone(row tenantPlacementLivenessRow, cellInstance string, now time.Time) bool {
+//
+// grace is the confirmed-gone grace, so a pod-read confirmation releases
+// a lock on the same schedule it interrupts a run.
+func fleetLockOwnerConfirmedGone(row tenantPlacementLivenessRow, cellInstance string, now time.Time,
+	grace time.Duration) bool {
 	if cellInstance == "" {
 		return false
 	}
 	if cellInstance == row.cellInstance {
 		return currentInstanceGone(row, now, silentHeartbeatWindow)
 	}
-	return deadInstanceGone(row.deadInstances, cellInstance, now, movedHeartbeatWindow)
+	return deadInstanceGone(row.deadInstances, cellInstance, now, movedHeartbeatWindow, grace)
 }
 
 // releasingFleetLock is one releasing fleet_locks row
@@ -47,7 +51,8 @@ type releasingFleetLock struct {
 // once per announce, against the row that announce just wrote, is
 // enough; the maintenance round adds nothing this test could not already
 // see at the last announce. It answers how many rows it released.
-func ReleaseConfirmedFleetLocks(ctx context.Context, pool *pgxpool.Pool, cluster, tenant string, row tenantPlacementLivenessRow, now time.Time, logger *slog.Logger) (int, error) {
+func ReleaseConfirmedFleetLocks(ctx context.Context, pool *pgxpool.Pool, cluster, tenant string,
+	row tenantPlacementLivenessRow, now time.Time, grace time.Duration, logger *slog.Logger) (int, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -66,7 +71,7 @@ func ReleaseConfirmedFleetLocks(ctx context.Context, pool *pgxpool.Pool, cluster
 
 	released := 0
 	for _, c := range candidates {
-		if !fleetLockOwnerConfirmedGone(row, c.cellInstance, now) {
+		if !fleetLockOwnerConfirmedGone(row, c.cellInstance, now, grace) {
 			continue
 		}
 		tag, err := pool.Exec(ctx, `

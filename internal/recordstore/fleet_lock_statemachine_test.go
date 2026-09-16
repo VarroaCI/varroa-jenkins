@@ -165,7 +165,7 @@ func TestFleetLockStateMachine_DeadInstanceEntryReleasesRow(t *testing.T) {
 		cellAlive:     true,
 		deadInstances: []TenantSyncDeadInstance{{Instance: "pod-a", LastSeenAt: staleSeen}},
 	}
-	released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha", row, now, nil)
+	released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha", row, now, testGrace, nil)
 	if err != nil {
 		t.Fatalf("ReleaseConfirmedFleetLocks: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestFleetLockStateMachine_TenantMoveWithNoDeadInstanceKeepsRow(t *testing.T
 
 	// The tenant moved to pod-b, but pod-a is absent from dead_instances.
 	row := tenantPlacementLivenessRow{cellInstance: "pod-b", cellAlive: true}
-	released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha", row, now, nil)
+	released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha", row, now, testGrace, nil)
 	if err != nil {
 		t.Fatalf("ReleaseConfirmedFleetLocks: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestFleetLockStateMachine_StaleCellAliveAtKeepsRow(t *testing.T) {
 		cellAliveAt:    &staleAliveAt,
 		cellLastSeenAt: &lastSeen,
 	}
-	released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha", row, now, nil)
+	released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha", row, now, testGrace, nil)
 	if err != nil {
 		t.Fatalf("ReleaseConfirmedFleetLocks: %v", err)
 	}
@@ -264,12 +264,65 @@ func TestFleetLockStateMachine_OwnerDiedWithPodReleasedWithoutCancel(t *testing.
 		cellAlive:     true,
 		deadInstances: []TenantSyncDeadInstance{{Instance: "pod-dead", LastSeenAt: staleSeen}},
 	}
-	released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha", row, now, nil)
+	released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha", row, now, testGrace, nil)
 	if err != nil {
 		t.Fatalf("ReleaseConfirmedFleetLocks: %v", err)
 	}
 	if released != 1 {
 		t.Fatalf("released = %d, want 1: no undelivered cancel_run should block the confirmed-dead release", released)
+	}
+}
+
+// TestFleetLockStateMachine_PodReadConfirmationReleasesInSeconds asserts
+// the delta's scenario: a pod-read confirmation older than the grace
+// releases a releasing row, with a last_seen_at far inside the
+// five-minute window. The same row with no confirmation is kept.
+func TestFleetLockStateMachine_PodReadConfirmationReleasesInSeconds(t *testing.T) {
+	now := time.Now()
+	confirmed := now.Add(-45 * time.Second)
+	recentSeen := now.Add(-time.Minute)
+
+	cases := []struct {
+		name         string
+		confirmation *time.Time
+		wantReleased int
+		wantFound    bool
+	}{
+		{name: "confirmed", confirmation: &confirmed, wantReleased: 1, wantFound: false},
+		{name: "no confirmation", confirmation: nil, wantReleased: 0, wantFound: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pool, db := setupLedgerPool(t)
+
+			runID := newTestUUIDv7String()
+			insertInterruptedRun(t, db, runID)
+			insertFleetLockRow(t, db, fleetLockStateMachineTestName, runID, FleetLockStateReleasing,
+				now.Add(-2*time.Minute), now.Add(5*time.Minute))
+			if _, err := db.Exec(`UPDATE varroa.fleet_locks SET cell_instance = 'pod-a' WHERE name = $1 AND run_id = $2`,
+				fleetLockStateMachineTestName, runID); err != nil {
+				t.Fatalf("set cell_instance: %v", err)
+			}
+
+			row := tenantPlacementLivenessRow{
+				cellInstance: "pod-b",
+				cellAlive:    true,
+				deadInstances: []TenantSyncDeadInstance{{
+					Instance: "pod-a", LastSeenAt: recentSeen, ConfirmedGoneAt: tc.confirmation,
+				}},
+			}
+			released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha",
+				row, now, testGrace, nil)
+			if err != nil {
+				t.Fatalf("ReleaseConfirmedFleetLocks: %v", err)
+			}
+			if released != tc.wantReleased {
+				t.Fatalf("released = %d, want %d", released, tc.wantReleased)
+			}
+			if _, _, found := fleetLockRowState(t, db, runID); found != tc.wantFound {
+				t.Fatalf("row found = %v, want %v", found, tc.wantFound)
+			}
+		})
 	}
 }
 

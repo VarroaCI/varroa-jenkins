@@ -27,6 +27,10 @@ type BackstopConfig struct {
 	// MaxSweepPending is VARROA_SWEEP_MAX_PENDING, D9's interrupted-sweep
 	// gate.
 	MaxSweepPending uint64
+	// ConfirmedGoneGrace is the wait a pod-read confirmation serves
+	// before the round counts the instance gone. A zero value applies
+	// DefaultConfirmedGoneGrace.
+	ConfirmedGoneGrace time.Duration
 	// SweepMetrics counts D9's interrupted-run marking.
 	SweepMetrics *InterruptedMetrics
 	// BackstopMetrics counts D11's fires and misses.
@@ -55,10 +59,18 @@ func (cfg BackstopConfig) logger() *slog.Logger {
 	return slog.Default()
 }
 
+func (cfg BackstopConfig) grace() time.Duration {
+	if cfg.ConfirmedGoneGrace > 0 {
+		return cfg.ConfirmedGoneGrace
+	}
+	return DefaultConfirmedGoneGrace
+}
+
 // RunBackstopRound tries the backstop advisory lock on one acquired
-// connection, and on success runs D9's interrupted sweep, then D11's
-// backstop cron round, before releasing it. It reports whether this
-// call took the lock; a replica that does not returns false, nil.
+// connection, and on success runs D9's interrupted sweep, then the
+// unstarted-intent re-fire, then D11's backstop cron round, before
+// releasing it. It reports whether this call took the lock; a replica
+// that does not returns false, nil.
 func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, cfg BackstopConfig) (bool, error) {
 	pgConn, err := pool.Acquire(ctx)
 	if err != nil {
@@ -80,8 +92,14 @@ func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c
 	now := cfg.now()
 	logger := cfg.logger()
 
-	if _, err := SweepInterruptedRuns(ctx, pool, conn, cfg.SweepMetrics, cfg.ActionMetrics, cfg.MaxSweepPending, now, logger); err != nil {
+	grace := cfg.grace()
+	if _, err := SweepInterruptedRuns(ctx, pool, conn, cfg.SweepMetrics, cfg.ActionMetrics,
+		cfg.MaxSweepPending, now, grace, logger); err != nil {
 		logger.Warn("interrupted sweep failed", "error", err)
+	}
+
+	if err := runRefireRound(ctx, pool, conn, cfg.SweepMetrics, cfg.ActionMetrics, now, grace, logger); err != nil {
+		logger.Warn("unstarted-intent re-fire round failed", "error", err)
 	}
 
 	if err := runBackstopSchedule(ctx, pool, conn, cfg, now); err != nil {

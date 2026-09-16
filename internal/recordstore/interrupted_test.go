@@ -307,6 +307,9 @@ func TestEvaluateInterruptionReasons(t *testing.T) {
 	oldHeartbeat := now.Add(-20 * time.Minute)
 	sixMinutes := now.Add(-6 * time.Minute)
 	fresh := now.Add(-time.Minute)
+	fortySeconds := now.Add(-40 * time.Second)
+	confirmed := now.Add(-45 * time.Second)
+	freshConfirmation := now.Add(-5 * time.Second)
 
 	cases := []struct {
 		name       string
@@ -361,11 +364,46 @@ func TestEvaluateInterruptionReasons(t *testing.T) {
 			},
 			wantOK: false,
 		},
+		{
+			// The heartbeat is 40 seconds old, far inside every other
+			// window. The pod read decides on its own.
+			name: "cell-lost with a fresh heartbeat",
+			c:    runInterruptCandidate{cell: "cell-a", cellInstance: "pod-old", lastHeartbeatAt: &fortySeconds},
+			row: tenantPlacementLivenessRow{
+				cell: "cell-a", cellInstance: "pod-new",
+				deadInstances: []TenantSyncDeadInstance{{
+					Instance: "pod-old", LastSeenAt: fortySeconds, ConfirmedGoneAt: &confirmed,
+				}},
+			},
+			wantOK: true, wantReason: ReasonCellLost,
+		},
+		{
+			name: "confirmed wins over moved when both hold",
+			c:    runInterruptCandidate{cell: "cell-a", cellInstance: "pod-old", lastHeartbeatAt: &sixMinutes},
+			row: tenantPlacementLivenessRow{
+				cell: "cell-a", cellInstance: "pod-new",
+				deadInstances: []TenantSyncDeadInstance{{
+					Instance: "pod-old", LastSeenAt: sixMinutes, ConfirmedGoneAt: &confirmed,
+				}},
+			},
+			wantOK: true, wantReason: ReasonCellLost,
+		},
+		{
+			name: "a fresh confirmation waits out the grace",
+			c:    runInterruptCandidate{cell: "cell-a", cellInstance: "pod-old", lastHeartbeatAt: &fortySeconds},
+			row: tenantPlacementLivenessRow{
+				cell: "cell-a", cellInstance: "pod-new",
+				deadInstances: []TenantSyncDeadInstance{{
+					Instance: "pod-old", LastSeenAt: fortySeconds, ConfirmedGoneAt: &freshConfirmation,
+				}},
+			},
+			wantOK: false,
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			reason, ok := evaluateInterruption(now, tc.c, tc.row, true)
+			reason, ok := evaluateInterruption(now, tc.c, tc.row, true, testGrace)
 			if ok != tc.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
 			}
@@ -410,6 +448,15 @@ func TestAfterMarkPublishesCancelOnlyForNoHeartbeat(t *testing.T) {
 	select {
 	case a := <-received:
 		t.Fatalf("want no action for a moved reason, got %+v", a)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	// A cell-lost mark proves the pod gone, so no process remains to
+	// stop and the cell that would receive the command no longer runs.
+	afterMark(context.Background(), conn, nil, nil, run, ReasonCellLost, "", nil)
+	select {
+	case a := <-received:
+		t.Fatalf("want no action for a cell-lost reason, got %+v", a)
 	case <-time.After(300 * time.Millisecond):
 	}
 }
@@ -537,7 +584,7 @@ func TestSweepInterruptedRunsMarksASilentRun(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -591,7 +638,7 @@ func TestSweepInterruptedRunsSkipsOnPendingBacklog(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, 1, time.Now(), nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, 1, time.Now(), testGrace, nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -619,6 +666,12 @@ func TestSweepInterruptedRunsSkipsOnStaleConsumer(t *testing.T) {
 	conn, cleanup := newSweepTestBus(t)
 	defer cleanup()
 
+	// The skip needs work in hand: one unconsumed message leaves the
+	// consumer with a pending count above zero and no ack floor at all.
+	if _, err := conn.PublishJetStream("builds.core.ns.cell", []byte("{}")); err != nil {
+		t.Fatalf("publish a pending message: %v", err)
+	}
+
 	reader, restore := swapMeterProvider(t)
 	defer restore()
 	metrics, err := NewInterruptedMetrics()
@@ -626,7 +679,7 @@ func TestSweepInterruptedRunsSkipsOnStaleConsumer(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -783,7 +836,7 @@ func TestSweepMarksQueuedRunWithDeadAcceptingInstance(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -846,7 +899,7 @@ func TestSweepLeavesQueuedRunWithLiveAcceptingInstanceAlone(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -887,7 +940,7 @@ func TestSweepSkipsQueuedPlaceholderWithNoOwningInstance(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -943,7 +996,7 @@ func TestSweepMarksClaimedQueuedRunThroughIntentInstance(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(ctx, pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), nil)
+	marked, err := SweepInterruptedRuns(ctx, pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -989,6 +1042,224 @@ func TestMarkMovedRunsForTenantMarksQueuedRunOfOldCell(t *testing.T) {
 	}
 	if status != StatusCompleted || result != "INTERRUPTED" || reason != ReasonCellRolled {
 		t.Fatalf("status=%q result=%q reason=%q, want COMPLETED/INTERRUPTED/%q", status, result, reason, ReasonCellRolled)
+	}
+}
+
+// TestSweepConsumerSkip asserts the consumer gate tests a backlog and
+// never quiet. A consumer with no pending message has processed
+// everything the stream holds, so an old or absent AckFloor.Last means
+// only that no build event arrived lately. A quiet tenant is exactly
+// the case the sweep must serve: nothing else would refresh the floor,
+// and a lost cell's runs would wait for a build that never comes.
+func TestSweepConsumerSkip(t *testing.T) {
+	now := time.Now()
+	fresh := now.Add(-5 * time.Second)
+	old := now.Add(-10 * time.Minute)
+	const maxPending = 1000
+
+	cases := []struct {
+		name       string
+		pending    uint64
+		floor      *time.Time
+		wantSkip   bool
+		wantReason string
+	}{
+		{name: "a backlog at the cap skips", pending: maxPending, floor: &fresh, wantSkip: true, wantReason: "pending"},
+		{name: "a backlog past the cap skips", pending: maxPending + 1, floor: &fresh, wantSkip: true, wantReason: "pending"},
+		{name: "work in hand with an old floor skips", pending: 5, floor: &old, wantSkip: true, wantReason: "stale"},
+		{name: "work in hand with a nil floor skips", pending: 5, floor: nil, wantSkip: true, wantReason: "stale"},
+		{name: "work in hand with a fresh floor runs", pending: 5, floor: &fresh, wantSkip: false},
+		{name: "an idle consumer with an old floor runs", pending: 0, floor: &old, wantSkip: false},
+		{name: "an idle consumer with a nil floor runs", pending: 0, floor: nil, wantSkip: false},
+		{name: "an idle consumer with a fresh floor runs", pending: 0, floor: &fresh, wantSkip: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			info := &nats.ConsumerInfo{
+				NumPending: tc.pending,
+				AckFloor:   nats.SequenceInfo{Last: tc.floor},
+			}
+			reason, skip := sweepConsumerSkip(info, maxPending, now)
+			if skip != tc.wantSkip {
+				t.Fatalf("skip = %v, want %v", skip, tc.wantSkip)
+			}
+			if skip && reason != tc.wantReason {
+				t.Fatalf("reason = %q, want %q", reason, tc.wantReason)
+			}
+			if !skip && reason != "" {
+				t.Fatalf("reason = %q, want empty when the round runs", reason)
+			}
+		})
+	}
+}
+
+// cellLossCountByPath sums every recorder_cell_loss_confirmed_total data
+// point whose "path" attribute equals path.
+func cellLossCountByPath(t *testing.T, reader *sdkmetric.ManualReader, path string) int64 {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	var total int64
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "recorder_cell_loss_confirmed_total" {
+				continue
+			}
+			data, ok := m.Data.(metricdata.Sum[int64])
+			if !ok {
+				continue
+			}
+			for _, dp := range data.DataPoints {
+				if v, ok := dp.Attributes.Value(attribute.Key("path")); ok && v.AsString() == path {
+					total += dp.Value
+				}
+			}
+		}
+	}
+	return total
+}
+
+// useManualMeter installs a manual metric reader for the duration of the
+// test and answers it.
+func useManualMeter(t *testing.T) *sdkmetric.ManualReader {
+	t.Helper()
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	prev := otel.GetMeterProvider()
+	otel.SetMeterProvider(mp)
+	t.Cleanup(func() { otel.SetMeterProvider(prev) })
+	return reader
+}
+
+// TestAnnounceHookMarksCellLostWithAFreshHeartbeat asserts the announce
+// hook does not skip a cell-lost reading. The run's heartbeat is 40
+// seconds old, far inside the five-minute window, and the pod-read
+// confirmation alone decides. It also asserts
+// recorder_cell_loss_confirmed_total counts one "announce" mark.
+func TestAnnounceHookMarksCellLostWithAFreshHeartbeat(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	reader := useManualMeter(t)
+	conn := newTestSyncConn(t)
+
+	now := time.Now().UTC()
+	runID := seedAcceptedOnlyRunRowInstance(t, db, "pod-old", now.Add(-40*time.Second))
+	confirmed := now.Add(-45 * time.Second)
+
+	metrics, err := NewInterruptedMetrics()
+	if err != nil {
+		t.Fatalf("new interrupted metrics: %v", err)
+	}
+	resp := sendTenantSyncWithMetrics(t, pool, conn, metrics, TenantSyncRequest{
+		Kind: TenantSyncKindAnnounce, Cluster: testCluster, Tenant: testTenant,
+		Namespace: testNamespace, Cell: "cell-a", Generation: 1, CellInstance: "",
+		DeadInstances: []TenantSyncDeadInstance{{
+			Instance: "pod-old", LastSeenAt: now.Add(-40 * time.Second), ConfirmedGoneAt: &confirmed,
+		}},
+	})
+	if resp.InterruptedMarked != 1 {
+		t.Fatalf("InterruptedMarked = %d, want 1: the announce hook must not skip a cell-lost reading", resp.InterruptedMarked)
+	}
+
+	var status, result, reason string
+	if err := db.QueryRow(`
+		SELECT status, result, payload->>'interrupted_reason' FROM varroa.runs WHERE run_id = $1
+	`, runID).Scan(&status, &result, &reason); err != nil {
+		t.Fatalf("read run: %v", err)
+	}
+	if status != StatusCompleted || result != "INTERRUPTED" || reason != ReasonCellLost {
+		t.Fatalf("status=%q result=%q reason=%q, want COMPLETED/INTERRUPTED/%q", status, result, reason, ReasonCellLost)
+	}
+	if got := cellLossCountByPath(t, reader, "announce"); got != 1 {
+		t.Fatalf("recorder_cell_loss_confirmed_total{path=announce} = %d, want 1", got)
+	}
+}
+
+// TestSweepMarksCellLostAndCountsIt asserts the periodic sweep marks a
+// confirmed loss with the cell-lost reason and counts it under the
+// "sweep" path.
+func TestSweepMarksCellLostAndCountsIt(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	reader := useManualMeter(t)
+	conn, cleanup := newSweepTestBus(t)
+	defer cleanup()
+	freshenSweepConsumer(t, conn)
+
+	now := time.Now().UTC()
+	runID := seedAcceptedOnlyRunRowInstance(t, db, "pod-old", now.Add(-40*time.Second))
+	confirmed := now.Add(-45 * time.Second)
+	seedPlacementLivenessWithPolicy(t, db, "pod-new", []TenantSyncDeadInstance{{
+		Instance: "pod-old", LastSeenAt: now.Add(-40 * time.Second), ConfirmedGoneAt: &confirmed,
+	}}, `{}`)
+
+	metrics, err := NewInterruptedMetrics()
+	if err != nil {
+		t.Fatalf("new interrupted metrics: %v", err)
+	}
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil,
+		DefaultSweepMaxPending, time.Now(), testGrace, nil)
+	if err != nil {
+		t.Fatalf("SweepInterruptedRuns: %v", err)
+	}
+	if marked != 1 {
+		t.Fatalf("marked = %d, want 1", marked)
+	}
+
+	var reason string
+	if err := db.QueryRow(`
+		SELECT payload->>'interrupted_reason' FROM varroa.runs WHERE run_id = $1
+	`, runID).Scan(&reason); err != nil {
+		t.Fatalf("read run: %v", err)
+	}
+	if reason != ReasonCellLost {
+		t.Fatalf("interrupted_reason = %q, want %q", reason, ReasonCellLost)
+	}
+	if got := cellLossCountByPath(t, reader, "sweep"); got != 1 {
+		t.Fatalf("recorder_cell_loss_confirmed_total{path=sweep} = %d, want 1", got)
+	}
+}
+
+// TestSweepMarksCellLostOnAnIdleConsumer asserts the sweep marks a
+// confirmed loss with no build event in the whole fleet. The consumer is
+// idle, so it holds no pending message and its ack floor never moved.
+// A quiet tenant is exactly the case the sweep must serve: nothing else
+// would refresh the floor, so the lost run would otherwise wait for a
+// build that never comes.
+func TestSweepMarksCellLostOnAnIdleConsumer(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn, cleanup := newSweepTestBus(t)
+	defer cleanup()
+	// Deliberately no freshening publish and no fetch.
+
+	now := time.Now().UTC()
+	runID := seedAcceptedOnlyRunRowInstance(t, db, "pod-old", now.Add(-40*time.Second))
+	confirmed := now.Add(-45 * time.Second)
+	seedPlacementLivenessWithPolicy(t, db, "pod-new", []TenantSyncDeadInstance{{
+		Instance: "pod-old", LastSeenAt: now.Add(-40 * time.Second), ConfirmedGoneAt: &confirmed,
+	}}, `{}`)
+
+	metrics, err := NewInterruptedMetrics()
+	if err != nil {
+		t.Fatalf("new interrupted metrics: %v", err)
+	}
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil,
+		DefaultSweepMaxPending, time.Now(), testGrace, nil)
+	if err != nil {
+		t.Fatalf("SweepInterruptedRuns: %v", err)
+	}
+	if marked != 1 {
+		t.Fatalf("marked = %d, want 1: an idle consumer must not skip the round", marked)
+	}
+
+	var reason string
+	if err := db.QueryRow(`
+		SELECT payload->>'interrupted_reason' FROM varroa.runs WHERE run_id = $1
+	`, runID).Scan(&reason); err != nil {
+		t.Fatalf("read run: %v", err)
+	}
+	if reason != ReasonCellLost {
+		t.Fatalf("interrupted_reason = %q, want %q", reason, ReasonCellLost)
 	}
 }
 

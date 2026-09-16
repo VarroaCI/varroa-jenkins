@@ -1134,3 +1134,81 @@ func TestPlace_Move_PurgeRetrySurvivesARefusalGate(t *testing.T) {
 		t.Errorf("expected the pending purge to clear after success: %+v", status.Pipelines)
 	}
 }
+
+// --- the confirmed-gone stamp on a dead instance ---
+
+// TestPlace_Reannounce_StampsConfirmation asserts the reannounce path
+// stamps ConfirmedGoneAt with the tick's clock. That path stands behind
+// the reconciler's own pod read, so the entry carries proof.
+func TestPlace_Reannounce_StampsConfirmation(t *testing.T) {
+	lastSeen := fixedNow.Add(-2 * time.Minute)
+	in := testInputs()
+	in.LastSync = &SyncCache{
+		Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1, CellInstance: "uid-1",
+		CellLastSeenAt: &lastSeen, At: lastSeen,
+	}
+	rolled := readyCell("cell-a", "payments")
+	rolled.Instance = "uid-2"
+	rolled.MiteConnected = true
+	in.Cells = []CellCandidate{rolled}
+
+	var got AnnounceRequest
+	in.Announce = func(_ context.Context, req AnnounceRequest) (AnnounceResult, error) {
+		got = req
+		return AnnounceResult{OK: true}, nil
+	}
+
+	team := testTeam()
+	status := placedStatus(1)
+	if _, err := Place(context.Background(), in, team, status); err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	if len(got.DeadInstances) != 1 {
+		t.Fatalf("dead instances = %+v, want exactly one", got.DeadInstances)
+	}
+	entry := got.DeadInstances[0]
+	if entry.Instance != "uid-1" {
+		t.Fatalf("dead instance = %q, want uid-1", entry.Instance)
+	}
+	if entry.ConfirmedGoneAt == nil || !entry.ConfirmedGoneAt.Equal(fixedNow) {
+		t.Fatalf("ConfirmedGoneAt = %v, want the tick's clock %v", entry.ConfirmedGoneAt, fixedNow)
+	}
+}
+
+// TestPlace_Move_StampsNoConfirmation asserts the move path stamps no
+// confirmation. That path reads no pod: it proves only that the old cell
+// object left the candidate set, and a deleting cell pod can still run
+// its whole termination grace.
+func TestPlace_Move_StampsNoConfirmation(t *testing.T) {
+	lastSeen := fixedNow.Add(-2 * time.Minute)
+	in := testInputs()
+	in.LastSync = &SyncCache{
+		Cell: "cell-a", CellNamespace: "cells-ns", Generation: 1, CellInstance: "uid-1",
+		CellLastSeenAt: &lastSeen, At: lastSeen,
+	}
+	// The bound cell object is gone from the candidate set, so the move
+	// path reports it as dead without any pod read behind the entry.
+	in.Cells = []CellCandidate{readyCell("cell-b")}
+
+	var got AnnounceRequest
+	in.Announce = func(_ context.Context, req AnnounceRequest) (AnnounceResult, error) {
+		got = req
+		return AnnounceResult{OK: true}, nil
+	}
+
+	team := testTeam()
+	status := placedStatus(1)
+	if _, err := Place(context.Background(), in, team, status); err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	if len(got.DeadInstances) != 1 {
+		t.Fatalf("dead instances = %+v, want exactly one", got.DeadInstances)
+	}
+	entry := got.DeadInstances[0]
+	if entry.Instance != "uid-1" {
+		t.Fatalf("dead instance = %q, want uid-1", entry.Instance)
+	}
+	if entry.ConfirmedGoneAt != nil {
+		t.Fatalf("ConfirmedGoneAt = %v, want nil: the move path reads no pod", entry.ConfirmedGoneAt)
+	}
+}

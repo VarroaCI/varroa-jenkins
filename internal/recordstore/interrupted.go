@@ -10,16 +10,20 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nats-io/nats.go"
 
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
 
 // Interrupted-run reasons runs.payload.interrupted_reason holds. The
-// moved test names cell-rolled when the run's stored cell equals the
-// tenant's current cell (the same cell's pod rolled), and tenant-moved
-// when they differ (the tenant now lives on a different cell).
+// confirmed test names cell-lost: the operator read the cell pod and
+// found none. The moved test names cell-rolled when the run's stored
+// cell equals the tenant's current cell (the same cell's pod rolled),
+// and tenant-moved when they differ (the tenant now lives on a
+// different cell).
 const (
+	ReasonCellLost    = "cell-lost"
 	ReasonCellRolled  = "cell-rolled"
 	ReasonTenantMoved = "tenant-moved"
 	ReasonNoHeartbeat = "no-heartbeat"
@@ -75,23 +79,26 @@ func livenessBaseline(c runInterruptCandidate) time.Time {
 	return c.createdAt
 }
 
-// evaluateInterruption applies the moved test, then the silent test, to
-// one RUNNING run. It answers the reason the first test that holds
-// names; the moved test wins when both would hold, because it runs
-// first. Neither test fires without a cell-liveness reading naming the
-// run's own owning cell instance.
-func evaluateInterruption(now time.Time, c runInterruptCandidate, row tenantPlacementLivenessRow, exists bool) (reason string, ok bool) {
+// evaluateInterruption applies the confirmed test, then the moved test,
+// then the silent test, to one QUEUED or RUNNING run. It answers the
+// reason the first test that holds names. No test fires without a
+// cell-liveness reading naming the run's own owning cell instance.
+func evaluateInterruption(now time.Time, c runInterruptCandidate, row tenantPlacementLivenessRow,
+	exists bool, grace time.Duration) (reason string, ok bool) {
 	anchor := livenessBaseline(c)
-	if !cellLivenessGone(now, anchor, c.cellInstance, row, exists) {
-		return "", false
-	}
-	if c.cellInstance != row.cellInstance {
+	switch cellLivenessGone(now, anchor, c.cellInstance, row, exists, grace) {
+	case livenessConfirmedGone:
+		return ReasonCellLost, true
+	case livenessMoved:
 		if c.cell == row.cell {
 			return ReasonCellRolled, true
 		}
 		return ReasonTenantMoved, true
+	case livenessSilent:
+		return ReasonNoHeartbeat, true
+	default:
+		return "", false
 	}
-	return ReasonNoHeartbeat, true
 }
 
 // scanCandidates reads the QUEUED/RUNNING candidate columns
@@ -261,12 +268,17 @@ func decodeInterruptedRetry(policy json.RawMessage) string {
 }
 
 // afterMark publishes the actions a successful mark triggers: one
-// cancel_run when the marked run's owning cell instance is still the
-// tenant's stored one (the silent reason, ReasonNoHeartbeat, is the only
-// case that holds), and one automatic retry_run when the tenant's policy
-// calls for it. Neither publish is transactional with markInterrupted's
-// write: a lost action produces no retry and no cancel, per design D14,
-// and the recorder never republishes.
+// cancel_run for the silent reason alone, and one automatic retry_run
+// when the tenant's policy calls for it. Neither publish is
+// transactional with markInterrupted's write: a lost action produces no
+// retry and no cancel, per design D14, and the recorder never
+// republishes.
+//
+// The cancel belongs to ReasonNoHeartbeat alone. A ReasonCellLost mark
+// proves the pod gone, so no process remains to stop and the cell that
+// would receive the command no longer runs. A moved reason names an
+// owning instance that already changed, so its process died with its
+// pod.
 //
 // A marked QUEUED run publishes neither action: no build ever started,
 // so there is nothing to cancel, and the store holds no parameters to
@@ -334,15 +346,18 @@ func markedStatusLabel(status string) string {
 	return "running"
 }
 
-// MarkMovedRunsForTenant runs the moved test only, for every QUEUED or
-// RUNNING run of cluster/tenant, immediately after a tenant.sync
-// announce changes cell or cell_instance. row is the placement row the
-// announce just wrote. It answers how many runs it marked, for the
-// TenantSyncResponse InterruptedMarked field. The sweep marks the rest
-// as their heartbeats age: this is the fast path design D9 gives a cell
-// roll, not a separate rule, so the silent test never fires here.
+// MarkMovedRunsForTenant runs the confirmed and moved tests, for every
+// QUEUED or RUNNING run of cluster/tenant, immediately after a
+// tenant.sync announce changes cell or cell_instance. row is the
+// placement row the announce just wrote. It answers how many runs it
+// marked, for the TenantSyncResponse InterruptedMarked field. The sweep
+// marks the rest as their heartbeats age: this is the fast path design
+// D9 gives a cell roll, not a separate rule, so the silent test never
+// fires here. The confirmed test does fire here, because a pod read
+// proves the loss and needs no heartbeat window.
 func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, metrics *InterruptedMetrics,
-	actionMetrics *ActionMetrics, cluster, tenant string, row tenantPlacementLivenessRow, now time.Time, logger *slog.Logger) (int, error) {
+	actionMetrics *ActionMetrics, cluster, tenant string, row tenantPlacementLivenessRow, now time.Time,
+	grace time.Duration, logger *slog.Logger) (int, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -359,7 +374,7 @@ func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.C
 			metrics.addSweepSkipped(ctx, "no-owning-instance")
 			continue
 		}
-		reason, ok := evaluateInterruption(now, c, row, true)
+		reason, ok := evaluateInterruption(now, c, row, true, grace)
 		if !ok || reason == ReasonNoHeartbeat {
 			continue
 		}
@@ -373,20 +388,50 @@ func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.C
 			continue
 		}
 		metrics.addMarked(ctx, "announce", markedStatusLabel(c.status))
+		if reason == ReasonCellLost {
+			metrics.addCellLoss(ctx, "announce")
+		}
 		afterMark(ctx, conn, metrics, actionMetrics, c, reason, interruptedRetry, logger)
 		marked++
 	}
 	return marked, nil
 }
 
+// sweepConsumerSkip answers whether the recorder's own varroa_builds
+// consumer is too far behind for the sweep to trust a run's heartbeat
+// age, and names the reason. A heartbeat reaches runs.last_heartbeat_at
+// through that consumer, so a backlog makes a live run look silent.
+//
+// The gate tests a BACKLOG, never quiet. A consumer with no pending
+// message has processed everything the stream holds, so an old or
+// absent AckFloor.Last means only that no build event arrived lately.
+// A quiet tenant is exactly the case the sweep must still serve: with
+// no other build running, nothing would ever refresh the floor, and a
+// lost cell's runs would wait for a build that never comes.
+//
+// The floor age therefore applies only while the consumer holds work.
+func sweepConsumerSkip(info *nats.ConsumerInfo, maxPending uint64, now time.Time) (reason string, skip bool) {
+	if info.NumPending >= maxPending {
+		return "pending", true
+	}
+	if info.NumPending == 0 {
+		return "", false
+	}
+	if info.AckFloor.Last == nil || now.Sub(*info.AckFloor.Last) >= pluginHeartbeatInterval {
+		return "stale", true
+	}
+	return "", false
+}
+
 // SweepInterruptedRuns runs one round of the interrupted-run sweep
 // (design D9, task 9.6a's gate): it checks the recorder's own
-// varroa_builds consumer for freshness before it reads any run, then
-// applies the moved and silent tests to every QUEUED or RUNNING run
-// fleet-wide, marking and publishing for each one that qualifies. It
-// answers how many runs it marked.
+// varroa_builds consumer for a backlog (sweepConsumerSkip) before it
+// reads any run, then applies the confirmed, moved, and silent tests to
+// every QUEUED or RUNNING run fleet-wide, marking and publishing for
+// each one that qualifies. It answers how many runs it marked.
 func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, metrics *InterruptedMetrics,
-	actionMetrics *ActionMetrics, maxPending uint64, now time.Time, logger *slog.Logger) (int, error) {
+	actionMetrics *ActionMetrics, maxPending uint64, now time.Time, grace time.Duration,
+	logger *slog.Logger) (int, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -395,12 +440,8 @@ func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 	if err != nil {
 		return 0, fmt.Errorf("read varroa_builds consumer info: %w", err)
 	}
-	if info.NumPending >= maxPending {
-		metrics.addSweepSkipped(ctx, "pending")
-		return 0, nil
-	}
-	if info.AckFloor.Last == nil || now.Sub(*info.AckFloor.Last) >= pluginHeartbeatInterval {
-		metrics.addSweepSkipped(ctx, "stale")
+	if reason, skip := sweepConsumerSkip(info, maxPending, now); skip {
+		metrics.addSweepSkipped(ctx, reason)
 		return 0, nil
 	}
 
@@ -420,7 +461,7 @@ func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 			logger.Warn("interrupted sweep: read tenant placement failed", "run_id", c.runID, "error", err)
 			continue
 		}
-		reason, ok := evaluateInterruption(now, c, row, exists)
+		reason, ok := evaluateInterruption(now, c, row, exists, grace)
 		if !ok {
 			continue
 		}
@@ -434,6 +475,9 @@ func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 			continue
 		}
 		metrics.addMarked(ctx, "sweep", markedStatusLabel(c.status))
+		if reason == ReasonCellLost {
+			metrics.addCellLoss(ctx, "sweep")
+		}
 		afterMark(ctx, conn, metrics, actionMetrics, c, reason, decodeInterruptedRetry(row.policy), logger)
 		marked++
 	}

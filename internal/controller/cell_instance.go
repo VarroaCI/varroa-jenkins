@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -18,6 +19,10 @@ import (
 // transient read error leaves the field at its last known value rather
 // than clobbering it with an empty one.
 //
+// A pod in phase Failed or Succeeded counts as no pod. An exited Jenkins
+// process serves no build, whatever its pod object still reports. A pod
+// in phase Running or Pending never clears the field.
+//
 // When the value changes away from a non-empty instance, that instance
 // moves to status.cell.previousInstance with the mite's last heartbeat
 // time, so the single-tenant announcement can report the replaced pod as
@@ -32,7 +37,7 @@ func (r *Reconciler) updateCellInstance(ctx context.Context, cr *v1alpha1.Contro
 		return
 	}
 	instance := ""
-	if pod != nil {
+	if pod != nil && pod.Status.Phase != corev1.PodFailed && pod.Status.Phase != corev1.PodSucceeded {
 		instance = string(pod.UID)
 	}
 	if cr.Status.Cell == nil {

@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
 // TestNewMuxReadyzFailsBeforeMigrationsFinish asserts /readyz answers
@@ -161,5 +163,30 @@ func TestAwaitShutdownReturnsNilOnContextDone(t *testing.T) {
 	}
 	if workerReceived {
 		t.Fatal("awaitShutdown reported workerReceived=true for a context cancellation")
+	}
+}
+
+// TestConfigConfirmedGoneGraceFallback asserts a zero field resolves to
+// the package default. main applies the environment default, but every
+// other Config construction would otherwise run a zero grace on the
+// placement-liveness and tenant-sync seams, which counts an instance
+// gone the moment the operator clears it.
+func TestConfigConfirmedGoneGraceFallback(t *testing.T) {
+	cases := []struct {
+		name  string
+		field time.Duration
+		want  time.Duration
+	}{
+		{name: "zero takes the default", field: 0, want: recordstore.DefaultConfirmedGoneGrace},
+		{name: "negative takes the default", field: -5 * time.Second, want: recordstore.DefaultConfirmedGoneGrace},
+		{name: "a set value is kept", field: 90 * time.Second, want: 90 * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{ConfirmedGoneGrace: tc.field}
+			if got := cfg.confirmedGoneGrace(); got != tc.want {
+				t.Fatalf("confirmedGoneGrace() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

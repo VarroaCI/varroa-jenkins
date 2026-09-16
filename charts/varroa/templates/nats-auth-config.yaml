@@ -87,6 +87,10 @@ stringData:
               // Hibernation: wake commands and replay results for this cluster.
               "wake.>"
               "whreply.>"
+              // Cell-loss detection: the gateway's disconnected brood
+              // event, which makes the operator read the cell pod at
+              // once. The event decides nothing on its own.
+              "events.brood.>"
 {{- if .Values.recordStore.enabled }}
               // Build-record ledger: the recorder's admission/duplicate decisions.
               "varroa.ledger.actions.>"

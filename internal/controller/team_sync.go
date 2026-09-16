@@ -64,7 +64,11 @@ func deadInstancesToWire(in []cells.DeadInstance) []recordstore.TenantSyncDeadIn
 	}
 	out := make([]recordstore.TenantSyncDeadInstance, 0, len(in))
 	for _, d := range in {
-		out = append(out, recordstore.TenantSyncDeadInstance{Instance: d.Instance, LastSeenAt: d.LastSeenAt})
+		out = append(out, recordstore.TenantSyncDeadInstance{
+			Instance:        d.Instance,
+			LastSeenAt:      d.LastSeenAt,
+			ConfirmedGoneAt: d.ConfirmedGoneAt,
+		})
 	}
 	return out
 }

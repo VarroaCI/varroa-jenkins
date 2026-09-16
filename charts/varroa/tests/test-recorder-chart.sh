@@ -219,6 +219,8 @@ grep -A1 '\- name: VARROA_RETENTION_ARTIFACTS' <<< "$RECORDER_DEPLOY" | grep -q 
 check "VARROA_RETENTION_ARTIFACTS default is 30d" "$rc"
 grep -A1 '\- name: VARROA_RETENTION_ACTIVITY' <<< "$RECORDER_DEPLOY" | grep -q 'value: "30d"' && rc=0 || rc=1
 check "VARROA_RETENTION_ACTIVITY default is 30d" "$rc"
+grep -A1 '\- name: VARROA_RECORDSTORE_CONFIRMED_GONE_GRACE' <<< "$RECORDER_DEPLOY" | grep -q 'value: "30s"' && rc=0 || rc=1
+check "VARROA_RECORDSTORE_CONFIRMED_GONE_GRACE default is 30s" "$rc"
 
 # ---------------------------------------------------------------------------
 # (g) S3 credential mapping on all three workloads.

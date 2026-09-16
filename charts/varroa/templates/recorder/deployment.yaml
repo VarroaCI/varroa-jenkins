@@ -92,6 +92,8 @@ spec:
               value: {{ .Values.recordStore.retention.artifacts | quote }}
             - name: VARROA_RETENTION_ACTIVITY
               value: {{ .Values.recordStore.retention.activity | quote }}
+            - name: VARROA_RECORDSTORE_CONFIRMED_GONE_GRACE
+              value: {{ .Values.recordStore.cellLoss.confirmedGoneGrace | quote }}
             - name: VARROA_TELEMETRY_DISABLED
               value: {{ .Values.telemetry.disabled | quote }}
             - name: METRICS_TOKEN

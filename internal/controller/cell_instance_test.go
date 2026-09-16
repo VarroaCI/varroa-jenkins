@@ -86,3 +86,44 @@ func TestUpdateCellInstance_ReplacedPodRecordsPrevious(t *testing.T) {
 		t.Fatalf("after new pod: instance = %q previous = %q, want pod-uid-3 and pod-uid-2", cr.Status.Cell.Instance, cr.Status.Cell.PreviousInstance)
 	}
 }
+
+// TestUpdateCellInstance_PodPhase asserts the pod-phase rule. A pod in
+// phase Failed or Succeeded counts as no pod, so the reconciler clears
+// status.cell.instance and records the replaced uid. A pod in phase
+// Running or Pending keeps the uid.
+func TestUpdateCellInstance_PodPhase(t *testing.T) {
+	cases := []struct {
+		name         string
+		phase        corev1.PodPhase
+		wantInstance string
+		wantPrevious string
+	}{
+		{name: "failed", phase: corev1.PodFailed, wantInstance: "", wantPrevious: "old-uid"},
+		{name: "succeeded", phase: corev1.PodSucceeded, wantInstance: "", wantPrevious: "old-uid"},
+		{name: "running", phase: corev1.PodRunning, wantInstance: "pod-uid-9", wantPrevious: "old-uid"},
+		{name: "pending", phase: corev1.PodPending, wantInstance: "pod-uid-9", wantPrevious: "old-uid"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := newTestClient()
+			client.controllerPod = &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{UID: types.UID("pod-uid-9")},
+				Status:     corev1.PodStatus{Phase: tc.phase},
+			}
+			rec := newTestReconciler(client)
+			cr := &v1alpha1.Controller{}
+			cr.Name = "test"
+			cr.Namespace = "default"
+			cr.Status.Cell = &v1alpha1.CellStatus{Instance: "old-uid"}
+
+			rec.updateCellInstance(context.Background(), cr)
+
+			if cr.Status.Cell.Instance != tc.wantInstance {
+				t.Fatalf("instance = %q, want %q", cr.Status.Cell.Instance, tc.wantInstance)
+			}
+			if cr.Status.Cell.PreviousInstance != tc.wantPrevious {
+				t.Fatalf("previousInstance = %q, want %q", cr.Status.Cell.PreviousInstance, tc.wantPrevious)
+			}
+		})
+	}
+}

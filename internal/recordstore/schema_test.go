@@ -49,6 +49,8 @@ var expectedColumns = map[string][]columnSpec{
 		{"params_digest", "text", true},
 		{"consumed_at", "timestamp with time zone", true},
 		{"cell_instance", "text", true},
+		{"refired_at", "timestamp with time zone", true},
+		{"refire_attempts", "integer", false},
 	},
 	"runs": {
 		{"run_id", "uuid", false},

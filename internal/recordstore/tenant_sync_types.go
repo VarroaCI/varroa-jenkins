@@ -21,6 +21,11 @@ const (
 type TenantSyncDeadInstance struct {
 	Instance   string    `json:"instance"`
 	LastSeenAt time.Time `json:"last_seen_at"`
+	// ConfirmedGoneAt is the time the operator's own pod read answered
+	// "no pod" for this instance. An entry the recorder stored before
+	// this field existed decodes with a nil value, and such an entry
+	// keeps the five-minute moved window.
+	ConfirmedGoneAt *time.Time `json:"confirmed_gone_at,omitempty"`
 }
 
 // TenantSyncRequest is the request body of a

@@ -26,6 +26,7 @@ func (r *Reconciler) announceSingleTenantPlacement(ctx context.Context, cr *v1al
 		return
 	}
 
+	now := time.Now()
 	instance := ""
 	var dead []cells.DeadInstance
 	if cr.Status.Cell != nil {
@@ -33,12 +34,17 @@ func (r *Reconciler) announceSingleTenantPlacement(ctx context.Context, cr *v1al
 		// A replaced pod of a single-tenant controller is always dead:
 		// the same StatefulSet never runs two instances. Report it on
 		// every tick; the recorder's merge is idempotent.
+		//
+		// The entry stands behind updateCellInstance's own pod read, so
+		// it carries this tick's clock as the confirmation time. The
+		// recorder keeps the earliest such value.
 		if prev := cr.Status.Cell.PreviousInstance; prev != "" && prev != instance {
-			seen := time.Now()
+			seen := now
 			if cr.Status.Cell.PreviousInstanceLastSeen != nil {
 				seen = cr.Status.Cell.PreviousInstanceLastSeen.Time
 			}
-			dead = []cells.DeadInstance{{Instance: prev, LastSeenAt: seen}}
+			confirmed := now
+			dead = []cells.DeadInstance{{Instance: prev, LastSeenAt: seen, ConfirmedGoneAt: &confirmed}}
 		}
 	}
 	connected := false
@@ -47,7 +53,6 @@ func (r *Reconciler) announceSingleTenantPlacement(ctx context.Context, cr *v1al
 		connected = cr.Status.MiteStatus.Connected
 		lastSeen = timeFromMetaV1(cr.Status.MiteStatus.LastSeen)
 	}
-	now := time.Now()
 
 	_, err := r.announce(ctx, cells.AnnounceRequest{
 		Cluster:            r.clusterName,

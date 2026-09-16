@@ -114,6 +114,7 @@ func main() {
 		RetentionActivity:  retentionActivity,
 		FinalizeWait:       envDurationMillis("VARROA_RECORDSTORE_LOG_FINALIZE_WAIT", defaultFinalizeWaitMs),
 		SweepMaxPending:    sweepMaxPendingFromEnv(),
+		ConfirmedGoneGrace: confirmedGoneGraceFromEnv(),
 		Logger:             logger,
 	}
 	if cfg.BusPassFile == "" {
@@ -166,6 +167,25 @@ func sweepMaxPendingFromEnv() uint64 {
 		return recordstore.DefaultSweepMaxPending
 	}
 	return n
+}
+
+// confirmedGoneGraceFromEnv reads
+// VARROA_RECORDSTORE_CONFIRMED_GONE_GRACE as a Go duration string, for
+// example "30s". A value that is empty, unparsable, or not positive
+// falls back to recordstore.DefaultConfirmedGoneGrace.
+//
+// It does not reuse envDurationMillis: that helper takes a millisecond
+// integer, which reads badly in a chart value.
+func confirmedGoneGraceFromEnv() time.Duration {
+	v := os.Getenv("VARROA_RECORDSTORE_CONFIRMED_GONE_GRACE")
+	if v == "" {
+		return recordstore.DefaultConfirmedGoneGrace
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return recordstore.DefaultConfirmedGoneGrace
+	}
+	return d
 }
 
 // envDurationMillis reads key as a millisecond count, defaulting to

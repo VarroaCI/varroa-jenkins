@@ -31,6 +31,13 @@ stating what it is/is not responsible for:
   direct hibernation wake, and counts an unknown kind rather than acting on
   it. `trigger_run` wakes a hibernated target through the same hibernation
   call before it sends the command; a connected target is not woken.
+  Every replica also subscribes to `events.brood.<cluster>`
+  (`brood_watch.go`): a `disconnected` event enqueues an on-demand
+  reconcile for the named Controller, which performs the pod read, and
+  wakes the `team` ticker through its buffered, size-one `wake` channel.
+  **The event decides nothing** — it only removes latency, so a foreign
+  cluster, any other event value, and a missed message all cost one tick
+  and no more, and the wake send never blocks.
 - **`gateway/`** (`bin/varroa-gateway`) — terminates mTLS/gRPC from mite
   sidecars on `:9090` and bridges each `CommandStream` to NATS
   (`mite.<cluster>.<ns>.<name>.{in,out,content}`). Loads the shared CA from the `varroa-ca`
@@ -71,8 +78,13 @@ stating what it is/is not responsible for:
   database read), the hourly retention/maintenance ticker, and the
   once-a-minute backstop scheduler (D9's interrupted sweep and D11's
   cron backstop, one leader-elected round under a third advisory-lock
-  key) (`runWorkers` in `run.go` takes a variadic `namedWorker` list, so
-  a worker's name travels with its function).
+  key, plus the unstarted-intent re-fire) (`runWorkers` in `run.go` takes
+  a variadic `namedWorker` list, so a worker's name travels with its
+  function). `confirmedGoneGraceFromEnv` reads
+  `VARROA_RECORDSTORE_CONFIRMED_GONE_GRACE` as a **Go duration string**
+  and feeds it to the tenant-sync responder, the backstop round, and the
+  retention liveness seam; it does not reuse `envDurationMillis`, whose
+  millisecond integer reads badly in a chart value.
   Needs no Kubernetes API access. `run(ctx, cfg)` in `run.go` holds the
   whole wiring and shutdown sequence, so a test drives it without
   `main`'s flag parsing. Does not serve any REST or MCP surface — that is

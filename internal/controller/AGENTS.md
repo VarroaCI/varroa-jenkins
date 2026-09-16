@@ -764,7 +764,18 @@ sections describe.
   every controller, cell or not. `updateCellInstance` writes
   `Controller.status.cell.instance` from the running pod's `metadata.uid` on
   every controller-reconciler tick; it clears the field only on a confirmed
-  absence, never on a transient pod-read error. A controller that carries no
+  absence, never on a transient pod-read error. **A pod in phase `Failed` or
+  `Succeeded` counts as no pod**, exactly as an absent pod does, because an
+  exited Jenkins process serves no build; a pod in phase `Running` or
+  `Pending` never clears the field. That read is the only proof a cell
+  instance is gone, so `DeadInstance.ConfirmedGoneAt` (`cells/sync.go`,
+  `TenantSyncDeadInstance` on the wire) is stamped **only** by a producer
+  standing behind it: `maybeReannounce`'s `deadInstanceDelta` call and
+  `announceSingleTenantPlacement`. `performMove` passes nil, because it
+  proves only that the cell object left the candidate set and a deleting
+  cell pod can still run its termination grace. The field is a
+  `*time.Time`: a zero `time.Time` marshals as year one and would confirm
+  every entry at once. A controller that carries no
   cell role is its own tenant and its own cell, so
   `announceSingleTenantPlacement` sends a generation-zero `tenant.sync`
   "announce" request for it on every tick — the fence needs a row for every

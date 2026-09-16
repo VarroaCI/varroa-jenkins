@@ -44,7 +44,23 @@ type Config struct {
 	// SweepMaxPending is VARROA_SWEEP_MAX_PENDING, the interrupted
 	// sweep's consumer-freshness gate (design D9, task 9.6a).
 	SweepMaxPending uint64
-	Logger          *slog.Logger
+	// ConfirmedGoneGrace is VARROA_RECORDSTORE_CONFIRMED_GONE_GRACE, the
+	// wait a pod-read confirmation serves before the recorder counts the
+	// instance gone.
+	ConfirmedGoneGrace time.Duration
+	Logger             *slog.Logger
+}
+
+// confirmedGoneGrace resolves the grace once for every seam that reads
+// it. A zero field applies the package default, so a Config built
+// without main's own environment parsing never runs a zero grace, which
+// would count an instance gone the moment the operator clears it. It
+// mirrors recordstore.BackstopConfig's own fallback.
+func (cfg Config) confirmedGoneGrace() time.Duration {
+	if cfg.ConfirmedGoneGrace > 0 {
+		return cfg.ConfirmedGoneGrace
+	}
+	return recordstore.DefaultConfirmedGoneGrace
 }
 
 // run wires the recorder's dependencies in the order design D6 states:
@@ -57,6 +73,7 @@ func run(ctx context.Context, cfg Config) error {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	confirmedGoneGrace := cfg.confirmedGoneGrace()
 
 	pool, err := pgxpool.New(ctx, cfg.RecordStoreDSN)
 	if err != nil {
@@ -137,11 +154,12 @@ func run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("register backstop metrics: %w", err)
 	}
 	backstopCfg := recordstore.BackstopConfig{
-		MaxSweepPending: cfg.SweepMaxPending,
-		SweepMetrics:    sweepMetrics,
-		BackstopMetrics: backstopMetrics,
-		ActionMetrics:   actionMetrics,
-		Logger:          logger,
+		MaxSweepPending:    cfg.SweepMaxPending,
+		ConfirmedGoneGrace: confirmedGoneGrace,
+		SweepMetrics:       sweepMetrics,
+		BackstopMetrics:    backstopMetrics,
+		ActionMetrics:      actionMetrics,
+		Logger:             logger,
 	}
 
 	ingester := recordstore.NewIngester(pool, busConn, logger)
@@ -164,6 +182,7 @@ func run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("register upstream fan-out metrics: %w", err)
 	}
 	ingester.SetUpstreamFanout(recordstore.NewGrantEvaluator(pool), fanoutMetrics)
+	ingester.SetRefireMetrics(sweepMetrics)
 
 	maintCfg := recordstore.MaintenanceConfig{
 		RunRetention:      cfg.RetentionRuns,
@@ -171,7 +190,7 @@ func run(ctx context.Context, cfg Config) error {
 		ArtifactRetention: cfg.RetentionArtifacts,
 		ActivityRetention: cfg.RetentionActivity,
 		LogStore:          store,
-		Liveness:          recordstore.NewPlacementLiveness(pool),
+		Liveness:          recordstore.NewPlacementLiveness(pool, confirmedGoneGrace),
 		FinalizeWait:      cfg.FinalizeWait,
 		FleetLockMetrics:  fleetLockMetrics,
 	}
@@ -210,7 +229,7 @@ func run(ctx context.Context, cfg Config) error {
 		return sub.Unsubscribe()
 	}
 	tenantSyncResponderFn := func(ctx context.Context) error {
-		sub, err := recordstore.RegisterTenantSyncResponder(busConn, pool, logger)
+		sub, err := recordstore.RegisterTenantSyncResponder(busConn, pool, confirmedGoneGrace, logger)
 		if err != nil {
 			return err
 		}

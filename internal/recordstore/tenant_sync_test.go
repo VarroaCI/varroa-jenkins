@@ -354,16 +354,153 @@ func TestTenantSyncAnnounceMergesAndTrimsDeadInstances(t *testing.T) {
 	}
 }
 
+// TestDeadInstancesTrimKeepsPendingRefireEntry asserts the trim keeps
+// the dead_instances entry a pending re-fire needs. A GRANTED intent
+// with a null refired_at holds no runs row, so the first two arms of the
+// keep set would miss it.
+func TestDeadInstancesTrimKeepsPendingRefireEntry(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+
+	base := time.Now().UTC()
+	intentKey := "manual:" + newTestUUIDv7String()
+	seedRefireIntent(t, db, intentKey, "pod-referenced", "")
+
+	first := TenantSyncRequest{
+		Kind: TenantSyncKindAnnounce, Cluster: testCluster, Tenant: testTenant,
+		Generation: 1, CellInstance: "pod-current",
+		DeadInstances: []TenantSyncDeadInstance{{Instance: "pod-referenced", LastSeenAt: base.Add(-time.Hour)}},
+	}
+	sendTenantSync(t, pool, conn, first)
+
+	entries := make([]TenantSyncDeadInstance, 0, 12)
+	for i := 0; i < 12; i++ {
+		entries = append(entries, TenantSyncDeadInstance{
+			Instance: "pod-extra-" + string(rune('a'+i)), LastSeenAt: base.Add(-time.Duration(i) * time.Minute),
+		})
+	}
+	sendTenantSync(t, pool, conn, TenantSyncRequest{
+		Kind: TenantSyncKindAnnounce, Cluster: testCluster, Tenant: testTenant,
+		Generation: 1, CellInstance: "pod-current", DeadInstances: entries,
+	})
+
+	stored := readTenantPlacement(t, db, testTenant)
+	var kept bool
+	for _, d := range stored.deadInstances {
+		if d.Instance == "pod-referenced" {
+			kept = true
+		}
+	}
+	if !kept {
+		t.Fatalf("want pod-referenced kept for the pending re-fire, got %v", stored.deadInstances)
+	}
+
+	// An intent the recorder already re-fired stops protecting its
+	// instance at once.
+	if _, err := db.Exec(`UPDATE varroa.run_intents SET refired_at = now() WHERE intent_key = $1`,
+		intentKey); err != nil {
+		t.Fatalf("mark the intent refired: %v", err)
+	}
+	sendTenantSync(t, pool, conn, TenantSyncRequest{
+		Kind: TenantSyncKindAnnounce, Cluster: testCluster, Tenant: testTenant,
+		Generation: 1, CellInstance: "pod-current", DeadInstances: entries,
+	})
+	stored = readTenantPlacement(t, db, testTenant)
+	if len(stored.deadInstances) != maxDeadInstances {
+		t.Fatalf("dead instances = %d, want %d once the re-fire marker is set",
+			len(stored.deadInstances), maxDeadInstances)
+	}
+}
+
+// TestMergeDeadInstancesConfirmation asserts the confirmation merge
+// rule: the EARLIER non-nil ConfirmedGoneAt wins, a stored nil takes the
+// incoming value, an incoming nil keeps the stored value, and LastSeenAt
+// still takes the newer value in every case.
+func TestMergeDeadInstancesConfirmation(t *testing.T) {
+	base := time.Now().UTC().Truncate(time.Second)
+	early := base.Add(-2 * time.Minute)
+	late := base.Add(-1 * time.Minute)
+	oldSeen := base.Add(-10 * time.Minute)
+	newSeen := base.Add(-5 * time.Minute)
+
+	cases := []struct {
+		name          string
+		stored        TenantSyncDeadInstance
+		incoming      TenantSyncDeadInstance
+		wantConfirmed *time.Time
+	}{
+		{
+			name:          "earlier incoming wins",
+			stored:        TenantSyncDeadInstance{Instance: "pod-a", LastSeenAt: oldSeen, ConfirmedGoneAt: &late},
+			incoming:      TenantSyncDeadInstance{Instance: "pod-a", LastSeenAt: newSeen, ConfirmedGoneAt: &early},
+			wantConfirmed: &early,
+		},
+		{
+			name:          "earlier stored wins",
+			stored:        TenantSyncDeadInstance{Instance: "pod-a", LastSeenAt: oldSeen, ConfirmedGoneAt: &early},
+			incoming:      TenantSyncDeadInstance{Instance: "pod-a", LastSeenAt: newSeen, ConfirmedGoneAt: &late},
+			wantConfirmed: &early,
+		},
+		{
+			name:          "stored nil takes the incoming value",
+			stored:        TenantSyncDeadInstance{Instance: "pod-a", LastSeenAt: oldSeen},
+			incoming:      TenantSyncDeadInstance{Instance: "pod-a", LastSeenAt: newSeen, ConfirmedGoneAt: &late},
+			wantConfirmed: &late,
+		},
+		{
+			name:          "incoming nil keeps the stored value",
+			stored:        TenantSyncDeadInstance{Instance: "pod-a", LastSeenAt: oldSeen, ConfirmedGoneAt: &early},
+			incoming:      TenantSyncDeadInstance{Instance: "pod-a", LastSeenAt: newSeen},
+			wantConfirmed: &early,
+		},
+		{
+			name:          "both nil stay nil",
+			stored:        TenantSyncDeadInstance{Instance: "pod-a", LastSeenAt: oldSeen},
+			incoming:      TenantSyncDeadInstance{Instance: "pod-a", LastSeenAt: newSeen},
+			wantConfirmed: nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			merged := mergeDeadInstances([]TenantSyncDeadInstance{tc.stored}, []TenantSyncDeadInstance{tc.incoming})
+			if len(merged) != 1 {
+				t.Fatalf("merged = %d entries, want 1", len(merged))
+			}
+			got := merged[0]
+			if !got.LastSeenAt.Equal(newSeen) {
+				t.Fatalf("LastSeenAt = %v, want the newer value %v", got.LastSeenAt, newSeen)
+			}
+			switch {
+			case tc.wantConfirmed == nil && got.ConfirmedGoneAt != nil:
+				t.Fatalf("ConfirmedGoneAt = %v, want nil", got.ConfirmedGoneAt)
+			case tc.wantConfirmed != nil && got.ConfirmedGoneAt == nil:
+				t.Fatalf("ConfirmedGoneAt = nil, want %v", tc.wantConfirmed)
+			case tc.wantConfirmed != nil && !got.ConfirmedGoneAt.Equal(*tc.wantConfirmed):
+				t.Fatalf("ConfirmedGoneAt = %v, want %v", got.ConfirmedGoneAt, tc.wantConfirmed)
+			}
+		})
+	}
+}
+
 // sendTenantSync marshals req, runs it through handleTenantSync, and
 // decodes the reply. conn feeds the announce-triggered interrupted-run
 // marking's action publishes.
 func sendTenantSync(t *testing.T, pool *pgxpool.Pool, conn *bus.Conn, req TenantSyncRequest) TenantSyncResponse {
 	t.Helper()
+	return sendTenantSyncWithMetrics(t, pool, conn, nil, req)
+}
+
+// sendTenantSyncWithMetrics is sendTenantSync with a caller-supplied
+// InterruptedMetrics, for a test that asserts on a counter the announce
+// hook's own marking increments.
+func sendTenantSyncWithMetrics(t *testing.T, pool *pgxpool.Pool, conn *bus.Conn,
+	metrics *InterruptedMetrics, req TenantSyncRequest) TenantSyncResponse {
+	t.Helper()
 	body, err := json.Marshal(req)
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	out := handleTenantSync(conn, slog.Default(), pool, nil, nil, body)
+	out := handleTenantSync(conn, slog.Default(), pool, metrics, nil, testGrace, body)
 	var resp TenantSyncResponse
 	if err := json.Unmarshal(out, &resp); err != nil {
 		t.Fatalf("unmarshal response: %v", err)

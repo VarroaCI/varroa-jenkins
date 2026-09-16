@@ -907,6 +907,15 @@ recordStore:
     artifacts: 30d
     # -- How long an activity event is kept.
     activity: 30d
+  # -- Cell-loss detection. The operator confirms a lost cell with its own
+  # pod read; these settings control what the recorder then does.
+  cellLoss:
+    # -- How long a pod-read confirmation waits before the recorder counts
+    # the cell instance gone. A Go duration string. The operator can clear
+    # its stored cell instance on the same tick a replacement pod appears,
+    # and a zero grace would then interrupt a run the new pod is about to
+    # adopt. An empty, unparsable, or non-positive value falls back to 30s.
+    confirmedGoneGrace: 30s
 
 # ---------------------------------------------------------------------------
 # Varroa Recorder — the only writer of the build-record store.

@@ -940,7 +940,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 3. Team reconciler (30s, immediate).
+	// 3. Team reconciler (30s, immediate). The brood subscriber below
+	// wakes it, so a confirmed cell loss is announced without waiting for
+	// the interval. The channel holds one token and the send never
+	// blocks, so no publisher can stall on it.
+	teamWakeCh := make(chan struct{}, 1)
 	if err := mgr.Add(&tickerRunnable{
 		name:      "team",
 		interval:  30 * time.Second,
@@ -948,11 +952,23 @@ func main() {
 		tick: func(ctx context.Context) {
 			reconcileAllTeams(ctx, clientsetClient, teamReconciler, logger)
 		},
+		wake:   (<-chan struct{})(teamWakeCh),
 		logger: logger,
 	}); err != nil {
 		logger.Error("failed to add team runnable", "error", err)
 		os.Exit(1)
 	}
+
+	// 3a. Brood subscriber. A mite stream death reaches the operator in
+	// about 40 seconds, which is faster than any reconcile interval. The
+	// event only removes latency and decides nothing: the Controller
+	// reconcile it enqueues performs the pod read that proves the loss.
+	broodSub, err := startBroodWatch(busConn, cluster, reconciler, teamWakeCh, logger)
+	if err != nil {
+		logger.Error("failed to subscribe to the brood subject", "error", err)
+		os.Exit(1)
+	}
+	defer func() { _ = broodSub.Unsubscribe() }()
 
 	// 3b. Cell-pool reconciler (60s), sizing and reporting every CellPool
 	// (design D5). It is the only creator of a cell and the only writer of

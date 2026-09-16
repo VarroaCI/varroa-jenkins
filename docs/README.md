@@ -75,6 +75,7 @@ Commands use `kubectl` and `helm`. Replace values in `<angle-brackets>` before r
 - [Cell pools](operations/cell-pools.md)
 - [Cell usage](operations/cell-usage.md)
 - [Cell views](operations/cell-views.md)
+- [Cell loss](operations/cell-loss.md)
 - [External runners](operations/runners.md)
 - [Brood operations](operations/brood-operations.md)
 - [Brood schedules](operations/brood-schedules.md)

@@ -72,14 +72,17 @@ func (h HeartbeatLiveness) CellGone(_ context.Context, run RunLiveness) (bool, e
 // disagree about whether a cell is gone.
 type PlacementLiveness struct {
 	pool *pgxpool.Pool
+	// grace is the confirmed-gone grace the confirmed reading applies.
+	grace time.Duration
 	// Now returns the reference time. A nil Now defaults to time.Now, so
 	// a test can pin it to a fixed instant.
 	Now func() time.Time
 }
 
-// NewPlacementLiveness returns a PlacementLiveness over pool.
-func NewPlacementLiveness(pool *pgxpool.Pool) *PlacementLiveness {
-	return &PlacementLiveness{pool: pool}
+// NewPlacementLiveness returns a PlacementLiveness over pool, with grace
+// as the confirmed-gone grace.
+func NewPlacementLiveness(pool *pgxpool.Pool, grace time.Duration) *PlacementLiveness {
+	return &PlacementLiveness{pool: pool, grace: grace}
 }
 
 // CellGone implements Liveness. It answers gone only when a
@@ -107,5 +110,7 @@ func (p *PlacementLiveness) CellGone(ctx context.Context, run RunLiveness) (bool
 	if err != nil {
 		return false, err
 	}
-	return cellLivenessGone(t, *anchor, run.CellInstance, row, exists), nil
+	// Any reading but livenessAlive answers gone, so this seam keeps the
+	// behavior it had before the reading carried its own name.
+	return cellLivenessGone(t, *anchor, run.CellInstance, row, exists, p.grace) != livenessAlive, nil
 }

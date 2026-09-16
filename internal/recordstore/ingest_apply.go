@@ -87,6 +87,7 @@ type Ingester struct {
 	logger        *slog.Logger
 	fanoutEval    *GrantEvaluator
 	fanoutMetrics *UpstreamFanoutMetrics
+	refireMetrics *InterruptedMetrics
 }
 
 // NewIngester returns an Ingester over pool. conn publishes a ledger
@@ -106,6 +107,14 @@ func NewIngester(pool *pgxpool.Pool, conn *bus.Conn, logger *slog.Logger) *Inges
 func (g *Ingester) SetUpstreamFanout(evaluator *GrantEvaluator, metrics *UpstreamFanoutMetrics) {
 	g.fanoutEval = evaluator
 	g.fanoutMetrics = metrics
+}
+
+// SetRefireMetrics counts the re-fire marker self-heal a rejected
+// trigger performs. It follows SetUpstreamFanout's own convention: an
+// Ingester built with no call to this method still heals the marker and
+// counts nothing, because addRefired is a no-op on a nil receiver.
+func (g *Ingester) SetRefireMetrics(metrics *InterruptedMetrics) {
+	g.refireMetrics = metrics
 }
 
 // Apply writes env to the record tables. It returns ErrIntentMissing

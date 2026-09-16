@@ -42,7 +42,7 @@ func TestPlacementLivenessDeadInstanceGone(t *testing.T) {
 	seedTenantPlacementLiveness(t, db, "pod-new", true, nil, nil,
 		[]TenantSyncDeadInstance{{Instance: "pod-old", LastSeenAt: past}})
 
-	liveness := NewPlacementLiveness(pool)
+	liveness := NewPlacementLiveness(pool, testGrace)
 	oldHeartbeat := past
 	gone, err := liveness.CellGone(context.Background(), RunLiveness{
 		Cluster: testCluster, Tenant: testTenant, CellInstance: "pod-old", LastHeartbeatAt: &oldHeartbeat,
@@ -63,7 +63,7 @@ func TestPlacementLivenessChangedInstanceAloneAnswersNotGone(t *testing.T) {
 
 	seedTenantPlacementLiveness(t, db, "pod-new", true, nil, nil, nil)
 
-	liveness := NewPlacementLiveness(pool)
+	liveness := NewPlacementLiveness(pool, testGrace)
 	oldHeartbeat := time.Now().Add(-20 * time.Minute)
 	gone, err := liveness.CellGone(context.Background(), RunLiveness{
 		Cluster: testCluster, Tenant: testTenant, CellInstance: "pod-old", LastHeartbeatAt: &oldHeartbeat,
@@ -96,7 +96,7 @@ func TestFinalizeStaleLogsSeesPlacementLivenessAnswer(t *testing.T) {
 		t.Fatalf("stamp last_heartbeat_at: %v", err)
 	}
 
-	liveness := NewPlacementLiveness(pool)
+	liveness := NewPlacementLiveness(pool, testGrace)
 	finalized, err := finalizeStaleLogs(context.Background(), pool, liveness, time.Minute, time.Now())
 	if err != nil {
 		t.Fatalf("finalizeStaleLogs: %v", err)

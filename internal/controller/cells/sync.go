@@ -76,6 +76,12 @@ func SyncPolicyFromPipelines(p *v1alpha1.TeamPipelinesSpec) SyncPolicy {
 type DeadInstance struct {
 	Instance   string
 	LastSeenAt time.Time
+	// ConfirmedGoneAt is the time a pod read answered "no pod" for this
+	// instance. A producer that made no pod read leaves it nil. A zero
+	// time.Time is not a valid stand-in for nil: it marshals as
+	// 0001-01-01T00:00:00Z, which reads as older than any grace and
+	// confirms the loss at once.
+	ConfirmedGoneAt *time.Time
 }
 
 // AnnounceRequest is one tenant's placement announcement (design D6, kind

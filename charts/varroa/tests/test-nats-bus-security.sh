@@ -381,6 +381,23 @@ for identity_block in "operator_rs_block:$operator_rs_block" "bff_rs_block:$bff_
   fi
 done
 
+# 18. Cell-loss detection (control-bus-security): the operator subscribes
+# to events.brood.> so a mite disconnect reaches a pod read at once. The
+# operator already publishes events.brood.*, so the subscribe grant is
+# matched on the ">" form alone. The recorder holds no brood grant in
+# either direction: it decides no cell loss and reads no brood event.
+grep -q '"events.brood.>"' <<<"$operator_block"
+check "operator subscribes events.brood.>" $?
+
+grep -q '"events.brood.>"' <<<"$operator_rs_block"
+check "operator (recordStore enabled) subscribes events.brood.>" $?
+
+if grep -q 'events.brood' <<<"$recorder_block"; then
+  check "recorder holds NO events.brood grant in either direction" 1
+else
+  check "recorder holds NO events.brood grant in either direction" 0
+fi
+
 if grep -q 'user: "mite"' <<<"$RS_RENDER"; then
   check "no mite NATS identity exists" 1
 else

@@ -111,7 +111,11 @@ the packaged CRDs. Does not own the Go source it packages
   gated the same way: the gateway publishes `varroa.ledger.crosstenant`
   and the recorder subscribes it, queue group `recorder`, both only when
   `recordStore.enabled` — no other identity (operator, BFF, or a mite
-  itself) holds a grant on this subject.
+  itself) holds a grant on this subject. Cell-loss detection adds one
+  ungated grant: the operator **subscribes** `events.brood.>`, so a mite
+  disconnect reaches a pod read at once. The operator already publishes
+  `events.brood.*`, so its publish list is unchanged, and the recorder
+  holds no brood grant in either direction — it decides no cell loss.
 - **Startup probes on operator/gateway/bff are load-bearing, not boilerplate.**
   `bus.Connect` blocks for up to `bus.DefaultStartupTimeout` (3 minutes) waiting
   out a bus outage or a rotated Secret that has not synced, and no probe port
@@ -214,7 +218,10 @@ the packaged CRDs. Does not own the Go source it packages
   `varroa-np-recorder` NetworkPolicy block; `tests/test-recorder-chart.sh`
   asserts the recorder workload shape, the CNPG `Cluster` and role Secrets,
   the DSN cross-references, the S3 credential mapping, the retention env
-  defaults (`runs`/`logs`/`artifacts`/`activity`), the recorder PDB, and every
+  defaults (`runs`/`logs`/`artifacts`/`activity`),
+  `recordStore.cellLoss.confirmedGoneGrace` (default `30s`, rendered into
+  `VARROA_RECORDSTORE_CONFIRMED_GONE_GRACE` as a **Go duration string**,
+  not a millisecond count), the recorder PDB, and every
   `recordstore-guard.yaml` failure mode, including the retired `activity`
   values block. `recordStore.retention.activity` (default `30d`) replaced the
   old `activity.retention` dial: the recorder gets `VARROA_RETENTION_ACTIVITY`,

@@ -540,7 +540,10 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 	policy := SyncPolicyFromPipelines(team.Spec.Pipelines)
 	var dead []DeadInstance
 	if wasPlaced && oldCell == nil {
-		dead = deadInstanceDelta(in.LastSync, oldCellName, oldCellNamespace, "")
+		// This call site reads no pod. A deleting cell pod can still run
+		// its whole termination grace, so the entry carries no
+		// confirmation and keeps the five-minute moved window.
+		dead = deadInstanceDelta(in.LastSync, oldCellName, oldCellNamespace, "", nil)
 	}
 	result, announceErr := sendAnnounce(ctx, in, AnnounceRequest{
 		Cluster:        in.ClusterIdentity,
@@ -688,7 +691,9 @@ func maybeReannounce(ctx context.Context, in Inputs, team *v1alpha1.Team, status
 		return
 	}
 
-	dead := deadInstanceDelta(last, status.Placement.Cell, status.Placement.CellNamespace, cell.Instance)
+	// The reannounce path stands behind updateCellInstance's own pod read,
+	// so it stamps the confirmation with this tick's clock.
+	dead := deadInstanceDelta(last, status.Placement.Cell, status.Placement.CellNamespace, cell.Instance, &nowT)
 
 	result, err := sendAnnounce(ctx, in, AnnounceRequest{
 		Cluster:            in.ClusterIdentity,
@@ -749,7 +754,12 @@ func rehydratedApplied(status *v1alpha1.TeamStatus) bool {
 // the same cell as cellName/cellNamespace and a different instance than
 // currentInstance. It answers nil otherwise, including the first tick of a
 // brand new placement, when last is nil.
-func deadInstanceDelta(last *SyncCache, cellName, cellNamespace, currentInstance string) []DeadInstance {
+//
+// confirmedGoneAt stamps the entry only for a caller whose own pod read
+// proved the instance gone. Every other caller passes nil, and the entry
+// then keeps the five-minute moved window.
+func deadInstanceDelta(last *SyncCache, cellName, cellNamespace, currentInstance string,
+	confirmedGoneAt *time.Time) []DeadInstance {
 	if last == nil || last.Cell != cellName || last.CellNamespace != cellNamespace ||
 		last.CellInstance == "" || last.CellInstance == currentInstance {
 		return nil
@@ -758,7 +768,7 @@ func deadInstanceDelta(last *SyncCache, cellName, cellNamespace, currentInstance
 	if last.CellLastSeenAt != nil {
 		seenAt = *last.CellLastSeenAt
 	}
-	return []DeadInstance{{Instance: last.CellInstance, LastSeenAt: seenAt}}
+	return []DeadInstance{{Instance: last.CellInstance, LastSeenAt: seenAt, ConfirmedGoneAt: confirmedGoneAt}}
 }
 
 // stringSlicesEqual reports whether a and b hold the same strings in the

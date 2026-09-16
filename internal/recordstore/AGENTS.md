@@ -44,7 +44,11 @@ of the fleet's audit activity, once a controller becomes disposable.
   `00008_trigger_failed_result.sql` widens `runs_result_check` so
   `runs.result` accepts `TRIGGER_FAILED`; its down step deletes every
   such row first, because a row left behind fails the narrower
-  constraint. A later migration never edits an applied one. `migrationsFS` (`migrations.go`) embeds
+  constraint. `00009_run_intents_refired_at.sql` adds the nullable
+  `run_intents.refired_at`, the unstarted-intent re-fire's at-most-once
+  marker, and `run_intents.refire_attempts`, the bound on the retry loop
+  a rejected trigger opens.
+  A later migration never edits an applied one. `migrationsFS` (`migrations.go`) embeds
   every file under `migrations/` into the binary through `embed.FS`, so
   the recorder needs no separate deploy artifact. Monthly partition
   names on `runs`, `log_chunks`, and `activity` follow
@@ -347,10 +351,34 @@ of the fleet's audit activity, once a controller becomes disposable.
   history, so a staleness sweep would delete a row the fleet still needs.
 - **Interrupted-run marking** (`interrupted.go`, `cell_liveness.go`,
   `interrupted_metrics.go`) — design D9. `evaluateInterruption` applies
-  the moved test, then the silent test, to one `QUEUED` or `RUNNING`
-  candidate; `cellLivenessGone` is the one shared cell-liveness reading
-  both this package's sweep and `retention_finalize.go`'s log-finalization
-  sweep call, through `PlacementLiveness`. `candidatesQuery` selects both
+  the confirmed test, then the moved test, then the silent test, to one
+  `QUEUED` or `RUNNING` candidate; `cellLivenessGone` is the one shared
+  cell-liveness reading both this package's sweep and
+  `retention_finalize.go`'s log-finalization sweep call, through
+  `PlacementLiveness`. It answers a `livenessReading`
+  (`livenessAlive`/`ConfirmedGone`/`Moved`/`Silent`), not a bool, because
+  the reason depends on which test fired; `retention_liveness.go`
+  compares against `livenessAlive` alone, so that seam is unchanged.
+  **The confirmed test is the one signal that rests on a pod read.** It
+  holds when the owning instance's `dead_instances` entry carries a
+  `confirmed_gone_at` older than `confirmedGoneGrace`
+  (`DefaultConfirmedGoneGrace`, 30s; chart
+  `recordStore.cellLoss.confirmedGoneGrace`, env
+  `VARROA_RECORDSTORE_CONFIRMED_GONE_GRACE`), and it applies **no anchor
+  and no window**: a run's heartbeat age proves nothing once the operator
+  has proved the pod gone. It names `ReasonCellLost` (`cell-lost`), which
+  `afterMark` deliberately excludes from the `cancel_run` publish — the
+  pod is gone and holds no process to stop — and which
+  `MarkMovedRunsForTenant` deliberately does **not** skip, unlike
+  `no-heartbeat`. An entry with no `confirmed_gone_at` keeps the
+  five-minute and fifteen-minute windows exactly. The grace is threaded as
+  an argument through four seams (the sweep, `PlacementLiveness`,
+  `ReleaseConfirmedFleetLocks`, `BackstopConfig.ConfirmedGoneGrace`),
+  never a package variable, so no test mutates global state.
+  `mergeDeadInstances` keeps the **earlier** `confirmed_gone_at` on a
+  collision while it keeps the newer `last_seen_at`: the operator repeats
+  the entry on every tick, and a later-wins rule would hold the timestamp
+  young forever. `candidatesQuery` selects both
   statuses in one query: a `QUEUED` candidate's owning instance is the
   ledger's `cell_instance` when an intent exists, else its
   `payload->>'accepted_instance'`, and its liveness baseline is its last
@@ -363,16 +391,92 @@ of the fleet's audit activity, once a controller becomes disposable.
   place. `MarkMovedRunsForTenant` is the fast path a `tenant.sync` announce
   triggers when `cell` or `cell_instance` changes; `SweepInterruptedRuns`
   is the periodic path, gated on the recorder's own `varroa_builds`
-  consumer staying fresh (`VARROA_SWEEP_MAX_PENDING`, default 1000).
+  consumer through `sweepConsumerSkip`. **That gate tests a backlog,
+  never quiet.** A pending count at or above `VARROA_SWEEP_MAX_PENDING`
+  (default 1000) skips the round as `pending`. The `AckFloor.Last` age
+  is applied **only while `NumPending > 0`**: a consumer with nothing
+  pending has processed everything the stream holds, so an old or nil
+  floor means no build event arrived lately, not lag. Skipping a quiet
+  fleet was a live defect — with no other build running, nothing ever
+  refreshes the floor, so a lost cell's runs waited for a build that
+  never came.
   Neither inserts an intent or touches `fleet_locks`; `afterMark` returns
   before either publish for a marked `QUEUED` run — no build ever started
   to cancel, and the store holds no parameters to retry with — and
   otherwise publishes the `cancel_run` and automatic `retry_run` actions a
   mark triggers. `recorder_interrupted_marked_total` carries a `status`
-  attribute (`queued` or `running`) beside `path`. `liveCellInstances`
+  attribute (`queued` or `running`) beside `path`, and
+  `recorder_cell_loss_confirmed_total` counts each `cell-lost` mark by
+  the same `path`. `liveCellInstances`
   (`tenant_sync.go`) is the dead-instances trim's keep-set: the union of
-  every intent-joined `QUEUED`/`RUNNING` run's `cell_instance` and every
-  unclaimed `QUEUED` run's `accepted_instance` payload value.
+  every intent-joined `QUEUED`/`RUNNING` run's `cell_instance`, every
+  unclaimed `QUEUED` run's `accepted_instance` payload value, and every
+  `GRANTED` intent with a null `refired_at`. The third arm exists because
+  the first two join `runs`: an intent whose build never started holds no
+  `runs` row, so a busy pool would otherwise trim away the evidence its
+  re-fire needs.
+- **Unstarted-intent re-fire** (`refire.go`) — `RefireLostIntents` is the
+  one path that recovers a build the sweep can never see: a `GRANTED`
+  `run_intents` row whose build never started writes no `runs` row at
+  all. It publishes one `LedgerActionTriggerRun` carrying the **same**
+  `run_id` and `intent_key`, so the repeat claim from the new cell takes
+  `reanswerSameRun`'s existing ownership move and stale-build-number
+  refresh; this package adds no action kind and changes no claim rule.
+  Four rules gate it, in order: the owning `cell_instance` reads
+  `livenessConfirmedGone` (a stream loss alone is never enough);
+  `params_digest` is null, empty, or `emptyParamsDigest` (the store holds
+  no parameters for a build that never started, so a re-fire would run
+  each declared default — the refusal counts `parameterized` and a person
+  reruns the job); `refirePlacement.ready()`, which **defers** a re-fire
+  rather than dropping one, twice over — the operator clears its stored
+  instance at the moment of the confirmation (`no-placement`), and a
+  replacement pod reports its UID well before its mite holds a Jenkins
+  token (`not-rehydrated`). **`rehydrated_instance == cell_instance` is
+  the one placement read that proves the cell can accept a trigger**: the
+  rehydration reload itself needs a token, so a rehydrated instance holds
+  one. Without that test the trigger lands on a tokenless mite, the
+  security realm answers 401, and the gateway reports
+  `TRIGGER_REJECTED` (a live defect on `core`). Last, the conditional
+  `UPDATE … SET refired_at WHERE refired_at IS NULL AND state = 'GRANTED'`
+  changes one row, which is the whole idempotency mechanism and the only
+  thing that authorizes the publish. The publish is not transactional
+  with that marker: a lost action produces no re-fire and the recorder
+  never republishes, matching the `retry_run` rule. **A publish that
+  returns an error rolls the marker back** (`clearIntentRefired`,
+  counted `publish-failed`), because the candidate query, the round's
+  own tenant list, and the trim keep-set all filter on
+  `refired_at IS NULL`: a marker left behind by a failed publish would
+  lose the queued build forever and stop protecting its evidence. The
+  marker still goes first, since that ordering is what makes two
+  replicas publish one action. **A rejected trigger heals the marker
+  too**: `applyTriggerFailed` calls `healRefiredIntent` inside its own
+  transaction, so the marker and the failed run's record commit
+  together. `TRIGGER_REJECTED` is transient (the cell answered but
+  refused), so it clears the marker and counts
+  `cleared`/`rejected-transient`; `JOB_NOT_FOUND` and
+  `JOB_NOT_BUILDABLE` are permanent, so the marker stays and the round
+  counts `skipped`/`rejected-permanent`. `run_intents.refire_attempts`
+  bounds that loop at `maxRefireAttempts` (5) and **never decreases**, so
+  a clear cannot restart it from zero; a retried run keeps its own run
+  identifier, so `applyTriggerFailed`'s `ON CONFLICT DO NOTHING` leaves
+  the `runs` table with one row for every attempt and no way to count
+  them. A spent intent leaves the candidate set, the round's tenant
+  list, and the trim keep-set, so its retry loop ends and its dead
+  instance stops being pinned. `Ingester.SetRefireMetrics` wires the
+  counter, following `SetUpstreamFanout`'s optional-setter convention.
+  The action names the
+  tenant's **current** cell and namespace, read from `tenant_placements`
+  by `refire.go`'s own query, because `tenantPlacementLivenessRow`
+  carries no namespace and the stored cell is the dead one. It runs from
+  the same two places the marking does: `backstop_round.go` for every
+  tenant (enumerating its own `(cluster, tenant)` pairs from
+  `run_intents`, never `listJobSchedulePairs`, which reads
+  `job_schedules` and would miss a tenant holding a granted intent and no
+  cron schedule), and `tenant_sync.go`'s announce hook for one tenant.
+  `recorder_intent_refired_total` counts every outcome by `outcome` and
+  `reason`. A mark and a re-fire are independent: `markInterrupted`
+  writes no `run_intents` row, so the intent survives the mark and the
+  re-fired build claims the same run.
 - **Backstop cron scheduler and the interrupted sweep's round**
   (`backstop_round.go`, `backstop_policy.go`, `backstop_candidates.go`,
   `backstop_fire.go`, `backstop_metrics.go`, `action_metrics.go`,

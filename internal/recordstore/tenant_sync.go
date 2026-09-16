@@ -36,7 +36,11 @@ const maxDeadInstances = 10
 // and its own ActionMetrics for the actions that marking publishes;
 // registration failure is logged and the responder still starts, with
 // marking and publishing counting nothing.
-func RegisterTenantSyncResponder(conn *bus.Conn, pool *pgxpool.Pool, logger *slog.Logger) (*bus.Sub, error) {
+//
+// grace is the confirmed-gone grace the announce hook's own marking,
+// fleet-lock release, and intent re-fire apply.
+func RegisterTenantSyncResponder(conn *bus.Conn, pool *pgxpool.Pool, grace time.Duration,
+	logger *slog.Logger) (*bus.Sub, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -49,7 +53,7 @@ func RegisterTenantSyncResponder(conn *bus.Conn, pool *pgxpool.Pool, logger *slo
 		logger.Warn("action metrics registration failed; the tenant sync responder starts anyway", "error", err)
 	}
 	handler := func(data []byte) []byte {
-		return handleTenantSync(conn, logger, pool, metrics, actionMetrics, data)
+		return handleTenantSync(conn, logger, pool, metrics, actionMetrics, grace, data)
 	}
 	return conn.SubscribeRequest(bus.TenantSyncSubject, tenantSyncQueueGroup, handler)
 }
@@ -58,7 +62,7 @@ func RegisterTenantSyncResponder(conn *bus.Conn, pool *pgxpool.Pool, logger *slo
 // Kind. A body the decoder rejects, and a kind outside the two known
 // values, both answer an error reply and write nothing.
 func handleTenantSync(conn *bus.Conn, logger *slog.Logger, pool *pgxpool.Pool, metrics *InterruptedMetrics,
-	actionMetrics *ActionMetrics, data []byte) []byte {
+	actionMetrics *ActionMetrics, grace time.Duration, data []byte) []byte {
 	var req TenantSyncRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		logger.Warn("tenant sync request decode failed", "error", err)
@@ -70,7 +74,7 @@ func handleTenantSync(conn *bus.Conn, logger *slog.Logger, pool *pgxpool.Pool, m
 
 	switch req.Kind {
 	case TenantSyncKindAnnounce:
-		resp, err := handleTenantSyncAnnounce(ctx, conn, pool, metrics, actionMetrics, logger, req)
+		resp, err := handleTenantSyncAnnounce(ctx, conn, pool, metrics, actionMetrics, grace, logger, req)
 		if err != nil {
 			logger.Error("tenant sync announce failed", "cluster", req.Cluster, "tenant", req.Tenant, "error", err)
 			return marshalTenantSyncResponse(logger, TenantSyncResponse{Error: "tenant sync announce failed"})
@@ -150,7 +154,8 @@ type tenantPlacementRow struct {
 // count in the response's InterruptedMarked field (design D9). conn and
 // metrics feed that marking; a nil metrics counts nothing.
 func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool.Pool, metrics *InterruptedMetrics,
-	actionMetrics *ActionMetrics, logger *slog.Logger, req TenantSyncRequest) (TenantSyncResponse, error) {
+	actionMetrics *ActionMetrics, grace time.Duration, logger *slog.Logger,
+	req TenantSyncRequest) (TenantSyncResponse, error) {
 	if req.Cluster == "" || req.Tenant == "" {
 		return TenantSyncResponse{}, errors.New("announce request needs a cluster and a tenant")
 	}
@@ -220,7 +225,8 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 
 	var interruptedMarked int
 	if old.cell != req.Cell || old.cellInstance != req.CellInstance {
-		n, markErr := MarkMovedRunsForTenant(ctx, pool, conn, metrics, actionMetrics, req.Cluster, req.Tenant, row, time.Now(), logger)
+		n, markErr := MarkMovedRunsForTenant(ctx, pool, conn, metrics, actionMetrics, req.Cluster, req.Tenant,
+			row, time.Now(), grace, logger)
 		if markErr != nil {
 			logger.Error("interrupted-run marking after announce failed",
 				"cluster", req.Cluster, "tenant", req.Tenant, "error", markErr)
@@ -229,12 +235,22 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 		}
 	}
 
+	// The unstarted-intent re-fire runs after the marking, for this one
+	// tenant. A granted intent whose build never started holds no runs
+	// row, so the marking above can never see it.
+	if _, refireErr := RefireLostIntents(ctx, pool, conn, metrics, actionMetrics, req.Cluster, req.Tenant,
+		grace, time.Now(), logger); refireErr != nil {
+		logger.Error("unstarted-intent re-fire after announce failed",
+			"cluster", req.Cluster, "tenant", req.Tenant, "error", refireErr)
+	}
+
 	// The fleet lock's second release confirmation (design.md D11) can
 	// become newly true on any announce, not only a cell or an instance
 	// change: cell_alive can flip to false while the tenant stays on the
 	// same cell, and dead_instances can gain an entry either way. This
 	// runs on every announce, against the row this announce just wrote.
-	if _, releaseErr := ReleaseConfirmedFleetLocks(ctx, pool, req.Cluster, req.Tenant, row, time.Now(), logger); releaseErr != nil {
+	if _, releaseErr := ReleaseConfirmedFleetLocks(ctx, pool, req.Cluster, req.Tenant, row, time.Now(),
+		grace, logger); releaseErr != nil {
 		logger.Error("fleet lock release confirmation after announce failed",
 			"cluster", req.Cluster, "tenant", req.Tenant, "error", releaseErr)
 	}
@@ -274,11 +290,19 @@ func readTenantPlacementForUpdate(ctx context.Context, tx pgx.Tx, cluster, tenan
 	return tenantPlacementRow{generation: generation, cell: cell, cellInstance: cellInstance, deadInstances: dead}, nil
 }
 
-// liveCellInstances answers the set of cell instances a QUEUED or
-// RUNNING run of cluster/tenant names: an intent-joined RUNNING or
-// QUEUED run's own cell_instance, and an unclaimed QUEUED run's
-// accepted_instance payload value. The dead-instances trim in
-// writeTenantPlacement never drops an entry in this set.
+// liveCellInstances answers the set of cell instances the tenant's live
+// work names: an intent-joined RUNNING or QUEUED run's own
+// cell_instance, an unclaimed QUEUED run's accepted_instance payload
+// value, and the owner a GRANTED intent with a null refired_at names.
+// The dead-instances trim in writeTenantPlacement never drops an entry
+// in this set.
+//
+// The third arm exists because the first two join runs. A GRANTED
+// intent whose build never started holds no runs row at all, so a busy
+// pool would otherwise trim away the evidence the re-fire needs. An
+// intent the recorder already re-fired holds a non-null refired_at, so
+// it stops protecting its dead instance at once, and so does one past
+// maxRefireAttempts, whose retry loop has ended.
 func liveCellInstances(ctx context.Context, tx pgx.Tx, cluster, tenant string) (map[string]bool, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT DISTINCT ri.cell_instance
@@ -290,7 +314,14 @@ func liveCellInstances(ctx context.Context, tx pgx.Tx, cluster, tenant string) (
 		SELECT DISTINCT r.payload->>'accepted_instance'
 		FROM varroa.runs r
 		WHERE r.cluster = $1 AND r.tenant = $2 AND r.status = 'QUEUED' AND r.payload ? 'accepted_instance'
-	`, cluster, tenant)
+		UNION
+		SELECT DISTINCT ri.cell_instance
+		FROM varroa.run_intents ri
+		WHERE ri.cluster = $1 AND ri.tenant = $2 AND ri.state = 'GRANTED'
+		  AND ri.refired_at IS NULL
+		  AND ri.refire_attempts < $3
+		  AND ri.cell_instance IS NOT NULL AND ri.cell_instance <> ''
+	`, cluster, tenant, maxRefireAttempts)
 	if err != nil {
 		return nil, fmt.Errorf("list live cell instances: %w", err)
 	}
@@ -314,6 +345,12 @@ func liveCellInstances(ctx context.Context, tx pgx.Tx, cluster, tenant string) (
 // newer LastSeenAt on a collision, and answers the result sorted newest
 // first. The recorder merges rather than replaces, because an operator
 // restart loses every deleted pod identity it held in memory.
+//
+// The merge keeps the EARLIER non-nil ConfirmedGoneAt. The operator
+// repeats the same dead instance on every tick, so a later-wins rule
+// would hold the timestamp young forever and the confirmed-gone grace
+// would never elapse. A stored nil takes the incoming value, and an
+// incoming nil never clears a stored one.
 func mergeDeadInstances(stored, incoming []TenantSyncDeadInstance) []TenantSyncDeadInstance {
 	byInstance := make(map[string]TenantSyncDeadInstance, len(stored)+len(incoming))
 	for _, d := range stored {
@@ -321,9 +358,16 @@ func mergeDeadInstances(stored, incoming []TenantSyncDeadInstance) []TenantSyncD
 	}
 	for _, d := range incoming {
 		existing, ok := byInstance[d.Instance]
-		if !ok || d.LastSeenAt.After(existing.LastSeenAt) {
+		if !ok {
 			byInstance[d.Instance] = d
+			continue
 		}
+		merged := existing
+		if d.LastSeenAt.After(existing.LastSeenAt) {
+			merged = d
+		}
+		merged.ConfirmedGoneAt = earlierConfirmation(existing.ConfirmedGoneAt, d.ConfirmedGoneAt)
+		byInstance[d.Instance] = merged
 	}
 	merged := make([]TenantSyncDeadInstance, 0, len(byInstance))
 	for _, d := range byInstance {
@@ -331,6 +375,21 @@ func mergeDeadInstances(stored, incoming []TenantSyncDeadInstance) []TenantSyncD
 	}
 	sort.Slice(merged, func(i, j int) bool { return merged[i].LastSeenAt.After(merged[j].LastSeenAt) })
 	return merged
+}
+
+// earlierConfirmation answers the earlier of two confirmation times. A
+// nil argument carries no confirmation, so the other one wins.
+func earlierConfirmation(a, b *time.Time) *time.Time {
+	switch {
+	case a == nil:
+		return b
+	case b == nil:
+		return a
+	case b.Before(*a):
+		return b
+	default:
+		return a
+	}
 }
 
 // trimDeadInstances keeps every entry named in keep without limit, and
