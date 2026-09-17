@@ -53,6 +53,73 @@ func TestItemValidate(t *testing.T) {
 		{"varroaUpstream trigger invalid result", Item{Kind: "freeStyle", Name: "my-job",
 			Triggers: []Trigger{{VarroaUpstream: &VarroaUpstreamTrigger{Tenant: "alpha", Job: "release", Result: "FLAKY"}}},
 		}, true},
+		{"valid item-level string parameter", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Parameters: []Parameter{{String: &StringParameter{Name: "BRANCH"}}},
+		}, false},
+		{"parameter with no kind set", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Parameters: []Parameter{{}},
+		}, true},
+		{"parameter with two kinds set", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Parameters: []Parameter{{String: &StringParameter{Name: "A"}, BooleanParam: &BooleanParameter{Name: "A"}}},
+		}, true},
+		{"parameter missing name", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Parameters: []Parameter{{String: &StringParameter{}}},
+		}, true},
+		{"choice parameter with no choices", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Parameters: []Parameter{{Choice: &ChoiceParameter{Name: "ENV"}}},
+		}, true},
+		{"valid property-level parameter", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Properties: []Property{{Parameters: &ParametersProperty{
+				ParameterDefinitions: []Parameter{{String: &StringParameter{Name: "BRANCH"}}},
+			}}},
+		}, false},
+		{"property-level parameter missing name", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Properties: []Property{{Parameters: &ParametersProperty{
+				ParameterDefinitions: []Parameter{{String: &StringParameter{}}},
+			}}},
+		}, true},
+		{"duplicate parameter name within one source", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Parameters: []Parameter{
+				{String: &StringParameter{Name: "BRANCH"}},
+				{String: &StringParameter{Name: "BRANCH"}},
+			},
+		}, true},
+		{"duplicate parameter name across both sources", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Parameters: []Parameter{{String: &StringParameter{Name: "BRANCH"}}},
+			Properties: []Property{{Parameters: &ParametersProperty{
+				ParameterDefinitions: []Parameter{{BooleanParam: &BooleanParameter{Name: "BRANCH"}}},
+			}}},
+		}, true},
+		{"valid durability hint", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Properties: []Property{{DurabilityHint: &DurabilityHint{Hint: "PERFORMANCE_OPTIMIZED"}}},
+		}, false},
+		{"invalid durability hint", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Properties: []Property{{DurabilityHint: &DurabilityHint{Hint: "FAST_AND_LOOSE"}}},
+		}, true},
+		{"durability hint on a folder is rejected", Item{Kind: "folder", Name: "my-folder",
+			Properties: []Property{{DurabilityHint: &DurabilityHint{Hint: "MAX_SURVIVABILITY"}}},
+		}, true},
+		{"parameters on a multibranch item is rejected", Item{Kind: "multibranch", Name: "my-branches",
+			SourcesList: []BranchSourceEntry{{GitHub: &GitHubSCMSource{RepoOwner: "org", Repository: "repo"}}},
+			Parameters:  []Parameter{{String: &StringParameter{Name: "BRANCH"}}},
+		}, true},
+		{"parameters on an organizationFolder item is rejected", Item{Kind: "organizationFolder", Name: "my-org",
+			Navigators: []SCMNavigator{{GitHub: &GitHubNavigator{RepoOwner: "org"}}},
+			Properties: []Property{{Parameters: &ParametersProperty{
+				ParameterDefinitions: []Parameter{{String: &StringParameter{Name: "BRANCH"}}},
+			}}},
+		}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -309,6 +376,143 @@ func TestGenerateConfigXMLPipeline(t *testing.T) {
 	}
 	if !strings.Contains(xml, "*/main") {
 		t.Errorf("expected branch spec in XML, got: %s", xml)
+	}
+}
+
+// TestGenerateConfigXMLPipelineWithParameters asserts that an item-level
+// parameters block on a pipeline item renders a
+// ParametersDefinitionProperty, so a re-fired trigger carries a non-empty
+// params_digest.
+func TestGenerateConfigXMLPipelineWithParameters(t *testing.T) {
+	item := Item{
+		Kind: "pipeline",
+		Name: "my-pipeline",
+		Definition: &PipelineDefinition{
+			Script: "pipeline { agent any; stages { stage('x') { steps { echo 'ok' } } } }",
+		},
+		Parameters: []Parameter{
+			{String: &StringParameter{Name: "BRANCH", DefaultValue: "main", Trim: true}},
+			{Choice: &ChoiceParameter{Name: "ENV", Choices: []string{"dev", "prod"}}},
+			{BooleanParam: &BooleanParameter{Name: "DEBUG", DefaultValue: true}},
+		},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(xml, "hudson.model.ParametersDefinitionProperty") {
+		t.Fatalf("expected ParametersDefinitionProperty in XML, got: %s", xml)
+	}
+	if !strings.Contains(xml, "<parameterDefinitions>") {
+		t.Fatalf("expected a parameterDefinitions wrapper around every definition, got: %s", xml)
+	}
+	if !strings.Contains(xml, "hudson.model.StringParameterDefinition") || !strings.Contains(xml, "<name>BRANCH</name>") {
+		t.Errorf("expected string parameter BRANCH in XML, got: %s", xml)
+	}
+	if !strings.Contains(xml, "hudson.model.ChoiceParameterDefinition") || !strings.Contains(xml, "<name>ENV</name>") {
+		t.Errorf("expected choice parameter ENV in XML, got: %s", xml)
+	}
+	if !strings.Contains(xml, "<string>dev</string>") || !strings.Contains(xml, "<string>prod</string>") {
+		t.Errorf("expected choice values dev/prod in XML, got: %s", xml)
+	}
+	if !strings.Contains(xml, "hudson.model.BooleanParameterDefinition") || !strings.Contains(xml, "<name>DEBUG</name>") {
+		t.Errorf("expected boolean parameter DEBUG in XML, got: %s", xml)
+	}
+}
+
+// TestGenerateConfigXMLPipelineWithPropertyLevelParameters asserts that a
+// parameters property nested under properties also renders a
+// ParametersDefinitionProperty, the same as the item-level spelling.
+func TestGenerateConfigXMLPipelineWithPropertyLevelParameters(t *testing.T) {
+	item := Item{
+		Kind: "pipeline",
+		Name: "my-pipeline",
+		Definition: &PipelineDefinition{
+			Script: "echo hi",
+		},
+		Properties: []Property{
+			{Parameters: &ParametersProperty{
+				ParameterDefinitions: []Parameter{{String: &StringParameter{Name: "BRANCH"}}},
+			}},
+		},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(xml, "hudson.model.ParametersDefinitionProperty") || !strings.Contains(xml, "<name>BRANCH</name>") {
+		t.Errorf("expected property-level BRANCH parameter in XML, got: %s", xml)
+	}
+}
+
+// TestGenerateConfigXMLPipelineMergesBothParameterSpellings asserts that a
+// pipeline item declaring parameters both ways carries every parameter
+// from both sources on one job, matching the pipelines API's own merge.
+func TestGenerateConfigXMLPipelineMergesBothParameterSpellings(t *testing.T) {
+	item := Item{
+		Kind: "pipeline",
+		Name: "my-pipeline",
+		Definition: &PipelineDefinition{
+			Script: "echo hi",
+		},
+		Parameters: []Parameter{{String: &StringParameter{Name: "VERSION"}}},
+		Properties: []Property{
+			{Parameters: &ParametersProperty{
+				ParameterDefinitions: []Parameter{{BooleanParam: &BooleanParameter{Name: "DRY_RUN"}}},
+			}},
+		},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(xml, "<name>VERSION</name>") {
+		t.Errorf("expected item-level VERSION parameter in XML, got: %s", xml)
+	}
+	if !strings.Contains(xml, "<name>DRY_RUN</name>") {
+		t.Errorf("expected property-level DRY_RUN parameter in XML, got: %s", xml)
+	}
+}
+
+func TestGenerateConfigXMLFreeStyleWithParameters(t *testing.T) {
+	item := Item{
+		Kind: "freeStyle",
+		Name: "my-job",
+		Parameters: []Parameter{
+			{String: &StringParameter{Name: "BRANCH", DefaultValue: "main"}},
+		},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(xml, "hudson.model.ParametersDefinitionProperty") {
+		t.Fatalf("expected ParametersDefinitionProperty in XML, got: %s", xml)
+	}
+	if !strings.Contains(xml, "<name>BRANCH</name>") {
+		t.Errorf("expected string parameter BRANCH in XML, got: %s", xml)
+	}
+}
+
+// TestGenerateConfigXMLFreeStyleWithPropertyLevelParameters asserts that a
+// freeStyle item's property-level parameters render too, matching the
+// pipeline renderer's merge of both spellings.
+func TestGenerateConfigXMLFreeStyleWithPropertyLevelParameters(t *testing.T) {
+	item := Item{
+		Kind: "freeStyle",
+		Name: "my-job",
+		Properties: []Property{
+			{Parameters: &ParametersProperty{
+				ParameterDefinitions: []Parameter{{String: &StringParameter{Name: "BRANCH"}}},
+			}},
+		},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(xml, "hudson.model.ParametersDefinitionProperty") || !strings.Contains(xml, "<name>BRANCH</name>") {
+		t.Errorf("expected property-level BRANCH parameter in XML, got: %s", xml)
 	}
 }
 

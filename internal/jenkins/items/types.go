@@ -37,9 +37,13 @@ type Item struct {
 	// Folder-specific: nested items
 	Items []Item `yaml:"items,omitempty"`
 
-	// Shared across multiple kinds
+	// Shared across multiple kinds. A pipeline or freeStyle item declares
+	// its build parameters here, as a flat list. Either kind may also
+	// declare parameters through its properties (see Property.Parameters).
+	// A controller renders both sources into one job.
 	Properties     []Property      `yaml:"properties,omitempty"`
 	BuildDiscarder *BuildDiscarder `yaml:"buildDiscarder,omitempty"`
+	Parameters     []Parameter     `yaml:"parameters,omitempty"`
 
 	// Pipeline-specific
 	Definition      *PipelineDefinition `yaml:"definition,omitempty"`
@@ -52,7 +56,6 @@ type Item struct {
 	Builders                         []Builder   `yaml:"builders,omitempty"`
 	PublishersList                   []Publisher `yaml:"publishersList,omitempty"`
 	Triggers                         []Trigger   `yaml:"triggers,omitempty"`
-	Parameters                       []Parameter `yaml:"parameters,omitempty"`
 	BlockBuildWhenDownstreamBuilding bool        `yaml:"blockBuildWhenDownstreamBuilding,omitempty"`
 	BlockBuildWhenUpstreamBuilding   bool        `yaml:"blockBuildWhenUpstreamBuilding,omitempty"`
 	CustomWorkspace                  string      `yaml:"customWorkspace,omitempty"`
@@ -339,9 +342,88 @@ func validateTriggers(itemName string, triggers []Trigger) error {
 	return nil
 }
 
+// parameterKinds holds the two item kinds a controller renders parameters
+// for. No renderer reads a parameter declared on any other kind.
+var parameterKinds = map[string]bool{
+	"pipeline":  true,
+	"freeStyle": true,
+}
+
+// validateParameters rejects a parameter declared on a kind no renderer
+// consumes it from, a build parameter that sets none or more than one of
+// string, choice, and booleanParam, an unnamed parameter, a choice
+// parameter with no choices, and a name repeated across the two spellings.
+func validateParameters(itemName, kind string, params []Parameter) error {
+	if len(params) > 0 && !parameterKinds[kind] {
+		return fmt.Errorf("item %q: a build parameter, from either the item-level list or a parameters property, is only valid on kind=pipeline and kind=freeStyle, not kind=%s", itemName, kind)
+	}
+	seen := make(map[string]bool, len(params))
+	for _, p := range params {
+		set := 0
+		var name string
+		if p.String != nil {
+			set++
+			name = p.String.Name
+		}
+		if p.Choice != nil {
+			set++
+			name = p.Choice.Name
+			if len(p.Choice.Choices) == 0 {
+				return fmt.Errorf("item %q: choice parameter %q requires at least one choice", itemName, name)
+			}
+		}
+		if p.BooleanParam != nil {
+			set++
+			name = p.BooleanParam.Name
+		}
+		if set != 1 {
+			return fmt.Errorf("item %q: a parameter requires exactly one of string, choice, and booleanParam", itemName)
+		}
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("item %q: a parameter requires a name", itemName)
+		}
+		if seen[name] {
+			return fmt.Errorf("item %q: parameter %q is declared more than once", itemName, name)
+		}
+		seen[name] = true
+	}
+	return nil
+}
+
+// validDurabilityHints holds the three FlowDurabilityHint names Jenkins
+// core defines.
+var validDurabilityHints = map[string]bool{
+	"PERFORMANCE_OPTIMIZED": true,
+	"SURVIVABLE_NONATOMIC":  true,
+	"MAX_SURVIVABILITY":     true,
+}
+
+// validateDurabilityHints rejects a durabilityHint property declared on a
+// kind other than pipeline, the only kind whose renderer reads it, and a
+// value that is not one of the three FlowDurabilityHint names. Jenkins
+// fails to load a job with any other value, on a cell or not, so this runs
+// for every controller rather than only the cell lint pass.
+func validateDurabilityHints(itemName, kind string, props []Property) error {
+	for _, p := range props {
+		if p.DurabilityHint == nil {
+			continue
+		}
+		if kind != "pipeline" {
+			return fmt.Errorf("item %q: durabilityHint is only valid on kind=pipeline, not kind=%s", itemName, kind)
+		}
+		if !validDurabilityHints[p.DurabilityHint.Hint] {
+			return fmt.Errorf("item %q: durabilityHint %q must be one of PERFORMANCE_OPTIMIZED, SURVIVABLE_NONATOMIC, MAX_SURVIVABILITY",
+				itemName, p.DurabilityHint.Hint)
+		}
+	}
+	return nil
+}
+
 // ---- Parameters ----
 
-// Parameter defines a build parameter.
+// Parameter defines one build parameter. A controller renders each entry
+// as one Jenkins ParameterDefinition, whether it reaches the job through
+// Item.Parameters or through ParametersProperty.
 type Parameter struct {
 	String       *StringParameter  `yaml:"string,omitempty"`
 	Choice       *ChoiceParameter  `yaml:"choice,omitempty"`
@@ -421,7 +503,10 @@ type DisableConcurrentBuilds struct{}
 // DisableResume prevents pipeline resume.
 type DisableResume struct{}
 
-// ParametersProperty defines build parameters as a property.
+// ParametersProperty is a build parameter list nested under properties, an
+// alternative to the item-level spelling (Item.Parameters). A pipeline or
+// freeStyle job carries parameters from both sources at once. Every other
+// kind rejects it.
 type ParametersProperty struct {
 	ParameterDefinitions []Parameter `yaml:"parameterDefinitions,omitempty"`
 }
@@ -431,7 +516,10 @@ type GithubProjectProperty struct {
 	ProjectURLStr string `yaml:"projectUrlStr"`
 }
 
-// DurabilityHint sets pipeline durability.
+// DurabilityHint sets a pipeline job's flow durability from its first
+// build. Hint must be one of PERFORMANCE_OPTIMIZED, SURVIVABLE_NONATOMIC,
+// and MAX_SURVIVABILITY, the three names Jenkins core's FlowDurabilityHint
+// defines. Item.Validate rejects any other value, for every controller.
 type DurabilityHint struct {
 	Hint string `yaml:"hint"`
 }
@@ -740,6 +828,15 @@ func (i *Item) Validate() error {
 		return fmt.Errorf("item missing name")
 	}
 	if err := validateTriggers(i.Name, i.Triggers); err != nil {
+		return err
+	}
+	// Validate every parameter a renderer will merge onto one job, together,
+	// so a name repeated across the two spellings is caught here rather
+	// than reaching Jenkins as two conflicting definitions.
+	if err := validateParameters(i.Name, i.Kind, collectParameters(*i)); err != nil {
+		return err
+	}
+	if err := validateDurabilityHints(i.Name, i.Kind, i.Properties); err != nil {
 		return err
 	}
 	switch i.Kind {

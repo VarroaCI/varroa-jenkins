@@ -759,7 +759,10 @@ sections describe.
     namespace, kube-dns, and the configured API-server CIDRs), `cell_jcasc.go`
     (the fixed cell JCasC fragment — `numExecutors: 0`,
     `MAX_SURVIVABILITY` flow durability, which the pipeline mesh needs
-    because a lower level writes the flow program at a checkpoint — and
+    because a lower level writes the flow program at a checkpoint. A job's
+    own `durabilityHint` property (`items.DurabilityHint`) overrides this
+    default; the plugin's `RunStatePusher` then pushes no state for that
+    job, so a lower hint opts a job fully out of the mesh, not partway. And
     `tenantCloudFor`, the
     operator's constant agent pod template per tenant), `cell_items_assembly.go`
     (`assembleCellContent` runs the tenant items pipeline — `items.ReRoot`

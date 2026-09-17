@@ -65,9 +65,17 @@ reading each package's entry point):
   one, rejecting a duplicate top-level name and fixing the remove strategy to
   `sync` — the only way a removed tenant's folder gets deleted. The sibling
   `items/lint` package runs cell-only policy rules (`no-poll-scm`,
-  `no-global-credentials`, `no-controller-config-dependency`) over the merged,
-  flattened manifest before a push; `items.Parse` itself is unchanged and
-  still accepts every shape a non-cell controller accepts today. Two item
+  `no-global-credentials`, `no-controller-config-dependency`) over the
+  merged, flattened manifest before a push; `items.Parse` itself is
+  unchanged and still accepts every shape a non-cell controller accepts
+  today. An item declares its build parameters two ways — a flat list at
+  the item level (`Item.Parameters`) or a parameters property nested under
+  `properties` (`Property.Parameters`) — and `configxml.go` merges both
+  sources into one `ParametersDefinitionProperty`, the same merge the
+  pipelines API's `buildPipelineParameters` already performs;
+  `Item.Validate` rejects a name repeated across the two sources and a
+  `durabilityHint` value outside Jenkins core's three `FlowDurabilityHint`
+  names, for every controller. Two item
   properties feed the cell's agent fence and shared-library support:
   `KubernetesFolderProperty` (`kubernetes.permittedClouds`) restricts which
   kubernetes-plugin clouds a folder's items may use — the cell assembly

@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -253,13 +254,108 @@ type paramsDefPropXML struct {
 	ParameterDefs []jenkinsParamXML `xml:"parameterDefinitions"`
 }
 
+// MarshalXML writes the parameterDefinitions wrapper Jenkins core expects,
+// then each parameter definition under its own class name. A plain struct
+// tag cannot express this: a definition's XMLName value, set to its class
+// name, takes precedence over the wrapping field's own tag.
+func (p paramsDefPropXML) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
+	if err := e.EncodeToken(start); err != nil {
+		return err
+	}
+	wrap := xml.StartElement{Name: xml.Name{Local: "parameterDefinitions"}}
+	if err := e.EncodeToken(wrap); err != nil {
+		return err
+	}
+	for _, def := range p.ParameterDefs {
+		if err := e.Encode(def); err != nil {
+			return err
+		}
+	}
+	if err := e.EncodeToken(wrap.End()); err != nil {
+		return err
+	}
+	return e.EncodeToken(start.End())
+}
+
 type jenkinsParamXML struct {
 	XMLName      xml.Name
-	Name         string   `xml:"name"`
-	Description  string   `xml:"description,omitempty"`
-	DefaultValue string   `xml:"defaultValue,omitempty"`
-	Trim         bool     `xml:"trim,omitempty"`
-	Choices      []string `xml:"choices,omitempty"`
+	Name         string           `xml:"name"`
+	Description  string           `xml:"description,omitempty"`
+	DefaultValue string           `xml:"defaultValue,omitempty"`
+	Trim         bool             `xml:"trim,omitempty"`
+	Choices      *paramChoicesXML `xml:"choices,omitempty"`
+}
+
+// paramChoicesXML mirrors the java.util.Arrays$ArrayList shape XStream
+// gives a choice parameter's choices field, so a config.xml push round
+// trips through Jenkins core the same way a UI-saved job does.
+type paramChoicesXML struct {
+	Class string          `xml:"class,attr"`
+	Array *stringArrayXML `xml:"a"`
+}
+
+type stringArrayXML struct {
+	Class   string   `xml:"class,attr"`
+	Strings []string `xml:"string"`
+}
+
+// Jenkins core class names for the three parameter kinds this DSL models.
+const (
+	stringParamClass  = "hudson.model.StringParameterDefinition"
+	choiceParamClass  = "hudson.model.ChoiceParameterDefinition"
+	booleanParamClass = "hudson.model.BooleanParameterDefinition"
+)
+
+// collectParameters gathers an item's build parameters from both spellings:
+// the item's own flat list and its parameters property. A renderer folds
+// both sources into one ParametersDefinitionProperty, the same merge the
+// pipelines API applies when it lists a job's parameters.
+func collectParameters(item Item) []Parameter {
+	params := append([]Parameter(nil), item.Parameters...)
+	for _, prop := range item.Properties {
+		if prop.Parameters != nil {
+			params = append(params, prop.Parameters.ParameterDefinitions...)
+		}
+	}
+	return params
+}
+
+// convertParameters renders a collected parameter list into the
+// ParameterDefinition elements a ParametersDefinitionProperty carries. A
+// caller has already run validateParameters, so every entry sets exactly
+// one of String, Choice, and BooleanParam.
+func convertParameters(params []Parameter) []jenkinsParamXML {
+	out := make([]jenkinsParamXML, 0, len(params))
+	for _, p := range params {
+		switch {
+		case p.String != nil:
+			out = append(out, jenkinsParamXML{
+				XMLName:      xml.Name{Local: stringParamClass},
+				Name:         p.String.Name,
+				Description:  p.String.Description,
+				DefaultValue: p.String.DefaultValue,
+				Trim:         p.String.Trim,
+			})
+		case p.Choice != nil:
+			out = append(out, jenkinsParamXML{
+				XMLName:     xml.Name{Local: choiceParamClass},
+				Name:        p.Choice.Name,
+				Description: p.Choice.Description,
+				Choices: &paramChoicesXML{
+					Class: "java.util.Arrays$ArrayList",
+					Array: &stringArrayXML{Class: "string-array", Strings: p.Choice.Choices},
+				},
+			})
+		case p.BooleanParam != nil:
+			out = append(out, jenkinsParamXML{
+				XMLName:      xml.Name{Local: booleanParamClass},
+				Name:         p.BooleanParam.Name,
+				Description:  p.BooleanParam.Description,
+				DefaultValue: strconv.FormatBool(p.BooleanParam.DefaultValue),
+			})
+		}
+	}
+	return out
 }
 
 // ---- Conversion helpers ----
@@ -358,6 +454,11 @@ func freeStyleConfigXML(item Item) xmlConfig {
 			}
 		}
 		f.Triggers = t
+	}
+	if params := collectParameters(item); len(params) > 0 {
+		f.Properties = &jenkinsParamsPropXML{
+			ParamsDefProp: &paramsDefPropXML{ParameterDefs: convertParameters(params)},
+		}
 	}
 	return f
 }
@@ -459,6 +560,7 @@ type pipelinePropertiesXML struct {
 	DisableConcurrentBuilds *disableConcurrentBuildsXML `xml:"org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty,omitempty"`
 	DisableResume           *disableResumeXML           `xml:"org.jenkinsci.plugins.workflow.job.properties.DisableResumeJobProperty,omitempty"`
 	DurabilityHint          *durabilityHintXML          `xml:"org.jenkinsci.plugins.workflow.job.properties.DurabilityHintJobProperty,omitempty"`
+	ParamsDefProp           *paramsDefPropXML           `xml:"hudson.model.ParametersDefinitionProperty,omitempty"`
 }
 
 type pipelineBuildDiscarderXML struct {
@@ -554,6 +656,12 @@ func pipelineConfigXML(item Item) xmlConfig {
 			}
 			p.Properties.DurabilityHint = &durabilityHintXML{Hint: prop.DurabilityHint.Hint}
 		}
+	}
+	if params := collectParameters(item); len(params) > 0 {
+		if p.Properties == nil {
+			p.Properties = &pipelinePropertiesXML{}
+		}
+		p.Properties.ParamsDefProp = &paramsDefPropXML{ParameterDefs: convertParameters(params)}
 	}
 	return p
 }
