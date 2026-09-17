@@ -327,6 +327,18 @@ public final class IntentKey {
     public static String paramsDigest(Queue.Item item) {
         Map<String, String> values = new LinkedHashMap<>();
         Set<String> masked = new HashSet<>();
+        collectParameters(item, values, masked);
+        return paramsDigest(values, masked);
+    }
+
+    /**
+     * Reads the queue item's parameters into {@code values}, name to
+     * string value, and names each sensitive parameter in {@code masked}.
+     *
+     * <p>{@code ParameterValue} declares no {@code getValue}; each
+     * subclass declares its own, so the read is reflective.
+     */
+    public static void collectParameters(Queue.Item item, Map<String, String> values, Set<String> masked) {
         for (Action action : item.getActions()) {
             if (action instanceof ParametersAction) {
                 for (ParameterValue pv : ((ParametersAction) action).getParameters()) {
@@ -337,7 +349,6 @@ public final class IntentKey {
                 }
             }
         }
-        return paramsDigest(values, masked);
     }
 
     /**

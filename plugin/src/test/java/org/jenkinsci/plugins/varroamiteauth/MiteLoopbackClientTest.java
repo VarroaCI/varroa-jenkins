@@ -83,7 +83,7 @@ public class MiteLoopbackClientTest {
         String callerJobPath = "alpha/build-it";
 
         List<Function<MiteLoopbackClient, MiteLoopbackClient.Response>> calls = List.of(
-                c -> c.crossTenantBuild(callerJobPath, "run-1", 1, "beta", "beta/deploy", Map.of()),
+                c -> c.crossTenantBuild(callerJobPath, "run-1", 1, "beta", "beta/deploy", Map.of(), ""),
                 c -> c.crossTenantStatus(callerJobPath, "run-1"),
                 c -> c.crossTenantLastSuccessful(callerJobPath, "beta", "beta/deploy"),
                 c -> c.crossTenantArtifactList(callerJobPath, "run-1"),
@@ -106,7 +106,7 @@ public class MiteLoopbackClientTest {
     @Test
     public void everyRouteReceivesOnlyItsOwnClosedKindSet() throws Exception {
         MiteLoopbackClient client = client();
-        client.crossTenantBuild("alpha/j", "run-1", 1, "beta", "beta/deploy", Map.of());
+        client.crossTenantBuild("alpha/j", "run-1", 1, "beta", "beta/deploy", Map.of(), "");
         client.crossTenantLastSuccessful("alpha/j", "beta", "beta/deploy");
         client.crossTenantArtifactUrl("alpha/j", "run-1", "out/app.jar");
         client.crossTenantLockRenew("alpha/j", "beta/deploy-prod", "run-1", 300L);
@@ -123,7 +123,7 @@ public class MiteLoopbackClientTest {
     @Test
     public void crossTenantBuildSendsSeqAsAnSPrefixedString() throws Exception {
         MiteLoopbackClient client = client();
-        client.crossTenantBuild("alpha/j", "run-1", 3, "beta", "deploy", Map.of());
+        client.crossTenantBuild("alpha/j", "run-1", 3, "beta", "deploy", Map.of(), "");
 
         assertEquals(1, receivedBodies.size());
         JSONObject sent = JSONObject.fromObject(receivedBodies.get(0));

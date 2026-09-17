@@ -113,7 +113,15 @@ of the fleet's audit activity, once a controller becomes disposable.
   through `reserveBuildNumber`. `Fence` gates a claim before the
   transaction opens; `allowAllFence` is the C1 default.
   `RegisterClaimResponder` subscribes `bus.SubjectLedgerClaim` with
-  queue group `recorder`. `NextBuildNumber` and
+  queue group `recorder`. A `duplicate` decision also marks the
+  requesting run's own row `DUPLICATE` through `markDuplicateClaim`, in
+  the same transaction and guarded on `status = 'QUEUED'` plus
+  `noBuildRecordedSQL`: that run never builds, and the interrupted sweep
+  leaves a QUEUED row alone while its accepting instance is alive, so
+  nothing else would ever resolve it. `applyTriggerAccepted` writes the
+  same row `DUPLICATE` at once when `run_intents` already holds its
+  intent key under another run identifier, because an accepted trigger
+  can land on either side of its claim. `NextBuildNumber` and
   `RaiseWatermarkForStartedBuild` are exported for `ingest_started.go`'s
   `run.started` write, which is their only caller in this package
   today.
@@ -187,7 +195,14 @@ of the fleet's audit activity, once a controller becomes disposable.
   `build` (`crosstenant_build.go`) reserves a run identifier against the ledger
   through `Reader.GetIntentByKey`, minting a fresh UUIDv7 and publishing one
   `LedgerActionTriggerRun` action (actor `svc-<caller-tenant>`) only when no
-  `run_intents` row exists yet, and never writing that row itself; `status` and
+  `run_intents` row exists yet, and never writing that row itself. The `build`
+  kind is the one kind that reads `CrossTenantRequest.IntentKey`, and only when
+  `CallerTenant` equals `TargetTenant`: an intra-tenant forward preserves the
+  claimer's own key, so two members that fire one cron in one minute reach one
+  ledger row. `crossTenantSuppliedKey` validates it with `ParseIntentKey`
+  (`reason_code=INVALID_KEY` for an unparsable key) and answers `code=INTERNAL`
+  for a cross-tenant request that carries one, because grant order 8 tests the
+  scheme of a key the recorder derived. `status` and
   `last_successful` (`crosstenant_status.go`) and `artifact_list`/`artifact_url`
   (`crosstenant_artifact.go`) read a run's tenant and job path
   (`crosstenant_runrecord.go`) and run the `request`-path grant against them
@@ -302,22 +317,44 @@ of the fleet's audit activity, once a controller becomes disposable.
   `Apply` calls `RunUpstreamFanout` (`upstream_fanout.go`) after the
   transaction that recorded an owner `run.completed` write has committed,
   never inside it, because the round reads `GrantEvaluator` over several
-  queries and publishes on the bus. The round selects
-  `job_schedules` rows by the producer's relative job name (stripped of
-  the producer's own tenant prefix, matching `upstream_job`'s own
-  storage convention), filters by the Jenkins result threshold and by
-  `resolveFanoutTargetCluster`'s own mirror of
-  `GrantEvaluator.resolveTargetPolicy`'s cluster resolution, orders by
-  `(cluster, tenant, job_path)`, caps at 32, then runs the `fanout`-path
+  queries and publishes on the bus. **The round is the one part of the
+  terminal path that is not idempotent**, because it mints a fresh run
+  identifier for each subscriber, so `dispatch` arms it only behind
+  `claimFanoutRound`: an at-most-once `payload.fanout_at` marker written
+  in that same transaction. The build stream is at least once, and a
+  repeat delivery would otherwise publish a second `trigger_run` under
+  one intent key, which the target's claim answers `duplicate`.
+  **The round selects two candidate sets.**
+  Set A holds a `varroaUpstream` subscription: rows matched by the producer's
+  relative job name (stripped of the producer's own tenant prefix, matching
+  `upstream_job`'s own storage convention), through the
+  `(upstream_tenant, upstream_job)` index. Set B holds a native Jenkins
+  `upstream` trigger inside the producer's own cluster and tenant, through the
+  `(tenant, trigger_type)` index; Go then matches each row's `spec`, the
+  comma-separated list of resolved upstream job paths the plugin exports,
+  against the producer's **tenant-qualified** path. Set B must not reuse set
+  A's relative form: a full path never equals it, and every native edge would
+  miss. A listed path whose first segment is another tenant is dropped, and a
+  subscriber that holds at least one such path and matched none of its own
+  counts one `cross_tenant` skip. Each set applies the Jenkins result threshold
+  inside its own selection. The joined list then takes the placement test
+  (`resolveFanoutTargetCluster`'s own mirror of
+  `GrantEvaluator.resolveTargetPolicy`'s cluster resolution) and the disabled
+  test, is de-duplicated by `(cluster, tenant, job_path)` **after** those two
+  tests, orders by `(cluster, tenant, job_path)`, and caps at 32. Filtering
+  before the de-duplication is what lets a job that declares both kinds build
+  when either declaration passes. The cap covers the de-duplicated list, never
+  one set. The round then runs the `fanout`-path
   `GrantEvaluator.Check` per row and publishes one `LedgerActionTriggerRun`
-  per allowed row, actor `varroa-upstream/<producer-tenant>`. The
+  per allowed row, actor `varroa-upstream/<producer-tenant>`; a set B candidate
+  always passes, because its caller tenant equals its target tenant. The
   intent-key seq is `t<digest>`, the first twelve hex characters of the
   SHA-256 of the subscriber's own `<cluster>/<tenant>/<job_path>`
   (`upstreamFanoutSeq`), stable across a redelivery because it never
   carries a position. `UpstreamFanoutMetrics`
   (`upstream_fanout_metrics.go`) holds `recorder_upstream_fanout_total`
   and `recorder_upstream_fanout_skipped_total` (labelled `reason`, over
-  `over_cap`/`denied`/`unplaced`/`disabled`/`publish_failed`).
+  `over_cap`/`denied`/`unplaced`/`disabled`/`publish_failed`/`cross_tenant`).
 - **Activity ingest** (`activity_consumer.go`, `activity_ingest.go`,
   `activity_stream.go`) — a second, independent pipeline, not a mode of
   the build pipeline above. `EnsureActivityStream` owns the

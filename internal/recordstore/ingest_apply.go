@@ -282,12 +282,21 @@ func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, e
 		}
 		res := dispatchResult{stateCleanup: intent.runID.String()}
 		if payload.Result != nil {
-			res.fanout = &FanoutProducer{
-				Cluster: intent.cluster,
-				Tenant:  intent.tenant,
-				JobPath: intent.jobPath,
-				RunID:   intent.runID.String(),
-				Result:  *payload.Result,
+			// The fan-out round is the one part of the terminal path
+			// that is not idempotent, so it runs behind its own
+			// at-most-once claim in this same transaction.
+			claimed, claimErr := claimFanoutRound(ctx, tx, intent.createdAt, intent.runID)
+			if claimErr != nil {
+				return dispatchResult{}, claimErr
+			}
+			if claimed {
+				res.fanout = &FanoutProducer{
+					Cluster: intent.cluster,
+					Tenant:  intent.tenant,
+					JobPath: intent.jobPath,
+					RunID:   intent.runID.String(),
+					Result:  *payload.Result,
+				}
 			}
 		}
 		return res, nil

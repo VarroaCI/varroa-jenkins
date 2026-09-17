@@ -15,8 +15,20 @@ type RunTriggerAcceptedPayload struct {
 }
 
 // applyTriggerAccepted writes the one runs row a run.trigger_accepted
-// envelope produces, inside its own transaction. It touches run_intents
+// envelope produces, inside its own transaction. It writes run_intents
 // never: an accepted trigger can arrive before any claim exists.
+//
+// It does read run_intents for the row's status. An intent key that
+// already belongs to another run identifier means the claim for this one
+// answers duplicate, so this trigger never builds and the row is
+// terminal at once. The claim path marks the same row when it wins the
+// race the other way. Both writes are needed: either order can happen,
+// and the interrupted sweep leaves a QUEUED row alone while its
+// accepting instance is alive.
+//
+// Such a row carries ended_at with its status. Retention reclaims a
+// terminal run by ended_at, so a DUPLICATE row with none would sit until
+// its partition expires.
 //
 // created_at is the UUIDv7 time of the run identifier, not occurred_at. A
 // real run's created_at holds that same moment, so one run identifier maps
@@ -47,10 +59,18 @@ func (g *Ingester) applyTriggerAccepted(ctx context.Context, env IngestEnvelope)
 	tag, err := tx.Exec(ctx, `
 		INSERT INTO varroa.runs (
 			run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path,
-			status, actor, payload
+			status, ended_at, actor, payload
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
-			'QUEUED', $9,
+			CASE WHEN EXISTS (
+				SELECT 1 FROM varroa.run_intents ri
+				WHERE ri.intent_key = $3 AND ri.run_id <> $1
+			) THEN 'DUPLICATE' ELSE 'QUEUED' END,
+			CASE WHEN EXISTS (
+				SELECT 1 FROM varroa.run_intents ri
+				WHERE ri.intent_key = $3 AND ri.run_id <> $1
+			) THEN now() END,
+			$9,
 			jsonb_build_object('accepted_at', $10::timestamptz, 'accepted_instance', $11::text)
 		)
 		ON CONFLICT (created_at, run_id) DO NOTHING

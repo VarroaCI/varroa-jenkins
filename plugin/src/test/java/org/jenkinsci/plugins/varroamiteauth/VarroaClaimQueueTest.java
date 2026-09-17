@@ -42,6 +42,9 @@ public class VarroaClaimQueueTest {
     @Rule
     public TemporaryFolder tmp = new TemporaryFolder();
 
+    @Rule
+    public HomeForwardHarness homes = new HomeForwardHarness();
+
     private static final int QUIET_PERIOD = 300;
 
     private HttpServer server;
@@ -339,6 +342,128 @@ public class VarroaClaimQueueTest {
         awaitTrue(resolved::get, "the offer to resolve");
         assertFalse("a missing action must never cancel the item", isCancelled(item));
         assertTrue("no claim request must have been sent for a missing action", requestBodies.isEmpty());
+    }
+
+    // ---- The intra-tenant forward ----
+
+    /** One job inside a tenant folder, so its full path opens with the tenant. */
+    private FreeStyleProject tenantJob(String tenant, String name) throws Exception {
+        com.cloudbees.hudson.plugins.folder.Folder folder = j.jenkins.createProject(
+                com.cloudbees.hudson.plugins.folder.Folder.class, tenant);
+        return folder.createProject(FreeStyleProject.class, name);
+    }
+
+    @Test
+    public void aNonHomeJobIsForwardedAndNeverClaimed() throws Exception {
+        FreeStyleProject project = tenantJob("payments", "deploy");
+        homes.seedHomes("payments", 0, "active", java.util.Map.of("payments/deploy", 1));
+        Queue.Item item = scheduleItem(project);
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
+                millis -> { }, homes.cache());
+        queue.offer(item, project);
+
+        awaitTrue(() -> isCancelled(item), "the item to be cancelled after the forward");
+        assertEquals("the claimer must post exactly one forward", 1, homes.stub().forwardCallCount());
+        assertEquals("the claimer must post no claim", 0, homes.stub().claimCallCount());
+    }
+
+    @Test
+    public void theForwardNamesOneTenantTwiceAndKeepsTheIntentKey() throws Exception {
+        FreeStyleProject project = tenantJob("payments", "nightly");
+        homes.seedHomes("payments", 0, "active", java.util.Map.of("payments/nightly", 1));
+        Queue.Item item = scheduleItem(project);
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
+                millis -> { }, homes.cache());
+        queue.offer(item, project);
+
+        awaitTrue(() -> homes.stub().forwardCallCount() == 1, "one forward");
+        String body = homes.stub().bodiesFor(StubLoopback.FORWARD_PATH).get(0);
+        assertEquals("build", extractField(body, "kind"));
+        assertEquals("payments/nightly", extractField(body, "caller_job_path"));
+        assertEquals("payments", extractField(body, "target_tenant"));
+        assertEquals("nightly", extractField(body, "job_path"));
+        assertEquals("s1", extractField(body, "seq"));
+        assertEquals("the forward carries the key the claimer derived",
+                item.getAction(VarroaIntentAction.class).getIntentKey(), extractField(body, "intent_key"));
+    }
+
+    @Test
+    public void aHomeJobClaimsAndForwardsNothing() throws Exception {
+        FreeStyleProject project = tenantJob("payments", "build");
+        homes.seedHomes("payments", 0, "active", java.util.Map.of("payments/build", 0));
+        homes.stub().setClaimResponder(
+                n -> new StubLoopback.Reply(200, "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":1}"));
+        Queue.Item item = scheduleItem(project);
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
+                millis -> { }, homes.cache());
+        queue.offer(item, project);
+
+        awaitTrue(() -> item.getAction(VarroaIntentAction.class).isGranted(), "the claim to be granted");
+        assertEquals("a home job must post no forward", 0, homes.stub().forwardCallCount());
+    }
+
+    @Test
+    public void aStandbyForwardsEverySubmission() throws Exception {
+        FreeStyleProject project = tenantJob("payments", "warm");
+        homes.seedHomes("payments", 0, "standby", java.util.Map.of("payments/warm", 0));
+        Queue.Item item = scheduleItem(project);
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
+                millis -> { }, homes.cache());
+        queue.offer(item, project);
+
+        awaitTrue(() -> isCancelled(item), "the item to be cancelled after the forward");
+        assertEquals(1, homes.stub().forwardCallCount());
+        assertEquals(0, homes.stub().claimCallCount());
+    }
+
+    @Test
+    public void aNotHomeVetoForwardsAndCancelsNoItemFirst() throws Exception {
+        FreeStyleProject project = tenantJob("payments", "moved");
+        // The cache is stale: it homes the job here, and the fence does not.
+        homes.seedHomes("payments", 0, "active", java.util.Map.of("payments/moved", 0));
+        homes.stub().setClaimResponder(
+                n -> new StubLoopback.Reply(200, "{\"decision\":\"vetoed\",\"reason_code\":\"NOT_HOME\"}"));
+        Queue.Item item = scheduleItem(project);
+
+        // The refresh the veto triggers reads the new map.
+        homes.stub().setHomesBody("{\"entries\":[{\"tenant\":\"payments\",\"slot\":0,\"role\":\"active\","
+                + "\"job_homes\":{\"payments/moved\":1}}]}");
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
+                millis -> { }, homes.cache());
+        queue.offer(item, project);
+
+        awaitTrue(() -> homes.stub().forwardCallCount() == 1, "a forward after the not-home veto");
+        assertEquals("the veto must cost exactly one claim", 1, homes.stub().claimCallCount());
+    }
+
+    @Test
+    public void aFailedForwardRetriesAndOnlyTheBudgetCancels() throws Exception {
+        FreeStyleProject project = tenantJob("payments", "flaky");
+        homes.seedHomes("payments", 0, "active", java.util.Map.of("payments/flaky", 1));
+        homes.stub().setForwardResponder(
+                n -> new StubLoopback.Reply(503, "{\"code\":\"UNAVAILABLE\"}"));
+        Queue.Item item = scheduleItem(project);
+
+        long[] clockMillis = {0L};
+        List<Long> slept = new CopyOnWriteArrayList<>();
+        VarroaClaimQueue.Sleeper sleeper = millis -> {
+            slept.add(millis);
+            clockMillis[0] += millis;
+        };
+        VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), () -> clockMillis[0], sleeper,
+                homes.cache());
+        queue.offer(item, project);
+
+        awaitTrue(() -> isCancelled(item), "the item to be cancelled at the one-hour budget");
+        assertTrue("a failed forward must retry on the ladder", homes.stub().forwardCallCount() > 5);
+        assertEquals("the ladder starts at one second", Long.valueOf(1000L), slept.get(0));
+        long totalSlept = slept.stream().mapToLong(Long::longValue).sum();
+        assertTrue("the budget is one hour, got " + totalSlept, totalSlept >= 60L * 60 * 1000);
     }
 
     private static String extractField(String json, String field) {

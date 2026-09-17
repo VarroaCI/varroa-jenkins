@@ -174,10 +174,11 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   last send, or `jobScheduleResendInterval` (30 minutes) has passed. Every
   other heartbeat leaves the field unset. A poll failure keeps the last
   known set and hash in place and retries on the next tick. A row's
-  `upstreamTenant`/`upstreamJob`/`upstreamResult` (empty for every row but
-  a `varroa-upstream` trigger) carry through to the matching
-  `mitev1.JobSchedule` fields unchanged, so an edit to just those three
-  values still reopens the send gate.
+  `upstreamTenant`/`upstreamJob`/`upstreamResult` carry through to the
+  matching `mitev1.JobSchedule` fields unchanged, so an edit to just those
+  three values still reopens the send gate. A `varroa-upstream` row sets
+  all three. A native `upstream` row sets the result alone and carries its
+  resolved job list in `spec`. Every other row leaves all three empty.
   - **Plugin inventory collector** — `startPluginInventoryCollector`
     (`agent.go`): runs on the heartbeat tick, with its own timeout so a wedged
     Jenkins never blocks the heartbeat send path. Collects via

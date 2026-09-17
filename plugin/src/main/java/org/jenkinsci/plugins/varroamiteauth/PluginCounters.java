@@ -16,11 +16,11 @@ import java.util.concurrent.atomic.AtomicLong;
  * itself and never resets outside a test: {@link
  * VarroaRunRecorder#oversizedDroppedCount()} and {@link
  * LogChunkBuffer#stuckQueueWarningCount()}. This class registers no
- * duplicate state for those two. The remaining four counters live here,
- * because the class that produces each one either resets its own local
- * count on drain ({@link BuildEventSink}) or keeps it per instance across
- * several live instances ({@link RunSpool}), and neither shape serves a
- * lifetime total on its own.
+ * duplicate state for those two. Every other counter lives here, because
+ * the class that produces each one either resets its own local count on
+ * drain ({@link BuildEventSink}) or keeps it per instance across several
+ * live instances ({@link RunSpool}), and neither shape serves a lifetime
+ * total on its own.
  */
 final class PluginCounters {
 
@@ -32,10 +32,36 @@ final class PluginCounters {
     static final String CLAIMS_NO_REVISION = "varroa_plugin_claims_no_revision";
     static final String RUN_STATE_PUSHED = "varroa_plugin_run_state_pushed";
     static final String RUN_STATE_REFUSED = "varroa_plugin_run_state_refused";
+    static final String FORWARDED_SCM = "varroa_plugin_forwarded_scm";
+    static final String FORWARDED_CRON = "varroa_plugin_forwarded_cron";
+    static final String FORWARDED_API = "varroa_plugin_forwarded_api";
+    static final String FORWARDED_OTHER = "varroa_plugin_forwarded_other";
+    static final String FORWARD_REFUSED = "varroa_plugin_forward_refused";
 
     private static final ConcurrentHashMap<String, AtomicLong> OWNED = new ConcurrentHashMap<>();
 
     private PluginCounters() {
+    }
+
+    /**
+     * The counter name for a forward, from the scheme of its intent key:
+     * the text before the key's first colon. The plugin mints {@code
+     * scm}, {@code cron}, and {@code api}. A key the mite supplies
+     * carries any allocated scheme, and it counts as other.
+     */
+    static String forwardedCounterFor(String intentKey) {
+        int colon = intentKey == null ? -1 : intentKey.indexOf(':');
+        String scheme = colon > 0 ? intentKey.substring(0, colon) : "";
+        switch (scheme) {
+            case "scm":
+                return FORWARDED_SCM;
+            case "cron":
+                return FORWARDED_CRON;
+            case "api":
+                return FORWARDED_API;
+            default:
+                return FORWARDED_OTHER;
+        }
     }
 
     /** Adds one to the named counter. Creates the counter at zero on first use. */
@@ -59,6 +85,11 @@ final class PluginCounters {
         out.put(CLAIMS_NO_REVISION, ownedValue(CLAIMS_NO_REVISION));
         out.put(RUN_STATE_PUSHED, ownedValue(RUN_STATE_PUSHED));
         out.put(RUN_STATE_REFUSED, ownedValue(RUN_STATE_REFUSED));
+        out.put(FORWARDED_SCM, ownedValue(FORWARDED_SCM));
+        out.put(FORWARDED_CRON, ownedValue(FORWARDED_CRON));
+        out.put(FORWARDED_API, ownedValue(FORWARDED_API));
+        out.put(FORWARDED_OTHER, ownedValue(FORWARDED_OTHER));
+        out.put(FORWARD_REFUSED, ownedValue(FORWARD_REFUSED));
         return out;
     }
 

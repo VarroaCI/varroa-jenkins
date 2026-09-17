@@ -1,17 +1,23 @@
 // Package recordstore: the upstream fan-out, design D9. RunUpstreamFanout
-// runs the six ordered steps after the recorder commits an ingested
+// runs the ordered steps after the recorder commits an ingested
 // run.completed for the run that owns a producer job. It never runs
 // inside that transaction: it reads the grant evaluator and publishes on
 // the bus, and a lost publish must never roll a stored run back.
+//
+// The round selects two candidate sets. Set A holds a varroaUpstream
+// subscription. Set B holds a native Jenkins upstream trigger inside the
+// producer's own tenant.
 package recordstore
 
 import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -46,6 +52,11 @@ const (
 	FanoutSkipUnplaced      = "unplaced"
 	FanoutSkipDisabled      = "disabled"
 	FanoutSkipPublishFailed = "publish_failed"
+	// FanoutSkipCrossTenant counts one subscriber whose native upstream
+	// list holds at least one path outside its own tenant and that
+	// matched no path inside it. The count is one for each such
+	// subscriber, never one for each foreign path.
+	FanoutSkipCrossTenant = "cross_tenant"
 )
 
 // The Jenkins Result ordinals design.md D9's threshold test compares. A
@@ -109,8 +120,8 @@ type FanoutDeps struct {
 	Metrics   *UpstreamFanoutMetrics
 }
 
-// upstreamFanoutCandidate is one job_schedules row the fan-out's step 1
-// selects: a subscriber's own declared varroa-upstream trigger.
+// upstreamFanoutCandidate is one job_schedules row the fan-out selects:
+// a subscriber's own declared upstream trigger, of either kind.
 type upstreamFanoutCandidate struct {
 	cluster, namespace, cell, tenant, jobPath string
 	disabled                                  bool
@@ -127,9 +138,59 @@ const upstreamFanoutCandidatesQuery = `
 	WHERE trigger_type = $1 AND upstream_tenant = $2 AND upstream_job = $3
 `
 
+// nativeUpstreamTriggerType is the trigger type a Jenkins
+// ReverseBuildTrigger exports.
+const nativeUpstreamTriggerType = "upstream"
+
+// nativeFanoutCandidatesQuery reads every native upstream row of the
+// producer's own tenant and cluster. A native edge never crosses a
+// tenant, so the tenant filter is the whole boundary.
+//
+// The query seeks on the (tenant, trigger_type) index. The
+// (upstream_tenant, upstream_job) index serves a varroaUpstream
+// subscription alone, because a native row names several jobs and holds
+// them in its specification field.
+const nativeFanoutCandidatesQuery = `
+	SELECT cluster, namespace, cell, tenant, job_path, disabled, upstream_result, spec
+	FROM varroa.job_schedules
+	WHERE cluster = $1 AND tenant = $2 AND trigger_type = $3
+`
+
+// claimFanoutRound marks producer's run row as fanned out, and reports
+// whether this transaction is the one that claimed it.
+//
+// The build stream is at least once, so one completion can reach the
+// ingest twice. Every other write of the terminal path is idempotent,
+// and the fan-out is not: it mints a fresh run identifier for each
+// subscriber, so a second round publishes a second trigger_run action
+// under the same intent key. The target's claim then answers duplicate,
+// and the accepted-trigger row of the second run records a build that
+// never runs.
+//
+// The marker is written in the transaction that records the terminal
+// write, so the claim is durable with it. A repeat delivery waits on the
+// same row, reads the committed marker, and claims nothing.
+func claimFanoutRound(ctx context.Context, tx pgx.Tx, createdAt time.Time, runID uuid.UUID) (bool, error) {
+	var claimed bool
+	err := tx.QueryRow(ctx, `
+		UPDATE varroa.runs
+		SET payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object('fanout_at', to_jsonb(now()))
+		WHERE created_at = $1 AND run_id = $2 AND NOT COALESCE(payload ? 'fanout_at', false)
+		RETURNING true
+	`, createdAt, runID).Scan(&claimed)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("claim upstream fan-out round for %s: %w", runID, err)
+	}
+	return claimed, nil
+}
+
 // RunUpstreamFanout runs one fan-out round for producer, design.md D9's
-// six ordered steps. The caller runs it after the ingest transaction
-// that recorded producer's completion has committed, never inside it.
+// ordered steps. The caller runs it after the ingest transaction that
+// recorded producer's completion has committed, never inside it, and
+// only when claimFanoutRound claimed that completion.
 func RunUpstreamFanout(ctx context.Context, deps FanoutDeps, producer FanoutProducer, now time.Time, logger *slog.Logger) error {
 	if logger == nil {
 		logger = slog.Default()
@@ -144,10 +205,26 @@ func RunUpstreamFanout(ctx context.Context, deps FanoutDeps, producer FanoutProd
 	if err != nil {
 		return fmt.Errorf("select upstream fan-out candidates for %s/%s: %w", producer.Tenant, relativeJob, err)
 	}
-	candidates, err := scanUpstreamFanoutCandidates(rows)
+	subscriptions, err := scanUpstreamFanoutCandidates(rows)
 	if err != nil {
 		return fmt.Errorf("scan upstream fan-out candidates for %s/%s: %w", producer.Tenant, relativeJob, err)
 	}
+
+	native, err := selectNativeFanoutCandidates(ctx, deps, producer)
+	if err != nil {
+		return err
+	}
+
+	// Step 3: the two sets join. A job that declares both trigger kinds
+	// contributes one candidate for each, with its own threshold and its
+	// own disabled flag.
+	candidates := make([]upstreamFanoutCandidate, 0, len(subscriptions)+len(native))
+	for _, c := range subscriptions {
+		if resultMeetsThreshold(producer.Result, c.upstreamResult) {
+			candidates = append(candidates, c)
+		}
+	}
+	candidates = append(candidates, native...)
 	if len(candidates) == 0 {
 		return nil
 	}
@@ -159,9 +236,6 @@ func RunUpstreamFanout(ctx context.Context, deps FanoutDeps, producer FanoutProd
 
 	active := make([]upstreamFanoutCandidate, 0, len(candidates))
 	for _, c := range candidates {
-		if !resultMeetsThreshold(producer.Result, c.upstreamResult) {
-			continue
-		}
 		if resolveFanoutTargetCluster(placements, c.cluster) != producer.Cluster {
 			// This subscriber's own resolution of producer.Tenant never
 			// lands on the cluster the run actually finished in, so it
@@ -175,6 +249,8 @@ func RunUpstreamFanout(ctx context.Context, deps FanoutDeps, producer FanoutProd
 		}
 		active = append(active, c)
 	}
+
+	active = dedupeFanoutCandidates(active)
 
 	sort.Slice(active, func(i, j int) bool {
 		if active[i].cluster != active[j].cluster {
@@ -195,6 +271,94 @@ func RunUpstreamFanout(ctx context.Context, deps FanoutDeps, producer FanoutProd
 		fanOutOne(ctx, deps, producer, c, logger)
 	}
 	return nil
+}
+
+// dedupeFanoutCandidates keeps one candidate for each
+// (cluster, tenant, job_path), in the order the joined list holds them.
+//
+// The de-duplication runs after the threshold test and the disabled test.
+// A job that declares both trigger kinds therefore builds when either
+// declaration passes, and one declaration cannot hide the other.
+func dedupeFanoutCandidates(in []upstreamFanoutCandidate) []upstreamFanoutCandidate {
+	seen := make(map[string]bool, len(in))
+	out := make([]upstreamFanoutCandidate, 0, len(in))
+	for _, c := range in {
+		key := c.cluster + "\x00" + c.tenant + "\x00" + c.jobPath
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, c)
+	}
+	return out
+}
+
+// selectNativeFanoutCandidates answers set B: every native upstream row
+// of the producer's own tenant whose specification list holds the
+// producer's tenant-qualified job path and whose threshold the run's
+// result meets.
+//
+// The comparison uses the qualified path on both sides. The export writes
+// each resolved upstream job's full path, which on a cell opens with the
+// tenant folder, so the relative form set A matches would never match
+// here.
+func selectNativeFanoutCandidates(ctx context.Context, deps FanoutDeps,
+	producer FanoutProducer) ([]upstreamFanoutCandidate, error) {
+	rows, err := deps.Pool.Query(ctx, nativeFanoutCandidatesQuery,
+		producer.Cluster, producer.Tenant, nativeUpstreamTriggerType)
+	if err != nil {
+		return nil, fmt.Errorf("select native upstream fan-out candidates for %s: %w", producer.JobPath, err)
+	}
+	defer rows.Close()
+
+	var out []upstreamFanoutCandidate
+	for rows.Next() {
+		var (
+			c    upstreamFanoutCandidate
+			spec string
+		)
+		if err := rows.Scan(&c.cluster, &c.namespace, &c.cell, &c.tenant, &c.jobPath,
+			&c.disabled, &c.upstreamResult, &spec); err != nil {
+			return nil, fmt.Errorf("scan job_schedules native upstream row: %w", err)
+		}
+		matched, foreign := matchNativeUpstreamList(spec, c.tenant, producer.JobPath)
+		if !matched {
+			if foreign {
+				deps.Metrics.addSkipped(ctx, FanoutSkipCrossTenant)
+			}
+			continue
+		}
+		if !resultMeetsThreshold(producer.Result, c.upstreamResult) {
+			continue
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("select native upstream fan-out rows for %s: %w", producer.JobPath, err)
+	}
+	return out, nil
+}
+
+// matchNativeUpstreamList reads one native row's comma-separated path
+// list. matched is true when a listed path of tenant equals producerJob.
+// foreign is true when the list holds at least one path whose first
+// segment is another tenant; the recorder drops such a path, because a
+// native edge is intra-tenant by definition.
+func matchNativeUpstreamList(spec, tenant, producerJob string) (matched, foreign bool) {
+	for _, raw := range strings.Split(spec, ",") {
+		path := strings.TrimSpace(raw)
+		if path == "" {
+			continue
+		}
+		if first, _, _ := strings.Cut(path, "/"); first != tenant {
+			foreign = true
+			continue
+		}
+		if path == producerJob {
+			matched = true
+		}
+	}
+	return matched, foreign
 }
 
 // fanOutOne evaluates and, when granted, publishes one subscriber's

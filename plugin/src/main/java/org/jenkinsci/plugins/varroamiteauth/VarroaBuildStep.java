@@ -153,7 +153,7 @@ public class VarroaBuildStep extends Step {
 
             VarroaCrossTenantReply reply = VarroaCrossTenantReply.parse(
                     VarroaCrossTenantOps.client().crossTenantBuild(
-                            callerJobPath, callerRunId, seq, targetTenant, jobPath, params));
+                            callerJobPath, callerRunId, seq, targetTenant, jobPath, params, ""));
             if (reply.isFailure()) {
                 getContext().onFailure(new AbortException(
                         "varroaBuild: the recorder did not answer (" + reply.code + ")"));

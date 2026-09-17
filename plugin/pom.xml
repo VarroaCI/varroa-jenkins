@@ -144,6 +144,16 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- The native `build` step, test scope only: a test runs
+             `build job: 'B'` in both wait modes against the queue decision
+             handler. No main-scope class names the step or its action, and
+             the handler matches the action by its class simple name. -->
+        <dependency>
+            <groupId>org.jenkins-ci.plugins</groupId>
+            <artifactId>pipeline-build-step</artifactId>
+            <scope>test</scope>
+        </dependency>
+
         <!-- Declarative Pipeline, test scope only (task 10.1): proves the
              `triggers { varroaUpstream(...) }` section binds
              VarroaUpstreamTrigger through its @Symbol, the same path a real

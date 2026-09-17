@@ -208,6 +208,39 @@ public class ActivityEndpointSchedulesTest {
         assertTrue(row.getJSONArray("nextFireTimes").isEmpty());
     }
 
+    // ---- The native upstream row's resolved path list ----
+
+    @Test
+    public void aNativeUpstreamRowCarriesItsResolvedPathsAndThreshold() throws Exception {
+        MockFolder tenant = j.createFolder("payments");
+        tenant.createProject(FreeStyleProject.class, "build");
+        tenant.createProject(FreeStyleProject.class, "test");
+        FreeStyleProject deploy = tenant.createProject(FreeStyleProject.class, "deploy");
+        Trigger<?> trigger = new ReverseBuildTrigger("build, test");
+
+        JSONObject row = ActivityEndpoint.buildTriggerRow(deploy, trigger, false);
+
+        assertEquals("upstream", row.getString("triggerType"));
+        assertEquals("payments/build,payments/test", row.getString("spec"));
+        assertEquals("SUCCESS", row.getString("upstreamResult"));
+        assertEquals("a native trigger names no tenant", "", row.getString("upstreamTenant"));
+        assertEquals("a native trigger names several jobs", "", row.getString("upstreamJob"));
+        assertTrue("a native upstream row carries no occurrence",
+                row.getJSONArray("nextFireTimes").isEmpty());
+    }
+
+    @Test
+    public void anUnresolvableUpstreamNameIsDropped() throws Exception {
+        MockFolder tenant = j.createFolder("payments-drop");
+        tenant.createProject(FreeStyleProject.class, "build");
+        FreeStyleProject deploy = tenant.createProject(FreeStyleProject.class, "deploy");
+        Trigger<?> trigger = new ReverseBuildTrigger("build, ghost");
+
+        JSONObject row = ActivityEndpoint.buildTriggerRow(deploy, trigger, false);
+
+        assertEquals("payments-drop/build", row.getString("spec"));
+    }
+
     // ---- Finding 9 (review round 1): the complete job inventory, not just the
     // ordinary freestyle case. ----
 

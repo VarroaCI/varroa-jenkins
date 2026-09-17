@@ -38,7 +38,8 @@ type jobScheduleRow struct {
 	Timezone      string   `json:"timezone"`
 	Disabled      bool     `json:"disabled"`
 	NextFireTimes []string `json:"nextFireTimes"`
-	// The three upstream fields are set on a varroa-upstream row only.
+	// A varroa-upstream row sets all three fields. A native upstream row
+	// sets the result alone, and carries its job list in Spec.
 	UpstreamTenant string `json:"upstreamTenant,omitempty"`
 	UpstreamJob    string `json:"upstreamJob,omitempty"`
 	UpstreamResult string `json:"upstreamResult,omitempty"`

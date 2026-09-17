@@ -235,7 +235,33 @@ func existingKeyDecision(ctx context.Context, tx pgx.Tx, req ClaimRequest, reqRu
 	}
 
 	// Row 4: every other case is a duplicate.
+	if err := markDuplicateClaim(ctx, tx, reqRunID, reqCreatedAt); err != nil {
+		return ClaimResponse{}, err
+	}
 	return ClaimResponse{Decision: DecisionDuplicate, RunID: row.runID.String()}, nil
+}
+
+// markDuplicateClaim marks the requesting run's accepted-trigger row
+// terminal, in the same transaction as the decision that made it
+// terminal.
+//
+// The requesting run never builds: the plugin cancels the queue item for
+// a duplicate decision. Its accepted-trigger row is QUEUED and records
+// no build, and the interrupted sweep leaves such a row alone while its
+// accepting instance is alive. Without this write a healthy cell holds
+// the row at QUEUED for good, and it reads as a build still waiting.
+//
+// The guard is the row's own state: only a QUEUED row that records no
+// build is marked, so a real run of that identifier is never touched.
+func markDuplicateClaim(ctx context.Context, tx pgx.Tx, runID uuid.UUID, createdAt time.Time) error {
+	if _, err := tx.Exec(ctx, `
+		UPDATE varroa.runs
+		SET status = 'DUPLICATE', ended_at = COALESCE(ended_at, now())
+		WHERE created_at = $1 AND run_id = $2 AND status = 'QUEUED' AND `+noBuildRecordedSQL+`
+	`, createdAt, runID); err != nil {
+		return fmt.Errorf("mark duplicate claim for run %s: %w", runID, err)
+	}
+	return nil
 }
 
 // reanswerSameRun grants a repeat claim for the run_id the row already

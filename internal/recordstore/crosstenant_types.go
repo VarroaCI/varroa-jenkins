@@ -44,10 +44,10 @@ const (
 
 // CrossTenantRequest is the request body of a varroa.ledger.crosstenant
 // call. It is the union of every kind's fields (design.md D4): a field a
-// kind does not use stays at its zero value and is never read. The
-// gateway overwrites Cluster, Namespace, Cell, CallerTenant, and
-// PlacementGeneration before it sends the request, whatever the calling
-// cell supplied.
+// kind does not use stays at its zero value and is never read. IntentKey
+// is the one field two kinds read. The gateway overwrites Cluster,
+// Namespace, Cell, CallerTenant, and PlacementGeneration before it sends
+// the request, whatever the calling cell supplied.
 type CrossTenantRequest struct {
 	Cluster             string    `json:"cluster"`
 	Namespace           string    `json:"namespace"`
@@ -65,7 +65,12 @@ type CrossTenantRequest struct {
 	Params       json.RawMessage `json:"params,omitempty"`
 
 	// status
-	RunID     string `json:"run_id,omitempty"`
+	RunID string `json:"run_id,omitempty"`
+
+	// build, status. An intra-tenant forward preserves the key the
+	// claimer derived, so two members that fire one cron in one minute
+	// reach one ledger row. The build kind reads the field only when the
+	// caller tenant equals the target tenant.
 	IntentKey string `json:"intent_key,omitempty"`
 
 	// artifact_url

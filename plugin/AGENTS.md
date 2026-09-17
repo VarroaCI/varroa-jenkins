@@ -69,8 +69,14 @@ the root AGENTS.md greenfield rule.
   (`TimerTrigger` → `cron`, `SCMTrigger` → `scm-poll`, `ReverseBuildTrigger` →
   `upstream`, `VarroaUpstreamTrigger` → `varroa-upstream`, else `other`); a
   `varroa-upstream` row carries `upstreamTenant`, `upstreamJob`, and
-  `upstreamResult` (camelCase, this endpoint's own convention); every other
-  row omits all three keys rather than sending them empty. A `cron` row
+  `upstreamResult` (camelCase, this endpoint's own convention). An `upstream`
+  row names several jobs and no tenant, so it carries the threshold in
+  `upstreamResult`, an empty `upstreamTenant` and `upstreamJob`, and the
+  resolved upstream job paths in its `spec` field, comma separated in
+  configuration order; the resolution runs against the job's parent as the
+  system identity, the way the trigger resolves its own projects, and drops a
+  name that resolves to no job. Every other row omits all three upstream keys
+  rather than sending them empty. A `cron` row
   carries the next three fire times,
   computed by mirroring `hudson.scheduler.CronTabList.create` — split the
   spec, skip the `TZ=` line, and seed each `CronTab` with
@@ -156,6 +162,7 @@ the root AGENTS.md greenfield rule.
   (helper: origin and intent-key derivation, the params digest, the revision wait),
   `VarroaClaimDispatcher.java` (`QueueTaskDispatcher`, blocks the item until granted),
   `VarroaClaimQueue.java` (bounded work queue, four daemon threads, a retry ladder),
+  `VarroaHomeCache.java` + `VarroaHomeRefresher.java` (the tenant home map, below),
   `DuplicateRegistry.java`, `ClaimRegistry.java`, and `VarroaDeliveryFilter.java` +
   `DeliveryRegistry.java` (records `X-Varroa-Delivery` for the claimer). Every class in
   this group is a no-op unless `VARROA_CLAIM_GATE=1` (stamped by the operator from
@@ -165,6 +172,39 @@ the root AGENTS.md greenfield rule.
   authentication (`Jenkins.getAuthentication2().getName()`, `anonymous` and
   `ACL.SYSTEM2` normalized to empty) when the action carries none; `VarroaClaimQueue`
   sends `action.getActor()` as the claim's `actor` field.
+- **Intra-tenant trigger forwarding** (a job pair split over two tenant slots keeps
+  working): `VarroaHomeCache.java` holds the newest answer of `GET /v1/homes`, keyed
+  by tenant, with the slot this cell holds, the role, and the tenant's job-path to
+  slot map. **The plugin computes no home**; it reads the map the recorder wrote and
+  the operator delivered, so the plugin and the claim fence read one home for every
+  job. Two fallbacks keep the two in step: an empty entry list is "no opinion" and
+  forwards nothing, and a job with no entry in a present map resolves to slot 0. A
+  job of a tenant this cell does not host is never forwarded.
+  `VarroaHomeRefresher.java` (`AsyncPeriodicWork`) is the only caller of the refresh,
+  every 30 s, overridden by `VARROA_HOMES_POLL_MS` and gated on `VARROA_CLAIM_GATE`;
+  a failed refresh keeps the previous answer. **The forward runs in
+  `VarroaClaimQueue`, never in the handler or the dispatcher**, because both hold the
+  Jenkins queue lock and a forward is a network call. The claimer resolves the home
+  before it posts the claim, forwards a non-home job over
+  `POST /v1/cross-tenant/build` with `caller_job_path` the job's own full path,
+  `target_tenant` the same tenant, `seq` `s1`, and `intent_key` the key it derived,
+  then cancels the local item. A standby holds no slot, so it forwards every
+  submission. A `vetoed`/`NOT_HOME` reply is the one veto the claimer does not
+  cancel: it refreshes the cache and forwards, and the one-hour budget bounds a
+  repeat. A failed forward joins the claim's own retry class.
+  `VarroaQueueDecisionHandler` gains one refusal: a **waiting** `build` step for a
+  non-home job, detected by an action whose class simple name is
+  `BuildTriggerAction`, because `Queue.schedule2` refuses on the first `false` and
+  `BuildTriggerStepExecution` aborts before its wait fork, which would fail a step
+  that does not wait. The handler reads the cache from memory, hands a notice to its
+  own single-thread executor (`AbortPolicy`, queue of 32, never the claim pool), and
+  catches every throwable of the hand-off so no notice defect can admit the build; a
+  hand-off that does not run logs the same line at `WARNING`. The notice thread writes
+  the line to the caller run's own console, reached through the item's
+  `Cause.UpstreamCause` and `FlowExecutionOwner`, and falls back to the system log.
+  The five counters are `varroa_plugin_forwarded_{scm,cron,api,other}`, keyed by the
+  intent key's scheme, and `varroa_plugin_forward_refused`. `pipeline-build-step` is a
+  **test-scope** dependency only: no main-scope class names the step or its action.
 - **Cross-tenant pipeline API** (the `varroa` global variable; D1, D2, D11, D12):
   `VarroaGlobalVariable.java` compiles `varroa/Varroa.groovy` and
   `varroa/VarroaRunHandle.groovy` (plugin resources, not classpath `.class` files) into
@@ -249,16 +289,13 @@ the root AGENTS.md greenfield rule.
   `action`, and `leaseSeconds` only. `TailEndpoint.doCounters` serves the
   same root action's second route, `GET /varroa-log/counters`, under the
   same authority: one JSON document with one integer per stable
-  snake_case counter name (`varroa_plugin_events_oversized`,
-  `varroa_plugin_events_dropped`, `varroa_plugin_spool_dropped`,
-  `varroa_plugin_log_chunks_dropped`, `varroa_plugin_log_queues_stuck`,
-  `varroa_plugin_claims_no_revision`). `PluginCounters.java` is the
-  process-wide, thread-safe registry: it owns four of the six counters
-  directly (incremented at each drop site in `BuildEventSink`,
-  `RunSpool`, `LogChunkBuffer`, and `IntentKey`) and reads the other two
-  live from `VarroaRunRecorder.oversizedDroppedCount()` and
+  snake_case counter name, with no `_total` suffix.
+  `PluginCounters.java` is the process-wide, thread-safe registry: it owns
+  every counter directly (incremented at each drop, push, forward, and
+  refusal site) except two it reads live from
+  `VarroaRunRecorder.oversizedDroppedCount()` and
   `LogChunkBuffer.stuckQueueWarningCount()`, which already track their
-  own lifetime totals. `BuildArtifact.java` and
+  own lifetime totals. The class holds the complete name list. `BuildArtifact.java` and
   `LogSummary.java` are immutable value objects mirroring their proto
   messages; `ArtifactCollector.java` walks `Run#getArtifacts()` into
   `BuildArtifact` entries, called from C2's `VarroaRunRecorder.onCompleted`.

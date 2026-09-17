@@ -18,7 +18,8 @@ import java.util.logging.Logger;
 /**
  * HTTP client for the mite loopback (D6, D7): {@code POST /v1/claim} and
  * {@code POST /v1/events} against {@code http://127.0.0.1:9095}. D2 adds
- * four cross-tenant routes, reusing the same token file and the same
+ * four cross-tenant routes, and {@code GET /v1/homes} reads the tenant
+ * home map. Every route reuses the same token file and the same
  * {@code 401} retry.
  *
  * <p>The bearer token comes from {@link LoopbackTokenFile}. A {@code 401}
@@ -49,6 +50,8 @@ public class MiteLoopbackClient {
      * a live value.
      */
     private static final long CROSSTENANT_MITE_HOP_DEFAULT_MILLIS = 9500L;
+
+    static final String HOMES_PATH = "/v1/homes";
 
     private static final String CROSSTENANT_BUILD_PATH = "/v1/cross-tenant/build";
     private static final String CROSSTENANT_STATUS_PATH = "/v1/cross-tenant/status";
@@ -118,6 +121,46 @@ public class MiteLoopbackClient {
             return attempt(path, jsonBody, refreshed);
         }
         return first;
+    }
+
+    /**
+     * Reads {@code path} on the loopback. Retries once, with a re-read
+     * token, when the first attempt answers {@code 401}.
+     */
+    public Response get(String path) {
+        Response first = attemptGet(path, tokenFile.token());
+        if (first.statusCode == 401) {
+            return attemptGet(path, tokenFile.onUnauthorized());
+        }
+        return first;
+    }
+
+    /**
+     * Route {@code GET /v1/homes}: the tenant home map of the newest
+     * desired state the mite applied.
+     */
+    public Response homes() {
+        return get(HOMES_PATH);
+    }
+
+    private Response attemptGet(String path, String token) {
+        try {
+            HttpRequest.Builder builder = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + path))
+                    .timeout(readTimeout)
+                    .GET();
+            if (token != null) {
+                builder.header("Authorization", "Bearer " + token);
+            }
+            HttpResponse<String> resp = client().send(builder.build(), HttpResponse.BodyHandlers.ofString());
+            return new Response(resp.statusCode(), resp.body(), null);
+        } catch (HttpTimeoutException e) {
+            LOGGER.log(Level.FINE, "MiteLoopbackClient: timeout reading " + path, e);
+            return new Response(0, null, "timeout");
+        } catch (Exception e) {
+            LOGGER.log(Level.FINE, "MiteLoopbackClient: failed to read " + path, e);
+            return new Response(0, null, e.getMessage() != null ? e.getMessage() : "transport error");
+        }
     }
 
     private Response attempt(String path, String jsonBody, String token) {
@@ -225,9 +268,15 @@ public class MiteLoopbackClient {
      * Kind {@code build}, route {@code /v1/cross-tenant/build}. {@code seq}
      * is a 1-based ordinal; the wire field carries it as the string
      * {@code "s" + seq} (design.md D6), never a JSON number.
+     *
+     * <p>{@code intentKey} is the key an intra-tenant forward preserves.
+     * The responder reads it only when the caller tenant equals the
+     * target tenant, and it refuses a cross-tenant call that carries one.
+     * A cross-tenant caller therefore sends an empty value, and the
+     * responder derives the key itself.
      */
     public Response crossTenantBuild(String callerJobPath, String callerRunId, int seq,
-            String targetTenant, String jobPath, Map<String, Object> params) {
+            String targetTenant, String jobPath, Map<String, Object> params, String intentKey) {
         JSONObject body = new JSONObject();
         body.put("kind", "build");
         body.put("caller_job_path", callerJobPath);
@@ -236,6 +285,9 @@ public class MiteLoopbackClient {
         body.put("target_tenant", targetTenant);
         body.put("job_path", jobPath);
         body.put("params", params != null ? params : Map.of());
+        if (intentKey != null && !intentKey.isEmpty()) {
+            body.put("intent_key", intentKey);
+        }
         return post(CROSSTENANT_BUILD_PATH, body.toString());
     }
 

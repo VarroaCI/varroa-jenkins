@@ -2,8 +2,10 @@ package org.jenkinsci.plugins.varroamiteauth;
 
 import static org.junit.Assert.*;
 
+import com.cloudbees.hudson.plugins.folder.Folder;
 import com.sun.net.httpserver.HttpServer;
 
+import hudson.ExtensionList;
 import hudson.model.Action;
 import hudson.model.FreeStyleProject;
 import hudson.model.Queue;
@@ -19,9 +21,13 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
+import org.jenkinsci.plugins.workflow.job.WorkflowJob;
+import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
@@ -44,9 +50,13 @@ public class VarroaQueueDecisionHandlerTest {
     @Rule
     public TemporaryFolder tmp = new TemporaryFolder();
 
+    @Rule
+    public HomeForwardHarness homes = new HomeForwardHarness();
+
     @Before
     public void resetRegistries() {
         DuplicateRegistry.get().resetForTesting();
+        PluginCounters.resetForTesting();
     }
 
     @After
@@ -245,5 +255,243 @@ public class VarroaQueueDecisionHandlerTest {
         } finally {
             server.stop(0);
         }
+    }
+
+    // ---- The waiting-step refusal ----
+
+    /**
+     * Registers a second handler that forces the gate on and reads the
+     * seeded cache. The test process cannot set an environment variable,
+     * and the gate value is the one input this path must not read from the
+     * environment under test.
+     *
+     * <p>The registered handler stays in place. It admits every item with
+     * the gate off, and the queue refuses on the first {@code false}, so
+     * the two together answer exactly as one gate-on handler answers.
+     */
+    private void installGateOnHandler() {
+        ExtensionList<Queue.QueueDecisionHandler> all = Queue.QueueDecisionHandler.all();
+        all.add(0, new GateOnHandler(homes.cache()));
+    }
+
+    private static final class GateOnHandler extends VarroaQueueDecisionHandler {
+        GateOnHandler(VarroaHomeCache cache) {
+            super(cache);
+        }
+
+        @Override
+        public boolean shouldSchedule(Queue.Task task, List<Action> actions) {
+            return shouldSchedule(task, actions, "1");
+        }
+    }
+
+    /** One job inside a tenant folder, so its full path opens with the tenant. */
+    private <T extends hudson.model.TopLevelItem> T tenantItem(Folder folder, Class<T> type, String name)
+            throws Exception {
+        return folder.createProject(type, name);
+    }
+
+    @Test
+    public void aWaitingBuildStepForANonHomeJobFailsAtOnce() throws Exception {
+        Folder folder = j.jenkins.createProject(Folder.class, "payments");
+        tenantItem(folder, FreeStyleProject.class, "deploy");
+        WorkflowJob caller = tenantItem(folder, WorkflowJob.class, "caller");
+        caller.setDefinition(new CpsFlowDefinition("build job: 'deploy', wait: true", true));
+        homes.seedHomes("payments", 0, "active", java.util.Map.of("payments/deploy", 1));
+        installGateOnHandler();
+
+        WorkflowRun run = j.assertBuildStatus(hudson.model.Result.FAILURE,
+                caller.scheduleBuild2(0));
+
+        assertEquals("the refusal must be counted once", Long.valueOf(1L),
+                PluginCounters.snapshot().get(PluginCounters.FORWARD_REFUSED));
+        assertNotNull(run);
+    }
+
+    @Test
+    public void aRefusedWaitingStepWritesTheNoticeOnTheCallerConsole() throws Exception {
+        Folder folder = j.jenkins.createProject(Folder.class, "payments");
+        tenantItem(folder, FreeStyleProject.class, "deploy");
+        WorkflowJob caller = tenantItem(folder, WorkflowJob.class, "caller");
+        caller.setDefinition(new CpsFlowDefinition(
+                "try { build job: 'deploy', wait: true } catch (e) { echo 'refused' }\nsleep 3", true));
+        homes.seedHomes("payments", 0, "active", java.util.Map.of("payments/deploy", 1));
+        installGateOnHandler();
+
+        WorkflowRun run = j.buildAndAssertSuccess(caller);
+
+        j.assertLogContains("job payments/deploy runs on another slot of this tenant.", run);
+        j.assertLogContains("Use varroa.build(job: 'deploy', wait: true) instead.", run);
+    }
+
+    @Test
+    public void aStepThatWaitsForStartIsRefusedTheSameWay() throws Exception {
+        Folder folder = j.jenkins.createProject(Folder.class, "payments");
+        tenantItem(folder, FreeStyleProject.class, "deploy");
+        WorkflowJob caller = tenantItem(folder, WorkflowJob.class, "caller");
+        caller.setDefinition(new CpsFlowDefinition("build job: 'deploy', waitForStart: true", true));
+        homes.seedHomes("payments", 0, "active", java.util.Map.of("payments/deploy", 1));
+        installGateOnHandler();
+
+        j.assertBuildStatus(hudson.model.Result.FAILURE, caller.scheduleBuild2(0));
+    }
+
+    @Test
+    public void aStepThatDoesNotWaitIsAdmitted() throws Exception {
+        Folder folder = j.jenkins.createProject(Folder.class, "payments");
+        FreeStyleProject target = tenantItem(folder, FreeStyleProject.class, "deploy");
+        WorkflowJob caller = tenantItem(folder, WorkflowJob.class, "caller");
+        caller.setDefinition(new CpsFlowDefinition("build job: 'deploy', wait: false", true));
+        homes.seedHomes("payments", 0, "active", java.util.Map.of("payments/deploy", 1));
+        installGateOnHandler();
+
+        j.buildAndAssertSuccess(caller);
+
+        assertEquals("a step that does not wait must be admitted, not refused", Long.valueOf(0L),
+                PluginCounters.snapshot().get(PluginCounters.FORWARD_REFUSED));
+        assertNotNull(target);
+    }
+
+    // ---- 8.5: the control case, a job this cell homes ----
+
+    @Test
+    public void aWaitingStepForAHomeJobIsUntouched() throws Exception {
+        Folder folder = j.jenkins.createProject(Folder.class, "payments");
+        tenantItem(folder, FreeStyleProject.class, "build");
+        WorkflowJob caller = tenantItem(folder, WorkflowJob.class, "caller");
+        caller.setDefinition(new CpsFlowDefinition("build job: 'build', wait: true", true));
+        homes.seedHomes("payments", 0, "active", java.util.Map.of("payments/build", 0));
+        installGateOnHandler();
+
+        j.buildAndAssertSuccess(caller);
+
+        assertEquals("a home job must not be refused", Long.valueOf(0L),
+                PluginCounters.snapshot().get(PluginCounters.FORWARD_REFUSED));
+    }
+
+    // ---- 8.8b: the two notice failure paths ----
+
+    @Test
+    public void aRejectedHandOffStillLogsTheLineAndStillRefuses() throws Exception {
+        Folder folder = j.jenkins.createProject(Folder.class, "payments");
+        FreeStyleProject target = tenantItem(folder, FreeStyleProject.class, "deploy");
+        homes.seedHomes("payments", 0, "active", java.util.Map.of("payments/deploy", 1));
+
+        List<String> warnings = captureWarnings();
+        CountDownLatch release = new CountDownLatch(1);
+        fillNoticeExecutor(release);
+        try {
+            VarroaQueueDecisionHandler handler = new VarroaQueueDecisionHandler(homes.cache());
+            List<Action> actions = new ArrayList<>();
+            actions.add(new BuildTriggerAction());
+
+            assertFalse("a rejected hand-off must still refuse",
+                    handler.shouldSchedule(target, actions, "1"));
+            assertTrue("the rejected notice must reach the system log: " + warnings,
+                    warnings.stream().anyMatch(line -> line.contains("Use varroa.build(job: 'deploy'")));
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    public void aThrownHandOffStillRefuses() throws Exception {
+        Folder folder = j.jenkins.createProject(Folder.class, "payments");
+        FreeStyleProject target = tenantItem(folder, FreeStyleProject.class, "deploy");
+        homes.seedHomes("payments", 0, "active", java.util.Map.of("payments/deploy", 1));
+
+        hudson.model.CauseAction throwing = org.mockito.Mockito.mock(hudson.model.CauseAction.class);
+        org.mockito.Mockito.when(throwing.getCauses()).thenThrow(new RuntimeException("boom"));
+
+        VarroaQueueDecisionHandler handler = new VarroaQueueDecisionHandler(homes.cache());
+        List<Action> actions = new ArrayList<>();
+        actions.add(new BuildTriggerAction());
+        actions.add(throwing);
+
+        assertFalse("a thrown hand-off must still refuse",
+                handler.shouldSchedule(target, actions, "1"));
+    }
+
+    @Test
+    public void theNoticeNamesEachCallInItsOwnPathForm() {
+        String notice = VarroaQueueDecisionHandler.noticeFor("payments/api/deploy");
+
+        assertTrue("build job: takes the job's own path: " + notice,
+                notice.contains("`build job: 'payments/api/deploy', wait: true`"));
+        assertTrue("varroa.build takes the path below the tenant folder: " + notice,
+                notice.contains("Use varroa.build(job: 'api/deploy', wait: true) instead."));
+    }
+
+    /** A stand-in action whose class simple name is the one the handler matches. */
+    private static final class BuildTriggerAction implements Action {
+        @Override
+        public String getIconFileName() {
+            return null;
+        }
+
+        @Override
+        public String getDisplayName() {
+            return null;
+        }
+
+        @Override
+        public String getUrlName() {
+            return null;
+        }
+    }
+
+    /** Fills the notice executor's one thread and its whole queue. */
+    private static void fillNoticeExecutor(CountDownLatch release) throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        VarroaQueueDecisionHandler.NOTICE_EXECUTOR.execute(() -> {
+            started.countDown();
+            try {
+                release.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        assertTrue("the blocking notice task must start", started.await(10, java.util.concurrent.TimeUnit.SECONDS));
+        for (int i = 0; i < 32; i++) {
+            VarroaQueueDecisionHandler.NOTICE_EXECUTOR.execute(() -> { });
+        }
+    }
+
+    /** Collects every WARNING the handler logs while the test runs. */
+    private List<String> captureWarnings() {
+        List<String> lines = new java.util.concurrent.CopyOnWriteArrayList<>();
+        java.util.logging.Logger logger =
+                java.util.logging.Logger.getLogger(VarroaQueueDecisionHandler.class.getName());
+        java.util.logging.Handler handler = new java.util.logging.Handler() {
+            @Override
+            public void publish(java.util.logging.LogRecord record) {
+                if (record.getLevel().intValue() >= java.util.logging.Level.WARNING.intValue()) {
+                    lines.add(record.getMessage());
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        logger.addHandler(handler);
+        noticeLogHandlers.add(handler);
+        return lines;
+    }
+
+    private final List<java.util.logging.Handler> noticeLogHandlers = new ArrayList<>();
+
+    @After
+    public void removeLogHandlers() {
+        java.util.logging.Logger logger =
+                java.util.logging.Logger.getLogger(VarroaQueueDecisionHandler.class.getName());
+        for (java.util.logging.Handler handler : noticeLogHandlers) {
+            logger.removeHandler(handler);
+        }
+        noticeLogHandlers.clear();
     }
 }

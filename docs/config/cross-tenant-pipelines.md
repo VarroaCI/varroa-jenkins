@@ -4,6 +4,11 @@ A cross-tenant call reaches its target only through Varroa. The core `build` ste
 a tenant boundary; it starts a job in the same tenant only. The `varroa` global variable carries
 every cross-tenant call, and Varroa checks the target tenant's export grant on each one.
 
+A call inside one tenant needs no export, even when the two jobs sit on different
+[slots](../operations/tenant-slots.md). A `build job:` step that waits cannot wait on another
+slot's run, so `varroa.build` is the supported waiting call there. Roll the recorder image before
+the plugin image: the recorder accepts the forwarded key before the plugin sends it.
+
 ## The varroa global variable
 
 `varroa` exposes four entry points. Each call resolves the target tenant's own cell, whatever
@@ -37,8 +42,8 @@ timeout(time: 15, unit: 'MINUTES') {
 ```
 
 `propagate` defaults to `true` and fails the caller's build when the target run does not
-succeed. Set `wait: false` to fire the build and move on. The returned handle starts in state
-`pending`; call `handle.refresh()` on it later to read the current state.
+succeed. Set `wait: false` to fire and move on: the handle starts in state `pending`, and
+`handle.refresh()` reads the current state.
 
 ### Read the last successful run
 
@@ -59,8 +64,8 @@ run.copyArtifact(path: 'dist/app.tar.gz', target: 'artifacts/app.tar.gz')
 ```
 
 A cross-tenant artifact read needs the S3 blob tier. Set `recordStore.blobs.mode` to an S3
-driver before you rely on it, and give the agent egress to the blob endpoint. A Postgres blob
-tier answers this call with an error naming the setting to change.
+driver, and give the agent egress to the blob endpoint. A Postgres blob tier answers with an error
+naming the setting to change.
 
 ### Acquire a fleet lock
 
@@ -71,7 +76,7 @@ varroa.lock(name: 'deploy-prod', timeout: 300) {
 ```
 
 The block runs only after the lock is held. The lock releases when the block ends, on success,
-on failure, or on abort. See [The fleet lock](#the-fleet-lock) below for the full contract.
+on failure, or on abort. See [The fleet lock](#the-fleet-lock) for the full contract.
 
 ## The run handle
 
@@ -98,9 +103,8 @@ triggers {
 ```
 
 `result` is a threshold: `SUCCESS`, `UNSTABLE`, or `FAILURE`. The default is `SUCCESS`, meaning
-this result or better. A job declares exactly one `varroaUpstream` trigger, an accepted limit of
-this release. A job that needs builds from two producers calls `varroa.build` from each
-producer's pipeline instead.
+this result or better. A job declares exactly one `varroaUpstream` trigger. A job that needs
+two producers calls `varroa.build` from each producer's pipeline instead.
 
 ## The export grant
 
@@ -122,15 +126,13 @@ spec:
         callers: ["payments"]
 ```
 
-Each entry names exactly one of two kinds, a `job` glob or a `locks` glob, plus `callers`, the
-list of Team names allowed to use it. A `job` glob matches the tenant's own job paths. A `locks`
-glob matches the tenant's own lock names, without the tenant prefix. The glob syntax uses three
-metacharacters: `*` matches any characters except `/`, `**` crosses `/`, and `?` matches one
-character.
+Each entry names exactly one of two kinds, a `job` glob or a `locks` glob, plus `callers`, the Team
+names allowed to use it. A `job` glob matches the tenant's own job paths. A `locks` glob matches
+its lock names, without the tenant prefix. Three metacharacters apply: `*` matches any characters
+except `/`, `**` crosses `/`, and `?` matches one character.
 
-An edit to `exports` takes one reconcile tick to reach the record store that enforces it. A
-caller that tries the grant immediately after saving the `Team` may see the old grant for a few
-seconds.
+An edit to `exports` takes one reconcile tick to reach the record store that enforces it. A caller
+may see the old grant for a few seconds after a save.
 
 An ungranted call fails with a message that starts "cross-tenant triggers go through Varroa."
 
@@ -139,8 +141,7 @@ An ungranted call fails with a message that starts "cross-tenant triggers go thr
 A job's page shows its declared upstream and downstream cross-tenant relationships on the
 **Triggers** card, as an **Upstream** row and a **Downstream** row. Each row names the other
 tenant, the other job, and the result threshold, and marks a row **grant missing** when the
-producer has not exported the job to the caller. An edge with a missing grant still shows; it
-never disappears.
+producer has not exported the job. Such an edge still shows; it never disappears.
 
 The same data is available over the API:
 
@@ -167,9 +168,9 @@ A lock moves through three states.
 
 A lock leaves `releasing` on one of two events: the holder's run reaches a terminal state, or an
 operator confirms the holder's cell instance is gone. A `releasing` lock still blocks every
-other caller. Sometimes neither event fires on its own, for example when a Jenkins process
-restarts inside its pod without a clean shutdown. Delete the cell pod in that case. The operator
-then confirms that instance gone, and the lock releases.
+other caller. Neither event fires when a Jenkins process restarts inside its pod without a clean
+shutdown. Delete the cell pod then: the operator confirms
+that instance gone, and the lock releases.
 
 ### Fencing tokens
 
@@ -187,9 +188,9 @@ varroa.lock(name: 'deploy-prod', timeout: 300) {
 ```
 
 `deploy.sh` stores the highest token it has accepted for the target it protects, and refuses a
-request carrying a lower token. A holder can lose its lock without knowing it, for example after
-a slow network partition. Its own token stays stamped on any write it still sends. The current
-holder's token is higher, so that late write is refused.
+lower token. A holder can lose its lock without knowing it, after a slow network partition. Its
+own token stays on any write it still sends, and the current holder's token is higher, so that late
+write is refused.
 
 ## Timeout budgets
 

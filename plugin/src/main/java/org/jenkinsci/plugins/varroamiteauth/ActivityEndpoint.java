@@ -3,11 +3,15 @@ package org.jenkinsci.plugins.varroamiteauth;
 import hudson.Extension;
 import hudson.model.Computer;
 import hudson.model.Executor;
+import hudson.model.Items;
 import hudson.model.Job;
 import hudson.model.Queue;
+import hudson.model.Result;
 import hudson.model.RootAction;
 import hudson.scheduler.CronTab;
 import hudson.scheduler.Hash;
+import hudson.security.ACL;
+import hudson.security.ACLContext;
 
 import java.io.StringWriter;
 import hudson.triggers.Trigger;
@@ -29,6 +33,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import jenkins.model.Jenkins;
+import jenkins.triggers.ReverseBuildTrigger;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 
@@ -230,7 +235,42 @@ public class ActivityEndpoint implements RootAction {
             return buildScheduleRow(jobPath, triggerType, spec, timezone, disabled, occurrences,
                     upstream.getTenant(), upstream.getJob(), upstream.getResult());
         }
+        if (trigger instanceof ReverseBuildTrigger) {
+            ReverseBuildTrigger reverse = (ReverseBuildTrigger) trigger;
+            return buildScheduleRow(jobPath, triggerType, resolvedUpstreamPaths(job, reverse), "",
+                    disabled, Collections.emptyList(), null, null, thresholdName(reverse));
+        }
         return buildScheduleRow(jobPath, triggerType, spec, timezone, disabled, occurrences);
+    }
+
+    /**
+     * The upstream job paths a native trigger names, resolved against the
+     * job's parent and joined with a comma, in configuration order. A name
+     * that resolves to no job is dropped.
+     *
+     * <p>A native trigger names several projects and names no tenant, so
+     * the two single-valued upstream fields cannot hold the list. The
+     * resolution runs as the system identity, because the trigger itself
+     * resolves its own projects that way.
+     */
+    static String resolvedUpstreamPaths(Job<?, ?> job, ReverseBuildTrigger trigger) {
+        String configured = trigger.getUpstreamProjects();
+        if (configured == null || configured.isEmpty()) {
+            return "";
+        }
+        List<String> paths = new ArrayList<>();
+        try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
+            for (Job<?, ?> upstream : Items.fromNameList(job.getParent(), configured, Job.class)) {
+                paths.add(upstream.getFullName());
+            }
+        }
+        return String.join(",", paths);
+    }
+
+    /** The native trigger's threshold: {@code SUCCESS}, {@code UNSTABLE}, or {@code FAILURE}. */
+    private static String thresholdName(ReverseBuildTrigger trigger) {
+        Result threshold = trigger.getThreshold();
+        return threshold != null ? threshold.toString() : "";
     }
 
     /**
@@ -370,9 +410,11 @@ public class ActivityEndpoint implements RootAction {
 
     /**
      * Builds one schedule row as JSON, field by field, so field names stay pinned to the
-     * schema. {@code upstreamTenant}, {@code upstreamJob}, and {@code upstreamResult} are
-     * omitted when {@code upstreamTenant} is {@code null} (design.md D9: every row but a
-     * {@code varroa-upstream} row carries none of the three).
+     * schema. Two trigger types carry upstream values, and each carries its own set. A
+     * {@code varroa-upstream} row carries the tenant, the job, and the threshold. An
+     * {@code upstream} row names several jobs and no tenant, so it carries the threshold
+     * with an empty tenant and an empty job, and its paths ride the specification field.
+     * Every other row omits all three keys.
      */
     private static JSONObject buildScheduleRow(String jobPath, String triggerType, String spec,
             String timezone, boolean disabled, List<String> nextFireTimes,
@@ -389,6 +431,10 @@ public class ActivityEndpoint implements RootAction {
         if (upstreamTenant != null) {
             row.put("upstreamTenant", upstreamTenant);
             row.put("upstreamJob", upstreamJob);
+            row.put("upstreamResult", upstreamResult);
+        } else if (upstreamResult != null) {
+            row.put("upstreamTenant", "");
+            row.put("upstreamJob", "");
             row.put("upstreamResult", upstreamResult);
         }
         return row;

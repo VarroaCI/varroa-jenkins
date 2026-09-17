@@ -25,10 +25,19 @@ var crossTenantBuildSeqPattern = regexp.MustCompile(`^s[1-9][0-9]*$`)
 // writes no run_intents row of its own: the target cell's claim gate
 // creates the one row, so this responder only reads run_intents and
 // publishes a trigger_run action.
+//
+// The kind also serves an intra-tenant forward, whose caller tenant
+// equals its target tenant. Such a request may carry its own intent key,
+// and the responder then derives none.
 func handleCrossTenantBuild(ctx context.Context, deps CrossTenantDeps, req CrossTenantRequest) (CrossTenantResponse, error) {
 	if !crossTenantBuildSeqPattern.MatchString(req.Seq) {
 		return CrossTenantResponse{Code: CodeInternal,
 			Error: fmt.Sprintf("seq %q must match s<n>, a 1-based ordinal", req.Seq)}, nil
+	}
+
+	suppliedKey, resp, ok := crossTenantSuppliedKey(req)
+	if !ok {
+		return resp, nil
 	}
 
 	qualifiedJobPath := qualifyCrossTenantJobPath(req.TargetTenant, req.JobPath)
@@ -55,7 +64,10 @@ func handleCrossTenantBuild(ctx context.Context, deps CrossTenantDeps, req Cross
 		return CrossTenantResponse{ReasonCode: grant.ReasonCode, Message: grant.Message}, nil
 	}
 
-	intentKey := fmt.Sprintf("%s:%s:%s", IntentSchemeUpstream, req.CallerRunID, req.Seq)
+	intentKey := suppliedKey
+	if intentKey == "" {
+		intentKey = fmt.Sprintf("%s:%s:%s", IntentSchemeUpstream, req.CallerRunID, req.Seq)
+	}
 	intent, found, err := deps.Reader.GetIntentByKey(ctx, intentKey)
 	if err != nil {
 		return CrossTenantResponse{}, err
@@ -106,6 +118,30 @@ func handleCrossTenantBuild(ctx context.Context, deps CrossTenantDeps, req Cross
 	}
 
 	return CrossTenantResponse{State: CrossTenantStatePending}, nil
+}
+
+// crossTenantSuppliedKey answers the intent key the caller supplied on a
+// build request, and the refusal to send when the request may not carry
+// one. An empty key with ok true means the responder derives its own.
+//
+// The responder reads a supplied key only from the caller's own tenant.
+// An intra-tenant forward must preserve the claimer's key, so a cron fire
+// on two members reaches one ledger row. A cross-tenant caller may not
+// supply one: the grant's intent-key-scheme order tests a key the
+// recorder derived, and a caller-supplied key would meet that order under
+// the caller's control.
+func crossTenantSuppliedKey(req CrossTenantRequest) (string, CrossTenantResponse, bool) {
+	if req.IntentKey == "" {
+		return "", CrossTenantResponse{}, true
+	}
+	if req.CallerTenant != req.TargetTenant {
+		return "", CrossTenantResponse{Code: CodeInternal,
+			Error: "intent_key is allowed only when the caller tenant equals the target tenant"}, false
+	}
+	if _, err := ParseIntentKey(req.IntentKey); err != nil {
+		return "", CrossTenantResponse{ReasonCode: ReasonInvalidKey, Message: err.Error()}, false
+	}
+	return req.IntentKey, CrossTenantResponse{}, true
 }
 
 // crossTenantTargetPlacement is the subset of a target tenant's

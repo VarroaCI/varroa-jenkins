@@ -6,7 +6,10 @@ import hudson.model.Queue;
 import net.sf.json.JSONObject;
 
 import java.io.IOException;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
@@ -27,6 +30,12 @@ import java.util.logging.Logger;
  * {@code ClaimRequest}, and applies the decision table. A grant applies
  * the build number first (D4's five steps, contract G3), then sets the
  * action's granted flag, which releases the dispatcher.
+ *
+ * <p>A claimer thread also owns the intra-tenant forward. It resolves the
+ * job's home slot from {@link VarroaHomeCache} before it posts the claim,
+ * and forwards a job this cell does not home. The forward is a network
+ * call, so it cannot run in the queue decision handler or in the
+ * dispatcher: both hold the Jenkins queue lock.
  */
 public class VarroaClaimQueue {
 
@@ -50,6 +59,13 @@ public class VarroaClaimQueue {
     private static final String DECISION_DUPLICATE = "duplicate";
     private static final String DECISION_VETOED = "vetoed";
     private static final String REASON_NOT_READY = "NOT_READY";
+    private static final String REASON_NOT_HOME = "NOT_HOME";
+
+    /**
+     * The sequence a forward sends. The preserved intent key carries the
+     * submission's identity, so the sequence is constant.
+     */
+    private static final int FORWARD_SEQ = 1;
 
     /** Seam for a test to skip real wall-clock waits. */
     interface Sleeper {
@@ -64,18 +80,25 @@ public class VarroaClaimQueue {
     private final MiteLoopbackClient client;
     private final Clock clock;
     private final Sleeper sleeper;
+    private final VarroaHomeCache homeCache;
     private final ThreadPoolExecutor executor;
     private final Set<String> pendingKeys = ConcurrentHashMap.newKeySet();
 
     public VarroaClaimQueue() {
-        this(new MiteLoopbackClient(), System::currentTimeMillis, Thread::sleep);
+        this(new MiteLoopbackClient(), System::currentTimeMillis, Thread::sleep, VarroaHomeCache.get());
     }
 
     /** Package-private constructor for testing: injects every collaborator. */
     VarroaClaimQueue(MiteLoopbackClient client, Clock clock, Sleeper sleeper) {
+        this(client, clock, sleeper, VarroaHomeCache.get());
+    }
+
+    /** Package-private constructor for testing: injects the home cache as well. */
+    VarroaClaimQueue(MiteLoopbackClient client, Clock clock, Sleeper sleeper, VarroaHomeCache homeCache) {
         this.client = client;
         this.clock = clock;
         this.sleeper = sleeper;
+        this.homeCache = homeCache;
         this.executor = new ThreadPoolExecutor(THREADS, THREADS, 0L, TimeUnit.MILLISECONDS,
                 new ArrayBlockingQueue<>(CAPACITY), daemonThreadFactory(),
                 new ThreadPoolExecutor.AbortPolicy());
@@ -162,39 +185,19 @@ public class VarroaClaimQueue {
             action.setIntentKey(derived.intentKey);
             action.setRevision(derived.revision);
 
-            JSONObject body = buildRequestBody(item, job, action, derived, attempt);
-            MiteLoopbackClient.Response resp = client.post(CLAIM_PATH, body.toString());
-            Decision decision = parseDecision(resp);
-
-            switch (decision.kind) {
-                case GRANTED:
-                    if (!applyBuildNumber(job, decision.buildNumber)) {
-                        cancel(item);
-                        return;
-                    }
-                    ClaimRegistry.get().record(derived.intentKey, action.getRunId());
-                    action.setGranted(true);
+            OptionalInt home = homeCache.forwardSlotFor(job.getFullName());
+            if (home.isPresent()) {
+                if (forwardOnce(item, job, action, derived, home.getAsInt())) {
                     return;
-                case DUPLICATE:
-                    DuplicateRegistry.get().record(action.getRunId());
-                    LOGGER.log(Level.WARNING, "VarroaClaimQueue: duplicate claim for run {0}", action.getRunId());
-                    cancel(item);
-                    return;
-                case VETOED_NOT_READY:
-                case RETRY:
-                    break;
-                case VETOED_OTHER:
-                case UNKNOWN:
-                default:
-                    LOGGER.log(Level.WARNING, "VarroaClaimQueue: claim refused for run {0}", action.getRunId());
-                    cancel(item);
-                    return;
+                }
+            } else if (claimOnce(item, job, action, derived, attempt)) {
+                return;
             }
 
             if (clock.nowMillis() >= deadline) {
                 LOGGER.log(Level.WARNING,
-                        "VarroaClaimQueue: giving up on pending claim for run {0} after one hour",
-                        action.getRunId());
+                        "VarroaClaimQueue: giving up on job {0} after one hour; home slot {1}, run {2}",
+                        new Object[] {job.getFullName(), homeSlotLabel(job), action.getRunId()});
                 cancel(item);
                 return;
             }
@@ -206,6 +209,103 @@ public class VarroaClaimQueue {
                 return;
             }
         }
+    }
+
+    /**
+     * Posts one claim and applies the decision table. Answers true when
+     * the submission is resolved, and false when the caller must retry.
+     *
+     * <p>A {@code NOT_HOME} veto proves the home cache was stale. It
+     * refreshes the cache and forwards at once, and it cancels no item:
+     * the one-hour budget bounds a repeat.
+     */
+    private boolean claimOnce(Queue.Item item, Job<?, ?> job, VarroaIntentAction action,
+            IntentKey.Result derived, int attempt) {
+        JSONObject body = buildRequestBody(item, job, action, derived, attempt);
+        MiteLoopbackClient.Response resp = client.post(CLAIM_PATH, body.toString());
+        Decision decision = parseDecision(resp);
+
+        switch (decision.kind) {
+            case GRANTED:
+                if (!applyBuildNumber(job, decision.buildNumber)) {
+                    cancel(item);
+                    return true;
+                }
+                ClaimRegistry.get().record(derived.intentKey, action.getRunId());
+                action.setGranted(true);
+                return true;
+            case DUPLICATE:
+                DuplicateRegistry.get().record(action.getRunId());
+                LOGGER.log(Level.WARNING, "VarroaClaimQueue: duplicate claim for run {0}", action.getRunId());
+                cancel(item);
+                return true;
+            case VETOED_NOT_HOME:
+                homeCache.refresh();
+                OptionalInt refreshed = homeCache.forwardSlotFor(job.getFullName());
+                return refreshed.isPresent() && forwardOnce(item, job, action, derived, refreshed.getAsInt());
+            case VETOED_NOT_READY:
+            case RETRY:
+                return false;
+            case VETOED_OTHER:
+            case UNKNOWN:
+            default:
+                LOGGER.log(Level.WARNING, "VarroaClaimQueue: claim refused for run {0}", action.getRunId());
+                cancel(item);
+                return true;
+        }
+    }
+
+    // --- The intra-tenant forward ---
+
+    /**
+     * Forwards one submission to the holder of {@code homeSlot} through
+     * the cross-tenant build route, and cancels the local queue item on
+     * success. Answers false when the forward failed, so the caller
+     * retries it on the claim's own ladder.
+     *
+     * <p>The caller tenant and the target tenant are the same tenant, so
+     * the grant allows the call with no export. The forward carries the
+     * derived intent key unchanged, so two members that fire one cron in
+     * one minute reach one ledger row.
+     */
+    private boolean forwardOnce(Queue.Item item, Job<?, ?> job, VarroaIntentAction action,
+            IntentKey.Result derived, int homeSlot) {
+        String jobPath = job.getFullName();
+        String tenant = VarroaHomeCache.tenantOf(jobPath);
+        MiteLoopbackClient.Response resp = client.crossTenantBuild(jobPath, action.getRunId(),
+                FORWARD_SEQ, tenant, VarroaHomeCache.pathBelowTenant(jobPath),
+                parametersOf(item), derived.intentKey);
+        VarroaCrossTenantReply reply = VarroaCrossTenantReply.parse(resp);
+        if (reply.isFailure() || !reply.getString("reason_code", "").isEmpty()) {
+            LOGGER.log(Level.FINE,
+                    "VarroaClaimQueue: the forward of job {0} to slot {1} failed; retrying",
+                    new Object[] {jobPath, homeSlot});
+            return false;
+        }
+        PluginCounters.increment(PluginCounters.forwardedCounterFor(derived.intentKey));
+        LOGGER.log(Level.INFO, "VarroaClaimQueue: forwarded job {0} to home slot {1}",
+                new Object[] {jobPath, homeSlot});
+        cancel(item);
+        return true;
+    }
+
+    /**
+     * The item's parameters, name to value. A forwarded build must keep
+     * them, because the home schedules the job from this list alone.
+     */
+    private static Map<String, Object> parametersOf(Queue.Item item) {
+        Map<String, String> values = new LinkedHashMap<>();
+        IntentKey.collectParameters(item, values, new HashSet<>());
+        return new LinkedHashMap<>(values);
+    }
+
+    /** The job's home slot as a log value, or {@code none} with no cached opinion. */
+    private String homeSlotLabel(Job<?, ?> job) {
+        String jobPath = job.getFullName();
+        if (!homeCache.hasOpinion() || !homeCache.hostsTenant(VarroaHomeCache.tenantOf(jobPath))) {
+            return "none";
+        }
+        return Integer.toString(homeCache.homeSlotOf(jobPath));
     }
 
     // --- Build number apply (contract G3) ---
@@ -264,7 +364,7 @@ public class VarroaClaimQueue {
     // --- Decision parsing ---
 
     private enum Kind {
-        GRANTED, DUPLICATE, VETOED_NOT_READY, VETOED_OTHER, RETRY, UNKNOWN
+        GRANTED, DUPLICATE, VETOED_NOT_READY, VETOED_NOT_HOME, VETOED_OTHER, RETRY, UNKNOWN
     }
 
     private static final class Decision {
@@ -305,9 +405,13 @@ public class VarroaClaimQueue {
                 return new Decision(Kind.DUPLICATE, 0);
             case DECISION_VETOED:
                 String reason = String.valueOf(body.get("reason_code"));
-                return REASON_NOT_READY.equals(reason)
-                        ? new Decision(Kind.VETOED_NOT_READY, 0)
-                        : new Decision(Kind.VETOED_OTHER, 0);
+                if (REASON_NOT_READY.equals(reason)) {
+                    return new Decision(Kind.VETOED_NOT_READY, 0);
+                }
+                if (REASON_NOT_HOME.equals(reason)) {
+                    return new Decision(Kind.VETOED_NOT_HOME, 0);
+                }
+                return new Decision(Kind.VETOED_OTHER, 0);
             case "":
                 Object code = body.get("code");
                 if (code != null && !String.valueOf(code).isEmpty()) {
