@@ -383,49 +383,6 @@ func TestSyncPolicyFromPipelines_NilSpec_NoExports(t *testing.T) {
 	}
 }
 
-func TestPlace_Reannounce_AppliedSeed(t *testing.T) {
-	in := testInputs()
-	cell := readyCell("cell-a")
-	cell.Instance = "uid-1"
-	in.Cells = []CellCandidate{cell}
-	team := testTeam()
-	status := &v1alpha1.TeamStatus{}
-	out1, err := Place(context.Background(), in, team, status)
-	if err != nil {
-		t.Fatalf("tick 1: %v", err)
-	}
-
-	// Simulate task 6.5 having just flipped Rehydrated to applied for the
-	// owning cell instance.
-	status.Conditions = append(status.Conditions, v1alpha1.TeamCondition{
-		Type: v1alpha1.TeamConditionRehydrated, Status: metav1.ConditionTrue, Reason: v1alpha1.TeamReasonTenantRehydrated,
-	})
-	status.Rehydration = &v1alpha1.TeamRehydrationStatus{CellInstance: "uid-1"}
-	in.LastSync = out1.SyncCacheUpdate
-	in.Now = fixedClock(fixedNow.Add(time.Minute))
-
-	var calls int
-	var got AnnounceRequest
-	in.Announce = func(_ context.Context, req AnnounceRequest) (AnnounceResult, error) {
-		calls++
-		got = req
-		return AnnounceResult{OK: true}, nil
-	}
-
-	if _, err := Place(context.Background(), in, team, status); err != nil {
-		t.Fatalf("tick 2: %v", err)
-	}
-	if calls != 1 {
-		t.Fatalf("expected one reannounce for the applied seed, got %d", calls)
-	}
-	if got.RehydratedInstance != "uid-1" {
-		t.Errorf("RehydratedInstance = %q, want uid-1", got.RehydratedInstance)
-	}
-	if len(got.PendingJobs) != 0 {
-		t.Errorf("expected no pending jobs once applied, got %v", got.PendingJobs)
-	}
-}
-
 func TestPlace_Reannounce_UnchangedSendsNothingInWindow(t *testing.T) {
 	in := testInputs()
 	cell := readyCell("cell-a")

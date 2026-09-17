@@ -170,8 +170,15 @@ of the fleet's audit activity, once a controller becomes disposable.
   A request that names a cell and no namespace is refused, rather than
   deleted on the name alone. A teardown names no cell and keeps the
   whole-tenant delete. The delete is a plain `DELETE`, idempotent by
-  construction. The operator side of this contract lives outside this
-  package.
+  construction. A teardown also resets that tenant's
+  `tenant_placements.generation` to zero
+  (`resetTenantPlacementGeneration`), under the same at-most test, because
+  the announce never lowers a stored generation and a `Team` created again
+  under the old name restarts at generation 1. The row itself survives the
+  reset: the interrupted-run sweep still reads its cell-liveness fields
+  for a run the teardown left behind. A purge that names a cell is a slot
+  move and resets nothing. The operator side of this contract lives
+  outside this package.
 - **Tenant sync responder** (`tenant_sync.go`, `tenant_sync_types.go`) —
   `RegisterTenantSyncResponder` subscribes `bus.TenantSyncSubject` with
   queue group `recorder`. It answers two request kinds: `announce`
@@ -179,9 +186,25 @@ of the fleet's audit activity, once a controller becomes disposable.
   `generation`; a generation-zero row seeds itself from the announced
   cell instance at once; a generation raise or a cell-instance change
   clears `rehydrated_instance` and `pending_jobs`, because the new cell
-  holds no seed yet) and merges `dead_instances` into the stored list,
-  keeping every entry a `RUNNING` run's `run_intents.cell_instance`
-  names and trimming the rest to ten; `records` calls
+  holds no seed yet; at the same generation and the same instance
+  `keepAppliedSeed` keeps a stored `rehydrated_instance` over an empty
+  report, for the scalar and for each member, because the operator can
+  read its own rehydration state one tick late and an empty report never
+  proves a seed gone. **`keepDeferredJobs` holds the two halves of one
+  seed report together**: a report `keepAppliedSeed` judged stale never
+  clears a deferred job either, because the cell clears its own
+  `Deferred` list and reports `Applied` false together
+  (`preSendEntry`) when it starts a fresh bundle, and taking that list
+  would admit the job through order 10 **and** order 11 with no record on
+  the cell. `resolveAnnouncedMembers` mirrors that whole rule per member,
+  **the generation arm included**: a teardown and a new tenant of one name
+  can share a cell and a live pod, so the instance test alone would hand
+  the new tenant the old one's seed) and merges
+  `dead_instances` into the stored list,
+  keeping every entry a `QUEUED` or `RUNNING` run names through
+  `candidatesQuery`'s own owning-instance expression
+  (`run_intents.cell_instance`, else `payload->>'accepted_instance'`) and
+  trimming the rest to ten; `records` calls
   `ListRehydrationRecords`. An unknown kind answers an error and writes
   nothing. The wire types (`TenantSyncRequest`, `TenantSyncResponse`,
   and the nested job/record shapes) live in `tenant_sync_types.go`,
@@ -494,12 +517,16 @@ of the fleet's audit activity, once a controller becomes disposable.
   `recorder_cell_loss_confirmed_total` counts each `cell-lost` mark by
   the same `path`. `liveCellInstances`
   (`tenant_sync.go`) is the dead-instances trim's keep-set: the union of
-  every intent-joined `QUEUED`/`RUNNING` run's `cell_instance`, every
-  unclaimed `QUEUED` run's `accepted_instance` payload value, and every
-  `GRANTED` intent with a null `refired_at`. The third arm exists because
-  the first two join `runs`: an intent whose build never started holds no
-  `runs` row, so a busy pool would otherwise trim away the evidence its
-  re-fire needs.
+  every `QUEUED`/`RUNNING` run's own owning instance and every `GRANTED`
+  intent with a null `refired_at`. **The first arm resolves that instance
+  with `candidatesQuery`'s own expression, over the same left join**
+  (`NULLIF(ri.cell_instance, '')`, else `payload->>'accepted_instance'`),
+  so the keep-set and the sweep read one owning-instance source. A
+  narrower keep-set trims away the only evidence the sweep can mark such
+  a run with, and the run then stays `RUNNING` for good. The second arm
+  exists because the first joins `runs`: an intent whose build never
+  started holds no `runs` row, so a busy pool would otherwise trim away
+  the evidence its re-fire needs.
 - **Unstarted-intent re-fire** (`refire.go`) — `RefireLostIntents` is the
   one path that recovers a build the sweep can never see: a `GRANTED`
   `run_intents` row whose build never started writes no `runs` row at

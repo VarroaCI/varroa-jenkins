@@ -162,10 +162,12 @@ func handleTenantSyncRecords(ctx context.Context, pool *pgxpool.Pool, req Tenant
 // means no row exists yet, which this responder treats the same as a
 // generation-zero row with no cell instance.
 type tenantPlacementRow struct {
-	generation    int64
-	cell          string
-	cellInstance  string
-	deadInstances []TenantSyncDeadInstance
+	generation         int64
+	cell               string
+	cellInstance       string
+	rehydratedInstance string
+	pendingJobs        []string
+	deadInstances      []TenantSyncDeadInstance
 	// members holds the stored member list, resolved through the row's
 	// own scalar columns. A row with an empty stored list therefore
 	// answers one synthetic slot-0 member, so an upgraded tenant keeps
@@ -210,6 +212,8 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 		newGeneration = req.Generation
 	}
 
+	generationRaised := req.Generation > old.generation
+
 	var rehydratedInstance string
 	var pendingJobs []string
 	switch {
@@ -217,16 +221,18 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 		// A controller with no cell role keeps its own home and needs
 		// no seed: it is ready the moment it is announced.
 		rehydratedInstance = req.CellInstance
-	case req.Generation > old.generation || req.CellInstance != old.cellInstance:
+	case generationRaised || req.CellInstance != old.cellInstance:
 		// A generation raise or a cell-instance change clears the seed
 		// state: the new cell holds no seed yet.
 		rehydratedInstance = ""
 		pendingJobs = nil
 	default:
 		// Same generation, same instance: store the seed state this
-		// announcement itself reports.
-		rehydratedInstance = req.RehydratedInstance
-		pendingJobs = req.PendingJobs
+		// announcement itself reports, except where keepAppliedSeed
+		// judges the report stale.
+		rehydratedInstance = keepAppliedSeed(old.rehydratedInstance, req.RehydratedInstance)
+		pendingJobs = keepDeferredJobs(old.pendingJobs, req.PendingJobs,
+			req.RehydratedInstance, rehydratedInstance)
 	}
 
 	live, err := liveCellInstances(ctx, tx, req.Cluster, req.Tenant)
@@ -235,7 +241,7 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 	}
 	deadInstances := trimDeadInstances(mergeDeadInstances(old.deadInstances, req.DeadInstances), live, maxDeadInstances)
 
-	members := resolveAnnouncedMembers(old.members, req.Members)
+	members := resolveAnnouncedMembers(old.members, req.Members, generationRaised)
 	jobHomes, err := recomputeJobHomes(ctx, tx, req.Cluster, req.Tenant, members, old.jobHomes, actionMetrics)
 	if err != nil {
 		return TenantSyncResponse{}, err
@@ -366,19 +372,27 @@ func readTenantPlacementForUpdate(ctx context.Context, tx pgx.Tx, cluster, tenan
 		return tenantPlacementRow{}, err
 	}
 	return tenantPlacementRow{
-		generation: generation, cell: cell, cellInstance: cellInstance, deadInstances: dead,
+		generation: generation, cell: cell, cellInstance: cellInstance,
+		rehydratedInstance: rehydratedInstance, pendingJobs: pending, deadInstances: dead,
 		members: decoded.members, jobHomes: decoded.jobHomes,
 	}, nil
 }
 
 // liveCellInstances answers the set of cell instances the tenant's live
-// work names: an intent-joined RUNNING or QUEUED run's own
-// cell_instance, an unclaimed QUEUED run's accepted_instance payload
-// value, and the owner a GRANTED intent with a null refired_at names.
-// The dead-instances trim in writeTenantPlacement never drops an entry
-// in this set.
+// work names: every QUEUED or RUNNING run's own owning instance, and the
+// owner a GRANTED intent with a null refired_at names. The
+// dead-instances trim in writeTenantPlacement never drops an entry in
+// this set.
 //
-// The third arm exists because the first two join runs. A GRANTED
+// The first arm resolves the owning instance exactly as candidatesQuery
+// does, over the same left join: the ledger's cell_instance when the
+// intent carries one, else the accepted trigger's own accepted_instance
+// payload value. The keep set and the sweep therefore read one
+// owning-instance source. A narrower keep set trims away the only
+// evidence the sweep can mark such a run with, and the run then stays
+// RUNNING for good.
+//
+// The second arm exists because the first one joins runs. A GRANTED
 // intent whose build never started holds no runs row at all, so a busy
 // pool would otherwise trim away the evidence the re-fire needs. An
 // intent the recorder already re-fired holds a non-null refired_at, so
@@ -386,15 +400,11 @@ func readTenantPlacementForUpdate(ctx context.Context, tx pgx.Tx, cluster, tenan
 // maxRefireAttempts, whose retry loop has ended.
 func liveCellInstances(ctx context.Context, tx pgx.Tx, cluster, tenant string) (map[string]bool, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT DISTINCT ri.cell_instance
-		FROM varroa.run_intents ri
-		JOIN varroa.runs r ON r.run_id = ri.run_id
-		WHERE ri.cluster = $1 AND ri.tenant = $2 AND r.status IN ('QUEUED', 'RUNNING')
-		  AND ri.cell_instance IS NOT NULL AND ri.cell_instance <> ''
-		UNION
-		SELECT DISTINCT r.payload->>'accepted_instance'
+		SELECT DISTINCT COALESCE(NULLIF(ri.cell_instance, ''), r.payload->>'accepted_instance')
 		FROM varroa.runs r
-		WHERE r.cluster = $1 AND r.tenant = $2 AND r.status = 'QUEUED' AND r.payload ? 'accepted_instance'
+		LEFT JOIN varroa.run_intents ri ON ri.run_id = r.run_id
+		WHERE r.cluster = $1 AND r.tenant = $2 AND r.status IN ('QUEUED', 'RUNNING')
+		  AND COALESCE(NULLIF(ri.cell_instance, ''), r.payload->>'accepted_instance', '') <> ''
 		UNION
 		SELECT DISTINCT ri.cell_instance
 		FROM varroa.run_intents ri
@@ -456,6 +466,50 @@ func mergeDeadInstances(stored, incoming []TenantSyncDeadInstance) []TenantSyncD
 	}
 	sort.Slice(merged, func(i, j int) bool { return merged[i].LastSeenAt.After(merged[j].LastSeenAt) })
 	return merged
+}
+
+// keepAppliedSeed answers the rehydrated instance to store at the same
+// generation and the same cell instance. An announcement that reports
+// none keeps the stored one.
+//
+// A cell that applied a tenant's seed holds it until the pod or the
+// generation changes, and each of those clears the seed on its own arm.
+// An empty report at the same generation and instance therefore never
+// proves the seed gone: it is the operator reading its own rehydration
+// state one tick late. Storing it would fence every build of the tenant
+// until the next announcement raises the value again.
+func keepAppliedSeed(stored, reported string) string {
+	if reported == "" {
+		return stored
+	}
+	return reported
+}
+
+// keepDeferredJobs answers the deferred job list to store beside a seed
+// keepAppliedSeed decided. It holds the two halves of one seed report
+// together: a report keepAppliedSeed judged stale never clears a job
+// either side still calls deferred, so the answer is the union.
+//
+// The cell clears its own deferred list at the moment it starts a fresh
+// bundle for a job it already deferred, and it reports that bundle as not
+// applied. An announcement in that window carries no seed and no deferred
+// job, so taking its list would leave the job admitted by both the seed
+// order and the deferred order, and the job would claim a build number
+// against a folder that holds no record for it.
+//
+// The union never grows without bound: the next announcement that reports
+// a seed of its own replaces the whole list.
+func keepDeferredJobs(stored, reported []string, reportedSeed, storedSeed string) []string {
+	if reportedSeed != "" || storedSeed == "" {
+		return reported
+	}
+	out := append([]string(nil), stored...)
+	for _, job := range reported {
+		if !containsJobPath(out, job) {
+			out = append(out, job)
+		}
+	}
+	return out
 }
 
 // earlierConfirmation answers the earlier of two confirmation times. A
@@ -556,16 +610,24 @@ func writeTenantPlacement(ctx context.Context, tx pgx.Tx, req TenantSyncRequest,
 	return nil
 }
 
-// resolveAnnouncedMembers answers the member list to store. It applies
-// the per-member seed rule: a member whose cell instance changed loses
-// its own rehydrated_instance and pending_jobs, because the new pod holds
-// no seed. A member whose instance is unchanged keeps what the
-// announcement itself reports.
+// resolveAnnouncedMembers answers the member list to store. It mirrors
+// the scalar seed rule, per member: a generation raise, or a member whose
+// cell instance changed, loses that member's own rehydrated_instance and
+// pending_jobs, because the cell holds no seed for the new cycle. A
+// member the raise and the instance test both leave alone keeps the seed
+// it already reported when this announcement reports none, which is
+// keepAppliedSeed's rule for one member.
+//
+// The generation arm is what a teardown and a new tenant of the same name
+// need: the cells can be the same and the pods can still be running, so
+// the instance test alone would hand the new tenant the seed state of the
+// old one, and its first build would pass the seed order against an
+// unseeded folder.
 //
 // The prior list is resolved through the row's scalar columns, so a
 // tenant the operator announces with a member list for the first time
 // keeps slot 0's seed state.
-func resolveAnnouncedMembers(prior, incoming []member) []member {
+func resolveAnnouncedMembers(prior, incoming []member, generationRaised bool) []member {
 	if len(incoming) == 0 {
 		return nil
 	}
@@ -573,9 +635,15 @@ func resolveAnnouncedMembers(prior, incoming []member) []member {
 	out := make([]member, 0, len(incoming))
 	for _, m := range incoming {
 		before, ok := memberForCell(priorRow, m.Namespace, m.Cell)
-		if !ok || before.Instance != m.Instance {
+		switch {
+		case generationRaised || !ok || before.Instance != m.Instance:
 			m.RehydratedInstance = ""
 			m.PendingJobs = nil
+		default:
+			reportedSeed := m.RehydratedInstance
+			m.RehydratedInstance = keepAppliedSeed(before.RehydratedInstance, reportedSeed)
+			m.PendingJobs = keepDeferredJobs(before.PendingJobs, m.PendingJobs,
+				reportedSeed, m.RehydratedInstance)
 		}
 		out = append(out, m)
 	}

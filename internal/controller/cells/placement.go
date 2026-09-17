@@ -792,7 +792,7 @@ func sendAnnounce(ctx context.Context, in Inputs, req AnnounceRequest) (Announce
 // binding (moveNone): status.Placement already names it.
 func maybeReannounce(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus, cell CellCandidate, nowT time.Time, out *Outcome) {
 	policy := SyncPolicyFromPipelines(team.Spec.Pipelines)
-	rehydratedInstance, pendingJobs := currentRehydrationState(status, in.PendingJobs)
+	rehydratedInstance, pendingJobs := currentRehydrationState(in, cell)
 
 	members, _ := desiredMembers(in, team, status, &cell, nowT)
 	announced := announceMembers(members)
@@ -1049,31 +1049,26 @@ func appendReleasedMemberPatches(ctx context.Context, in Inputs, team *v1alpha1.
 }
 
 // currentRehydrationState answers the rehydrated_instance and pending_jobs
-// an announcement carries (design D13): the rehydrated instance is
-// status.rehydration.cellInstance while the Rehydrated condition reads
-// True/TenantRehydrated, and empty otherwise; pending_jobs is the caller's
-// own PendingJobs seam (task 5.7a fills it) while not applied, and empty
-// once applied.
-func currentRehydrationState(status *v1alpha1.TeamStatus, pendingJobsSeam []string) (rehydratedInstance string, pendingJobs []string) {
-	if !rehydratedApplied(status) {
-		return "", pendingJobsSeam
+// an announcement carries for slot 0 (design D13). The rehydrated
+// instance is the seed the bound cell itself reports through the
+// MemberSeed seam, and empty while that cell applies none; pending_jobs
+// is the caller's own PendingJobs seam (task 5.7a fills it) while not
+// applied, and empty once applied.
+//
+// The seed comes from the cell and never from the Rehydrated condition.
+// The rehydration pass writes that condition after this pass runs, so a
+// read of it reports the state of the tick before. The tenant would be
+// announced as unseeded on the tick its seed applies, and the fence
+// would hold every build until the next announcement. The member entries
+// read the same seam, so the scalar and the member seed always agree.
+func currentRehydrationState(in Inputs, cell CellCandidate) (rehydratedInstance string, pendingJobs []string) {
+	if in.MemberSeed != nil {
+		rehydratedInstance, _ = in.MemberSeed(cell.Namespace, cell.Name)
 	}
-	if status.Rehydration != nil {
-		rehydratedInstance = status.Rehydration.CellInstance
+	if rehydratedInstance == "" {
+		return "", in.PendingJobs
 	}
 	return rehydratedInstance, nil
-}
-
-// rehydratedApplied reports whether status already carries
-// Rehydrated=True/TenantRehydrated, as task 4.5's rehydration pass (and
-// task 6.5, which completes it) last wrote it.
-func rehydratedApplied(status *v1alpha1.TeamStatus) bool {
-	for _, c := range status.Conditions {
-		if c.Type == v1alpha1.TeamConditionRehydrated {
-			return c.Status == metav1.ConditionTrue && c.Reason == v1alpha1.TeamReasonTenantRehydrated
-		}
-	}
-	return false
 }
 
 // deadInstanceDelta answers the one dead instance to report for a rolled

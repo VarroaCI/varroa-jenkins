@@ -870,7 +870,14 @@ sections describe.
   condition from the tenant's own entry on the bound cell by comparing
   generation and cell instance — it never computes a deadline of its own,
   since `attachCellRehydration` already wrote the give-up as the entry's own
-  `Error`.
+  `Error`. **The announcement reads the seed from the cell, never from the
+  `Rehydrated` condition.** `cells.currentRehydrationState` calls the same
+  `Inputs.MemberSeed` seam the member entries use (`memberSeedReader`,
+  `team_controller.go`), because `RehydrationPass` writes that condition
+  **after** `cells.Place` runs in the same tick. A read of the condition
+  reports the tick before, so the tenant would be announced as unseeded on
+  the tick its seed applies and the fence would hold every build of that
+  tenant until the next announcement.
 - `bootstrap.go` — `BootstrapLocalAdmin` seeds the local-mode admin user/password on
   first boot.
 - `webhook_replay.go` — drains a NATS queue of webhook deliveries received while a

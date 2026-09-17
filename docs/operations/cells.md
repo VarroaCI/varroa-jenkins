@@ -215,7 +215,9 @@ confirm the folder is idle, then performs the same two-step move.
 
 **Roll.** A cell that reports `CellReady=False` past `cells.unreadyGracePeriod`, for a reason
 other than the three configuration gates, gets its pod deleted once and the reason `CellRolled`.
-The original fault reason moves into the condition message.
+
+**Teardown.** Teardown releases the tenant's placement record, so the same name can be used
+again.
 
 **Eviction.** Past twice that grace period, the operator sets `status.cell.evacuate`, and every
 tenant moves off on its next placement tick. Recovery clears `evacuate`, `unreadySince`, and
@@ -228,18 +230,18 @@ Every `Placed` reason on a `Team`:
 | Reason | Status | Meaning | Action |
 |---|---|---|---|
 | `TenantPlaced` | True | The tenant is bound to a cell and ready. | None. |
-| `TenantMoved` | True | An involuntary move landed on a new cell. | None. The old cell's schedule purge keeps retrying in the background. |
+| `TenantMoved` | True | An involuntary move landed on a new cell. | None. The old cell's schedule purge retries in the background. |
 | `RecordStoreUnsupported` | False | `recordStore.enabled` is false. | Enable the record store. |
 | `BlobTierUnsupported` | False | `recordStore.blobs.mode` is not `s3`. | Set the blob tier to `s3`. |
 | `ProfileNotFound` | False | `spec.pipelines.profile` names no `JenkinsVersionProfile`. | Create the profile, or fix the name. |
 | `CellPoolNotFound` | False | `spec.pipelines.cellPool` names no pool, or names one serving another profile. The message names the profile the pool serves. | Create the pool, or fix the name. |
-| `AgentNamespaceUnmanaged` | False | `agentNamespace` is missing from `spec.namespaces`, or Varroa does not manage it. | Add it to `spec.namespaces` and confirm it is a managed namespace. |
+| `AgentNamespaceUnmanaged` | False | `agentNamespace` is missing from `spec.namespaces`, or Varroa does not manage it. | Add it to `spec.namespaces` as a managed namespace. |
 | `AwaitingCell` | False | No cell of the tenant's pool is enabled, ready, not evacuating, and under its resolved capacity. | Wait for the pool to create a cell, or raise its `warm` or `maxTenantsPerCell`. |
 | `CellCapReached` | False | The tenant's pool sits at its `maxCells` and no cell is free. | Raise `maxCells`, or move the tenant to another pool. |
 | `TenantMoving` | False | A voluntary move is waiting for the old cell to finish draining the tenant's folder. | Wait. Check `status.pendingItemDeletions` for a stuck delete on the old cell. |
 | `CellNotReady` | False | The pass keeps the tenant on its current cell, but that cell reports `CellReady=False` with no `evacuate` signal yet. | Diagnose the cell's own `CellReady` reason below. |
 | `AgentServiceFailed` | False | An agent Service write or delete failed. The placement is kept. | See [Agent Services](agents.md). |
-| `TenantTeardownPending` | False | Dropping `spec.pipelines` is tearing the tenant down, but the schedule purge or the old cell's drain has not confirmed yet. | Wait. The pass retries up to ten times, or up to a ten-minute bounded wait when the cell is unreachable. |
+| `TenantTeardownPending` | False | Dropping `spec.pipelines` is tearing the tenant down, but the schedule purge or the old cell's drain has not confirmed yet. | Wait. The pass retries up to ten times, or waits ten minutes when the cell is unreachable. |
 
 Every `CellReady` reason on a cell `Controller`:
 
@@ -284,8 +286,8 @@ child seeds only after branch indexing creates it; the operator retries until th
 | `RehydrationFailed` | False | The mite rejected the bundle, or `rehydrateDeadline` passed. | Read the message. A give-up needs a fresh generation: move the tenant or roll the cell. |
 
 A build can wait on the claim reason `NOT_READY` even when `Rehydrated` is `True`: its cell
-instance may not match the announced one, or the job may lack a build-number seed. The claimer
-retries on its own.
+instance may not be announced yet, the announced seed may name an older instance, or the job may
+lack one. The claimer retries on its own.
 
 ## Interrupted runs
 
@@ -298,8 +300,7 @@ its last event is old.
 | Silent | No heartbeat for 15 minutes | `no-heartbeat` |
 
 Both tests need a signal naming the run's cell instance gone; a slow cell marks nothing.
-The moved test also covers a single-tenant controller, whose replaced pod is reported as a
-dead instance.
+The moved test also covers a single-tenant controller: its replaced pod is reported dead.
 
 Marking sets the run's result to `INTERRUPTED` and releases no fleet lock; only a terminal event
 or a confirmed dead instance does. The recorder cancels the build only when its cell instance is

@@ -92,7 +92,7 @@ func handleTenantPurge(logger *slog.Logger, pool *pgxpool.Pool, data []byte) []b
 	ctx, cancel := context.WithTimeout(context.Background(), tenantPurgeTimeout)
 	defer cancel()
 
-	if err := purgeTenantJobSchedules(ctx, pool, req); err != nil {
+	if err := purgeTenant(ctx, pool, req); err != nil {
 		logger.Error("tenant purge failed", "cluster", req.Cluster, "tenant", req.Tenant, "error", err)
 		out, _ := json.Marshal(TenantPurgeResponse{Error: "tenant purge failed"})
 		return out
@@ -104,6 +104,68 @@ func handleTenantPurge(logger *slog.Logger, pool *pgxpool.Pool, data []byte) []b
 		out, _ = json.Marshal(TenantPurgeResponse{Error: "tenant purge response encode failed"})
 	}
 	return out
+}
+
+// purgeTenant applies one purge request: it deletes the tenant's
+// job_schedules rows, and, for a teardown, resets the tenant's placement
+// generation.
+//
+// A request that names a cell is a slot move. The tenant lives on, so the
+// move purges that cell's rows alone and leaves the placement generation
+// where it is.
+func purgeTenant(ctx context.Context, pool *pgxpool.Pool, req TenantPurgeRequest) error {
+	if err := purgeTenantJobSchedules(ctx, pool, req); err != nil {
+		return err
+	}
+	if req.Cell != "" {
+		return nil
+	}
+	return resetTenantPlacementGeneration(ctx, pool, req)
+}
+
+// resetTenantPlacementGeneration sets the tenant's stored placement
+// generation to zero, for a teardown alone.
+//
+// Teardown ends the tenant, but it leaves the tenant_placements row in
+// place. A Team created again under the same name starts at generation 1,
+// and the announce never lowers a stored generation, so the fence would
+// answer NOT_READY to every claim of the new tenant for good. The reset
+// lets the first announcement of the new tenant own the row again.
+//
+// The row itself survives, because the interrupted-run sweep reads its
+// cell-liveness fields to mark a run the teardown left behind. The reset
+// moves the generation alone: the first announcement of the new tenant
+// raises the generation, and that raise clears every seed field on its
+// own. Until it arrives, the generation orders refuse every claim.
+//
+// The generation test matches the job_schedules delete: a teardown retry
+// that arrives after the tenant is created again, and announces a higher
+// generation, resets nothing. An exact-equality test would be wrong here:
+// a lost announcement leaves the stored generation below the one the
+// teardown names, and the row would then keep a generation the new tenant
+// can never reach.
+//
+// One teardown request can still be applied after the teardown completes.
+// Two teardown paths release the Team finalizer with no successful purge:
+// an absent cell, and the tenth failed attempt. The purge rides core NATS
+// request-reply, which redelivers nothing, and both ends bound one call
+// at ten seconds, so that window is at most ten seconds wide. A tenant of
+// the same name created inside it reads generation 0 and its claims wait.
+//
+// The wait usually ends on the next rehydration-state announcement: a new
+// tenant's member applied state, its seed, and its deferred job list each
+// move once while it rehydrates, and each move is an announce trigger.
+// A request that lands after all three have moved waits for the fixed
+// ten-minute resync instead. The claims stay on the retryable NOT_READY
+// either way, and the seed order holds the same claims while the tenant
+// is still rehydrating.
+func resetTenantPlacementGeneration(ctx context.Context, pool *pgxpool.Pool, req TenantPurgeRequest) error {
+	_, err := pool.Exec(ctx, `
+		UPDATE varroa.tenant_placements
+		SET generation = 0
+		WHERE cluster = $1 AND tenant = $2 AND generation <= $3
+	`, req.Cluster, req.Tenant, req.PlacementGeneration)
+	return err
 }
 
 // purgeTenantJobSchedules deletes every varroa.job_schedules row for
