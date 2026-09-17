@@ -95,6 +95,9 @@
     operationId: createRun
     tags: [Pipelines]
     summary: Requests a new build. Fire and forget — the BFF does not claim the build number.
+    description: >
+      job may omit or repeat the tenant's folder segment; both forms
+      resolve to the same job.
     parameters:
       - $ref: '../components/parameters.yaml#/team'
       - $ref: '../components/parameters.yaml#/job'

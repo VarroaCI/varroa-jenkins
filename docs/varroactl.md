@@ -101,9 +101,9 @@ varroactl lint marker --team team-a --marker .varroa/pipeline.yaml
 
 Use [Controller lifecycle operations](operations/lifecycle.md) for state changes, [Brood operations](operations/brood-operations.md) for fleet actions, [Brood schedules](operations/brood-schedules.md) for recurring work, and the [pipelines tutorial](tutorials/pipelines.md) to trigger a run, read a log, and download an artifact.
 
-`run` splits `<team>/<job>` on the first slash. It percent-encodes the job path, so a job path with its own slashes reaches the server intact. `--param` is repeatable and takes `key=value`. A repeated key is a usage error. `run` mints one client token per invocation, so a retried request runs one build. It prints the run identifier on success. Add `--follow` to wait for the run to appear and stream its log until the run ends. The command exits non-zero when the run's result is not a success.
+`run` splits `<team>/<job>` on the first slash. `<job>` may omit or repeat the team's folder segment; both forms reach the same job. It percent-encodes the job path, so slashes reach the server intact. `--param` is repeatable and takes `key=value`. A repeated key is a usage error. `run` mints one client token per invocation, so a retried request runs one build. It prints the run identifier on success. Add `--follow` to wait for the run to appear and stream its log until the run ends. The command exits non-zero when the run's result is not a success.
 
-`lint marker` reads a [pipeline template](config/pipeline-templates.md) marker file, resolves it against the named team's delivered templates, and prints each finding's severity, path, and message. `--marker` defaults to `.varroa/pipeline.yaml`. The command exits zero when the marker is valid and non-zero when any finding is present, so a pre-commit hook or a pipeline step can gate on it. It contacts no Jenkins controller.
+`lint marker` reads a [pipeline template](config/pipeline-templates.md) marker file, resolves it against the named team's delivered templates, and prints each finding's severity, path, and message. `--marker` defaults to `.varroa/pipeline.yaml`. The command exits zero when the marker is valid and non-zero otherwise, so a pre-commit hook or a pipeline step can gate on it.
 
 ## Work across clusters
 

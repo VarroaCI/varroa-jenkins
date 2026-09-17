@@ -380,14 +380,27 @@ func TestTailLeaseExpiryRacingRenewalKeepsRenewedLease(t *testing.T) {
 }
 
 // TestTailLeaseExpiryRacingRenewalStressNeverLosesAnActiveLease is a
-// concurrency stress test for the same invariant as the test above, this
-// time through the package's own timers under real goroutine scheduling
-// and -race, rather than a hand-sequenced call: with the last operation
-// always a renewal, the lease must never end up cleared by a racing
-// expiry.
+// concurrency stress test for the same invariant as the test above,
+// this time under real goroutine scheduling and -race, rather than a
+// hand-sequenced call: with the last operation always a renewal, the
+// lease must never end up cleared by a racing expiry.
+//
+// Each iteration races a fresh renewal against onTailLeaseExpired
+// called with the control_id the lease held the instant before that
+// renewal — the same information a real timer's closure would have
+// captured moments earlier. expireTailLeaseIfCurrent only clears a
+// lease whose control_id still matches, so once both calls finish the
+// lease is live either way: the expiry wins and clears it, so the
+// renewal then finds none to reuse and starts a fresh one; or the
+// renewal wins first, so the expiry's now-stale control_id no-ops.
+// Joining the pair before the next iteration keeps the race live for
+// the whole run. A real timer would instead need a lease window
+// comfortably above any scheduler stall, closing the window between
+// the loop's last renewal and the assertion below — which then leaves
+// the timer no realistic chance of firing near a renewal at all.
 func TestTailLeaseExpiryRacingRenewalStressNeverLosesAnActiveLease(t *testing.T) {
 	sender := &recordingSender{}
-	h := newTailTestHandler(t, 2*time.Millisecond, time.Minute)
+	h := newTailTestHandler(t, time.Minute, time.Minute)
 	const ns, name = "ns1", "cell1"
 	runID := newTestRunID()
 
@@ -400,9 +413,21 @@ func TestTailLeaseExpiryRacingRenewalStressNeverLosesAnActiveLease(t *testing.T)
 
 	stop := time.Now().Add(200 * time.Millisecond)
 	for time.Now().Before(stop) {
+		lease := h.getExistingTailLease(runID)
+		lease.mu.Lock()
+		controlID := lease.controlID
+		lease.mu.Unlock()
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			h.onTailLeaseExpired(sender.send, runID, ns, name, id)
+		}(controlID)
 		_ = h.handleTailStart(ns, name, sender.send, tailRequest{
 			RunID: runID, Action: "start", JobPath: "folder/job", BuildNumber: 1,
 		})
+		wg.Wait()
 	}
 
 	if !h.isTailActive(runID) {

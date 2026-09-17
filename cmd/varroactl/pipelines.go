@@ -40,6 +40,8 @@ func registerPipelineCommands(root *cobra.Command) {
 		Long: `Trigger a pipeline run.
 
 <team>/<job> splits on the first slash. <job> may hold further slashes.
+<job> may omit the team's own folder segment; the server adds it. <job>
+may also repeat the folder segment; both forms name the same job.
 --param is repeatable. It takes key=value. --follow waits for the run to
 appear. It then streams the log until the run ends. It exits non-zero
 when the result is not a success.`,

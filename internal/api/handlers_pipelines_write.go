@@ -61,44 +61,76 @@ func decodeJSONBody(body io.Reader, v any) error {
 // --- Task 4.1: tenant narrowing for a write ---
 
 // selectWriteTenant implements design D3's step 1: narrow refs (already
-// read-admitted by TenantResolver.Resolve) to the tenants whose folder
-// prefixes jobPath, because a job path starts with its tenant folder.
-// One surviving tenant is used. Two or more break on an explicit
-// cluster value; a remaining tie answers 409 naming every candidate,
-// and no surviving tenant answers 404. The first candidate is never
-// taken silently.
-func selectWriteTenant(refs []TenantRef, jobPath, cluster string) (TenantRef, *ServiceError) {
-	var survivors []TenantRef
-	for _, ref := range refs {
-		if withinFolder(ref.Folder, jobPath) {
-			survivors = append(survivors, ref)
-		}
-	}
+// read-admitted by TenantResolver.Resolve) to the tenant that hosts
+// jobPath, and return the folder-qualified job path to use from that
+// point on. A jobPath that already starts with a candidate's folder is
+// the long form. A jobPath that omits it is the short form: team names
+// the tenant already, so the one candidate whose folder equals team
+// hosts jobPath under that folder. One surviving tenant is used. Two or
+// more break on an explicit cluster value; a remaining tie answers 409
+// naming every candidate, and no surviving tenant answers 404 naming
+// the expected shape. The first candidate is never taken silently.
+func selectWriteTenant(refs []TenantRef, team, jobPath, cluster string) (TenantRef, string, *ServiceError) {
+	survivors, paths := matchingWriteTenants(refs, team, jobPath)
 	if len(survivors) == 0 {
-		return TenantRef{}, &ServiceError{Status: http.StatusNotFound, Message: "no tenant hosts job path " + jobPath}
+		return TenantRef{}, "", &ServiceError{
+			Status:  http.StatusNotFound,
+			Message: fmt.Sprintf("no tenant hosts job path %q; expected <team>/<job path below the tenant folder>", jobPath),
+		}
 	}
 	if len(survivors) == 1 {
-		return survivors[0], nil
+		return survivors[0], paths[0], nil
 	}
 	if cluster != "" {
-		var selected []TenantRef
-		for _, ref := range survivors {
+		var selectedRef TenantRef
+		var selectedPath string
+		matches := 0
+		for i, ref := range survivors {
 			if ref.Cluster == cluster {
-				selected = append(selected, ref)
+				selectedRef, selectedPath = ref, paths[i]
+				matches++
 			}
 		}
-		if len(selected) == 1 {
-			return selected[0], nil
+		if matches == 1 {
+			return selectedRef, selectedPath, nil
 		}
 	}
 	names := make([]string, len(survivors))
 	for i, ref := range survivors {
 		names[i] = ref.Cluster + "/" + ref.Tenant
 	}
-	return TenantRef{}, &ServiceError{
+	return TenantRef{}, "", &ServiceError{
 		Status:  http.StatusConflict,
 		Message: fmt.Sprintf("job path %q is ambiguous across tenants %s; name a cluster to select one", jobPath, strings.Join(names, ", ")),
 	}
+}
+
+// matchingWriteTenants returns every ref of refs that hosts jobPath,
+// paired with the folder-qualified job path to use for that ref. It
+// tries the long form first: jobPath already inside a ref's folder. A
+// direct match wins outright, since an explicit folder-qualified path
+// names its tenant without guessing. Only when no ref matches directly
+// does it try the short form: jobPath alone, prefixed with the one
+// ref whose folder equals team. team already names the tenant, so a
+// folder that disagrees with it is never a short-form candidate.
+func matchingWriteTenants(refs []TenantRef, team, jobPath string) ([]TenantRef, []string) {
+	var direct []TenantRef
+	var directPaths []string
+	for _, ref := range refs {
+		if withinFolder(ref.Folder, jobPath) {
+			direct = append(direct, ref)
+			directPaths = append(directPaths, jobPath)
+		}
+	}
+	if len(direct) > 0 {
+		return direct, directPaths
+	}
+	for _, ref := range refs {
+		if ref.Folder != "" && ref.Folder == team {
+			return []TenantRef{ref}, []string{ref.Folder + "/" + jobPath}
+		}
+	}
+	return nil, nil
 }
 
 // --- Task 4.2: the client-token validator (design D3a) ---
@@ -255,7 +287,7 @@ func (s *Server) createRun(ctx context.Context, claims *auth.Claims, team, jobPa
 	if serr != nil {
 		return "", "", TenantRef{}, serr
 	}
-	ref, serr = selectWriteTenant(refs, jobPath, cluster)
+	ref, jobPath, serr = selectWriteTenant(refs, team, jobPath, cluster)
 	if serr != nil {
 		return "", "", TenantRef{}, serr
 	}

@@ -17403,6 +17403,7 @@
         ]
       },
       "post": {
+        "description": "job may omit or repeat the tenant's folder segment; both forms resolve to the same job.\n",
         "operationId": "createRun",
         "parameters": [
           {

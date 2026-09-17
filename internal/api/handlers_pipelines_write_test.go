@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -142,18 +143,39 @@ func TestSelectWriteTenant(t *testing.T) {
 	openB := TenantRef{Cluster: "hive", Tenant: "open-b", Folder: ""}
 
 	cases := []struct {
-		name       string
-		refs       []TenantRef
-		jobPath    string
-		cluster    string
-		wantRef    TenantRef
-		wantStatus int
+		name        string
+		refs        []TenantRef
+		team        string
+		jobPath     string
+		cluster     string
+		wantRef     TenantRef
+		wantPath    string
+		wantStatus  int
+		wantMessage string
 	}{
 		{
-			name:    "one surviving tenant is used",
-			refs:    []TenantRef{teamA, teamB},
-			jobPath: "team-a/checkout",
-			wantRef: teamA,
+			name:     "the long form already carries the tenant folder",
+			refs:     []TenantRef{teamA, teamB},
+			team:     "team-a",
+			jobPath:  "team-a/checkout",
+			wantRef:  teamA,
+			wantPath: "team-a/checkout",
+		},
+		{
+			name:     "the short form omits the tenant folder",
+			refs:     []TenantRef{teamA},
+			team:     "team-a",
+			jobPath:  "checkout",
+			wantRef:  teamA,
+			wantPath: "team-a/checkout",
+		},
+		{
+			name:     "the short form picks the candidate matching team, not the first one",
+			refs:     []TenantRef{teamA, teamB},
+			team:     "team-b",
+			jobPath:  "checkout",
+			wantRef:  teamB,
+			wantPath: "team-b/checkout",
 		},
 		{
 			name:       "an ambiguous write is refused, never guessed",
@@ -169,22 +191,27 @@ func TestSelectWriteTenant(t *testing.T) {
 			wantRef: openB,
 		},
 		{
-			name:       "no surviving tenant answers 404",
-			refs:       []TenantRef{teamA, teamB},
-			jobPath:    "team-c/checkout",
-			wantStatus: http.StatusNotFound,
+			name:        "no surviving tenant answers 404 naming the expected shape",
+			refs:        []TenantRef{teamA, teamB},
+			team:        "team-c",
+			jobPath:     "team-c/checkout",
+			wantStatus:  http.StatusNotFound,
+			wantMessage: `no tenant hosts job path "team-c/checkout"; expected <team>/<job path below the tenant folder>`,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ref, serr := selectWriteTenant(tc.refs, tc.jobPath, tc.cluster)
+			ref, jobPath, serr := selectWriteTenant(tc.refs, tc.team, tc.jobPath, tc.cluster)
 			if tc.wantStatus != 0 {
 				if serr == nil {
 					t.Fatalf("want status %d, got a resolved ref %+v", tc.wantStatus, ref)
 				}
 				if serr.Status != tc.wantStatus {
 					t.Fatalf("status = %d, want %d (%s)", serr.Status, tc.wantStatus, serr.Message)
+				}
+				if tc.wantMessage != "" && serr.Message != tc.wantMessage {
+					t.Fatalf("message = %q, want %q", serr.Message, tc.wantMessage)
 				}
 				return
 			}
@@ -193,6 +220,9 @@ func TestSelectWriteTenant(t *testing.T) {
 			}
 			if ref != tc.wantRef {
 				t.Fatalf("ref = %+v, want %+v", ref, tc.wantRef)
+			}
+			if tc.wantPath != "" && jobPath != tc.wantPath {
+				t.Fatalf("jobPath = %q, want %q", jobPath, tc.wantPath)
 			}
 		})
 	}
@@ -267,6 +297,120 @@ func TestHandleCreateRun_PublishesTheSuppliedToken(t *testing.T) {
 	}
 	if cmd.TriggerBuild.IntentKey != wantIntentKey {
 		t.Fatalf("published intent_key = %q, want %q", cmd.TriggerBuild.IntentKey, wantIntentKey)
+	}
+}
+
+// placedTeamWriteServer assembles a *Server wired for a placed pipelines
+// Team named "payments" whose folder is "payments", granted read and
+// write, over the caller's mite transport. It mirrors writeTestServer
+// but exercises the placed-Team path selectWriteTenant's short-form fix
+// covers, rather than a folder-less synthetic controller tenant.
+func placedTeamWriteServer(t *testing.T, mt transport.Transport) *Server {
+	t.Helper()
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"cell-a": {ObjectMeta: metav1.ObjectMeta{Name: "cell-a", Namespace: "varroa-cells"}},
+	}
+	store := storeFromFake(client)
+	seedTeam(t, store, placedTeamObject("payments", "core", "varroa-cells", "cell-a"))
+	authz := pipelineGrantAuthorizer([]string{"read", "write"}, "payments")
+	brood := newFakeBrood(client)
+	deps := &Dependencies{
+		Store:             store,
+		Client:            client,
+		Brood:             brood,
+		Authorizer:        authz,
+		RecordStore:       newFakeRecordReader(),
+		TenantResolver:    NewTeamTenantResolver(store, brood, authz),
+		MiteRegistry:      mt,
+		Logger:            slog.Default(),
+		OperatorNamespace: "test-ns",
+	}
+	return NewServer(deps)
+}
+
+// TestHandleCreateRun_AcceptsBothJobPathForms asserts POST
+// /pipelines/{team}/jobs/{job}/runs resolves a placed Team's tenant, and
+// publishes the same folder-qualified job path, whether the caller
+// repeats the tenant folder (the long form) or omits it (the short
+// form).
+func TestHandleCreateRun_AcceptsBothJobPathForms(t *testing.T) {
+	cases := []struct {
+		name string
+		job  string
+	}{
+		{name: "the long form repeats the tenant folder", job: "payments/checkout/build"},
+		{name: "the short form omits the tenant folder", job: "checkout/build"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mt := &fakeTriggerTransport{}
+			srv := placedTeamWriteServer(t, mt)
+			req := doWriteRequest("/pipelines/payments/jobs/"+tc.job+"/runs",
+				map[string]string{"team": "payments", "job": tc.job}, testClaims(), createRunRequest{})
+			rec := httptest.NewRecorder()
+			srv.handleCreateRun(rec, req)
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, body = %s, want 202", rec.Code, rec.Body.String())
+			}
+			calls := mt.calls()
+			if len(calls) != 1 {
+				t.Fatalf("published %d commands, want 1", len(calls))
+			}
+			const wantJobPath = "payments/checkout/build"
+			if got := calls[0].cmd.TriggerBuild.JobPath; got != wantJobPath {
+				t.Fatalf("published job_path = %q, want %q", got, wantJobPath)
+			}
+		})
+	}
+}
+
+// fixedTenantResolver answers Resolve with a fixed ref list for any
+// team, so a handler test can drive selectWriteTenant's own decisions
+// (including the 404 no candidate can reach) without depending on
+// TeamTenantResolver's folder-equals-team invariant.
+type fixedTenantResolver struct {
+	refs []TenantRef
+}
+
+func (f fixedTenantResolver) Resolve(context.Context, *auth.Claims, string) ([]TenantRef, error) {
+	return f.refs, nil
+}
+
+func (f fixedTenantResolver) ResolveRun(context.Context, *auth.Claims, recordstore.Run) (TenantRef, error) {
+	return TenantRef{}, nil
+}
+
+// TestHandleCreateRun_UnresolvedJobPathNamesTheExpectedShape asserts a
+// job path no candidate tenant can host, in either form, answers 404
+// naming the accepted shape rather than a bare "not found".
+func TestHandleCreateRun_UnresolvedJobPathNamesTheExpectedShape(t *testing.T) {
+	deps := &Dependencies{
+		RecordStore: newFakeRecordReader(),
+		TenantResolver: fixedTenantResolver{refs: []TenantRef{
+			{Cluster: "core", Tenant: "team-a", Folder: "team-a"},
+			{Cluster: "core", Tenant: "team-b", Folder: "team-b"},
+		}},
+		Logger: slog.Default(),
+	}
+	srv := NewServer(deps)
+
+	req := doWriteRequest("/pipelines/payments/jobs/other-team/checkout/runs",
+		map[string]string{"team": "payments", "job": "other-team/checkout"}, testClaims(), createRunRequest{})
+	rec := httptest.NewRecorder()
+	srv.handleCreateRun(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s, want 404", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	const wantSubstring = "expected <team>/<job path below the tenant folder>"
+	if !strings.Contains(body.Error, wantSubstring) {
+		t.Fatalf("error = %q, want it to contain %q", body.Error, wantSubstring)
 	}
 }
 

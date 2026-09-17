@@ -234,6 +234,34 @@ func TestRunPipelineReturnsRunIDAndIntentKey(t *testing.T) {
 	}
 }
 
+// run_pipeline accepts a job path that omits the tenant folder, the
+// short form, and publishes the same folder-qualified job path the long
+// form would.
+func TestRunPipelineAcceptsTheShortFormJobPath(t *testing.T) {
+	reader := newFakePipelineReader()
+	sent := &fakePipelineTransport{}
+	deps := &api.Dependencies{
+		Authorizer:     pipelinesTestAuthorizer("write"),
+		RecordStore:    reader,
+		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", Team: "team-a", Folder: "team-a"}}},
+		MiteRegistry:   sent,
+	}
+
+	tr := callPipelineTool(t, deps, "run_pipeline", map[string]interface{}{
+		"team": "team-a", "job": "build",
+	})
+	if tr.IsError {
+		t.Fatalf("run_pipeline returned error: %v", tr.Content)
+	}
+	if len(sent.sent) != 1 {
+		t.Fatalf("published %d commands, want 1", len(sent.sent))
+	}
+	const wantJobPath = "team-a/build"
+	if got := sent.sent[0].TriggerBuild.JobPath; got != wantJobPath {
+		t.Errorf("published job_path = %q, want %q", got, wantJobPath)
+	}
+}
+
 // A read-only caller cannot start a build (mcp-jenkins-proxy scenario).
 func TestRunPipelineDeniesReadOnlyCaller(t *testing.T) {
 	sent := &fakePipelineTransport{}

@@ -12141,6 +12141,8 @@ paths:
       tags:
       - Pipelines
     post:
+      description: |
+        job may omit or repeat the tenant's folder segment; both forms resolve to the same job.
       operationId: createRun
       parameters:
       - $ref: '#/components/parameters/components_parameters_team'
