@@ -30,6 +30,8 @@ final class PluginCounters {
     static final String LOG_CHUNKS_DROPPED = "varroa_plugin_log_chunks_dropped";
     static final String LOG_QUEUES_STUCK = "varroa_plugin_log_queues_stuck";
     static final String CLAIMS_NO_REVISION = "varroa_plugin_claims_no_revision";
+    static final String RUN_STATE_PUSHED = "varroa_plugin_run_state_pushed";
+    static final String RUN_STATE_REFUSED = "varroa_plugin_run_state_refused";
 
     private static final ConcurrentHashMap<String, AtomicLong> OWNED = new ConcurrentHashMap<>();
 
@@ -55,6 +57,8 @@ final class PluginCounters {
         out.put(LOG_CHUNKS_DROPPED, ownedValue(LOG_CHUNKS_DROPPED));
         out.put(LOG_QUEUES_STUCK, LogChunkBuffer.stuckQueueWarningCount());
         out.put(CLAIMS_NO_REVISION, ownedValue(CLAIMS_NO_REVISION));
+        out.put(RUN_STATE_PUSHED, ownedValue(RUN_STATE_PUSHED));
+        out.put(RUN_STATE_REFUSED, ownedValue(RUN_STATE_REFUSED));
         return out;
     }
 

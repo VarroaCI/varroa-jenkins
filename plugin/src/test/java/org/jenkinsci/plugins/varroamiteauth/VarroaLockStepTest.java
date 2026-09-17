@@ -1,13 +1,18 @@
 package org.jenkinsci.plugins.varroamiteauth;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.cloudbees.hudson.plugins.folder.Folder;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
 import hudson.model.Result;
+import hudson.model.Run;
 
 import java.io.ByteArrayOutputStream;
 import java.io.OutputStream;
@@ -19,6 +24,7 @@ import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -26,6 +32,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
+import org.jenkinsci.plugins.workflow.steps.StepContext;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
@@ -269,6 +276,48 @@ public class VarroaLockStepTest {
             }
         }
         assertEquals(1, warnings);
+    }
+
+    // ---- D15: onResume restores the held token ----
+
+    /**
+     * {@code VarroaActiveLocksAction}'s stack is transient, so a resumed
+     * build restores it empty. {@code onResume} must push the held name
+     * and fence token back before {@code varroa.lock.token} reads them
+     * again. This drives {@code Execution.onResume()} directly, the same
+     * way {@link #concurrentReleaseAttemptsReleaseTheLockExactlyOnce()}
+     * drives {@code releaseLock()} directly: the defect is in the resume
+     * bookkeeping itself, not in the acquire/renew network calls, so no
+     * lock server is needed.
+     */
+    @Test
+    public void onResumeRestoresTheHeldNameAndFenceToken() throws Exception {
+        WorkflowJob p = newPipeline("echo 'noop'");
+        WorkflowRun run = buildSync(p, "run-resume", Result.SUCCESS);
+
+        assertNull("no lock is held before the resume restores one",
+                VarroaActiveLocksAction.currentTokenMap(run));
+
+        StepContext context = mock(StepContext.class);
+        when(context.get(Run.class)).thenReturn(run);
+
+        VarroaLockStep step = new VarroaLockStep("resume-test");
+        VarroaLockStep.Execution exec = new VarroaLockStep.Execution(step, context);
+
+        java.lang.reflect.Field qualifiedNameField = VarroaLockStep.Execution.class.getDeclaredField("qualifiedName");
+        qualifiedNameField.setAccessible(true);
+        qualifiedNameField.set(exec, "alpha/resume-test");
+
+        java.lang.reflect.Field fenceTokenField = VarroaLockStep.Execution.class.getDeclaredField("fenceToken");
+        fenceTokenField.setAccessible(true);
+        fenceTokenField.set(exec, 42L);
+
+        exec.onResume();
+
+        Map<String, Object> token = VarroaActiveLocksAction.currentTokenMap(run);
+        assertNotNull("onResume must restore the held lock's entry", token);
+        assertEquals("alpha/resume-test", token.get("name"));
+        assertEquals(42L, token.get("token"));
     }
 
     // ---- released races across the Timer thread and stop()/finish() ----

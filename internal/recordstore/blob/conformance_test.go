@@ -57,6 +57,49 @@ func RunConformance(
 		}
 	})
 
+	t.Run("ReplaceOverwritesStoredObject", func(t *testing.T) {
+		key := "conformance/replace-existing"
+
+		if err := store.Put(ctx, key, strings.NewReader("first bytes"), logOpts); err != nil {
+			t.Fatalf("put: %v", err)
+		}
+		if err := store.Replace(ctx, key, strings.NewReader("second"), logOpts); err != nil {
+			t.Fatalf("replace: got %v, want nil", err)
+		}
+		r, err := store.NewRangeReader(ctx, key, 0, -1)
+		if err != nil {
+			t.Fatalf("NewRangeReader: %v", err)
+		}
+		defer func() { _ = r.Close() }()
+		got, err := io.ReadAll(r)
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		if string(got) != "second" {
+			t.Fatalf("got %q, want %q", got, "second")
+		}
+	})
+
+	t.Run("ReplaceWritesEmptyKey", func(t *testing.T) {
+		key := "conformance/replace-empty"
+
+		if err := store.Replace(ctx, key, strings.NewReader("only bytes"), logOpts); err != nil {
+			t.Fatalf("replace: got %v, want nil", err)
+		}
+		r, err := store.NewRangeReader(ctx, key, 0, -1)
+		if err != nil {
+			t.Fatalf("NewRangeReader: %v", err)
+		}
+		defer func() { _ = r.Close() }()
+		got, err := io.ReadAll(r)
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		if string(got) != "only bytes" {
+			t.Fatalf("got %q, want %q", got, "only bytes")
+		}
+	})
+
 	t.Run("AppendIdenticalRetrySucceeds", func(t *testing.T) {
 		key := "conformance/append-retry"
 		data := []byte("same bytes")

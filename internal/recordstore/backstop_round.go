@@ -37,6 +37,10 @@ type BackstopConfig struct {
 	BackstopMetrics *BackstopMetrics
 	// ActionMetrics counts every action this round publishes.
 	ActionMetrics *ActionMetrics
+	// StateDeleter removes a marked run's replicated state. A nil
+	// StateDeleter skips the delete, the same rule MaintenanceConfig's
+	// LogStore follows. cmd/recorder passes a blob.Store value.
+	StateDeleter ObjectDeleter
 	// Now returns the round's reference time. A nil Now defaults to
 	// time.Now in UTC, so a test can pin the round to a fixed instant.
 	Now func() time.Time
@@ -93,8 +97,14 @@ func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c
 	logger := cfg.logger()
 
 	grace := cfg.grace()
+	// The mesh takeover runs before the sweep, so an armed run is
+	// shielded before the sweep reads it as a candidate.
+	if err := runTakeoverRound(ctx, pool, conn, cfg.SweepMetrics, cfg.ActionMetrics, now, grace, logger); err != nil {
+		logger.Warn("resume takeover round failed", "error", err)
+	}
+
 	if _, err := SweepInterruptedRuns(ctx, pool, conn, cfg.SweepMetrics, cfg.ActionMetrics,
-		cfg.MaxSweepPending, now, grace, logger); err != nil {
+		cfg.StateDeleter, cfg.MaxSweepPending, now, grace, logger); err != nil {
 		logger.Warn("interrupted sweep failed", "error", err)
 	}
 

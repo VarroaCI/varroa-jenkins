@@ -40,7 +40,7 @@ const maxDeadInstances = 10
 // grace is the confirmed-gone grace the announce hook's own marking,
 // fleet-lock release, and intent re-fire apply.
 func RegisterTenantSyncResponder(conn *bus.Conn, pool *pgxpool.Pool, grace time.Duration,
-	logger *slog.Logger) (*bus.Sub, error) {
+	stateDeleter ObjectDeleter, logger *slog.Logger) (*bus.Sub, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -53,7 +53,7 @@ func RegisterTenantSyncResponder(conn *bus.Conn, pool *pgxpool.Pool, grace time.
 		logger.Warn("action metrics registration failed; the tenant sync responder starts anyway", "error", err)
 	}
 	handler := func(data []byte) []byte {
-		return handleTenantSync(conn, logger, pool, metrics, actionMetrics, grace, data)
+		return handleTenantSync(conn, logger, pool, metrics, actionMetrics, stateDeleter, grace, data)
 	}
 	return conn.SubscribeRequest(bus.TenantSyncSubject, tenantSyncQueueGroup, handler)
 }
@@ -62,7 +62,7 @@ func RegisterTenantSyncResponder(conn *bus.Conn, pool *pgxpool.Pool, grace time.
 // Kind. A body the decoder rejects, and a kind outside the two known
 // values, both answer an error reply and write nothing.
 func handleTenantSync(conn *bus.Conn, logger *slog.Logger, pool *pgxpool.Pool, metrics *InterruptedMetrics,
-	actionMetrics *ActionMetrics, grace time.Duration, data []byte) []byte {
+	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, grace time.Duration, data []byte) []byte {
 	var req TenantSyncRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		logger.Warn("tenant sync request decode failed", "error", err)
@@ -74,7 +74,7 @@ func handleTenantSync(conn *bus.Conn, logger *slog.Logger, pool *pgxpool.Pool, m
 
 	switch req.Kind {
 	case TenantSyncKindAnnounce:
-		resp, err := handleTenantSyncAnnounce(ctx, conn, pool, metrics, actionMetrics, grace, logger, req)
+		resp, err := handleTenantSyncAnnounce(ctx, conn, pool, metrics, actionMetrics, stateDeleter, grace, logger, req)
 		if err != nil {
 			logger.Error("tenant sync announce failed", "cluster", req.Cluster, "tenant", req.Tenant, "error", err)
 			return marshalTenantSyncResponse(logger, TenantSyncResponse{Error: "tenant sync announce failed"})
@@ -154,7 +154,7 @@ type tenantPlacementRow struct {
 // count in the response's InterruptedMarked field (design D9). conn and
 // metrics feed that marking; a nil metrics counts nothing.
 func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool.Pool, metrics *InterruptedMetrics,
-	actionMetrics *ActionMetrics, grace time.Duration, logger *slog.Logger,
+	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, grace time.Duration, logger *slog.Logger,
 	req TenantSyncRequest) (TenantSyncResponse, error) {
 	if req.Cluster == "" || req.Tenant == "" {
 		return TenantSyncResponse{}, errors.New("announce request needs a cluster and a tenant")
@@ -223,10 +223,20 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 		policy:         policy,
 	}
 
+	// The mesh takeover runs before the marking, so an armed run is
+	// shielded before the marking sees it. No rule depends on that
+	// order: the dispatch tests its own window, and the marking write
+	// tests the same window against the committed record.
+	if _, takeoverErr := TakeOverLostRuns(ctx, pool, conn, metrics, actionMetrics, req.Cluster, req.Tenant,
+		grace, time.Now(), logger); takeoverErr != nil {
+		logger.Error("resume takeover after announce failed",
+			"cluster", req.Cluster, "tenant", req.Tenant, "error", takeoverErr)
+	}
+
 	var interruptedMarked int
 	if old.cell != req.Cell || old.cellInstance != req.CellInstance {
-		n, markErr := MarkMovedRunsForTenant(ctx, pool, conn, metrics, actionMetrics, req.Cluster, req.Tenant,
-			row, time.Now(), grace, logger)
+		n, markErr := MarkMovedRunsForTenant(ctx, pool, conn, metrics, actionMetrics, stateDeleter,
+			req.Cluster, req.Tenant, row, time.Now(), grace, logger)
 		if markErr != nil {
 			logger.Error("interrupted-run marking after announce failed",
 				"cluster", req.Cluster, "tenant", req.Tenant, "error", markErr)

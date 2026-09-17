@@ -2,7 +2,9 @@ package org.jenkinsci.plugins.varroamiteauth;
 
 import net.sf.json.JSONObject;
 
+import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -136,6 +138,84 @@ public class MiteLoopbackClient {
         } catch (Exception e) {
             LOGGER.log(Level.FINE, "MiteLoopbackClient: failed to post to " + path, e);
             return new Response(0, null, e.getMessage() != null ? e.getMessage() : "transport error");
+        }
+    }
+
+    // ---- Run-state route: headers and a raw gzip body, never JSON ----
+
+    /**
+     * Posts one run-state chunk to {@code url}. The metadata rides nine
+     * {@code X-Varroa-*} headers and the body is the raw gzip of that
+     * chunk, because base64 inside a JSON body would add a third to
+     * every byte of a multi-megabyte file.
+     *
+     * <p>A {@code 503} the mite raises from a gateway refusal carries
+     * {@code X-Varroa-State-Reason}, and a busy answer also carries
+     * {@code X-Varroa-Pause-Ms}.
+     */
+    public RunStateAnswer postRunState(String url, JSONObject record, byte[] gzipBody) {
+        RunStateAnswer first = attemptRunState(url, record, gzipBody, tokenFile.token());
+        if (first.statusCode == 401) {
+            return attemptRunState(url, record, gzipBody, tokenFile.onUnauthorized());
+        }
+        return first;
+    }
+
+    private RunStateAnswer attemptRunState(String url, JSONObject record, byte[] gzipBody, String token) {
+        try {
+            HttpRequest.Builder b = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(readTimeout)
+                    .header("Content-Type", "application/octet-stream")
+                    .header("X-Varroa-Run-Id", record.getString("run_id"))
+                    .header("X-Varroa-Job-Path",
+                            URLEncoder.encode(record.getString("job_path"), StandardCharsets.UTF_8))
+                    .header("X-Varroa-Build-Number", Long.toString(record.getLong("build_number")))
+                    .header("X-Varroa-Relpath",
+                            URLEncoder.encode(record.getString("relpath"), StandardCharsets.UTF_8))
+                    .header("X-Varroa-State-Gen", Long.toString(record.getLong("state_gen")))
+                    .header("X-Varroa-Seq", Long.toString(record.getLong("seq")))
+                    .header("X-Varroa-Total", Long.toString(record.getLong("total")))
+                    .header("X-Varroa-Raw-Size", Long.toString(record.getLong("raw_size")))
+                    .header("X-Varroa-Object-Size", Long.toString(record.getLong("object_size")))
+                    .header("X-Varroa-Pusher-Epoch", Long.toString(record.getLong("pusher_epoch")))
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(gzipBody));
+            if (token != null) {
+                b.header("Authorization", "Bearer " + token);
+            }
+            HttpResponse<byte[]> resp = client().send(b.build(), HttpResponse.BodyHandlers.ofByteArray());
+            String reason = resp.headers().firstValue("X-Varroa-State-Reason").orElse(null);
+            long pause = resp.headers().firstValue("X-Varroa-Pause-Ms")
+                    .map(MiteLoopbackClient::parseLongOrZero).orElse(0L);
+            return new RunStateAnswer(resp.statusCode(), reason, pause);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOGGER.log(Level.FINE, "MiteLoopbackClient: interrupted posting a run-state chunk", e);
+            return new RunStateAnswer(0, null, 0);
+        } catch (IOException | RuntimeException e) {
+            LOGGER.log(Level.FINE, "MiteLoopbackClient: failed to post a run-state chunk", e);
+            return new RunStateAnswer(0, null, 0);
+        }
+    }
+
+    private static long parseLongOrZero(String raw) {
+        try {
+            return Long.parseLong(raw.trim());
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
+    }
+
+    /** One run-state post's outcome: a status code and the mite's reason. */
+    public static final class RunStateAnswer {
+        public final int statusCode;
+        public final String reason;
+        public final long pauseMillis;
+
+        public RunStateAnswer(int statusCode, String reason, long pauseMillis) {
+            this.statusCode = statusCode;
+            this.reason = reason;
+            this.pauseMillis = pauseMillis;
         }
     }
 

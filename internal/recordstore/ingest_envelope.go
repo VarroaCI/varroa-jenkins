@@ -6,12 +6,12 @@ import (
 )
 
 // Ingest kind constants. The payload on builds.<cluster>.<ns>.<cell>
-// carries exactly one of these eleven values in its "kind" field: ten
-// run.* kinds, and the cell-scoped job.schedules kind C11's gateway
-// publishes. C2 maps its protobuf BuildEvent onto eight of the run.*
-// kinds; the gateway publishes run.trigger_failed from a failed
-// TRIGGER_BUILD result, and run.trigger_accepted from a successful one,
-// instead.
+// carries exactly one of these twelve values in its "kind" field:
+// eleven run.* kinds, and the cell-scoped job.schedules kind C11's
+// gateway publishes. C2 maps its protobuf BuildEvent onto eight of the
+// run.* kinds; the gateway publishes run.trigger_failed from a failed
+// TRIGGER_BUILD result, run.trigger_accepted from a successful one, and
+// run.state from each run-state push outcome, instead.
 const (
 	KindRunStarted   = "run.started"
 	KindRunStage     = "run.stage"
@@ -30,7 +30,11 @@ const (
 	// arrive before any claim, so the recorder routes it before the
 	// intent read, beside run.trigger_failed.
 	KindRunTriggerAccepted = "run.trigger_accepted"
-	KindJobSchedules       = "job.schedules"
+	// KindRunState records one run-state push outcome. The gateway
+	// publishes it after it stores a file, and after it refuses a push
+	// because the run passed its byte cap.
+	KindRunState     = "run.state"
+	KindJobSchedules = "job.schedules"
 )
 
 // ingestKinds lists every kind the recorder accepts. A kind outside this
@@ -46,10 +50,11 @@ var ingestKinds = map[string]bool{
 	KindRunHeartbeat:       true,
 	KindRunTriggerFailed:   true,
 	KindRunTriggerAccepted: true,
+	KindRunState:           true,
 	KindJobSchedules:       true,
 }
 
-// IsKnownKind reports whether kind is one of the eleven ingest kinds.
+// IsKnownKind reports whether kind is one of the twelve ingest kinds.
 func IsKnownKind(kind string) bool {
 	return ingestKinds[kind]
 }
@@ -105,6 +110,19 @@ type RunCompletedPayload struct {
 	Result     *string    `json:"result,omitempty"`
 	EndedAt    *time.Time `json:"ended_at,omitempty"`
 	DurationMs *int64     `json:"duration_ms,omitempty"`
+}
+
+// RunStatePayload is the payload of a run.state envelope. It takes one
+// of two shapes. A stored file carries RelPath, Bytes, Seq, and
+// StateGen, where Bytes is the whole stored object's inflated size. A
+// refused push carries RejectedReason alone, because the gateway wrote
+// no object for it.
+type RunStatePayload struct {
+	RelPath        string `json:"relpath,omitempty"`
+	Bytes          int64  `json:"bytes,omitempty"`
+	Seq            int64  `json:"seq,omitempty"`
+	StateGen       int64  `json:"state_gen,omitempty"`
+	RejectedReason string `json:"rejected_reason,omitempty"`
 }
 
 // RunTriggerFailedPayload is the payload of a run.trigger_failed

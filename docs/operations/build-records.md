@@ -81,14 +81,12 @@ the `Cluster` resource without the operator present, so a render never needs a l
 | `varroa_gateway` | CloudNativePG, as a managed role | the gateway, only in `postgres` blob mode; reads every table and inserts log chunks |
 
 `varroa_gateway` holds no `UPDATE` or `DELETE` on any table, and no default `INSERT` privilege on
-future tables: it can insert only into `varroa.log_chunks`, the parent of the monthly log-chunk
-partitions, and that grant reaches every partition created after it automatically. The recorder
-stays the only writer of every other table.
+future tables: it inserts only into `varroa.log_chunks`, and that grant reaches every later
+partition automatically. The recorder stays the only writer of every other table.
 
-`external` mode skips all three roles. It uses one DSN for the recorder, the BFF, and the
-gateway. Point `existingSecret` at a role that owns schema `varroa`: it must create the schema,
-run migrations, and read and write every table. The read-only privileges of `varroa_client` or
-`varroa_gateway` are not enough, because the recorder shares this same role.
+`external` mode skips all three roles and uses one DSN for the recorder, the BFF, and the gateway.
+Point `existingSecret` at a role that owns schema `varroa`: it must create the schema, run
+migrations, and read and write every table.
 
 ## Retention
 
@@ -105,8 +103,8 @@ long a build's row, stages, and test summary stay queryable. `logs` and `artifac
 long their blob content stays queryable, independent of `runs`.
 
 Retention rounds up to a month boundary, because the recorder drops a whole monthly partition
-instead of deleting rows one at a time. A `runs` value of `365d` keeps a build for 365 to 396
-days, depending on where in the month the build ran. `logs` and `artifacts` round the same way.
+instead of deleting rows one at a time. A `runs` value of `365d` therefore keeps a build for 365
+to 396 days.
 
 The build-number watermark is permanent. Retention never deletes it, even after every run of a
 job expires. A build number is never reused.
@@ -122,36 +120,25 @@ Jenkins can refuse a build trigger. The record store then holds one run whose re
 | `JOB_NOT_BUILDABLE` | The job exists, but it cannot start a build. |
 | `TRIGGER_REJECTED` | The controller refused the trigger for another reason. |
 
-The run page also shows the error text the controller reported.
+The run page also shows the error text the controller reported. Such a run holds no build number,
+no log, and no stage, because no build started. `Re-run` starts a fresh run with each parameter's
+declared default.
 
-Such a run holds no build number, no log, and no stage. No build started, so there is nothing to
-show. `Re-run` starts a fresh run, with each parameter's declared default.
-
-A `TRIGGER_FAILED` run counts in no job statistic. It changes no pass rate, no result count, no
-median duration, and no last-build tile. It still appears in the job's run list, and a run list
-filtered on the result `TRIGGER_FAILED` returns it.
-
-Retention treats the run like every other run. The `runs` value above bounds it.
+A `TRIGGER_FAILED` run counts in no job statistic: no pass rate, no result count, no median
+duration, and no last-build tile. It still appears in the job's run list, and retention bounds it
+under the `runs` value above.
 
 ## A trigger that a cell loses
 
 A cell pod can roll before a build Jenkins accepted onto its queue starts. The record store then
-holds one run whose status is `QUEUED`, with no build number. The run page shows `Queued` as soon
-as the record exists.
-
-The recorder marks the run interrupted once its accepting cell instance is confirmed gone for
-five minutes, with reason `cell-rolled`. The run page names the reason and states that the build
-never started on the cell.
-
-The recorder publishes no automatic retry for a queued run, because the record holds no build
-parameters. `Re-run` starts the build with each parameter's declared default.
+holds one run whose status is `QUEUED`, with no build number, and the run page shows `Queued`.
+[Cell loss](cell-loss.md) states how the recorder marks and re-fires such a run. Retention treats
+it like every other run, under the `runs` value above.
 
 Counters: `varroa.gateway.trigger_accepted`, `recorder_ingest_trigger_accepted_total` (a
 `stored` attribute), and `recorder_interrupted_marked_total` (a `status` attribute, `queued` or
 `running`). `recorder_ingest_superseded_start_total` counts a dropped late `run.started`; see
 [Build claims](build-claims.md).
-
-Retention treats the run like every other run. The `runs` value above bounds it.
 
 ## Activity history
 
@@ -169,16 +156,14 @@ recordStore:
     activity: 30d
 ```
 
-Size Postgres for the retention you configure. An activity row is roughly 400 bytes with its
-payload. A busy fleet of 400 controllers produces on the order of 100000 rows a day, about 40 MB
-a day. A `30d` retention therefore needs about 1.2 GB; a `90d` retention needs about 3.6 GB. Add
-that figure to the `runs`/`logs`/`artifacts` sizing above when you plan total volume.
+Size Postgres for the retention you configure. An activity row is roughly 400 bytes, and a busy
+fleet of 400 controllers writes about 40 MB a day, so `30d` needs about 1.2 GB and `90d` about
+3.6 GB. Add that to the `runs`, `logs`, and `artifacts` sizing above.
 
-Enabling the record store against a fleet that already ran with no record store imports history
-once. The recorder's stream consumer starts at the oldest stored message. Every event the
-72-hour buffer still holds at that moment lands in Postgres on the first drain. An event already
-older than `retention.activity` when it is read is acknowledged and discarded, not stored, so a
-stale backlog never creates rows headed for immediate deletion.
+Enabling the store against a fleet that already ran without one imports history once, from the
+oldest message the 72-hour buffer still holds. An event already older than `retention.activity`
+when it is read is acknowledged and discarded, so a stale backlog creates no row headed for
+immediate deletion.
 
 ## Job schedules
 
@@ -188,35 +173,32 @@ branch job a scan discovered yesterday, with no trigger and no run yet, still ha
 no other producer reports it.
 
 The Jenkins plugin computes each cron row's next three occurrences with Jenkins's own cron
-engine, so the times you read back match the Jenkins job page exactly. A row for an `scm-poll`,
+engine, so the times you read back match the Jenkins job page. A row for an `scm-poll`,
 `upstream`, or `other` trigger, and every `none` row, carries no occurrence.
 
-Each mite polls its Jenkins for the schedule set every ten minutes, and once immediately after
-every stream reconnect. It sends the set to the gateway only when the set changed, the stream
-reconnected, or thirty minutes passed since the last send. The gateway publishes one cell's whole
-set in one envelope; the recorder replaces the cell's rows with it, or rejects the whole envelope
-when it cannot resolve a tenant for every row in it.
+Each mite polls its Jenkins every ten minutes, and once after every stream reconnect. It sends the
+set only when the set changed, the stream reconnected, or thirty minutes passed. The gateway
+publishes one cell's whole set in one envelope; the recorder replaces the cell's rows with it, or
+rejects the envelope when it cannot resolve a tenant for every row.
 
 `job_schedule_cells` holds one watermark row per cell: the time of the newest envelope the
 recorder accepted. Read that watermark before you judge a missing occurrence. An occurrence that
-never fired while the watermark is fresh, no more than about thirty minutes old, is a missed
-fire. An occurrence that never fired while the watermark is old is different: the cell itself
-has not reported in a while, likely a disconnected mite or a hibernated controller. There the
-whole set is stale, not the one occurrence.
+never fired under a fresh watermark, no more than about thirty minutes old, is a missed fire.
+Under an old watermark the cell itself has not reported, likely a disconnected mite or a
+hibernated controller, and the whole set is stale.
 
-A `truncated: true` set means the plugin's walk stopped early, at 5000 rows or 700 KiB of
-serialized rows, whichever it reached first. A truncated set's rows still hold accurate data;
-only the row count for that cell is undercounted. The recorder deletes no row on a truncated set,
-because a partial set would otherwise erase schedules the plugin had simply not reached yet.
+A `truncated: true` set means the plugin's walk stopped early, at 5000 rows or 700 KiB, whichever
+it reached first. Its rows still hold accurate data; only the row count is undercounted. The
+recorder deletes no row on a truncated set, because a partial set would erase schedules the plugin
+had not reached.
 
 ## Search
 
 `GET /search` and the MCP `search` tool add three record-backed kinds on top of the four
-Kubernetes-sourced kinds: `job` (from `job_schedules`), `run` (from `runs`), and `activity` (from
-`activity`). Each kind is capped at five results. Matching uses Postgres full-text search: a
-prefix match on the last search token, not substring matching, so a query for `serv` matches a
-job path token like `team-a/service/main` but not an arbitrary infix inside a longer word. When
-the record store is not wired, these three kinds are absent and the other four still answer.
+Kubernetes-sourced kinds: `job`, `run`, and `activity`. Each kind is capped at five results.
+Matching is a Postgres full-text prefix match on the last search token, not a substring match, so
+`serv` matches a job path token like `team-a/service/main` but no infix inside a longer word.
+Without the record store these three kinds are absent and the other four still answer.
 
 ## The ledger and intent keys
 
@@ -245,14 +227,13 @@ The recorder exports three metrics for the ingest backlog:
 | `recorder_ingest_backlog_bytes` | Bytes of build events waiting to be written. |
 | `recorder_activity_backlog_msgs` | Activity events waiting to be written. |
 
-The build-event metrics measure the `varroa_builds` stream, which holds at most 1 GiB. Alert at
-two thresholds against that limit: warn at 50 percent (512 MiB) and page at 80 percent (819 MiB).
-That stream discards a new build event once full until the backlog drains.
+The build-event metrics measure the `varroa_builds` stream, which holds at most 1 GiB. Warn at 50
+percent (512 MiB) and page at 80 percent (819 MiB). That stream discards a new build event once
+full, until the backlog drains.
 
 The activity metric measures the `varroa_activity` stream, which holds at most 1000000 messages.
-Alert the same way: warn at 50 percent (500000) and page at 80 percent (800000). That stream
-discards its **oldest** message once full, not the newest, so a sustained backlog above the page
-threshold silently loses old activity history rather than rejecting new events.
+Warn at 500000 and page at 800000. That stream discards its **oldest** message once full, so a
+sustained backlog loses old history rather than rejecting new events.
 
 ## Network policy
 
@@ -268,10 +249,10 @@ networkPolicy:
     ports: [443]
 ```
 
-`recordStorePostgresEgress` governs egress from the recorder, the BFF, and, in `postgres` blob
-mode, the gateway, to Postgres. An empty `cidrs` list selects the in-cluster CloudNativePG pods
-automatically in `cnpg` mode. In `external` mode an empty list selects nothing, so the render
-fails and asks you to name the external host.
+`recordStorePostgresEgress` governs egress to Postgres from the recorder, the BFF, and, in
+`postgres` blob mode, the gateway. In `cnpg` mode an empty `cidrs` list selects the in-cluster
+CloudNativePG pods. In `external` mode an empty list selects nothing, so the render fails and asks
+you to name the host.
 
 `recordStoreBlobEgress` governs the same three components' egress to S3-compatible storage. It
 renders nothing when `recordStore.blobs.mode` is `postgres`, because that mode needs no external

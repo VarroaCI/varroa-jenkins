@@ -298,6 +298,187 @@ func TestMarkInterruptedSkipsAlreadyTerminalRun(t *testing.T) {
 	}
 }
 
+// TestEvaluateResumeGuardRows asserts design D14's three guard rows: an
+// armed run inside its arm window (0a) and a dispatched run inside its
+// deadline (0b) are both shielded, and a run past its applicable window
+// (0c) is marked resume-timeout. A dispatched run whose last heartbeat
+// is newer than the resume's own request time stays shielded even past
+// the deadline, because a live resume proves itself by that heartbeat.
+func TestEvaluateResumeGuardRows(t *testing.T) {
+	now := time.Now()
+	future := now.Add(5 * time.Minute)
+	past := now.Add(-time.Minute)
+	requestedAt := now.Add(-3 * time.Minute)
+	newerHeartbeat := now.Add(-time.Minute)
+	olderHeartbeat := now.Add(-4 * time.Minute)
+
+	cases := []struct {
+		name        string
+		c           runInterruptCandidate
+		wantDecided bool
+		wantOK      bool
+		wantReason  string
+	}{
+		{
+			name:        "no mesh resume leaves the ordinary tests to answer",
+			c:           runInterruptCandidate{},
+			wantDecided: false,
+		},
+		{
+			name:        "row 0a: an armed run inside its arm window is not marked",
+			c:           runInterruptCandidate{mesh: &runMeshRecord{Resume: &runMeshResume{ArmExpires: &future}}},
+			wantDecided: true, wantOK: false,
+		},
+		{
+			name: "row 0b: a dispatched run inside its deadline is not marked",
+			c: runInterruptCandidate{
+				mesh: &runMeshRecord{Resume: &runMeshResume{Instance: "pod-live", Deadline: &future}},
+			},
+			wantDecided: true, wantOK: false,
+		},
+		{
+			name:        "row 0c: an armed run past its arm window is marked resume-timeout",
+			c:           runInterruptCandidate{mesh: &runMeshRecord{Resume: &runMeshResume{ArmExpires: &past}}},
+			wantDecided: true, wantOK: true, wantReason: ReasonResumeTimeout,
+		},
+		{
+			name: "row 0c: a dispatched run past its deadline with no fresher heartbeat is marked resume-timeout",
+			c: runInterruptCandidate{
+				mesh: &runMeshRecord{
+					Resume: &runMeshResume{Instance: "pod-live", Deadline: &past, RequestedAt: &requestedAt},
+				},
+				lastHeartbeatAt: &olderHeartbeat,
+			},
+			wantDecided: true, wantOK: true, wantReason: ReasonResumeTimeout,
+		},
+		{
+			// A heartbeat newer than the request proves the target took
+			// the run over, so the guard decides nothing and the
+			// ordinary liveness tests apply. Without that fall-through
+			// a resumed run would be shielded for the rest of its life,
+			// and a later death of the target would never mark it.
+			name: "a resume a fresher heartbeat proved leaves the ordinary tests to answer",
+			c: runInterruptCandidate{
+				mesh: &runMeshRecord{
+					Resume: &runMeshResume{Instance: "pod-live", Deadline: &past, RequestedAt: &requestedAt},
+				},
+				lastHeartbeatAt: &newerHeartbeat,
+			},
+			wantDecided: false,
+		},
+		{
+			name: "row 0b: a dispatched run inside its deadline with a fresher heartbeat is not marked",
+			c: runInterruptCandidate{
+				mesh: &runMeshRecord{
+					Resume: &runMeshResume{Instance: "pod-live", Deadline: &future, RequestedAt: &requestedAt},
+				},
+				lastHeartbeatAt: &olderHeartbeat,
+			},
+			wantDecided: true, wantOK: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reason, ok, decided := evaluateResumeGuard(now, tc.c)
+			if decided != tc.wantDecided {
+				t.Fatalf("decided = %v, want %v", decided, tc.wantDecided)
+			}
+			if !decided {
+				return
+			}
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if ok && reason != tc.wantReason {
+				t.Fatalf("reason = %q, want %q", reason, tc.wantReason)
+			}
+		})
+	}
+}
+
+// TestMarkInterruptedNoopsWhenAnArmRacesTheMark asserts a mark that
+// arrives after an arm committed changes no row: the sweep read its
+// candidate before the arm committed, but the mark's own SQL re-reads
+// the committed payload and finds a live arm window.
+func TestMarkInterruptedNoopsWhenAnArmRacesTheMark(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
+	c := fetchRunningCandidate(t, pool, runID)
+
+	future := time.Now().Add(10 * time.Minute)
+	if _, err := db.Exec(`
+		UPDATE varroa.runs
+		   SET payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object('mesh',
+		         jsonb_build_object('resume', jsonb_build_object('armed_at', now(), 'arm_expires', $2::timestamptz)))
+		 WHERE run_id = $1
+	`, runID, future); err != nil {
+		t.Fatalf("commit an arm that races the mark: %v", err)
+	}
+
+	changed, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now())
+	if err != nil {
+		t.Fatalf("markInterrupted: %v", err)
+	}
+	if changed {
+		t.Fatal("want changed=false: the committed arm must shield the run")
+	}
+
+	var status string
+	if err := db.QueryRow(`SELECT status FROM varroa.runs WHERE run_id = $1`, runID).Scan(&status); err != nil {
+		t.Fatalf("read run: %v", err)
+	}
+	if status != "RUNNING" {
+		t.Fatalf("status = %q, want RUNNING unchanged", status)
+	}
+}
+
+// TestAfterMarkPublishesCancelForDispatchedResumeTimeoutOnly asserts a
+// resume-timeout mark publishes one cancel_run when the mesh already
+// dispatched the run to a live target, and none when it only armed one:
+// an undispatched arm still names the dead instance, so no process
+// remains to stop.
+func TestAfterMarkPublishesCancelForDispatchedResumeTimeoutOnly(t *testing.T) {
+	conn := newTestActionConn(t)
+	received := make(chan LedgerAction, 4)
+	sub, err := conn.Subscribe(bus.LedgerActionSubject("core"), func(msg *nats.Msg) {
+		var a LedgerAction
+		_ = json.Unmarshal(msg.Data, &a)
+		received <- a
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	conn.NATSConn().Flush()
+
+	dispatched := runInterruptCandidate{
+		runID: uuid.Must(uuid.NewV7()), cluster: "core", namespace: "team-a", cell: "cell-1", jobPath: "folder/job",
+		mesh: &runMeshRecord{Resume: &runMeshResume{Instance: "pod-live"}},
+	}
+	afterMark(context.Background(), conn, nil, nil, dispatched, ReasonResumeTimeout, "", nil)
+
+	select {
+	case a := <-received:
+		if a.Kind != LedgerActionCancelRun || a.RunID != dispatched.runID.String() {
+			t.Fatalf("got %+v, want a cancel_run for %s", a, dispatched.runID)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("want a cancel_run action for a dispatched resume-timeout")
+	}
+
+	armedOnly := runInterruptCandidate{
+		runID: uuid.Must(uuid.NewV7()), cluster: "core", namespace: "team-a", cell: "cell-1", jobPath: "folder/job",
+		mesh: &runMeshRecord{Resume: &runMeshResume{}},
+	}
+	afterMark(context.Background(), conn, nil, nil, armedOnly, ReasonResumeTimeout, "", nil)
+	select {
+	case a := <-received:
+		t.Fatalf("want no action for an undispatched resume-timeout, got %+v", a)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
 // TestEvaluateInterruptionReasons asserts the reason each named scenario
 // answers: no-heartbeat for the silent test, cell-rolled when the run's
 // stored cell matches the tenant's current one, and tenant-moved when it
@@ -584,7 +765,7 @@ func TestSweepInterruptedRunsMarksASilentRun(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -638,7 +819,7 @@ func TestSweepInterruptedRunsSkipsOnPendingBacklog(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, 1, time.Now(), testGrace, nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil, 1, time.Now(), testGrace, nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -679,7 +860,7 @@ func TestSweepInterruptedRunsSkipsOnStaleConsumer(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -836,7 +1017,7 @@ func TestSweepMarksQueuedRunWithDeadAcceptingInstance(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -899,7 +1080,7 @@ func TestSweepLeavesQueuedRunWithLiveAcceptingInstanceAlone(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -940,7 +1121,7 @@ func TestSweepSkipsQueuedPlaceholderWithNoOwningInstance(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -996,7 +1177,7 @@ func TestSweepMarksClaimedQueuedRunThroughIntentInstance(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(ctx, pool, conn, metrics, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
+	marked, err := SweepInterruptedRuns(ctx, pool, conn, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1197,7 +1378,7 @@ func TestSweepMarksCellLostAndCountsIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil,
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil,
 		DefaultSweepMaxPending, time.Now(), testGrace, nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
@@ -1243,7 +1424,7 @@ func TestSweepMarksCellLostOnAnIdleConsumer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil,
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil,
 		DefaultSweepMaxPending, time.Now(), testGrace, nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)

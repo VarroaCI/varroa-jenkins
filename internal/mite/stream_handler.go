@@ -95,6 +95,16 @@ type StreamHandler interface {
 	// goroutine with no new per-connection state in server.go. token is
 	// the value OnConnect returned for this stream.
 	OnCrossTenantRequest(name, ns string, connToken int64, req *mitev1.CrossTenantRequest, send Sender)
+
+	// OnRunStateChunk is called for each run-state chunk a mite forwards
+	// from the Jenkins plugin. The handler stores the chunk and answers
+	// through OperatorMessage.run_state_ack.
+	OnRunStateChunk(name, ns string, chunk *mitev1.RunStateChunk)
+
+	// OnRunStateRequest is called when a mite fetches one stored state
+	// file under a resume command. send is the same stream-bound sender
+	// OnConnect received, so the handler answers on that connection.
+	OnRunStateRequest(name, ns string, req *mitev1.RunStateRequest, send Sender)
 }
 
 // cellInstanceRecorder is an optional capability of a StreamHandler that
@@ -128,6 +138,8 @@ func (noopHandler) OnLogChunk(_, _ string, _ *mitev1.LogChunk)                  
 func (noopHandler) OnTailAck(_, _ string, _ *mitev1.TailAck)                              {}
 func (noopHandler) OnCrossTenantRequest(_, _ string, _ int64, _ *mitev1.CrossTenantRequest, _ Sender) {
 }
+func (noopHandler) OnRunStateChunk(_, _ string, _ *mitev1.RunStateChunk)               {}
+func (noopHandler) OnRunStateRequest(_, _ string, _ *mitev1.RunStateRequest, _ Sender) {}
 
 // Ensure noopHandler implements StreamHandler.
 var _ StreamHandler = noopHandler{}

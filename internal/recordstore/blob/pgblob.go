@@ -75,6 +75,42 @@ func (s *pgStore) Put(ctx context.Context, key string, r io.Reader, opts ObjectO
 	return nil
 }
 
+// Replace deletes every row of key and inserts the new object as
+// sequence 0, inside one transaction, so a reader never sees the key
+// empty.
+func (s *pgStore) Replace(ctx context.Context, key string, r io.Reader, opts ObjectOptions) error {
+	if err := opts.Validate(); err != nil {
+		return err
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return fmt.Errorf("read object body: %w", err)
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin replace transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	if _, err := tx.Exec(ctx, `DELETE FROM varroa.log_chunks WHERE object_key = $1`, key); err != nil {
+		return fmt.Errorf("delete replaced object: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO varroa.log_chunks (object_key, chunk_seq, created_at, object_class, content_type, digest, bytes)
+		VALUES ($1, 0, $2, $3, $4, $5, $6)
+	`, key, opts.CreatedAt, opts.ObjectClass, nullableString(opts.ContentType), sha256Digest(data), data); err != nil {
+		return fmt.Errorf("insert replaced object: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit replace transaction: %w", err)
+	}
+	return nil
+}
+
 // Append inserts one row per call, holding the chunk's sha256 in digest,
 // with ON CONFLICT DO NOTHING on the primary key. It then reads the
 // stored digest: an identical retry succeeds, and a conflicting retry

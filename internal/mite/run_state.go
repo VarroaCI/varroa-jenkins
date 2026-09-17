@@ -1,0 +1,682 @@
+package mite
+
+import (
+	"bytes"
+	"compress/gzip"
+	"context"
+	"encoding/json"
+	"io"
+	"strings"
+	"sync"
+	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
+	"github.com/varroaci/varroa-jenkins/internal/bus"
+	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
+)
+
+// Bounds of the run-state store path (design.md D6).
+const (
+	// perRunStateMaxBytes bounds the stored state of one run. The
+	// counter lives in gateway memory, so a restart loses it and the
+	// recorder is the durable authority.
+	perRunStateMaxBytes = 64 * 1024 * 1024
+
+	// runStateResponseChunkBytes bounds one run_state_response body, so
+	// a multi-megabyte file crosses the stream as several messages.
+	runStateResponseChunkBytes = 512 * 1024
+
+	// runStateObjectClass is the blob object class of every run-state
+	// object. Migration 00010 widens the check constraint for it.
+	runStateObjectClass = "state"
+
+	// runStateContentType names the gzip body every run-state object
+	// holds.
+	runStateContentType = "application/gzip"
+)
+
+// RunStateAck status and reason tokens. The status set mirrors LogAck's,
+// and the reason set is the whole set mite-loopback-api fixes.
+const (
+	stateAckStatusStored   = "STORED"
+	stateAckStatusBusy     = "BUSY"
+	stateAckStatusRejected = "REJECTED"
+
+	stateReasonMalformed  = "malformed"
+	stateReasonForeignRun = "foreign-run"
+	stateReasonStateCap   = "state-cap"
+	stateReasonIncomplete = "incomplete"
+	stateReasonBudgetFull = "gateway-budget-full"
+)
+
+var (
+	runStateBytes    metric.Int64Counter
+	runStateRejected metric.Int64Counter
+)
+
+// runStateBuffer holds the chunks of one file of one push generation,
+// until every sequence is present.
+type runStateBuffer struct {
+	// epoch names the Jenkins process that opened this buffer. A chunk
+	// of another epoch replaces it, because its generation counts on a
+	// different clock.
+	epoch      int64
+	stateGen   int64
+	objectSize int64
+	total      int64
+	chunks     map[int64][]byte
+	// pending is the gzip byte count this buffer charges against the
+	// gateway-wide bound.
+	pending int64
+}
+
+// runStateEntry is the gateway's per-run run-state knowledge: the stored
+// size of each relative path, their sum, and the buffers of each partial
+// push. One entry lives until the run reads terminal, or until its cell
+// disconnects.
+type runStateEntry struct {
+	ns, name, jobPath string
+
+	storedSizes map[string]int64
+	storedTotal int64
+	// newestEpoch is the newest pushing process this run has been seen
+	// from. The epoch is that process's start time, so it only ever
+	// rises for one run, and a chunk below it comes from a Jenkins
+	// process that is already gone.
+	newestEpoch int64
+	buffers     map[string]*runStateBuffer
+	// completed holds the push this gateway last stored for each path.
+	// A chunk that repeats it exactly is a redelivery and is answered
+	// as stored, so an ordinary retry never reads as a refusal.
+	completed map[string]storedPush
+	// fetched records that this run has already served one state fetch,
+	// so the owner-cache invalidation runs on the first fetch alone.
+	fetched bool
+	// writeMu orders the object writes of one run. A write runs outside
+	// the gateway-wide lock, so this monitor is what holds the epoch
+	// test and the write together. It is never taken under h.stateMu.
+	writeMu sync.Mutex
+}
+
+// storedPush is the push a gateway last stored for one path: the
+// pusher process that sent it and that process's own generation.
+//
+// The epoch is part of the identity because a generation counts inside
+// one Jenkins process, and a restart starts it again at 1 while this
+// entry lives on. An identity the restart could repeat would answer
+// every push of the restarted build as a duplicate and freeze the run's
+// stored state at its pre-restart copy.
+type storedPush struct {
+	epoch int64
+	gen   int64
+}
+
+// runStateOutcome is what one chunk produced: the ack the mite receives,
+// and the envelope the recorder receives.
+type runStateOutcome struct {
+	status   string
+	reason   string
+	pauseMS  int
+	stored   bool
+	relpath  string
+	bytes    int64
+	seq      int64
+	stateGen int64
+}
+
+// getOrCreateStateEntry returns the run's state entry, creating it on
+// first touch. Caller must not hold h.stateMu.
+func (h *BusHandler) getOrCreateStateEntry(runID, ns, name, jobPath string) *runStateEntry {
+	h.stateMu.Lock()
+	defer h.stateMu.Unlock()
+	if h.stateRuns == nil {
+		h.stateRuns = make(map[string]*runStateEntry)
+	}
+	e, ok := h.stateRuns[runID]
+	if !ok {
+		e = &runStateEntry{
+			ns: ns, name: name, jobPath: jobPath,
+			storedSizes: make(map[string]int64),
+			buffers:     make(map[string]*runStateBuffer),
+			completed:   make(map[string]storedPush),
+		}
+		h.stateRuns[runID] = e
+	}
+	return e
+}
+
+// dropStateEntry removes one run's entry and refunds its pending bytes.
+// A terminal run keeps no entry: without this drop an entry would live
+// for the whole gateway lifetime.
+func (h *BusHandler) dropStateEntry(runID string) {
+	h.stateMu.Lock()
+	defer h.stateMu.Unlock()
+	e, ok := h.stateRuns[runID]
+	if !ok {
+		return
+	}
+	for _, b := range e.buffers {
+		h.stateTotalPendingBytes -= b.pending
+	}
+	if h.stateTotalPendingBytes < 0 {
+		h.stateTotalPendingBytes = 0
+	}
+	delete(h.stateRuns, runID)
+}
+
+// dropCellStateEntries removes every entry of one cell. A disconnect
+// ends every push that cell had in flight.
+func (h *BusHandler) dropCellStateEntries(ns, name string) {
+	h.stateMu.Lock()
+	defer h.stateMu.Unlock()
+	for runID, e := range h.stateRuns {
+		if e.ns != ns || e.name != name {
+			continue
+		}
+		for _, b := range e.buffers {
+			h.stateTotalPendingBytes -= b.pending
+		}
+		delete(h.stateRuns, runID)
+	}
+	if h.stateTotalPendingBytes < 0 {
+		h.stateTotalPendingBytes = 0
+	}
+}
+
+// OnRunStateChunk implements StreamHandler for one run-state chunk a
+// mite forwards. It applies D6's six ordered steps and answers one
+// RunStateAck. It publishes one run.state envelope for each outcome the
+// recorder must record.
+func (h *BusHandler) OnRunStateChunk(name, ns string, chunk *mitev1.RunStateChunk) {
+	if h.logStore == nil {
+		return
+	}
+	ctx := context.Background()
+
+	// Step 1: the run must be named and the path must be usable as a
+	// key suffix.
+	if chunk.RunId == "" || !validRunStateRelpath(chunk.Relpath) {
+		h.rejectRunState(ctx, ns, name, chunk, stateReasonMalformed)
+		return
+	}
+
+	// Step 2: the sending cell must own the run. The gateway stamps the
+	// instance from the registered identity, so the message's own value
+	// is never read.
+	instance := h.lookupCellInstance(ns, name)
+	decision, tuple := h.checkOwner(ctx, h.cluster, ns, name, instance, chunk.RunId)
+	switch decision {
+	case ownerForeign:
+		h.rejectRunState(ctx, ns, name, chunk, stateReasonForeignRun)
+		return
+	case ownerUnknown:
+		h.sendRunStateAck(ns, name, chunk, stateAckStatusBusy, stateReasonBudgetFull, gatewayBudgetPauseMinMS)
+		return
+	}
+	if tuple.status != "" && isTerminalRunStatus(tuple.status) {
+		h.dropStateEntry(chunk.RunId)
+		h.sendRunStateAck(ns, name, chunk, stateAckStatusStored, "", 0)
+		return
+	}
+
+	e := h.getOrCreateStateEntry(chunk.RunId, ns, name, chunk.JobPath)
+
+	outcome, complete := h.bufferRunStateChunk(e, chunk)
+	if complete != nil {
+		// The declared object size is proved here: a completed set whose
+		// chunk sizes do not sum to it answers malformed, so the
+		// gateway's charge and the recorder's record agree.
+		body, rawTotal, err := inflateRunStateSet(complete)
+		if err != nil || rawTotal != complete.objectSize {
+			outcome = runStateOutcome{status: stateAckStatusRejected, reason: stateReasonMalformed}
+		} else {
+			outcome = h.storeRunStateObject(ctx, e, chunk, body, outcome)
+		}
+	}
+	if outcome.status == stateAckStatusRejected {
+		runStateRejected.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", outcome.reason)))
+	}
+
+	h.sendRunStateAck(ns, name, chunk, outcome.status, outcome.reason, outcome.pauseMS)
+	h.publishRunStateOutcome(ns, name, chunk, outcome)
+}
+
+// validRunStateRelpath reports whether relpath is usable as a key
+// suffix and as a path under the Jenkins home. It refuses an empty
+// value, an absolute path, a Windows separator, and any dot segment, so
+// no push can name a key or a file outside its own run.
+func validRunStateRelpath(relpath string) bool {
+	if relpath == "" || strings.HasPrefix(relpath, "/") || strings.Contains(relpath, `\`) {
+		return false
+	}
+	for _, seg := range strings.Split(relpath, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+// bufferRunStateChunk applies steps 3, 4, and 5a. It returns the
+// outcome, and the completed buffer once every sequence is present. The
+// caller inflates that buffer outside h.stateMu: an inflate of a
+// multi-megabyte set under a gateway-wide lock would stall every other
+// cell's push.
+func (h *BusHandler) bufferRunStateChunk(e *runStateEntry, chunk *mitev1.RunStateChunk) (runStateOutcome, *runStateBuffer) {
+	h.stateMu.Lock()
+	defer h.stateMu.Unlock()
+
+	// The epoch fence runs before every other test, because every other
+	// test can drop this path's buffer. A malformed or over-cap chunk
+	// from a retired process would otherwise throw away the live
+	// process's partial push, and that push's own later chunks would
+	// then answer incomplete.
+	//
+	// The epoch is the pushing process's start time, so it only rises
+	// for one run. A lower epoch comes from a Jenkins process that is
+	// already gone.
+	if chunk.PusherEpoch < e.newestEpoch {
+		return runStateOutcome{status: stateAckStatusStored}, nil
+	}
+	if chunk.PusherEpoch > e.newestEpoch {
+		// The previous process is gone, so its partial buffers can
+		// never complete. They are dropped here rather than at the end
+		// of the run, so their bytes leave the gateway-wide bound at
+		// once.
+		h.retireEpochBuffersLocked(e, chunk.PusherEpoch)
+		e.newestEpoch = chunk.PusherEpoch
+	}
+
+	if chunk.ObjectSize <= 0 || chunk.Total <= 0 || chunk.Seq < 0 || chunk.Seq >= chunk.Total {
+		h.dropRunStateBufferLocked(e, chunk.Relpath)
+		return runStateOutcome{status: stateAckStatusRejected, reason: stateReasonMalformed}, nil
+	}
+
+	// Step 3: the run's stored bytes, less this file's stored size, plus
+	// this file's declared size, must stay at or below the cap.
+	if e.storedTotal-e.storedSizes[chunk.Relpath]+chunk.ObjectSize > perRunStateMaxBytes {
+		h.dropRunStateBufferLocked(e, chunk.Relpath)
+		return runStateOutcome{status: stateAckStatusRejected, reason: stateReasonStateCap}, nil
+	}
+
+	size := int64(len(chunk.GzipContent))
+	if h.stateTotalPendingBytes+size > h.logPendingMaxBytesOrDefault() {
+		if h.stateBudgetCrossedAt.IsZero() {
+			h.stateBudgetCrossedAt = time.Now()
+		}
+		pause := h.stateBudgetPauseMSLocked()
+		return runStateOutcome{status: stateAckStatusBusy, reason: stateReasonBudgetFull, pauseMS: pause}, nil
+	}
+	h.stateBudgetCrossedAt = time.Time{}
+
+	// A chunk that repeats the stored push is a redelivery, and it is
+	// answered as stored. The mite can retry a chunk whose answer it
+	// never saw, and without this test the last chunk of a multi-chunk
+	// file would open a fresh buffer and read as incomplete.
+	//
+	// The test names the pusher process as well as its generation. A
+	// generation alone repeats after a Jenkins restart, which counts
+	// from 1 again while this entry lives, and every push of the
+	// restarted build would then be discarded. A chunk of another epoch
+	// always replaces.
+	if done, ok := e.completed[chunk.Relpath]; ok &&
+		done.epoch == chunk.PusherEpoch && done.gen == chunk.StateGen {
+		return runStateOutcome{status: stateAckStatusStored}, nil
+	}
+
+	// Step 4: buffer the chunk under the run, the path, and the push
+	// generation. A chunk of an older generation is discarded, and a
+	// newer one replaces the buffer. A newer epoch replaces it too: its
+	// generation counts on a different clock.
+	b := e.buffers[chunk.Relpath]
+	switch {
+	case b == nil || chunk.PusherEpoch > b.epoch || chunk.StateGen > b.stateGen:
+		if b != nil {
+			h.stateTotalPendingBytes -= b.pending
+		}
+		b = &runStateBuffer{
+			epoch: chunk.PusherEpoch, stateGen: chunk.StateGen, objectSize: chunk.ObjectSize,
+			total: chunk.Total, chunks: make(map[int64][]byte),
+		}
+		e.buffers[chunk.Relpath] = b
+	case chunk.StateGen < b.stateGen:
+		return runStateOutcome{status: stateAckStatusStored}, nil
+	}
+	b.chunks[chunk.Seq] = chunk.GzipContent
+	b.pending += size
+	h.stateTotalPendingBytes += size
+
+	// Step 5a: a missing sequence when the last chunk arrives drops the
+	// buffer. Each chunk is compressed on its own, so an incomplete set
+	// would inflate into a truncated file with no error.
+	if int64(len(b.chunks)) < b.total {
+		if chunk.Seq == b.total-1 {
+			h.dropRunStateBufferLocked(e, chunk.Relpath)
+			return runStateOutcome{status: stateAckStatusRejected, reason: stateReasonIncomplete}, nil
+		}
+		return runStateOutcome{status: stateAckStatusStored}, nil
+	}
+
+	// Step 5: every sequence is present, so the caller inflates the set.
+	h.dropRunStateBufferLocked(e, chunk.Relpath)
+	return runStateOutcome{
+		stored: true, relpath: chunk.Relpath, bytes: b.objectSize, seq: chunk.Seq, stateGen: b.stateGen,
+	}, b
+}
+
+// storeRunStateObject writes the whole object and charges it. The charge
+// replaces the path's previous size, so a replaced file counts once.
+//
+// The write of one run runs under that run's own monitor, and the epoch
+// test runs under the same monitor. A retired process whose write is
+// still in flight therefore cannot land on top of the new process's
+// object: it either writes first, and the new process overwrites it, or
+// it waits and then reads its own epoch as retired and writes nothing.
+// The stored object always equals the newest process's content.
+func (h *BusHandler) storeRunStateObject(ctx context.Context, e *runStateEntry, chunk *mitev1.RunStateChunk, body []byte, outcome runStateOutcome) runStateOutcome {
+	e.writeMu.Lock()
+	defer e.writeMu.Unlock()
+
+	h.stateMu.Lock()
+	retired := chunk.PusherEpoch < e.newestEpoch
+	h.stateMu.Unlock()
+	if retired {
+		// A retired process answers stored, as it does at the buffer
+		// fence. The push came from a Jenkins process that is gone, so
+		// no refusal can reach a pusher that could act on it.
+		h.log().Debug("run-state write from a retired process dropped",
+			"run_id", chunk.RunId, "relpath", chunk.Relpath, "pusher_epoch", chunk.PusherEpoch)
+		return runStateOutcome{status: stateAckStatusStored}
+	}
+
+	key := blob.RunStateKey(chunk.RunId, chunk.Relpath)
+	opts := blob.ObjectOptions{
+		ObjectClass: runStateObjectClass,
+		ContentType: runStateContentType,
+		CreatedAt:   time.Now().UTC(),
+	}
+	if err := h.logStore.Replace(ctx, key, bytes.NewReader(body), opts); err != nil {
+		h.log().Warn("run-state object write failed", "run_id", chunk.RunId, "relpath", chunk.Relpath, "error", err)
+		return runStateOutcome{status: stateAckStatusBusy, reason: stateReasonBudgetFull, pauseMS: gatewayBudgetPauseMinMS}
+	}
+
+	h.stateMu.Lock()
+	e.storedTotal += outcome.bytes - e.storedSizes[chunk.Relpath]
+	e.storedSizes[chunk.Relpath] = outcome.bytes
+	e.completed[chunk.Relpath] = storedPush{epoch: chunk.PusherEpoch, gen: outcome.stateGen}
+	h.stateMu.Unlock()
+
+	runStateBytes.Add(ctx, outcome.bytes)
+	outcome.status = stateAckStatusStored
+	return outcome
+}
+
+// inflateRunStateSet concatenates the inflated bytes of every sequence
+// of b, in ascending order, and reports the inflated total.
+func inflateRunStateSet(b *runStateBuffer) ([]byte, int64, error) {
+	var out bytes.Buffer
+	for seq := int64(0); seq < b.total; seq++ {
+		zr, err := gzip.NewReader(bytes.NewReader(b.chunks[seq]))
+		if err != nil {
+			return nil, 0, err
+		}
+		if _, err := io.Copy(&out, zr); err != nil {
+			_ = zr.Close()
+			return nil, 0, err
+		}
+		if err := zr.Close(); err != nil {
+			return nil, 0, err
+		}
+	}
+	return out.Bytes(), int64(out.Len()), nil
+}
+
+// retireEpochBuffersLocked drops every buffer of e whose epoch is below
+// newEpoch and refunds their pending bytes. A process that has been
+// replaced sends no more chunks, so its partial pushes can never
+// complete and their bytes would otherwise stay charged against the
+// gateway-wide bound for the rest of the run. Caller must hold
+// h.stateMu.
+func (h *BusHandler) retireEpochBuffersLocked(e *runStateEntry, newEpoch int64) {
+	for relpath, b := range e.buffers {
+		if b.epoch < newEpoch {
+			h.stateTotalPendingBytes -= b.pending
+			delete(e.buffers, relpath)
+		}
+	}
+	if h.stateTotalPendingBytes < 0 {
+		h.stateTotalPendingBytes = 0
+	}
+}
+
+// dropRunStateBufferLocked removes one path's buffer and refunds its
+// pending bytes. Caller must hold h.stateMu.
+func (h *BusHandler) dropRunStateBufferLocked(e *runStateEntry, relpath string) {
+	b, ok := e.buffers[relpath]
+	if !ok {
+		return
+	}
+	h.stateTotalPendingBytes -= b.pending
+	if h.stateTotalPendingBytes < 0 {
+		h.stateTotalPendingBytes = 0
+	}
+	delete(e.buffers, relpath)
+}
+
+// stateBudgetPauseMSLocked computes the busy pause for the gateway-wide
+// run-state bound, on the log path's own ladder. Caller must hold
+// h.stateMu.
+func (h *BusHandler) stateBudgetPauseMSLocked() int {
+	if h.stateBudgetCrossedAt.IsZero() {
+		return gatewayBudgetPauseMinMS
+	}
+	ms := gatewayBudgetPauseMinMS + int(time.Since(h.stateBudgetCrossedAt)/time.Second)*1000
+	if ms > gatewayBudgetPauseMaxMS {
+		ms = gatewayBudgetPauseMaxMS
+	}
+	return ms
+}
+
+// rejectRunState answers one refusal and counts it by its reason.
+func (h *BusHandler) rejectRunState(ctx context.Context, ns, name string, chunk *mitev1.RunStateChunk, reason string) {
+	runStateRejected.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", reason)))
+	h.sendRunStateAck(ns, name, chunk, stateAckStatusRejected, reason, 0)
+	if reason == stateReasonStateCap {
+		h.publishRunStateOutcome(ns, name, chunk, runStateOutcome{status: stateAckStatusRejected, reason: reason})
+	}
+}
+
+// sendRunStateAck answers one RunStateAck on the cell's current
+// connection. It is a no-op when no connection is current: the pusher
+// retries from its own spool.
+func (h *BusHandler) sendRunStateAck(ns, name string, chunk *mitev1.RunStateChunk, status, reason string, pauseMS int) {
+	send := h.currentSender(ns, name)
+	if send == nil {
+		return
+	}
+	msg := &mitev1.OperatorMessage{
+		Message: &mitev1.OperatorMessage_RunStateAck{RunStateAck: &mitev1.RunStateAck{
+			RunId: chunk.RunId, Relpath: chunk.Relpath, StateGen: chunk.StateGen,
+			Status: status, Reason: reason, PauseMs: pauseMS,
+		}},
+	}
+	if err := send(msg); err != nil {
+		h.log().Error("send run-state ack failed", "controller", ns+"/"+name, "run_id", chunk.RunId, "error", err)
+	}
+}
+
+// publishRunStateOutcome publishes one run.state envelope. A stored file
+// carries the path, the whole object's inflated size, the sequence, and
+// the push generation. A cap refusal carries the reason alone, although
+// no object was written: that envelope is the only carrier of
+// mesh.cap_warned_at, which is an operator's one signal that the cap
+// tripped.
+func (h *BusHandler) publishRunStateOutcome(ns, name string, chunk *mitev1.RunStateChunk, outcome runStateOutcome) {
+	if h.publisher == nil {
+		return
+	}
+	var payload map[string]interface{}
+	switch {
+	case outcome.stored:
+		payload = map[string]interface{}{
+			"relpath":   outcome.relpath,
+			"bytes":     outcome.bytes,
+			"seq":       outcome.seq,
+			"state_gen": outcome.stateGen,
+		}
+	case outcome.reason == stateReasonStateCap:
+		payload = map[string]interface{}{"rejected_reason": stateReasonStateCap}
+	default:
+		return
+	}
+
+	tenant, _ := h.resolver().ResolveJobTenant(h.cluster, ns, name, chunk.JobPath)
+	if tenant == "" {
+		h.log().Warn("run-state outcome unresolved, publishing no envelope",
+			"controller", ns+"/"+name, "job_path", chunk.JobPath)
+		return
+	}
+
+	env := ingestEnvelope{
+		SchemaVersion: 1,
+		Kind:          kindRunState,
+		RunID:         chunk.RunId,
+		Cluster:       h.cluster,
+		Namespace:     ns,
+		Cell:          name,
+		CellInstance:  h.lookupCellInstance(ns, name),
+		Tenant:        tenant,
+		JobPath:       chunk.JobPath,
+		OccurredAt:    time.Now().UTC(),
+		Payload:       payload,
+	}
+	data, err := json.Marshal(env)
+	if err != nil {
+		h.log().Error("marshal run.state envelope failed", "run_id", chunk.RunId, "error", err)
+		return
+	}
+	if _, err := h.publisher.PublishJetStream(bus.BuildSubject(h.cluster, ns, name), data); err != nil {
+		h.log().Warn("run.state publish failed", "run_id", chunk.RunId, "error", err)
+	}
+}
+
+// OnRunStateRequest implements StreamHandler for a mite that fetches one
+// stored file under a resume command. It answers one or more
+// run_state_response messages, each carrying the request's own
+// request_id. A read failure answers one response carrying error.
+func (h *BusHandler) OnRunStateRequest(name, ns string, req *mitev1.RunStateRequest, send Sender) {
+	if send == nil {
+		return
+	}
+	if h.logStore == nil {
+		h.sendRunStateError(send, req, "the gateway holds no blob store")
+		return
+	}
+	if req.RunId == "" || !validRunStateRelpath(req.Relpath) {
+		h.sendRunStateError(send, req, "the request names no run or no usable path")
+		return
+	}
+
+	h.invalidateOwnerOnFirstFetch(req.RunId, ns, name)
+
+	ctx := context.Background()
+	// Replace writes through Put, which both drivers store as chunked
+	// part 0, so the chunked read is the matching read.
+	r, err := h.logStore.NewRangeReader(ctx, blob.RunStateKey(req.RunId, req.Relpath), 0, -1)
+	if err != nil {
+		h.sendRunStateError(send, req, "the gateway cannot read the stored file")
+		return
+	}
+	body, err := io.ReadAll(r)
+	_ = r.Close()
+	if err != nil {
+		h.sendRunStateError(send, req, "the gateway cannot read the stored file")
+		return
+	}
+
+	total := int64(len(body)) / runStateResponseChunkBytes
+	if int64(len(body))%runStateResponseChunkBytes != 0 || len(body) == 0 {
+		total++
+	}
+	for seq := int64(0); seq < total; seq++ {
+		start := seq * runStateResponseChunkBytes
+		end := start + runStateResponseChunkBytes
+		if end > int64(len(body)) {
+			end = int64(len(body))
+		}
+		part := body[start:end]
+		gz, gerr := gzipBytes(part)
+		if gerr != nil {
+			h.sendRunStateError(send, req, "the gateway cannot compress the stored file")
+			return
+		}
+		msg := &mitev1.OperatorMessage{
+			Message: &mitev1.OperatorMessage_RunStateResponse{RunStateResponse: &mitev1.RunStateResponse{
+				RequestId: req.RequestId, Relpath: req.Relpath,
+				Seq: seq, Total: total, GzipContent: gz, RawSize: int64(len(part)),
+			}},
+		}
+		if err := send(msg); err != nil {
+			h.log().Error("send run-state response failed", "controller", ns+"/"+name, "run_id", req.RunId, "error", err)
+			return
+		}
+	}
+}
+
+// invalidateOwnerOnFirstFetch drops the run's cached owner the first
+// time this gateway serves a fetch for it. A resume moves a run's owner
+// with no claim behind it, so no grant can replace the entry. It only
+// forces a re-read of the recorder, and sets no owner.
+func (h *BusHandler) invalidateOwnerOnFirstFetch(runID, ns, name string) {
+	h.stateMu.Lock()
+	e, ok := h.stateRuns[runID]
+	if !ok {
+		if h.stateRuns == nil {
+			h.stateRuns = make(map[string]*runStateEntry)
+		}
+		e = &runStateEntry{
+			ns: ns, name: name,
+			storedSizes: make(map[string]int64),
+			buffers:     make(map[string]*runStateBuffer),
+			completed:   make(map[string]storedPush),
+		}
+		h.stateRuns[runID] = e
+	}
+	first := !e.fetched
+	e.fetched = true
+	h.stateMu.Unlock()
+
+	if first && h.ownerCache != nil {
+		h.ownerCache.invalidate(runID)
+	}
+}
+
+// sendRunStateError answers one response carrying error, so the mite
+// fails the resume command rather than write a partial file.
+func (h *BusHandler) sendRunStateError(send Sender, req *mitev1.RunStateRequest, reason string) {
+	msg := &mitev1.OperatorMessage{
+		Message: &mitev1.OperatorMessage_RunStateResponse{RunStateResponse: &mitev1.RunStateResponse{
+			RequestId: req.RequestId, Relpath: req.Relpath, Error: reason,
+		}},
+	}
+	if err := send(msg); err != nil {
+		h.log().Error("send run-state error failed", "run_id", req.RunId, "error", err)
+	}
+}
+
+// gzipBytes compresses p.
+func gzipBytes(p []byte) ([]byte, error) {
+	var out bytes.Buffer
+	zw := gzip.NewWriter(&out)
+	if _, err := zw.Write(p); err != nil {
+		_ = zw.Close()
+		return nil, err
+	}
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}

@@ -244,6 +244,17 @@ type BusHandler struct {
 	// before it writes one byte.
 	ownerCache *ownerCache
 
+	// stateMu guards stateRuns and the gateway-wide run-state pending
+	// counter. It is separate from logMu, so a run-state push never
+	// contends with the console-log append path.
+	stateMu                sync.Mutex
+	stateRuns              map[string]*runStateEntry // keyed by run_id
+	stateTotalPendingBytes int64
+	// stateBudgetCrossedAt is when the gateway-wide run-state pending
+	// bound was first crossed. It grows the busy pause on the log
+	// path's own ladder.
+	stateBudgetCrossedAt time.Time
+
 	// tailMu guards tailLeases and tailErrors, kept separate from mu so a
 	// tail-control push never contends with the heartbeat/presence path.
 	// A terminal condition deletes a run's tailLeases entry outright
@@ -341,6 +352,7 @@ func NewBusHandler(cluster string, conn *bus.Conn, snapshotKV, presenceKV, desir
 		crossTenantCounts:          make(map[string]int),
 		tenantResolver:             defaultCellTenantResolver{},
 		logRuns:                    make(map[string]*runLogState),
+		stateRuns:                  make(map[string]*runStateEntry),
 		ownerCache:                 newOwnerCache(0),
 		tailLeases:                 make(map[string]*runTailLease),
 		tailErrors:                 make(map[string]tailErrorEntry),
@@ -973,6 +985,11 @@ func (h *BusHandler) OnDisconnect(name, ns string, token int64) {
 	// tailMu is independent of h.mu, so this is safe to call while h.mu
 	// is held; it never blocks on anything else in this critical section.
 	h.clearTailLeasesForController(ns, name)
+
+	// stateMu is independent of h.mu too. A disconnect ends every push
+	// this cell had in flight, and without this drop each entry lives
+	// for the whole gateway lifetime.
+	h.dropCellStateEntries(ns, name)
 
 	if cancel, ok := h.cancels[key]; ok {
 		cancel()

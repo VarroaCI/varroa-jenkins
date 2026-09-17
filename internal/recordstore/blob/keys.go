@@ -13,3 +13,16 @@ func LogKey(runID string) string {
 func LogIndexKey(runID string) string {
 	return fmt.Sprintf("logindex/%s", runID)
 }
+
+// RunStateKey returns the object key that holds one replicated state
+// file of a running build. relpath is that file's own path under the
+// Jenkins home.
+func RunStateKey(runID, relpath string) string {
+	return fmt.Sprintf("runstate/%s/%s", runID, relpath)
+}
+
+// RunStatePrefix returns the key prefix that holds every replicated
+// state file of one run. A cleanup deletes the whole prefix.
+func RunStatePrefix(runID string) string {
+	return fmt.Sprintf("runstate/%s/", runID)
+}

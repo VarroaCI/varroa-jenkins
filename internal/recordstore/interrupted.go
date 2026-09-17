@@ -14,6 +14,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
 
 // Interrupted-run reasons runs.payload.interrupted_reason holds. The
@@ -27,6 +28,10 @@ const (
 	ReasonCellRolled  = "cell-rolled"
 	ReasonTenantMoved = "tenant-moved"
 	ReasonNoHeartbeat = "no-heartbeat"
+	// ReasonResumeTimeout names a run the pipeline mesh claimed and could
+	// not bring back. One reason covers both windows: in each case the
+	// recorder tried to resume the run and the run did not come back.
+	ReasonResumeTimeout = "resume-timeout"
 )
 
 // interruptedRetryAutomatic is the Team.spec.pipelines.interruptedRetry
@@ -62,6 +67,7 @@ type runInterruptCandidate struct {
 	cellInstance    string
 	lastHeartbeatAt *time.Time
 	acceptedAt      *time.Time
+	mesh            *runMeshRecord
 }
 
 // livenessBaseline is the moved and silent tests' anchor: the run's own
@@ -79,12 +85,16 @@ func livenessBaseline(c runInterruptCandidate) time.Time {
 	return c.createdAt
 }
 
-// evaluateInterruption applies the confirmed test, then the moved test,
-// then the silent test, to one QUEUED or RUNNING run. It answers the
-// reason the first test that holds names. No test fires without a
-// cell-liveness reading naming the run's own owning cell instance.
+// evaluateInterruption applies the mesh guard, then the confirmed test,
+// then the moved test, then the silent test, to one QUEUED or RUNNING
+// run. It answers the reason the first test that holds names. No test
+// fires without a cell-liveness reading naming the run's own owning cell
+// instance.
 func evaluateInterruption(now time.Time, c runInterruptCandidate, row tenantPlacementLivenessRow,
 	exists bool, grace time.Duration) (reason string, ok bool) {
+	if reason, ok, decided := evaluateResumeGuard(now, c); decided {
+		return reason, ok
+	}
 	anchor := livenessBaseline(c)
 	switch cellLivenessGone(now, anchor, c.cellInstance, row, exists, grace) {
 	case livenessConfirmedGone:
@@ -101,6 +111,54 @@ func evaluateInterruption(now time.Time, c runInterruptCandidate, row tenantPlac
 	}
 }
 
+// resumeDispatched reports whether the mesh moved this run's owner to a
+// live target. Every reader tests the named instance, never the
+// presence of the resume: an armed run holds a resume that names none.
+func (c runInterruptCandidate) resumeDispatched() bool {
+	return c.mesh != nil && c.mesh.Resume != nil && c.mesh.Resume.Instance != ""
+}
+
+// evaluateResumeGuard applies the pipeline mesh's three guard rows
+// before every other test. It reports decided=false when the run holds
+// no resume, which leaves the ordinary tests to answer.
+//
+// Row 0a shields an armed run inside its arm window. Row 0b shields a
+// dispatched run inside its deadline. Row 0c marks a run whose
+// applicable window has passed.
+//
+// Row 0c applies only while the run's last heartbeat is null or older
+// than the resume's own request time. A resumed build proves itself by
+// its ordinary heartbeat, which the plugin emits every 60 seconds, so
+// the 6-minute deadline gives the target six chances and one lost
+// heartbeat never times out a live resume.
+func evaluateResumeGuard(now time.Time, c runInterruptCandidate) (reason string, ok, decided bool) {
+	if c.mesh == nil || c.mesh.Resume == nil {
+		return "", false, false
+	}
+	r := c.mesh.Resume
+
+	if r.Instance == "" {
+		if r.ArmExpires != nil && r.ArmExpires.After(now) {
+			return "", false, true
+		}
+		return ReasonResumeTimeout, true, true
+	}
+
+	// A heartbeat newer than the request proves the target took the
+	// run over, so this resume is complete. The guard then answers
+	// nothing and the ordinary liveness tests decide, which is what
+	// marks the run if the target itself dies later. The heartbeat
+	// ingest clears the resume record for the same reason; this
+	// fall-through covers a record the clear has not reached yet.
+	if c.lastHeartbeatAt != nil && r.RequestedAt != nil && c.lastHeartbeatAt.After(*r.RequestedAt) {
+		return "", false, false
+	}
+	if r.Deadline != nil && r.Deadline.After(now) {
+		return "", false, true
+	}
+	return ReasonResumeTimeout, true, true
+}
+
 // scanCandidates reads the QUEUED/RUNNING candidate columns
 // evaluateInterruption and markInterrupted need, shared by the periodic
 // sweep's query and the announce-triggered query.
@@ -113,11 +171,14 @@ func scanCandidates(rows pgx.Rows) ([]runInterruptCandidate, error) {
 			c              runInterruptCandidate
 			owningInstance *string
 			actor          *string
+			meshRaw        json.RawMessage
 		)
 		if err := rows.Scan(&c.runID, &c.createdAt, &c.cluster, &c.namespace, &c.cell, &c.tenant, &c.jobPath,
-			&c.status, &c.buildNumber, &actor, &c.params, &c.lastHeartbeatAt, &c.acceptedAt, &owningInstance); err != nil {
+			&c.status, &c.buildNumber, &actor, &c.params, &c.lastHeartbeatAt, &c.acceptedAt, &owningInstance,
+			&meshRaw); err != nil {
 			return nil, fmt.Errorf("scan interrupt candidate: %w", err)
 		}
+		c.mesh = decodeMeshRecord(meshRaw)
 		c.cellInstance = derefString(owningInstance)
 		c.actor = derefString(actor)
 		out = append(out, c)
@@ -137,7 +198,8 @@ const candidatesQuery = `
 	SELECT r.run_id, r.created_at, r.cluster, r.namespace, r.cell, r.tenant, r.job_path,
 	       r.status, r.build_number, r.actor, r.params, r.last_heartbeat_at,
 	       (r.payload->>'accepted_at')::timestamptz,
-	       COALESCE(NULLIF(ri.cell_instance, ''), r.payload->>'accepted_instance')
+	       COALESCE(NULLIF(ri.cell_instance, ''), r.payload->>'accepted_instance'),
+	       r.payload->'mesh'
 	FROM varroa.runs r
 	LEFT JOIN varroa.run_intents ri ON ri.run_id = r.run_id
 	WHERE r.status IN ('QUEUED', 'RUNNING')`
@@ -171,6 +233,20 @@ func selectCandidatesForTenant(ctx context.Context, pool *pgxpool.Pool, cluster,
 // recorder_interrupted_skipped_total. It leaves a QUEUED run's accepted
 // keys in place: a query that asks whether a real build was ever
 // recorded must still answer no for a marked queued run.
+//
+// The mesh window lives in this write, not in the caller's test: the
+// sweep reads its candidates in one query and marks each one later, so
+// an arm that commits between the two would otherwise be ignored. The
+// clause re-reads the committed record, so a dispatched run answers on
+// its deadline and never on its arm window. A jsonb_typeof test covers
+// a JSON null; a bare IS NULL test would leave a JSON null matching no
+// branch, and the run unmarkable. The test says IS DISTINCT FROM, never
+// <>: a null payload and a missing mesh key both make jsonb_typeof
+// answer SQL NULL, and <> would then answer NULL for every branch.
+//
+// The dispatched branch also compares the heartbeat against the
+// resume's own request time. A target that proved itself between the
+// candidate read and this write must not be marked.
 func markInterrupted(ctx context.Context, pool *pgxpool.Pool, run runInterruptCandidate, reason string, now time.Time) (bool, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -191,6 +267,15 @@ func markInterrupted(ctx context.Context, pool *pgxpool.Pool, run runInterruptCa
 		                 ELSE '{"finalized": true, "incomplete": true, "incomplete_reason": "no-summary"}'::jsonb
 		             END)
 		WHERE run_id = $1 AND status = $4
+		  AND (
+		    jsonb_typeof(payload->'mesh'->'resume') IS DISTINCT FROM 'object'
+		    OR (payload->'mesh'->'resume'->>'instance' IS NULL
+		        AND (payload->'mesh'->'resume'->>'arm_expires')::timestamptz <= $2)
+		    OR (payload->'mesh'->'resume'->>'instance' IS NOT NULL
+		        AND (payload->'mesh'->'resume'->>'deadline')::timestamptz <= $2
+		        AND (last_heartbeat_at IS NULL
+		             OR last_heartbeat_at <= (payload->'mesh'->'resume'->>'requested_at')::timestamptz))
+		  )
 	`, run.runID, now, reason, run.status)
 	if err != nil {
 		return false, fmt.Errorf("mark run interrupted: %w", err)
@@ -274,11 +359,16 @@ func decodeInterruptedRetry(policy json.RawMessage) string {
 // retry and no cancel, per design D14, and the recorder never
 // republishes.
 //
-// The cancel belongs to ReasonNoHeartbeat alone. A ReasonCellLost mark
-// proves the pod gone, so no process remains to stop and the cell that
-// would receive the command no longer runs. A moved reason names an
-// owning instance that already changed, so its process died with its
-// pod.
+// The cancel belongs to ReasonNoHeartbeat and ReasonResumeTimeout. A
+// ReasonCellLost mark proves the pod gone, so no process remains to
+// stop and the cell that would receive the command no longer runs. A
+// moved reason names an owning instance that already changed, so its
+// process died with its pod.
+//
+// A dispatched resume moved the owner to a live target, so a process
+// remains to stop. An undispatched arm still names the dead instance,
+// so it takes the existing "owner already changed" arm and publishes
+// no cancel.
 //
 // A marked QUEUED run publishes neither action: no build ever started,
 // so there is nothing to cancel, and the store holds no parameters to
@@ -292,7 +382,11 @@ func afterMark(ctx context.Context, conn *bus.Conn, metrics *InterruptedMetrics,
 		return
 	}
 
-	if reason == ReasonNoHeartbeat {
+	if reason == ReasonResumeTimeout {
+		metrics.addResumeTimeout(ctx)
+	}
+
+	if reason == ReasonNoHeartbeat || (reason == ReasonResumeTimeout && run.resumeDispatched()) {
 		action := LedgerAction{
 			Kind:        LedgerActionCancelRun,
 			Cluster:     run.cluster,
@@ -337,6 +431,19 @@ func afterMark(ctx context.Context, conn *bus.Conn, metrics *InterruptedMetrics,
 	}
 }
 
+// deleteRunState removes a marked run's replicated state, after the
+// marking transaction commits and never inside it: a lost object delete
+// must never roll the record back. A nil deleter skips the delete, the
+// same rule the log store follows.
+func deleteRunState(ctx context.Context, store ObjectDeleter, runID string, logger *slog.Logger) {
+	if store == nil {
+		return
+	}
+	if err := store.DeletePrefix(ctx, blob.RunStatePrefix(runID)); err != nil {
+		logger.Warn("delete run state after marking failed", "run_id", runID, "error", err)
+	}
+}
+
 // markedStatusLabel maps a candidate's status to the "status" attribute
 // recorder_interrupted_marked_total carries: "queued" or "running".
 func markedStatusLabel(status string) string {
@@ -356,8 +463,8 @@ func markedStatusLabel(status string) string {
 // fires here. The confirmed test does fire here, because a pod read
 // proves the loss and needs no heartbeat window.
 func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, metrics *InterruptedMetrics,
-	actionMetrics *ActionMetrics, cluster, tenant string, row tenantPlacementLivenessRow, now time.Time,
-	grace time.Duration, logger *slog.Logger) (int, error) {
+	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, cluster, tenant string,
+	row tenantPlacementLivenessRow, now time.Time, grace time.Duration, logger *slog.Logger) (int, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -391,6 +498,7 @@ func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.C
 		if reason == ReasonCellLost {
 			metrics.addCellLoss(ctx, "announce")
 		}
+		deleteRunState(ctx, stateDeleter, c.runID.String(), logger)
 		afterMark(ctx, conn, metrics, actionMetrics, c, reason, interruptedRetry, logger)
 		marked++
 	}
@@ -430,8 +538,8 @@ func sweepConsumerSkip(info *nats.ConsumerInfo, maxPending uint64, now time.Time
 // every QUEUED or RUNNING run fleet-wide, marking and publishing for
 // each one that qualifies. It answers how many runs it marked.
 func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, metrics *InterruptedMetrics,
-	actionMetrics *ActionMetrics, maxPending uint64, now time.Time, grace time.Duration,
-	logger *slog.Logger) (int, error) {
+	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, maxPending uint64, now time.Time,
+	grace time.Duration, logger *slog.Logger) (int, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -478,6 +586,7 @@ func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 		if reason == ReasonCellLost {
 			metrics.addCellLoss(ctx, "sweep")
 		}
+		deleteRunState(ctx, stateDeleter, c.runID.String(), logger)
 		afterMark(ctx, conn, metrics, actionMetrics, c, reason, decodeInterruptedRetry(row.policy), logger)
 		marked++
 	}

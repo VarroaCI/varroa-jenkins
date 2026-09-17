@@ -300,6 +300,7 @@ type ImperativeCommand struct {
 	ReplayWebhook   *ReplayWebhookPayload `json:"replay_webhook,omitempty"`
 	TriggerBuild    *TriggerBuildPayload  `json:"trigger_build,omitempty"`
 	CancelBuild     *CancelBuildPayload   `json:"cancel_build,omitempty"`
+	ResumeBuild     *ResumeBuildPayload   `json:"resume_build,omitempty"`
 }
 
 type InstalledPlugin struct {
@@ -466,6 +467,18 @@ type MiteMessage_CrossTenantRequest struct {
 
 func (*MiteMessage_CrossTenantRequest) isMiteMessage_message() {}
 
+type MiteMessage_RunStateChunk struct {
+	RunStateChunk *RunStateChunk `json:"run_state_chunk,omitempty"`
+}
+
+func (*MiteMessage_RunStateChunk) isMiteMessage_message() {}
+
+type MiteMessage_RunStateRequest struct {
+	RunStateRequest *RunStateRequest `json:"run_state_request,omitempty"`
+}
+
+func (*MiteMessage_RunStateRequest) isMiteMessage_message() {}
+
 func (m *MiteMessage) MarshalJSON() ([]byte, error) {
 	type alias struct {
 		Hello               *Hello                `json:"hello,omitempty"`
@@ -482,6 +495,8 @@ func (m *MiteMessage) MarshalJSON() ([]byte, error) {
 		LogChunk            *LogChunk             `json:"log_chunk,omitempty"`
 		TailAck             *TailAck              `json:"tail_ack,omitempty"`
 		CrossTenantRequest  *CrossTenantRequest   `json:"cross_tenant_request,omitempty"`
+		RunStateChunk       *RunStateChunk        `json:"run_state_chunk,omitempty"`
+		RunStateRequest     *RunStateRequest      `json:"run_state_request,omitempty"`
 	}
 	var a alias
 	switch v := m.Message.(type) {
@@ -513,6 +528,10 @@ func (m *MiteMessage) MarshalJSON() ([]byte, error) {
 		a.TailAck = v.TailAck
 	case *MiteMessage_CrossTenantRequest:
 		a.CrossTenantRequest = v.CrossTenantRequest
+	case *MiteMessage_RunStateChunk:
+		a.RunStateChunk = v.RunStateChunk
+	case *MiteMessage_RunStateRequest:
+		a.RunStateRequest = v.RunStateRequest
 	}
 	return json.Marshal(a)
 }
@@ -533,6 +552,8 @@ func (m *MiteMessage) UnmarshalJSON(data []byte) error {
 		LogChunk            *LogChunk             `json:"log_chunk,omitempty"`
 		TailAck             *TailAck              `json:"tail_ack,omitempty"`
 		CrossTenantRequest  *CrossTenantRequest   `json:"cross_tenant_request,omitempty"`
+		RunStateChunk       *RunStateChunk        `json:"run_state_chunk,omitempty"`
+		RunStateRequest     *RunStateRequest      `json:"run_state_request,omitempty"`
 	}
 	if err := json.Unmarshal(data, &a); err != nil {
 		return err
@@ -566,6 +587,10 @@ func (m *MiteMessage) UnmarshalJSON(data []byte) error {
 		m.Message = &MiteMessage_TailAck{TailAck: a.TailAck}
 	case a.CrossTenantRequest != nil:
 		m.Message = &MiteMessage_CrossTenantRequest{CrossTenantRequest: a.CrossTenantRequest}
+	case a.RunStateChunk != nil:
+		m.Message = &MiteMessage_RunStateChunk{RunStateChunk: a.RunStateChunk}
+	case a.RunStateRequest != nil:
+		m.Message = &MiteMessage_RunStateRequest{RunStateRequest: a.RunStateRequest}
 	}
 	return nil
 }
@@ -668,6 +693,20 @@ func (m *MiteMessage) GetCrossTenantRequest() *CrossTenantRequest {
 	return nil
 }
 
+func (m *MiteMessage) GetRunStateChunk() *RunStateChunk {
+	if x, ok := m.Message.(*MiteMessage_RunStateChunk); ok {
+		return x.RunStateChunk
+	}
+	return nil
+}
+
+func (m *MiteMessage) GetRunStateRequest() *RunStateRequest {
+	if x, ok := m.Message.(*MiteMessage_RunStateRequest); ok {
+		return x.RunStateRequest
+	}
+	return nil
+}
+
 type ObservabilityBuild struct {
 	JobName         string `json:"job_name"`
 	BuildNumber     int    `json:"build_number"`
@@ -760,6 +799,18 @@ type OperatorMessage_EventAck struct {
 
 func (*OperatorMessage_EventAck) isOperatorMessage_message() {}
 
+type OperatorMessage_RunStateResponse struct {
+	RunStateResponse *RunStateResponse `json:"run_state_response,omitempty"`
+}
+
+func (*OperatorMessage_RunStateResponse) isOperatorMessage_message() {}
+
+type OperatorMessage_RunStateAck struct {
+	RunStateAck *RunStateAck `json:"run_state_ack,omitempty"`
+}
+
+func (*OperatorMessage_RunStateAck) isOperatorMessage_message() {}
+
 func (m *OperatorMessage) MarshalJSON() ([]byte, error) {
 	type alias struct {
 		DesiredState        *DesiredStateCommand `json:"desired_state,omitempty"`
@@ -771,6 +822,8 @@ func (m *OperatorMessage) MarshalJSON() ([]byte, error) {
 		LogAck              *LogAck              `json:"log_ack,omitempty"`
 		CrossTenantResponse *CrossTenantResponse `json:"cross_tenant_response,omitempty"`
 		EventAck            *EventAck            `json:"event_ack,omitempty"`
+		RunStateResponse    *RunStateResponse    `json:"run_state_response,omitempty"`
+		RunStateAck         *RunStateAck         `json:"run_state_ack,omitempty"`
 	}
 	var a alias
 	switch v := m.Message.(type) {
@@ -792,6 +845,10 @@ func (m *OperatorMessage) MarshalJSON() ([]byte, error) {
 		a.CrossTenantResponse = v.CrossTenantResponse
 	case *OperatorMessage_EventAck:
 		a.EventAck = v.EventAck
+	case *OperatorMessage_RunStateResponse:
+		a.RunStateResponse = v.RunStateResponse
+	case *OperatorMessage_RunStateAck:
+		a.RunStateAck = v.RunStateAck
 	}
 	return json.Marshal(a)
 }
@@ -807,6 +864,8 @@ func (m *OperatorMessage) UnmarshalJSON(data []byte) error {
 		LogAck              *LogAck              `json:"log_ack,omitempty"`
 		CrossTenantResponse *CrossTenantResponse `json:"cross_tenant_response,omitempty"`
 		EventAck            *EventAck            `json:"event_ack,omitempty"`
+		RunStateResponse    *RunStateResponse    `json:"run_state_response,omitempty"`
+		RunStateAck         *RunStateAck         `json:"run_state_ack,omitempty"`
 	}
 	if err := json.Unmarshal(data, &a); err != nil {
 		return err
@@ -830,6 +889,10 @@ func (m *OperatorMessage) UnmarshalJSON(data []byte) error {
 		m.Message = &OperatorMessage_CrossTenantResponse{CrossTenantResponse: a.CrossTenantResponse}
 	case a.EventAck != nil:
 		m.Message = &OperatorMessage_EventAck{EventAck: a.EventAck}
+	case a.RunStateResponse != nil:
+		m.Message = &OperatorMessage_RunStateResponse{RunStateResponse: a.RunStateResponse}
+	case a.RunStateAck != nil:
+		m.Message = &OperatorMessage_RunStateAck{RunStateAck: a.RunStateAck}
 	}
 	return nil
 }
@@ -897,6 +960,20 @@ func (m *OperatorMessage) GetEventAck() *EventAck {
 	return nil
 }
 
+func (m *OperatorMessage) GetRunStateResponse() *RunStateResponse {
+	if x, ok := m.Message.(*OperatorMessage_RunStateResponse); ok {
+		return x.RunStateResponse
+	}
+	return nil
+}
+
+func (m *OperatorMessage) GetRunStateAck() *RunStateAck {
+	if x, ok := m.Message.(*OperatorMessage_RunStateAck); ok {
+		return x.RunStateAck
+	}
+	return nil
+}
+
 type PluginDep struct {
 	Name     string `json:"name"`
 	Min      string `json:"min,omitempty"`
@@ -957,6 +1034,55 @@ type ReplayWebhookPayload struct {
 	DeliveryId string            `json:"delivery_id,omitempty"`
 }
 
+type ResumeBuildPayload struct {
+	RunId        string   `json:"run_id"`
+	JobPath      string   `json:"job_path"`
+	BuildNumber  int64    `json:"build_number,omitempty"`
+	Files        []string `json:"files,omitempty"`
+	Instance     string   `json:"instance"`
+	DeadlineUnix int64    `json:"deadline_unix,omitempty"`
+}
+
+type RunStateAck struct {
+	RunId    string `json:"run_id"`
+	Relpath  string `json:"relpath,omitempty"`
+	StateGen int64  `json:"state_gen,omitempty"`
+	Status   string `json:"status"`
+	Reason   string `json:"reason,omitempty"`
+	PauseMs  int    `json:"pause_ms,omitempty"`
+}
+
+type RunStateChunk struct {
+	RunId        string `json:"run_id"`
+	JobPath      string `json:"job_path,omitempty"`
+	BuildNumber  int64  `json:"build_number,omitempty"`
+	Relpath      string `json:"relpath"`
+	StateGen     int64  `json:"state_gen,omitempty"`
+	Seq          int64  `json:"seq,omitempty"`
+	Total        int64  `json:"total,omitempty"`
+	GzipContent  []byte `json:"gzip_content,omitempty"`
+	RawSize      int64  `json:"raw_size,omitempty"`
+	CellInstance string `json:"cell_instance,omitempty"`
+	ObjectSize   int64  `json:"object_size,omitempty"`
+	PusherEpoch  int64  `json:"pusher_epoch,omitempty"`
+}
+
+type RunStateRequest struct {
+	RequestId *uint64 `json:"request_id,omitempty"`
+	RunId     string  `json:"run_id"`
+	Relpath   string  `json:"relpath"`
+}
+
+type RunStateResponse struct {
+	RequestId   *uint64 `json:"request_id,omitempty"`
+	Relpath     string  `json:"relpath,omitempty"`
+	Seq         int64   `json:"seq,omitempty"`
+	Total       int64   `json:"total,omitempty"`
+	GzipContent []byte  `json:"gzip_content,omitempty"`
+	RawSize     int64   `json:"raw_size,omitempty"`
+	Error       string  `json:"error,omitempty"`
+}
+
 type StateSnapshot struct {
 	ActualStateHash string          `json:"actual_state_hash,omitempty"`
 	ConfigHash      string          `json:"config_hash,omitempty"`
@@ -1015,6 +1141,7 @@ const (
 	CommandTypeCollectPluginInventory CommandType = 4
 	CommandTypeTriggerBuild           CommandType = 5
 	CommandTypeCancelBuild            CommandType = 6
+	CommandTypeResumeBuild            CommandType = 7
 )
 
 // MiteServer is the server-side interface for the Mite service.

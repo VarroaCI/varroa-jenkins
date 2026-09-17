@@ -78,9 +78,11 @@ import org.jenkinsci.plugins.varroamiteauth.template.VarroaTemplateValuesAction;
  *
  * <p>A per-run state map, keyed by {@code <job full name>#<build number>},
  * holds the run identity and a shared sequence counter. It is bounded at
- * 512 entries (D1). {@link Runs#onCompleted} removes the entry for every
- * run, pipeline or freestyle, because {@link Flows} never attaches for a
- * freestyle run. Upstream ordering places {@code RunListener.onStarted}
+ * 512 entries (D1). A build another process began and this one resumed
+ * carries no {@code onStarted} call, so {@link Flows#onResumed} rebuilds
+ * its entry from the run's own persisted action. {@link Runs#onCompleted}
+ * removes the entry for every run, pipeline or freestyle, because
+ * {@link Flows} never attaches for a freestyle run. Upstream ordering places {@code RunListener.onStarted}
  * before {@code FlowExecutionListener.onRunning}, and {@code
  * RunListener.onCompleted} before {@code FlowExecutionListener.onCompleted}
  * (workflow-job-plugin, {@code WorkflowRun.java}, {@code run()} and
@@ -324,19 +326,73 @@ public final class VarroaRunRecorder {
         synchronized (RUN_STATE) {
             snapshot = new ArrayList<>(RUN_STATE.values());
         }
-        long now = System.currentTimeMillis();
         for (RunState state : snapshot) {
-            BuildEvent event = BuildEvent.builder()
-                    .phase(BuildEvent.PHASE_HEARTBEAT)
-                    .seq(state.nextSeq())
-                    .emittedAtMillis(now)
-                    .runId(state.runId)
-                    .intentKey(state.intentKey)
-                    .jobPath(state.jobPath)
-                    .buildNumber(state.buildNumber)
-                    .build();
-            emit(event);
+            emitHeartbeat(state);
         }
+    }
+
+    /** Emits one {@code HEARTBEAT} event for one run. */
+    private static void emitHeartbeat(RunState state) {
+        emit(BuildEvent.builder()
+                .phase(BuildEvent.PHASE_HEARTBEAT)
+                .seq(state.nextSeq())
+                .emittedAtMillis(System.currentTimeMillis())
+                .runId(state.runId)
+                .intentKey(state.intentKey)
+                .jobPath(state.jobPath)
+                .buildNumber(state.buildNumber)
+                .build());
+    }
+
+    /**
+     * Rebuilds the per-run state of a build this process loaded from
+     * disk, and reports whether this call rebuilt it.
+     *
+     * <p>A resumed build never fires {@code RunListener.onStarted}: that
+     * call belongs to the process that began the build, and the pipeline
+     * mesh moves a running build to another one. Without this rebuild
+     * the run has no heartbeat, no stage events, and no sequence
+     * counter, so the recorder sees nothing of it after the resume and
+     * interrupts it at the resume deadline.
+     *
+     * <p>Every field comes from the run's own persisted action, which
+     * travels with the build record. The run identity is therefore the
+     * one the recorder dispatched, never a new one.
+     *
+     * <p>The first heartbeat goes out here, not one interval later. The
+     * recorder clears a run's resume only on a heartbeat from the
+     * instance it named, received after it asked, and it gives up six
+     * minutes after that ask.
+     *
+     * <p>It emits no {@code STARTED} event. The run started once, in the
+     * process that is gone, and a second start would rewrite the run's
+     * own beginning.
+     */
+    static boolean attachResumedRun(Run<?, ?> run) {
+        if (!gateEnabled()) {
+            return false;
+        }
+        VarroaIntentAction action = run.getAction(VarroaIntentAction.class);
+        if (action == null || action.getRunId().isEmpty()) {
+            return false;
+        }
+        if (!run.isBuilding()) {
+            // A build that ended needs no heartbeat and no listener. Its
+            // completion already went out, from whichever process ran
+            // it, and an entry here would heartbeat a finished run.
+            return false;
+        }
+        String jobPath = safeJobPath(run);
+        long buildNumber = run.getNumber();
+        if (stateFor(jobPath, buildNumber) != null) {
+            return false;
+        }
+        RunState state = registerRun(jobPath, buildNumber, resolveRunId(action), action.getIntentKey());
+        ensureHeartbeatStarted();
+        emitHeartbeat(state);
+        LOGGER.log(Level.INFO, () -> "VarroaRunRecorder: attached to the resumed build "
+                + jobPath + "#" + buildNumber + " of run " + state.runId);
+        return true;
     }
 
     // --- Runs: STARTED and COMPLETED (D1, D3) ---
@@ -380,6 +436,8 @@ public final class VarroaRunRecorder {
         public void onCompleted(Run<?, ?> run, TaskListener listener) {
             String jobPath = safeJobPath(run);
             long buildNumber = run.getNumber();
+            RunState existing = stateFor(jobPath, buildNumber);
+            String pusherRunId = existing != null ? existing.runId : "";
             try {
                 if (!gateEnabled()) {
                     return;
@@ -418,6 +476,7 @@ public final class VarroaRunRecorder {
             } catch (Exception e) {
                 LOGGER.log(Level.WARNING, "VarroaRunRecorder.Runs: failed to emit COMPLETED", e);
             } finally {
+                RunStatePusher.remove(pusherRunId);
                 removeState(jobPath, buildNumber);
             }
         }
@@ -819,6 +878,26 @@ public final class VarroaRunRecorder {
 
         @Override
         public void onRunning(FlowExecution execution) {
+            attach(execution);
+        }
+
+        /**
+         * A build Jenkins loads from disk resumes its execution here.
+         * Jenkins calls this for a build that was running when its
+         * process ended, which is every build the pipeline mesh moves.
+         */
+        @Override
+        public void onResumed(FlowExecution execution) {
+            attach(execution);
+        }
+
+        /**
+         * Attaches the recorder to one execution: the per-run state when
+         * this process does not hold it, and the graph listener once.
+         * Both entry points take this path, because only one of them
+         * fires for a given build and the work is the same.
+         */
+        private static void attach(FlowExecution execution) {
             try {
                 if (!gateEnabled()) {
                     return;
@@ -827,9 +906,13 @@ public final class VarroaRunRecorder {
                 if (run == null) {
                     return;
                 }
+                // A resumed build has no state here, because its
+                // STARTED listener fired in another process.
+                attachResumedRun(run);
                 Graph graph = new Graph(run);
-                ATTACHED.put(execution, graph);
-                execution.addListener(graph);
+                if (ATTACHED.putIfAbsent(execution, graph) == null) {
+                    execution.addListener(graph);
+                }
             } catch (Exception e) {
                 LOGGER.log(Level.WARNING, "VarroaRunRecorder.Flows: failed to attach the graph listener", e);
             }
@@ -893,6 +976,11 @@ public final class VarroaRunRecorder {
                         emitStageEnded(run, state, start, (BlockEndNode) node);
                     }
                 }
+                // The push is scheduled, never performed, on this call:
+                // this listener runs on the flow's own thread. A failure
+                // of any kind leaves the build running and emits no
+                // build event.
+                RunStatePusher.scheduleFor(run, state.runId, node);
             } catch (Exception e) {
                 LOGGER.log(Level.WARNING, "VarroaRunRecorder.Graph: failed to process a flow node", e);
             }

@@ -185,7 +185,17 @@ public class BuildEventDispatcher implements Runnable {
         }
         List<PostableEvent> events = new ArrayList<>(entries.size());
         for (RunSpool.Entry entry : entries) {
+            // A run-state record carries the run-state route's headers
+            // and a gzip body, never a build event. Its own pusher
+            // replays it.
+            if (entry.runState) {
+                continue;
+            }
             events.add(new SpooledEvent(runId, entry));
+        }
+        if (events.isEmpty()) {
+            clearAnnounced(runId);
+            return true;
         }
         for (List<PostableEvent> group : split(events)) {
             postWithRetry(group);

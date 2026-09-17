@@ -500,7 +500,7 @@ func sendTenantSyncWithMetrics(t *testing.T, pool *pgxpool.Pool, conn *bus.Conn,
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	out := handleTenantSync(conn, slog.Default(), pool, metrics, nil, testGrace, body)
+	out := handleTenantSync(conn, slog.Default(), pool, metrics, nil, nil, testGrace, body)
 	var resp TenantSyncResponse
 	if err := json.Unmarshal(out, &resp); err != nil {
 		t.Fatalf("unmarshal response: %v", err)

@@ -746,7 +746,9 @@ sections describe.
     gateway's gRPC and API-key-verify ports, each placed tenant's agent
     namespace, kube-dns, and the configured API-server CIDRs), `cell_jcasc.go`
     (the fixed cell JCasC fragment — `numExecutors: 0`,
-    `PERFORMANCE_OPTIMIZED` flow durability — and `tenantCloudFor`, the
+    `MAX_SURVIVABILITY` flow durability, which the pipeline mesh needs
+    because a lower level writes the flow program at a checkpoint — and
+    `tenantCloudFor`, the
     operator's constant agent pod template per tenant), `cell_items_assembly.go`
     (`assembleCellContent` runs the tenant items pipeline — `items.ReRoot`
     then `items.Merge` per tenant, `lint.Run` against `cellLintRules`

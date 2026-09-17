@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"reflect"
 	"testing"
+	"time"
 
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
@@ -255,5 +256,89 @@ func TestHandleLedgerAction_OtherCluster(t *testing.T) {
 
 	if len(rec.sent) != 0 || rec.wokeCalls != 0 {
 		t.Fatalf("expected no action for another cluster's action, got sent=%d woke=%d", len(rec.sent), rec.wokeCalls)
+	}
+}
+
+// TestHandleLedgerAction_ResumeRunCarriesItsDeadline pins the deadline
+// design D12 names. Without it a command that reaches its target late
+// restores a run the recorder has already marked, which a live run on
+// core did: the mite wrote the files six minutes past the resume's own
+// deadline and the build ended at once.
+func TestHandleLedgerAction_ResumeRunCarriesItsDeadline(t *testing.T) {
+	rec := &fakeLedgerActionRunner{}
+	action := recordstore.LedgerAction{
+		Kind: "resume_run", Cluster: "core",
+		Namespace: "cells-ns", Controller: "cell-a",
+		RunID: "run-9", JobPath: "team/job-a", Instance: "pod-live",
+		Files: []string{"jobs/team/jobs/job-a/builds/5/build.xml"},
+	}
+	data, _ := json.Marshal(action)
+	handleLedgerAction(context.Background(), testLogger(), "core", rec, data)
+
+	if len(rec.sent) != 1 {
+		t.Fatalf("expected one imperative command, got %d", len(rec.sent))
+	}
+	cmd := rec.sent[0]
+	if cmd.Type != mitev1.CommandTypeResumeBuild {
+		t.Fatalf("expected RESUME_BUILD, got %v", cmd.Type)
+	}
+	if cmd.DeadlineSec != resumeCommandDeadlineSec {
+		t.Fatalf("DeadlineSec = %d, want %d", cmd.DeadlineSec, resumeCommandDeadlineSec)
+	}
+	rb := cmd.ResumeBuild
+	if rb == nil || rb.Instance != "pod-live" || rb.RunId != "run-9" {
+		t.Fatalf("unexpected ResumeBuild payload: %+v", rb)
+	}
+}
+
+// TestHandleLedgerAction_ResumeRunCarriesTheAbsoluteExpiry proves the
+// command carries the moment the recorder gives up, not only a
+// duration. DeadlineSec bounds the work once the worker starts it, and
+// that window opens at pickup, so it cannot end a command that waited
+// in the queue.
+func TestHandleLedgerAction_ResumeRunCarriesTheAbsoluteExpiry(t *testing.T) {
+	rec := &fakeLedgerActionRunner{}
+	deadline := time.Now().Add(6 * time.Minute).UTC()
+	action := recordstore.LedgerAction{
+		Kind: "resume_run", Cluster: "core",
+		Namespace: "cells-ns", Controller: "cell-a",
+		RunID: "run-9", JobPath: "team/job-a", Instance: "pod-live",
+		Files:    []string{"jobs/team/jobs/job-a/builds/5/build.xml"},
+		Deadline: &deadline,
+	}
+	data, _ := json.Marshal(action)
+	handleLedgerAction(context.Background(), testLogger(), "core", rec, data)
+
+	if len(rec.sent) != 1 {
+		t.Fatalf("expected one imperative command, got %d", len(rec.sent))
+	}
+	rb := rec.sent[0].ResumeBuild
+	if rb == nil {
+		t.Fatal("expected a ResumeBuild payload")
+	}
+	if rb.DeadlineUnix != deadline.Unix() {
+		t.Fatalf("DeadlineUnix = %d, want %d", rb.DeadlineUnix, deadline.Unix())
+	}
+}
+
+// TestHandleLedgerAction_ResumeRunWithoutADeadlineSendsZero proves an
+// action that carries no deadline leaves the field empty, so the mite
+// applies no expiry test.
+func TestHandleLedgerAction_ResumeRunWithoutADeadlineSendsZero(t *testing.T) {
+	rec := &fakeLedgerActionRunner{}
+	action := recordstore.LedgerAction{
+		Kind: "resume_run", Cluster: "core",
+		Namespace: "cells-ns", Controller: "cell-a",
+		RunID: "run-9", JobPath: "team/job-a", Instance: "pod-live",
+		Files: []string{"jobs/team/jobs/job-a/builds/5/build.xml"},
+	}
+	data, _ := json.Marshal(action)
+	handleLedgerAction(context.Background(), testLogger(), "core", rec, data)
+
+	if len(rec.sent) != 1 {
+		t.Fatalf("expected one imperative command, got %d", len(rec.sent))
+	}
+	if rb := rec.sent[0].ResumeBuild; rb == nil || rb.DeadlineUnix != 0 {
+		t.Fatalf("DeadlineUnix = %+v, want 0", rb)
 	}
 }

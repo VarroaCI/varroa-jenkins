@@ -3,6 +3,7 @@ package recordstore
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
@@ -16,6 +17,7 @@ const (
 	LedgerActionRetryRun   = "retry_run"
 	LedgerActionWakeCell   = "wake_cell"
 	LedgerActionTriggerRun = "trigger_run"
+	LedgerActionResumeRun  = "resume_run"
 )
 
 // LedgerActionRecorder is the literal actor value the recorder sets when
@@ -44,6 +46,21 @@ type LedgerAction struct {
 	// alongside RunID and JobPath above.
 	IntentKey  string          `json:"intent_key,omitempty"`
 	Parameters json.RawMessage `json:"parameters,omitempty"`
+
+	// Instance, Files, and Deadline apply to resume_run alone. Instance
+	// names the cell instance that must adopt the run. Files lists the
+	// run's stored state paths, relative to the Jenkins home, because
+	// the operator holds no database connection and cannot read them
+	// itself.
+	//
+	// Deadline is the moment the resume stops being useful, which is
+	// the run's own stored deadline. It travels with the action because
+	// a command can wait in a queue: a command that arrives after this
+	// moment must restore nothing, and the target has no other way to
+	// know that the recorder already gave up.
+	Instance string     `json:"instance,omitempty"`
+	Files    []string   `json:"files,omitempty"`
+	Deadline *time.Time `json:"deadline,omitempty"`
 }
 
 // PublishLedgerAction marshals action and publishes it on

@@ -140,6 +140,20 @@ func (c *ownerCache) set(runID string, entry ownerCacheEntry) {
 	}
 }
 
+// invalidate drops runID's cached decision, so the next check reads the
+// ledger again. A resume moves a run's owner with no claim behind it,
+// so observeGrant never replaces the entry for such a run.
+func (c *ownerCache) invalidate(runID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	el, ok := c.entries[runID]
+	if !ok {
+		return
+	}
+	c.order.Remove(el)
+	delete(c.entries, runID)
+}
+
 // observeGrant records a matched owner directly from a relayed granted
 // ClaimResponse, at no lookup cost. A later grant for the same run_id
 // replaces the entry unconditionally, so an ownership transfer

@@ -45,6 +45,10 @@ const (
 	// its queue. The gateway publishes it from a successful TRIGGER_BUILD
 	// result, not from a BuildEvent.
 	kindRunTriggerAccepted = "run.trigger_accepted"
+	// kindRunState records one run-state push outcome. The gateway
+	// publishes it after it stores a file, and after it refuses a push
+	// because the run passed its byte cap.
+	kindRunState = "run.state"
 )
 
 // Reason codes a run.trigger_failed envelope carries. The set is complete:

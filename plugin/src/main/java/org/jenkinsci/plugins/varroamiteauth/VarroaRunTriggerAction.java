@@ -6,6 +6,7 @@ import hudson.model.Cause;
 import hudson.model.CauseAction;
 import hudson.model.Item;
 import hudson.model.Job;
+import hudson.model.Node;
 import hudson.model.ParameterDefinition;
 import hudson.model.ParameterValue;
 import hudson.model.ParametersAction;
@@ -15,7 +16,11 @@ import hudson.model.RootAction;
 import hudson.model.Run;
 
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 import java.lang.reflect.Method;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
@@ -24,12 +29,19 @@ import java.util.stream.Collectors;
 
 import jenkins.model.Jenkins;
 import jenkins.model.ParameterizedJobMixIn;
+import jenkins.model.lazy.LazyBuildMixIn;
+
+import org.jenkinsci.plugins.workflow.flow.FlowExecution;
+import org.jenkinsci.plugins.workflow.flow.FlowExecutionList;
+import org.jenkinsci.plugins.workflow.flow.FlowExecutionOwner;
+import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse2;
+import org.kohsuke.stapler.WebMethod;
 
 import org.springframework.security.core.GrantedAuthority;
 
@@ -40,6 +52,14 @@ import org.springframework.security.core.GrantedAuthority;
  * <p>Requires the authority {@code ROLE:varroa:system-mite}, the same check {@link
  * ActivityEndpoint} performs. Only the mite calls these routes, over the Jenkins
  * bearer token the operator signs.
+ *
+ * <p>{@code POST /varroa-run/load-build} loads one numbered build, because Jenkins
+ * loads builds on demand and a build restored onto disk is otherwise invisible.
+ *
+ * <p>A route whose name holds more than one word carries {@link WebMethod}. Stapler
+ * derives a URL token from the method name and never writes a dash, so {@code
+ * doLoadBuild} would serve {@code loadBuild} and the dashed name every caller and
+ * every specification uses would answer {@code 404}.
  *
  * <p>{@code POST /varroa-run/trigger} stamps a caller-supplied run identifier and
  * intent key onto the queue item before it schedules, so the claim gate observes the
@@ -309,6 +329,298 @@ public class VarroaRunTriggerAction implements RootAction {
     private static void stopRun(Run<?, ?> run) throws Exception {
         Method m = run.getClass().getMethod("doStop");
         m.invoke(run);
+    }
+
+    /**
+     * Handles {@code POST /varroa-run/adopt-node}. Reads {@code name} and
+     * adds the node {@code nodes/<name>/config.xml} describes, so a build
+     * that resumed on this process finds the agent it was running on.
+     * Jenkins reads {@code nodes/} at boot only, and nothing else loads a
+     * file written after that.
+     *
+     * <p>Answers {@code 405} for a method other than {@code POST},
+     * {@code 403} without the mite authority, {@code 400} for a body that
+     * does not name a usable node, {@code 409} for a node this process
+     * already holds, {@code 404} for a missing file, and {@code 202} on
+     * success.
+     */
+    @WebMethod(name = "adopt-node")
+    public void doAdoptNode(StaplerRequest2 req, StaplerResponse2 rsp) {
+        try {
+            if (!"POST".equalsIgnoreCase(req.getMethod())) {
+                rsp.sendError(405, "Method Not Allowed: only POST is served");
+                return;
+            }
+            if (!isMitePrincipal()) {
+                rsp.sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                return;
+            }
+
+            JSONObject body;
+            try {
+                body = readBody(req);
+            } catch (Exception e) {
+                rsp.sendError(400, "Bad Request: body does not decode");
+                return;
+            }
+
+            String name = body.optString("name", "");
+            if (!isAdoptableNodeName(name)) {
+                rsp.sendError(400, "Bad Request: the body names no usable node");
+                return;
+            }
+
+            Jenkins jenkins = Jenkins.get();
+            if (jenkins.getNode(name) != null) {
+                rsp.sendError(409, "Conflict: this process already holds the node " + name);
+                return;
+            }
+
+            File config = new File(new File(jenkins.getRootDir(), "nodes"), name + "/config.xml");
+            if (!config.isFile()) {
+                rsp.sendError(404, "Not Found: no configuration file for the node " + name);
+                return;
+            }
+
+            Object loaded;
+            try (InputStream in = Files.newInputStream(config.toPath())) {
+                loaded = Jenkins.XSTREAM.fromXML(in);
+            } catch (IOException | RuntimeException e) {
+                rsp.sendError(400, "Bad Request: the configuration file does not load");
+                return;
+            }
+            if (!(loaded instanceof Node)) {
+                rsp.sendError(400, "Bad Request: the configuration file is not a node");
+                return;
+            }
+
+            jenkins.addNode((Node) loaded);
+            rsp.setStatus(202);
+        } catch (IOException | RuntimeException e) {
+            LOGGER.log(Level.WARNING, "VarroaRunTriggerAction.doAdoptNode caught exception", e);
+            try {
+                rsp.sendError(500, "Internal server error");
+            } catch (IOException ignored) {
+                // Best-effort error response.
+            }
+        }
+    }
+
+    /**
+     * Handles {@code POST /varroa-run/load-build}. Reads {@code jobPath}
+     * and {@code buildNumber}, loads that build, and answers whether it
+     * is running.
+     *
+     * <p>Jenkins loads a job's builds one at a time, on demand. A build
+     * directory written after the job was loaded is therefore invisible
+     * until something asks for that build, and a reload of the job
+     * config does not ask. The resume machinery runs inside that load:
+     * the run registers with {@link FlowExecutionList} and its execution
+     * resumes. Without this call a restored build waits until an
+     * unrelated read touches it, which on a live cell was several
+     * minutes, long past the resume deadline.
+     *
+     * <p>A body carrying {@code "probe": true} loads nothing. It reads
+     * the flow execution list and the job's loaded builds, and reports
+     * whether that build already runs here and whether it already ended
+     * here. The mite asks this before it writes any file,
+     * because the command transport redelivers a command whose result
+     * was lost, and rewriting a running build's files would corrupt it.
+     *
+     * <p>Answers {@code 405} for a method other than {@code POST},
+     * {@code 403} without the mite authority, {@code 400} for a body
+     * that names no job or no build, {@code 404} when the job or the
+     * build does not load, and {@code 200} with
+     * {@code {"building": ..., "registered": ...}} on success. A probe
+     * answers {@code 404} for an unknown job alone: a build that is not
+     * on the list is reported as not running, never as missing.
+     */
+    @WebMethod(name = "load-build")
+    public void doLoadBuild(StaplerRequest2 req, StaplerResponse2 rsp) {
+        try {
+            if (!"POST".equalsIgnoreCase(req.getMethod())) {
+                rsp.sendError(405, "Method Not Allowed: only POST is served");
+                return;
+            }
+            if (!isMitePrincipal()) {
+                rsp.sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                return;
+            }
+
+            JSONObject body;
+            try {
+                body = readBody(req);
+            } catch (Exception e) {
+                rsp.sendError(400, "Bad Request: body does not decode");
+                return;
+            }
+
+            String jobPath = body.optString("jobPath", "");
+            long buildNumber = body.optLong("buildNumber", 0L);
+            if (jobPath.isEmpty() || buildNumber <= 0) {
+                rsp.sendError(400, "Bad Request: the body names no job and build");
+                return;
+            }
+
+            Job<?, ?> job = Jenkins.get().getItemByFullName(jobPath, Job.class);
+            if (job == null) {
+                rsp.sendError(404, "Not Found: no job " + jobPath);
+                return;
+            }
+
+            if (body.optBoolean("probe", false)) {
+                probeAnswer(job, (int) buildNumber, rsp);
+                return;
+            }
+
+            // This read is the load. It runs the run's own onLoad, which
+            // resumes a pipeline that was still running when its file
+            // was written.
+            Run<?, ?> run = job.getBuildByNumber((int) buildNumber);
+            if (run == null) {
+                rsp.sendError(404, "Not Found: no build " + buildNumber + " of " + jobPath);
+                return;
+            }
+
+            boolean building = run.isBuilding();
+            writeLoadAnswer(rsp, building, building && registerExecution(run));
+        } catch (IOException | RuntimeException e) {
+            LOGGER.log(Level.WARNING, "VarroaRunTriggerAction.doLoadBuild caught exception", e);
+            try {
+                rsp.sendError(500, "Internal server error");
+            } catch (IOException ignored) {
+                // Best-effort error response.
+            }
+        }
+    }
+
+    /** Writes the load route's own answer. */
+    private static void writeLoadAnswer(StaplerResponse2 rsp, boolean building, boolean registered)
+            throws IOException {
+        writeAnswer(rsp, building, registered, false);
+    }
+
+    /** Writes one answer of the load route, probe or load. */
+    private static void writeAnswer(StaplerResponse2 rsp, boolean building, boolean registered,
+            boolean finished) throws IOException {
+        JSONObject answer = new JSONObject();
+        answer.put("building", building);
+        answer.put("registered", registered);
+        answer.put("finished", finished);
+        rsp.setStatus(200);
+        rsp.setContentType("application/json");
+        rsp.getWriter().write(answer.toString());
+    }
+
+    /**
+     * Answers the probe: whether the named build runs here, and whether
+     * it already ended here.
+     *
+     * <p>Both readings come from what this process already holds. The
+     * flow execution list names the running pipelines. A build this
+     * process loaded earlier is read from the job's loaded set, which
+     * loads nothing: a resume that already completed leaves a loaded
+     * build that no longer runs, and the caller needs that reading to
+     * know its command is a repeat rather than a fresh rescue.
+     */
+    private static void probeAnswer(Job<?, ?> job, int number, StaplerResponse2 rsp) throws IOException {
+        Run<?, ?> loaded = loadedBuild(job, number);
+        boolean running = runsOnTheList(job, number) || (loaded != null && loaded.isBuilding());
+        boolean finished = !running && loaded != null && !loaded.isBuilding();
+        writeAnswer(rsp, running, running, finished);
+    }
+
+    /**
+     * Answers the numbered build of {@code job} when this process
+     * already holds it, and null otherwise. It never loads a build:
+     * Jenkins loads builds on demand, and a probe that loaded one would
+     * resume it before the command wrote its files and adopted its
+     * nodes.
+     */
+    private static Run<?, ?> loadedBuild(Job<?, ?> job, int number) {
+        if (!(job instanceof LazyBuildMixIn.LazyLoadingJob)) {
+            return null;
+        }
+        LazyBuildMixIn<?, ?> mixIn = ((LazyBuildMixIn.LazyLoadingJob<?, ?>) job).getLazyBuildMixIn();
+        return mixIn._getRuns().getLoadedBuilds().get(number);
+    }
+
+    /**
+     * Reports whether a build of {@code job} numbered {@code number}
+     * already runs in this process, reading the flow execution list
+     * alone.
+     *
+     * <p>The list holds the running pipelines this process knows, so a
+     * build that is on it is loaded and running. Reading the list loads
+     * nothing, which is why the probe uses it: asking the job for the
+     * build would load that build, and a probe must not resume one
+     * before the command has written its files and adopted its nodes.
+     */
+    private static boolean runsOnTheList(Job<?, ?> job, int number) {
+        for (FlowExecution execution : FlowExecutionList.get()) {
+            Run<?, ?> run;
+            try {
+                Queue.Executable executable = execution.getOwner().getExecutable();
+                if (!(executable instanceof Run)) {
+                    continue;
+                }
+                run = (Run<?, ?>) executable;
+            } catch (IOException | RuntimeException e) {
+                LOGGER.log(Level.FINE, "VarroaRunTriggerAction: an execution owner did not resolve", e);
+                continue;
+            }
+            if (run.getNumber() == number
+                    && run.getParent().getFullName().equals(job.getFullName())
+                    && run.isBuilding()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Reports whether {@code run} is registered with {@link
+     * FlowExecutionList}, registering it when it is not. A pipeline that
+     * is not on that list runs unsupervised: nothing saves its program
+     * and nothing resumes it after the next restart.
+     *
+     * <p>The run's own load registers it, so this is a confirmation.
+     * Registering a run twice logs a warning, so the list is read first.
+     * A build that is not a pipeline needs no list and answers false.
+     */
+    private static boolean registerExecution(Run<?, ?> run) {
+        if (!(run instanceof WorkflowRun)) {
+            return false;
+        }
+        FlowExecutionOwner owner = ((WorkflowRun) run).asFlowExecutionOwner();
+        FlowExecutionList list = FlowExecutionList.get();
+        for (FlowExecution execution : list) {
+            try {
+                if (owner.equals(execution.getOwner())) {
+                    return true;
+                }
+            } catch (RuntimeException e) {
+                LOGGER.log(Level.FINE, "VarroaRunTriggerAction: an execution owner did not resolve", e);
+            }
+        }
+        list.register(owner);
+        return true;
+    }
+
+    /**
+     * Reports whether {@code name} may be joined onto the {@code nodes/}
+     * directory. A name holding a path separator, or starting with a
+     * dot, can escape that directory, so the route refuses it before it
+     * builds any path.
+     */
+    static boolean isAdoptableNodeName(String name) {
+        if (name == null || name.isEmpty()) {
+            return false;
+        }
+        if (name.startsWith(".")) {
+            return false;
+        }
+        return name.indexOf('/') < 0 && name.indexOf('\\') < 0;
     }
 
     // ---- Shared ----

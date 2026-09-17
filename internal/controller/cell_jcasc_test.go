@@ -48,8 +48,8 @@ func TestApplyCellContent_MergesCellDocumentAndKeepsBundleCloud(t *testing.T) {
 
 	unclassified, _ := doc["unclassified"].(map[string]any)
 	durability, _ := unclassified["globalDefaultFlowDurabilityLevel"].(map[string]any)
-	if durability == nil || durability["durabilityHint"] != "PERFORMANCE_OPTIMIZED" {
-		t.Errorf("unclassified.globalDefaultFlowDurabilityLevel.durabilityHint = %v, want PERFORMANCE_OPTIMIZED", durability)
+	if durability == nil || durability["durabilityHint"] != "MAX_SURVIVABILITY" {
+		t.Errorf("unclassified.globalDefaultFlowDurabilityLevel.durabilityHint = %v, want MAX_SURVIVABILITY", durability)
 	}
 
 	clouds, _ := jenkins["clouds"].([]any)

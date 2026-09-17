@@ -3,6 +3,7 @@ package recordstore
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -33,6 +34,47 @@ func applyRunHeartbeat(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 		intent.cellValue(), intent.tenant, intent.jobPath, env.OccurredAt,
 	); err != nil {
 		return fmt.Errorf("raise last_heartbeat_at: %w", err)
+	}
+	return clearProvedResume(ctx, tx, intent, env)
+}
+
+// clearProvedResume removes runs.payload->'mesh'.resume once the target
+// the recorder named sends its own heartbeat. A resumed build emits no
+// run.started, so the heartbeat is the only proof the target took the
+// run over.
+//
+// The clear matters because the resume record shields the run from
+// every interruption test. A record left in place would hold a resumed
+// run RUNNING, with its state and its fleet lock, through a later death
+// of the target itself.
+//
+// Only the named target's own heartbeat clears it, and only a heartbeat
+// that reaches the recorder after the dispatch. The dead instance can
+// still deliver a heartbeat that was in flight, and the target itself
+// can deliver one it emitted before it took the run over. Neither
+// proves the resume, and clearing on either would drop the run's
+// protection before the target restored it.
+//
+// The comparison runs on the recorder's own clock, never the pod's.
+// requested_at is stamped by the recorder, and occurred_at by the
+// Jenkins pod, so comparing the two would answer on the skew between
+// two machines. now() is the recorder's receive time, and a heartbeat
+// always reaches the recorder after it was emitted, so the test stays
+// conservative: it clears no earlier than the pod clock would.
+func clearProvedResume(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) error {
+	if env.CellInstance == "" {
+		return nil
+	}
+	receivedAt := time.Now().UTC()
+	if _, err := tx.Exec(ctx, `
+		UPDATE varroa.runs
+		   SET payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object('mesh',
+		         COALESCE(payload->'mesh', '{}'::jsonb) - 'resume')
+		 WHERE run_id = $1 AND created_at = $2
+		   AND payload->'mesh'->'resume'->>'instance' = $3
+		   AND $4::timestamptz > (payload->'mesh'->'resume'->>'requested_at')::timestamptz
+	`, intent.runID, intent.createdAt, env.CellInstance, receivedAt); err != nil {
+		return fmt.Errorf("clear a proved resume: %w", err)
 	}
 	return nil
 }

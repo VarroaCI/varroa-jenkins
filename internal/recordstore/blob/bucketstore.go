@@ -54,6 +54,24 @@ func (s *bucketStore) Put(ctx context.Context, key string, r io.Reader, opts Obj
 	return s.writeObject(ctx, partKey(key, 0), data, opts)
 }
 
+// Replace deletes every part under key and writes the new object as
+// sequence 0. The object tier carries no transaction, so a reader can
+// observe the key absent between the two calls. A run-state reader
+// retries, because the next push writes the object again.
+func (s *bucketStore) Replace(ctx context.Context, key string, r io.Reader, opts ObjectOptions) error {
+	if err := opts.Validate(); err != nil {
+		return err
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return fmt.Errorf("read object body: %w", err)
+	}
+	if err := s.Delete(ctx, key); err != nil {
+		return err
+	}
+	return s.writeObject(ctx, partKey(key, 0), data, opts)
+}
+
 // Append writes one part object at sequence seq, with the digest in
 // object metadata. An identical retry succeeds. A conflicting retry
 // returns ErrChunkConflict.

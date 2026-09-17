@@ -12,9 +12,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
 
-// ErrUnknownKind means an envelope's kind is outside the eleven known
+// ErrUnknownKind means an envelope's kind is outside the twelve known
 // ingest kinds. The consumer acknowledges and drops such an event; it
 // can never become readable.
 var ErrUnknownKind = errors.New("unknown ingest kind")
@@ -88,6 +89,7 @@ type Ingester struct {
 	fanoutEval    *GrantEvaluator
 	fanoutMetrics *UpstreamFanoutMetrics
 	refireMetrics *InterruptedMetrics
+	stateDeleter  ObjectDeleter
 }
 
 // NewIngester returns an Ingester over pool. conn publishes a ledger
@@ -117,9 +119,17 @@ func (g *Ingester) SetRefireMetrics(metrics *InterruptedMetrics) {
 	g.refireMetrics = metrics
 }
 
+// SetStateDeleter enables the run-state cleanup that follows a run's
+// real terminal write and the recorder's own cap refusal. An Ingester
+// built with no call to this method deletes nothing, which every
+// existing caller keeps getting.
+func (g *Ingester) SetStateDeleter(d ObjectDeleter) {
+	g.stateDeleter = d
+}
+
 // Apply writes env to the record tables. It returns ErrIntentMissing
 // when no run_intents row exists for env.RunID, ErrUnknownKind when
-// env.Kind is outside the eleven known kinds, and ErrMalformedEnvelope
+// env.Kind is outside the twelve known kinds, and ErrMalformedEnvelope
 // when env.RunID is not a valid UUID or a typed payload does not
 // decode. Any other error is a retryable database failure. A nil error
 // and a false ApplyResult.Conflict mean the write committed cleanly.
@@ -195,6 +205,15 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 		}
 	}
 
+	// The run-state cleanup runs after the commit, never inside it: a
+	// lost object delete must never roll the record back. The hourly
+	// backstop repairs a recorder that stops between the two.
+	if dispatched.stateCleanup != "" && g.stateDeleter != nil {
+		if delErr := g.stateDeleter.DeletePrefix(ctx, blob.RunStatePrefix(dispatched.stateCleanup)); delErr != nil {
+			g.logger.Error("delete run state failed", "runID", dispatched.stateCleanup, "error", delErr)
+		}
+	}
+
 	return result, nil
 }
 
@@ -207,6 +226,12 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 type dispatchResult struct {
 	action *LedgerAction
 	fanout *FanoutProducer
+
+	// stateCleanup names the run whose run-state objects Apply deletes
+	// after the transaction commits. It is set on a run's real terminal
+	// write, the same owner test the fan-out uses, and on the recorder's
+	// own cap refusal.
+	stateCleanup string
 
 	supersededStart    bool
 	supersededReported int64
@@ -252,16 +277,20 @@ func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, e
 		if err != nil {
 			return dispatchResult{}, err
 		}
-		if owner && payload.Result != nil {
-			return dispatchResult{fanout: &FanoutProducer{
+		if !owner {
+			return dispatchResult{}, nil
+		}
+		res := dispatchResult{stateCleanup: intent.runID.String()}
+		if payload.Result != nil {
+			res.fanout = &FanoutProducer{
 				Cluster: intent.cluster,
 				Tenant:  intent.tenant,
 				JobPath: intent.jobPath,
 				RunID:   intent.runID.String(),
 				Result:  *payload.Result,
-			}}, nil
+			}
 		}
-		return dispatchResult{}, nil
+		return res, nil
 	case KindRunTests:
 		return dispatchResult{}, applyRunTests(ctx, tx, intent, env)
 	case KindRunArtifacts:
@@ -272,6 +301,8 @@ func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, e
 		return dispatchResult{}, applyRunLog(ctx, tx, intent, env)
 	case KindRunHeartbeat:
 		return dispatchResult{}, applyRunHeartbeat(ctx, tx, intent, env)
+	case KindRunState:
+		return applyRunState(ctx, tx, intent, env)
 	default:
 		return dispatchResult{}, fmt.Errorf("%w: %s", ErrUnknownKind, env.Kind)
 	}

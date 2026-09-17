@@ -253,6 +253,18 @@ type Agent struct {
 	// call with the CrossTenantResponse that arrives on the command
 	// stream.
 	crossTenantWaiters *crossTenantWaiterMap
+
+	// runStateAcks holds the gateway's last answer for each run, so the
+	// run-state route can name a refusal reason on that run's next post.
+	runStateAcks *runStateAckStore
+
+	// runStateSeq allocates each run-state fetch its own numeric id. The
+	// waiter map only needs uniqueness among currently open fetches.
+	runStateSeq atomic.Uint64
+
+	// runStateWaiters correlates an in-flight fetch with the
+	// run_state_response messages that arrive on the command stream.
+	runStateWaiters *runStateWaiterMap
 }
 
 // identityState represents the agent's identity state during the bootstrap
@@ -283,6 +295,8 @@ func NewAgent(cfg Config) *Agent {
 		logRetention:           newLogRetentionStore(logRetainBytesFromEnv()),
 		crossTenantTimeout:     defaultCrossTenantMiteTimeoutMS * time.Millisecond,
 		crossTenantWaiters:     newCrossTenantWaiterMap(),
+		runStateAcks:           newRunStateAckStore(),
+		runStateWaiters:        newRunStateWaiterMap(),
 	}
 }
 
@@ -1189,6 +1203,10 @@ func (a *Agent) processCommands(ctx context.Context) {
 			go a.handleTailControl(ctx, m.TailControl)
 		case *mitev1.OperatorMessage_LogAck:
 			a.handleLogAck(ctx, m.LogAck)
+		case *mitev1.OperatorMessage_RunStateAck:
+			a.runStateAcks.record(m.RunStateAck)
+		case *mitev1.OperatorMessage_RunStateResponse:
+			a.runStateWaiters.resolve(m.RunStateResponse)
 		case *mitev1.OperatorMessage_ContentRequest:
 			req := m.ContentRequest
 			if req != nil && req.RequestId != "" {
@@ -1457,6 +1475,12 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 			})
 			if cancelErr != nil {
 				errStr = cancelErr.Error()
+			} else {
+				success = true
+			}
+		case mitev1.CommandTypeResumeBuild:
+			if resumeErr := a.applyResumeBuild(cctx, cmd.ResumeBuild); resumeErr != nil {
+				errStr = resumeErr.Error()
 			} else {
 				success = true
 			}

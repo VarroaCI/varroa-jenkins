@@ -19,6 +19,12 @@ type Store interface {
 	// ErrObjectExists when any part of key already exists.
 	Put(ctx context.Context, key string, r io.Reader, opts ObjectOptions) error
 
+	// Replace writes a complete object as sequence 0, over whatever key
+	// already holds. Put answers ErrObjectExists for a key that already
+	// holds any part, so a writer that rewrites one whole object needs
+	// this pair instead.
+	Replace(ctx context.Context, key string, r io.Reader, opts ObjectOptions) error
+
 	// Append writes one chunk at sequence seq. The writer owns sequence
 	// assignment and starts at 0. A retry that carries identical bytes
 	// succeeds. A retry that carries different bytes returns
@@ -56,7 +62,7 @@ type Store interface {
 
 // ObjectOptions carries the metadata a write needs.
 type ObjectOptions struct {
-	// ObjectClass is "log" or "artifact". pgblob writes it to
+	// ObjectClass is "log", "artifact", or "state". pgblob writes it to
 	// log_chunks.object_class.
 	ObjectClass string
 	// ContentType is the MIME type of the object.

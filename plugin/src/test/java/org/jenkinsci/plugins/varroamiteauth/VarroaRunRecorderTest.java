@@ -16,6 +16,7 @@ import hudson.model.StringParameterValue;
 import java.util.ArrayList;
 import java.util.List;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
+import org.jenkinsci.plugins.workflow.flow.FlowExecutionListener;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.junit.After;
@@ -59,6 +60,69 @@ public class VarroaRunRecorderTest {
             }
         }
         return matched;
+    }
+
+    // --- Live finding L5: a build another process began ---
+
+    /**
+     * Proves a build this process resumes reports itself again. The
+     * pipeline mesh moves a running build to another Jenkins process,
+     * where {@code RunListener.onStarted} never fires, so the recorder
+     * has no entry for the run and the recorder sees nothing of it.
+     *
+     * <p>The resume is simulated the way Jenkins performs it: the per-run
+     * state is cleared, as a fresh process holds none, and the flow
+     * execution's own resumed event is fired.
+     */
+    @Test
+    public void aResumedBuildHeartbeatsAndCompletesUnderItsOwnRunId() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "resumed");
+        job.setDefinition(new CpsFlowDefinition("stage('one') { echo 'one' }\nsleep 5\n", true));
+        VarroaIntentAction action = grantedAction("");
+        WorkflowRun run = job.scheduleBuild2(0, action).waitForStart();
+        j.waitForMessage("Sleeping", run);
+        String runId = action.getRunId();
+
+        // The process that began the build is gone. Its per-run state
+        // went with it, and its heartbeat with that.
+        VarroaRunRecorder.resetStateForTesting();
+        BuildEventSink.get().resetForTesting();
+        assertEquals(0, VarroaRunRecorder.stateSizeForTesting());
+
+        FlowExecutionListener.fireResumed(run.getExecution());
+
+        assertEquals("the resumed build owns one state entry", 1, VarroaRunRecorder.stateSizeForTesting());
+        assertFalse("a build this process already holds is not attached again",
+                VarroaRunRecorder.attachResumedRun(run));
+        BuildEventSink.DrainResult afterResume = BuildEventSink.get().drain(100);
+        List<BuildEvent> beats = byPhase(afterResume.events, BuildEvent.PHASE_HEARTBEAT);
+        assertEquals("the resume heartbeats at once, not one interval later", 1, beats.size());
+        assertEquals(runId, beats.get(0).getRunId());
+        assertTrue("a resume starts no second run", byPhase(afterResume.events, BuildEvent.PHASE_STARTED).isEmpty());
+
+        j.assertBuildStatusSuccess(j.waitForCompletion(run));
+
+        BuildEventSink.DrainResult atEnd = BuildEventSink.get().drain(100);
+        List<BuildEvent> completed = byPhase(atEnd.events, BuildEvent.PHASE_COMPLETED);
+        assertEquals(1, completed.size());
+        assertEquals("the completion carries the run the recorder resumed", runId, completed.get(0).getRunId());
+    }
+
+    /**
+     * Proves a build that ended is never attached. Its completion went
+     * out from whichever process ran it, and an entry here would
+     * heartbeat a finished run for the life of this process.
+     */
+    @Test
+    public void aFinishedBuildIsNotAttached() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "attach-finished");
+        job.setDefinition(new CpsFlowDefinition("echo 'once'\n", true));
+        VarroaIntentAction action = grantedAction("");
+        WorkflowRun run = j.assertBuildStatusSuccess(job.scheduleBuild2(0, action));
+
+        assertFalse("a build that ended is not attached",
+                VarroaRunRecorder.attachResumedRun(run));
+        assertEquals("a finished build owns no state entry", 0, VarroaRunRecorder.stateSizeForTesting());
     }
 
     // --- 5.9: one STARTED and one COMPLETED for a freestyle job ---

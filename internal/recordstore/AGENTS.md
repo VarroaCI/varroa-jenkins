@@ -27,12 +27,33 @@ of the fleet's audit activity, once a controller becomes disposable.
   goes through this package. A sibling package that needs record data
   reads through the `Reader` this package exports; it never opens its own
   write path.
+- **The pipeline mesh** (`mesh_takeover.go`, `resume_target.go`,
+  `ingest_state.go`) — C3's run-state replication and cross-cell resume.
+  `applyRunState` merges each `run.state` outcome into
+  `runs.payload->'mesh'`; the recorder alone owns the 64 MiB cap, and the
+  cap path clears `mesh.state_at`, `mesh.resume`, and the run's stored
+  objects together. `TakeOverLostRuns` claims a lost run in two steps: it
+  arms every `RUNNING` run whose owner is confirmed gone and whose anchor
+  is fresh, then dispatches once `resumeTargetForRun` answers a seeded
+  member. `resumeTargetForRun` is the **only** reader of the placement row
+  for a takeover, and C4 extends that one body. The dispatch moves
+  `run_intents`, `fleet_locks`, and `runs` in one transaction, and only the
+  `runs` statement's row count gates the publish: the other two may move
+  zero rows for a legitimate run. `resumeArmWindow` (15 minutes) and
+  `resumeDeadline` (6 minutes) are constants, never settings. The
+  heartbeat ingest clears `mesh.resume` once the named target's own
+  heartbeat arrives **after** the dispatch, which is the only proof a
+  resumed build gives: a
+  record left in place would shield the run from every interruption test
+  through a later death of the target itself.
 - **Migrations** — `migrations/00001_initial_schema.sql` holds the seven
   build-record tables (`run_intents`, `runs`, `run_stages`, `run_tests`,
   `run_artifacts`, `log_chunks`, `job_numbers`). `00002_activity.sql` adds
   `activity` (monthly RANGE partitions on `ts`) plus the search GIN index
   on `runs`. `00003_job_schedules.sql` adds `job_schedules` and
-  `job_schedule_cells`. `00005_tenant_placements.sql` adds
+  `job_schedule_cells`. `00010_run_state_object_class.sql` widens
+  `log_chunks_object_class_check` to accept the class `state`, which the
+  pipeline mesh's run-state objects carry. `00005_tenant_placements.sql` adds
   `tenant_placements`, the placement-fencing authority: one row per
   `(cluster, tenant)`, holding the placement identity, the rehydration
   seed (`rehydrated_instance`, `pending_jobs`), and the cell-liveness
@@ -215,7 +236,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   its protobuf `BuildEvent` onto its field names. `Ingester.Apply`
   (`ingest_apply.go`) writes one envelope inside one transaction, dispatching
   by `Kind` to one `ingest_<kind>.go` file per D4's write table. Each write
-  is a natural-key upsert; `runsStatusMergeSQL` (`ingest_common.go`) is the
+  is a natural-key upsert. The kind set holds twelve values; `run.state` is
+  the mesh's own kind and writes no typed column, only `payload.mesh`.
+  `runsStatusMergeSQL` (`ingest_common.go`) is the
   one CASE expression every `runs` writer reuses to keep `status` monotonic
   and `DUPLICATE` terminal. `ingest_duplicate.go` holds the duplicate
   backstop `run.started` runs in the same transaction, publishing a
@@ -324,9 +347,13 @@ of the fleet's audit activity, once a controller becomes disposable.
   on every tick itself, not inside the locked round, because every
   replica must notice the client role as soon as CloudNativePG creates
   it. Object deletes (`retention_objects.go`) take an `ObjectDeleter`
-  (`Delete(ctx, key) error`), a narrow interface over `blob.Store`'s
-  `Delete` method, and call `blob.LogKey`/`blob.LogIndexKey` for the two
-  fixed log keys. `finalizeStaleLogs` (`retention_finalize.go`) is step
+  (`Delete` plus `DeletePrefix`), a narrow interface over `blob.Store`, and
+  call `blob.LogKey`/`blob.LogIndexKey` for the two fixed log keys.
+  `deleteExpiredRunState` is the mesh's hourly backstop: it removes the
+  run-state prefix of every run terminal for more than an hour, over its
+  own bounded query, because the log step reads a different cutoff. The
+  prompt delete runs after the terminal commit instead, from `Apply` and
+  from each `markInterrupted` caller. `finalizeStaleLogs` (`retention_finalize.go`) is step
   10, the log-finalization sweep C3's `build-log-externalization`
   capability defines; it never lowers a stored `finalized` true. The
   exported `Liveness` interface answers whether a run's owning cell is

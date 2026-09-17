@@ -64,6 +64,17 @@ public class RunSpool {
     private static final String TMP_SUFFIX = ".tmp";
 
     /**
+     * The phase a run-state record carries, and the name prefix that
+     * keeps its sequence space apart from a build event's. A build
+     * event's acknowledge deletes by the bare decimal prefix, so a
+     * run-state record sharing a sequence would be deleted with it.
+     * The prefix sorts after every digit, so a replay still reads every
+     * build event first.
+     */
+    static final String PHASE_RUN_STATE = "RUNSTATE";
+    private static final String RUN_STATE_PREFIX = "S";
+
+    /**
      * Process-wide, keyed by a run's resolved directory path, so every
      * {@code RunSpool} instance over the same directory shares the same
      * monitor for that run.
@@ -116,6 +127,101 @@ public class RunSpool {
         } finally {
             releaseLock(runId, lock);
         }
+    }
+
+    /**
+     * Writes a spool file for one run-state record. The record holds the
+     * run-state route's own headers and its gzip body, in place of a
+     * build event.
+     */
+    public void appendRunState(String runId, long seq, JSONObject record) {
+        if (record == null) {
+            return;
+        }
+        RunLock lock = acquireLock(runId);
+        try {
+            synchronized (lock) {
+                try {
+                    Path dir = runDir(runId);
+                    Files.createDirectories(dir);
+                    Path file = dir.resolve(runStateFileName(seq));
+                    Path temp = dir.resolve("." + UUID.randomUUID() + TMP_SUFFIX);
+                    Files.write(temp, record.toString().getBytes(StandardCharsets.UTF_8));
+                    Files.move(temp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                    evictToCap(dir, file);
+                } catch (IOException e) {
+                    LOGGER.log(Level.WARNING, "RunSpool: failed to write a run-state record for run " + runId, e);
+                }
+            }
+        } finally {
+            releaseLock(runId, lock);
+        }
+    }
+
+    /** Returns the run's spooled run-state records in replay order. */
+    public List<Entry> readRunStateOrdered(String runId) {
+        List<Entry> out = new ArrayList<>();
+        for (Entry entry : readOrdered(runId)) {
+            if (entry.runState) {
+                out.add(entry);
+            }
+        }
+        return out;
+    }
+
+    /** Deletes the spooled run-state record for {@code (runId, seq)}, if present. */
+    public void acknowledgeRunState(String runId, long seq) {
+        RunLock lock = acquireLock(runId);
+        try {
+            synchronized (lock) {
+                Path dir = runDir(runId);
+                if (!Files.isDirectory(dir)) {
+                    return;
+                }
+                String prefix = RUN_STATE_PREFIX + seqPrefix(seq);
+                try (Stream<Path> files = Files.list(dir)) {
+                    files.filter(p -> p.getFileName().toString().startsWith(prefix))
+                            .forEach(this::deleteQuietly);
+                } catch (IOException e) {
+                    LOGGER.log(Level.WARNING,
+                            "RunSpool: failed to acknowledge a run-state record for run " + runId, e);
+                }
+            }
+        } finally {
+            releaseLock(runId, lock);
+        }
+    }
+
+    /**
+     * Deletes every run-state record of {@code runId}, then removes the
+     * run's directory when no event file is left.
+     *
+     * <p>It deletes the run-state records alone, never the directory
+     * outright. A build event of the same run lives in that directory,
+     * and the run's own {@code COMPLETED} event can still be waiting
+     * there for the dispatcher, so an unconditional delete would lose
+     * it.
+     */
+    public void deleteRunStateRecords(String runId) {
+        RunLock lock = acquireLock(runId);
+        try {
+            synchronized (lock) {
+                Path dir = runDir(runId);
+                if (!Files.isDirectory(dir)) {
+                    return;
+                }
+                try (Stream<Path> files = Files.list(dir)) {
+                    files.filter(p -> p.getFileName().toString().startsWith(RUN_STATE_PREFIX))
+                            .forEach(this::deleteQuietly);
+                } catch (IOException e) {
+                    LOGGER.log(Level.WARNING,
+                            "RunSpool: failed to delete the run-state records of run " + runId, e);
+                }
+            }
+        } finally {
+            releaseLock(runId, lock);
+        }
+        deleteRunIfEmpty(runId);
     }
 
     /**
@@ -313,22 +419,29 @@ public class RunSpool {
         return seqPrefix(seq) + phase + FILE_SUFFIX;
     }
 
+    private static String runStateFileName(long seq) {
+        return RUN_STATE_PREFIX + seqPrefix(seq) + PHASE_RUN_STATE + FILE_SUFFIX;
+    }
+
     private static String seqPrefix(long seq) {
         return String.format(Locale.ROOT, "%020d-", seq);
     }
 
     private Entry readEntry(Path file) {
         String name = file.getFileName().toString();
-        int dash = name.indexOf('-');
+        boolean runState = name.startsWith(RUN_STATE_PREFIX);
+        String body = runState ? name.substring(RUN_STATE_PREFIX.length()) : name;
+        int dash = body.indexOf('-');
         if (dash < 0) {
             return null;
         }
         long seq;
         try {
-            seq = Long.parseLong(name.substring(0, dash));
+            seq = Long.parseLong(body.substring(0, dash));
         } catch (NumberFormatException e) {
             return null;
         }
+        name = body;
         String phase = name.substring(dash + 1, name.length() - FILE_SUFFIX.length());
         String json;
         try {
@@ -347,7 +460,7 @@ public class RunSpool {
             LOGGER.log(Level.WARNING, "RunSpool: skipping an unparsable spool file " + file, e);
             return null;
         }
-        return new Entry(seq, phase, json);
+        return new Entry(seq, phase, json, runState);
     }
 
     private void evictToCap(Path dir, Path justWritten) throws IOException {
@@ -430,11 +543,23 @@ public class RunSpool {
         public final long seq;
         public final String phase;
         public final String json;
+        /**
+         * True for a run-state record. A replay reader tells the two
+         * variants apart by this flag: a run-state record carries the
+         * run-state route's headers and a gzip body, never a build
+         * event, so the build-event dispatcher must skip it.
+         */
+        public final boolean runState;
 
         public Entry(long seq, String phase, String json) {
+            this(seq, phase, json, false);
+        }
+
+        public Entry(long seq, String phase, String json, boolean runState) {
             this.seq = seq;
             this.phase = phase;
             this.json = json;
+            this.runState = runState;
         }
 
         /** Parses {@link #json} into a {@link JSONObject}. */

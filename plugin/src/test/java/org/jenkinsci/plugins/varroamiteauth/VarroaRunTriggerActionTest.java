@@ -1,6 +1,8 @@
 package org.jenkinsci.plugins.varroamiteauth;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -11,6 +13,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import hudson.EnvVars;
 import hudson.Launcher;
 import hudson.model.AbstractBuild;
 import hudson.model.BuildListener;
@@ -28,10 +31,16 @@ import java.io.BufferedReader;
 import java.io.PrintWriter;
 import java.io.StringReader;
 import java.io.StringWriter;
+import java.net.URL;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import org.htmlunit.HttpMethod;
+import org.htmlunit.WebRequest;
+import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
+import org.jenkinsci.plugins.workflow.job.WorkflowJob;
+import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.junit.Rule;
 import org.junit.Test;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -235,16 +244,282 @@ public class VarroaRunTriggerActionTest {
     }
 
     @Test
-    public void theEndpointExposesOnlyTriggerAndCancel() {
+    public void theEndpointExposesOnlyItsFourRoutes() {
         int doMethods = 0;
         for (java.lang.reflect.Method m : VarroaRunTriggerAction.class.getDeclaredMethods()) {
             if (m.getName().startsWith("do") && java.lang.reflect.Modifier.isPublic(m.getModifiers())) {
                 doMethods++;
                 assertTrue("unexpected route method " + m.getName(),
-                        m.getName().equals("doTrigger") || m.getName().equals("doCancel"));
+                        m.getName().equals("doTrigger") || m.getName().equals("doCancel")
+                                || m.getName().equals("doAdoptNode") || m.getName().equals("doLoadBuild"));
             }
         }
-        assertEquals(2, doMethods);
+        assertEquals(4, doMethods);
+    }
+
+    // ---- D13 adopt-node route ----
+
+    @Test
+    public void adoptNodeUnauthorizedCallerGets403() throws Exception {
+        try (ACLContext ctx = ACL.as2(new UsernamePasswordAuthenticationToken(
+                "bob", "", List.of(new SimpleGrantedAuthority("ROLE:varroa:developer"))))) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody("{\"name\":\"agent-1\"}");
+            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+
+            action.doAdoptNode(req, rsp);
+
+            verify(rsp).sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+        }
+    }
+
+    @Test
+    public void adoptNodeWithNoConfigurationFileGets404() throws Exception {
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody("{\"name\":\"missing-agent\"}");
+            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+
+            action.doAdoptNode(req, rsp);
+
+            verify(rsp).sendError(eq(404), contains("missing-agent"));
+        }
+    }
+
+    @Test
+    public void adoptNodeAlreadyHeldGets409() throws Exception {
+        j.createSlave("held-agent", "", new EnvVars());
+
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody("{\"name\":\"held-agent\"}");
+            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+
+            action.doAdoptNode(req, rsp);
+
+            verify(rsp).sendError(eq(409), contains("held-agent"));
+        }
+    }
+
+    @Test
+    public void adoptNodeWithATraversingNameGets400() throws Exception {
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody("{\"name\":\"../secrets\"}");
+            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+
+            action.doAdoptNode(req, rsp);
+
+            verify(rsp).sendError(eq(400), contains("no usable node"));
+        }
+    }
+
+    // ---- Live finding L3: the load-build route ----
+
+    @Test
+    public void loadBuildUnauthorizedCallerGets403() throws Exception {
+        try (ACLContext ctx = ACL.as2(new UsernamePasswordAuthenticationToken(
+                "bob", "", List.of(new SimpleGrantedAuthority("ROLE:varroa:developer"))))) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody("{\"jobPath\":\"pipe\",\"buildNumber\":1}");
+            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+
+            action.doLoadBuild(req, rsp);
+
+            verify(rsp).sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+        }
+    }
+
+    @Test
+    public void loadBuildWithNoJobAndBuildGets400() throws Exception {
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody("{\"jobPath\":\"\",\"buildNumber\":0}");
+            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+
+            action.doLoadBuild(req, rsp);
+
+            verify(rsp).sendError(eq(400), contains("no job and build"));
+        }
+    }
+
+    @Test
+    public void loadBuildOfAnUnknownJobGets404() throws Exception {
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody("{\"jobPath\":\"no-such-job\",\"buildNumber\":1}");
+            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+
+            action.doLoadBuild(req, rsp);
+
+            verify(rsp).sendError(eq(404), contains("no-such-job"));
+        }
+    }
+
+    @Test
+    public void loadBuildOfAnUnknownBuildGets404() throws Exception {
+        FreeStyleProject p = j.createFreeStyleProject("load-missing-build");
+
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody(
+                    "{\"jobPath\":\"" + p.getFullName() + "\",\"buildNumber\":42}");
+            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+
+            action.doLoadBuild(req, rsp);
+
+            verify(rsp).sendError(eq(404), contains("42"));
+        }
+    }
+
+    @Test
+    public void loadBuildOfAFinishedBuildAnswersNotBuilding() throws Exception {
+        FreeStyleProject p = j.createFreeStyleProject("load-finished");
+        j.buildAndAssertSuccess(p);
+
+        StringWriter body = new StringWriter();
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody(
+                    "{\"jobPath\":\"" + p.getFullName() + "\",\"buildNumber\":1}");
+            StaplerResponse2 rsp = responseCapturing(body);
+
+            action.doLoadBuild(req, rsp);
+
+            verify(rsp).setStatus(200);
+        }
+        JSONObject answer = JSONObject.fromObject(body.toString());
+        assertFalse("a finished build does not run", answer.getBoolean("building"));
+        assertFalse("a finished build holds no place on the list", answer.getBoolean("registered"));
+    }
+
+    @Test
+    public void loadBuildOfARunningPipelineAnswersBuildingAndRegistered() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "load-running");
+        job.setDefinition(new CpsFlowDefinition("sleep 120\n", true));
+        WorkflowRun run = job.scheduleBuild2(0).waitForStart();
+        j.waitForMessage("Sleeping", run);
+
+        StringWriter body = new StringWriter();
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody(
+                    "{\"jobPath\":\"" + job.getFullName() + "\",\"buildNumber\":"
+                            + run.getNumber() + "}");
+            StaplerResponse2 rsp = responseCapturing(body);
+
+            action.doLoadBuild(req, rsp);
+
+            verify(rsp).setStatus(200);
+        }
+        JSONObject answer = JSONObject.fromObject(body.toString());
+        assertTrue("a running build runs", answer.getBoolean("building"));
+        assertTrue("a running pipeline holds a place on the flow execution list",
+                answer.getBoolean("registered"));
+
+        run.doStop();
+        j.waitForCompletion(run);
+    }
+
+    @Test
+    public void probeOfARunningPipelineAnswersBuilding() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "probe-running");
+        job.setDefinition(new CpsFlowDefinition("sleep 120\n", true));
+        WorkflowRun run = job.scheduleBuild2(0).waitForStart();
+        j.waitForMessage("Sleeping", run);
+
+        StringWriter body = new StringWriter();
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody(
+                    "{\"jobPath\":\"" + job.getFullName() + "\",\"buildNumber\":"
+                            + run.getNumber() + ",\"probe\":true}");
+            StaplerResponse2 rsp = responseCapturing(body);
+
+            action.doLoadBuild(req, rsp);
+
+            verify(rsp).setStatus(200);
+        }
+        JSONObject running = JSONObject.fromObject(body.toString());
+        assertTrue("the probe sees a running pipeline", running.getBoolean("building"));
+        assertFalse("a running build has not finished", running.getBoolean("finished"));
+
+        run.doStop();
+        j.waitForCompletion(run);
+    }
+
+    @Test
+    public void probeOfAFinishedBuildAnswersNotBuilding() throws Exception {
+        FreeStyleProject p = j.createFreeStyleProject("probe-finished");
+        j.buildAndAssertSuccess(p);
+
+        StringWriter body = new StringWriter();
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody(
+                    "{\"jobPath\":\"" + p.getFullName() + "\",\"buildNumber\":1,\"probe\":true}");
+            StaplerResponse2 rsp = responseCapturing(body);
+
+            action.doLoadBuild(req, rsp);
+
+            verify(rsp).setStatus(200);
+        }
+        JSONObject answer = JSONObject.fromObject(body.toString());
+        assertFalse("a finished build does not run", answer.getBoolean("building"));
+        // The build is loaded, because it just ran here. A resume of it
+        // is a repeat of work this process already did.
+        assertTrue("a loaded build that ended reads as finished", answer.getBoolean("finished"));
+    }
+
+    @Test
+    public void probeOfAnAbsentBuildAnswersNotBuildingRatherThanMissing() throws Exception {
+        FreeStyleProject p = j.createFreeStyleProject("probe-absent");
+
+        StringWriter body = new StringWriter();
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody(
+                    "{\"jobPath\":\"" + p.getFullName() + "\",\"buildNumber\":42,\"probe\":true}");
+            StaplerResponse2 rsp = responseCapturing(body);
+
+            action.doLoadBuild(req, rsp);
+
+            verify(rsp).setStatus(200);
+        }
+        JSONObject absent = JSONObject.fromObject(body.toString());
+        assertFalse("a build that is not on the list does not run", absent.getBoolean("building"));
+        assertFalse("a build this process never held has not finished here",
+                absent.getBoolean("finished"));
+    }
+
+    // ---- Live finding L4: the served URL of each route ----
+
+    /**
+     * Posts to one {@code /varroa-run} route over HTTP and answers the
+     * status. The caller holds no mite authority, so a mapped route
+     * answers {@code 403} and an unmapped one answers {@code 404}.
+     */
+    private int postToRoute(String route) throws Exception {
+        // The crumb filter answers 403 before Stapler routes, which
+        // would hide an unmapped route behind the same status.
+        j.jenkins.setCrumbIssuer(null);
+        JenkinsRule.WebClient wc = j.createWebClient();
+        wc.setThrowExceptionOnFailingStatusCode(false);
+        WebRequest request = new WebRequest(new URL(j.getURL(), "varroa-run/" + route), HttpMethod.POST);
+        request.setAdditionalHeader("Content-Type", "application/json");
+        request.setRequestBody("{}");
+        return wc.getPage(request).getWebResponse().getStatusCode();
+    }
+
+    @Test
+    public void everyRouteIsServedAtTheNameItsCallersUse() throws Exception {
+        // Stapler derives a URL token from the method name and writes no
+        // dash, so a route of more than one word needs @WebMethod. The
+        // mite posts these names and nothing else.
+        for (String route : List.of("trigger", "cancel", "adopt-node", "load-build")) {
+            assertNotEquals("route " + route + " is not served at that name",
+                    404, postToRoute(route));
+        }
     }
 
     // ---- 2.6 cancel route ----

@@ -159,6 +159,7 @@ func run(ctx context.Context, cfg Config) error {
 		SweepMetrics:       sweepMetrics,
 		BackstopMetrics:    backstopMetrics,
 		ActionMetrics:      actionMetrics,
+		StateDeleter:       store,
 		Logger:             logger,
 	}
 
@@ -183,6 +184,7 @@ func run(ctx context.Context, cfg Config) error {
 	}
 	ingester.SetUpstreamFanout(recordstore.NewGrantEvaluator(pool), fanoutMetrics)
 	ingester.SetRefireMetrics(sweepMetrics)
+	ingester.SetStateDeleter(store)
 
 	maintCfg := recordstore.MaintenanceConfig{
 		RunRetention:      cfg.RetentionRuns,
@@ -229,7 +231,7 @@ func run(ctx context.Context, cfg Config) error {
 		return sub.Unsubscribe()
 	}
 	tenantSyncResponderFn := func(ctx context.Context) error {
-		sub, err := recordstore.RegisterTenantSyncResponder(busConn, pool, confirmedGoneGrace, logger)
+		sub, err := recordstore.RegisterTenantSyncResponder(busConn, pool, confirmedGoneGrace, store, logger)
 		if err != nil {
 			return err
 		}

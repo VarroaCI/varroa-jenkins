@@ -486,6 +486,64 @@ message CrossTenantResponse {
   string payload_json = 3;
 }
 
+message RunStateChunk {
+  // @required
+  string run_id = 1;
+  string job_path = 2;
+  int64 build_number = 3;
+  // @required
+  string relpath = 4;
+  int64 state_gen = 5;
+  int64 seq = 6;
+  int64 total = 7;
+  bytes gzip_content = 8;
+  int64 raw_size = 9;
+  string cell_instance = 10;
+  int64 object_size = 11;
+  int64 pusher_epoch = 12;
+}
+
+message RunStateRequest {
+  uint64 request_id = 1;
+  // @required
+  string run_id = 2;
+  // @required
+  string relpath = 3;
+}
+
+message RunStateResponse {
+  uint64 request_id = 1;
+  string relpath = 2;
+  int64 seq = 3;
+  int64 total = 4;
+  bytes gzip_content = 5;
+  int64 raw_size = 6;
+  string error = 7;
+}
+
+message RunStateAck {
+  // @required
+  string run_id = 1;
+  string relpath = 2;
+  int64 state_gen = 3;
+  // @required
+  string status = 4;
+  string reason = 5;
+  int32 pause_ms = 6;
+}
+
+message ResumeBuildPayload {
+  // @required
+  string run_id = 1;
+  // @required
+  string job_path = 2;
+  int64 build_number = 3;
+  repeated string files = 4;
+  // @required
+  string instance = 5;
+  int64 deadline_unix = 6;
+}
+
 message MiteMessage {
   oneof message {
     Hello hello = 1;
@@ -502,6 +560,8 @@ message MiteMessage {
     LogChunk log_chunk = 28;
     TailAck tail_ack = 29;
     CrossTenantRequest cross_tenant_request = 30;
+    RunStateChunk run_state_chunk = 31;
+    RunStateRequest run_state_request = 32;
   }
 }
 
@@ -516,6 +576,8 @@ message OperatorMessage {
     LogAck              log_ack         = 16;
     CrossTenantResponse cross_tenant_response = 17;
     EventAck            event_ack       = 18;
+    RunStateResponse    run_state_response = 19;
+    RunStateAck         run_state_ack   = 20;
   }
 }
 
@@ -527,6 +589,7 @@ enum CommandType {
   COLLECT_PLUGIN_INVENTORY = 4;
   TRIGGER_BUILD = 5;
   CANCEL_BUILD = 6;
+  COMMAND_TYPE_RESUME_BUILD = 7;
 }
 
 message ImperativeCommand {
@@ -540,6 +603,7 @@ message ImperativeCommand {
   ReplayWebhookPayload replay_webhook = 6;
   TriggerBuildPayload trigger_build = 7;
   CancelBuildPayload cancel_build = 8;
+  ResumeBuildPayload resume_build = 9;
 }
 
 message ReplayWebhookPayload {

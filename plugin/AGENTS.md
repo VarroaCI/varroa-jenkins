@@ -184,7 +184,10 @@ the root AGENTS.md greenfield rule.
   agent's own workspace channel, so the artifact's bytes never transit the controller.
   `VarroaLockStep.java` records the acquired lock on `VarroaActiveLocksAction.java` (a
   transient, per-run stack, innermost lock last), and exposes the fence token as the
-  environment variable `VARROA_LOCK_TOKEN` through an `EnvironmentExpander`.
+  environment variable `VARROA_LOCK_TOKEN` through an `EnvironmentExpander`. That stack
+  is `transient`, so a resumed build restores an empty one: `Execution.onResume`
+  re-pushes the held name and token before it reschedules the renewal, or
+  `varroa.lock.token` reads null inside a block that holds a lock.
   `VarroaCallSeqAction.java` is the run-scoped `s<n>` sequence `varroaBuild` uses for its
   intent key. `MiteLoopbackClient.java` gained one method per cross-tenant kind, a
   `forCrossTenant()` factory reading `VARROA_CROSSTENANT_CONNECT_TIMEOUT_MS` (default
@@ -206,9 +209,15 @@ the root AGENTS.md greenfield rule.
   drops only a `HEARTBEAT` event when full) feeds `RunSpool.java`
   (`$JENKINS_HOME/varroa/spool/<run_id>/`, one file per event, never drops a `COMPLETED`
   file) feeds `BuildEventDispatcher.java` (one daemon thread, posts to the mite loopback,
-  retries a failed post forever). `MiteLoopbackClient.java` and `LoopbackTokenFile.java`
+  retries a failed post forever). The spool holds a second record variant for a
+  run-state push, named with an `S` prefix so its sequence space never collides
+  with a build event's; `Entry.runState` tells the two apart, and the dispatcher
+  skips a run-state record because its own pusher replays it.
+  `MiteLoopbackClient.java` and `LoopbackTokenFile.java`
   call `POST /v1/claim` and `POST /v1/events` against `http://127.0.0.1:9095`, bearer
-  token cached from `/var/run/varroa/loopback-token` and re-read after a `401`. The mite
+  token cached from `/var/run/varroa/loopback-token` and re-read after a `401`.
+  `postRunState` posts `POST /v1/run-state` instead as nine headers and a raw
+  gzip body, because base64 in a JSON body would add a third to every byte. The mite
   retains each forwarded event until the gateway's JetStream publish acknowledgement, and
   replays after a reconnect. `Uuid7.java` mints every run id. `VarroaBuildEventLifecycle.java`
   starts `BuildEventDispatcher` from an `@Initializer(after = PLUGINS_STARTED)`, replaying
@@ -291,7 +300,93 @@ the root AGENTS.md greenfield rule.
   alone, because one job can hold several queued items and several running
   builds — a `buildNumber` greater than zero stops a running build whose
   `VarroaIntentAction` carries the same run id, and zero searches the queue
-  instead.
+  instead. `POST /varroa-run/adopt-node` reads `name`, refuses a name holding a
+  path separator or starting with a dot, answers `409` for a node the process
+  already holds, and otherwise loads `nodes/<name>/config.xml` with
+  `Jenkins.XSTREAM` and adds it. Jenkins reads `nodes/` at boot only, so a
+  resumed build needs this route to find the agent it was running on.
+  `POST /varroa-run/load-build` takes `{jobPath, buildNumber}` and reads
+  `Job#getBuildByNumber`, which is the load: Jenkins loads builds on
+  demand, and a job reload loads no build. The run's own load resumes
+  its execution. The route then confirms the run holds a place on
+  `FlowExecutionList` and takes one when it does not, reading the list
+  first because a second registration logs a warning. It answers
+  `{building, registered, finished}` and starts nothing itself. The same
+  route with `probe` set reads that list and the job's already loaded
+  builds, and loads nothing, which is how the mite makes a redelivered
+  resume touch nothing; a probe answers `404` for an unknown job alone,
+  and reports a build that ended in this process as `finished`.
+  **A route of more than one word needs `@WebMethod(name = "...")`.** Stapler
+  derives the URL token from the method name and never writes a dash, so
+  `doLoadBuild` serves `loadBuild` and the dashed name every caller uses answers
+  `404`. A test posts to each `/varroa-run` route over HTTP, with the crumb
+  issuer cleared, because the crumb filter answers `403` before Stapler routes
+  and would hide an unmapped route.
+- **A resumed build attaches through `Flows.onResumed`.** `RunListener.onStarted`
+  fires in the process that began a build, so a build the mesh moves to another
+  JVM has no per-run state, no heartbeat, no stage events, and no sequence
+  counter there. `Flows.onResumed` and `Flows.onRunning` share one `attach`,
+  which rebuilds the state from the run's persisted `VarroaIntentAction` (the
+  run id travels inside `build.xml`), starts the heartbeat, and **emits the
+  first heartbeat at once** — the recorder clears the run's resume only on a
+  heartbeat from the named instance received after it asked, and gives up six
+  minutes later. It emits no second `STARTED`, and refuses a build that is not
+  running. `VarroaLogStorageFactory` needs no change: it resolves the run from
+  the same persisted action.
+- **Run-state replication** (the pipeline mesh's plugin half):
+  `RunStatePusher.java` holds one instance per run, armed by
+  `VarroaRunRecorder.Graph.onNewHead` and removed by `Runs#onCompleted`. The
+  listener only schedules: it runs on the flow's own thread, so it reads no
+  file and posts nothing. The first schedule after an idle period arms one
+  `jenkins.util.Timer` task two seconds out, and the task then posts the whole
+  current file set once, serially. The set holds `build.xml` and `program.dat`
+  every time, each `workflow/<n>.xml` whose size or modification time changed,
+  and `nodes/<name>/config.xml` for each node an executor step named. A build
+  whose `FlowDurabilityHint` is below `MAX_SURVIVABILITY` pushes nothing and
+  logs once: a lower level writes the flow program at a checkpoint, so a copied
+  set can be stale by whole stages. `VARROA_MITE_RUN_STATE_URL` gates the push,
+  with the rule `VarroaLogStorageFactory.parseActivationUrl` applies. A refusal
+  reason decides what happens next: `state-cap` and `foreign-run` stop the
+  build's pushes, `incomplete` and `malformed` drop the record and keep
+  pushing, and `gateway-budget-full` waits the named pause. Every other
+  answer, and every transport failure, **keeps** the spooled record for a
+  later window: only an answer a retry cannot change may drop it. The
+  replay runs before the generation increments, and a record is dropped
+  only when the spool holds a newer generation of the same path: a
+  counter that moved is not supersession. A window that cannot drain the
+  spool posts nothing new, so a later generation never overtakes a kept
+  record whose source file may already be gone; such a window arms one
+  more, because a push is otherwise scheduled only by a later flow node.
+  That re-arm doubles its delay to a one-minute cap, a window that drains
+  resets it, and a record older than the recorder's fifteen-minute arm
+  window is dropped. A window that **succeeds** arms a refresh 30 seconds
+  out, on a flag of its own, because a long step fires no flow node and
+  the build record and the flow program both carry that step: without it
+  a run's stored state is as old as its longest step. The refresh
+  schedules an ordinary window rather than pushing, so it and a flow
+  node still coalesce. A stopped pusher arms none.
+  **One run posts one window at a time.** The window clears `armed` when
+  it starts, so a node or a refresh arms the next one while it still
+  posts, and `jenkins.util.Timer` runs ten tasks at once: two windows
+  would post one path under two generations together, and the gateway
+  fences the pushing process, not the generation. A task that finds a
+  window running re-schedules itself one window later and leaves `armed`
+  set, so it stays the run's single armed window. `remove` **stops** the pusher rather than only
+  dropping the map entry: a task already on the timer holds the pusher
+  itself and would otherwise post after the run ended. It also clears
+  the run's own run-state records, because a stopped pusher replays
+  nothing. It clears those records alone, never the run's directory: the
+  same directory holds the run's build events, including a `COMPLETED`
+  event the dispatcher may not have sent yet. One monitor orders that
+  delete against a window's own append, so a window that is already past
+  its stopped test leaves no record behind. The monitor is never held
+  across a post, so a run's completion never waits on the network.
+  Every post carries `PUSHER_EPOCH`, the JVM start time, which names this
+  Jenkins process to the gateway: the push generation counts inside one
+  process and starts again after a restart. A flow
+  node file's size and time marker is written after its own push
+  succeeds, so a failed push never reads as a replicated file. A push
+  failure of any kind leaves the build running and emits no build event.
 - **Build identity and the agent fence** (runs every tenant build as its own service
   identity, and fences it to its own tenant's agents): `VarroaTenantResolver.java`
   holds the one shared rule — `tenantOf(Queue.Task)` resolves a task to its owning

@@ -19,6 +19,8 @@ type InterruptedMetrics struct {
 	retryPublished metric.Int64Counter
 	cellLoss       metric.Int64Counter
 	intentRefired  metric.Int64Counter
+	runResume      metric.Int64Counter
+	resumeTimeout  metric.Int64Counter
 }
 
 // NewInterruptedMetrics registers the interrupted-run marking's
@@ -27,7 +29,9 @@ type InterruptedMetrics struct {
 // recorder_sweep_skipped_total (labelled "reason"),
 // recorder_retry_published_total, recorder_cell_loss_confirmed_total
 // (labelled "path"), and recorder_intent_refired_total (labelled
-// "outcome" and "reason").
+// "outcome" and "reason"). It also registers the pipeline mesh's
+// recorder_run_resume_total (labelled "outcome" and "reason") and
+// recorder_run_resume_timeout_total.
 func NewInterruptedMetrics() (*InterruptedMetrics, error) {
 	meter := otel.Meter("varroa-recorder")
 
@@ -68,6 +72,17 @@ func NewInterruptedMetrics() (*InterruptedMetrics, error) {
 		return nil, fmt.Errorf("register recorder_intent_refired_total: %w", err)
 	}
 
+	runResume, err := meter.Int64Counter("recorder_run_resume_total",
+		metric.WithDescription("Resume outcomes of the pipeline mesh, labelled by outcome and reason"))
+	if err != nil {
+		return nil, fmt.Errorf("register recorder_run_resume_total: %w", err)
+	}
+	resumeTimeout, err := meter.Int64Counter("recorder_run_resume_timeout_total",
+		metric.WithDescription("Runs marked interrupted because their resume passed its window"))
+	if err != nil {
+		return nil, fmt.Errorf("register recorder_run_resume_timeout_total: %w", err)
+	}
+
 	return &InterruptedMetrics{
 		marked:         marked,
 		skipped:        skipped,
@@ -76,6 +91,8 @@ func NewInterruptedMetrics() (*InterruptedMetrics, error) {
 		retryPublished: retryPublished,
 		cellLoss:       cellLoss,
 		intentRefired:  intentRefired,
+		runResume:      runResume,
+		resumeTimeout:  resumeTimeout,
 	}, nil
 }
 
@@ -143,4 +160,24 @@ func (m *InterruptedMetrics) addRefired(ctx context.Context, outcome, reason str
 	}
 	m.intentRefired.Add(ctx, 1,
 		metric.WithAttributes(attribute.String("outcome", outcome), attribute.String("reason", reason)))
+}
+
+// addResume counts one resume outcome, labelled by outcome ("armed",
+// "published", or "skipped") and by reason ("no-state" or "no-target",
+// empty otherwise). A nil receiver is a no-op.
+func (m *InterruptedMetrics) addResume(ctx context.Context, outcome, reason string) {
+	if m == nil || m.runResume == nil {
+		return
+	}
+	m.runResume.Add(ctx, 1,
+		metric.WithAttributes(attribute.String("outcome", outcome), attribute.String("reason", reason)))
+}
+
+// addResumeTimeout counts one run marked because its resume passed its
+// window. A nil receiver is a no-op.
+func (m *InterruptedMetrics) addResumeTimeout(ctx context.Context) {
+	if m == nil || m.resumeTimeout == nil {
+		return
+	}
+	m.resumeTimeout.Add(ctx, 1)
 }

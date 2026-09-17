@@ -18,7 +18,7 @@ import (
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
-// rehydrationPathKind identifies which of the three accepted file shapes a
+// rehydrationPathKind identifies which of the six accepted file shapes a
 // rehydration path matches.
 type rehydrationPathKind int
 
@@ -26,13 +26,22 @@ const (
 	rehydrationPathBuildXML rehydrationPathKind = iota
 	rehydrationPathChangelog
 	rehydrationPathNextBuildNumber
+	// The pipeline mesh adds three shapes. A resume writes them; a
+	// desired-state rehydration bundle never sends one.
+	rehydrationPathProgramDat
+	rehydrationPathWorkflowNode
+	rehydrationPathNodeConfig
 )
 
-// changelogFileName and buildFileName are the two file names the "builds"
-// shape accepts.
+// The file names the "builds" shape accepts, and the two fixed names of
+// the mesh's own shapes.
 const (
-	changelogFileName = "changelog0.xml"
-	buildFileName     = "build.xml"
+	changelogFileName  = "changelog0.xml"
+	buildFileName      = "build.xml"
+	programDatFileName = "program.dat"
+	workflowDirName    = "workflow"
+	nodesDirName       = "nodes"
+	nodeConfigFileName = "config.xml"
 )
 
 // parsedRehydrationPath is one validated rehydration file path.
@@ -43,9 +52,10 @@ type parsedRehydrationPath struct {
 	// jobDirParts are the filesystem path parts under jenkinsHomeDir that
 	// name the job's own directory ("jobs", "team", "jobs", "pipeline").
 	jobDirParts []string
-	// buildNumber is set only for rehydrationPathBuildXML and
-	// rehydrationPathChangelog.
+	// buildNumber is set only for a shape that names a build.
 	buildNumber int
+	// nodeName is set only for rehydrationPathNodeConfig.
+	nodeName string
 }
 
 // validateJobSegment checks one job-path segment against the allow-list: it
@@ -82,11 +92,14 @@ func parseBuildNumber(s string) (int, error) {
 	return n, nil
 }
 
-// parseRehydrationPath checks relPath against the three accepted shapes:
+// parseRehydrationPath checks relPath against the six accepted shapes:
 //
 //	jobs/<seg>(/jobs/<seg>)*/builds/<n>/build.xml
 //	jobs/<seg>(/jobs/<seg>)*/builds/<n>/changelog0.xml
+//	jobs/<seg>(/jobs/<seg>)*/builds/<n>/program.dat
+//	jobs/<seg>(/jobs/<seg>)*/builds/<n>/workflow/<m>.xml
 //	jobs/<seg>(/jobs/<seg>)*/nextBuildNumber
+//	nodes/<seg>/config.xml
 //
 // Any other shape fails. relPath uses forward slashes, matching the wire
 // format the operator sends.
@@ -95,6 +108,10 @@ func parseRehydrationPath(relPath string) (parsedRehydrationPath, error) {
 		return parsedRehydrationPath{}, errors.New("rehydration path is empty")
 	}
 	parts := strings.Split(relPath, "/")
+
+	if parts[0] == nodesDirName {
+		return parseNodeConfigPath(relPath, parts)
+	}
 
 	var jobSegs, dirParts []string
 	i := 0
@@ -127,21 +144,58 @@ func parseRehydrationPath(relPath string) (parsedRehydrationPath, error) {
 	case len(rest) == 1 && rest[0] == "nextBuildNumber":
 		parsed.kind = rehydrationPathNextBuildNumber
 		return parsed, nil
-	case len(rest) == 3 && rest[0] == "builds" && (rest[2] == buildFileName || rest[2] == changelogFileName):
+	case len(rest) == 3 && rest[0] == "builds" && buildFileKind(rest[2]) >= 0:
 		n, err := parseBuildNumber(rest[1])
 		if err != nil {
 			return parsedRehydrationPath{}, fmt.Errorf("rehydration path %q: %w", relPath, err)
 		}
 		parsed.buildNumber = n
-		if rest[2] == buildFileName {
-			parsed.kind = rehydrationPathBuildXML
-		} else {
-			parsed.kind = rehydrationPathChangelog
+		parsed.kind = rehydrationPathKind(buildFileKind(rest[2]))
+		return parsed, nil
+	case len(rest) == 4 && rest[0] == "builds" && rest[2] == workflowDirName && strings.HasSuffix(rest[3], ".xml"):
+		n, err := parseBuildNumber(rest[1])
+		if err != nil {
+			return parsedRehydrationPath{}, fmt.Errorf("rehydration path %q: %w", relPath, err)
 		}
+		// A workflow node number takes the same digits rule a build
+		// number takes, so no leading zero and no sign can pass.
+		if _, err := parseBuildNumber(strings.TrimSuffix(rest[3], ".xml")); err != nil {
+			return parsedRehydrationPath{}, fmt.Errorf("rehydration path %q: %w", relPath, err)
+		}
+		parsed.buildNumber = n
+		parsed.kind = rehydrationPathWorkflowNode
 		return parsed, nil
 	default:
 		return parsedRehydrationPath{}, fmt.Errorf("rehydration path %q: does not match an accepted shape", relPath)
 	}
+}
+
+// buildFileKind maps a build-directory file name onto its path kind, or
+// -1 for a name outside the accepted set.
+func buildFileKind(name string) int {
+	switch name {
+	case buildFileName:
+		return int(rehydrationPathBuildXML)
+	case changelogFileName:
+		return int(rehydrationPathChangelog)
+	case programDatFileName:
+		return int(rehydrationPathProgramDat)
+	default:
+		return -1
+	}
+}
+
+// parseNodeConfigPath checks the nodes/<seg>/config.xml shape. The node
+// segment takes the same allow-list a job segment takes, so a node
+// named ".." is refused.
+func parseNodeConfigPath(relPath string, parts []string) (parsedRehydrationPath, error) {
+	if len(parts) != 3 || parts[2] != nodeConfigFileName {
+		return parsedRehydrationPath{}, fmt.Errorf("rehydration path %q: does not match an accepted shape", relPath)
+	}
+	if err := validateJobSegment(parts[1]); err != nil {
+		return parsedRehydrationPath{}, fmt.Errorf("rehydration path %q: %w", relPath, err)
+	}
+	return parsedRehydrationPath{kind: rehydrationPathNodeConfig, nodeName: parts[1]}, nil
 }
 
 // confineRehydrationPath joins relPath under jenkinsHomeDir and refuses a
@@ -245,6 +299,24 @@ func atomicWriteRehydrationFile(absPath string, data []byte) error {
 		return fmt.Errorf("rename temp file for %s: %w", absPath, err)
 	}
 	return nil
+}
+
+// errRehydrationFileExists reports a refused overwrite of an existing
+// file. A resume command treats an existing node config as an expected
+// outcome, not as a command failure.
+var errRehydrationFileExists = errors.New("rehydration file already exists")
+
+// writeRehydrationFileAt writes data at absPath. allowOverwrite lets the
+// write land on a path that already holds a file. Only the resume path
+// sets the flag: applyRehydrationBundle keeps its own rules, which skip
+// an existing build directory before any write.
+func writeRehydrationFileAt(absPath string, data []byte, allowOverwrite bool) error {
+	if !allowOverwrite {
+		if _, err := os.Stat(absPath); err == nil {
+			return fmt.Errorf("file %s already exists: %w", absPath, errRehydrationFileExists)
+		}
+	}
+	return atomicWriteRehydrationFile(absPath, data)
 }
 
 // jobConfigExists reports whether the job at jobDir already holds a

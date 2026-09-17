@@ -121,6 +121,10 @@ func runMaintenanceSteps(ctx context.Context, db maintDB, cfg MaintenanceConfig)
 		return fmt.Errorf("delete expired log objects: %w", err)
 	}
 
+	if _, err := deleteExpiredRunState(ctx, db, cfg.LogStore, now); err != nil {
+		return fmt.Errorf("delete expired run state: %w", err)
+	}
+
 	artifactsCutoff := now.Add(-cfg.ArtifactRetention)
 	if _, err := deleteExpiredArtifacts(ctx, db, cfg.LogStore, artifactsCutoff); err != nil {
 		return fmt.Errorf("delete expired artifacts: %w", err)

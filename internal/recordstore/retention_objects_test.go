@@ -2,6 +2,7 @@ package recordstore
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
@@ -349,4 +351,88 @@ func TestMaintenanceRoundAppliesRetentionAcrossFourMonths(t *testing.T) {
 	if januaryArtifactCount != 0 {
 		t.Fatalf("January's run_artifacts row survived, want it deleted")
 	}
+}
+
+// prefixRecordingStore is a blob.Store fake that records every
+// DeletePrefix call. It satisfies ObjectDeleter through blob.Store's
+// superset method set.
+type prefixRecordingStore struct {
+	prefixes []string
+}
+
+func (r *prefixRecordingStore) Put(context.Context, string, io.Reader, blob.ObjectOptions) error {
+	return nil
+}
+
+func (r *prefixRecordingStore) Replace(context.Context, string, io.Reader, blob.ObjectOptions) error {
+	return nil
+}
+
+func (r *prefixRecordingStore) Append(context.Context, string, int64, []byte, blob.ObjectOptions) error {
+	return nil
+}
+
+func (r *prefixRecordingStore) NewRangeReader(context.Context, string, int64, int64) (io.ReadCloser, error) {
+	return nil, blob.ErrObjectNotFound
+}
+
+func (r *prefixRecordingStore) Delete(context.Context, string) error {
+	return nil
+}
+
+func (r *prefixRecordingStore) DeletePrefix(_ context.Context, prefix string) error {
+	r.prefixes = append(r.prefixes, prefix)
+	return nil
+}
+
+func (r *prefixRecordingStore) NewObjectReader(context.Context, string, int64, int64) (io.ReadCloser, int64, error) {
+	return nil, 0, blob.ErrObjectNotFound
+}
+
+// TestDeleteExpiredRunStateRemovesOnlyOldTerminalRuns asserts the
+// hourly backstop removes the run-state prefix of a run terminal for two
+// hours and keeps the prefix of a run terminal for ten minutes.
+func TestDeleteExpiredRunStateRemovesOnlyOldTerminalRuns(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	oldRun := seedTerminalRunAt(t, pool, db, "manual:run-state-old", now.Add(-2*time.Hour))
+	freshRun := seedTerminalRunAt(t, pool, db, "manual:run-state-fresh", now.Add(-10*time.Minute))
+
+	fake := &prefixRecordingStore{}
+	n, err := deleteExpiredRunState(ctx, pool, fake, now)
+	if err != nil {
+		t.Fatalf("deleteExpiredRunState: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("deleted %d run-state prefixes, want 1", n)
+	}
+	want := blob.RunStatePrefix(oldRun)
+	if len(fake.prefixes) != 1 || fake.prefixes[0] != want {
+		t.Fatalf("deleted prefixes = %v, want [%s]", fake.prefixes, want)
+	}
+	for _, p := range fake.prefixes {
+		if p == blob.RunStatePrefix(freshRun) {
+			t.Fatalf("backstop removed the state of a run terminal for ten minutes")
+		}
+	}
+}
+
+// seedTerminalRunAt stores one run and marks it terminal at endedAt.
+func seedTerminalRunAt(t *testing.T, pool *pgxpool.Pool, db *sql.DB, intentKey string, endedAt time.Time) string {
+	t.Helper()
+	runID := seedGrantedIntent(t, pool, intentKey)
+	g := NewIngester(pool, nil, nil)
+	started := newTestEnvelope(t, runID, intentKey, KindRunStarted, RunStartedPayload{})
+	if _, err := g.Apply(context.Background(), started); err != nil {
+		t.Fatalf("apply run.started: %v", err)
+	}
+	if _, err := db.Exec(`
+		UPDATE varroa.runs SET status = 'COMPLETED', result = 'SUCCESS', ended_at = $2
+		 WHERE run_id = $1
+	`, runID, endedAt); err != nil {
+		t.Fatalf("mark run terminal: %v", err)
+	}
+	return runID.String()
 }

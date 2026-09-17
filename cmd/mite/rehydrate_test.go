@@ -40,11 +40,12 @@ func rehydrationFile(t *testing.T, path string, data []byte) *mitev1.Rehydration
 
 func TestParseRehydrationPath_AcceptedShapes(t *testing.T) {
 	cases := []struct {
-		name        string
-		path        string
-		wantKind    rehydrationPathKind
-		wantJobPath string
-		wantBuild   int
+		name         string
+		path         string
+		wantKind     rehydrationPathKind
+		wantJobPath  string
+		wantBuild    int
+		wantNodeName string
 	}{
 		{
 			name:        "build.xml",
@@ -66,6 +67,26 @@ func TestParseRehydrationPath_AcceptedShapes(t *testing.T) {
 			wantKind:    rehydrationPathNextBuildNumber,
 			wantJobPath: "team/pipeline",
 		},
+		{
+			name:        "program.dat",
+			path:        "jobs/team/jobs/pipeline/builds/7/program.dat",
+			wantKind:    rehydrationPathProgramDat,
+			wantJobPath: "team/pipeline",
+			wantBuild:   7,
+		},
+		{
+			name:        "workflow node xml",
+			path:        "jobs/team/jobs/pipeline/builds/7/workflow/3.xml",
+			wantKind:    rehydrationPathWorkflowNode,
+			wantJobPath: "team/pipeline",
+			wantBuild:   7,
+		},
+		{
+			name:         "node config.xml",
+			path:         "nodes/agent-1/config.xml",
+			wantKind:     rehydrationPathNodeConfig,
+			wantNodeName: "agent-1",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -81,6 +102,9 @@ func TestParseRehydrationPath_AcceptedShapes(t *testing.T) {
 			}
 			if got.buildNumber != tc.wantBuild {
 				t.Errorf("buildNumber = %d, want %d", got.buildNumber, tc.wantBuild)
+			}
+			if got.nodeName != tc.wantNodeName {
+				t.Errorf("nodeName = %q, want %q", got.nodeName, tc.wantNodeName)
 			}
 		})
 	}
@@ -99,6 +123,9 @@ func TestParseRehydrationPath_Rejections(t *testing.T) {
 		{"unrecognized shape", "jobs/team/config.xml"},
 		{"leading zero build number", "jobs/team/builds/07/build.xml"},
 		{"non-numeric build number", "jobs/team/builds/x/build.xml"},
+		{"workflow node leading zero", "jobs/team/builds/7/workflow/01.xml"},
+		{"node segment traverses", "nodes/../config.xml"},
+		{"node segment hidden", "nodes/.hidden/config.xml"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

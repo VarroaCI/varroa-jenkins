@@ -61,6 +61,12 @@ func init() {
 	logAppendRetries, _ = meter.Int64Counter("varroa.gateway.log.append.retries",
 		metric.WithDescription("Blob store append retries for console-log chunks and index entries"),
 	)
+	runStateBytes, _ = meter.Int64Counter("varroa.gateway.run_state.bytes",
+		metric.WithDescription("Inflated bytes of run-state objects the gateway stored"),
+	)
+	runStateRejected, _ = meter.Int64Counter("varroa.gateway.run_state.rejected",
+		metric.WithDescription("Run-state chunks the gateway rejected, by reason"),
+	)
 }
 
 // runLogState is the gateway's per-run blob-writer state: the append

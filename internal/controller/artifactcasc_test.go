@@ -785,6 +785,77 @@ func TestCreateStatefulSet_MiteLogURLEnv(t *testing.T) {
 	}
 }
 
+// TestCreateStatefulSet_MiteRunStateURLEnv covers both branches of the
+// pipeline mesh's own gate. RunStatePusher reads
+// VARROA_MITE_RUN_STATE_URL and pushes nothing without it, so the
+// variable rides the record-store gate the log URL already rides.
+func TestCreateStatefulSet_MiteRunStateURLEnv(t *testing.T) {
+	cases := []struct {
+		name      string
+		claimGate string
+		wantSet   bool
+	}{
+		{name: "record store enabled", claimGate: "1", wantSet: true},
+		{name: "record store disabled", claimGate: "0", wantSet: false},
+		{name: "unset", claimGate: "", wantSet: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sts := buildStatefulSet(StatefulSetSpec{
+				Name: "ci-00000000", Namespace: "team-a", ControllerName: "ci",
+				ClaimGate: tc.claimGate,
+			})
+			env := builtContainerEnv(t, sts, "jenkins")
+			got, set := env["VARROA_MITE_RUN_STATE_URL"]
+			if set != tc.wantSet {
+				t.Fatalf("VARROA_MITE_RUN_STATE_URL set = %v, want %v", set, tc.wantSet)
+			}
+			if tc.wantSet && got != "http://127.0.0.1:9095" {
+				t.Errorf("VARROA_MITE_RUN_STATE_URL = %q", got)
+			}
+		})
+	}
+}
+
+// TestCreateStatefulSet_MiteRunStateURLCarriesNoPath asserts the
+// variable carries the loopback base and no route. RunStatePusher
+// appends its own path to this value, so a value that already carries
+// the path makes every push target that path twice and store nothing.
+// The plugin's own constant is /v1/run-state, and the two compose to
+// the route the mite serves.
+func TestCreateStatefulSet_MiteRunStateURLCarriesNoPath(t *testing.T) {
+	sts := buildStatefulSet(StatefulSetSpec{
+		Name: "ci-00000000", Namespace: "team-a", ControllerName: "ci",
+		ClaimGate: "1",
+	})
+	env := builtContainerEnv(t, sts, "jenkins")
+	base := env["VARROA_MITE_RUN_STATE_URL"]
+	if strings.Contains(strings.TrimPrefix(base, "http://"), "/") {
+		t.Fatalf("VARROA_MITE_RUN_STATE_URL = %q, want a base with no path", base)
+	}
+	const pluginRoute = "/v1/run-state"
+	if composed := base + pluginRoute; composed != "http://127.0.0.1:9095/v1/run-state" {
+		t.Fatalf("the base and the plugin route compose to %q", composed)
+	}
+}
+
+// TestCreateStatefulSet_MiteURLsShareOneGate asserts the two loopback
+// URLs are stamped together. A pod that pushes its console log but no
+// run state replicates nothing, and that loss stays silent until a cell
+// dies.
+func TestCreateStatefulSet_MiteURLsShareOneGate(t *testing.T) {
+	sts := buildStatefulSet(StatefulSetSpec{
+		Name: "ci-00000000", Namespace: "team-a", ControllerName: "ci",
+		ClaimGate: "1",
+	})
+	env := builtContainerEnv(t, sts, "jenkins")
+	_, logSet := env["VARROA_MITE_LOG_URL"]
+	_, stateSet := env["VARROA_MITE_RUN_STATE_URL"]
+	if logSet != stateSet {
+		t.Fatalf("log URL set = %v, run-state URL set = %v; both take one gate", logSet, stateSet)
+	}
+}
+
 // TestCreateStatefulSet_CellInstanceEnv asserts VARROA_CELL_INSTANCE on both
 // containers, sourced from the downward API field metadata.uid (task 5.5a).
 func TestCreateStatefulSet_CellInstanceEnv(t *testing.T) {

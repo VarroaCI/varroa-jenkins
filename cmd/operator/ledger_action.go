@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -65,14 +66,29 @@ func ledgerActionParameters(raw json.RawMessage) map[string]string {
 	return params
 }
 
+// ledgerActionDeadlineUnix renders an action's deadline as unix
+// seconds, or 0 when the action carries none.
+func ledgerActionDeadlineUnix(deadline *time.Time) int64 {
+	if deadline == nil {
+		return 0
+	}
+	return deadline.Unix()
+}
+
+// resumeCommandDeadlineSec bounds one resume command. A command that
+// reaches its target after the recorder gave up must not restore a run
+// the recorder already marked, and this deadline is what ends it. The
+// value leaves the resume's own six-minute deadline room for a retry.
+const resumeCommandDeadlineSec = 120
+
 // handleLedgerAction implements design D8a/D7 / the mite-command-transport
 // spec's operator subscriber (task 9.1a, task 7.1): it decodes one action
 // published on varroa.ledger.actions.<cluster>, ignores an action naming
 // another cluster, and maps cancel_run/retry_run/trigger_run to the
 // matching imperative command or wake_cell to a direct
-// WakeHibernatedController call. trigger_run wakes the target through the
-// same call before it sends the command. An unknown kind takes no action
-// and is counted.
+// WakeHibernatedController call. trigger_run and resume_run both wake
+// the target through the same call before they send the command. An
+// unknown kind takes no action and is counted.
 //
 // The imperative command's subject comes from the action's own namespace
 // and controller fields only — no other field ever names the target.
@@ -138,6 +154,51 @@ func handleLedgerAction(ctx context.Context, logger *slog.Logger, ownCluster str
 		if err := rec.SendImperativeCommand(ctx, action.Namespace, action.Controller, cmd); err != nil {
 			logger.Warn("ledger action trigger_run send failed",
 				"controller", action.Namespace+"/"+action.Controller, "error", err)
+		}
+	case recordstore.LedgerActionResumeRun:
+		// The target must run before it can adopt anything, so the
+		// operator wakes it through the same routine trigger_run uses.
+		// The namespace and the controller name the target cell, as they
+		// do for every other kind.
+		//
+		// The action's Instance rides the command as a fence. The
+		// recorder assigned the run to one pod, and that pod can roll
+		// before the command arrives. The replacement then holds the
+		// same controller name but a different instance, and it must
+		// refuse the command rather than restore a run the recorder
+		// gave to another pod.
+		rec.WakeHibernatedController(ctx, action.Namespace, action.Controller)
+		cmd := &mitev1.ImperativeCommand{
+			CommandId: "resume-build-" + action.RunID,
+			Type:      mitev1.CommandTypeResumeBuild,
+			// The command carries its own deadline, so a delivery that
+			// arrives late is abandoned instead of restoring a run the
+			// recorder has already given up on. The value leaves the
+			// resume's own six-minute deadline room for one retry.
+			DeadlineSec: resumeCommandDeadlineSec,
+			ResumeBuild: &mitev1.ResumeBuildPayload{
+				RunId:       action.RunID,
+				JobPath:     action.JobPath,
+				BuildNumber: ledgerActionBuildNumber(action.BuildNumber),
+				Files:       action.Files,
+				Instance:    action.Instance,
+				// The absolute expiry, not a duration. DeadlineSec
+				// below bounds the work once the mite starts it, and
+				// that window opens when the worker picks the command
+				// up. A command that waited in the queue needs the
+				// moment the recorder gave up, which only this field
+				// carries.
+				DeadlineUnix: ledgerActionDeadlineUnix(action.Deadline),
+			},
+		}
+		logger.Info("resume_run dispatching",
+			"controller", action.Namespace+"/"+action.Controller,
+			"instance", action.Instance, "run_id", action.RunID,
+			"job_path", action.JobPath, "files", len(action.Files))
+		if err := rec.SendImperativeCommand(ctx, action.Namespace, action.Controller, cmd); err != nil {
+			logger.Error("ledger action resume_run send failed",
+				"controller", action.Namespace+"/"+action.Controller,
+				"instance", action.Instance, "run_id", action.RunID, "error", err)
 		}
 	case recordstore.LedgerActionWakeCell:
 		rec.WakeHibernatedController(ctx, action.Namespace, action.Controller)

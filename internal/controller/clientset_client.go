@@ -1580,9 +1580,22 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 										// VarroaLogStorageFactory.forBuild returns null (Jenkins keeps
 										// its own FileLogStorage) unless this is set, so it is set
 										// only when the record store is enabled (design D1).
+										//
+										// RunStatePusher reads its own gate the same way, and the
+										// pipeline mesh needs the record store for the same reason
+										// the log path does. Both variables therefore take one
+										// gate: without the run-state URL every build replicates
+										// nothing and a lost cell loses its running builds.
 										if claimGate == "1" {
 											jenkinsEnv = append(jenkinsEnv, map[string]interface{}{
 												"name": "VARROA_MITE_LOG_URL", "value": "http://127.0.0.1:9095/v1/log",
+											})
+											// This one carries the loopback BASE url, not a
+											// route: RunStatePusher appends its own path. A
+											// value carrying the path makes every push target
+											// that path twice and store nothing.
+											jenkinsEnv = append(jenkinsEnv, map[string]interface{}{
+												"name": "VARROA_MITE_RUN_STATE_URL", "value": "http://127.0.0.1:9095",
 											})
 										}
 										jenkinsEnv = append(jenkinsEnv, map[string]interface{}{

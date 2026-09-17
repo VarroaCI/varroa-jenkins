@@ -265,6 +265,10 @@ func (r *recordingHandler) OnTailAck(name, ns string, ack *mitev1.TailAck) {
 func (r *recordingHandler) OnCrossTenantRequest(_, _ string, _ int64, _ *mitev1.CrossTenantRequest, _ Sender) {
 }
 
+func (r *recordingHandler) OnRunStateChunk(_, _ string, _ *mitev1.RunStateChunk) {}
+
+func (r *recordingHandler) OnRunStateRequest(_, _ string, _ *mitev1.RunStateRequest, _ Sender) {}
+
 // Ensure recordingHandler implements StreamHandler.
 var _ StreamHandler = (*recordingHandler)(nil)
 

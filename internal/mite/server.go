@@ -430,6 +430,16 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 			if ctr := m.CrossTenantRequest; ctr != nil {
 				handler.OnCrossTenantRequest(controllerName, namespace, connToken, ctr, send)
 			}
+
+		case *mitev1.MiteMessage_RunStateChunk:
+			if rsc := m.RunStateChunk; rsc != nil {
+				handler.OnRunStateChunk(controllerName, namespace, rsc)
+			}
+
+		case *mitev1.MiteMessage_RunStateRequest:
+			if rsr := m.RunStateRequest; rsr != nil {
+				handler.OnRunStateRequest(controllerName, namespace, rsr, send)
+			}
 		}
 	}
 }

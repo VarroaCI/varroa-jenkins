@@ -12,6 +12,8 @@ import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import org.jenkinsci.plugins.workflow.steps.BodyExecutionCallback;
 import org.jenkinsci.plugins.workflow.steps.EnvironmentExpander;
@@ -39,6 +41,8 @@ import jenkins.util.Timer;
  * that class for why a nested block cannot run correctly on this platform.
  */
 public class VarroaLockStep extends Step {
+
+    private static final Logger LOGGER = Logger.getLogger(VarroaLockStep.class.getName());
 
     private final String name;
     private int timeout;
@@ -138,6 +142,19 @@ public class VarroaLockStep extends Step {
                 return;
             }
             if (fenceToken != 0) {
+                // The action's stack is transient, so a resumed build
+                // restores an empty one and varroa.lock.token reads null
+                // inside a block that holds a lock. Push the held entry
+                // back before the renewal resumes.
+                try {
+                    Run<?, ?> run = getContext().get(Run.class);
+                    if (run != null) {
+                        VarroaActiveLocksAction.of(run).push(qualifiedName, fenceToken);
+                    }
+                } catch (Exception e) {
+                    LOGGER.log(Level.WARNING,
+                            "varroaLock: could not restore the held token after a resume", e);
+                }
                 scheduleRenew();
             } else {
                 attemptAcquire();

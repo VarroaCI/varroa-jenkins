@@ -174,6 +174,15 @@ func (h *RegistryHandler) OnTailAck(name, ns string, ack *mitev1.TailAck) {}
 func (h *RegistryHandler) OnCrossTenantRequest(name, ns string, connToken int64, req *mitev1.CrossTenantRequest, send Sender) {
 }
 
+// OnRunStateChunk is a no-op for the registry handler; only BusHandler
+// writes a run-state object to the blob store.
+func (h *RegistryHandler) OnRunStateChunk(name, ns string, chunk *mitev1.RunStateChunk) {}
+
+// OnRunStateRequest is a no-op for the registry handler; only BusHandler
+// reads a run-state object from the blob store.
+func (h *RegistryHandler) OnRunStateRequest(name, ns string, req *mitev1.RunStateRequest, send Sender) {
+}
+
 // OnDisconnect unregisters the mite and broadcasts.
 func (h *RegistryHandler) OnDisconnect(name, ns string, token int64) {
 	// Ignore a late teardown from a stream the mite has already replaced —

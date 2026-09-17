@@ -270,6 +270,48 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   byte range the index does not cover as a hole, and reports `incomplete`
   with a reason token (`no-summary` when the run carries no `LogSummary` at
   all) — it is never itself written back to storage.
+- **Run-state store** (`run_state.go`) — `BusHandler.OnRunStateChunk` stores
+  one replicated file of a running Pipeline build as one whole blob object
+  (`runstate/<run_id>/<relpath>`, class `state`), through `blob.Store.Replace`.
+  It applies six ordered steps: a path check, the same `checkOwner` a log
+  chunk takes, the 64 MiB per-run bound against the chunk's declared
+  `object_size`, a buffer keyed `(run_id, relpath, state_gen)`, a write only
+  once every sequence is present, and one `run.state` publish. Each chunk is
+  gzipped on its own, so a missing middle chunk would inflate into a
+  truncated file: the gateway drops the buffer and answers `incomplete`
+  instead. It charges one amount per **completed object**, never per chunk,
+  because a push replaces a whole object. The per-run entry is dropped on a
+  terminal owner tuple and on `OnDisconnect`; without both drops an entry
+  lives for the gateway's whole lifetime. The entry also remembers the
+  push it last stored per path, keyed on the chunk's `pusher_epoch` and
+  its generation, so a chunk repeating both answers stored instead of
+  opening a fresh buffer and reading as `incomplete`. The epoch is part
+  of that identity because a generation counts inside one Jenkins
+  process: a restart starts it again at 1 while the entry lives on, and
+  an identity a restart could repeat would freeze the run's stored state
+  at its pre-restart copy. The entry also holds the newest epoch it has
+  seen for the run: a **lower** epoch is a chunk a retired Jenkins
+  process sent, delivered late, and it is discarded rather than allowed
+  to drop the live buffer or overwrite the stored object. It is answered
+  as stored, because the sender is gone and the loopback's reason set is
+  closed. Only a higher epoch replaces, and a rise retires every buffer
+  below it so their bytes leave the gateway-wide bound at once. **The
+  fence runs before every other test**, because the shape test and the
+  cap test both drop the path's buffer: a bad chunk from a retired
+  process must never throw away the live process's partial push. **Each
+  run owns a write monitor**, because the object write runs outside the
+  gateway-wide lock: the monitor holds the epoch test and the write
+  together, so a retired process's slow write either goes first, and the
+  new process overwrites it, or it waits and then writes nothing. It also
+  keeps two writes of one key apart, which the file tier fails outright.
+  `OnRunStateRequest` serves a
+  resume's fetch through `NewRangeReader` (the chunked read `Put` pairs
+  with, never `NewObjectReader`), and calls `ownerCache.invalidate` on a
+  run's **first** fetch: a resume moves a run's owner with no claim behind
+  it, so `observeGrant` never replaces the entry. The invalidation only
+  forces a re-read of the recorder and sets no owner. Answers ride
+  `OperatorMessage.run_state_ack`, which mirrors `LogAck`; the mite records
+  the answer and raises its own `503` on that run's next post.
 - **Live tail** (`tail.go`) — `runTailLease` is a 90-second lease
   (`tailLeaseSeconds`) per run, held in `BusHandler.tailLeases`.
   `watchTail` subscribes `bus.TailSubject` (request-reply, queue group
@@ -316,7 +358,8 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   `OnSnapshot`, `OnCommandResult`, `OnTokenRefreshRequest`, `OnObservabilityReport`,
   `OnContentResponse`, `OnJenkinsActivity`, `OnPluginInventory`, `OnBuildEvent`,
   `OnClaimRequest`, `OnLogChunk`, `OnTailAck`, `OnCrossTenantRequest`,
-  `IsCurrentConnection`, `OnDisconnect`.
+  `OnRunStateChunk`, `OnRunStateRequest`, `IsCurrentConnection`,
+  `OnDisconnect`.
 - `BusHandler` per-connection maps (`cancels`, `certExpiry`, `pendingAcks`,
   `replayCmds`, `pendingContent*`, `watchDegraded`, `miteVersion`) are all keyed
   `"ns/name"` under one `mu`; follow that pattern rather than adding a second

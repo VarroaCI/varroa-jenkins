@@ -14,12 +14,15 @@ import (
 // cellJCascDocument is the fixed JCasC fragment every cell merges onto its
 // composed jenkins.yaml (design D11): no local executors, since every build
 // runs on a tenant cloud's agent, and the most durable pipeline flow so a
-// cell restart never loses step state.
+// cell loss never loses step state. The pipeline mesh replicates a
+// running build's flow files, and a lower level writes them at a
+// checkpoint instead of at each step, so a copied set would be stale by
+// whole stages.
 const cellJCascDocument = `jenkins:
   numExecutors: 0
 unclassified:
   globalDefaultFlowDurabilityLevel:
-    durabilityHint: PERFORMANCE_OPTIMIZED
+    durabilityHint: MAX_SURVIVABILITY
 `
 
 // The operator's own constant agent pod template (design D11). A
