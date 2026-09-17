@@ -19,12 +19,12 @@ const safeHeartbeatMsExpr = `CASE WHEN ` + heartbeatMsText + ` ~ '^[0-9]{1,15}$'
 
 // anchorExpr is the SQL expression for a run's finalize-wait anchor: the
 // writer's own safe heartbeat when present, else ended_at, then
-// last_heartbeat_at, then started_at, then queued_at. The candidate
+// heartbeat_received_at, then started_at, then queued_at. The candidate
 // selection query and the finalize update both use this exact
 // expression, so the two statements can never disagree about which
 // moment gates the wait, even when the anchor is a fallback column that
 // a concurrent write can change between the two statements.
-const anchorExpr = `COALESCE(to_timestamp((` + safeHeartbeatMsExpr + `) / 1000.0), ended_at, last_heartbeat_at, started_at, queued_at)`
+const anchorExpr = `COALESCE(to_timestamp((` + safeHeartbeatMsExpr + `) / 1000.0), ended_at, heartbeat_received_at, started_at, queued_at)`
 
 // finalizeCandidate is the subset of a runs row the log-finalization
 // sweep needs to decide, and to act on, one run.
@@ -37,7 +37,7 @@ type finalizeCandidate struct {
 	cell                  string
 	tenant                string
 	cellInstance          *string
-	lastHeartbeatAt       *time.Time
+	heartbeatReceivedAt   *time.Time
 	startedAt             *time.Time
 	queuedAt              *time.Time
 	endedAt               *time.Time
@@ -112,7 +112,7 @@ type finalizeCursor struct {
 // after after. safeHeartbeatMsExpr gates the bigint cast, so a run whose
 // writer_heartbeat_unix_ms holds a fractional, negative, oversized, or
 // non-numeric JSON value never reaches the cast: it falls back to
-// ended_at, last_heartbeat_at, started_at, or queued_at, matching
+// ended_at, heartbeat_received_at, started_at, or queued_at, matching
 // waitAnchor's own precedence.
 func selectFinalizeCandidates(ctx context.Context, db maintDB, cutoff time.Time, after *finalizeCursor) ([]finalizeCandidate, error) {
 	args := []any{cutoff}
@@ -125,7 +125,7 @@ func selectFinalizeCandidates(ctx context.Context, db maintDB, cutoff time.Time,
 
 	query := fmt.Sprintf(`
 		SELECT r.run_id, r.created_at, r.status, r.cluster, r.namespace, r.cell, r.tenant,
-		       r.last_heartbeat_at, r.started_at, r.queued_at, r.ended_at,
+		       r.heartbeat_received_at, r.started_at, r.queued_at, r.ended_at,
 		       `+heartbeatMsText+`,
 		       `+safeHeartbeatMsExpr+`,
 		       ri.cell_instance
@@ -152,7 +152,7 @@ func selectFinalizeCandidates(ctx context.Context, db maintDB, cutoff time.Time,
 	for rows.Next() {
 		var c finalizeCandidate
 		if err := rows.Scan(&c.runID, &c.createdAt, &c.status, &c.cluster, &c.namespace, &c.cell, &c.tenant,
-			&c.lastHeartbeatAt, &c.startedAt, &c.queuedAt, &c.endedAt,
+			&c.heartbeatReceivedAt, &c.startedAt, &c.queuedAt, &c.endedAt,
 			&c.writerHeartbeatRaw, &c.writerHeartbeatUnixMs, &c.cellInstance); err != nil {
 			return nil, fmt.Errorf("scan log-finalization candidate: %w", err)
 		}
@@ -176,26 +176,28 @@ func isTerminalOrCellGone(ctx context.Context, liveness Liveness, c finalizeCand
 		return false, nil
 	}
 	return liveness.CellGone(ctx, RunLiveness{
-		RunID:           c.runID,
-		Cluster:         c.cluster,
-		Namespace:       c.namespace,
-		Cell:            c.cell,
-		Tenant:          c.tenant,
-		CellInstance:    derefString(c.cellInstance),
-		LastHeartbeatAt: c.lastHeartbeatAt,
-		StartedAt:       c.startedAt,
+		RunID:               c.runID,
+		Cluster:             c.cluster,
+		Namespace:           c.namespace,
+		Cell:                c.cell,
+		Tenant:              c.tenant,
+		CellInstance:        derefString(c.cellInstance),
+		HeartbeatReceivedAt: c.heartbeatReceivedAt,
+		StartedAt:           c.startedAt,
 	})
 }
 
 // waitAnchor returns the moment the finalize wait counts from: the
 // writer's own reported heartbeat when present, else the first of
-// ended_at, last_heartbeat_at, started_at, or queued_at that is set.
+// ended_at, heartbeat_received_at, started_at, or queued_at that is
+// set. The heartbeat anchor is the recorder's own receive time, so the
+// wait never counts a pod clock against a recorder cutoff.
 func waitAnchor(c finalizeCandidate) *time.Time {
 	if c.writerHeartbeatUnixMs != nil {
 		t := time.UnixMilli(*c.writerHeartbeatUnixMs).UTC()
 		return &t
 	}
-	for _, t := range []*time.Time{c.endedAt, c.lastHeartbeatAt, c.startedAt, c.queuedAt} {
+	for _, t := range []*time.Time{c.endedAt, c.heartbeatReceivedAt, c.startedAt, c.queuedAt} {
 		if t != nil {
 			return t
 		}
@@ -214,7 +216,7 @@ func waitAnchor(c finalizeCandidate) *time.Time {
 // heartbeat in that same window: it must equal the exact text the
 // select observed, or the update skips the row. anchorExpr repeats the
 // same check for a fallback anchor: a concurrent run.heartbeat that
-// moves last_heartbeat_at (or any other fallback column) into the wait
+// moves heartbeat_received_at (or any other fallback column) into the wait
 // window between the select and this update also makes the update skip
 // the row, even though the writer heartbeat guard alone would not catch
 // that change.

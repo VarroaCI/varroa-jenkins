@@ -7,7 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// heartbeatGoneAfter is the age a run's last_heartbeat_at, or its
+// heartbeatGoneAfter is the age a run's heartbeat_received_at, or its
 // started_at when no heartbeat ever arrived, must reach before
 // HeartbeatLiveness reports the owning cell gone. It matches the
 // heartbeat rule of the run-ledger ingest kind.
@@ -17,15 +17,20 @@ const heartbeatGoneAfter = 15 * time.Minute
 // judge whether a run's owning cell is still alive. Tenant and
 // CellInstance feed the placement-aware implementation below; the
 // heartbeat-only implementation ignores them.
+//
+// HeartbeatReceivedAt is the recorder's own receive time, never the
+// pod's occurred_at. Each implementation compares it with the
+// recorder's now, so a pod clock would add the skew between two
+// machines to the answer.
 type RunLiveness struct {
-	RunID           string
-	Cluster         string
-	Namespace       string
-	Cell            string
-	Tenant          string
-	CellInstance    string
-	LastHeartbeatAt *time.Time
-	StartedAt       *time.Time
+	RunID               string
+	Cluster             string
+	Namespace           string
+	Cell                string
+	Tenant              string
+	CellInstance        string
+	HeartbeatReceivedAt *time.Time
+	StartedAt           *time.Time
 }
 
 // Liveness answers whether the cell that owns a run is gone. This
@@ -38,7 +43,7 @@ type Liveness interface {
 }
 
 // HeartbeatLiveness is the heartbeat-only Liveness this change ships.
-// The cell is gone when LastHeartbeatAt is older than
+// The cell is gone when HeartbeatReceivedAt is older than
 // heartbeatGoneAfter, or when it is null and StartedAt is older than
 // heartbeatGoneAfter.
 type HeartbeatLiveness struct {
@@ -56,8 +61,8 @@ func (h HeartbeatLiveness) CellGone(_ context.Context, run RunLiveness) (bool, e
 	}
 	cutoff := now().Add(-heartbeatGoneAfter)
 
-	if run.LastHeartbeatAt != nil {
-		return run.LastHeartbeatAt.Before(cutoff), nil
+	if run.HeartbeatReceivedAt != nil {
+		return run.HeartbeatReceivedAt.Before(cutoff), nil
 	}
 	if run.StartedAt != nil {
 		return run.StartedAt.Before(cutoff), nil
@@ -98,8 +103,8 @@ func (p *PlacementLiveness) CellGone(ctx context.Context, run RunLiveness) (bool
 
 	var anchor *time.Time
 	switch {
-	case run.LastHeartbeatAt != nil:
-		anchor = run.LastHeartbeatAt
+	case run.HeartbeatReceivedAt != nil:
+		anchor = run.HeartbeatReceivedAt
 	case run.StartedAt != nil:
 		anchor = run.StartedAt
 	default:

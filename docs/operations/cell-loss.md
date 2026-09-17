@@ -11,9 +11,8 @@ windows.
 ## Two signals make one fact
 
 A stream loss alone is never proof: a network partition leaves a live Jenkins process that still
-runs builds, and marking those builds lost would strand them on two owners. The gateway sees the
-stream die in about 40 seconds, and that only makes the operator reconcile the controller sooner
-than its 30-second interval.
+runs builds, and marking those builds lost would strand them on two owners. A dead stream only
+makes the operator reconcile sooner.
 
 A pod read is proof. The operator writes the pod's unique identifier into
 `Controller.status.cell.instance`. A pod that is absent, `Failed`, or `Succeeded` counts as no
@@ -24,6 +23,9 @@ proved it, in the placement announcement.
 A confirmed loss reaches a mark in about 70 to 130 seconds. Without a confirmation the recorder
 falls back to two fixed windows: five minutes for a run whose owning instance changed, and fifteen
 minutes for a silent run on the current instance.
+
+The recorder measures each window on its own clock. It stamps the time every heartbeat arrives,
+so a drifting cell clock moves no window.
 
 ## The grace
 
@@ -75,8 +77,7 @@ rule is permanent: Varroa stores no parameters for a build that never started, s
 run the job with each declared default.
 
 A marked run and a re-fired build do not conflict. The mark leaves the ledger entry alone, so the
-re-fired build claims the same run identifier, and the run reads `RUNNING` again after a few
-seconds.
+re-fired build claims the same run identifier.
 
 ## Metrics
 

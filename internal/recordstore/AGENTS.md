@@ -45,7 +45,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   heartbeat arrives **after** the dispatch, which is the only proof a
   resumed build gives: a
   record left in place would shield the run from every interruption test
-  through a later death of the target itself.
+  through a later death of the target itself. The clear, the resume
+  guard, and the marking write all compare the recorder's own receive
+  stamp against `mesh.resume.requested_at`, so one clock answers.
 - **Migrations** — `migrations/00001_initial_schema.sql` holds the seven
   build-record tables (`run_intents`, `runs`, `run_stages`, `run_tests`,
   `run_artifacts`, `log_chunks`, `job_numbers`). `00002_activity.sql` adds
@@ -75,7 +77,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   constraint. `00009_run_intents_refired_at.sql` adds the nullable
   `run_intents.refired_at`, the unstarted-intent re-fire's at-most-once
   marker, and `run_intents.refire_attempts`, the bound on the retry loop
-  a rejected trigger opens.
+  a rejected trigger opens. `00012_runs_heartbeat_received_at.sql` adds
+  `runs.heartbeat_received_at`, the recorder's own receive time for a
+  run's newest heartbeat, and backfills it from `last_heartbeat_at` for
+  every `QUEUED` or `RUNNING` run. That backfill is mandatory: a live run
+  with a null column loses its liveness anchor, and the first sweep after
+  the upgrade marks the whole fleet interrupted.
   A later migration never edits an applied one. `migrationsFS` (`migrations.go`) embeds
   every file under `migrations/` into the binary through `embed.FS`, so
   the recorder needs no separate deploy artifact. Monthly partition
@@ -439,10 +446,11 @@ of the fleet's audit activity, once a controller becomes disposable.
   capability defines; it never lowers a stored `finalized` true. The
   exported `Liveness` interface answers whether a run's owning cell is
   gone; `HeartbeatLiveness` is C1's heartbeat-only implementation
-  (15-minute bound), and `PlacementLiveness` (`retention_liveness.go`) is
-  the placement-aware one C6 supplies in its place, reading
-  `tenant_placements` through the same `cellLivenessGone` reading
-  `interrupted.go`'s sweep uses. `sweepFleetLocks`
+  (15-minute bound, no production call site), and `PlacementLiveness`
+  (`retention_liveness.go`) is the placement-aware one `cmd/recorder`
+  actually builds, reading `tenant_placements` through the same
+  `cellLivenessGone` reading `interrupted.go`'s sweep uses. Both read
+  `RunLiveness.HeartbeatReceivedAt`, never the pod's own stamp. `sweepFleetLocks`
   (`retention_fleet_locks.go`) runs after `finalizeStaleLogs`: it moves
   every `held` fleet_locks row of an `INTERRUPTED` run to `releasing`
   fleet-wide, then deletes every expired row that is not `releasing`, in
@@ -489,9 +497,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   young forever. `candidatesQuery` selects both
   statuses in one query: a `QUEUED` candidate's owning instance is the
   ledger's `cell_instance` when an intent exists, else its
-  `payload->>'accepted_instance'`, and its liveness baseline is its last
-  heartbeat, else that `accepted_at` payload value, else `created_at`
-  (`livenessBaseline`). A candidate with no owning instance from either
+  `payload->>'accepted_instance'`, and its liveness baseline is
+  `runs.heartbeat_received_at`, else that `accepted_at` payload value,
+  else `created_at` (`livenessBaseline`). A candidate with no owning instance from either
   source is skipped and counted in `recorder_sweep_skipped_total` with
   reason `no-owning-instance`, in both round loops. `markInterrupted`
   conditions its update on the status the round observed, `QUEUED` or

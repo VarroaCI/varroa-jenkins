@@ -118,7 +118,7 @@ func TestFinalizeStaleLogsLeavesRunInsideTheWait(t *testing.T) {
 		t.Fatalf("apply run.heartbeat: %v", err)
 	}
 
-	// The run's wait anchor falls back to last_heartbeat_at, stamped at
+	// The run's wait anchor falls back to heartbeat_received_at, stamped at
 	// "now" by the heartbeat envelope, so a one-hour wait is not yet
 	// past.
 	now := time.Now().UTC()
@@ -180,7 +180,7 @@ func TestFinalizeStaleLogsUsesHeartbeatForARunningRun(t *testing.T) {
 	runID := startRunForFinalize(t, pool, "manual:finalize-stale-heartbeat-1")
 
 	staleHeartbeat := time.Now().UTC().Add(-20 * time.Minute)
-	if _, err := db.Exec(`UPDATE varroa.runs SET last_heartbeat_at = $1 WHERE run_id = $2`, staleHeartbeat, runID); err != nil {
+	if _, err := db.Exec(`UPDATE varroa.runs SET heartbeat_received_at = $1 WHERE run_id = $2`, staleHeartbeat, runID); err != nil {
 		t.Fatalf("stamp stale heartbeat: %v", err)
 	}
 
@@ -200,7 +200,7 @@ func TestFinalizeStaleLogsUsesHeartbeatForARunningRun(t *testing.T) {
 	// A second RUNNING run whose heartbeat is fresh is left alone.
 	runID2 := startRunForFinalize(t, pool, "manual:finalize-fresh-heartbeat-1")
 	freshHeartbeat := time.Now().UTC().Add(-2 * time.Minute)
-	if _, err := db.Exec(`UPDATE varroa.runs SET last_heartbeat_at = $1 WHERE run_id = $2`, freshHeartbeat, runID2); err != nil {
+	if _, err := db.Exec(`UPDATE varroa.runs SET heartbeat_received_at = $1 WHERE run_id = $2`, freshHeartbeat, runID2); err != nil {
 		t.Fatalf("stamp fresh heartbeat: %v", err)
 	}
 	if _, err := finalizeStaleLogs(context.Background(), pool, HeartbeatLiveness{}, time.Minute, now); err != nil {
@@ -219,7 +219,7 @@ func TestFinalizeStaleLogsSkipsOnLivenessError(t *testing.T) {
 	runID := startRunForFinalize(t, pool, "manual:finalize-liveness-error-1")
 
 	staleHeartbeat := time.Now().UTC().Add(-20 * time.Minute)
-	if _, err := db.Exec(`UPDATE varroa.runs SET last_heartbeat_at = $1 WHERE run_id = $2`, staleHeartbeat, runID); err != nil {
+	if _, err := db.Exec(`UPDATE varroa.runs SET heartbeat_received_at = $1 WHERE run_id = $2`, staleHeartbeat, runID); err != nil {
 		t.Fatalf("stamp stale heartbeat: %v", err)
 	}
 
@@ -260,7 +260,7 @@ func TestFinalizeStaleLogsPassesCellIdentityToLiveness(t *testing.T) {
 	runID := startRunForFinalize(t, pool, "manual:finalize-cell-identity-1")
 
 	staleHeartbeat := time.Now().UTC().Add(-20 * time.Minute)
-	if _, err := db.Exec(`UPDATE varroa.runs SET last_heartbeat_at = $1 WHERE run_id = $2`, staleHeartbeat, runID); err != nil {
+	if _, err := db.Exec(`UPDATE varroa.runs SET heartbeat_received_at = $1 WHERE run_id = $2`, staleHeartbeat, runID); err != nil {
 		t.Fatalf("stamp stale heartbeat: %v", err)
 	}
 
@@ -411,7 +411,7 @@ func TestFinalizeStaleLogsProtectsFallbackAnchorFromRace(t *testing.T) {
 	runID := startRunForFinalize(t, pool, "manual:finalize-fallback-race-1")
 
 	staleHeartbeat := time.Now().UTC().Add(-20 * time.Minute)
-	if _, err := db.Exec(`UPDATE varroa.runs SET last_heartbeat_at = $1 WHERE run_id = $2`, staleHeartbeat, runID); err != nil {
+	if _, err := db.Exec(`UPDATE varroa.runs SET heartbeat_received_at = $1 WHERE run_id = $2`, staleHeartbeat, runID); err != nil {
 		t.Fatalf("stamp stale heartbeat: %v", err)
 	}
 
@@ -433,7 +433,7 @@ func TestFinalizeStaleLogsProtectsFallbackAnchorFromRace(t *testing.T) {
 		t.Fatalf("writerHeartbeatRaw = %q, want nil for a run with no writer heartbeat", *candidate.writerHeartbeatRaw)
 	}
 
-	// A concurrent run.heartbeat raises last_heartbeat_at, the run's
+	// A concurrent run.heartbeat raises heartbeat_received_at, the run's
 	// fallback anchor, after the select above already read the stale
 	// value.
 	g := NewIngester(pool, nil, nil)
@@ -457,7 +457,7 @@ func TestFinalizeStaleLogsProtectsFallbackAnchorFromRace(t *testing.T) {
 }
 
 // TestWaitAnchorPrecedence asserts waitAnchor picks the writer's own
-// heartbeat first, then ended_at, then last_heartbeat_at, then
+// heartbeat first, then ended_at, then heartbeat_received_at, then
 // started_at, then queued_at, in that order.
 func TestWaitAnchorPrecedence(t *testing.T) {
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -476,7 +476,7 @@ func TestWaitAnchorPrecedence(t *testing.T) {
 			c: finalizeCandidate{
 				writerHeartbeatUnixMs: &writerMs,
 				endedAt:               at(time.Hour),
-				lastHeartbeatAt:       at(2 * time.Hour),
+				heartbeatReceivedAt:   at(2 * time.Hour),
 				startedAt:             at(3 * time.Hour),
 				queuedAt:              at(4 * time.Hour),
 			},
@@ -484,18 +484,18 @@ func TestWaitAnchorPrecedence(t *testing.T) {
 		{
 			name: "ended_at wins when the writer heartbeat is absent",
 			c: finalizeCandidate{
-				endedAt:         at(0),
-				lastHeartbeatAt: at(time.Hour),
-				startedAt:       at(2 * time.Hour),
-				queuedAt:        at(3 * time.Hour),
+				endedAt:             at(0),
+				heartbeatReceivedAt: at(time.Hour),
+				startedAt:           at(2 * time.Hour),
+				queuedAt:            at(3 * time.Hour),
 			},
 		},
 		{
-			name: "last_heartbeat_at wins when the writer heartbeat and ended_at are absent",
+			name: "heartbeat_received_at wins when the writer heartbeat and ended_at are absent",
 			c: finalizeCandidate{
-				lastHeartbeatAt: at(0),
-				startedAt:       at(time.Hour),
-				queuedAt:        at(2 * time.Hour),
+				heartbeatReceivedAt: at(0),
+				startedAt:           at(time.Hour),
+				queuedAt:            at(2 * time.Hour),
 			},
 		},
 		{

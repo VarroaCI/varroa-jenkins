@@ -53,31 +53,36 @@ const pluginHeartbeatInterval = 60 * time.Second
 // status the round observed, so the marking write can condition on it
 // rather than a literal.
 type runInterruptCandidate struct {
-	runID           uuid.UUID
-	createdAt       time.Time
-	cluster         string
-	namespace       string
-	cell            string
-	tenant          string
-	jobPath         string
-	status          string
-	buildNumber     *int64
-	actor           string
-	params          json.RawMessage
-	cellInstance    string
-	lastHeartbeatAt *time.Time
-	acceptedAt      *time.Time
-	mesh            *runMeshRecord
+	runID               uuid.UUID
+	createdAt           time.Time
+	cluster             string
+	namespace           string
+	cell                string
+	tenant              string
+	jobPath             string
+	status              string
+	buildNumber         *int64
+	actor               string
+	params              json.RawMessage
+	cellInstance        string
+	heartbeatReceivedAt *time.Time
+	acceptedAt          *time.Time
+	mesh                *runMeshRecord
 }
 
-// livenessBaseline is the moved and silent tests' anchor: the run's own
-// last heartbeat when it has sent one, else its accepted_at payload
-// value when it has one, else its creation time. A cell that died
-// before a run's first heartbeat is still measured, and a queued run
-// that never started is measured from the moment Jenkins accepted it.
+// livenessBaseline is the moved and silent tests' anchor: the recorder's
+// own receive time for the run's last heartbeat, else its accepted_at
+// payload value when it has one, else its creation time. A cell that
+// died before a run's first heartbeat is still measured, and a queued
+// run that never started is measured from the moment Jenkins accepted
+// it.
+//
+// The anchor is the recorder's stamp, never the pod's. Every caller
+// compares this value with a recorder timestamp, so a pod clock would
+// add the skew between two machines to each window.
 func livenessBaseline(c runInterruptCandidate) time.Time {
-	if c.lastHeartbeatAt != nil {
-		return *c.lastHeartbeatAt
+	if c.heartbeatReceivedAt != nil {
+		return *c.heartbeatReceivedAt
 	}
 	if c.acceptedAt != nil {
 		return *c.acceptedAt
@@ -129,11 +134,14 @@ func (c runInterruptCandidate) resumeDispatched() bool {
 // dispatched run inside its deadline. Row 0c marks a run whose
 // applicable window has passed.
 //
-// Row 0c applies only while the run's last heartbeat is null or older
-// than the resume's own request time. A resumed build proves itself by
-// its ordinary heartbeat, which the plugin emits every 60 seconds, so
-// the 6-minute deadline gives the target six chances and one lost
-// heartbeat never times out a live resume.
+// Row 0c applies only while the run's heartbeat receive stamp is null
+// or older than the resume's own request time. A resumed build proves
+// itself by its ordinary heartbeat, which the plugin emits every 60
+// seconds, so the 6-minute deadline gives the target six chances and
+// one lost heartbeat never times out a live resume.
+//
+// The recorder stamps both values, so the test reads one clock. The
+// pod's own occurred_at would answer on the skew between two machines.
 func evaluateResumeGuard(now time.Time, c runInterruptCandidate) (reason string, ok, decided bool) {
 	if c.mesh == nil || c.mesh.Resume == nil {
 		return "", false, false
@@ -153,7 +161,7 @@ func evaluateResumeGuard(now time.Time, c runInterruptCandidate) (reason string,
 	// marks the run if the target itself dies later. The heartbeat
 	// ingest clears the resume record for the same reason; this
 	// fall-through covers a record the clear has not reached yet.
-	if c.lastHeartbeatAt != nil && r.RequestedAt != nil && c.lastHeartbeatAt.After(*r.RequestedAt) {
+	if c.heartbeatReceivedAt != nil && r.RequestedAt != nil && c.heartbeatReceivedAt.After(*r.RequestedAt) {
 		return "", false, false
 	}
 	if r.Deadline != nil && r.Deadline.After(now) {
@@ -177,7 +185,7 @@ func scanCandidates(rows pgx.Rows) ([]runInterruptCandidate, error) {
 			meshRaw        json.RawMessage
 		)
 		if err := rows.Scan(&c.runID, &c.createdAt, &c.cluster, &c.namespace, &c.cell, &c.tenant, &c.jobPath,
-			&c.status, &c.buildNumber, &actor, &c.params, &c.lastHeartbeatAt, &c.acceptedAt, &owningInstance,
+			&c.status, &c.buildNumber, &actor, &c.params, &c.heartbeatReceivedAt, &c.acceptedAt, &owningInstance,
 			&meshRaw); err != nil {
 			return nil, fmt.Errorf("scan interrupt candidate: %w", err)
 		}
@@ -199,7 +207,7 @@ func scanCandidates(rows pgx.Rows) ([]runInterruptCandidate, error) {
 // no intent yet.
 const candidatesQuery = `
 	SELECT r.run_id, r.created_at, r.cluster, r.namespace, r.cell, r.tenant, r.job_path,
-	       r.status, r.build_number, r.actor, r.params, r.last_heartbeat_at,
+	       r.status, r.build_number, r.actor, r.params, r.heartbeat_received_at,
 	       (r.payload->>'accepted_at')::timestamptz,
 	       COALESCE(NULLIF(ri.cell_instance, ''), r.payload->>'accepted_instance'),
 	       r.payload->'mesh'
@@ -247,9 +255,10 @@ func selectCandidatesForTenant(ctx context.Context, pool *pgxpool.Pool, cluster,
 // <>: a null payload and a missing mesh key both make jsonb_typeof
 // answer SQL NULL, and <> would then answer NULL for every branch.
 //
-// The dispatched branch also compares the heartbeat against the
-// resume's own request time. A target that proved itself between the
-// candidate read and this write must not be marked.
+// The dispatched branch also compares the heartbeat receive stamp
+// against the resume's own request time. A target that proved itself
+// between the candidate read and this write must not be marked. Both
+// values carry the recorder's own clock.
 func markInterrupted(ctx context.Context, pool *pgxpool.Pool, run runInterruptCandidate, reason string, now time.Time) (bool, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -276,8 +285,8 @@ func markInterrupted(ctx context.Context, pool *pgxpool.Pool, run runInterruptCa
 		        AND (payload->'mesh'->'resume'->>'arm_expires')::timestamptz <= $2)
 		    OR (payload->'mesh'->'resume'->>'instance' IS NOT NULL
 		        AND (payload->'mesh'->'resume'->>'deadline')::timestamptz <= $2
-		        AND (last_heartbeat_at IS NULL
-		             OR last_heartbeat_at <= (payload->'mesh'->'resume'->>'requested_at')::timestamptz))
+		        AND (heartbeat_received_at IS NULL
+		             OR heartbeat_received_at <= (payload->'mesh'->'resume'->>'requested_at')::timestamptz))
 		  )
 	`, run.runID, now, reason, run.status)
 	if err != nil {
@@ -510,7 +519,7 @@ func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.C
 
 // sweepConsumerSkip answers whether the recorder's own varroa_builds
 // consumer is too far behind for the sweep to trust a run's heartbeat
-// age, and names the reason. A heartbeat reaches runs.last_heartbeat_at
+// age, and names the reason. A heartbeat reaches runs.heartbeat_received_at
 // through that consumer, so a backlog makes a live run look silent.
 //
 // The gate tests a BACKLOG, never quiet. A consumer with no pending

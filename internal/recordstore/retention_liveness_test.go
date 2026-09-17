@@ -45,7 +45,7 @@ func TestPlacementLivenessDeadInstanceGone(t *testing.T) {
 	liveness := NewPlacementLiveness(pool, testGrace)
 	oldHeartbeat := past
 	gone, err := liveness.CellGone(context.Background(), RunLiveness{
-		Cluster: testCluster, Tenant: testTenant, CellInstance: "pod-old", LastHeartbeatAt: &oldHeartbeat,
+		Cluster: testCluster, Tenant: testTenant, CellInstance: "pod-old", HeartbeatReceivedAt: &oldHeartbeat,
 	})
 	if err != nil {
 		t.Fatalf("CellGone: %v", err)
@@ -66,7 +66,7 @@ func TestPlacementLivenessChangedInstanceAloneAnswersNotGone(t *testing.T) {
 	liveness := NewPlacementLiveness(pool, testGrace)
 	oldHeartbeat := time.Now().Add(-20 * time.Minute)
 	gone, err := liveness.CellGone(context.Background(), RunLiveness{
-		Cluster: testCluster, Tenant: testTenant, CellInstance: "pod-old", LastHeartbeatAt: &oldHeartbeat,
+		Cluster: testCluster, Tenant: testTenant, CellInstance: "pod-old", HeartbeatReceivedAt: &oldHeartbeat,
 	})
 	if err != nil {
 		t.Fatalf("CellGone: %v", err)
@@ -92,8 +92,8 @@ func TestFinalizeStaleLogsSeesPlacementLivenessAnswer(t *testing.T) {
 	// PlacementLiveness's own time.Now() call takes to run.
 	past := time.Now().Add(-17 * time.Minute)
 	seedTenantPlacementLiveness(t, db, "pod-a", false, &past, &past, nil)
-	if _, err := db.Exec(`UPDATE varroa.runs SET last_heartbeat_at = $1 WHERE run_id = $2`, past, runID); err != nil {
-		t.Fatalf("stamp last_heartbeat_at: %v", err)
+	if _, err := db.Exec(`UPDATE varroa.runs SET heartbeat_received_at = $1 WHERE run_id = $2`, past, runID); err != nil {
+		t.Fatalf("stamp heartbeat_received_at: %v", err)
 	}
 
 	liveness := NewPlacementLiveness(pool, testGrace)
@@ -108,5 +108,42 @@ func TestFinalizeStaleLogsSeesPlacementLivenessAnswer(t *testing.T) {
 	found, isFinalized := readLogSummaryFinalized(t, db, runID)
 	if !found || !isFinalized {
 		t.Fatalf("want the run's log summary finalized, found=%v finalized=%v", found, isFinalized)
+	}
+}
+
+// TestPlacementLivenessReadsTheReceiveStamp asserts the one production
+// Liveness implementation judges a run by the recorder's receive stamp,
+// not by the pod's own occurred_at. The run's pod reports a heartbeat one
+// minute old, and the recorder received nothing for 17 minutes.
+func TestPlacementLivenessReadsTheReceiveStamp(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+
+	now := time.Now()
+	fresh := now.Add(-time.Minute)
+	past := now.Add(-17 * time.Minute)
+	seedTenantPlacementLiveness(t, db, "pod-a", false, &past, &past, nil)
+
+	liveness := NewPlacementLiveness(pool, testGrace)
+	gone, err := liveness.CellGone(context.Background(), RunLiveness{
+		Cluster: testCluster, Tenant: testTenant, CellInstance: "pod-a",
+		HeartbeatReceivedAt: &past, StartedAt: &fresh,
+	})
+	if err != nil {
+		t.Fatalf("CellGone: %v", err)
+	}
+	if !gone {
+		t.Fatal("CellGone = false for a receive stamp 17 minutes old, want true")
+	}
+
+	// The mirror case: the recorder heard from the cell a minute ago.
+	gone, err = liveness.CellGone(context.Background(), RunLiveness{
+		Cluster: testCluster, Tenant: testTenant, CellInstance: "pod-a",
+		HeartbeatReceivedAt: &fresh, StartedAt: &past,
+	})
+	if err != nil {
+		t.Fatalf("CellGone: %v", err)
+	}
+	if gone {
+		t.Fatal("CellGone = true for a receive stamp one minute old, want false")
 	}
 }

@@ -229,9 +229,11 @@ func TestApplyRunLogSweepThenLateRunLogNeverReopensFinalized(t *testing.T) {
 	}
 }
 
-// TestApplyRunHeartbeatTouchesOneColumn asserts a heartbeat raises
-// last_heartbeat_at and changes no other column.
-func TestApplyRunHeartbeatTouchesOneColumn(t *testing.T) {
+// TestApplyRunHeartbeatTouchesTheTwoHeartbeatColumns asserts a heartbeat
+// raises last_heartbeat_at from the envelope's occurred_at, raises
+// heartbeat_received_at from the recorder's own clock, and changes no
+// other column.
+func TestApplyRunHeartbeatTouchesTheTwoHeartbeatColumns(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:heartbeat-1")
 	g := NewIngester(pool, nil, nil)
@@ -276,6 +278,79 @@ func TestApplyRunHeartbeatTouchesOneColumn(t *testing.T) {
 	}
 	if !stillLatest.Equal(first.OccurredAt) {
 		t.Fatalf("last_heartbeat_at moved backward to %v, want %v", stillLatest, first.OccurredAt)
+	}
+
+	// A heartbeat the pod stamped 30 minutes ago still reaches the
+	// recorder now, so the two columns differ by that gap. The case needs
+	// its own run: the monotonic raise would refuse an older occurred_at
+	// on the run above, and last_heartbeat_at would keep its newer value.
+	skewRunID := seedGrantedIntent(t, pool, "manual:heartbeat-skew-1")
+	// The payload carries no build number. The ledger already reserved the
+	// next one for this intent, so repeating the first run's number would
+	// take the build-number conflict path instead of an ordinary start.
+	skewStart := newTestEnvelope(t, skewRunID, "manual:heartbeat-skew-1", KindRunStarted,
+		RunStartedPayload{})
+	if _, err := g.Apply(context.Background(), skewStart); err != nil {
+		t.Fatalf("apply run.started for the skew case: %v", err)
+	}
+	stale := newTestEnvelope(t, skewRunID, "manual:heartbeat-skew-1", KindRunHeartbeat, map[string]any{})
+	stale.OccurredAt = time.Now().UTC().Add(-30 * time.Minute).Truncate(time.Microsecond)
+	before := time.Now().UTC()
+	if _, err := g.Apply(context.Background(), stale); err != nil {
+		t.Fatalf("apply a heartbeat with a skewed pod clock: %v", err)
+	}
+	var pod, received time.Time
+	if err := db.QueryRow(`
+		SELECT last_heartbeat_at, heartbeat_received_at FROM varroa.runs WHERE run_id = $1
+	`, skewRunID).Scan(&pod, &received); err != nil {
+		t.Fatalf("read the heartbeat columns: %v", err)
+	}
+	if !pod.Equal(stale.OccurredAt) {
+		t.Fatalf("last_heartbeat_at = %v, want the pod's own %v", pod, stale.OccurredAt)
+	}
+	if received.Before(before) || received.After(time.Now().UTC().Add(time.Minute)) {
+		t.Fatalf("heartbeat_received_at = %v, want the recorder's own current time", received)
+	}
+	if !received.After(pod) {
+		t.Fatalf("heartbeat_received_at %v is not newer than the stale pod stamp %v", received, pod)
+	}
+}
+
+// TestApplyRunHeartbeatNeverLowersTheReceiveStamp asserts the receive
+// stamp only rises. Two recorder replicas hold two clocks, and a
+// liveness window that moved backward would mark a live run.
+func TestApplyRunHeartbeatNeverLowersTheReceiveStamp(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:heartbeat-monotonic-1")
+	g := NewIngester(pool, nil, nil)
+
+	buildNumber := int64(1)
+	started := newTestEnvelope(t, runID, "manual:heartbeat-monotonic-1", KindRunStarted,
+		RunStartedPayload{BuildNumber: &buildNumber})
+	if _, err := g.Apply(context.Background(), started); err != nil {
+		t.Fatalf("apply run.started: %v", err)
+	}
+
+	future := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)
+	if _, err := db.Exec(`
+		UPDATE varroa.runs SET heartbeat_received_at = $1 WHERE run_id = $2
+	`, future, runID); err != nil {
+		t.Fatalf("stamp a future receive time: %v", err)
+	}
+
+	beat := newTestEnvelope(t, runID, "manual:heartbeat-monotonic-1", KindRunHeartbeat, map[string]any{})
+	if _, err := g.Apply(context.Background(), beat); err != nil {
+		t.Fatalf("apply heartbeat: %v", err)
+	}
+
+	var got time.Time
+	if err := db.QueryRow(`
+		SELECT heartbeat_received_at FROM varroa.runs WHERE run_id = $1
+	`, runID).Scan(&got); err != nil {
+		t.Fatalf("read heartbeat_received_at: %v", err)
+	}
+	if !got.Equal(future) {
+		t.Fatalf("heartbeat_received_at = %v, want the stored %v", got, future)
 	}
 }
 

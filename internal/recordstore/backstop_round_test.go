@@ -199,8 +199,8 @@ func TestRunBackstopRoundRunsInterruptedSweepInSameRound(t *testing.T) {
 	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
 
 	past := time.Now().Add(-17 * time.Minute)
-	if _, err := db.Exec(`UPDATE varroa.runs SET last_heartbeat_at = $1 WHERE run_id = $2`, past, runID); err != nil {
-		t.Fatalf("backdate last_heartbeat_at: %v", err)
+	if _, err := db.Exec(`UPDATE varroa.runs SET heartbeat_received_at = $1 WHERE run_id = $2`, past, runID); err != nil {
+		t.Fatalf("backdate heartbeat_received_at: %v", err)
 	}
 	seedTenantPlacementLiveness(t, db, "pod-a", false, &past, &past, nil)
 

@@ -347,7 +347,7 @@ func TestEvaluateResumeGuardRows(t *testing.T) {
 				mesh: &runMeshRecord{
 					Resume: &runMeshResume{Instance: "pod-live", Deadline: &past, RequestedAt: &requestedAt},
 				},
-				lastHeartbeatAt: &olderHeartbeat,
+				heartbeatReceivedAt: &olderHeartbeat,
 			},
 			wantDecided: true, wantOK: true, wantReason: ReasonResumeTimeout,
 		},
@@ -362,7 +362,7 @@ func TestEvaluateResumeGuardRows(t *testing.T) {
 				mesh: &runMeshRecord{
 					Resume: &runMeshResume{Instance: "pod-live", Deadline: &past, RequestedAt: &requestedAt},
 				},
-				lastHeartbeatAt: &newerHeartbeat,
+				heartbeatReceivedAt: &newerHeartbeat,
 			},
 			wantDecided: false,
 		},
@@ -372,7 +372,7 @@ func TestEvaluateResumeGuardRows(t *testing.T) {
 				mesh: &runMeshRecord{
 					Resume: &runMeshResume{Instance: "pod-live", Deadline: &future, RequestedAt: &requestedAt},
 				},
-				lastHeartbeatAt: &olderHeartbeat,
+				heartbeatReceivedAt: &olderHeartbeat,
 			},
 			wantDecided: true, wantOK: false,
 		},
@@ -501,7 +501,7 @@ func TestEvaluateInterruptionReasons(t *testing.T) {
 	}{
 		{
 			name: "no-heartbeat",
-			c:    runInterruptCandidate{cell: "cell-a", cellInstance: "pod-a", lastHeartbeatAt: &oldHeartbeat},
+			c:    runInterruptCandidate{cell: "cell-a", cellInstance: "pod-a", heartbeatReceivedAt: &oldHeartbeat},
 			row: tenantPlacementLivenessRow{
 				cell: "cell-a", cellInstance: "pod-a", cellAlive: false,
 				cellAliveAt: &fresh, cellLastSeenAt: &oldHeartbeat,
@@ -510,7 +510,7 @@ func TestEvaluateInterruptionReasons(t *testing.T) {
 		},
 		{
 			name: "cell-rolled",
-			c:    runInterruptCandidate{cell: "cell-a", cellInstance: "pod-old", lastHeartbeatAt: &sixMinutes},
+			c:    runInterruptCandidate{cell: "cell-a", cellInstance: "pod-old", heartbeatReceivedAt: &sixMinutes},
 			row: tenantPlacementLivenessRow{
 				cell: "cell-a", cellInstance: "pod-new",
 				deadInstances: []TenantSyncDeadInstance{{Instance: "pod-old", LastSeenAt: sixMinutes}},
@@ -519,7 +519,7 @@ func TestEvaluateInterruptionReasons(t *testing.T) {
 		},
 		{
 			name: "tenant-moved",
-			c:    runInterruptCandidate{cell: "cell-a", cellInstance: "pod-old", lastHeartbeatAt: &sixMinutes},
+			c:    runInterruptCandidate{cell: "cell-a", cellInstance: "pod-old", heartbeatReceivedAt: &sixMinutes},
 			row: tenantPlacementLivenessRow{
 				cell: "cell-b", cellInstance: "pod-new",
 				deadInstances: []TenantSyncDeadInstance{{Instance: "pod-old", LastSeenAt: sixMinutes}},
@@ -528,7 +528,7 @@ func TestEvaluateInterruptionReasons(t *testing.T) {
 		},
 		{
 			name: "moved wins over silent when both hold",
-			c:    runInterruptCandidate{cell: "cell-a", cellInstance: "pod-old", lastHeartbeatAt: &oldHeartbeat},
+			c:    runInterruptCandidate{cell: "cell-a", cellInstance: "pod-old", heartbeatReceivedAt: &oldHeartbeat},
 			row: tenantPlacementLivenessRow{
 				cell: "cell-a", cellInstance: "pod-new", cellAlive: false,
 				cellAliveAt: &fresh, cellLastSeenAt: &oldHeartbeat,
@@ -538,7 +538,7 @@ func TestEvaluateInterruptionReasons(t *testing.T) {
 		},
 		{
 			name: "a live run on a rolled cell is not marked yet",
-			c:    runInterruptCandidate{cell: "cell-a", cellInstance: "pod-old", lastHeartbeatAt: &fresh},
+			c:    runInterruptCandidate{cell: "cell-a", cellInstance: "pod-old", heartbeatReceivedAt: &fresh},
 			row: tenantPlacementLivenessRow{
 				cell: "cell-a", cellInstance: "pod-new",
 				deadInstances: []TenantSyncDeadInstance{{Instance: "pod-old", LastSeenAt: sixMinutes}},
@@ -549,7 +549,7 @@ func TestEvaluateInterruptionReasons(t *testing.T) {
 			// The heartbeat is 40 seconds old, far inside every other
 			// window. The pod read decides on its own.
 			name: "cell-lost with a fresh heartbeat",
-			c:    runInterruptCandidate{cell: "cell-a", cellInstance: "pod-old", lastHeartbeatAt: &fortySeconds},
+			c:    runInterruptCandidate{cell: "cell-a", cellInstance: "pod-old", heartbeatReceivedAt: &fortySeconds},
 			row: tenantPlacementLivenessRow{
 				cell: "cell-a", cellInstance: "pod-new",
 				deadInstances: []TenantSyncDeadInstance{{
@@ -560,7 +560,7 @@ func TestEvaluateInterruptionReasons(t *testing.T) {
 		},
 		{
 			name: "confirmed wins over moved when both hold",
-			c:    runInterruptCandidate{cell: "cell-a", cellInstance: "pod-old", lastHeartbeatAt: &sixMinutes},
+			c:    runInterruptCandidate{cell: "cell-a", cellInstance: "pod-old", heartbeatReceivedAt: &sixMinutes},
 			row: tenantPlacementLivenessRow{
 				cell: "cell-a", cellInstance: "pod-new",
 				deadInstances: []TenantSyncDeadInstance{{
@@ -571,7 +571,7 @@ func TestEvaluateInterruptionReasons(t *testing.T) {
 		},
 		{
 			name: "a fresh confirmation waits out the grace",
-			c:    runInterruptCandidate{cell: "cell-a", cellInstance: "pod-old", lastHeartbeatAt: &fortySeconds},
+			c:    runInterruptCandidate{cell: "cell-a", cellInstance: "pod-old", heartbeatReceivedAt: &fortySeconds},
 			row: tenantPlacementLivenessRow{
 				cell: "cell-a", cellInstance: "pod-new",
 				deadInstances: []TenantSyncDeadInstance{{
@@ -737,8 +737,8 @@ func TestSweepInterruptedRunsMarksASilentRun(t *testing.T) {
 	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
 
 	past := time.Now().Add(-17 * time.Minute)
-	if _, err := db.Exec(`UPDATE varroa.runs SET last_heartbeat_at = $1 WHERE run_id = $2`, past, runID); err != nil {
-		t.Fatalf("backdate last_heartbeat_at: %v", err)
+	if _, err := db.Exec(`UPDATE varroa.runs SET heartbeat_received_at = $1 WHERE run_id = $2`, past, runID); err != nil {
+		t.Fatalf("backdate heartbeat_received_at: %v", err)
 	}
 	seedTenantPlacementLiveness(t, db, "pod-a", false, &past, &past, nil)
 
