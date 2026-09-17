@@ -4,13 +4,15 @@ Varroa exposes component metrics and a controller activity feed. Configure your 
 
 ## Scrape metrics
 
-The chart exposes metrics for the operator, gateway, BFF, and enabled update center. Configure `telemetry.metricsToken` before exposing metrics, then allow the scraper through [Network policies](../install/network-policies.md). Keep metrics endpoints private to trusted monitoring workloads.
+The chart exposes metrics for the operator, gateway, BFF, recorder (when `recordStore.enabled`), and enabled update center. Configure `telemetry.metricsToken` before exposing metrics, then allow the scraper through [Network policies](../install/network-policies.md).
 
-The operator, gateway, and BFF export `varroa.bus.connected`, tagged with a `component`
+The operator, gateway, BFF, and recorder export `varroa.bus.connected`, tagged with a `component`
 attribute. It reads 1 while the component holds a NATS connection and 0 while it
 does not. Alert on a sustained 0. A brief 0 is expected after a credential
-rotation and clears itself. To inspect JetStream streams and consumers directly, see
-[Troubleshooting](troubleshooting.md).
+rotation and clears itself; inspect JetStream streams and consumers in
+[Troubleshooting](troubleshooting.md). The recorder also exports `recorder_fence_veto_total` and
+`recorder_job_home_changed_total`, and logs a refused claim's reason and tenant; see
+[Build claims](build-claims.md).
 
 ## Use activity history
 
@@ -21,7 +23,7 @@ varroactl activity --controller <name>
 varroactl activity --controller <name> --follow
 ```
 
-`varroactl activity` prints a backfill table, then, with `--follow`, streams new events live. Without the record store, the backfill table is always empty: `--follow` still shows events published after you start watching, but no history from before that moment. Enable the record store to get history back.
+`varroactl activity` prints a backfill table, then, with `--follow`, streams new events live. Without the record store, the backfill table is always empty: `--follow` still shows events published after you start watching, but no history from before that moment.
 
 The activity feed records lifecycle and audit events. It is not a substitute for Jenkins build logs. Use `varroactl logs <namespace>/<name> --follow` for controller logs.
 

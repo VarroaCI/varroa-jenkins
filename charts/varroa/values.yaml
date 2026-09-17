@@ -124,6 +124,14 @@ telemetry:
         enabled: true
       logs:
         enabled: true
+    recorder:
+      traces:
+        enabled: true
+        samplerRatio: 1.0
+      metrics:
+        enabled: true
+      logs:
+        enabled: true
     mite:
       traces:
         enabled: false

@@ -223,6 +223,32 @@ grep -A1 '\- name: VARROA_RECORDSTORE_CONFIRMED_GONE_GRACE' <<< "$RECORDER_DEPLO
 check "VARROA_RECORDSTORE_CONFIRMED_GONE_GRACE default is 30s" "$rc"
 
 # ---------------------------------------------------------------------------
+# (f2) OTel metrics bridge wiring (issue #666): the recorder must carry the
+# same OTEL_* env set as operator/gateway/bff, so its counters reach
+# /metrics through the shared telemetry.InitTelemetry path.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- (f2) OTel metrics bridge wiring ---"
+
+grep -A1 '\- name: OTEL_METRICS_ENABLED' <<< "$RECORDER_DEPLOY" | grep -q 'value: "true"' && rc=0 || rc=1
+check "recorder OTEL_METRICS_ENABLED default is true" "$rc"
+grep -A1 '\- name: OTEL_TRACES_ENABLED' <<< "$RECORDER_DEPLOY" | grep -q 'value: "true"' && rc=0 || rc=1
+check "recorder OTEL_TRACES_ENABLED default is true" "$rc"
+grep -A1 '\- name: OTEL_LOGS_ENABLED' <<< "$RECORDER_DEPLOY" | grep -q 'value: "true"' && rc=0 || rc=1
+check "recorder OTEL_LOGS_ENABLED default is true" "$rc"
+grep -q '\- name: OTEL_EXPORTER_OTLP_ENDPOINT' <<< "$RECORDER_DEPLOY" && rc=0 || rc=1
+check "recorder carries OTEL_EXPORTER_OTLP_ENDPOINT" "$rc"
+
+RENDER_METRICS_OFF=$(helm template "$ROOT" $COMMON \
+  --set recordStore.enabled=true \
+  --set telemetry.services.recorder.metrics.enabled=false 2>/dev/null) || {
+  echo "FAIL: helm template (metrics off) failed"; failures=$((failures + 1)); RENDER_METRICS_OFF=""
+}
+RECORDER_DEPLOY_METRICS_OFF=$(extract_doc "Deployment" "varroa-recorder" "$RENDER_METRICS_OFF")
+grep -A1 '\- name: OTEL_METRICS_ENABLED' <<< "$RECORDER_DEPLOY_METRICS_OFF" | grep -q 'value: "false"' && rc=0 || rc=1
+check "telemetry.services.recorder.metrics.enabled=false turns off OTEL_METRICS_ENABLED" "$rc"
+
+# ---------------------------------------------------------------------------
 # (g) S3 credential mapping on all three workloads.
 # ---------------------------------------------------------------------------
 echo ""

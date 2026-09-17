@@ -96,6 +96,20 @@ spec:
               value: {{ .Values.recordStore.cellLoss.confirmedGoneGrace | quote }}
             - name: VARROA_TELEMETRY_DISABLED
               value: {{ .Values.telemetry.disabled | quote }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.telemetry.endpoint | quote }}
+            - name: OTEL_TRACES_ENABLED
+              value: {{ and .Values.telemetry.traces.enabled .Values.telemetry.services.recorder.traces.enabled | quote }}
+            - name: OTEL_TRACES_SAMPLER_RATIO
+              value: {{ .Values.telemetry.services.recorder.traces.samplerRatio | quote }}
+            - name: OTEL_METRICS_ENABLED
+              value: {{ and .Values.telemetry.metrics.enabled .Values.telemetry.services.recorder.metrics.enabled | quote }}
+            - name: OTEL_LOGS_ENABLED
+              value: {{ and .Values.telemetry.logs.enabled .Values.telemetry.services.recorder.logs.enabled | quote }}
+            - name: OTEL_LOG_LEVEL
+              value: {{ .Values.telemetry.logs.level | quote }}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "deployment.environment={{ .Values.telemetry.resourceAttributes.deploymentName }},cluster.name={{ .Values.telemetry.resourceAttributes.clusterName }}"
             - name: METRICS_TOKEN
               value: {{ .Values.telemetry.metricsToken | quote }}
             {{- range .Values.recorder.env }}

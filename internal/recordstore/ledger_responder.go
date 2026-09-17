@@ -50,6 +50,12 @@ func handleClaim(logger *slog.Logger, ledger *Ledger, data []byte) []byte {
 	defer cancel()
 
 	resp := ledger.Claim(ctx, req)
+	if resp.Decision == DecisionVetoed {
+		// Log the reason code and tenant for a refused claim, once per
+		// refusal. Log no other request or response field, so the log
+		// never carries the payload body.
+		logger.Info("claim refused", "reason_code", resp.ReasonCode, "tenant", req.Tenant)
+	}
 	out, err := json.Marshal(resp)
 	if err != nil {
 		logger.Error("claim response encode failed", "error", err)

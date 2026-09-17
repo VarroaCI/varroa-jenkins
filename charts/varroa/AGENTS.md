@@ -230,6 +230,16 @@ the packaged CRDs. Does not own the Go source it packages
   `varroa_activity` JetStream grants from the BFF to the recorder — the BFF
   keeps only the core `activity.>` publish/subscribe grant.
   `tests/test-activity-stream-acl.sh` asserts the moved grants.
+  The recorder Deployment carries the full `OTEL_*` env block
+  (`OTEL_EXPORTER_OTLP_ENDPOINT`/`OTEL_TRACES_ENABLED`/`OTEL_METRICS_ENABLED`/
+  `OTEL_LOGS_ENABLED`/`OTEL_LOG_LEVEL`/`OTEL_RESOURCE_ATTRIBUTES`), gated by
+  its own `telemetry.services.recorder` values entry — the same shape as
+  operator/gateway/bff. Without `OTEL_METRICS_ENABLED=true`,
+  `internal/telemetry.InitTelemetry` never wires the Prometheus bridge, so
+  every `otel.Meter("varroa-recorder")` counter in `internal/recordstore`
+  stays off `/metrics` (issue #666). `tests/test-recorder-chart.sh`
+  section (f2) asserts the env block and the
+  `telemetry.services.recorder.metrics.enabled` toggle.
   In `cnpg` mode `postgres-cluster.yaml`'s `spec.managed.roles` carries three
   roles, each with its own `varroa-recordstore-<role>` Secret from
   `postgres-secrets.yaml`: `varroa_recorder` (the database owner),

@@ -112,8 +112,11 @@ of the fleet's audit activity, once a controller becomes disposable.
   decision table to an existing one, then reserves a build number
   through `reserveBuildNumber`. `Fence` gates a claim before the
   transaction opens; `allowAllFence` is the C1 default.
-  `RegisterClaimResponder` subscribes `bus.SubjectLedgerClaim` with
-  queue group `recorder`. A `duplicate` decision also marks the
+  `RegisterClaimResponder` subscribes `bus.LedgerClaimSubject` with
+  queue group `recorder`. `handleClaim` (`ledger_responder.go`) logs a
+  vetoed decision at info level, once, naming only the reason code and
+  the tenant — never the request or response body (issue #666). A
+  `duplicate` decision also marks the
   requesting run's own row `DUPLICATE` through `markDuplicateClaim`, in
   the same transaction and guarded on `status = 'QUEUED'` plus
   `noBuildRecordedSQL`: that run never builds, and the interrupted sweep
