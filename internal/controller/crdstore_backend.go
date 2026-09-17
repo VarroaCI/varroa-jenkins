@@ -138,11 +138,7 @@ func (c *ClientsetClient) PatchObjectStatus(ctx context.Context, gvr schema.Grou
 	if err := json.Unmarshal(statusJSON, &statusMap); err != nil {
 		return fmt.Errorf("unmarshal status: %w", err)
 	}
-	for key, zero := range crdstore.ClearStatusFields(gvr) {
-		if _, ok := statusMap[key]; !ok {
-			statusMap[key] = zero
-		}
-	}
+	crdstore.ApplyStatusClears(gvr, statusMap)
 	data, err := json.Marshal(map[string]any{"status": statusMap})
 	if err != nil {
 		return fmt.Errorf("marshal status patch: %w", err)

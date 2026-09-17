@@ -488,6 +488,36 @@ export interface TeamPlacement {
   cellNamespace?: string;
   /** Increases only when the bound cell changes. */
   generation?: number;
+  /**
+   * Every member of this tenant. The scalar fields above keep describing
+   * slot 0, so a page that renders the member list shows every cell and
+   * not slot 0's alone.
+   */
+  members?: TeamMember[];
+}
+
+/** One member of a pipelines tenant (status.placement.members). */
+export interface TeamMember {
+  /** Name of the cell Controller that holds this member. */
+  cell?: string;
+  /** Namespace of that cell Controller. */
+  cellNamespace?: string;
+  /** "active" or "standby". A standby holds no slot and runs no build. */
+  role?: string;
+  /** The slot index. Set only on an active member. */
+  slot?: number;
+  /** True when the member's cell reports this tenant applied. */
+  applied?: boolean;
+}
+
+/**
+ * teamMemberLabel renders one member for a listing: the cell name, and the
+ * slot or the standby role. A tenant with no member list falls back to the
+ * scalar placement, so a single-member tenant reads as it always has.
+ */
+export function teamMemberLabel(member: TeamMember): string {
+  const role = member.role === "standby" ? "standby" : `slot ${member.slot ?? 0}`;
+  return `${member.cell ?? "?"} (${role})`;
 }
 
 /**
@@ -1903,9 +1933,15 @@ export interface CellUsageCounts {
   jobs: number;
 }
 
-/** One tenant on a cell, with that tenant's four counts. */
+/** One tenant on a cell, with that tenant's role and four counts. */
 export interface CellTenantUsage extends CellUsageCounts {
   tenant: string;
+  /**
+   * That tenant's role on this cell: "slot <n>" for an active member and
+   * "standby" for a standby. A standby holds the tenant folder and runs no
+   * build, so its running count is zero.
+   */
+  role?: string;
 }
 
 /**
@@ -1970,6 +2006,30 @@ export interface TeamCell {
    * The hint gates no other field of this body.
    */
   canOpenCell: boolean;
+  /**
+   * One entry for each member of the tenant, ordered by role: active
+   * members by ascending slot first, then standbys by cell name. Absent
+   * for unplaced and notCellHosted. Every other field of this body
+   * describes the tenant's slot 0.
+   */
+  members?: TeamCellMember[];
+}
+
+/**
+ * One member of the tenant, with that member's own four load counts. The
+ * counts apply the same grant narrowing the top-level counts apply, and no
+ * entry names another tenant.
+ */
+export interface TeamCellMember {
+  cell: string;
+  namespace: string;
+  cluster: string;
+  /** "slot <n>" for an active member and "standby" for a standby. */
+  role: string;
+  runningNow: number;
+  runsLast24h: number;
+  failedLast24h: number;
+  jobs: number;
 }
 
 /** One status condition of a CellPool. The only type is PoolReady. */

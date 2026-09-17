@@ -204,8 +204,8 @@ func TestPlace_Keep_MissingTenantEntryPatchesAndClaims(t *testing.T) {
 	if status.Placement.Generation != 3 || status.Placement.Cell != "cell-a" {
 		t.Errorf("a missing tenant entry must not move a tenant: %+v", status.Placement)
 	}
-	if out.CellClaim == nil || out.CellClaim.Name != "cell-a" || out.CellClaim.Tenant != team.Name {
-		t.Fatalf("expected a claim on cell-a for %s, got %+v", team.Name, out.CellClaim)
+	if len(out.CellClaims) != 1 || out.CellClaims[0].Name != "cell-a" || out.CellClaims[0].Tenant != team.Name {
+		t.Fatalf("expected a claim on cell-a for %s, got %+v", team.Name, out.CellClaims)
 	}
 	if len(out.CellPatches) != 1 || out.CellPatches[0].Name != "cell-a" {
 		t.Fatalf("expected one tenant patch on cell-a, got %+v", out.CellPatches)
@@ -220,8 +220,8 @@ func TestPlace_Keep_MissingTenantEntryPatchesAndClaims(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Place returned error: %v", err)
 	}
-	if out.CellClaim != nil || len(out.CellPatches) != 0 {
-		t.Errorf("a listed tenant must patch nothing: claim=%+v patches=%+v", out.CellClaim, out.CellPatches)
+	if len(out.CellClaims) != 0 || len(out.CellPatches) != 0 {
+		t.Errorf("a listed tenant must patch nothing: claims=%+v patches=%+v", out.CellClaims, out.CellPatches)
 	}
 }
 
@@ -899,6 +899,9 @@ func TestPlace_Move_PurgeRequestCarriesOldGeneration(t *testing.T) {
 	if captured.OldGeneration != 5 || captured.Tenant != "payments" {
 		t.Errorf("unexpected purge request: %+v", captured)
 	}
+	if captured.Cell != "cell-a" || captured.CellNamespace != "cells-ns" {
+		t.Errorf("the purge must name the old cell and its namespace: %+v", captured)
+	}
 }
 
 func TestPlace_Move_PurgeFailureDoesNotBlock(t *testing.T) {
@@ -973,6 +976,12 @@ func TestPlace_Move_PurgeRetrySurvivesTransientCellNotReadyTick(t *testing.T) {
 	if status.Pipelines.PendingPurgeGeneration == nil || *status.Pipelines.PendingPurgeGeneration != 1 {
 		t.Fatalf("expected the retry to remain pending after the transient tick: %+v", status.Pipelines)
 	}
+	for _, req := range requests {
+		// Every retry names the cell the move left, and its namespace.
+		if req.Cell != "cell-a" || req.CellNamespace != "cells-ns" {
+			t.Fatalf("a retry lost the old cell reference: %+v", req)
+		}
+	}
 
 	// Tick 3: cell-b is ready again and the purge now succeeds.
 	purgeOK = true
@@ -990,6 +999,19 @@ func TestPlace_Move_PurgeRetrySurvivesTransientCellNotReadyTick(t *testing.T) {
 	}
 	if status.Pipelines.PendingPurgeGeneration != nil {
 		t.Errorf("expected PendingPurgeGeneration cleared once the purge succeeds, got %v", *status.Pipelines.PendingPurgeGeneration)
+	}
+	if status.Pipelines.PendingPurgeCell != "" || status.Pipelines.PendingPurgeCellNamespace != "" {
+		t.Errorf("expected the pending purge cell cleared with it: %+v", status.Pipelines)
+	}
+
+	// Tick 4: the pending purge is gone, so the tick asks for nothing. A
+	// clear the status patch never carries would repeat the completed
+	// purge on every tick that follows.
+	if _, err := Place(context.Background(), in, team, status); err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	if len(requests) != 3 {
+		t.Fatalf("a tick after the successful purge asked again: %d requests", len(requests))
 	}
 }
 

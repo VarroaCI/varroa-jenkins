@@ -89,6 +89,26 @@ type Reader interface {
 	// the caller decides whether the tenant belongs there. A caller that
 	// may read only part of the tenant's jobs sums the rows it may read.
 	CellTenantUsage(ctx context.Context, cluster, namespace, cell, tenant string) ([]CellJobUsage, error)
+
+	// JobHome answers the member that holds jobPath's home slot.
+	//
+	// A trigger write resolves the home before it publishes the imperative
+	// command, so a job homed on slot 1 reaches slot 1's holder and not
+	// slot 0's. The answer separates two states a caller must not confuse:
+	// a tenant that holds no placement row at all, and a tenant whose home
+	// slot holds no cell yet. The first keeps the caller's own coordinate,
+	// which is what a controller with no cell role needs. The second is a
+	// retryable hold, because a trigger sent to the wrong member answers
+	// the permanent NOT_HOME and cancels the build.
+	JobHome(ctx context.Context, cluster, tenant, jobPath string) (JobHome, error)
+}
+
+// JobHome is one job's home member. Placed reports whether the tenant
+// holds a placement row. Cell is empty when the home slot holds no cell.
+type JobHome struct {
+	Placed    bool
+	Namespace string
+	Cell      string
 }
 
 // pgReader is the Postgres-backed Reader implementation.

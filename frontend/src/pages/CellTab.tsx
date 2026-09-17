@@ -120,6 +120,9 @@ function TopologyPanel({
   }
 
   const teamByName = new Map((teams ?? []).map((t) => [t.name, t]));
+  // The role comes from the cell usage read. The tab computes nothing: a
+  // standby holds the tenant folder and runs no build.
+  const roleByTenant = new Map((usage?.tenants ?? []).map((row) => [row.tenant, row.role]));
 
   return (
     <Card>
@@ -149,6 +152,7 @@ function TopologyPanel({
             <tr>
               <th>Tenant</th>
               <th>Folder</th>
+              <th>Role</th>
               <th>Placement</th>
               {canReadTeams && <th>Agent namespace</th>}
               {canReadTeams && <th>Placement generation</th>}
@@ -168,6 +172,7 @@ function TopologyPanel({
                     )}
                   </td>
                   <td className={styles.mono}>{tenant}</td>
+                  <td>{roleByTenant.get(tenant) || DASH}</td>
                   <td>{applied.has(tenant) ? "placed" : "rehydrating"}</td>
                   {canReadTeams && <td className={styles.mono}>{team?.pipelines?.agentNamespace || DASH}</td>}
                   {canReadTeams && <td>{team?.placement?.generation ?? DASH}</td>}

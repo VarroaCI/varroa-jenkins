@@ -58,7 +58,14 @@ of the fleet's audit activity, once a controller becomes disposable.
   `(cluster, tenant)`, holding the placement identity, the rehydration
   seed (`rehydrated_instance`, `pending_jobs`), and the cell-liveness
   signal (`cell_alive`, `cell_alive_at`, `cell_last_seen_at`,
-  `dead_instances`) the interrupted-run sweep reads. `00006_fleet_locks.sql`
+  `dead_instances`) the interrupted-run sweep reads.
+  `00011_tenant_members.sql` adds `members` and `job_homes` to that row:
+  the tenant's member list and its job path to slot map. Both default to
+  an empty value, and an empty `members` list answers one synthetic
+  slot-0 member built from the row's scalar columns. `members.go` holds
+  the only three readers of a member's identity, `memberForJob`,
+  `memberForInstance`, and `memberForCell`, plus the Lamping and Veach
+  jump consistent hash the recorder homes a job with. `00006_fleet_locks.sql`
   adds `fleet_locks`, the fleet-lock authority (see the Fleet locks
   bullet), and the sequence `fleet_lock_fence_seq`. `00007_job_schedule_upstream.sql`
   adds `job_schedules`'s three upstream columns.
@@ -125,10 +132,15 @@ of the fleet's audit activity, once a controller becomes disposable.
   `ledger_fence_metrics.go`) — `PlacementFence` is the placement-fencing
   capability's `Fence`. `Check` reads the claim's `(cluster, tenant)` row
   from `varroa.tenant_placements` and applies `decidePlacement`, the
-  pure, ten-order table: tenant, namespace, cell, cell instance, and
-  generation, in that order, then the cross-tenant test, then the
-  rehydration seed state (`rehydrated_instance` and `pending_jobs`). A
-  missing row answers `NOT_READY` with no exemption. `FenceMetrics`
+  pure, twelve-order table: the row, the member namespace, the member
+  cell, the announced instance, the standby test, the home slot test,
+  the two generation orders, the cross-tenant test, and the home
+  member's own seed state (`rehydrated_instance` and `pending_jobs`). A
+  missing row answers `NOT_READY` with no exemption. A claim from a
+  standby or a non-home slot answers the permanent `NOT_HOME`. The
+  generation orders answer the retryable `NOT_READY`, because orders 2
+  and 3 already refuse a cell the tenant has left, so a request that
+  reaches them comes from a live member with a stale resolver cache. `FenceMetrics`
   holds `recorder_fence_veto_total`, labelled by reason; a
   `PlacementFence` built with a nil `*FenceMetrics` counts nothing.
   `cmd/recorder` still constructs its `Ledger` with a nil `Fence`, so
@@ -140,7 +152,13 @@ of the fleet's audit activity, once a controller becomes disposable.
   after the tenant leaves a cell: it deletes only the rows matching the
   request's cluster and tenant, and whose stored `placement_generation` is at
   most the request's, so a delayed retry can never remove a row the tenant's
-  new cell already reported. The delete is a plain `DELETE`, idempotent by
+  new cell already reported. A request that names a cell narrows the delete
+  to that cell's rows, so a slot move purges one member and leaves every
+  other slot's rows; the narrow delete tests `namespace` **and** `cell`,
+  because a row carries both and two namespaces can hold a cell of one name.
+  A request that names a cell and no namespace is refused, rather than
+  deleted on the name alone. A teardown names no cell and keeps the
+  whole-tenant delete. The delete is a plain `DELETE`, idempotent by
   construction. The operator side of this contract lives outside this
   package.
 - **Tenant sync responder** (`tenant_sync.go`, `tenant_sync_types.go`) —

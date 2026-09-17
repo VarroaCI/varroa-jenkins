@@ -8,6 +8,21 @@ import (
 // testGrace is the confirmed-gone grace every reading test applies.
 const testGrace = 30 * time.Second
 
+// resolveLivenessMembers rebuilds a hand-built row's member view from its
+// own scalar columns, the way readTenantPlacementLivenessRow does after a
+// read. A test that builds a row directly calls it, so the reading runs
+// against the same member view production resolves.
+func resolveLivenessMembers(row tenantPlacementLivenessRow) tenantPlacementLivenessRow {
+	resolved, err := decodePlacementMembers(nil, nil, placementScalars{
+		cell: row.cell, cellInstance: row.cellInstance,
+	})
+	if err != nil {
+		panic(err)
+	}
+	row.members = resolved
+	return row
+}
+
 // TestCellLivenessGoneMovedReading asserts an old instance listed dead in
 // dead_instances, with a last_seen_at older than the moved window, counts
 // as gone.
@@ -18,7 +33,7 @@ func TestCellLivenessGoneMovedReading(t *testing.T) {
 		deadInstances: []TenantSyncDeadInstance{{Instance: "pod-old", LastSeenAt: now.Add(-6 * time.Minute)}},
 	}
 	anchor := now.Add(-6 * time.Minute)
-	if got := cellLivenessGone(now, anchor, "pod-old", row, true, testGrace); got != livenessMoved {
+	if got := cellLivenessGone(now, anchor, "pod-old", resolveLivenessMembers(row), true, testGrace); got != livenessMoved {
 		t.Fatalf("reading = %d, want livenessMoved: the old instance is listed dead past the moved window", got)
 	}
 }
@@ -30,7 +45,7 @@ func TestCellLivenessGoneChangedInstanceAloneIsNotAReading(t *testing.T) {
 	now := time.Now()
 	row := tenantPlacementLivenessRow{cellInstance: "pod-new"}
 	anchor := now.Add(-20 * time.Minute)
-	if got := cellLivenessGone(now, anchor, "pod-old", row, true, testGrace); got != livenessAlive {
+	if got := cellLivenessGone(now, anchor, "pod-old", resolveLivenessMembers(row), true, testGrace); got != livenessAlive {
 		t.Fatalf("reading = %d, want livenessAlive: a changed placement alone is not a reading", got)
 	}
 }
@@ -45,7 +60,7 @@ func TestCellLivenessGoneFreshDeadEntryIsNotGoneYet(t *testing.T) {
 		deadInstances: []TenantSyncDeadInstance{{Instance: "pod-old", LastSeenAt: now.Add(-10 * time.Second)}},
 	}
 	anchor := now.Add(-6 * time.Minute)
-	if got := cellLivenessGone(now, anchor, "pod-old", row, true, testGrace); got != livenessAlive {
+	if got := cellLivenessGone(now, anchor, "pod-old", resolveLivenessMembers(row), true, testGrace); got != livenessAlive {
 		t.Fatalf("reading = %d, want livenessAlive: the dead-instance entry is only ten seconds old", got)
 	}
 }
@@ -74,7 +89,7 @@ func TestCellLivenessGoneSilentReading(t *testing.T) {
 		cellLastSeenAt: &lastSeen,
 	}
 	anchor := now.Add(-20 * time.Minute)
-	if got := cellLivenessGone(now, anchor, "pod-a", row, true, testGrace); got != livenessSilent {
+	if got := cellLivenessGone(now, anchor, "pod-a", resolveLivenessMembers(row), true, testGrace); got != livenessSilent {
 		t.Fatalf("reading = %d, want livenessSilent: the current instance is not alive for the whole window", got)
 	}
 }
@@ -86,7 +101,7 @@ func TestCellLivenessGoneSilentReadingLiveCellIsNotGone(t *testing.T) {
 	aliveAt := now.Add(-time.Minute)
 	row := tenantPlacementLivenessRow{cellInstance: "pod-a", cellAlive: true, cellAliveAt: &aliveAt}
 	anchor := now.Add(-20 * time.Minute)
-	if got := cellLivenessGone(now, anchor, "pod-a", row, true, testGrace); got != livenessAlive {
+	if got := cellLivenessGone(now, anchor, "pod-a", resolveLivenessMembers(row), true, testGrace); got != livenessAlive {
 		t.Fatalf("reading = %d, want livenessAlive: cell_alive is true", got)
 	}
 }
@@ -105,7 +120,7 @@ func TestCellLivenessGoneStaleCellAliveAtAnswersFalse(t *testing.T) {
 		cellLastSeenAt: &lastSeen,
 	}
 	anchor := now.Add(-time.Hour)
-	if got := cellLivenessGone(now, anchor, "pod-a", row, true, testGrace); got != livenessAlive {
+	if got := cellLivenessGone(now, anchor, "pod-a", resolveLivenessMembers(row), true, testGrace); got != livenessAlive {
 		t.Fatalf("reading = %d, want livenessAlive: a stale cell_alive_at counts as an absent signal", got)
 	}
 }
@@ -124,7 +139,7 @@ func TestCellLivenessGoneAnchorTooFreshHoldsOffTheSilentReading(t *testing.T) {
 		cellLastSeenAt: &lastSeen,
 	}
 	anchor := now.Add(-time.Minute)
-	if got := cellLivenessGone(now, anchor, "pod-a", row, true, testGrace); got != livenessAlive {
+	if got := cellLivenessGone(now, anchor, "pod-a", resolveLivenessMembers(row), true, testGrace); got != livenessAlive {
 		t.Fatalf("reading = %d, want livenessAlive: the run's own heartbeat is only a minute old", got)
 	}
 }
@@ -144,7 +159,7 @@ func TestCellLivenessGoneConfirmedReading(t *testing.T) {
 		}},
 	}
 	anchor := now.Add(-40 * time.Second)
-	if got := cellLivenessGone(now, anchor, "pod-old", row, true, testGrace); got != livenessConfirmedGone {
+	if got := cellLivenessGone(now, anchor, "pod-old", resolveLivenessMembers(row), true, testGrace); got != livenessConfirmedGone {
 		t.Fatalf("reading = %d, want livenessConfirmedGone: the confirmation is older than the grace", got)
 	}
 }
@@ -161,7 +176,7 @@ func TestCellLivenessGoneFreshConfirmationWaitsOutTheGrace(t *testing.T) {
 		}},
 	}
 	anchor := now.Add(-5 * time.Second)
-	if got := cellLivenessGone(now, anchor, "pod-old", row, true, testGrace); got != livenessAlive {
+	if got := cellLivenessGone(now, anchor, "pod-old", resolveLivenessMembers(row), true, testGrace); got != livenessAlive {
 		t.Fatalf("reading = %d, want livenessAlive: the confirmation is five seconds old", got)
 	}
 }
@@ -176,7 +191,7 @@ func TestCellLivenessGoneNoConfirmationKeepsTheMovedWindow(t *testing.T) {
 		cellInstance:  "pod-new",
 		deadInstances: []TenantSyncDeadInstance{{Instance: "pod-old", LastSeenAt: now.Add(-time.Minute)}},
 	}
-	if got := cellLivenessGone(now, now.Add(-time.Minute), "pod-old", fresh, true, testGrace); got != livenessAlive {
+	if got := cellLivenessGone(now, now.Add(-time.Minute), "pod-old", resolveLivenessMembers(fresh), true, testGrace); got != livenessAlive {
 		t.Fatalf("reading = %d, want livenessAlive: the entry is one minute old and carries no confirmation", got)
 	}
 
@@ -184,7 +199,7 @@ func TestCellLivenessGoneNoConfirmationKeepsTheMovedWindow(t *testing.T) {
 		cellInstance:  "pod-new",
 		deadInstances: []TenantSyncDeadInstance{{Instance: "pod-old", LastSeenAt: now.Add(-6 * time.Minute)}},
 	}
-	if got := cellLivenessGone(now, now.Add(-6*time.Minute), "pod-old", aged, true, testGrace); got != livenessMoved {
+	if got := cellLivenessGone(now, now.Add(-6*time.Minute), "pod-old", resolveLivenessMembers(aged), true, testGrace); got != livenessMoved {
 		t.Fatalf("reading = %d, want livenessMoved: the entry is six minutes old", got)
 	}
 }

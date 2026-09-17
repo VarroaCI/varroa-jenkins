@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { getTeam, createTeam, updateTeam, listRoles, listComposedBundles } from "../api/client";
 import type { TeamEntry } from "../api/client";
 import type { ComposedBundle } from "../types";
+import { teamMemberLabel } from "../types";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { useClusters } from "../hooks/useClusters";
@@ -834,6 +835,15 @@ export default function TeamForm() {
                     : "—"}
                 </span>
               </div>
+
+              {team.placement?.members && team.placement.members.length > 0 && (
+                <div>
+                  <span className={styles.statusLabel}>Members</span>
+                  <span>
+                    {team.placement.members.map((member) => teamMemberLabel(member)).join(", ")}
+                  </span>
+                </div>
+              )}
 
               <div>
                 <span className={styles.statusLabel}>Rehydration status</span>

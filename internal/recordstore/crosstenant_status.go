@@ -99,7 +99,7 @@ func handleCrossTenantLastSuccessful(ctx context.Context, deps CrossTenantDeps, 
 		return CrossTenantResponse{ReasonCode: grant.ReasonCode, Message: grant.Message}, nil
 	}
 
-	target, err := resolveCrossTenantTargetPlacement(ctx, deps.Pool, req.Cluster, req.TargetTenant)
+	target, err := resolveCrossTenantTargetPlacement(ctx, deps.Pool, req.Cluster, req.TargetTenant, qualifiedJobPath)
 	if err != nil {
 		return CrossTenantResponse{}, err
 	}

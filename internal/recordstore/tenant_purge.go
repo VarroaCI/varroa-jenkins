@@ -31,6 +31,16 @@ type TenantPurgeRequest struct {
 	Cluster             string `json:"cluster"`
 	Tenant              string `json:"tenant"`
 	PlacementGeneration int64  `json:"placement_generation"`
+	// Cell narrows the delete to one cell's rows. A slot move raises the
+	// tenant generation, so a whole-tenant delete would drop every other
+	// slot's schedule rows. A teardown leaves this field empty, which
+	// keeps the whole-tenant delete.
+	Cell string `json:"cell,omitempty"`
+	// CellNamespace names that cell's namespace. A job_schedules row
+	// carries both columns, and two cells in two namespaces can hold the
+	// same name, so the cell name alone names no one cell. A request
+	// that names a cell must name its namespace.
+	CellNamespace string `json:"cell_namespace,omitempty"`
 }
 
 // TenantPurgeResponse is the reply body of a
@@ -71,6 +81,13 @@ func handleTenantPurge(logger *slog.Logger, pool *pgxpool.Pool, data []byte) []b
 		out, _ := json.Marshal(TenantPurgeResponse{Error: "tenant purge request needs a cluster and a tenant"})
 		return out
 	}
+	if req.Cell != "" && req.CellNamespace == "" {
+		// A cell name with no namespace names no one cell. The delete
+		// would drop the rows of a same-named cell in another namespace,
+		// so the request answers an error and the caller retries.
+		out, _ := json.Marshal(TenantPurgeResponse{Error: "tenant purge request needs the cell's namespace"})
+		return out
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), tenantPurgeTimeout)
 	defer cancel()
@@ -95,7 +112,21 @@ func handleTenantPurge(logger *slog.Logger, pool *pgxpool.Pool, data []byte) []b
 // still succeeds. It never deletes a row at a newer generation, so a
 // delayed retry can never remove a row the tenant's new cell already
 // reported.
+//
+// A request that names a cell narrows the delete to that cell's rows, so
+// a slot move purges one cell and leaves every other slot's rows in
+// place. The narrow delete tests the namespace and the cell together,
+// because a row carries both and two namespaces can hold a cell of the
+// same name.
 func purgeTenantJobSchedules(ctx context.Context, pool *pgxpool.Pool, req TenantPurgeRequest) error {
+	if req.Cell != "" {
+		_, err := pool.Exec(ctx, `
+			DELETE FROM varroa.job_schedules
+			WHERE cluster = $1 AND tenant = $2 AND placement_generation <= $3
+			  AND namespace = $4 AND cell = $5
+		`, req.Cluster, req.Tenant, req.PlacementGeneration, req.CellNamespace, req.Cell)
+		return err
+	}
 	_, err := pool.Exec(ctx, `
 		DELETE FROM varroa.job_schedules
 		WHERE cluster = $1 AND tenant = $2 AND placement_generation <= $3

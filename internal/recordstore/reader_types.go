@@ -192,6 +192,10 @@ type CellJobUsage struct {
 // four counts.
 type CellTenantUsage struct {
 	Tenant string
+	// Role is that tenant's role on this cell: "slot <n>" for an active
+	// member and "standby" for a standby. A standby runs no build, so
+	// its running count is zero.
+	Role string
 	CellUsageCounts
 }
 

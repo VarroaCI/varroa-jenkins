@@ -2,23 +2,76 @@ package recordstore
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 )
 
-// TestFleetLockRenew_StaleRowGenerationAnswersFenced covers task 3.10's
-// first acceptance: a row whose stored placement_generation is below the
-// current placement is refused, so a cell cannot renew a lease it took
-// under an older generation.
-func TestFleetLockRenew_StaleRowGenerationAnswersFenced(t *testing.T) {
+// readLockGeneration reads one fleet_locks row's stored generation.
+func readLockGeneration(t *testing.T, db *sql.DB, name, runID string) int64 {
+	t.Helper()
+	var generation int64
+	if err := db.QueryRow(`
+		SELECT placement_generation FROM varroa.fleet_locks WHERE name = $1 AND run_id = $2
+	`, name, runID).Scan(&generation); err != nil {
+		t.Fatalf("read the lock generation: %v", err)
+	}
+	return generation
+}
+
+// TestFleetLockRenew_GenerationRaiseKeepsALiveHold asserts a build that
+// holds a lock across a slot takeover keeps it. The tenant generation
+// rose after the acquire, and the renew still extends the lease and
+// raises the lock's stored generation.
+//
+// A generation test would refuse this renew, and the build would lose a
+// lock it still holds.
+func TestFleetLockRenew_GenerationRaiseKeepsALiveHold(t *testing.T) {
 	deps, db := lockTestDeps(t)
-	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 5, "pod-a", "pod-a", nil)
+	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 6, "pod-a", "pod-a", nil)
 
 	now := time.Now().UTC()
 	insertFleetLockRow(t, db, "alpha/deploy-prod", "run-1", "held", now.Add(-time.Minute), now.Add(5*time.Minute))
 	if _, err := db.Exec(`UPDATE varroa.fleet_locks SET placement_generation = 3 WHERE name = $1 AND run_id = $2`,
 		"alpha/deploy-prod", "run-1"); err != nil {
-		t.Fatalf("stamp stale placement_generation: %v", err)
+		t.Fatalf("stamp the acquire generation: %v", err)
+	}
+
+	resp, err := handleCrossTenantLockRenew(context.Background(), deps, CrossTenantRequest{
+		Cluster:             testCluster,
+		Namespace:           "ns-alpha",
+		Cell:                "cell-alpha",
+		CallerTenant:        "alpha",
+		PlacementGeneration: 6,
+		Name:                "deploy-prod",
+		RunID:               "run-1",
+	})
+	if err != nil {
+		t.Fatalf("handleCrossTenantLockRenew: %v", err)
+	}
+	if resp.ReasonCode != "" {
+		t.Fatalf("reason_code: got %q, want an extended lease (message %q)", resp.ReasonCode, resp.Message)
+	}
+	if resp.ExpiresAt == nil {
+		t.Fatal("the renew answered no lease deadline")
+	}
+	if got := readLockGeneration(t, db, "alpha/deploy-prod", "run-1"); got != 6 {
+		t.Fatalf("the stored generation is %d, want 6: a successful renew raises it", got)
+	}
+}
+
+// TestFleetLockRenew_LowerCallerGenerationRefusesNothing asserts a caller
+// whose resolver cache is behind still renews. The generation carries no
+// identity the lock's own cell_instance does not already carry.
+func TestFleetLockRenew_LowerCallerGenerationRefusesNothing(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 5, "pod-a", "pod-a", nil)
+
+	now := time.Now().UTC()
+	insertFleetLockRow(t, db, "alpha/deploy-prod", "run-1", "held", now.Add(-time.Minute), now.Add(5*time.Minute))
+	if _, err := db.Exec(`UPDATE varroa.fleet_locks SET placement_generation = 5 WHERE name = $1 AND run_id = $2`,
+		"alpha/deploy-prod", "run-1"); err != nil {
+		t.Fatalf("stamp the acquire generation: %v", err)
 	}
 
 	resp, err := handleCrossTenantLockRenew(context.Background(), deps, CrossTenantRequest{
@@ -33,8 +86,38 @@ func TestFleetLockRenew_StaleRowGenerationAnswersFenced(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handleCrossTenantLockRenew: %v", err)
 	}
+	if resp.ReasonCode != "" {
+		t.Fatalf("reason_code: got %q, want an extended lease", resp.ReasonCode)
+	}
+	if got := readLockGeneration(t, db, "alpha/deploy-prod", "run-1"); got != 5 {
+		t.Fatalf("the stored generation is %d, want 5: a renew never lowers it", got)
+	}
+}
+
+// TestFleetLockRenew_MovedTenantIsStillFenced asserts the placement
+// orders still run first: a renew from a cell the tenant holds no member
+// on answers the permanent FENCED, and the lease lapses.
+func TestFleetLockRenew_MovedTenantIsStillFenced(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 5, "pod-a", "pod-a", nil)
+
+	now := time.Now().UTC()
+	insertFleetLockRow(t, db, "alpha/deploy-prod", "run-1", "held", now.Add(-time.Minute), now.Add(5*time.Minute))
+
+	resp, err := handleCrossTenantLockRenew(context.Background(), deps, CrossTenantRequest{
+		Cluster:             testCluster,
+		Namespace:           "ns-alpha",
+		Cell:                "cell-old",
+		CallerTenant:        "alpha",
+		PlacementGeneration: 5,
+		Name:                "deploy-prod",
+		RunID:               "run-1",
+	})
+	if err != nil {
+		t.Fatalf("handleCrossTenantLockRenew: %v", err)
+	}
 	if resp.ReasonCode != ReasonFenced {
-		t.Fatalf("reason_code: got %q, want %q (message %q)", resp.ReasonCode, ReasonFenced, resp.Message)
+		t.Fatalf("reason_code: got %q, want %q", resp.ReasonCode, ReasonFenced)
 	}
 }
 

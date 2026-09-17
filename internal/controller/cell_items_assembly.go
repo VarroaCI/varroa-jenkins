@@ -93,9 +93,13 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 			}
 		}
 
-		// A cell holds slot 0 of every tenant it hosts until a later change
-		// adds further slots.
-		agentEndpoint := tenantAgentEndpoint(team.Name, cr.Namespace, tenantSlotZero)
+		// The cloud names the agent Service of the slot this cell holds
+		// for the tenant. A standby holds no slot, so its cloud names
+		// slot 0's Service: the cloud must exist before a promotion flips
+		// the selector, or a first resumed build would find no cloud to
+		// provision from. A standby never launches an agent, because the
+		// claim fence answers NOT_HOME for every job.
+		agentEndpoint := tenantAgentEndpoint(team.Name, cr.Namespace, tenantSlotOnCell(team, cr))
 		clouds = append(clouds, tenantCloudFor(team.Name, agentNamespace, agentEndpoint))
 		if cred := r.tenantCloudCredentialFor(ctx, team.Name, agentNamespace); cred != nil {
 			creds = append(creds, *cred)

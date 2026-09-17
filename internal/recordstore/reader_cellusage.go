@@ -35,9 +35,16 @@ const cellUsageWindow = 24 * time.Hour
 // holds one row for each trigger type.
 const cellUsageQuery = `
 	WITH placed AS (
-		SELECT cell, tenant
-		FROM varroa.tenant_placements
-		WHERE cluster = $1 AND namespace = $2 AND cell = ANY($3)
+		SELECT m.cell, p.tenant, m.role, m.slot
+		FROM varroa.tenant_placements p
+		CROSS JOIN LATERAL jsonb_to_recordset(
+			CASE WHEN jsonb_array_length(p.members) > 0 THEN p.members
+			     ELSE jsonb_build_array(jsonb_build_object(
+			         'cell', p.cell, 'namespace', p.namespace,
+			         'role', 'active', 'slot', 0))
+			END
+		) AS m(cell text, namespace text, role text, slot int)
+		WHERE p.cluster = $1 AND m.namespace = $2 AND m.cell = ANY($3)
 	),
 	windowed AS (
 		SELECT r.cell, r.tenant,
@@ -62,7 +69,7 @@ const cellUsageQuery = `
 		WHERE s.cluster = $1 AND s.namespace = $2 AND s.cell = ANY($3)
 		GROUP BY s.cell, s.tenant
 	)
-	SELECT p.cell, p.tenant,
+	SELECT p.cell, p.tenant, p.role, p.slot,
 	       COALESCE(n.running_now, 0),
 	       COALESCE(w.runs, 0),
 	       COALESCE(w.failed, 0),
@@ -91,9 +98,16 @@ const cellUsageQuery = `
 // aggregate reports for those jobs.
 const cellTenantJobQuery = `
 	WITH placed AS (
-		SELECT cell, tenant
-		FROM varroa.tenant_placements
-		WHERE cluster = $1 AND namespace = $2 AND cell = $3 AND tenant = $4
+		SELECT m.cell, p.tenant
+		FROM varroa.tenant_placements p
+		CROSS JOIN LATERAL jsonb_to_recordset(
+			CASE WHEN jsonb_array_length(p.members) > 0 THEN p.members
+			     ELSE jsonb_build_array(jsonb_build_object(
+			         'cell', p.cell, 'namespace', p.namespace,
+			         'role', 'active', 'slot', 0))
+			END
+		) AS m(cell text, namespace text, role text, slot int)
+		WHERE p.cluster = $1 AND m.namespace = $2 AND m.cell = $3 AND p.tenant = $4
 	),
 	windowed AS (
 		SELECT r.job_path,
@@ -140,6 +154,8 @@ const cellTenantJobQuery = `
 type cellUsageRow struct {
 	cell   string
 	tenant string
+	role   string
+	slot   *int32
 	counts CellUsageCounts
 }
 
@@ -154,7 +170,7 @@ func (r *pgReader) queryCellUsage(ctx context.Context, cluster, namespace string
 	var rows []cellUsageRow
 	for pgRows.Next() {
 		var row cellUsageRow
-		if err := pgRows.Scan(&row.cell, &row.tenant, &row.counts.RunningNow,
+		if err := pgRows.Scan(&row.cell, &row.tenant, &row.role, &row.slot, &row.counts.RunningNow,
 			&row.counts.RunsLast24h, &row.counts.FailedLast24h, &row.counts.Jobs); err != nil {
 			return nil, fmt.Errorf("scan cell usage: %w", err)
 		}
@@ -193,7 +209,8 @@ func (r *pgReader) CellUsageMany(ctx context.Context, cluster, namespace string,
 		if !ok {
 			continue
 		}
-		cell.Tenants = append(cell.Tenants, CellTenantUsage{Tenant: row.tenant, CellUsageCounts: row.counts})
+		cell.Tenants = append(cell.Tenants, CellTenantUsage{
+			Tenant: row.tenant, Role: renderMemberRole(row.role, row.slot), CellUsageCounts: row.counts})
 		cell.Totals.RunningNow += row.counts.RunningNow
 		cell.Totals.RunsLast24h += row.counts.RunsLast24h
 		cell.Totals.FailedLast24h += row.counts.FailedLast24h
@@ -242,4 +259,22 @@ func (r *pgReader) CellTenantUsage(ctx context.Context, cluster, namespace, cell
 		return nil, fmt.Errorf("read cell tenant usage: %w", err)
 	}
 	return rows, nil
+}
+
+// JobHome answers the member that holds jobPath's home slot. A tenant
+// with no placement row answers Placed false. A tenant whose home slot
+// holds no cell answers Placed true and an empty Cell.
+func (r *pgReader) JobHome(ctx context.Context, cluster, tenant, jobPath string) (JobHome, error) {
+	if err := r.checkSchema(ctx); err != nil {
+		return JobHome{}, err
+	}
+	row, exists, err := readTenantPlacementMembers(ctx, r.pool, cluster, tenant)
+	if err != nil {
+		return JobHome{}, err
+	}
+	if !exists {
+		return JobHome{}, nil
+	}
+	home := memberForJob(row, jobPath)
+	return JobHome{Placed: true, Namespace: home.Namespace, Cell: home.Cell}, nil
 }

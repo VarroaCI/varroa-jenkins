@@ -18,12 +18,13 @@ type resumeMember struct {
 // resumeTargetForRun answers the member that may resume run's build,
 // and ok=false while no member may.
 //
-// This is the only reader of the placement row for a takeover. C3
-// answers slot 0's current instance once its reported seed matches it.
-// C4 extends this one body to members[job_homes[job_path]], and every
-// caller follows with no change.
+// This is the only reader of the placement row for a takeover. It
+// answers the member that holds the run's job's home slot, resolved with
+// memberForJob over the run's own job path. A tenant with one active
+// slot therefore resolves to slot 0, exactly as it did before slots
+// existed.
 //
-// Three tests must hold. The placement must name a live instance,
+// Three tests must hold. The home member must name a live instance,
 // because a cell with no pod can resume nothing. That instance must
 // differ from the run's stored owner, because the dead instance is
 // never its own target. The reported seed must equal the live instance,
@@ -31,32 +32,25 @@ type resumeMember struct {
 // the seed applied would reload a job whose own configuration is not
 // written yet.
 func resumeTargetForRun(ctx context.Context, tx pgx.Tx, run meshCandidate) (resumeMember, bool, error) {
-	var (
-		namespace          string
-		cell               string
-		cellInstance       string
-		rehydratedInstance *string
-	)
-	err := tx.QueryRow(ctx, `
-		SELECT namespace, cell, cell_instance, rehydrated_instance
-		  FROM varroa.tenant_placements
-		 WHERE cluster = $1 AND tenant = $2
-	`, run.cluster, run.tenant).Scan(&namespace, &cell, &cellInstance, &rehydratedInstance)
+	row, exists, err := readTenantPlacementMembers(ctx, tx, run.cluster, run.tenant)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return resumeMember{}, false, nil
 	case err != nil:
 		return resumeMember{}, false, fmt.Errorf("read resume target placement: %w", err)
+	case !exists:
+		return resumeMember{}, false, nil
 	}
 
-	if cell == "" || cellInstance == "" {
+	home := memberForJob(row, run.jobPath)
+	if home.Cell == "" || home.Instance == "" {
 		return resumeMember{}, false, nil
 	}
-	if cellInstance == run.cellInstance {
+	if home.Instance == run.cellInstance {
 		return resumeMember{}, false, nil
 	}
-	if derefString(rehydratedInstance) != cellInstance {
+	if home.RehydratedInstance != home.Instance {
 		return resumeMember{}, false, nil
 	}
-	return resumeMember{cell: cell, namespace: namespace, instance: cellInstance}, true, nil
+	return resumeMember{cell: home.Cell, namespace: home.Namespace, instance: home.Instance}, true, nil
 }

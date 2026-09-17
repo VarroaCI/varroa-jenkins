@@ -96,6 +96,13 @@ type PurgeRequest struct {
 	Cluster       string
 	Tenant        string
 	OldGeneration int64
+	// Cell narrows the purge to one cell's schedule rows. A slot move
+	// raises the tenant generation, so a whole-tenant delete would drop
+	// every other slot's rows. Teardown leaves it empty.
+	Cell string
+	// CellNamespace is that cell's namespace. A schedule row is keyed by
+	// the namespace and the cell, so the name alone can name two cells.
+	CellNamespace string
 }
 
 // PurgeFunc requests a tenant's job_schedules purge and reports whether the
@@ -157,6 +164,16 @@ type Inputs struct {
 	// RequestPurge is: a missing wire-up shows up as a retry, not a panic.
 	Announce Announcer
 
+	// MemberSeed answers one member cell's own seed state for this
+	// tenant: the instance whose rehydration bundle applied there, and
+	// the job paths that cell has not seeded yet. The caller reads both
+	// from that cell's own status.cell.rehydration entry.
+	//
+	// The seam exists because one member's deferred job must never hold
+	// another member's build. A nil func answers no seed for every
+	// member, which closes the fence until the caller wires it.
+	MemberSeed func(namespace, cell string) (rehydratedInstance string, pendingJobs []string)
+
 	// PendingJobs is this tenant's current pending-job set: the union of
 	// the deferred job paths and the job paths no rehydration bundle has
 	// covered yet. The rehydration rendering pass (design D4, task 5.7a)
@@ -164,6 +181,20 @@ type Inputs struct {
 	// has not wired that pass yet leaves it nil, which Place treats as "no
 	// pending job" rather than as a rehydrated tenant.
 	PendingJobs []string
+
+	// DepartedPods answers, for one member cell that is absent from the
+	// candidate set, whether that cell's Jenkins pod is gone. The key is
+	// the cell's namespace and name, as memberKey builds it.
+	//
+	// A true value is a confirmed absence: the caller's read succeeded
+	// and answered no pod, or a pod in phase Failed or Succeeded. Every
+	// other outcome answers false — a pod that still exists, a read that
+	// failed, and a cell the caller did not read.
+	//
+	// The pass reports a member confirmed gone only on that value, and a
+	// confirmed reading is what arms a takeover of the member's runs. The
+	// caller builds the map because Place performs no Kubernetes read.
+	DepartedPods map[string]bool
 
 	// LastSync is this tenant's last successfully sent AnnounceRequest,
 	// kept by the caller across reconcile ticks (design D6's five
@@ -206,12 +237,18 @@ type ActivityEvent struct {
 type Outcome struct {
 	// CellPatches lists each affected cell's new tenant list.
 	CellPatches []CellPatch
-	// CellClaim names the cell this tenant needs held: the cell a new
-	// placement selected, or the bound cell whose tenant list does not name
-	// the tenant yet. It is nil once the tenant patch has landed. The
-	// caller writes it before the Team status patch, and retires it only
-	// after that cell's tenant patch succeeds.
-	CellClaim *CellClaim
+	// CellClaims names every cell this tenant needs held: the cell a new
+	// placement selected, and each member cell whose tenant list does not
+	// name the tenant yet. A cell leaves the list once its tenant patch
+	// has landed. The caller writes every entry before the Team status
+	// patch, and retires each one only after that cell's own tenant patch
+	// succeeds.
+	//
+	// Every member cell needs a claim, not slot 0's alone. A pool drain
+	// reads the fence set before it re-reads a free cell, and only the
+	// claim closes the window in which the drain deletes a cell this pass
+	// is binding.
+	CellClaims []CellClaim
 	// ActivityEvents lists the events to publish.
 	ActivityEvents []ActivityEvent
 	// FinalizerAdd is true when the caller must add
@@ -295,11 +332,11 @@ func Place(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1
 		// when the patch lands, so the tenant list converges or the cell
 		// stays held.
 		if !containsString(cell.Tenants, team.Name) {
-			out.CellClaim = &CellClaim{
+			out.CellClaims = append(out.CellClaims, CellClaim{
 				Name:      cell.Name,
 				Namespace: cell.Namespace,
 				Tenant:    team.Name,
-			}
+			})
 			out.CellPatches = append(out.CellPatches, CellPatch{
 				Name:      cell.Name,
 				Namespace: cell.Namespace,
@@ -313,10 +350,52 @@ func Place(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1
 		performVoluntaryMove(ctx, in, team, status, cell, nowT, &out)
 	}
 
+	applyMemberReason(team, status, nowT)
+
 	if status.Placement != nil && !hasFinalizer {
 		out.FinalizerAdd = true
 	}
 	return out, nil
+}
+
+// applyMemberReason overrides the Placed reason with the one the member
+// set implies, when the member set has one to state. SlotPending outranks
+// StandbyPending, and both report Placed=False. MembersApplied reports
+// Placed=True.
+//
+// A tenant that asks for one member and no standby never reaches this
+// path, so every earlier reason is unchanged for it.
+func applyMemberReason(team *v1alpha1.Team, status *v1alpha1.TeamStatus, nowT time.Time) {
+	if status.Placement == nil || team.Spec.Pipelines == nil {
+		return
+	}
+	wantedSlots := team.Spec.Pipelines.EffectiveMembers()
+	wantedStandby := team.Spec.Pipelines.EffectiveStandby()
+	if wantedSlots+wantedStandby <= 1 {
+		return
+	}
+	switch memberReasonFromStatus(status.Placement.Members, wantedSlots, wantedStandby) {
+	case v1alpha1.TeamReasonSlotPending:
+		setPlaced(status, metav1.ConditionFalse, v1alpha1.TeamReasonSlotPending,
+			"at least one active slot holds no cell", nowT)
+	case v1alpha1.TeamReasonStandbyPending:
+		setPlaced(status, metav1.ConditionFalse, v1alpha1.TeamReasonStandbyPending,
+			"every active slot holds a cell and at least one standby does not", nowT)
+	case v1alpha1.TeamReasonMembersApplied:
+		setPlaced(status, metav1.ConditionTrue, v1alpha1.TeamReasonMembersApplied, "", nowT)
+	}
+}
+
+// memberReasonFromStatus answers the member reason for a stored member
+// list, the shape applyMemberReason reads after the pass wrote it.
+func memberReasonFromStatus(members []v1alpha1.TeamMemberStatus, wantedSlots, wantedStandby int32) string {
+	bound := make([]MemberBinding, 0, len(members))
+	for _, m := range members {
+		bound = append(bound, MemberBinding{
+			Cell: m.Cell, Namespace: m.CellNamespace, Role: m.Role, Slot: m.Slot, Applied: m.Applied,
+		})
+	}
+	return memberReason(bound, wantedSlots, wantedStandby)
 }
 
 // moveKind classifies why an existing (or absent) placement cannot be kept.
@@ -508,7 +587,10 @@ func noCandidateReason(in Inputs, team *v1alpha1.Team) (string, string) {
 // spec): the fence (the new placement, with generation+1) is written before
 // either cell's tenant list is patched.
 func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus, oldCell *CellCandidate, nowT time.Time, out *Outcome) {
-	newCell := selectCandidate(in, team)
+	newCell := promotionCellForSlotZero(in, team, status)
+	if newCell == nil {
+		newCell = selectCandidate(in, team)
+	}
 	if newCell == nil {
 		reason, message := noCandidateReason(in, team)
 		setPlaced(status, metav1.ConditionFalse, reason, message, nowT)
@@ -540,11 +622,18 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 	policy := SyncPolicyFromPipelines(team.Spec.Pipelines)
 	var dead []DeadInstance
 	if wasPlaced && oldCell == nil {
-		// This call site reads no pod. A deleting cell pod can still run
-		// its whole termination grace, so the entry carries no
-		// confirmation and keeps the five-minute moved window.
-		dead = deadInstanceDelta(in.LastSync, oldCellName, oldCellNamespace, "", nil)
+		// The old cell left the candidate set, so this call site reads
+		// no pod of its own. It stamps the confirmation only when the
+		// caller's own read of that cell answers no pod, because a
+		// deleting cell pod can run its whole termination grace. An
+		// unconfirmed entry keeps the five-minute moved window.
+		dead = deadInstanceDelta(in.LastSync, oldCellName, oldCellNamespace, "",
+			confirmedGoneAt(in, oldCellNamespace, oldCellName, nowT))
 	}
+	priorMembers := status.Placement.DeepCopy()
+	members, _ := desiredMembers(in, team, status, newCell, nowT)
+	announced := announceMembers(members)
+	dead = append(dead, memberDeadInstances(in.LastSync, announced, dead, in.DepartedPods, nowT)...)
 	result, announceErr := sendAnnounce(ctx, in, AnnounceRequest{
 		Cluster:        in.ClusterIdentity,
 		Tenant:         team.Name,
@@ -557,6 +646,7 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 		CellAliveAt:    &nowT,
 		CellLastSeenAt: newCell.MiteLastSeen,
 		DeadInstances:  dead,
+		Members:        announced,
 	})
 	if announceErr != nil || !result.OK {
 		// A failed announcement stops the move for this tick (design
@@ -569,17 +659,18 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 		Cell: newCell.Name, CellNamespace: newCell.Namespace,
 		Generation: newGeneration, CellInstance: newCell.Instance,
 		Policy: policy, CellLastSeenAt: newCell.MiteLastSeen, At: nowT,
+		Members: announced,
 	}
 
 	// The claim: the caller writes it onto the new cell before the fence
 	// below reaches the Team. A pool drain that re-read the cell earlier
 	// then loses its delete precondition, and one that re-reads it later
 	// finds the claim.
-	out.CellClaim = &CellClaim{
+	out.CellClaims = append(out.CellClaims, CellClaim{
 		Name:      newCell.Name,
 		Namespace: newCell.Namespace,
 		Tenant:    team.Name,
-	}
+	})
 
 	// The fence: write the placement before either cell's tenant list.
 	status.Placement = &v1alpha1.TeamPlacementStatus{
@@ -587,6 +678,7 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 		Cell:          newCell.Name,
 		CellNamespace: newCell.Namespace,
 		Generation:    newGeneration,
+		Members:       memberStatuses(members),
 	}
 	setPlaced(status, metav1.ConditionTrue, reason, "", nowT)
 	out.ActivityEvents = append(out.ActivityEvents, ActivityEvent{
@@ -599,6 +691,8 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 		Namespace: newCell.Namespace,
 		Tenants:   appendUnique(newCell.Tenants, team.Name),
 	})
+	appendMemberCellPatches(in, team, members, out)
+	appendReleasedMemberPatches(ctx, in, team, priorMembers, members, out)
 	if wasPlaced && oldCell != nil {
 		out.CellPatches = append(out.CellPatches, CellPatch{
 			Name:      oldCell.Name,
@@ -610,8 +704,12 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 	if wasPlaced {
 		gen := oldGeneration
 		status.Pipelines.PendingPurgeGeneration = &gen
-		if requestPurge(ctx, in, team.Name, oldGeneration) {
+		status.Pipelines.PendingPurgeCell, status.Pipelines.PendingPurgeCellNamespace = purgeCellRef(oldCell)
+		if requestPurge(ctx, in, team.Name, oldGeneration,
+			status.Pipelines.PendingPurgeCell, status.Pipelines.PendingPurgeCellNamespace) {
 			status.Pipelines.PendingPurgeGeneration = nil
+			status.Pipelines.PendingPurgeCell = ""
+			status.Pipelines.PendingPurgeCellNamespace = ""
 		}
 	}
 }
@@ -641,15 +739,29 @@ func performVoluntaryMove(ctx context.Context, in Inputs, team *v1alpha1.Team, s
 // for an unrelated cause (design D4's move-purge retry).
 func retryMovePurge(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus) {
 	gen := *status.Pipelines.PendingPurgeGeneration
-	if requestPurge(ctx, in, team.Name, gen) {
+	if requestPurge(ctx, in, team.Name, gen,
+		status.Pipelines.PendingPurgeCell, status.Pipelines.PendingPurgeCellNamespace) {
 		status.Pipelines.PendingPurgeGeneration = nil
+		status.Pipelines.PendingPurgeCell = ""
+		status.Pipelines.PendingPurgeCellNamespace = ""
 	}
+}
+
+// purgeCellRef answers the cell a move's purge must narrow to. A move
+// with no previous cell answers two empty strings, which keeps the
+// whole-tenant delete.
+func purgeCellRef(oldCell *CellCandidate) (name, namespace string) {
+	if oldCell == nil {
+		return "", ""
+	}
+	return oldCell.Name, oldCell.Namespace
 }
 
 // requestPurge calls Inputs.RequestPurge and reports success. A failed
 // purge on a move never blocks the move (tenant-placement spec); the caller
 // decides what a failure means for its own retry state.
-func requestPurge(ctx context.Context, in Inputs, tenant string, oldGeneration int64) bool {
+func requestPurge(ctx context.Context, in Inputs, tenant string, oldGeneration int64,
+	cell, cellNamespace string) bool {
 	if in.RequestPurge == nil {
 		return false
 	}
@@ -657,6 +769,8 @@ func requestPurge(ctx context.Context, in Inputs, tenant string, oldGeneration i
 		Cluster:       in.ClusterIdentity,
 		Tenant:        tenant,
 		OldGeneration: oldGeneration,
+		Cell:          cell,
+		CellNamespace: cellNamespace,
 	})
 	return ok && err == nil
 }
@@ -680,27 +794,42 @@ func maybeReannounce(ctx context.Context, in Inputs, team *v1alpha1.Team, status
 	policy := SyncPolicyFromPipelines(team.Spec.Pipelines)
 	rehydratedInstance, pendingJobs := currentRehydrationState(status, in.PendingJobs)
 
+	members, _ := desiredMembers(in, team, status, &cell, nowT)
+	announced := announceMembers(members)
+	// A member joining, a member leaving, a member instance change, a
+	// member seed change, and a member applied change are each a trigger.
+	membersChanged := in.LastSync == nil || !membersEqual(in.LastSync.Members, announced)
+	// The generation rises only when the tenant's bound cell set changes.
+	cellSetChanged := memberCellSetChanged(status.Placement, members)
+
 	last := in.LastSync
 	due := last == nil ||
 		last.CellInstance != cell.Instance ||
 		!last.Policy.Equal(policy) ||
 		last.RehydratedInstance != rehydratedInstance ||
 		!stringSlicesEqual(last.PendingJobs, pendingJobs) ||
+		membersChanged ||
 		nowT.Sub(last.At) >= syncResyncInterval
 	if !due {
 		return
 	}
 
+	generation := status.Placement.Generation
+	if cellSetChanged {
+		generation++
+	}
+
 	// The reannounce path stands behind updateCellInstance's own pod read,
 	// so it stamps the confirmation with this tick's clock.
 	dead := deadInstanceDelta(last, status.Placement.Cell, status.Placement.CellNamespace, cell.Instance, &nowT)
+	dead = append(dead, memberDeadInstances(last, announced, dead, in.DepartedPods, nowT)...)
 
 	result, err := sendAnnounce(ctx, in, AnnounceRequest{
 		Cluster:            in.ClusterIdentity,
 		Tenant:             team.Name,
 		Namespace:          status.Placement.CellNamespace,
 		Cell:               status.Placement.Cell,
-		Generation:         status.Placement.Generation,
+		Generation:         generation,
 		CellInstance:       cell.Instance,
 		Policy:             policy,
 		RehydratedInstance: rehydratedInstance,
@@ -709,15 +838,213 @@ func maybeReannounce(ctx context.Context, in Inputs, team *v1alpha1.Team, status
 		CellAliveAt:        &nowT,
 		CellLastSeenAt:     cell.MiteLastSeen,
 		DeadInstances:      dead,
+		Members:            announced,
 	})
 	if err != nil || !result.OK {
+		// A failed announcement stops the member change for this tick.
+		// The member list is unchanged and the pass retries next tick.
 		return
 	}
 	out.SyncCacheUpdate = &SyncCache{
 		Cell: status.Placement.Cell, CellNamespace: status.Placement.CellNamespace,
-		Generation: status.Placement.Generation, CellInstance: cell.Instance,
+		Generation: generation, CellInstance: cell.Instance,
 		Policy: policy, RehydratedInstance: rehydratedInstance, PendingJobs: pendingJobs,
-		CellLastSeenAt: cell.MiteLastSeen, At: nowT,
+		CellLastSeenAt: cell.MiteLastSeen, At: nowT, Members: announced,
+	}
+
+	// The announce is the pre-step, so the status write follows it. The
+	// prior member list is read before the write, because the release
+	// path compares against it.
+	prior := status.Placement.DeepCopy()
+	status.Placement.Generation = generation
+	status.Placement.Members = memberStatuses(members)
+	appendMemberCellPatches(in, team, members, out)
+	appendReleasedMemberPatches(ctx, in, team, prior, members, out)
+}
+
+// memberCellSetChanged reports whether the tenant's bound cell set
+// differs between the stored member list and the decided one. The tenant
+// generation rises only on such a change.
+// A placement whose stored member list is empty describes one slot-0
+// member on its scalar cell, so a tenant the pass has not yet written a
+// member list for raises no generation on its first member-carrying tick.
+func memberCellSetChanged(placement *v1alpha1.TeamPlacementStatus, decided []MemberBinding) bool {
+	before := map[string]bool{}
+	for _, m := range placement.Members {
+		before[memberKey(m.CellNamespace, m.Cell)] = true
+	}
+	if len(before) == 0 && placement.Cell != "" {
+		before[memberKey(placement.CellNamespace, placement.Cell)] = true
+	}
+	after := map[string]bool{}
+	for _, m := range decided {
+		after[memberKey(m.Namespace, m.Cell)] = true
+	}
+	if len(before) != len(after) {
+		return true
+	}
+	for key := range after {
+		if !before[key] {
+			return true
+		}
+	}
+	return false
+}
+
+// memberDeadInstances reports a dead instance for every member whose
+// instance changed since the last announcement, and not for slot 0 alone.
+//
+// A member whose cell is still bound and reports a new instance carries a
+// confirmation stamped with nowT, exactly as deadInstanceDelta stamps slot
+// 0's. The evidence is the same: the Controller reconciler reads that
+// cell's pod every tick, and CellCandidate.Instance is the pod UID it
+// read. Without the stamp the confirmed reading never holds for a member
+// above slot 0, so no run of that member is ever armed for a resume and no
+// unstarted intent of it is ever re-fired.
+//
+// A member whose cell left the candidate set carries a confirmation only
+// when departed reports that cell's pod gone. The cell object, its
+// StatefulSet, and its pod can all go within seconds of a cell delete, and
+// without the confirmation no run of that member is ever armed for the
+// promoted standby. A cell whose pod still terminates carries no
+// confirmation, because such a pod can serve builds for its whole
+// termination grace.
+//
+// The LastSeenAt comes from the member's own presence reading. A cache
+// entry written before that reading existed carries none, and the entry
+// then falls back to the tenant's scalar reading and the cache time.
+func memberDeadInstances(last *SyncCache, announced []AnnounceMember, reported []DeadInstance,
+	departed map[string]bool, nowT time.Time) []DeadInstance {
+	if last == nil {
+		return nil
+	}
+	current := map[string]string{}
+	for _, m := range announced {
+		current[memberKey(m.Namespace, m.Cell)] = m.Instance
+	}
+	already := map[string]bool{}
+	for _, d := range reported {
+		already[d.Instance] = true
+	}
+	var out []DeadInstance
+	for _, before := range last.Members {
+		if before.Instance == "" || already[before.Instance] {
+			continue
+		}
+		now, stillBound := current[memberKey(before.Namespace, before.Cell)]
+		if stillBound && now == before.Instance {
+			continue
+		}
+		already[before.Instance] = true
+		entry := DeadInstance{
+			Instance:   before.Instance,
+			LastSeenAt: memberLastSeen(before, last),
+		}
+		if stillBound || departed[memberKey(before.Namespace, before.Cell)] {
+			stamped := nowT
+			entry.ConfirmedGoneAt = &stamped
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// confirmedGoneAt answers the confirmation stamp for one cell that left the
+// candidate set: nowT when the caller's own pod read answers no pod, and
+// nil otherwise.
+func confirmedGoneAt(in Inputs, namespace, cell string, nowT time.Time) *time.Time {
+	if !in.DepartedPods[memberKey(namespace, cell)] {
+		return nil
+	}
+	stamped := nowT
+	return &stamped
+}
+
+// memberLastSeen answers the newest presence reading for one member: its
+// own when the cache carries one, else the tenant's scalar reading, else
+// the time the cache was written.
+func memberLastSeen(before AnnounceMember, last *SyncCache) time.Time {
+	if before.LastSeenAt != nil {
+		return *before.LastSeenAt
+	}
+	if last.CellLastSeenAt != nil {
+		return *last.CellLastSeenAt
+	}
+	return last.At
+}
+
+// appendMemberCellPatches names the tenant on every member cell that does
+// not list it yet. The tenant's items and its placement rehydration seed
+// then apply on every member, active or standby, exactly as they do for
+// slot 0.
+func appendMemberCellPatches(in Inputs, team *v1alpha1.Team, members []MemberBinding, out *Outcome) {
+	for _, m := range members {
+		if m.Slot != nil && *m.Slot == 0 {
+			// Slot 0's patch is the caller's own, written beside its
+			// claim.
+			continue
+		}
+		cell, found := lookupCell(in.Cells, m.Cell, m.Namespace)
+		if !found || containsString(cell.Tenants, team.Name) {
+			continue
+		}
+		// The claim holds this cell for the same window slot 0's claim
+		// holds its own: the caller writes it before the status patch,
+		// so a drain that already read the fence set still finds a
+		// claim when it re-reads the cell.
+		out.CellClaims = append(out.CellClaims, CellClaim{
+			Name:      cell.Name,
+			Namespace: cell.Namespace,
+			Tenant:    team.Name,
+		})
+		out.CellPatches = append(out.CellPatches, CellPatch{
+			Name:      cell.Name,
+			Namespace: cell.Namespace,
+			Tenants:   appendUnique(cell.Tenants, team.Name),
+		})
+	}
+}
+
+// appendReleasedMemberPatches drops the tenant from every cell it held a
+// member on before this tick and holds no member on now. A scale-down of
+// the slots, a scale-down of the standbys, and a member replacement all
+// reach this path, so no former member keeps the tenant's folder, its
+// desired state, or a unit of that cell's capacity.
+//
+// Slot 0's cell is excluded: the keep and move path owns it, and it drops
+// the tenant from the cell it leaves in the same tick it binds the new
+// one.
+//
+// Each released cell also takes a cell-scoped schedule purge, so the
+// backstop stops firing that cell's rows. The purge is best effort, the
+// same way a move's is: the row's own staleness test already skips a row
+// the released cell exported.
+func appendReleasedMemberPatches(ctx context.Context, in Inputs, team *v1alpha1.Team,
+	prior *v1alpha1.TeamPlacementStatus, members []MemberBinding, out *Outcome) {
+	if prior == nil {
+		return
+	}
+	kept := map[string]bool{}
+	for _, m := range members {
+		kept[memberKey(m.Namespace, m.Cell)] = true
+	}
+	for _, before := range prior.Members {
+		if before.Cell == "" || kept[memberKey(before.CellNamespace, before.Cell)] {
+			continue
+		}
+		if before.Slot != nil && *before.Slot == 0 {
+			continue
+		}
+		requestPurge(ctx, in, team.Name, prior.Generation, before.Cell, before.CellNamespace)
+		cell, found := lookupCell(in.Cells, before.Cell, before.CellNamespace)
+		if !found || !containsString(cell.Tenants, team.Name) {
+			continue
+		}
+		out.CellPatches = append(out.CellPatches, CellPatch{
+			Name:      cell.Name,
+			Namespace: cell.Namespace,
+			Tenants:   removeString(cell.Tenants, team.Name),
+		})
 	}
 }
 
@@ -805,17 +1132,28 @@ func teardown(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alp
 			Tenants:   removeString(cell.Tenants, team.Name),
 		})
 	}
+	// A tenant holds one member on each of several cells, so teardown
+	// drops it from every one of them. A cell the pass misses keeps the
+	// tenant folder and a unit of its own capacity for good.
+	appendTeardownMemberPatches(in, team, status.Placement, out)
 
-	if !found {
-		// A deleted cell never reports an apply; teardown completes at
-		// once. The purge is still attempted, best-effort, but never holds
-		// the finalizer: no cell remains to drain.
-		requestPurge(ctx, in, team.Name, status.Placement.Generation)
+	membersDrained := membersDrainedTenant(in, team, status.Placement)
+	if !found && membersDrained {
+		// A deleted cell never reports an apply, and every other member
+		// has drained, so teardown completes at once. The purge is still
+		// attempted, best effort, but never holds the finalizer: no cell
+		// remains to drain.
+		requestPurge(ctx, in, team.Name, status.Placement.Generation, "", "")
 		finishTeardown(status, out, hasFinalizer)
 		return
 	}
 
-	drained := !containsString(cell.AppliedTenants, team.Name) && !hasPendingDeletionForTenant(cell.PendingDeletionPaths, team.Name)
+	// A missing scalar cell never blocks on itself, and a surviving member
+	// cell still does. Releasing the finalizer over such a member would
+	// leave it the tenant folder and a unit of its capacity, and would
+	// remove the retry path that drops them. The bounded wait below is the
+	// escape: a member that never reports still completes the teardown.
+	drained := membersDrained && (!found || cellDrainedTenant(cell, team.Name))
 	boundedWaitExpired := nowT.Sub(placedTransitionTime(status)) >= teardownBoundedWait &&
 		placedReason(status) == v1alpha1.TeamReasonTenantTeardownPending
 	if !drained && !boundedWaitExpired {
@@ -854,6 +1192,50 @@ func teardown(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alp
 		return
 	}
 	setPlaced(status, metav1.ConditionFalse, v1alpha1.TeamReasonTenantTeardownPending, teardownPendingMessage, nowT)
+}
+
+// appendTeardownMemberPatches drops the tenant from every member cell but
+// slot 0's, which the caller patches beside this call.
+func appendTeardownMemberPatches(in Inputs, team *v1alpha1.Team, placement *v1alpha1.TeamPlacementStatus, out *Outcome) {
+	for _, m := range placement.Members {
+		if m.Cell == "" || (m.Cell == placement.Cell && m.CellNamespace == placement.CellNamespace) {
+			continue
+		}
+		cell, found := lookupCell(in.Cells, m.Cell, m.CellNamespace)
+		if !found || !containsString(cell.Tenants, team.Name) {
+			continue
+		}
+		out.CellPatches = append(out.CellPatches, CellPatch{
+			Name:      cell.Name,
+			Namespace: cell.Namespace,
+			Tenants:   removeString(cell.Tenants, team.Name),
+		})
+	}
+}
+
+// cellDrainedTenant reports whether one cell has finished dropping the
+// tenant's folder: it no longer reports the tenant applied and owes no
+// item deletion for it.
+func cellDrainedTenant(cell CellCandidate, tenant string) bool {
+	return !containsString(cell.AppliedTenants, tenant) &&
+		!hasPendingDeletionForTenant(cell.PendingDeletionPaths, tenant)
+}
+
+// membersDrainedTenant reports whether every member cell the pass can
+// still read has dropped the tenant. A cell the candidate set no longer
+// holds counts as drained: the object is gone, so nothing remains to
+// drain and nothing would ever report one.
+func membersDrainedTenant(in Inputs, team *v1alpha1.Team, placement *v1alpha1.TeamPlacementStatus) bool {
+	for _, m := range placement.Members {
+		cell, found := lookupCell(in.Cells, m.Cell, m.CellNamespace)
+		if !found {
+			continue
+		}
+		if !cellDrainedTenant(cell, team.Name) {
+			return false
+		}
+	}
+	return true
 }
 
 // finishTeardown clears the placement and every pipelines status field, and

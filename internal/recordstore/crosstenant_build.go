@@ -2,10 +2,12 @@ package recordstore
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -78,9 +80,14 @@ func handleCrossTenantBuild(ctx context.Context, deps CrossTenantDeps, req Cross
 		return CrossTenantResponse{}, fmt.Errorf("mint reserved run id: %w", err)
 	}
 
-	target, err := resolveCrossTenantTargetPlacement(ctx, deps.Pool, req.Cluster, req.TargetTenant)
+	target, err := resolveCrossTenantTargetPlacement(ctx, deps.Pool, req.Cluster, req.TargetTenant, qualifiedJobPath)
 	if err != nil {
 		return CrossTenantResponse{}, err
+	}
+	if target.cell == "" {
+		// The target job's home slot holds no cell yet. The caller
+		// retries and the recorder drops nothing.
+		return CrossTenantResponse{State: CrossTenantStatePending}, nil
 	}
 
 	action := LedgerAction{
@@ -119,8 +126,18 @@ type crossTenantTargetPlacement struct {
 // GrantEvaluator.resolveTargetPolicy's own resolution, duplicated
 // because that method is unexported in a file this batch does not
 // touch.
-func resolveCrossTenantTargetPlacement(ctx context.Context, pool *pgxpool.Pool, callerCluster, target string) (crossTenantTargetPlacement, error) {
-	rows, err := pool.Query(ctx, `SELECT cluster, namespace, cell FROM varroa.tenant_placements WHERE tenant = $1`, target)
+//
+// The namespace and the cell name the member that holds targetJobPath's
+// home slot, so a trigger for a job homed on slot 1 reaches slot 1's
+// holder. An empty targetJobPath resolves slot 0, which is what a lock
+// call carries: a fleet lock belongs to the tenant and not to one job.
+func resolveCrossTenantTargetPlacement(ctx context.Context, pool *pgxpool.Pool, callerCluster, target,
+	targetJobPath string) (crossTenantTargetPlacement, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT cluster, namespace, cell, cell_instance, rehydrated_instance, pending_jobs,
+		       members, job_homes
+		FROM varroa.tenant_placements WHERE tenant = $1
+	`, target)
 	if err != nil {
 		return crossTenantTargetPlacement{}, fmt.Errorf("select tenant placements for %s: %w", target, err)
 	}
@@ -132,8 +149,8 @@ func resolveCrossTenantTargetPlacement(ctx context.Context, pool *pgxpool.Pool, 
 		found   bool
 	)
 	for rows.Next() {
-		var p crossTenantTargetPlacement
-		if err := rows.Scan(&p.cluster, &p.namespace, &p.cell); err != nil {
+		p, err := scanCrossTenantTargetPlacement(rows, targetJobPath)
+		if err != nil {
 			return crossTenantTargetPlacement{}, fmt.Errorf("scan tenant placement for %s: %w", target, err)
 		}
 		all = append(all, p)
@@ -152,4 +169,38 @@ func resolveCrossTenantTargetPlacement(ctx context.Context, pool *pgxpool.Pool, 
 		return crossTenantTargetPlacement{}, fmt.Errorf("no tenant placement for %s", target)
 	}
 	return all[0], nil
+}
+
+// scanCrossTenantTargetPlacement reads one placement row and resolves the
+// member that holds targetJobPath's home slot.
+func scanCrossTenantTargetPlacement(row pgx.Row, targetJobPath string) (crossTenantTargetPlacement, error) {
+	var (
+		cluster     string
+		namespace   string
+		cell        string
+		instance    string
+		rehydrated  string
+		pendingRaw  json.RawMessage
+		membersRaw  json.RawMessage
+		jobHomesRaw json.RawMessage
+	)
+	if err := row.Scan(&cluster, &namespace, &cell, &instance, &rehydrated, &pendingRaw,
+		&membersRaw, &jobHomesRaw); err != nil {
+		return crossTenantTargetPlacement{}, err
+	}
+	var pending []string
+	if len(pendingRaw) > 0 {
+		if err := json.Unmarshal(pendingRaw, &pending); err != nil {
+			return crossTenantTargetPlacement{}, fmt.Errorf("decode pending jobs: %w", err)
+		}
+	}
+	decoded, err := decodePlacementMembers(membersRaw, jobHomesRaw, placementScalars{
+		cell: cell, namespace: namespace, cellInstance: instance,
+		rehydratedInstance: rehydrated, pendingJobs: pending,
+	})
+	if err != nil {
+		return crossTenantTargetPlacement{}, err
+	}
+	home := memberForJob(decoded, targetJobPath)
+	return crossTenantTargetPlacement{cluster: cluster, namespace: home.Namespace, cell: home.Cell}, nil
 }

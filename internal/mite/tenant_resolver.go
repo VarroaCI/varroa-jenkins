@@ -50,7 +50,24 @@ type teamPlacementEntry struct {
 	cellNamespace string
 	cell          string
 	generation    int64
-	expires       time.Time
+	// members holds every cell of the tenant, active or standby, keyed
+	// by "<namespace>/<cell>". A tenant holds several members, so the
+	// scalar cell above names slot 0 alone. An empty map resolves to
+	// that scalar cell, so a single-member tenant reads exactly as it
+	// did before slots existed.
+	members map[string]bool
+	expires time.Time
+}
+
+// holdsCell reports whether the tenant holds a member on the named cell.
+// The gateway answers the tenant for any member cell, slot or standby:
+// the claim fence answers NOT_HOME, and a resolver that refused such a
+// cell would hide that answer behind a fail-closed path.
+func (e teamPlacementEntry) holdsCell(namespace, cell string) bool {
+	if len(e.members) == 0 {
+		return e.cellNamespace == namespace && e.cell == cell
+	}
+	return e.members[namespace+"/"+cell]
 }
 
 // NewCellTenantResolver builds the resolver design.md D14 owns. store
@@ -92,8 +109,8 @@ func (r *crdCellTenantResolver) ResolveJobTenant(cluster, ns, cell, jobPath stri
 	if !resolved || !placement.placed {
 		return "", 0
 	}
-	if placement.cellNamespace != ns || placement.cell != cell {
-		// The team is placed on a different cell. This cell must not
+	if !placement.holdsCell(ns, cell) {
+		// The team holds no member on this cell. This cell must not
 		// answer for a tenant it does not host.
 		return "", 0
 	}
@@ -182,6 +199,7 @@ func (r *crdCellTenantResolver) teamPlacement(team string) (entry teamPlacementE
 			cellNamespace: p.CellNamespace,
 			cell:          p.Cell,
 			generation:    p.Generation,
+			members:       memberCellSet(p.Members),
 		}
 	}
 	e.expires = now.Add(cellTenantResolveTTL)
@@ -190,6 +208,23 @@ func (r *crdCellTenantResolver) teamPlacement(team string) (entry teamPlacementE
 	r.teams[team] = e
 	r.mu.Unlock()
 	return e, true
+}
+
+// memberCellSet answers the cell key of every member of the tenant.
+// An empty member list answers an empty map, which holdsCell resolves to
+// the scalar cell.
+func memberCellSet(members []v1alpha1.TeamMemberStatus) map[string]bool {
+	if len(members) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(members))
+	for _, m := range members {
+		if m.Cell == "" {
+			continue
+		}
+		out[m.CellNamespace+"/"+m.Cell] = true
+	}
+	return out
 }
 
 var _ CellTenantResolver = (*crdCellTenantResolver)(nil)

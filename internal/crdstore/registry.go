@@ -99,7 +99,22 @@ var clearStatusFields = map[schema.GroupVersionResource]map[string]any{
 	// the last agent Service a move left behind must be able to empty the
 	// list, or the merge patch drops the key, the server keeps the stale
 	// names, and every later tick deletes an absent Service again.
-	teamGVR: {"placement": nil, "pipelines": nil, "rehydration": nil, "staleAgentServiceNamespaces": nil},
+	// The three pendingPurge keys inside pipelines need their own entry.
+	// The move-purge retry writes their zero values into a pipelines object
+	// that is still present, so a plain marshal drops the keys, the server
+	// keeps the old values, and the tick repeats a completed purge for
+	// good. A NestedClear still deletes the whole object when the caller
+	// omits it.
+	teamGVR: {
+		"placement": nil,
+		"pipelines": NestedClear{
+			"pendingPurgeGeneration":    nil,
+			"pendingPurgeCell":          nil,
+			"pendingPurgeCellNamespace": nil,
+		},
+		"rehydration":                 nil,
+		"staleAgentServiceNamespaces": nil,
+	},
 	// cell and cellNamespace are both omitempty. An unplaced runner must
 	// clear both, or a merge patch would leave the stale cell binding in
 	// etcd once the owning Team loses its placement.
@@ -109,12 +124,39 @@ var clearStatusFields = map[schema.GroupVersionResource]map[string]any{
 	cellPoolGVR: {"tenants": nil},
 }
 
-// ClearStatusFields returns, per status key, the explicit zero value a
-// status merge patch must carry for gvr when the key is absent from the
-// marshaled status (nil → RFC 7386 key deletion; ""/0 → set-to-zero,
-// matching the pre-crdstore per-kind patch bytes exactly).
-func ClearStatusFields(gvr schema.GroupVersionResource) map[string]any {
-	return clearStatusFields[gvr]
+// NestedClear is a clearStatusFields value for a status object that holds
+// clearable keys of its own. The object itself still goes when the caller
+// omits it, exactly as a nil value makes it go. When the caller sends the
+// object, each key named here that the object omits takes its zero value,
+// so a merge patch clears the server's copy of that key too.
+type NestedClear map[string]any
+
+// ApplyStatusClears sets every clearable key of gvr that statusMap omits to
+// its explicit zero value, so a status merge patch clears the server's
+// stale value (RFC 7386: null deletes the key; ""/0 set to zero, matching
+// the pre-crdstore per-kind patch bytes exactly). It is the one
+// implementation of that rule: ClientsetClient.PatchObjectStatus calls it
+// on every status patch it sends.
+func ApplyStatusClears(gvr schema.GroupVersionResource, statusMap map[string]any) {
+	for key, zero := range clearStatusFields[gvr] {
+		nested, isNested := zero.(NestedClear)
+		if !isNested {
+			if _, sent := statusMap[key]; !sent {
+				statusMap[key] = zero
+			}
+			continue
+		}
+		child, sent := statusMap[key].(map[string]any)
+		if !sent {
+			statusMap[key] = nil
+			continue
+		}
+		for name, childZero := range nested {
+			if _, sent := child[name]; !sent {
+				child[name] = childZero
+			}
+		}
+	}
 }
 
 // GVRFor returns the schema.GroupVersionResource for the given type T.

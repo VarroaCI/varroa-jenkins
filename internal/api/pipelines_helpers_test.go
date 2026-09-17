@@ -48,6 +48,32 @@ type fakeRecordReader struct {
 	// JobDependencies. An unset key answers the zero value: two empty,
 	// non-nil edge lists.
 	jobDependencies map[string]recordstore.JobDependencies
+
+	// jobHomes is keyed by "<cluster>/<tenant>/<jobPath>" and answers the
+	// member that holds that job's home slot. An unset key answers
+	// ok=false, which leaves the caller's own coordinate unchanged.
+	jobHomes map[string]jobHomeAnswer
+	// jobHomeErr makes every JobHome call fail, for the read-error case.
+	jobHomeErr error
+}
+
+// jobHomeAnswer is one fake JobHome result.
+type jobHomeAnswer struct {
+	namespace string
+	cell      string
+}
+
+// JobHome answers the seeded home member for a tenant and a job path. An
+// unset key answers Placed false, which is a tenant with no placement row.
+func (f *fakeRecordReader) JobHome(_ context.Context, cluster, tenant, jobPath string) (recordstore.JobHome, error) {
+	if f.jobHomeErr != nil {
+		return recordstore.JobHome{}, f.jobHomeErr
+	}
+	home, ok := f.jobHomes[cluster+"/"+tenant+"/"+jobPath]
+	if !ok {
+		return recordstore.JobHome{}, nil
+	}
+	return recordstore.JobHome{Placed: true, Namespace: home.namespace, Cell: home.cell}, nil
 }
 
 func newFakeRecordReader() *fakeRecordReader {
@@ -58,6 +84,7 @@ func newFakeRecordReader() *fakeRecordReader {
 		stages:          map[string][]recordstore.Stage{},
 		artifacts:       map[string][]recordstore.Artifact{},
 		tests:           map[string][]recordstore.TestSuite{},
+		jobHomes:        map[string]jobHomeAnswer{},
 		intents:         map[string]recordstore.Intent{},
 		windowStats:     map[string]recordstore.JobWindowStats{},
 		jobDependencies: map[string]recordstore.JobDependencies{},

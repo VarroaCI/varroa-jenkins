@@ -245,6 +245,7 @@ type DesiredStateCommand struct {
 	DrainTimeoutSec            int64              `json:"drain_timeout_sec,omitempty"`
 	LiveFingerprintIntervalSec int64              `json:"live_fingerprint_interval_sec,omitempty"`
 	Rehydration                *RehydrationBundle `json:"rehydration,omitempty"`
+	TenantHomes                []*TenantHomes     `json:"tenant_homes,omitempty"`
 }
 
 type DesiredStateResult struct {
@@ -1113,6 +1114,14 @@ type TailControl struct {
 	Action       string `json:"action"`
 	LeaseSeconds int    `json:"lease_seconds,omitempty"`
 	ControlId    string `json:"control_id"`
+}
+
+// TenantHomes names one hosted tenant's slot on this cell and that
+type TenantHomes struct {
+	Tenant   string         `json:"tenant"`
+	Slot     int            `json:"slot,omitempty"`
+	Role     string         `json:"role,omitempty"`
+	JobHomes map[string]int `json:"job_homes,omitempty"`
 }
 
 type TokenGrant struct {

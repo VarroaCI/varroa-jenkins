@@ -127,18 +127,20 @@ func handleCrossTenantLockReleaseForTest(t *testing.T, deps CrossTenantDeps, run
 	return resp
 }
 
-// TestFleetLockAcquire_StaleGenerationAnswersFenced covers task 3.8's
-// second acceptance.
-func TestFleetLockAcquire_StaleGenerationAnswersFenced(t *testing.T) {
+// TestFleetLockAcquire_StaleCellAnswersFenced asserts an acquire from a
+// cell the tenant holds no member on is refused permanently and writes
+// no row. A stale generation alone answers the retryable NOT_READY, so
+// it is not the shape this test drives.
+func TestFleetLockAcquire_StaleCellAnswersFenced(t *testing.T) {
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 5, "pod-a", "pod-a", nil)
 
 	resp, err := handleCrossTenantLockAcquire(context.Background(), deps, CrossTenantRequest{
 		Cluster:             testCluster,
 		Namespace:           "ns-alpha",
-		Cell:                "cell-alpha",
+		Cell:                "cell-old",
 		CallerTenant:        "alpha",
-		PlacementGeneration: 4,
+		PlacementGeneration: 5,
 		Name:                "deploy-prod",
 		RunID:               "run-1",
 	})

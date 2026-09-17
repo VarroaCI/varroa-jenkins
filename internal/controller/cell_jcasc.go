@@ -223,3 +223,26 @@ func (r *Reconciler) applyCellContent(ctx context.Context, cr *v1alpha1.Controll
 	recordCellTenantWarnings(cr, state.Warnings)
 	return nil
 }
+
+// tenantSlotOnCell answers the slot the tenant holds on cr. A standby, a
+// tenant with no member list, and a tenant no member of which names this
+// cell all answer slot 0.
+//
+// The answer is the slot whose agent Service this cell's tenant cloud
+// dials, so an agent launched here reaches an endpoint that follows the
+// slot's own holder.
+func tenantSlotOnCell(team *v1alpha1.Team, cr *v1alpha1.Controller) int32 {
+	if team.Status.Placement == nil {
+		return tenantSlotZero
+	}
+	for _, m := range team.Status.Placement.Members {
+		if m.Cell != cr.Name || m.CellNamespace != cr.Namespace {
+			continue
+		}
+		if m.Role == v1alpha1.TeamMemberRoleStandby || m.Slot == nil {
+			return tenantSlotZero
+		}
+		return *m.Slot
+	}
+	return tenantSlotZero
+}

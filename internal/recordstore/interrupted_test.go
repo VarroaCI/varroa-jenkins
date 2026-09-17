@@ -584,7 +584,7 @@ func TestEvaluateInterruptionReasons(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			reason, ok := evaluateInterruption(now, tc.c, tc.row, true, testGrace)
+			reason, ok := evaluateInterruption(now, tc.c, resolveLivenessMembers(tc.row), true, testGrace)
 			if ok != tc.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
 			}

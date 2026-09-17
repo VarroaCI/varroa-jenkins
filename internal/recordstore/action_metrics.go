@@ -17,8 +17,21 @@ import (
 // (recorder_concurrency_cancel_total, recorder_cron_fired_total, and so
 // on), because it counts every kind under one name, labelled by kind.
 type ActionMetrics struct {
-	published metric.Int64Counter
+	published      metric.Int64Counter
+	jobHomeChanged metric.Int64Counter
 }
+
+// Causes of a job home change, the label values of
+// recorder_job_home_changed_total.
+const (
+	// jobHomeCauseScale names a path the active slot count moved.
+	jobHomeCauseScale = "scale"
+	// jobHomeCauseTakeover names a path the member set moved.
+	jobHomeCauseTakeover = "takeover"
+	// jobHomeCauseNewJob names a path the recorder homes for the first
+	// time.
+	jobHomeCauseNewJob = "new-job"
+)
 
 // NewActionMetrics registers recorder_actions_published_total on the
 // "varroa-recorder" meter.
@@ -29,7 +42,21 @@ func NewActionMetrics() (*ActionMetrics, error) {
 	if err != nil {
 		return nil, fmt.Errorf("register recorder_actions_published_total: %w", err)
 	}
-	return &ActionMetrics{published: published}, nil
+	jobHomeChanged, err := meter.Int64Counter("recorder_job_home_changed_total",
+		metric.WithDescription("Job home slot changes the recorder stored, labelled by cause"))
+	if err != nil {
+		return nil, fmt.Errorf("register recorder_job_home_changed_total: %w", err)
+	}
+	return &ActionMetrics{published: published, jobHomeChanged: jobHomeChanged}, nil
+}
+
+// addJobHomeChanged counts one moved job path, labelled by cause. A nil
+// receiver is a no-op, so an unwired caller counts nothing.
+func (m *ActionMetrics) addJobHomeChanged(ctx context.Context, cause string) {
+	if m == nil || m.jobHomeChanged == nil {
+		return
+	}
+	m.jobHomeChanged.Add(ctx, 1, metric.WithAttributes(attribute.String("cause", cause)))
 }
 
 // addPublished counts one published action, labelled by kind. A nil

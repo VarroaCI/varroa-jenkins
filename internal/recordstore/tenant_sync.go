@@ -59,7 +59,7 @@ func RegisterTenantSyncResponder(conn *bus.Conn, pool *pgxpool.Pool, grace time.
 }
 
 // handleTenantSync decodes a TenantSyncRequest and dispatches it by
-// Kind. A body the decoder rejects, and a kind outside the two known
+// Kind. A body the decoder rejects, and a kind outside the three known
 // values, both answer an error reply and write nothing.
 func handleTenantSync(conn *bus.Conn, logger *slog.Logger, pool *pgxpool.Pool, metrics *InterruptedMetrics,
 	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, grace time.Duration, data []byte) []byte {
@@ -87,9 +87,37 @@ func handleTenantSync(conn *bus.Conn, logger *slog.Logger, pool *pgxpool.Pool, m
 			return marshalTenantSyncResponse(logger, TenantSyncResponse{Error: "tenant sync records failed"})
 		}
 		return marshalTenantSyncResponse(logger, resp)
+	case TenantSyncKindHomes:
+		resp, err := handleTenantSyncHomes(ctx, pool, req)
+		if err != nil {
+			logger.Error("tenant sync homes failed", "cluster", req.Cluster, "tenant", req.Tenant, "error", err)
+			return marshalTenantSyncResponse(logger, TenantSyncResponse{Error: "tenant sync homes failed"})
+		}
+		return marshalTenantSyncResponse(logger, resp)
 	default:
 		return marshalTenantSyncResponse(logger, TenantSyncResponse{Error: fmt.Sprintf("unknown tenant sync kind %q", req.Kind)})
 	}
+}
+
+// handleTenantSyncHomes answers the tenant's member list and its job home
+// map. The recorder is the map's only owner, and this kind is how the
+// operator reads it for the desired state.
+//
+// A tenant with no stored row answers an empty list and an empty map. A
+// tenant whose stored list is empty answers the synthetic slot-0 member
+// every reader resolves, so the caller needs no branch.
+func handleTenantSyncHomes(ctx context.Context, pool *pgxpool.Pool, req TenantSyncRequest) (TenantSyncResponse, error) {
+	if req.Cluster == "" || req.Tenant == "" {
+		return TenantSyncResponse{}, errors.New("homes request needs a cluster and a tenant")
+	}
+	row, exists, err := readTenantPlacementMembers(ctx, pool, req.Cluster, req.Tenant)
+	if err != nil {
+		return TenantSyncResponse{}, err
+	}
+	if !exists {
+		return TenantSyncResponse{Ok: true, JobHomes: map[string]int32{}}, nil
+	}
+	return TenantSyncResponse{Ok: true, Members: row.members, JobHomes: nonNilJobHomes(row.jobHomes)}, nil
 }
 
 // marshalTenantSyncResponse encodes resp, falling back to an encode-error
@@ -138,6 +166,12 @@ type tenantPlacementRow struct {
 	cell          string
 	cellInstance  string
 	deadInstances []TenantSyncDeadInstance
+	// members holds the stored member list, resolved through the row's
+	// own scalar columns. A row with an empty stored list therefore
+	// answers one synthetic slot-0 member, so an upgraded tenant keeps
+	// its seed state on its first member-carrying announcement.
+	members  []member
+	jobHomes map[string]int32
 }
 
 // handleTenantSyncAnnounce upserts cluster/tenant's tenant_placements
@@ -201,7 +235,14 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 	}
 	deadInstances := trimDeadInstances(mergeDeadInstances(old.deadInstances, req.DeadInstances), live, maxDeadInstances)
 
-	if err := writeTenantPlacement(ctx, tx, req, newGeneration, rehydratedInstance, pendingJobs, deadInstances); err != nil {
+	members := resolveAnnouncedMembers(old.members, req.Members)
+	jobHomes, err := recomputeJobHomes(ctx, tx, req.Cluster, req.Tenant, members, old.jobHomes, actionMetrics)
+	if err != nil {
+		return TenantSyncResponse{}, err
+	}
+
+	if err := writeTenantPlacement(ctx, tx, req, newGeneration, rehydratedInstance, pendingJobs,
+		deadInstances, members, jobHomes); err != nil {
 		return TenantSyncResponse{}, err
 	}
 
@@ -221,6 +262,13 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 		cellLastSeenAt: req.CellLastSeenAt,
 		deadInstances:  deadInstances,
 		policy:         policy,
+		// The built row carries the member view this announce just
+		// wrote, so the marking resolves a run's owning instance the
+		// same way a fresh read would.
+		members: newPlacementMembers(members, jobHomes, placementScalars{
+			cell: req.Cell, namespace: req.Namespace, cellInstance: req.CellInstance,
+			rehydratedInstance: rehydratedInstance, pendingJobs: pendingJobs,
+		}),
 	}
 
 	// The mesh takeover runs before the marking, so an armed run is
@@ -273,20 +321,27 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 // tenantPlacementRow, with no error, when no row exists yet.
 func readTenantPlacementForUpdate(ctx context.Context, tx pgx.Tx, cluster, tenant string) (tenantPlacementRow, error) {
 	var (
-		generation   int64
-		cell         string
-		cellInstance string
-		deadRaw      json.RawMessage
+		generation         int64
+		cell               string
+		namespace          string
+		cellInstance       string
+		rehydratedInstance string
+		deadRaw            json.RawMessage
+		pendingRaw         json.RawMessage
+		membersRaw         json.RawMessage
+		jobHomesRaw        json.RawMessage
 	)
 	err := tx.QueryRow(ctx, `
-		SELECT generation, cell, cell_instance, dead_instances
+		SELECT generation, cell, namespace, cell_instance, rehydrated_instance,
+		       dead_instances, pending_jobs, members, job_homes
 		FROM varroa.tenant_placements
 		WHERE cluster = $1 AND tenant = $2
 		FOR UPDATE
-	`, cluster, tenant).Scan(&generation, &cell, &cellInstance, &deadRaw)
+	`, cluster, tenant).Scan(&generation, &cell, &namespace, &cellInstance, &rehydratedInstance,
+		&deadRaw, &pendingRaw, &membersRaw, &jobHomesRaw)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		return tenantPlacementRow{}, nil
+		return tenantPlacementRow{jobHomes: map[string]int32{}}, nil
 	case err != nil:
 		return tenantPlacementRow{}, fmt.Errorf("read tenant placement: %w", err)
 	}
@@ -297,7 +352,23 @@ func readTenantPlacementForUpdate(ctx context.Context, tx pgx.Tx, cluster, tenan
 			return tenantPlacementRow{}, fmt.Errorf("decode dead instances: %w", err)
 		}
 	}
-	return tenantPlacementRow{generation: generation, cell: cell, cellInstance: cellInstance, deadInstances: dead}, nil
+	var pending []string
+	if len(pendingRaw) > 0 {
+		if err := json.Unmarshal(pendingRaw, &pending); err != nil {
+			return tenantPlacementRow{}, fmt.Errorf("decode pending jobs: %w", err)
+		}
+	}
+	decoded, err := decodePlacementMembers(membersRaw, jobHomesRaw, placementScalars{
+		cell: cell, namespace: namespace, cellInstance: cellInstance,
+		rehydratedInstance: rehydratedInstance, pendingJobs: pending,
+	})
+	if err != nil {
+		return tenantPlacementRow{}, err
+	}
+	return tenantPlacementRow{
+		generation: generation, cell: cell, cellInstance: cellInstance, deadInstances: dead,
+		members: decoded.members, jobHomes: decoded.jobHomes,
+	}, nil
 }
 
 // liveCellInstances answers the set of cell instances the tenant's live
@@ -428,7 +499,8 @@ func trimDeadInstances(merged []TenantSyncDeadInstance, keep map[string]bool, li
 // receives a Go nil: an empty policy becomes "{}", and empty
 // pending_jobs and dead_instances lists become "[]".
 func writeTenantPlacement(ctx context.Context, tx pgx.Tx, req TenantSyncRequest, generation int64,
-	rehydratedInstance string, pendingJobs []string, deadInstances []TenantSyncDeadInstance) error {
+	rehydratedInstance string, pendingJobs []string, deadInstances []TenantSyncDeadInstance,
+	members []member, jobHomes map[string]int32) error {
 	policy := req.Policy
 	if len(policy) == 0 {
 		policy = json.RawMessage(`{}`)
@@ -441,14 +513,23 @@ func writeTenantPlacement(ctx context.Context, tx pgx.Tx, req TenantSyncRequest,
 	if err != nil {
 		return fmt.Errorf("encode dead instances: %w", err)
 	}
+	membersJSON, err := json.Marshal(nonNilMembers(members))
+	if err != nil {
+		return fmt.Errorf("encode members: %w", err)
+	}
+	jobHomesJSON, err := json.Marshal(nonNilJobHomes(jobHomes))
+	if err != nil {
+		return fmt.Errorf("encode job homes: %w", err)
+	}
 
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO varroa.tenant_placements (
 			cluster, tenant, namespace, cell, generation, cell_instance, policy,
 			rehydrated_instance, pending_jobs, cell_alive, cell_alive_at, cell_last_seen_at,
-			dead_instances, announced_at
+			dead_instances, announced_at, members, job_homes
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::jsonb, $10, $11, $12, $13::jsonb, now()
+			$1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::jsonb, $10, $11, $12, $13::jsonb, now(),
+			$14::jsonb, $15::jsonb
 		)
 		ON CONFLICT (cluster, tenant) DO UPDATE SET
 			namespace           = EXCLUDED.namespace,
@@ -462,15 +543,60 @@ func writeTenantPlacement(ctx context.Context, tx pgx.Tx, req TenantSyncRequest,
 			cell_alive_at       = EXCLUDED.cell_alive_at,
 			cell_last_seen_at   = EXCLUDED.cell_last_seen_at,
 			dead_instances      = EXCLUDED.dead_instances,
-			announced_at        = now()
+			announced_at        = now(),
+			members             = EXCLUDED.members,
+			job_homes           = EXCLUDED.job_homes
 	`,
 		req.Cluster, req.Tenant, req.Namespace, req.Cell, generation, req.CellInstance, string(policy),
 		rehydratedInstance, string(pendingJobsJSON), req.CellAlive, req.CellAliveAt, req.CellLastSeenAt,
-		string(deadInstancesJSON),
+		string(deadInstancesJSON), string(membersJSON), string(jobHomesJSON),
 	); err != nil {
 		return fmt.Errorf("upsert tenant placement: %w", err)
 	}
 	return nil
+}
+
+// resolveAnnouncedMembers answers the member list to store. It applies
+// the per-member seed rule: a member whose cell instance changed loses
+// its own rehydrated_instance and pending_jobs, because the new pod holds
+// no seed. A member whose instance is unchanged keeps what the
+// announcement itself reports.
+//
+// The prior list is resolved through the row's scalar columns, so a
+// tenant the operator announces with a member list for the first time
+// keeps slot 0's seed state.
+func resolveAnnouncedMembers(prior, incoming []member) []member {
+	if len(incoming) == 0 {
+		return nil
+	}
+	priorRow := placementMembers{members: prior, jobHomes: map[string]int32{}}
+	out := make([]member, 0, len(incoming))
+	for _, m := range incoming {
+		before, ok := memberForCell(priorRow, m.Namespace, m.Cell)
+		if !ok || before.Instance != m.Instance {
+			m.RehydratedInstance = ""
+			m.PendingJobs = nil
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// nonNilMembers turns a nil slice into an empty one, so json.Marshal
+// writes "[]" instead of "null" into a NOT NULL jsonb column.
+func nonNilMembers(m []member) []member {
+	if m == nil {
+		return []member{}
+	}
+	return m
+}
+
+// nonNilJobHomes is nonNilMembers for the home map.
+func nonNilJobHomes(h map[string]int32) map[string]int32 {
+	if h == nil {
+		return map[string]int32{}
+	}
+	return h
 }
 
 // nonNilStrings turns a nil slice into an empty one, so json.Marshal

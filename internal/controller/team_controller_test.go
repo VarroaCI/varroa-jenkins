@@ -1679,8 +1679,7 @@ func TestTeamReconciler_AgentService_FollowsTheSlotHolder(t *testing.T) {
 	if status.Placement.Cell == "cell-a" {
 		other = "cell-b"
 	}
-	moved := &v1alpha1.TeamPlacementStatus{Cell: other, CellNamespace: "cells-ns"}
-	if err := rec.upsertTenantAgentService(context.Background(), "payments", moved, cellsByKey, tenantSlotZero); err != nil {
+	if err := rec.upsertTenantAgentService(context.Background(), "payments", "cells-ns", other, cellsByKey, tenantSlotZero); err != nil {
 		t.Fatalf("upsertTenantAgentService: %v", err)
 	}
 	after := client.tenantServices[len(client.tenantServices)-1]

@@ -193,6 +193,16 @@ spec:
                     - manual
                     - automatic
                     type: string
+                  members:
+                    default: 1
+                    description: |-
+                      Members sets the number of active slots this tenant runs. Each slot
+                      holds one cell. A job runs only on its home slot's holder. This field
+                      is not spec.members, which lists local usernames.
+                    format: int32
+                    maximum: 16
+                    minimum: 1
+                    type: integer
                   profile:
                     description: |-
                       Profile names the JenkinsVersionProfile the placement pass resolves a
@@ -215,6 +225,15 @@ spec:
                       deferred rehydration seed before it stops and reports
                       RehydrationFailed. Default 30m, range 1m to 24h.
                     type: string
+                  standby:
+                    default: 0
+                    description: |-
+                      Standby sets the number of warm members this tenant keeps. A standby
+                      holds the folder and no slot. It takes a slot whose holder dies.
+                    format: int32
+                    maximum: 8
+                    minimum: 0
+                    type: integer
                 type: object
               provisionNamespaces:
                 description: |-
@@ -327,6 +346,22 @@ spec:
                       token Secret after spec.pipelines is gone, the same way Placement
                       keeps naming a cell after the placement pass stops writing to it.
                     type: string
+                  pendingPurgeCell:
+                    description: |-
+                      PendingPurgeCell names the cell whose schedule rows the pending
+                      purge must delete. A slot move raises the tenant generation, so a
+                      whole-tenant delete would drop every other slot's rows. The retry
+                      therefore needs the cell the move left, not only the generation.
+                      An empty value means a whole-tenant delete, which is what teardown
+                      asks for.
+                    type: string
+                  pendingPurgeCellNamespace:
+                    description: |-
+                      PendingPurgeCellNamespace names that cell's namespace. A schedule
+                      row is keyed by both, so a cell name alone can name two cells and
+                      the delete would drop the rows of a same-named cell in another
+                      namespace. It is set and cleared with PendingPurgeCell.
+                    type: string
                   pendingPurgeGeneration:
                     description: |-
                       PendingPurgeGeneration names the old placement generation a move
@@ -377,6 +412,35 @@ spec:
                       C6 owns rejects a claim carrying an older generation.
                     format: int64
                     type: integer
+                  members:
+                    description: |-
+                      Members reports every member of this tenant. The scalar fields above
+                      keep describing slot 0.
+                    items:
+                      description: TeamMemberStatus reports one member of a pipelines
+                        tenant.
+                      properties:
+                        applied:
+                          description: Applied is true when the member's cell reports
+                            this tenant applied.
+                          type: boolean
+                        cell:
+                          description: Cell is the name of the cell Controller that
+                            holds this member.
+                          type: string
+                        cellNamespace:
+                          description: CellNamespace is the namespace of that cell
+                            Controller.
+                          type: string
+                        role:
+                          description: Role is TeamMemberRoleActive or TeamMemberRoleStandby.
+                          type: string
+                        slot:
+                          description: Slot is set only on an active member.
+                          format: int32
+                          type: integer
+                      type: object
+                    type: array
                 type: object
               rehydration:
                 description: |-

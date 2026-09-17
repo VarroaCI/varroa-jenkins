@@ -196,9 +196,9 @@ const (
 
 // Defines values for ComponentsSchemasClusterInfoState.
 const (
-	Active   ComponentsSchemasClusterInfoState = "active"
-	Drained  ComponentsSchemasClusterInfoState = "drained"
-	Draining ComponentsSchemasClusterInfoState = "draining"
+	ComponentsSchemasClusterInfoStateActive   ComponentsSchemasClusterInfoState = "active"
+	ComponentsSchemasClusterInfoStateDrained  ComponentsSchemasClusterInfoState = "drained"
+	ComponentsSchemasClusterInfoStateDraining ComponentsSchemasClusterInfoState = "draining"
 )
 
 // Defines values for ComponentsSchemasComposedBundleSpecJcascMergeStrategy.
@@ -413,6 +413,12 @@ const (
 	Placed        ComponentsSchemasTeamCellState = "placed"
 	Rehydrating   ComponentsSchemasTeamCellState = "rehydrating"
 	Unplaced      ComponentsSchemasTeamCellState = "unplaced"
+)
+
+// Defines values for ComponentsSchemasTeamMemberRole.
+const (
+	ComponentsSchemasTeamMemberRoleActive  ComponentsSchemasTeamMemberRole = "active"
+	ComponentsSchemasTeamMemberRoleStandby ComponentsSchemasTeamMemberRole = "standby"
 )
 
 // Defines values for ComponentsSchemasTeamPipelinesConcurrency.
@@ -1168,13 +1174,16 @@ type ComponentsSchemasCellTenantGrants struct {
 	Truncated bool `json:"truncated"`
 }
 
-// ComponentsSchemasCellTenantUsage One tenant on a cell, with that tenant's four counts.
+// ComponentsSchemasCellTenantUsage One tenant on a cell, with that tenant's role and four counts.
 type ComponentsSchemasCellTenantUsage struct {
-	FailedLast24h int64  `json:"failedLast24h"`
-	Jobs          int64  `json:"jobs"`
-	RunningNow    int64  `json:"runningNow"`
-	RunsLast24h   int64  `json:"runsLast24h"`
-	Tenant        string `json:"tenant"`
+	FailedLast24h int64 `json:"failedLast24h"`
+	Jobs          int64 `json:"jobs"`
+
+	// Role That tenant's role on this cell: "slot <n>" for an active member and "standby" for a standby. A standby holds the tenant folder and runs no build, so its running count is zero.
+	Role        *string `json:"role,omitempty"`
+	RunningNow  int64   `json:"runningNow"`
+	RunsLast24h int64   `json:"runsLast24h"`
+	Tenant      string  `json:"tenant"`
 }
 
 // ComponentsSchemasCellTenantWarning One non-blocking finding the reconciler recorded about a tenant.
@@ -3127,7 +3136,10 @@ type ComponentsSchemasTeamCell struct {
 	FreeSlots      *int32  `json:"freeSlots,omitempty"`
 	JenkinsVersion *string `json:"jenkinsVersion,omitempty"`
 	Jobs           *int64  `json:"jobs,omitempty"`
-	Namespace      *string `json:"namespace,omitempty"`
+
+	// Members One entry for each member of the tenant, ordered by role: active members by ascending slot first, then standbys by cell name. It is absent for unplaced and notCellHosted. Every other field of this body describes the tenant's slot 0.
+	Members   *[]ComponentsSchemasTeamCellMember `json:"members,omitempty"`
+	Namespace *string                            `json:"namespace,omitempty"`
 
 	// OtherTenantCount The number of other tenants on the cell. It is a count, never a list.
 	OtherTenantCount *int32  `json:"otherTenantCount,omitempty"`
@@ -3143,6 +3155,20 @@ type ComponentsSchemasTeamCell struct {
 
 // ComponentsSchemasTeamCellState defines model for ComponentsSchemasTeamCell.State.
 type ComponentsSchemasTeamCellState string
+
+// ComponentsSchemasTeamCellMember One member of the tenant, with that member's own four load counts. The counts apply the same grant narrowing the top-level counts apply. No entry names another tenant.
+type ComponentsSchemasTeamCellMember struct {
+	Cell          string `json:"cell"`
+	Cluster       string `json:"cluster"`
+	FailedLast24h int64  `json:"failedLast24h"`
+	Jobs          int64  `json:"jobs"`
+	Namespace     string `json:"namespace"`
+
+	// Role "slot <n>" for an active member and "standby" for a standby.
+	Role        string `json:"role"`
+	RunningNow  int64  `json:"runningNow"`
+	RunsLast24h int64  `json:"runsLast24h"`
+}
 
 // ComponentsSchemasTeamCondition Status condition for a Team.
 type ComponentsSchemasTeamCondition struct {
@@ -3194,6 +3220,27 @@ type ComponentsSchemasTeamExport struct {
 	Locks *[]string `json:"locks,omitempty"`
 }
 
+// ComponentsSchemasTeamMember One member of a pipelines tenant (status.placement.members). Response-only: the placement pass is its only writer.
+type ComponentsSchemasTeamMember struct {
+	// Applied True when the member's cell reports this tenant applied.
+	Applied *bool `json:"applied,omitempty"`
+
+	// Cell Name of the cell Controller that holds this member.
+	Cell *string `json:"cell,omitempty"`
+
+	// CellNamespace Namespace of that cell Controller.
+	CellNamespace *string `json:"cellNamespace,omitempty"`
+
+	// Role An active member holds one slot. A standby holds the folder, holds no slot, and runs no build.
+	Role *ComponentsSchemasTeamMemberRole `json:"role,omitempty"`
+
+	// Slot The slot index. Set only on an active member.
+	Slot *int32 `json:"slot,omitempty"`
+}
+
+// ComponentsSchemasTeamMemberRole An active member holds one slot. A standby holds the folder, holds no slot, and runs no build.
+type ComponentsSchemasTeamMemberRole string
+
 // ComponentsSchemasTeamNamespaceState State of a single namespace for a Team.
 type ComponentsSchemasTeamNamespaceState struct {
 	Name  string `json:"name"`
@@ -3229,6 +3276,9 @@ type ComponentsSchemasTeamPipelines struct {
 	// InterruptedRetry Whether an interrupted run retries on its own. "manual" (default) leaves the retry to a user. "automatic" retries once.
 	InterruptedRetry *ComponentsSchemasTeamPipelinesInterruptedRetry `json:"interruptedRetry,omitempty"`
 
+	// Members The number of active slots this tenant runs. Each slot holds one cell, and a job runs only on its home slot's holder. Default 1. This field is not spec.members, which lists local usernames.
+	Members *int32 `json:"members,omitempty"`
+
 	// Profile JenkinsVersionProfile the placement pass resolves a cell against.
 	Profile *string `json:"profile,omitempty"`
 
@@ -3237,6 +3287,9 @@ type ComponentsSchemasTeamPipelines struct {
 
 	// RehydrateDeadline How long the operator keeps retrying a deferred rehydration seed before it stops and reports RehydrationFailed. Default 30m, range 1m to 24h.
 	RehydrateDeadline *string `json:"rehydrateDeadline,omitempty"`
+
+	// Standby The number of warm members this tenant keeps. A standby holds the folder and no slot. It takes a slot whose holder dies. Default 0.
+	Standby *int32 `json:"standby,omitempty"`
 }
 
 // ComponentsSchemasTeamPipelinesConcurrency This tenant's job concurrency policy. "allow" (default) runs builds side by side. "cancelInProgress" cancels the running build of the same job path when a new one starts.
@@ -3261,6 +3314,9 @@ type ComponentsSchemasTeamPlacement struct {
 
 	// Generation Increases only when the bound cell changes.
 	Generation *int64 `json:"generation,omitempty"`
+
+	// Members Every member of this tenant. The scalar fields above keep describing slot 0.
+	Members *[]ComponentsSchemasTeamMember `json:"members,omitempty"`
 }
 
 // ComponentsSchemasTeamRehydration A pipelines tenant's build-record rehydration state (status.rehydration). Response-only: TeamReconciler is its only writer.

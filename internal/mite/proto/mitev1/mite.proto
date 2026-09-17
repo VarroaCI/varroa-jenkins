@@ -127,6 +127,26 @@ message DesiredStateCommand {
   // composite desired-state hash: the record set changes after every
   // build, so hashing it would force a push after every build.
   RehydrationBundle rehydration = 17;
+  // tenant_homes carries each hosted tenant's slot, role, and job home
+  // map. It is inside the composite desired-state hash: it changes only
+  // when a slot changes or a job's home changes, so hashing it costs at
+  // most one push for each such change.
+  repeated TenantHomes tenant_homes = 18;
+}
+
+// TenantHomes names one hosted tenant's slot on this cell and that
+// tenant's job home map. The plugin computes no home. It reads what the
+// operator delivers.
+message TenantHomes {
+  // @required
+  string tenant = 1;
+  // slot is the slot this cell holds for the tenant. A standby carries
+  // no meaningful slot, and role says so.
+  int32 slot = 2;
+  // role is "active" or "standby".
+  string role = 3;
+  // job_homes maps a job path to its home slot index.
+  map<string, int32> job_homes = 4;
 }
 
 // RehydrationBundle carries the build-record rehydration files for one

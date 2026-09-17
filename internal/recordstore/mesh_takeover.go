@@ -265,9 +265,16 @@ func dispatchMeshResume(ctx context.Context, pool *pgxpool.Pool, metrics *Interr
 		return LedgerAction{}, false, fmt.Errorf("move run intent owner: %w", err)
 	}
 
+	// The move also raises the lock's stored generation to the tenant's
+	// current value, so the epoch follows its holder. The guard names
+	// the dead instance, so a repeat of the move writes nothing.
 	if _, err := tx.Exec(ctx, `
-		UPDATE varroa.fleet_locks SET cell_instance = $2
-		 WHERE run_id = $1::text AND cell_instance = $3
+		UPDATE varroa.fleet_locks l SET cell_instance = $2,
+		       placement_generation = GREATEST(l.placement_generation, COALESCE((
+		           SELECT p.generation FROM varroa.tenant_placements p
+		            WHERE p.cluster = l.cluster AND p.tenant = l.tenant
+		       ), l.placement_generation))
+		 WHERE l.run_id = $1::text AND l.cell_instance = $3
 	`, c.runID, target.instance, c.cellInstance); err != nil {
 		return LedgerAction{}, false, fmt.Errorf("move fleet lock owner: %w", err)
 	}

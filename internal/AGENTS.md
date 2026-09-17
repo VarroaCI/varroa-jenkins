@@ -32,7 +32,14 @@ reading each package's entry point):
   registers: a kind that also needs a deep Kubernetes operation carries a
   second GVR variable in `internal/controller/clientset_client.go`, and a kind
   this store alone serves (`runners`, `profilecandidates`, `cellpools`) does
-  not. Tests seed `crdstore.Fake` (upsert
+  not. `ApplyStatusClears` (`registry.go`) is the one implementation of the
+  clearable-key rule: an `omitempty` status key a merge patch omits leaves a
+  stale server value, so `registry.go` names, per kind, the keys a patch must
+  carry as an explicit zero. A `NestedClear` value names such keys **inside**
+  one status object, for a writer that sends the object and clears a field of
+  it. Only `ClientsetClient.PatchObjectStatus` applies it: the `Fake` does not,
+  so a test asserts on the recorded patch or applies the helper itself. Tests
+  seed `crdstore.Fake` (upsert
   semantics; re-seed after mutating a seeded object) and assert on its
   `StatusPatches`/`MetaPatches` recorders. `ApplyOwned` is the guarded sibling
   of `Apply`: `Apply` is a full-object replace whose internal `Get` never

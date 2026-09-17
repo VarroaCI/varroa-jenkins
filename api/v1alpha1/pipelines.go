@@ -20,6 +20,19 @@ const (
 	DefaultConcurrency = "allow"
 	// DefaultCronCatchUp is spec.pipelines.cronCatchUp's default.
 	DefaultCronCatchUp = "one"
+	// DefaultPipelineMembers is spec.pipelines.members's default.
+	DefaultPipelineMembers int32 = 1
+	// DefaultPipelineStandby is spec.pipelines.standby's default.
+	DefaultPipelineStandby int32 = 0
+)
+
+// Member roles of a pipelines tenant. An active member holds one slot. A
+// standby holds the folder, holds no slot, and runs no build.
+const (
+	// TeamMemberRoleActive names a member that holds a slot.
+	TeamMemberRoleActive = "active"
+	// TeamMemberRoleStandby names a warm member that holds no slot.
+	TeamMemberRoleStandby = "standby"
 )
 
 // DefaultRehydrateDeadline is spec.pipelines.rehydrateDeadline's default.
@@ -89,4 +102,24 @@ func (p *TeamPipelinesSpec) EffectiveCronGrace() time.Duration {
 		return DefaultCronGrace().Duration
 	}
 	return p.CronGrace.Duration
+}
+
+// EffectiveMembers resolves spec.pipelines.members, the tenant's active slot
+// count. A nil spec or a nil field means the default. A value below one
+// reads as one, because slot indexes are dense from zero.
+func (p *TeamPipelinesSpec) EffectiveMembers() int32 {
+	if p == nil || p.Members == nil || *p.Members < 1 {
+		return DefaultPipelineMembers
+	}
+	return *p.Members
+}
+
+// EffectiveStandby resolves spec.pipelines.standby, the tenant's warm member
+// count. A nil spec or a nil field means the default. A negative value reads
+// as zero.
+func (p *TeamPipelinesSpec) EffectiveStandby() int32 {
+	if p == nil || p.Standby == nil || *p.Standby < 0 {
+		return DefaultPipelineStandby
+	}
+	return *p.Standby
 }

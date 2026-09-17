@@ -100,7 +100,10 @@ func evaluateInterruption(now time.Time, c runInterruptCandidate, row tenantPlac
 	case livenessConfirmedGone:
 		return ReasonCellLost, true
 	case livenessMoved:
-		if c.cell == row.cell {
+		// cell-rolled applies when the run's stored cell still holds a
+		// member of the same slot, so the pod was replaced under the
+		// tenant. tenant-moved applies otherwise.
+		if home := memberForJob(row.members, c.jobPath); c.cell == home.Cell {
 			return ReasonCellRolled, true
 		}
 		return ReasonTenantMoved, true

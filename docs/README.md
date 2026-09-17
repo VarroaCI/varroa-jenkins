@@ -77,6 +77,7 @@ Commands use `kubectl` and `helm`. Replace values in `<angle-brackets>` before r
 - [Cell views](operations/cell-views.md)
 - [Cell loss](operations/cell-loss.md)
 - [Pipeline mesh](operations/pipeline-mesh.md)
+- [Tenant slots](operations/tenant-slots.md)
 - [Agent Services](operations/agents.md)
 - [External runners](operations/runners.md)
 - [Brood operations](operations/brood-operations.md)

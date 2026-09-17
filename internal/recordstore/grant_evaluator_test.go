@@ -21,7 +21,8 @@ func seedGrantPlacement(t *testing.T, db *sql.DB, cluster, tenant, namespace, ce
 
 // TestCheckPlacementOrders covers the placement-fencing capability's five
 // orders across the four call-site paths, including the path distinction
-// on order 1.
+// on order 1. The member order runs before the generation order, and the
+// generation order answers the retryable NOT_READY.
 func TestCheckPlacementOrders(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	evaluator := NewGrantEvaluator(pool)
@@ -97,27 +98,27 @@ func TestCheckPlacementOrders(t *testing.T) {
 			wantAllow: true,
 		},
 		{
-			name: "order 3: the claim path vetoes a stale generation",
+			name: "order 4: the claim path holds a stale generation",
 			in: func() PlacementInput {
 				p := baseline(GrantPathClaim)
 				p.PlacementGeneration = 2
 				return p
 			}(),
 			wantAllow: false,
-			wantCode:  ReasonFenced,
+			wantCode:  ReasonNotReady,
 		},
 		{
-			name: "order 3: the lock path vetoes a stale generation",
+			name: "order 4: the lock path holds a stale generation",
 			in: func() PlacementInput {
 				p := baseline(GrantPathLock)
 				p.PlacementGeneration = 2
 				return p
 			}(),
 			wantAllow: false,
-			wantCode:  ReasonFenced,
+			wantCode:  ReasonNotReady,
 		},
 		{
-			name: "order 4: the request path vetoes a mismatched cell",
+			name: "order 3: the request path vetoes a cell of no member",
 			in: func() PlacementInput {
 				p := baseline(GrantPathRequest)
 				p.Cell = "cell-b"
@@ -127,7 +128,7 @@ func TestCheckPlacementOrders(t *testing.T) {
 			wantCode:  ReasonFenced,
 		},
 		{
-			name: "order 4: the claim path vetoes a mismatched namespace",
+			name: "order 3: the claim path vetoes a namespace of no member",
 			in: func() PlacementInput {
 				p := baseline(GrantPathClaim)
 				p.Namespace = "ns-b"

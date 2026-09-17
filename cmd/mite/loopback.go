@@ -335,6 +335,7 @@ func (a *Agent) startLoopback(ctx context.Context) error {
 	mux.HandleFunc("/v1/claim", a.handleClaim)
 	mux.HandleFunc("/v1/log", a.handleLog)
 	mux.HandleFunc("/v1/run-state", a.handleRunState)
+	mux.HandleFunc("/v1/homes", a.handleHomes)
 	mux.HandleFunc("/v1/cross-tenant/build", a.crossTenantHandler("build"))
 	mux.HandleFunc("/v1/cross-tenant/status", a.crossTenantHandler("status"))
 	mux.HandleFunc("/v1/cross-tenant/artifact", a.crossTenantHandler("artifact"))

@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -459,6 +460,16 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 			// whole tenant while it is not yet applied (see
 			// review-log.md's "task 5.7a pending_jobs" entry).
 			PendingJobs: rehydrate.PendingJobPaths(cellRehydrationEntryDeferred(status, cellsByKey, team.Name), nil),
+			// MemberSeed reads each member cell's own rehydration entry,
+			// so one member's deferred job never holds another member's
+			// build.
+			MemberSeed: memberSeedReader(cellsByKey, team.Name),
+			// DepartedPods carries the pod reading of every member cell
+			// the tenant still names that the candidate list no longer
+			// holds. The pass reports such a member confirmed gone only
+			// on a confirmed absence, and that reading is what arms the
+			// takeover of the member's runs.
+			DepartedPods: r.departedMemberPods(ctx, status, cellsByKey),
 		}
 		outcome, placeErr := cells.Place(ctx, placeInputs, team, status)
 		if placeErr != nil {
@@ -489,7 +500,10 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 		// cell, this pass writes the fence, and the conditional delete
 		// still succeeds over a tenant that is arriving. A failed claim
 		// therefore ends the tick with no fence written.
-		if claim := outcome.CellClaim; claim != nil {
+		// Every member cell takes a claim, not slot 0's alone: a drain
+		// that has already read the fence set finds a claim on each cell
+		// this pass is binding.
+		for _, claim := range outcome.CellClaims {
 			if err := cells.WriteCellClaim(ctx, r.store, claim.Name, claim.Namespace, claim.Tenant, time.Now()); err != nil {
 				r.logger.Error("failed to claim the cell", "team", team.Name,
 					"cell", claim.Namespace+"/"+claim.Name, "error", err)
@@ -508,24 +522,25 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 		// idempotent (a cell patch, a finalizer patch, the pipelines
 		// RoleBinding/agent-identity sync) or a best-effort side effect
 		// (the activity events).
-		claim := outcome.CellClaim
-		claimSettled := false
+		settled := map[string]bool{}
 		for _, cp := range outcome.CellPatches {
 			cellStatus := &v1alpha1.CellStatus{Tenants: cp.Tenants}
 			if err := r.client.PatchControllerCellStatus(ctx, cp.Name, cp.Namespace, cellStatus); err != nil {
 				r.logger.Error("failed to patch cell tenant list", "cell", cp.Namespace+"/"+cp.Name, "error", err)
 				continue
 			}
-			if claim != nil && cp.Name == claim.Name && cp.Namespace == claim.Namespace {
-				claimSettled = true
-			}
+			settled[cp.Namespace+"/"+cp.Name] = true
 		}
-		if claim != nil && claimSettled {
-			// Only a tenant patch that succeeded retires the claim: the
-			// tenant list is the durable record the claim stands in for. A
-			// refused patch keeps the claim, and the next tick writes it
-			// again. A failed release costs one claim window of drain
-			// protection on a cell the drain must skip anyway.
+		for _, claim := range outcome.CellClaims {
+			if !settled[claim.Namespace+"/"+claim.Name] {
+				continue
+			}
+			// Only a tenant patch that succeeded retires that cell's
+			// claim: the tenant list is the durable record the claim
+			// stands in for. A refused patch keeps the claim, and the
+			// next tick writes it again. A failed release costs one claim
+			// window of drain protection on a cell the drain must skip
+			// anyway.
 			if err := cells.ReleaseCellClaim(ctx, r.store, claim.Name, claim.Namespace, claim.Tenant, time.Now()); err != nil {
 				r.logger.Error("failed to retire the cell claim", "team", team.Name,
 					"cell", claim.Namespace+"/"+claim.Name, "error", err)
@@ -639,6 +654,103 @@ func cellRehydrationEntryFor(status *v1alpha1.TeamStatus, cellsByKey map[string]
 		}
 	}
 	return nil
+}
+
+// memberSeedReader answers one member cell's own seed state for teamName,
+// read from that cell's status.cell.rehydration entry. A cell with no
+// entry, or one whose bundle is not applied, answers an empty instance,
+// which holds every build on that member until its seed lands.
+func memberSeedReader(cellsByKey map[string]*v1alpha1.Controller, teamName string) func(string, string) (string, []string) {
+	return func(namespace, cellName string) (string, []string) {
+		cell := cellsByKey[teamCellKey(namespace, cellName)]
+		if cell == nil || cell.Status.Cell == nil {
+			return "", nil
+		}
+		for i := range cell.Status.Cell.Rehydration {
+			entry := &cell.Status.Cell.Rehydration[i]
+			if entry.Tenant != teamName {
+				continue
+			}
+			if !entry.Applied {
+				return "", entry.Deferred
+			}
+			return entry.CellInstance, entry.Deferred
+		}
+		return "", nil
+	}
+}
+
+// departedMemberPods reads the Jenkins pod of every member cell the tenant
+// still names that the candidate list no longer holds, and answers whether
+// each of those pods is gone.
+//
+// The placement pass performs no Kubernetes read, so the reading is taken
+// here. It is the evidence the pass needs to report such a member confirmed
+// gone: a cell delete removes the Controller, its StatefulSet, and its pod
+// within seconds, and the pass alone can only see that the cell left the
+// candidate list, which a scoped-RBAC change or a list error also produces.
+//
+// The read count is bounded by the tenant's member count, and only a
+// departed member costs a read.
+func (r *TeamReconciler) departedMemberPods(ctx context.Context, status *v1alpha1.TeamStatus,
+	cellsByKey map[string]*v1alpha1.Controller) map[string]bool {
+	if status.Placement == nil {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, ref := range memberCellRefs(status.Placement) {
+		key := teamCellKey(ref.namespace, ref.name)
+		if _, live := cellsByKey[key]; live {
+			continue
+		}
+		if _, read := out[key]; read {
+			continue
+		}
+		out[key] = r.cellPodGone(ctx, ref.namespace, ref.name)
+	}
+	return out
+}
+
+// memberCellRefs lists the cells the tenant's members hold. A placement
+// with an empty member list describes one slot-0 member on its scalar
+// cell.
+func memberCellRefs(placement *v1alpha1.TeamPlacementStatus) []struct{ namespace, name string } {
+	var out []struct{ namespace, name string }
+	add := func(namespace, name string) {
+		if name == "" {
+			return
+		}
+		out = append(out, struct{ namespace, name string }{namespace, name})
+	}
+	add(placement.CellNamespace, placement.Cell)
+	for _, m := range placement.Members {
+		add(m.CellNamespace, m.Cell)
+	}
+	return out
+}
+
+// cellPodGone reports whether one cell's Jenkins pod is confirmed absent.
+// It applies updateCellInstance's own rule: no pod, or a pod in phase
+// Failed or Succeeded, is an absence, and a running pod is not.
+//
+// A deleted Controller answers NotFound, which is the strongest absence:
+// no Controller, no StatefulSet, and therefore no pod. Every other read
+// error answers false, so a transient API failure never confirms a member
+// gone.
+func (r *TeamReconciler) cellPodGone(ctx context.Context, namespace, name string) bool {
+	pod, err := r.client.GetControllerPod(ctx, namespace, name)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return true
+		}
+		r.logger.Warn("read a departed member cell's pod",
+			"cell", teamCellKey(namespace, name), "error", err)
+		return false
+	}
+	if pod == nil {
+		return true
+	}
+	return pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded
 }
 
 // cellRehydrationEntryDeferred answers teamName's own cell entry's
@@ -1134,7 +1246,7 @@ func (r *TeamReconciler) syncPipelinesChildren(ctx context.Context, team *v1alph
 		if agentNamespace != "" {
 			r.ensureTenantAgentIdentity(ctx, team.Name, agentNamespace)
 		}
-		serviceErr = r.upsertTenantAgentService(ctx, team.Name, status.Placement, cellsByKey, tenantSlotZero)
+		serviceErr = r.reconcileTenantAgentServices(ctx, team.Name, team.Status.Placement, status, cellsByKey)
 	} else {
 		if err := crdstore.Delete[v1alpha1.JenkinsRoleBinding](ctx, r.store, bindingName, ""); err != nil {
 			r.logger.Warn("failed to delete pipelines JenkinsRoleBinding", "team", team.Name, "error", err)
@@ -1160,9 +1272,89 @@ func (r *TeamReconciler) syncPipelinesChildren(ctx context.Context, team *v1alph
 	return serviceErr
 }
 
-// tenantSlotZero is the one slot this release writes. A later change loops
-// over the slots a tenant holds, through this same code path.
+// tenantSlotZero is the slot the scalar placement fields describe. A
+// tenant with no member list holds this slot alone.
 const tenantSlotZero = int32(0)
+
+// maxTenantSlotSweep bounds the slot indexes a namespace drain deletes a
+// Service for. It is the CRD maximum of spec.pipelines.members, so a
+// namespace a move left loses every slot's Service whatever the tenant
+// held there.
+const maxTenantSlotSweep = int32(16)
+
+// reconcileTenantAgentServices converges one Service for each active slot
+// of the tenant, and deletes the Service of each slot a scale-down
+// removed. A standby holds no Service of its own: it takes the Service of
+// the slot it is promoted into, through the selector flip the promotion
+// performs.
+//
+// The delete set is the slots the tenant held before this tick and holds
+// no longer, so a steady tenant costs no delete call at all.
+//
+// It reports the first failure. The caller turns that into Placed=False
+// with reason AgentServiceFailed and retries on a later tick.
+func (r *TeamReconciler) reconcileTenantAgentServices(ctx context.Context, team string,
+	prior *v1alpha1.TeamPlacementStatus, status *v1alpha1.TeamStatus,
+	cellsByKey map[string]*v1alpha1.Controller) error {
+	if status.Placement == nil {
+		return nil
+	}
+	holders := activeSlotHolders(status.Placement)
+	var first error
+	for slot, holder := range holders {
+		if err := r.upsertTenantAgentService(ctx, team, holder.namespace, holder.cell, cellsByKey, slot); err != nil && first == nil {
+			first = err
+		}
+	}
+	for slot, gone := range removedSlots(prior, holders) {
+		name := tenantAgentServiceName(team, slot)
+		if err := r.client.DeleteResource(ctx, "Service", name, gone.namespace); err != nil {
+			r.logger.Warn("failed to delete a removed slot's agent Service",
+				"team", team, "service", name, "error", err)
+		}
+	}
+	return first
+}
+
+// removedSlots answers each slot the tenant held before this tick and
+// holds no longer, with the namespace its Service sits in. A scale-down
+// releases the highest slots, and each of them loses its Service.
+func removedSlots(prior *v1alpha1.TeamPlacementStatus, holders map[int32]slotHolder) map[int32]slotHolder {
+	out := map[int32]slotHolder{}
+	if prior == nil {
+		return out
+	}
+	for slot, before := range activeSlotHolders(prior) {
+		if _, held := holders[slot]; held {
+			continue
+		}
+		out[slot] = before
+	}
+	return out
+}
+
+// slotHolder names one active slot's cell.
+type slotHolder struct {
+	namespace string
+	cell      string
+}
+
+// activeSlotHolders answers each active slot's holder. A placement with an
+// empty member list answers slot 0 on its scalar cell, so a tenant the
+// pass has not written a member list for is unchanged.
+func activeSlotHolders(p *v1alpha1.TeamPlacementStatus) map[int32]slotHolder {
+	out := map[int32]slotHolder{}
+	for _, m := range p.Members {
+		if m.Role == v1alpha1.TeamMemberRoleStandby || m.Slot == nil || m.Cell == "" {
+			continue
+		}
+		out[*m.Slot] = slotHolder{namespace: m.CellNamespace, cell: m.Cell}
+	}
+	if len(out) == 0 && p.Cell != "" {
+		out[tenantSlotZero] = slotHolder{namespace: p.CellNamespace, cell: p.Cell}
+	}
+	return out
+}
 
 // setStaleAgentServiceNamespace records one more namespace the next tick
 // must clean. A namespace the list already names is not appended again, so a
@@ -1184,16 +1376,23 @@ func (r *TeamReconciler) drainStaleAgentServices(ctx context.Context, team strin
 	if len(status.StaleAgentServiceNamespaces) == 0 {
 		return nil
 	}
-	name := tenantAgentServiceName(team, tenantSlotZero)
 	var kept []string
 	var first error
 	for _, namespace := range status.StaleAgentServiceNamespaces {
-		if err := r.client.DeleteResource(ctx, "Service", name, namespace); err != nil {
-			kept = append(kept, namespace)
-			if first == nil {
-				first = fmt.Errorf("delete the agent service %q in namespace %q: %w", name, namespace, err)
+		failed := false
+		// Every slot's Service carries the same name shape, so the drain
+		// deletes each one the tenant could have left behind.
+		for slot := int32(0); slot < maxTenantSlotSweep; slot++ {
+			name := tenantAgentServiceName(team, slot)
+			if err := r.client.DeleteResource(ctx, "Service", name, namespace); err != nil {
+				failed = true
+				if first == nil {
+					first = fmt.Errorf("delete the agent service %q in namespace %q: %w", name, namespace, err)
+				}
 			}
-			continue
+		}
+		if failed {
+			kept = append(kept, namespace)
 		}
 	}
 	status.StaleAgentServiceNamespaces = kept
@@ -1204,22 +1403,23 @@ func (r *TeamReconciler) drainStaleAgentServices(ctx context.Context, team strin
 // lives in the slot holder's namespace, and its selector names that
 // holder's pod label, so an agent pod dials an endpoint that follows the
 // tenant's placement rather than a dead Jenkins JVM.
-func (r *TeamReconciler) upsertTenantAgentService(ctx context.Context, team string, placement *v1alpha1.TeamPlacementStatus, cellsByKey map[string]*v1alpha1.Controller, slot int32) error {
-	if placement == nil {
+func (r *TeamReconciler) upsertTenantAgentService(ctx context.Context, team, namespace, cell string,
+	cellsByKey map[string]*v1alpha1.Controller, slot int32) error {
+	if cell == "" {
 		return nil
 	}
 	writer, ok := r.client.(tenantServiceWriter)
 	if !ok {
 		return nil
 	}
-	holder := cellsByKey[teamCellKey(placement.CellNamespace, placement.Cell)]
+	holder := cellsByKey[teamCellKey(namespace, cell)]
 	if holder == nil {
 		// The pass holds no object for the cell, so it cannot derive the pod
 		// label. The next tick reads the cell again.
 		return nil
 	}
 	name := tenantAgentServiceName(team, slot)
-	if err := writer.CreateOrUpdateTenantService(ctx, name, placement.CellNamespace, controllerPrefix(holder)); err != nil {
+	if err := writer.CreateOrUpdateTenantService(ctx, name, namespace, controllerPrefix(holder)); err != nil {
 		r.logger.Error("failed to write the tenant agent Service", "team", team, "service", name, "error", err)
 		return fmt.Errorf("write the agent service %q: %w", name, err)
 	}
@@ -1272,6 +1472,8 @@ func NewNATSPurgeRequester(conn *bus.Conn) cells.PurgeFunc {
 			Cluster:             req.Cluster,
 			Tenant:              req.Tenant,
 			PlacementGeneration: req.OldGeneration,
+			Cell:                req.Cell,
+			CellNamespace:       req.CellNamespace,
 		})
 		if err != nil {
 			return false, fmt.Errorf("marshal tenant purge request: %w", err)

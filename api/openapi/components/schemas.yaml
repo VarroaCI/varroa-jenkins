@@ -345,6 +345,23 @@ TeamPipelines:
       description: >-
         How long the backstop waits past a missed cron occurrence before
         it fires. Default 5m, range 1m to 60m.
+    members:
+      type: integer
+      format: int32
+      minimum: 1
+      maximum: 16
+      description: >-
+        The number of active slots this tenant runs. Each slot holds one
+        cell, and a job runs only on its home slot's holder. Default 1.
+        This field is not spec.members, which lists local usernames.
+    standby:
+      type: integer
+      format: int32
+      minimum: 0
+      maximum: 8
+      description: >-
+        The number of warm members this tenant keeps. A standby holds the
+        folder and no slot. It takes a slot whose holder dies. Default 0.
     exports:
       type: array
       items:
@@ -445,6 +462,40 @@ TeamPlacement:
       type: integer
       format: int64
       description: Increases only when the bound cell changes.
+    members:
+      type: array
+      items:
+        $ref: '#/TeamMember'
+      description: >-
+        Every member of this tenant. The scalar fields above keep
+        describing slot 0.
+  additionalProperties: false
+
+TeamMember:
+  type: object
+  description: >-
+    One member of a pipelines tenant (status.placement.members).
+    Response-only: the placement pass is its only writer.
+  properties:
+    cell:
+      type: string
+      description: Name of the cell Controller that holds this member.
+    cellNamespace:
+      type: string
+      description: Namespace of that cell Controller.
+    role:
+      type: string
+      enum: [active, standby]
+      description: >-
+        An active member holds one slot. A standby holds the folder, holds
+        no slot, and runs no build.
+    slot:
+      type: integer
+      format: int32
+      description: The slot index. Set only on an active member.
+    applied:
+      type: boolean
+      description: True when the member's cell reports this tenant applied.
   additionalProperties: false
 
 TeamEntry:
@@ -5129,11 +5180,17 @@ CellUsageCounts:
 
 CellTenantUsage:
   type: object
-  description: One tenant on a cell, with that tenant's four counts.
+  description: One tenant on a cell, with that tenant's role and four counts.
   required: [tenant, runningNow, runsLast24h, failedLast24h, jobs]
   properties:
     tenant:
       type: string
+    role:
+      type: string
+      description: >-
+        That tenant's role on this cell: "slot <n>" for an active member
+        and "standby" for a standby. A standby holds the tenant folder and
+        runs no build, so its running count is zero.
     runningNow:
       type: integer
       format: int64
@@ -5262,4 +5319,45 @@ TeamCell:
       description: >-
         True when the caller also holds the controller read grant on the
         cell. The hint gates no other field of this body.
+    members:
+      type: array
+      items:
+        $ref: '#/TeamCellMember'
+      description: >-
+        One entry for each member of the tenant, ordered by role: active
+        members by ascending slot first, then standbys by cell name. It is
+        absent for unplaced and notCellHosted. Every other field of this
+        body describes the tenant's slot 0.
+  additionalProperties: false
+
+TeamCellMember:
+  type: object
+  description: >-
+    One member of the tenant, with that member's own four load counts. The
+    counts apply the same grant narrowing the top-level counts apply. No
+    entry names another tenant.
+  required: [cell, namespace, cluster, role, runningNow, runsLast24h, failedLast24h, jobs]
+  properties:
+    cell:
+      type: string
+    namespace:
+      type: string
+    cluster:
+      type: string
+    role:
+      type: string
+      description: >-
+        "slot <n>" for an active member and "standby" for a standby.
+    runningNow:
+      type: integer
+      format: int64
+    runsLast24h:
+      type: integer
+      format: int64
+    failedLast24h:
+      type: integer
+      format: int64
+    jobs:
+      type: integer
+      format: int64
   additionalProperties: false

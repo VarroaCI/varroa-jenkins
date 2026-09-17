@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -889,6 +890,25 @@ type teamCellJSON struct {
 	Jobs             *int64 `json:"jobs,omitempty"`
 	OtherTenantCount *int32 `json:"otherTenantCount,omitempty"`
 	CanOpenCell      bool   `json:"canOpenCell"`
+	// Members carries one entry for each member of the tenant, ordered
+	// by role: active members by ascending slot first, then standbys by
+	// cell name. It is absent for unplaced and notCellHosted. Every
+	// top-level field above keeps describing slot 0.
+	Members []teamCellMemberJSON `json:"members,omitempty"`
+}
+
+// teamCellMemberJSON is one member of the tenant on the team cell read.
+// Each entry carries that member's own four load counts, narrowed by the
+// caller's own grant exactly as the top-level counts are.
+type teamCellMemberJSON struct {
+	Cell          string `json:"cell"`
+	Namespace     string `json:"namespace"`
+	Cluster       string `json:"cluster"`
+	Role          string `json:"role"`
+	RunningNow    int64  `json:"runningNow"`
+	RunsLast24h   int64  `json:"runsLast24h"`
+	FailedLast24h int64  `json:"failedLast24h"`
+	Jobs          int64  `json:"jobs"`
 }
 
 // placedConditionReason returns the Team's Placed condition reason, or
@@ -949,7 +969,7 @@ func (s *Server) handleGetTeamCell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, serr := s.buildTeamCell(ctx, claims, ref, reason)
+	body, serr := s.buildTeamCell(ctx, claims, ref, reason, team)
 	if serr != nil {
 		s.writeServiceError(w, serr)
 		return
@@ -961,7 +981,8 @@ func (s *Server) handleGetTeamCell(w http.ResponseWriter, r *http.Request) {
 // reads status.cell.appliedTenants. It reads no status.cell.rehydration:
 // the cell-controllers capability keeps that key internal to the
 // operator.
-func (s *Server) buildTeamCell(ctx context.Context, claims *auth.Claims, ref TenantRef, reason string) (teamCellJSON, *ServiceError) {
+func (s *Server) buildTeamCell(ctx context.Context, claims *auth.Claims, ref TenantRef, reason string,
+	team *v1alpha1.Team) (teamCellJSON, *ServiceError) {
 	cr, err := s.cellController(ctx, ref.Cluster, ref.Namespace, ref.Controller)
 	if err != nil {
 		s.deps.Logger.Error("read team cell", "team", ref.Team, "error", err)
@@ -1005,7 +1026,91 @@ func (s *Server) buildTeamCell(ctx context.Context, claims *auth.Claims, ref Ten
 	if s.deps.Authorizer != nil {
 		body.CanOpenCell = s.deps.Authorizer.CanReadController(claims, ref.Namespace, ref.Controller)
 	}
+	body.Members = s.teamCellMembers(ctx, claims, ref, team)
 	return body, nil
+}
+
+// teamCellMembers answers one entry for each member of the tenant,
+// ordered by role: active members by ascending slot first, then standbys
+// by cell name. Each entry carries that member's own four load counts,
+// narrowed by the caller's own grant.
+//
+// The body names no other tenant. A tenant with no stored member list
+// answers one entry for slot 0, so a single-member tenant reads one
+// member and the top-level fields describe that same cell.
+func (s *Server) teamCellMembers(ctx context.Context, claims *auth.Claims, ref TenantRef,
+	team *v1alpha1.Team) []teamCellMemberJSON {
+	members := orderedTeamMembers(team, ref)
+	out := make([]teamCellMemberJSON, 0, len(members))
+	for _, m := range members {
+		entry := teamCellMemberJSON{
+			Cell: m.Cell, Namespace: m.CellNamespace, Cluster: ref.Cluster,
+			Role: renderTeamMemberRole(m),
+		}
+		memberRef := ref
+		memberRef.Namespace = m.CellNamespace
+		memberRef.Controller = m.Cell
+		rows, err := s.deps.RecordStore.CellTenantUsage(ctx, ref.Cluster, m.CellNamespace, m.Cell, ref.Tenant)
+		if err != nil {
+			s.deps.Logger.Warn("read a team cell member's usage",
+				"team", ref.Team, "cell", m.Cell, "error", err)
+		} else {
+			counts := s.admittedJobCounts(claims, memberRef, rows)
+			entry.RunningNow = counts.RunningNow
+			entry.RunsLast24h = counts.RunsLast24h
+			entry.FailedLast24h = counts.FailedLast24h
+			entry.Jobs = counts.Jobs
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// orderedTeamMembers answers the tenant's members in the response order:
+// active members by ascending slot, then standbys by cell name. A tenant
+// with no stored member list answers one synthetic slot-0 entry built
+// from the scalar placement.
+func orderedTeamMembers(team *v1alpha1.Team, ref TenantRef) []v1alpha1.TeamMemberStatus {
+	var members []v1alpha1.TeamMemberStatus
+	if team != nil && team.Status.Placement != nil {
+		members = append(members, team.Status.Placement.Members...)
+	}
+	if len(members) == 0 {
+		slot := int32(0)
+		members = []v1alpha1.TeamMemberStatus{{
+			Cell: ref.Controller, CellNamespace: ref.Namespace,
+			Role: v1alpha1.TeamMemberRoleActive, Slot: &slot,
+		}}
+	}
+	sort.SliceStable(members, func(i, j int) bool {
+		si, sj := teamMemberSortKey(members[i]), teamMemberSortKey(members[j])
+		if si != sj {
+			return si < sj
+		}
+		return members[i].Cell < members[j].Cell
+	})
+	return members
+}
+
+// teamMemberSortKey answers an active member's slot index, and a value
+// above every slot for a standby, so a standby sorts last.
+func teamMemberSortKey(m v1alpha1.TeamMemberStatus) int32 {
+	if m.Role == v1alpha1.TeamMemberRoleStandby || m.Slot == nil {
+		return 1 << 20
+	}
+	return *m.Slot
+}
+
+// renderTeamMemberRole answers the rendered role: "slot <n>" for an
+// active member and "standby" for a standby.
+func renderTeamMemberRole(m v1alpha1.TeamMemberStatus) string {
+	if m.Role == v1alpha1.TeamMemberRoleStandby || m.Slot == nil {
+		if m.Role == v1alpha1.TeamMemberRoleStandby {
+			return v1alpha1.TeamMemberRoleStandby
+		}
+		return "slot 0"
+	}
+	return fmt.Sprintf("slot %d", *m.Slot)
 }
 
 // admittedJobCounts sums the counts of the jobs this caller may read.

@@ -6,12 +6,10 @@ package recordstore
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
@@ -110,11 +108,6 @@ func RefireLostIntents(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn,
 	if !exists {
 		return 0, nil
 	}
-	placement, err := readRefirePlacement(ctx, pool, cluster, tenant)
-	if err != nil {
-		return 0, err
-	}
-
 	published := 0
 	for _, c := range candidates {
 		// Rule 1: only a pod-read confirmation re-fires. A stream loss
@@ -127,12 +120,15 @@ func RefireLostIntents(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn,
 			metrics.addRefired(ctx, refireOutcomeSkipped, refireReasonParams)
 			continue
 		}
-		// Rule 3: the tenant must hold a live, rehydrated placement. The
+		// Rule 3: the job's home slot must hold a live, rehydrated
+		// holder. The action must name that holder, because the
+		// intent's own stored cell is the dead one. The
 		// operator clears its stored cell instance at the moment of the
 		// confirmation, and a replacement pod reports its UID well
 		// before its mite holds a Jenkins token. This rule therefore
 		// defers the re-fire twice over. It never drops one: refired_at
 		// stays null and a later round retries.
+		placement := refirePlacementForJob(row.members, c.jobPath)
 		if !placement.ready() {
 			reason := refireReasonNoPlace
 			if placement.cell != "" && placement.cellInstance != "" {
@@ -251,23 +247,18 @@ func selectRefireCandidates(ctx context.Context, pool *pgxpool.Pool, cluster, te
 	return out, nil
 }
 
-// readRefirePlacement reads cluster/tenant's current placement identity.
-// tenantPlacementLivenessRow carries no namespace, and the action needs
-// one, so the re-fire runs its own read. A missing row answers a zero
-// value, which rule 3 then defers on.
-func readRefirePlacement(ctx context.Context, pool *pgxpool.Pool, cluster, tenant string) (refirePlacement, error) {
-	var p refirePlacement
-	err := pool.QueryRow(ctx, `
-		SELECT namespace, cell, cell_instance, rehydrated_instance FROM varroa.tenant_placements
-		WHERE cluster = $1 AND tenant = $2
-	`, cluster, tenant).Scan(&p.namespace, &p.cell, &p.cellInstance, &p.rehydratedInstance)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		return refirePlacement{}, nil
-	case err != nil:
-		return refirePlacement{}, fmt.Errorf("read placement for re-fire of %s/%s: %w", cluster, tenant, err)
+// refirePlacementForJob answers the identity of the member that holds
+// jobPath's home slot. The action names that holder, and never slot 0's
+// cell for a job homed on another slot. A slot with no bound member
+// answers a zero value, which rule 3 then defers on.
+func refirePlacementForJob(row placementMembers, jobPath string) refirePlacement {
+	home := memberForJob(row, jobPath)
+	return refirePlacement{
+		namespace:          home.Namespace,
+		cell:               home.Cell,
+		cellInstance:       home.Instance,
+		rehydratedInstance: home.RehydratedInstance,
 	}
-	return p, nil
 }
 
 // clearIntentRefired rolls the marker back after a failed publish, so a

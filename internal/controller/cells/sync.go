@@ -84,6 +84,71 @@ type DeadInstance struct {
 	ConfirmedGoneAt *time.Time
 }
 
+// AnnounceMember is one member of a pipelines tenant an AnnounceRequest
+// carries. The member set is announced as one list, so the recorder never
+// observes a half-applied change. Slot 0's entry repeats the request's
+// scalar fields.
+type AnnounceMember struct {
+	Cell      string
+	Namespace string
+	// Role is v1alpha1.TeamMemberRoleActive or TeamMemberRoleStandby.
+	Role string
+	// Slot is set only on an active member.
+	Slot *int32
+	// Instance is the cell pod's unique identifier, empty when no pod
+	// runs.
+	Instance string
+	// RehydratedInstance and PendingJobs are this member's own seed state.
+	RehydratedInstance string
+	PendingJobs        []string
+	// AppliedAt is when this member's cell first reported the tenant
+	// applied. The promotion choice reads it on a later tick.
+	AppliedAt *time.Time
+	// LastSeenAt is this member's own newest mite-presence reading. A
+	// later tick reports it as the dead instance's LastSeenAt, so each
+	// member's window rests on its own clock and not on slot 0's.
+	//
+	// It never crosses the wire: dead_instances carries the value the
+	// recorder needs, and the member entry carries none.
+	LastSeenAt *time.Time
+}
+
+// Equal reports whether two member entries announce the same member.
+//
+// It ignores LastSeenAt on purpose. That value moves with every mite
+// heartbeat, so comparing it would make every tick due for a fresh
+// announcement.
+func (m AnnounceMember) Equal(other AnnounceMember) bool {
+	if m.Cell != other.Cell || m.Namespace != other.Namespace || m.Role != other.Role ||
+		m.Instance != other.Instance || m.RehydratedInstance != other.RehydratedInstance {
+		return false
+	}
+	if (m.Slot == nil) != (other.Slot == nil) {
+		return false
+	}
+	if m.Slot != nil && *m.Slot != *other.Slot {
+		return false
+	}
+	if (m.AppliedAt == nil) != (other.AppliedAt == nil) {
+		return false
+	}
+	return stringSlicesEqual(m.PendingJobs, other.PendingJobs)
+}
+
+// membersEqual reports whether two announced member lists hold the same
+// members in the same order.
+func membersEqual(a, b []AnnounceMember) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !a[i].Equal(b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 // AnnounceRequest is one tenant's placement announcement (design D6, kind
 // "announce"). The caller sends it immediately before a write that raises
 // Team.status.placement.generation, at the same generation when the cell
@@ -103,6 +168,9 @@ type AnnounceRequest struct {
 	CellAliveAt        *time.Time
 	CellLastSeenAt     *time.Time
 	DeadInstances      []DeadInstance
+	// Members carries the whole member list of the tenant. Slot 0's entry
+	// repeats the scalar fields above.
+	Members []AnnounceMember
 }
 
 // AnnounceResult is the "announce" reply (design D6).
@@ -180,4 +248,39 @@ type SyncCache struct {
 	// instance's LastSeenAt when a later tick finds that instance gone.
 	CellLastSeenAt *time.Time
 	At             time.Time
+	// Members is the member list the last announcement carried. The
+	// member triggers compare against it, and the promotion choice reads
+	// each member's applied time from it.
+	Members []AnnounceMember
 }
+
+// HomesRequest asks for one tenant's member list and its job home map
+// (design D9, kind "homes"). The recorder is the map's only owner.
+type HomesRequest struct {
+	Cluster string
+	Tenant  string
+}
+
+// HomesMember is one member of the tenant a HomesResult carries.
+type HomesMember struct {
+	Cell      string
+	Namespace string
+	// Role is v1alpha1.TeamMemberRoleActive or TeamMemberRoleStandby.
+	Role string
+	// Slot is set only on an active member.
+	Slot *int32
+}
+
+// HomesResult is the "homes" reply: the tenant's member list and its
+// job-path to slot map.
+type HomesResult struct {
+	Members  []HomesMember
+	JobHomes map[string]int32
+}
+
+// HomesFunc sends one HomesRequest and reports the reply. The caller
+// wires the real NATS request-reply call; a test injects a fake.
+//
+// A failed call leaves the previous map in place for that tick. A stale
+// map costs at most one refused claim, which the claim fence corrects.
+type HomesFunc func(ctx context.Context, req HomesRequest) (HomesResult, error)

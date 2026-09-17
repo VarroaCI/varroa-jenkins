@@ -198,6 +198,16 @@ type Reconciler struct {
 	// every cell, which is visible (the Rehydrated condition stays
 	// RehydrationPending) rather than a panic.
 	recordsFunc cells.RecordsFunc
+	// homesFunc sends the tenant.sync "homes" request: one tenant's
+	// member list and its job home map. A nil func leaves tenant_homes
+	// empty on every desired state, which costs at most one refused
+	// claim the fence corrects.
+	//
+	// homesCache holds the last answer for each cell key and tenant, so a
+	// failed call keeps the previous map for that tick.
+	homesFunc  cells.HomesFunc
+	homesMu    sync.Mutex
+	homesCache map[string]cells.HomesResult
 	// buildJobSeed renders one job's rehydration seed (design D4,
 	// tasks 5.7/5.8). Production wires rehydrate.BuildJobSeed; a test
 	// injects a fake that fails for a chosen job path, to prove a
@@ -301,6 +311,12 @@ func (r *Reconciler) SetSyncAnnouncer(fn cells.Announcer) {
 // fake.
 func (r *Reconciler) SetRecordsFunc(fn cells.RecordsFunc) {
 	r.recordsFunc = fn
+}
+
+// SetHomesFunc injects the tenant.sync "homes" requester. Production
+// wires NewNATSSyncHomesRequester(conn); a test injects a fake.
+func (r *Reconciler) SetHomesFunc(fn cells.HomesFunc) {
+	r.homesFunc = fn
 }
 
 // SetBuildJobSeedFunc injects the per-job rehydration seed renderer.
@@ -3646,6 +3662,10 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		if buildErr != nil {
 			return nil, "", buildErr
 		}
+		// tenant_homes is inside the composite hash, so it is stamped
+		// before the hash is computed. A home change therefore pushes a
+		// new desired state.
+		r.attachTenantHomes(ctx, cr, r.listPlacedTeams(ctx, cr), d)
 		h := computeDesiredStateHash(d)
 		d.DesiredStateHash = h
 		span.SetAttributes(attribute.String("hash", h))
@@ -5889,6 +5909,37 @@ func computeDesiredStateHash(cmd *mitev1.DesiredStateCommand) string {
 	h.Write([]byte(jcascHash))
 	h.Write([]byte(rbacHash))
 	h.Write([]byte(itemsHash))
+	// tenant_homes is inside the hash. It changes only when a slot
+	// changes or a job's home changes, so it costs at most one push for
+	// each such change. The rehydration bundle stays outside for its own
+	// reason: it changes after every build.
+	h.Write([]byte(tenantHomesHash(cmd.TenantHomes)))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// tenantHomesHash answers a stable hash of a desired state's tenant home
+// entries. The entries and each map are sorted first, so two assemblies
+// of the same state answer the same hash.
+func tenantHomesHash(homes []*mitev1.TenantHomes) string {
+	if len(homes) == 0 {
+		return ""
+	}
+	sorted := make([]*mitev1.TenantHomes, len(homes))
+	copy(sorted, homes)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Tenant < sorted[j].Tenant })
+
+	h := sha256.New()
+	for _, entry := range sorted {
+		fmt.Fprintf(h, "%s\x00%d\x00%s\x00", entry.Tenant, entry.Slot, entry.Role)
+		paths := make([]string, 0, len(entry.JobHomes))
+		for path := range entry.JobHomes {
+			paths = append(paths, path)
+		}
+		sort.Strings(paths)
+		for _, path := range paths {
+			fmt.Fprintf(h, "%s\x00%d\x00", path, entry.JobHomes[path])
+		}
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 

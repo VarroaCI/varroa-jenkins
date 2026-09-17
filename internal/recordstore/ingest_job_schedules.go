@@ -81,7 +81,23 @@ func applyJobSchedulesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, pay
 		return ApplyResult{ScheduleStale: true}, nil
 	}
 
+	// homeByTenant caches one placement read for each tenant the envelope
+	// names, so a cell hosting many tenants runs one read for each.
+	homeByTenant := map[string]placementMembers{}
+
 	for _, row := range payload.Rows {
+		home, known, err := jobScheduleHomeCell(ctx, tx, env.Cluster, row.Tenant, row.JobPath, homeByTenant)
+		if err != nil {
+			return ApplyResult{}, err
+		}
+		if known && home != env.Cell {
+			// Only a job's home slot holder owns that job's row. A
+			// standby polls SCM and fires cron, so its export would
+			// overwrite the row's cell and the backstop would then fire
+			// the job on a cell that must not run it. The envelope does
+			// not fail: its other rows can be valid.
+			continue
+		}
 		fireTimes, err := parseJobScheduleFireTimes(row.NextFireTimes)
 		if err != nil {
 			return ApplyResult{}, fmt.Errorf("%w: decode next_fire_times: %v", ErrMalformedEnvelope, err)
@@ -157,4 +173,32 @@ func parseJobScheduleFireTimes(values []string) ([]time.Time, error) {
 		out = append(out, t.UTC())
 	}
 	return out, nil
+}
+
+// jobScheduleHomeCell answers the cell that holds jobPath's home slot
+// for tenant, and whether the tenant holds a placement row at all. A
+// tenant with no row is unknown, and the caller then stores every row it
+// exports, which is the behaviour before slots existed.
+//
+// The cache holds one decoded placement for each tenant of the envelope,
+// so a cell hosting many tenants runs one read for each.
+func jobScheduleHomeCell(ctx context.Context, tx pgx.Tx, cluster, tenant, jobPath string,
+	cache map[string]placementMembers) (string, bool, error) {
+	row, cached := cache[tenant]
+	if !cached {
+		read, exists, err := readTenantPlacementMembers(ctx, tx, cluster, tenant)
+		if err != nil {
+			return "", false, err
+		}
+		if !exists {
+			cache[tenant] = placementMembers{}
+			return "", false, nil
+		}
+		cache[tenant] = read
+		row = read
+	}
+	if len(row.members) == 0 {
+		return "", false, nil
+	}
+	return memberForJob(row, jobPath).Cell, true, nil
 }

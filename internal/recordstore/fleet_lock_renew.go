@@ -12,7 +12,25 @@ import (
 
 // handleCrossTenantLockRenew implements the lock_renew kind: the same
 // CheckPlacement call and cross-prefix grant an acquire runs, then the
-// row's own stale-generation refusal, then the refresh.
+// refresh.
+//
+// The run is the renew's identity. A fleet_locks row is keyed by the
+// lock name and the run id, and a renew carries no instance of its own,
+// so the row a caller reaches is the row of the run it names. The
+// ownership move rewrites that row's cell_instance inside its own
+// transaction, which is why a run resumed on another cell still renews
+// its own lock.
+//
+// checkCrossTenantLockPlacement is the authorization gate. It refuses a
+// caller that holds no member of the tenant, so a caller outside the
+// placement never reaches the refresh below.
+//
+// The renew applies no generation test in either direction. The stored
+// generation freezes at the acquire, and a tenant's generation rises
+// whenever its bound cell set changes, so a generation test would refuse
+// a live holder after a takeover or a scale. A lower caller generation
+// only means that the caller's resolver cache is behind. The placement
+// orders run first, so a caller on no member still gets FENCED.
 func handleCrossTenantLockRenew(ctx context.Context, deps CrossTenantDeps, req CrossTenantRequest) (CrossTenantResponse, error) {
 	if veto, err := checkCrossTenantLockPlacement(ctx, deps, req); err != nil || veto != nil {
 		return derefCrossTenantResponse(veto), err
@@ -38,18 +56,19 @@ func handleCrossTenantLockRenew(ctx context.Context, deps CrossTenantDeps, req C
 		// A sweep or another acquire already deleted the expired row.
 		return CrossTenantResponse{State: FleetLockStateLost}, nil
 	}
-	if row.placementGeneration < req.PlacementGeneration {
-		// A cell cannot renew a lease it took under an older generation.
-		return CrossTenantResponse{ReasonCode: ReasonFenced,
-			Message: fmt.Sprintf("placement generation %d is stale for lock %s", row.placementGeneration, name)}, nil
-	}
-
 	lease := req.LeaseSeconds
 	if lease <= 0 {
 		lease = fleetLockDefaultLeaseSeconds
 	}
 	expiresAt := time.Now().UTC().Add(time.Duration(lease) * time.Second)
-	if err := renewFleetLockExpiry(ctx, deps.Pool, name, req.RunID, expiresAt); err != nil {
+	// A successful renew raises the stored generation to the caller's,
+	// so the epoch follows its holder and never falls behind. It never
+	// lowers the stored value.
+	generation := row.placementGeneration
+	if req.PlacementGeneration > generation {
+		generation = req.PlacementGeneration
+	}
+	if err := renewFleetLockExpiry(ctx, deps.Pool, name, req.RunID, expiresAt, generation); err != nil {
 		return CrossTenantResponse{}, err
 	}
 
@@ -69,7 +88,8 @@ func handleCrossTenantLockRelease(ctx context.Context, deps CrossTenantDeps, req
 	return CrossTenantResponse{State: FleetLockStateReleased}, nil
 }
 
-// fleetLockRow is the subset of one fleet_locks row a renew reads.
+// fleetLockRow is the subset of one fleet_locks row a renew reads. It
+// holds no cell_instance: a renew carries none to compare it against.
 type fleetLockRow struct {
 	state               string
 	fenceToken          int64
@@ -81,7 +101,8 @@ type fleetLockRow struct {
 func readFleetLockRow(ctx context.Context, pool *pgxpool.Pool, name, runID string) (fleetLockRow, bool, error) {
 	var row fleetLockRow
 	err := pool.QueryRow(ctx, `
-		SELECT state, fence_token, placement_generation FROM varroa.fleet_locks WHERE name = $1 AND run_id = $2
+		SELECT state, fence_token, placement_generation
+		FROM varroa.fleet_locks WHERE name = $1 AND run_id = $2
 	`, name, runID).Scan(&row.state, &row.fenceToken, &row.placementGeneration)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
@@ -92,11 +113,15 @@ func readFleetLockRow(ctx context.Context, pool *pgxpool.Pool, name, runID strin
 	return row, true, nil
 }
 
-// renewFleetLockExpiry refreshes name/runID's expires_at.
-func renewFleetLockExpiry(ctx context.Context, pool *pgxpool.Pool, name, runID string, expiresAt time.Time) error {
+// renewFleetLockExpiry refreshes name/runID's expires_at and raises its
+// placement_generation. It writes no other column: mutual exclusion
+// rests on the acquire path and on the fencing token.
+func renewFleetLockExpiry(ctx context.Context, pool *pgxpool.Pool, name, runID string,
+	expiresAt time.Time, generation int64) error {
 	if _, err := pool.Exec(ctx, `
-		UPDATE varroa.fleet_locks SET expires_at = $3 WHERE name = $1 AND run_id = $2
-	`, name, runID, expiresAt); err != nil {
+		UPDATE varroa.fleet_locks SET expires_at = $3, placement_generation = $4
+		WHERE name = $1 AND run_id = $2
+	`, name, runID, expiresAt, generation); err != nil {
 		return fmt.Errorf("renew fleet lock expiry: %w", err)
 	}
 	return nil

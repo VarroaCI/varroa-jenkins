@@ -31,7 +31,9 @@ func seedTenantPlacement(t *testing.T, db *sql.DB, tenant, namespace, cell strin
 
 // baselinePlacementRow answers a tenantPlacementFenceRow and a
 // ClaimRequest that agree on every field, so a test can violate exactly
-// one comparison and expect exactly one order to fire.
+// one comparison and expect exactly one order to fire. The row carries an
+// empty member list, which resolves to the synthetic slot-0 member: this
+// is the single-member tenant every canonical scenario describes.
 func baselinePlacementRow() (tenantPlacementFenceRow, ClaimRequest) {
 	req := newTestClaimRequest("key", 3)
 	row := tenantPlacementFenceRow{
@@ -41,16 +43,52 @@ func baselinePlacementRow() (tenantPlacementFenceRow, ClaimRequest) {
 		cellInstance:       "pod-a",
 		rehydratedInstance: "pod-a",
 	}
+	resolveFenceRowMembers(&row)
 	return row, req
 }
 
-// TestDecidePlacementOrders asserts D7's ten-order decision table, one
-// subtest per order, each violating exactly the comparison under test.
+// resolveFenceRowMembers rebuilds a fence row's member view from its own
+// scalar columns, the way scanTenantPlacementFenceRow does after a read.
+// A test that mutates a scalar calls it again.
+func resolveFenceRowMembers(row *tenantPlacementFenceRow) {
+	resolved, err := decodePlacementMembers(nil, nil, placementScalars{
+		cell: row.cell, namespace: row.namespace, cellInstance: row.cellInstance,
+		rehydratedInstance: row.rehydratedInstance, pendingJobs: row.pendingJobs,
+	})
+	if err != nil {
+		panic(err)
+	}
+	row.members = resolved
+}
+
+// twoSlotFenceRow answers a fence row for a tenant with two active slots
+// and one standby, plus a home map that homes testJobPath on slot 0.
+func twoSlotFenceRow(generation int64) tenantPlacementFenceRow {
+	return tenantPlacementFenceRow{
+		namespace: testNamespace, cell: "cell-a", generation: generation,
+		cellInstance: "pod-a", rehydratedInstance: "pod-a",
+		members: placementMembers{
+			members: []member{
+				{Cell: "cell-a", Namespace: testNamespace, Role: MemberRoleActive, Slot: slotPtr(0),
+					Instance: "pod-a", RehydratedInstance: "pod-a"},
+				{Cell: "cell-b", Namespace: testNamespace, Role: MemberRoleActive, Slot: slotPtr(1),
+					Instance: "pod-b", RehydratedInstance: "pod-b"},
+				{Cell: "cell-c", Namespace: testNamespace, Role: MemberRoleStandby,
+					Instance: "pod-c", RehydratedInstance: "pod-c"},
+			},
+			jobHomes: map[string]int32{testJobPath: 0},
+		},
+	}
+}
+
+// TestDecidePlacementOrders asserts design D5's twelve-order decision
+// table, one subtest per order, each violating exactly the comparison
+// under test.
 func TestDecidePlacementOrders(t *testing.T) {
 	tests := []struct {
 		name       string
 		exists     bool
-		mutateRow  func(*tenantPlacementFenceRow)
+		row        func() tenantPlacementFenceRow
 		mutateReq  func(*ClaimRequest)
 		wantAllow  bool
 		wantReason string
@@ -63,58 +101,96 @@ func TestDecidePlacementOrders(t *testing.T) {
 			wantMsg:    "no placement row for tenant acme",
 		},
 		{
-			name:   "order 2: request generation below stored",
+			name:   "order 2: no member in the request namespace",
 			exists: true,
-			mutateRow: func(r *tenantPlacementFenceRow) {
-				r.generation = 5
-			},
-			mutateReq: func(req *ClaimRequest) {
-				req.PlacementGeneration = 3
-			},
-			wantReason: ReasonFenced,
-			wantMsg:    "placement generation 3 is stale for tenant acme",
-		},
-		{
-			name:   "order 3: request generation above stored",
-			exists: true,
-			mutateRow: func(r *tenantPlacementFenceRow) {
-				r.generation = 1
-			},
-			mutateReq: func(req *ClaimRequest) {
-				req.PlacementGeneration = 3
-			},
-			wantReason: ReasonFenced,
-			wantMsg:    "placement generation 3 is stale for tenant acme",
-		},
-		{
-			name:   "order 4: namespace differs",
-			exists: true,
-			mutateRow: func(r *tenantPlacementFenceRow) {
-				r.namespace = "other-ns"
+			row: func() tenantPlacementFenceRow {
+				row, _ := baselinePlacementRow()
+				row.namespace = "other-ns"
+				resolveFenceRowMembers(&row)
+				return row
 			},
 			wantReason: ReasonFenced,
 			wantMsg:    "cell cell-a is not the placement of tenant acme",
 		},
 		{
-			name:   "order 5: cell differs",
+			name:   "order 3: no member on the request cell",
 			exists: true,
-			mutateRow: func(r *tenantPlacementFenceRow) {
-				r.cell = "cell-b"
+			row: func() tenantPlacementFenceRow {
+				row, _ := baselinePlacementRow()
+				row.cell = "cell-b"
+				resolveFenceRowMembers(&row)
+				return row
 			},
 			wantReason: ReasonFenced,
 			wantMsg:    "cell cell-a is not the placement of tenant acme",
 		},
 		{
-			name:   "order 6: cell instance differs",
+			name:   "order 4: no member names the request cell instance",
 			exists: true,
-			mutateRow: func(r *tenantPlacementFenceRow) {
-				r.cellInstance = "pod-b"
+			row: func() tenantPlacementFenceRow {
+				row, _ := baselinePlacementRow()
+				row.cellInstance = "pod-b"
+				resolveFenceRowMembers(&row)
+				return row
 			},
 			wantReason: ReasonNotReady,
 			wantMsg:    "cell instance pod-a is not announced for tenant acme",
 		},
 		{
-			name:   "order 7: cross-tenant actor",
+			name:   "order 5: the claiming member is a standby",
+			exists: true,
+			row: func() tenantPlacementFenceRow {
+				row := twoSlotFenceRow(3)
+				return row
+			},
+			mutateReq: func(req *ClaimRequest) {
+				req.Cell = "cell-c"
+				req.CellInstance = "pod-c"
+			},
+			wantReason: ReasonNotHome,
+			wantMsg:    "cell cell-c is not the home of job acme/app",
+		},
+		{
+			name:   "order 6: the claiming slot is not the job's home",
+			exists: true,
+			row:    func() tenantPlacementFenceRow { return twoSlotFenceRow(3) },
+			mutateReq: func(req *ClaimRequest) {
+				req.Cell = "cell-b"
+				req.CellInstance = "pod-b"
+			},
+			wantReason: ReasonNotHome,
+			wantMsg:    "cell cell-b is not the home of job acme/app",
+		},
+		{
+			name:   "order 7: request generation below stored",
+			exists: true,
+			row: func() tenantPlacementFenceRow {
+				row, _ := baselinePlacementRow()
+				row.generation = 5
+				return row
+			},
+			mutateReq: func(req *ClaimRequest) {
+				req.PlacementGeneration = 3
+			},
+			wantReason: ReasonNotReady,
+			wantMsg:    "placement generation 3 is stale for tenant acme",
+		},
+		{
+			name:   "order 8: request generation above stored",
+			exists: true,
+			row: func() tenantPlacementFenceRow {
+				row, _ := baselinePlacementRow()
+				row.generation = 1
+				return row
+			},
+			mutateReq: func(req *ClaimRequest) {
+				req.PlacementGeneration = 3
+			},
+			wantReason: ReasonNotReady,
+			wantMsg:    "placement generation 3 is stale for tenant acme",
+		},
+		{
+			name:   "order 9: cross-tenant actor",
 			exists: true,
 			mutateReq: func(req *ClaimRequest) {
 				req.Actor = "svc-other"
@@ -123,25 +199,31 @@ func TestDecidePlacementOrders(t *testing.T) {
 			wantMsg:    crossTenantMessage,
 		},
 		{
-			name:   "order 8: rehydrated instance differs",
+			name:   "order 10: the home member's rehydrated instance differs",
 			exists: true,
-			mutateRow: func(r *tenantPlacementFenceRow) {
-				r.rehydratedInstance = ""
+			row: func() tenantPlacementFenceRow {
+				row, _ := baselinePlacementRow()
+				row.rehydratedInstance = ""
+				resolveFenceRowMembers(&row)
+				return row
 			},
 			wantReason: ReasonNotReady,
 			wantMsg:    "rehydration seed is not applied for job acme/app",
 		},
 		{
-			name:   "order 9: job path pending",
+			name:   "order 11: the job path is pending on its home member",
 			exists: true,
-			mutateRow: func(r *tenantPlacementFenceRow) {
-				r.pendingJobs = []string{testJobPath}
+			row: func() tenantPlacementFenceRow {
+				row, _ := baselinePlacementRow()
+				row.pendingJobs = []string{testJobPath}
+				resolveFenceRowMembers(&row)
+				return row
 			},
 			wantReason: ReasonNotReady,
 			wantMsg:    "rehydration seed is not applied for job acme/app",
 		},
 		{
-			name:      "order 10: every comparison passes",
+			name:      "order 12: every comparison passes",
 			exists:    true,
 			wantAllow: true,
 		},
@@ -150,8 +232,8 @@ func TestDecidePlacementOrders(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			row, req := baselinePlacementRow()
-			if tc.mutateRow != nil {
-				tc.mutateRow(&row)
+			if tc.row != nil {
+				row = tc.row()
 			}
 			if tc.mutateReq != nil {
 				tc.mutateReq(&req)

@@ -29,6 +29,10 @@ type CellUsageCounts struct {
 // serializes.
 type CellTenantUsage struct {
 	Tenant string `json:"tenant"`
+	// Role is that tenant's role on this cell: "slot <n>" for an active
+	// member and "standby" for a standby. A standby holds the tenant
+	// folder and runs no build.
+	Role string `json:"role,omitempty"`
 	CellUsageCounts
 }
 
@@ -67,6 +71,7 @@ func cellUsageRowJSON(usage recordstore.CellUsage) cellUsageJSON {
 	for _, tenant := range usage.Tenants {
 		row.Tenants = append(row.Tenants, cellTenantUsageJSON{
 			Tenant: tenant.Tenant,
+			Role:   tenant.Role,
 			cellUsageCountsJSON: cellUsageCountsJSON{
 				RunningNow:    tenant.RunningNow,
 				RunsLast24h:   tenant.RunsLast24h,

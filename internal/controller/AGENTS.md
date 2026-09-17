@@ -628,7 +628,14 @@ sections describe.
     else the pool named by `spec.pipelines.profile`; gate 4 refuses a named
     pool that is absent or serves another profile with `CellPoolNotFound`,
     while an uncreated **default** pool stays `AwaitingCell` because the pool
-    reconciler creates it within one tick. `TeamReconciler` then applies the
+    reconciler creates it within one tick. `cells/members.go`'s
+    `desiredMembers` answers the whole member list a tenant should hold:
+    one cell for each of `spec.pipelines.members` active slots and each of
+    `spec.pipelines.standby` warm members, with the scalar placement
+    describing slot 0. A slot whose holder is gone takes the newest-applied
+    standby, and the announce carries the whole list before the status
+    write. The reasons `SlotPending`, `StandbyPending`, and
+    `MembersApplied` report the member set. `TeamReconciler` then applies the
     `Outcome` in a fixed order: **the claim first** (`cells.WriteCellClaim` on
     the selected cell, and a failed claim ends the tick with no fence
     written), then `Team.status.placement.cluster` (and the rest of
@@ -668,8 +675,13 @@ sections describe.
     `varroa.dev/cell-pool` and keep only those whose
     `varroa.dev/cell-profile` matches (the second test keeps a stale label out
     of a new pool of the same name); compute **one** target
-    (`desiredFree = max(warm, ceil(max(0, pending - placedSlots) /
-    maxTenantsPerCell))`) and either fill or drain, never both in a tick, so
+    (`desiredFree = max(warm, ceil(deficit / maxTenantsPerCell))`, where
+    `deficit` sums each tenant's unmet member demand, minus the owned cells
+    that can take a member of **that** tenant — a cell holds at most one
+    member of a tenant, so a cell that already holds one offsets nothing,
+    whatever spare capacity it has, and a cell with spare capacity offsets
+    one member of each other tenant; a free cell offsets nothing either,
+    because `len(free)` counts it already) and either fill or drain, never both in a tick, so
     the pass cannot oscillate; re-stamp `spec.version`/`resources`/
     `podOverrides` on free cells only; write status. A wanted fill first runs
     `fillGateReason`, in this order: `ClaimGate != "1"` is
@@ -789,10 +801,20 @@ sections describe.
   `Pending` never clears the field. That read is the only proof a cell
   instance is gone, so `DeadInstance.ConfirmedGoneAt` (`cells/sync.go`,
   `TenantSyncDeadInstance` on the wire) is stamped **only** by a producer
-  standing behind it: `maybeReannounce`'s `deadInstanceDelta` call and
-  `announceSingleTenantPlacement`. `performMove` passes nil, because it
-  proves only that the cell object left the candidate set and a deleting
-  cell pod can still run its termination grace. The field is a
+  standing behind such a read: `maybeReannounce`'s `deadInstanceDelta` call,
+  `announceSingleTenantPlacement`, and `memberDeadInstances` for a member
+  whose cell is still bound. A cell that **left** the candidate set is read
+  by `TeamReconciler.departedMemberPods`, which applies the same pod rule to
+  every member cell the tenant still names and hands the answers to
+  `Inputs.DepartedPods` — the placement pass performs no Kubernetes read of
+  its own. `performMove`'s deleted-cell branch and `memberDeadInstances`
+  stamp such an entry only when that reading confirms the pod gone. A
+  `NotFound` on the `Controller` is the strongest absence (no `Controller`,
+  no StatefulSet, no pod); every other read error, and a pod that still
+  terminates, confirm nothing, and the entry then keeps the five-minute
+  moved window. Without the reading a lost cell's member was never confirmed
+  gone, so the promoted standby never received that member's armed runs. The
+  field is a
   `*time.Time`: a zero `time.Time` marshals as year one and would confirm
   every entry at once. A controller that carries no
   cell role is its own tenant and its own cell, so
@@ -821,7 +843,12 @@ sections describe.
   `Team.spec.pipelines.rehydrateDeadline` (`rehydrationExpired`,
   `deadlineEntry`), else fetches the tenant's build records over the
   `records` tenant-sync request (`fetchTenantJobRecords`, enumerate then page
-  at 32 job paths) and builds one `rehydrate.JobSeed` per job.
+  at 32 job paths) and builds one `rehydrate.JobSeed` per job. Each member
+  cell's own `status.cell.rehydration` entry is that member's seed state,
+  read through `Inputs.MemberSeed`, so one member's deferred job never
+  holds another member's build. `attachTenantHomes`
+  (`cell_tenant_homes.go`) stamps `DesiredStateCommand.tenant_homes` from
+  the recorder's `homes` request kind, inside the composite hash.
   `rehydrate.SelectForBundle` combines every pending tenant's seeds into one
   cell-wide bundle, falling back to `AdvanceNumberOnlyRound` when the full
   selection cannot fit; `attachCellRehydration` writes the result onto

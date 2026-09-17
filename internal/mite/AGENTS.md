@@ -224,9 +224,13 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   named `Team`'s `status.placement`, each cached 30 seconds
   (`cellTenantResolveTTL`). A non-cell controller always resolves to the
   permanent `<namespace>/<cell>` placeholder. A cell resolves the first
-  path segment of the job path to a `Team` only when that Team's
-  placement names this exact `(namespace, cell)` — a Team placed
-  elsewhere, an unplaced Team, and a read error all resolve to the empty,
+  path segment of the job path to a `Team` only when **some member of
+  that Team** names this exact `(namespace, cell)`: the entry caches the
+  whole `status.placement.members` cell set, so a cell holding slot 1 or
+  a standby resolves too. The claim fence, not the gateway, decides a
+  job's home and answers `NOT_HOME`. A placement with an empty member
+  list falls back to the scalar `cell`. A Team that holds no member on
+  this cell, an unplaced Team, and a read error all resolve to the empty,
   unknown tenant, never a guess. `job_schedules.go`'s
   `ResolveJobTenant` calls already existed before this resolver did; they
   needed no change to pick it up.

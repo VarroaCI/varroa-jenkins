@@ -56,6 +56,11 @@ const (
 	ReasonNotReady    = "NOT_READY"
 	ReasonCrossTenant = "CROSS_TENANT"
 	ReasonThrottled   = "THROTTLED"
+	// ReasonNotHome refuses a claim from a standby, or from an active
+	// slot that is not the job's home slot. It carries the same retry
+	// class as FENCED: it is permanent, because a non-home cell never
+	// becomes the home by waiting.
+	ReasonNotHome = "NOT_HOME"
 )
 
 // ReasonCodes lists every reason code a Fence or the ledger may answer
@@ -66,6 +71,7 @@ var ReasonCodes = []string{
 	ReasonNotReady,
 	ReasonCrossTenant,
 	ReasonThrottled,
+	ReasonNotHome,
 }
 
 // Failure codes a ClaimResponse carries in Code, following the

@@ -112,6 +112,13 @@ func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c
 		logger.Warn("unstarted-intent re-fire round failed", "error", err)
 	}
 
+	// The home recompute runs after the sweep. A job that first appears
+	// between two announces waits at most one round for its home, and the
+	// announce resync window is ten minutes.
+	if _, err := RefreshJobHomes(ctx, pool, cfg.ActionMetrics, logger); err != nil {
+		logger.Warn("job home recompute round failed", "error", err)
+	}
+
 	if err := runBackstopSchedule(ctx, pool, conn, cfg, now); err != nil {
 		logger.Warn("backstop schedule round failed", "error", err)
 	}

@@ -58,6 +58,11 @@ type teamPipelinesEntry struct {
 	CronCatchUp       string           `json:"cronCatchUp,omitempty"`
 	CronGrace         *metav1.Duration `json:"cronGrace,omitempty"`
 
+	// Members and Standby carry the tenant's slot counts: the number of
+	// active slots it runs, and the number of warm members it keeps.
+	Members *int32 `json:"members,omitempty"`
+	Standby *int32 `json:"standby,omitempty"`
+
 	// Exports carries spec.pipelines.exports: the grants this tenant makes
 	// of its own jobs and locks to other tenants. Reading it needs
 	// CanReadPipeline on the owning tenant; writing it needs the tenant's
@@ -89,6 +94,19 @@ type teamPlacementEntry struct {
 	Cell          string `json:"cell,omitempty"`
 	CellNamespace string `json:"cellNamespace,omitempty"`
 	Generation    int64  `json:"generation,omitempty"`
+	// Members reports every member of the tenant. The scalar fields above
+	// keep describing slot 0.
+	Members []teamMemberEntry `json:"members,omitempty"`
+}
+
+// teamMemberEntry is the JSON shape of one status.placement.members
+// entry, response-only.
+type teamMemberEntry struct {
+	Cell          string `json:"cell,omitempty"`
+	CellNamespace string `json:"cellNamespace,omitempty"`
+	Role          string `json:"role,omitempty"`
+	Slot          *int32 `json:"slot,omitempty"`
+	Applied       bool   `json:"applied,omitempty"`
 }
 
 // teamRehydrationEntry is the JSON shape of status.rehydration,
@@ -121,6 +139,8 @@ func teamPipelinesEntryFromSpec(p *v1alpha1.TeamPipelinesSpec) *teamPipelinesEnt
 		CronBackstop:      p.CronBackstop,
 		CronCatchUp:       p.CronCatchUp,
 		CronGrace:         p.CronGrace,
+		Members:           p.Members,
+		Standby:           p.Standby,
 	}
 	if p.ComposedBundleRef != nil {
 		e.ComposedBundleRef = &teamComposedBundleRefEntry{
@@ -157,6 +177,8 @@ func teamPipelinesSpecFromEntry(e *teamPipelinesEntry) *v1alpha1.TeamPipelinesSp
 		CronBackstop:      e.CronBackstop,
 		CronCatchUp:       e.CronCatchUp,
 		CronGrace:         e.CronGrace,
+		Members:           e.Members,
+		Standby:           e.Standby,
 	}
 	if e.ComposedBundleRef != nil {
 		spec.ComposedBundleRef = &v1alpha1.ComposedBundleRef{
@@ -179,12 +201,19 @@ func teamPlacementEntryFromStatus(p *v1alpha1.TeamPlacementStatus) *teamPlacemen
 	if p == nil {
 		return nil
 	}
-	return &teamPlacementEntry{
+	out := &teamPlacementEntry{
 		Cluster:       p.Cluster,
 		Cell:          p.Cell,
 		CellNamespace: p.CellNamespace,
 		Generation:    p.Generation,
 	}
+	for _, m := range p.Members {
+		out.Members = append(out.Members, teamMemberEntry{
+			Cell: m.Cell, CellNamespace: m.CellNamespace, Role: m.Role,
+			Slot: m.Slot, Applied: m.Applied,
+		})
+	}
+	return out
 }
 
 // teamRehydrationEntryFromStatus maps status.rehydration onto the wire

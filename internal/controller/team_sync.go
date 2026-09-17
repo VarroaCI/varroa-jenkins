@@ -73,6 +73,37 @@ func deadInstancesToWire(in []cells.DeadInstance) []recordstore.TenantSyncDeadIn
 	return out
 }
 
+// membersToWire maps the placement pass's member list onto the recorder's
+// wire shape. The list must cross the wire whole: the recorder stores what
+// the request carries, so a dropped list reads as an empty one and every
+// claim then resolves the synthetic slot-0 member.
+//
+// A controller with no cell role announces no member, and the recorder
+// resolves its row to that synthetic member by design.
+func membersToWire(in []cells.AnnounceMember) []recordstore.TenantSyncMember {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]recordstore.TenantSyncMember, 0, len(in))
+	for _, m := range in {
+		entry := recordstore.TenantSyncMember{
+			Cell:               m.Cell,
+			Namespace:          m.Namespace,
+			Role:               m.Role,
+			Instance:           m.Instance,
+			RehydratedInstance: m.RehydratedInstance,
+			PendingJobs:        m.PendingJobs,
+			AppliedAt:          m.AppliedAt,
+		}
+		if m.Slot != nil {
+			slot := *m.Slot
+			entry.Slot = &slot
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
 // NewNATSSyncAnnouncer builds a cells.Announcer that sends a tenant.sync
 // "announce" request over bus.TenantSyncSubject and decodes the recorder's
 // reply (design D6, D7).
@@ -100,6 +131,7 @@ func NewNATSSyncAnnouncer(conn *bus.Conn) cells.Announcer {
 			CellAliveAt:        req.CellAliveAt,
 			CellLastSeenAt:     req.CellLastSeenAt,
 			DeadInstances:      deadInstancesToWire(req.DeadInstances),
+			Members:            membersToWire(req.Members),
 		})
 		if err != nil {
 			return cells.AnnounceResult{}, fmt.Errorf("marshal tenant sync announce request: %w", err)
@@ -169,5 +201,43 @@ func NewNATSSyncRecordsRequester(conn *bus.Conn) cells.RecordsFunc {
 			jobs = append(jobs, cells.JobRecords{JobPath: j.JobPath, NextBuildNumber: j.NextBuildNumber, Records: records})
 		}
 		return cells.RecordsResult{Jobs: jobs}, nil
+	}
+}
+
+// NewNATSSyncHomesRequester builds a cells.HomesFunc that sends a
+// tenant.sync "homes" request over bus.TenantSyncSubject and decodes the
+// recorder's reply. The recorder stays the only owner of the home map,
+// and this kind is how the cell desired state reads it.
+func NewNATSSyncHomesRequester(conn *bus.Conn) cells.HomesFunc {
+	return func(ctx context.Context, req cells.HomesRequest) (cells.HomesResult, error) {
+		if conn == nil {
+			return cells.HomesResult{}, fmt.Errorf("no nats connection")
+		}
+		payload, err := json.Marshal(recordstore.TenantSyncRequest{
+			Kind:    recordstore.TenantSyncKindHomes,
+			Cluster: req.Cluster,
+			Tenant:  req.Tenant,
+		})
+		if err != nil {
+			return cells.HomesResult{}, fmt.Errorf("marshal tenant sync homes request: %w", err)
+		}
+		msg, err := conn.RequestWithContext(ctx, bus.TenantSyncSubject, payload, tenantSyncRequestTimeout)
+		if err != nil {
+			return cells.HomesResult{}, err
+		}
+		var resp recordstore.TenantSyncResponse
+		if err := json.Unmarshal(msg.Data, &resp); err != nil {
+			return cells.HomesResult{}, fmt.Errorf("decode tenant sync homes response: %w", err)
+		}
+		if resp.Error != "" {
+			return cells.HomesResult{}, fmt.Errorf("%s", resp.Error)
+		}
+		out := cells.HomesResult{JobHomes: resp.JobHomes}
+		for _, m := range resp.Members {
+			out.Members = append(out.Members, cells.HomesMember{
+				Cell: m.Cell, Namespace: m.Namespace, Role: m.Role, Slot: m.Slot,
+			})
+		}
+		return out, nil
 	}
 }

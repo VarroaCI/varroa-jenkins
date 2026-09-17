@@ -131,3 +131,41 @@
   color: var(--text-2);
   font-size: 0.8125rem;
 }
+
+/* The member list renders one card for each member of the tenant: its
+   cell, its role, and that member's own load. */
+.members {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.85rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.member {
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.memberHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.memberCell {
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.8125rem;
+}
+
+/* The role is the slot signal. It reads as text, never as a colour alone. */
+.memberRole {
+  color: var(--text-2);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}

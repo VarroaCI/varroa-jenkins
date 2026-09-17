@@ -54,7 +54,16 @@ func tenantIsDrainingFromCell(team *v1alpha1.Team, cr *v1alpha1.Controller) bool
 	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.TeamReasonTenantMoving {
 		return false
 	}
-	return team.Status.Placement != nil &&
-		team.Status.Placement.Cell == cr.Name &&
-		team.Status.Placement.CellNamespace == cr.Namespace
+	// A draining tenant loses its folder on every member's cell, so the
+	// voluntary move's idle test converges on all of them.
+	p := team.Status.Placement
+	if p == nil {
+		return false
+	}
+	for _, m := range p.Members {
+		if m.Cell == cr.Name && m.CellNamespace == cr.Namespace {
+			return true
+		}
+	}
+	return p.Cell == cr.Name && p.CellNamespace == cr.Namespace
 }

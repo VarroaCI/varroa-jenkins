@@ -55,6 +55,9 @@ type tenantPlacementLivenessRow struct {
 	cellLastSeenAt *time.Time
 	deadInstances  []TenantSyncDeadInstance
 	policy         json.RawMessage
+	// members resolves the run's own owning instance. A tenant holds
+	// several members, so the scalar cellInstance names slot 0 alone.
+	members placementMembers
 }
 
 // livenessQuerier is the subset of *pgxpool.Pool and pgx.Tx
@@ -68,15 +71,21 @@ type livenessQuerier interface {
 // error, when no row is stored yet: a missing row gives no reading.
 func readTenantPlacementLivenessRow(ctx context.Context, db livenessQuerier, cluster, tenant string) (tenantPlacementLivenessRow, bool, error) {
 	var (
-		row     tenantPlacementLivenessRow
-		deadRaw json.RawMessage
+		row         tenantPlacementLivenessRow
+		namespace   string
+		rehydrated  string
+		deadRaw     json.RawMessage
+		pendingRaw  json.RawMessage
+		membersRaw  json.RawMessage
+		jobHomesRaw json.RawMessage
 	)
 	err := db.QueryRow(ctx, `
-		SELECT cell, cell_instance, cell_alive, cell_alive_at, cell_last_seen_at, dead_instances, policy
+		SELECT cell, namespace, cell_instance, rehydrated_instance, cell_alive, cell_alive_at,
+		       cell_last_seen_at, dead_instances, policy, pending_jobs, members, job_homes
 		FROM varroa.tenant_placements
 		WHERE cluster = $1 AND tenant = $2
-	`, cluster, tenant).Scan(&row.cell, &row.cellInstance, &row.cellAlive, &row.cellAliveAt,
-		&row.cellLastSeenAt, &deadRaw, &row.policy)
+	`, cluster, tenant).Scan(&row.cell, &namespace, &row.cellInstance, &rehydrated, &row.cellAlive,
+		&row.cellAliveAt, &row.cellLastSeenAt, &deadRaw, &row.policy, &pendingRaw, &membersRaw, &jobHomesRaw)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return tenantPlacementLivenessRow{}, false, nil
@@ -87,6 +96,19 @@ func readTenantPlacementLivenessRow(ctx context.Context, db livenessQuerier, clu
 		if err := json.Unmarshal(deadRaw, &row.deadInstances); err != nil {
 			return tenantPlacementLivenessRow{}, false, fmt.Errorf("decode dead instances: %w", err)
 		}
+	}
+	var pending []string
+	if len(pendingRaw) > 0 {
+		if err := json.Unmarshal(pendingRaw, &pending); err != nil {
+			return tenantPlacementLivenessRow{}, false, fmt.Errorf("decode pending jobs: %w", err)
+		}
+	}
+	row.members, err = decodePlacementMembers(membersRaw, jobHomesRaw, placementScalars{
+		cell: row.cell, namespace: namespace, cellInstance: row.cellInstance,
+		rehydratedInstance: rehydrated, pendingJobs: pending,
+	})
+	if err != nil {
+		return tenantPlacementLivenessRow{}, false, err
 	}
 	return row, true, nil
 }
@@ -151,10 +173,15 @@ func currentInstanceGone(row tenantPlacementLivenessRow, now time.Time, window t
 // a run's heartbeat age proves nothing once the operator has proved the
 // pod gone.
 //
-// The moved test applies the dead_instances reading when cellInstance
-// differs from row's own stored instance, and the silent test applies
-// the cell_alive reading when it matches. Neither fires unless anchor is
-// already older than that test's own window.
+// The moved test applies the dead_instances reading when no current
+// member names cellInstance, and the silent test applies the cell_alive
+// reading when one does. Neither fires unless anchor is already older
+// than that test's own window.
+//
+// The member resolution is what keeps a live second slot out of the
+// moved reading. A tenant holds several members, so the scalar
+// cell_instance names slot 0 alone, and a run owned by slot 1 would
+// otherwise read as moved merely because its instance differs.
 //
 // A missing row answers livenessAlive: no reading is possible. This is
 // the "one piece of code" design D9 requires: both the placement-aware
@@ -171,7 +198,7 @@ func cellLivenessGone(now, anchor time.Time, cellInstance string, row tenantPlac
 			}
 		}
 	}
-	if cellInstance != row.cellInstance {
+	if _, isMember := memberForInstance(row.members, cellInstance); !isMember {
 		if anchor.Before(now.Add(-movedHeartbeatWindow)) &&
 			deadInstanceGone(row.deadInstances, cellInstance, now, movedHeartbeatWindow, grace) {
 			return livenessMoved

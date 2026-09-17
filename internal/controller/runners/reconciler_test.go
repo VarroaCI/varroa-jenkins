@@ -126,7 +126,7 @@ func TestTick_CellWrites_MovedPlacement(t *testing.T) {
 
 // TestTick_CellWrites_PlacedToUnplaced proves the reconciler computes an
 // empty cell/cellNamespace once a Team's placement clears. The in-package
-// Fake does not itself consult crdstore.ClearStatusFields (only the real
+// Fake does not itself apply crdstore.ApplyStatusClears (only the real
 // ClientsetClient.PatchObjectStatus force-nulls an absent clearable key), so
 // this asserts against the recorded StatusPatch's Status value — what the
 // reconciler actually computed and sent — rather than a re-Get, mirroring

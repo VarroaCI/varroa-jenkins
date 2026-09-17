@@ -6,7 +6,7 @@ import { Card } from "../../components/Card";
 import { KVGrid } from "../../components/KVGrid";
 import { age } from "../../components/activityTimeline.util";
 import { controllerRoute } from "../../routing";
-import type { TeamCellState } from "../../types";
+import type { TeamCellMember, TeamCellState } from "../../types";
 import styles from "./TeamCellCard.module.css";
 
 /** BADGES holds the label and the colour pair of every rendered state. The
@@ -47,6 +47,25 @@ function Frame({ children }: { children: ReactNode }) {
         {children}
       </Card>
     </section>
+  );
+}
+
+/** MemberCard renders one member of the tenant: the cell it sits on, the
+ * role it holds there, and that member's own load. A standby holds the
+ * tenant folder and runs no build, so its running count is zero. */
+function MemberCard({ member }: { member: TeamCellMember }) {
+  return (
+    <li className={styles.member}>
+      <div className={styles.memberHead}>
+        <span className={styles.memberCell}>{member.cell}</span>
+        <span className={styles.memberRole}>{member.role}</span>
+      </div>
+      <div className={styles.load}>
+        <Pair label="Running" value={member.runningNow} />
+        <Pair label="Last 24h" value={member.runsLast24h} />
+        <Pair label="Jobs" value={member.jobs} />
+      </div>
+    </li>
   );
 }
 
@@ -131,6 +150,14 @@ export default function TeamCellCard({ team }: { team: string }) {
               <Pair label="Your running builds" value={data.runningNow} />
             )}
           </div>
+
+          {data.members && data.members.length > 0 && (
+            <ul className={styles.members} aria-label="Members">
+              {data.members.map((member) => (
+                <MemberCard key={`${member.namespace}/${member.cell}`} member={member} />
+              ))}
+            </ul>
+          )}
 
           {data.otherTenantCount !== undefined && (
             <p className={styles.sharing}>{sharingLine(data.otherTenantCount)}</p>

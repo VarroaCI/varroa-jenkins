@@ -58,10 +58,18 @@ const (
 	TeamReasonBlobTierUnsupported     = "BlobTierUnsupported"
 	TeamReasonCellNotReady            = "CellNotReady"
 	TeamReasonTenantTeardownPending   = "TenantTeardownPending"
-	// TeamReasonAgentServiceFailed reports a tenant whose slot 0 agent
-	// Service could not be written this tick. It leaves the placement
-	// unchanged.
+	// TeamReasonAgentServiceFailed reports a tenant whose agent Service
+	// could not be written this tick. It leaves the placement unchanged.
 	TeamReasonAgentServiceFailed = "AgentServiceFailed"
+	// TeamReasonSlotPending reports a tenant with at least one active slot
+	// that holds no cell. It outranks TeamReasonStandbyPending.
+	TeamReasonSlotPending = "SlotPending"
+	// TeamReasonStandbyPending reports a tenant whose every active slot
+	// holds a cell and whose at least one standby does not.
+	TeamReasonStandbyPending = "StandbyPending"
+	// TeamReasonMembersApplied reports a tenant whose every member cell
+	// lists it as applied.
+	TeamReasonMembersApplied = "MembersApplied"
 )
 
 // TenantWarnings reasons.

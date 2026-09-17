@@ -6,6 +6,7 @@ import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { useAuth } from "../context/AuthContext";
 import { canDoGlobal } from "../hooks/usePermissions";
+import { teamMemberLabel } from "../types";
 import styles from "./Teams.module.css";
 
 /**
@@ -145,11 +146,21 @@ export default function Teams() {
                       </span>
                     </td>
                     <td>
-                      {team.placement?.cell
-                        ? `${team.placement.cluster}/${team.placement.cell}`
-                        : placedCond
-                        ? placedCond.reason || "Not placed"
-                        : "—"}
+                      {team.placement?.members && team.placement.members.length > 0 ? (
+                        <ul className={styles.memberList}>
+                          {team.placement.members.map((member) => (
+                            <li key={`${member.cellNamespace}/${member.cell}`}>
+                              {teamMemberLabel(member)}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : team.placement?.cell ? (
+                        `${team.placement.cluster}/${team.placement.cell}`
+                      ) : placedCond ? (
+                        placedCond.reason || "Not placed"
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td>
                       {!team.pipelines

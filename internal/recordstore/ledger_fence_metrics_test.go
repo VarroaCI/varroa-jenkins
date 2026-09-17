@@ -58,8 +58,11 @@ func TestFenceVetoMetricCountsByReason(t *testing.T) {
 
 	seedTenantPlacement(t, db, testTenant, testNamespace, "cell-a", 5, "pod-a", "pod-a", nil)
 
-	// A stale generation vetoes FENCED.
-	staleReq := newTestClaimRequest("manual:"+newTestUUIDv7String(), 4)
+	// A claim from a cell the tenant holds no member on vetoes FENCED.
+	// A stale generation alone answers the retryable NOT_READY, because
+	// it comes from a current member whose resolver cache is behind.
+	staleReq := newTestClaimRequest("manual:"+newTestUUIDv7String(), 5)
+	staleReq.Cell = "cell-old"
 	resp := ledger.Claim(context.Background(), staleReq)
 	if resp.ReasonCode != ReasonFenced {
 		t.Fatalf("want FENCED, got %+v", resp)

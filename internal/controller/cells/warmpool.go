@@ -459,10 +459,10 @@ func (r *WarmPoolReconciler) poolCapacity(pool *v1alpha1.CellPool) int32 {
 // desiredFreeCount computes one target for the pass (design D5 step 5), so
 // the pass never fills and drains in the same tick.
 func (r *WarmPoolReconciler) desiredFreeCount(pool *v1alpha1.CellPool, owned []*v1alpha1.Controller, teams []*v1alpha1.Team, capPerCell int32) int {
-	// placedSlots deliberately excludes free cells. A free cell is already
+	// fits deliberately excludes free cells. A free cell is already
 	// counted by len(free), so counting its capacity again would hide real
 	// demand and stall a warm: 0 pool.
-	placedSlots := 0
+	var fits []cellFit
 	ownedNames := make(map[string]bool, len(owned))
 	summary := SummarizeCellPool(pool)
 	for _, cell := range owned {
@@ -473,24 +473,29 @@ func (r *WarmPoolReconciler) desiredFreeCount(pool *v1alpha1.CellPool, owned []*
 		}
 		capacity := resolveCellCapacity(cellMaxTenants(cell), &summary, r.chartMaxTenants())
 		if spare := int(capacity) - tenants; spare > 0 {
-			placedSlots += spare
+			fits = append(fits, cellFit{name: cell.Name, spare: spare})
 		}
 	}
 
-	pending := 0
+	deficit := 0
 	for _, team := range teams {
 		if team.Spec.Pipelines == nil || ResolvedPoolName(team.Spec.Pipelines) != pool.Name {
 			continue
 		}
-		if team.Status.Placement != nil && ownedNames[team.Status.Placement.Cell] {
+		// A tenant asks the pool for one cell for each active slot and
+		// each standby. Counting it as one unit would stop a warm: 0
+		// pool from creating a cell once slot 0 binds, and every other
+		// slot would stay pending for good.
+		unmet := unmetMemberDemand(team, ownedNames)
+		if unmet == 0 {
 			continue
 		}
-		pending++
-	}
-
-	deficit := pending - placedSlots
-	if deficit < 0 {
-		deficit = 0
+		// Only a cell that holds no member of this tenant can take one,
+		// so only such a cell offsets the tenant's demand. Offsetting it
+		// with the spare capacity of the tenant's own member cells left
+		// a vacated standby unreplaced for good: the demand read as met
+		// while no cell could take it.
+		deficit += unmet - takeMemberFits(fits, memberCellNames(team.Status.Placement), unmet)
 	}
 	needed := (deficit + int(capPerCell) - 1) / int(capPerCell)
 	desired := int(pool.Spec.Warm)
@@ -745,7 +750,19 @@ func (r *WarmPoolReconciler) fencedCells(ctx context.Context) (map[string]bool, 
 	}
 	fenced := make(map[string]bool, len(teams))
 	for _, team := range teams {
-		if p := team.Status.Placement; p != nil && p.Cell != "" {
+		p := team.Status.Placement
+		if p == nil {
+			continue
+		}
+		// Every member's cell is fenced, active or standby. A drain that
+		// read the scalar cell alone would delete a cell holding slot 1
+		// or a standby out from under its tenant.
+		for _, m := range p.Members {
+			if m.Cell != "" {
+				fenced[cellKey(m.CellNamespace, m.Cell)] = true
+			}
+		}
+		if p.Cell != "" {
 			fenced[cellKey(p.CellNamespace, p.Cell)] = true
 		}
 	}
@@ -754,6 +771,86 @@ func (r *WarmPoolReconciler) fencedCells(ctx context.Context) (map[string]bool, 
 
 // cellKey names one cell across namespaces.
 func cellKey(namespace, name string) string { return namespace + "/" + name }
+
+// unmetMemberDemand answers how many cells of this pool the tenant still
+// lacks: its active slot count plus its standby count, minus the members
+// it already holds on a cell the pool owns.
+//
+// A placement with an empty member list reads as its scalar cell alone,
+// so a tenant the pass has not written a member list for counts one bound
+// member.
+func unmetMemberDemand(team *v1alpha1.Team, ownedNames map[string]bool) int {
+	wanted := int(team.Spec.Pipelines.EffectiveMembers() + team.Spec.Pipelines.EffectiveStandby())
+	bound := boundMemberCount(team.Status.Placement, ownedNames)
+	if bound >= wanted {
+		return 0
+	}
+	return wanted - bound
+}
+
+// boundMemberCount counts the tenant's members that sit on a cell the pool
+// owns. A cell holds at most one member of a tenant, so each owned cell
+// counts once.
+func boundMemberCount(p *v1alpha1.TeamPlacementStatus, ownedNames map[string]bool) int {
+	count := 0
+	for name := range memberCellNames(p) {
+		if ownedNames[name] {
+			count++
+		}
+	}
+	return count
+}
+
+// memberCellNames names every cell the tenant's members hold. A placement
+// with an empty member list reads as its scalar cell alone.
+func memberCellNames(p *v1alpha1.TeamPlacementStatus) map[string]bool {
+	out := map[string]bool{}
+	if p == nil {
+		return out
+	}
+	if len(p.Members) == 0 {
+		if p.Cell != "" {
+			out[p.Cell] = true
+		}
+		return out
+	}
+	for _, m := range p.Members {
+		if m.Cell != "" {
+			out[m.Cell] = true
+		}
+	}
+	return out
+}
+
+// cellFit is one owned cell that holds tenants and has spare tenant
+// capacity left.
+type cellFit struct {
+	name  string
+	spare int
+}
+
+// takeMemberFits consumes the spare capacity of the cells that hold no
+// member of one tenant, and answers how many of that tenant's members
+// those cells can take.
+//
+// A cell holds at most one member of a tenant, so a fit gives that tenant
+// one member and keeps the rest of its spare capacity for another tenant.
+// The pass runs on a ticker, so a tenant that the cells cannot take is
+// counted again on the next round.
+func takeMemberFits(fits []cellFit, held map[string]bool, want int) int {
+	took := 0
+	for i := range fits {
+		if took == want {
+			break
+		}
+		if fits[i].spare == 0 || held[fits[i].name] {
+			continue
+		}
+		fits[i].spare--
+		took++
+	}
+	return took
+}
 
 // deleteFreeCell deletes one cell, and only while it is still free. It
 // answers whether the delete happened.

@@ -33,6 +33,9 @@ type cellUsageCountsJSON struct {
 // counts beside the name.
 type cellTenantUsageJSON struct {
 	Tenant string `json:"tenant"`
+	// Role is that tenant's role on this cell: "slot <n>" for an active
+	// member and "standby" for a standby.
+	Role string `json:"role,omitempty"`
 	cellUsageCountsJSON
 }
 

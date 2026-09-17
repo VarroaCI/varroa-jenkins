@@ -80,11 +80,7 @@ func TestClearStatusFields_RunnerClearsCellFields(t *testing.T) {
 	if err := json.Unmarshal(statusJSON, &statusMap); err != nil {
 		t.Fatalf("unmarshal empty status: %v", err)
 	}
-	for key, zero := range ClearStatusFields(gvr) {
-		if _, ok := statusMap[key]; !ok {
-			statusMap[key] = zero
-		}
-	}
+	ApplyStatusClears(gvr, statusMap)
 	if err := f.PatchObjectStatus(ctx, gvr, "", "payments-win-1", statusMap); err != nil {
 		t.Fatalf("PatchObjectStatus (clear): %v", err)
 	}
@@ -119,9 +115,7 @@ func TestClearStatusFields_TeamClearsPipelines(t *testing.T) {
 		t.Fatalf("PatchStatus (set): %v", err)
 	}
 	statusMap := map[string]any{}
-	for key, zero := range ClearStatusFields(gvr) {
-		statusMap[key] = zero
-	}
+	ApplyStatusClears(gvr, statusMap)
 	if err := f.PatchObjectStatus(ctx, gvr, "", "payments", statusMap); err != nil {
 		t.Fatalf("PatchObjectStatus (clear): %v", err)
 	}
@@ -243,11 +237,7 @@ func TestClearStatusFields_CellPoolClearsTenants(t *testing.T) {
 	if err := json.Unmarshal(statusJSON, &statusMap); err != nil {
 		t.Fatalf("unmarshal empty status: %v", err)
 	}
-	for key, zero := range ClearStatusFields(gvr) {
-		if _, ok := statusMap[key]; !ok {
-			statusMap[key] = zero
-		}
-	}
+	ApplyStatusClears(gvr, statusMap)
 	if err := f.PatchObjectStatus(ctx, gvr, "", "lts-2-555", statusMap); err != nil {
 		t.Fatalf("PatchObjectStatus (clear): %v", err)
 	}
@@ -258,5 +248,86 @@ func TestClearStatusFields_CellPoolClearsTenants(t *testing.T) {
 	}
 	if len(got.Status.Tenants) != 0 {
 		t.Errorf("status.tenants = %v, want empty", got.Status.Tenants)
+	}
+}
+
+// TestApplyStatusClears_TeamClearsThePendingPurgeKeys asserts a Team status
+// patch that still carries a pipelines object clears the three pendingPurge
+// keys inside it.
+//
+// The move-purge retry writes the zero value of each key into a pipelines
+// object that stays present. All three are omitempty, so a plain marshal
+// drops them, the merge patch leaves the server's copies in place, and the
+// tick repeats a purge that already succeeded on every reconciliation that
+// follows.
+func TestApplyStatusClears_TeamClearsThePendingPurgeKeys(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	gvr, err := GVRFor[v1alpha1.Team]()
+	if err != nil {
+		t.Fatalf("GVRFor[Team]: %v", err)
+	}
+	MustSeed(f, &v1alpha1.Team{ObjectMeta: metav1.ObjectMeta{Name: "payments"}})
+
+	generation := int64(4)
+	if err := PatchStatus[v1alpha1.Team](ctx, f, "payments", "", &v1alpha1.TeamStatus{
+		Pipelines: &v1alpha1.TeamPipelinesStatus{
+			WebhookToken:              "tok",
+			PendingPurgeGeneration:    &generation,
+			PendingPurgeCell:          "cell-a",
+			PendingPurgeCellNamespace: "cells",
+		},
+	}); err != nil {
+		t.Fatalf("PatchStatus (set): %v", err)
+	}
+
+	// The status the retry computes once the purge succeeds: the pipelines
+	// object stands, and every pendingPurge field holds its zero value.
+	cleared := &v1alpha1.TeamStatus{
+		Pipelines: &v1alpha1.TeamPipelinesStatus{WebhookToken: "tok"},
+	}
+	statusJSON, err := json.Marshal(cleared)
+	if err != nil {
+		t.Fatalf("marshal cleared status: %v", err)
+	}
+	statusMap := map[string]any{}
+	if err := json.Unmarshal(statusJSON, &statusMap); err != nil {
+		t.Fatalf("unmarshal cleared status: %v", err)
+	}
+	ApplyStatusClears(gvr, statusMap)
+
+	pipelines, ok := statusMap["pipelines"].(map[string]any)
+	if !ok {
+		t.Fatalf("the patch body dropped the pipelines object: %+v", statusMap)
+	}
+	for _, key := range []string{"pendingPurgeGeneration", "pendingPurgeCell", "pendingPurgeCellNamespace"} {
+		value, sent := pipelines[key]
+		if !sent {
+			t.Fatalf("the patch body omits %s, so the server keeps its value: %+v", key, pipelines)
+		}
+		if value != nil {
+			t.Fatalf("%s = %v, want null", key, value)
+		}
+	}
+
+	if err := f.PatchObjectStatus(ctx, gvr, "", "payments", statusMap); err != nil {
+		t.Fatalf("PatchObjectStatus (clear): %v", err)
+	}
+	got, err := Get[v1alpha1.Team](ctx, f, "payments", "")
+	if err != nil {
+		t.Fatalf("Get (after clear): %v", err)
+	}
+	if got.Status.Pipelines == nil {
+		t.Fatal("status.pipelines went, and it must stand")
+	}
+	if got.Status.Pipelines.PendingPurgeGeneration != nil {
+		t.Errorf("pendingPurgeGeneration = %v, want cleared", *got.Status.Pipelines.PendingPurgeGeneration)
+	}
+	if got.Status.Pipelines.PendingPurgeCell != "" || got.Status.Pipelines.PendingPurgeCellNamespace != "" {
+		t.Errorf("the pending purge cell stands: %+v", got.Status.Pipelines)
+	}
+	if got.Status.Pipelines.WebhookToken != "tok" {
+		t.Errorf("webhookToken = %q, want tok: the clear reaches the three keys alone",
+			got.Status.Pipelines.WebhookToken)
 	}
 }

@@ -39,6 +39,13 @@ type fakePipelineReader struct {
 	listErr error
 }
 
+// JobHome answers no placement row, so the trigger write keeps the tenant
+// reference the resolver handed it. These tests assert the tool's own
+// answer, not the placement.
+func (f *fakePipelineReader) JobHome(_ context.Context, _, _, _ string) (recordstore.JobHome, error) {
+	return recordstore.JobHome{}, nil
+}
+
 func newFakePipelineReader() *fakePipelineReader {
 	return &fakePipelineReader{
 		runs:    map[string]recordstore.Run{},

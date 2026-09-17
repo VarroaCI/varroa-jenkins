@@ -537,6 +537,7 @@ func main() {
 	reconciler.SetClaimGate(claimGate)
 	reconciler.SetSyncAnnouncer(controller.NewNATSSyncAnnouncer(busConn))
 	reconciler.SetRecordsFunc(controller.NewNATSSyncRecordsRequester(busConn))
+	reconciler.SetHomesFunc(controller.NewNATSSyncHomesRequester(busConn))
 	reconciler.SetBlobstoreURL(blobstoreURL)
 	reconciler.SetArtifactSecretBase(artifactSecretBase)
 	if raw := os.Getenv("VARROA_CLAIM_TIMEOUT_MS"); raw != "" {

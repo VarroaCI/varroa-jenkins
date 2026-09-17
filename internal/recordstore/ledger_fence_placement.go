@@ -22,7 +22,7 @@ const crossTenantMessage = "cross-tenant triggers go through Varroa"
 
 // PlacementFence is the placement-fencing capability's Fence
 // implementation. It reads varroa.tenant_placements and applies the
-// ten-order decision table.
+// twelve-order decision table.
 type PlacementFence struct {
 	pool      *pgxpool.Pool
 	metrics   *FenceMetrics
@@ -44,12 +44,17 @@ type tenantPlacementFenceRow struct {
 	cellInstance       string
 	rehydratedInstance string
 	pendingJobs        []string
+	// members resolves every member's identity for this row. A row with
+	// an empty stored list answers one synthetic slot-0 member, so a
+	// single-member tenant reads exactly as it did before slots existed.
+	members placementMembers
 }
 
 // tenantPlacementFenceQuery is the column list both readRow and
 // readRowTx select, in the order scanTenantPlacementFenceRow expects.
 const tenantPlacementFenceQuery = `
-	SELECT namespace, cell, generation, cell_instance, rehydrated_instance, pending_jobs
+	SELECT namespace, cell, generation, cell_instance, rehydrated_instance, pending_jobs,
+	       members, job_homes
 	FROM varroa.tenant_placements
 	WHERE cluster = $1 AND tenant = $2
 `
@@ -146,11 +151,13 @@ func (f *PlacementFence) checkCrossTenantGrant(ctx context.Context, req ClaimReq
 // error, when no row is stored yet.
 func scanTenantPlacementFenceRow(row pgx.Row) (tenantPlacementFenceRow, bool, error) {
 	var (
-		out        tenantPlacementFenceRow
-		pendingRaw json.RawMessage
+		out         tenantPlacementFenceRow
+		pendingRaw  json.RawMessage
+		membersRaw  json.RawMessage
+		jobHomesRaw json.RawMessage
 	)
 	err := row.Scan(&out.namespace, &out.cell, &out.generation, &out.cellInstance,
-		&out.rehydratedInstance, &pendingRaw)
+		&out.rehydratedInstance, &pendingRaw, &membersRaw, &jobHomesRaw)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return tenantPlacementFenceRow{}, false, nil
@@ -162,64 +169,121 @@ func scanTenantPlacementFenceRow(row pgx.Row) (tenantPlacementFenceRow, bool, er
 			return tenantPlacementFenceRow{}, false, fmt.Errorf("decode pending jobs: %w", err)
 		}
 	}
+	out.members, err = decodePlacementMembers(membersRaw, jobHomesRaw, placementScalars{
+		cell: out.cell, namespace: out.namespace, cellInstance: out.cellInstance,
+		rehydratedInstance: out.rehydratedInstance, pendingJobs: out.pendingJobs,
+	})
+	if err != nil {
+		return tenantPlacementFenceRow{}, false, err
+	}
 	return out, true, nil
 }
 
-// decidePlacement applies the placement-fencing capability's ten-order
-// decision table to one claim. It is pure, so every order is testable
-// with no database. row and exists describe the stored placement;
-// exists is false when no row is stored for the claim's cluster and
-// tenant.
+// decidePlacement applies the placement-fencing capability's
+// twelve-order decision table to one claim. It is pure, so every order is
+// testable with no database. row and exists describe the stored
+// placement; exists is false when no row is stored for the claim's
+// cluster and tenant.
+//
+// The fence resolves the claiming member and the job's home member, then
+// compares. Orders 2 and 3 are the permanent identity test: a cell the
+// tenant has left is no member of the row. Every request that reaches
+// order 7 therefore comes from a current member whose gateway resolver
+// cache is stale, and the retryable hold is correct for it.
 func decidePlacement(row tenantPlacementFenceRow, exists bool, req ClaimRequest) FenceResult {
-	switch {
-	case !exists:
+	if !exists {
 		// Order 1: a missing row is recoverable, and holding no
-		// exemption is the epic finding this change fixes.
+		// exemption is the epic finding the fence change fixes.
 		return FenceResult{Allow: false, ReasonCode: ReasonNotReady,
 			Message: fmt.Sprintf("no placement row for tenant %s", req.Tenant)}
+	}
 
-	case req.PlacementGeneration < row.generation, req.PlacementGeneration > row.generation:
-		// Orders 2 and 3: the request's generation does not match the
-		// stored one, in either direction.
-		return FenceResult{Allow: false, ReasonCode: ReasonFenced,
-			Message: fmt.Sprintf("placement generation %d is stale for tenant %s", req.PlacementGeneration, req.Tenant)}
+	claimer, isMember := memberForCell(row.members, req.Namespace, req.Cell)
+	home := memberForJob(row.members, req.JobPath)
 
-	case req.Namespace != row.namespace, req.Cell != row.cell:
-		// Orders 4 and 5: the rest of the placement identity. The
-		// gateway resolver caches a tenant for 30 seconds, so a claim
-		// can carry a stale namespace or cell after a move or a roll.
+	switch {
+	case !hasMemberInNamespace(row.members, req.Namespace):
+		// Order 2: no member of the tenant sits in this namespace.
 		return FenceResult{Allow: false, ReasonCode: ReasonFenced,
 			Message: fmt.Sprintf("cell %s is not the placement of tenant %s", req.Cell, req.Tenant)}
 
-	case req.CellInstance != row.cellInstance:
-		// Order 6: Kubernetes replaces a pod on an eviction or a node
-		// failure with no generation change, so an unnamed pod is
-		// usually the new pod, not a stale one. The answer is the
+	case !isMember:
+		// Order 3: the namespace holds a member and this cell is not
+		// one. The gateway resolver caches a tenant for 30 seconds, so
+		// a claim can carry a stale cell after a move or a scale.
+		return FenceResult{Allow: false, ReasonCode: ReasonFenced,
+			Message: fmt.Sprintf("cell %s is not the placement of tenant %s", req.Cell, req.Tenant)}
+
+	case !instanceIsAnnounced(row.members, req.CellInstance):
+		// Order 4: Kubernetes replaces a pod on an eviction or a node
+		// failure with no generation change, so an instance the row
+		// does not name is usually the new pod. The answer is the
 		// retryable hold either way.
 		return FenceResult{Allow: false, ReasonCode: ReasonNotReady,
 			Message: fmt.Sprintf("cell instance %s is not announced for tenant %s", req.CellInstance, req.Tenant)}
 
+	case claimer.Role == MemberRoleStandby:
+		// Order 5: a standby holds the folder and runs no build.
+		return FenceResult{Allow: false, ReasonCode: ReasonNotHome,
+			Message: fmt.Sprintf("cell %s is not the home of job %s", req.Cell, req.JobPath)}
+
+	case !sameSlot(claimer, home):
+		// Order 6: an active slot that is not this job's home slot.
+		return FenceResult{Allow: false, ReasonCode: ReasonNotHome,
+			Message: fmt.Sprintf("cell %s is not the home of job %s", req.Cell, req.JobPath)}
+
+	case req.PlacementGeneration < row.generation, req.PlacementGeneration > row.generation:
+		// Orders 7 and 8: the request's generation does not match the
+		// stored one, in either direction. The claimer is a current
+		// member, so the hold is retryable: its next claim carries the
+		// current generation.
+		return FenceResult{Allow: false, ReasonCode: ReasonNotReady,
+			Message: fmt.Sprintf("placement generation %d is stale for tenant %s", req.PlacementGeneration, req.Tenant)}
+
 	case isCrossTenantActor(req.Actor, req.Tenant):
-		// Order 7: a cross-tenant claim is a permanent answer, so it
+		// Order 9: a cross-tenant claim is a permanent answer, so it
 		// runs before the two retryable seed orders below.
 		return FenceResult{Allow: false, ReasonCode: ReasonCrossTenant, Message: crossTenantMessage}
 
-	case row.rehydratedInstance != req.CellInstance:
-		// Order 8: the whole tenant's rehydration seed is not applied
+	case home.RehydratedInstance != req.CellInstance:
+		// Order 10: the home member's rehydration seed is not applied
 		// on the claiming cell instance yet.
 		return FenceResult{Allow: false, ReasonCode: ReasonNotReady,
 			Message: fmt.Sprintf("rehydration seed is not applied for job %s", req.JobPath)}
 
-	case containsJobPath(row.pendingJobs, req.JobPath):
-		// Order 9: this one job is still deferred, or a number-only
-		// bundle has not reached it yet.
+	case containsJobPath(home.PendingJobs, req.JobPath):
+		// Order 11: this one job is still deferred on its home member,
+		// so one member's deferred job never holds another's build.
 		return FenceResult{Allow: false, ReasonCode: ReasonNotReady,
 			Message: fmt.Sprintf("rehydration seed is not applied for job %s", req.JobPath)}
 
 	default:
-		// Order 10: every comparison passed.
+		// Order 12: every comparison passed.
 		return FenceResult{Allow: true}
 	}
+}
+
+// instanceIsAnnounced reports whether any member of the row names
+// instance. An empty instance is announced only by a member that names no
+// instance either, which is the shape a controller with no running pod
+// carries.
+func instanceIsAnnounced(row placementMembers, instance string) bool {
+	for _, m := range row.members {
+		if m.Instance == instance {
+			return true
+		}
+	}
+	return false
+}
+
+// sameSlot reports whether the claiming member holds the job's home slot.
+// A home member with no slot is the zero member of an unbound slot, so
+// the answer is false and the claim fails closed.
+func sameSlot(claimer, home member) bool {
+	if claimer.Slot == nil || home.Slot == nil {
+		return false
+	}
+	return *claimer.Slot == *home.Slot
 }
 
 // deriveCallerTenant derives the tenant-export-grant capability's

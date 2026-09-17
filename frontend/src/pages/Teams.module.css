@@ -179,3 +179,11 @@
 .exportKind {
   color: var(--text-2);
 }
+
+/* The member list names every cell of a tenant, one line each. A tenant
+   with one member reads as one line. */
+.memberList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}

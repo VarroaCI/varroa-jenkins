@@ -87,11 +87,16 @@ type placementRow struct {
 	namespace  string
 	cell       string
 	generation int64
+	// members resolves the caller's own member. PlacementInput carries a
+	// namespace and a cell and carries no cell instance and no job path,
+	// so memberForCell is the exact lookup for that question.
+	members placementMembers
 }
 
 // placementRowQuery reads the columns placementRow needs.
 const placementRowQuery = `
-	SELECT namespace, cell, generation
+	SELECT namespace, cell, generation, cell_instance, rehydrated_instance, pending_jobs,
+	       members, job_homes
 	FROM varroa.tenant_placements
 	WHERE cluster = $1 AND tenant = $2
 `
@@ -105,10 +110,28 @@ const placementRowQuery = `
 // which the caller reads as a skip. A found row checks the input
 // generation and cell against the stored ones for every path except
 // fanout, which asks only whether the subscriber is placed at all.
+//
+// The member order runs before the generation order. A tenant holds
+// several members, so the stored scalar cell names slot 0 alone, and a
+// caller on any slot passes. A caller on a cell the tenant has left gets
+// the permanent FENCED. Every input that reaches the generation order
+// therefore comes from a current member whose gateway resolver cache is
+// stale, so that order answers the retryable NOT_READY: a lock acquire
+// and every cross-tenant request enter this method directly, not through
+// the claim fence, and a permanent answer would refuse a live member
+// after any generation raise.
 func (e *GrantEvaluator) CheckPlacement(ctx context.Context, in PlacementInput) (GrantResult, error) {
-	var row placementRow
+	var (
+		row         placementRow
+		instance    string
+		rehydrated  string
+		pendingRaw  json.RawMessage
+		membersRaw  json.RawMessage
+		jobHomesRaw json.RawMessage
+	)
 	err := e.pool.QueryRow(ctx, placementRowQuery, in.Cluster, in.Tenant).
-		Scan(&row.namespace, &row.cell, &row.generation)
+		Scan(&row.namespace, &row.cell, &row.generation, &instance, &rehydrated,
+			&pendingRaw, &membersRaw, &jobHomesRaw)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return checkPlacementNoRow(in), nil
@@ -119,13 +142,27 @@ func (e *GrantEvaluator) CheckPlacement(ctx context.Context, in PlacementInput) 
 	if in.Path == GrantPathFanout {
 		return GrantResult{Allow: true}, nil
 	}
-	if in.PlacementGeneration != row.generation {
-		return GrantResult{Allow: false, ReasonCode: ReasonFenced,
-			Message: fmt.Sprintf("placement generation %d is stale for tenant %s", in.PlacementGeneration, in.Tenant)}, nil
+	var pending []string
+	if len(pendingRaw) > 0 {
+		if err := json.Unmarshal(pendingRaw, &pending); err != nil {
+			return GrantResult{}, fmt.Errorf("decode pending jobs for %s: %w", in.Tenant, err)
+		}
 	}
-	if in.Namespace != row.namespace || in.Cell != row.cell {
+	row.members, err = decodePlacementMembers(membersRaw, jobHomesRaw, placementScalars{
+		cell: row.cell, namespace: row.namespace, cellInstance: instance,
+		rehydratedInstance: rehydrated, pendingJobs: pending,
+	})
+	if err != nil {
+		return GrantResult{}, err
+	}
+
+	if _, isMember := memberForCell(row.members, in.Namespace, in.Cell); !isMember {
 		return GrantResult{Allow: false, ReasonCode: ReasonFenced,
 			Message: fmt.Sprintf("cell %s is not the placement of tenant %s", in.Cell, in.Tenant)}, nil
+	}
+	if in.PlacementGeneration != row.generation {
+		return GrantResult{Allow: false, ReasonCode: ReasonNotReady,
+			Message: fmt.Sprintf("placement generation %d is stale for tenant %s", in.PlacementGeneration, in.Tenant)}, nil
 	}
 	return GrantResult{Allow: true}, nil
 }

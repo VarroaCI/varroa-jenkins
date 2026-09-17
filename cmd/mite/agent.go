@@ -201,6 +201,13 @@ type Agent struct {
 	jobScheduleInterval     time.Duration
 	jobScheduleResendAfter  time.Duration
 
+	// tenantHomes caches the tenant_homes field of the newest applied
+	// desired state. The loopback route GET /v1/homes serves it. The mite
+	// computes no home: the recorder is the only writer of the map and
+	// the operator is the only carrier. Nil before the first apply that
+	// carries the field, which the route answers as an empty list.
+	tenantHomes atomic.Pointer[[]*mitev1.TenantHomes]
+
 	// --- Loopback listener state (D7/D8): the co-located Jenkins plugin
 	// talks to the mite over 127.0.0.1 for build events and run claims.
 
@@ -1521,6 +1528,11 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 		a.jenkinsTokenMu.Unlock()
 		a.wakeTokenWaiters()
 	}
+
+	// Cache the tenant home map this command carries. The cache is
+	// refreshed before the convergence gate, so a converged push still
+	// delivers a fresh map to the loopback route.
+	a.cacheTenantHomes(cmd)
 
 	// Convergence gate: if the desired state hash matches the last applied
 	// hash and this is not an explicit reload, skip all Jenkins writes.

@@ -741,7 +741,9 @@ func TestCellPool_LastTenantLeavingClearsTheList(t *testing.T) {
 	if len(last.Tenants) != 0 {
 		t.Fatalf("tenants = %v, want empty", last.Tenants)
 	}
-	if _, cleared := crdstore.ClearStatusFields(gvr)["tenants"]; !cleared {
+	clears := map[string]any{}
+	crdstore.ApplyStatusClears(gvr, clears)
+	if _, cleared := clears["tenants"]; !cleared {
 		t.Error("cellpools must clear the tenants key, or the stale list survives in etcd")
 	}
 }

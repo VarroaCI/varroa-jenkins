@@ -849,6 +849,16 @@ func (in *TeamPipelinesSpec) DeepCopyInto(out *TeamPipelinesSpec) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.Members != nil {
+		in, out := &in.Members, &out.Members
+		*out = new(int32)
+		**out = **in
+	}
+	if in.Standby != nil {
+		in, out := &in.Standby, &out.Standby
+		*out = new(int32)
+		**out = **in
+	}
 }
 
 // DeepCopy creates a deep copy of TeamPipelinesSpec.
@@ -904,7 +914,7 @@ func (in *TeamStatus) DeepCopyInto(out *TeamStatus) {
 	if in.Placement != nil {
 		in, out := &in.Placement, &out.Placement
 		*out = new(TeamPlacementStatus)
-		**out = **in
+		(*in).DeepCopyInto(*out)
 	}
 	if in.Pipelines != nil {
 		in, out := &in.Pipelines, &out.Pipelines
@@ -950,6 +960,13 @@ func (in *TeamRehydrationStatus) DeepCopy() *TeamRehydrationStatus {
 // DeepCopyInto for TeamPlacementStatus.
 func (in *TeamPlacementStatus) DeepCopyInto(out *TeamPlacementStatus) {
 	*out = *in
+	if in.Members != nil {
+		in, out := &in.Members, &out.Members
+		*out = make([]TeamMemberStatus, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
 }
 
 // DeepCopy creates a deep copy of TeamPlacementStatus.
@@ -958,6 +975,26 @@ func (in *TeamPlacementStatus) DeepCopy() *TeamPlacementStatus {
 		return nil
 	}
 	out := new(TeamPlacementStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for TeamMemberStatus.
+func (in *TeamMemberStatus) DeepCopyInto(out *TeamMemberStatus) {
+	*out = *in
+	if in.Slot != nil {
+		in, out := &in.Slot, &out.Slot
+		*out = new(int32)
+		**out = **in
+	}
+}
+
+// DeepCopy creates a deep copy of TeamMemberStatus.
+func (in *TeamMemberStatus) DeepCopy() *TeamMemberStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamMemberStatus)
 	in.DeepCopyInto(out)
 	return out
 }

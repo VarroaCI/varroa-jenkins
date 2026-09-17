@@ -165,6 +165,47 @@ func (s *Server) publishImperative(ctx context.Context, ref TenantRef, cmd *mite
 	return s.deps.MiteRegistry.SendImperative(ctx, ref.Namespace, ref.Controller, cmd)
 }
 
+// homeRef answers the tenant reference of the member that holds jobPath's
+// home slot. A job homed on slot 1 therefore reaches slot 1's holder, and
+// not slot 0's, which the TenantRef alone names.
+//
+// The resolution never guesses. A trigger published to a member that is
+// not the job's home answers the permanent NOT_HOME, and the plugin then
+// cancels a build this API already reported accepted. A failed read and
+// an unbound home slot therefore both answer a retryable 503, and the
+// caller repeats the request.
+//
+// A tenant that holds no placement row keeps the caller's own reference.
+// That is a controller with no cell role, which holds one Jenkins and no
+// member list.
+func (s *Server) homeRef(ctx context.Context, ref TenantRef, jobPath string) (TenantRef, *ServiceError) {
+	if s.deps.RecordStore == nil || ref.Tenant == "" {
+		return ref, nil
+	}
+	home, err := s.deps.RecordStore.JobHome(ctx, ref.Cluster, ref.Tenant, jobPath)
+	if err != nil {
+		s.deps.Logger.Error("resolve the job home member",
+			"tenant", ref.Tenant, "job_path", jobPath, "error", err)
+		return TenantRef{}, &ServiceError{
+			Status:  http.StatusServiceUnavailable,
+			Message: "resolve the job home member failed",
+		}
+	}
+	if !home.Placed {
+		return ref, nil
+	}
+	if home.Cell == "" {
+		return TenantRef{}, &ServiceError{
+			Status:  http.StatusServiceUnavailable,
+			Message: "the home slot of job " + jobPath + " holds no cell yet",
+		}
+	}
+	out := ref
+	out.Namespace = home.Namespace
+	out.Controller = home.Cell
+	return out, nil
+}
+
 // resolveRunForWrite reads runID and authorizes it with the tenant
 // write check on the run's own TenantRef (pipelines-api's authorization
 // table: cancel and rerun authorize by tenant and job path, not by the
@@ -238,7 +279,11 @@ func (s *Server) createRun(ctx context.Context, claims *auth.Claims, team, jobPa
 			Actor:      ActorFrom(claims),
 		},
 	}
-	if err := s.publishImperative(ctx, ref, cmd); err != nil {
+	target, homeErr := s.homeRef(ctx, ref, jobPath)
+	if homeErr != nil {
+		return "", "", TenantRef{}, homeErr
+	}
+	if err := s.publishImperative(ctx, target, cmd); err != nil {
 		s.deps.Logger.Error("publish trigger build", "error", err)
 		return "", "", TenantRef{}, &ServiceError{Status: http.StatusInternalServerError, Message: "publish trigger build failed"}
 	}
@@ -363,7 +408,12 @@ func (s *Server) handleRerunRun(w http.ResponseWriter, r *http.Request) {
 			Actor:      ActorFrom(claims),
 		},
 	}
-	if err := s.publishImperative(ctx, ref, cmd); err != nil {
+	target, homeErr := s.homeRef(ctx, ref, sourceRun.JobPath)
+	if homeErr != nil {
+		s.writeServiceError(w, homeErr)
+		return
+	}
+	if err := s.publishImperative(ctx, target, cmd); err != nil {
 		s.deps.Logger.Error("publish rerun", "error", err)
 		s.writeJSONError(w, http.StatusInternalServerError, "publish trigger build failed")
 		return

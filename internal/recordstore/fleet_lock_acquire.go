@@ -53,7 +53,7 @@ func handleCrossTenantLockAcquire(ctx context.Context, deps CrossTenantDeps, req
 		}
 	}
 
-	cellInstance, err := readTenantCellInstance(ctx, deps.Pool, req.Cluster, req.CallerTenant)
+	cellInstance, err := readTenantCellInstance(ctx, deps.Pool, req.Cluster, req.CallerTenant, req.JobPath)
 	if err != nil {
 		return CrossTenantResponse{}, err
 	}
@@ -139,23 +139,23 @@ func derefCrossTenantResponse(resp *CrossTenantResponse) CrossTenantResponse {
 	return *resp
 }
 
-// readTenantCellInstance answers cluster/tenant's stored cell_instance
-// from tenant_placements. It answers "" for a tenant with no row, which
-// a caller reaches only when GrantEvaluator already vetoed the request:
-// this is a best-effort read for a value fleet_locks records for
-// diagnosis, and it never gates the acquire on its own.
-func readTenantCellInstance(ctx context.Context, pool *pgxpool.Pool, cluster, tenant string) (string, error) {
-	var instance string
-	err := pool.QueryRow(ctx, `
-		SELECT cell_instance FROM varroa.tenant_placements WHERE cluster = $1 AND tenant = $2
-	`, cluster, tenant).Scan(&instance)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		return "", nil
-	case err != nil:
-		return "", fmt.Errorf("read tenant cell instance: %w", err)
+// readTenantCellInstance answers the cell instance of the member that
+// holds jobPath's home slot. It answers "" for a tenant with no row,
+// which a caller reaches only when GrantEvaluator already vetoed the
+// request: this is a best-effort read for a value fleet_locks records
+// for diagnosis, and it never gates the acquire on its own.
+//
+// The lock's stored instance is the renew's identity gate, so it must
+// name the member that actually runs the build, not slot 0.
+func readTenantCellInstance(ctx context.Context, pool *pgxpool.Pool, cluster, tenant, jobPath string) (string, error) {
+	row, exists, err := readTenantPlacementMembers(ctx, pool, cluster, tenant)
+	if err != nil {
+		return "", err
 	}
-	return instance, nil
+	if !exists {
+		return "", nil
+	}
+	return memberForJob(row, jobPath).Instance, nil
 }
 
 // fleetLockAcquireParams carries one lock_acquire request's identity,

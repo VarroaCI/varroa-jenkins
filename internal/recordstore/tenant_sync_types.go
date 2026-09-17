@@ -11,7 +11,37 @@ import (
 const (
 	TenantSyncKindAnnounce = "announce"
 	TenantSyncKindRecords  = "records"
+	// TenantSyncKindHomes asks for a tenant's member list and its job
+	// home map. The recorder is the only owner of that map.
+	TenantSyncKindHomes = "homes"
 )
+
+// TenantSyncMember is one member of a pipelines tenant: one cell that
+// holds the tenant's folder. The announce request carries the whole list,
+// and the recorder stores it in tenant_placements.members.
+//
+// A cell holds at most one member of a tenant, so the cell and namespace
+// pair is the member's key. An active member carries a slot index. A
+// standby carries no slot and is never a job's home.
+type TenantSyncMember struct {
+	Cell      string `json:"cell"`
+	Namespace string `json:"namespace"`
+	// Role is MemberRoleActive or MemberRoleStandby.
+	Role string `json:"role"`
+	// Slot is set only on an active member.
+	Slot *int32 `json:"slot,omitempty"`
+	// Instance is the cell pod's unique identifier, empty when no pod
+	// runs.
+	Instance string `json:"instance,omitempty"`
+	// RehydratedInstance is the instance whose rehydration seed applied
+	// for this member.
+	RehydratedInstance string `json:"rehydrated_instance,omitempty"`
+	// PendingJobs holds the job paths this member has not seeded yet.
+	PendingJobs []string `json:"pending_jobs,omitempty"`
+	// AppliedAt is when this member's cell last reported the tenant
+	// applied.
+	AppliedAt *time.Time `json:"applied_at,omitempty"`
+}
 
 // TenantSyncDeadInstance is one confirmed-gone cell instance a
 // TenantSyncRequest of kind "announce" carries. The operator lists an
@@ -51,6 +81,12 @@ type TenantSyncRequest struct {
 	CellAliveAt        *time.Time               `json:"cell_alive_at,omitempty"`
 	CellLastSeenAt     *time.Time               `json:"cell_last_seen_at,omitempty"`
 	DeadInstances      []TenantSyncDeadInstance `json:"dead_instances,omitempty"`
+	// Members carries the whole member list of the tenant, so the
+	// recorder never observes a half-applied change. Slot 0's entry
+	// repeats the scalar fields above. An empty list is stored as an
+	// empty list, which every reader resolves to one synthetic slot-0
+	// member.
+	Members []TenantSyncMember `json:"members,omitempty"`
 
 	// JobPaths and PerJob apply to kind "records". An empty JobPaths
 	// means enumerate.
@@ -92,6 +128,13 @@ type TenantSyncResponse struct {
 
 	// Jobs applies to kind "records".
 	Jobs []TenantSyncJobRecords `json:"jobs,omitempty"`
+
+	// Members and JobHomes apply to kind "homes". Members holds the
+	// tenant's stored member list, and JobHomes maps a job path to a slot
+	// index. A tenant with no stored list answers one synthetic slot-0
+	// member built from the row's scalar columns.
+	Members  []TenantSyncMember `json:"members,omitempty"`
+	JobHomes map[string]int32   `json:"job_homes,omitempty"`
 
 	Error string `json:"error,omitempty"`
 }

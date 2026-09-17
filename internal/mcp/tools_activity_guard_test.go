@@ -20,10 +20,19 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/transport"
 )
 
-// guardRecordReader is a non-nil recordstore.Reader that no guarded tool
-// calls a method on: run_pipeline only checks the field for nil, so an
-// unimplemented method (the embedded nil interface) never fires.
+// guardRecordReader is a non-nil recordstore.Reader for the one method a
+// guarded tool calls before its activity emit. run_pipeline resolves the
+// job's home member, so JobHome is implemented here; every other method
+// comes from the embedded nil interface and must stay uncalled.
 type guardRecordReader struct{ recordstore.Reader }
+
+// JobHome answers slot 0, which is the tenant reference the guard's own
+// resolver already hands the tool. The guard asserts the activity emit,
+// not the placement, so the answer only needs to leave the reference
+// unchanged.
+func (guardRecordReader) JobHome(_ context.Context, _, _, _ string) (recordstore.JobHome, error) {
+	return recordstore.JobHome{}, nil
+}
 
 // guardTenantResolver is a fixed-answer api.TenantResolver for
 // run_pipeline: every team resolves to the one write-admitted tenant

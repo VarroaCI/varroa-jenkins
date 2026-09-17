@@ -76,13 +76,13 @@ func seedMeshPlacement(t *testing.T, db *sql.DB, cellInstance, rehydratedInstanc
 
 // seedMeshFleetLock inserts one held fleet_locks row naming runID and
 // cellInstance as its owner.
-func seedMeshFleetLock(t *testing.T, db *sql.DB, runID uuid.UUID, cellInstance string) {
+func seedMeshFleetLock(t *testing.T, db *sql.DB, runID uuid.UUID) {
 	t.Helper()
 	if _, err := db.Exec(`
 		INSERT INTO varroa.fleet_locks
 			(name, run_id, cluster, tenant, job_path, cell_instance, state, fence_token, waiting_since, acquired_at, expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6, 'held', 1, now(), now(), now() + interval '1 hour')
-	`, testTenant+"/deploy-lock", runID.String(), testCluster, testTenant, testJobPath, cellInstance); err != nil {
+	`, testTenant+"/deploy-lock", runID.String(), testCluster, testTenant, testJobPath, meshDeadInstance); err != nil {
 		t.Fatalf("seed fleet lock: %v", err)
 	}
 }
@@ -190,7 +190,7 @@ func TestTakeOverLostRunsDispatchesToLiveTarget(t *testing.T) {
 	received := collectActions(t, conn)
 
 	runID := seedMeshRunningRun(t, pool, db)
-	seedMeshFleetLock(t, db, runID, meshDeadInstance)
+	seedMeshFleetLock(t, db, runID)
 	seedMeshPlacement(t, db, "pod-live", "pod-live")
 
 	metrics, err := NewInterruptedMetrics()
@@ -261,7 +261,7 @@ func TestTakeOverLostRunsSecondDispatchPublishesNothing(t *testing.T) {
 	received := collectActions(t, conn)
 
 	runID := seedMeshRunningRun(t, pool, db)
-	seedMeshFleetLock(t, db, runID, meshDeadInstance)
+	seedMeshFleetLock(t, db, runID)
 	seedMeshPlacement(t, db, "pod-live", "pod-live")
 
 	if got := runTakeover(t, pool, conn, nil, nil); got != 1 {
@@ -287,7 +287,7 @@ func TestDispatchMeshResumeRollsBackOnRealCompletion(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 
 	runID := seedMeshRunningRun(t, pool, db)
-	seedMeshFleetLock(t, db, runID, meshDeadInstance)
+	seedMeshFleetLock(t, db, runID)
 	seedMeshPlacement(t, db, "pod-live", "pod-live")
 
 	now := time.Now()

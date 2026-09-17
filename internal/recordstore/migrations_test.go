@@ -21,6 +21,7 @@ func TestMigrationsFSListsEveryFile(t *testing.T) {
 		"00008_trigger_failed_result.sql":  false,
 		"00009_run_intents_refired_at.sql": false,
 		"00010_run_state_object_class.sql": false,
+		"00011_tenant_members.sql":         false,
 	}
 	for _, entry := range entries {
 		if _, ok := want[entry.Name()]; !ok {

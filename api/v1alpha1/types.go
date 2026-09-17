@@ -1455,6 +1455,23 @@ type TeamPipelinesSpec struct {
 	// +kubebuilder:validation:MaxItems=64
 	// +optional
 	Exports []TeamExport `json:"exports,omitempty"`
+
+	// Members sets the number of active slots this tenant runs. Each slot
+	// holds one cell. A job runs only on its home slot's holder. This field
+	// is not spec.members, which lists local usernames.
+	// +kubebuilder:default=1
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=16
+	// +optional
+	Members *int32 `json:"members,omitempty"`
+
+	// Standby sets the number of warm members this tenant keeps. A standby
+	// holds the folder and no slot. It takes a slot whose holder dies.
+	// +kubebuilder:default=0
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=8
+	// +optional
+	Standby *int32 `json:"standby,omitempty"`
 }
 
 // TeamExport is one grant a pipelines tenant makes to other tenants: a
@@ -1566,6 +1583,25 @@ type TeamPlacementStatus struct {
 	// Generation increases only when the bound cell changes. The fence
 	// C6 owns rejects a claim carrying an older generation.
 	Generation int64 `json:"generation,omitempty"`
+	// Members reports every member of this tenant. The scalar fields above
+	// keep describing slot 0.
+	// +optional
+	Members []TeamMemberStatus `json:"members,omitempty"`
+}
+
+// TeamMemberStatus reports one member of a pipelines tenant.
+type TeamMemberStatus struct {
+	// Cell is the name of the cell Controller that holds this member.
+	Cell string `json:"cell,omitempty"`
+	// CellNamespace is the namespace of that cell Controller.
+	CellNamespace string `json:"cellNamespace,omitempty"`
+	// Role is TeamMemberRoleActive or TeamMemberRoleStandby.
+	Role string `json:"role,omitempty"`
+	// Slot is set only on an active member.
+	// +optional
+	Slot *int32 `json:"slot,omitempty"`
+	// Applied is true when the member's cell reports this tenant applied.
+	Applied bool `json:"applied,omitempty"`
 }
 
 // TeamPipelinesStatus carries a pipelines tenant's door credentials and
@@ -1594,6 +1630,18 @@ type TeamPipelinesStatus struct {
 	// survives a transient tick that changes the Placed reason for an
 	// unrelated cause.
 	PendingPurgeGeneration *int64 `json:"pendingPurgeGeneration,omitempty"`
+	// PendingPurgeCell names the cell whose schedule rows the pending
+	// purge must delete. A slot move raises the tenant generation, so a
+	// whole-tenant delete would drop every other slot's rows. The retry
+	// therefore needs the cell the move left, not only the generation.
+	// An empty value means a whole-tenant delete, which is what teardown
+	// asks for.
+	PendingPurgeCell string `json:"pendingPurgeCell,omitempty"`
+	// PendingPurgeCellNamespace names that cell's namespace. A schedule
+	// row is keyed by both, so a cell name alone can name two cells and
+	// the delete would drop the rows of a same-named cell in another
+	// namespace. It is set and cleared with PendingPurgeCell.
+	PendingPurgeCellNamespace string `json:"pendingPurgeCellNamespace,omitempty"`
 }
 
 // TeamNamespaceState reports the state of a single namespace for a Team.

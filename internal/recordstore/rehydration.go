@@ -61,6 +61,27 @@ func ListRehydrationRecords(ctx context.Context, pool *pgxpool.Pool, cluster, te
 	return rehydrationRecordsForPaths(ctx, pool, cluster, tenant, jobPaths, perJob)
 }
 
+// RefreshJobRecords reads the seed of a named set of job paths, for a job
+// whose holder changed. A slot takeover refreshes every job the home map
+// homes on that slot, and a home change refreshes that one job.
+//
+// It differs from ListRehydrationRecords in one rule: an empty jobPaths
+// is an error, never an enumeration. A refresh always names its jobs, so
+// a caller that loses its list never seeds the whole tenant by accident.
+// The call carries at most maxRehydrationJobPaths paths.
+//
+// The refresh reuses the records path, so it adds no path shape and keeps
+// the mite's never-overwrite-real-history rule. It is idempotent: a
+// repeat for the same job and the same holder answers the same records
+// and raises no number twice.
+func RefreshJobRecords(ctx context.Context, pool *pgxpool.Pool, cluster, tenant string,
+	jobPaths []string, perJob int) ([]RehydrationJobRecords, error) {
+	if len(jobPaths) == 0 {
+		return nil, fmt.Errorf("a job record refresh names at least one job path")
+	}
+	return ListRehydrationRecords(ctx, pool, cluster, tenant, jobPaths, perJob)
+}
+
 // enumerateRehydrationJobs lists every distinct job path of cluster and
 // tenant that holds a job_numbers row or a completed run. The
 // job_numbers half is necessary: a job whose every claimed build was
