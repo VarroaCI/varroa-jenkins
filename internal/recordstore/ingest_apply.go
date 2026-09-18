@@ -244,6 +244,16 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 		}
 	}
 
+	// The superseded-object delete runs at the same place and for the
+	// same reason. It is best effort: a failed delete leaves one object,
+	// which the run's own prefix delete removes when the run ends.
+	if dispatched.stateKeyCleanup != "" && g.stateDeleter != nil {
+		if delErr := g.stateDeleter.Delete(ctx, dispatched.stateKeyCleanup); delErr != nil {
+			g.logger.Error("delete superseded run-state object failed",
+				"runID", env.RunID, "key", dispatched.stateKeyCleanup, "error", delErr)
+		}
+	}
+
 	return result, nil
 }
 
@@ -262,6 +272,12 @@ type dispatchResult struct {
 	// write, the same owner test the fan-out uses, and on the recorder's
 	// own cap refusal.
 	stateCleanup string
+
+	// stateKeyCleanup names one exact run-state object key Apply deletes
+	// after the transaction commits. A run-state upsert that supersedes
+	// another epoch's object sets it, so the stored bytes of a run stay
+	// equal to the bytes its record counts.
+	stateKeyCleanup string
 
 	supersededStart    bool
 	supersededReported int64

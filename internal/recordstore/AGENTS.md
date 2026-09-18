@@ -33,7 +33,19 @@ of the fleet's audit activity, once a controller becomes disposable.
   `applyRunState` merges each `run.state` outcome into
   `runs.payload->'mesh'`; the recorder alone owns the 64 MiB cap, and the
   cap path clears `mesh.state_at`, `mesh.resume`, and the run's stored
-  objects together. `TakeOverLostRuns` claims a lost run in two steps: it
+  objects together. Each `mesh.files` entry carries the pusher `epoch` of
+  the object it names, and `applyRunStateFile` decides precedence under a
+  `SELECT … FOR UPDATE` of the run row: the higher epoch wins, and inside
+  one epoch the higher generation wins. The lock is what makes that safe
+  against a second recorder replica; `UPDATE … RETURNING` cannot answer it,
+  because that array is already the written one. A decision that supersedes
+  another epoch's object sets `dispatchResult.stateKeyCleanup`, and `Apply`
+  deletes that exact key after the commit, beside the existing prefix
+  cleanup. Two entries of one epoch name one key, so an equal-epoch upsert
+  deletes nothing. `runMeshRecord.hasState` refuses a record holding an
+  entry whose epoch is not positive: such an entry names no object, so the
+  run takes the ordinary confirmed-loss path. `LedgerAction.Files` is
+  `[]ResumeFile{RelPath, Epoch}`, and the build record stays last. `TakeOverLostRuns` claims a lost run in two steps: it
   arms every `RUNNING` run whose owner is confirmed gone and whose anchor
   is fresh, then dispatches once `resumeTargetForRun` answers a seeded
   member. `resumeTargetForRun` is the **only** reader of the placement row

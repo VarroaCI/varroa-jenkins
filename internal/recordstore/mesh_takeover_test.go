@@ -29,6 +29,11 @@ const (
 	meshProgramPath     = "jobs/t/jobs/j/builds/7/program.dat"
 )
 
+// meshPusherEpoch is the pusher epoch every seeded file entry carries.
+// An entry without one names no object, so the takeover would claim the
+// run for no resume.
+const meshPusherEpoch = int64(1737000000000)
+
 // seedMeshRunningRun claims and starts one RUNNING run owned by the
 // confirmed-gone instance, then stamps its payload with a usable mesh
 // record: a state_at anchor and two stored files.
@@ -42,10 +47,12 @@ func seedMeshRunningRun(t *testing.T, pool *pgxpool.Pool, db *sql.DB) uuid.UUID 
 		   SET payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object('mesh', jsonb_build_object(
 		         'state_at', now(),
 		         'files', jsonb_build_array(
-		             jsonb_build_object('relpath', $2::text, 'bytes', 100, 'seq', 1, 'state_gen', 1),
-		             jsonb_build_object('relpath', $3::text, 'bytes', 200, 'seq', 1, 'state_gen', 1))))
+		             jsonb_build_object('relpath', $2::text, 'bytes', 100, 'seq', 1, 'state_gen', 1,
+		                                'epoch', $4::bigint),
+		             jsonb_build_object('relpath', $3::text, 'bytes', 200, 'seq', 1, 'state_gen', 1,
+		                                'epoch', $4::bigint))))
 		 WHERE run_id = $1
-	`, runID, meshBuildRecordPath, meshProgramPath); err != nil {
+	`, runID, meshBuildRecordPath, meshProgramPath, meshPusherEpoch); err != nil {
 		t.Fatalf("seed mesh state: %v", err)
 	}
 	return runID
@@ -237,7 +244,7 @@ func TestTakeOverLostRunsDispatchesToLiveTarget(t *testing.T) {
 		if a.Kind != LedgerActionResumeRun || a.Instance != "pod-live" || a.RunID != runID.String() {
 			t.Fatalf("action = %+v, want a resume_run to pod-live for %s", a, runID)
 		}
-		if len(a.Files) == 0 || a.Files[len(a.Files)-1] != meshBuildRecordPath {
+		if len(a.Files) == 0 || a.Files[len(a.Files)-1].RelPath != meshBuildRecordPath {
 			t.Fatalf("files = %v, want the build record last", a.Files)
 		}
 		// The action carries the run's own deadline, so a command that
@@ -370,21 +377,95 @@ func TestDispatchMeshResumeRollsBackOnRealCompletion(t *testing.T) {
 // input.
 func TestResumeFileListOrdersBuildRecordLast(t *testing.T) {
 	files := []runStateFile{
-		{RelPath: meshBuildRecordPath},
-		{RelPath: meshProgramPath},
-		{RelPath: "jobs/t/jobs/j/builds/7/log"},
+		{RelPath: meshBuildRecordPath, Epoch: 100},
+		{RelPath: meshProgramPath, Epoch: 100},
+		{RelPath: "jobs/t/jobs/j/builds/7/log", Epoch: 200},
 	}
 	got := resumeFileList(files)
 	if len(got) != 3 {
 		t.Fatalf("len(got) = %d, want 3", len(got))
 	}
-	if got[len(got)-1] != meshBuildRecordPath {
-		t.Fatalf("last entry = %q, want the build record", got[len(got)-1])
+	if got[len(got)-1].RelPath != meshBuildRecordPath {
+		t.Fatalf("last entry = %q, want the build record", got[len(got)-1].RelPath)
 	}
-	rest := map[string]bool{meshProgramPath: true, "jobs/t/jobs/j/builds/7/log": true}
+	rest := map[string]int64{meshProgramPath: 100, "jobs/t/jobs/j/builds/7/log": 200}
 	for _, f := range got[:len(got)-1] {
-		if !rest[f] {
-			t.Fatalf("unexpected non-last entry %q", f)
+		epoch, ok := rest[f.RelPath]
+		if !ok {
+			t.Fatalf("unexpected non-last entry %q", f.RelPath)
+		}
+		if f.Epoch != epoch {
+			t.Fatalf("entry %q carries epoch %d, want %d", f.RelPath, f.Epoch, epoch)
+		}
+	}
+}
+
+// TestDispatchMeshResumeReadsTheRecordedEpoch asserts the action names the
+// epochs the record holds at dispatch, not the epochs the candidate was
+// read with. An ingest that supersedes an epoch deletes the older object,
+// so an action built from a stale copy could name an object that is gone.
+func TestDispatchMeshResumeReadsTheRecordedEpoch(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+
+	runID := seedMeshRunningRun(t, pool, db)
+	seedMeshFleetLock(t, db, runID)
+	seedMeshPlacement(t, db, "pod-live", "pod-live")
+
+	metrics, err := NewInterruptedMetrics()
+	if err != nil {
+		t.Fatalf("new interrupted metrics: %v", err)
+	}
+
+	now := time.Now().UTC()
+	expires := now.Add(resumeArmWindow)
+	if _, err := db.Exec(`
+		UPDATE varroa.runs
+		   SET payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object('mesh',
+		         COALESCE(payload->'mesh', '{}'::jsonb) || jsonb_build_object('resume',
+		           jsonb_build_object('armed_at', $2::timestamptz, 'arm_expires', $3::timestamptz)))
+		 WHERE run_id = $1
+	`, runID, now, expires); err != nil {
+		t.Fatalf("seed the arm: %v", err)
+	}
+
+	// The record moves to a newer epoch after the candidate was read.
+	const newEpoch = int64(1737000999999)
+	if _, err := db.Exec(`
+		UPDATE varroa.runs
+		   SET payload = jsonb_set(payload, '{mesh,files}', (
+		         SELECT jsonb_agg(e || jsonb_build_object('epoch', $2::bigint))
+		           FROM jsonb_array_elements(payload->'mesh'->'files') e))
+		 WHERE run_id = $1
+	`, runID, newEpoch); err != nil {
+		t.Fatalf("raise the recorded epoch: %v", err)
+	}
+
+	candidates, err := selectMeshCandidates(context.Background(), pool, testCluster, testTenant)
+	if err != nil {
+		t.Fatalf("select candidates: %v", err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("len(candidates) = %d, want 1", len(candidates))
+	}
+	// The candidate now carries the stale epoch the round read first.
+	c := candidates[0]
+	for i := range c.mesh.Files {
+		c.mesh.Files[i].Epoch = meshPusherEpoch
+	}
+
+	action, ok, err := dispatchMeshResume(context.Background(), pool, metrics, c, now)
+	if err != nil {
+		t.Fatalf("dispatchMeshResume: %v", err)
+	}
+	if !ok {
+		t.Fatal("want one dispatched action")
+	}
+	if len(action.Files) == 0 {
+		t.Fatal("the action names no file")
+	}
+	for _, f := range action.Files {
+		if f.Epoch != newEpoch {
+			t.Fatalf("file %q names epoch %d, want the recorded %d", f.RelPath, f.Epoch, newEpoch)
 		}
 	}
 }

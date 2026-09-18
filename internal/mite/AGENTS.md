@@ -292,7 +292,14 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   all) — it is never itself written back to storage.
 - **Run-state store** (`run_state.go`) — `BusHandler.OnRunStateChunk` stores
   one replicated file of a running Pipeline build as one whole blob object
-  (`runstate/<run_id>/<relpath>`, class `state`), through `blob.Store.Replace`.
+  (`runstate/<run_id>/<pusher_epoch>/<relpath>`, class `state`), through
+  `blob.Store.Replace`. **The key carries the pusher epoch, and that is what
+  orders two epochs.** The chart runs two gateway replicas, each with its own
+  `stateRuns` map: a retired process reconnecting through the other replica
+  would otherwise land its `Replace` on the live process's object, and the
+  30-second refresh repairs only `program.dat` and `build.xml`. A
+  `workflow/<n>.xml` and a node config go once per process, so a stale
+  overwrite of either lasts for the run.
   It applies six ordered steps: a path check, the same `checkOwner` a log
   chunk takes, the 64 MiB per-run bound against the chunk's declared
   `object_size`, a buffer keyed `(run_id, relpath, state_gen)`, a write only
@@ -316,15 +323,17 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   as stored, because the sender is gone and the loopback's reason set is
   closed. Only a higher epoch replaces, and a rise retires every buffer
   below it so their bytes leave the gateway-wide bound at once. **The
-  fence runs before every other test**, because the shape test and the
-  cap test both drop the path's buffer: a bad chunk from a retired
-  process must never throw away the live process's partial push. **Each
-  run owns a write monitor**, because the object write runs outside the
-  gateway-wide lock: the monitor holds the epoch test and the write
-  together, so a retired process's slow write either goes first, and the
-  new process overwrites it, or it waits and then writes nothing. It also
-  keeps two writes of one key apart, which the file tier fails outright.
-  `OnRunStateRequest` serves a
+  fence runs before the shape test and the cap test**, because both drop
+  the path's buffer: a bad chunk from a retired process must never throw
+  away the live process's partial push. That fence, and `newestEpoch`
+  itself, bound this replica's buffers alone. **Each run owns a write
+  monitor**, which keeps two writes of one key apart: `bucketStore.Replace`
+  deletes the key and then writes part 0, so two same-epoch writes of one
+  path must not interleave. The retired-epoch test inside
+  `storeRunStateObject` is an optimization, not the ordering rule: it skips
+  a write this replica already knows is superseded.
+  `OnRunStateRequest` refuses a request whose `pusher_epoch` is not
+  positive, because the key names the epoch. It serves a
   resume's fetch through `NewRangeReader` (the chunked read `Put` pairs
   with, never `NewObjectReader`), and calls `ownerCache.invalidate` on a
   run's **first** fetch: a resume moves a run's owner with no claim behind

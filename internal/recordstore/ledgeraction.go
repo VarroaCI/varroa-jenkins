@@ -49,18 +49,26 @@ type LedgerAction struct {
 
 	// Instance, Files, and Deadline apply to resume_run alone. Instance
 	// names the cell instance that must adopt the run. Files lists the
-	// run's stored state paths, relative to the Jenkins home, because
-	// the operator holds no database connection and cannot read them
-	// itself.
+	// run's stored state files, because the operator holds no database
+	// connection and cannot read them itself.
 	//
 	// Deadline is the moment the resume stops being useful, which is
 	// the run's own stored deadline. It travels with the action because
 	// a command can wait in a queue: a command that arrives after this
 	// moment must restore nothing, and the target has no other way to
 	// know that the recorder already gave up.
-	Instance string     `json:"instance,omitempty"`
-	Files    []string   `json:"files,omitempty"`
-	Deadline *time.Time `json:"deadline,omitempty"`
+	Instance string       `json:"instance,omitempty"`
+	Files    []ResumeFile `json:"files,omitempty"`
+	Deadline *time.Time   `json:"deadline,omitempty"`
+}
+
+// ResumeFile is one stored state file of a resume action: the path under
+// the Jenkins home, and the epoch of the object that holds it. The
+// run-state object key carries the epoch, so a path alone names no
+// object.
+type ResumeFile struct {
+	RelPath string `json:"relpath"`
+	Epoch   int64  `json:"epoch"`
 }
 
 // PublishLedgerAction marshals action and publishes it on

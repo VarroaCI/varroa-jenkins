@@ -529,6 +529,11 @@ message RunStateRequest {
   string run_id = 2;
   // @required
   string relpath = 3;
+  // pusher_epoch names the Jenkins process whose object the fetch wants.
+  // The run-state key carries the epoch, so a run and a path alone name
+  // no object.
+  // @required
+  int64 pusher_epoch = 4;
 }
 
 message RunStateResponse {
@@ -552,16 +557,27 @@ message RunStateAck {
   int32 pause_ms = 6;
 }
 
+// ResumeStateFile is one stored file a resume must materialize: the path
+// under JENKINS_HOME, and the epoch of the object that holds it.
+message ResumeStateFile {
+  // @required
+  string relpath = 1;
+  // @required
+  int64 pusher_epoch = 2;
+}
+
 message ResumeBuildPayload {
   // @required
   string run_id = 1;
   // @required
   string job_path = 2;
   int64 build_number = 3;
-  repeated string files = 4;
+  reserved 4;
+  reserved "files";
   // @required
   string instance = 5;
   int64 deadline_unix = 6;
+  repeated ResumeStateFile state_files = 7;
 }
 
 message MiteMessage {

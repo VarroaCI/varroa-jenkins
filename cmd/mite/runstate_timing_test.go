@@ -54,7 +54,7 @@ func TestResumeFetchesManyFilesQuickly(t *testing.T) {
 	start := time.Now()
 	for i := 0; i < 25; i++ {
 		relPath := fmt.Sprintf("jobs/team/jobs/pipeline/builds/7/workflow/%d.xml", i+1)
-		if _, err := agent.fetchRunStateFileWithRetry(context.Background(), "run-1", relPath); err != nil {
+		if _, err := agent.fetchRunStateFileWithRetry(context.Background(), "run-1", relPath, testPusherEpoch); err != nil {
 			t.Fatalf("fetch %s: %v", relPath, err)
 		}
 	}

@@ -7,6 +7,8 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
 
 // runStateCapBytes bounds the stored state of one run. The recorder is
@@ -18,12 +20,24 @@ const runStateCapBytes = int64(64 * 1024 * 1024)
 const runStateCapReason = "state-cap"
 
 // runStateFile is one entry of mesh.files. Bytes is the whole stored
-// object's inflated size, not the last chunk's.
+// object's inflated size, not the last chunk's. Epoch names the Jenkins
+// process whose object this entry points at.
 type runStateFile struct {
 	RelPath  string `json:"relpath"`
 	Bytes    int64  `json:"bytes"`
 	Seq      int64  `json:"seq"`
 	StateGen int64  `json:"state_gen"`
+	Epoch    int64  `json:"epoch"`
+}
+
+// newer reports whether f supersedes stored. A higher epoch always wins,
+// because the lower epoch's process is gone. Inside one epoch the higher
+// generation wins.
+func (f runStateFile) newer(stored runStateFile) bool {
+	if f.Epoch != stored.Epoch {
+		return f.Epoch > stored.Epoch
+	}
+	return f.StateGen > stored.StateGen
 }
 
 // applyRunState merges one run-state push outcome into
@@ -80,13 +94,52 @@ func applyRunStateRefusal(ctx context.Context, tx pgx.Tx, intent *intentRow, env
 
 // applyRunStateFile upserts one stored file by its relative path and
 // then applies the durable cap.
+//
+// The upsert reads the stored entry under a row lock first. Two recorder
+// replicas can hold two reports of one run at one moment, and without
+// the lock both would read one entry and the later write would lose the
+// earlier decision. An UPDATE ... RETURNING cannot answer this: that
+// array is already the written one.
 func applyRunStateFile(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope, payload RunStatePayload) (dispatchResult, error) {
-	entry, err := json.Marshal(runStateFile{
+	incoming := runStateFile{
 		RelPath:  payload.RelPath,
 		Bytes:    payload.Bytes,
 		Seq:      payload.Seq,
 		StateGen: payload.StateGen,
-	})
+		Epoch:    payload.PusherEpoch,
+	}
+
+	stored, found, dispatched, err := lockedRunStateEntry(ctx, tx, intent, payload.RelPath)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return dispatchResult{}, nil
+	case err != nil:
+		return dispatchResult{}, err
+	}
+
+	winner := incoming
+	superseded := runStateFile{}
+	if found {
+		if incoming.newer(stored) {
+			superseded = stored
+		} else {
+			winner, superseded = stored, incoming
+		}
+	}
+
+	// Two entries of one epoch name one key, so a delete of that key
+	// would remove the object the record keeps.
+	//
+	// A dispatched resume names the epochs it read, and its target
+	// fetches them one at a time. The delete waits while such a resume is
+	// in flight, so it can never remove an object the target still needs.
+	// The run's own prefix delete removes that object when the run ends.
+	var cleanupKey string
+	if !dispatched && superseded.RelPath != "" && superseded.Epoch != winner.Epoch {
+		cleanupKey = blob.RunStateKey(intent.runID.String(), superseded.Epoch, superseded.RelPath)
+	}
+
+	entry, err := json.Marshal(winner)
 	if err != nil {
 		return dispatchResult{}, fmt.Errorf("encode run-state file entry: %w", err)
 	}
@@ -117,10 +170,52 @@ func applyRunStateFile(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 	if err != nil {
 		return dispatchResult{}, err
 	}
-	if total <= runStateCapBytes {
-		return dispatchResult{}, nil
+	if total > runStateCapBytes {
+		// The cap deletes the whole prefix, which covers the superseded
+		// object as well.
+		return applyRunStateCap(ctx, tx, intent)
 	}
-	return applyRunStateCap(ctx, tx, intent)
+	return dispatchResult{stateKeyCleanup: cleanupKey}, nil
+}
+
+// lockedRunStateEntry reads the run's stored entry for relpath under a
+// row lock. It reports whether the record holds one, and whether the run
+// holds a dispatched resume. The lock is what makes the precedence
+// decision safe against a second recorder replica.
+func lockedRunStateEntry(ctx context.Context, tx pgx.Tx, intent *intentRow, relpath string) (runStateFile, bool, bool, error) {
+	var raw, resumeRaw []byte
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(payload->'mesh'->'files', '[]'::jsonb),
+		       COALESCE(payload->'mesh'->'resume', 'null'::jsonb)
+		  FROM varroa.runs
+		 WHERE run_id = $1 AND created_at = $2
+		   FOR UPDATE
+	`, intent.runID, intent.createdAt).Scan(&raw, &resumeRaw); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return runStateFile{}, false, false, err
+		}
+		return runStateFile{}, false, false, fmt.Errorf("read run-state file list: %w", err)
+	}
+
+	var resume *runMeshResume
+	if err := json.Unmarshal(resumeRaw, &resume); err != nil {
+		return runStateFile{}, false, false, fmt.Errorf("decode run-state resume: %w", err)
+	}
+	// An armed run holds a resume that names no instance, so the named
+	// instance is what proves a dispatch. The heartbeat ingest clears the
+	// whole object once the target reports the run.
+	dispatched := resume != nil && resume.Instance != ""
+
+	entries, err := decodeRunStateFiles(raw)
+	if err != nil {
+		return runStateFile{}, false, dispatched, err
+	}
+	for _, e := range entries {
+		if e.RelPath == relpath {
+			return e, true, dispatched, nil
+		}
+	}
+	return runStateFile{}, false, dispatched, nil
 }
 
 // sumRunStateBytes sums the stored size of every file the record holds

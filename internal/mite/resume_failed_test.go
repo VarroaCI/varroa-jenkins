@@ -22,8 +22,10 @@ func resumeBuildCommand() *mitev1.ImperativeCommand {
 			RunId:       "0199d0b7-0000-7000-8000-000000000011",
 			JobPath:     triggerFailedJob,
 			BuildNumber: 7,
-			Files:       []string{"jobs/team-a/jobs/build/builds/7/build.xml"},
-			Instance:    resumeFailedInstance,
+			StateFiles: []*mitev1.ResumeStateFile{
+				{Relpath: "jobs/team-a/jobs/build/builds/7/build.xml", PusherEpoch: 1737000000000},
+			},
+			Instance: resumeFailedInstance,
 		},
 	}
 }

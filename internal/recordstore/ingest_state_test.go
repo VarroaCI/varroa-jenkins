@@ -46,7 +46,7 @@ func TestApplyRunStateStoresFileAndSetsAnchor(t *testing.T) {
 	ingester := NewIngester(pool, nil, nil)
 
 	applyMeshRunState(t, ingester, runID, intentKey, RunStatePayload{
-		RelPath: meshProgramPath, Bytes: 4096, Seq: 1, StateGen: 3,
+		RelPath: meshProgramPath, Bytes: 4096, Seq: 1, StateGen: 3, PusherEpoch: meshPusherEpoch,
 	})
 
 	var stateAt sql.NullTime
@@ -62,7 +62,8 @@ func TestApplyRunStateStoresFileAndSetsAnchor(t *testing.T) {
 	if len(files) != 1 {
 		t.Fatalf("len(files) = %d, want 1", len(files))
 	}
-	if files[0].RelPath != meshProgramPath || files[0].Bytes != 4096 || files[0].Seq != 1 || files[0].StateGen != 3 {
+	if files[0].RelPath != meshProgramPath || files[0].Bytes != 4096 || files[0].Seq != 1 ||
+		files[0].StateGen != 3 || files[0].Epoch != meshPusherEpoch {
 		t.Fatalf("files[0] = %+v, want the stored payload", files[0])
 	}
 }
@@ -113,10 +114,10 @@ func TestApplyRunStateUpsertsByRelPath(t *testing.T) {
 	ingester := NewIngester(pool, nil, nil)
 
 	applyMeshRunState(t, ingester, runID, intentKey, RunStatePayload{
-		RelPath: meshProgramPath, Bytes: 1000, Seq: 1, StateGen: 1,
+		RelPath: meshProgramPath, Bytes: 1000, Seq: 1, StateGen: 1, PusherEpoch: meshPusherEpoch,
 	})
 	applyMeshRunState(t, ingester, runID, intentKey, RunStatePayload{
-		RelPath: meshProgramPath, Bytes: 2000, Seq: 2, StateGen: 2,
+		RelPath: meshProgramPath, Bytes: 2000, Seq: 2, StateGen: 2, PusherEpoch: meshPusherEpoch,
 	})
 
 	files := readMeshFiles(t, db, runID)
@@ -313,5 +314,162 @@ func TestHeartbeatBeforeTheRequestKeepsTheResume(t *testing.T) {
 	instance, ok := readResumeInstance(t, db, runID)
 	if !ok || instance != "pod-live" {
 		t.Fatalf("mesh.resume.instance = %q, ok = %v, want pod-live", instance, ok)
+	}
+}
+
+// TestApplyRunStateKeepsTheHigherEpoch asserts an older-epoch report
+// that arrives after a newer one leaves the record on the newer epoch,
+// and reports the older epoch's own key for deletion.
+func TestApplyRunStateKeepsTheHigherEpoch(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	intentKey := "manual:" + newTestUUIDv7String()
+	runID := seedGrantedIntent(t, pool, intentKey)
+
+	fake := &prefixRecordingStore{}
+	ingester := NewIngester(pool, nil, nil)
+	ingester.SetStateDeleter(fake)
+
+	applyMeshRunState(t, ingester, runID, intentKey, RunStatePayload{
+		RelPath: meshProgramPath, Bytes: 2000, Seq: 2, StateGen: 4, PusherEpoch: 200,
+	})
+	applyMeshRunState(t, ingester, runID, intentKey, RunStatePayload{
+		RelPath: meshProgramPath, Bytes: 1000, Seq: 1, StateGen: 9, PusherEpoch: 100,
+	})
+
+	files := readMeshFiles(t, db, runID)
+	if len(files) != 1 {
+		t.Fatalf("len(files) = %d, want 1", len(files))
+	}
+	if files[0].Epoch != 200 || files[0].Bytes != 2000 || files[0].StateGen != 4 {
+		t.Fatalf("files[0] = %+v, want the epoch-200 entry", files[0])
+	}
+
+	want := blob.RunStateKey(runID.String(), 100, meshProgramPath)
+	if len(fake.keys) != 1 || fake.keys[0] != want {
+		t.Fatalf("deleted keys = %v, want only %q", fake.keys, want)
+	}
+}
+
+// TestApplyRunStateSupersedesTheOlderObject asserts a newer epoch
+// replaces the entry and deletes the older epoch's object.
+func TestApplyRunStateSupersedesTheOlderObject(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	intentKey := "manual:" + newTestUUIDv7String()
+	runID := seedGrantedIntent(t, pool, intentKey)
+
+	fake := &prefixRecordingStore{}
+	ingester := NewIngester(pool, nil, nil)
+	ingester.SetStateDeleter(fake)
+
+	applyMeshRunState(t, ingester, runID, intentKey, RunStatePayload{
+		RelPath: meshProgramPath, Bytes: 1000, Seq: 1, StateGen: 7, PusherEpoch: 100,
+	})
+	applyMeshRunState(t, ingester, runID, intentKey, RunStatePayload{
+		RelPath: meshProgramPath, Bytes: 2000, Seq: 1, StateGen: 1, PusherEpoch: 200,
+	})
+
+	files := readMeshFiles(t, db, runID)
+	if len(files) != 1 || files[0].Epoch != 200 || files[0].Bytes != 2000 {
+		t.Fatalf("files = %+v, want one epoch-200 entry", files)
+	}
+
+	want := blob.RunStateKey(runID.String(), 100, meshProgramPath)
+	if len(fake.keys) != 1 || fake.keys[0] != want {
+		t.Fatalf("deleted keys = %v, want only %q", fake.keys, want)
+	}
+}
+
+// TestApplyRunStateSameEpochDeletesNothing asserts two reports of one
+// epoch delete no object. Both name one key, so a delete would remove
+// the object the record keeps.
+func TestApplyRunStateSameEpochDeletesNothing(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	intentKey := "manual:" + newTestUUIDv7String()
+	runID := seedGrantedIntent(t, pool, intentKey)
+
+	fake := &prefixRecordingStore{}
+	ingester := NewIngester(pool, nil, nil)
+	ingester.SetStateDeleter(fake)
+
+	applyMeshRunState(t, ingester, runID, intentKey, RunStatePayload{
+		RelPath: meshProgramPath, Bytes: 1000, Seq: 1, StateGen: 1, PusherEpoch: 100,
+	})
+	applyMeshRunState(t, ingester, runID, intentKey, RunStatePayload{
+		RelPath: meshProgramPath, Bytes: 2000, Seq: 2, StateGen: 2, PusherEpoch: 100,
+	})
+
+	files := readMeshFiles(t, db, runID)
+	if len(files) != 1 || files[0].StateGen != 2 || files[0].Bytes != 2000 {
+		t.Fatalf("files = %+v, want the newer generation of one epoch", files)
+	}
+	if len(fake.keys) != 0 {
+		t.Fatalf("deleted keys = %v, want none for one epoch", fake.keys)
+	}
+}
+
+// TestHasStateRejectsAnEntryWithNoEpoch asserts the takeover gate. An
+// entry whose epoch is not positive names no object, so the run has no
+// state a resume can read.
+func TestHasStateRejectsAnEntryWithNoEpoch(t *testing.T) {
+	now := time.Now().UTC()
+	withEpoch := &runMeshRecord{
+		StateAt: &now,
+		Files:   []runStateFile{{RelPath: meshProgramPath, Epoch: 100}},
+	}
+	if !withEpoch.hasState() {
+		t.Fatal("a record whose entries carry an epoch must report usable state")
+	}
+
+	noEpoch := &runMeshRecord{
+		StateAt: &now,
+		Files: []runStateFile{
+			{RelPath: meshProgramPath, Epoch: 100},
+			{RelPath: meshBuildRecordPath},
+		},
+	}
+	if noEpoch.hasState() {
+		t.Fatal("a record holding an entry with no epoch must report no usable state")
+	}
+}
+
+// TestApplyRunStateKeepsTheObjectADispatchedResumeNames asserts the
+// superseded-object delete waits while a resume is in flight. The action
+// named the epochs it read, and its target fetches them one at a time, so
+// a delete could remove an object the target still needs.
+func TestApplyRunStateKeepsTheObjectADispatchedResumeNames(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	intentKey := "manual:" + newTestUUIDv7String()
+	runID := seedGrantedIntent(t, pool, intentKey)
+
+	fake := &prefixRecordingStore{}
+	ingester := NewIngester(pool, nil, nil)
+	ingester.SetStateDeleter(fake)
+
+	applyMeshRunState(t, ingester, runID, intentKey, RunStatePayload{
+		RelPath: meshProgramPath, Bytes: 1000, Seq: 1, StateGen: 1, PusherEpoch: 100,
+	})
+
+	// The takeover dispatched a resume that names the epoch-100 object.
+	if _, err := db.Exec(`
+		UPDATE varroa.runs
+		   SET payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object('mesh',
+		         COALESCE(payload->'mesh', '{}'::jsonb) || jsonb_build_object('resume',
+		           jsonb_build_object('armed_at', now(), 'arm_expires', now() + interval '10 minutes',
+		                              'instance', 'pod-live', 'deadline', now() + interval '6 minutes')))
+		 WHERE run_id = $1
+	`, runID); err != nil {
+		t.Fatalf("seed a dispatched resume: %v", err)
+	}
+
+	applyMeshRunState(t, ingester, runID, intentKey, RunStatePayload{
+		RelPath: meshProgramPath, Bytes: 2000, Seq: 1, StateGen: 1, PusherEpoch: 200,
+	})
+
+	files := readMeshFiles(t, db, runID)
+	if len(files) != 1 || files[0].Epoch != 200 {
+		t.Fatalf("files = %+v, want the epoch-200 entry", files)
+	}
+	if len(fake.keys) != 0 {
+		t.Fatalf("deleted keys = %v, want none while a resume is in flight", fake.keys)
 	}
 }

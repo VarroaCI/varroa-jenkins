@@ -2,6 +2,7 @@ package mite
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"io"
@@ -21,11 +22,19 @@ import (
 // "ns1"/"cell1".
 func newRunStateTestHandler(t *testing.T, owner *fakeOwnerRequester, sender *recordingSender) *BusHandler {
 	t.Helper()
-	const ns, name = "ns1", "cell1"
 	store, err := blob.Open(context.Background(), "file://"+t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("open blob store: %v", err)
 	}
+	return newRunStateTestHandlerOver(t, owner, sender, store)
+}
+
+// newRunStateTestHandlerOver builds the same handler over a store the
+// caller owns. Two handlers over one store are two gateway replicas that
+// share one storage tier.
+func newRunStateTestHandlerOver(t *testing.T, owner *fakeOwnerRequester, sender *recordingSender, store blob.Store) *BusHandler {
+	t.Helper()
+	const ns, name = "ns1", "cell1"
 	h := &BusHandler{
 		cluster:        "core",
 		cellInstances:  make(map[string]string),
@@ -60,6 +69,10 @@ func runStateAcksFrom(sender *recordingSender) []*mitev1.RunStateAck {
 	return out
 }
 
+// oneChunkEpoch is the pusher epoch oneChunk stamps. The object key
+// carries the epoch, so a test that reads a key names this value.
+const oneChunkEpoch = int64(100)
+
 // oneChunk builds a single-chunk RunStateChunk: seq 0 of 1, whose
 // gzip_content is gz's compression of data and whose object_size is
 // data's own length.
@@ -71,7 +84,7 @@ func oneChunk(runID, relpath string, stateGen int64, data []byte) *mitev1.RunSta
 	return &mitev1.RunStateChunk{
 		RunId: runID, JobPath: "team/pipeline", BuildNumber: 1, Relpath: relpath,
 		StateGen: stateGen, Seq: 0, Total: 1, GzipContent: gz, RawSize: int64(len(data)),
-		ObjectSize: int64(len(data)),
+		ObjectSize: int64(len(data)), PusherEpoch: oneChunkEpoch,
 	}
 }
 
@@ -90,7 +103,7 @@ func TestOnRunStateChunk_ForeignPushRejected(t *testing.T) {
 	if len(acks) != 1 || acks[0].Status != stateAckStatusRejected || acks[0].Reason != stateReasonForeignRun {
 		t.Fatalf("expected one REJECTED foreign-run ack, got %+v", acks)
 	}
-	if _, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, "jobs/team/builds/1/program.dat"), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
+	if _, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, oneChunkEpoch, "jobs/team/builds/1/program.dat"), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
 		t.Errorf("expected no object stored for a foreign push, NewRangeReader error = %v", err)
 	}
 }
@@ -134,7 +147,7 @@ func TestOnRunStateChunk_MissingMiddleChunkIsIncomplete(t *testing.T) {
 	if last.Status != stateAckStatusRejected || last.Reason != stateReasonIncomplete {
 		t.Fatalf("expected the last chunk's ack to be REJECTED incomplete, got %+v", last)
 	}
-	if _, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, relpath), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
+	if _, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, 100, relpath), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
 		t.Errorf("expected no object stored for an incomplete set, NewRangeReader error = %v", err)
 	}
 }
@@ -217,7 +230,7 @@ func TestOnRunStateChunk_InflatedSizeMismatchIsMalformed(t *testing.T) {
 	if last.Status != stateAckStatusRejected || last.Reason != stateReasonMalformed {
 		t.Fatalf("expected the completed set's ack to be REJECTED malformed, got %+v", last)
 	}
-	if _, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, relpath), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
+	if _, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, 100, relpath), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
 		t.Errorf("expected no object stored for a malformed set, NewRangeReader error = %v", err)
 	}
 }
@@ -244,6 +257,7 @@ func TestOnRunStateRequest_FirstFetchInvalidatesOwnerCache(t *testing.T) {
 	requestID := uint64(1)
 	h.OnRunStateRequest("cell1", "ns1", &mitev1.RunStateRequest{
 		RequestId: &requestID, RunId: runID, Relpath: "jobs/team/builds/1/program.dat",
+		PusherEpoch: oneChunkEpoch,
 	}, send)
 
 	if _, ok := h.ownerCache.get(runID); ok {
@@ -256,6 +270,7 @@ func TestOnRunStateRequest_FirstFetchInvalidatesOwnerCache(t *testing.T) {
 	requestID2 := uint64(2)
 	h.OnRunStateRequest("cell1", "ns1", &mitev1.RunStateRequest{
 		RequestId: &requestID2, RunId: runID, Relpath: "jobs/team/builds/1/program.dat",
+		PusherEpoch: oneChunkEpoch,
 	}, send)
 	if _, ok := h.ownerCache.get(runID); !ok {
 		t.Error("expected only the first run_state_request of a run to invalidate the cached owner")
@@ -348,7 +363,7 @@ func TestOnRunStateChunk_RestartedGenerationIsNotADuplicate(t *testing.T) {
 	epoch = 200
 	store(1, "after-the-restart")
 
-	r, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, relpath), 0, -1)
+	r, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, epoch, relpath), 0, -1)
 	if err != nil {
 		t.Fatalf("NewRangeReader: %v", err)
 	}
@@ -397,7 +412,7 @@ func TestOnRunStateChunk_LateChunkFromARetiredEpochIsDiscarded(t *testing.T) {
 	// The new process finishes its push. Its buffer must have survived.
 	h.OnRunStateChunk("cell1", "ns1", chunk(2, 1, 1, 2, "new-last"))
 
-	r, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, relpath), 0, -1)
+	r, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, 2, relpath), 0, -1)
 	if err != nil {
 		t.Fatalf("NewRangeReader: %v", err)
 	}
@@ -443,7 +458,7 @@ func TestOnRunStateChunk_MalformedRetiredChunkKeepsTheLiveBuffer(t *testing.T) {
 
 	h.OnRunStateChunk("cell1", "ns1", chunk(2, 1, 1, 2, 18, "new-last"))
 
-	r, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, relpath), 0, -1)
+	r, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, 2, relpath), 0, -1)
 	if err != nil {
 		t.Fatalf("NewRangeReader: %v", err)
 	}
@@ -604,7 +619,7 @@ func TestOnRunStateChunk_AnInFlightRetiredWriteNeverOverwritesTheNewEpoch(t *tes
 	<-oldDone
 	<-newDone
 
-	r, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, relpath), 0, -1)
+	r, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, 200, relpath), 0, -1)
 	if err != nil {
 		t.Fatalf("NewRangeReader: %v", err)
 	}
@@ -643,7 +658,7 @@ func TestStoreRunStateObject_ARetiredWriteIsDropped(t *testing.T) {
 	if out.status != stateAckStatusStored {
 		t.Errorf("outcome.status = %q, want %q", out.status, stateAckStatusStored)
 	}
-	if _, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, relpath), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
+	if _, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, oneChunkEpoch, relpath), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
 		t.Errorf("expected no object stored, NewRangeReader error = %v", err)
 	}
 	h.stateMu.Lock()
@@ -652,5 +667,220 @@ func TestStoreRunStateObject_ARetiredWriteIsDropped(t *testing.T) {
 	h.stateMu.Unlock()
 	if total != 0 || completed {
 		t.Errorf("storedTotal = %d, completed = %v, want a retired write to charge nothing", total, completed)
+	}
+}
+
+// TestOnRunStateChunk_TwoReplicasEpochOrdering is the cross-replica
+// proof. Two gateway replicas share one store and hold no shared order
+// between them. The retired process's write stays in flight on the first
+// replica while the live process's write completes on the second, and
+// the retired write then finishes last.
+//
+// The second half repeats that landing order against one shared key, so
+// the test also proves the order is harmful without the epoch.
+func TestOnRunStateChunk_TwoReplicasEpochOrdering(t *testing.T) {
+	ctx := context.Background()
+	shared, err := blob.Open(ctx, "file://"+t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("open blob store: %v", err)
+	}
+	gate := &blockingStateStore{Store: shared, entered: make(chan struct{}), release: make(chan struct{})}
+
+	runID := newTestRunID()
+	ownerAnswer := ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"}
+
+	ownerA := newFakeOwnerRequester()
+	ownerA.setAnswer(runID, ownerAnswer)
+	replicaA := newRunStateTestHandlerOver(t, ownerA, &recordingSender{}, gate)
+
+	ownerB := newFakeOwnerRequester()
+	ownerB.setAnswer(runID, ownerAnswer)
+	replicaB := newRunStateTestHandlerOver(t, ownerB, &recordingSender{}, gate)
+
+	const relpath = "jobs/team/jobs/pipeline/builds/1/workflow/5.xml"
+	push := func(h *BusHandler, epoch int64, body string) {
+		gz, gerr := gzipBytes([]byte(body))
+		if gerr != nil {
+			t.Error(gerr)
+			return
+		}
+		h.OnRunStateChunk("cell1", "ns1", &mitev1.RunStateChunk{
+			RunId: runID, JobPath: "team/pipeline", BuildNumber: 1, Relpath: relpath,
+			StateGen: 1, Seq: 0, Total: 1, GzipContent: gz,
+			RawSize: int64(len(body)), ObjectSize: int64(len(body)),
+			CellInstance: "inst1", PusherEpoch: epoch,
+		})
+	}
+
+	// The retired process pushes through the first replica. Its write
+	// enters the store and stays there.
+	oldDone := make(chan struct{})
+	go func() { defer close(oldDone); push(replicaA, 100, "old-content") }()
+	<-gate.entered
+
+	// The live process reconnects through the second replica, which
+	// knows nothing of the first replica's epoch.
+	push(replicaB, 200, "new-content")
+
+	close(gate.release)
+	<-oldDone
+
+	if order := gate.writeOrder(); len(order) != 2 || order[1] != "old-content" {
+		t.Fatalf("write order = %v, want the retired write last", order)
+	}
+
+	assertObject := func(epoch int64, want string) {
+		t.Helper()
+		r, rerr := shared.NewRangeReader(ctx, blob.RunStateKey(runID, epoch, relpath), 0, -1)
+		if rerr != nil {
+			t.Fatalf("NewRangeReader at epoch %d: %v", epoch, rerr)
+		}
+		defer func() { _ = r.Close() }()
+		got, rerr := io.ReadAll(r)
+		if rerr != nil {
+			t.Fatalf("read at epoch %d: %v", epoch, rerr)
+		}
+		if string(got) != want {
+			t.Fatalf("object at epoch %d = %q, want %q", epoch, got, want)
+		}
+	}
+	assertObject(200, "new-content")
+	assertObject(100, "old-content")
+
+	// The same landing order against one shared key loses the live
+	// process's content, which is the defect the epoch removes.
+	oneKey := "runstate/" + runID + "/shared/" + relpath
+	opts := blob.ObjectOptions{ObjectClass: runStateObjectClass, ContentType: runStateContentType, CreatedAt: time.Now().UTC()}
+	if err := shared.Replace(ctx, oneKey, bytes.NewReader([]byte("new-content")), opts); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	if err := shared.Replace(ctx, oneKey, bytes.NewReader([]byte("old-content")), opts); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	r, err := shared.NewRangeReader(ctx, oneKey, 0, -1)
+	if err != nil {
+		t.Fatalf("NewRangeReader: %v", err)
+	}
+	defer func() { _ = r.Close() }()
+	got, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(got) != "old-content" {
+		t.Fatalf("one shared key holds %q, want the retired bytes that prove the defect", got)
+	}
+}
+
+// TestOnRunStateRequest_ReadsTheRequestedEpoch proves a fetch reads the
+// object of the epoch it names, while another epoch's object exists.
+func TestOnRunStateRequest_ReadsTheRequestedEpoch(t *testing.T) {
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	h := newRunStateTestHandler(t, owner, &recordingSender{})
+
+	const relpath = "jobs/team/jobs/pipeline/builds/1/program.dat"
+	push := func(epoch int64, body string) {
+		gz, gerr := gzipBytes([]byte(body))
+		if gerr != nil {
+			t.Fatal(gerr)
+		}
+		h.OnRunStateChunk("cell1", "ns1", &mitev1.RunStateChunk{
+			RunId: runID, JobPath: "team/pipeline", BuildNumber: 1, Relpath: relpath,
+			StateGen: 1, Seq: 0, Total: 1, GzipContent: gz,
+			RawSize: int64(len(body)), ObjectSize: int64(len(body)),
+			CellInstance: "inst1", PusherEpoch: epoch,
+		})
+	}
+	push(100, "old-content")
+	push(200, "new-content")
+
+	fetch := func(epoch int64) []*mitev1.RunStateResponse {
+		t.Helper()
+		var out []*mitev1.RunStateResponse
+		requestID := uint64(epoch)
+		h.OnRunStateRequest("cell1", "ns1", &mitev1.RunStateRequest{
+			RequestId: &requestID, RunId: runID, Relpath: relpath, PusherEpoch: epoch,
+		}, func(m *mitev1.OperatorMessage) error {
+			out = append(out, m.GetRunStateResponse())
+			return nil
+		})
+		return out
+	}
+
+	for _, tc := range []struct {
+		epoch int64
+		want  string
+	}{{100, "old-content"}, {200, "new-content"}} {
+		got := fetch(tc.epoch)
+		if len(got) != 1 || got[0].Error != "" {
+			t.Fatalf("fetch at epoch %d answered %+v, want one body", tc.epoch, got)
+		}
+		body, err := inflateOneResponse(got[0])
+		if err != nil {
+			t.Fatalf("inflate: %v", err)
+		}
+		if body != tc.want {
+			t.Fatalf("fetch at epoch %d = %q, want %q", tc.epoch, body, tc.want)
+		}
+	}
+}
+
+// TestOnRunStateRequest_NoEpochIsRefused proves a request that names no
+// epoch answers an error, because the key carries the epoch.
+func TestOnRunStateRequest_NoEpochIsRefused(t *testing.T) {
+	h := newRunStateTestHandler(t, newFakeOwnerRequester(), &recordingSender{})
+	runID := newTestRunID()
+
+	var got []*mitev1.RunStateResponse
+	requestID := uint64(1)
+	h.OnRunStateRequest("cell1", "ns1", &mitev1.RunStateRequest{
+		RequestId: &requestID, RunId: runID, Relpath: "jobs/team/builds/1/program.dat",
+	}, func(m *mitev1.OperatorMessage) error {
+		got = append(got, m.GetRunStateResponse())
+		return nil
+	})
+
+	if len(got) != 1 || got[0].Error == "" {
+		t.Fatalf("answer = %+v, want one response carrying an error", got)
+	}
+}
+
+// inflateOneResponse returns the body of a one-message answer.
+func inflateOneResponse(resp *mitev1.RunStateResponse) (string, error) {
+	zr, err := gzip.NewReader(bytes.NewReader(resp.GzipContent))
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = zr.Close() }()
+	body, err := io.ReadAll(zr)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// TestOnRunStateChunk_NoEpochIsMalformed proves a chunk that names no
+// pusher epoch is refused. The key carries the epoch, so such a chunk
+// would store an object no fetch can name, and the run could never
+// resume.
+func TestOnRunStateChunk_NoEpochIsMalformed(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	h := newRunStateTestHandler(t, owner, sender)
+
+	const relpath = "jobs/team/jobs/pipeline/builds/1/program.dat"
+	chunk := oneChunk(runID, relpath, 1, []byte("hello"))
+	chunk.PusherEpoch = 0
+	h.OnRunStateChunk("cell1", "ns1", chunk)
+
+	acks := runStateAcksFrom(sender)
+	if len(acks) != 1 || acks[0].Status != stateAckStatusRejected || acks[0].Reason != stateReasonMalformed {
+		t.Fatalf("acks = %+v, want one malformed refusal", acks)
+	}
+	if _, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, 0, relpath), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
+		t.Fatalf("expected no object stored, NewRangeReader error = %v", err)
 	}
 }

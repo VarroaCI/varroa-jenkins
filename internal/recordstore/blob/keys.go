@@ -16,13 +16,19 @@ func LogIndexKey(runID string) string {
 
 // RunStateKey returns the object key that holds one replicated state
 // file of a running build. relpath is that file's own path under the
-// Jenkins home.
-func RunStateKey(runID, relpath string) string {
-	return fmt.Sprintf("runstate/%s/%s", runID, relpath)
+// Jenkins home. pusherEpoch names the Jenkins process that pushed it.
+//
+// The epoch is part of the key because two gateway replicas hold no
+// shared order. Without it a retired process's write can land on a live
+// process's object, and no rule inside one replica can stop that. Two
+// epochs name two keys, so no write reaches another epoch's object.
+func RunStateKey(runID string, pusherEpoch int64, relpath string) string {
+	return fmt.Sprintf("runstate/%s/%d/%s", runID, pusherEpoch, relpath)
 }
 
 // RunStatePrefix returns the key prefix that holds every replicated
-// state file of one run. A cleanup deletes the whole prefix.
+// state file of one run. A cleanup deletes the whole prefix. The epoch
+// sits inside this prefix, so one delete covers every epoch of a run.
 func RunStatePrefix(runID string) string {
 	return fmt.Sprintf("runstate/%s/", runID)
 }

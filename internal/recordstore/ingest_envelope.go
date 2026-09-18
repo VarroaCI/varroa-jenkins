@@ -120,15 +120,19 @@ type RunCompletedPayload struct {
 }
 
 // RunStatePayload is the payload of a run.state envelope. It takes one
-// of two shapes. A stored file carries RelPath, Bytes, Seq, and
-// StateGen, where Bytes is the whole stored object's inflated size. A
-// refused push carries RejectedReason alone, because the gateway wrote
-// no object for it.
+// of two shapes. A stored file carries RelPath, Bytes, Seq, StateGen,
+// and PusherEpoch, where Bytes is the whole stored object's inflated
+// size. A refused push carries RejectedReason alone, because the gateway
+// wrote no object for it.
 type RunStatePayload struct {
-	RelPath        string `json:"relpath,omitempty"`
-	Bytes          int64  `json:"bytes,omitempty"`
-	Seq            int64  `json:"seq,omitempty"`
-	StateGen       int64  `json:"state_gen,omitempty"`
+	RelPath  string `json:"relpath,omitempty"`
+	Bytes    int64  `json:"bytes,omitempty"`
+	Seq      int64  `json:"seq,omitempty"`
+	StateGen int64  `json:"state_gen,omitempty"`
+	// PusherEpoch names the Jenkins process that pushed the file. The
+	// object key carries it, so the record cannot name the object
+	// without it.
+	PusherEpoch    int64  `json:"pusher_epoch,omitempty"`
 	RejectedReason string `json:"rejected_reason,omitempty"`
 }
 

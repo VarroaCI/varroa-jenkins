@@ -354,10 +354,11 @@ func TestMaintenanceRoundAppliesRetentionAcrossFourMonths(t *testing.T) {
 }
 
 // prefixRecordingStore is a blob.Store fake that records every
-// DeletePrefix call. It satisfies ObjectDeleter through blob.Store's
-// superset method set.
+// DeletePrefix and Delete call. It satisfies ObjectDeleter through
+// blob.Store's superset method set.
 type prefixRecordingStore struct {
 	prefixes []string
+	keys     []string
 }
 
 func (r *prefixRecordingStore) Put(context.Context, string, io.Reader, blob.ObjectOptions) error {
@@ -376,7 +377,8 @@ func (r *prefixRecordingStore) NewRangeReader(context.Context, string, int64, in
 	return nil, blob.ErrObjectNotFound
 }
 
-func (r *prefixRecordingStore) Delete(context.Context, string) error {
+func (r *prefixRecordingStore) Delete(_ context.Context, key string) error {
+	r.keys = append(r.keys, key)
 	return nil
 }
 

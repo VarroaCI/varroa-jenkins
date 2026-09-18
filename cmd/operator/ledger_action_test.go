@@ -271,7 +271,7 @@ func TestHandleLedgerAction_ResumeRunCarriesItsDeadline(t *testing.T) {
 		Kind: "resume_run", Cluster: "core",
 		Namespace: "cells-ns", Controller: "cell-a",
 		RunID: "run-9", JobPath: "team/job-a", Instance: "pod-live",
-		Files: []string{"jobs/team/jobs/job-a/builds/5/build.xml"},
+		Files: []recordstore.ResumeFile{{RelPath: "jobs/team/jobs/job-a/builds/5/build.xml", Epoch: 1737000000000}},
 	}
 	data, _ := json.Marshal(action)
 	handleLedgerAction(context.Background(), testLogger(), "core", rec, data)
@@ -308,7 +308,7 @@ func TestHandleLedgerAction_ResumeRunIdentifiesItsTarget(t *testing.T) {
 			Kind: "resume_run", Cluster: "core",
 			Namespace: "cells-ns", Controller: "cell-a",
 			RunID: "run-9", JobPath: "team/job-a", Instance: instance,
-			Files: []string{"jobs/team/jobs/job-a/builds/5/build.xml"},
+			Files: []recordstore.ResumeFile{{RelPath: "jobs/team/jobs/job-a/builds/5/build.xml", Epoch: 1737000000000}},
 		}
 		data, _ := json.Marshal(action)
 		handleLedgerAction(context.Background(), testLogger(), "core", rec, data)
@@ -340,7 +340,7 @@ func TestHandleLedgerAction_ResumeRunCarriesTheAbsoluteExpiry(t *testing.T) {
 		Kind: "resume_run", Cluster: "core",
 		Namespace: "cells-ns", Controller: "cell-a",
 		RunID: "run-9", JobPath: "team/job-a", Instance: "pod-live",
-		Files:    []string{"jobs/team/jobs/job-a/builds/5/build.xml"},
+		Files:    []recordstore.ResumeFile{{RelPath: "jobs/team/jobs/job-a/builds/5/build.xml", Epoch: 1737000000000}},
 		Deadline: &deadline,
 	}
 	data, _ := json.Marshal(action)
@@ -367,7 +367,7 @@ func TestHandleLedgerAction_ResumeRunWithoutADeadlineSendsZero(t *testing.T) {
 		Kind: "resume_run", Cluster: "core",
 		Namespace: "cells-ns", Controller: "cell-a",
 		RunID: "run-9", JobPath: "team/job-a", Instance: "pod-live",
-		Files: []string{"jobs/team/jobs/job-a/builds/5/build.xml"},
+		Files: []recordstore.ResumeFile{{RelPath: "jobs/team/jobs/job-a/builds/5/build.xml", Epoch: 1737000000000}},
 	}
 	data, _ := json.Marshal(action)
 	handleLedgerAction(context.Background(), testLogger(), "core", rec, data)
@@ -377,5 +377,38 @@ func TestHandleLedgerAction_ResumeRunWithoutADeadlineSendsZero(t *testing.T) {
 	}
 	if rb := rec.sent[0].ResumeBuild; rb == nil || rb.DeadlineUnix != 0 {
 		t.Fatalf("DeadlineUnix = %+v, want 0", rb)
+	}
+}
+
+// TestHandleLedgerAction_ResumeRunCarriesEachFileEpoch proves the
+// operator carries every action entry's own epoch into the command. The
+// run-state object key names the epoch, so a path alone names no object
+// and the target could fetch nothing.
+func TestHandleLedgerAction_ResumeRunCarriesEachFileEpoch(t *testing.T) {
+	rec := &fakeLedgerActionRunner{}
+	action := recordstore.LedgerAction{
+		Kind: "resume_run", Cluster: "core",
+		Namespace: "cells-ns", Controller: "cell-a",
+		RunID: "run-9", JobPath: "team/job-a", Instance: "pod-live",
+		Files: []recordstore.ResumeFile{
+			{RelPath: "jobs/team/jobs/job-a/builds/5/program.dat", Epoch: 100},
+			{RelPath: "jobs/team/jobs/job-a/builds/5/build.xml", Epoch: 200},
+		},
+	}
+	data, _ := json.Marshal(action)
+	handleLedgerAction(context.Background(), testLogger(), "core", rec, data)
+
+	if len(rec.sent) != 1 {
+		t.Fatalf("expected one imperative command, got %d", len(rec.sent))
+	}
+	rb := rec.sent[0].ResumeBuild
+	if rb == nil || len(rb.StateFiles) != 2 {
+		t.Fatalf("payload = %+v, want two state files", rb)
+	}
+	for i, want := range action.Files {
+		got := rb.StateFiles[i]
+		if got.Relpath != want.RelPath || got.PusherEpoch != want.Epoch {
+			t.Fatalf("state_files[%d] = %+v, want %+v", i, got, want)
+		}
 	}
 }

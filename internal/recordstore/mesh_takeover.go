@@ -7,11 +7,13 @@ package recordstore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
@@ -116,9 +118,31 @@ func decodeMeshRecord(raw json.RawMessage) *runMeshRecord {
 	return &rec
 }
 
-// hasState reports whether the record holds a usable freshness anchor.
+// hasState reports whether the record holds usable replicated state.
+//
+// A file entry whose epoch is not positive names no object: the object
+// key carries the epoch. An empty list names nothing at all. Either way
+// the run has no state a resume can read, so it takes the ordinary
+// confirmed-loss path.
 func (r *runMeshRecord) hasState() bool {
-	return r != nil && r.StateAt != nil
+	if r == nil || r.StateAt == nil || len(r.Files) == 0 {
+		return false
+	}
+	for _, f := range r.Files {
+		if f.Epoch <= 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// decodeRunStateFiles decodes one run's mesh.files array.
+func decodeRunStateFiles(raw []byte) ([]runStateFile, error) {
+	var files []runStateFile
+	if err := json.Unmarshal(raw, &files); err != nil {
+		return nil, fmt.Errorf("decode run-state file list: %w", err)
+	}
+	return files, nil
 }
 
 // meshCandidate is one RUNNING run the takeover reads.
@@ -315,7 +339,13 @@ func dispatchMeshResume(ctx context.Context, pool *pgxpool.Pool, metrics *Interr
 	}
 
 	deadline := now.Add(resumeDeadline)
-	tag, err := tx.Exec(ctx, `
+	// The statement returns the run's own file list, so the action names
+	// the epochs the record holds at this moment. The candidate's copy was
+	// read before the arm, and an ingest that supersedes an epoch deletes
+	// the older object: an action built from that copy could name an
+	// object that is already gone.
+	var files []byte
+	err = tx.QueryRow(ctx, `
 		UPDATE varroa.runs
 		   SET cell = $3,
 		       payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object('mesh',
@@ -325,16 +355,29 @@ func dispatchMeshResume(ctx context.Context, pool *pgxpool.Pool, metrics *Interr
 		 WHERE run_id = $1 AND created_at = $2 AND status = 'RUNNING'
 		   AND payload->'mesh'->'resume' IS NOT NULL
 		   AND payload->'mesh'->'resume'->'instance' IS NULL
-	`, c.runID, c.createdAt, target.cell, target.instance, now, deadline)
-	if err != nil {
+		RETURNING COALESCE(payload->'mesh'->'files', '[]'::jsonb)
+	`, c.runID, c.createdAt, target.cell, target.instance, now, deadline).Scan(&files)
+	switch {
+	// No row matched. A real completion can commit while this transaction
+	// is open, and the first two statements would then leave a finished
+	// run owning an intent row and a lock row that name the target, so the
+	// whole transaction rolls back.
+	case errors.Is(err, pgx.ErrNoRows):
+		metrics.addResume(ctx, resumeOutcomeSkipped, resumeReasonNone)
+		return LedgerAction{}, false, nil
+	case err != nil:
 		return LedgerAction{}, false, fmt.Errorf("move run owner: %w", err)
 	}
-	// A zero row count rolls the whole transaction back. A real
-	// completion can commit while this transaction is open, and the
-	// first two statements would then leave a finished run owning an
-	// intent row and a lock row that name the target.
-	if tag.RowsAffected() != 1 {
-		metrics.addResume(ctx, resumeOutcomeSkipped, resumeReasonNone)
+
+	fresh, err := decodeRunStateFiles(files)
+	if err != nil {
+		return LedgerAction{}, false, err
+	}
+	// A file entry with no epoch names no object, and an empty list names
+	// nothing at all. Either answers the no-state refusal, so the run
+	// keeps its arm and takes the ordinary path at its deadline.
+	if !(&runMeshRecord{StateAt: c.mesh.StateAt, Files: fresh}).hasState() {
+		metrics.addResume(ctx, resumeOutcomeSkipped, resumeReasonNoState)
 		return LedgerAction{}, false, nil
 	}
 
@@ -352,23 +395,26 @@ func dispatchMeshResume(ctx context.Context, pool *pgxpool.Pool, metrics *Interr
 		JobPath:     c.jobPath,
 		BuildNumber: c.buildNumber,
 		Instance:    target.instance,
-		Files:       resumeFileList(c.mesh.Files),
+		Files:       resumeFileList(fresh),
 		Deadline:    &deadline,
 	}, true, nil
 }
 
-// resumeFileList orders the run's stored paths with the build record
+// resumeFileList orders the run's stored files with the build record
 // last. Jenkins reads that file to rebuild the run, so writing it last
 // means a reload never sees a run whose flow program is still missing.
-func resumeFileList(files []runStateFile) []string {
-	out := make([]string, 0, len(files))
+//
+// Each entry carries the epoch of the object that holds the file. The
+// target reads that exact object, so a path alone would name nothing.
+func resumeFileList(files []runStateFile) []ResumeFile {
+	out := make([]ResumeFile, 0, len(files))
 	for _, f := range files {
 		if f.RelPath != "" {
-			out = append(out, f.RelPath)
+			out = append(out, ResumeFile{RelPath: f.RelPath, Epoch: f.Epoch})
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		return !isBuildRecordPath(out[i]) && isBuildRecordPath(out[j])
+		return !isBuildRecordPath(out[i].RelPath) && isBuildRecordPath(out[j].RelPath)
 	})
 	return out
 }

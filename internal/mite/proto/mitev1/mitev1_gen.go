@@ -1036,12 +1036,18 @@ type ReplayWebhookPayload struct {
 }
 
 type ResumeBuildPayload struct {
-	RunId        string   `json:"run_id"`
-	JobPath      string   `json:"job_path"`
-	BuildNumber  int64    `json:"build_number,omitempty"`
-	Files        []string `json:"files,omitempty"`
-	Instance     string   `json:"instance"`
-	DeadlineUnix int64    `json:"deadline_unix,omitempty"`
+	RunId        string             `json:"run_id"`
+	JobPath      string             `json:"job_path"`
+	BuildNumber  int64              `json:"build_number,omitempty"`
+	Instance     string             `json:"instance"`
+	DeadlineUnix int64              `json:"deadline_unix,omitempty"`
+	StateFiles   []*ResumeStateFile `json:"state_files,omitempty"`
+}
+
+// ResumeStateFile is one stored file a resume must materialize: the path
+type ResumeStateFile struct {
+	Relpath     string `json:"relpath"`
+	PusherEpoch int64  `json:"pusher_epoch"`
 }
 
 type RunStateAck struct {
@@ -1069,9 +1075,10 @@ type RunStateChunk struct {
 }
 
 type RunStateRequest struct {
-	RequestId *uint64 `json:"request_id,omitempty"`
-	RunId     string  `json:"run_id"`
-	Relpath   string  `json:"relpath"`
+	RequestId   *uint64 `json:"request_id,omitempty"`
+	RunId       string  `json:"run_id"`
+	Relpath     string  `json:"relpath"`
+	PusherEpoch int64   `json:"pusher_epoch,omitempty"`
 }
 
 type RunStateResponse struct {

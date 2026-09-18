@@ -83,21 +83,28 @@ type runStateEntry struct {
 	storedSizes map[string]int64
 	storedTotal int64
 	// newestEpoch is the newest pushing process this run has been seen
-	// from. The epoch is that process's start time, so it only ever
-	// rises for one run, and a chunk below it comes from a Jenkins
-	// process that is already gone.
+	// from, in this replica alone. The epoch is that process's start
+	// time, so it only ever rises for one run, and a chunk below it
+	// comes from a Jenkins process that is already gone.
+	//
+	// It fences this replica's buffers. It does not order the stored
+	// objects of two epochs: the object key carries the epoch.
 	newestEpoch int64
 	buffers     map[string]*runStateBuffer
-	// completed holds the push this gateway last stored for each path.
-	// A chunk that repeats it exactly is a redelivery and is answered
-	// as stored, so an ordinary retry never reads as a refusal.
+	// completed holds the push this gateway last stored for each path,
+	// named by its epoch and its generation together. A chunk that
+	// repeats both is a redelivery and is answered as stored, so an
+	// ordinary retry never reads as a refusal.
 	completed map[string]storedPush
 	// fetched records that this run has already served one state fetch,
 	// so the owner-cache invalidation runs on the first fetch alone.
 	fetched bool
-	// writeMu orders the object writes of one run. A write runs outside
-	// the gateway-wide lock, so this monitor is what holds the epoch
-	// test and the write together. It is never taken under h.stateMu.
+	// writeMu keeps two writes of one key apart. A whole-object replace
+	// is not atomic on the object tier: it deletes the key and then
+	// writes part 0. It is never taken under h.stateMu.
+	//
+	// It does not order two epochs. The object key carries the pusher
+	// epoch, so two epochs write two keys.
 	writeMu sync.Mutex
 }
 
@@ -196,9 +203,13 @@ func (h *BusHandler) OnRunStateChunk(name, ns string, chunk *mitev1.RunStateChun
 	}
 	ctx := context.Background()
 
-	// Step 1: the run must be named and the path must be usable as a
-	// key suffix.
-	if chunk.RunId == "" || !validRunStateRelpath(chunk.Relpath) {
+	// Step 1: the run must be named, the path must be usable as a key
+	// suffix, and the pusher epoch must be positive.
+	//
+	// The key carries the epoch, so a chunk without one would store an
+	// object no fetch can name. The run would then hold a record that
+	// points at nothing, and it could never resume.
+	if chunk.RunId == "" || !validRunStateRelpath(chunk.Relpath) || chunk.PusherEpoch <= 0 {
 		h.rejectRunState(ctx, ns, name, chunk, stateReasonMalformed)
 		return
 	}
@@ -269,11 +280,14 @@ func (h *BusHandler) bufferRunStateChunk(e *runStateEntry, chunk *mitev1.RunStat
 	h.stateMu.Lock()
 	defer h.stateMu.Unlock()
 
-	// The epoch fence runs before every other test, because every other
-	// test can drop this path's buffer. A malformed or over-cap chunk
-	// from a retired process would otherwise throw away the live
+	// The epoch fence runs before the shape test and the cap test,
+	// because both drop this path's buffer. A malformed or over-cap
+	// chunk from a retired process would otherwise throw away the live
 	// process's partial push, and that push's own later chunks would
 	// then answer incomplete.
+	//
+	// This fence protects the buffers of one replica. The stored objects
+	// of two epochs are ordered by the object key, not here.
 	//
 	// The epoch is the pushing process's start time, so it only rises
 	// for one run. A lower epoch comes from a Jenkins process that is
@@ -370,12 +384,13 @@ func (h *BusHandler) bufferRunStateChunk(e *runStateEntry, chunk *mitev1.RunStat
 // storeRunStateObject writes the whole object and charges it. The charge
 // replaces the path's previous size, so a replaced file counts once.
 //
-// The write of one run runs under that run's own monitor, and the epoch
-// test runs under the same monitor. A retired process whose write is
-// still in flight therefore cannot land on top of the new process's
-// object: it either writes first, and the new process overwrites it, or
-// it waits and then reads its own epoch as retired and writes nothing.
-// The stored object always equals the newest process's content.
+// The object key carries the pusher epoch, so a retired process's write
+// lands on its own key and can never reach the live process's object.
+// That holds for every gateway replica, because no replica has to agree
+// with another about which epoch is newest.
+//
+// The retired-epoch test below is an optimization alone. It skips a
+// write this replica already knows is superseded.
 func (h *BusHandler) storeRunStateObject(ctx context.Context, e *runStateEntry, chunk *mitev1.RunStateChunk, body []byte, outcome runStateOutcome) runStateOutcome {
 	e.writeMu.Lock()
 	defer e.writeMu.Unlock()
@@ -392,7 +407,7 @@ func (h *BusHandler) storeRunStateObject(ctx context.Context, e *runStateEntry, 
 		return runStateOutcome{status: stateAckStatusStored}
 	}
 
-	key := blob.RunStateKey(chunk.RunId, chunk.Relpath)
+	key := blob.RunStateKey(chunk.RunId, chunk.PusherEpoch, chunk.Relpath)
 	opts := blob.ObjectOptions{
 		ObjectClass: runStateObjectClass,
 		ContentType: runStateContentType,
@@ -509,8 +524,10 @@ func (h *BusHandler) sendRunStateAck(ns, name string, chunk *mitev1.RunStateChun
 }
 
 // publishRunStateOutcome publishes one run.state envelope. A stored file
-// carries the path, the whole object's inflated size, the sequence, and
-// the push generation. A cap refusal carries the reason alone, although
+// carries the path, the whole object's inflated size, the sequence, the
+// push generation, and the pusher epoch. The epoch is part of the object
+// key, so the record cannot name the object without it.
+// A cap refusal carries the reason alone, although
 // no object was written: that envelope is the only carrier of
 // mesh.cap_warned_at, which is an operator's one signal that the cap
 // tripped.
@@ -522,10 +539,11 @@ func (h *BusHandler) publishRunStateOutcome(ns, name string, chunk *mitev1.RunSt
 	switch {
 	case outcome.stored:
 		payload = map[string]interface{}{
-			"relpath":   outcome.relpath,
-			"bytes":     outcome.bytes,
-			"seq":       outcome.seq,
-			"state_gen": outcome.stateGen,
+			"relpath":      outcome.relpath,
+			"bytes":        outcome.bytes,
+			"seq":          outcome.seq,
+			"state_gen":    outcome.stateGen,
+			"pusher_epoch": chunk.PusherEpoch,
 		}
 	case outcome.reason == stateReasonStateCap:
 		payload = map[string]interface{}{"rejected_reason": stateReasonStateCap}
@@ -579,13 +597,20 @@ func (h *BusHandler) OnRunStateRequest(name, ns string, req *mitev1.RunStateRequ
 		h.sendRunStateError(send, req, "the request names no run or no usable path")
 		return
 	}
+	// The key carries the pusher epoch, so a request without one names no
+	// object. It is refused here rather than read as a miss, because the
+	// two failures need different repairs.
+	if req.PusherEpoch <= 0 {
+		h.sendRunStateError(send, req, "the request names no pusher epoch")
+		return
+	}
 
 	h.invalidateOwnerOnFirstFetch(req.RunId, ns, name)
 
 	ctx := context.Background()
 	// Replace writes through Put, which both drivers store as chunked
 	// part 0, so the chunked read is the matching read.
-	r, err := h.logStore.NewRangeReader(ctx, blob.RunStateKey(req.RunId, req.Relpath), 0, -1)
+	r, err := h.logStore.NewRangeReader(ctx, blob.RunStateKey(req.RunId, req.PusherEpoch, req.Relpath), 0, -1)
 	if err != nil {
 		h.sendRunStateError(send, req, "the gateway cannot read the stored file")
 		return

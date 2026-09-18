@@ -75,6 +75,17 @@ func ledgerActionDeadlineUnix(deadline *time.Time) int64 {
 	return deadline.Unix()
 }
 
+// ledgerActionStateFiles renders an action's stored files as the command
+// payload's own entries. Each one carries the path and the epoch of the
+// object that holds it, because the run-state object key names both.
+func ledgerActionStateFiles(files []recordstore.ResumeFile) []*mitev1.ResumeStateFile {
+	out := make([]*mitev1.ResumeStateFile, 0, len(files))
+	for _, f := range files {
+		out = append(out, &mitev1.ResumeStateFile{Relpath: f.RelPath, PusherEpoch: f.Epoch})
+	}
+	return out
+}
+
 // resumeCommandDeadlineSec bounds one resume command. A command that
 // reaches its target after the recorder gave up must not restore a run
 // the recorder already marked, and this deadline is what ends it. The
@@ -187,7 +198,7 @@ func handleLedgerAction(ctx context.Context, logger *slog.Logger, ownCluster str
 				RunId:       action.RunID,
 				JobPath:     action.JobPath,
 				BuildNumber: ledgerActionBuildNumber(action.BuildNumber),
-				Files:       action.Files,
+				StateFiles:  ledgerActionStateFiles(action.Files),
 				Instance:    action.Instance,
 				// The absolute expiry, not a duration. DeadlineSec
 				// below bounds the work once the mite starts it, and

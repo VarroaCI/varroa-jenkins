@@ -407,7 +407,7 @@ func (a *Agent) applyResumeBuild(ctx context.Context, payload *mitev1.ResumeBuil
 	if payload.RunId == "" {
 		return errors.New("resume_build payload names no run")
 	}
-	if len(payload.Files) == 0 {
+	if len(payload.StateFiles) == 0 {
 		return errors.New("resume_build payload lists no file")
 	}
 
@@ -514,14 +514,15 @@ func (a *Agent) applyResumeBuild(ctx context.Context, payload *mitev1.ResumeBuil
 	started := time.Now()
 	a.Logger.Info("resume started",
 		"run_id", payload.RunId, "job_path", payload.JobPath,
-		"build_number", payload.BuildNumber, "files", len(payload.Files),
+		"build_number", payload.BuildNumber, "files", len(payload.StateFiles),
 		"instance", payload.Instance)
 
 	var nodeNames []string
 	var slowestPath string
 	var slowestFetch time.Duration
 	var fetchedBytes int
-	for _, relPath := range payload.Files {
+	for _, file := range payload.StateFiles {
+		relPath := file.Relpath
 		parsed, absPath, err := checkRehydrationPath(home, relPath)
 		if err != nil {
 			return fmt.Errorf("resume_build: %w", err)
@@ -534,7 +535,7 @@ func (a *Agent) applyResumeBuild(ctx context.Context, payload *mitev1.ResumeBuil
 		}
 
 		fetchStart := time.Now()
-		data, err := a.fetchRunStateFileWithRetry(ctx, payload.RunId, relPath)
+		data, err := a.fetchRunStateFileWithRetry(ctx, payload.RunId, relPath, file.PusherEpoch)
 		if err != nil {
 			a.Logger.Error("resume fetch failed",
 				"run_id", payload.RunId, "relpath", relPath, "error", err)
@@ -564,7 +565,7 @@ func (a *Agent) applyResumeBuild(ctx context.Context, payload *mitev1.ResumeBuil
 	// would otherwise never adopt it, and the build would wait for a
 	// node that never appears.
 	a.Logger.Info("resume files written",
-		"run_id", payload.RunId, "files", len(payload.Files), "bytes", fetchedBytes,
+		"run_id", payload.RunId, "files", len(payload.StateFiles), "bytes", fetchedBytes,
 		"slowest_file", slowestPath, "slowest_fetch", slowestFetch.String(),
 		"elapsed", time.Since(started).String())
 
@@ -685,8 +686,8 @@ func resumeAlreadyFinished(home string, payload *mitev1.ResumeBuildPayload, answ
 // resumeBuildDir answers the directory of the command's own build under
 // home, or an empty string when the command names no build record.
 func resumeBuildDir(home string, payload *mitev1.ResumeBuildPayload) string {
-	for _, relPath := range payload.Files {
-		parsed, absPath, err := checkRehydrationPath(home, relPath)
+	for _, file := range payload.StateFiles {
+		parsed, absPath, err := checkRehydrationPath(home, file.Relpath)
 		if err != nil || parsed.kind != rehydrationPathBuildXML {
 			continue
 		}
@@ -767,7 +768,7 @@ func checkResumePathBinding(parsed parsedRehydrationPath, payload *mitev1.Resume
 // run again rather than sending this same command back. The run then
 // waits for a target instance that is new, so a transient read that is
 // not retried here costs this deadline and at least one more round.
-func (a *Agent) fetchRunStateFileWithRetry(ctx context.Context, runID, relPath string) ([]byte, error) {
+func (a *Agent) fetchRunStateFileWithRetry(ctx context.Context, runID, relPath string, pusherEpoch int64) ([]byte, error) {
 	var lastErr error
 	wait := runStateFetchBackoff
 	for attempt := 0; attempt < runStateFetchAttempts; attempt++ {
@@ -782,7 +783,7 @@ func (a *Agent) fetchRunStateFileWithRetry(ctx context.Context, runID, relPath s
 			timer.Stop()
 			wait *= 2
 		}
-		data, err := a.fetchRunStateFile(ctx, runID, relPath)
+		data, err := a.fetchRunStateFile(ctx, runID, relPath, pusherEpoch)
 		if err == nil {
 			return data, nil
 		}
@@ -797,7 +798,7 @@ func (a *Agent) fetchRunStateFileWithRetry(ctx context.Context, runID, relPath s
 // fetchRunStateFile asks the gateway for one stored file and returns its
 // inflated bytes. A response carrying an error fails the fetch, so the
 // caller writes no partial file.
-func (a *Agent) fetchRunStateFile(ctx context.Context, runID, relPath string) ([]byte, error) {
+func (a *Agent) fetchRunStateFile(ctx context.Context, runID, relPath string, pusherEpoch int64) ([]byte, error) {
 	requestID := a.runStateSeq.Add(1)
 	ch, ok := a.runStateWaiters.register(requestID)
 	if !ok {
@@ -805,7 +806,9 @@ func (a *Agent) fetchRunStateFile(ctx context.Context, runID, relPath string) ([
 	}
 	defer a.runStateWaiters.cancel(requestID)
 
-	req := &mitev1.RunStateRequest{RequestId: &requestID, RunId: runID, Relpath: relPath}
+	req := &mitev1.RunStateRequest{
+		RequestId: &requestID, RunId: runID, Relpath: relPath, PusherEpoch: pusherEpoch,
+	}
 	if err := a.sendRunStateRequestLocked(req); err != nil {
 		a.closeOnSendError(err)
 		return nil, fmt.Errorf("fetch %s: %w", relPath, err)
