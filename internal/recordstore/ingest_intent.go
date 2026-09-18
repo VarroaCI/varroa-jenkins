@@ -70,3 +70,14 @@ func (r *intentRow) cellValue() string {
 	}
 	return *r.cell
 }
+
+// cellInstanceValue returns the instance that owns the run, or an empty
+// string when the intent names none. The mesh moves this column on a
+// resume dispatch, so it answers the run's current owner and not its
+// first one.
+func (r *intentRow) cellInstanceValue() string {
+	if r.cellInstance == nil {
+		return ""
+	}
+	return *r.cellInstance
+}

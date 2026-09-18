@@ -339,7 +339,7 @@ func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, e
 	case KindRunLog:
 		return dispatchResult{}, applyRunLog(ctx, tx, intent, env)
 	case KindRunHeartbeat:
-		return dispatchResult{}, applyRunHeartbeat(ctx, tx, intent, env)
+		return dispatchResult{}, applyRunHeartbeat(ctx, tx, intent, env, g.logger)
 	case KindRunState:
 		return applyRunState(ctx, tx, intent, env)
 	default:

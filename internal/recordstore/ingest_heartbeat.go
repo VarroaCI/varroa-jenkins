@@ -3,10 +3,30 @@ package recordstore
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 )
+
+// heartbeatOwnerSQL is the owner test both halves of the heartbeat
+// write apply. $9 is the envelope's sender and $10 the intent's own
+// owning instance. The stored row supplies the other two sources, so
+// the test reads the same ownership expression the sweep reads:
+// the intent's instance, else the accepted trigger's instance.
+//
+// The first two rows hold the earlier behaviour where the test has no
+// two names to compare: an envelope that names no sender, and a run
+// that no source names an owner for. A live install meets neither.
+//
+// The last row admits the dispatched resume's target. That target's
+// first heartbeat is the only proof a resumed build gives, and it
+// arrives before any other write moves ownership on.
+const heartbeatOwnerSQL = `
+	$9::text = ''
+	OR COALESCE(NULLIF($10::text, ''), runs.payload->>'accepted_instance') IS NULL
+	OR $9::text = COALESCE(NULLIF($10::text, ''), runs.payload->>'accepted_instance')
+	OR $9::text = runs.payload->'mesh'->'resume'->>'instance'`
 
 // applyRunHeartbeat raises the run's two heartbeat columns. It raises
 // last_heartbeat_at to the envelope's occurred_at, which a Jenkins pod
@@ -23,19 +43,34 @@ import (
 // recorder. The reader answers last_heartbeat_at, which reports what
 // the build itself sent.
 //
+// Only the run's own owner raises the columns, or the target a
+// dispatched resume names. A heartbeat from any other instance changes
+// nothing at all. Two cases hold the unconditional raise, because the
+// owner test needs a name on each side: an envelope that names no
+// sender, and a run that no source names an owner for.
+//
+// The dead owner of a resumed run can still deliver a
+// heartbeat that was in flight, and that heartbeat proves no liveness:
+// it would raise heartbeat_received_at above the resume's own request
+// time, and nothing ever lowers the column again. The resume guard and
+// the marking write both read that comparison, so the run would stay
+// RUNNING for the rest of its life.
+//
 // heartbeat_received_at belongs in the insert column list, not only in
 // the update clause. Postgres resolves EXCLUDED from the insert's own
 // column list, so a column the insert omits reads as null in EXCLUDED
 // and the CASE would keep the stored value forever.
-func applyRunHeartbeat(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) error {
+func applyRunHeartbeat(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope,
+	logger *slog.Logger) error {
 	receivedAt := time.Now().UTC()
-	if _, err := tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		INSERT INTO varroa.runs (
 			run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path,
 			status, last_heartbeat_at, heartbeat_received_at
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, 'QUEUED', $9, $10
 		)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, 'QUEUED', $11, $12
+		 WHERE $9::text = '' OR $10::text = '' OR $9::text = $10::text
+		    OR EXISTS (SELECT 1 FROM varroa.runs r WHERE r.run_id = $1 AND r.created_at = $2)
 		ON CONFLICT (created_at, run_id) DO UPDATE SET
 			last_heartbeat_at = CASE
 				WHEN runs.last_heartbeat_at IS NULL OR EXCLUDED.last_heartbeat_at > runs.last_heartbeat_at
@@ -49,11 +84,23 @@ func applyRunHeartbeat(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 				ELSE runs.heartbeat_received_at
 			END,
 			payload = runs.payload `+acceptedPayloadKeysSQL+`
+		 WHERE `+heartbeatOwnerSQL+`
 	`,
 		intent.runID, intent.createdAt, intent.intentKey, intent.cluster, intent.namespace,
-		intent.cellValue(), intent.tenant, intent.jobPath, env.OccurredAt, receivedAt,
-	); err != nil {
+		intent.cellValue(), intent.tenant, intent.jobPath,
+		env.CellInstance, intent.cellInstanceValue(), env.OccurredAt, receivedAt,
+	)
+	if err != nil {
 		return fmt.Errorf("raise the heartbeat columns: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Debug("drop a heartbeat from an instance that does not own the run",
+			"run_id", intent.runID, "cell_instance", env.CellInstance,
+			"intent_owner", intent.cellInstanceValue())
+		return nil
 	}
 	return clearProvedResume(ctx, tx, intent, env, receivedAt)
 }
@@ -69,10 +116,9 @@ func applyRunHeartbeat(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 // of the target itself.
 //
 // Only the named target's own heartbeat clears it, and only a heartbeat
-// that reaches the recorder after the dispatch. The dead instance can
-// still deliver a heartbeat that was in flight, and the target itself
-// can deliver one it emitted before it took the run over. Neither
-// proves the resume, and clearing on either would drop the run's
+// that reaches the recorder after the dispatch. The target itself can
+// deliver a heartbeat it emitted before it took the run over. That
+// heartbeat proves no resume, and clearing on it would drop the run's
 // protection before the target restored it.
 //
 // The comparison runs on the recorder's own clock, never the pod's.

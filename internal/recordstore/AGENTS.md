@@ -336,7 +336,20 @@ of the fleet's audit activity, once a controller becomes disposable.
   the mesh's own kind and writes no typed column, only `payload.mesh`.
   `runsStatusMergeSQL` (`ingest_common.go`) is the
   one CASE expression every `runs` writer reuses to keep `status` monotonic
-  and `DUPLICATE` terminal. `ingest_duplicate.go` holds the duplicate
+  and `DUPLICATE` terminal.
+  `applyRunHeartbeat` (`ingest_heartbeat.go`) raises the two liveness
+  columns only for the run's own owner. The owner is the intent's
+  `cell_instance`, else the stored `accepted_instance`, which is the
+  expression the sweep reads. The target a dispatched `mesh.resume`
+  names also raises them, because that target's first heartbeat proves
+  the resume. A heartbeat from any other instance changes no column, and
+  the recorder logs it at debug level. Two cases hold the unconditional
+  raise, because the test needs a name on each side: an envelope that
+  names no sender, and a run that no source names an owner for. Without
+  the owner rule a dead owner's
+  in-flight heartbeat raises the stamp above `mesh.resume.requested_at`.
+  The run then stays `RUNNING` for good, because nothing lowers the
+  column again. `ingest_duplicate.go` holds the duplicate
   backstop `run.started` runs in the same transaction, publishing a
   `cancel_run` ledger action (`ledgeraction.go`) through
   `PublishLedgerAction` on `bus.LedgerActionSubject`. `RunIngestConsumer`

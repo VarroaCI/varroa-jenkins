@@ -24,8 +24,9 @@ A confirmed loss reaches a mark in about 70 to 130 seconds. Without a confirmati
 falls back to two fixed windows: five minutes for a run whose owning instance changed, and fifteen
 minutes for a silent run on the current instance.
 
-The recorder measures each window on its own clock. It stamps the time every heartbeat arrives,
-so a drifting cell clock moves no window.
+The recorder measures each window on its own clock, and stamps the time each heartbeat arrives.
+A heartbeat from an instance that no longer owns the run moves no window. A drifting cell clock
+therefore moves none.
 
 ## The grace
 
@@ -36,9 +37,9 @@ recordStore:
 ```
 
 The grace is how long a confirmation waits before the recorder counts the instance gone. An empty,
-unparsable, or non-positive value falls back to `30s`. It exists because the operator can clear its
-stored cell instance on the tick a replacement pod appears, and a zero grace would then interrupt a
-run the new pod is about to adopt.
+unparsable, or non-positive value falls back to `30s`. The operator can clear its stored cell
+instance on the tick a replacement pod appears. A zero grace would then interrupt a run the new
+pod is about to adopt.
 
 ## What a user sees
 
@@ -54,8 +55,8 @@ activity feed. The reason names the signal that decided.
 | `resume-timeout` | the mesh claimed the run and the run did not come back |
 
 A `cell-lost` mark sends no cancel command, because the pod is gone and holds no process to stop. A
-fleet lock the lost run held is released on the same schedule: a lock does not wait out the
-five-minute window when a pod read already proved its owner gone.
+fleet lock the lost run held is released on the same schedule. A pod read that proved its owner
+gone ends the five-minute wait.
 
 ## The re-fire
 
