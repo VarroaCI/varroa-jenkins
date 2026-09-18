@@ -386,6 +386,62 @@ public class RunStatePusherTest {
         assertFalse("a finished run arms no refresh", pusher.refreshArmedForTesting());
     }
 
+    // ---- a build this process resumed ----
+
+    @Test
+    public void aResumedBuildPushesWithNoFlowNode() throws Exception {
+        Path rootDir = tmp.newFolder("run-r").toPath();
+        Files.writeString(rootDir.resolve(RunStatePusher.PROGRAM_DAT), "program-bytes");
+        Files.writeString(rootDir.resolve(RunStatePusher.BUILD_XML), "<build/>");
+
+        FakeSender sender = new FakeSender();
+        RunStatePusher pusher = newPusher(rootDir, sender, newSpool("spool-r"));
+
+        FlowExecution execution = mock(FlowExecution.class);
+        when(execution.getDurabilityHint()).thenReturn(FlowDurabilityHint.MAX_SURVIVABILITY);
+
+        // The resumed build runs inside one long step, so no flow node
+        // arms a window. Its own process must replicate the run.
+        pusher.scheduleResumed(execution);
+
+        waitUntil(() -> sender.postCount() >= 2, 10_000);
+        assertTrue("a successful window arms the refresh that follows it",
+                pusher.refreshArmedForTesting());
+    }
+
+    @Test
+    public void aResumedBuildBelowMaxSurvivabilityPushesNothing() throws Exception {
+        Path rootDir = tmp.newFolder("run-s").toPath();
+        Files.writeString(rootDir.resolve(RunStatePusher.BUILD_XML), "<build/>");
+
+        FakeSender sender = new FakeSender();
+        RunStatePusher pusher = newPusher(rootDir, sender, newSpool("spool-s"));
+
+        FlowExecution execution = mock(FlowExecution.class);
+        when(execution.getDurabilityHint()).thenReturn(FlowDurabilityHint.PERFORMANCE_OPTIMIZED);
+
+        pusher.scheduleResumed(execution);
+        Thread.sleep(RunStatePusher.WINDOW_MILLIS + 500);
+
+        assertEquals("a resumed build below MAX_SURVIVABILITY must push nothing", 0, sender.postCount());
+    }
+
+    @Test
+    public void aResumeThatNamesNoExecutionPushesNothing() throws Exception {
+        Path rootDir = tmp.newFolder("run-t").toPath();
+        Files.writeString(rootDir.resolve(RunStatePusher.BUILD_XML), "<build/>");
+
+        FakeSender sender = new FakeSender();
+        RunStatePusher pusher = newPusher(rootDir, sender, newSpool("spool-t"));
+
+        // An execution that is gone names no durability, so the gate
+        // fails closed.
+        pusher.scheduleResumed(null);
+        Thread.sleep(RunStatePusher.WINDOW_MILLIS + 500);
+
+        assertEquals("a resume with no execution must push nothing", 0, sender.postCount());
+    }
+
     // ---- pre-flight round 9: one window at a time ----
 
     @Test

@@ -4,6 +4,7 @@ import static org.junit.Assert.*;
 
 import hudson.model.Cause;
 import hudson.model.CauseAction;
+import hudson.model.Executor;
 import hudson.model.FreeStyleProject;
 import hudson.model.ParameterDefinition;
 import hudson.model.ParametersAction;
@@ -15,6 +16,11 @@ import hudson.model.StringParameterValue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BooleanSupplier;
+
+import net.sf.json.JSONObject;
+
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.flow.FlowExecutionListener;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
@@ -45,6 +51,38 @@ public class VarroaRunRecorderTest {
     @After
     public void clearGateOverride() {
         VarroaRunRecorder.setGateOverrideForTesting(null);
+    }
+
+    /** The gate value the run-state pusher accepts. */
+    private static final String LOOPBACK_URL = "http://127.0.0.1:9095";
+
+    private static void waitUntil(BooleanSupplier condition, long timeoutMillis) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMillis;
+        while (!condition.getAsBoolean() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(50);
+        }
+        assertTrue("condition not met within " + timeoutMillis + "ms", condition.getAsBoolean());
+    }
+
+    /** A {@link RunStatePusher.RunStateSender} that records each path it is given. */
+    private static final class RecordingSender implements RunStatePusher.RunStateSender {
+
+        private final List<String> paths = new CopyOnWriteArrayList<>();
+
+        boolean holds(String suffix) {
+            for (String path : paths) {
+                if (path.endsWith(suffix)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        @Override
+        public RunStatePusher.RunStateSender.Answer post(String url, JSONObject record) {
+            paths.add(record.getString("relpath"));
+            return RunStatePusher.RunStateSender.Answer.accepted();
+        }
     }
 
     private static VarroaIntentAction grantedAction(String deliveryId) {
@@ -106,6 +144,50 @@ public class VarroaRunRecorderTest {
         List<BuildEvent> completed = byPhase(atEnd.events, BuildEvent.PHASE_COMPLETED);
         assertEquals(1, completed.size());
         assertEquals("the completion carries the run the recorder resumed", runId, completed.get(0).getRunId());
+    }
+
+    /**
+     * Proves a build this process resumed replicates its own state. The
+     * node listener arms a push window for each flow node, and a build
+     * that resumes inside one long step fires none. Without a schedule
+     * at the attach, the new process pushes nothing for the whole step,
+     * and a second loss resumes from the dead process's copy.
+     */
+    @Test
+    public void aResumedBuildReplicatesItsOwnStateWithNoFlowNode() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "resumed-push");
+        job.setDefinition(new CpsFlowDefinition("sleep 120\n", true));
+        VarroaIntentAction action = grantedAction("");
+        WorkflowRun run = job.scheduleBuild2(0, action).waitForStart();
+        j.waitForMessage("Sleeping", run);
+        String runId = action.getRunId();
+
+        // The process that began the build is gone, and this one holds
+        // neither its state nor a pusher for it.
+        VarroaRunRecorder.resetStateForTesting();
+        RunStatePusher.resetForTesting();
+        RunStatePusher.setActivationUrlForTesting(LOOPBACK_URL);
+        RecordingSender sender = new RecordingSender();
+        RunStatePusher pusher = new RunStatePusher(runId, run.getParent().getFullName(), run.getNumber(),
+                run.getRootDir().toPath(), LOOPBACK_URL, sender, new RunSpool());
+        RunStatePusher.putForTesting(runId, pusher);
+        try {
+            FlowExecutionListener.fireResumed(run.getExecution());
+
+            waitUntil(() -> sender.holds(RunStatePusher.BUILD_XML), 20_000);
+            assertTrue("the resumed process replicates the flow program too",
+                    sender.holds(RunStatePusher.PROGRAM_DAT));
+        } finally {
+            RunStatePusher.remove(runId);
+            RunStatePusher.setActivationUrlForTesting(null);
+            Executor executor = run.getExecutor();
+            if (executor != null) {
+                executor.interrupt();
+            } else {
+                run.doStop();
+            }
+            j.waitForCompletion(run);
+        }
     }
 
     /**

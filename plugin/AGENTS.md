@@ -368,13 +368,21 @@ the root AGENTS.md greenfield rule.
   first heartbeat at once** — the recorder clears the run's resume only on a
   heartbeat from the named instance received after it asked, and gives up six
   minutes later. It emits no second `STARTED`, and refuses a build that is not
-  running. `VarroaLogStorageFactory` needs no change: it resolves the run from
+  running. An attach that rebuilt the state also schedules the run's **first
+  run-state push** (`RunStatePusher.scheduleForResumedRun`): the graph listener
+  arms a window per flow node, and a build that resumes inside one long step
+  fires none, so this process would otherwise replicate nothing for the whole
+  step and a second loss would resume from the dead process's copy.
+  `VarroaLogStorageFactory` needs no change: it resolves the run from
   the same persisted action.
 - **Run-state replication** (the pipeline mesh's plugin half):
   `RunStatePusher.java` holds one instance per run, armed by
-  `VarroaRunRecorder.Graph.onNewHead` and removed by `Runs#onCompleted`. The
+  `VarroaRunRecorder.Graph.onNewHead` and by `Flows`'s own resume attach, and
+  removed by `Runs#onCompleted`. The
   listener only schedules: it runs on the flow's own thread, so it reads no
-  file and posts nothing. The first schedule after an idle period arms one
+  file and posts nothing. The resume path names a `FlowExecution` instead of a
+  node, because the resumed build names no new node; the durability gate reads
+  that execution, and a resume that names none arms nothing. The first schedule after an idle period arms one
   `jenkins.util.Timer` task two seconds out, and the task then posts the whole
   current file set once, serially. The set holds `build.xml` and `program.dat`
   every time, each `workflow/<n>.xml` whose size or modification time changed,

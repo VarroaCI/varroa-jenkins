@@ -908,14 +908,31 @@ public final class VarroaRunRecorder {
                 }
                 // A resumed build has no state here, because its
                 // STARTED listener fired in another process.
-                attachResumedRun(run);
+                boolean resumed = attachResumedRun(run);
                 Graph graph = new Graph(run);
                 if (ATTACHED.putIfAbsent(execution, graph) == null) {
                     execution.addListener(graph);
                 }
+                if (resumed) {
+                    scheduleResumedPush(run, execution);
+                }
             } catch (Exception e) {
                 LOGGER.log(Level.WARNING, "VarroaRunRecorder.Flows: failed to attach the graph listener", e);
             }
+        }
+
+        /**
+         * Schedules the first run-state push of a build this process
+         * resumed. The graph listener arms a window for each flow node,
+         * and a build that resumes inside one long step fires none, so
+         * this process would replicate nothing until that step ends.
+         */
+        private static void scheduleResumedPush(Run<?, ?> run, FlowExecution execution) {
+            RunState state = stateFor(safeJobPath(run), run.getNumber());
+            if (state == null) {
+                return;
+            }
+            RunStatePusher.scheduleForResumedRun(run, state.runId, execution);
         }
 
         @Override

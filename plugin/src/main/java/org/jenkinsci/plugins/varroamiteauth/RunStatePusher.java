@@ -31,6 +31,7 @@ import net.sf.json.JSONObject;
 
 import org.jenkinsci.plugins.workflow.actions.WorkspaceAction;
 import org.jenkinsci.plugins.workflow.flow.FlowDurabilityHint;
+import org.jenkinsci.plugins.workflow.flow.FlowExecution;
 import org.jenkinsci.plugins.workflow.graph.FlowNode;
 
 /**
@@ -196,20 +197,48 @@ public final class RunStatePusher {
      */
     public static void scheduleFor(Run<?, ?> run, String runId, FlowNode node) {
         try {
-            if (run == null || runId == null || runId.isEmpty()) {
-                return;
+            RunStatePusher pusher = pusherFor(run, runId);
+            if (pusher != null) {
+                pusher.schedule(node);
             }
-            String url = activationUrl();
-            if (url == null) {
-                return;
-            }
-            RunStatePusher pusher = PUSHERS.computeIfAbsent(runId, id -> new RunStatePusher(
-                    id, run.getParent().getFullName(), run.getNumber(), run.getRootDir().toPath(),
-                    url, new HttpRunStateSender(), new RunSpool()));
-            pusher.schedule(node);
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "RunStatePusher: failed to schedule a push for run " + runId, e);
         }
+    }
+
+    /**
+     * Schedules the first push of a build this process resumed. The run
+     * then replicates under this process's own epoch, and the refresh
+     * window keeps that copy current.
+     *
+     * <p>A resumed build fires no flow node while the step it resumes in
+     * runs, so the node listener arms no window. Without this schedule
+     * the run's stored state stays the dead process's copy for the whole
+     * step, and a second loss repeats the work since that copy.
+     */
+    public static void scheduleForResumedRun(Run<?, ?> run, String runId, FlowExecution execution) {
+        try {
+            RunStatePusher pusher = pusherFor(run, runId);
+            if (pusher != null) {
+                pusher.scheduleResumed(execution);
+            }
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "RunStatePusher: failed to schedule a resumed push for run " + runId, e);
+        }
+    }
+
+    /** The run's pusher, created on the first schedule, or null when the gate is off. */
+    private static RunStatePusher pusherFor(Run<?, ?> run, String runId) {
+        if (run == null || runId == null || runId.isEmpty()) {
+            return null;
+        }
+        String url = activationUrl();
+        if (url == null) {
+            return null;
+        }
+        return PUSHERS.computeIfAbsent(runId, id -> new RunStatePusher(
+                id, run.getParent().getFullName(), run.getNumber(), run.getRootDir().toPath(),
+                url, new HttpRunStateSender(), new RunSpool()));
     }
 
     /**
@@ -285,11 +314,43 @@ public final class RunStatePusher {
         if (stopped.get()) {
             return;
         }
-        if (!durableEnough(node)) {
+        if (!durableEnough(executionOf(node))) {
             return;
         }
         recordNodeName(node);
         armWindow();
+    }
+
+    /**
+     * Arms the window of a build this process resumed. It names no node:
+     * the build resumes inside a step that already ran, and the file set
+     * a window posts holds every file that step wrote.
+     *
+     * <p>A resume that names no execution arms nothing. The execution is
+     * what carries the run's durability, and a resume with none proves
+     * no level.
+     */
+    void scheduleResumed(FlowExecution execution) {
+        if (stopped.get() || execution == null) {
+            return;
+        }
+        if (!durableEnough(execution)) {
+            return;
+        }
+        armWindow();
+    }
+
+    /** The execution a flow node belongs to, or null when it names none. */
+    private static FlowExecution executionOf(FlowNode node) {
+        if (node == null) {
+            return null;
+        }
+        try {
+            return node.getExecution();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, "RunStatePusher: could not read the execution of a flow node", e);
+            return null;
+        }
     }
 
     /**
@@ -312,7 +373,7 @@ public final class RunStatePusher {
      * copied set can be stale by whole stages, and a resume from such a
      * set repeats finished work under the same build number.
      */
-    private boolean durableEnough(FlowNode node) {
+    private boolean durableEnough(FlowExecution execution) {
         Boolean known = durable;
         if (known != null) {
             return known;
@@ -320,8 +381,8 @@ public final class RunStatePusher {
         boolean ok = true;
         FlowDurabilityHint hint = null;
         try {
-            if (node != null && node.getExecution() != null) {
-                hint = node.getExecution().getDurabilityHint();
+            if (execution != null) {
+                hint = execution.getDurabilityHint();
             }
         } catch (Exception e) {
             LOGGER.log(Level.FINE, "RunStatePusher: could not read the durability hint for run " + runId, e);

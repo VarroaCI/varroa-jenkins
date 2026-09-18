@@ -11,7 +11,8 @@ It resumes a Pipeline build only.
 
 The plugin pushes the build's state files every two seconds while it moves. A long step gets one
 push every 30 seconds. A resumed build starts again from its last push, so **the work since then
-repeats**.
+repeats**. The resumed build replicates from its own process, so a second loss repeats only the work
+since the resume.
 
 A step that is not safe to repeat should hold a fleet lock, whose token survives the resume:
 
@@ -36,8 +37,7 @@ Past either window the run reads `INTERRUPTED` with the reason `resume-timeout`.
 
 **The arm window delays the mark, and that delay buys the resume.** Without the mesh, a lost run is
 marked 30 seconds after the confirmation. With the mesh it waits up to 15 minutes. That wait has two
-costs: the pipelines page shows a run whose cell is gone, and the run's fleet lock stays held. That
-is why the window is not longer.
+costs: the pipelines page shows a run whose cell is gone, and the run's fleet lock stays held.
 
 **A failed resume is tried again on a new pod.** A pod that cannot fetch the files, or that rolls
 first, reports it. Varroa sends the resume again inside the same arm window, never to a pod
