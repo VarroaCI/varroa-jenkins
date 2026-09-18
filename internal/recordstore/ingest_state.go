@@ -47,8 +47,9 @@ func (f runStateFile) newer(stored runStateFile) bool {
 // advisory and must not end a run's replication.
 //
 // It reports the run for a prefix delete once the recorded file sizes
-// pass the cap. Every write uses COALESCE, because runs.payload is
-// nullable and a plain concatenation with NULL answers NULL.
+// pass the cap, unless a dispatched resume holds that delete. Every
+// write uses COALESCE, because runs.payload is nullable and a plain
+// concatenation with NULL answers NULL.
 func applyRunState(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) (dispatchResult, error) {
 	var payload RunStatePayload
 	if err := json.Unmarshal(env.Payload, &payload); err != nil {
@@ -81,6 +82,13 @@ func applyRunStateRefusal(ctx context.Context, tx pgx.Tx, intent *intentRow, env
 	if payload.RejectedReason != runStateCapReason {
 		return nil
 	}
+	return recordRunStateCapWarning(ctx, tx, intent, env)
+}
+
+// recordRunStateCapWarning stamps mesh.cap_warned_at, an operator's one
+// signal that a run passed the cap. It writes that key alone: both
+// callers keep the run's replication in place.
+func recordRunStateCapWarning(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) error {
 	if _, err := tx.Exec(ctx, `
 		UPDATE varroa.runs
 		   SET payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object('mesh',
@@ -171,6 +179,9 @@ func applyRunStateFile(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 		return dispatchResult{}, err
 	}
 	if total > runStateCapBytes {
+		if dispatched {
+			return dispatchResult{}, holdRunStateCap(ctx, tx, intent, env)
+		}
 		// The cap deletes the whole prefix, which covers the superseded
 		// object as well.
 		return applyRunStateCap(ctx, tx, intent)
@@ -232,10 +243,30 @@ func sumRunStateBytes(files []byte) (int64, error) {
 	return total, nil
 }
 
+// holdRunStateCap holds the cap while a dispatched resume names a
+// target. It records the cap warning alone and keeps mesh.state_at,
+// mesh.resume, and every stored object: the target reads exactly the
+// objects the cap deletes, and it reads them one at a time.
+//
+// The cap holds whole. It cannot bound the stored bytes by refusing the
+// entry instead, because the gateway writes the object before it reports
+// it: a refused entry loses the record of an object that exists, and
+// frees no storage. The record therefore keeps every entry, and the
+// first report after the resume clears ends the replication.
+//
+// The hold is bounded by three exits. The target's own heartbeat clears
+// mesh.resume, a resume failure clears the named instance, and a resume
+// that proves neither passes its deadline, which marks the run
+// interrupted and ends the run.
+func holdRunStateCap(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) error {
+	return recordRunStateCapWarning(ctx, tx, intent, env)
+}
+
 // applyRunStateCap ends a run's replication. It clears the resume as
 // well as the anchor: a run whose state is gone can never resume, and a
 // stale arm would shield it from the sweep, and hold its fleet lock,
-// for the whole arm window.
+// for the whole arm window. Its caller holds it while a dispatched
+// resume names a target.
 func applyRunStateCap(ctx context.Context, tx pgx.Tx, intent *intentRow) (dispatchResult, error) {
 	if _, err := tx.Exec(ctx, `
 		UPDATE varroa.runs

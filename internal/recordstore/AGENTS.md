@@ -33,7 +33,16 @@ of the fleet's audit activity, once a controller becomes disposable.
   `applyRunState` merges each `run.state` outcome into
   `runs.payload->'mesh'`; the recorder alone owns the 64 MiB cap, and the
   cap path clears `mesh.state_at`, `mesh.resume`, and the run's stored
-  objects together. Each `mesh.files` entry carries the pusher `epoch` of
+  objects together. **A dispatched resume holds that whole path**: while
+  `mesh.resume` names a target, the cap records `mesh.cap_warned_at`
+  alone, because the target reads exactly the objects the cap deletes.
+  The cap cannot bound the bytes by refusing the entry instead: the
+  gateway writes the object before it reports it, so a refused entry
+  frees nothing and loses the record of an object that exists. The
+  record therefore keeps every entry, and the first report after the
+  resume clears ends the replication. The target's own heartbeat, a
+  resume failure, and the resume deadline are the three exits that
+  bound the hold. Each `mesh.files` entry carries the pusher `epoch` of
   the object it names, and `applyRunStateFile` decides precedence under a
   `SELECT … FOR UPDATE` of the run row: the higher epoch wins, and inside
   one epoch the higher generation wins. The lock is what makes that safe

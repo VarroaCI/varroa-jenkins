@@ -470,6 +470,139 @@ func TestApplyRunStateKeepsTheObjectADispatchedResumeNames(t *testing.T) {
 		t.Fatalf("files = %+v, want the epoch-200 entry", files)
 	}
 	if len(fake.keys) != 0 {
-		t.Fatalf("deleted keys = %v, want none while a resume is in flight", fake.keys)
+		t.Fatalf("deleted keys = %v, want none while a resume is active", fake.keys)
+	}
+}
+
+// --- The cap holds while a dispatched resume names a target ---
+
+// seedDispatchedResumeKeepingMesh merges a dispatched resume into
+// runID's existing mesh record, so the run keeps the files it already
+// replicated. The takeover's own dispatch writes the same keys.
+func seedDispatchedResumeKeepingMesh(t *testing.T, db *sql.DB, runID uuid.UUID, target string) {
+	t.Helper()
+	if _, err := db.Exec(`
+		UPDATE varroa.runs
+		   SET payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object('mesh',
+		         COALESCE(payload->'mesh', '{}'::jsonb) || jsonb_build_object('resume',
+		           jsonb_build_object('armed_at', now(), 'arm_expires', now() + interval '10 minutes',
+		                              'instance', $2::text, 'requested_at', now(),
+		                              'deadline', now() + interval '6 minutes')))
+		 WHERE run_id = $1
+	`, runID, target); err != nil {
+		t.Fatalf("seed a dispatched resume: %v", err)
+	}
+}
+
+// readMeshCapState reads the three values the cap writes: mesh.state_at
+// as text, mesh.rejected_reason, and whether mesh.cap_warned_at is set.
+func readMeshCapState(t *testing.T, db *sql.DB, runID uuid.UUID) (string, string, bool) {
+	t.Helper()
+	var stateAtText, rejectedReason string
+	var capWarnedAt sql.NullTime
+	if err := db.QueryRow(`
+		SELECT COALESCE((payload->'mesh'->'state_at')::text, 'null'),
+		       COALESCE(payload->'mesh'->>'rejected_reason', ''),
+		       (payload->'mesh'->>'cap_warned_at')::timestamptz
+		FROM varroa.runs WHERE run_id = $1
+	`, runID).Scan(&stateAtText, &rejectedReason, &capWarnedAt); err != nil {
+		t.Fatalf("read the run's cap state: %v", err)
+	}
+	return stateAtText, rejectedReason, capWarnedAt.Valid
+}
+
+// TestApplyRunStateCapHoldsWhileAResumeIsDispatched asserts the durable
+// cap waits while mesh.resume names a target. The target reads exactly
+// the objects the cap deletes, so the cap keeps the resume, the anchor,
+// and every object. It records mesh.cap_warned_at alone.
+func TestApplyRunStateCapHoldsWhileAResumeIsDispatched(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	intentKey := "manual:" + newTestUUIDv7String()
+	runID := seedGrantedIntent(t, pool, intentKey)
+
+	fake := &prefixRecordingStore{}
+	ingester := NewIngester(pool, nil, nil)
+	ingester.SetStateDeleter(fake)
+
+	applyMeshRunState(t, ingester, runID, intentKey, RunStatePayload{
+		RelPath: meshProgramPath, Bytes: 1000, Seq: 1, StateGen: 1, PusherEpoch: meshPusherEpoch,
+	})
+	seedDispatchedResumeKeepingMesh(t, db, runID, "pod-live")
+
+	applyMeshRunState(t, ingester, runID, intentKey, RunStatePayload{
+		RelPath: meshBuildRecordPath, Bytes: 70 * 1024 * 1024, Seq: 1, StateGen: 1, PusherEpoch: meshPusherEpoch,
+	})
+
+	instance, ok := readResumeInstance(t, db, runID)
+	if !ok || instance != "pod-live" {
+		t.Fatalf("mesh.resume.instance = %q, ok = %v, want pod-live: the cap must wait", instance, ok)
+	}
+	stateAtText, rejectedReason, capWarned := readMeshCapState(t, db, runID)
+	if stateAtText == "null" {
+		t.Fatal("mesh.state_at = JSON null, want the anchor left in place")
+	}
+	if rejectedReason != "" {
+		t.Fatalf("rejected_reason = %q, want none while a resume is active", rejectedReason)
+	}
+	if !capWarned {
+		t.Fatal("want mesh.cap_warned_at set, the one signal that the run passed the cap")
+	}
+	if len(fake.prefixes) != 0 || len(fake.keys) != 0 {
+		t.Fatalf("deleted prefixes = %v, keys = %v, want none while a resume is active",
+			fake.prefixes, fake.keys)
+	}
+	if files := readMeshFiles(t, db, runID); len(files) != 2 {
+		t.Fatalf("len(files) = %d, want 2: the record must keep every stored object", len(files))
+	}
+}
+
+// TestApplyRunStateCapEndsReplicationOnceTheResumeClears asserts the
+// held cap is a wait and not an exemption. Once the target's heartbeat
+// clears mesh.resume, the next report ends the run's replication.
+func TestApplyRunStateCapEndsReplicationOnceTheResumeClears(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	intentKey := "manual:" + newTestUUIDv7String()
+	runID := seedGrantedIntent(t, pool, intentKey)
+
+	fake := &prefixRecordingStore{}
+	ingester := NewIngester(pool, nil, nil)
+	ingester.SetStateDeleter(fake)
+
+	applyMeshRunState(t, ingester, runID, intentKey, RunStatePayload{
+		RelPath: meshProgramPath, Bytes: 1000, Seq: 1, StateGen: 1, PusherEpoch: meshPusherEpoch,
+	})
+	seedDispatchedResumeKeepingMesh(t, db, runID, "pod-live")
+
+	applyMeshRunState(t, ingester, runID, intentKey, RunStatePayload{
+		RelPath: meshBuildRecordPath, Bytes: 70 * 1024 * 1024, Seq: 1, StateGen: 1, PusherEpoch: meshPusherEpoch,
+	})
+	if len(fake.prefixes) != 0 {
+		t.Fatalf("deleted prefixes = %v, want none while a resume is active", fake.prefixes)
+	}
+
+	// The target's heartbeat clears the resume.
+	if _, err := db.Exec(`
+		UPDATE varroa.runs
+		   SET payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object('mesh',
+		         COALESCE(payload->'mesh', '{}'::jsonb) - 'resume')
+		 WHERE run_id = $1
+	`, runID); err != nil {
+		t.Fatalf("clear the resume: %v", err)
+	}
+
+	applyMeshRunState(t, ingester, runID, intentKey, RunStatePayload{
+		RelPath: meshProgramPath, Bytes: 2000, Seq: 2, StateGen: 2, PusherEpoch: meshPusherEpoch,
+	})
+
+	stateAtText, rejectedReason, _ := readMeshCapState(t, db, runID)
+	if stateAtText != "null" {
+		t.Fatalf("mesh.state_at = %s, want JSON null once the resume is gone", stateAtText)
+	}
+	if rejectedReason != runStateCapReason {
+		t.Fatalf("rejected_reason = %q, want %q", rejectedReason, runStateCapReason)
+	}
+	want := blob.RunStatePrefix(runID.String())
+	if len(fake.prefixes) != 1 || fake.prefixes[0] != want {
+		t.Fatalf("deleted prefixes = %v, want [%s]", fake.prefixes, want)
 	}
 }

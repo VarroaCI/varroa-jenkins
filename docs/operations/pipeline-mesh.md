@@ -26,8 +26,8 @@ varroa.lock('deploy/production') {
 
 Jenkins writes a build's flow program at a frequency its durability setting decides. A lower setting
 writes only at a checkpoint, so a copy can be stale by whole stages. Varroa therefore sets
-`MAX_SURVIVABILITY` in every cell, and the plugin pushes nothing below that level. A job that sets
-its own durability property has no mesh.
+`MAX_SURVIVABILITY` in every cell, and the plugin pushes nothing below that level. A job with its own
+durability property has no mesh.
 
 ## The two windows
 
@@ -35,9 +35,9 @@ Each wait is a constant. The **arm window** is 15 minutes from the claim, and bo
 replacement cell. The **resume deadline** is 6 minutes from the dispatch, and bounds the resume.
 Past either window the run reads `INTERRUPTED` with the reason `resume-timeout`.
 
-**The arm window delays the mark, and that delay buys the resume.** Without the mesh, a lost run is
-marked 30 seconds after the confirmation. With the mesh it waits up to 15 minutes. That wait has two
-costs: the pipelines page shows a run whose cell is gone, and the run's fleet lock stays held.
+**The arm window delays the mark.** Without the mesh, a lost run is marked 30 seconds after the
+confirmation. With the mesh it waits up to 15 minutes. That wait has two costs: the pipelines page
+shows a run whose cell is gone, and the run's fleet lock stays held.
 
 **A failed resume is tried again on a new pod.** A pod that cannot fetch the files, or that rolls
 first, reports it. Varroa sends the resume again inside the same arm window, never to a pod
@@ -47,7 +47,10 @@ that already failed. Once a pod loads the build no other may take it.
 
 A run's replicated state stays at or below 64 MiB. Over that bound Varroa deletes it, and the run
 takes the ordinary path. A gateway restart lets one run overshoot, because that counter lives in
-memory. The recorder reclaims it on the next push, and deletes a superseded copy at once.
+memory. The next push reclaims it.
+
+**An active resume holds that delete.** Varroa keeps the state until the target reports or its
+deadline passes.
 
 **A run's state is deleted when the run ends.** An hourly round removes the state of any run
 terminal for more than an hour, so a stopped recorder leaves nothing.
@@ -55,5 +58,5 @@ terminal for more than an hour, so a stopped recorder leaves nothing.
 ## The stored copy
 
 Varroa stores each state file under the Jenkins process that pushed it, and a resume reads the
-process the recorder recorded. A retired process's late push therefore cannot replace a live copy,
-whichever gateway pod writes it.
+process the recorder recorded. A retired process's late push cannot replace a live copy, whichever
+gateway pod writes it.
