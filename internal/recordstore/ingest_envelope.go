@@ -6,12 +6,13 @@ import (
 )
 
 // Ingest kind constants. The payload on builds.<cluster>.<ns>.<cell>
-// carries exactly one of these twelve values in its "kind" field:
-// eleven run.* kinds, and the cell-scoped job.schedules kind C11's
+// carries exactly one of these thirteen values in its "kind" field:
+// twelve run.* kinds, and the cell-scoped job.schedules kind C11's
 // gateway publishes. C2 maps its protobuf BuildEvent onto eight of the
-// run.* kinds; the gateway publishes run.trigger_failed from a failed
-// TRIGGER_BUILD result, run.trigger_accepted from a successful one, and
-// run.state from each run-state push outcome, instead.
+// run.* kinds. The gateway publishes run.trigger_failed from a failed
+// TRIGGER_BUILD result, run.trigger_accepted from a successful one,
+// run.state from each run-state push outcome, and run.resume_failed
+// from a failed RESUME_BUILD result, instead.
 const (
 	KindRunStarted   = "run.started"
 	KindRunStage     = "run.stage"
@@ -30,6 +31,11 @@ const (
 	// arrive before any claim, so the recorder routes it before the
 	// intent read, beside run.trigger_failed.
 	KindRunTriggerAccepted = "run.trigger_accepted"
+	// KindRunResumeFailed records a RESUME_BUILD command the target could
+	// not apply. The run already holds its own record, and the write
+	// touches that record alone, so the recorder routes it before the
+	// intent read beside the two trigger kinds.
+	KindRunResumeFailed = "run.resume_failed"
 	// KindRunState records one run-state push outcome. The gateway
 	// publishes it after it stores a file, and after it refuses a push
 	// because the run passed its byte cap.
@@ -50,11 +56,12 @@ var ingestKinds = map[string]bool{
 	KindRunHeartbeat:       true,
 	KindRunTriggerFailed:   true,
 	KindRunTriggerAccepted: true,
+	KindRunResumeFailed:    true,
 	KindRunState:           true,
 	KindJobSchedules:       true,
 }
 
-// IsKnownKind reports whether kind is one of the twelve ingest kinds.
+// IsKnownKind reports whether kind is one of the thirteen ingest kinds.
 func IsKnownKind(kind string) bool {
 	return ingestKinds[kind]
 }
@@ -134,6 +141,18 @@ type RunTriggerFailedPayload struct {
 	ReasonCode string `json:"reason_code"`
 	HTTPStatus int    `json:"http_status"`
 	Actor      string `json:"actor,omitempty"`
+}
+
+// RunResumeFailedPayload is the payload of a run.resume_failed
+// envelope. Instance names the target the recorder dispatched to, and
+// the write changes nothing when the stored record names another
+// instance. ReasonCode decides whether the run returns to the armed
+// state: the gateway alone reads the target's error text, and the
+// recorder applies the one value it answers.
+type RunResumeFailedPayload struct {
+	Instance   string `json:"instance"`
+	Error      string `json:"error"`
+	ReasonCode string `json:"reason_code"`
 }
 
 // RunStagePayload is the payload of a run.stage envelope, mapped onto

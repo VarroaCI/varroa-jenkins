@@ -228,8 +228,14 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   A node's own `config.xml` is never overwritten, and a `409` from the
   adopt route counts as success for that file. Each fetch is retried
   three times with a doubling wait, bounded by the command's own
-  deadline: a failed resume is acknowledged and never republished, so a
-  transient read that is not retried costs the run its whole deadline.
+  deadline. A failed resume is acknowledged and never redelivered to
+  this mite: the gateway records it, and the recorder arms the run again
+  and waits for a target instance that is new. A transient read that is
+  not retried here therefore costs the run this deadline and at least
+  one more takeover round. **The two failures at or after the build load
+  are the exception.** `RESUME_LOAD_FAILED` and `RESUME_NOT_BUILDING`
+  prove this JVM may hold the build, so the recorder keeps the dispatch
+  and no second cell adopts it.
   **The resume probes before it writes.** The transport redelivers a
   command whose result was lost, so the mite asks
   `/varroa-run/load-build` with `probe` first and answers success

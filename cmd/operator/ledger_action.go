@@ -169,7 +169,14 @@ func handleLedgerAction(ctx context.Context, logger *slog.Logger, ownCluster str
 		// gave to another pod.
 		rec.WakeHibernatedController(ctx, action.Namespace, action.Controller)
 		cmd := &mitev1.ImperativeCommand{
-			CommandId: "resume-build-" + action.RunID,
+			// The identifier carries the target instance, because one run
+			// can hold several resume attempts inside its arm window. The
+			// gateway files one pending message for each command
+			// identifier on a controller, so two attempts that shared an
+			// identifier would file one entry: a late result from the
+			// first attempt would then acknowledge the second attempt's
+			// message and be recorded against the second target.
+			CommandId: "resume-build-" + action.RunID + "-" + action.Instance,
 			Type:      mitev1.CommandTypeResumeBuild,
 			// The command carries its own deadline, so a delivery that
 			// arrives late is abandoned instead of restoring a run the

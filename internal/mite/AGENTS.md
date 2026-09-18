@@ -165,14 +165,30 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   onto the `run.started`/`run.completed` payload via `addTemplateFields`,
   omitting any field the event does not carry; a `HEARTBEAT` event never
   carries them.
-- **Build trigger outcomes** (`bus_handler.go`, `build_events.go`) — a
-  `CommandResult` for a pending `TRIGGER_BUILD` imperative publishes one
-  envelope on the same `builds.<cluster>.<ns>.<cell>` subject the build
-  events use: `run.trigger_failed` when `success` is false, or
-  `run.trigger_accepted` when `success` is true. `recordTriggerOutcome`
-  decodes the pending message's own `TriggerBuildPayload` once (no second
-  map) and calls `publishTriggerFailed` or `publishTriggerAccepted`. Both
-  resolve the tenant through `CellTenantResolver.ResolveJobTenant`.
+- **Command outcomes** (`bus_handler.go`, `build_events.go`) — a
+  `CommandResult` for a pending imperative publishes one envelope on the
+  same `builds.<cluster>.<ns>.<cell>` subject the build events use.
+  `recordCommandOutcome` decodes the pending message once through
+  `pendingCommand` (no second map) and switches on the command type.
+  `TRIGGER_BUILD` publishes `run.trigger_failed` when `success` is false,
+  or `run.trigger_accepted` when `success` is true. `RESUME_BUILD`
+  publishes `run.resume_failed` for a failed result and nothing for a
+  successful one, because a resumed build proves itself by its own
+  heartbeat. **A resume result always acks, whatever the publish
+  answers**, which is the opposite of the trigger rule below: a
+  redelivered resume can succeed while the recorder holds no dispatched
+  resume, and only the named target's heartbeat clears a resume record,
+  so that live build would read `INTERRUPTED` at the arm window with no
+  cancel. A lost publish leaves the run on its 6-minute resume deadline
+  instead. `publishResumeFailed` maps the mite's own error text onto one
+  of six reason codes with `reasonCodeForResumeError`, which tests
+  `RESUME_LOAD_FAILED` and `RESUME_NOT_BUILDING` **first** so a deadline
+  that wraps a load failure still reads as the load failure and the
+  recorder keeps the dispatch. The token test is bounded (`token + ": "`,
+  `hasResumeToken`), never a plain substring: a Jenkins folder may carry
+  a token in its own name, and the mite writes a job path into the text
+  of an unnamed failure. Every publisher resolves the tenant through
+  `CellTenantResolver.ResolveJobTenant`.
   `publishTriggerFailed` maps `CommandResult.http_status` onto a reason code
   with `reasonCodeForStatus` (`404` to `JOB_NOT_FOUND`, `409` to
   `JOB_NOT_BUILDABLE`, everything else and `0` to `TRIGGER_REJECTED`);

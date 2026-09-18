@@ -78,7 +78,7 @@ func (g *Ingester) applyTriggerFailed(ctx context.Context, env IngestEnvelope) (
 	}
 
 	if outcome != "" {
-		g.refireMetrics.addRefired(ctx, outcome, reason)
+		g.sweepMetrics.addRefired(ctx, outcome, reason)
 	}
 	return ApplyResult{
 		TriggerFailedReason: payload.ReasonCode,

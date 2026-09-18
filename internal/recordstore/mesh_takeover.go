@@ -42,9 +42,21 @@ const (
 	resumeOutcomeArmed     = "armed"
 	resumeOutcomePublished = "published"
 	resumeOutcomeSkipped   = "skipped"
-	resumeReasonNone       = ""
-	resumeReasonNoState    = "no-state"
-	resumeReasonNoTarget   = "no-target"
+	// resumeOutcomeFailed counts a run the recorder returned to the armed
+	// state after its target failed the resume command.
+	resumeOutcomeFailed = "failed"
+	// resumeOutcomeHeld counts a failure the recorder does not re-arm,
+	// because its reason code proves the target reached the build load.
+	resumeOutcomeHeld    = "held"
+	resumeReasonNone     = ""
+	resumeReasonNoState  = "no-state"
+	resumeReasonNoTarget = "no-target"
+	// resumeReasonTargetFailed names a home instance that already failed
+	// this run's resume, which the helper never picks again.
+	resumeReasonTargetFailed = "target-failed"
+	// resumeReasonBuildLoaded names a failure at or after the build load.
+	// A second target must never adopt a build the first may hold.
+	resumeReasonBuildLoaded = "build-loaded"
 )
 
 // runMeshResume is the resume half of a run's mesh record. An armed run
@@ -57,6 +69,27 @@ type runMeshResume struct {
 	Instance    string     `json:"instance,omitempty"`
 	RequestedAt *time.Time `json:"requested_at,omitempty"`
 	Deadline    *time.Time `json:"deadline,omitempty"`
+
+	// Failed lists the instances that already failed this run's resume.
+	// resumeTargetForRun never picks an instance on the list, which is
+	// the bound on re-dispatch: a further dispatch needs an instance that
+	// is new, so a pod must roll or a job home must move. The list lives
+	// as long as the resume record, which the target's own heartbeat
+	// removes.
+	Failed []string `json:"failed,omitempty"`
+}
+
+// hasFailed reports whether instance already failed this run's resume.
+func (r *runMeshResume) hasFailed(instance string) bool {
+	if r == nil || instance == "" {
+		return false
+	}
+	for _, failed := range r.Failed {
+		if failed == instance {
+			return true
+		}
+	}
+	return false
 }
 
 // runMeshRecord is runs.payload->'mesh'. StateAt is the freshness
@@ -248,13 +281,15 @@ func dispatchMeshResume(ctx context.Context, pool *pgxpool.Pool, metrics *Interr
 
 	// B5: only a seeded replacement may adopt the build. A missing
 	// target defers the dispatch and never drops it; the round retries
-	// every minute until the arm window passes.
-	target, ok, err := resumeTargetForRun(ctx, tx, c)
+	// every minute until the arm window passes. The helper names its own
+	// refusal, so a tenant with no replacement and a tenant whose only
+	// candidate already failed are counted apart.
+	target, refusal, err := resumeTargetForRun(ctx, tx, c)
 	if err != nil {
 		return LedgerAction{}, false, err
 	}
-	if !ok {
-		metrics.addResume(ctx, resumeOutcomeSkipped, resumeReasonNoTarget)
+	if refusal != resumeRefusalNone {
+		metrics.addResume(ctx, resumeOutcomeSkipped, string(refusal))
 		return LedgerAction{}, false, nil
 	}
 

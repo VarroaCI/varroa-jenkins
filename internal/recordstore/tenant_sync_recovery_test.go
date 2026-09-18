@@ -56,6 +56,10 @@ func TestDeadInstancesTrimKeepsARunningRunAcceptedInstance(t *testing.T) {
 // end-to-end half of the trim rule: a RUNNING run whose owning instance
 // the trim dropped can never be marked again, because the sweep and the
 // announce read that instance from dead_instances alone.
+//
+// The fixture moves heartbeat_received_at with last_heartbeat_at. The
+// liveness reading measures the age of the recorder's own receive stamp,
+// so a fixture that ages the pod stamp alone leaves the cell live.
 func TestAnnounceMarksARunWhoseKeptDeadInstanceSurvivedTheTrim(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
@@ -64,8 +68,8 @@ func TestAnnounceMarksARunWhoseKeptDeadInstanceSurvivedTheTrim(t *testing.T) {
 	if _, err := db.Exec(`
 		INSERT INTO varroa.runs
 			(run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path, status,
-			 last_heartbeat_at, payload)
-		VALUES ($1, now(), $2, $3, $4, 'cell-a', $5, $6, 'RUNNING', now(),
+			 last_heartbeat_at, heartbeat_received_at, payload)
+		VALUES ($1, now(), $2, $3, $4, 'cell-a', $5, $6, 'RUNNING', now(), now(),
 			'{"accepted_instance": "pod-referenced"}'::jsonb)
 	`, runID, "manual:"+runID, testCluster, testNamespace, testTenant, testJobPath); err != nil {
 		t.Fatalf("insert running run: %v", err)
@@ -94,7 +98,10 @@ func TestAnnounceMarksARunWhoseKeptDeadInstanceSurvivedTheTrim(t *testing.T) {
 	sendTenantSync(t, pool, conn, trimming)
 
 	if _, err := db.Exec(`
-		UPDATE varroa.runs SET last_heartbeat_at = now() - interval '20 minutes' WHERE run_id = $1
+		UPDATE varroa.runs
+		SET last_heartbeat_at = now() - interval '20 minutes',
+		    heartbeat_received_at = now() - interval '20 minutes'
+		WHERE run_id = $1
 	`, runID); err != nil {
 		t.Fatalf("age the heartbeat: %v", err)
 	}

@@ -573,31 +573,54 @@ func (h *BusHandler) SetRecordStoreEnabled(enabled bool) {
 	h.recordStoreEnabled = enabled
 }
 
-// recordTriggerOutcome publishes the record of a TRIGGER_BUILD result, and
+// recordCommandOutcome publishes the record of one command result, and
 // reports whether the pending imperative message may be acknowledged.
 //
-// The rule has two arms. With no record store the gateway publishes nothing,
-// counts nothing, and acknowledges: such an install has nothing to record.
-// With a record store the gateway publishes, and ANY publish error blocks the
+// With no record store the gateway publishes nothing, counts nothing, and
+// acknowledges: such an install has nothing to record.
+//
+// A TRIGGER_BUILD result publishes, and ANY publish error blocks the
 // acknowledgement. The stream then redelivers the command, the mite triggers
 // again, and the next result publishes. It consults no time-based cache here:
 // a cache cannot tell a missing stream from a transient failure, so an armed
 // cache would acknowledge the redelivery and lose the record.
 //
-// Every other outcome acknowledges, because a redelivery would trigger the
-// same build again and change nothing.
-func (h *BusHandler) recordTriggerOutcome(ns, name string, pendingMsg *nats.Msg, result *mitev1.CommandResult) bool {
+// A RESUME_BUILD result acknowledges whatever the publish answers, which is
+// the opposite rule. A redelivered trigger builds the same job again and costs
+// nothing. A redelivered resume can succeed on its second delivery, while the
+// recorder holds no dispatched resume any more. Only the named target's own
+// heartbeat clears a resume record, so that live build would read INTERRUPTED
+// at the arm window with no cancel behind it. A lost publish instead leaves
+// the run on its resume deadline, which is the path it takes today.
+//
+// Every other command type acknowledges, because it writes no record.
+func (h *BusHandler) recordCommandOutcome(ns, name string, pendingMsg *nats.Msg, result *mitev1.CommandResult) bool {
 	if !h.recordStoreEnabled {
 		return true
 	}
-	payload := triggerBuildPayload(pendingMsg)
-	if payload == nil {
+	imp := pendingCommand(pendingMsg)
+	if imp == nil {
 		return true
 	}
-	if result.Success {
-		return h.publishTriggerAccepted(ns, name, payload, result)
+	switch imp.Type {
+	case mitev1.CommandTypeTriggerBuild:
+		if imp.TriggerBuild == nil {
+			return true
+		}
+		if result.Success {
+			return h.publishTriggerAccepted(ns, name, imp.TriggerBuild, result)
+		}
+		return h.publishTriggerFailed(ns, name, imp.TriggerBuild, result)
+	case mitev1.CommandTypeResumeBuild:
+		// A successful resume publishes nothing. The resumed build proves
+		// itself by its own heartbeat, which the recorder already reads.
+		if !result.Success {
+			h.publishResumeFailed(ns, name, imp.ResumeBuild, result)
+		}
+		return true
+	default:
+		return true
 	}
-	return h.publishTriggerFailed(ns, name, payload, result)
 }
 
 // publishTriggerFailed publishes one run.trigger_failed envelope for a
@@ -710,20 +733,86 @@ func (h *BusHandler) publishTriggerAccepted(ns, name string, payload *mitev1.Tri
 	return true
 }
 
-// triggerBuildPayload returns the TriggerBuildPayload of a pending imperative
-// message, or nil when the message carries another command type. The pending
-// message's Data holds the marshaled OperatorMessage, so the gateway decodes it
-// again rather than keeping a second map.
-func triggerBuildPayload(msg *nats.Msg) *mitev1.TriggerBuildPayload {
+// publishResumeFailed publishes one run.resume_failed envelope for a
+// RESUME_BUILD command the target could not apply. It answers nothing: the
+// caller acknowledges the command whatever this publish does.
+//
+// The envelope carries the instance the command named, because the recorder's
+// write is guarded by it. A command that names no run and a command that names
+// no instance therefore publish nothing: the recorder could not apply either.
+//
+// An unresolved tenant publishes nothing and counts a rejection, which is the
+// rule both trigger publishers follow: a cell must not write a record under a
+// tenant it does not host.
+func (h *BusHandler) publishResumeFailed(ns, name string, payload *mitev1.ResumeBuildPayload, result *mitev1.CommandResult) {
+	key := ns + "/" + name
+
+	if payload == nil || payload.RunId == "" || payload.Instance == "" {
+		buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("failed resume names no run or no instance, publishing no envelope",
+			"controller", key)
+		return
+	}
+
+	tenant, _ := h.resolver().ResolveJobTenant(h.cluster, ns, name, payload.JobPath)
+	if tenant == "" {
+		buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("failed resume unresolved, publishing no envelope",
+			"controller", key, "job_path", payload.JobPath)
+		return
+	}
+
+	reasonCode := reasonCodeForResumeError(result.Error)
+	env := ingestEnvelope{
+		SchemaVersion: 1,
+		Kind:          kindRunResumeFailed,
+		RunID:         payload.RunId,
+		Cluster:       h.cluster,
+		Namespace:     ns,
+		Cell:          name,
+		CellInstance:  h.lookupCellInstance(ns, name),
+		Tenant:        tenant,
+		JobPath:       payload.JobPath,
+		// A ResumeBuildPayload carries no timestamp, so the gateway clock
+		// is the only source.
+		OccurredAt: time.Now().UTC(),
+		Payload: map[string]interface{}{
+			"instance":    payload.Instance,
+			"error":       truncateRunes(result.Error, errorTruncateChars),
+			"reason_code": reasonCode,
+		},
+	}
+
+	data, err := json.Marshal(env)
+	if err != nil {
+		h.log().Error("marshal resume failure envelope failed", "controller", key, "error", err)
+		return
+	}
+
+	if _, err := h.publisher.PublishJetStream(bus.BuildSubject(h.cluster, ns, name), data); err != nil {
+		buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("resume failure publish failed, the run keeps its resume deadline",
+			"controller", key, "run_id", payload.RunId, "error", err)
+		return
+	}
+
+	resumeFailedTotal.Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("reason_code", reasonCode)))
+	h.log().Info("failed resume recorded",
+		"controller", key, "run_id", payload.RunId,
+		"instance", payload.Instance, "reason_code", reasonCode)
+}
+
+// pendingCommand returns the imperative command a pending message carries, or
+// nil when it carries none. The pending message's Data holds the marshaled
+// OperatorMessage, so the gateway decodes it again rather than keeping a second
+// map. One decode serves every command type the outcome switch answers.
+func pendingCommand(msg *nats.Msg) *mitev1.ImperativeCommand {
 	var op mitev1.OperatorMessage
 	if err := json.Unmarshal(msg.Data, &op); err != nil {
 		return nil
 	}
-	imp := op.GetImperative()
-	if imp == nil || imp.Type != mitev1.CommandTypeTriggerBuild {
-		return nil
-	}
-	return imp.TriggerBuild
+	return op.GetImperative()
 }
 
 // OnCommandResult publishes the result to the mite inbound subject — or, for a
@@ -735,7 +824,9 @@ func triggerBuildPayload(msg *nats.Msg) *mitev1.TriggerBuildPayload {
 // A TRIGGER_BUILD result first publishes one run record: run.trigger_failed
 // for a refused trigger, or run.trigger_accepted for an accepted one. Its
 // pending message waits for that publish, so either outcome's failed publish
-// leaves the stream to redeliver the command. Every other case acks at once.
+// leaves the stream to redeliver the command. A failed RESUME_BUILD result
+// publishes one run.resume_failed record and acks whatever that publish
+// answers. Every other case acks at once.
 func (h *BusHandler) OnCommandResult(name, ns string, result *mitev1.CommandResult) {
 	key := ns + "/" + name
 
@@ -764,7 +855,7 @@ func (h *BusHandler) OnCommandResult(name, ns string, result *mitev1.CommandResu
 	}
 	h.mu.Unlock()
 
-	if pendingMsg != nil && h.recordTriggerOutcome(ns, name, pendingMsg, result) {
+	if pendingMsg != nil && h.recordCommandOutcome(ns, name, pendingMsg, result) {
 		_ = pendingMsg.Ack()
 	}
 

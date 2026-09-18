@@ -50,10 +50,11 @@ const (
 	// resume command's own deadline bounds the whole sequence.
 	runStateFetchTimeout = 30 * time.Second
 
-	// runStateFetchAttempts bounds the retry of one file. The gateway
-	// acknowledges a failed resume and the recorder never republishes
-	// it, so a transient read must be retried inside the command's own
-	// deadline or the whole remaining deadline is wasted.
+	// runStateFetchAttempts bounds the retry of one file. A transient
+	// read that is not retried here costs the run this command's whole
+	// remaining deadline, and one takeover round on top of it: the
+	// recorder answers a failed fetch by arming the run again, and the
+	// next round needs a target instance that is new.
 	runStateFetchAttempts = 3
 
 	// runStateFetchBackoff is the first wait between two fetch
@@ -761,10 +762,11 @@ func checkResumePathBinding(parsed parsedRehydrationPath, payload *mitev1.Resume
 // with a doubling wait. The command's own deadline bounds the loop: the
 // context ends the wait, so a retry never outlives the command.
 //
-// The retry is the mite's own repair. A failed resume answers one
-// CommandResult, the gateway acknowledges it, and the recorder never
-// republishes the action, so a transient read that is not retried here
-// costs the run its whole remaining deadline.
+// The retry is the mite's own repair, and it is the cheapest one. A
+// failed resume answers one CommandResult, and the recorder arms the
+// run again rather than sending this same command back. The run then
+// waits for a target instance that is new, so a transient read that is
+// not retried here costs this deadline and at least one more round.
 func (a *Agent) fetchRunStateFileWithRetry(ctx context.Context, runID, relPath string) ([]byte, error) {
 	var lastErr error
 	wait := runStateFetchBackoff

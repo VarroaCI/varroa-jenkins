@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,6 +50,11 @@ const (
 	// publishes it after it stores a file, and after it refuses a push
 	// because the run passed its byte cap.
 	kindRunState = "run.state"
+	// kindRunResumeFailed records a RESUME_BUILD command the target could
+	// not apply. The gateway publishes it from a failed RESUME_BUILD
+	// result. A successful result publishes nothing, because a resumed
+	// build proves itself by its own heartbeat.
+	kindRunResumeFailed = "run.resume_failed"
 )
 
 // Reason codes a run.trigger_failed envelope carries. The set is complete:
@@ -58,6 +64,61 @@ const (
 	reasonJobNotBuildable = "JOB_NOT_BUILDABLE"
 	reasonTriggerRejected = "TRIGGER_REJECTED"
 )
+
+// Reason codes a run.resume_failed envelope carries. The mite names five
+// failures with a leading token, and every other failure answers
+// reasonResumeFailed. The first two codes prove the target's own Jenkins
+// process reached the build load, so the recorder keeps the dispatch for
+// them and a second target never adopts the same build.
+const (
+	reasonResumeLoadFailed       = "RESUME_LOAD_FAILED"
+	reasonResumeNotBuilding      = "RESUME_NOT_BUILDING"
+	reasonResumeExpired          = "RESUME_EXPIRED"
+	reasonResumeInstanceMismatch = "RESUME_INSTANCE_MISMATCH"
+	reasonResumeProbeFailed      = "RESUME_PROBE_FAILED"
+	reasonResumeFailed           = "RESUME_FAILED"
+)
+
+// miteInstanceMismatchToken is the token the mite writes for an instance
+// mismatch. It carries no RESUME_ prefix, so the envelope's own code and
+// the mite's token differ for this one failure alone.
+const miteInstanceMismatchToken = "INSTANCE_MISMATCH"
+
+// resumeReasonOrder is the order reasonCodeForResumeError tests the
+// tokens in. The two codes that prove a loaded build come first, so a
+// deadline that wraps a load failure still answers the load failure and
+// the run keeps its dispatch. A wrong answer in the other direction
+// would hand a loaded build to a second target.
+var resumeReasonOrder = []struct{ token, code string }{
+	{reasonResumeLoadFailed, reasonResumeLoadFailed},
+	{reasonResumeNotBuilding, reasonResumeNotBuilding},
+	{reasonResumeExpired, reasonResumeExpired},
+	{miteInstanceMismatchToken, reasonResumeInstanceMismatch},
+	{reasonResumeProbeFailed, reasonResumeProbeFailed},
+}
+
+// hasResumeToken reports whether text names token as a failure reason.
+//
+// The test is a bounded form, never a plain substring. The mite writes
+// every named reason as "TOKEN: ", and it wraps an inner error with
+// ": ". A Jenkins folder may legally be named RESUME_LOAD_FAILED_backup,
+// and the mite writes a job path into the text of an unnamed failure, so
+// a plain substring test would read that folder as a loaded build.
+func hasResumeToken(text, token string) bool {
+	return strings.Contains(text, token+": ")
+}
+
+// reasonCodeForResumeError maps a failed resume's error text onto one
+// reason code. A text that names no token answers reasonResumeFailed,
+// because every step the mite leaves unnamed runs before the build load.
+func reasonCodeForResumeError(text string) string {
+	for _, entry := range resumeReasonOrder {
+		if hasResumeToken(text, entry.token) {
+			return entry.code
+		}
+	}
+	return reasonResumeFailed
+}
 
 // reasonCodeForStatus maps the Jenkins HTTP status of a failed trigger onto
 // one reason code. The status 0 names a call that reached no Jenkins.
@@ -94,6 +155,7 @@ var (
 	buildEventsDropped   metric.Int64Counter
 	triggerFailedTotal   metric.Int64Counter
 	triggerAcceptedTotal metric.Int64Counter
+	resumeFailedTotal    metric.Int64Counter
 )
 
 func init() {
@@ -106,6 +168,9 @@ func init() {
 	)
 	triggerAcceptedTotal, _ = meter.Int64Counter("varroa.gateway.trigger_accepted",
 		metric.WithDescription("Accepted build triggers the gateway published as a record"),
+	)
+	resumeFailedTotal, _ = meter.Int64Counter("varroa.gateway.resume_failed",
+		metric.WithDescription("Failed build resumes the gateway published as a record"),
 	)
 }
 

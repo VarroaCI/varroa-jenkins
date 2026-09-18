@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -288,6 +289,42 @@ func TestHandleLedgerAction_ResumeRunCarriesItsDeadline(t *testing.T) {
 	rb := cmd.ResumeBuild
 	if rb == nil || rb.Instance != "pod-live" || rb.RunId != "run-9" {
 		t.Fatalf("unexpected ResumeBuild payload: %+v", rb)
+	}
+}
+
+// TestHandleLedgerAction_ResumeRunIdentifiesItsTarget proves two resume
+// attempts for one run carry different command identifiers.
+//
+// One run can hold several attempts inside its arm window. The gateway
+// files one pending message for each command identifier on a
+// controller, so a shared identifier would file one entry for both
+// attempts. A late result from the first attempt would then acknowledge
+// the second attempt's message, and the gateway would record that
+// failure against the second target and strand a live resume.
+func TestHandleLedgerAction_ResumeRunIdentifiesItsTarget(t *testing.T) {
+	send := func(instance string) string {
+		rec := &fakeLedgerActionRunner{}
+		action := recordstore.LedgerAction{
+			Kind: "resume_run", Cluster: "core",
+			Namespace: "cells-ns", Controller: "cell-a",
+			RunID: "run-9", JobPath: "team/job-a", Instance: instance,
+			Files: []string{"jobs/team/jobs/job-a/builds/5/build.xml"},
+		}
+		data, _ := json.Marshal(action)
+		handleLedgerAction(context.Background(), testLogger(), "core", rec, data)
+		if len(rec.sent) != 1 {
+			t.Fatalf("expected one imperative command, got %d", len(rec.sent))
+		}
+		return rec.sent[0].CommandId
+	}
+
+	first := send("pod-live")
+	second := send("pod-live-2")
+	if first == second {
+		t.Fatalf("both attempts carry the command id %q, want one for each target", first)
+	}
+	if !strings.Contains(first, "run-9") || !strings.Contains(first, "pod-live") {
+		t.Fatalf("command id = %q, want the run and the target instance", first)
 	}
 }
 

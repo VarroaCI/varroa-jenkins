@@ -143,6 +143,20 @@ func handleIngestMessage(ctx context.Context, ingester *Ingester, metrics *Inges
 					"runID", env.RunID, "reasonCode", result.TriggerFailedReason)
 			}
 		}
+		if env.Kind == KindRunResumeFailed {
+			// The command's own target, never the envelope's
+			// CellInstance: an INSTANCE_MISMATCH failure proves the cell
+			// registers a different pod than the command named.
+			if result.ResumeFailedCleared {
+				logger.Info("failed resume re-armed the run",
+					"runID", env.RunID, "instance", result.ResumeFailedInstance,
+					"reasonCode", result.ResumeFailedReason)
+			} else {
+				logger.Info("failed resume left the run on its deadline",
+					"runID", env.RunID, "instance", result.ResumeFailedInstance,
+					"reasonCode", result.ResumeFailedReason)
+			}
+		}
 		if result.ScheduleStale {
 			metrics.addScheduleStale(ctx)
 			logger.Info("stale job schedule envelope acknowledged with no change",

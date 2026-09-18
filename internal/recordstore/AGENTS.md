@@ -28,7 +28,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   reads through the `Reader` this package exports; it never opens its own
   write path.
 - **The pipeline mesh** (`mesh_takeover.go`, `resume_target.go`,
-  `ingest_state.go`) — C3's run-state replication and cross-cell resume.
+  `ingest_state.go`, `ingest_resume_failed.go`) — C3's run-state
+  replication and cross-cell resume.
   `applyRunState` merges each `run.state` outcome into
   `runs.payload->'mesh'`; the recorder alone owns the 64 MiB cap, and the
   cap path clears `mesh.state_at`, `mesh.resume`, and the run's stored
@@ -48,6 +49,25 @@ of the fleet's audit activity, once a controller becomes disposable.
   through a later death of the target itself. The clear, the resume
   guard, and the marking write all compare the recorder's own receive
   stamp against `mesh.resume.requested_at`, so one clock answers.
+  `ingest_resume_failed.go` answers a resume the target could not apply.
+  `applyResumeFailed` clears `instance`, `requested_at`, and `deadline`
+  from `mesh.resume` and **keeps the arm**, so the next round can pick
+  another target while the original `arm_expires` holds. It never moves
+  that value: a failure buys the run no time, and the window bounds how
+  long the run holds its fleet lock. It records the failed instance in
+  `mesh.resume.failed`, and `resumeTargetForRun` never picks an instance
+  on that list — the bound on re-dispatch, because a further dispatch
+  then needs a pod that rolled or a job home that moved. **Two reason
+  codes are held and write nothing at all**, `RESUME_LOAD_FAILED` and
+  `RESUME_NOT_BUILDING`: both prove the target's own Jenkins process
+  reached the build load, and a second target must never adopt a build
+  the first may hold. Such a run keeps its dispatch and takes the
+  ordinary deadline path, which publishes the cancel. The write opens no
+  transaction — one guarded statement commits on its own — and its guard
+  reads the run's status and its stored `mesh.resume.instance`, so a
+  repeat and a late result from an earlier attempt both change no row.
+  **The run's owner is not moved back**: the failed target keeps it, and
+  the next dispatch moves it again.
 - **Migrations** — `migrations/00001_initial_schema.sql` holds the seven
   build-record tables (`run_intents`, `runs`, `run_stages`, `run_tests`,
   `run_artifacts`, `log_chunks`, `job_numbers`). `00002_activity.sql` adds

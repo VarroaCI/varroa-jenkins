@@ -26,17 +26,25 @@ func seedResumeTargetPlacement(t *testing.T, db *sql.DB, cell, cellInstance, reh
 // function only reads.
 func withResumeTargetTx(t *testing.T, pool *pgxpool.Pool, run meshCandidate) (resumeMember, bool) {
 	t.Helper()
+	member, refusal := withResumeTargetRefusal(t, pool, run)
+	return member, refusal == resumeRefusalNone
+}
+
+// withResumeTargetRefusal is withResumeTargetTx with the refusal reason
+// the helper answered, for a test that tells two refusals apart.
+func withResumeTargetRefusal(t *testing.T, pool *pgxpool.Pool, run meshCandidate) (resumeMember, resumeRefusal) {
+	t.Helper()
 	ctx := context.Background()
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	member, ok, err := resumeTargetForRun(ctx, tx, run)
+	member, refusal, err := resumeTargetForRun(ctx, tx, run)
 	if err != nil {
 		t.Fatalf("resumeTargetForRun: %v", err)
 	}
-	return member, ok
+	return member, refusal
 }
 
 // TestResumeTargetForRunThreeTests asserts design D9's three tests: an

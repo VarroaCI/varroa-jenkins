@@ -15,7 +15,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
 
-// ErrUnknownKind means an envelope's kind is outside the twelve known
+// ErrUnknownKind means an envelope's kind is outside the thirteen known
 // ingest kinds. The consumer acknowledges and drops such an event; it
 // can never become readable.
 var ErrUnknownKind = errors.New("unknown ingest kind")
@@ -65,6 +65,23 @@ type ApplyResult struct {
 	// recorder_ingest_trigger_accepted_total with a stored attribute.
 	TriggerAcceptedStored bool
 
+	// ResumeFailedCleared reports whether a run.resume_failed envelope
+	// returned a run to the armed state. It is false for a reason code
+	// that proves the target reached the build load, and false when the
+	// guard matched no row. The caller acknowledges the message either
+	// way and logs the outcome.
+	ResumeFailedCleared bool
+
+	// ResumeFailedReason holds that envelope's reason code, for the
+	// caller's log line.
+	ResumeFailedReason string
+
+	// ResumeFailedInstance holds the instance the failed command named.
+	// The envelope's own CellInstance is the cell's current registered
+	// instance, which an INSTANCE_MISMATCH failure proves is a different
+	// pod, so a log line that read it would name the wrong target.
+	ResumeFailedInstance string
+
 	// SupersededStart is true when a run.started reported a build number
 	// below the intent's stored number from an instance other than the
 	// intent's current owner: the ledger moved and refreshed the intent
@@ -88,7 +105,7 @@ type Ingester struct {
 	logger        *slog.Logger
 	fanoutEval    *GrantEvaluator
 	fanoutMetrics *UpstreamFanoutMetrics
-	refireMetrics *InterruptedMetrics
+	sweepMetrics  *InterruptedMetrics
 	stateDeleter  ObjectDeleter
 }
 
@@ -111,12 +128,18 @@ func (g *Ingester) SetUpstreamFanout(evaluator *GrantEvaluator, metrics *Upstrea
 	g.fanoutMetrics = metrics
 }
 
-// SetRefireMetrics counts the re-fire marker self-heal a rejected
-// trigger performs. It follows SetUpstreamFanout's own convention: an
-// Ingester built with no call to this method still heals the marker and
-// counts nothing, because addRefired is a no-op on a nil receiver.
-func (g *Ingester) SetRefireMetrics(metrics *InterruptedMetrics) {
-	g.refireMetrics = metrics
+// SetSweepMetrics gives the ingest path the sweep's own counters. It
+// counts the re-fire marker self-heal a rejected trigger performs, and
+// the resume outcome a failed resume answers. One object carries both,
+// because the takeover already holds it: a second setter and a second
+// field would let one missed call drop a counter in silence.
+//
+// It follows SetUpstreamFanout's own convention. An Ingester built with
+// no call to this method still heals the marker and still answers the
+// resume, and counts nothing, because every add is a no-op on a nil
+// receiver.
+func (g *Ingester) SetSweepMetrics(metrics *InterruptedMetrics) {
+	g.sweepMetrics = metrics
 }
 
 // SetStateDeleter enables the run-state cleanup that follows a run's
@@ -129,7 +152,7 @@ func (g *Ingester) SetStateDeleter(d ObjectDeleter) {
 
 // Apply writes env to the record tables. It returns ErrIntentMissing
 // when no run_intents row exists for env.RunID, ErrUnknownKind when
-// env.Kind is outside the twelve known kinds, and ErrMalformedEnvelope
+// env.Kind is outside the thirteen known kinds, and ErrMalformedEnvelope
 // when env.RunID is not a valid UUID or a typed payload does not
 // decode. Any other error is a retryable database failure. A nil error
 // and a false ApplyResult.Conflict mean the write committed cleanly.
@@ -153,6 +176,13 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 	}
 	if env.Kind == KindRunTriggerAccepted {
 		return g.applyTriggerAccepted(ctx, env)
+	}
+
+	// run.resume_failed touches one runs row and nothing else. The run
+	// already holds an intent, but this write needs none of it, so the
+	// kind takes the same early route the two trigger kinds take.
+	if env.Kind == KindRunResumeFailed {
+		return g.applyResumeFailed(ctx, env)
 	}
 
 	runID, err := uuid.Parse(env.RunID)

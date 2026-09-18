@@ -151,14 +151,14 @@ func TestResumeTargetAnswersTheHomeSlotMember(t *testing.T) {
 			t.Fatalf("begin: %v", err)
 		}
 		defer func() { _ = tx.Rollback(context.Background()) }()
-		got, ok, err := resumeTargetForRun(context.Background(), tx, meshCandidate{
+		got, refusal, err := resumeTargetForRun(context.Background(), tx, meshCandidate{
 			cluster: testCluster, tenant: testTenant, jobPath: jobPath, cellInstance: meshDeadInstance,
 		})
 		if err != nil {
 			t.Fatalf("resumeTargetForRun: %v", err)
 		}
-		if !ok || got.cell != wantCell {
-			t.Fatalf("%s resolved to %+v (ok=%v), want %s", jobPath, got, ok, wantCell)
+		if refusal != resumeRefusalNone || got.cell != wantCell {
+			t.Fatalf("%s resolved to %+v (refusal=%q), want %s", jobPath, got, refusal, wantCell)
 		}
 	}
 	assertTarget(testJobPath, meshTargetCell)

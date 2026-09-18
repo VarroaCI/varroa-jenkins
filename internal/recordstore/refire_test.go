@@ -484,7 +484,7 @@ func ingestRejectedTrigger(t *testing.T, pool *pgxpool.Pool, metrics *Interrupte
 		t.Fatalf("marshal payload: %v", err)
 	}
 	ingester := NewIngester(pool, nil, nil)
-	ingester.SetRefireMetrics(metrics)
+	ingester.SetSweepMetrics(metrics)
 	if _, err := ingester.Apply(context.Background(), IngestEnvelope{
 		SchemaVersion: 1,
 		Kind:          KindRunTriggerFailed,

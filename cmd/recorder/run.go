@@ -183,7 +183,7 @@ func run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("register upstream fan-out metrics: %w", err)
 	}
 	ingester.SetUpstreamFanout(recordstore.NewGrantEvaluator(pool), fanoutMetrics)
-	ingester.SetRefireMetrics(sweepMetrics)
+	ingester.SetSweepMetrics(sweepMetrics)
 	ingester.SetStateDeleter(store)
 
 	maintCfg := recordstore.MaintenanceConfig{
