@@ -1,0 +1,23 @@
+name: Set up the exact Go toolchain
+description: >
+  Installs the Go version go.mod's toolchain line names, through
+  actions/setup-go's own GitHub-hosted download path. cmd/go otherwise
+  fetches that toolchain itself, over the network, the first time any
+  go command runs — and the self-hosted runner node cannot always reach
+  proxy.golang.org.
+
+runs:
+  using: composite
+  steps:
+    - id: version
+      shell: bash
+      run: |
+        version=$(grep -m1 '^toolchain go' go.mod | awk '{print $2}' | sed 's/^go//')
+        if [ -z "$version" ]; then
+          version=$(grep -m1 '^go ' go.mod | awk '{print $2}')
+        fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+    - uses: actions/setup-go@v5
+      with:
+        go-version: ${{ steps.version.outputs.version }}
+        cache: true
