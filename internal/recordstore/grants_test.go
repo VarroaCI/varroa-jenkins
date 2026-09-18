@@ -2,37 +2,80 @@ package recordstore
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// roleExists reports whether role is present anywhere on the Postgres
+// instance db connects to. A role is instance-wide, so this answer does
+// not depend on which database issued the query.
+func roleExists(ctx context.Context, t *testing.T, db *sql.DB, role string) bool {
+	t.Helper()
+
+	var exists bool
+	if err := db.QueryRowContext(ctx,
+		"SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)", role,
+	).Scan(&exists); err != nil {
+		t.Fatalf("check role %s: %v", role, err)
+	}
+	return exists
+}
+
+// ensureTestRole creates role for a grants test, but only when it does not
+// already exist. A Postgres role is instance-wide, so another database on
+// a shared instance may have created it first. Cleanup revokes only the
+// privileges this database granted and never drops the role: DROP ROLE
+// fails when another database on the same instance still holds a grant to
+// the role.
+func ensureTestRole(ctx context.Context, t *testing.T, db *sql.DB, role string) {
+	t.Helper()
+
+	if !roleExists(ctx, t, db, role) {
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("CREATE ROLE %s", role)); err != nil {
+			// Another database on the shared instance may have created
+			// the role between the check above and this statement.
+			if !roleExists(ctx, t, db, role) {
+				t.Fatalf("create role %s: %v", role, err)
+			}
+		}
+	}
+
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		_, _ = db.ExecContext(cleanupCtx, fmt.Sprintf("DROP OWNED BY %s", role))
+	})
+}
+
 // TestEnsureGrantsIdempotent asserts EnsureGrants runs with no error when
 // the client role is absent, and grants the client role its privileges
-// once the role exists.
+// once the role exists. The role-absent assertions run only when the
+// role does not already exist on the instance: checking is safe, but
+// clearing it first is not — a concurrent worktree's own test can observe
+// the role between its own check and its own grant call, so this test
+// never runs DROP ROLE. CI always exercises the role-absent path for
+// real, because each job starts from a fresh Postgres instance; a local
+// shared instance that already carries the role skips the check and logs
+// why instead of asserting nothing.
 func TestEnsureGrantsIdempotent(t *testing.T) {
 	db := setupTestDB(t)
 	ctx := context.Background()
 
-	if err := EnsureGrants(ctx, db); err != nil {
-		t.Fatalf("first call with no role: %v", err)
-	}
-	if err := EnsureGrants(ctx, db); err != nil {
-		t.Fatalf("second call with no role: %v", err)
+	if roleExists(ctx, t, db, "varroa_client") {
+		t.Log("varroa_client already exists on this Postgres instance; skipping the role-absent no-op check")
+	} else {
+		if err := EnsureGrants(ctx, db); err != nil {
+			t.Fatalf("first call with no role: %v", err)
+		}
+		if err := EnsureGrants(ctx, db); err != nil {
+			t.Fatalf("second call with no role: %v", err)
+		}
 	}
 
-	if _, err := db.ExecContext(ctx, "DROP ROLE IF EXISTS varroa_client"); err != nil {
-		t.Fatalf("drop role before create: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, "CREATE ROLE varroa_client"); err != nil {
-		t.Fatalf("create role varroa_client: %v", err)
-	}
-	t.Cleanup(func() {
-		cleanupCtx := context.Background()
-		_, _ = db.ExecContext(cleanupCtx, "DROP OWNED BY varroa_client")
-		_, _ = db.ExecContext(cleanupCtx, "DROP ROLE IF EXISTS varroa_client")
-	})
+	ensureTestRole(ctx, t, db, "varroa_client")
 
 	if err := EnsureGrants(ctx, db); err != nil {
 		t.Fatalf("call once the role exists: %v", err)
@@ -87,17 +130,7 @@ func TestEnsureGrantsGatewayRole(t *testing.T) {
 	}
 	t.Cleanup(pool.Close)
 
-	if _, err := db.ExecContext(ctx, "DROP ROLE IF EXISTS varroa_gateway"); err != nil {
-		t.Fatalf("drop role before create: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, "CREATE ROLE varroa_gateway"); err != nil {
-		t.Fatalf("create role varroa_gateway: %v", err)
-	}
-	t.Cleanup(func() {
-		cleanupCtx := context.Background()
-		_, _ = db.ExecContext(cleanupCtx, "DROP OWNED BY varroa_gateway")
-		_, _ = db.ExecContext(cleanupCtx, "DROP ROLE IF EXISTS varroa_gateway")
-	})
+	ensureTestRole(ctx, t, db, "varroa_gateway")
 
 	if err := EnsureGrants(ctx, db); err != nil {
 		t.Fatalf("EnsureGrants once the role exists: %v", err)

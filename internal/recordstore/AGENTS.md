@@ -123,11 +123,21 @@ of the fleet's audit activity, once a controller becomes disposable.
 - **`VARROA_TEST_DSN` harness** (`testutil_test.go`) — a test that needs a
   live database reads this environment variable and calls `t.Skip` when it
   is unset, so `make test` stays green with no database present. Each such
-  test drops and recreates schema `varroa` (and any role it created) during
-  setup, so a repeated run starts clean. The `blob` test binary runs at the
-  same time and owns a sibling database, `<db>_blob`, that it creates on
-  first use; no other test binary may share the DSN's database with this
-  harness.
+  test drops and recreates schema `varroa` during setup, so a repeated run
+  starts clean. The `blob` test binary runs at the same time and owns a
+  sibling database, `<db>_blob`, that it creates on first use; no other
+  test binary may share the DSN's database with this harness.
+- **Cluster-wide roles in a grants test** (`grants_test.go`) — a Postgres
+  role is instance-wide, not per-database. A grants test creates
+  `varroa_client`/`varroa_gateway` only when the role does not already
+  exist, and cleans up with `DROP OWNED BY <role>` scoped to its own
+  database. It never runs `DROP ROLE`, even conditionally: several test
+  databases on one shared instance (parallel worktrees) may hold grants
+  to the same role, so dropping it fails with a dependency error for a
+  database that still holds one, and a conditional drop races a
+  concurrent worktree's own check-then-grant sequence. The role-absent
+  behavior is asserted only when the role happens to already be absent,
+  which every CI job's fresh instance guarantees on its first run.
 - **`blob/`** — the storage abstraction for build logs and build
   artifacts, behind `gocloud.dev/blob`: the `pgblob` driver for tier one
   and S3/GCS/Azure/file wiring for tier two. See its own `AGENTS.md`.
