@@ -9,8 +9,8 @@ Kubernetes agents.
 A cell is a `Controller` with `spec.cell.enabled: true`. Its Jenkins home is an `emptyDir`, so a
 pod roll loses the Jenkins local state and the mite's identity. The operator mints a fresh
 bootstrap token per pod, and [rehydration](#rehydration) restores build history.
-`spec.cell.enabled` cannot change after creation. `spec.cell.maxTenants` can change, and only
-caps the cell's tenant count.
+`spec.cell.enabled` cannot change after creation. `spec.cell.maxTenants` can, and only caps the
+tenant count.
 
 A cell hosts each tenant as a top-level folder named after its `Team`. It accepts no ingress host.
 Tenant traffic reaches it through the [tenant webhook door](#the-tenant-webhook-door), or through
@@ -56,7 +56,7 @@ spec:
     maxTenants: 10
 ```
 
-Apply the resource and let it reach `Connected`.
+Apply it and wait for `Connected`.
 
 **Verify:**
 
@@ -196,8 +196,7 @@ curl -i -X POST \
   "https://<host>/hibernation/<token>/teams/payments/queue/github-webhook/"
 ```
 
-Expect `202 Accepted`, and a build in the `payments` folder shortly after. A request signed with
-the wrong secret, or carrying no signature header, answers `400`.
+Expect `202 Accepted`, and a build in the `payments` folder shortly after.
 
 ## Placement lifecycle
 
@@ -216,8 +215,9 @@ confirm the folder is idle, then performs the same two-step move.
 **Roll.** A cell that reports `CellReady=False` past `cells.unreadyGracePeriod`, for a reason
 other than the three configuration gates, gets its pod deleted once and the reason `CellRolled`.
 
-**Teardown.** Teardown releases the tenant's placement record, so the same name can be used
-again.
+**Teardown.** Teardown releases the tenant's placement record, so the same name is free at once.
+A `Team` created again under that name owns a fresh record, even when the old teardown finishes
+late.
 
 **Eviction.** Past twice that grace period, the operator sets `status.cell.evacuate`, and every
 tenant moves off on its next placement tick. Recovery clears `evacuate`, `unreadySince`, and

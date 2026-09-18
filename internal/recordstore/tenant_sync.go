@@ -168,6 +168,10 @@ type tenantPlacementRow struct {
 	rehydratedInstance string
 	pendingJobs        []string
 	deadInstances      []TenantSyncDeadInstance
+	// incarnation identifies the tenant object the row describes. An
+	// empty value means unknown: the row was written before the column
+	// existed, or by a caller that names no incarnation.
+	incarnation string
 	// members holds the stored member list, resolved through the row's
 	// own scalar columns. A row with an empty stored list therefore
 	// answers one synthetic slot-0 member, so an upgraded tenant keeps
@@ -207,12 +211,37 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 		return TenantSyncResponse{}, err
 	}
 
+	// A tenant created again under one name carries a new incarnation. The
+	// row it finds belongs to the tenant before it, so this announcement
+	// takes the row over: it adopts the announced generation, even below
+	// the stored one, and clears every seed the old tenant left. Without
+	// the take-over the announce could never lower the generation, and the
+	// new tenant's claims would wait for the teardown purge to reset the
+	// row.
+	//
+	// A row that names no incarnation needs the second test. Such a row
+	// was written before the column existed, so the incarnations cannot
+	// be compared, and a generation below the stored one is the proof
+	// instead: a tenant never lowers its own generation, so a lower one
+	// comes from a tenant that started again.
+	takeOver := incarnationChanged(old.incarnation, req.Incarnation) ||
+		(old.incarnation == "" && req.Incarnation != "" && req.Generation < old.generation)
+
+	// The first announcement to name an incarnation stamps a row that
+	// names none. Such a row can hold the schedules of the tenant before
+	// this one, at any generation, and no test tells them from this
+	// tenant's own. The stamp therefore drops every one of them, exactly
+	// once per tenant: the cell exports the live set again within its own
+	// ten-minute poll, and the rows of a tenant that is gone never come
+	// back.
+	stampsIncarnation := old.incarnation == "" && req.Incarnation != ""
+
 	newGeneration := old.generation
-	if req.Generation > newGeneration {
+	if takeOver || req.Generation > newGeneration {
 		newGeneration = req.Generation
 	}
 
-	generationRaised := req.Generation > old.generation
+	generationRaised := takeOver || req.Generation > old.generation
 
 	var rehydratedInstance string
 	var pendingJobs []string
@@ -247,8 +276,21 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 		return TenantSyncResponse{}, err
 	}
 
+	if takeOver || stampsIncarnation {
+		// On a take-over every job_schedules row of this name belongs to
+		// the tenant before this one. A cell exports a tenant's jobs only
+		// after the announce that placed it, and this is that announce,
+		// so the new tenant has exported none yet. A row left here would
+		// outlive its own tenant: the backstop skips a row below the
+		// stored generation alone, and the old tenant's cron would keep
+		// firing under the new tenant's name.
+		if err := deleteTenantJobSchedules(ctx, tx, req.Cluster, req.Tenant); err != nil {
+			return TenantSyncResponse{}, err
+		}
+	}
+
 	if err := writeTenantPlacement(ctx, tx, req, newGeneration, rehydratedInstance, pendingJobs,
-		deadInstances, members, jobHomes); err != nil {
+		deadInstances, members, jobHomes, keptIncarnation(old.incarnation, req.Incarnation)); err != nil {
 		return TenantSyncResponse{}, err
 	}
 
@@ -336,15 +378,16 @@ func readTenantPlacementForUpdate(ctx context.Context, tx pgx.Tx, cluster, tenan
 		pendingRaw         json.RawMessage
 		membersRaw         json.RawMessage
 		jobHomesRaw        json.RawMessage
+		incarnation        string
 	)
 	err := tx.QueryRow(ctx, `
 		SELECT generation, cell, namespace, cell_instance, rehydrated_instance,
-		       dead_instances, pending_jobs, members, job_homes
+		       dead_instances, pending_jobs, members, job_homes, incarnation
 		FROM varroa.tenant_placements
 		WHERE cluster = $1 AND tenant = $2
 		FOR UPDATE
 	`, cluster, tenant).Scan(&generation, &cell, &namespace, &cellInstance, &rehydratedInstance,
-		&deadRaw, &pendingRaw, &membersRaw, &jobHomesRaw)
+		&deadRaw, &pendingRaw, &membersRaw, &jobHomesRaw, &incarnation)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return tenantPlacementRow{jobHomes: map[string]int32{}}, nil
@@ -374,7 +417,7 @@ func readTenantPlacementForUpdate(ctx context.Context, tx pgx.Tx, cluster, tenan
 	return tenantPlacementRow{
 		generation: generation, cell: cell, cellInstance: cellInstance,
 		rehydratedInstance: rehydratedInstance, pendingJobs: pending, deadInstances: dead,
-		members: decoded.members, jobHomes: decoded.jobHomes,
+		incarnation: incarnation, members: decoded.members, jobHomes: decoded.jobHomes,
 	}, nil
 }
 
@@ -468,6 +511,38 @@ func mergeDeadInstances(stored, incoming []TenantSyncDeadInstance) []TenantSyncD
 	return merged
 }
 
+// incarnationChanged reports whether two incarnations name two different
+// tenant objects. An empty value on either side means unknown, and an
+// unknown value never differs: a row written before the incarnation
+// column existed, and a caller that names no incarnation, both keep the
+// behavior they had before the column.
+func incarnationChanged(stored, reported string) bool {
+	return stored != "" && reported != "" && stored != reported
+}
+
+// deleteTenantJobSchedules deletes every job_schedules row of one
+// tenant, inside tx. The announce is its only caller, and it runs the
+// delete and the placement write together, so no reader sees the new
+// tenant's row beside the old tenant's schedules.
+func deleteTenantJobSchedules(ctx context.Context, tx pgx.Tx, cluster, tenant string) error {
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM varroa.job_schedules WHERE cluster = $1 AND tenant = $2
+	`, cluster, tenant); err != nil {
+		return fmt.Errorf("delete the previous tenant's job schedules: %w", err)
+	}
+	return nil
+}
+
+// keptIncarnation answers the incarnation to store. An announcement that
+// names none keeps the stored value, because an empty report proves
+// nothing about the tenant's identity.
+func keptIncarnation(stored, reported string) string {
+	if reported == "" {
+		return stored
+	}
+	return reported
+}
+
 // keepAppliedSeed answers the rehydrated instance to store at the same
 // generation and the same cell instance. An announcement that reports
 // none keeps the stored one.
@@ -549,12 +624,12 @@ func trimDeadInstances(merged []TenantSyncDeadInstance, keep map[string]bool, li
 }
 
 // writeTenantPlacement upserts cluster/tenant's row with the computed
-// generation and seed fields, inside tx. A NOT NULL jsonb column never
-// receives a Go nil: an empty policy becomes "{}", and empty
+// generation, seed fields, and incarnation, inside tx. A NOT NULL jsonb
+// column never receives a Go nil: an empty policy becomes "{}", and empty
 // pending_jobs and dead_instances lists become "[]".
 func writeTenantPlacement(ctx context.Context, tx pgx.Tx, req TenantSyncRequest, generation int64,
 	rehydratedInstance string, pendingJobs []string, deadInstances []TenantSyncDeadInstance,
-	members []member, jobHomes map[string]int32) error {
+	members []member, jobHomes map[string]int32, incarnation string) error {
 	policy := req.Policy
 	if len(policy) == 0 {
 		policy = json.RawMessage(`{}`)
@@ -580,10 +655,10 @@ func writeTenantPlacement(ctx context.Context, tx pgx.Tx, req TenantSyncRequest,
 		INSERT INTO varroa.tenant_placements (
 			cluster, tenant, namespace, cell, generation, cell_instance, policy,
 			rehydrated_instance, pending_jobs, cell_alive, cell_alive_at, cell_last_seen_at,
-			dead_instances, announced_at, members, job_homes
+			dead_instances, announced_at, members, job_homes, incarnation
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::jsonb, $10, $11, $12, $13::jsonb, now(),
-			$14::jsonb, $15::jsonb
+			$14::jsonb, $15::jsonb, $16
 		)
 		ON CONFLICT (cluster, tenant) DO UPDATE SET
 			namespace           = EXCLUDED.namespace,
@@ -599,11 +674,12 @@ func writeTenantPlacement(ctx context.Context, tx pgx.Tx, req TenantSyncRequest,
 			dead_instances      = EXCLUDED.dead_instances,
 			announced_at        = now(),
 			members             = EXCLUDED.members,
-			job_homes           = EXCLUDED.job_homes
+			job_homes           = EXCLUDED.job_homes,
+			incarnation         = EXCLUDED.incarnation
 	`,
 		req.Cluster, req.Tenant, req.Namespace, req.Cell, generation, req.CellInstance, string(policy),
 		rehydratedInstance, string(pendingJobsJSON), req.CellAlive, req.CellAliveAt, req.CellLastSeenAt,
-		string(deadInstancesJSON), string(membersJSON), string(jobHomesJSON),
+		string(deadInstancesJSON), string(membersJSON), string(jobHomesJSON), incarnation,
 	); err != nil {
 		return fmt.Errorf("upsert tenant placement: %w", err)
 	}

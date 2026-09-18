@@ -3,9 +3,13 @@ package recordstore
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
@@ -41,6 +45,12 @@ type TenantPurgeRequest struct {
 	// same name, so the cell name alone names no one cell. A request
 	// that names a cell must name its namespace.
 	CellNamespace string `json:"cell_namespace,omitempty"`
+	// Incarnation is the identity of the Team this purge tears down: the
+	// object's metadata.uid. A teardown purge that names another
+	// incarnation than the stored one leaves the placement row alone,
+	// because a newer tenant of the same name already owns it. An empty
+	// value means the caller names no incarnation, which keeps the reset.
+	Incarnation string `json:"incarnation,omitempty"`
 }
 
 // TenantPurgeResponse is the reply body of a
@@ -92,7 +102,7 @@ func handleTenantPurge(logger *slog.Logger, pool *pgxpool.Pool, data []byte) []b
 	ctx, cancel := context.WithTimeout(context.Background(), tenantPurgeTimeout)
 	defer cancel()
 
-	if err := purgeTenant(ctx, pool, req); err != nil {
+	if err := purgeTenant(ctx, logger, pool, req); err != nil {
 		logger.Error("tenant purge failed", "cluster", req.Cluster, "tenant", req.Tenant, "error", err)
 		out, _ := json.Marshal(TenantPurgeResponse{Error: "tenant purge failed"})
 		return out
@@ -112,24 +122,25 @@ func handleTenantPurge(logger *slog.Logger, pool *pgxpool.Pool, data []byte) []b
 //
 // A request that names a cell is a slot move. The tenant lives on, so the
 // move purges that cell's rows alone and leaves the placement generation
-// where it is.
-func purgeTenant(ctx context.Context, pool *pgxpool.Pool, req TenantPurgeRequest) error {
-	if err := purgeTenantJobSchedules(ctx, pool, req); err != nil {
-		return err
-	}
+// where it is. A move needs no incarnation test: the tenant that sends it
+// is the tenant the row names.
+func purgeTenant(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, req TenantPurgeRequest) error {
 	if req.Cell != "" {
-		return nil
+		return purgeTenantJobSchedules(ctx, pool, req)
 	}
-	return resetTenantPlacementGeneration(ctx, pool, req)
+	return purgeTornDownTenant(ctx, logger, pool, req)
 }
 
-// resetTenantPlacementGeneration sets the tenant's stored placement
-// generation to zero, for a teardown alone.
+// purgeTornDownTenant applies a teardown purge. It deletes the tenant's
+// job_schedules rows and resets the tenant's placement generation to
+// zero. One transaction holds both writes, and one incarnation test
+// guards both.
 //
 // Teardown ends the tenant, but it leaves the tenant_placements row in
 // place. A Team created again under the same name starts at generation 1,
-// and the announce never lowers a stored generation, so the fence would
-// answer NOT_READY to every claim of the new tenant for good. The reset
+// and the announce lowers a stored generation for one reason alone: an
+// announcement that names a new incarnation. The reset serves the row
+// whose incarnation is unknown, where that take-over cannot apply: it
 // lets the first announcement of the new tenant own the row again.
 //
 // The row itself survives, because the interrupted-run sweep reads its
@@ -138,34 +149,102 @@ func purgeTenant(ctx context.Context, pool *pgxpool.Pool, req TenantPurgeRequest
 // raises the generation, and that raise clears every seed field on its
 // own. Until it arrives, the generation orders refuse every claim.
 //
+// One teardown request can still be applied after the teardown completes.
+// Two teardown paths release the Team finalizer with no successful purge:
+// an absent cell, and the tenth failed attempt. The purge rides core NATS
+// request-reply, which redelivers nothing, and both ends bound one call
+// at ten seconds, so that window is at most ten seconds wide. A tenant of
+// the same name created inside it owns the row already, and its own rows
+// sit at generation 1, which every generation test of the old tenant
+// admits. The incarnation test is what keeps both writes off them: the
+// stored incarnation is the new tenant's, and the request names the old
+// one.
+//
+// The test reads the row under FOR UPDATE, which is the lock the announce
+// takes, so a purge and an announcement of one tenant never interleave. An
+// empty value on either side means unknown, and an unknown value matches:
+// a row written before the incarnation column existed still answers the
+// purge, and so does a request from a caller that names no incarnation. A
+// tenant with no row answers the purge too, because the schedule rows can
+// outlive the placement row.
+//
+// A purge the test refuses writes nothing at all. The rows the torn-down
+// tenant left are already gone: the announcement that took the row over
+// deleted every job_schedules row of the name, because at that moment
+// every one of them belonged to the tenant before it.
+func purgeTornDownTenant(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool,
+	req TenantPurgeRequest) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tenant purge transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	stored, exists, err := readPlacementIncarnation(ctx, tx, req)
+	if err != nil {
+		return err
+	}
+	if exists && incarnationChanged(stored, req.Incarnation) {
+		logger.Info("tenant purge keeps the rows a newer tenant owns",
+			"cluster", req.Cluster, "tenant", req.Tenant,
+			"stored_incarnation", stored, "purged_incarnation", req.Incarnation)
+		return nil
+	}
+
+	if err := purgeTenantJobSchedules(ctx, tx, req); err != nil {
+		return err
+	}
+	if err := resetTenantPlacementGeneration(ctx, tx, req); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// readPlacementIncarnation reads the tenant's stored incarnation and
+// locks its placement row for the rest of tx. It reports whether the row
+// exists.
+func readPlacementIncarnation(ctx context.Context, tx pgx.Tx, req TenantPurgeRequest) (string, bool, error) {
+	var stored string
+	err := tx.QueryRow(ctx, `
+		SELECT incarnation FROM varroa.tenant_placements
+		WHERE cluster = $1 AND tenant = $2
+		FOR UPDATE
+	`, req.Cluster, req.Tenant).Scan(&stored)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return "", false, nil
+	case err != nil:
+		return "", false, fmt.Errorf("read tenant placement incarnation: %w", err)
+	}
+	return stored, true, nil
+}
+
+// resetTenantPlacementGeneration sets the tenant's stored placement
+// generation to zero.
+//
 // The generation test matches the job_schedules delete: a teardown retry
 // that arrives after the tenant is created again, and announces a higher
 // generation, resets nothing. An exact-equality test would be wrong here:
 // a lost announcement leaves the stored generation below the one the
 // teardown names, and the row would then keep a generation the new tenant
 // can never reach.
-//
-// One teardown request can still be applied after the teardown completes.
-// Two teardown paths release the Team finalizer with no successful purge:
-// an absent cell, and the tenth failed attempt. The purge rides core NATS
-// request-reply, which redelivers nothing, and both ends bound one call
-// at ten seconds, so that window is at most ten seconds wide. A tenant of
-// the same name created inside it reads generation 0 and its claims wait.
-//
-// The wait usually ends on the next rehydration-state announcement: a new
-// tenant's member applied state, its seed, and its deferred job list each
-// move once while it rehydrates, and each move is an announce trigger.
-// A request that lands after all three have moved waits for the fixed
-// ten-minute resync instead. The claims stay on the retryable NOT_READY
-// either way, and the seed order holds the same claims while the tenant
-// is still rehydrating.
-func resetTenantPlacementGeneration(ctx context.Context, pool *pgxpool.Pool, req TenantPurgeRequest) error {
-	_, err := pool.Exec(ctx, `
+func resetTenantPlacementGeneration(ctx context.Context, db purgeExecer, req TenantPurgeRequest) error {
+	if _, err := db.Exec(ctx, `
 		UPDATE varroa.tenant_placements
 		SET generation = 0
 		WHERE cluster = $1 AND tenant = $2 AND generation <= $3
-	`, req.Cluster, req.Tenant, req.PlacementGeneration)
-	return err
+	`, req.Cluster, req.Tenant, req.PlacementGeneration); err != nil {
+		return fmt.Errorf("reset tenant placement generation: %w", err)
+	}
+	return nil
+}
+
+// purgeExecer is the subset of pgx.Tx and *pgxpool.Pool this file's two
+// writes need: one Exec call. A slot move sends its delete straight to
+// the pool, and a teardown sends both writes to one transaction, so both
+// shapes share one copy of each statement.
+type purgeExecer interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }
 
 // purgeTenantJobSchedules deletes every varroa.job_schedules row for
@@ -180,18 +259,22 @@ func resetTenantPlacementGeneration(ctx context.Context, pool *pgxpool.Pool, req
 // place. The narrow delete tests the namespace and the cell together,
 // because a row carries both and two namespaces can hold a cell of the
 // same name.
-func purgeTenantJobSchedules(ctx context.Context, pool *pgxpool.Pool, req TenantPurgeRequest) error {
+func purgeTenantJobSchedules(ctx context.Context, db purgeExecer, req TenantPurgeRequest) error {
 	if req.Cell != "" {
-		_, err := pool.Exec(ctx, `
+		if _, err := db.Exec(ctx, `
 			DELETE FROM varroa.job_schedules
 			WHERE cluster = $1 AND tenant = $2 AND placement_generation <= $3
 			  AND namespace = $4 AND cell = $5
-		`, req.Cluster, req.Tenant, req.PlacementGeneration, req.CellNamespace, req.Cell)
-		return err
+		`, req.Cluster, req.Tenant, req.PlacementGeneration, req.CellNamespace, req.Cell); err != nil {
+			return fmt.Errorf("delete the cell's job schedule rows: %w", err)
+		}
+		return nil
 	}
-	_, err := pool.Exec(ctx, `
+	if _, err := db.Exec(ctx, `
 		DELETE FROM varroa.job_schedules
 		WHERE cluster = $1 AND tenant = $2 AND placement_generation <= $3
-	`, req.Cluster, req.Tenant, req.PlacementGeneration)
-	return err
+	`, req.Cluster, req.Tenant, req.PlacementGeneration); err != nil {
+		return fmt.Errorf("delete the tenant's job schedule rows: %w", err)
+	}
+	return nil
 }

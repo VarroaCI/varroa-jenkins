@@ -103,6 +103,11 @@ type PurgeRequest struct {
 	// CellNamespace is that cell's namespace. A schedule row is keyed by
 	// the namespace and the cell, so the name alone can name two cells.
 	CellNamespace string
+	// Incarnation is the tenant object's metadata.uid. A teardown purge
+	// can arrive after the finalizer clears, so the recorder compares this
+	// value with the one its placement row holds and keeps a row a newer
+	// tenant of the same name already owns.
+	Incarnation string
 }
 
 // PurgeFunc requests a tenant's job_schedules purge and reports whether the
@@ -637,6 +642,7 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 	result, announceErr := sendAnnounce(ctx, in, AnnounceRequest{
 		Cluster:        in.ClusterIdentity,
 		Tenant:         team.Name,
+		Incarnation:    string(team.UID),
 		Namespace:      newCell.Namespace,
 		Cell:           newCell.Name,
 		Generation:     newGeneration,
@@ -705,7 +711,7 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 		gen := oldGeneration
 		status.Pipelines.PendingPurgeGeneration = &gen
 		status.Pipelines.PendingPurgeCell, status.Pipelines.PendingPurgeCellNamespace = purgeCellRef(oldCell)
-		if requestPurge(ctx, in, team.Name, oldGeneration,
+		if requestPurge(ctx, in, team, oldGeneration,
 			status.Pipelines.PendingPurgeCell, status.Pipelines.PendingPurgeCellNamespace) {
 			status.Pipelines.PendingPurgeGeneration = nil
 			status.Pipelines.PendingPurgeCell = ""
@@ -739,7 +745,7 @@ func performVoluntaryMove(ctx context.Context, in Inputs, team *v1alpha1.Team, s
 // for an unrelated cause (design D4's move-purge retry).
 func retryMovePurge(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus) {
 	gen := *status.Pipelines.PendingPurgeGeneration
-	if requestPurge(ctx, in, team.Name, gen,
+	if requestPurge(ctx, in, team, gen,
 		status.Pipelines.PendingPurgeCell, status.Pipelines.PendingPurgeCellNamespace) {
 		status.Pipelines.PendingPurgeGeneration = nil
 		status.Pipelines.PendingPurgeCell = ""
@@ -760,17 +766,18 @@ func purgeCellRef(oldCell *CellCandidate) (name, namespace string) {
 // requestPurge calls Inputs.RequestPurge and reports success. A failed
 // purge on a move never blocks the move (tenant-placement spec); the caller
 // decides what a failure means for its own retry state.
-func requestPurge(ctx context.Context, in Inputs, tenant string, oldGeneration int64,
+func requestPurge(ctx context.Context, in Inputs, team *v1alpha1.Team, oldGeneration int64,
 	cell, cellNamespace string) bool {
 	if in.RequestPurge == nil {
 		return false
 	}
 	ok, err := in.RequestPurge(ctx, PurgeRequest{
 		Cluster:       in.ClusterIdentity,
-		Tenant:        tenant,
+		Tenant:        team.Name,
 		OldGeneration: oldGeneration,
 		Cell:          cell,
 		CellNamespace: cellNamespace,
+		Incarnation:   string(team.UID),
 	})
 	return ok && err == nil
 }
@@ -827,6 +834,7 @@ func maybeReannounce(ctx context.Context, in Inputs, team *v1alpha1.Team, status
 	result, err := sendAnnounce(ctx, in, AnnounceRequest{
 		Cluster:            in.ClusterIdentity,
 		Tenant:             team.Name,
+		Incarnation:        string(team.UID),
 		Namespace:          status.Placement.CellNamespace,
 		Cell:               status.Placement.Cell,
 		Generation:         generation,
@@ -1035,7 +1043,7 @@ func appendReleasedMemberPatches(ctx context.Context, in Inputs, team *v1alpha1.
 		if before.Slot != nil && *before.Slot == 0 {
 			continue
 		}
-		requestPurge(ctx, in, team.Name, prior.Generation, before.Cell, before.CellNamespace)
+		requestPurge(ctx, in, team, prior.Generation, before.Cell, before.CellNamespace)
 		cell, found := lookupCell(in.Cells, before.Cell, before.CellNamespace)
 		if !found || !containsString(cell.Tenants, team.Name) {
 			continue
@@ -1138,7 +1146,7 @@ func teardown(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alp
 		// has drained, so teardown completes at once. The purge is still
 		// attempted, best effort, but never holds the finalizer: no cell
 		// remains to drain.
-		requestPurge(ctx, in, team.Name, status.Placement.Generation, "", "")
+		requestPurge(ctx, in, team, status.Placement.Generation, "", "")
 		finishTeardown(status, out, hasFinalizer)
 		return
 	}
@@ -1162,6 +1170,7 @@ func teardown(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alp
 			Cluster:       in.ClusterIdentity,
 			Tenant:        team.Name,
 			OldGeneration: status.Placement.Generation,
+			Incarnation:   string(team.UID),
 		})
 	}
 	if ok && err == nil {

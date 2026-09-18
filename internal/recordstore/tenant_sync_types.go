@@ -88,6 +88,13 @@ type TenantSyncRequest struct {
 	// member.
 	Members []TenantSyncMember `json:"members,omitempty"`
 
+	// Incarnation applies to kind "announce". It is the identity of the
+	// tenant object this announcement describes: the object's
+	// metadata.uid. A tenant created again under one name carries a new
+	// value, and that change hands the row to the new tenant. An empty
+	// value means the caller names no incarnation.
+	Incarnation string `json:"incarnation,omitempty"`
+
 	// JobPaths and PerJob apply to kind "records". An empty JobPaths
 	// means enumerate.
 	JobPaths []string `json:"job_paths,omitempty"`

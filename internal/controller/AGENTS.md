@@ -835,7 +835,13 @@ sections describe.
   field, so a caller compares two values with `SyncPolicy.Equal`, never
   `==`. An exports-only edit reaches the recorder on the next tick through
   the same-generation reannounce path (`cells/placement.go`'s
-  `maybeReannounce`) and never raises the placement generation.
+  `maybeReannounce`) and never raises the placement generation. **Every
+  announcement and every teardown purge carries the tenant object's
+  `metadata.uid`** as `Incarnation` (`AnnounceRequest`, `PurgeRequest`,
+  `announceSingleTenantPlacement`). The recorder stores it on the
+  placement row and refuses a teardown purge that names another
+  incarnation, so a `Team` created again under one name keeps the row its
+  own first announcement wrote.
 - **Cell rehydration send and apply** (`cell_rehydration.go`,
   `cell_rehydration_adapt.go`, `cell_rehydration_applied.go`,
   `cell_rehydration_entry.go`, `cell_rehydration_fetch.go`,

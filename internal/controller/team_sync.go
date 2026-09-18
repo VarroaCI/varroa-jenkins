@@ -120,6 +120,7 @@ func NewNATSSyncAnnouncer(conn *bus.Conn) cells.Announcer {
 			Kind:               recordstore.TenantSyncKindAnnounce,
 			Cluster:            req.Cluster,
 			Tenant:             req.Tenant,
+			Incarnation:        req.Incarnation,
 			Namespace:          req.Namespace,
 			Cell:               req.Cell,
 			Generation:         req.Generation,

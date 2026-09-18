@@ -124,6 +124,10 @@ of the fleet's audit activity, once a controller becomes disposable.
   every `QUEUED` or `RUNNING` run. That backfill is mandatory: a live run
   with a null column loses its liveness anchor, and the first sweep after
   the upgrade marks the whole fleet interrupted.
+  `00013_tenant_placement_incarnation.sql` adds `tenant_placements.incarnation`,
+  the `metadata.uid` of the tenant object the row describes. It defaults to
+  the empty string, which means unknown, and a row keeps that value until
+  its tenant announces again.
   A later migration never edits an applied one. `migrationsFS` (`migrations.go`) embeds
   every file under `migrations/` into the binary through `embed.FS`, so
   the recorder needs no separate deploy artifact. Monthly partition
@@ -235,13 +239,44 @@ of the fleet's audit activity, once a controller becomes disposable.
   under the old name restarts at generation 1. The row itself survives the
   reset: the interrupted-run sweep still reads its cell-liveness fields
   for a run the teardown left behind. A purge that names a cell is a slot
-  move and resets nothing. The operator side of this contract lives
-  outside this package.
+  move and resets nothing. **A teardown tests the incarnation first, and
+  one transaction holds both of its writes** (`purgeTornDownTenant`): the
+  request carries the `Team`'s `metadata.uid`, the purge reads the row's
+  `incarnation` column under `FOR UPDATE`, and a request that names
+  another incarnation than the stored one logs at info and writes nothing.
+  A teardown purge can arrive up to ten seconds after the finalizer
+  clears, and a tenant of the same name created in that window owns the
+  row by then. Its own `job_schedules` rows sit at generation 1, which the
+  old tenant's generation test admits, so the incarnation test is the only
+  thing that holds them. A refused purge writes nothing at all: the
+  take-over announcement already deleted what the old tenant left (see the
+  tenant sync responder below). An empty value on either side means
+  unknown and matches, and a tenant with no placement row is purged too,
+  because the schedule rows can outlive it. The operator side of this
+  contract lives outside this package.
 - **Tenant sync responder** (`tenant_sync.go`, `tenant_sync_types.go`) —
   `RegisterTenantSyncResponder` subscribes `bus.TenantSyncSubject` with
   queue group `recorder`. It answers two request kinds: `announce`
   upserts the tenant's `tenant_placements` row (never lowering
-  `generation`; a generation-zero row seeds itself from the announced
+  `generation`, except on a take-over: an announcement whose `incarnation`
+  differs from the stored one comes from a tenant created again under one
+  name, so it adopts the announced generation, even below the stored one,
+  and clears every seed like a generation raise — without it the new
+  tenant would wait for the teardown purge to reset the row. A row that
+  names no incarnation takes the second proof instead: an announced
+  generation **below** the stored one, because a tenant never lowers its
+  own generation. That second test is what keeps a row written before the
+  column existed from fencing the tenant that follows it.
+  `keptIncarnation` never lets an announcement naming none erase the
+  stored value. **A take-over deletes every `job_schedules` row of the
+  name** (`deleteTenantJobSchedules`), inside the same transaction: a cell
+  exports a tenant's jobs only after the announce that placed it, so at
+  that moment every row belongs to the tenant before this one, and a row
+  left behind keeps firing the old tenant's cron. The first announcement
+  to stamp a row that names no incarnation runs the same delete, once per
+  tenant, because such a row can hold a gone tenant's rows at the very
+  generation this tenant announces; the live cell exports its own set
+  again on its ten-minute poll; a generation-zero row seeds itself from the announced
   cell instance at once; a generation raise or a cell-instance change
   clears `rehydrated_instance` and `pending_jobs`, because the new cell
   holds no seed yet; at the same generation and the same instance

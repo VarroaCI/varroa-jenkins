@@ -11,18 +11,19 @@ func TestMigrationsFSListsEveryFile(t *testing.T) {
 	}
 
 	want := map[string]bool{
-		"00001_initial_schema.sql":             false,
-		"00002_activity.sql":                   false,
-		"00003_job_schedules.sql":              false,
-		"00004_search_paths.sql":               false,
-		"00005_tenant_placements.sql":          false,
-		"00006_fleet_locks.sql":                false,
-		"00007_job_schedule_upstream.sql":      false,
-		"00008_trigger_failed_result.sql":      false,
-		"00009_run_intents_refired_at.sql":     false,
-		"00010_run_state_object_class.sql":     false,
-		"00011_tenant_members.sql":             false,
-		"00012_runs_heartbeat_received_at.sql": false,
+		"00001_initial_schema.sql":               false,
+		"00002_activity.sql":                     false,
+		"00003_job_schedules.sql":                false,
+		"00004_search_paths.sql":                 false,
+		"00005_tenant_placements.sql":            false,
+		"00006_fleet_locks.sql":                  false,
+		"00007_job_schedule_upstream.sql":        false,
+		"00008_trigger_failed_result.sql":        false,
+		"00009_run_intents_refired_at.sql":       false,
+		"00010_run_state_object_class.sql":       false,
+		"00011_tenant_members.sql":               false,
+		"00012_runs_heartbeat_received_at.sql":   false,
+		"00013_tenant_placement_incarnation.sql": false,
 	}
 	for _, entry := range entries {
 		if _, ok := want[entry.Name()]; !ok {

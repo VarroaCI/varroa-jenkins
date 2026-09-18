@@ -11,18 +11,22 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
 
+// seedTenantPurgeCell is the cell every seeded schedule row names. One
+// cell serves every purge test: no test of this file reads the column.
+const seedTenantPurgeCell = "cell-a"
+
 // seedTenantPurgeRows applies one job.schedules envelope carrying three
 // rows: two for tenant, at oldGen and newGen, and one for a second
 // tenant, so a purge test can assert both the generation fence and
 // tenant isolation from a single seed call.
-func seedTenantPurgeRows(t *testing.T, ing *Ingester, cluster, cell, tenant string, oldGen, newGen int64, otherTenant string) {
+func seedTenantPurgeRows(t *testing.T, ing *Ingester, tenant string, oldGen, newGen int64, otherTenant string) {
 	t.Helper()
 	env := IngestEnvelope{
 		SchemaVersion: 1,
 		Kind:          KindJobSchedules,
-		Cluster:       cluster,
+		Cluster:       testCluster,
 		Namespace:     "jenkins",
-		Cell:          cell,
+		Cell:          seedTenantPurgeCell,
 		OccurredAt:    time.Now().UTC().Truncate(time.Microsecond),
 	}
 	payload := JobSchedulesPayload{
@@ -67,7 +71,7 @@ func TestTenantPurgeResponderIntegration(t *testing.T) {
 	ing := NewIngester(pool, nil, nil)
 
 	const cluster = "core"
-	seedTenantPurgeRows(t, ing, cluster, "cell-a", "payments", 3, 5, "billing")
+	seedTenantPurgeRows(t, ing, "payments", 3, 5, "billing")
 
 	if got := countTenantRows(t, db, "payments"); got != 2 {
 		t.Fatalf("seeded payments rows = %d, want 2", got)

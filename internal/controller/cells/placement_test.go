@@ -872,6 +872,57 @@ func TestPlace_Teardown_DoesNotHoldWhenControllerAbsent(t *testing.T) {
 	}
 }
 
+// TestPlace_TeardownPurgeCarriesTheIncarnation asserts the teardown purge
+// names the Team object it tears down. The recorder compares that value
+// with the one its placement row holds, so a purge that arrives after a
+// tenant of the same name is created again keeps the new row.
+func TestPlace_TeardownPurgeCarriesTheIncarnation(t *testing.T) {
+	team := testTeam()
+	team.UID = "uid-old"
+	team.Spec.Pipelines = nil
+	team.Finalizers = []string{v1alpha1.TeamFinalizerTenantPlacement}
+	status := placedStatus(1)
+
+	var captured PurgeRequest
+	in := testInputs()
+	in.Cells = nil
+	in.RequestPurge = func(_ context.Context, req PurgeRequest) (bool, error) {
+		captured = req
+		return true, nil
+	}
+
+	if _, err := Place(context.Background(), in, team, status); err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	if captured.Incarnation != "uid-old" {
+		t.Errorf("teardown purge incarnation = %q, want uid-old", captured.Incarnation)
+	}
+}
+
+// TestPlace_AnnounceCarriesTheIncarnation asserts the placement
+// announcement names the Team object it places. The recorder stores that
+// value, and the teardown purge reads it.
+func TestPlace_AnnounceCarriesTheIncarnation(t *testing.T) {
+	team := testTeam()
+	team.UID = "uid-new"
+
+	var captured AnnounceRequest
+	in := testInputs()
+	in.Cells = []CellCandidate{readyCell("cell-a")}
+	in.Announce = func(_ context.Context, req AnnounceRequest) (AnnounceResult, error) {
+		captured = req
+		return AnnounceResult{OK: true}, nil
+	}
+
+	status := &v1alpha1.TeamStatus{}
+	if _, err := Place(context.Background(), in, team, status); err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	if captured.Incarnation != "uid-new" {
+		t.Errorf("announce incarnation = %q, want uid-new", captured.Incarnation)
+	}
+}
+
 // --- schedule purge on a move (task 6.11) ---
 
 func TestPlace_Move_PurgeRequestCarriesOldGeneration(t *testing.T) {

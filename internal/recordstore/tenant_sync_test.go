@@ -39,13 +39,14 @@ func newTestSyncConn(t *testing.T) *bus.Conn {
 }
 
 // readTenantPlacement reads one tenant_placements row's generation, cell
-// instance, seed fields, and dead_instances for assertions.
+// instance, seed fields, dead_instances, and incarnation for assertions.
 type storedTenantPlacement struct {
 	generation         int64
 	cellInstance       string
 	rehydratedInstance string
 	pendingJobs        []string
 	deadInstances      []TenantSyncDeadInstance
+	incarnation        string
 }
 
 func readTenantPlacement(t *testing.T, db *sql.DB, tenant string) storedTenantPlacement {
@@ -56,11 +57,12 @@ func readTenantPlacement(t *testing.T, db *sql.DB, tenant string) storedTenantPl
 		rehydrated   string
 		pendingRaw   []byte
 		deadRaw      []byte
+		incarnation  string
 	)
 	if err := db.QueryRow(`
-		SELECT generation, cell_instance, rehydrated_instance, pending_jobs, dead_instances
+		SELECT generation, cell_instance, rehydrated_instance, pending_jobs, dead_instances, incarnation
 		FROM varroa.tenant_placements WHERE cluster = 'core' AND tenant = $1
-	`, tenant).Scan(&generation, &cellInstance, &rehydrated, &pendingRaw, &deadRaw); err != nil {
+	`, tenant).Scan(&generation, &cellInstance, &rehydrated, &pendingRaw, &deadRaw, &incarnation); err != nil {
 		t.Fatalf("read tenant_placements row: %v", err)
 	}
 	var pending []string
@@ -73,7 +75,7 @@ func readTenantPlacement(t *testing.T, db *sql.DB, tenant string) storedTenantPl
 	}
 	return storedTenantPlacement{
 		generation: generation, cellInstance: cellInstance, rehydratedInstance: rehydrated,
-		pendingJobs: pending, deadInstances: dead,
+		pendingJobs: pending, deadInstances: dead, incarnation: incarnation,
 	}
 }
 

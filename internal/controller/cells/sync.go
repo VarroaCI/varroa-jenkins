@@ -155,8 +155,12 @@ func membersEqual(a, b []AnnounceMember) bool {
 // instance, the policy, or the rehydration state changes, and once every
 // ten minutes as a resync.
 type AnnounceRequest struct {
-	Cluster            string
-	Tenant             string
+	Cluster string
+	Tenant  string
+	// Incarnation is the tenant object's metadata.uid. It tells one
+	// tenant from the next under one name, and the recorder hands the
+	// placement row to a tenant whose incarnation is new.
+	Incarnation        string
 	Namespace          string
 	Cell               string
 	Generation         int64

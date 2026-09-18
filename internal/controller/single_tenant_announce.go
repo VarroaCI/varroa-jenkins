@@ -57,6 +57,7 @@ func (r *Reconciler) announceSingleTenantPlacement(ctx context.Context, cr *v1al
 	_, err := r.announce(ctx, cells.AnnounceRequest{
 		Cluster:            r.clusterName,
 		Tenant:             cr.Namespace + "/" + cr.Name,
+		Incarnation:        string(cr.UID),
 		Namespace:          cr.Namespace,
 		Cell:               cr.Name,
 		Generation:         0,
