@@ -534,6 +534,11 @@ message RunStateRequest {
   // no object.
   // @required
   int64 pusher_epoch = 4;
+  // state_gen names the push generation whose object the fetch wants.
+  // The run-state key carries the generation as well as the epoch, so
+  // two pushes of one process name two objects.
+  // @required
+  int64 state_gen = 5;
 }
 
 message RunStateResponse {
@@ -558,12 +563,15 @@ message RunStateAck {
 }
 
 // ResumeStateFile is one stored file a resume must materialize: the path
-// under JENKINS_HOME, and the epoch of the object that holds it.
+// under JENKINS_HOME, and the epoch and generation of the object that
+// holds it.
 message ResumeStateFile {
   // @required
   string relpath = 1;
   // @required
   int64 pusher_epoch = 2;
+  // @required
+  int64 state_gen = 3;
 }
 
 message ResumeBuildPayload {

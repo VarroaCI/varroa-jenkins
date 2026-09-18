@@ -535,7 +535,7 @@ func (a *Agent) applyResumeBuild(ctx context.Context, payload *mitev1.ResumeBuil
 		}
 
 		fetchStart := time.Now()
-		data, err := a.fetchRunStateFileWithRetry(ctx, payload.RunId, relPath, file.PusherEpoch)
+		data, err := a.fetchRunStateFileWithRetry(ctx, payload.RunId, relPath, file.PusherEpoch, file.StateGen)
 		if err != nil {
 			a.Logger.Error("resume fetch failed",
 				"run_id", payload.RunId, "relpath", relPath, "error", err)
@@ -768,7 +768,14 @@ func checkResumePathBinding(parsed parsedRehydrationPath, payload *mitev1.Resume
 // run again rather than sending this same command back. The run then
 // waits for a target instance that is new, so a transient read that is
 // not retried here costs this deadline and at least one more round.
-func (a *Agent) fetchRunStateFileWithRetry(ctx context.Context, runID, relPath string, pusherEpoch int64) ([]byte, error) {
+//
+// A push the object key cannot name fails at once. The gateway refuses
+// such a request every time, so a retry can only spend the command's
+// deadline on an answer that never changes.
+func (a *Agent) fetchRunStateFileWithRetry(ctx context.Context, runID, relPath string, pusherEpoch, stateGen int64) ([]byte, error) {
+	if pusherEpoch <= 0 || stateGen <= 0 {
+		return nil, fmt.Errorf("fetch %s: the file names no pusher epoch or no push generation", relPath)
+	}
 	var lastErr error
 	wait := runStateFetchBackoff
 	for attempt := 0; attempt < runStateFetchAttempts; attempt++ {
@@ -783,7 +790,7 @@ func (a *Agent) fetchRunStateFileWithRetry(ctx context.Context, runID, relPath s
 			timer.Stop()
 			wait *= 2
 		}
-		data, err := a.fetchRunStateFile(ctx, runID, relPath, pusherEpoch)
+		data, err := a.fetchRunStateFile(ctx, runID, relPath, pusherEpoch, stateGen)
 		if err == nil {
 			return data, nil
 		}
@@ -798,7 +805,7 @@ func (a *Agent) fetchRunStateFileWithRetry(ctx context.Context, runID, relPath s
 // fetchRunStateFile asks the gateway for one stored file and returns its
 // inflated bytes. A response carrying an error fails the fetch, so the
 // caller writes no partial file.
-func (a *Agent) fetchRunStateFile(ctx context.Context, runID, relPath string, pusherEpoch int64) ([]byte, error) {
+func (a *Agent) fetchRunStateFile(ctx context.Context, runID, relPath string, pusherEpoch, stateGen int64) ([]byte, error) {
 	requestID := a.runStateSeq.Add(1)
 	ch, ok := a.runStateWaiters.register(requestID)
 	if !ok {
@@ -807,7 +814,8 @@ func (a *Agent) fetchRunStateFile(ctx context.Context, runID, relPath string, pu
 	defer a.runStateWaiters.cancel(requestID)
 
 	req := &mitev1.RunStateRequest{
-		RequestId: &requestID, RunId: runID, Relpath: relPath, PusherEpoch: pusherEpoch,
+		RequestId: &requestID, RunId: runID, Relpath: relPath,
+		PusherEpoch: pusherEpoch, StateGen: stateGen,
 	}
 	if err := a.sendRunStateRequestLocked(req); err != nil {
 		a.closeOnSendError(err)

@@ -1048,6 +1048,7 @@ type ResumeBuildPayload struct {
 type ResumeStateFile struct {
 	Relpath     string `json:"relpath"`
 	PusherEpoch int64  `json:"pusher_epoch"`
+	StateGen    int64  `json:"state_gen"`
 }
 
 type RunStateAck struct {
@@ -1079,6 +1080,7 @@ type RunStateRequest struct {
 	RunId       string  `json:"run_id"`
 	Relpath     string  `json:"relpath"`
 	PusherEpoch int64   `json:"pusher_epoch,omitempty"`
+	StateGen    int64   `json:"state_gen,omitempty"`
 }
 
 type RunStateResponse struct {

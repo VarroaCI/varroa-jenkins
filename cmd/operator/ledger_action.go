@@ -76,12 +76,15 @@ func ledgerActionDeadlineUnix(deadline *time.Time) int64 {
 }
 
 // ledgerActionStateFiles renders an action's stored files as the command
-// payload's own entries. Each one carries the path and the epoch of the
-// object that holds it, because the run-state object key names both.
+// payload's own entries. Each one carries the path, the epoch, and the
+// push generation of the object that holds it, because the run-state
+// object key names all three.
 func ledgerActionStateFiles(files []recordstore.ResumeFile) []*mitev1.ResumeStateFile {
 	out := make([]*mitev1.ResumeStateFile, 0, len(files))
 	for _, f := range files {
-		out = append(out, &mitev1.ResumeStateFile{Relpath: f.RelPath, PusherEpoch: f.Epoch})
+		out = append(out, &mitev1.ResumeStateFile{
+			Relpath: f.RelPath, PusherEpoch: f.Epoch, StateGen: f.StateGen,
+		})
 	}
 	return out
 }

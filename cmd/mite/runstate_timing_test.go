@@ -54,7 +54,7 @@ func TestResumeFetchesManyFilesQuickly(t *testing.T) {
 	start := time.Now()
 	for i := 0; i < 25; i++ {
 		relPath := fmt.Sprintf("jobs/team/jobs/pipeline/builds/7/workflow/%d.xml", i+1)
-		if _, err := agent.fetchRunStateFileWithRetry(context.Background(), "run-1", relPath, testPusherEpoch); err != nil {
+		if _, err := agent.fetchRunStateFileWithRetry(context.Background(), "run-1", relPath, testPusherEpoch, testPusherGen); err != nil {
 			t.Fatalf("fetch %s: %v", relPath, err)
 		}
 	}
@@ -62,5 +62,30 @@ func TestResumeFetchesManyFilesQuickly(t *testing.T) {
 	t.Logf("fetched 25 files in %s", elapsed)
 	if elapsed > 30*time.Second {
 		t.Fatalf("25 fetches took %s, want well under a minute", elapsed)
+	}
+}
+
+// TestFetchRunStateFileRejectsAnUnnamedPush proves the mite fails a
+// fetch whose file names no pusher epoch or no push generation. The
+// gateway refuses such a request every time, so a retry would spend the
+// command's deadline on an answer that never changes.
+func TestFetchRunStateFileRejectsAnUnnamedPush(t *testing.T) {
+	agent := NewAgent(Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
+	agent.Logger = slog.Default()
+
+	for _, tc := range []struct {
+		name       string
+		epoch, gen int64
+	}{
+		{"no epoch", 0, 4},
+		{"no generation", 100, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := agent.fetchRunStateFileWithRetry(
+				context.Background(), "run-1", "jobs/team/builds/7/build.xml", tc.epoch, tc.gen)
+			if err == nil {
+				t.Fatal("expected a fetch that names no push to fail at once")
+			}
+		})
 	}
 }

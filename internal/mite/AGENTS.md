@@ -292,14 +292,17 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   all) — it is never itself written back to storage.
 - **Run-state store** (`run_state.go`) — `BusHandler.OnRunStateChunk` stores
   one replicated file of a running Pipeline build as one whole blob object
-  (`runstate/<run_id>/<pusher_epoch>/<relpath>`, class `state`), through
-  `blob.Store.Replace`. **The key carries the pusher epoch, and that is what
-  orders two epochs.** The chart runs two gateway replicas, each with its own
-  `stateRuns` map: a retired process reconnecting through the other replica
-  would otherwise land its `Replace` on the live process's object, and the
-  30-second refresh repairs only `program.dat` and `build.xml`. A
-  `workflow/<n>.xml` and a node config go once per process, so a stale
-  overwrite of either lasts for the run.
+  (`runstate/<run_id>/<pusher_epoch>/<state_gen>/<relpath>`, class `state`),
+  through `blob.Store.Replace`. **The key carries the pusher epoch and the
+  push generation, and that pair is what orders two writes.** The chart runs
+  two gateway replicas, each with its own `stateRuns` map: a superseded
+  process reconnecting through the other replica would otherwise land its
+  `Replace` on the live object, and the 30-second refresh repairs only
+  `program.dat` and `build.xml`. A `workflow/<n>.xml` and a node config go
+  once per process, so a stale overwrite of either lasts for the run. **A
+  gateway rollout leaves two replicas that forward chunks of one process**,
+  which the epoch alone cannot separate: both chunks name that process, so
+  the generation is what keeps those two writes on two keys.
   It applies six ordered steps: a path check, the same `checkOwner` a log
   chunk takes, the 64 MiB per-run bound against the chunk's declared
   `object_size`, a buffer keyed `(run_id, relpath, state_gen)`, a write only
@@ -328,12 +331,12 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   away the live process's partial push. That fence, and `newestEpoch`
   itself, bound this replica's buffers alone. **Each run owns a write
   monitor**, which keeps two writes of one key apart: `bucketStore.Replace`
-  deletes the key and then writes part 0, so two same-epoch writes of one
-  path must not interleave. The retired-epoch test inside
-  `storeRunStateObject` is an optimization, not the ordering rule: it skips
-  a write this replica already knows is superseded.
-  `OnRunStateRequest` refuses a request whose `pusher_epoch` is not
-  positive, because the key names the epoch. It serves a
+  deletes the key and then writes part 0, so a redelivery of the push a
+  replica is still writing must not interleave with it. The retired-epoch
+  test inside `storeRunStateObject` is an optimization, not the ordering
+  rule: it skips a write this replica already knows is superseded.
+  `OnRunStateRequest` refuses a request whose `pusher_epoch` or
+  `state_gen` is not positive, because the key names both. It serves a
   resume's fetch through `NewRangeReader` (the chunked read `Put` pairs
   with, never `NewObjectReader`), and calls `ownerCache.invalidate` on a
   run's **first** fetch: a resume moves a run's owner with no claim behind

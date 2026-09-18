@@ -40,6 +40,13 @@ func (f runStateFile) newer(stored runStateFile) bool {
 	return f.StateGen > stored.StateGen
 }
 
+// sameObject reports whether f and other name one stored object. The
+// object key carries the path, the epoch, and the generation, so two
+// entries name one object only when all three match.
+func (f runStateFile) sameObject(other runStateFile) bool {
+	return f.RelPath == other.RelPath && f.Epoch == other.Epoch && f.StateGen == other.StateGen
+}
+
 // applyRunState merges one run-state push outcome into
 // runs.payload->'mesh'. A stored file sets the freshness anchor and
 // upserts the file entry by its relative path. A gateway cap refusal
@@ -135,16 +142,18 @@ func applyRunStateFile(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 		}
 	}
 
-	// Two entries of one epoch name one key, so a delete of that key
-	// would remove the object the record keeps.
+	// Every push names its own key, so the superseded entry's key holds
+	// an object no reader needs. A push that repeats both numbers is a
+	// redelivery of the winner, and its key is the winner's own.
 	//
-	// A dispatched resume names the epochs it read, and its target
+	// A dispatched resume names the pushes it read, and its target
 	// fetches them one at a time. The delete waits while such a resume is
 	// in flight, so it can never remove an object the target still needs.
 	// The run's own prefix delete removes that object when the run ends.
 	var cleanupKey string
-	if !dispatched && superseded.RelPath != "" && superseded.Epoch != winner.Epoch {
-		cleanupKey = blob.RunStateKey(intent.runID.String(), superseded.Epoch, superseded.RelPath)
+	if !dispatched && superseded.RelPath != "" && !superseded.sameObject(winner) {
+		cleanupKey = blob.RunStateKey(
+			intent.runID.String(), superseded.Epoch, superseded.StateGen, superseded.RelPath)
 	}
 
 	entry, err := json.Marshal(winner)

@@ -344,7 +344,7 @@ func TestApplyRunStateKeepsTheHigherEpoch(t *testing.T) {
 		t.Fatalf("files[0] = %+v, want the epoch-200 entry", files[0])
 	}
 
-	want := blob.RunStateKey(runID.String(), 100, meshProgramPath)
+	want := blob.RunStateKey(runID.String(), 100, 9, meshProgramPath)
 	if len(fake.keys) != 1 || fake.keys[0] != want {
 		t.Fatalf("deleted keys = %v, want only %q", fake.keys, want)
 	}
@@ -373,16 +373,17 @@ func TestApplyRunStateSupersedesTheOlderObject(t *testing.T) {
 		t.Fatalf("files = %+v, want one epoch-200 entry", files)
 	}
 
-	want := blob.RunStateKey(runID.String(), 100, meshProgramPath)
+	want := blob.RunStateKey(runID.String(), 100, 7, meshProgramPath)
 	if len(fake.keys) != 1 || fake.keys[0] != want {
 		t.Fatalf("deleted keys = %v, want only %q", fake.keys, want)
 	}
 }
 
-// TestApplyRunStateSameEpochDeletesNothing asserts two reports of one
-// epoch delete no object. Both name one key, so a delete would remove
-// the object the record keeps.
-func TestApplyRunStateSameEpochDeletesNothing(t *testing.T) {
+// TestApplyRunStateSupersedesTheOlderGeneration asserts a newer
+// generation of one epoch replaces the entry and deletes the older
+// generation's own object. Two generations name two keys, so the older
+// object is one no reader needs.
+func TestApplyRunStateSupersedesTheOlderGeneration(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -402,33 +403,45 @@ func TestApplyRunStateSameEpochDeletesNothing(t *testing.T) {
 	if len(files) != 1 || files[0].StateGen != 2 || files[0].Bytes != 2000 {
 		t.Fatalf("files = %+v, want the newer generation of one epoch", files)
 	}
-	if len(fake.keys) != 0 {
-		t.Fatalf("deleted keys = %v, want none for one epoch", fake.keys)
+	want := blob.RunStateKey(runID.String(), 100, 1, meshProgramPath)
+	if len(fake.keys) != 1 || fake.keys[0] != want {
+		t.Fatalf("deleted keys = %v, want only %q", fake.keys, want)
 	}
 }
 
-// TestHasStateRejectsAnEntryWithNoEpoch asserts the takeover gate. An
-// entry whose epoch is not positive names no object, so the run has no
-// state a resume can read.
-func TestHasStateRejectsAnEntryWithNoEpoch(t *testing.T) {
+// TestHasStateRejectsAnEntryWithNoPush asserts the takeover gate. An
+// entry whose epoch or generation is not positive names no object, so
+// the run has no state a resume can read.
+func TestHasStateRejectsAnEntryWithNoPush(t *testing.T) {
 	now := time.Now().UTC()
-	withEpoch := &runMeshRecord{
+	withPush := &runMeshRecord{
 		StateAt: &now,
-		Files:   []runStateFile{{RelPath: meshProgramPath, Epoch: 100}},
+		Files:   []runStateFile{{RelPath: meshProgramPath, Epoch: 100, StateGen: 4}},
 	}
-	if !withEpoch.hasState() {
-		t.Fatal("a record whose entries carry an epoch must report usable state")
+	if !withPush.hasState() {
+		t.Fatal("a record whose entries carry a push must report usable state")
 	}
 
 	noEpoch := &runMeshRecord{
 		StateAt: &now,
 		Files: []runStateFile{
-			{RelPath: meshProgramPath, Epoch: 100},
-			{RelPath: meshBuildRecordPath},
+			{RelPath: meshProgramPath, Epoch: 100, StateGen: 4},
+			{RelPath: meshBuildRecordPath, StateGen: 4},
 		},
 	}
 	if noEpoch.hasState() {
 		t.Fatal("a record holding an entry with no epoch must report no usable state")
+	}
+
+	noGeneration := &runMeshRecord{
+		StateAt: &now,
+		Files: []runStateFile{
+			{RelPath: meshProgramPath, Epoch: 100, StateGen: 4},
+			{RelPath: meshBuildRecordPath, Epoch: 100},
+		},
+	}
+	if noGeneration.hasState() {
+		t.Fatal("a record holding an entry with no generation must report no usable state")
 	}
 }
 

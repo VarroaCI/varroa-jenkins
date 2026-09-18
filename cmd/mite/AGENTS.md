@@ -226,9 +226,10 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   An absent `instance` fails the same way, because a command that names
   none fences nothing.
   The payload carries `state_files`, a repeated `ResumeStateFile` of
-  `relpath` plus `pusher_epoch`; the old repeated-string `files` tag is
-  reserved. The run-state object key carries the epoch, so each fetch sets
-  `RunStateRequest.pusher_epoch` and the gateway reads that exact object. A
+  `relpath` plus `pusher_epoch` and `state_gen`; the old repeated-string
+  `files` tag is reserved. The run-state object key carries the epoch and
+  the generation, so each fetch sets `RunStateRequest.pusher_epoch` and
+  `RunStateRequest.state_gen`, and the gateway reads that exact object. A
   path alone names nothing.
   A node's own `config.xml` is never overwritten, and a `409` from the
   adopt route counts as success for that file. Each fetch is retried

@@ -120,16 +120,16 @@ func decodeMeshRecord(raw json.RawMessage) *runMeshRecord {
 
 // hasState reports whether the record holds usable replicated state.
 //
-// A file entry whose epoch is not positive names no object: the object
-// key carries the epoch. An empty list names nothing at all. Either way
-// the run has no state a resume can read, so it takes the ordinary
-// confirmed-loss path.
+// A file entry whose epoch or generation is not positive names no
+// object: the object key carries both numbers. An empty list names
+// nothing at all. Either way the run has no state a resume can read, so
+// it takes the ordinary confirmed-loss path.
 func (r *runMeshRecord) hasState() bool {
 	if r == nil || r.StateAt == nil || len(r.Files) == 0 {
 		return false
 	}
 	for _, f := range r.Files {
-		if f.Epoch <= 0 {
+		if f.Epoch <= 0 || f.StateGen <= 0 {
 			return false
 		}
 	}
@@ -404,13 +404,14 @@ func dispatchMeshResume(ctx context.Context, pool *pgxpool.Pool, metrics *Interr
 // last. Jenkins reads that file to rebuild the run, so writing it last
 // means a reload never sees a run whose flow program is still missing.
 //
-// Each entry carries the epoch of the object that holds the file. The
-// target reads that exact object, so a path alone would name nothing.
+// Each entry carries the epoch and the generation of the object that
+// holds the file. The target reads that exact object, so a path alone
+// would name nothing.
 func resumeFileList(files []runStateFile) []ResumeFile {
 	out := make([]ResumeFile, 0, len(files))
 	for _, f := range files {
 		if f.RelPath != "" {
-			out = append(out, ResumeFile{RelPath: f.RelPath, Epoch: f.Epoch})
+			out = append(out, ResumeFile{RelPath: f.RelPath, Epoch: f.Epoch, StateGen: f.StateGen})
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {

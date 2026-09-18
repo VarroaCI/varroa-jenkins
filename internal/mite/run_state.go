@@ -101,10 +101,12 @@ type runStateEntry struct {
 	fetched bool
 	// writeMu keeps two writes of one key apart. A whole-object replace
 	// is not atomic on the object tier: it deletes the key and then
-	// writes part 0. It is never taken under h.stateMu.
+	// writes part 0. A redelivery repeats a push that this replica is
+	// still writing, and both writes name one key. It is never taken
+	// under h.stateMu.
 	//
-	// It does not order two epochs. The object key carries the pusher
-	// epoch, so two epochs write two keys.
+	// It does not order two pushes. The object key carries the pusher
+	// epoch and the push generation, so two pushes write two keys.
 	writeMu sync.Mutex
 }
 
@@ -204,12 +206,16 @@ func (h *BusHandler) OnRunStateChunk(name, ns string, chunk *mitev1.RunStateChun
 	ctx := context.Background()
 
 	// Step 1: the run must be named, the path must be usable as a key
-	// suffix, and the pusher epoch must be positive.
+	// suffix, and the pusher epoch and the push generation must both be
+	// positive.
 	//
-	// The key carries the epoch, so a chunk without one would store an
-	// object no fetch can name. The run would then hold a record that
-	// points at nothing, and it could never resume.
-	if chunk.RunId == "" || !validRunStateRelpath(chunk.Relpath) || chunk.PusherEpoch <= 0 {
+	// The key carries both numbers, so a chunk missing either would
+	// store an object no fetch can name. The run would then hold a
+	// record that points at nothing, and it could never resume. The
+	// test runs before every other step, so no such chunk reaches the
+	// redelivery test or a write.
+	if chunk.RunId == "" || !validRunStateRelpath(chunk.Relpath) ||
+		chunk.PusherEpoch <= 0 || chunk.StateGen <= 0 {
 		h.rejectRunState(ctx, ns, name, chunk, stateReasonMalformed)
 		return
 	}
@@ -331,13 +337,19 @@ func (h *BusHandler) bufferRunStateChunk(e *runStateEntry, chunk *mitev1.RunStat
 	// never saw, and without this test the last chunk of a multi-chunk
 	// file would open a fresh buffer and read as incomplete.
 	//
+	// A chunk below the stored generation is answered the same way. The
+	// store drops the path's buffer, so such a chunk would otherwise
+	// open a fresh one, store a superseded push, and move this entry's
+	// stored size and stored push back to it. The next retry of the
+	// winning push would then read as incomplete.
+	//
 	// The test names the pusher process as well as its generation. A
 	// generation alone repeats after a Jenkins restart, which counts
 	// from 1 again while this entry lives, and every push of the
 	// restarted build would then be discarded. A chunk of another epoch
 	// always replaces.
 	if done, ok := e.completed[chunk.Relpath]; ok &&
-		done.epoch == chunk.PusherEpoch && done.gen == chunk.StateGen {
+		done.epoch == chunk.PusherEpoch && chunk.StateGen <= done.gen {
 		return runStateOutcome{status: stateAckStatusStored}, nil
 	}
 
@@ -384,10 +396,12 @@ func (h *BusHandler) bufferRunStateChunk(e *runStateEntry, chunk *mitev1.RunStat
 // storeRunStateObject writes the whole object and charges it. The charge
 // replaces the path's previous size, so a replaced file counts once.
 //
-// The object key carries the pusher epoch, so a retired process's write
-// lands on its own key and can never reach the live process's object.
-// That holds for every gateway replica, because no replica has to agree
-// with another about which epoch is newest.
+// The object key carries the pusher epoch and the push generation, so a
+// superseded write lands on its own key and can never reach the live
+// object. That holds for every gateway replica, because no replica has
+// to agree with another about which push is newest. A gateway rollout
+// leaves two replicas that forward chunks of one process, and the
+// generation is what separates those writes.
 //
 // The retired-epoch test below is an optimization alone. It skips a
 // write this replica already knows is superseded.
@@ -407,7 +421,7 @@ func (h *BusHandler) storeRunStateObject(ctx context.Context, e *runStateEntry, 
 		return runStateOutcome{status: stateAckStatusStored}
 	}
 
-	key := blob.RunStateKey(chunk.RunId, chunk.PusherEpoch, chunk.Relpath)
+	key := blob.RunStateKey(chunk.RunId, chunk.PusherEpoch, outcome.stateGen, chunk.Relpath)
 	opts := blob.ObjectOptions{
 		ObjectClass: runStateObjectClass,
 		ContentType: runStateContentType,
@@ -597,11 +611,16 @@ func (h *BusHandler) OnRunStateRequest(name, ns string, req *mitev1.RunStateRequ
 		h.sendRunStateError(send, req, "the request names no run or no usable path")
 		return
 	}
-	// The key carries the pusher epoch, so a request without one names no
-	// object. It is refused here rather than read as a miss, because the
-	// two failures need different repairs.
+	// The key carries the pusher epoch and the push generation, so a
+	// request without both names no object. It is refused here rather
+	// than read as a miss, because the two failures need different
+	// repairs.
 	if req.PusherEpoch <= 0 {
 		h.sendRunStateError(send, req, "the request names no pusher epoch")
+		return
+	}
+	if req.StateGen <= 0 {
+		h.sendRunStateError(send, req, "the request names no push generation")
 		return
 	}
 
@@ -610,7 +629,8 @@ func (h *BusHandler) OnRunStateRequest(name, ns string, req *mitev1.RunStateRequ
 	ctx := context.Background()
 	// Replace writes through Put, which both drivers store as chunked
 	// part 0, so the chunked read is the matching read.
-	r, err := h.logStore.NewRangeReader(ctx, blob.RunStateKey(req.RunId, req.PusherEpoch, req.Relpath), 0, -1)
+	key := blob.RunStateKey(req.RunId, req.PusherEpoch, req.StateGen, req.Relpath)
+	r, err := h.logStore.NewRangeReader(ctx, key, 0, -1)
 	if err != nil {
 		h.sendRunStateError(send, req, "the gateway cannot read the stored file")
 		return

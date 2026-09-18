@@ -103,7 +103,7 @@ func TestOnRunStateChunk_ForeignPushRejected(t *testing.T) {
 	if len(acks) != 1 || acks[0].Status != stateAckStatusRejected || acks[0].Reason != stateReasonForeignRun {
 		t.Fatalf("expected one REJECTED foreign-run ack, got %+v", acks)
 	}
-	if _, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, oneChunkEpoch, "jobs/team/builds/1/program.dat"), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
+	if _, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, oneChunkEpoch, 1, "jobs/team/builds/1/program.dat"), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
 		t.Errorf("expected no object stored for a foreign push, NewRangeReader error = %v", err)
 	}
 }
@@ -147,7 +147,7 @@ func TestOnRunStateChunk_MissingMiddleChunkIsIncomplete(t *testing.T) {
 	if last.Status != stateAckStatusRejected || last.Reason != stateReasonIncomplete {
 		t.Fatalf("expected the last chunk's ack to be REJECTED incomplete, got %+v", last)
 	}
-	if _, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, 100, relpath), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
+	if _, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, 100, 1, relpath), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
 		t.Errorf("expected no object stored for an incomplete set, NewRangeReader error = %v", err)
 	}
 }
@@ -230,7 +230,7 @@ func TestOnRunStateChunk_InflatedSizeMismatchIsMalformed(t *testing.T) {
 	if last.Status != stateAckStatusRejected || last.Reason != stateReasonMalformed {
 		t.Fatalf("expected the completed set's ack to be REJECTED malformed, got %+v", last)
 	}
-	if _, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, 100, relpath), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
+	if _, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, 100, 1, relpath), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
 		t.Errorf("expected no object stored for a malformed set, NewRangeReader error = %v", err)
 	}
 }
@@ -257,7 +257,7 @@ func TestOnRunStateRequest_FirstFetchInvalidatesOwnerCache(t *testing.T) {
 	requestID := uint64(1)
 	h.OnRunStateRequest("cell1", "ns1", &mitev1.RunStateRequest{
 		RequestId: &requestID, RunId: runID, Relpath: "jobs/team/builds/1/program.dat",
-		PusherEpoch: oneChunkEpoch,
+		PusherEpoch: oneChunkEpoch, StateGen: 1,
 	}, send)
 
 	if _, ok := h.ownerCache.get(runID); ok {
@@ -270,7 +270,7 @@ func TestOnRunStateRequest_FirstFetchInvalidatesOwnerCache(t *testing.T) {
 	requestID2 := uint64(2)
 	h.OnRunStateRequest("cell1", "ns1", &mitev1.RunStateRequest{
 		RequestId: &requestID2, RunId: runID, Relpath: "jobs/team/builds/1/program.dat",
-		PusherEpoch: oneChunkEpoch,
+		PusherEpoch: oneChunkEpoch, StateGen: 1,
 	}, send)
 	if _, ok := h.ownerCache.get(runID); !ok {
 		t.Error("expected only the first run_state_request of a run to invalidate the cached owner")
@@ -363,7 +363,7 @@ func TestOnRunStateChunk_RestartedGenerationIsNotADuplicate(t *testing.T) {
 	epoch = 200
 	store(1, "after-the-restart")
 
-	r, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, epoch, relpath), 0, -1)
+	r, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, epoch, 1, relpath), 0, -1)
 	if err != nil {
 		t.Fatalf("NewRangeReader: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestOnRunStateChunk_LateChunkFromARetiredEpochIsDiscarded(t *testing.T) {
 	// The new process finishes its push. Its buffer must have survived.
 	h.OnRunStateChunk("cell1", "ns1", chunk(2, 1, 1, 2, "new-last"))
 
-	r, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, 2, relpath), 0, -1)
+	r, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, 2, 1, relpath), 0, -1)
 	if err != nil {
 		t.Fatalf("NewRangeReader: %v", err)
 	}
@@ -458,7 +458,7 @@ func TestOnRunStateChunk_MalformedRetiredChunkKeepsTheLiveBuffer(t *testing.T) {
 
 	h.OnRunStateChunk("cell1", "ns1", chunk(2, 1, 1, 2, 18, "new-last"))
 
-	r, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, 2, relpath), 0, -1)
+	r, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, 2, 1, relpath), 0, -1)
 	if err != nil {
 		t.Fatalf("NewRangeReader: %v", err)
 	}
@@ -619,7 +619,7 @@ func TestOnRunStateChunk_AnInFlightRetiredWriteNeverOverwritesTheNewEpoch(t *tes
 	<-oldDone
 	<-newDone
 
-	r, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, 200, relpath), 0, -1)
+	r, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, 200, 1, relpath), 0, -1)
 	if err != nil {
 		t.Fatalf("NewRangeReader: %v", err)
 	}
@@ -658,7 +658,7 @@ func TestStoreRunStateObject_ARetiredWriteIsDropped(t *testing.T) {
 	if out.status != stateAckStatusStored {
 		t.Errorf("outcome.status = %q, want %q", out.status, stateAckStatusStored)
 	}
-	if _, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, oneChunkEpoch, relpath), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
+	if _, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, oneChunkEpoch, 1, relpath), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
 		t.Errorf("expected no object stored, NewRangeReader error = %v", err)
 	}
 	h.stateMu.Lock()
@@ -731,7 +731,7 @@ func TestOnRunStateChunk_TwoReplicasEpochOrdering(t *testing.T) {
 
 	assertObject := func(epoch int64, want string) {
 		t.Helper()
-		r, rerr := shared.NewRangeReader(ctx, blob.RunStateKey(runID, epoch, relpath), 0, -1)
+		r, rerr := shared.NewRangeReader(ctx, blob.RunStateKey(runID, epoch, 1, relpath), 0, -1)
 		if rerr != nil {
 			t.Fatalf("NewRangeReader at epoch %d: %v", epoch, rerr)
 		}
@@ -800,7 +800,7 @@ func TestOnRunStateRequest_ReadsTheRequestedEpoch(t *testing.T) {
 		var out []*mitev1.RunStateResponse
 		requestID := uint64(epoch)
 		h.OnRunStateRequest("cell1", "ns1", &mitev1.RunStateRequest{
-			RequestId: &requestID, RunId: runID, Relpath: relpath, PusherEpoch: epoch,
+			RequestId: &requestID, RunId: runID, Relpath: relpath, PusherEpoch: epoch, StateGen: 1,
 		}, func(m *mitev1.OperatorMessage) error {
 			out = append(out, m.GetRunStateResponse())
 			return nil
@@ -835,7 +835,7 @@ func TestOnRunStateRequest_NoEpochIsRefused(t *testing.T) {
 	var got []*mitev1.RunStateResponse
 	requestID := uint64(1)
 	h.OnRunStateRequest("cell1", "ns1", &mitev1.RunStateRequest{
-		RequestId: &requestID, RunId: runID, Relpath: "jobs/team/builds/1/program.dat",
+		RequestId: &requestID, RunId: runID, Relpath: "jobs/team/builds/1/program.dat", StateGen: 1,
 	}, func(m *mitev1.OperatorMessage) error {
 		got = append(got, m.GetRunStateResponse())
 		return nil
@@ -880,7 +880,197 @@ func TestOnRunStateChunk_NoEpochIsMalformed(t *testing.T) {
 	if len(acks) != 1 || acks[0].Status != stateAckStatusRejected || acks[0].Reason != stateReasonMalformed {
 		t.Fatalf("acks = %+v, want one malformed refusal", acks)
 	}
-	if _, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, 0, relpath), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
+	if _, err := h.logStore.NewRangeReader(context.Background(), blob.RunStateKey(runID, 0, 1, relpath), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
+		t.Fatalf("expected no object stored, NewRangeReader error = %v", err)
+	}
+}
+
+// TestOnRunStateChunk_TwoReplicasGenerationOrdering is the cross-replica
+// proof for two push generations of one Jenkins process. A gateway
+// rollout leaves two replicas that both forward chunks of one epoch, and
+// the epoch fence cannot order them: it names one process, and both
+// chunks carry that process.
+//
+// The older generation's write stays in flight on the first replica
+// while the newer generation's write completes on the second, and the
+// older write then lands last. The record names the newer generation, so
+// the object that generation names must hold the newer bytes.
+func TestOnRunStateChunk_TwoReplicasGenerationOrdering(t *testing.T) {
+	ctx := context.Background()
+	shared, err := blob.Open(ctx, "file://"+t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("open blob store: %v", err)
+	}
+	gate := &blockingStateStore{Store: shared, entered: make(chan struct{}), release: make(chan struct{})}
+
+	runID := newTestRunID()
+	ownerAnswer := ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"}
+
+	ownerA := newFakeOwnerRequester()
+	ownerA.setAnswer(runID, ownerAnswer)
+	replicaA := newRunStateTestHandlerOver(t, ownerA, &recordingSender{}, gate)
+
+	ownerB := newFakeOwnerRequester()
+	ownerB.setAnswer(runID, ownerAnswer)
+	replicaB := newRunStateTestHandlerOver(t, ownerB, &recordingSender{}, gate)
+
+	const epoch = int64(100)
+	const relpath = "jobs/team/jobs/pipeline/builds/1/workflow/5.xml"
+	push := func(h *BusHandler, gen int64, body string) {
+		gz, gerr := gzipBytes([]byte(body))
+		if gerr != nil {
+			t.Error(gerr)
+			return
+		}
+		h.OnRunStateChunk("cell1", "ns1", &mitev1.RunStateChunk{
+			RunId: runID, JobPath: "team/pipeline", BuildNumber: 1, Relpath: relpath,
+			StateGen: gen, Seq: 0, Total: 1, GzipContent: gz,
+			RawSize: int64(len(body)), ObjectSize: int64(len(body)),
+			CellInstance: "inst1", PusherEpoch: epoch,
+		})
+	}
+
+	// The older generation's write enters the store and stays there.
+	oldDone := make(chan struct{})
+	go func() { defer close(oldDone); push(replicaA, 5, "generation-5") }()
+	<-gate.entered
+
+	// The pusher reconnects through the second replica, which knows
+	// nothing of the first replica's push.
+	push(replicaB, 6, "generation-6")
+
+	close(gate.release)
+	<-oldDone
+
+	if order := gate.writeOrder(); len(order) != 2 || order[1] != "generation-5" {
+		t.Fatalf("write order = %v, want the older generation's write last", order)
+	}
+
+	assertObject := func(gen int64, want string) {
+		t.Helper()
+		r, rerr := shared.NewRangeReader(ctx, blob.RunStateKey(runID, epoch, gen, relpath), 0, -1)
+		if rerr != nil {
+			t.Fatalf("NewRangeReader at generation %d: %v", gen, rerr)
+		}
+		defer func() { _ = r.Close() }()
+		got, rerr := io.ReadAll(r)
+		if rerr != nil {
+			t.Fatalf("read at generation %d: %v", gen, rerr)
+		}
+		if string(got) != want {
+			t.Fatalf("object at generation %d = %q, want %q", gen, got, want)
+		}
+	}
+	assertObject(6, "generation-6")
+	assertObject(5, "generation-5")
+}
+
+// TestOnRunStateRequest_ReadsTheRequestedGeneration proves a fetch reads
+// the object of the generation it names, while another generation of the
+// same process and path exists.
+func TestOnRunStateRequest_ReadsTheRequestedGeneration(t *testing.T) {
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	h := newRunStateTestHandler(t, owner, &recordingSender{})
+
+	const relpath = "jobs/team/jobs/pipeline/builds/1/program.dat"
+	h.OnRunStateChunk("cell1", "ns1", oneChunk(runID, relpath, 5, []byte("generation-5")))
+	h.OnRunStateChunk("cell1", "ns1", oneChunk(runID, relpath, 6, []byte("generation-6")))
+
+	fetcher := &recordingSender{}
+	requestID := uint64(7)
+	h.OnRunStateRequest("cell1", "ns1", &mitev1.RunStateRequest{
+		RequestId: &requestID, RunId: runID, Relpath: relpath,
+		PusherEpoch: oneChunkEpoch, StateGen: 5,
+	}, fetcher.send)
+
+	fetcher.mu.Lock()
+	sent := append([]*mitev1.OperatorMessage(nil), fetcher.sent...)
+	fetcher.mu.Unlock()
+	if len(sent) != 1 {
+		t.Fatalf("sent %d messages, want one response", len(sent))
+	}
+	body, err := inflateOneResponse(sent[0].GetRunStateResponse())
+	if err != nil {
+		t.Fatalf("inflate: %v", err)
+	}
+	if body != "generation-5" {
+		t.Fatalf("fetched %q, want the generation the request named", body)
+	}
+}
+
+// TestOnRunStateRequest_NoGenerationIsRefused proves a fetch that names
+// no push generation is refused. The key carries the generation, so such
+// a request names no object.
+func TestOnRunStateRequest_NoGenerationIsRefused(t *testing.T) {
+	h := newRunStateTestHandler(t, newFakeOwnerRequester(), &recordingSender{})
+	fetcher := &recordingSender{}
+	requestID := uint64(1)
+	h.OnRunStateRequest("cell1", "ns1", &mitev1.RunStateRequest{
+		RequestId: &requestID, RunId: newTestRunID(),
+		Relpath:     "jobs/team/jobs/pipeline/builds/1/program.dat",
+		PusherEpoch: 100, StateGen: 0,
+	}, fetcher.send)
+
+	fetcher.mu.Lock()
+	sent := append([]*mitev1.OperatorMessage(nil), fetcher.sent...)
+	fetcher.mu.Unlock()
+	if len(sent) != 1 || sent[0].GetRunStateResponse().Error == "" {
+		t.Fatalf("sent = %+v, want one response carrying an error", sent)
+	}
+}
+
+// TestOnRunStateChunk_ALateOlderGenerationIsDropped proves one replica
+// discards a chunk below the generation it already stored for the path.
+// The store drops the path's buffer, so such a chunk would otherwise
+// open a fresh one and move the entry's stored size and stored push back
+// to a superseded copy.
+func TestOnRunStateChunk_ALateOlderGenerationIsDropped(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	h := newRunStateTestHandler(t, owner, sender)
+
+	const relpath = "jobs/team/jobs/pipeline/builds/1/program.dat"
+	h.OnRunStateChunk("cell1", "ns1", oneChunk(runID, relpath, 6, []byte("generation-6-body")))
+	h.OnRunStateChunk("cell1", "ns1", oneChunk(runID, relpath, 5, []byte("five")))
+
+	if _, err := h.logStore.NewRangeReader(context.Background(),
+		blob.RunStateKey(runID, oneChunkEpoch, 5, relpath), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
+		t.Errorf("expected no object for the older generation, NewRangeReader error = %v", err)
+	}
+
+	h.stateMu.Lock()
+	done := h.stateRuns[runID].completed[relpath]
+	size := h.stateRuns[runID].storedSizes[relpath]
+	h.stateMu.Unlock()
+	if done.gen != 6 || size != int64(len("generation-6-body")) {
+		t.Fatalf("entry holds push %+v of %d bytes, want the generation-6 push", done, size)
+	}
+}
+
+// TestOnRunStateChunk_NoGenerationIsMalformed proves a chunk that names
+// no push generation is refused before every other step. The key carries
+// the generation, so such a chunk would store an object no fetch can
+// name, and the redelivery test must never see it.
+func TestOnRunStateChunk_NoGenerationIsMalformed(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	h := newRunStateTestHandler(t, owner, sender)
+
+	const relpath = "jobs/team/jobs/pipeline/builds/1/program.dat"
+	h.OnRunStateChunk("cell1", "ns1", oneChunk(runID, relpath, 0, []byte("hello")))
+
+	acks := runStateAcksFrom(sender)
+	if len(acks) != 1 || acks[0].Status != stateAckStatusRejected || acks[0].Reason != stateReasonMalformed {
+		t.Fatalf("acks = %+v, want one malformed refusal", acks)
+	}
+	if _, err := h.logStore.NewRangeReader(context.Background(),
+		blob.RunStateKey(runID, oneChunkEpoch, 0, relpath), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
 		t.Fatalf("expected no object stored, NewRangeReader error = %v", err)
 	}
 }

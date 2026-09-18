@@ -63,12 +63,13 @@ type LedgerAction struct {
 }
 
 // ResumeFile is one stored state file of a resume action: the path under
-// the Jenkins home, and the epoch of the object that holds it. The
-// run-state object key carries the epoch, so a path alone names no
-// object.
+// the Jenkins home, and the epoch and generation of the object that
+// holds it. The run-state object key carries both numbers, so a path
+// alone names no object.
 type ResumeFile struct {
-	RelPath string `json:"relpath"`
-	Epoch   int64  `json:"epoch"`
+	RelPath  string `json:"relpath"`
+	Epoch    int64  `json:"epoch"`
+	StateGen int64  `json:"state_gen"`
 }
 
 // PublishLedgerAction marshals action and publishes it on

@@ -50,13 +50,15 @@ GCS, Azure Blob, and the local filesystem.
   `Open` never sets).
 - **Key helpers** (`keys.go`) — `LogKey` and `LogIndexKey` are the only
   place a `logs/` or `logindex/` string appears outside their own tests.
-  `RunStateKey(runID, pusherEpoch, relpath)` renders
-  `runstate/<run_id>/<pusher_epoch>/<relpath>`. The epoch is part of the
-  key because two gateway replicas share no order: without it a retired
-  Jenkins process's `Replace` can land on a live process's object, and no
-  rule inside one replica can stop that. `RunStatePrefix(runID)` stays
-  `runstate/<run_id>/`, so one `DeletePrefix` still removes every epoch of
-  a run.
+  `RunStateKey(runID, pusherEpoch, stateGen, relpath)` renders
+  `runstate/<run_id>/<pusher_epoch>/<state_gen>/<relpath>`. Both numbers
+  are part of the key because two gateway replicas share no order: without
+  them a superseded `Replace` can land on the live object, and no rule
+  inside one replica can stop that. The epoch separates two Jenkins
+  processes, and the generation separates two pushes of one process, which
+  a gateway rollout can leave in flight on two replicas at one moment.
+  `RunStatePrefix(runID)` stays `runstate/<run_id>/`, so one
+  `DeletePrefix` still removes every push of a run.
   This package adds no artifact-key helper: `artifact-manager-s3` owns
   the layout after the fixed prefix, and `run_artifacts.blob_key` records
   the exact key.

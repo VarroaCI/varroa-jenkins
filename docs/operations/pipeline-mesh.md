@@ -57,6 +57,6 @@ terminal for more than an hour, so a stopped recorder leaves nothing.
 
 ## The stored copy
 
-Varroa stores each state file under the Jenkins process that pushed it, and a resume reads the
-process the recorder recorded. A retired process's late push cannot replace a live copy, whichever
-gateway pod writes it.
+Varroa stores each state file under its own push: the Jenkins process and its push count. A resume
+reads the push the recorder recorded. A late push cannot overwrite a newer one, whichever gateway
+pod writes it.

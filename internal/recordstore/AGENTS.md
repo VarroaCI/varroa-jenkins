@@ -42,19 +42,24 @@ of the fleet's audit activity, once a controller becomes disposable.
   record therefore keeps every entry, and the first report after the
   resume clears ends the replication. The target's own heartbeat, a
   resume failure, and the resume deadline are the three exits that
-  bound the hold. Each `mesh.files` entry carries the pusher `epoch` of
-  the object it names, and `applyRunStateFile` decides precedence under a
-  `SELECT … FOR UPDATE` of the run row: the higher epoch wins, and inside
-  one epoch the higher generation wins. The lock is what makes that safe
-  against a second recorder replica; `UPDATE … RETURNING` cannot answer it,
-  because that array is already the written one. A decision that supersedes
-  another epoch's object sets `dispatchResult.stateKeyCleanup`, and `Apply`
-  deletes that exact key after the commit, beside the existing prefix
-  cleanup. Two entries of one epoch name one key, so an equal-epoch upsert
-  deletes nothing. `runMeshRecord.hasState` refuses a record holding an
-  entry whose epoch is not positive: such an entry names no object, so the
-  run takes the ordinary confirmed-loss path. `LedgerAction.Files` is
-  `[]ResumeFile{RelPath, Epoch}`, and the build record stays last. `TakeOverLostRuns` claims a lost run in two steps: it
+  bound the hold. Each `mesh.files` entry carries the pusher `epoch` and
+  the `state_gen` of the object it names, and `applyRunStateFile` decides
+  precedence under a `SELECT … FOR UPDATE` of the run row: the higher epoch
+  wins, and inside one epoch the higher generation wins. The lock is what
+  makes that safe against a second recorder replica; `UPDATE … RETURNING`
+  cannot answer it, because that array is already the written one. **The
+  object key carries the epoch and the generation together**, so a decision
+  that supersedes another push sets `dispatchResult.stateKeyCleanup`, and
+  `Apply` deletes that exact key after the commit, beside the existing
+  prefix cleanup. A redelivery repeats both numbers, names the winner's own
+  key, and deletes nothing. The cap counts the record's entries, one per
+  path, so a run's stored objects can hold one superseded push per path
+  until that delete lands; the run's own prefix delete removes the rest.
+  `runMeshRecord.hasState` refuses a record
+  holding an entry whose epoch or generation is not positive: such an entry
+  names no object, so the run takes the ordinary confirmed-loss path.
+  `LedgerAction.Files` is `[]ResumeFile{RelPath, Epoch, StateGen}`, and the
+  build record stays last. `TakeOverLostRuns` claims a lost run in two steps: it
   arms every `RUNNING` run whose owner is confirmed gone and whose anchor
   is fresh, then dispatches once `resumeTargetForRun` answers a seeded
   member. `resumeTargetForRun` is the **only** reader of the placement row
