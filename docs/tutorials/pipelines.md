@@ -58,7 +58,7 @@ operator reads both numbers on the cell page.
 Below the cell card the team page shows two more cards.
 
 **Running now** holds one tile per build in progress: the job name, the build number, the
-current stage, the branch, the commit, and a progress bar against the job's usual duration.
+current stage, the branch, and a progress bar against the job's usual duration.
 
 **Pipelines** holds the team's folder tree. A job row carries its health, its last build, its
 branch, its last eight build durations, and when it last ran. Health is a weather glyph: clear
@@ -167,10 +167,10 @@ disabled once a retry of that build already exists, because Varroa allows one re
 
 ## Concurrent runs of the same job
 
-A job can start a new build while an older one of the same job is still running.
-`Team.spec.pipelines.concurrency` decides what happens next. `allow`, the default, runs both
-side by side. `cancelInProgress` cancels the older run fleet-wide as soon as the new one is
-claimed.
+A job can start a new build before an older one finishes. The
+`Team.spec.pipelines.concurrency` setting controls this: `allow` (the default) runs both, and
+`cancelInProgress` cancels the older run fleet-wide once the new run claims a
+build number.
 
 The setting is per tenant, and the group it cancels within is the job path itself, not the
 build. A multibranch child job's path includes its branch, so a new build on one branch never

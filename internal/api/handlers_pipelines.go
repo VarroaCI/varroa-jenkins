@@ -288,12 +288,17 @@ func buildRunSummary(run recordstore.Run) runSummaryJSON {
 	return s
 }
 
-// causeSummary reads runs.cause, the free-form Jenkins Cause object, for
-// its shortDescription. Jenkins reports a build's causes as either one
-// object or an array; an unrecognized shape yields the empty string.
+// causeSummary reads runs.cause. The gateway writes the cause as a
+// plain JSON string. It also reads an object or an array with a
+// shortDescription field, for an older payload shape. An unrecognized
+// shape yields the empty string.
 func causeSummary(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
+	}
+	var str string
+	if json.Unmarshal(raw, &str) == nil {
+		return str
 	}
 	type causeShape struct {
 		ShortDescription string `json:"shortDescription"`
@@ -311,6 +316,23 @@ func causeSummary(raw json.RawMessage) string {
 		}
 	}
 	return ""
+}
+
+// latestChangeMessage reads runs.changes, the ordered array of commit
+// entries the gateway writes oldest first. It returns the newest
+// entry's commit message, or the empty string when there is no entry
+// or the newest entry carries no message.
+func latestChangeMessage(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var entries []struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(raw, &entries) != nil || len(entries) == 0 {
+		return ""
+	}
+	return entries[len(entries)-1].Message
 }
 
 // computeHealth implements design D8's weather glyph: clear when every
@@ -366,7 +388,10 @@ func averageInt64(vs []int64) int64 {
 // currentStage is left empty: a live stage read is one more call per
 // running run, which the team home's first load does not need — the
 // build page's own log-stream poll (design D9) is where stage state
-// updates live.
+// updates live. ChangeSummary reads runs.changes, which the gateway
+// fills only at the completed phase, so a QUEUED or RUNNING row has
+// no entry yet and the tile shows no change summary until the build
+// finishes.
 func buildRunningRun(run recordstore.Run, trendMs []int64) runningRunJSON {
 	out := runningRunJSON{RunID: run.RunID, JobPath: run.JobPath, Status: run.Status}
 	if run.BuildNumber != nil {
@@ -378,7 +403,7 @@ func buildRunningRun(run recordstore.Run, trendMs []int64) runningRunJSON {
 	if run.SCMRevision != nil {
 		out.SCMRevision = *run.SCMRevision
 	}
-	out.ChangeSummary = causeSummary(run.Cause)
+	out.ChangeSummary = latestChangeMessage(run.Changes)
 	out.QueuedAt = run.QueuedAt
 	out.StartedAt = run.StartedAt
 	out.TypicalDurationMs = averageInt64(trendMs)

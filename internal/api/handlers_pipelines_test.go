@@ -105,6 +105,59 @@ func TestComputeHealth(t *testing.T) {
 	}
 }
 
+// TestCauseSummary asserts causeSummary reads the plain string the
+// gateway writes, and falls back to the older object and array shapes.
+func TestCauseSummary(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"plain string is the primary shape", `"Started by user nate"`, "Started by user nate"},
+		{"empty input yields empty string", "", ""},
+		{"object with shortDescription falls back", `{"shortDescription":"Started by timer"}`, "Started by timer"},
+		{"array with shortDescription falls back", `[{"shortDescription":"Started by SCM change"}]`, "Started by SCM change"},
+		{"malformed JSON yields empty string", `{not valid`, ""},
+		{"object without shortDescription yields empty string", `{"other":"field"}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := causeSummary(json.RawMessage(tc.raw))
+			if got != tc.want {
+				t.Fatalf("causeSummary(%s) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestLatestChangeMessage asserts latestChangeMessage returns the
+// newest commit message, the last entry in the oldest-first array.
+func TestLatestChangeMessage(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"empty input yields empty string", "", ""},
+		{"no entries yields empty string", `[]`, ""},
+		{
+			"newest entry is the last array element",
+			`[{"message":"first commit"},{"message":"second commit"}]`,
+			"second commit",
+		},
+		{"newest entry with no message yields empty string", `[{"message":"first commit"},{"message":""}]`, ""},
+		{"malformed JSON yields empty string", `{not valid`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := latestChangeMessage(json.RawMessage(tc.raw))
+			if got != tc.want {
+				t.Fatalf("latestChangeMessage(%s) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
 // --- 3.5: GET /pipelines/{team} ---
 
 func TestHandleListPipelines_UnionsCatalogAndRecords_TruncatedFlag(t *testing.T) {
