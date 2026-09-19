@@ -121,6 +121,9 @@ func TestSSEScope(t *testing.T) {
 		"/api/v1/runs/run-123/log":                 "run:run-123",
 		"/api/v1/runs/run-123":                     "",
 		"/api/v1/runs/run-123/artifacts":           "",
+		"/api/v1/pipelines/payments/stream":        "pipelines:payments",
+		"/api/v1/pipelines//stream":                "",
+		"/api/v1/pipelines/payments/cell":          "",
 	}
 	for path, want := range cases {
 		if got := sseScope(path); got != want {

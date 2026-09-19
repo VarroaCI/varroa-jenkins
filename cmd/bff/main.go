@@ -285,6 +285,15 @@ func main() {
 		}
 	}()
 
+	// --- Live run notification fanout (one key per cluster and tenant) ---
+	runFanout := sse.NewRunFanout(busConn, otel.Meter("varroa-bff"))
+	runFanout.Logger = logger
+	go func() {
+		if err := runFanout.Start(ctx); err != nil {
+			logger.Error("run fanout error", "error", err)
+		}
+	}()
+
 	// --- Cluster membership gauge (15s ticker) ---
 	go func() {
 		meter := otel.Meter("varroa-bff")
@@ -623,6 +632,7 @@ func main() {
 		Store:             clientsetClient, // *ClientsetClient implements crdstore.Backend
 		MiteRegistry:      miteTransport,
 		Broadcaster:       fanout, // bus-backed fanout replaces the in-process Broadcaster
+		RunFanout:         runFanout,
 		ActivityPublisher: actPub,
 		OperatorNamespace: operatorNamespace,
 		ManagedNamespaces: managedNamespaces,

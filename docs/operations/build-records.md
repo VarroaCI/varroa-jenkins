@@ -4,10 +4,9 @@ The build record store keeps build history outside each Jenkins controller. It r
 per build: its stages, its test summary, its artifact index, and a durable build-number ledger.
 It is optional and off by default.
 
-The store does not hold job configuration, console log text, or artifact bytes. Logs and
-artifacts live in a separate blob store. The build record store holds only the index that points
-to them. See [Build logs and artifacts](build-logs-and-artifacts.md) for the log path, the live
-tail, and artifact storage.
+The store holds no job configuration, console log text, or artifact bytes. Logs and artifacts
+live in a separate blob store, and the record store holds only their index. See [Build logs and
+artifacts](build-logs-and-artifacts.md) for the log path, the live tail, and artifact storage.
 
 ## Enable the store
 
@@ -31,8 +30,8 @@ recorder:
   replicas: 1
 ```
 
-`recordStore.postgres.mode` selects the database. `cnpg` renders a CloudNativePG `Cluster` inside
-the chart. `external` skips the `Cluster` and reads a Secret you provide instead:
+`recordStore.postgres.mode` selects the database. `cnpg` renders a CloudNativePG `Cluster` in the
+chart; `external` skips the `Cluster` and reads your Secret instead:
 
 ```yaml
 recordStore:
@@ -44,7 +43,7 @@ recordStore:
 ```
 
 `recordStore.blobs.mode` selects where log and artifact bytes live. `postgres` stores them as
-rows in the same database. `s3` stores them in an S3-compatible bucket:
+rows in the same database; `s3` stores them in an S3-compatible bucket:
 
 ```yaml
 recordStore:
@@ -61,7 +60,7 @@ component the same way `bff.*` configures the BFF.
 ## Install CloudNativePG first
 
 `recordStore.postgres.mode: cnpg` needs the [CloudNativePG](https://cloudnative-pg.io/) operator
-in the cluster. The chart does not install it. Install the operator before you enable the record
+in the cluster, which the chart does not install. Install the operator before you enable the
 store:
 
 ```bash
@@ -69,8 +68,8 @@ kubectl apply --server-side -f \
   https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.30/releases/cnpg-1.30.0.yaml
 ```
 
-Pin the operator version you install and upgrade it on your own schedule. `helm template` renders
-the `Cluster` resource without the operator present, so a render never needs a live cluster.
+Pin the operator version and upgrade it on your schedule. `helm template` renders the
+`Cluster` without the operator present, so a render needs no live cluster.
 
 ## Postgres roles
 
@@ -80,13 +79,13 @@ the `Cluster` resource without the operator present, so a render never needs a l
 | `varroa_client` | CloudNativePG, as a managed role | the BFF; reads runs, stages, tests, and artifacts |
 | `varroa_gateway` | CloudNativePG, as a managed role | the gateway, only in `postgres` blob mode; reads every table and inserts log chunks |
 
-`varroa_gateway` holds no `UPDATE` or `DELETE` on any table, and no default `INSERT` privilege on
-future tables: it inserts only into `varroa.log_chunks`, and that grant reaches every later
-partition automatically. The recorder stays the only writer of every other table.
+`varroa_gateway` holds no `UPDATE` or `DELETE` on any table, and no default `INSERT` on future
+tables: it inserts only into `varroa.log_chunks`, and that grant reaches every later partition.
+The recorder alone writes every other table.
 
-`external` mode skips all three roles and uses one DSN for the recorder, the BFF, and the gateway.
-Point `existingSecret` at a role that owns schema `varroa`: it must create the schema, run
-migrations, and read and write every table.
+`external` mode skips the three roles and uses one DSN for the recorder, the BFF and the
+gateway. Point `existingSecret` at a role that owns schema `varroa`: it creates the schema, runs
+migrations, and reads and writes every table.
 
 ## Retention
 
@@ -98,20 +97,19 @@ recordStore:
     artifacts: 30d
 ```
 
-Each value is a number of days followed by `d`, from `1d` through `3650d`. `runs` controls how
-long a build's row, stages, and test summary stay queryable. `logs` and `artifacts` control how
-long their blob content stays queryable, independent of `runs`.
+Each value is a day count with a `d` suffix, from `1d` through `3650d`. `runs` controls how long
+a build's row, stages, and test summary stay queryable; `logs` and `artifacts` control their blob
+content, independent of `runs`.
 
 Retention rounds up to a month boundary, because the recorder drops a whole monthly partition
-instead of deleting rows one at a time. A `runs` value of `365d` therefore keeps a build for 365
-to 396 days.
+rather than single rows. A `runs` value of `365d` therefore keeps a build for 365 to 396 days.
 
-The build-number watermark is permanent. Retention never deletes it, even after every run of a
+The build-number watermark is permanent: retention never deletes it, even after every run of a
 job expires. A build number is never reused.
 
 ## A trigger that fails
 
-Jenkins can refuse a build trigger. The record store then holds one run whose result is
+Jenkins can refuse a build trigger. The store then holds one run whose result is
 `TRIGGER_FAILED`, and the run page names the reason.
 
 | Reason code | What it means |
@@ -121,34 +119,50 @@ Jenkins can refuse a build trigger. The record store then holds one run whose re
 | `TRIGGER_REJECTED` | The controller refused the trigger for another reason. |
 
 The run page also shows the error text the controller reported. Such a run holds no build number,
-no log, and no stage, because no build started. `Re-run` starts a fresh run with each parameter's
+no log, and no stage: no build started. `Re-run` starts a fresh run with each parameter's
 declared default.
 
 A `TRIGGER_FAILED` run counts in no job statistic: no pass rate, no result count, no median
-duration, and no last-build tile. It still appears in the job's run list, and retention bounds it
-under the `runs` value above.
+duration, and no last-build tile. It still appears in the run list, and retention bounds it under
+`runs` above.
 
 ## A trigger that a cell loses
 
-A cell pod can roll before a build Jenkins accepted onto its queue starts. The record store then
-holds one run whose status is `QUEUED`, with no build number, and the run page shows `Queued`.
+A cell pod can roll before a build Jenkins accepted onto its queue starts. The store then holds
+one run whose status is `QUEUED`, with no build number, and the run page shows `Queued`.
 [Cell loss](cell-loss.md) states how the recorder marks and re-fires such a run. Retention treats
-it like every other run, under the `runs` value above.
+it like every other run, under `runs` above.
 
 Counters: `varroa.gateway.trigger_accepted`, `recorder_ingest_trigger_accepted_total` (a
 `stored` attribute), and `recorder_interrupted_marked_total` (a `status` attribute, `queued` or
 `running`). `recorder_ingest_superseded_start_total` counts a dropped late `run.started`; see
 [Build claims](build-claims.md).
 
+## Live updates
+
+The recorder publishes one notification per run change onto the NATS subject
+`runs.<cluster>.<tenant>`.
+
+The BFF serves one stream per team at `GET /pipelines/{team}/stream`, under the ticket scope
+`pipelines:{team}`, with `run` and `stage` events.
+
+A page treats a notification as a hint: it refetches its reads and renders the record.
+
+The recorder coalesces per run: a change waits at most 500 milliseconds, and a terminal state
+publishes at once.
+
+Each page refetches when its stream opens, because the stream sends no first frame. While the
+stream is closed and the run is not terminal, the build page reads the record every 3 seconds.
+
 ## Activity history
 
 Activity history rides two stores: a fixed transport buffer in NATS and a durable table in
-Postgres. Every activity event publishes onto the NATS JetStream stream `varroa_activity`.
-Events include lifecycle changes, user actions, and mite-observed changes. That stream holds at
-most 72 hours, in code, not in chart values: it exists so the recorder can catch up after a
-brief outage, not as a retention tier. The recorder drains the stream and writes each event once
-into the `activity` table. `GET /activity` and every MCP tool that reads activity read that
-table, never the stream.
+Postgres. Every activity event publishes onto the JetStream stream `varroa_activity`, which
+covers lifecycle changes, user actions, and mite-observed changes. That stream holds at most 72
+hours, in code and not in chart values: it lets the recorder catch up after a brief outage, and
+it is no retention tier. The recorder drains the stream and writes each event once into the
+`activity` table. `GET /activity` and every MCP activity reader read that table, never the
+stream.
 
 ```yaml
 recordStore:
@@ -158,53 +172,52 @@ recordStore:
 
 Size Postgres for the retention you configure. An activity row is roughly 400 bytes, and a busy
 fleet of 400 controllers writes about 40 MB a day, so `30d` needs about 1.2 GB and `90d` about
-3.6 GB. Add that to the `runs`, `logs`, and `artifacts` sizing above.
+3.6 GB, plus the sizing above.
 
 Enabling the store against a fleet that already ran without one imports history once, from the
 oldest message the 72-hour buffer still holds. An event already older than `retention.activity`
-when it is read is acknowledged and discarded, so a stale backlog creates no row headed for
-immediate deletion.
+when read is acknowledged and discarded, so a stale backlog creates no row bound for immediate
+deletion.
 
 ## Job schedules
 
 The `job_schedules` table holds the fleet's cron inventory: one row per job trigger, plus one
-`none` row for a job with no trigger. The set for a cell is that cell's whole job inventory. A
-branch job a scan discovered yesterday, with no trigger and no run yet, still has a row, because
-no other producer reports it.
+`none` row for a job with no trigger. A cell's set is that cell's whole job inventory, so a
+branch job with no trigger and no run still holds a row, because no other producer reports it.
 
-The Jenkins plugin computes each cron row's next three occurrences with Jenkins's own cron
-engine, so the times you read back match the Jenkins job page. A row for an `scm-poll`,
-`upstream`, or `other` trigger, and every `none` row, carries no occurrence.
+The plugin computes each cron row's next three occurrences with Jenkins's cron engine, so the
+times match the Jenkins job page. An `scm-poll`, `upstream`, or `other` row, and every `none`
+row, carries no occurrence.
 
-Each mite polls its Jenkins every ten minutes, and once after every stream reconnect. It sends the
-set only when the set changed, the stream reconnected, or thirty minutes passed. The gateway
-publishes one cell's whole set in one envelope; the recorder replaces the cell's rows with it, or
-rejects the envelope when it cannot resolve a tenant for every row.
+Each mite polls its Jenkins every ten minutes and after every reconnect. It sends the set when
+the set changed, the stream reconnected, or thirty minutes passed. The gateway publishes one
+cell's set in one envelope, and the recorder replaces the cell's rows with it or rejects it when
+a tenant is unresolved for a row.
 
 `job_schedule_cells` holds one watermark row per cell: the time of the newest envelope the
-recorder accepted. Read that watermark before you judge a missing occurrence. An occurrence that
-never fired under a fresh watermark, no more than about thirty minutes old, is a missed fire.
-Under an old watermark the cell itself has not reported, likely a disconnected mite or a
-hibernated controller, and the whole set is stale.
+recorder accepted. Read it before you judge a missing occurrence. An occurrence that never fired
+under a fresh watermark, no more than thirty minutes old, is a missed fire. An old watermark
+means the cell has not reported, likely a disconnected mite or a hibernated controller, and the
+whole set is stale.
 
 A `truncated: true` set means the plugin's walk stopped early, at 5000 rows or 700 KiB, whichever
-it reached first. Its rows still hold accurate data; only the row count is undercounted. The
-recorder deletes no row on a truncated set, because a partial set would erase schedules the plugin
-had not reached.
+came first. Its rows still hold accurate data; only the count is undercounted. The recorder
+deletes no row on a truncated set, because a partial set would erase schedules the plugin never
+reached.
 
 ## Search
 
 `GET /search` and the MCP `search` tool add three record-backed kinds on top of the four
 Kubernetes-sourced kinds: `job`, `run`, and `activity`. Each kind is capped at five results.
 Matching is a Postgres full-text prefix match on the last search token, not a substring match, so
-`serv` matches a job path token like `team-a/service/main` but no infix inside a longer word.
-Without the record store these three kinds are absent and the other four still answer.
+`serv` matches `team-a/service/main` but no infix in a longer word. Without the record store
+these three kinds are absent and the other four still answer.
 
 ## The ledger and intent keys
 
-Every build starts with a claim against the ledger. The claim carries an intent key, a string
-that identifies the request that caused the build. The recorder uses the key to make a retried
-claim idempotent: the same key with the same run always gets the same answer.
+Every build starts with a claim against the ledger, carrying an intent key that identifies the
+request that caused it. The recorder uses the key to make a retried claim idempotent: the same
+key with the same run always gets the same answer.
 
 | Scheme | Shape | Use |
 |---|---|---|
@@ -215,11 +228,11 @@ claim idempotent: the same key with the same run always gets the same answer.
 | `upstream` | `upstream:<caller-run-id>:<seq>` | a build triggered by an upstream pipeline |
 | `api` | `api:<uuid>` | a build triggered through the API |
 
-A claim with a key outside this set, or with an empty segment, is rejected.
+A claim with a key outside this set, or an empty segment, is rejected.
 
 ## Backlog metrics
 
-The recorder exports three metrics for the ingest backlog:
+The recorder exports three ingest-backlog metrics:
 
 | Metric | Meaning |
 |---|---|
@@ -228,12 +241,12 @@ The recorder exports three metrics for the ingest backlog:
 | `recorder_activity_backlog_msgs` | Activity events waiting to be written. |
 
 The build-event metrics measure the `varroa_builds` stream, which holds at most 1 GiB. Warn at 50
-percent (512 MiB) and page at 80 percent (819 MiB). That stream discards a new build event once
-full, until the backlog drains.
+percent (512 MiB) and page at 80 percent (819 MiB). A full stream discards a new event until the
+backlog drains.
 
 The activity metric measures the `varroa_activity` stream, which holds at most 1000000 messages.
-Warn at 500000 and page at 800000. That stream discards its **oldest** message once full, so a
-sustained backlog loses old history rather than rejecting new events.
+Warn at 500000 and page at 800000. A full stream discards its **oldest** message, so a sustained
+backlog loses old history rather than rejecting new events.
 
 ## Network policy
 
@@ -251,26 +264,24 @@ networkPolicy:
 
 `recordStorePostgresEgress` governs egress to Postgres from the recorder, the BFF, and, in
 `postgres` blob mode, the gateway. In `cnpg` mode an empty `cidrs` list selects the in-cluster
-CloudNativePG pods. In `external` mode an empty list selects nothing, so the render fails and asks
-you to name the host.
+CloudNativePG pods; in `external` mode it selects nothing, so the render fails and asks you to
+name the host.
 
-`recordStoreBlobEgress` governs the same three components' egress to S3-compatible storage. It
-renders nothing when `recordStore.blobs.mode` is `postgres`, because that mode needs no external
-egress.
+`recordStoreBlobEgress` governs the same components' egress to S3-compatible storage, and it
+renders nothing when `recordStore.blobs.mode` is `postgres`: that mode needs no external egress.
 
-Both policies apply only when `networkPolicy.enabled` and `recordStore.enabled` are both true.
+Both policies apply only when `networkPolicy.enabled` and `recordStore.enabled` are true.
 
-In `cnpg` mode the chart also renders a policy for the Postgres pods themselves. It admits the
-recorder, the BFF, and the gateway on port 5432, and the CloudNativePG operator on port 8000
-from the namespace `networkPolicy.recordStoreCNPGOperatorNamespaceSelector` names (default
-`cnpg-system`). It lets the pods reach the API server, which the instance manager watches.
+In `cnpg` mode the chart also renders a policy for the Postgres pods, admitting the recorder, the
+BFF, and the gateway on port 5432, and the CloudNativePG operator on port 8000 from the namespace
+`networkPolicy.recordStoreCNPGOperatorNamespaceSelector` names (default `cnpg-system`). It lets
+the pods reach the API server that the instance manager watches.
 
 ## Remove the database
 
-Disabling `recordStore.enabled` does not delete the database. The chart marks the CloudNativePG
-`Cluster` and every role Secret `helm.sh/resource-policy: keep`, so a disabled or uninstalled
-release leaves the data in place. To delete the data, remove the `Cluster` and every role Secret
-together:
+Disabling `recordStore.enabled` does not delete the database. The chart marks the `Cluster` and
+every role Secret `helm.sh/resource-policy: keep`, so a disabled or uninstalled release leaves
+the data in place. To delete the data, remove the `Cluster` and every role Secret together:
 
 ```bash
 kubectl delete clusters.postgresql.cnpg.io varroa-recordstore -n <release-namespace>
@@ -278,4 +289,4 @@ kubectl delete secret varroa-recordstore-recorder varroa-recordstore-client varr
 ```
 
 Deleting only the `Cluster` and re-enabling the store regenerates the Secrets with new passwords,
-which locks the recorder out of any volume that survives. Delete both together, or not at all.
+which locks the recorder out of any surviving volume. Delete both together, or not at all.

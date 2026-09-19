@@ -3997,6 +3997,7 @@ type SearchParams struct {
 
 // CreateStreamTicketJSONBody defines parameters for CreateStreamTicket.
 type CreateStreamTicketJSONBody struct {
+	// Scope The one stream the ticket opens. One of brood, activity, controller:{cluster}/{ns}/{name}, broodop:{ns}/{name}, run:{run_id}, or pipelines:{team}. A ticket opens the stream whose path maps onto the same scope, and no other.
 	Scope string `json:"scope"`
 }
 
@@ -5062,6 +5063,9 @@ type ClientInterface interface {
 	ValidatePipelineMarkerWithBody(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	ValidatePipelineMarker(ctx context.Context, team ComponentsParametersTeam, body ValidatePipelineMarkerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StreamTeamRuns request
+	StreamTeamRuns(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListVarroaRoleBindings request
 	ListVarroaRoleBindings(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -6917,6 +6921,18 @@ func (c *Client) ValidatePipelineMarkerWithBody(ctx context.Context, team Compon
 
 func (c *Client) ValidatePipelineMarker(ctx context.Context, team ComponentsParametersTeam, body ValidatePipelineMarkerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewValidatePipelineMarkerRequest(c.Server, team, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) StreamTeamRuns(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStreamTeamRunsRequest(c.Server, team)
 	if err != nil {
 		return nil, err
 	}
@@ -12935,6 +12951,40 @@ func NewValidatePipelineMarkerRequestWithBody(server string, team ComponentsPara
 	return req, nil
 }
 
+// NewStreamTeamRunsRequest generates requests for StreamTeamRuns
+func NewStreamTeamRunsRequest(server string, team ComponentsParametersTeam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/stream", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListVarroaRoleBindingsRequest generates requests for ListVarroaRoleBindings
 func NewListVarroaRoleBindingsRequest(server string) (*http.Request, error) {
 	var err error
@@ -15096,6 +15146,9 @@ type ClientWithResponsesInterface interface {
 	ValidatePipelineMarkerWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ValidatePipelineMarkerResponse, error)
 
 	ValidatePipelineMarkerWithResponse(ctx context.Context, team ComponentsParametersTeam, body ValidatePipelineMarkerJSONRequestBody, reqEditors ...RequestEditorFn) (*ValidatePipelineMarkerResponse, error)
+
+	// StreamTeamRunsWithResponse request
+	StreamTeamRunsWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*StreamTeamRunsResponse, error)
 
 	// ListVarroaRoleBindingsWithResponse request
 	ListVarroaRoleBindingsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListVarroaRoleBindingsResponse, error)
@@ -17981,6 +18034,30 @@ func (r ValidatePipelineMarkerResponse) StatusCode() int {
 	return 0
 }
 
+type StreamTeamRunsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r StreamTeamRunsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r StreamTeamRunsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListVarroaRoleBindingsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -20374,6 +20451,15 @@ func (c *ClientWithResponses) ValidatePipelineMarkerWithResponse(ctx context.Con
 		return nil, err
 	}
 	return ParseValidatePipelineMarkerResponse(rsp)
+}
+
+// StreamTeamRunsWithResponse request returning *StreamTeamRunsResponse
+func (c *ClientWithResponses) StreamTeamRunsWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*StreamTeamRunsResponse, error) {
+	rsp, err := c.StreamTeamRuns(ctx, team, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStreamTeamRunsResponse(rsp)
 }
 
 // ListVarroaRoleBindingsWithResponse request returning *ListVarroaRoleBindingsResponse
@@ -25734,6 +25820,46 @@ func ParseValidatePipelineMarkerResponse(rsp *http.Response) (*ValidatePipelineM
 		}
 		response.JSON400 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseStreamTeamRunsResponse parses an HTTP response from a StreamTeamRunsWithResponse call
+func ParseStreamTeamRunsResponse(rsp *http.Response) (*StreamTeamRunsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &StreamTeamRunsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest ComponentsResponsesUnauthorized
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

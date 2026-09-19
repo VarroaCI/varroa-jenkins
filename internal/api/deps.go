@@ -36,10 +36,13 @@ type Dependencies struct {
 	// Local is set in local auth mode; nil otherwise.
 	Local *local.Provider
 	// LDAP is set in ldap auth mode; nil otherwise.
-	LDAP              *ldap.Provider
-	KeyVerifier       *apikey.Verifier
-	TicketIssuer      *auth.TicketIssuer
-	Broadcaster       sse.EventSource
+	LDAP         *ldap.Provider
+	KeyVerifier  *apikey.Verifier
+	TicketIssuer *auth.TicketIssuer
+	Broadcaster  sse.EventSource
+	// RunFanout carries live run notifications to the team run stream. It is
+	// nil in tests that do not exercise that stream.
+	RunFanout         sse.RunEventSource
 	LogBuffer         *logbuffer.LogBuffer
 	Logger            *slog.Logger
 	OperatorNamespace string

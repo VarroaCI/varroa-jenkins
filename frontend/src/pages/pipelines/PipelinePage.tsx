@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getPipelineJob, listRuns, type ListRunsParams } from "../../api/client";
 import { ApiError } from "../../hooks/useApi";
+import { useEventStream } from "../../hooks/useEventStream";
 import { ForbiddenPage, GenericErrorPage, NotFoundPage, RecordStoreDisabledPage } from "../../components/RecoveryState";
 import { Card } from "../../components/Card";
 import { usePermissions, canAccessTenantPipeline } from "../../hooks/usePermissions";
@@ -10,7 +11,7 @@ import { age } from "../../components/activityTimeline.util";
 import { stripTenantFolder } from "./jobPath";
 import JobBreadcrumbs from "./JobBreadcrumbs";
 import { RunDrawer } from "./RunDrawer";
-import type { PipelineTemplateInfo, PipelineDependencyEdge } from "../../types";
+import type { RunNotification, PipelineTemplateInfo, PipelineDependencyEdge } from "../../types";
 import styles from "./PipelinePage.module.css";
 
 const enc = (s: string) => encodeURIComponent(s);
@@ -155,6 +156,57 @@ export default function PipelinePage() {
     queryFn: () => listRuns(team!, job!, runsFilter),
     enabled: !!team && !!job && !jobQuery.error,
   });
+
+  // The team's stream carries every job of that team, so the page keeps the
+  // frames of its own job only.
+  const { lastEvent, readyState } = useEventStream<RunNotification>(
+    team ? `/pipelines/${enc(team)}/stream` : null,
+    team ? `pipelines:${team}` : null,
+    ["run", "stage"],
+  );
+  const queryClient = useQueryClient();
+
+  // The runs table carries the filter the URL holds, so the key repeats
+  // that filter to match the query's own key.
+  const invalidateRuns = useCallback(() => {
+    void queryClient.invalidateQueries({
+      queryKey: [
+        "pipelineRuns",
+        team,
+        job,
+        {
+          branch: branch || undefined,
+          result: result || undefined,
+          actor: actor || undefined,
+          cause: cause || undefined,
+        },
+      ],
+    });
+  }, [queryClient, team, job, branch, result, actor, cause]);
+
+  const invalidateJob = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["pipelineJob", team, job] });
+  }, [queryClient, team, job]);
+
+  // The stream replays nothing, so an open stream is the page's signal to
+  // refetch both reads.
+  useEffect(() => {
+    if (readyState !== "open") return;
+    invalidateRuns();
+    invalidateJob();
+  }, [readyState, invalidateRuns, invalidateJob]);
+
+  useEffect(() => {
+    // The page drops a stage frame: the table and the job read carry no
+    // stage value.
+    if (lastEvent?.type !== "run") return;
+    // The page matches the job path the URL holds, and renders no payload
+    // field.
+    if (lastEvent.data.job_path !== job) return;
+    invalidateRuns();
+    // A terminal run moves the health values and the Last 30 days card.
+    if (lastEvent.data.status === "COMPLETED") invalidateJob();
+  }, [lastEvent, job, invalidateRuns, invalidateJob]);
 
   if (jobQuery.isLoading) {
     return (

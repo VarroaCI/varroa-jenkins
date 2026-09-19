@@ -29,6 +29,7 @@ import type {
   RunLogLiveEvent,
   RunLogMetaEvent,
   RunLogStageEvent,
+  RunNotification,
   RunStage,
 } from "../../types";
 import { stripTenantFolder } from "./jobPath";
@@ -67,23 +68,30 @@ const TRIGGER_REASON_SENTENCES: Record<string, string> = {
 const TRIGGER_REASON_FALLBACK = "The controller refused the trigger.";
 
 /**
- * Reads the run record, and — while no record exists yet — polls it under
- * one of two windows. A run this browser session just requested polls for
- * 60 seconds before it reports "not started"; polling never stops, so a
- * late record still resolves the page. A cold load of an unknown run polls
- * for 30 seconds and then settles on "not found", because the page cannot
- * otherwise tell a starting run from an unknown one.
+ * Reads the run record, and polls it while the record can still change. A
+ * record that does not exist yet keeps the pre-record poll under one of two
+ * windows: a run this browser session just requested polls for 60 seconds
+ * before it reports "not started", and a cold load of an unknown run polls
+ * for 30 seconds and then settles on "not found". A record that exists
+ * polls every 3 seconds only while the stream is not open and the run is
+ * not terminal.
  */
-function useRunRecord(runId: string | undefined, requested: boolean) {
+function useRunRecord(runId: string | undefined, requested: boolean, streamOpen: boolean) {
   const [run, setRun] = useState<RunDetail | null>(null);
   const [status, setStatus] = useState<RunPageStatus>(requested ? "requested" : "loading");
   const startRef = useRef(Date.now());
   const settledRef = useRef(false);
+  // The interval outlives the render that created it, so it reads the
+  // record and the stream state through refs.
+  const runRef = useRef<RunDetail | null>(null);
+  const streamOpenRef = useRef(streamOpen);
+  streamOpenRef.current = streamOpen;
 
   const fetchOnce = useCallback(async (): Promise<boolean> => {
     if (!runId) return true;
     try {
       const r = await getRun(runId);
+      runRef.current = r;
       setRun(r);
       setStatus("found");
       return true;
@@ -105,6 +113,7 @@ function useRunRecord(runId: string | undefined, requested: boolean) {
   useEffect(() => {
     if (!runId) return;
     settledRef.current = false;
+    runRef.current = null;
     startRef.current = Date.now();
     setRun(null);
     setStatus(requested ? "requested" : "loading");
@@ -130,7 +139,12 @@ function useRunRecord(runId: string | undefined, requested: boolean) {
 
     void tick();
     const interval = setInterval(() => {
-      if (!settledRef.current) void tick();
+      // A record that does not exist yet keeps the pre-record poll, whatever
+      // the stream state. A record that exists polls only while the stream
+      // is not open and the run is not terminal.
+      const current = runRef.current;
+      if (settledRef.current && (!current || streamOpenRef.current || isTerminal(current))) return;
+      void tick();
     }, POLL_MS);
     return () => {
       cancelled = true;
@@ -138,7 +152,8 @@ function useRunRecord(runId: string | undefined, requested: boolean) {
     };
   }, [runId, requested, fetchOnce]);
 
-  return { run, status, refetch: () => void fetchOnce() };
+  const refetch = useCallback(() => void fetchOnce(), [fetchOnce]);
+  return { run, status, refetch };
 }
 
 const RESULT_LABELS: Record<string, string> = {
@@ -184,7 +199,15 @@ export default function BuildPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const requested = !!(location.state as { requested?: boolean } | null)?.requested;
-  const { run, status, refetch } = useRunRecord(runId, requested);
+
+  // The team's stream carries every run of the team.
+  const { lastEvent: runEvent, readyState: runStreamReady } = useEventStream<RunNotification>(
+    team ? `/pipelines/${encodeURIComponent(team)}/stream` : null,
+    team ? `pipelines:${team}` : null,
+    ["run", "stage"],
+  );
+  const streamOpen = runStreamReady === "open";
+  const { run, status, refetch } = useRunRecord(runId, requested, streamOpen);
 
   const { data: permissions } = usePermissions();
   const folderRelativeJobPath = run ? stripTenantFolder(run.tenantFolder, run.jobPath) : undefined;
@@ -226,6 +249,23 @@ export default function BuildPage() {
       logWatermarkRef.current = { from: ev.off };
     }
   }, [lastEvent]);
+
+  // A stage frame and a run frame both change the record, so the page
+  // refetches the record for either one. The page renders the record, never
+  // a payload field.
+  useEffect(() => {
+    if (!runEvent) return;
+    if (runEvent.type !== "run" && runEvent.type !== "stage") return;
+    const notification = runEvent.data;
+    if (!notification || notification.run_id !== runId) return;
+    void refetch();
+  }, [runEvent, runId, refetch]);
+
+  // The stream sends no first frame and replays nothing, so an open stream
+  // is the page's signal to refetch the record.
+  useEffect(() => {
+    if (streamOpen) void refetch();
+  }, [streamOpen, refetch]);
 
   const logViewerRef = useRef<RunLogViewerHandle>(null);
   const [activeTab, setActiveTab] = useState<TabId>("log");

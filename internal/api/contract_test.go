@@ -209,6 +209,7 @@ var routeManifest = []route{
 	{Method: "POST", Path: "/api/v1/pipelines/{team}/jobs/{job}/runs"},
 	{Method: "POST", Path: "/api/v1/pipelines/{team}/markers/validate"},
 	{Method: "GET", Path: "/api/v1/pipelines/{team}/cell"},
+	{Method: "GET", Path: "/api/v1/pipelines/{team}/stream"},
 	{Method: "GET", Path: "/api/v1/cells/usage"},
 	{Method: "GET", Path: "/api/v1/cells/{namespace}/{name}/usage"},
 	{Method: "GET", Path: "/api/v1/cells/{namespace}/{name}/grants"},

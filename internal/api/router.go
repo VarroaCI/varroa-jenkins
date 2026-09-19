@@ -101,6 +101,7 @@ func NewRouter(deps *Dependencies) http.Handler {
 	mux.HandleFunc("POST /pipelines/{team}/jobs/{job}/runs", srv.handleCreateRun)
 	mux.HandleFunc("POST /pipelines/{team}/markers/validate", srv.handleValidatePipelineMarker)
 	mux.HandleFunc("GET /pipelines/{team}/cell", srv.handleGetTeamCell)
+	mux.HandleFunc("GET /pipelines/{team}/stream", srv.handleTeamRunStream)
 	// Runs: detail, log stream, artifacts, tests, changes, cancel, rerun.
 	mux.HandleFunc("GET /runs/{run}", srv.handleGetRun)
 	mux.HandleFunc("GET /runs/{run}/log", srv.handleStreamRunLog)

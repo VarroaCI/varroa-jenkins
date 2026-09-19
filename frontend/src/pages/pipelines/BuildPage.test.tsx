@@ -109,15 +109,19 @@ function baseRun(overrides: Partial<RunDetail> = {}): RunDetail {
   };
 }
 
+/** renderPage returns repaint, which re-renders the page so it reads the
+ * stream state the test just set. */
 function renderPage(entry: InitialEntry = "/pipelines/payments/checkout-api%2Fmain/run-1") {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const tree = () => (
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[entry]}>
         <BuildPage />
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const view = render(tree());
+  return { ...view, repaint: () => view.rerender(tree()) };
 }
 
 beforeEach(() => {
@@ -464,5 +468,121 @@ describe("BuildPage — a refused build trigger", () => {
 
     expect(await screen.findByText("The controller refused the trigger.")).toBeInTheDocument();
     expect(screen.queryByText("Run not found")).not.toBeInTheDocument();
+  });
+});
+
+describe("BuildPage — live run events", () => {
+  /** notification builds one frame of the team run stream. */
+  function notification(overrides: Record<string, unknown> = {}) {
+    return {
+      kind: "run",
+      cluster: "core",
+      tenant: "payments",
+      job_path: "checkout-api/main",
+      run_id: "run-1",
+      seq: 1,
+      at: "2026-01-01T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  /** runStream makes the page read the given frame off the team run stream,
+   * and holds the run log stream closed. */
+  function runStream(frame: { type: string; data: unknown } | null, readyState = "closed") {
+    mockUseEventStream.mockImplementation((_baseUrl, scope) =>
+      scope === "pipelines:payments"
+        ? { lastEvent: frame, readyState, error: null }
+        : { lastEvent: null, readyState: "closed", error: null },
+    );
+  }
+
+  it("refetches the record for a matching run event", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    const { repaint } = renderPage();
+    await screen.findByText(/Build #42/);
+    const before = mockGetRun.mock.calls.length;
+
+    runStream({ type: "run", data: notification() });
+    await act(async () => {
+      repaint();
+    });
+
+    expect(mockGetRun.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it("refetches the record for a matching stage event, and renders the stage the record carries", async () => {
+    mockGetRun.mockResolvedValueOnce(baseRun({ status: "RUNNING", result: undefined, stages: [] }));
+    const { repaint } = renderPage();
+    await screen.findByText(/Build #42/);
+    expect(document.getElementById("node-stage-s1")).toBeNull();
+
+    mockGetRun.mockResolvedValue(
+      baseRun({
+        status: "RUNNING",
+        result: undefined,
+        stages: [{ stageId: "s1", name: "Deploy", status: "IN_PROGRESS" }],
+      }),
+    );
+    runStream({ type: "stage", data: notification({ kind: "stage" }) });
+    await act(async () => {
+      repaint();
+    });
+
+    expect(document.getElementById("node-stage-s1")).toBeTruthy();
+  });
+
+  it("refetches nothing for an event of another run", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    const { repaint } = renderPage();
+    await screen.findByText(/Build #42/);
+    const before = mockGetRun.mock.calls.length;
+
+    runStream({ type: "run", data: notification({ run_id: "run-9" }) });
+    await act(async () => {
+      repaint();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockGetRun.mock.calls.length).toBe(before);
+  });
+
+  it("polls the record while the stream is not open and the run is not terminal", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockGetRun.mockResolvedValue(baseRun({ status: "RUNNING", result: undefined }));
+      runStream(null, "closed");
+      renderPage();
+      await screen.findByText(/Build #42/);
+      const before = mockGetRun.mock.calls.length;
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6_000);
+      });
+
+      expect(mockGetRun.mock.calls.length).toBeGreaterThanOrEqual(before + 2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("runs no poll while the stream is open", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockGetRun.mockResolvedValue(baseRun({ status: "RUNNING", result: undefined }));
+      runStream(null, "open");
+      renderPage();
+      await screen.findByText(/Build #42/);
+      const settled = mockGetRun.mock.calls.length;
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(9_000);
+      });
+
+      expect(mockGetRun.mock.calls.length).toBe(settled);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

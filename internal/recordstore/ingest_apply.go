@@ -107,6 +107,7 @@ type Ingester struct {
 	fanoutMetrics *UpstreamFanoutMetrics
 	sweepMetrics  *InterruptedMetrics
 	stateDeleter  ObjectDeleter
+	notifier      *RunNotifier
 }
 
 // NewIngester returns an Ingester over pool. conn publishes a ledger
@@ -150,6 +151,27 @@ func (g *Ingester) SetStateDeleter(d ObjectDeleter) {
 	g.stateDeleter = d
 }
 
+// SetRunNotifier enables the live run notifications the BFF streams. An
+// Ingester built with no call to this method publishes nothing, which
+// every test with no bus relies on.
+func (g *Ingester) SetRunNotifier(n *RunNotifier) {
+	g.notifier = n
+}
+
+// notify publishes one ingest envelope's live notification. It publishes
+// nothing for a nil notifier, a failed write, or a kind that changes no
+// run state.
+func (g *Ingester) notify(env IngestEnvelope, res ApplyResult, err error) {
+	if err != nil || g.notifier == nil {
+		return
+	}
+	n, ok := notificationFor(env, res)
+	if !ok {
+		return
+	}
+	g.notifier.Notify(n)
+}
+
 // Apply writes env to the record tables. It returns ErrIntentMissing
 // when no run_intents row exists for env.RunID, ErrUnknownKind when
 // env.Kind is outside the thirteen known kinds, and ErrMalformedEnvelope
@@ -172,17 +194,23 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 	// record of its run when no other event has arrived, so no intent
 	// needs to exist before either one. Both take the same early route.
 	if env.Kind == KindRunTriggerFailed {
-		return g.applyTriggerFailed(ctx, env)
+		res, err := g.applyTriggerFailed(ctx, env)
+		g.notify(env, res, err)
+		return res, err
 	}
 	if env.Kind == KindRunTriggerAccepted {
-		return g.applyTriggerAccepted(ctx, env)
+		res, err := g.applyTriggerAccepted(ctx, env)
+		g.notify(env, res, err)
+		return res, err
 	}
 
 	// run.resume_failed touches one runs row and nothing else. The run
 	// already holds an intent, but this write needs none of it, so the
 	// kind takes the same early route the two trigger kinds take.
 	if env.Kind == KindRunResumeFailed {
-		return g.applyResumeFailed(ctx, env)
+		res, err := g.applyResumeFailed(ctx, env)
+		g.notify(env, res, err)
+		return res, err
 	}
 
 	runID, err := uuid.Parse(env.RunID)
@@ -253,6 +281,11 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 				"runID", env.RunID, "key", dispatched.stateKeyCleanup, "error", delErr)
 		}
 	}
+
+	// The live notification joins the other post-commit sites: it runs
+	// after the commit, never inside it, and a lost publish never rolls a
+	// record back.
+	g.notify(env, result, nil)
 
 	return result, nil
 }

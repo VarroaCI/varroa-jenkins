@@ -17529,6 +17529,43 @@
         ]
       }
     },
+    "/api/v1/pipelines/{team}/stream": {
+      "get": {
+        "description": "Streams one frame per live run notification, with the event name run or stage and the notification body as data. The stream writes no initial frame and replays nothing, so a page refetches its own reads when the stream reports itself open. It uses `?ticket=` for browser EventSource auth, and the ticket carries the scope pipelines:{team}.\n",
+        "operationId": "streamTeamRuns",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/components_parameters_team"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The event stream (event kinds run and stage)."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/components_responses_ServiceUnavailable"
+          }
+        },
+        "summary": "Streams live run notifications for one team via Server-Sent Events.",
+        "tags": [
+          "Pipelines"
+        ],
+        "x-sse": true
+      }
+    },
     "/api/v1/rolebindings": {
       "get": {
         "operationId": "listVarroaRoleBindings",
@@ -18609,6 +18646,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "scope": {
+                    "description": "The one stream the ticket opens. One of brood, activity, controller:{cluster}/{ns}/{name}, broodop:{ns}/{name}, run:{run_id}, or pipelines:{team}. A ticket opens the stream whose path maps onto the same scope, and no other.\n",
                     "type": "string"
                   }
                 },

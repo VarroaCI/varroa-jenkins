@@ -1,12 +1,13 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getTeamCell, listPipelines, listRunners } from "../../api/client";
 import { ApiError } from "../../hooks/useApi";
+import { useEventStream } from "../../hooks/useEventStream";
 import { ForbiddenPage, GenericErrorPage, NotFoundPage, RecordStoreDisabledPage } from "../../components/RecoveryState";
 import { Card } from "../../components/Card";
 import { age } from "../../components/activityTimeline.util";
-import type { RunnerEntry, RunningRun } from "../../types";
+import type { RunNotification, RunnerEntry, RunningRun } from "../../types";
 import JobTree, { formatDuration } from "./JobTree";
 import TeamCellCard, { CELL_STATE_LABELS } from "./TeamCellCard";
 import { buildJobTree, defaultOpenPaths, visibleRows } from "./jobTree";
@@ -15,6 +16,10 @@ import styles from "./TeamHome.module.css";
 /** DEFAULT_OPEN_LEVELS is how many folder levels a first load unfolds. The
  * value counts levels, so two means node depth 0 and node depth 1. */
 const DEFAULT_OPEN_LEVELS = 2;
+
+/** RUN_EVENT_WINDOW_MS bounds the team read to one request per window. One
+ * build writes in bursts, and one read answers every event of a burst. */
+const RUN_EVENT_WINDOW_MS = 2000;
 
 const enc = (s: string) => encodeURIComponent(s);
 
@@ -95,11 +100,51 @@ function RunnerRow({ item }: { item: RunnerEntry }) {
 export default function TeamHome() {
   const { team } = useParams<{ team: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: ["pipelines", team],
     queryFn: () => listPipelines(team!),
     enabled: !!team,
   });
+
+  // The team's stream carries every run of every tenant of that team.
+  const { lastEvent, readyState } = useEventStream<RunNotification>(
+    team ? `/pipelines/${enc(team)}/stream` : null,
+    team ? `pipelines:${team}` : null,
+    ["run", "stage"],
+  );
+
+  const invalidateTeam = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["pipelines", team] });
+  }, [queryClient, team]);
+
+  // The run-event effect reads the invalidator through this ref, so it runs
+  // for one frame only and never replays a frame a team change leaves
+  // behind.
+  const invalidateTeamRef = useRef(invalidateTeam);
+  invalidateTeamRef.current = invalidateTeam;
+
+  // One read holds the running strip and the aggregates both, so the page
+  // refetches that read and renders no payload field. A reconnect
+  // refetches too, because the stream replays nothing.
+  useEffect(() => {
+    if (readyState === "open") invalidateTeam();
+  }, [readyState, invalidateTeam]);
+
+  const lastRunEventAtRef = useRef(0);
+  // A new team starts a new window.
+  useEffect(() => {
+    lastRunEventAtRef.current = 0;
+  }, [team]);
+  useEffect(() => {
+    // The team read carries no stage value, so a stage frame says nothing.
+    if (lastEvent?.type !== "run") return;
+    const now = Date.now();
+    if (now - lastRunEventAtRef.current < RUN_EVENT_WINDOW_MS) return;
+    lastRunEventAtRef.current = now;
+    invalidateTeamRef.current();
+  }, [lastEvent]);
+
   const runnersQuery = useQuery({
     queryKey: ["runners", team],
     queryFn: () => listRunners(team!),

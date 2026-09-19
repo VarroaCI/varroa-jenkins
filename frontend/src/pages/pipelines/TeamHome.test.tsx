@@ -8,6 +8,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { createTestQueryClient } from "../../test/render-utils";
 import { ApiError } from "../../hooks/useApi";
 import { createPipelineSummary, createRunningRun } from "../../test/factories";
+import type { RunNotification } from "../../types";
 import TeamHome from "./TeamHome";
 
 const mockListPipelines = vi.fn();
@@ -19,6 +20,39 @@ vi.mock("../../api/client", () => ({
   getTeamCell: (...args: unknown[]) => mockGetTeamCell(...args),
 }));
 
+/** RunEvent holds one frame the page reads off the team stream. */
+type RunEvent = { type: string; data: RunNotification };
+
+const mockUseEventStream = vi.fn(
+  (_baseUrl?: string | null, _scope?: string | null, _eventNames?: string[]) => ({
+    lastEvent: null as RunEvent | null,
+    readyState: "closed",
+    error: null as Error | null,
+  }),
+);
+vi.mock("../../hooks/useEventStream", () => ({
+  useEventStream: (...args: Parameters<typeof mockUseEventStream>) => mockUseEventStream(...args),
+}));
+
+/** notification builds one stream frame of a team's run. */
+function notification(overrides: Partial<RunNotification> = {}): RunNotification {
+  return {
+    kind: "run",
+    cluster: "core",
+    tenant: "payments",
+    job_path: "payments/checkout-api",
+    run_id: "run-1",
+    seq: 1,
+    at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  mockUseEventStream.mockClear();
+  mockUseEventStream.mockReturnValue({ lastEvent: null, readyState: "closed", error: null });
+});
+
 /** LocationSpy publishes the current search string, so a test can read the
  * URL the page wrote. */
 function LocationSpy() {
@@ -26,9 +60,11 @@ function LocationSpy() {
   return <div data-testid="search">{location.search}</div>;
 }
 
+/** renderPage returns repaint, which re-renders the page so it reads the
+ * stream state the test just set. */
 function renderPage(route = "/pipelines/acme") {
   const queryClient = createTestQueryClient();
-  return render(
+  const tree = () => (
     <MemoryRouter initialEntries={[route]}>
       <QueryClientProvider client={queryClient}>
         <LocationSpy />
@@ -36,8 +72,10 @@ function renderPage(route = "/pipelines/acme") {
           <Route path="/pipelines/:team" element={<TeamHome />} />
         </Routes>
       </QueryClientProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+  const view = render(tree());
+  return { ...view, repaint: () => view.rerender(tree()) };
 }
 
 /** BackControl steps the router's own history back, which is what the
@@ -646,5 +684,175 @@ describe("TeamHome — the cell pill", () => {
 
     expect(withWait.querySelectorAll("td")[5].textContent).toBe("30s");
     expect(withoutWait.querySelectorAll("td")[5].textContent).toBe("—");
+  });
+});
+
+describe("TeamHome — live run events", () => {
+  beforeEach(() => {
+    mockListPipelines.mockReset();
+    mockListRunners.mockReset();
+    mockGetTeamCell.mockReset();
+    mockListRunners.mockResolvedValue([]);
+    mockGetTeamCell.mockResolvedValue({ state: "notCellHosted", canOpenCell: false });
+    mockListPipelines.mockResolvedValue(pipelineList("payments", ["payments/checkout-api"]));
+  });
+
+  it("subscribes to the team's own stream with both event names", async () => {
+    renderPage("/pipelines/payments");
+    await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(1));
+
+    expect(mockUseEventStream).toHaveBeenCalledWith(
+      "/pipelines/payments/stream",
+      "pipelines:payments",
+      ["run", "stage"],
+    );
+  });
+
+  it("refetches the team read for a run event", async () => {
+    const { repaint } = renderPage("/pipelines/payments");
+    await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(1));
+
+    mockUseEventStream.mockReturnValue({
+      lastEvent: { type: "run", data: notification() },
+      readyState: "closed",
+      error: null,
+    });
+    await act(async () => {
+      repaint();
+    });
+
+    await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(2));
+  });
+
+  it("ignores a stage event", async () => {
+    const { repaint } = renderPage("/pipelines/payments");
+    await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(1));
+
+    mockUseEventStream.mockReturnValue({
+      lastEvent: { type: "stage", data: notification({ kind: "stage" }) },
+      readyState: "closed",
+      error: null,
+    });
+    await act(async () => {
+      repaint();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockListPipelines).toHaveBeenCalledTimes(1);
+    expect(mockListRunners).toHaveBeenCalledTimes(1);
+  });
+
+  it("refetches the team read on a reconnect, before it applies a later event", async () => {
+    const { repaint } = renderPage("/pipelines/payments");
+    await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(1));
+
+    // The stream comes back open with no frame yet: that alone is the
+    // page's signal to refetch.
+    mockUseEventStream.mockReturnValue({ lastEvent: null, readyState: "open", error: null });
+    await act(async () => {
+      repaint();
+    });
+    await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(2));
+
+    // A frame of the reconnected stream arrives after the open read.
+    mockUseEventStream.mockReturnValue({
+      lastEvent: { type: "run", data: notification({ seq: 2 }) },
+      readyState: "open",
+      error: null,
+    });
+    await act(async () => {
+      repaint();
+    });
+    await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(3));
+  });
+
+  it("runs no cell read for a run event, and leaves the card on its own interval", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockGetTeamCell.mockResolvedValue({ state: "placed", cell: "cell-a", canOpenCell: false });
+      const { repaint } = renderPage("/pipelines/payments");
+      await waitFor(() => expect(mockGetTeamCell).toHaveBeenCalledTimes(1));
+
+      mockUseEventStream.mockReturnValue({
+        lastEvent: { type: "run", data: notification() },
+        readyState: "closed",
+        error: null,
+      });
+      await act(async () => {
+        repaint();
+      });
+      await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(2));
+      expect(mockGetTeamCell).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+
+      expect(mockGetTeamCell).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refetches the new team's read for a run event inside the old team's window", async () => {
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    // The switch keeps one TeamHome instance across two teams, which is what
+    // a reader does with the navigation.
+    function TeamSwitch() {
+      const navigate = useNavigate();
+      return (
+        <button type="button" onClick={() => navigate("/pipelines/payments")}>
+          Switch team
+        </button>
+      );
+    }
+    const tree = () => (
+      <MemoryRouter initialEntries={["/pipelines/acme"]}>
+        <QueryClientProvider client={queryClient}>
+          <Routes>
+            <Route path="/pipelines/:team" element={<TeamHome />} />
+          </Routes>
+          <TeamSwitch />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+
+    const view = render(tree());
+    await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(1));
+
+    // A run event refetches the first team's read.
+    mockUseEventStream.mockReturnValue({
+      lastEvent: { type: "run", data: notification({ tenant: "acme" }) },
+      readyState: "closed",
+      error: null,
+    });
+    await act(async () => {
+      view.rerender(tree());
+    });
+    await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(2));
+
+    // The reader switches team, and the switch costs the new team one read.
+    await user.click(screen.getByRole("button", { name: "Switch team" }));
+    await waitFor(() => expect(mockListPipelines.mock.calls.length).toBeGreaterThanOrEqual(3));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const settled = mockListPipelines.mock.calls.length;
+
+    // The new team's first frame arrives inside the old window, and the new
+    // team starts a new window.
+    mockUseEventStream.mockReturnValue({
+      lastEvent: { type: "run", data: notification({ tenant: "payments", seq: 2 }) },
+      readyState: "closed",
+      error: null,
+    });
+    await act(async () => {
+      view.rerender(tree());
+    });
+
+    await waitFor(() => expect(mockListPipelines.mock.calls.length).toBeGreaterThan(settled));
   });
 });

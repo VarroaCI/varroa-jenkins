@@ -404,6 +404,40 @@ else
   check "no mite NATS identity exists" 0
 fi
 
+# 19. Live run events: the recorder publishes runs.> and the bff subscribes
+# to it only when the record store is enabled, and no other identity holds
+# the subject in either direction.
+grep -q '"runs\.>"' <<<"$recorder_block"
+check "recorder (recordStore enabled) publishes runs.>" $?
+
+grep -q '"runs\.>"' <<<"$bff_rs_subscribe"
+check "bff (recordStore enabled) subscribes runs.>" $?
+
+for identity_block in "operator_rs_block:$operator_rs_block" "gateway_rs_block:$gateway_rs_block"; do
+  name="${identity_block%%:*}"
+  block="${identity_block#*:}"
+  if grep -q 'runs\.>' <<<"$block"; then
+    check "$name does NOT hold runs.>" 1
+  else
+    check "$name does NOT hold runs.>" 0
+  fi
+done
+
+# The tail grants follow the record store gate, and this subject follows the
+# same gate: a disabled record store runs no recorder, so it publishes
+# nothing to read.
+if grep -q 'runs\.>' <<<"$bff_block"; then
+  check "bff (recordStore disabled) does NOT hold runs.>" 1
+else
+  check "bff (recordStore disabled) does NOT hold runs.>" 0
+fi
+
+if grep -q 'runs\.>' <<<"$operator_block$gateway_block"; then
+  check "recordStore disabled: no other identity holds runs.>" 1
+else
+  check "recordStore disabled: no other identity holds runs.>" 0
+fi
+
 echo ""
 if [[ "$failures" -eq 0 ]]; then
   echo "=== ALL ASSERTIONS PASSED ==="

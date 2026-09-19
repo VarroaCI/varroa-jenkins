@@ -4,6 +4,7 @@ import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createTestQueryClient } from "../../test/render-utils";
 import { ApiError } from "../../hooks/useApi";
+import type { RunNotification } from "../../types";
 import PipelinePage from "./PipelinePage";
 
 const mockGetPipelineJob = vi.fn();
@@ -15,6 +16,20 @@ vi.mock("../../api/client", () => ({
   createRun: (...args: unknown[]) => mockCreateRun(...args),
 }));
 
+/** RunEvent holds one frame the page reads off the team stream. */
+type RunEvent = { type: string; data: RunNotification };
+
+const mockUseEventStream = vi.fn(
+  (_baseUrl?: string | null, _scope?: string | null, _eventNames?: string[]) => ({
+    lastEvent: null as RunEvent | null,
+    readyState: "closed",
+    error: null as Error | null,
+  }),
+);
+vi.mock("../../hooks/useEventStream", () => ({
+  useEventStream: (...args: Parameters<typeof mockUseEventStream>) => mockUseEventStream(...args),
+}));
+
 vi.mock("../../hooks/usePermissions", async () => {
   const actual = await vi.importActual<typeof import("../../hooks/usePermissions")>(
     "../../hooks/usePermissions",
@@ -22,6 +37,25 @@ vi.mock("../../hooks/usePermissions", async () => {
   return { ...actual, usePermissions: vi.fn(() => ({ data: undefined })) };
 });
 import { usePermissions } from "../../hooks/usePermissions";
+
+/** notification builds one stream frame of the job under test. */
+function notification(overrides: Partial<RunNotification> = {}): RunNotification {
+  return {
+    kind: "run",
+    cluster: "core",
+    tenant: "acme",
+    job_path: "payments/checkout-api/main",
+    run_id: "run-1",
+    seq: 1,
+    at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  mockUseEventStream.mockClear();
+  mockUseEventStream.mockReturnValue({ lastEvent: null, readyState: "closed", error: null });
+});
 
 function LocationProbe() {
   const location = useLocation();
@@ -36,9 +70,11 @@ function LocationProbe() {
   );
 }
 
+/** renderPage returns repaint, which re-renders the page so it reads the
+ * stream state the test just set. */
 function renderPage(route = "/pipelines/acme/payments%2Fcheckout-api%2Fmain") {
   const queryClient = createTestQueryClient();
-  return render(
+  const tree = () => (
     <MemoryRouter initialEntries={[route]}>
       <QueryClientProvider client={queryClient}>
         <Routes>
@@ -50,8 +86,10 @@ function renderPage(route = "/pipelines/acme/payments%2Fcheckout-api%2Fmain") {
         </Routes>
         <LocationProbe />
       </QueryClientProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+  const view = render(tree());
+  return { ...view, repaint: () => view.rerender(tree()) };
 }
 
 const jobDetail = (overrides: Record<string, unknown> = {}) => ({
@@ -435,5 +473,63 @@ describe("PipelinePage — dependency edges", () => {
     expect(row?.textContent).toContain("search/rebuild");
     expect(row?.textContent).toContain("grant missing");
     expect(screen.queryByText("Upstream")).not.toBeInTheDocument();
+  });
+});
+
+describe("PipelinePage — live run events", () => {
+  beforeEach(() => {
+    mockGetPipelineJob.mockReset();
+    mockListRuns.mockReset();
+    mockGetPipelineJob.mockResolvedValue(jobDetail());
+    mockListRuns.mockResolvedValue({ items: [] });
+    vi.mocked(usePermissions).mockReturnValue({ data: undefined } as unknown as ReturnType<typeof usePermissions>);
+  });
+
+  /** runStream makes the job page read one frame of its own job off the
+   * team stream. */
+  function runStream(frame: RunEvent | null, readyState = "closed") {
+    mockUseEventStream.mockImplementation((_baseUrl, scope) =>
+      (scope ?? "").startsWith("pipelines:")
+        ? { lastEvent: frame, readyState, error: null }
+        : { lastEvent: null, readyState: "closed", error: null },
+    );
+  }
+
+  it("refetches the builds table, and not the job read, for a matching running event", async () => {
+    const { repaint } = renderPage();
+    await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(1));
+
+    runStream({ type: "run", data: notification({ status: "RUNNING" }) });
+    repaint();
+
+    await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(2));
+    expect(mockGetPipelineJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("refetches both reads for a completed event", async () => {
+    const { repaint } = renderPage();
+    await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(1));
+
+    runStream({ type: "run", data: notification({ status: "COMPLETED", result: "SUCCESS" }) });
+    repaint();
+
+    await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(2));
+  });
+
+  it("refetches nothing for an event of another job", async () => {
+    const { repaint } = renderPage();
+    await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(1));
+
+    runStream({
+      type: "run",
+      data: notification({ job_path: "payments/other/main", status: "COMPLETED" }),
+    });
+    repaint();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mockListRuns).toHaveBeenCalledTimes(1);
+    expect(mockGetPipelineJob).toHaveBeenCalledTimes(1);
   });
 });

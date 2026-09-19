@@ -246,6 +246,9 @@ stringData:
               // Live tail: receive console-log chunks the gateway relays
               // while a tail lease is active.
               "logs.>"
+              // Live run notifications: the recorder's per-run changes,
+              // which the team run stream forwards to a reader.
+              "runs.>"
 {{- end }}
             ]
           }
@@ -262,6 +265,9 @@ stringData:
               // The tenant purge reply and the tenant sync reply: the
               // operator owns the request inbox.
               "_INBOX_operator.>"
+              // Live run notifications: tell the BFF that a run changed,
+              // so a reader refetches the record without a reload.
+              "runs.>"
               "$JS.API.STREAM.CREATE.varroa_builds"
               "$JS.API.STREAM.UPDATE.varroa_builds"
               "$JS.API.STREAM.INFO.varroa_builds"

@@ -15,6 +15,7 @@
 // Ledger cross-tenant subject: varroa.ledger.crosstenant (core NATS, request-reply)
 // Ledger action subjects:     varroa.ledger.actions.<cluster> (core NATS, at-most-once)
 // Build subjects:             builds.<cluster>.<ns>.<cell> (JetStream)
+// Run subjects:                runs.<cluster>.<tenant> (core NATS, at-most-once)
 // Log subjects:                logs.<cluster>.<ns>.<cell>.<runid> (core NATS, gateway to BFF SSE)
 // Tail subjects:               varroa.tail.<cluster>.<ns>.<cell> (core NATS, request-reply)
 // Tenant purge subject:        varroa.recordstore.tenant.purge (core NATS, request-reply)
@@ -126,6 +127,10 @@ const (
 	// BuildsWildcard is the wildcard subject capturing every build event
 	// for the varroa_builds stream.
 	BuildsWildcard = "builds.>"
+
+	// RunNotifyWildcard is the wildcard subject capturing every live run
+	// notification for the BFF's per-team run stream.
+	RunNotifyWildcard = "runs.>"
 )
 
 // MiteInSubject returns the subject for mite→operator messages.
@@ -252,6 +257,15 @@ func LogSubject(cluster, ns, cell, runID string) string {
 // Format: varroa.tail.<cluster>.<ns>.<cell>
 func TailSubject(cluster, ns, cell string) string {
 	return fmt.Sprintf("varroa.tail.%s.%s.%s", cluster, ns, cell)
+}
+
+// RunNotifySubject returns the core-NATS subject the recorder publishes one
+// tenant's live run notifications on. The tenant of a controller is
+// <namespace>/<controller>, which holds no dot, so the subject keeps three
+// tokens.
+// Format: runs.<cluster>.<tenant>
+func RunNotifySubject(cluster, tenant string) string {
+	return fmt.Sprintf("runs.%s.%s", cluster, tenant)
 }
 
 // ParseWakeSubject extracts the namespace and controller name from a wake

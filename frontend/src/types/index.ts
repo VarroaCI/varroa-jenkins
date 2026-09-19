@@ -1806,6 +1806,31 @@ export interface RunChangeListResponse {
   items: RunChange[];
 }
 
+// ---- Live run notifications (the team run stream) ----
+
+/**
+ * One frame of the team run stream, named "run" or "stage". The recorder
+ * publishes the frame, so every field keeps its snake_case name. The
+ * stream sends no first frame and replays nothing, so a page refetches
+ * when its stream opens.
+ */
+export interface RunNotification {
+  kind: "run" | "stage";
+  cluster: string;
+  tenant: string;
+  job_path: string;
+  run_id: string;
+  /** Present on a started run; absent on every other frame. */
+  build_number?: number;
+  /** Empty when the write changed no run state. A page reads it only to
+   * decide whether an aggregate query refetches. */
+  status?: string;
+  /** Empty unless the run ended. No page renders it. */
+  result?: string;
+  seq: number;
+  at: string;
+}
+
 // The run log SSE stream (D5) carries six named event kinds. The event
 // stream itself has no OpenAPI schema (it is documented in the path's
 // description, not in components/schemas.yaml), so these mirror design.md's

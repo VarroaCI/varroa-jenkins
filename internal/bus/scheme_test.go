@@ -49,6 +49,8 @@ func TestBusScheme(t *testing.T) {
 		{"builds stream name", BuildsStreamName, "varroa_builds"},
 		{"log", LogSubject("core", "team-a", "cell-1", "run-1"), "logs.core.team-a.cell-1.run-1"},
 		{"tail", TailSubject("core", "team-a", "cell-1"), "varroa.tail.core.team-a.cell-1"},
+		{"run notify", RunNotifySubject("core", "team-a/foo"), "runs.core.team-a/foo"},
+		{"run notify wildcard", RunNotifyWildcard, "runs.>"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

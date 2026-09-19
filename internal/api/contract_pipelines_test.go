@@ -109,5 +109,16 @@ func init() {
 			Claims:     adminClaims,
 			WantStatus: http.StatusServiceUnavailable,
 		},
+
+		// The team run stream reads no record-store row, but it answers
+		// 503 through pipelinesUnavailable while RecordStore is unset, so
+		// the handler refuses the stream rather than opening a dead one.
+		contractCase{
+			Name:       "streamTeamRuns-recordStoreDisabled",
+			Method:     "GET",
+			Path:       "/api/v1/pipelines/payments/stream",
+			Claims:     adminClaims,
+			WantStatus: http.StatusServiceUnavailable,
+		},
 	)
 }

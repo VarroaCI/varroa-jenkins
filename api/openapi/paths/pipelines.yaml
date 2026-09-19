@@ -192,3 +192,31 @@
         $ref: '../components/responses.yaml#/NotFound'
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/pipelines/{team}/stream:
+  get:
+    operationId: streamTeamRuns
+    tags: [Pipelines]
+    summary: Streams live run notifications for one team via Server-Sent Events.
+    description: >
+      Streams one frame per live run notification, with the event name run
+      or stage and the notification body as data. The stream writes no
+      initial frame and replays nothing, so a page refetches its own reads
+      when the stream reports itself open. It uses `?ticket=` for browser
+      EventSource auth, and the ticket carries the scope pipelines:{team}.
+    x-sse: true
+    parameters:
+      - $ref: '../components/parameters.yaml#/team'
+    responses:
+      "200":
+        description: The event stream (event kinds run and stage).
+        content:
+          text/event-stream:
+            schema:
+              type: string
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'

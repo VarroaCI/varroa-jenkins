@@ -625,3 +625,98 @@ func TestHandleStreamTicket_BroodopScope_ForbiddenOutsideNamespace(t *testing.T)
 		t.Fatalf("expected 403 Forbidden for broodop scope outside namespace, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+// --------------------------------------------------------------------------
+// handleStreamTicket mint-time authz, pipelines scope
+// --------------------------------------------------------------------------
+
+// mintTeamTicket drives one pipelines-scope mint and answers the recorder.
+func mintTeamTicket(srv *Server, scope string) *httptest.ResponseRecorder {
+	body := `{"scope":"` + scope + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/stream/ticket", strings.NewReader(body)).
+		WithContext(authContext(testClaims()))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.handleStreamTicket(w, req)
+	return w
+}
+
+// TestHandleStreamTicket_PipelinesScope_NotFoundForRefusedTeam proves a
+// team whose candidate tenants the read check all refuses answers 404, the
+// same status the team read answers.
+func TestHandleStreamTicket_PipelinesScope_NotFoundForRefusedTeam(t *testing.T) {
+	srv := NewServer(&Dependencies{
+		RecordStore:    newFakeRecordReader(),
+		TenantResolver: refusingTenantResolver{},
+		Authorizer:     pipelineGrantAuthorizer([]string{"read"}, "team-a"),
+		TicketIssuer:   newTicketIssuerForTest(t),
+		Logger:         slog.Default(),
+	})
+
+	w := mintTeamTicket(srv, "pipelines:team-a")
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for a refused team, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestHandleStreamTicket_PipelinesScope_AllowedForPermittedCaller proves a
+// caller who may read a tenant of the team receives a ticket.
+func TestHandleStreamTicket_PipelinesScope_AllowedForPermittedCaller(t *testing.T) {
+	srv := NewServer(&Dependencies{
+		RecordStore:    newFakeRecordReader(),
+		TenantResolver: fixedTenantResolver{refs: teamStreamRefs()},
+		Authorizer:     pipelineGrantAuthorizer([]string{"read"}, "team-a"),
+		TicketIssuer:   newTicketIssuerForTest(t),
+		Logger:         slog.Default(),
+	})
+
+	w := mintTeamTicket(srv, "pipelines:team-a")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for a permitted caller, got %d: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Ticket string `json:"ticket"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode ticket response: %v", err)
+	}
+	if body.Ticket == "" {
+		t.Error("the mint answered no ticket")
+	}
+}
+
+// TestHandleStreamTicket_PipelinesScope_UnavailableWithoutRecordStore
+// proves the pipelines mint answers 503 with no record store, like every
+// other pipelines path.
+func TestHandleStreamTicket_PipelinesScope_UnavailableWithoutRecordStore(t *testing.T) {
+	srv := NewServer(&Dependencies{
+		TenantResolver: fixedTenantResolver{refs: teamStreamRefs()},
+		Authorizer:     pipelineGrantAuthorizer([]string{"read"}, "team-a"),
+		TicketIssuer:   newTicketIssuerForTest(t),
+		Logger:         slog.Default(),
+	})
+
+	w := mintTeamTicket(srv, "pipelines:team-a")
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 with no record store, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestHandleStreamTicket_PipelinesScope_RejectsAnEmptyTeam proves the scope
+// check rejects a pipelines scope with no team, before any authorization
+// runs.
+func TestHandleStreamTicket_PipelinesScope_RejectsAnEmptyTeam(t *testing.T) {
+	srv := NewServer(&Dependencies{
+		RecordStore:    newFakeRecordReader(),
+		TenantResolver: fixedTenantResolver{refs: teamStreamRefs()},
+		Authorizer:     pipelineGrantAuthorizer([]string{"read"}, "team-a"),
+		TicketIssuer:   newTicketIssuerForTest(t),
+		Logger:         slog.Default(),
+	})
+
+	for _, scope := range []string{"pipelines:", "pipelines:team-a/team-b"} {
+		if w := mintTeamTicket(srv, scope); w.Code != http.StatusBadRequest {
+			t.Errorf("scope %q: expected 400, got %d: %s", scope, w.Code, w.Body.String())
+		}
+	}
+}

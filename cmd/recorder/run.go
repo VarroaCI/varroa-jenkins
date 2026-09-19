@@ -65,7 +65,7 @@ func (cfg Config) confirmedGoneGrace() time.Duration {
 
 // run wires the recorder's dependencies in the order design D6 states:
 // open the pool, run migrations, ensure the builds stream, ensure the
-// ingest consumer, ensure the activity stream, start the nine
+// ingest consumer, ensure the activity stream, start the ten
 // goroutines, then serve HTTP. It blocks until ctx is cancelled, then
 // shuts every goroutine and the HTTP server down before returning.
 func run(ctx context.Context, cfg Config) error {
@@ -185,6 +185,8 @@ func run(ctx context.Context, cfg Config) error {
 	ingester.SetUpstreamFanout(recordstore.NewGrantEvaluator(pool), fanoutMetrics)
 	ingester.SetSweepMetrics(sweepMetrics)
 	ingester.SetStateDeleter(store)
+	runNotifier := recordstore.NewRunNotifier(busConn, logger)
+	ingester.SetRunNotifier(runNotifier)
 
 	maintCfg := recordstore.MaintenanceConfig{
 		RunRetention:      cfg.RetentionRuns,
@@ -255,6 +257,11 @@ func run(ctx context.Context, cfg Config) error {
 		return nil
 	}
 
+	runNotifierFn := func(ctx context.Context) error { //nolint:unparam // matches runWorkers' func(context.Context) error shape; Start sweeps until ctx ends and reports nothing
+		runNotifier.Start(ctx)
+		return nil
+	}
+
 	workerDone := make(chan error, 1)
 	go func() {
 		workerDone <- runWorkers(goroutineCtx,
@@ -266,6 +273,7 @@ func run(ctx context.Context, cfg Config) error {
 			namedWorker{"cross-tenant responder", crossTenantResponderFn},
 			namedWorker{"maintenance", maintenanceFn},
 			namedWorker{"activity ingest", activityIngestFn},
+			namedWorker{"run notifier", runNotifierFn},
 			namedWorker{"backstop scheduler", backstopFn},
 		)
 	}()
@@ -286,6 +294,10 @@ func run(ctx context.Context, cfg Config) error {
 	}
 
 	cancelGoroutines()
+
+	// The notifier publishes what it still holds while the bus connection
+	// is open, so a run that ends at shutdown still reaches a reader.
+	runNotifier.Close()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
 	defer shutdownCancel()
@@ -317,8 +329,8 @@ type namedWorker struct {
 // one dead worker must not go on looking healthy to the rest. The set of
 // workers is open-ended; run passes ingest, the claim responder, the
 // owner responder, the tenant purge responder, the tenant sync
-// responder, maintenance, the activity ingest consumer, and the
-// backstop scheduler.
+// responder, maintenance, the activity ingest consumer, the run
+// notifier, and the backstop scheduler.
 func runWorkers(ctx context.Context, workers ...namedWorker) error {
 	workerCtx, stopWorkers := context.WithCancel(ctx)
 	defer stopWorkers()
