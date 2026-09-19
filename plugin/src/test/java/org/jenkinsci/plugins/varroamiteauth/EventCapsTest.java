@@ -253,4 +253,116 @@ public class EventCapsTest {
         assertEquals(4000, capped.getStages().get(0).getStageId().length());
         assertEquals(4000, capped.getStages().get(0).getParentId().length());
     }
+
+    // --- The run-source caps and rungs ---
+
+    @Test
+    public void librariesAreCappedAt50KeepingTheNewest() {
+        List<BuildLibrary> libraries = new ArrayList<>();
+        for (int i = 0; i < 60; i++) {
+            libraries.add(BuildLibrary.builder().name("lib-" + i).version("1.0").build());
+        }
+        BuildEvent event = BuildEvent.builder()
+                .phase(BuildEvent.PHASE_RUN_SOURCE)
+                .libraries(libraries)
+                .build();
+
+        BuildEvent capped = VarroaRunRecorder.applyCaps(event);
+
+        assertEquals(50, capped.getLibraries().size());
+        assertEquals("lib-10", capped.getLibraries().get(0).getName());
+        assertEquals("lib-59", capped.getLibraries().get(49).getName());
+    }
+
+    @Test
+    public void ladderDropsPodTemplatesBeforeItTouchesLibraries() {
+        List<BuildPodTemplate> podTemplates = new ArrayList<>();
+        for (int i = 0; i < 140; i++) {
+            podTemplates.add(BuildPodTemplate.builder().name("pod-" + i).label("linux").image(big(12000)).build());
+        }
+        BuildEvent event = BuildEvent.builder()
+                .phase(BuildEvent.PHASE_RUN_SOURCE)
+                .definitionPath("ci/Jenkinsfile")
+                .podTemplates(podTemplates)
+                .libraries(List.of(BuildLibrary.builder().name("shared-lib").version("1.2.0").build()))
+                .build();
+        assertTrue("fixture must start oversize", serializedBytes(event) > 512 * 1024);
+
+        BuildEvent shrunk = VarroaRunRecorder.applyCaps(event);
+
+        assertTrue(serializedBytes(shrunk) <= 512 * 1024);
+        assertTrue("pod_templates were dropped", shrunk.getPodTemplates().size() < 140);
+        assertEquals("libraries survive while the pod rung fits", 1, shrunk.getLibraries().size());
+    }
+
+    @Test
+    public void ladderDropsLibrariesWhenThePodRungIsNotEnough() {
+        // The two source rungs sit after the stage rung and the error
+        // truncation, so the fixture must stay above 512 KiB with an empty
+        // stage list. An identifier holds that size, because the stage rung
+        // never drops an identifier.
+        List<BuildStage> stages = new ArrayList<>();
+        for (int i = 0; i < 1000; i++) {
+            stages.add(BuildStage.builder()
+                    .stageId("s" + i)
+                    .name(big(512))
+                    .status("SUCCESS")
+                    .error(big(2048))
+                    .build());
+        }
+        List<BuildPodTemplate> podTemplates = new ArrayList<>();
+        for (int i = 0; i < 50; i++) {
+            podTemplates.add(BuildPodTemplate.builder().name("pod-" + i).label("linux").image(big(512)).build());
+        }
+        List<BuildLibrary> libraries = new ArrayList<>();
+        for (int i = 0; i < 50; i++) {
+            libraries.add(BuildLibrary.builder().name("lib-" + i).version(big(512)).build());
+        }
+        BuildEvent event = BuildEvent.builder()
+                .phase(BuildEvent.PHASE_RUN_SOURCE)
+                .runId("run-1")
+                .intentKey("intent-1")
+                .jobPath(big(700 * 1024))
+                .buildNumber(7)
+                .definitionPath("ci/Jenkinsfile")
+                .stages(stages)
+                .podTemplates(podTemplates)
+                .libraries(libraries)
+                .build();
+        assertTrue("fixture must start oversize", serializedBytes(event) > 512 * 1024);
+
+        BuildEvent shrunk = VarroaRunRecorder.applyCaps(event);
+
+        assertTrue("the stage rung drains before both source rungs", shrunk.getStages().isEmpty());
+        assertTrue("the pod rung drains first", shrunk.getPodTemplates().isEmpty());
+        assertTrue("the library rung follows", shrunk.getLibraries().isEmpty());
+        assertEquals("only the reduced event survives", "", shrunk.getDefinitionPath());
+        assertTrue("the reduced event stays inside the loopback limit",
+                serializedBytes(shrunk) <= 1024 * 1024);
+    }
+
+    @Test
+    public void podTemplatesAreCappedAt50KeepingTheNewest() {
+        // The resolver no longer bounds its own list, so a run that
+        // allocates 60 nodes reaches the caps with 60 entries.
+        List<BuildPodTemplate> podTemplates = new ArrayList<>();
+        for (int i = 0; i < 60; i++) {
+            podTemplates.add(BuildPodTemplate.builder()
+                    .name("pod-" + i)
+                    .label("linux")
+                    .image("image-" + i)
+                    .build());
+        }
+        BuildEvent event = BuildEvent.builder()
+                .phase(BuildEvent.PHASE_RUN_SOURCE)
+                .podTemplates(podTemplates)
+                .build();
+
+        BuildEvent capped = VarroaRunRecorder.applyCaps(event);
+
+        assertEquals(50, capped.getPodTemplates().size());
+        assertEquals("pod-10", capped.getPodTemplates().get(0).getName());
+        assertEquals("pod-59", capped.getPodTemplates().get(49).getName());
+        assertEquals("image-59", capped.getPodTemplates().get(49).getImage());
+    }
 }

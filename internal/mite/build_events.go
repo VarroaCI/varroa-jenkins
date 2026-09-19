@@ -25,6 +25,7 @@ const (
 	phaseStage        = "STAGE"
 	phaseHeartbeat    = "HEARTBEAT"
 	phaseCompleted    = "COMPLETED"
+	phaseRunSource    = "run.source"
 )
 
 // Ingest kinds the recorder accepts on builds.<cluster>.<ns>.<cell>. The
@@ -38,6 +39,7 @@ const (
 	kindRunChanges   = "run.changes"
 	kindRunLog       = "run.log"
 	kindRunHeartbeat = "run.heartbeat"
+	kindRunSource    = "run.source"
 	// kindRunTriggerFailed records a build trigger Jenkins refused. The
 	// gateway publishes it from a failed TRIGGER_BUILD result, not from a
 	// BuildEvent.
@@ -203,6 +205,22 @@ type changeEntry struct {
 	Message           string    `json:"message"`
 	Timestamp         time.Time `json:"timestamp"`
 	AffectedPathCount int       `json:"affected_path_count"`
+}
+
+// libraryEntry is one entry of a run.source envelope's payload["libraries"]
+// array.
+type libraryEntry struct {
+	Name     string `json:"name"`
+	Version  string `json:"version,omitempty"`
+	Revision string `json:"revision,omitempty"`
+}
+
+// podTemplateEntry is one entry of a run.source envelope's
+// payload["pod_templates"] array.
+type podTemplateEntry struct {
+	Name  string `json:"name"`
+	Label string `json:"label,omitempty"`
+	Image string `json:"image,omitempty"`
 }
 
 // kindPayload is one mapped envelope's kind and payload, before the
@@ -400,8 +418,8 @@ func heartbeatPayload(evt *mitev1.BuildEvent) map[string]interface{} {
 	return p
 }
 
-// changesPayload maps a COMPLETED BuildEvent's changes onto a run.changes
-// payload.
+// changesPayload maps a BuildEvent's changes onto a run.changes payload. A
+// COMPLETED event and a run.source event both carry the change list.
 func changesPayload(evt *mitev1.BuildEvent) map[string]interface{} {
 	entries := make([]changeEntry, 0, len(evt.Changes))
 	for _, c := range evt.Changes {
@@ -422,6 +440,63 @@ func changesPayload(evt *mitev1.BuildEvent) map[string]interface{} {
 		p["change_count"] = evt.ChangeCount
 	}
 	return p
+}
+
+// sourcePayload maps a run.source BuildEvent onto a run.source payload. It
+// writes a key only for a non-empty value, so an absent value never
+// reaches the recorder as an empty string. It writes seq unconditionally,
+// including the value zero. A run's first event takes seq zero, and the
+// recorder's source guard reads that value.
+func sourcePayload(evt *mitev1.BuildEvent) map[string]interface{} {
+	p := map[string]interface{}{"seq": evt.Seq}
+	if evt.Branch != "" {
+		p["branch"] = evt.Branch
+	}
+	if evt.ScmRevision != "" {
+		p["scm_revision"] = evt.ScmRevision
+	}
+	if evt.ScmHead != "" {
+		p["scm_head"] = evt.ScmHead
+	}
+	if evt.ScmUrl != "" {
+		p["scm_url"] = evt.ScmUrl
+	}
+	if evt.DefinitionPath != "" {
+		p["definition_path"] = evt.DefinitionPath
+	}
+	if libs := libraryEntries(evt.Libraries); len(libs) > 0 {
+		p["libraries"] = libs
+	}
+	if pods := podTemplateEntries(evt.PodTemplates); len(pods) > 0 {
+		p["pod_templates"] = pods
+	}
+	return p
+}
+
+// libraryEntries maps the event's libraries onto payload entries. It skips
+// a nil element, and an absent list answers no entries.
+func libraryEntries(in []*mitev1.BuildLibrary) []libraryEntry {
+	out := make([]libraryEntry, 0, len(in))
+	for _, l := range in {
+		if l == nil {
+			continue
+		}
+		out = append(out, libraryEntry{Name: l.Name, Version: l.Version, Revision: l.Revision})
+	}
+	return out
+}
+
+// podTemplateEntries maps the event's pod templates onto payload entries.
+// It skips a nil element, and an absent list answers no entries.
+func podTemplateEntries(in []*mitev1.BuildPodTemplate) []podTemplateEntry {
+	out := make([]podTemplateEntry, 0, len(in))
+	for _, t := range in {
+		if t == nil {
+			continue
+		}
+		out = append(out, podTemplateEntry{Name: t.Name, Label: t.Label, Image: t.Image})
+	}
+	return out
 }
 
 // testsPayload maps a COMPLETED BuildEvent's test counters onto the
@@ -452,6 +527,9 @@ func completedPayload(evt *mitev1.BuildEvent) map[string]interface{} {
 	}
 	if evt.Seq != 0 {
 		p["seq"] = evt.Seq
+	}
+	if evt.ScmRevision != "" {
+		p["scm_revision"] = evt.ScmRevision
 	}
 	addTemplateFields(p, evt)
 	return p
@@ -524,6 +602,15 @@ func (h *BusHandler) buildPayloadGroup(evt *mitev1.BuildEvent) ([]kindPayload, e
 		}
 		return []kindPayload{{kindRunStage, payload}}, nil
 
+	case phaseRunSource:
+		// The run.source envelope goes first: it carries the revision the
+		// change list belongs to.
+		out := []kindPayload{{kindRunSource, sourcePayload(evt)}}
+		if len(evt.Changes) > 0 {
+			out = append(out, kindPayload{kindRunChanges, changesPayload(evt)})
+		}
+		return out, nil
+
 	case phaseCompleted:
 		out := make([]kindPayload, 0, len(evt.Stages)+len(evt.Artifacts)+4)
 		for _, st := range evt.Stages {
@@ -553,12 +640,13 @@ func (h *BusHandler) buildPayloadGroup(evt *mitev1.BuildEvent) ([]kindPayload, e
 	}
 }
 
-// shrinkToBudget applies design.md D9's size ladder to env until its
-// marshaled size fits gatewayEnvelopeBudget, or returns false when it
-// still does not fit. It truncates payload["error"], then drops
-// payload["changes"] entries from the oldest, then drops
-// payload["stages"] entries from the oldest (defensive: no kind this
-// package emits carries a plural "stages" key today).
+// shrinkToBudget applies the size ladder to env until its marshaled size
+// fits gatewayEnvelopeBudget. It returns false when env still does not
+// fit. The ladder truncates payload["error"] first. It then drops entries
+// from the oldest, in this order: payload["changes"],
+// payload["pod_templates"], payload["libraries"], payload["stages"]. No
+// kind this package emits carries a plural "stages" key today, so the
+// last step stays defensive.
 func shrinkToBudget(env *ingestEnvelope) bool {
 	fits := func() bool {
 		data, err := json.Marshal(env)
@@ -579,6 +667,26 @@ func shrinkToBudget(env *ingestEnvelope) bool {
 		for len(changes) > 0 {
 			changes = changes[1:]
 			env.Payload["changes"] = changes
+			if fits() {
+				return true
+			}
+		}
+	}
+
+	if pods, ok := env.Payload["pod_templates"].([]podTemplateEntry); ok {
+		for len(pods) > 0 {
+			pods = pods[1:]
+			env.Payload["pod_templates"] = pods
+			if fits() {
+				return true
+			}
+		}
+	}
+
+	if libs, ok := env.Payload["libraries"].([]libraryEntry); ok {
+		for len(libs) > 0 {
+			libs = libs[1:]
+			env.Payload["libraries"] = libs
 			if fits() {
 				return true
 			}

@@ -255,6 +255,7 @@ func TestNotificationForMapsEveryKind(t *testing.T) {
 		{KindRunTests, map[string]any{"build_number": 7}, "run", "", "", 0, true},
 		{KindRunState, map[string]any{"build_number": 7}, "run", "", "", 0, true},
 		{KindRunResumeFailed, map[string]any{"build_number": 7}, "run", "", "", 0, true},
+		{KindRunSource, RunSourcePayload{Seq: 0}, "run", "", "", 0, true},
 		{KindRunTriggerAccepted, map[string]any{}, "run", "QUEUED", "", 0, true},
 		{KindRunTriggerFailed, map[string]any{}, "run", "COMPLETED", "TRIGGER_FAILED", 0, true},
 		{KindRunArtifacts, map[string]any{}, "", "", "", 0, false},

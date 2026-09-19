@@ -2,6 +2,8 @@ package org.jenkinsci.plugins.varroamiteauth;
 
 import static org.junit.Assert.*;
 
+import net.sf.json.JSONObject;
+
 import org.junit.After;
 import org.junit.Test;
 
@@ -82,5 +84,24 @@ public class RunHeartbeatTest {
             VarroaRunRecorder.registerRunForTesting("job-" + i, 1, "run-" + i, "intent-" + i);
         }
         assertEquals(512, VarroaRunRecorder.stateSizeForTesting());
+    }
+
+    @Test
+    public void heartbeatCarriesNoneOfTheSourceFields() {
+        VarroaRunRecorder.registerRunForTesting("job-a", 1, "run-a", "intent-a");
+
+        VarroaRunRecorder.heartbeatTick();
+
+        BuildEventSink.DrainResult result = BuildEventSink.get().drain(100);
+        assertEquals(1, result.events.size());
+        BuildEvent e = result.events.get(0);
+        assertEquals(BuildEvent.PHASE_HEARTBEAT, e.getPhase());
+        assertTrue(e.getLibraries().isEmpty());
+        assertEquals("", e.getDefinitionPath());
+        assertTrue(e.getPodTemplates().isEmpty());
+        JSONObject json = e.toJson();
+        assertFalse(json.containsKey("libraries"));
+        assertFalse(json.containsKey("definition_path"));
+        assertFalse(json.containsKey("pod_templates"));
     }
 }

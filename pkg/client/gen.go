@@ -2879,12 +2879,28 @@ type ComponentsSchemasRunDetail struct {
 	Result       *string            `json:"result,omitempty"`
 
 	// RetryRunId An existing retry's run id, when one already exists.
-	RetryRunId  *string                      `json:"retryRunId,omitempty"`
-	RunId       string                       `json:"runId"`
-	ScmRevision *string                      `json:"scmRevision,omitempty"`
-	Stages      *[]ComponentsSchemasRunStage `json:"stages,omitempty"`
-	StartedAt   *time.Time                   `json:"startedAt,omitempty"`
-	Status      string                       `json:"status"`
+	RetryRunId  *string `json:"retryRunId,omitempty"`
+	RunId       string  `json:"runId"`
+	ScmRevision *string `json:"scmRevision,omitempty"`
+
+	// Source How the run was defined, read from the run's stored source column. This field is absent until a run.source event arrives.
+	Source *struct {
+		// DefinitionPath The pipeline script path in the run's own repository. A run that a template defines reports no value here.
+		DefinitionPath *string `json:"definitionPath,omitempty"`
+		Libraries      *[]struct {
+			Name     *string `json:"name,omitempty"`
+			Revision *string `json:"revision,omitempty"`
+			Version  *string `json:"version,omitempty"`
+		} `json:"libraries,omitempty"`
+		PodTemplates *[]struct {
+			Image *string `json:"image,omitempty"`
+			Label *string `json:"label,omitempty"`
+			Name  *string `json:"name,omitempty"`
+		} `json:"podTemplates,omitempty"`
+	} `json:"source,omitempty"`
+	Stages    *[]ComponentsSchemasRunStage `json:"stages,omitempty"`
+	StartedAt *time.Time                   `json:"startedAt,omitempty"`
+	Status    string                       `json:"status"`
 
 	// Tenant The tenant noun the server authorizes against: the run row's stored tenant column. A Team name for a Team tenant, or "<namespace>/<controller>" for a synthetic tenant.
 	Tenant string `json:"tenant"`

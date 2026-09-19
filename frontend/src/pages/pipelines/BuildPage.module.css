@@ -68,6 +68,21 @@
   font-size: 13px;
 }
 
+/* The "Ran with" row sits under the meta line. */
+.ranWith {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 14px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.ranWithLabel {
+  font-weight: 600;
+  color: var(--text);
+}
+
 .mono {
   font-family: var(--mono);
 }

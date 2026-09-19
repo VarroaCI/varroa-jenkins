@@ -29,6 +29,7 @@ type Run struct {
 	Cause                   json.RawMessage
 	Params                  json.RawMessage
 	Changes                 json.RawMessage
+	Source                  json.RawMessage
 	TestsTotal              *int32
 	TestsFailed             *int32
 	TestsSkipped            *int32

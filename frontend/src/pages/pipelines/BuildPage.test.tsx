@@ -471,6 +471,70 @@ describe("BuildPage — a refused build trigger", () => {
   });
 });
 
+describe("BuildPage — the header's source facts", () => {
+  it("renders the branch, the short commit, and the record's own cause on the meta line", async () => {
+    mockGetRun.mockResolvedValue(
+      baseRun({ branch: "main", scmRevision: "abcdef1234567890", cause: "Push" }),
+    );
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.getByText("main")).toBeInTheDocument();
+    expect(screen.getByText("abcdef12")).toBeInTheDocument();
+    // The title keeps the cause as the commit message line, so the cause
+    // string itself appears on the meta line alone.
+    expect(screen.getByText("Push")).toBeInTheDocument();
+    expect(screen.queryByText("abcdef1234567890")).not.toBeInTheDocument();
+  });
+
+  it("renders the definition path, the libraries, and the pod templates in the Ran with row", async () => {
+    mockGetRun.mockResolvedValue(
+      baseRun({
+        source: {
+          definitionPath: "ci/Jenkinsfile",
+          libraries: [{ name: "acme", version: "1.2.3", revision: "abcdef1234567890" }],
+          podTemplates: [{ name: "maven", label: "maven", image: "maven:3.9.6" }],
+        },
+      }),
+    );
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.getByText("Ran with")).toBeInTheDocument();
+    expect(screen.getByText("ci/Jenkinsfile")).toBeInTheDocument();
+    expect(screen.getByText("acme@1.2.3 abcdef12")).toBeInTheDocument();
+    expect(screen.getByText("maven (maven:3.9.6)")).toBeInTheDocument();
+  });
+
+  it("renders the row's values alone when the record carries no version and no revision", async () => {
+    mockGetRun.mockResolvedValue(
+      baseRun({ source: { libraries: [{ name: "acme" }], podTemplates: [{ name: "maven" }] } }),
+    );
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.getByText("Ran with")).toBeInTheDocument();
+    expect(screen.getByText("acme")).toBeInTheDocument();
+    expect(screen.getByText("maven")).toBeInTheDocument();
+  });
+
+  it("renders no Ran with row for a record with no source object", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.queryByText("Ran with")).not.toBeInTheDocument();
+  });
+
+  it("renders no Ran with row for an empty source object", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ source: {} }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.queryByText("Ran with")).not.toBeInTheDocument();
+  });
+});
+
 describe("BuildPage — live run events", () => {
   /** notification builds one frame of the team run stream. */
   function notification(overrides: Record<string, unknown> = {}) {

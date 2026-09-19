@@ -308,6 +308,54 @@ func TestGetRunNotFoundForUnreadableTenant(t *testing.T) {
 	}
 }
 
+// --- The get_run tool reads the same record as GET /runs/{run}, so its
+// result carries the same source object. ---
+
+func TestGetRunCarriesSourceObject(t *testing.T) {
+	reader := newFakePipelineReader()
+	reader.runs["run-a"] = recordstore.Run{
+		RunID: "run-a", Tenant: "team-a", JobPath: "team-a/build", Status: "COMPLETED",
+		Source: json.RawMessage(`{"definition_path":"ci/Jenkinsfile","libraries":[{"name":"acme","version":"1.2.3"}],"pod_templates":[{"name":"maven","image":"maven:3.9.6"}]}`),
+	}
+	deps := &api.Dependencies{
+		Authorizer:  pipelinesTestAuthorizer("read"),
+		RecordStore: reader,
+	}
+
+	tr := callPipelineTool(t, deps, "get_run", map[string]interface{}{"run": "run-a"})
+	if tr.IsError {
+		t.Fatalf("get_run returned error: %v", tr.Content)
+	}
+	var detail struct {
+		Source *struct {
+			DefinitionPath string `json:"definitionPath"`
+			Libraries      []struct {
+				Name    string `json:"name"`
+				Version string `json:"version"`
+			} `json:"libraries"`
+			PodTemplates []struct {
+				Name  string `json:"name"`
+				Image string `json:"image"`
+			} `json:"podTemplates"`
+		} `json:"source"`
+	}
+	if err := json.Unmarshal(tr.StructuredContent, &detail); err != nil {
+		t.Fatalf("unmarshal structuredContent: %v", err)
+	}
+	if detail.Source == nil {
+		t.Fatal("the get_run result carries no source object")
+	}
+	if detail.Source.DefinitionPath != "ci/Jenkinsfile" {
+		t.Errorf("definitionPath = %q, want %q", detail.Source.DefinitionPath, "ci/Jenkinsfile")
+	}
+	if len(detail.Source.Libraries) != 1 || detail.Source.Libraries[0].Name != "acme" || detail.Source.Libraries[0].Version != "1.2.3" {
+		t.Errorf("libraries = %+v, want one acme entry at 1.2.3", detail.Source.Libraries)
+	}
+	if len(detail.Source.PodTemplates) != 1 || detail.Source.PodTemplates[0].Image != "maven:3.9.6" {
+		t.Errorf("podTemplates = %+v, want one maven entry", detail.Source.PodTemplates)
+	}
+}
+
 // --- Task 9.6: get_run_log's bounded tail. ---
 
 func fakeConsoleLog(lines int) []byte {

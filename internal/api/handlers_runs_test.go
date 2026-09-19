@@ -113,6 +113,99 @@ func TestHandleGetRun_TenantFolderForPlacedTeam(t *testing.T) {
 	}
 }
 
+// --- 7.6: the run's source column and its response object ---
+
+// runSourceColumnJSON is the snake_case JSON the recorder's merge writes
+// into the runs.source column: the store's key names, never the camelCase
+// names the response carries.
+const runSourceColumnJSON = `{"definition_path":"ci/Jenkinsfile","libraries":[{"name":"acme","version":"1.2.3","revision":"abcdef1234567890"}],"pod_templates":[{"name":"maven","label":"maven","image":"maven:3.9.6"}]}`
+
+// TestHandleGetRun_CarriesSource seeds the column with the recorder's own
+// shape and asserts the response answers all three camelCase fields. A
+// direct unmarshal of the column into the response type would leave
+// definitionPath and podTemplates empty, because the column spells those
+// two keys with snake_case.
+func TestHandleGetRun_CarriesSource(t *testing.T) {
+	reader := newFakeRecordReader()
+	reader.runs["r1"] = recordstore.Run{
+		RunID: "r1", Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: "COMPLETED",
+		Source: json.RawMessage(runSourceColumnJSON),
+	}
+	srv := newRunFixtureServer(reader, nil)
+
+	rec := doRunRequest(t, srv.handleGetRun, "/runs/r1", map[string]string{"run": "r1"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	var detail runDetailJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if detail.Source == nil {
+		t.Fatalf("source is absent, want the record's source object")
+	}
+	if detail.Source.DefinitionPath != "ci/Jenkinsfile" {
+		t.Errorf("definitionPath = %q, want %q", detail.Source.DefinitionPath, "ci/Jenkinsfile")
+	}
+	if len(detail.Source.Libraries) != 1 {
+		t.Fatalf("libraries = %+v, want one entry", detail.Source.Libraries)
+	}
+	if got := detail.Source.Libraries[0]; got.Name != "acme" || got.Version != "1.2.3" || got.Revision != "abcdef1234567890" {
+		t.Errorf("libraries[0] = %+v, want acme, 1.2.3, abcdef1234567890", got)
+	}
+	if len(detail.Source.PodTemplates) != 1 {
+		t.Fatalf("podTemplates = %+v, want one entry", detail.Source.PodTemplates)
+	}
+	if got := detail.Source.PodTemplates[0]; got.Name != "maven" || got.Label != "maven" || got.Image != "maven:3.9.6" {
+		t.Errorf("podTemplates[0] = %+v, want maven, maven, maven:3.9.6", got)
+	}
+	if !strings.Contains(rec.Body.String(), `"definitionPath"`) {
+		t.Errorf("body = %s, want the camelCase key definitionPath", rec.Body.String())
+	}
+}
+
+// TestHandleGetRun_OmitsSourceWhenColumnCarriesNone covers the three
+// empty cases: a NULL column, an empty object, and a column that fails to
+// decode. Each one still answers the run.
+func TestHandleGetRun_OmitsSourceWhenColumnCarriesNone(t *testing.T) {
+	cases := []struct {
+		name   string
+		source json.RawMessage
+	}{
+		{"null column", nil},
+		{"empty object", json.RawMessage(`{}`)},
+		{"undecodable column", json.RawMessage(`{"definition_path":`)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			reader := newFakeRecordReader()
+			reader.runs["r1"] = recordstore.Run{
+				RunID: "r1", Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: "COMPLETED",
+				Source: c.source,
+			}
+			srv := newRunFixtureServer(reader, nil)
+
+			rec := doRunRequest(t, srv.handleGetRun, "/runs/r1", map[string]string{"run": "r1"}, nil)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+			}
+			var detail runDetailJSON
+			if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if detail.RunID != "r1" {
+				t.Fatalf("runId = %q, want r1: one unreadable column must not hide the run", detail.RunID)
+			}
+			if detail.Source != nil {
+				t.Fatalf("source = %+v, want it absent", detail.Source)
+			}
+			if strings.Contains(rec.Body.String(), `"source"`) {
+				t.Fatalf("body = %s, want no source key", rec.Body.String())
+			}
+		})
+	}
+}
+
 // --- 3.9: nil RecordStore / nil BlobStore / ErrSchemaTooOld -> 503 ---
 
 func newFakeRecordReaderWithRun() *fakeRecordReader {

@@ -2436,6 +2436,40 @@ components:
           type: string
         scmRevision:
           type: string
+        source:
+          additionalProperties: false
+          description: |
+            How the run was defined, read from the run's stored source column. This field is absent until a run.source event arrives.
+          properties:
+            definitionPath:
+              description: |
+                The pipeline script path in the run's own repository. A run that a template defines reports no value here.
+              type: string
+            libraries:
+              items:
+                additionalProperties: false
+                properties:
+                  name:
+                    type: string
+                  revision:
+                    type: string
+                  version:
+                    type: string
+                type: object
+              type: array
+            podTemplates:
+              items:
+                additionalProperties: false
+                properties:
+                  image:
+                    type: string
+                  label:
+                    type: string
+                  name:
+                    type: string
+                type: object
+              type: array
+          type: object
         stages:
           items:
             $ref: '#/components/schemas/components_schemas_RunStage'
@@ -7393,6 +7427,40 @@ components:
           type: string
         scmRevision:
           type: string
+        source:
+          additionalProperties: false
+          description: |
+            How the run was defined, read from the run's stored source column. This field is absent until a run.source event arrives.
+          properties:
+            definitionPath:
+              description: |
+                The pipeline script path in the run's own repository. A run that a template defines reports no value here.
+              type: string
+            libraries:
+              items:
+                additionalProperties: false
+                properties:
+                  name:
+                    type: string
+                  revision:
+                    type: string
+                  version:
+                    type: string
+                type: object
+              type: array
+            podTemplates:
+              items:
+                additionalProperties: false
+                properties:
+                  image:
+                    type: string
+                  label:
+                    type: string
+                  name:
+                    type: string
+                type: object
+              type: array
+          type: object
         stages:
           items:
             $ref: '#/components/schemas/components_schemas_RunStage'

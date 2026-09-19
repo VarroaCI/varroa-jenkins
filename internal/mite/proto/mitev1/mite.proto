@@ -301,6 +301,20 @@ message BuildChange {
   int32 affected_path_count = 6;
 }
 
+message BuildLibrary {
+  // @required
+  string name = 1;
+  string version = 2;
+  string revision = 3;
+}
+
+message BuildPodTemplate {
+  // @required
+  string name = 1;
+  string label = 2;
+  string image = 3;
+}
+
 message BuildStage {
   // @required
   string stage_id = 1;
@@ -393,6 +407,9 @@ message BuildEvent {
   string marker_path = 40;
   string marker_revision = 41;
   string delivery_id = 42;
+  repeated BuildLibrary libraries = 43;
+  string definition_path = 44;
+  repeated BuildPodTemplate pod_templates = 45;
 }
 
 message ClaimRequest {

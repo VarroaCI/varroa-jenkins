@@ -47,13 +47,14 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 	_, err = tx.Exec(ctx, `
 		INSERT INTO varroa.runs (
 			run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path,
-			status, result, ended_at, duration_ms, payload
+			status, result, ended_at, duration_ms, scm_revision, payload
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
 			CASE WHEN $13 THEN 'COMPLETED' ELSE 'QUEUED' END,
 			CASE WHEN $13 THEN $9::text ELSE NULL::text END,
 			CASE WHEN $13 THEN $10::timestamptz ELSE NULL::timestamptz END,
 			CASE WHEN $13 THEN $11::bigint ELSE NULL::bigint END,
+			$14,
 			CASE WHEN $13 THEN jsonb_build_object('run.completed', $12::jsonb) ELSE jsonb_build_object('foreign_completion', $12::jsonb) END
 		)
 		ON CONFLICT (created_at, run_id) DO UPDATE SET
@@ -65,6 +66,10 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 			result = CASE WHEN $13 THEN EXCLUDED.result ELSE COALESCE(EXCLUDED.result, runs.result) END,
 			ended_at = CASE WHEN $13 THEN EXCLUDED.ended_at ELSE COALESCE(EXCLUDED.ended_at, runs.ended_at) END,
 			duration_ms = CASE WHEN $13 THEN EXCLUDED.duration_ms ELSE COALESCE(EXCLUDED.duration_ms, runs.duration_ms) END,
+			-- The fill-only revision rule: an absent value takes the
+			-- newest changelog entry's revision, whatever the seq. A set
+			-- value stays, so the rule never rewrites a known commit.
+			scm_revision = COALESCE(NULLIF(runs.scm_revision, ''), EXCLUDED.scm_revision),
 			interrupted_superseded_at = CASE
 				WHEN $13 AND runs.result = 'INTERRUPTED' THEN now()
 				ELSE runs.interrupted_superseded_at
@@ -78,7 +83,7 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 		intent.runID, intent.createdAt, intent.intentKey, intent.cluster, intent.namespace,
 		intent.cellValue(), intent.tenant, intent.jobPath,
 		payload.Result, payload.EndedAt, payload.DurationMs, string(envelopeJSON),
-		owner,
+		owner, payload.SCMRevision,
 	)
 	if err != nil {
 		return false, RunCompletedPayload{}, fmt.Errorf("upsert completed run: %w", err)

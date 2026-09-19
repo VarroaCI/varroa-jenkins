@@ -165,6 +165,73 @@ func TestApplyRunStagePublishesOneNotification(t *testing.T) {
 	}
 }
 
+// TestApplyRunSourcePublishesOneNotification asserts a committed
+// run.source write publishes exactly one run notification.
+func TestApplyRunSourcePublishesOneNotification(t *testing.T) {
+	pool, _ := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:notify-source")
+	g := NewIngester(pool, nil, nil)
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	g.SetRunNotifier(notifier)
+
+	env := newTestEnvelope(t, runID, "manual:notify-source", KindRunSource, RunSourcePayload{
+		Seq:            0,
+		DefinitionPath: "Jenkinsfile",
+	})
+	res, err := g.Apply(context.Background(), env)
+	if err != nil {
+		t.Fatalf("apply run.source: %v", err)
+	}
+	if res.RefusedSource {
+		t.Fatal("the run.source write was refused, want applied")
+	}
+	if got := sent.count(); got != 1 {
+		t.Fatalf("published %d notifications, want 1", got)
+	}
+	got := sent.payload(0)
+	if got.Kind != "run" || got.RunID != env.RunID || got.Status != "" || got.Result != "" {
+		t.Fatalf("published %+v, want one run notification for the run", got)
+	}
+}
+
+// TestApplyRefusedRunSourcePublishesNothing asserts a run.source write
+// the guard refused publishes no notification.
+func TestApplyRefusedRunSourcePublishesNothing(t *testing.T) {
+	pool, _ := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:notify-source-refused")
+	g := NewIngester(pool, nil, nil)
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	g.SetRunNotifier(notifier)
+
+	first := newTestEnvelope(t, runID, "manual:notify-source-refused", KindRunSource, RunSourcePayload{
+		Seq:            5,
+		DefinitionPath: "Jenkinsfile",
+	})
+	if _, err := g.Apply(context.Background(), first); err != nil {
+		t.Fatalf("apply first run.source: %v", err)
+	}
+	if got := sent.count(); got != 1 {
+		t.Fatalf("published %d notifications for the first write, want 1", got)
+	}
+
+	lower := newTestEnvelope(t, runID, "manual:notify-source-refused", KindRunSource, RunSourcePayload{
+		Seq:            4,
+		DefinitionPath: "Other.groovy",
+	})
+	res, err := g.Apply(context.Background(), lower)
+	if err != nil {
+		t.Fatalf("apply lower run.source: %v", err)
+	}
+	if !res.RefusedSource {
+		t.Fatal("the lower run.source write was applied, want refused")
+	}
+	if got := sent.count(); got != 1 {
+		t.Fatalf("published %d notifications after the refused write, want 1", got)
+	}
+}
+
 // TestApplyBuildNumberConflictPublishesOnce asserts the retried
 // run.started publishes one notification, after the retry commits.
 func TestApplyBuildNumberConflictPublishesOnce(t *testing.T) {

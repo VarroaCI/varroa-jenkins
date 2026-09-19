@@ -763,6 +763,148 @@ func TestShrinkToBudget_DropsOldestChanges(t *testing.T) {
 	}
 }
 
+// --- 5.6: the run.source mapping ---
+
+func TestBuildPayloadGroup_RunSourceMapsSourceThenChanges(t *testing.T) {
+	evt := &mitev1.BuildEvent{
+		Phase:          phaseRunSource,
+		RunId:          "run-1",
+		Branch:         "main",
+		ScmRevision:    "abc123",
+		ScmHead:        "main",
+		ScmUrl:         "https://example.invalid/repo.git",
+		DefinitionPath: "Jenkinsfile",
+		Libraries:      []*mitev1.BuildLibrary{{Name: "shared", Version: "1.0", Revision: "def456"}},
+		PodTemplates:   []*mitev1.BuildPodTemplate{{Name: "pod-1", Label: "linux", Image: "img:1"}},
+		Changes:        []*mitev1.BuildChange{{CommitId: "abc123"}},
+		ChangeCount:    1,
+	}
+	h := newBuildEventTestHandler(nil)
+	kps, err := h.buildPayloadGroup(evt)
+	if err != nil {
+		t.Fatalf("buildPayloadGroup: %v", err)
+	}
+	if len(kps) != 2 || kps[0].kind != kindRunSource || kps[1].kind != kindRunChanges {
+		t.Fatalf("kps = %+v, want run.source then run.changes", kps)
+	}
+	src := kps[0].payload
+	if src["seq"] != evt.Seq {
+		t.Fatalf("seq = %v, want %v written unconditionally", src["seq"], evt.Seq)
+	}
+	if src["branch"] != "main" || src["scm_revision"] != "abc123" || src["scm_head"] != "main" {
+		t.Fatalf("source payload = %+v", src)
+	}
+	if src["definition_path"] != "Jenkinsfile" {
+		t.Fatalf("definition_path = %v, want the Jenkinsfile path", src["definition_path"])
+	}
+	libs, ok := src["libraries"].([]libraryEntry)
+	if !ok || len(libs) != 1 || libs[0].Name != "shared" || libs[0].Revision != "def456" {
+		t.Fatalf("libraries = %+v", src["libraries"])
+	}
+	pods, ok := src["pod_templates"].([]podTemplateEntry)
+	if !ok || len(pods) != 1 || pods[0].Image != "img:1" {
+		t.Fatalf("pod_templates = %+v", src["pod_templates"])
+	}
+}
+
+func TestBuildPayloadGroup_RunSourceWithoutChanges(t *testing.T) {
+	evt := &mitev1.BuildEvent{Phase: phaseRunSource, RunId: "run-1", Seq: 3}
+	h := newBuildEventTestHandler(nil)
+	kps, err := h.buildPayloadGroup(evt)
+	if err != nil {
+		t.Fatalf("buildPayloadGroup: %v", err)
+	}
+	if len(kps) != 1 || kps[0].kind != kindRunSource {
+		t.Fatalf("kps = %+v, want exactly one run.source envelope", kps)
+	}
+	p := kps[0].payload
+	if p["seq"] != int64(3) {
+		t.Fatalf("seq = %v, want 3", p["seq"])
+	}
+	for _, key := range []string{"branch", "scm_revision", "scm_head", "scm_url", "definition_path", "libraries", "pod_templates"} {
+		if _, ok := p[key]; ok {
+			t.Fatalf("payload carries %q for an empty value: %+v", key, p)
+		}
+	}
+}
+
+func TestShrinkToBudget_DropsOldestPodTemplatesThenLibraries(t *testing.T) {
+	const entryCount = 8
+	libs := make([]libraryEntry, 0, entryCount)
+	pods := make([]podTemplateEntry, 0, entryCount)
+	for i := 0; i < entryCount; i++ {
+		libs = append(libs, libraryEntry{
+			Name:    fmt.Sprintf("lib-%d", i),
+			Version: strings.Repeat("v", 150*1024), // 150 KiB each, ~1.2 MiB total
+		})
+		pods = append(pods, podTemplateEntry{
+			Name:  fmt.Sprintf("pod-%d", i),
+			Image: strings.Repeat("p", 150*1024),
+		})
+	}
+	env := ingestEnvelope{
+		Kind: kindRunSource,
+		Payload: map[string]interface{}{
+			"seq":           int64(1),
+			"libraries":     libs,
+			"pod_templates": pods,
+		},
+	}
+	data, _ := json.Marshal(env)
+	if len(data) <= gatewayEnvelopeBudget {
+		t.Fatalf("fixture is not oversized: %d bytes", len(data))
+	}
+
+	if !shrinkToBudget(&env) {
+		t.Fatal("shrinkToBudget should fit by dropping the two lists")
+	}
+	shrunk, _ := json.Marshal(env)
+	if len(shrunk) > gatewayEnvelopeBudget {
+		t.Fatalf("still oversized after shrink: %d bytes", len(shrunk))
+	}
+	// pod_templates drops before libraries, so pod-0 goes before lib-0.
+	remainingPods, ok := env.Payload["pod_templates"].([]podTemplateEntry)
+	if !ok || len(remainingPods) != 0 {
+		t.Fatalf("pod_templates remaining = %+v, want none", env.Payload["pod_templates"])
+	}
+	remainingLibs, ok := env.Payload["libraries"].([]libraryEntry)
+	if !ok || len(remainingLibs) == 0 || len(remainingLibs) >= entryCount {
+		t.Fatalf("libraries remaining = %+v, want some but not all dropped", env.Payload["libraries"])
+	}
+	if remainingLibs[0].Name == "lib-0" {
+		t.Fatal("want the oldest libraries dropped first")
+	}
+	if env.Payload["seq"] != int64(1) {
+		t.Fatalf("seq = %v, want the ladder to keep it", env.Payload["seq"])
+	}
+}
+
+func TestOnBuildEvent_OversizeRunSourceStillPublishes(t *testing.T) {
+	pub := &fakePublisher{}
+	h := newBuildEventTestHandler(pub)
+	sender := &fakeSender{}
+	startTestWorker(t, h, sender.send)
+
+	libs := make([]*mitev1.BuildLibrary, 0, 8)
+	for i := 0; i < 8; i++ {
+		libs = append(libs, &mitev1.BuildLibrary{
+			Name:    fmt.Sprintf("lib-%d", i),
+			Version: strings.Repeat("v", 150*1024),
+		})
+	}
+	evt := &mitev1.BuildEvent{Phase: phaseRunSource, RunId: "run-1", Seq: 1, Libraries: libs}
+	if err := h.OnBuildEvent("ctrl1", "ns1", testConnToken, evt); err != nil {
+		t.Fatalf("OnBuildEvent: %v", err)
+	}
+	waitFor(t, func() bool { return len(sender.acks()) == 1 }, time.Second, "condition not met")
+	if ack := sender.acks()[0]; ack.Status == eventAckRejected {
+		t.Fatalf("ack = %+v, want an accepted run.source publish", ack)
+	}
+	if pub.publishedCount() != 1 {
+		t.Fatalf("published %d envelopes, want 1", pub.publishedCount())
+	}
+}
+
 func TestOnBuildEvent_OversizedRejected(t *testing.T) {
 	pub := &fakePublisher{}
 	h := newBuildEventTestHandler(pub)

@@ -1,0 +1,363 @@
+package org.jenkinsci.plugins.varroamiteauth;
+
+import static org.junit.Assert.*;
+
+import hudson.model.Action;
+import hudson.model.FreeStyleProject;
+import hudson.model.InvisibleAction;
+import hudson.model.Run;
+import hudson.model.TaskListener;
+
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+
+import jenkins.scm.api.SCMHead;
+import jenkins.scm.api.SCMRevision;
+import jenkins.scm.api.SCMRevisionAction;
+
+import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
+import org.jenkinsci.plugins.workflow.flow.FlowDefinition;
+import org.jenkinsci.plugins.workflow.flow.FlowExecution;
+import org.jenkinsci.plugins.workflow.flow.FlowExecutionOwner;
+import org.jenkinsci.plugins.workflow.job.WorkflowJob;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.jvnet.hudson.test.JenkinsRule;
+
+/**
+ * Tests for the two {@code run.source} emissions (E1 and E2), the source
+ * facts they carry, and their interaction with the claim's revision and
+ * the changelog fallback.
+ */
+public class VarroaRunSourceTest {
+
+    @Rule
+    public JenkinsRule j = new JenkinsRule();
+
+    private String repoUrl;
+    private String commitId;
+    private String secondCommitId;
+
+    @Before
+    public void setUp() {
+        VarroaRunRecorder.resetStateForTesting();
+        BuildEventSink.get().resetForTesting();
+        VarroaRunRecorder.setGateOverrideForTesting("1");
+    }
+
+    @After
+    public void tearDown() {
+        VarroaRunRecorder.setGateOverrideForTesting(null);
+    }
+
+    private static VarroaIntentAction grantedAction() {
+        return new VarroaIntentAction(Uuid7.next(), "", null, System.currentTimeMillis());
+    }
+
+    private static List<BuildEvent> byPhase(List<BuildEvent> events, String phase) {
+        List<BuildEvent> matched = new ArrayList<>();
+        for (BuildEvent e : events) {
+            if (phase.equals(e.getPhase())) {
+                matched.add(e);
+            }
+        }
+        return matched;
+    }
+
+    private static List<BuildEvent> drainEvents() {
+        return BuildEventSink.get().drain(400).events;
+    }
+
+    // --- E1: the flow's script compiled and the execution started ---
+
+    @Test
+    public void e1FiresAfterTheFlowLoadsCarryingTheScriptPathAndOneLibrary() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "library-run");
+        job.setDefinition(new SourceFactsFlowDefinition("echo 'hi'", false));
+
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
+
+        List<BuildEvent> sources = byPhase(drainEvents(), BuildEvent.PHASE_RUN_SOURCE);
+        assertEquals("a run with no resolved revision emits E1 alone", 1, sources.size());
+        assertEquals("ci/Jenkinsfile", sources.get(0).getDefinitionPath());
+        assertEquals(1, sources.get(0).getLibraries().size());
+        assertEquals("shared-lib", sources.get(0).getLibraries().get(0).getName());
+        assertEquals("1.2.0", sources.get(0).getLibraries().get(0).getVersion());
+        assertEquals("the pinned library record declares no revision method",
+                "", sources.get(0).getLibraries().get(0).getRevision());
+        assertEquals("E1 writes no revision", "", sources.get(0).getScmRevision());
+        assertEquals("E1 carries no SCM URL", "", sources.get(0).getScmUrl());
+        assertEquals("E1 carries no SCM head", "", sources.get(0).getScmHead());
+        assertTrue("E1 carries no pod templates", sources.get(0).getPodTemplates().isEmpty());
+    }
+
+    // --- E2: the first node at which the run answers a revision ---
+
+    @Test
+    public void aCheckoutRunEmitsASecondSourceEventWithTheScmFacts() throws Exception {
+        createRepository();
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "checkout-run");
+        job.setDefinition(new CpsFlowDefinition("node {\n"
+                + "  stage('checkout') { git url: '" + repoUrl + "', branch: 'master' }\n"
+                + "  stage('build') { echo 'built' }\n"
+                + "}", true));
+
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
+
+        List<BuildEvent> events = drainEvents();
+        List<BuildEvent> sources = byPhase(events, BuildEvent.PHASE_RUN_SOURCE);
+        assertEquals(2, sources.size());
+        BuildEvent e1 = sources.get(0);
+        BuildEvent e2 = sources.get(1);
+        assertTrue("E1 holds the lower sequence", e1.getSeq() < e2.getSeq());
+
+        assertTrue("the branch names the checked-out branch", e2.getBranch().endsWith("master"));
+        assertTrue("the SCM head names the same branch", e2.getScmHead().endsWith("master"));
+        assertEquals(commitId, e2.getScmRevision());
+        assertTrue("the SCM URL names the sample repository", e2.getScmUrl().startsWith("file:"));
+
+        assertTrue("a node after the second emission still emits its stage event",
+                sawStage(events, "build"));
+    }
+
+    @Test
+    public void aMultibranchChildResolvesItsBranchAndHashFromTheRevisionAction() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "child-run");
+        job.setDefinition(new SourceFactsFlowDefinition("echo 'hi'", true));
+
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
+
+        List<BuildEvent> sources = byPhase(drainEvents(), BuildEvent.PHASE_RUN_SOURCE);
+        assertEquals(2, sources.size());
+        BuildEvent e2 = sources.get(1);
+        assertEquals("main", e2.getBranch());
+        assertEquals("main", e2.getScmHead());
+        assertEquals("abc123", e2.getScmRevision());
+        // This case drives a revision action on a plain pipeline job, so
+        // E1 has no multibranch name to carry.
+        assertEquals("E1 carries no SCM head even with a revision action",
+                "", sources.get(0).getScmHead());
+        assertEquals("E1's branch is empty: the job is a plain pipeline, not a multibranch child",
+                "", sources.get(0).getBranch());
+    }
+
+    // --- A run that answers no revision at all ---
+
+    @Test
+    public void aRunWithNoScmFactsEmitsOneSourceEventAndThrowsNothing() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "no-scm-run");
+        job.setDefinition(new CpsFlowDefinition("node { echo 'hi' }", true));
+
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
+
+        List<BuildEvent> events = drainEvents();
+        assertEquals("no revision, so E1 alone", 1, byPhase(events, BuildEvent.PHASE_RUN_SOURCE).size());
+        assertEquals(1, byPhase(events, BuildEvent.PHASE_COMPLETED).size());
+    }
+
+    @Test
+    public void aFreestyleRunEmitsNoSourceEvent() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("freestyle-run");
+
+        j.assertBuildStatusSuccess(project.scheduleBuild2(0, grantedAction()));
+
+        assertEquals(0, byPhase(drainEvents(), BuildEvent.PHASE_RUN_SOURCE).size());
+    }
+
+    // --- The two existing revision writers survive both emissions ---
+
+    @Test
+    public void startedKeepsTheClaimsRevisionAndCompletedKeepsTheChangelogFallback() throws Exception {
+        createRepository();
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "claim-revision-run");
+        job.setDefinition(new CpsFlowDefinition(
+                "node { git url: '" + repoUrl + "', branch: 'master' }", true));
+        VarroaIntentAction action = grantedAction();
+        action.setRevision("claim-revision");
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, action));
+        drainEvents();
+
+        // A first build records no changelog, because the sample repository
+        // holds no earlier build to compare against. The second commit gives
+        // the second build a changelog, and its fallback a value.
+        commitAgain();
+        VarroaIntentAction secondAction = grantedAction();
+        secondAction.setRevision("claim-revision");
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, secondAction));
+
+        List<BuildEvent> events = drainEvents();
+        List<BuildEvent> started = byPhase(events, BuildEvent.PHASE_STARTED);
+        List<BuildEvent> completed = byPhase(events, BuildEvent.PHASE_COMPLETED);
+        assertEquals(1, started.size());
+        assertEquals("the claim's revision survives the source emissions",
+                "claim-revision", started.get(0).getScmRevision());
+        assertEquals(1, completed.size());
+        assertEquals("the changelog fallback survives the source emissions",
+                secondCommitId, completed.get(0).getScmRevision());
+    }
+
+    private static boolean sawStage(List<BuildEvent> events, String name) {
+        for (BuildEvent event : byPhase(events, BuildEvent.PHASE_STAGE)) {
+            for (BuildStage stage : event.getStages()) {
+                if (name.equals(stage.getName())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Builds the sample repository beside the test home. The pipeline receives
+     * the repository as a {@code file:} URL, which encodes the space in the
+     * home path that the git step refuses.
+     */
+    private void createRepository() throws Exception {
+        File repo = new File(j.jenkins.getRootDir(), "sample-repo");
+        repo.mkdirs();
+        git(repo, "init", "-b", "master");
+        git(repo, "config", "user.email", "varroa@example.com");
+        git(repo, "config", "user.name", "Varroa Test");
+        commitFile(repo, "hello\n", "the first commit");
+        commitId = git(repo, "rev-parse", "HEAD").trim();
+        repoUrl = repo.toURI().toString();
+    }
+
+    private void commitAgain() throws Exception {
+        File repo = new File(j.jenkins.getRootDir(), "sample-repo");
+        commitFile(repo, "hello again\n", "the second commit");
+        secondCommitId = git(repo, "rev-parse", "HEAD").trim();
+    }
+
+    private static void commitFile(File repo, String content, String message) throws Exception {
+        Files.write(new File(repo, "README.md").toPath(), content.getBytes(StandardCharsets.UTF_8));
+        git(repo, "add", "README.md");
+        git(repo, "commit", "-m", message);
+    }
+
+    private static String git(File directory, String... args) throws Exception {
+        List<String> command = new ArrayList<>();
+        command.add("git");
+        command.addAll(List.of(args));
+        ProcessBuilder builder = new ProcessBuilder(command).directory(directory).redirectErrorStream(true);
+        Process process = builder.start();
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertEquals("git " + String.join(" ", args) + " failed: " + output, 0, process.waitFor());
+        return output;
+    }
+}
+
+/**
+ * A flow definition double that declares a script path and attaches the
+ * actions a real run carries: one libraries action, and, when asked, one
+ * SCM revision action.
+ */
+final class SourceFactsFlowDefinition extends FlowDefinition {
+
+    private final String script;
+    private final boolean attachRevisionAction;
+
+    SourceFactsFlowDefinition(String script, boolean attachRevisionAction) {
+        this.script = script;
+        this.attachRevisionAction = attachRevisionAction;
+    }
+
+    /** The Jenkinsfile path a consumer repository's CpsScmFlowDefinition answers. */
+    public String getScriptPath() {
+        return "ci/Jenkinsfile";
+    }
+
+    @Override
+    public FlowExecution create(FlowExecutionOwner owner, TaskListener listener, List<? extends Action> actions)
+            throws Exception {
+        Run<?, ?> run = (Run<?, ?>) owner.getExecutable();
+        run.addAction(new LibrariesAction());
+        if (attachRevisionAction) {
+            run.addAction(new SCMRevisionAction(new FakeRevision(new SCMHead("main"), "abc123")));
+        }
+        return new CpsFlowDefinition(script, true).create(owner, listener, actions);
+    }
+}
+
+/**
+ * A stand-in for the global-library action. The resolver matches this
+ * class by its simple name, so the name must stay {@code LibrariesAction}.
+ */
+final class LibrariesAction extends InvisibleAction {
+
+    private final List<LibraryRecord> libraries = new ArrayList<>();
+
+    LibrariesAction() {
+        libraries.add(new LibraryRecord("shared-lib", "1.2.0"));
+    }
+
+    /** The records the resolver reads back reflectively. */
+    public Collection<LibraryRecord> getLibraries() {
+        return libraries;
+    }
+}
+
+/**
+ * A stand-in for a global-library record. It declares no {@code getRevision},
+ * which matches the pinned record's own shape.
+ */
+final class LibraryRecord {
+
+    private final String name;
+    private final String version;
+
+    LibraryRecord(String name, String version) {
+        this.name = name;
+        this.version = version;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public String getVersion() {
+        return version;
+    }
+}
+
+/** A stand-in for the git plugin's revision implementation. */
+final class FakeRevision extends SCMRevision {
+
+    private final String hash;
+
+    FakeRevision(SCMHead head, String hash) {
+        super(head);
+        this.hash = hash;
+    }
+
+    /** The hash accessor the git plugin's own implementation declares. */
+    public String getHash() {
+        return hash;
+    }
+
+    @Override
+    public boolean isDeterministic() {
+        return true;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof FakeRevision && hash.equals(((FakeRevision) o).hash);
+    }
+
+    @Override
+    public int hashCode() {
+        return hash.hashCode();
+    }
+
+    @Override
+    public String toString() {
+        return hash;
+    }
+}

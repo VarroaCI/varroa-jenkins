@@ -137,3 +137,71 @@ func TestApplyRunCompletedForeignInstanceIsAuditOnly(t *testing.T) {
 		t.Fatalf("foreign_completion.kind = %v, want %q", foreignKey, KindRunCompleted)
 	}
 }
+
+// TestApplyRunCompletedFillsAbsentRevision asserts a completion writes
+// the newest changelog entry's revision when the row holds none.
+func TestApplyRunCompletedFillsAbsentRevision(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:completed-fill")
+	g := NewIngester(pool, nil, nil)
+
+	buildNumber := int64(1)
+	started := newTestEnvelope(t, runID, "manual:completed-fill", KindRunStarted, RunStartedPayload{BuildNumber: &buildNumber})
+	if _, err := g.Apply(context.Background(), started); err != nil {
+		t.Fatalf("apply run.started: %v", err)
+	}
+
+	result := "SUCCESS"
+	revision := "changelog-rev"
+	completed := newTestEnvelope(t, runID, "manual:completed-fill", KindRunCompleted, RunCompletedPayload{
+		Result:      &result,
+		SCMRevision: &revision,
+	})
+	if _, err := g.Apply(context.Background(), completed); err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+
+	var revisionGot *string
+	if err := db.QueryRow(`SELECT scm_revision FROM varroa.runs WHERE run_id = $1`, runID).Scan(&revisionGot); err != nil {
+		t.Fatalf("read scm_revision: %v", err)
+	}
+	if revisionGot == nil || *revisionGot != revision {
+		t.Fatalf("scm_revision = %v, want %q", revisionGot, revision)
+	}
+}
+
+// TestApplyRunCompletedKeepsSetRevision asserts a completion never
+// replaces a revision the row already holds.
+func TestApplyRunCompletedKeepsSetRevision(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:completed-keep")
+	g := NewIngester(pool, nil, nil)
+
+	buildNumber := int64(1)
+	claimRevision := "claim-rev"
+	started := newTestEnvelope(t, runID, "manual:completed-keep", KindRunStarted, RunStartedPayload{
+		BuildNumber: &buildNumber,
+		SCMRevision: &claimRevision,
+	})
+	if _, err := g.Apply(context.Background(), started); err != nil {
+		t.Fatalf("apply run.started: %v", err)
+	}
+
+	result := "SUCCESS"
+	changelogRevision := "changelog-rev"
+	completed := newTestEnvelope(t, runID, "manual:completed-keep", KindRunCompleted, RunCompletedPayload{
+		Result:      &result,
+		SCMRevision: &changelogRevision,
+	})
+	if _, err := g.Apply(context.Background(), completed); err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+
+	var revisionGot *string
+	if err := db.QueryRow(`SELECT scm_revision FROM varroa.runs WHERE run_id = $1`, runID).Scan(&revisionGot); err != nil {
+		t.Fatalf("read scm_revision: %v", err)
+	}
+	if revisionGot == nil || *revisionGot != claimRevision {
+		t.Fatalf("scm_revision = %v, want %q", revisionGot, claimRevision)
+	}
+}

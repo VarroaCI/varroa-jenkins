@@ -72,6 +72,14 @@ func TestRenderBuildXML_GoldenFixtures(t *testing.T) {
 			if string(got) != string(want) {
 				t.Errorf("rendered document differs from %s\n--- got ---\n%s\n--- want ---\n%s", goldenPath, got, want)
 			}
+			// The store's source column has no rehydration meaning. The
+			// rendered document must name no definition path, no library,
+			// and no pod template.
+			for _, field := range []string{"definition_path", "libraries", "pod_templates"} {
+				if strings.Contains(string(got), field) {
+					t.Errorf("rendered %s carries the source field %q", goldenPath, field)
+				}
+			}
 		})
 	}
 }

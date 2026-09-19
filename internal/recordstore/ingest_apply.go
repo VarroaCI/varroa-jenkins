@@ -15,9 +15,9 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
 
-// ErrUnknownKind means an envelope's kind is outside the thirteen known
-// ingest kinds. The consumer acknowledges and drops such an event; it
-// can never become readable.
+// ErrUnknownKind means an envelope's kind is outside the kinds
+// ingestKinds lists. The consumer acknowledges and drops such an event;
+// it can never become readable.
 var ErrUnknownKind = errors.New("unknown ingest kind")
 
 // ErrMalformedEnvelope means an envelope's run_id is not a valid UUID,
@@ -94,6 +94,12 @@ type ApplyResult struct {
 	SupersededReported int64
 	SupersededStored   int64
 	SupersededOwner    string
+
+	// RefusedSource is true when a run.source write carried a seq below
+	// the stored source_seq. The merge then left every stored value in
+	// place, so the caller acknowledges the message and publishes
+	// nothing.
+	RefusedSource bool
 }
 
 // Ingester applies one IngestEnvelope to the record tables inside a
@@ -174,10 +180,11 @@ func (g *Ingester) notify(env IngestEnvelope, res ApplyResult, err error) {
 
 // Apply writes env to the record tables. It returns ErrIntentMissing
 // when no run_intents row exists for env.RunID, ErrUnknownKind when
-// env.Kind is outside the thirteen known kinds, and ErrMalformedEnvelope
-// when env.RunID is not a valid UUID or a typed payload does not
-// decode. Any other error is a retryable database failure. A nil error
-// and a false ApplyResult.Conflict mean the write committed cleanly.
+// env.Kind is outside the kinds ingestKinds lists, and
+// ErrMalformedEnvelope when env.RunID is not a valid UUID or a typed
+// payload does not decode. Any other error is a retryable database
+// failure. A nil error and a false ApplyResult.Conflict mean the write
+// committed cleanly.
 func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, error) {
 	if !IsKnownKind(env.Kind) {
 		return ApplyResult{}, fmt.Errorf("%w: %s", ErrUnknownKind, env.Kind)
@@ -244,6 +251,9 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 		result.SupersededStored = dispatched.supersededStored
 		result.SupersededOwner = dispatched.supersededOwner
 	}
+	if dispatched.refusedSource {
+		result.RefusedSource = true
+	}
 
 	if dispatched.action != nil && g.conn != nil {
 		if perr := PublishLedgerAction(g.conn, *dispatched.action); perr != nil {
@@ -293,9 +303,10 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 // dispatchResult is what dispatch reports for one write, beyond a plain
 // error: a pending LedgerAction for run.started's duplicate backstop,
 // for a run.completed write that was this run's real terminal write,
-// the producer identity Apply feeds the fan-out round, and for a
+// the producer identity Apply feeds the fan-out round, for a
 // run.started that described a superseded grant, the superseded fields
-// Apply copies onto its ApplyResult.
+// Apply copies onto its ApplyResult, and for a run.source write the
+// guard refused, the refusal flag Apply copies onto its ApplyResult.
 type dispatchResult struct {
 	action *LedgerAction
 	fanout *FanoutProducer
@@ -316,6 +327,11 @@ type dispatchResult struct {
 	supersededReported int64
 	supersededStored   int64
 	supersededOwner    string
+
+	// refusedSource is true when a run.source write carried a seq below
+	// the stored source_seq, so the merge changed no stored value. The
+	// kind raises no ledger action either way.
+	refusedSource bool
 }
 
 // applyOnce runs one attempt of env's write in its own transaction.
@@ -389,6 +405,12 @@ func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, e
 		return dispatchResult{}, applyRunLog(ctx, tx, intent, env)
 	case KindRunHeartbeat:
 		return dispatchResult{}, applyRunHeartbeat(ctx, tx, intent, env, g.logger)
+	case KindRunSource:
+		refused, err := applyRunSource(ctx, tx, intent, env)
+		if err != nil {
+			return dispatchResult{}, err
+		}
+		return dispatchResult{refusedSource: refused}, nil
 	case KindRunState:
 		return applyRunState(ctx, tx, intent, env)
 	default:

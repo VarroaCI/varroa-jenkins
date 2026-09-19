@@ -4756,6 +4756,42 @@ RunDetail:
     retryRunId:
       type: string
       description: An existing retry's run id, when one already exists.
+    source:
+      type: object
+      description: >
+        How the run was defined, read from the run's stored source column.
+        This field is absent until a run.source event arrives.
+      additionalProperties: false
+      properties:
+        definitionPath:
+          type: string
+          description: >
+            The pipeline script path in the run's own repository. A run that a
+            template defines reports no value here.
+        libraries:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              name:
+                type: string
+              version:
+                type: string
+              revision:
+                type: string
+        podTemplates:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              name:
+                type: string
+              label:
+                type: string
+              image:
+                type: string
     stages:
       type: array
       items:

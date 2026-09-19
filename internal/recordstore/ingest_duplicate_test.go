@@ -363,3 +363,117 @@ func startDuplicateTestServer(t *testing.T) *server.Server {
 	t.Cleanup(s.Shutdown)
 	return s
 }
+
+// TestDuplicateBackstopMatchesRevisionRunSourceWrote asserts a
+// run.started carrying a claim revision stops a live run whose revision
+// a run.source event wrote.
+func TestDuplicateBackstopMatchesRevisionRunSourceWrote(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	g := NewIngester(pool, nil, nil)
+
+	revision := "rev-from-source"
+	runA := seedGrantedIntent(t, pool, "manual:dup-source-a")
+	buildA := int64(1)
+	startedA := newTestEnvelope(t, runA, "manual:dup-source-a", KindRunStarted, RunStartedPayload{BuildNumber: &buildA})
+	if _, err := g.Apply(context.Background(), startedA); err != nil {
+		t.Fatalf("apply run.started A: %v", err)
+	}
+	sourceA := newTestEnvelope(t, runA, "manual:dup-source-a", KindRunSource, RunSourcePayload{
+		Seq:         1,
+		SCMRevision: &revision,
+	})
+	if _, err := g.Apply(context.Background(), sourceA); err != nil {
+		t.Fatalf("apply run.source A: %v", err)
+	}
+
+	runB := seedGrantedIntent(t, pool, "manual:dup-source-b")
+	buildB := int64(2)
+	startedB := newTestEnvelope(t, runB, "manual:dup-source-b", KindRunStarted, RunStartedPayload{
+		BuildNumber: &buildB,
+		SCMRevision: &revision,
+	})
+	if _, err := g.Apply(context.Background(), startedB); err != nil {
+		t.Fatalf("apply run.started B: %v", err)
+	}
+
+	// runB is the newer of the two, so it is the one marked DUPLICATE.
+	var statusA, statusB string
+	if err := db.QueryRow(`SELECT status FROM varroa.runs WHERE run_id = $1`, runA).Scan(&statusA); err != nil {
+		t.Fatalf("read run A: %v", err)
+	}
+	if err := db.QueryRow(`SELECT status FROM varroa.runs WHERE run_id = $1`, runB).Scan(&statusB); err != nil {
+		t.Fatalf("read run B: %v", err)
+	}
+	if statusA != StatusRunning {
+		t.Fatalf("run A status = %q, want RUNNING", statusA)
+	}
+	if statusB != StatusDuplicate {
+		t.Fatalf("run B status = %q, want DUPLICATE", statusB)
+	}
+}
+
+// TestApplyRunSourceRaisesNoDuplicateBackstop asserts a run.source write
+// that reports a revision a live run holds marks no run and publishes
+// no action.
+func TestApplyRunSourceRaisesNoDuplicateBackstop(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+
+	s := startDuplicateTestServer(t)
+	conn, err := bus.Connect(s.ClientURL())
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(conn.Close)
+
+	received := make(chan []byte, 4)
+	sub, err := conn.Subscribe(bus.LedgerActionSubject(testCluster), func(msg *nats.Msg) {
+		received <- msg.Data
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+
+	g := NewIngester(pool, conn, nil)
+
+	revision := "rev-live-source"
+	runA := seedGrantedIntent(t, pool, "manual:dup-source-live")
+	buildA := int64(1)
+	startedA := newTestEnvelope(t, runA, "manual:dup-source-live", KindRunStarted, RunStartedPayload{
+		BuildNumber: &buildA,
+		SCMRevision: &revision,
+	})
+	if _, err := g.Apply(context.Background(), startedA); err != nil {
+		t.Fatalf("apply run.started A: %v", err)
+	}
+
+	runB := seedGrantedIntent(t, pool, "manual:dup-source-arriving")
+	sourceB := newTestEnvelope(t, runB, "manual:dup-source-arriving", KindRunSource, RunSourcePayload{
+		Seq:         0,
+		SCMRevision: &revision,
+	})
+	if _, err := g.Apply(context.Background(), sourceB); err != nil {
+		t.Fatalf("apply run.source B: %v", err)
+	}
+
+	var statusA, statusB string
+	if err := db.QueryRow(`SELECT status FROM varroa.runs WHERE run_id = $1`, runA).Scan(&statusA); err != nil {
+		t.Fatalf("read run A: %v", err)
+	}
+	if err := db.QueryRow(`SELECT status FROM varroa.runs WHERE run_id = $1`, runB).Scan(&statusB); err != nil {
+		t.Fatalf("read run B: %v", err)
+	}
+	if statusA != StatusRunning {
+		t.Fatalf("run A status = %q, want RUNNING", statusA)
+	}
+	if statusB != "QUEUED" {
+		t.Fatalf("run B status = %q, want QUEUED", statusB)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-received:
+		t.Fatal("run.source published a ledger action")
+	default:
+	}
+}

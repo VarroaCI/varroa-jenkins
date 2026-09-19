@@ -1772,6 +1772,32 @@ export interface RunDetail {
   /** An existing retry's run id, when one already exists. */
   retryRunId?: string;
   stages?: RunStage[];
+  /** How the run was defined, from the record's source column. Absent until
+   * a run.source event arrives. */
+  source?: RunSource;
+}
+
+/** One shared library a run was defined with. */
+export interface RunSourceLibrary {
+  name: string;
+  version?: string;
+  revision?: string;
+}
+
+/** One pod template the run allocated. */
+export interface RunSourcePodTemplate {
+  name: string;
+  label?: string;
+  image?: string;
+}
+
+/** How a run was defined. */
+export interface RunSource {
+  /** The pipeline script path in the run's own repository. Absent for a run
+   * that a template defines. */
+  definitionPath?: string;
+  libraries?: RunSourceLibrary[];
+  podTemplates?: RunSourcePodTemplate[];
 }
 
 export interface RunArtifact {

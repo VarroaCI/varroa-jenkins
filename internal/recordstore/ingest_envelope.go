@@ -6,13 +6,14 @@ import (
 )
 
 // Ingest kind constants. The payload on builds.<cluster>.<ns>.<cell>
-// carries exactly one of these thirteen values in its "kind" field:
-// twelve run.* kinds, and the cell-scoped job.schedules kind C11's
-// gateway publishes. C2 maps its protobuf BuildEvent onto eight of the
-// run.* kinds. The gateway publishes run.trigger_failed from a failed
-// TRIGGER_BUILD result, run.trigger_accepted from a successful one,
-// run.state from each run-state push outcome, and run.resume_failed
-// from a failed RESUME_BUILD result, instead.
+// carries exactly one of the kinds below in its "kind" field: the
+// run.* kinds the recorder accepts, and the cell-scoped job.schedules
+// kind C11's gateway publishes. C2 maps its protobuf BuildEvent onto
+// the run.* kinds that carry build state. The gateway publishes
+// run.trigger_failed from a failed TRIGGER_BUILD result,
+// run.trigger_accepted from a successful one, run.state from each
+// run-state push outcome, and run.resume_failed from a failed
+// RESUME_BUILD result, instead.
 const (
 	KindRunStarted   = "run.started"
 	KindRunStage     = "run.stage"
@@ -22,6 +23,10 @@ const (
 	KindRunChanges   = "run.changes"
 	KindRunLog       = "run.log"
 	KindRunHeartbeat = "run.heartbeat"
+	// KindRunSource records the source facts of a run: its definition
+	// path, its libraries, and its pod templates. The merge writes one
+	// StoredRunSource value into the runs.source column.
+	KindRunSource = "run.source"
 	// KindRunTriggerFailed records a build trigger Jenkins refused. Such a
 	// run holds no intent row, so the recorder routes it before the intent
 	// read.
@@ -54,6 +59,7 @@ var ingestKinds = map[string]bool{
 	KindRunChanges:         true,
 	KindRunLog:             true,
 	KindRunHeartbeat:       true,
+	KindRunSource:          true,
 	KindRunTriggerFailed:   true,
 	KindRunTriggerAccepted: true,
 	KindRunResumeFailed:    true,
@@ -61,7 +67,8 @@ var ingestKinds = map[string]bool{
 	KindJobSchedules:       true,
 }
 
-// IsKnownKind reports whether kind is one of the thirteen ingest kinds.
+// IsKnownKind reports whether kind is one of the kinds ingestKinds
+// lists.
 func IsKnownKind(kind string) bool {
 	return ingestKinds[kind]
 }
@@ -117,6 +124,10 @@ type RunCompletedPayload struct {
 	Result     *string    `json:"result,omitempty"`
 	EndedAt    *time.Time `json:"ended_at,omitempty"`
 	DurationMs *int64     `json:"duration_ms,omitempty"`
+	// SCMRevision carries the newest changelog entry's revision. A
+	// run.completed write fills an absent runs.scm_revision from it,
+	// and never replaces a stored value.
+	SCMRevision *string `json:"scm_revision,omitempty"`
 }
 
 // RunStatePayload is the payload of a run.state envelope. It takes one
@@ -199,6 +210,46 @@ type RunArtifactsPayload struct {
 // runs.changes.
 type RunChangesPayload struct {
 	Changes json.RawMessage `json:"changes"`
+}
+
+// RunSourcePayload is the payload of a run.source envelope. A pointer
+// field is nil when the plugin resolved no value, so the merge leaves
+// the stored column untouched rather than clearing it.
+type RunSourcePayload struct {
+	Seq            int64               `json:"seq"`
+	Branch         *string             `json:"branch,omitempty"`
+	SCMRevision    *string             `json:"scm_revision,omitempty"`
+	SCMHead        string              `json:"scm_head,omitempty"`
+	SCMURL         string              `json:"scm_url,omitempty"`
+	DefinitionPath string              `json:"definition_path,omitempty"`
+	Libraries      []SourceLibrary     `json:"libraries,omitempty"`
+	PodTemplates   []SourcePodTemplate `json:"pod_templates,omitempty"`
+}
+
+// SourceLibrary is one shared library a run loaded, as the payload
+// carries it.
+type SourceLibrary struct {
+	Name     string `json:"name"`
+	Version  string `json:"version,omitempty"`
+	Revision string `json:"revision,omitempty"`
+}
+
+// SourcePodTemplate is one pod template a run used, as the payload
+// carries it.
+type SourcePodTemplate struct {
+	Name  string `json:"name"`
+	Label string `json:"label,omitempty"`
+	Image string `json:"image,omitempty"`
+}
+
+// StoredRunSource is the shape of the runs.source column. The recorder
+// marshals it on the write, and the BFF unmarshals it on the read, so
+// one type owns the column's key names on both sides. The keys are the
+// column's own snake_case names, never the response's camelCase names.
+type StoredRunSource struct {
+	DefinitionPath string              `json:"definition_path,omitempty"`
+	Libraries      []SourceLibrary     `json:"libraries,omitempty"`
+	PodTemplates   []SourcePodTemplate `json:"pod_templates,omitempty"`
 }
 
 // JobSchedulesPayload is the payload of a job.schedules envelope,

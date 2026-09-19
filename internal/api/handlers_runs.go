@@ -38,6 +38,29 @@ type runStageJSON struct {
 	Error      string     `json:"error,omitempty"`
 }
 
+// runSourceLibraryJSON is one shared library the run was defined with.
+type runSourceLibraryJSON struct {
+	Name     string `json:"name"`
+	Version  string `json:"version,omitempty"`
+	Revision string `json:"revision,omitempty"`
+}
+
+// runSourcePodTemplateJSON is one pod template the run allocated.
+type runSourcePodTemplateJSON struct {
+	Name  string `json:"name"`
+	Label string `json:"label,omitempty"`
+	Image string `json:"image,omitempty"`
+}
+
+// runSourceJSON describes how the run was defined. The recorder stores these
+// facts under snake_case keys, so buildRunDetail maps the stored shape into
+// this type field by field.
+type runSourceJSON struct {
+	DefinitionPath string                     `json:"definitionPath,omitempty"`
+	Libraries      []runSourceLibraryJSON     `json:"libraries,omitempty"`
+	PodTemplates   []runSourcePodTemplateJSON `json:"podTemplates,omitempty"`
+}
+
 type runDetailJSON struct {
 	RunID             string            `json:"runId"`
 	JobPath           string            `json:"jobPath"`
@@ -65,6 +88,7 @@ type runDetailJSON struct {
 	TriggerReasonCode string            `json:"triggerReasonCode,omitempty"`
 	RetryRunID        string            `json:"retryRunId,omitempty"`
 	Stages            []runStageJSON    `json:"stages,omitempty"`
+	Source            *runSourceJSON    `json:"source,omitempty"`
 }
 
 type runArtifactJSON struct {
@@ -169,6 +193,30 @@ type runInterruptedPayload struct {
 	InterruptedReason string `json:"interrupted_reason"`
 }
 
+// buildRunSource maps the stored column shape into the response shape, field
+// by field. It answers nil when the column carries none of the three facts.
+func buildRunSource(stored recordstore.StoredRunSource) *runSourceJSON {
+	if stored.DefinitionPath == "" && len(stored.Libraries) == 0 && len(stored.PodTemplates) == 0 {
+		return nil
+	}
+	out := &runSourceJSON{DefinitionPath: stored.DefinitionPath}
+	for _, lib := range stored.Libraries {
+		out.Libraries = append(out.Libraries, runSourceLibraryJSON{
+			Name:     lib.Name,
+			Version:  lib.Version,
+			Revision: lib.Revision,
+		})
+	}
+	for _, pod := range stored.PodTemplates {
+		out.PodTemplates = append(out.PodTemplates, runSourcePodTemplateJSON{
+			Name:  pod.Name,
+			Label: pod.Label,
+			Image: pod.Image,
+		})
+	}
+	return out
+}
+
 func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID, tenantFolder string) runDetailJSON {
 	d := runDetailJSON{RunID: run.RunID, JobPath: run.JobPath, TenantFolder: tenantFolder, Tenant: run.Tenant, Status: run.Status, RetryRunID: retryRunID}
 	if run.BuildNumber != nil {
@@ -193,6 +241,15 @@ func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID,
 		d.Actor = *run.Actor
 	}
 	d.Cause = causeSummary(run.Cause)
+	// The column holds snake_case keys, so decode it into the store shape.
+	// buildRunSource then maps the three fields one by one. A NULL column
+	// and a malformed column both leave the pointer nil.
+	if len(run.Source) > 0 {
+		var stored recordstore.StoredRunSource
+		if json.Unmarshal(run.Source, &stored) == nil {
+			d.Source = buildRunSource(stored)
+		}
+	}
 	if len(run.Params) > 0 {
 		var params map[string]string
 		if json.Unmarshal(run.Params, &params) == nil {

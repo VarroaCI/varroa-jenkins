@@ -6,7 +6,7 @@ It is optional and off by default.
 
 The store holds no job configuration, console log text, or artifact bytes. Logs and artifacts
 live in a separate blob store, and the record store holds only their index. See [Build logs and
-artifacts](build-logs-and-artifacts.md) for the log path, the live tail, and artifact storage.
+artifacts](build-logs-and-artifacts.md).
 
 ## Enable the store
 
@@ -60,8 +60,7 @@ component the same way `bff.*` configures the BFF.
 ## Install CloudNativePG first
 
 `recordStore.postgres.mode: cnpg` needs the [CloudNativePG](https://cloudnative-pg.io/) operator
-in the cluster, which the chart does not install. Install the operator before you enable the
-store:
+in the cluster, which the chart does not install. Install it before you enable the store:
 
 ```bash
 kubectl apply --server-side -f \
@@ -69,7 +68,7 @@ kubectl apply --server-side -f \
 ```
 
 Pin the operator version and upgrade it on your schedule. `helm template` renders the
-`Cluster` without the operator present, so a render needs no live cluster.
+`Cluster` without the operator, so a render needs no live cluster.
 
 ## Postgres roles
 
@@ -99,13 +98,13 @@ recordStore:
 
 Each value is a day count with a `d` suffix, from `1d` through `3650d`. `runs` controls how long
 a build's row, stages, and test summary stay queryable; `logs` and `artifacts` control their blob
-content, independent of `runs`.
+content independently.
 
-Retention rounds up to a month boundary, because the recorder drops a whole monthly partition
-rather than single rows. A `runs` value of `365d` therefore keeps a build for 365 to 396 days.
+Retention rounds up to a month boundary, because the recorder drops a whole monthly partition,
+not single rows. A `runs` value of `365d` keeps a build for 365 to 396 days.
 
-The build-number watermark is permanent: retention never deletes it, even after every run of a
-job expires. A build number is never reused.
+The build-number watermark is permanent, and no build number is reused, even after every run of a
+job expires.
 
 ## A trigger that fails
 
@@ -119,8 +118,7 @@ Jenkins can refuse a build trigger. The store then holds one run whose result is
 | `TRIGGER_REJECTED` | The controller refused the trigger for another reason. |
 
 The run page also shows the error text the controller reported. Such a run holds no build number,
-no log, and no stage: no build started. `Re-run` starts a fresh run with each parameter's
-declared default.
+no log, and no stage. `Re-run` starts a fresh run with each parameter's declared default.
 
 A `TRIGGER_FAILED` run counts in no job statistic: no pass rate, no result count, no median
 duration, and no last-build tile. It still appears in the run list, and retention bounds it under
@@ -130,8 +128,7 @@ duration, and no last-build tile. It still appears in the run list, and retentio
 
 A cell pod can roll before a build Jenkins accepted onto its queue starts. The store then holds
 one run whose status is `QUEUED`, with no build number, and the run page shows `Queued`.
-[Cell loss](cell-loss.md) states how the recorder marks and re-fires such a run. Retention treats
-it like every other run, under `runs` above.
+[Cell loss](cell-loss.md) states how the recorder marks and re-fires such a run.
 
 Counters: `varroa.gateway.trigger_accepted`, `recorder_ingest_trigger_accepted_total` (a
 `stored` attribute), and `recorder_interrupted_marked_total` (a `status` attribute, `queued` or
@@ -146,7 +143,7 @@ The recorder publishes one notification per run change onto the NATS subject
 The BFF serves one stream per team at `GET /pipelines/{team}/stream`, under the ticket scope
 `pipelines:{team}`, with `run` and `stage` events.
 
-A page treats a notification as a hint: it refetches its reads and renders the record.
+A page treats a notification as a hint: it refetches and renders the record.
 
 The recorder coalesces per run: a change waits at most 500 milliseconds, and a terminal state
 publishes at once.
@@ -161,8 +158,7 @@ Postgres. Every activity event publishes onto the JetStream stream `varroa_activ
 covers lifecycle changes, user actions, and mite-observed changes. That stream holds at most 72
 hours, in code and not in chart values: it lets the recorder catch up after a brief outage, and
 it is no retention tier. The recorder drains the stream and writes each event once into the
-`activity` table. `GET /activity` and every MCP activity reader read that table, never the
-stream.
+`activity` table. `GET /activity` and the MCP activity readers read that table, never the stream.
 
 ```yaml
 recordStore:
@@ -174,10 +170,24 @@ Size Postgres for the retention you configure. An activity row is roughly 400 by
 fleet of 400 controllers writes about 40 MB a day, so `30d` needs about 1.2 GB and `90d` about
 3.6 GB, plus the sizing above.
 
-Enabling the store against a fleet that already ran without one imports history once, from the
-oldest message the 72-hour buffer still holds. An event already older than `retention.activity`
-when read is acknowledged and discarded, so a stale backlog creates no row bound for immediate
-deletion.
+Enabling the store against a fleet that ran without one imports history once, from the oldest
+message the 72-hour buffer still holds. An event older than `retention.activity` when read is
+acknowledged and discarded, so a stale backlog creates no row bound for deletion.
+
+## Source fields
+
+A build reports its definition in two events.
+
+| Event | Fields |
+|---|---|
+| The flow starts. | The script path. The shared libraries. The branch, for a multibranch child. |
+| The first node that resolves a revision. | The branch, the revision, the repository URL, the changes, and the pod templates. |
+
+A template-defined run reports no script path, and the pod template set ends there: a later agent
+reports no entry.
+
+`GET /runs/{run}` answers them in one `source` object: `definitionPath`, `libraries[]`,
+`podTemplates[]`.
 
 ## Job schedules
 
@@ -190,34 +200,32 @@ times match the Jenkins job page. An `scm-poll`, `upstream`, or `other` row, and
 row, carries no occurrence.
 
 Each mite polls its Jenkins every ten minutes and after every reconnect. It sends the set when
-the set changed, the stream reconnected, or thirty minutes passed. The gateway publishes one
-cell's set in one envelope, and the recorder replaces the cell's rows with it or rejects it when
-a tenant is unresolved for a row.
+it changed, on a reconnect, or every thirty minutes. The gateway publishes one cell's set in
+one envelope, and the recorder replaces the cell's rows with it or rejects a row whose tenant
+is unresolved.
 
-`job_schedule_cells` holds one watermark row per cell: the time of the newest envelope the
-recorder accepted. Read it before you judge a missing occurrence. An occurrence that never fired
-under a fresh watermark, no more than thirty minutes old, is a missed fire. An old watermark
-means the cell has not reported, likely a disconnected mite or a hibernated controller, and the
-whole set is stale.
+`job_schedule_cells` holds one watermark row per cell: the time of the newest accepted envelope.
+Read it before you judge a missing occurrence. An occurrence that never fired under a watermark
+no more than thirty minutes old is a missed fire. An old watermark means the cell has not
+reported, likely a disconnected mite or a hibernated controller, and the whole set is stale.
 
 A `truncated: true` set means the plugin's walk stopped early, at 5000 rows or 700 KiB, whichever
-came first. Its rows still hold accurate data; only the count is undercounted. The recorder
-deletes no row on a truncated set, because a partial set would erase schedules the plugin never
-reached.
+came first. Its rows still hold accurate data; only the count is low. The recorder deletes no
+row, because a partial set would erase schedules the plugin never reached.
 
 ## Search
 
 `GET /search` and the MCP `search` tool add three record-backed kinds on top of the four
 Kubernetes-sourced kinds: `job`, `run`, and `activity`. Each kind is capped at five results.
-Matching is a Postgres full-text prefix match on the last search token, not a substring match, so
-`serv` matches `team-a/service/main` but no infix in a longer word. Without the record store
-these three kinds are absent and the other four still answer.
+Matching is a Postgres full-text prefix match on the last search token, not a substring match:
+`serv` matches `team-a/service/main`, but no infix in a longer word. Without the record store
+these three kinds are absent; the other four still answer.
 
 ## The ledger and intent keys
 
 Every build starts with a claim against the ledger, carrying an intent key that identifies the
 request that caused it. The recorder uses the key to make a retried claim idempotent: the same
-key with the same run always gets the same answer.
+key and run always get the same answer.
 
 | Scheme | Shape | Use |
 |---|---|---|
@@ -241,7 +249,7 @@ The recorder exports three ingest-backlog metrics:
 | `recorder_activity_backlog_msgs` | Activity events waiting to be written. |
 
 The build-event metrics measure the `varroa_builds` stream, which holds at most 1 GiB. Warn at 50
-percent (512 MiB) and page at 80 percent (819 MiB). A full stream discards a new event until the
+percent (512 MiB) and page at 80 percent (819 MiB). A full stream discards new events until the
 backlog drains.
 
 The activity metric measures the `varroa_activity` stream, which holds at most 1000000 messages.

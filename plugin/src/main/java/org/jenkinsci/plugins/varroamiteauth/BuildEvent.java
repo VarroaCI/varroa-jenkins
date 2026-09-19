@@ -20,6 +20,10 @@ import java.util.Map;
  * template_name}, {@code template_version}, {@code marker_path}, and
  * {@code marker_revision} — are empty for a run with no template, and a
  * {@code HEARTBEAT} event never sets them.
+ *
+ * <p>Fields 43 to 45 — {@code libraries}, {@code definition_path}, and
+ * {@code pod_templates} — are empty for a run whose source the plugin did
+ * not read. {@link #toJson()} then writes no key for them.
  */
 public final class BuildEvent implements PostableEvent {
 
@@ -29,6 +33,8 @@ public final class BuildEvent implements PostableEvent {
     public static final String PHASE_STAGE = "STAGE";
     public static final String PHASE_HEARTBEAT = "HEARTBEAT";
     public static final String PHASE_COMPLETED = "COMPLETED";
+    /** Phase value of the two run-source emissions. The registry allocates the lower-case literal. */
+    public static final String PHASE_RUN_SOURCE = "run.source";
 
     private final String phase;
     private final long seq;
@@ -72,6 +78,9 @@ public final class BuildEvent implements PostableEvent {
     private final String templateVersion;
     private final String markerPath;
     private final String markerRevision;
+    private final List<BuildLibrary> libraries;
+    private final String definitionPath;
+    private final List<BuildPodTemplate> podTemplates;
 
     private BuildEvent(Builder b) {
         this.phase = orEmpty(b.phase);
@@ -116,6 +125,9 @@ public final class BuildEvent implements PostableEvent {
         this.templateVersion = orEmpty(b.templateVersion);
         this.markerPath = orEmpty(b.markerPath);
         this.markerRevision = orEmpty(b.markerRevision);
+        this.libraries = List.copyOf(b.libraries);
+        this.definitionPath = orEmpty(b.definitionPath);
+        this.podTemplates = List.copyOf(b.podTemplates);
     }
 
     private static String orEmpty(String s) {
@@ -307,6 +319,21 @@ public final class BuildEvent implements PostableEvent {
         return markerRevision;
     }
 
+    /** Field 43: one entry per global library the definition loaded. Empty at a run with no library. */
+    public List<BuildLibrary> getLibraries() {
+        return libraries;
+    }
+
+    /** Field 44: the script path the run's definition declares. Empty for no path. */
+    public String getDefinitionPath() {
+        return definitionPath;
+    }
+
+    /** Field 45: one entry per pod template the run allocated. Empty before the probe resolves. */
+    public List<BuildPodTemplate> getPodTemplates() {
+        return podTemplates;
+    }
+
     /**
      * Serializes the event to a {@link JSONObject} using proto JSON field
      * names, ready to post to {@code /v1/events}.
@@ -373,6 +400,23 @@ public final class BuildEvent implements PostableEvent {
         o.put("template_version", templateVersion);
         o.put("marker_path", markerPath);
         o.put("marker_revision", markerRevision);
+        if (!libraries.isEmpty()) {
+            JSONArray librariesArr = new JSONArray();
+            for (BuildLibrary lib : libraries) {
+                librariesArr.add(lib.toJson());
+            }
+            o.put("libraries", librariesArr);
+        }
+        if (!definitionPath.isEmpty()) {
+            o.put("definition_path", definitionPath);
+        }
+        if (!podTemplates.isEmpty()) {
+            JSONArray podTemplatesArr = new JSONArray();
+            for (BuildPodTemplate t : podTemplates) {
+                podTemplatesArr.add(t.toJson());
+            }
+            o.put("pod_templates", podTemplatesArr);
+        }
         return o;
     }
 
@@ -432,7 +476,10 @@ public final class BuildEvent implements PostableEvent {
                 .templateName(templateName)
                 .templateVersion(templateVersion)
                 .markerPath(markerPath)
-                .markerRevision(markerRevision);
+                .markerRevision(markerRevision)
+                .libraries(libraries)
+                .definitionPath(definitionPath)
+                .podTemplates(podTemplates);
     }
 
     public static final class Builder {
@@ -478,6 +525,9 @@ public final class BuildEvent implements PostableEvent {
         private String templateVersion;
         private String markerPath;
         private String markerRevision;
+        private List<BuildLibrary> libraries = new ArrayList<>();
+        private String definitionPath;
+        private List<BuildPodTemplate> podTemplates = new ArrayList<>();
 
         private Builder() {
         }
@@ -695,6 +745,24 @@ public final class BuildEvent implements PostableEvent {
         /** Field 41: the marker's trusted revision. */
         public Builder markerRevision(String v) {
             this.markerRevision = v;
+            return this;
+        }
+
+        /** Field 43: one entry per global library the definition loaded. */
+        public Builder libraries(List<BuildLibrary> v) {
+            this.libraries = v != null ? new ArrayList<>(v) : new ArrayList<>();
+            return this;
+        }
+
+        /** Field 44: the script path the run's definition declares. */
+        public Builder definitionPath(String v) {
+            this.definitionPath = v;
+            return this;
+        }
+
+        /** Field 45: one entry per pod template the run allocated. */
+        public Builder podTemplates(List<BuildPodTemplate> v) {
+            this.podTemplates = v != null ? new ArrayList<>(v) : new ArrayList<>();
             return this;
         }
 

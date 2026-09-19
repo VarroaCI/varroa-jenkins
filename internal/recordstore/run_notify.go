@@ -69,7 +69,17 @@ func notificationFor(env IngestEnvelope, res ApplyResult) (RunNotification, bool
 		n.Result = completedResult(env)
 	case KindRunStage:
 		n.Kind = "stage"
-	case KindRunHeartbeat, KindRunLog, KindRunChanges, KindRunTests, KindRunState, KindRunResumeFailed:
+	// These kinds report facts about a run without changing a state a
+	// reader displays, so the notification carries the identity alone.
+	case KindRunHeartbeat, KindRunLog, KindRunChanges, KindRunTests, KindRunState,
+		KindRunResumeFailed:
+		n.Kind = "run"
+	case KindRunSource:
+		// A refused write changed no stored value, so it reports
+		// nothing, like a superseded start.
+		if res.RefusedSource {
+			return RunNotification{}, false
+		}
 		n.Kind = "run"
 	case KindRunTriggerAccepted:
 		n.Kind = "run"

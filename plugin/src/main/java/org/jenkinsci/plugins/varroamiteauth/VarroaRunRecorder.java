@@ -2,8 +2,10 @@ package org.jenkinsci.plugins.varroamiteauth;
 
 import hudson.Extension;
 import hudson.model.Action;
+import hudson.model.Actionable;
 import hudson.model.Cause;
 import hudson.model.Job;
+import hudson.model.Node;
 import hudson.model.ParameterValue;
 import hudson.model.ParametersAction;
 import hudson.model.Result;
@@ -36,7 +38,11 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import jenkins.model.Jenkins;
 import jenkins.scm.RunWithSCM;
+import jenkins.scm.api.SCMHead;
+import jenkins.scm.api.SCMRevision;
+import jenkins.scm.api.SCMRevisionAction;
 
 import org.jenkinsci.plugins.workflow.actions.ErrorAction;
 import org.jenkinsci.plugins.workflow.actions.LabelAction;
@@ -110,6 +116,8 @@ public final class VarroaRunRecorder {
     private static final int MAX_PARAM_NAME = 256;
     private static final int MAX_PARAM_VALUE = 512;
     private static final int MAX_FIELD_512 = 512;
+    private static final int MAX_LIBRARIES = 50;
+    private static final int MAX_POD_TEMPLATES = 50;
     private static final int MAX_STAGE_ERROR = 2048;
     private static final int LADDER_ERROR_LIMIT = 512;
     private static final int MAX_EVENT_BYTES = 512 * 1024;
@@ -134,6 +142,8 @@ public final class VarroaRunRecorder {
         final String jobPath;
         final long buildNumber;
         private final AtomicLong seq = new AtomicLong();
+        /** Set once the first source probe answered a revision. */
+        final AtomicBoolean sourceResolved = new AtomicBoolean();
         /**
          * Set while a {@code STARTED} event is held for this run (D8a), so
          * a {@link VarroaTemplateValuesAction} attachment or a terminal
@@ -709,12 +719,14 @@ public final class VarroaRunRecorder {
             b.testSkipped(counts[3]);
         }
 
-        // No scm-api or branch-api compile dependency (D3): best-effort branch
-        // name from the job's own short name under a multi-branch parent.
-        String branchName = truncate(IntentKey.branchNameFor(job), MAX_FIELD_512);
-        b.scmHead(branchName);
-        b.branch(branchName);
-        b.scmUrl("");
+        // Every SCM fact comes from a reflective read of the run's own
+        // actions. A missing plugin, action, or method leaves its value
+        // empty. This call site writes no scm_revision: the claim and the
+        // changelog fallback keep their own writers.
+        SourceFacts source = resolveBranchFacts(run);
+        b.scmHead(source.scmHead);
+        b.branch(source.branch);
+        b.scmUrl(source.scmUrl);
 
         ParametersAction params = run.getAction(ParametersAction.class);
         Map<String, String> values = new LinkedHashMap<>();
@@ -867,6 +879,362 @@ public final class VarroaRunRecorder {
         }
     }
 
+    // --- The source resolver (D2) ---
+
+    /**
+     * The source facts one run answers. Every string stays empty and both
+     * lists stay empty when no read resolved them.
+     */
+    static final class SourceFacts {
+        final String branch;
+        final String scmHead;
+        final String scmRevision;
+        final String scmUrl;
+        final String definitionPath;
+        final List<BuildLibrary> libraries;
+        final List<BuildPodTemplate> podTemplates;
+
+        SourceFacts(String branch, String scmHead, String scmRevision, String scmUrl,
+                String definitionPath, List<BuildLibrary> libraries, List<BuildPodTemplate> podTemplates) {
+            this.branch = branch;
+            this.scmHead = scmHead;
+            this.scmRevision = scmRevision;
+            this.scmUrl = scmUrl;
+            this.definitionPath = definitionPath;
+            this.libraries = libraries;
+            this.podTemplates = podTemplates;
+        }
+    }
+
+    /** The exact class name of the git plugin's per-run build record. */
+    private static final String BUILD_DATA_CLASS_NAME = "hudson.plugins.git.util.BuildData";
+
+    /**
+     * Resolves every source fact of a run. Each field takes the first
+     * non-empty answer of its own chain.
+     */
+    static SourceFacts resolveSourceFacts(Run<?, ?> run) {
+        SourceFacts scmApi = resolveScmApiFacts(run);
+        SourceFacts git = resolveGitFacts(run);
+        String revision = firstNonEmpty(scmApi.scmRevision, git.scmRevision);
+        if (revision.isEmpty()) {
+            // The probe short-circuits here: a run with no revision yet
+            // pays no graph walk.
+            return new SourceFacts("", "", "", "", "", List.of(), List.of());
+        }
+        String branch = branchFrom(run, scmApi, git);
+        return new SourceFacts(
+                branch,
+                branch,
+                revision,
+                git.scmUrl,
+                resolveDefinitionPath(run),
+                resolveLibraries(run),
+                resolvePodTemplates(run));
+    }
+
+    /**
+     * Resolves the branch and the SCM head of a run: the revision
+     * action's head name, else the job's own branch name, else the git
+     * plugin's branch name.
+     */
+    private static String branchFrom(Run<?, ?> run, SourceFacts scmApi, SourceFacts git) {
+        String jobBranch = truncate(IntentKey.branchNameFor(run.getParent()), MAX_FIELD_512);
+        return firstNonEmpty(scmApi.scmHead, jobBranch, git.scmHead);
+    }
+
+    /**
+     * Resolves the branch, the SCM head, and the SCM URL the run
+     * metadata carries. The revision stays out of this shape.
+     */
+    private static SourceFacts resolveBranchFacts(Run<?, ?> run) {
+        SourceFacts scmApi = resolveScmApiFacts(run);
+        SourceFacts git = resolveGitFacts(run);
+        String branch = branchFrom(run, scmApi, git);
+        return new SourceFacts(branch, branch, "", git.scmUrl, "", List.of(), List.of());
+    }
+
+    /**
+     * Reads the SCM facts from the run's revision action. An absent
+     * action leaves every value empty.
+     */
+    private static SourceFacts resolveScmApiFacts(Run<?, ?> run) {
+        String head = "";
+        String revision = "";
+        SCMRevision scmRevision = revisionFromAction(run);
+        if (scmRevision != null) {
+            SCMHead scmHead = scmRevision.getHead();
+            head = scmHead != null ? orEmpty(scmHead.getName()) : "";
+            revision = stringOf(invokeNoArg(scmRevision, "getHash"));
+        }
+        return new SourceFacts(head, head, revision, "", "", List.of(), List.of());
+    }
+
+    /**
+     * Reads the run's revision through scm-api's revision action. The
+     * call goes through reflection, because scm-api restricts its static
+     * entry point to its own plugin.
+     */
+    private static SCMRevision revisionFromAction(Run<?, ?> run) {
+        try {
+            Method method = SCMRevisionAction.class.getMethod("getRevision", Actionable.class);
+            return (SCMRevision) method.invoke(null, run);
+        } catch (Exception e) {
+            LOGGER.log(Level.FINE, "VarroaRunRecorder: the revision action read failed", e);
+            return null;
+        }
+    }
+
+    /**
+     * Reads the git facts from the run's build record of the git plugin.
+     * The lookup matches the class name exactly, because that name is the
+     * plugin's identity. An absent action leaves every value empty.
+     */
+    private static SourceFacts resolveGitFacts(Run<?, ?> run) {
+        String branch = "";
+        String revision = "";
+        String url = "";
+        Object buildData = findActionByClassName(run, BUILD_DATA_CLASS_NAME);
+        if (buildData != null) {
+            Object builtRevision = invokeNoArg(buildData, "getLastBuiltRevision");
+            revision = stringOf(invokeNoArg(builtRevision, "getSha1String"));
+            branch = firstBranchName(invokeNoArg(builtRevision, "getBranches"));
+            url = firstStringOf(invokeNoArg(buildData, "getRemoteUrls"));
+        }
+        return new SourceFacts(branch, branch, revision, url, "", List.of(), List.of());
+    }
+
+    /** Finds the first action of a run whose class name matches exactly. */
+    private static Object findActionByClassName(Run<?, ?> run, String className) {
+        for (Action action : run.getAllActions()) {
+            if (action.getClass().getName().equals(className)) {
+                return action;
+            }
+        }
+        return null;
+    }
+
+    private static String firstBranchName(Object branches) {
+        if (!(branches instanceof Iterable)) {
+            return "";
+        }
+        for (Object branch : (Iterable<?>) branches) {
+            String name = stringOf(invokeNoArg(branch, "getName"));
+            if (!name.isEmpty()) {
+                return name;
+            }
+        }
+        return "";
+    }
+
+    private static String firstStringOf(Object values) {
+        if (!(values instanceof Iterable)) {
+            return "";
+        }
+        for (Object value : (Iterable<?>) values) {
+            String text = stringOf(value);
+            if (!text.isEmpty()) {
+                return text;
+            }
+        }
+        return "";
+    }
+
+    private static String stringOf(Object value) {
+        return value instanceof String ? (String) value : "";
+    }
+
+    private static String firstNonEmpty(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isEmpty()) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    /**
+     * Reads the script path the job's own definition declares. An inline
+     * definition holds its script, and a template definition lives in
+     * another repository, so both answer no path.
+     */
+    private static String resolveDefinitionPath(Run<?, ?> run) {
+        if (!(run.getParent() instanceof WorkflowJob)) {
+            return "";
+        }
+        FlowDefinition definition = ((WorkflowJob) run.getParent()).getDefinition();
+        if (definition == null) {
+            return "";
+        }
+        return truncate(stringOf(invokeNoArg(definition, "getScriptPath")), MAX_FIELD_512);
+    }
+
+    /**
+     * Reads the global libraries the definition loaded. An absent
+     * libraries action leaves the list empty. The event caps bound this
+     * list.
+     */
+    private static List<BuildLibrary> resolveLibraries(Run<?, ?> run) {
+        // LibraryRecord declares getName() and getVersion(), and no
+        // getRevision(), on the pinned pipeline-groovy-lib. The revision
+        // read therefore answers empty. The proto field stays for a
+        // plugin that adds the method.
+        Object librariesAction = null;
+        for (Action action : run.getAllActions()) {
+            if (hasSimpleNameInHierarchy(action.getClass(), "LibrariesAction")) {
+                librariesAction = action;
+                break;
+            }
+        }
+        if (librariesAction == null) {
+            return List.of();
+        }
+        Object records = invokeNoArg(librariesAction, "getLibraries");
+        if (!(records instanceof Iterable)) {
+            return List.of();
+        }
+        List<BuildLibrary> libraries = new ArrayList<>();
+        for (Object record : (Iterable<?>) records) {
+            libraries.add(BuildLibrary.builder()
+                    .name(truncate(stringOf(invokeNoArg(record, "getName")), MAX_FIELD_512))
+                    .version(truncate(stringOf(invokeNoArg(record, "getVersion")), MAX_FIELD_512))
+                    .revision(truncate(stringOf(invokeNoArg(record, "getRevision")), MAX_FIELD_512))
+                    .build());
+        }
+        return libraries;
+    }
+
+    /**
+     * Walks the run's flow graph and reads the pod templates it
+     * allocated: one entry per distinct node name, in the order the run
+     * allocated them. The event caps bound this list.
+     */
+    private static List<BuildPodTemplate> resolvePodTemplates(Run<?, ?> run) {
+        if (!(run instanceof WorkflowRun)) {
+            return List.of();
+        }
+        FlowExecution execution = ((WorkflowRun) run).getExecution();
+        if (execution == null) {
+            return List.of();
+        }
+        List<BuildPodTemplate> podTemplates = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (FlowNode node : new FlowGraphWalker(execution)) {
+            WorkspaceAction workspace = node.getAction(WorkspaceAction.class);
+            if (workspace == null) {
+                continue;
+            }
+            String nodeName = orEmpty(workspace.getNode());
+            if (nodeName.isEmpty() || !seen.add(nodeName)) {
+                continue;
+            }
+            podTemplates.add(BuildPodTemplate.builder()
+                    .name(truncate(nodeName, MAX_FIELD_512))
+                    .label(agentLabelFrom(workspace))
+                    .image(resolvePodTemplateImage(Jenkins.get().getNode(nodeName)))
+                    .build());
+        }
+        return podTemplates;
+    }
+
+    /**
+     * Reads the container image of the node that ran the build. A node
+     * that is no kubernetes agent answers no image.
+     */
+    static String resolvePodTemplateImage(Node node) {
+        // KubernetesSlave declares getTemplateOrNull() and getTemplate().
+        // The second throws when the template is gone, so the null-first
+        // read happens first, and the throwing call is the fallback.
+        // PodTemplate declares getImage() and getContainers(), and
+        // ContainerTemplate declares getImage().
+        if (node == null || !hasSimpleNameInHierarchy(node.getClass(), "KubernetesSlave")) {
+            return "";
+        }
+        Object template = invokeNoArg(node, "getTemplateOrNull");
+        if (template == null) {
+            template = invokeNoArg(node, "getTemplate");
+        }
+        if (template == null) {
+            return "";
+        }
+        String image = stringOf(invokeNoArg(template, "getImage"));
+        if (!image.isEmpty()) {
+            return image;
+        }
+        Object containers = invokeNoArg(template, "getContainers");
+        if (!(containers instanceof Iterable)) {
+            return "";
+        }
+        for (Object container : (Iterable<?>) containers) {
+            String containerImage = stringOf(invokeNoArg(container, "getImage"));
+            if (!containerImage.isEmpty()) {
+                return containerImage;
+            }
+        }
+        return "";
+    }
+
+    /**
+     * Resolves the facts E1 carries: the definition path and the
+     * libraries. E1 reads no SCM fact and walks no flow graph.
+     */
+    private static SourceFacts resolveDefinitionFacts(Run<?, ?> run) {
+        return new SourceFacts("", "", "", "", resolveDefinitionPath(run), resolveLibraries(run), List.of());
+    }
+
+    /**
+     * Emits one {@code run.source} event for a run. The event carries
+     * the run identity, the definition path, and the libraries. With
+     * {@code withScm} true it also carries the branch, the SCM head, the
+     * revision, the URL, the pod templates, and the changeset. The
+     * builder writes a resolved value only when it is not empty.
+     */
+    private static void emitRunSource(Run<?, ?> run, RunState state, SourceFacts source, boolean withScm) {
+        BuildEvent.Builder b = BuildEvent.builder()
+                .phase(BuildEvent.PHASE_RUN_SOURCE)
+                .seq(state.nextSeq())
+                .emittedAtMillis(System.currentTimeMillis())
+                .runId(state.runId)
+                .intentKey(state.intentKey)
+                .jobPath(state.jobPath)
+                .buildNumber(state.buildNumber);
+        applyCommonMetadata(b, run, false);
+        applyTemplateFields(b, run);
+        if (!source.definitionPath.isEmpty()) {
+            b.definitionPath(source.definitionPath);
+        }
+        if (!source.libraries.isEmpty()) {
+            b.libraries(source.libraries);
+        }
+        if (withScm) {
+            if (!source.branch.isEmpty()) {
+                b.branch(source.branch);
+            }
+            if (!source.scmHead.isEmpty()) {
+                b.scmHead(source.scmHead);
+            }
+            if (!source.scmRevision.isEmpty()) {
+                b.scmRevision(source.scmRevision);
+            }
+            if (!source.scmUrl.isEmpty()) {
+                b.scmUrl(source.scmUrl);
+            }
+            if (!source.podTemplates.isEmpty()) {
+                b.podTemplates(source.podTemplates);
+            }
+            List<BuildChange> changes = extractChanges(run);
+            b.changes(changes);
+            b.changeCount(changes.size());
+        } else {
+            // The frozen table for E1 leaves the SCM facts empty. The
+            // branch carries the multibranch name alone.
+            b.scmHead("");
+            b.scmUrl("");
+            b.branch(truncate(IntentKey.branchNameFor(run.getParent()), MAX_FIELD_512));
+        }
+        emitCapped(b.build());
+    }
+
     // --- Flows: attaches and detaches the graph listener (D1, D2) ---
 
     /** Attaches a {@link Graph} listener to a running pipeline, and detaches it at completion. */
@@ -915,6 +1283,14 @@ public final class VarroaRunRecorder {
                 }
                 if (resumed) {
                     scheduleResumedPush(run, execution);
+                } else {
+                    // E1: the flow's script compiled and the execution
+                    // started. A resumed build sent its E1 from the
+                    // process that loaded the flow.
+                    RunState state = stateFor(safeJobPath(run), run.getNumber());
+                    if (state != null) {
+                        emitRunSource(run, state, resolveDefinitionFacts(run), false);
+                    }
                 }
             } catch (Exception e) {
                 LOGGER.log(Level.WARNING, "VarroaRunRecorder.Flows: failed to attach the graph listener", e);
@@ -991,6 +1367,21 @@ public final class VarroaRunRecorder {
                     BlockStartNode start = ((BlockEndNode) node).getStartNode();
                     if (hasLabel(start)) {
                         emitStageEnded(run, state, start, (BlockEndNode) node);
+                    }
+                }
+                // E2: the first node at which the run answers a
+                // revision. The probe never stops the listener's other
+                // work: its own catch logs and falls through.
+                if (!state.sourceResolved.get()) {
+                    try {
+                        SourceFacts source = resolveSourceFacts(run);
+                        if (!source.scmRevision.isEmpty()) {
+                            emitRunSource(run, state, source, true);
+                            state.sourceResolved.set(true);
+                        }
+                    } catch (Exception e) {
+                        LOGGER.log(Level.WARNING,
+                                "VarroaRunRecorder.Graph: failed to probe the run's source", e);
                     }
                 }
                 // The push is scheduled, never performed, on this call:
@@ -1339,17 +1730,33 @@ public final class VarroaRunRecorder {
             b.parameters(keepNewestParams(event.getParameters(), MAX_PARAMETERS));
             changed = true;
         }
+        List<BuildLibrary> libraries = capLibraries(keepNewest(event.getLibraries(), MAX_LIBRARIES));
+        if (!libraries.equals(event.getLibraries())) {
+            b.libraries(libraries);
+            changed = true;
+        }
+        List<BuildPodTemplate> podTemplates = capPodTemplates(keepNewest(event.getPodTemplates(), MAX_POD_TEMPLATES));
+        if (!podTemplates.equals(event.getPodTemplates())) {
+            b.podTemplates(podTemplates);
+            changed = true;
+        }
+        String definitionPath = truncate(event.getDefinitionPath(), MAX_FIELD_512);
+        if (!definitionPath.equals(event.getDefinitionPath())) {
+            b.definitionPath(definitionPath);
+            changed = true;
+        }
         return changed ? b.build() : event;
     }
 
     /**
      * While the serialized event stays above 512 KiB, drops {@code
-     * stages} entries from the oldest, then {@code changes} entries from
-     * the oldest, then {@code parameters} entries, then truncates every
-     * remaining stage's error to 512 characters (D11). Because the stage
-     * rung fully drains {@code stages} before the error rung runs, the
-     * error rung has no effect once the stage list is already empty.
-     * When the event is still above 512 KiB, replaces it with a reduced,
+     * stages} entries from the oldest, then {@code changes} entries, then
+     * {@code parameters} entries, then {@code pod_templates} entries,
+     * then {@code libraries} entries, then truncates every remaining
+     * stage's error to 512 characters (D11). Because the stage rung
+     * fully drains {@code stages} before the error rung runs, the error
+     * rung has no effect once the stage list is already empty. When the
+     * event is still above 512 KiB, replaces it with a reduced,
      * identity-only event. When even that reduced event is above the
      * loopback's 1 MiB body limit — an identifier field the ladder
      * cannot shrink — drops it instead of returning it (ruling o).
@@ -1370,6 +1777,12 @@ public final class VarroaRunRecorder {
         }
         if (serializedSize(current) > MAX_EVENT_BYTES && !current.getStages().isEmpty()) {
             current = current.toBuilder().stages(truncateStageErrors(current.getStages())).build();
+        }
+        while (serializedSize(current) > MAX_EVENT_BYTES && !current.getPodTemplates().isEmpty()) {
+            current = current.toBuilder().podTemplates(dropOldest(current.getPodTemplates())).build();
+        }
+        while (serializedSize(current) > MAX_EVENT_BYTES && !current.getLibraries().isEmpty()) {
+            current = current.toBuilder().libraries(dropOldest(current.getLibraries())).build();
         }
         if (serializedSize(current) > MAX_EVENT_BYTES) {
             current = reducedEvent(current);
@@ -1439,6 +1852,45 @@ public final class VarroaRunRecorder {
         it.next();
         it.remove();
         return result;
+    }
+
+    /** Truncates every string of every library to the field cap. */
+    private static List<BuildLibrary> capLibraries(List<BuildLibrary> libraries) {
+        List<BuildLibrary> capped = new ArrayList<>(libraries.size());
+        for (BuildLibrary library : libraries) {
+            capped.add(longerThanCap(library.getName(), library.getVersion(), library.getRevision())
+                    ? BuildLibrary.builder()
+                            .name(truncate(library.getName(), MAX_FIELD_512))
+                            .version(truncate(library.getVersion(), MAX_FIELD_512))
+                            .revision(truncate(library.getRevision(), MAX_FIELD_512))
+                            .build()
+                    : library);
+        }
+        return capped;
+    }
+
+    /** Truncates every string of every pod template to the field cap. */
+    private static List<BuildPodTemplate> capPodTemplates(List<BuildPodTemplate> podTemplates) {
+        List<BuildPodTemplate> capped = new ArrayList<>(podTemplates.size());
+        for (BuildPodTemplate template : podTemplates) {
+            capped.add(longerThanCap(template.getName(), template.getLabel(), template.getImage())
+                    ? BuildPodTemplate.builder()
+                            .name(truncate(template.getName(), MAX_FIELD_512))
+                            .label(truncate(template.getLabel(), MAX_FIELD_512))
+                            .image(truncate(template.getImage(), MAX_FIELD_512))
+                            .build()
+                    : template);
+        }
+        return capped;
+    }
+
+    private static boolean longerThanCap(String... values) {
+        for (String value : values) {
+            if (value.length() > MAX_FIELD_512) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static List<BuildStage> truncateStageErrors(List<BuildStage> stages) {

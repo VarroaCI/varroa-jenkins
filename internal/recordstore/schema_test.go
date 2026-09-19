@@ -80,6 +80,7 @@ var expectedColumns = map[string][]columnSpec{
 		{"cause", "jsonb", true},
 		{"params", "jsonb", true},
 		{"changes", "jsonb", true},
+		{"source", "jsonb", true},
 		{"tests_total", "integer", true},
 		{"tests_failed", "integer", true},
 		{"tests_skipped", "integer", true},

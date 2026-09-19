@@ -100,6 +100,7 @@ type RunDetail struct {
 	TriggerReasonCode string            `json:"triggerReasonCode,omitempty"`
 	RetryRunID        string            `json:"retryRunId,omitempty"`
 	Stages            []RunStage        `json:"stages,omitempty"`
+	Source            *runSourceJSON    `json:"source,omitempty"`
 }
 
 // convertJSON re-shapes in into a T by round-tripping through JSON. Every
