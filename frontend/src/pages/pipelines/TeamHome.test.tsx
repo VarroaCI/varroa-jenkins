@@ -18,6 +18,7 @@ vi.mock("../../api/client", () => ({
   listPipelines: (...args: unknown[]) => mockListPipelines(...args),
   listRunners: (...args: unknown[]) => mockListRunners(...args),
   getTeamCell: (...args: unknown[]) => mockGetTeamCell(...args),
+  teamRunStreamUrl: (team: string) => `/api/v1/pipelines/${encodeURIComponent(team)}/stream`,
 }));
 
 /** RunEvent holds one frame the page reads off the team stream. */
@@ -701,8 +702,10 @@ describe("TeamHome — live run events", () => {
     renderPage("/pipelines/payments");
     await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(1));
 
+    // The URL carries the BFF base, so the browser reaches the API and not
+    // the SPA fallback.
     expect(mockUseEventStream).toHaveBeenCalledWith(
-      "/pipelines/payments/stream",
+      "/api/v1/pipelines/payments/stream",
       "pipelines:payments",
       ["run", "stage"],
     );

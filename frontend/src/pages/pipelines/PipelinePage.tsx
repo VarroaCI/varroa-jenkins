@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getPipelineJob, listRuns, type ListRunsParams } from "../../api/client";
+import { getPipelineJob, listRuns, teamRunStreamUrl, type ListRunsParams } from "../../api/client";
 import { ApiError } from "../../hooks/useApi";
 import { useEventStream } from "../../hooks/useEventStream";
 import { ForbiddenPage, GenericErrorPage, NotFoundPage, RecordStoreDisabledPage } from "../../components/RecoveryState";
@@ -160,7 +160,7 @@ export default function PipelinePage() {
   // The team's stream carries every job of that team, so the page keeps the
   // frames of its own job only.
   const { lastEvent, readyState } = useEventStream<RunNotification>(
-    team ? `/pipelines/${enc(team)}/stream` : null,
+    team ? teamRunStreamUrl(team) : null,
     team ? `pipelines:${team}` : null,
     ["run", "stage"],
   );

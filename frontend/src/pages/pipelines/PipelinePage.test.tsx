@@ -14,6 +14,7 @@ vi.mock("../../api/client", () => ({
   getPipelineJob: (...args: unknown[]) => mockGetPipelineJob(...args),
   listRuns: (...args: unknown[]) => mockListRuns(...args),
   createRun: (...args: unknown[]) => mockCreateRun(...args),
+  teamRunStreamUrl: (team: string) => `/api/v1/pipelines/${encodeURIComponent(team)}/stream`,
 }));
 
 /** RunEvent holds one frame the page reads off the team stream. */

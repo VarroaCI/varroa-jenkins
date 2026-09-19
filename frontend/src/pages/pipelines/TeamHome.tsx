@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getTeamCell, listPipelines, listRunners } from "../../api/client";
+import { getTeamCell, listPipelines, listRunners, teamRunStreamUrl } from "../../api/client";
 import { ApiError } from "../../hooks/useApi";
 import { useEventStream } from "../../hooks/useEventStream";
 import { ForbiddenPage, GenericErrorPage, NotFoundPage, RecordStoreDisabledPage } from "../../components/RecoveryState";
@@ -109,7 +109,7 @@ export default function TeamHome() {
 
   // The team's stream carries every run of every tenant of that team.
   const { lastEvent, readyState } = useEventStream<RunNotification>(
-    team ? `/pipelines/${enc(team)}/stream` : null,
+    team ? teamRunStreamUrl(team) : null,
     team ? `pipelines:${team}` : null,
     ["run", "stage"],
   );

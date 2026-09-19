@@ -11,6 +11,7 @@ import {
   listRunTests,
   rerunRun,
   runLogUrl,
+  teamRunStreamUrl,
   downloadRunArtifact,
 } from "../../api/client";
 import { ApiError } from "../../hooks/useApi";
@@ -202,7 +203,7 @@ export default function BuildPage() {
 
   // The team's stream carries every run of the team.
   const { lastEvent: runEvent, readyState: runStreamReady } = useEventStream<RunNotification>(
-    team ? `/pipelines/${encodeURIComponent(team)}/stream` : null,
+    team ? teamRunStreamUrl(team) : null,
     team ? `pipelines:${team}` : null,
     ["run", "stage"],
   );

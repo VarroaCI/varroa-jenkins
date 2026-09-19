@@ -950,6 +950,13 @@ export function broodStreamUrl(name: string, namespace: string): string {
   return `${BFF_BASE}/brood-operations/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/stream`;
 }
 
+/** teamRunStreamUrl builds the team run stream URL on BFF_BASE, so the
+ * browser reaches the API and not the SPA. useEventStream appends the
+ * stream ticket as a query parameter; this URL holds none. */
+export function teamRunStreamUrl(team: string): string {
+  return `${BFF_BASE}/pipelines/${encodeURIComponent(team)}/stream`;
+}
+
 // ---- Brood Schedules ----
 
 export function listBroodSchedules(namespace?: string): Promise<BroodScheduleListResponse> {
