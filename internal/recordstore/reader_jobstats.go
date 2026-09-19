@@ -17,12 +17,14 @@ type StageStat struct {
 // window holds no finished run, because a rate over zero runs has no
 // value to report. MedianDurationMs is nil for the same reason.
 // SlowestStage is nil when no run in the window carries a finished
-// stage.
+// stage. MedianQueueWaitMs is nil when no run in the window has both
+// queued_at and started_at set.
 type JobWindowStats struct {
-	Builds           int64
-	PassRate         *float64
-	MedianDurationMs *int64
-	SlowestStage     *StageStat
+	Builds            int64
+	PassRate          *float64
+	MedianDurationMs  *int64
+	MedianQueueWaitMs *int64
+	SlowestStage      *StageStat
 }
 
 // JobWindowStats summarizes jobPath's runs created at or after since.
@@ -47,12 +49,13 @@ func (r *pgReader) JobWindowStats(ctx context.Context, cluster, tenant, jobPath 
 
 	var builds, finished, passed int64
 	var medianDurationMs *int64
+	var medianQueueWaitMs *int64
 	var slowestStageName *string
 	var slowestStageDurationMs *int64
 
 	err := r.pool.QueryRow(ctx, `
 		WITH window_runs AS (
-			SELECT run_id, result, duration_ms
+			SELECT run_id, result, duration_ms, queued_at, started_at
 			FROM varroa.runs
 			WHERE cluster = $1 AND tenant = $2 AND job_path = $3 AND created_at >= $4
 			  AND `+recordsBuildSQL+`
@@ -71,16 +74,20 @@ func (r *pgReader) JobWindowStats(ctx context.Context, cluster, tenant, jobPath 
 			(SELECT count(*) FROM window_runs WHERE result = 'SUCCESS') AS passed,
 			(SELECT ROUND(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms)::numeric)::bigint
 			   FROM window_runs WHERE duration_ms IS NOT NULL) AS median_duration_ms,
+			(SELECT ROUND(percentile_cont(0.5) WITHIN GROUP (
+			    ORDER BY EXTRACT(EPOCH FROM (started_at - queued_at)) * 1000
+			 )::numeric)::bigint
+			   FROM window_runs WHERE queued_at IS NOT NULL AND started_at IS NOT NULL) AS median_queue_wait_ms,
 			(SELECT stage_name FROM stage_medians ORDER BY median_duration_ms DESC, stage_name LIMIT 1) AS slowest_stage_name,
 			(SELECT median_duration_ms FROM stage_medians ORDER BY median_duration_ms DESC, stage_name LIMIT 1) AS slowest_stage_duration_ms
 	`, cluster, tenant, jobPath, since).Scan(
-		&builds, &finished, &passed, &medianDurationMs, &slowestStageName, &slowestStageDurationMs,
+		&builds, &finished, &passed, &medianDurationMs, &medianQueueWaitMs, &slowestStageName, &slowestStageDurationMs,
 	)
 	if err != nil {
 		return JobWindowStats{}, fmt.Errorf("read job window stats: %w", err)
 	}
 
-	stats := JobWindowStats{Builds: builds, MedianDurationMs: medianDurationMs}
+	stats := JobWindowStats{Builds: builds, MedianDurationMs: medianDurationMs, MedianQueueWaitMs: medianQueueWaitMs}
 	if finished > 0 {
 		rate := float64(passed) / float64(finished)
 		stats.PassRate = &rate

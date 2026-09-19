@@ -4,7 +4,8 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createTestQueryClient } from "../../test/render-utils";
 import type { TeamCell } from "../../types";
-import TeamCellCard from "./TeamCellCard";
+import TeamCellCard, { CELL_STATE_LABELS } from "./TeamCellCard";
+import styles from "./TeamCellCard.module.css";
 
 const mockGetTeamCell = vi.fn();
 vi.mock("../../api/client", () => ({
@@ -216,5 +217,31 @@ describe("TeamCellCard", () => {
     const updated = await screen.findByText(/^Updated /);
     expect(updated).toHaveTextContent("Updated just now");
     expect(updated.textContent).not.toContain("heartbeat");
+  });
+
+  it("shows the CELL_STATE_LABELS text as the badge of every state", async () => {
+    const cases = [
+      ["placed", styles.badgeOk],
+      ["moving", styles.badgeInfo],
+      ["rehydrating", styles.badgeInfo],
+      ["unplaced", styles.badgeWarn],
+    ] as const;
+
+    for (const [state, badgeClass] of cases) {
+      mockGetTeamCell.mockResolvedValue(placedCell({ state, reason: "TenantPlaced" }));
+      const { container, unmount } = renderCard();
+
+      // The badge is the span the card's own badge row holds, so its class
+      // names the element and its text proves the label comes from
+      // CELL_STATE_LABELS.
+      await waitFor(() =>
+        expect(container.querySelector(`.${styles.badgeRow} > span`)).not.toBeNull(),
+      );
+      const badge = container.querySelector(`.${styles.badgeRow} > span`) as HTMLElement;
+
+      expect(badge).toHaveClass(badgeClass);
+      expect(badge.textContent).toBe(CELL_STATE_LABELS[state]);
+      unmount();
+    }
   });
 });

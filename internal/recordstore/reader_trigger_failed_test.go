@@ -122,7 +122,7 @@ func TestTriggerFailedChangesNoJobStatistic(t *testing.T) {
 		t.Fatalf("median duration = %v, want none", *stats.MedianDurationMs)
 	}
 
-	summaries, err := reader.ListJobSummaries(ctx, testCluster, testTenant)
+	summaries, err := reader.ListJobSummaries(ctx, testCluster, testTenant, time.Now().Add(-30*24*time.Hour))
 	if err != nil {
 		t.Fatalf("ListJobSummaries: %v", err)
 	}

@@ -15,18 +15,27 @@
   .page { animation: none; }
 }
 
-/* The title track is minmax(0, 1fr), never 1fr: a 1fr track has an auto
-   minimum, so one long team name would push the card out of the row. The
-   card track is fit-content, so a page whose card renders nothing keeps no
-   empty column. */
-.head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) fit-content(320px);
-  gap: 16px;
+/* The pill carries the state as text, in the colour pair the card's own
+   badge uses. A CSS module shares no class name with another file. */
+.cellPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+  padding: 0.2rem 0.6rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  cursor: pointer;
 }
+.cellPillOk   { composes: cellPill; background: var(--ok-soft);   color: var(--ok-text); }
+.cellPillInfo { composes: cellPill; background: var(--info-soft); color: var(--info-text); }
+.cellPillWarn { composes: cellPill; background: var(--warn-soft); color: var(--warn-text); }
 
-@media (max-width: 1080px) {
-  .head { grid-template-columns: 1fr; }
+/* The margin keeps the open card clear of the page head above it. */
+.cellDisclosure {
+  margin: 1rem 0 0;
 }
 
 .pageHead {

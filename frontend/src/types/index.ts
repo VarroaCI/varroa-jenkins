@@ -1537,7 +1537,8 @@ export type PipelineItemKind = "pipeline" | "multibranch" | "unknown";
 
 /**
  * One job's run-history summary for the Pipelines table. A job that has
- * never run carries no lastBuild.
+ * never run carries no lastBuild. medianQueueWaitMs is absent when no run
+ * in the window started.
  */
 export interface PipelineSummary {
   jobPath: string;
@@ -1545,6 +1546,7 @@ export interface PipelineSummary {
   kind: PipelineItemKind;
   lastBuild?: RunSummary;
   durationTrendMs?: number[];
+  medianQueueWaitMs?: number;
 }
 
 /** GET /pipelines/{team}: the job list plus the running-now strip. */
@@ -1626,12 +1628,14 @@ export interface PipelineSlowestStage {
 /**
  * The job's "Last 30 days" card. passRate, medianDurationMs, and
  * slowestStage are absent when the window holds no finished run or no
- * finished stage.
+ * finished stage. medianQueueWaitMs is absent when no run in the window
+ * started.
  */
 export interface PipelineLast30Days {
   builds: number;
   passRate?: number;
   medianDurationMs?: number;
+  medianQueueWaitMs?: number;
   slowestStage?: PipelineSlowestStage;
 }
 

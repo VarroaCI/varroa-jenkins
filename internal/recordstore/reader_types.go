@@ -134,11 +134,16 @@ const jobHealthRecentResultsSize = 5
 // RecentResults holds the job's most recent jobHealthRecentResultsSize
 // finished runs' results, newest first; a run with no result yet
 // (QUEUED or RUNNING) is not finished and never appears here.
+// MedianQueueWaitMs is nil when the tenant's job has no run in the
+// window with both queued_at and started_at set. ListJobSummaries
+// alone sets it; GetJobSummary leaves it nil, because the job detail
+// page reads its own queue wait from JobWindowStats.
 type JobSummary struct {
-	JobPath         string
-	LastRun         *Run
-	DurationTrendMs []int64
-	RecentResults   []string
+	JobPath           string
+	LastRun           *Run
+	DurationTrendMs   []int64
+	RecentResults     []string
+	MedianQueueWaitMs *int64
 }
 
 // RunQuery is ListRuns' filter and paging input. Cluster and Tenant are

@@ -74,6 +74,10 @@ type pipelineSummaryJSON struct {
 	Kind            string          `json:"kind"`
 	LastBuild       *runSummaryJSON `json:"lastBuild,omitempty"`
 	DurationTrendMs []int64         `json:"durationTrendMs,omitempty"`
+	// MedianQueueWaitMs is the job's median queue wait in milliseconds
+	// over the trailing window. It is absent when the job started no
+	// build in that window.
+	MedianQueueWaitMs *int64 `json:"medianQueueWaitMs,omitempty"`
 }
 
 type pipelineListResponse struct {
@@ -185,15 +189,16 @@ func buildPipelineDependencies(deps recordstore.JobDependencies) pipelineDepende
 }
 
 // pipelineLast30DaysJSON is design D8's "Last 30 days" card. PassRate,
-// MedianDurationMs, and SlowestStage stay nil when the window holds no
-// finished run or no finished stage. handleGetPipelineJob sets the
-// whole field to nil, not this struct's zero value, when the
-// record-store call itself fails.
+// MedianDurationMs, MedianQueueWaitMs, and SlowestStage stay nil when
+// the window holds no finished run, no started build, or no finished
+// stage. handleGetPipelineJob sets the whole field to nil, not this
+// struct's zero value, when the record-store call itself fails.
 type pipelineLast30DaysJSON struct {
-	Builds           int64                     `json:"builds"`
-	PassRate         *float64                  `json:"passRate,omitempty"`
-	MedianDurationMs *int64                    `json:"medianDurationMs,omitempty"`
-	SlowestStage     *pipelineSlowestStageJSON `json:"slowestStage,omitempty"`
+	Builds            int64                     `json:"builds"`
+	PassRate          *float64                  `json:"passRate,omitempty"`
+	MedianDurationMs  *int64                    `json:"medianDurationMs,omitempty"`
+	MedianQueueWaitMs *int64                    `json:"medianQueueWaitMs,omitempty"`
+	SlowestStage      *pipelineSlowestStageJSON `json:"slowestStage,omitempty"`
 }
 
 type pipelineSlowestStageJSON struct {
@@ -368,6 +373,7 @@ func buildPipelineSummary(js recordstore.JobSummary) pipelineSummaryJSON {
 		rs := buildRunSummary(*js.LastRun)
 		out.LastBuild = &rs
 	}
+	out.MedianQueueWaitMs = js.MedianQueueWaitMs
 	return out
 }
 
@@ -468,6 +474,10 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 		tenantFolder = refs[0].Folder
 	}
 
+	// One window serves every tenant, so a later tenant's read never
+	// measures a different 30 days than the first.
+	since := time.Now().UTC().AddDate(0, 0, -pipelineWindowDays)
+
 	for _, ref := range refs {
 		// The grants resolve once per tenant, never once per row. The row
 		// filter then runs before the rows of this ref reach the shared
@@ -475,7 +485,7 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 		// row of another tenant that carries the same job path.
 		grants, granted := s.deps.Authorizer.tenantGrants(claims, ref.Tenant, ref.Folder)
 
-		summaries, err := s.deps.RecordStore.ListJobSummaries(ctx, ref.Cluster, ref.Tenant)
+		summaries, err := s.deps.RecordStore.ListJobSummaries(ctx, ref.Cluster, ref.Tenant, since)
 		if s.handleReaderError(w, err, "list job summaries") {
 			return
 		}
@@ -629,7 +639,12 @@ func (s *Server) buildLast30Days(ctx context.Context, ref TenantRef, jobPath str
 		s.deps.Logger.Warn("pipeline job window stats failed", "jobPath", jobPath, "error", err)
 		return nil
 	}
-	out := &pipelineLast30DaysJSON{Builds: stats.Builds, PassRate: stats.PassRate, MedianDurationMs: stats.MedianDurationMs}
+	out := &pipelineLast30DaysJSON{
+		Builds:            stats.Builds,
+		PassRate:          stats.PassRate,
+		MedianDurationMs:  stats.MedianDurationMs,
+		MedianQueueWaitMs: stats.MedianQueueWaitMs,
+	}
 	if stats.SlowestStage != nil {
 		out.SlowestStage = &pipelineSlowestStageJSON{Name: stats.SlowestStage.Name, DurationMs: stats.SlowestStage.DurationMs}
 	}

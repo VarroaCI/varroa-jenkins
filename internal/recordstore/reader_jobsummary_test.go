@@ -41,7 +41,7 @@ func TestListJobSummariesGroupsByJobPath(t *testing.T) {
 	newestA := seedJobSummaryRun(t, db, "acme/app-a", base.Add(time.Hour), "FAILURE", &durA2)
 	seedJobSummaryRun(t, db, "acme/app-b", base, "SUCCESS", nil)
 
-	summaries, err := reader.ListJobSummaries(ctx, testCluster, testTenant)
+	summaries, err := reader.ListJobSummaries(ctx, testCluster, testTenant, time.Now().Add(-30*24*time.Hour))
 	if err != nil {
 		t.Fatalf("ListJobSummaries: %v", err)
 	}
@@ -162,5 +162,62 @@ func TestGetJobSummaryUnknownJobHasNoRecentResults(t *testing.T) {
 	}
 	if len(summary.RecentResults) != 0 {
 		t.Fatalf("RecentResults = %v, want none", summary.RecentResults)
+	}
+}
+
+// TestListJobSummariesAddsQueueWaitMedians asserts the team home table's
+// queue wait comes from the runs inside the window: the median of a
+// job's waits, no value for a job that never started a build, and no
+// contribution from a run created before the window.
+func TestListJobSummariesAddsQueueWaitMedians(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	reader := NewReader(pool)
+	ctx := context.Background()
+
+	base := time.Now().UTC().Add(-time.Hour)
+	wait1, wait2, wait3 := int64(2000), int64(4000), int64(9000)
+	seedJobQueueWaitRun(t, db, "acme/queue-wait", base, &wait1)
+	seedJobQueueWaitRun(t, db, "acme/queue-wait", base.Add(time.Minute), &wait2)
+	seedJobQueueWaitRun(t, db, "acme/queue-wait", base.Add(2*time.Minute), &wait3)
+	seedJobQueueWaitRun(t, db, "acme/queue-pending", base, nil)
+
+	// Two hours back bounds the window. The older run carries a wait far
+	// above the others, so counting it would move the median.
+	windowStart := base.Add(-time.Hour)
+	oldWait := int64(600000)
+	seedJobQueueWaitRun(t, db, "acme/queue-wait", base.Add(-3*time.Hour), &oldWait)
+	seedJobQueueWaitRun(t, db, "acme/queue-old", base.Add(-3*time.Hour), &oldWait)
+
+	summaries, err := reader.ListJobSummaries(ctx, testCluster, testTenant, windowStart)
+	if err != nil {
+		t.Fatalf("ListJobSummaries: %v", err)
+	}
+	byPath := map[string]JobSummary{}
+	for _, s := range summaries {
+		byPath[s.JobPath] = s
+	}
+
+	waited, ok := byPath["acme/queue-wait"]
+	if !ok {
+		t.Fatalf("acme/queue-wait missing from %v", byPath)
+	}
+	if waited.MedianQueueWaitMs == nil || *waited.MedianQueueWaitMs != 4000 {
+		t.Fatalf("acme/queue-wait MedianQueueWaitMs = %v, want 4000 (median of 2000, 4000, 9000)", waited.MedianQueueWaitMs)
+	}
+
+	pending, ok := byPath["acme/queue-pending"]
+	if !ok {
+		t.Fatalf("acme/queue-pending missing from %v", byPath)
+	}
+	if pending.MedianQueueWaitMs != nil {
+		t.Fatalf("acme/queue-pending MedianQueueWaitMs = %v, want nil: no run started", *pending.MedianQueueWaitMs)
+	}
+
+	old, ok := byPath["acme/queue-old"]
+	if !ok {
+		t.Fatalf("acme/queue-old missing from %v", byPath)
+	}
+	if old.MedianQueueWaitMs != nil {
+		t.Fatalf("acme/queue-old MedianQueueWaitMs = %v, want nil: its only run predates the window", *old.MedianQueueWaitMs)
 	}
 }

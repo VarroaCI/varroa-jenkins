@@ -1,14 +1,14 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { listPipelines, listRunners } from "../../api/client";
+import { getTeamCell, listPipelines, listRunners } from "../../api/client";
 import { ApiError } from "../../hooks/useApi";
 import { ForbiddenPage, GenericErrorPage, NotFoundPage, RecordStoreDisabledPage } from "../../components/RecoveryState";
 import { Card } from "../../components/Card";
 import { age } from "../../components/activityTimeline.util";
 import type { RunnerEntry, RunningRun } from "../../types";
 import JobTree, { formatDuration } from "./JobTree";
-import TeamCellCard from "./TeamCellCard";
+import TeamCellCard, { CELL_STATE_LABELS } from "./TeamCellCard";
 import { buildJobTree, defaultOpenPaths, visibleRows } from "./jobTree";
 import styles from "./TeamHome.module.css";
 
@@ -24,6 +24,19 @@ function jobHref(team: string, jobPath: string): string {
 
 function runHref(team: string, jobPath: string, runId: string): string {
   return `${jobHref(team, jobPath)}/${enc(runId)}`;
+}
+
+/** PILL_CLASS maps each cell-hosting state to the pill's colour pair. The
+ * text carries the state, and the colour supports it only. */
+const PILL_CLASS: Record<keyof typeof CELL_STATE_LABELS, string> = {
+  placed: styles.cellPillOk,
+  moving: styles.cellPillInfo,
+  rehydrating: styles.cellPillInfo,
+  unplaced: styles.cellPillWarn,
+};
+
+function pillClassName(state: keyof typeof CELL_STATE_LABELS): string {
+  return PILL_CLASS[state];
 }
 
 function RunningTile({ team, run }: { team: string; run: RunningRun }) {
@@ -92,6 +105,15 @@ export default function TeamHome() {
     queryFn: () => listRunners(team!),
     enabled: !!team,
   });
+  // This call shares its query key with TeamCellCard's own call, so React
+  // Query dedupes the two into one request.
+  const cellQuery = useQuery({
+    queryKey: ["team-cell", team],
+    queryFn: () => getTeamCell(team!),
+    enabled: !!team,
+    refetchInterval: 30_000,
+  });
+  const [cellOpen, setCellOpen] = useState(false);
 
   const tree = useMemo(
     () => buildJobTree(data?.items ?? [], data?.runningNow ?? [], data?.tenantFolder ?? ""),
@@ -147,11 +169,28 @@ export default function TeamHome() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.head}>
-        <div className={styles.pageHead}>
-          <h1 className={styles.pageTitle}>{team}</h1>
-          <div className={styles.pageDesc}>Pipelines for this team</div>
-        </div>
+      <div className={styles.pageHead}>
+        <h1 className={styles.pageTitle}>{team}</h1>
+        <div className={styles.pageDesc}>Pipelines for this team</div>
+        {/* A failed refetch keeps the last data, so the isError test hides
+            the pill then, as TeamCellCard hides its own card. */}
+        {cellQuery.data && !cellQuery.isError && cellQuery.data.state !== "notCellHosted" && (
+          <button
+            type="button"
+            className={pillClassName(cellQuery.data.state)}
+            aria-expanded={cellOpen}
+            aria-controls="team-cell-disclosure"
+            onClick={() => setCellOpen((v) => !v)}
+          >
+            {CELL_STATE_LABELS[cellQuery.data.state]}
+            {cellQuery.data.cell ? ` · ${cellQuery.data.cell}` : ""}
+          </button>
+        )}
+      </div>
+
+      {/* The card stays mounted while the disclosure is closed, so its own
+          30 second read keeps running underneath. */}
+      <div id="team-cell-disclosure" className={styles.cellDisclosure} hidden={!cellOpen}>
         <TeamCellCard team={team!} />
       </div>
 
@@ -187,6 +226,7 @@ export default function TeamHome() {
                 <th>Last build</th>
                 <th>Branch</th>
                 <th>Duration, last 8</th>
+                <th>Queue wait</th>
                 <th>When</th>
               </tr>
             </thead>

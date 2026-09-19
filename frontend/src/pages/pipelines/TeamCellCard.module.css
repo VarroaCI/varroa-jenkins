@@ -1,9 +1,6 @@
-/* The card sizes its own column. The page head's card track is
-   fit-content, so a page whose card renders nothing keeps no empty
-   column. */
+/* The card fills the width of the disclosure region that holds it. */
 .section {
-  min-width: 260px;
-  max-width: 320px;
+  width: 100%;
 }
 
 .heading {

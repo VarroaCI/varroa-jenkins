@@ -4278,6 +4278,13 @@ PipelineSummary:
       items:
         type: integer
         format: int64
+    medianQueueWaitMs:
+      type: integer
+      format: int64
+      description: >
+        The median wait between a build's queued moment and its started
+        moment, in milliseconds, over the trailing 30 days. Absent when the
+        job started no build in that window.
   additionalProperties: false
 
 PipelineListResponse:
@@ -4520,6 +4527,10 @@ PipelineLast30Days:
       format: int64
       nullable: true
       description: The median duration_ms over finished runs. Null when the window holds no finished run.
+    medianQueueWaitMs:
+      type: integer
+      format: int64
+      description: The median wait between a build's queued moment and its started moment, in milliseconds. Absent when the job started no build in that window.
     slowestStage:
       allOf:
         - $ref: '#/PipelineSlowestStage'

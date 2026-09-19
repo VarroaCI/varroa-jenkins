@@ -460,7 +460,8 @@ describe("TeamHome — the cell card", () => {
     mockGetTeamCell.mockResolvedValue({ state: "notCellHosted", canOpenCell: false });
   });
 
-  it("puts the card in the page head, after the title and above Running now", async () => {
+  it("puts the pill in the page head after the title and opens the card from it", async () => {
+    const user = userEvent.setup();
     mockGetTeamCell.mockResolvedValue({
       state: "placed",
       reason: "TenantPlaced",
@@ -475,19 +476,27 @@ describe("TeamHome — the cell card", () => {
     });
     renderPage("/pipelines/payments");
 
-    const card = await screen.findByRole("region", { name: "Your cell" });
+    const pill = await screen.findByRole("button", { name: "Placed · cell-a" });
     const title = screen.getByRole("heading", { level: 1, name: "payments" });
     const running = screen.getByText("Running now");
-    expect(card.parentElement).toContainElement(title);
-    expect(title.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(title.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // A closed disclosure keeps the card out of the accessibility tree, so
+    // the region arrives only once a reader selects the pill.
+    expect(screen.queryByRole("region", { name: "Your cell" })).not.toBeInTheDocument();
+
+    await user.click(pill);
+    const card = screen.getByRole("region", { name: "Your cell" });
+    expect(pill.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(card.compareDocumentPosition(running) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("heads the page with an h1 and the card with an h2", async () => {
+    const user = userEvent.setup();
     mockGetTeamCell.mockResolvedValue({ state: "placed", cell: "cell-a", canOpenCell: false });
     renderPage("/pipelines/payments");
 
-    await screen.findByRole("region", { name: "Your cell" });
+    await user.click(await screen.findByRole("button", { name: "Placed · cell-a" }));
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("payments");
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Your cell");
   });
@@ -517,5 +526,125 @@ describe("TeamHome — the cell card", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("TeamHome — the cell pill", () => {
+  beforeEach(() => {
+    mockListPipelines.mockReset();
+    mockListRunners.mockReset();
+    mockGetTeamCell.mockReset();
+    mockListRunners.mockResolvedValue([]);
+    mockListPipelines.mockResolvedValue(pipelineList("payments", ["payments/checkout-api"]));
+  });
+
+  /** cellPill finds the pill by the region it controls, so a page that
+   * renders none answers null. */
+  function cellPill(): Element | null {
+    return document.querySelector('[aria-controls="team-cell-disclosure"]');
+  }
+
+  it("renders each cell-hosting state's pill with its own label, and a cell name only when the API sends one", async () => {
+    const rows = [
+      ["placed", "Placed · cell-a", "cell-a"],
+      ["moving", "Moving · cell-a", "cell-a"],
+      ["rehydrating", "Rehydrating · cell-a", "cell-a"],
+      ["unplaced", "Not placed", undefined],
+    ] as const;
+
+    for (const [state, name, cell] of rows) {
+      // The API omits `cell` for a state it has not placed, so the fixture
+      // omits the key rather than sending a name the pill would show.
+      mockGetTeamCell.mockResolvedValue(
+        cell ? { state, cell, canOpenCell: false } : { state, canOpenCell: false },
+      );
+      const { unmount } = renderPage("/pipelines/payments");
+
+      const pill = await screen.findByRole("button", { name });
+      expect(pill.textContent).toBe(name);
+      unmount();
+    }
+  });
+
+  it("renders no pill for a team on its own controller", async () => {
+    mockGetTeamCell.mockResolvedValue({ state: "notCellHosted", canOpenCell: false });
+    renderPage("/pipelines/payments");
+
+    await waitFor(() => expect(screen.getByText("checkout-api")).toBeInTheDocument());
+    expect(cellPill()).toBeNull();
+  });
+
+  it("renders no pill while the cell read is pending", async () => {
+    mockGetTeamCell.mockReturnValue(new Promise(() => {}));
+    renderPage("/pipelines/payments");
+
+    await waitFor(() => expect(screen.getByText("checkout-api")).toBeInTheDocument());
+    expect(cellPill()).toBeNull();
+  });
+
+  it("renders no pill when the first cell read fails", async () => {
+    mockGetTeamCell.mockRejectedValue(new Error("boom"));
+    renderPage("/pipelines/payments");
+
+    await waitFor(() => expect(screen.getByText("checkout-api")).toBeInTheDocument());
+    expect(cellPill()).toBeNull();
+  });
+
+  it("hides the pill when a successful read is followed by a failed refetch", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockGetTeamCell.mockResolvedValueOnce({ state: "placed", cell: "cell-a", canOpenCell: false });
+      mockGetTeamCell.mockRejectedValue(new Error("boom"));
+      renderPage("/pipelines/payments");
+
+      expect(await screen.findByRole("button", { name: "Placed · cell-a" })).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+
+      await waitFor(() => expect(cellPill()).toBeNull());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("toggles aria-expanded and reveals the disclosure", async () => {
+    const user = userEvent.setup();
+    mockGetTeamCell.mockResolvedValue({ state: "placed", cell: "cell-a", canOpenCell: false });
+    renderPage("/pipelines/payments");
+
+    const pill = await screen.findByRole("button", { name: "Placed · cell-a" });
+    expect(pill).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: "Your cell" })).not.toBeInTheDocument();
+
+    await user.click(pill);
+    await waitFor(() => expect(pill).toHaveAttribute("aria-expanded", "true"));
+    expect(screen.getByRole("region", { name: "Your cell" })).toBeInTheDocument();
+
+    await user.click(pill);
+    await waitFor(() => expect(pill).toHaveAttribute("aria-expanded", "false"));
+    expect(screen.queryByRole("region", { name: "Your cell" })).not.toBeInTheDocument();
+  });
+
+  it("renders a Queue wait value, and an em dash for a job with none", async () => {
+    mockListPipelines.mockResolvedValue({
+      items: [
+        createPipelineSummary({ jobPath: "payments/with-wait", medianQueueWaitMs: 30000 }),
+        createPipelineSummary({ jobPath: "payments/without-wait" }),
+      ],
+      runningNow: [],
+      tenantFolder: "payments",
+      truncated: false,
+    });
+    mockGetTeamCell.mockResolvedValue({ state: "notCellHosted", canOpenCell: false });
+    renderPage("/pipelines/payments");
+
+    await waitFor(() => expect(screen.getByText("Queue wait")).toBeInTheDocument());
+    const withWait = screen.getByRole("link", { name: "with-wait" }).closest("tr") as HTMLTableRowElement;
+    const withoutWait = screen.getByRole("link", { name: "without-wait" }).closest("tr") as HTMLTableRowElement;
+
+    expect(withWait.querySelectorAll("td")[5].textContent).toBe("30s");
+    expect(withoutWait.querySelectorAll("td")[5].textContent).toBe("—");
   });
 });

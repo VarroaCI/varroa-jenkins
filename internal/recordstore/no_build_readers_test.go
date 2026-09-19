@@ -244,7 +244,7 @@ func TestJobSummaryExcludesAcceptedOnly(t *testing.T) {
 
 	assertNoJobHealth := func() {
 		t.Helper()
-		summaries, err := reader.ListJobSummaries(ctx, testCluster, testTenant)
+		summaries, err := reader.ListJobSummaries(ctx, testCluster, testTenant, time.Now().Add(-30*24*time.Hour))
 		if err != nil {
 			t.Fatalf("ListJobSummaries: %v", err)
 		}

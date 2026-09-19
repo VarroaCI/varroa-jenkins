@@ -148,6 +148,7 @@ function FolderRow({
       <td />
       <td />
       <td />
+      <td />
     </tr>
   );
 }
@@ -180,6 +181,7 @@ function JobRow({ team, node, item }: { team: string; node: JobTreeNode; item: P
           <span className={styles.lastDuration}>{formatDuration(item.lastBuild?.durationMs)}</span>
         </div>
       </td>
+      <td>{formatDuration(item.medianQueueWaitMs)}</td>
       <td>
         {item.lastBuild?.endedAt ? (
           age(item.lastBuild.endedAt)

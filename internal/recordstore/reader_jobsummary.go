@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -18,12 +19,16 @@ type rowQuerier interface {
 // ListJobSummaries lists every job under cluster and tenant that has at
 // least one run. A job the catalog knows with no run does not appear;
 // the pipelines API supplies that job from the catalog instead.
-func (r *pgReader) ListJobSummaries(ctx context.Context, cluster, tenant string) ([]JobSummary, error) {
+// MedianQueueWaitMs counts runs created at or after since only.
+func (r *pgReader) ListJobSummaries(ctx context.Context, cluster, tenant string, since time.Time) ([]JobSummary, error) {
 	if err := r.checkSchema(ctx); err != nil {
 		return nil, err
 	}
 	byJobPath, err := r.jobSummaries(ctx, cluster, tenant, "")
 	if err != nil {
+		return nil, err
+	}
+	if err := addJobQueueWaitMedians(ctx, r.pool, cluster, tenant, since, byJobPath); err != nil {
 		return nil, err
 	}
 	summaries := make([]JobSummary, 0, len(byJobPath))
@@ -220,6 +225,44 @@ func addJobDurationTrends(
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("list job duration trend: %w", err)
+	}
+	return nil
+}
+
+// addJobQueueWaitMedians fills MedianQueueWaitMs for every job of cluster
+// and tenant with a run created at or after since that carries both
+// queued_at and started_at. It runs one query outside jobSummaries'
+// transaction: ListJobSummaries is the only caller, because the job
+// detail page's own queue wait comes from JobWindowStats.
+func addJobQueueWaitMedians(ctx context.Context, db rowQuerier, cluster, tenant string, since time.Time, summaries map[string]JobSummary) error {
+	rows, err := db.Query(ctx, `
+		SELECT job_path,
+		       ROUND(percentile_cont(0.5) WITHIN GROUP (
+		           ORDER BY EXTRACT(EPOCH FROM (started_at - queued_at)) * 1000
+		       )::numeric)::bigint AS median_queue_wait_ms
+		FROM varroa.runs
+		WHERE cluster = $1 AND tenant = $2 AND created_at >= $3 AND `+recordsBuildSQL+`
+		  AND queued_at IS NOT NULL AND started_at IS NOT NULL
+		GROUP BY job_path
+	`, cluster, tenant, since)
+	if err != nil {
+		return fmt.Errorf("list job queue wait medians: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var path string
+		var medianMs int64
+		if err := rows.Scan(&path, &medianMs); err != nil {
+			return fmt.Errorf("scan job queue wait median: %w", err)
+		}
+		if s, ok := summaries[path]; ok {
+			v := medianMs
+			s.MedianQueueWaitMs = &v
+			summaries[path] = s
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("list job queue wait medians: %w", err)
 	}
 	return nil
 }

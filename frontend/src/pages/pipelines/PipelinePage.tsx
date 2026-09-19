@@ -270,6 +270,16 @@ export default function PipelinePage() {
                 <span className={styles.dim}>—</span>
               )}
             </dd>
+            <dt>Median queue wait</dt>
+            <dd>
+              {!jobDetail.last30Days ? (
+                <span className={styles.dim}>Not available</span>
+              ) : jobDetail.last30Days.medianQueueWaitMs !== undefined ? (
+                formatDuration(jobDetail.last30Days.medianQueueWaitMs)
+              ) : (
+                <span className={styles.dim}>—</span>
+              )}
+            </dd>
             <dt>Slowest stage</dt>
             <dd>
               {!jobDetail.last30Days ? (

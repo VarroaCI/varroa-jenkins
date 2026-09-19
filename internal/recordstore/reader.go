@@ -34,7 +34,7 @@ var ErrRunNotFound = errors.New("run not found")
 // Reader is the BFF's read surface over the record tables. C1 owns the
 // Go queries; C4 owns the HTTP shapes and the JSON.
 type Reader interface {
-	ListJobSummaries(ctx context.Context, cluster, tenant string) ([]JobSummary, error)
+	ListJobSummaries(ctx context.Context, cluster, tenant string, since time.Time) ([]JobSummary, error)
 	GetJobSummary(ctx context.Context, cluster, tenant, jobPath string) (JobSummary, error)
 	ListRuns(ctx context.Context, q RunQuery) (RunPage, error)
 	GetRun(ctx context.Context, runID string) (Run, []Stage, error)

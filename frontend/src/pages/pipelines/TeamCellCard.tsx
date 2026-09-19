@@ -9,14 +9,23 @@ import { controllerRoute } from "../../routing";
 import type { TeamCellMember, TeamCellState } from "../../types";
 import styles from "./TeamCellCard.module.css";
 
+/** CELL_STATE_LABELS holds the state text the card's badge and the team
+ * home's pill both show. One source keeps the two in step. */
+export const CELL_STATE_LABELS: Record<Exclude<TeamCellState, "notCellHosted">, string> = {
+  placed: "Placed",
+  moving: "Moving",
+  rehydrating: "Rehydrating",
+  unplaced: "Not placed",
+};
+
 /** BADGES holds the label and the colour pair of every rendered state. The
  * label is the state signal. Colour supports it and never replaces it,
  * because `moving` and `rehydrating` share one colour. */
 const BADGES: Record<Exclude<TeamCellState, "notCellHosted">, { label: string; className: string }> = {
-  placed: { label: "Placed", className: styles.badgeOk },
-  moving: { label: "Moving", className: styles.badgeInfo },
-  rehydrating: { label: "Rehydrating", className: styles.badgeInfo },
-  unplaced: { label: "Not placed", className: styles.badgeWarn },
+  placed: { label: CELL_STATE_LABELS.placed, className: styles.badgeOk },
+  moving: { label: CELL_STATE_LABELS.moving, className: styles.badgeInfo },
+  rehydrating: { label: CELL_STATE_LABELS.rehydrating, className: styles.badgeInfo },
+  unplaced: { label: CELL_STATE_LABELS.unplaced, className: styles.badgeWarn },
 };
 
 /** EXPLANATIONS holds the sentence each state adds under its reason. The

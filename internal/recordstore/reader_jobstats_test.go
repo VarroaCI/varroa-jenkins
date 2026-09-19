@@ -127,3 +127,99 @@ func TestJobWindowStatsIgnoresRunBeforeTheWindow(t *testing.T) {
 		t.Fatalf("MedianDurationMs = %v, want %d", stats.MedianDurationMs, inWindowDuration)
 	}
 }
+
+// seedJobQueueWaitRun inserts one run directly, with queued_at set to
+// createdAt. A non-nil waitMs inserts a completed build: status
+// COMPLETED, result SUCCESS, duration 1000 ms, and started_at waitMs
+// milliseconds after createdAt. A nil waitMs inserts the pending shape
+// Jenkins reports for a run that never started: status QUEUED, with no
+// result, no duration, and no started_at.
+func seedJobQueueWaitRun(t *testing.T, db *sql.DB, jobPath string, createdAt time.Time, waitMs *int64) {
+	t.Helper()
+	runID := uuid.New()
+	status := "QUEUED"
+	var result *string
+	var durationMs *int64
+	var startedAt *time.Time
+	if waitMs != nil {
+		status = "COMPLETED"
+		success := "SUCCESS"
+		result = &success
+		duration := int64(1000)
+		durationMs = &duration
+		started := createdAt.Add(time.Duration(*waitMs) * time.Millisecond)
+		startedAt = &started
+	}
+	if _, err := db.Exec(`
+		INSERT INTO varroa.runs (
+			run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path,
+			status, result, duration_ms, queued_at, started_at
+		) VALUES ($1, $2, $3, $4, $5, 'cell-a', $6, $7, $8, $9, $10, $2, $11)
+	`, runID, createdAt, "manual:queue-wait-"+runID.String(), testCluster, testNamespace, testTenant, jobPath, status, result, durationMs, startedAt); err != nil {
+		t.Fatalf("seed queue-wait run for %s: %v", jobPath, err)
+	}
+}
+
+// TestJobWindowStatsReportsMedianQueueWait asserts the card reports the
+// median wait between the queued and the started moment of the window's
+// runs, beside the build count and the duration median it already
+// reports.
+func TestJobWindowStatsReportsMedianQueueWait(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	reader := NewReader(pool)
+	ctx := context.Background()
+
+	base := time.Now().UTC().Add(-time.Hour)
+	jobPath := "acme/app-queue-wait"
+	wait1, wait2, wait3 := int64(1000), int64(8000), int64(3000)
+	seedJobQueueWaitRun(t, db, jobPath, base, &wait1)
+	seedJobQueueWaitRun(t, db, jobPath, base.Add(time.Minute), &wait2)
+	seedJobQueueWaitRun(t, db, jobPath, base.Add(2*time.Minute), &wait3)
+
+	stats, err := reader.JobWindowStats(ctx, testCluster, testTenant, jobPath, base.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("JobWindowStats: %v", err)
+	}
+	if stats.Builds != 3 {
+		t.Fatalf("Builds = %d, want 3", stats.Builds)
+	}
+	if stats.PassRate == nil || *stats.PassRate != 1.0 {
+		t.Fatalf("PassRate = %v, want 1.0", stats.PassRate)
+	}
+	if stats.MedianDurationMs == nil || *stats.MedianDurationMs != 1000 {
+		t.Fatalf("MedianDurationMs = %v, want 1000", stats.MedianDurationMs)
+	}
+	if stats.MedianQueueWaitMs == nil || *stats.MedianQueueWaitMs != 3000 {
+		t.Fatalf("MedianQueueWaitMs = %v, want 3000 (median of 1000, 8000, 3000)", stats.MedianQueueWaitMs)
+	}
+}
+
+// TestJobWindowStatsQueueWaitAbsentWithoutStartedRun asserts a job whose
+// only window run never started reports no queue wait and no duration
+// median, while its build count still reports.
+func TestJobWindowStatsQueueWaitAbsentWithoutStartedRun(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	reader := NewReader(pool)
+	ctx := context.Background()
+
+	base := time.Now().UTC().Add(-time.Hour)
+	jobPath := "acme/app-never-started"
+	seedJobQueueWaitRun(t, db, jobPath, base, nil)
+
+	stats, err := reader.JobWindowStats(ctx, testCluster, testTenant, jobPath, base.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("JobWindowStats: %v", err)
+	}
+	if stats.Builds != 1 {
+		t.Fatalf("Builds = %d, want 1", stats.Builds)
+	}
+	if stats.PassRate != nil {
+		t.Fatalf("PassRate = %v, want nil: the run has no result yet", *stats.PassRate)
+	}
+	if stats.MedianDurationMs != nil {
+		t.Fatalf("MedianDurationMs = %v, want nil: the run has no duration yet", *stats.MedianDurationMs)
+	}
+	if stats.MedianQueueWaitMs != nil {
+		t.Fatalf("MedianQueueWaitMs = %v, want nil: the run never started", *stats.MedianQueueWaitMs)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -246,7 +247,7 @@ func TestSchemaVersionBelowMinimumFailsEveryMethod(t *testing.T) {
 		t.Fatalf("lower schema version: %v", err)
 	}
 
-	if _, err := reader.ListJobSummaries(ctx, testCluster, testTenant); !errors.Is(err, ErrSchemaTooOld) {
+	if _, err := reader.ListJobSummaries(ctx, testCluster, testTenant, time.Now().Add(-30*24*time.Hour)); !errors.Is(err, ErrSchemaTooOld) {
 		t.Fatalf("ListJobSummaries error = %v, want ErrSchemaTooOld", err)
 	}
 	if _, err := reader.GetJobSummary(ctx, testCluster, testTenant, testJobPath); !errors.Is(err, ErrSchemaTooOld) {

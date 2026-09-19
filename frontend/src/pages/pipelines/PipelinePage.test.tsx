@@ -147,6 +147,7 @@ describe("PipelinePage", () => {
     expect(last30DaysRow("Builds")).toBe("Not available");
     expect(last30DaysRow("Pass rate")).toBe("Not available");
     expect(last30DaysRow("Median")).toBe("Not available");
+    expect(last30DaysRow("Median queue wait")).toBe("Not available");
     expect(last30DaysRow("Slowest stage")).toBe("Not available");
   });
 
@@ -157,6 +158,7 @@ describe("PipelinePage", () => {
           builds: 12,
           passRate: 0.75,
           medianDurationMs: 65000,
+          medianQueueWaitMs: 30000,
           slowestStage: { name: "Deploy", durationMs: 125000 },
         },
       }),
@@ -166,6 +168,7 @@ describe("PipelinePage", () => {
     expect(last30DaysRow("Builds")).toBe("12");
     expect(last30DaysRow("Pass rate")).toBe("75%");
     expect(last30DaysRow("Median")).toBe("1m 5s");
+    expect(last30DaysRow("Median queue wait")).toBe("30s");
     expect(last30DaysRow("Slowest stage")).toBe("Deploy (2m 5s)");
   });
 
@@ -176,6 +179,7 @@ describe("PipelinePage", () => {
     expect(last30DaysRow("Builds")).toBe("0");
     expect(last30DaysRow("Pass rate")).toBe("—");
     expect(last30DaysRow("Median")).toBe("—");
+    expect(last30DaysRow("Median queue wait")).toBe("—");
     expect(last30DaysRow("Slowest stage")).toBe("—");
   });
 

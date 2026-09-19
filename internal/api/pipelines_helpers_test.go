@@ -101,7 +101,7 @@ func (f *fakeRecordReader) addRun(run recordstore.Run) {
 	f.runs[run.RunID] = run
 }
 
-func (f *fakeRecordReader) ListJobSummaries(_ context.Context, cluster, tenant string) ([]recordstore.JobSummary, error) {
+func (f *fakeRecordReader) ListJobSummaries(_ context.Context, cluster, tenant string, _ time.Time) ([]recordstore.JobSummary, error) {
 	if f.schemaTooOld {
 		return nil, recordstore.ErrSchemaTooOld
 	}

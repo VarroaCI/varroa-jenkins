@@ -2373,6 +2373,9 @@ type ComponentsSchemasPipelineLast30Days struct {
 	// MedianDurationMs The median duration_ms over finished runs. Null when the window holds no finished run.
 	MedianDurationMs *int64 `json:"medianDurationMs"`
 
+	// MedianQueueWaitMs The median wait between a build's queued moment and its started moment, in milliseconds. Absent when the job started no build in that window.
+	MedianQueueWaitMs *int64 `json:"medianQueueWaitMs,omitempty"`
+
 	// PassRate The share of finished runs whose result is SUCCESS. Null when the window holds no finished run.
 	PassRate *float64 `json:"passRate"`
 
@@ -2453,6 +2456,9 @@ type ComponentsSchemasPipelineSummary struct {
 
 	// LastBuild One run, condensed for a list or a card.
 	LastBuild *ComponentsSchemasRunSummary `json:"lastBuild,omitempty"`
+
+	// MedianQueueWaitMs The median wait between a build's queued moment and its started moment, in milliseconds, over the trailing 30 days. Absent when the job started no build in that window.
+	MedianQueueWaitMs *int64 `json:"medianQueueWaitMs,omitempty"`
 }
 
 // ComponentsSchemasPipelineSummaryHealth The weather glyph, computed from the last five runs: clear when all passed, cloudy when one or two failed, rain when three or more failed, unknown for a job that has never run.

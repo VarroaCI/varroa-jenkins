@@ -2718,6 +2718,11 @@
           },
           "lastBuild": {
             "$ref": "#/components/schemas/components_schemas_RunSummary"
+          },
+          "medianQueueWaitMs": {
+            "description": "The median wait between a build's queued moment and its started moment, in milliseconds, over the trailing 30 days. Absent when the job started no build in that window.\n",
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
@@ -8835,6 +8840,11 @@
             "nullable": true,
             "type": "integer"
           },
+          "medianQueueWaitMs": {
+            "description": "The median wait between a build's queued moment and its started moment, in milliseconds. Absent when the job started no build in that window.",
+            "format": "int64",
+            "type": "integer"
+          },
           "passRate": {
             "description": "The share of finished runs whose result is SUCCESS. Null when the window holds no finished run.",
             "format": "double",
@@ -9044,6 +9054,11 @@
           },
           "lastBuild": {
             "$ref": "#/components/schemas/components_schemas_RunSummary"
+          },
+          "medianQueueWaitMs": {
+            "description": "The median wait between a build's queued moment and its started moment, in milliseconds, over the trailing 30 days. Absent when the job started no build in that window.\n",
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
