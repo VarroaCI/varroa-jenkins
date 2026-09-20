@@ -393,14 +393,12 @@ func averageInt64(vs []int64) int64 {
 
 // buildRunningRun converts one unfinished run into the Running now tile.
 // trendMs is the job's duration trend, when known, for typicalDurationMs.
-// currentStage is left empty: a live stage read is one more call per
-// running run, which the team home's first load does not need — the
-// build page's own log-stream poll (design D9) is where stage state
-// updates live. ChangeSummary reads runs.changes, which the gateway
-// fills only at the completed phase, so a QUEUED or RUNNING row has
-// no entry yet and the tile shows no change summary until the build
-// finishes.
-func buildRunningRun(run recordstore.Run, trendMs []int64) runningRunJSON {
+// currentStage is the run's stage in progress. It is empty when the run
+// holds no such stage, and the tile then names the run's own state.
+// ChangeSummary reads runs.changes, which the gateway fills only at the
+// completed phase, so a QUEUED or RUNNING row has no entry yet and the
+// tile shows no change summary until the build finishes.
+func buildRunningRun(run recordstore.Run, trendMs []int64, currentStage string) runningRunJSON {
 	out := runningRunJSON{RunID: run.RunID, JobPath: run.JobPath, Status: run.Status}
 	if run.BuildNumber != nil {
 		out.BuildNumber = *run.BuildNumber
@@ -411,6 +409,7 @@ func buildRunningRun(run recordstore.Run, trendMs []int64) runningRunJSON {
 	if run.SCMRevision != nil {
 		out.SCMRevision = *run.SCMRevision
 	}
+	out.CurrentStage = currentStage
 	out.ChangeSummary = latestChangeMessage(run.Changes)
 	out.QueuedAt = run.QueuedAt
 	out.StartedAt = run.StartedAt
@@ -543,9 +542,22 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].JobPath < items[j].JobPath })
 
+	// One stage read answers every tile of this page, so the strip never
+	// issues one read per run (design D7's bound). The list holds the run
+	// ids the row filters admitted, so the read names no run this response
+	// drops.
+	runIDs := make([]string, 0, len(runningRuns))
+	for _, run := range runningRuns {
+		runIDs = append(runIDs, run.RunID)
+	}
+	currentStages, err := s.deps.RecordStore.CurrentStages(ctx, runIDs)
+	if s.handleReaderError(w, err, "list current stages") {
+		return
+	}
+
 	runningOut := make([]runningRunJSON, 0, len(runningRuns))
 	for _, run := range runningRuns {
-		runningOut = append(runningOut, buildRunningRun(run, trendByJob[run.JobPath]))
+		runningOut = append(runningOut, buildRunningRun(run, trendByJob[run.JobPath], currentStages[run.RunID]))
 	}
 	sort.Slice(runningOut, func(i, j int) bool {
 		if runningOut[i].JobPath != runningOut[j].JobPath {

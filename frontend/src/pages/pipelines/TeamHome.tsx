@@ -44,6 +44,11 @@ function pillClassName(state: keyof typeof CELL_STATE_LABELS): string {
   return PILL_CLASS[state];
 }
 
+/**
+ * RunningTile renders one Running now tile. The stage line names the run's
+ * stage in progress. A run that has started no stage reads "Starting", and
+ * a run that has not started reads "Queued".
+ */
 function RunningTile({ team, run }: { team: string; run: RunningRun }) {
   const started = run.startedAt ?? run.queuedAt;
   const elapsedMs = started ? Date.now() - Date.parse(started) : 0;
@@ -56,7 +61,7 @@ function RunningTile({ team, run }: { team: string; run: RunningRun }) {
         <span className={styles.tileJob}>{run.jobPath}</span>
         <span className={styles.tileBuild}>{run.buildNumber ? `#${run.buildNumber}` : "Queued"}</span>
       </div>
-      <div className={styles.tileStage}>{run.currentStage ?? "Queued"}</div>
+      <div className={styles.tileStage}>{run.currentStage ?? (run.startedAt ? "Starting" : "Queued")}</div>
       <div className={styles.tileMeta}>
         <span>{run.branch ?? "—"}</span>
         <span>{run.scmRevision ? run.scmRevision.slice(0, 7) : "—"}</span>
@@ -132,17 +137,46 @@ export default function TeamHome() {
   }, [readyState, invalidateTeam]);
 
   const lastRunEventAtRef = useRef(0);
-  // A new team starts a new window.
+  const windowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A new team starts a new window, and it cancels the timer the old team
+  // armed. An unmount cancels too, so no read lands on a page that has
+  // left.
   useEffect(() => {
     lastRunEventAtRef.current = 0;
+    return () => {
+      if (windowTimerRef.current !== null) {
+        clearTimeout(windowTimerRef.current);
+        windowTimerRef.current = null;
+      }
+    };
   }, [team]);
   useEffect(() => {
-    // The team read carries no stage value, so a stage frame says nothing.
-    if (lastEvent?.type !== "run") return;
+    // A run frame and a stage frame both change a tile, and a run's first
+    // stage row can land after the frame that started the run. The page
+    // reads the team once per window: a frame outside the window reads at
+    // once, and a frame inside it arms one timer that reads when the
+    // window ends, so no frame is lost.
+    if (lastEvent?.type !== "run" && lastEvent?.type !== "stage") return;
     const now = Date.now();
-    if (now - lastRunEventAtRef.current < RUN_EVENT_WINDOW_MS) return;
-    lastRunEventAtRef.current = now;
-    invalidateTeamRef.current();
+    const waitMs = RUN_EVENT_WINDOW_MS - (now - lastRunEventAtRef.current);
+    if (waitMs <= 0) {
+      // A window timer can still be pending here when it fires late, and
+      // the read below covers the window it armed. Clear it first, so two
+      // reads never land inside one window.
+      if (windowTimerRef.current !== null) {
+        clearTimeout(windowTimerRef.current);
+        windowTimerRef.current = null;
+      }
+      lastRunEventAtRef.current = now;
+      invalidateTeamRef.current();
+      return;
+    }
+    if (windowTimerRef.current !== null) return;
+    windowTimerRef.current = setTimeout(() => {
+      windowTimerRef.current = null;
+      lastRunEventAtRef.current = Date.now();
+      invalidateTeamRef.current();
+    }, waitMs);
   }, [lastEvent]);
 
   const runnersQuery = useQuery({

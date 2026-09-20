@@ -230,6 +230,44 @@ func (f *fakeRecordReader) ListTests(_ context.Context, runID string) ([]records
 	return f.tests[runID], nil
 }
 
+// CurrentStages answers the top-level stage in progress for each run, read
+// from the stages this fake holds. It applies the reader's own predicate:
+// only a row that carries node_type "stage" and no parent competes, and
+// the IN_PROGRESS stage with the latest startedAt then wins, with the
+// latest createdAt breaking a tie. A run that holds no such stage carries
+// no entry.
+func (f *fakeRecordReader) CurrentStages(_ context.Context, runIDs []string) (map[string]string, error) {
+	stages := map[string]string{}
+	for _, runID := range runIDs {
+		best := -1
+		for i, s := range f.stages[runID] {
+			if s.Status != "IN_PROGRESS" || s.NodeType != "stage" || s.ParentID != nil {
+				continue
+			}
+			if best < 0 || laterStage(s, f.stages[runID][best]) {
+				best = i
+			}
+		}
+		if best >= 0 {
+			stages[runID] = f.stages[runID][best].Name
+		}
+	}
+	return stages, nil
+}
+
+// laterStage reports whether a is the newer of two stages in progress: a
+// stage that has started beats one that has no startedAt yet, and the
+// created time breaks a tie.
+func laterStage(a, b recordstore.Stage) bool {
+	if (a.StartedAt != nil) != (b.StartedAt != nil) {
+		return a.StartedAt != nil
+	}
+	if a.StartedAt != nil && !a.StartedAt.Equal(*b.StartedAt) {
+		return a.StartedAt.After(*b.StartedAt)
+	}
+	return a.CreatedAt.After(b.CreatedAt)
+}
+
 // setWindowStats seeds the JobWindowStats result for one cluster,
 // tenant, and job path, for a test to assert the "Last 30 days" card.
 func (f *fakeRecordReader) setWindowStats(cluster, tenant, jobPath string, stats recordstore.JobWindowStats) {

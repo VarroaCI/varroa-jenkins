@@ -38,6 +38,14 @@ type Reader interface {
 	GetJobSummary(ctx context.Context, cluster, tenant, jobPath string) (JobSummary, error)
 	ListRuns(ctx context.Context, q RunQuery) (RunPage, error)
 	GetRun(ctx context.Context, runID string) (Run, []Stage, error)
+
+	// CurrentStages answers the name of the top-level stage in progress
+	// for each run in runIDs, keyed by run id. A run that holds no
+	// top-level stage in progress carries no entry. One call answers every
+	// run in the list, so a caller that needs many runs reads the store
+	// once.
+	CurrentStages(ctx context.Context, runIDs []string) (map[string]string, error)
+
 	ListArtifacts(ctx context.Context, runID string) ([]Artifact, error)
 	ListTests(ctx context.Context, runID string) ([]TestSuite, error)
 	GetIntentByKey(ctx context.Context, intentKey string) (Intent, bool, error)
@@ -330,6 +338,47 @@ func (r *pgReader) listStages(ctx context.Context, runID string) ([]Stage, error
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list stages: %w", err)
+	}
+	return stages, nil
+}
+
+// CurrentStages answers one run_stages name for each run in runIDs: the
+// top-level stage in progress with the latest started_at, and the latest
+// created_at among those when the started_at values tie or are absent. A
+// run_stages row nested in a parallel branch or in another stage carries
+// a parent_id, so the predicate here keeps the top level alone. It issues
+// one statement for the whole list, never one statement per run. An empty
+// runIDs answers an empty map and issues no statement.
+func (r *pgReader) CurrentStages(ctx context.Context, runIDs []string) (map[string]string, error) {
+	if len(runIDs) == 0 {
+		return map[string]string{}, nil
+	}
+	if err := r.checkSchema(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT ON (run_id) run_id, name
+		FROM varroa.run_stages
+		WHERE run_id = ANY($1::uuid[]) AND status = 'IN_PROGRESS'
+		  AND node_type = 'stage' AND parent_id IS NULL
+		ORDER BY run_id, started_at DESC NULLS LAST, created_at DESC
+	`, runIDs)
+	if err != nil {
+		return nil, fmt.Errorf("current stages: %w", err)
+	}
+	defer rows.Close()
+
+	stages := make(map[string]string, len(runIDs))
+	for rows.Next() {
+		var runID uuid.UUID
+		var name string
+		if err := rows.Scan(&runID, &name); err != nil {
+			return nil, fmt.Errorf("scan current stage: %w", err)
+		}
+		stages[runID.String()] = name
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("current stages: %w", err)
 	}
 	return stages, nil
 }

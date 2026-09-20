@@ -3102,7 +3102,7 @@ type ComponentsSchemasRunnerStatus struct {
 	Token *string `json:"token,omitempty"`
 }
 
-// ComponentsSchemasRunningRun One unfinished run for the team home's Running now card. currentStage names the stage in progress; it is absent for a run that is still queued.
+// ComponentsSchemasRunningRun One unfinished run for the team home's Running now card. currentStage names the top-level stage in progress. It is absent when no top-level stage is in progress: before the first stage, between two stages, and for a queued run.
 type ComponentsSchemasRunningRun struct {
 	Branch      *string `json:"branch,omitempty"`
 	BuildNumber *int64  `json:"buildNumber,omitempty"`

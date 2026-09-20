@@ -255,6 +255,55 @@ func TestHandleListPipelines_RunningRunSurvivesFinishedRunFlood(t *testing.T) {
 	}
 }
 
+// TestHandleListPipelines_RunningNowCarriesTheCurrentStage asserts each
+// Running now tile names the stage in progress of its run, and that a run
+// which holds no stage in progress carries no currentStage field.
+func TestHandleListPipelines_RunningNowCarriesTheCurrentStage(t *testing.T) {
+	client := newSingleControllerFixture(t)
+	authz := pipelineGrantAuthorizer([]string{"read"}, "test-ns/ctrl-a")
+	reader := newFakeRecordReader()
+
+	base := time.Now().Add(-2 * time.Hour)
+	startedAt := base.Add(2 * time.Minute)
+	reader.addRun(recordstore.Run{
+		RunID: "run-in-stage", Cluster: "core", Namespace: "test-ns", Cell: "ctrl-a",
+		Tenant: "test-ns/ctrl-a", JobPath: "acme/app-a", Status: "RUNNING", CreatedAt: base,
+	})
+	reader.addRun(recordstore.Run{
+		RunID: "run-before-stage", Cluster: "core", Namespace: "test-ns", Cell: "ctrl-a",
+		Tenant: "test-ns/ctrl-a", JobPath: "acme/app-a", Status: "RUNNING", CreatedAt: base.Add(time.Minute),
+	})
+	reader.stages["run-in-stage"] = []recordstore.Stage{
+		{RunID: "run-in-stage", StageID: "stage-1", Name: "Checkout", NodeType: "stage",
+			Status: "SUCCESS", CreatedAt: base},
+		{RunID: "run-in-stage", StageID: "stage-2", Name: "Build", NodeType: "stage",
+			Status: "IN_PROGRESS", CreatedAt: base.Add(time.Minute), StartedAt: &startedAt},
+	}
+
+	srv := pipelinesTestServer(client, authz, reader, nil)
+	rec := doPipelinesRequest(t, srv.handleListPipelines, "/pipelines/ctrl-a", map[string]string{"team": "ctrl-a"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		RunningNow []map[string]any `json:"runningNow"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	byRun := map[string]map[string]any{}
+	for _, tile := range body.RunningNow {
+		runID, _ := tile["runId"].(string)
+		byRun[runID] = tile
+	}
+	if got := byRun["run-in-stage"]["currentStage"]; got != "Build" {
+		t.Fatalf("currentStage = %v, want Build", got)
+	}
+	if _, present := byRun["run-before-stage"]["currentStage"]; present {
+		t.Fatalf("a run with no stage in progress carries currentStage: %+v", byRun["run-before-stage"])
+	}
+}
+
 // --- 3.6: GET /pipelines/{team}/jobs/{job} ---
 
 const parameterizedItemYAML = `

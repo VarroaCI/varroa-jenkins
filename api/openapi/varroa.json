@@ -3621,7 +3621,7 @@
       },
       "RunningRun": {
         "additionalProperties": false,
-        "description": "One unfinished run for the team home's Running now card. currentStage names the stage in progress; it is absent for a run that is still queued.\n",
+        "description": "One unfinished run for the team home's Running now card. currentStage names the top-level stage in progress. It is absent when no top-level stage is in progress: before the first stage, between two stages, and for a queued run.\n",
         "properties": {
           "branch": {
             "type": "string"
@@ -10645,7 +10645,7 @@
       },
       "components_schemas_RunningRun": {
         "additionalProperties": false,
-        "description": "One unfinished run for the team home's Running now card. currentStage names the stage in progress; it is absent for a run that is still queued.\n",
+        "description": "One unfinished run for the team home's Running now card. currentStage names the top-level stage in progress. It is absent when no top-level stage is in progress: before the first stage, between two stages, and for a queued run.\n",
         "properties": {
           "branch": {
             "type": "string"

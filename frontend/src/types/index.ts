@@ -1512,7 +1512,9 @@ export interface RunSummary {
 
 /**
  * One unfinished run for the team home's Running now card. currentStage
- * names the stage in progress; it is absent for a run that is still queued.
+ * names the top-level stage in progress. It is absent when no top-level
+ * stage is in progress: before the first stage, between two stages, and
+ * for a queued run.
  */
 export interface RunningRun {
   runId: string;

@@ -59,7 +59,9 @@ reads both numbers on the cell page.
 Two cards follow the page head: **Running now** and **Pipelines**.
 
 **Running now** holds one tile per build in progress: the job name, the build number, the
-current stage, the branch, and a progress bar against the job's usual duration.
+current stage, the branch, and a progress bar against the job's usual duration. The stage line
+names the run's top-level stage in progress. A running build with no stage in progress reads
+`Starting`, and a build that has not started reads `Queued`.
 
 **Pipelines** holds the team's folder tree. A job row carries its health, its last build, its
 branch, its last eight build durations, and when it last ran. **Queue wait** shows the job's

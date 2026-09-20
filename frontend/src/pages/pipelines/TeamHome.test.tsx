@@ -188,6 +188,30 @@ describe("TeamHome", () => {
     });
   });
 
+  it("names the stage in progress on a running tile, and Starting or Queued without one", async () => {
+    mockListPipelines.mockResolvedValue({
+      items: [],
+      runningNow: [
+        {
+          runId: "r1", jobPath: "team/a/main", status: "RUNNING", buildNumber: 12,
+          currentStage: "Build",
+        },
+        {
+          runId: "r2", jobPath: "team/b/main", status: "RUNNING", buildNumber: 13,
+          startedAt: "2026-01-01T00:00:00Z",
+        },
+        { runId: "r3", jobPath: "team/c/main", status: "QUEUED", buildNumber: 14 },
+      ],
+      truncated: false,
+    });
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Build")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Starting")).toBeInTheDocument();
+    expect(screen.getByText("Queued")).toBeInTheDocument();
+  });
+
   it("renders the forbidden state on a 403", async () => {
     mockListPipelines.mockRejectedValue(new ApiError(403, "no"));
     renderPage();
@@ -727,24 +751,120 @@ describe("TeamHome — live run events", () => {
     await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(2));
   });
 
-  it("ignores a stage event", async () => {
-    const { repaint } = renderPage("/pipelines/payments");
-    await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(1));
+  it("reads once per window, and reads again when a frame inside the window ends it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { repaint } = renderPage("/pipelines/payments");
+      await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(1));
 
-    mockUseEventStream.mockReturnValue({
-      lastEvent: { type: "stage", data: notification({ kind: "stage" }) },
-      readyState: "closed",
-      error: null,
-    });
-    await act(async () => {
-      repaint();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
+      // A run frame outside the window reads at once.
+      mockUseEventStream.mockReturnValue({
+        lastEvent: { type: "run", data: notification() },
+        readyState: "closed",
+        error: null,
+      });
+      await act(async () => {
+        repaint();
+      });
+      await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(2));
+      expect(mockListRunners).toHaveBeenCalledTimes(1);
 
-    expect(mockListPipelines).toHaveBeenCalledTimes(1);
-    expect(mockListRunners).toHaveBeenCalledTimes(1);
+      // A stage frame 500ms later arms one read for the end of the window.
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+      mockUseEventStream.mockReturnValue({
+        lastEvent: { type: "stage", data: notification({ kind: "stage", seq: 2 }) },
+        readyState: "closed",
+        error: null,
+      });
+      await act(async () => {
+        repaint();
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(mockListPipelines).toHaveBeenCalledTimes(2);
+
+      // A second stage frame inside the same window arms no second read.
+      mockUseEventStream.mockReturnValue({
+        lastEvent: { type: "stage", data: notification({ kind: "stage", seq: 3 }) },
+        readyState: "closed",
+        error: null,
+      });
+      await act(async () => {
+        repaint();
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(mockListPipelines).toHaveBeenCalledTimes(2);
+
+      // The window ends 2 seconds after the run frame, and one read lands.
+      await act(async () => {
+        vi.advanceTimersByTime(2000);
+      });
+      await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(3));
+      expect(mockListRunners).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reads once when a frame outside the window finds a pending timer", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { repaint } = renderPage("/pipelines/payments");
+      await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(1));
+
+      // A run frame reads at once and stamps the window.
+      mockUseEventStream.mockReturnValue({
+        lastEvent: { type: "run", data: notification() },
+        readyState: "closed",
+        error: null,
+      });
+      await act(async () => {
+        repaint();
+      });
+      await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(2));
+
+      // A stage frame 500ms later arms one read for the end of the window.
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+      mockUseEventStream.mockReturnValue({
+        lastEvent: { type: "stage", data: notification({ kind: "stage", seq: 2 }) },
+        readyState: "closed",
+        error: null,
+      });
+      await act(async () => {
+        repaint();
+      });
+
+      // A busy loop can hold that read past the window. The clock then
+      // stands beyond the window end while the timer has not run yet.
+      await act(async () => {
+        vi.setSystemTime(Date.now() + 2500);
+      });
+      mockUseEventStream.mockReturnValue({
+        lastEvent: { type: "stage", data: notification({ kind: "stage", seq: 3 }) },
+        readyState: "closed",
+        error: null,
+      });
+      await act(async () => {
+        repaint();
+      });
+      await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(3));
+
+      // The stale timer reads nothing, so the window holds one read.
+      await act(async () => {
+        vi.advanceTimersByTime(2000);
+      });
+      expect(mockListPipelines).toHaveBeenCalledTimes(3);
+      expect(mockListRunners).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refetches the team read on a reconnect, before it applies a later event", async () => {
