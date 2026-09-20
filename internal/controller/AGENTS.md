@@ -573,7 +573,7 @@ sections describe.
     `OCIAuthFromSecret`, resolves manifest digest via `oci.RegistryStore.Resolve`,
     populates `resolvedOCIAuth[i]`, and `hasNewOCIInputs` gates the skip path.
     `Composer.Compose` receives `resolvedOCIAuth` as its 5th argument. An
-    `itemRef` that no longer resolves records the `itemMissingRevision`
+    `itemRef` that no longer resolves records the `ItemMissingRevision`
     sentinel (`"<missing>"`, never valid sha256 hex) rather than being skipped:
     skipping left no `observedRevisions` entry, so the gate saw no drift and the
     bundle kept serving content for a vanished input. The sentinel makes the

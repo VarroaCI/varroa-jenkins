@@ -4341,6 +4341,71 @@ PipelineDefinition:
     profile:
       type: string
       description: The version profile in effect for this job's controller.
+    definitionPath:
+      type: string
+      description: >
+        The Jenkinsfile's script path within its own repository, from the
+        job's last run. Present only when source is jenkinsfile and the
+        run recorded one.
+    declaredBy:
+      $ref: '#/JobDeclaredBy'
+  additionalProperties: false
+
+JobDeclaredBy:
+  type: object
+  description: >
+    Which input of the job's composed bundle declared it. Present when one
+    bundle input resolved as the declarer. Absent when the bundle or every
+    candidate input is unresolved.
+  required: [kind, name, bundle]
+  properties:
+    kind:
+      type: string
+      enum: [gitSource, ociSource, itemRef]
+    name:
+      type: string
+      description: >
+        gitSource: the input's repoURL. ociSource: the input's ociRef.
+        itemRef: the CatalogItem name.
+    revision:
+      type: string
+      description: >
+        A git SHA (gitSource), an OCI manifest digest (ociSource), or a
+        CatalogItem content hash (itemRef). Absent when the composed
+        bundle has not resolved this input yet.
+    bundle:
+      $ref: '#/BundleRef'
+    repoURL:
+      type: string
+      description: Present only for kind gitSource.
+    path:
+      type: string
+      description: The input's sub-path. Absent when the input declares no sub-path.
+    ociRef:
+      type: string
+      description: Present only for kind ociSource.
+    catalogItem:
+      $ref: '#/CatalogItemRef'
+  additionalProperties: false
+
+BundleRef:
+  type: object
+  required: [namespace, name]
+  properties:
+    namespace:
+      type: string
+    name:
+      type: string
+  additionalProperties: false
+
+CatalogItemRef:
+  type: object
+  required: [name, namespace]
+  properties:
+    name:
+      type: string
+    namespace:
+      type: string
   additionalProperties: false
 
 PipelineTemplateInfo:

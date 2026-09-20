@@ -37,10 +37,10 @@ const (
 	// The value should be an RFC 3339 timestamp.
 	syncRequestedAtAnno = "varroa.dev/sync-requested-at"
 
-	// itemMissingRevision is the observedRevisions value recorded for an
+	// ItemMissingRevision is the observedRevisions value recorded for an
 	// itemRef input whose CatalogItem does not resolve. It is deliberately not
 	// valid sha256 hex, so it can never collide with a real content hash.
-	itemMissingRevision = "<missing>"
+	ItemMissingRevision = "<missing>"
 
 	// ucFullPassInterval bounds how long the update-center arm may rely on its
 	// digest before deriving every item again. The digest covers the inventory
@@ -530,7 +530,7 @@ func (r *CatalogReconciler) ReconcileComposedBundle(ctx context.Context, cb *v1a
 			// makes the disappearance itself a drift event exactly once — the
 			// composer then reports it via result.Missing — while the recorded
 			// value stops it from forcing a recompose on every later tick.
-			hash := itemMissingRevision
+			hash := ItemMissingRevision
 			switch {
 			case err == nil && item != nil:
 				hash = item.Status.ContentHash

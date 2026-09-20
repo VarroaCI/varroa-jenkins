@@ -98,10 +98,12 @@ type pipelineListResponse struct {
 // marker-defined multibranch job reads its marker from a repository, so
 // it stays "jenkinsfile"; the template row names its template.
 type pipelineDefinitionJSON struct {
-	Source            string `json:"source"`
-	JenkinsfileRepo   string `json:"jenkinsfileRepo,omitempty"`
-	JenkinsfileCommit string `json:"jenkinsfileCommit,omitempty"`
-	Profile           string `json:"profile,omitempty"`
+	Source            string          `json:"source"`
+	JenkinsfileRepo   string          `json:"jenkinsfileRepo,omitempty"`
+	JenkinsfileCommit string          `json:"jenkinsfileCommit,omitempty"`
+	Profile           string          `json:"profile,omitempty"`
+	DeclaredBy        *declaredByJSON `json:"declaredBy,omitempty"`
+	DefinitionPath    string          `json:"definitionPath,omitempty"`
 }
 
 // pipelineTemplateInfoJSON is design D12's Template row: the resolved
@@ -594,19 +596,25 @@ func (s *Server) handleGetPipelineJob(w http.ResponseWriter, r *http.Request) {
 		detail.LastBuild = &rs
 	}
 
-	cr, item, err := s.findDeclaredItem(ctx, ref, jobPath)
+	cr, item, declaredBy, err := s.findDeclaredItem(ctx, ref, jobPath)
 	if err != nil {
 		s.deps.Logger.Warn("pipeline job definition lookup failed", "jobPath", jobPath, "error", err)
 	}
 	if item != nil {
 		detail.Definition = buildPipelineDefinition(item)
 		if detail.Definition != nil {
+			detail.Definition.DeclaredBy = declaredBy
 			if cr != nil {
 				detail.Definition.Profile = cr.Spec.Version
 			}
 			// A checked-out commit belongs to a repository script only.
 			if detail.Definition.Source == "jenkinsfile" && summary.LastRun != nil && summary.LastRun.SCMRevision != nil {
 				detail.Definition.JenkinsfileCommit = *summary.LastRun.SCMRevision
+			}
+			// The script path names a file inside that repository, so
+			// only a repository script carries one.
+			if detail.Definition.Source == "jenkinsfile" && summary.LastRun != nil {
+				detail.Definition.DefinitionPath = lastRunDefinitionPath(summary.LastRun)
 			}
 		}
 		detail.Triggers = buildPipelineTriggers(item)

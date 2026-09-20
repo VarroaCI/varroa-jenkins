@@ -534,3 +534,230 @@ describe("PipelinePage — live run events", () => {
     expect(mockGetPipelineJob).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("PipelinePage — provenance rows", () => {
+  beforeEach(() => {
+    mockGetPipelineJob.mockReset();
+    mockListRuns.mockReset();
+    mockListRuns.mockResolvedValue({ items: [] });
+    vi.mocked(usePermissions).mockReturnValue({ data: undefined } as unknown as ReturnType<typeof usePermissions>);
+  });
+
+  /** definedByCard returns the "Defined by" card, so every absence
+   * assertion stays inside that card. */
+  function definedByCard(): HTMLElement {
+    const cardTitle = screen.getByText("Defined by");
+    const card = cardTitle.parentElement?.parentElement;
+    if (!card) throw new Error("Defined by card not found");
+    return card;
+  }
+
+  /** definedByRow reads the <dd> immediately after the named <dt> inside
+   * the "Defined by" card, mirroring the other describe blocks. */
+  function definedByRow(label: string): HTMLElement | null {
+    const dt = within(definedByCard()).getByText(label);
+    return dt.nextElementSibling as HTMLElement | null;
+  }
+
+  /** declaredByGitSource builds one git-declared input, with the
+   * forge-shaped repository the link cases expect. */
+  function declaredByGitSource(overrides: Record<string, unknown> = {}) {
+    return {
+      kind: "gitSource",
+      name: "https://github.com/example/casc-bundles",
+      repoURL: "https://github.com/example/casc-bundles",
+      path: "bundles/team-platform",
+      revision: "9f1c2d3e4a5b6c7d8e9f0a1b2c3d4e5f60718293",
+      bundle: { namespace: "teams-platform", name: "platform-baseline" },
+      ...overrides,
+    };
+  }
+
+  /** renderJobWithDefinition opens the page on a job detail carrying the
+   * given definition object. */
+  async function renderJobWithDefinition(definition: Record<string, unknown>) {
+    mockGetPipelineJob.mockResolvedValue(jobDetail({ definition }));
+    renderPage();
+    await waitFor(() => expect(screen.getByText("payments/checkout-api/main")).toBeInTheDocument());
+  }
+
+  it("links the Bundle row to the composed bundle page", async () => {
+    await renderJobWithDefinition({ source: "jenkinsfile", declaredBy: declaredByGitSource() });
+
+    const link = within(definedByRow("Bundle")!).getByRole("link", { name: "platform-baseline" });
+    expect(link.getAttribute("href")).toBe("/catalog/bundles/teams-platform/platform-baseline");
+  });
+
+  it("links the Source input row for a GitHub gitSource and truncates the revision", async () => {
+    await renderJobWithDefinition({ source: "jenkinsfile", declaredBy: declaredByGitSource() });
+
+    const row = definedByRow("Source input")!;
+    const link = within(row).getByRole("link", { name: /casc-bundles/ });
+    expect(link.getAttribute("href")).toBe(
+      "https://github.com/example/casc-bundles/tree/9f1c2d3e4a5b6c7d8e9f0a1b2c3d4e5f60718293",
+    );
+    expect(link.textContent).toContain("9f1c2d3e4a5b");
+    expect(link.textContent).not.toContain("9f1c2d3e4a5b6");
+  });
+
+  it("shows an ociSource as text with no link", async () => {
+    await renderJobWithDefinition({
+      source: "jenkinsfile",
+      declaredBy: {
+        kind: "ociSource",
+        name: "ghcr.io/varroaci/casc-bundles:v1",
+        ociRef: "ghcr.io/varroaci/casc-bundles:v1",
+        path: "bundles/team-platform",
+        revision: "sha256:1f2e3d4c5b6a79880796a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4",
+        bundle: { namespace: "teams-platform", name: "platform-baseline" },
+      },
+    });
+
+    const row = definedByRow("Source input")!;
+    expect(within(row).queryByRole("link")).toBeNull();
+    expect(row.textContent).toContain("ghcr.io/varroaci/casc-bundles:v1");
+    expect(row.textContent).toContain("@ sha256:1f2e3");
+    expect(row.textContent).not.toContain("sha256:1f2e3d");
+  });
+
+  it("shows a non-forge gitSource as text with no link", async () => {
+    await renderJobWithDefinition({
+      source: "jenkinsfile",
+      declaredBy: declaredByGitSource({
+        name: "https://git.example.com/team/casc-bundles",
+        repoURL: "https://git.example.com/team/casc-bundles",
+      }),
+    });
+
+    const row = definedByRow("Source input")!;
+    expect(within(row).queryByRole("link")).toBeNull();
+    expect(row.textContent).toContain("https://git.example.com/team/casc-bundles");
+    expect(row.textContent).toContain("@ 9f1c2d3e4a5b");
+  });
+
+  it("shows an itemRef's catalog item name and namespace with no link", async () => {
+    await renderJobWithDefinition({
+      source: "jenkinsfile",
+      declaredBy: {
+        kind: "itemRef",
+        name: "standard-theme",
+        revision: "sha256:1f2e3d4c5b6a79880796a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4",
+        bundle: { namespace: "teams-platform", name: "platform-baseline" },
+        catalogItem: { name: "standard-theme", namespace: "catalog" },
+      },
+    });
+
+    const row = definedByRow("Source input")!;
+    expect(within(row).queryByRole("link")).toBeNull();
+    expect(row.textContent).toBe("standard-theme (catalog)");
+  });
+
+  it("falls back to the input name when an itemRef carries no catalogItem object", async () => {
+    await renderJobWithDefinition({
+      source: "jenkinsfile",
+      declaredBy: {
+        kind: "itemRef",
+        name: "standard-theme",
+        bundle: { namespace: "teams-platform", name: "platform-baseline" },
+      },
+    });
+
+    const row = definedByRow("Source input")!;
+    expect(within(row).queryByRole("link")).toBeNull();
+    expect(row.textContent).toBe("standard-theme");
+  });
+
+  it("falls back to the input name when a gitSource carries no repoURL", async () => {
+    await renderJobWithDefinition({
+      source: "jenkinsfile",
+      declaredBy: {
+        kind: "gitSource",
+        name: "example/casc-bundles",
+        bundle: { namespace: "teams-platform", name: "platform-baseline" },
+      },
+    });
+
+    const row = definedByRow("Source input")!;
+    expect(within(row).queryByRole("link")).toBeNull();
+    expect(row.textContent).toBe("example/casc-bundles");
+  });
+
+  it("shows neither provenance row without a declaredBy object", async () => {
+    await renderJobWithDefinition({
+      source: "jenkinsfile",
+      jenkinsfileRepo: "https://github.com/example/app",
+      jenkinsfileCommit: "9f1c2d3e4a5b6c7d8e9f0a1b2c3d4e5f60718293",
+      definitionPath: "Jenkinsfile",
+    });
+
+    const card = definedByCard();
+    expect(within(card).queryByText("Bundle")).not.toBeInTheDocument();
+    expect(within(card).queryByText("Source input")).not.toBeInTheDocument();
+  });
+
+  it("links the Jenkinsfile row when all four conditions hold", async () => {
+    await renderJobWithDefinition({
+      source: "jenkinsfile",
+      jenkinsfileRepo: "https://github.com/example/app",
+      jenkinsfileCommit: "9f1c2d3e4a5b6c7d8e9f0a1b2c3d4e5f60718293",
+      definitionPath: "Jenkinsfile",
+    });
+
+    const link = within(definedByRow("Jenkinsfile")!).getByRole("link");
+    expect(link.getAttribute("href")).toBe(
+      "https://github.com/example/app/blob/9f1c2d3e4a5b6c7d8e9f0a1b2c3d4e5f60718293/Jenkinsfile",
+    );
+    expect(link.textContent).toBe("https://github.com/example/app @ 9f1c2d3");
+  });
+
+  it("keeps the Jenkinsfile row as plain text when the script path is absent", async () => {
+    await renderJobWithDefinition({
+      source: "jenkinsfile",
+      jenkinsfileRepo: "https://github.com/example/app",
+      jenkinsfileCommit: "9f1c2d3e4a5b6c7d8e9f0a1b2c3d4e5f60718293",
+    });
+
+    const row = definedByRow("Jenkinsfile")!;
+    expect(within(row).queryByRole("link")).toBeNull();
+    expect(row.textContent).toBe("https://github.com/example/app @ 9f1c2d3");
+  });
+
+  it("keeps the Jenkinsfile row as plain text for a repository outside a known forge", async () => {
+    await renderJobWithDefinition({
+      source: "jenkinsfile",
+      jenkinsfileRepo: "https://git.example.com/team/app",
+      jenkinsfileCommit: "9f1c2d3e4a5b6c7d8e9f0a1b2c3d4e5f60718293",
+      definitionPath: "Jenkinsfile",
+    });
+
+    const row = definedByRow("Jenkinsfile")!;
+    expect(within(row).queryByRole("link")).toBeNull();
+    expect(row.textContent).toBe("https://git.example.com/team/app @ 9f1c2d3");
+  });
+
+  it("keeps the Jenkinsfile row as plain text when the commit is absent", async () => {
+    await renderJobWithDefinition({
+      source: "jenkinsfile",
+      jenkinsfileRepo: "https://github.com/example/app",
+      definitionPath: "Jenkinsfile",
+    });
+
+    const row = definedByRow("Jenkinsfile")!;
+    expect(within(row).queryByRole("link")).toBeNull();
+    expect(row.textContent).toBe("https://github.com/example/app");
+  });
+
+  it("never links the Jenkinsfile row for a template source", async () => {
+    await renderJobWithDefinition({
+      source: "template",
+      jenkinsfileRepo: "https://github.com/example/app",
+      jenkinsfileCommit: "9f1c2d3e4a5b6c7d8e9f0a1b2c3d4e5f60718293",
+      definitionPath: "Jenkinsfile",
+      profile: "2.570",
+    });
+
+    const row = definedByRow("Jenkinsfile")!;
+    expect(within(row).queryByRole("link")).toBeNull();
+    expect(row.textContent).toBe("https://github.com/example/app @ 9f1c2d3");
+  });
+});

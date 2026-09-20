@@ -2504,6 +2504,13 @@
         "additionalProperties": false,
         "description": "Where a job's pipeline script comes from. The catalog template, when one exists, is reported separately on PipelineJobDetail.template — see PipelineTemplateInfo.\n",
         "properties": {
+          "declaredBy": {
+            "$ref": "#/components/schemas/components_schemas_JobDeclaredBy"
+          },
+          "definitionPath": {
+            "description": "The Jenkinsfile's script path within its own repository, from the job's last run. Present only when source is jenkinsfile and the run recorded one.\n",
+            "type": "string"
+          },
           "jenkinsfileCommit": {
             "description": "The last build's checked-out commit, from its run record.",
             "type": "string"
@@ -5248,6 +5255,22 @@
         ],
         "type": "object"
       },
+      "components_schemas_BundleRef": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "name"
+        ],
+        "type": "object"
+      },
       "components_schemas_CancelRunResponse": {
         "additionalProperties": false,
         "description": "202 response for a cancel request. Cancel is fire and forget.",
@@ -5385,6 +5408,22 @@
         "required": [
           "profile",
           "pins"
+        ],
+        "type": "object"
+      },
+      "components_schemas_CatalogItemRef": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "namespace"
         ],
         "type": "object"
       },
@@ -8262,6 +8301,52 @@
         ],
         "type": "object"
       },
+      "components_schemas_JobDeclaredBy": {
+        "additionalProperties": false,
+        "description": "Which input of the job's composed bundle declared it. Present when one bundle input resolved as the declarer. Absent when the bundle or every candidate input is unresolved.\n",
+        "properties": {
+          "bundle": {
+            "$ref": "#/components/schemas/components_schemas_BundleRef"
+          },
+          "catalogItem": {
+            "$ref": "#/components/schemas/components_schemas_CatalogItemRef"
+          },
+          "kind": {
+            "enum": [
+              "gitSource",
+              "ociSource",
+              "itemRef"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "gitSource: the input's repoURL. ociSource: the input's ociRef. itemRef: the CatalogItem name.\n",
+            "type": "string"
+          },
+          "ociRef": {
+            "description": "Present only for kind ociSource.",
+            "type": "string"
+          },
+          "path": {
+            "description": "The input's sub-path. Absent when the input declares no sub-path.",
+            "type": "string"
+          },
+          "repoURL": {
+            "description": "Present only for kind gitSource.",
+            "type": "string"
+          },
+          "revision": {
+            "description": "A git SHA (gitSource), an OCI manifest digest (ociSource), or a CatalogItem content hash (itemRef). Absent when the composed bundle has not resolved this input yet.\n",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "bundle"
+        ],
+        "type": "object"
+      },
       "components_schemas_KeyMeta": {
         "additionalProperties": false,
         "description": "Non-secret metadata for an API key.",
@@ -8710,6 +8795,13 @@
         "additionalProperties": false,
         "description": "Where a job's pipeline script comes from. The catalog template, when one exists, is reported separately on PipelineJobDetail.template — see PipelineTemplateInfo.\n",
         "properties": {
+          "declaredBy": {
+            "$ref": "#/components/schemas/components_schemas_JobDeclaredBy"
+          },
+          "definitionPath": {
+            "description": "The Jenkinsfile's script path within its own repository, from the job's last run. Present only when source is jenkinsfile and the run recorded one.\n",
+            "type": "string"
+          },
           "jenkinsfileCommit": {
             "description": "The last build's checked-out commit, from its run record.",
             "type": "string"

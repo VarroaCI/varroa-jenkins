@@ -105,6 +105,26 @@ kubectl annotate composedbundle platform-baseline -n teams-platform \
 Remove the annotation to resume. See [rollout waves](../operations/rollout-waves.md)
 for staged application.
 
+## Trace a job back to its bundle input
+
+The pipelines dashboard's job page shows a `Defined by` card. Its `Bundle` row links to this
+bundle's own page. Its `Source input` row names the input that declared the job:
+
+- A git input shows the repository and the resolved revision, linked to the repository at that
+  revision when the repository matches a recognized host.
+- An OCI input shows the reference and the resolved digest as text. No OCI registry has a
+  browsable web shape this feature addresses.
+- A catalog item input shows the item's name and namespace as text.
+
+The `Jenkinsfile` row links to the file at the job's last checked-out commit under the same
+recognized hosts, when the job's last run recorded the script's path within its own repository.
+
+A repository is recognized when, after stripping one trailing `.git`, it takes one of three
+forms: `https://<host>/<owner>/<repo>`, `ssh://git@<host>/<owner>/<repo>`, or the scp-like
+`git@<host>:<owner>/<repo>`. In every form, `<host>` is exactly `github.com` or `gitlab.com`.
+Every other host, and every URL that does not fit one of the three forms, shows as plain text:
+the URL and the revision, with no link.
+
 ## Preflight plugin pins
 
 The validate and preview responses also include `pinPreflight`, computed

@@ -508,8 +508,8 @@ func TestReconcileComposedBundle_ItemRefDisappearanceReMaterializes(t *testing.T
 	if st.Phase != v1alpha1.ComposedBundleInvalid {
 		t.Errorf("phase = %q, want Invalid once the only input stopped resolving", st.Phase)
 	}
-	if got := st.ObservedRevisions["0"]; got != itemMissingRevision {
-		t.Errorf("observedRevisions[0] = %q, want %q", got, itemMissingRevision)
+	if got := st.ObservedRevisions["0"]; got != ItemMissingRevision {
+		t.Errorf("observedRevisions[0] = %q, want %q", got, ItemMissingRevision)
 	}
 	// Last-good content is retained rather than blanked.
 	if st.ContentRef != "item-gone-cb-content" {

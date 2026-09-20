@@ -1573,6 +1573,39 @@ export interface PipelineDefinition {
   jenkinsfileRepo?: string;
   jenkinsfileCommit?: string;
   profile?: string;
+  /** Which input of the job's composed bundle declared the job. */
+  declaredBy?: JobDeclaredBy;
+  /** The Jenkinsfile's script path inside its own repository. The server
+   * sets it only for a `jenkinsfile` source whose last run recorded it. */
+  definitionPath?: string;
+}
+
+/** The composed bundle that owns a declaring input. */
+export interface BundleRef {
+  namespace: string;
+  name: string;
+}
+
+/** The catalog item an `itemRef` input references, at the namespace it
+ * resolved in. */
+export interface CatalogItemRef {
+  name: string;
+  namespace: string;
+}
+
+/**
+ * Which input of the job's composed bundle declared the job. `kind` names
+ * the input's union branch. `bundle` names the bundle that owns the input.
+ */
+export interface JobDeclaredBy {
+  kind: "gitSource" | "ociSource" | "itemRef";
+  name: string;
+  revision?: string;
+  bundle: BundleRef;
+  repoURL?: string;
+  path?: string;
+  ociRef?: string;
+  catalogItem?: CatalogItemRef;
 }
 
 /** Where a job's resolved template came from. */

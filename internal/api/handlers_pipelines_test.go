@@ -841,3 +841,161 @@ func TestHandleListRuns_CrossTenantMerge_ExhaustedTenantDoesNotRevive(t *testing
 		}
 	}
 }
+
+// The job response's provenance fields.
+
+// jenkinsfileItemsYAML declares acme/app-a with an SCM definition, so the
+// item renders a jenkinsfile source.
+const jenkinsfileItemsYAML = `
+items:
+  - kind: folder
+    name: acme
+    items:
+      - kind: pipeline
+        name: app-a
+        definition:
+          cpsScmFlowDefinition:
+            scm:
+              gitSCM:
+                userRemoteConfigs:
+                  - userRemoteConfig:
+                      url: https://github.com/acme/svc
+`
+
+// pipelinesJobDetail issues one job-detail request and decodes it.
+func pipelinesJobDetail(t *testing.T, srv *Server, team, jobPath string) pipelineJobDetailJSON {
+	t.Helper()
+	var detail pipelineJobDetailJSON
+	if err := json.Unmarshal([]byte(pipelinesJobDetailBody(t, srv, team, jobPath)), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return detail
+}
+
+// pipelinesJobDetailBody issues one job-detail request and returns its
+// body, so a test can assert a key is absent rather than zero.
+func pipelinesJobDetailBody(t *testing.T, srv *Server, team, jobPath string) string {
+	t.Helper()
+	rec := doPipelinesRequest(t, srv.handleGetPipelineJob, "/pipelines/"+team+"/jobs/"+url.PathEscape(jobPath),
+		map[string]string{"team": team, "job": jobPath})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	return rec.Body.String()
+}
+
+// TestHandleGetPipelineJob_DeclaredByAndDefinitionPath asserts a
+// git-declared job with a recorded last run carries both fields.
+func TestHandleGetPipelineJob_DeclaredByAndDefinitionPath(t *testing.T) {
+	client := newSingleControllerFixture(t)
+	client.configMaps["bundle-a-content"] = map[string]string{"items.yaml": jenkinsfileItemsYAML}
+	client.composedBundles["bundle-a"].Spec.Inputs = []v1alpha1.ComposedInput{
+		{GitSource: &v1alpha1.GitBundleSource{RepoURL: "https://github.com/acme/svc", Path: "bundles/team"}},
+	}
+	client.composedBundles["bundle-a"].Status.ObservedRevisions = map[string]string{"0": "sha-git"}
+
+	rev := "sha-checkout"
+	reader := newFakeRecordReader()
+	reader.jobSummaries["core/test-ns/ctrl-a"] = []recordstore.JobSummary{{
+		JobPath: "acme/app-a",
+		LastRun: &recordstore.Run{JobPath: "acme/app-a", Source: json.RawMessage(runSourceColumnJSON), SCMRevision: &rev},
+	}}
+	srv := pipelinesTestServer(client, pipelineGrantAuthorizer([]string{"read"}, "test-ns/ctrl-a"), reader, nil)
+
+	detail := pipelinesJobDetail(t, srv, "ctrl-a", "acme/app-a")
+	if detail.Definition == nil {
+		t.Fatal("definition is nil, want the job's jenkinsfile definition")
+	}
+	if detail.Definition.DefinitionPath != "ci/Jenkinsfile" {
+		t.Errorf("definitionPath = %q, want the last run's recorded script path", detail.Definition.DefinitionPath)
+	}
+	if detail.Definition.JenkinsfileCommit != rev {
+		t.Errorf("jenkinsfileCommit = %q, want the last run's revision", detail.Definition.JenkinsfileCommit)
+	}
+	db := detail.Definition.DeclaredBy
+	if db == nil {
+		t.Fatal("declaredBy is missing, want the bundle's git input")
+	}
+	if db.Kind != "gitSource" || db.Name != "https://github.com/acme/svc" || db.RepoURL != "https://github.com/acme/svc" {
+		t.Errorf("declaredBy = %+v, want the gitSource input's repo URL", db)
+	}
+	if db.Path != "bundles/team" || db.Revision != "sha-git" {
+		t.Errorf("path/revision = %q/%q, want the input's path and observed revision", db.Path, db.Revision)
+	}
+	if want := (bundleRefJSON{Namespace: "test-ns", Name: "bundle-a"}); db.Bundle != want {
+		t.Errorf("bundle = %+v, want %+v", db.Bundle, want)
+	}
+}
+
+// TestHandleGetPipelineJob_NoDefinitionCarriesNoProvenance asserts a job
+// with no declared item carries neither field, though its last run
+// recorded a script path.
+func TestHandleGetPipelineJob_NoDefinitionCarriesNoProvenance(t *testing.T) {
+	client := newSingleControllerFixture(t)
+	rev := "sha-checkout"
+	reader := newFakeRecordReader()
+	reader.jobSummaries["core/test-ns/ctrl-a"] = []recordstore.JobSummary{{
+		JobPath: "acme/app-z",
+		LastRun: &recordstore.Run{JobPath: "acme/app-z", Source: json.RawMessage(runSourceColumnJSON), SCMRevision: &rev},
+	}}
+	srv := pipelinesTestServer(client, pipelineGrantAuthorizer([]string{"read"}, "test-ns/ctrl-a"), reader, nil)
+
+	body := pipelinesJobDetailBody(t, srv, "ctrl-a", "acme/app-z")
+	var detail pipelineJobDetailJSON
+	if err := json.Unmarshal([]byte(body), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if detail.Definition != nil {
+		t.Errorf("definition = %+v, want nil for a job with no declared item", detail.Definition)
+	}
+	if strings.Contains(body, "declaredBy") || strings.Contains(body, "definitionPath") {
+		t.Errorf("provenance leaked for a job with no definition: %s", body)
+	}
+}
+
+// TestHandleGetPipelineJob_StaleDefinitionPathStaysAbsent asserts the
+// jenkinsfile source gate, not omitempty alone, keeps definitionPath
+// absent for an inline job whose last run recorded one.
+func TestHandleGetPipelineJob_StaleDefinitionPathStaysAbsent(t *testing.T) {
+	client := newSingleControllerFixture(t)
+	rev := "sha-checkout"
+	reader := newFakeRecordReader()
+	reader.jobSummaries["core/test-ns/ctrl-a"] = []recordstore.JobSummary{{
+		JobPath: "acme/app-a",
+		LastRun: &recordstore.Run{JobPath: "acme/app-a", Source: json.RawMessage(runSourceColumnJSON), SCMRevision: &rev},
+	}}
+	srv := pipelinesTestServer(client, pipelineGrantAuthorizer([]string{"read"}, "test-ns/ctrl-a"), reader, nil)
+
+	detail := pipelinesJobDetail(t, srv, "ctrl-a", "acme/app-a")
+	if detail.Definition == nil || detail.Definition.Source != "inline" {
+		t.Fatalf("definition = %+v, want the item's inline source", detail.Definition)
+	}
+	if detail.Definition.DefinitionPath != "" {
+		t.Errorf("definitionPath = %q, want it absent for an inline job", detail.Definition.DefinitionPath)
+	}
+	if detail.Definition.JenkinsfileCommit != "" {
+		t.Errorf("jenkinsfileCommit = %q, want it absent for an inline job", detail.Definition.JenkinsfileCommit)
+	}
+}
+
+// TestHandleGetPipelineJob_UnresolvableInputKeepsDefinition asserts a job
+// whose bundle input cannot be resolved keeps its definition and every
+// other definition field, and reports no provenance.
+func TestHandleGetPipelineJob_UnresolvableInputKeepsDefinition(t *testing.T) {
+	client := newSingleControllerFixture(t)
+	client.composedBundles["bundle-a"].Spec.Inputs = []v1alpha1.ComposedInput{
+		{ItemRef: &v1alpha1.ComposedItemRef{Name: "items-missing"}},
+	}
+	client.composedBundles["bundle-a"].Status.InputSummary = []v1alpha1.InputSummaryEntry{
+		{Kind: "itemRef", Type: "item", Namespace: "test-ns"},
+	}
+	srv := pipelinesTestServer(client, pipelineGrantAuthorizer([]string{"read"}, "test-ns/ctrl-a"), newFakeRecordReader(), nil)
+
+	detail := pipelinesJobDetail(t, srv, "ctrl-a", "acme/app-a")
+	if detail.Definition == nil {
+		t.Fatal("definition is nil, want the item's inline definition")
+	}
+	if want := (&pipelineDefinitionJSON{Source: "inline"}); *detail.Definition != *want {
+		t.Fatalf("definition = %+v, want %+v: an unresolvable input changes no other field", *detail.Definition, *want)
+	}
+}

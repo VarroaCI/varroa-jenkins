@@ -285,6 +285,13 @@ const (
 	Pattern ComponentsSchemasJenkinsScopeType = "Pattern"
 )
 
+// Defines values for ComponentsSchemasJobDeclaredByKind.
+const (
+	GitSource ComponentsSchemasJobDeclaredByKind = "gitSource"
+	ItemRef   ComponentsSchemasJobDeclaredByKind = "itemRef"
+	OciSource ComponentsSchemasJobDeclaredByKind = "ociSource"
+)
+
 // Defines values for ComponentsSchemasLogEntryLevel.
 const (
 	DEBUG ComponentsSchemasLogEntryLevel = "DEBUG"
@@ -858,6 +865,12 @@ type ComponentsSchemasBuiltinRoleRef struct {
 	Name           string `json:"name"`
 }
 
+// ComponentsSchemasBundleRef defines model for components_schemas_BundleRef.
+type ComponentsSchemasBundleRef struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+}
+
 // ComponentsSchemasCancelRunResponse 202 response for a cancel request. Cancel is fire and forget.
 type ComponentsSchemasCancelRunResponse struct {
 	State ComponentsSchemasCancelRunResponseState `json:"state"`
@@ -922,6 +935,12 @@ type ComponentsSchemasCatalogItemDetailResponse struct {
 type ComponentsSchemasCatalogItemLockPins struct {
 	Pins    map[string]string `json:"pins"`
 	Profile string            `json:"profile"`
+}
+
+// ComponentsSchemasCatalogItemRef defines model for components_schemas_CatalogItemRef.
+type ComponentsSchemasCatalogItemRef struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
 }
 
 // ComponentsSchemasCatalogItemSpec Spec for a CatalogItem.
@@ -2111,6 +2130,31 @@ type ComponentsSchemasJenkinsVersionProfile struct {
 	AdditionalProperties map[string]interface{}  `json:"-"`
 }
 
+// ComponentsSchemasJobDeclaredBy Which input of the job's composed bundle declared it. Present when one bundle input resolved as the declarer. Absent when the bundle or every candidate input is unresolved.
+type ComponentsSchemasJobDeclaredBy struct {
+	Bundle      ComponentsSchemasBundleRef         `json:"bundle"`
+	CatalogItem *ComponentsSchemasCatalogItemRef   `json:"catalogItem,omitempty"`
+	Kind        ComponentsSchemasJobDeclaredByKind `json:"kind"`
+
+	// Name gitSource: the input's repoURL. ociSource: the input's ociRef. itemRef: the CatalogItem name.
+	Name string `json:"name"`
+
+	// OciRef Present only for kind ociSource.
+	OciRef *string `json:"ociRef,omitempty"`
+
+	// Path The input's sub-path. Absent when the input declares no sub-path.
+	Path *string `json:"path,omitempty"`
+
+	// RepoURL Present only for kind gitSource.
+	RepoURL *string `json:"repoURL,omitempty"`
+
+	// Revision A git SHA (gitSource), an OCI manifest digest (ociSource), or a CatalogItem content hash (itemRef). Absent when the composed bundle has not resolved this input yet.
+	Revision *string `json:"revision,omitempty"`
+}
+
+// ComponentsSchemasJobDeclaredByKind defines model for ComponentsSchemasJobDeclaredBy.Kind.
+type ComponentsSchemasJobDeclaredByKind string
+
 // ComponentsSchemasKeyMeta Non-secret metadata for an API key.
 type ComponentsSchemasKeyMeta struct {
 	// Created ISO 8601 creation time.
@@ -2292,6 +2336,12 @@ type ComponentsSchemasPinPreflightReport struct {
 
 // ComponentsSchemasPipelineDefinition Where a job's pipeline script comes from. The catalog template, when one exists, is reported separately on PipelineJobDetail.template — see PipelineTemplateInfo.
 type ComponentsSchemasPipelineDefinition struct {
+	// DeclaredBy Which input of the job's composed bundle declared it. Present when one bundle input resolved as the declarer. Absent when the bundle or every candidate input is unresolved.
+	DeclaredBy *ComponentsSchemasJobDeclaredBy `json:"declaredBy,omitempty"`
+
+	// DefinitionPath The Jenkinsfile's script path within its own repository, from the job's last run. Present only when source is jenkinsfile and the run recorded one.
+	DefinitionPath *string `json:"definitionPath,omitempty"`
+
 	// JenkinsfileCommit The last build's checked-out commit, from its run record.
 	JenkinsfileCommit *string `json:"jenkinsfileCommit,omitempty"`
 	JenkinsfileRepo   *string `json:"jenkinsfileRepo,omitempty"`

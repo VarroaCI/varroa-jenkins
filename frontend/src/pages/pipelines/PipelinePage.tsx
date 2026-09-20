@@ -11,7 +11,14 @@ import { age } from "../../components/activityTimeline.util";
 import { stripTenantFolder } from "./jobPath";
 import JobBreadcrumbs from "./JobBreadcrumbs";
 import { RunDrawer } from "./RunDrawer";
-import type { RunNotification, PipelineTemplateInfo, PipelineDependencyEdge } from "../../types";
+import { matchForgeShape, repositoryHref, fileHref } from "./forgeLink";
+import type {
+  RunNotification,
+  PipelineTemplateInfo,
+  PipelineDependencyEdge,
+  PipelineDefinition,
+  JobDeclaredBy,
+} from "../../types";
 import styles from "./PipelinePage.module.css";
 
 const enc = (s: string) => encodeURIComponent(s);
@@ -117,6 +124,65 @@ function renderDependencyRow(label: string, edges: PipelineDependencyEdge[]) {
       </dd>
     </>
   );
+}
+
+/**
+ * renderJenkinsfileRow renders the "Defined by" card's Jenkinsfile row
+ * value. The row links to the file when four conditions hold: the
+ * definition source is "jenkinsfile", the repository matches a
+ * recognized forge shape, the commit is present, and the script path is
+ * present. Every other case prints the repository and, when present, the
+ * short commit as plain text, with no link. The text and the truncation
+ * do not change.
+ */
+function renderJenkinsfileRow(definition: PipelineDefinition) {
+  const { jenkinsfileRepo, jenkinsfileCommit, definitionPath } = definition;
+  if (!jenkinsfileRepo) return null;
+  const match = matchForgeShape(jenkinsfileRepo);
+  const text = (
+    <>
+      {jenkinsfileRepo}
+      {jenkinsfileCommit ? ` @ ${jenkinsfileCommit.slice(0, 7)}` : ""}
+    </>
+  );
+  if (definition.source !== "jenkinsfile" || !match || !jenkinsfileCommit || !definitionPath) {
+    return text;
+  }
+  return (
+    <a href={fileHref(match, jenkinsfileCommit, definitionPath)} target="_blank" rel="noreferrer">
+      {text}
+    </a>
+  );
+}
+
+/**
+ * renderSourceInputRow renders the "Defined by" card's Source input row
+ * value. A catalog item input prints the item name and the namespace as
+ * text. A git or OCI input prints the URL and, when present, the first 12
+ * characters of the revision. The row links to the repository only when
+ * the URL matches a recognized forge shape and the revision is present.
+ */
+function renderSourceInputRow(declaredBy: JobDeclaredBy) {
+  if (declaredBy.kind === "itemRef") {
+    // catalogItem is optional in the schema, even for kind itemRef: the
+    // required list holds only kind, name, and bundle. Fall back to the
+    // name field instead of asserting the value.
+    if (!declaredBy.catalogItem) return declaredBy.name;
+    return `${declaredBy.catalogItem.name} (${declaredBy.catalogItem.namespace})`;
+  }
+  const url = declaredBy.kind === "gitSource" ? declaredBy.repoURL : declaredBy.ociRef;
+  if (!url) return declaredBy.name;
+  const match = declaredBy.kind === "gitSource" ? matchForgeShape(url) : null;
+  const revisionText = declaredBy.revision ? ` @ ${declaredBy.revision.slice(0, 12)}` : "";
+  if (match && declaredBy.revision) {
+    return (
+      <a href={repositoryHref(match, declaredBy.revision)} target="_blank" rel="noreferrer">
+        {url}
+        {revisionText}
+      </a>
+    );
+  }
+  return `${url}${revisionText}`;
 }
 
 export default function PipelinePage() {
@@ -227,6 +293,9 @@ export default function PipelinePage() {
   const folderRelativeJobPath = stripTenantFolder(jobDetail.tenantFolder, jobDetail.jobPath);
   const canRun = canAccessTenantPipeline(permissions, jobDetail.tenant, "write", folderRelativeJobPath);
   const runs = runsQuery.data?.items ?? [];
+  // One local keeps the narrowing the row guards establish.
+  const definition = jobDetail.definition;
+  const declaredBy = definition?.declaredBy;
 
   return (
     <div className={styles.page}>
@@ -245,16 +314,13 @@ export default function PipelinePage() {
       <div className={styles.cardGrid}>
         <Card title="Defined by">
           <dl className={styles.kv}>
-            {jobDetail.definition?.jenkinsfileRepo && (
+            {definition?.jenkinsfileRepo && (
               <>
                 <dt>Jenkinsfile</dt>
-                <dd>
-                  {jobDetail.definition.jenkinsfileRepo}
-                  {jobDetail.definition.jenkinsfileCommit ? ` @ ${jobDetail.definition.jenkinsfileCommit.slice(0, 7)}` : ""}
-                </dd>
+                <dd>{renderJenkinsfileRow(definition)}</dd>
               </>
             )}
-            {jobDetail.definition?.source === "inline" && (
+            {definition?.source === "inline" && (
               <>
                 <dt>Script</dt>
                 <dd>Inline, declared by the bundle item.</dd>
@@ -266,10 +332,22 @@ export default function PipelinePage() {
                 <dd>{renderTemplateRow(jobDetail.template)}</dd>
               </>
             )}
-            {jobDetail.definition?.profile && (
+            {definition?.profile && (
               <>
                 <dt>Profile</dt>
-                <dd>{jobDetail.definition.profile}</dd>
+                <dd>{definition.profile}</dd>
+              </>
+            )}
+            {declaredBy && (
+              <>
+                <dt>Bundle</dt>
+                <dd>
+                  <Link to={`/catalog/bundles/${enc(declaredBy.bundle.namespace)}/${enc(declaredBy.bundle.name)}`}>
+                    {declaredBy.bundle.name}
+                  </Link>
+                </dd>
+                <dt>Source input</dt>
+                <dd>{renderSourceInputRow(declaredBy)}</dd>
               </>
             )}
             {!jobDetail.definition && !jobDetail.template && (

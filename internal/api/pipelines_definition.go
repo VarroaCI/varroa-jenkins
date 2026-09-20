@@ -11,53 +11,84 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle/pipelinetemplate"
+	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
-// composedBundleContent reads one ComposedBundle's content ConfigMap by
-// name and namespace. It returns a nil map, with no error, when the
-// bundle or its ConfigMap cannot be found: a tenant with no catalog
-// template still serves record-derived data alone.
-func (s *Server) composedBundleContent(ctx context.Context, bundleName, bundleNamespace string) (map[string]string, error) {
-	cb, err := crdstore.Get[v1alpha1.ComposedBundle](ctx, s.deps.Store, bundleName, bundleNamespace)
-	if err != nil {
-		if k8serrors.IsNotFound(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	if cb.Status.ContentRef == "" {
-		return nil, nil
-	}
-
-	cm, err := s.deps.Client.GetConfigMap(ctx, cb.Status.ContentRef, bundleNamespace)
-	if err != nil {
-		if k8serrors.IsNotFound(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return cm, nil
+// declaredByJSON is the Defined by card's provenance data: which input of
+// the composed bundle declared this job. Kind names the input's union
+// branch. Every key below is complete; no other key exists.
+type declaredByJSON struct {
+	Kind        string              `json:"kind"`
+	Name        string              `json:"name"`
+	Revision    string              `json:"revision,omitempty"`
+	Bundle      bundleRefJSON       `json:"bundle"`
+	RepoURL     string              `json:"repoURL,omitempty"`
+	Path        string              `json:"path,omitempty"`
+	OCIRef      string              `json:"ociRef,omitempty"`
+	CatalogItem *catalogItemRefJSON `json:"catalogItem,omitempty"`
 }
 
-// controllerBundleContent reads ref's controller's composed bundle content
-// ConfigMap. It returns a nil cr and a nil map, with no error, when the
-// controller, its bundle, or the ConfigMap cannot be found: a tenant with
-// no catalog template still serves record-derived data alone. Design D1's
-// cell mode names a controller ref.Controller does not yet identify as a
-// Controller CR, which the same not-found path also covers.
-func (s *Server) controllerBundleContent(ctx context.Context, ref TenantRef) (*v1alpha1.Controller, map[string]string, error) {
-	if ref.Controller == "" {
-		return nil, nil, nil
-	}
-	cr, err := crdstore.Get[v1alpha1.Controller](ctx, s.deps.Store, ref.Controller, ref.Namespace)
+// bundleRefJSON names the ComposedBundle CR that owns a declaring input.
+type bundleRefJSON struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+}
+
+// catalogItemRefJSON names the CatalogItem an itemRef input references,
+// at the namespace it actually resolved in.
+type catalogItemRefJSON struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+}
+
+// composedBundleContent reads one ComposedBundle and its content
+// ConfigMap by name and namespace. It returns the bundle with a nil map,
+// and no error, when the bundle holds no content reference or its
+// ConfigMap is absent: a tenant with no catalog template still serves
+// record-derived data alone. It returns a nil bundle, with no error, when
+// the bundle itself is absent.
+func (s *Server) composedBundleContent(ctx context.Context, bundleName, bundleNamespace string) (*v1alpha1.ComposedBundle, map[string]string, error) {
+	cb, err := crdstore.Get[v1alpha1.ComposedBundle](ctx, s.deps.Store, bundleName, bundleNamespace)
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			return nil, nil, nil
 		}
 		return nil, nil, err
+	}
+	if cb.Status.ContentRef == "" {
+		return cb, nil, nil
+	}
+
+	cm, err := s.deps.Client.GetConfigMap(ctx, cb.Status.ContentRef, bundleNamespace)
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			return cb, nil, nil
+		}
+		return cb, nil, err
+	}
+	return cb, cm, nil
+}
+
+// controllerBundleContent reads ref's controller, its composed bundle, and
+// the bundle's content ConfigMap. It returns nil for every value, with no
+// error, when ref names no controller or the controller cannot be found. It
+// returns the controller with a nil bundle and a nil map when the bundle
+// cannot be found, and the controller and the bundle with a nil map when
+// the ConfigMap cannot be found. A tenant with no catalog template still
+// serves record-derived data alone.
+func (s *Server) controllerBundleContent(ctx context.Context, ref TenantRef) (*v1alpha1.Controller, *v1alpha1.ComposedBundle, map[string]string, error) {
+	if ref.Controller == "" {
+		return nil, nil, nil, nil
+	}
+	cr, err := crdstore.Get[v1alpha1.Controller](ctx, s.deps.Store, ref.Controller, ref.Namespace)
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			return nil, nil, nil, nil
+		}
+		return nil, nil, nil, err
 	}
 
 	bundleName := v1alpha1.StarterBundleName
@@ -70,31 +101,32 @@ func (s *Server) controllerBundleContent(ctx context.Context, ref TenantRef) (*v
 		}
 	}
 
-	cm, err := s.composedBundleContent(ctx, bundleName, bundleNamespace)
+	cb, cm, err := s.composedBundleContent(ctx, bundleName, bundleNamespace)
 	if err != nil {
-		return cr, nil, err
+		return cr, cb, nil, err
 	}
-	return cr, cm, nil
+	return cr, cb, cm, nil
 }
 
-// teamPipelineBundleContent reads a placed Team's own composed bundle
-// content ConfigMap, named by Team.spec.pipelines.composedBundleRef. It
-// returns a nil map, with no error, when the Team, its pipelines spec,
-// its bundle ref, or the bundle's ConfigMap cannot be found: a tenant
-// with no catalog template still serves record-derived data alone.
-func (s *Server) teamPipelineBundleContent(ctx context.Context, ref TenantRef) (map[string]string, error) {
+// teamPipelineBundleContent reads a placed Team's own composed bundle and
+// its content ConfigMap, named by Team.spec.pipelines.composedBundleRef.
+// It returns a nil bundle and a nil map, with no error, when the Team, its
+// pipelines spec, its bundle ref, or the bundle's ConfigMap cannot be
+// found: a tenant with no catalog template still serves record-derived
+// data alone.
+func (s *Server) teamPipelineBundleContent(ctx context.Context, ref TenantRef) (*v1alpha1.ComposedBundle, map[string]string, error) {
 	if ref.Team == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	team, err := crdstore.Get[v1alpha1.Team](ctx, s.deps.Store, ref.Team, "")
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	if team.Spec.Pipelines == nil || team.Spec.Pipelines.ComposedBundleRef == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	bundleRef := team.Spec.Pipelines.ComposedBundleRef
 	return s.composedBundleContent(ctx, bundleRef.Name, bundleRef.Namespace)
@@ -121,12 +153,14 @@ func (s *Server) tenantController(ctx context.Context, ref TenantRef) (*v1alpha1
 // and re-roots the manifest under the Team folder, which is how the cell
 // assembles it; the cell's bundle never carries a tenant job. A synthetic
 // single-controller tenant (ref.Folder empty) reads its controller's
-// bundle. It returns a nil manifest, with no error, when the controller,
-// the bundle, or an items.yaml key cannot be found: a tenant with no
-// declared item still serves record-derived data alone.
-func (s *Server) controllerItemManifest(ctx context.Context, ref TenantRef) (*v1alpha1.Controller, *items.Manifest, error) {
+// bundle. It returns the bundle it read, and a nil manifest, with no
+// error, when the controller, the bundle, or an items.yaml key cannot be
+// found: a tenant with no declared item still serves record-derived data
+// alone.
+func (s *Server) controllerItemManifest(ctx context.Context, ref TenantRef) (*v1alpha1.Controller, *v1alpha1.ComposedBundle, *items.Manifest, error) {
 	var (
 		cr  *v1alpha1.Controller
+		cb  *v1alpha1.ComposedBundle
 		cm  map[string]string
 		err error
 	)
@@ -135,36 +169,36 @@ func (s *Server) controllerItemManifest(ctx context.Context, ref TenantRef) (*v1
 		// fetched only for its version.
 		cr, err = s.tenantController(ctx, ref)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		cm, err = s.teamPipelineBundleContent(ctx, ref)
+		cb, cm, err = s.teamPipelineBundleContent(ctx, ref)
 	} else {
-		cr, cm, err = s.controllerBundleContent(ctx, ref)
+		cr, cb, cm, err = s.controllerBundleContent(ctx, ref)
 	}
 	if err != nil {
-		return cr, nil, err
+		return cr, cb, nil, err
 	}
 	if cm == nil {
-		return cr, nil, nil
+		return cr, cb, nil, nil
 	}
 	content, ok := cm["items.yaml"]
 	if !ok || content == "" {
-		return cr, nil, nil
+		return cr, cb, nil, nil
 	}
 	manifest, err := items.Parse(content)
 	if err != nil {
 		// An items.yaml that fails to parse leaves the pipeline surface
 		// without a definition rather than failing the read: the
 		// bundle-validation gate is the place that rejects a bad manifest.
-		return cr, nil, nil //nolint:nilerr // best-effort enrichment, see comment above
+		return cr, cb, nil, nil //nolint:nilerr // best-effort enrichment, see comment above
 	}
 	if ref.Folder != "" {
 		manifest, err = items.ReRoot(manifest, ref.Folder)
 		if err != nil {
-			return cr, nil, nil //nolint:nilerr // a tenant manifest that names its own root is rejected upstream
+			return cr, cb, nil, nil //nolint:nilerr // a tenant manifest that names its own root is rejected upstream
 		}
 	}
-	return cr, manifest, nil
+	return cr, cb, manifest, nil
 }
 
 // controllerPipelineTemplates reads and parses the composed bundle
@@ -179,9 +213,9 @@ func (s *Server) controllerPipelineTemplates(ctx context.Context, ref TenantRef)
 	var cm map[string]string
 	var err error
 	if ref.Folder != "" {
-		cm, err = s.teamPipelineBundleContent(ctx, ref)
+		_, cm, err = s.teamPipelineBundleContent(ctx, ref)
 	} else {
-		_, cm, err = s.controllerBundleContent(ctx, ref)
+		_, _, cm, err = s.controllerBundleContent(ctx, ref)
 	}
 	if err != nil || cm == nil {
 		return nil, err
@@ -208,7 +242,7 @@ func (s *Server) controllerPipelineTemplates(ctx context.Context, ref TenantRef)
 // template per branch, so no items-engine entry names a branch job
 // directly.
 func (s *Server) markerContainerPath(ctx context.Context, ref TenantRef, jobPath string) (string, bool) {
-	_, manifest, err := s.controllerItemManifest(ctx, ref)
+	_, _, manifest, err := s.controllerItemManifest(ctx, ref)
 	if err != nil || manifest == nil {
 		return "", false
 	}
@@ -227,19 +261,140 @@ func (s *Server) markerContainerPath(ctx context.Context, ref TenantRef, jobPath
 }
 
 // findDeclaredItem returns the item declaring jobPath, from ref's
-// controller's composed bundle, and reports whether one was found.
-func (s *Server) findDeclaredItem(ctx context.Context, ref TenantRef, jobPath string) (*v1alpha1.Controller, *items.Item, error) {
-	cr, manifest, err := s.controllerItemManifest(ctx, ref)
+// controller's composed bundle, and reports whether one was found. It
+// also returns the bundle input that declared the item. It resolves that
+// input only when the item's definition renders, so an item with no
+// definition carries no provenance.
+func (s *Server) findDeclaredItem(ctx context.Context, ref TenantRef, jobPath string) (*v1alpha1.Controller, *items.Item, *declaredByJSON, error) {
+	cr, cb, manifest, err := s.controllerItemManifest(ctx, ref)
 	if err != nil || manifest == nil {
-		return cr, nil, err
+		return cr, nil, nil, err
 	}
 	for _, ip := range manifest.Flatten() {
 		if ip.Path == jobPath {
 			item := ip.Item
-			return cr, &item, nil
+			var declaredBy *declaredByJSON
+			if buildPipelineDefinition(&item) != nil {
+				declaredBy = s.resolveDeclaredInput(ctx, cb, ref, jobPath)
+			}
+			return cr, &item, declaredBy, nil
 		}
 	}
-	return cr, nil, nil
+	return cr, nil, nil, nil
+}
+
+// resolveDeclaredInput determines which input of cb declared jobPath.
+// Called only after the merged manifest already resolved jobPath to an
+// item whose definition renders (buildPipelineDefinition returned
+// non-nil), so it performs no manifest walk of its own — it examines
+// cb.Spec.Inputs, already in memory on the fetched cb, plus a bounded
+// number of CatalogItem reads for itemRef candidates. Returns nil when
+// cb is nil (bundle not found) or when no input resolves.
+func (s *Server) resolveDeclaredInput(ctx context.Context, cb *v1alpha1.ComposedBundle, ref TenantRef, jobPath string) *declaredByJSON {
+	if cb == nil {
+		return nil
+	}
+	bundleRef := bundleRefJSON{Namespace: cb.Namespace, Name: cb.Name}
+
+	for i, input := range cb.Spec.Inputs {
+		if input.ItemRef == nil {
+			continue
+		}
+		var summary v1alpha1.InputSummaryEntry
+		if i < len(cb.Status.InputSummary) {
+			summary = cb.Status.InputSummary[i]
+		}
+		if summary.Namespace == "" {
+			// An entry with no namespace means the input is unresolved,
+			// so it cannot be the declarer.
+			continue
+		}
+		catalogItem, err := crdstore.Get[v1alpha1.CatalogItem](ctx, s.deps.Store, input.ItemRef.Name, summary.Namespace)
+		if err != nil {
+			if k8serrors.IsNotFound(err) {
+				continue // deleted since the last reconcile: not this one
+			}
+			// A transient read error is terminal for the whole
+			// resolution: it must never let step 2 name a git/OCI input
+			// in this itemRef's place.
+			s.deps.Logger.Warn("declared-input itemRef read failed", "jobPath", jobPath, "item", input.ItemRef.Name, "error", err)
+			return nil
+		}
+		if catalogItem.Spec.Type != v1alpha1.CatalogItemItem {
+			continue
+		}
+		manifest, err := items.Parse(catalogItem.Status.Content)
+		if err != nil {
+			continue // malformed content: not a match, not a failure of this call
+		}
+		// The merge drops each input's root key. Clear Root here, so the
+		// paths compare in the merged path space.
+		manifest.Root = ""
+		if ref.Folder != "" {
+			manifest, err = items.ReRoot(manifest, ref.Folder)
+			if err != nil {
+				// ReRoot cannot fail once Root is clear. A failure here is
+				// unexpected, so answer no declarer.
+				s.deps.Logger.Warn("declared-input itemRef re-root failed", "jobPath", jobPath, "item", input.ItemRef.Name, "error", err)
+				return nil
+			}
+		}
+		for _, ip := range manifest.Flatten() {
+			if ip.Path != jobPath {
+				continue
+			}
+			return &declaredByJSON{
+				Kind:     "itemRef",
+				Name:     input.ItemRef.Name,
+				Revision: revisionForInput(cb, i, input.ItemRef.Name),
+				Bundle:   bundleRef,
+				CatalogItem: &catalogItemRefJSON{
+					Name:      input.ItemRef.Name,
+					Namespace: summary.Namespace,
+				},
+			}
+		}
+	}
+
+	for i, input := range cb.Spec.Inputs {
+		switch {
+		case input.GitSource != nil:
+			return &declaredByJSON{
+				Kind:     "gitSource",
+				Name:     input.GitSource.RepoURL,
+				RepoURL:  input.GitSource.RepoURL,
+				Path:     input.GitSource.Path,
+				Revision: revisionForInput(cb, i, ""),
+				Bundle:   bundleRef,
+			}
+		case input.OCISource != nil:
+			return &declaredByJSON{
+				Kind:     "ociSource",
+				Name:     input.OCISource.Ref,
+				OCIRef:   input.OCISource.Ref,
+				Path:     input.OCISource.Path,
+				Revision: revisionForInput(cb, i, ""),
+				Bundle:   bundleRef,
+			}
+		}
+	}
+	return nil
+}
+
+// revisionForInput reads ComposedBundle.status.observedRevisions for
+// input index i, falling back to the itemRefName key when itemRefName is
+// non-empty and the index key is empty — the same two-key read
+// projectResolvedInputs (handlers_clusters.go) performs. Returns "" for
+// the operator's ItemMissingRevision sentinel, which is not a revision.
+func revisionForInput(cb *v1alpha1.ComposedBundle, i int, itemRefName string) string {
+	rev := cb.Status.ObservedRevisions[strconv.Itoa(i)]
+	if rev == "" && itemRefName != "" {
+		rev = cb.Status.ObservedRevisions[itemRefName]
+	}
+	if rev == controller.ItemMissingRevision {
+		return ""
+	}
+	return rev
 }
 
 // declaredJob is one job path a composed bundle declares, with the item
@@ -255,7 +410,7 @@ type declaredJob struct {
 // the union of the record store's job summaries and the jobs the catalog
 // declares, because a job that has never run holds no record-store row.
 func (s *Server) catalogDeclaredJobPaths(ctx context.Context, ref TenantRef) []declaredJob {
-	_, manifest, err := s.controllerItemManifest(ctx, ref)
+	_, _, manifest, err := s.controllerItemManifest(ctx, ref)
 	if err != nil || manifest == nil {
 		return nil
 	}
@@ -276,6 +431,27 @@ type runTemplatePayload struct {
 	TemplateVersion string `json:"template_version"`
 	MarkerPath      string `json:"marker_path"`
 	MarkerRevision  string `json:"marker_revision"`
+}
+
+// runSourcePayload reads the script path a run's source column records.
+// The stored envelope writes snake_case keys, so this type tags the key
+// the envelope carries, not a response DTO's camelCase.
+type runSourcePayload struct {
+	DefinitionPath string `json:"definition_path,omitempty"`
+}
+
+// lastRunDefinitionPath returns the Jenkinsfile's path within its own
+// repository, as the job's last run recorded it. It returns "" when the
+// run is absent, carries no source, or carries malformed JSON.
+func lastRunDefinitionPath(lastRun *recordstore.Run) string {
+	if lastRun == nil || len(lastRun.Source) == 0 {
+		return ""
+	}
+	var src runSourcePayload
+	if err := json.Unmarshal(lastRun.Source, &src); err != nil {
+		return ""
+	}
+	return src.DefinitionPath
 }
 
 // buildPipelineTemplateInfo builds design D12's Template row. An
