@@ -565,6 +565,15 @@ func (h *BusHandler) publishRunStateOutcome(ns, name string, chunk *mitev1.RunSt
 		return
 	}
 
+	if chunk.JobPath == "" {
+		// A cell derives the tenant from the first path segment, so no
+		// envelope publishes there. A controller tenant publishes the
+		// envelope with the empty path. The warning names the sender in
+		// both cases.
+		h.log().Warn("run-state chunk carries no job path",
+			"run_id", chunk.RunId, "controller", ns+"/"+name)
+	}
+
 	tenant, _ := h.resolver().ResolveJobTenant(h.cluster, ns, name, chunk.JobPath)
 	if tenant == "" {
 		h.log().Warn("run-state outcome unresolved, publishing no envelope",

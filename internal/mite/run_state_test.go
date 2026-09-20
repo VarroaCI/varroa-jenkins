@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1072,5 +1074,90 @@ func TestOnRunStateChunk_NoGenerationIsMalformed(t *testing.T) {
 	if _, err := h.logStore.NewRangeReader(context.Background(),
 		blob.RunStateKey(runID, oneChunkEpoch, 0, relpath), 0, -1); !errors.Is(err, blob.ErrObjectNotFound) {
 		t.Fatalf("expected no object stored, NewRangeReader error = %v", err)
+	}
+}
+
+// TestOnRunStateChunk_EmptyJobPathWarnsAndStillPublishes proves a chunk
+// with no job path still stores its file and still publishes. The
+// gateway warns once, so an operator finds the pusher that omitted the
+// path.
+func TestOnRunStateChunk_EmptyJobPathWarnsAndStillPublishes(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	pub := &fakePublisher{}
+	var logs bytes.Buffer
+	h := newRunStateTestHandler(t, owner, sender)
+	h.publisher = pub
+	h.Logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	const relpath = "jobs/team/builds/1/program.dat"
+	chunk := oneChunk(runID, relpath, 1, []byte("hello"))
+	chunk.JobPath = ""
+	h.OnRunStateChunk("cell1", "ns1", chunk)
+
+	acks := runStateAcksFrom(sender)
+	if len(acks) != 1 || acks[0].Status != stateAckStatusStored {
+		t.Fatalf("acks = %+v, want one STORED ack", acks)
+	}
+	if _, err := h.logStore.NewRangeReader(context.Background(),
+		blob.RunStateKey(runID, oneChunkEpoch, 1, relpath), 0, -1); err != nil {
+		t.Fatalf("expected the file stored, NewRangeReader error = %v", err)
+	}
+	if got := pub.publishedCount(); got != 1 {
+		t.Fatalf("published %d envelopes, want 1", got)
+	}
+	env := pub.envelopeAt(0)
+	if env.Kind != kindRunState || env.JobPath != "" {
+		t.Fatalf("envelope kind/job_path = %q/%q, want %q/empty", env.Kind, env.JobPath, kindRunState)
+	}
+	if !strings.Contains(logs.String(), "run-state chunk carries no job path") {
+		t.Fatalf("log = %q, want the empty-job-path warning", logs.String())
+	}
+	if !strings.Contains(logs.String(), runID) {
+		t.Fatalf("log = %q, want the run id", logs.String())
+	}
+}
+
+// TestOnRunStateChunk_EmptyJobPathOnACellPublishesNoEnvelope proves a
+// chunk with no job path still stores its file and still earns its ack,
+// while a resolver that derives the tenant from the path answers no
+// tenant, so no envelope publishes. The log holds both warnings.
+func TestOnRunStateChunk_EmptyJobPathOnACellPublishesNoEnvelope(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	pub := &fakePublisher{}
+	var logs bytes.Buffer
+	h := newRunStateTestHandler(t, owner, sender)
+	h.publisher = pub
+	// A cell derives the tenant from the first path segment, so an
+	// empty path answers no tenant.
+	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{}})
+	h.Logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	const relpath = "jobs/team/builds/1/program.dat"
+	chunk := oneChunk(runID, relpath, 1, []byte("hello"))
+	chunk.JobPath = ""
+	h.OnRunStateChunk("cell1", "ns1", chunk)
+
+	acks := runStateAcksFrom(sender)
+	if len(acks) != 1 || acks[0].Status != stateAckStatusStored {
+		t.Fatalf("acks = %+v, want one STORED ack", acks)
+	}
+	if _, err := h.logStore.NewRangeReader(context.Background(),
+		blob.RunStateKey(runID, oneChunkEpoch, 1, relpath), 0, -1); err != nil {
+		t.Fatalf("expected the file stored, NewRangeReader error = %v", err)
+	}
+	if got := pub.publishedCount(); got != 0 {
+		t.Fatalf("published %d envelopes, want none", got)
+	}
+	if !strings.Contains(logs.String(), "run-state chunk carries no job path") {
+		t.Fatalf("log = %q, want the empty-job-path warning", logs.String())
+	}
+	if !strings.Contains(logs.String(), "run-state outcome unresolved, publishing no envelope") {
+		t.Fatalf("log = %q, want the unresolved warning", logs.String())
 	}
 }

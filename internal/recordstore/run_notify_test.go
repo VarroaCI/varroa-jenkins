@@ -232,7 +232,7 @@ func TestRunNotifierEntryLife(t *testing.T) {
 }
 
 // TestNotificationForMapsEveryKind asserts the notification builder maps
-// every ingest kind, and answers false for the two kinds that publish
+// every ingest kind, and answers false for the three kinds that publish
 // nothing.
 func TestNotificationForMapsEveryKind(t *testing.T) {
 	buildNumber := int64(42)
@@ -253,7 +253,7 @@ func TestNotificationForMapsEveryKind(t *testing.T) {
 		{KindRunLog, map[string]any{"build_number": 7}, "run", "", "", 0, true},
 		{KindRunChanges, map[string]any{"build_number": 7}, "run", "", "", 0, true},
 		{KindRunTests, map[string]any{"build_number": 7}, "run", "", "", 0, true},
-		{KindRunState, map[string]any{"build_number": 7}, "run", "", "", 0, true},
+		{KindRunState, map[string]any{"build_number": 7}, "", "", "", 0, false},
 		{KindRunResumeFailed, map[string]any{"build_number": 7}, "run", "", "", 0, true},
 		{KindRunSource, RunSourcePayload{Seq: 0}, "run", "", "", 0, true},
 		{KindRunTriggerAccepted, map[string]any{}, "run", "QUEUED", "", 0, true},
