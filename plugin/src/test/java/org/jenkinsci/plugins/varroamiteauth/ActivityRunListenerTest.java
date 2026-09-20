@@ -116,6 +116,21 @@ public class ActivityRunListenerTest {
     }
 
     @Test
+    public void actorResolvedFromVarroaUserCause() {
+        String actor = ActivityRunListener.resolveActorFromCauses(
+                List.of(new VarroaUserCause("alice")));
+        assertEquals("alice", actor);
+    }
+
+    @Test
+    public void varroaUserCauseWinsOverUserIdCause() {
+        // The list order must not matter: the Varroa cause carries the actor.
+        String actor = ActivityRunListener.resolveActorFromCauses(
+                List.of(new UserIdCause("anonymous"), new VarroaUserCause("alice")));
+        assertEquals("alice", actor);
+    }
+
+    @Test
     public void actorResolvedToScmForSCMTriggerCause() {
         String actor = ActivityRunListener.resolveActorFromCauses(
                 List.of(new SCMTrigger.SCMTriggerCause()));

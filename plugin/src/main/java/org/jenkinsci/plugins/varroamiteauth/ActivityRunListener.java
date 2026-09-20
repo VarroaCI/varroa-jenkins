@@ -2,13 +2,9 @@ package org.jenkinsci.plugins.varroamiteauth;
 
 import hudson.Extension;
 import hudson.model.Cause;
-import hudson.model.Cause.UpstreamCause;
-import hudson.model.Cause.UserIdCause;
 import hudson.model.Run;
 import hudson.model.TaskListener;
 import hudson.model.listeners.RunListener;
-import hudson.triggers.SCMTrigger;
-import hudson.triggers.TimerTrigger;
 
 import java.util.List;
 import java.util.logging.Level;
@@ -81,49 +77,22 @@ public class ActivityRunListener extends RunListener<Run<?, ?>> {
     }
 
     /**
-     * Resolves the actor from the build's causes per the precedence defined in
-     * the design (§3.4):
-     * <ol>
-     *   <li>First {@link UserIdCause#getUserId()}
-     *   <li>{@link SCMTrigger.SCMTriggerCause} or {@link Cause.RemoteCause} → {@code "scm"}
-     *   <li>{@link TimerTrigger.TimerTriggerCause} → {@code "timer"}
-     *   <li>{@link UpstreamCause} → {@code "upstream:<upstreamProject>"}
-     *   <li>{@code "unknown"}
-     * </ol>
+     * Resolves the actor from the build's causes. {@link
+     * VarroaUserCause#actorFromCauses} holds the precedence, and a cause list
+     * that names no actor reads as {@code "unknown"}.
      */
     static String resolveActor(Run<?, ?> run) {
         return resolveActorFromCauses(run.getCauses());
     }
 
     /**
-     * Package-private helper that resolves an actor from a list of causes.
-     * Exposed for direct testing without needing a full Run instance.
+     * Package-private wrapper around {@link VarroaUserCause#actorFromCauses},
+     * which holds the precedence. It stays package-private, and takes a cause
+     * list, so the unit tests read it without a full Run instance. A list that
+     * names no actor reads as {@code "unknown"}, this event's own last resort.
      */
     static String resolveActorFromCauses(List<Cause> causes) {
-        for (Cause cause : causes) {
-            if (cause instanceof UserIdCause) {
-                String userId = ((UserIdCause) cause).getUserId();
-                if (userId != null && !userId.isEmpty()) {
-                    return userId;
-                }
-            }
-        }
-        for (Cause cause : causes) {
-            if (cause instanceof SCMTrigger.SCMTriggerCause
-                    || cause instanceof Cause.RemoteCause) {
-                return "scm";
-            }
-        }
-        for (Cause cause : causes) {
-            if (cause instanceof TimerTrigger.TimerTriggerCause) {
-                return "timer";
-            }
-        }
-        for (Cause cause : causes) {
-            if (cause instanceof UpstreamCause) {
-                return "upstream:" + ((UpstreamCause) cause).getUpstreamProject();
-            }
-        }
-        return "unknown";
+        String actor = VarroaUserCause.actorFromCauses(causes);
+        return actor != null ? actor : "unknown";
     }
 }

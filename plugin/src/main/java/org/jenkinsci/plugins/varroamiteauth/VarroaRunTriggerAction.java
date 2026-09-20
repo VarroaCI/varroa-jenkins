@@ -2,7 +2,6 @@ package org.jenkinsci.plugins.varroamiteauth;
 
 import hudson.Extension;
 import hudson.model.Action;
-import hudson.model.Cause;
 import hudson.model.CauseAction;
 import hudson.model.Item;
 import hudson.model.Job;
@@ -89,10 +88,13 @@ public class VarroaRunTriggerAction implements RootAction {
 
     /**
      * Handles {@code POST /varroa-run/trigger}. Reads {@code runId}, {@code
-     * intentKey}, {@code jobPath}, {@code parameters}, and {@code actor}, narrows
-     * the named item to a parameterized job, builds a {@link ParametersAction} from
-     * its declared definitions, stamps a {@link VarroaIntentAction} carrying the
-     * caller's identity, and schedules through {@link ParameterizedJobMixIn}.
+     * intentKey}, {@code jobPath}, {@code parameters}, and {@code actor},
+     * normalizes the actor through {@link VarroaUserCause#normalizeActor},
+     * narrows the named item to a parameterized job, builds a {@link
+     * ParametersAction} from its declared definitions, stamps a {@link
+     * VarroaIntentAction} carrying the caller's identity, attaches a {@link
+     * VarroaUserCause} for a non-empty actor, and schedules through {@link
+     * ParameterizedJobMixIn}.
      */
     public void doTrigger(StaplerRequest2 req, StaplerResponse2 rsp) {
         try {
@@ -116,7 +118,9 @@ public class VarroaRunTriggerAction implements RootAction {
             String runId = body.optString("runId", "");
             String intentKey = body.optString("intentKey", "");
             String jobPath = body.optString("jobPath", "");
-            String actor = body.optString("actor", "");
+            // The body supplies the actor, so the route normalizes it once.
+            // The intent action and the Varroa cause then carry one value.
+            String actor = VarroaUserCause.normalizeActor(body.optString("actor", ""));
             JSONObject parameters = body.optJSONObject("parameters");
 
             // Look the item up untyped first: Jenkins.getItemByFullName(path, Job.class)
@@ -139,7 +143,10 @@ public class VarroaRunTriggerAction implements RootAction {
             actions.add(buildParametersAction(job, req, parameters, droppedParameters));
             actions.add(stampedIntentAction(runId, intentKey, actor));
             if (!actor.isEmpty()) {
-                actions.add(new CauseAction(new Cause.UserIdCause(actor)));
+                // The Varroa cause names the actor itself. A UserIdCause
+                // answers "anonymous" on a headless cell, which holds no
+                // Jenkins User record for the actor.
+                actions.add(new CauseAction(new VarroaUserCause(actor)));
             }
 
             Queue.Item item = ParameterizedJobMixIn.scheduleBuild2(job, 0, actions.toArray(new Action[0]));
@@ -227,7 +234,7 @@ public class VarroaRunTriggerAction implements RootAction {
      * identifier, intent key, and actor. The action's origin is {@code
      * VARROA_INTENT}: the claim gate reads a non-empty intent key straight
      * off the action rather than deriving one (see {@link IntentKey#derive}).
-     * The actor is the value the caller supplied, unchanged, even when empty.
+     * The actor is the normalized value the caller supplied, even when empty.
      */
     private static VarroaIntentAction stampedIntentAction(String runId, String intentKey, String actor) {
         VarroaIntentAction action = new VarroaIntentAction(runId, "", null, System.currentTimeMillis());

@@ -16,7 +16,10 @@ import static org.mockito.Mockito.when;
 import hudson.EnvVars;
 import hudson.Launcher;
 import hudson.model.AbstractBuild;
+import hudson.model.Action;
 import hudson.model.BuildListener;
+import hudson.model.Cause;
+import hudson.model.CauseAction;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
 import hudson.model.ParametersAction;
@@ -32,6 +35,7 @@ import java.io.PrintWriter;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -138,6 +142,170 @@ public class VarroaRunTriggerActionTest {
         VarroaIntentAction stamped = items[0].getAction(VarroaIntentAction.class);
         assertNotNull("queued item must carry a VarroaIntentAction", stamped);
         assertEquals("varroa-upstream/payments", stamped.getActor());
+    }
+
+    @Test
+    public void triggerSchedulesAVarroaCauseNamingTheActor() throws Exception {
+        j.jenkins.setNumExecutors(0);
+        FreeStyleProject p = j.createFreeStyleProject("trigger-cause");
+
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody("{\"runId\":\"run-cause-1\",\"intentKey\":\"manual:run-cause-1\""
+                    + ",\"jobPath\":\"" + p.getFullName() + "\",\"actor\":\"nate\"}");
+            StaplerResponse2 rsp = responseCapturing(new StringWriter());
+
+            action.doTrigger(req, rsp);
+
+            verify(rsp).setStatus(202);
+        }
+
+        Queue.Item[] items = Queue.getInstance().getItems();
+        assertEquals(1, items.length);
+        List<VarroaUserCause> causes = varroaCausesOf(items[0]);
+        assertEquals("the item carries one Varroa cause", 1, causes.size());
+        assertEquals("nate", causes.get(0).getUserId());
+        assertEquals("Started by nate through Varroa", causes.get(0).getShortDescription());
+    }
+
+    @Test
+    public void anEmptyActorAttachesNoVarroaCause() throws Exception {
+        j.jenkins.setNumExecutors(0);
+        FreeStyleProject p = j.createFreeStyleProject("trigger-no-cause");
+
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody("{\"runId\":\"run-no-cause\",\"intentKey\":\"manual:run-no-cause\""
+                    + ",\"jobPath\":\"" + p.getFullName() + "\"}");
+            StaplerResponse2 rsp = responseCapturing(new StringWriter());
+
+            action.doTrigger(req, rsp);
+
+            verify(rsp).setStatus(202);
+        }
+
+        Queue.Item[] items = Queue.getInstance().getItems();
+        assertEquals(1, items.length);
+        assertTrue("an empty actor attaches no Varroa cause", varroaCausesOf(items[0]).isEmpty());
+    }
+
+    @Test
+    public void anActorWithWhitespaceAndANewlineNormalizesToTheTrimmedName() throws Exception {
+        j.jenkins.setNumExecutors(0);
+        FreeStyleProject p = j.createFreeStyleProject("trigger-actor-trimmed");
+
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody("{\"runId\":\"run-actor-trimmed\","
+                    + "\"intentKey\":\"manual:run-actor-trimmed\""
+                    + ",\"jobPath\":\"" + p.getFullName() + "\",\"actor\":\"  alice\\n\"}");
+            StaplerResponse2 rsp = responseCapturing(new StringWriter());
+
+            action.doTrigger(req, rsp);
+
+            verify(rsp).setStatus(202);
+        }
+
+        Queue.Item[] items = Queue.getInstance().getItems();
+        assertEquals(1, items.length);
+        VarroaIntentAction stamped = items[0].getAction(VarroaIntentAction.class);
+        assertNotNull("queued item must carry a VarroaIntentAction", stamped);
+        assertEquals("alice", stamped.getActor());
+        List<VarroaUserCause> causes = varroaCausesOf(items[0]);
+        assertEquals("the item carries one Varroa cause", 1, causes.size());
+        assertEquals("alice", causes.get(0).getUserId());
+    }
+
+    @Test
+    public void anAnonymousActorAttachesNoVarroaCause() throws Exception {
+        j.jenkins.setNumExecutors(0);
+        FreeStyleProject p = j.createFreeStyleProject("trigger-anonymous");
+
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody("{\"runId\":\"run-anonymous\","
+                    + "\"intentKey\":\"manual:run-anonymous\""
+                    + ",\"jobPath\":\"" + p.getFullName() + "\",\"actor\":\"anonymous\"}");
+            StaplerResponse2 rsp = responseCapturing(new StringWriter());
+
+            action.doTrigger(req, rsp);
+
+            verify(rsp).setStatus(202);
+        }
+
+        Queue.Item[] items = Queue.getInstance().getItems();
+        assertEquals(1, items.length);
+        VarroaIntentAction stamped = items[0].getAction(VarroaIntentAction.class);
+        assertNotNull("queued item must carry a VarroaIntentAction", stamped);
+        assertEquals("", stamped.getActor());
+        assertTrue("an anonymous actor attaches no Varroa cause", varroaCausesOf(items[0]).isEmpty());
+    }
+
+    @Test
+    public void aTriggeredBuildNamesTheActorInItsCausesAndItsFirstLogLines() throws Exception {
+        j.jenkins.setNumExecutors(1);
+        FreeStyleProject p = j.createFreeStyleProject("trigger-log");
+        CountDownLatch started = new CountDownLatch(1);
+        p.getBuildersList().add(new TestBuilder() {
+            @Override
+            public boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener)
+                    throws InterruptedException {
+                started.countDown();
+                return true;
+            }
+        });
+
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody("{\"runId\":\"run-log-1\",\"intentKey\":\"manual:run-log-1\""
+                    + ",\"jobPath\":\"" + p.getFullName() + "\",\"actor\":\"nate\"}");
+            StaplerResponse2 rsp = responseCapturing(new StringWriter());
+
+            action.doTrigger(req, rsp);
+
+            verify(rsp).setStatus(202);
+            assertTrue("the triggered build must start within 10s", started.await(10, TimeUnit.SECONDS));
+        }
+
+        FreeStyleBuild build = p.getLastBuild();
+        assertNotNull("the triggered build must run", build);
+        j.assertBuildStatusSuccess(j.waitForCompletion(build));
+
+        List<Cause> causes = build.getCauses();
+        boolean namesTheActor = false;
+        for (Cause cause : causes) {
+            if (cause instanceof VarroaUserCause) {
+                namesTheActor = true;
+                assertEquals("nate", ((VarroaUserCause) cause).getUserId());
+            }
+        }
+        assertTrue("the run must carry a VarroaUserCause naming the actor", namesTheActor);
+        assertEquals("nate", VarroaUserCause.actorFromCauses(causes));
+
+        // Jenkins prints every cause's short description at the top of the log.
+        String head = String.join("\n", build.getLog(20));
+        assertTrue("the first log lines must name the actor, got: " + head,
+                head.contains("Started by nate through Varroa"));
+        assertFalse("no cause may render as anonymous, got: " + head, head.contains("anonymous"));
+    }
+
+    /**
+     * Answers the {@link VarroaUserCause} causes a queue item holds. Jenkins
+     * core may attach a cause of its own, so this reads every cause action the
+     * item carries and keeps the Varroa ones.
+     */
+    private static List<VarroaUserCause> varroaCausesOf(Queue.Item item) {
+        List<VarroaUserCause> found = new ArrayList<>();
+        for (Action action : item.getActions()) {
+            if (action instanceof CauseAction) {
+                for (Cause cause : ((CauseAction) action).getCauses()) {
+                    if (cause instanceof VarroaUserCause) {
+                        found.add((VarroaUserCause) cause);
+                    }
+                }
+            }
+        }
+        return found;
     }
 
     @Test

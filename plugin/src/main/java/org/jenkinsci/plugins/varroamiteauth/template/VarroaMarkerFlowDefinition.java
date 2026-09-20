@@ -6,7 +6,6 @@ import hudson.FilePath;
 import hudson.Functions;
 import hudson.Launcher;
 import hudson.model.Action;
-import hudson.model.Cause;
 import hudson.model.ItemGroup;
 import hudson.model.Queue;
 import hudson.model.Run;
@@ -35,6 +34,7 @@ import jenkins.scm.api.SCMSource;
 
 import org.jenkinsci.plugins.varroamiteauth.ActivityEvent;
 import org.jenkinsci.plugins.varroamiteauth.ActivitySink;
+import org.jenkinsci.plugins.varroamiteauth.VarroaUserCause;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition;
 import org.jenkinsci.plugins.workflow.flow.FlowDefinition;
@@ -448,16 +448,14 @@ public class VarroaMarkerFlowDefinition extends FlowDefinition {
         }
     }
 
+    /**
+     * Resolves the emitting run's actor. {@link
+     * VarroaUserCause#actorFromCauses} holds the precedence. A cause list that
+     * names no actor reads as {@code "unknown"}.
+     */
     private static String actorOf(Run<?, ?> run) {
-        for (Cause cause : run.getCauses()) {
-            if (cause instanceof Cause.UserIdCause) {
-                String userId = ((Cause.UserIdCause) cause).getUserId();
-                if (userId != null && !userId.isEmpty()) {
-                    return userId;
-                }
-            }
-        }
-        return "unknown";
+        String actor = VarroaUserCause.actorFromCauses(run.getCauses());
+        return actor != null ? actor : "unknown";
     }
 
     /**
