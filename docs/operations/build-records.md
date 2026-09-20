@@ -176,15 +176,17 @@ acknowledged and discarded, so a stale backlog creates no row bound for deletion
 
 ## Source fields
 
-A build reports its definition in two events.
+A build reports its definition in three events.
 
 | Event | Fields |
 |---|---|
 | The flow starts. | The script path. The shared libraries. The branch, for a multibranch child. |
-| The first node that resolves a revision. | The branch, the revision, the repository URL, the changes, and the pod templates. |
+| The first node that resolves a revision. | The branch, the revision, the repository URL, the changes, and the pod templates the run has allocated. |
+| The first allocation, when the first node that resolves a revision reported no pod template. | Every source field again, and the pod template of the allocated agent. It carries no change list. |
 
-A template-defined run reports no script path, and the pod template set ends there: a later agent
-reports no entry.
+A template-defined run reports no script path. A run that resolves a revision reports the pod
+template once it allocates its first agent. A run that resolves no revision reports none. A later
+agent reports no entry.
 
 `GET /runs/{run}` answers them in one `source` object: `definitionPath`, `libraries[]`,
 `podTemplates[]`.

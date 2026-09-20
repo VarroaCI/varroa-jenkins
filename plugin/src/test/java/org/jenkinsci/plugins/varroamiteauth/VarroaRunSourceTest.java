@@ -2,11 +2,13 @@ package org.jenkinsci.plugins.varroamiteauth;
 
 import static org.junit.Assert.*;
 
+import hudson.EnvVars;
 import hudson.model.Action;
 import hudson.model.FreeStyleProject;
 import hudson.model.InvisibleAction;
 import hudson.model.Run;
 import hudson.model.TaskListener;
+import hudson.slaves.DumbSlave;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -102,8 +104,12 @@ public class VarroaRunSourceTest {
     @Test
     public void aCheckoutRunEmitsASecondSourceEventWithTheScmFacts() throws Exception {
         createRepository();
+        // The run allocates this agent, so the second emission carries
+        // its pod template.
+        DumbSlave agent = j.createSlave("probe-agent", "probe-agent", new EnvVars());
+        j.waitOnline(agent);
         WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "checkout-run");
-        job.setDefinition(new CpsFlowDefinition("node {\n"
+        job.setDefinition(new CpsFlowDefinition("node('probe-agent') {\n"
                 + "  stage('checkout') { git url: '" + repoUrl + "', branch: 'master' }\n"
                 + "  stage('build') { echo 'built' }\n"
                 + "}", true));
@@ -115,6 +121,9 @@ public class VarroaRunSourceTest {
         assertEquals(2, sources.size());
         BuildEvent e1 = sources.get(0);
         BuildEvent e2 = sources.get(1);
+        assertFalse("the second emission carries the allocated pod template",
+                e2.getPodTemplates().isEmpty());
+        assertEquals("probe-agent", e2.getPodTemplates().get(0).getName());
         assertTrue("E1 holds the lower sequence", e1.getSeq() < e2.getSeq());
 
         assertTrue("the branch names the checked-out branch", e2.getBranch().endsWith("master"));
@@ -135,6 +144,10 @@ public class VarroaRunSourceTest {
 
         List<BuildEvent> sources = byPhase(drainEvents(), BuildEvent.PHASE_RUN_SOURCE);
         assertEquals(2, sources.size());
+        for (BuildEvent source : sources) {
+            assertTrue("no allocation, so no source event carries a pod template",
+                    source.getPodTemplates().isEmpty());
+        }
         BuildEvent e2 = sources.get(1);
         assertEquals("main", e2.getBranch());
         assertEquals("main", e2.getScmHead());
@@ -145,6 +158,37 @@ public class VarroaRunSourceTest {
                 "", sources.get(0).getScmHead());
         assertEquals("E1's branch is empty: the job is a plain pipeline, not a multibranch child",
                 "", sources.get(0).getBranch());
+    }
+
+    // --- E3: the first allocation ---
+
+    @Test
+    public void anScmDefinedRunReportsItsPodTemplateAtTheFirstAllocation() throws Exception {
+        // The agent carries a label of its own, and the script requests
+        // that label. The workspace action holds the assigned labels minus
+        // the node's own name label, so a label equal to the node name
+        // reads empty.
+        DumbSlave agent = j.createSlave("probe-agent", "probe-pool", new EnvVars());
+        j.waitOnline(agent);
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "scm-defined-run");
+        job.setDefinition(new SourceFactsFlowDefinition("node('probe-pool') { echo 'hi' }", true));
+
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
+
+        List<BuildEvent> sources = byPhase(drainEvents(), BuildEvent.PHASE_RUN_SOURCE);
+        assertEquals(3, sources.size());
+        BuildEvent e1 = sources.get(0);
+        BuildEvent e2 = sources.get(1);
+        BuildEvent e3 = sources.get(2);
+        assertTrue("E1 holds the lowest sequence", e1.getSeq() < e2.getSeq());
+        assertTrue("E2 holds the middle sequence", e2.getSeq() < e3.getSeq());
+        assertTrue("the second emission carries no pod template yet", e2.getPodTemplates().isEmpty());
+        assertEquals(1, e3.getPodTemplates().size());
+        assertEquals("probe-agent", e3.getPodTemplates().get(0).getName());
+        assertEquals("the label names the allocated node's labels", "probe-pool",
+                e3.getPodTemplates().get(0).getLabel());
+        assertEquals("the third emission carries no change list", 0, e3.getChanges().size());
+        assertEquals("E3 re-reads the revision", e2.getScmRevision(), e3.getScmRevision());
     }
 
     // --- A run that answers no revision at all ---

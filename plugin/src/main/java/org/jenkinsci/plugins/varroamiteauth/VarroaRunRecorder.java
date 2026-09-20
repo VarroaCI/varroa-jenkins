@@ -144,6 +144,10 @@ public final class VarroaRunRecorder {
         private final AtomicLong seq = new AtomicLong();
         /** Set once the first source probe answered a revision. */
         final AtomicBoolean sourceResolved = new AtomicBoolean();
+        /** Set once the allocation emission fired, or was refused for this run. */
+        final AtomicBoolean allocationResolved = new AtomicBoolean();
+        /** Set when the second emission carried a pod template. */
+        final AtomicBoolean sourceHadPodTemplate = new AtomicBoolean();
         /**
          * Set while a {@code STARTED} event is held for this run (D8a), so
          * a {@link VarroaTemplateValuesAction} attachment or a terminal
@@ -1189,7 +1193,8 @@ public final class VarroaRunRecorder {
      * revision, the URL, the pod templates, and the changeset. The
      * builder writes a resolved value only when it is not empty.
      */
-    private static void emitRunSource(Run<?, ?> run, RunState state, SourceFacts source, boolean withScm) {
+    private static void emitRunSource(Run<?, ?> run, RunState state, SourceFacts source,
+            boolean withScm, boolean withChanges) {
         BuildEvent.Builder b = BuildEvent.builder()
                 .phase(BuildEvent.PHASE_RUN_SOURCE)
                 .seq(state.nextSeq())
@@ -1222,9 +1227,11 @@ public final class VarroaRunRecorder {
             if (!source.podTemplates.isEmpty()) {
                 b.podTemplates(source.podTemplates);
             }
-            List<BuildChange> changes = extractChanges(run);
-            b.changes(changes);
-            b.changeCount(changes.size());
+            if (withChanges) {
+                List<BuildChange> changes = extractChanges(run);
+                b.changes(changes);
+                b.changeCount(changes.size());
+            }
         } else {
             // The frozen table for E1 leaves the SCM facts empty. The
             // branch carries the multibranch name alone.
@@ -1289,7 +1296,7 @@ public final class VarroaRunRecorder {
                     // process that loaded the flow.
                     RunState state = stateFor(safeJobPath(run), run.getNumber());
                     if (state != null) {
-                        emitRunSource(run, state, resolveDefinitionFacts(run), false);
+                        emitRunSource(run, state, resolveDefinitionFacts(run), false, false);
                     }
                 }
             } catch (Exception e) {
@@ -1376,12 +1383,35 @@ public final class VarroaRunRecorder {
                     try {
                         SourceFacts source = resolveSourceFacts(run);
                         if (!source.scmRevision.isEmpty()) {
-                            emitRunSource(run, state, source, true);
+                            emitRunSource(run, state, source, true, true);
                             state.sourceResolved.set(true);
+                            if (!source.podTemplates.isEmpty()) {
+                                state.sourceHadPodTemplate.set(true);
+                            }
                         }
                     } catch (Exception e) {
                         LOGGER.log(Level.WARNING,
                                 "VarroaRunRecorder.Graph: failed to probe the run's source", e);
+                    }
+                }
+                // E3: the first allocation, when the second emission carried no pod
+                // template. The workspace action sits on the node step's start node,
+                // so the gate reads the arriving node and the blocks that enclose it.
+                // The body's first node is the first node whose enclosing block holds
+                // that action. The flags come first, so a node after the emission, or a
+                // run whose second emission carried a pod template, reads no enclosing
+                // block. The gate walks no graph, it returns early from nothing, and it
+                // stops neither the stage events nor the run-state push below.
+                if (state.sourceResolved.get()
+                        && !state.allocationResolved.get()
+                        && !state.sourceHadPodTemplate.get()
+                        && carriesWorkspace(node)
+                        && state.allocationResolved.compareAndSet(false, true)) {
+                    try {
+                        emitRunSource(run, state, resolveSourceFacts(run), true, false);
+                    } catch (Exception e) {
+                        LOGGER.log(Level.WARNING,
+                                "VarroaRunRecorder.Graph: failed to emit the allocation source event", e);
                     }
                 }
                 // The push is scheduled, never performed, on this call:
@@ -1401,6 +1431,28 @@ public final class VarroaRunRecorder {
 
     static boolean isParallel(FlowNode node) {
         return node.getAction(ThreadNameAction.class) != null;
+    }
+
+    /**
+     * Answers true when {@code node} carries the workspace action, or when
+     * a block that encloses {@code node} does. The node step's start node
+     * holds that action, and the body's first node is the first node whose
+     * enclosing block holds it. The read covers one node plus its nesting
+     * chain, and it walks no graph.
+     */
+    private static boolean carriesWorkspace(FlowNode node) {
+        if (node == null) {
+            return false;
+        }
+        if (node.getAction(WorkspaceAction.class) != null) {
+            return true;
+        }
+        for (BlockStartNode enclosing : node.getEnclosingBlocks()) {
+            if (enclosing.getAction(WorkspaceAction.class) != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void emitStageStarted(Run<?, ?> run, RunState state, BlockStartNode start) {

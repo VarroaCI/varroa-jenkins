@@ -96,6 +96,90 @@ func TestApplyRunSourceSecondEventKeepsDefinitionPath(t *testing.T) {
 	}
 }
 
+// TestApplyRunSourceAllocationEventAddsPodTemplates asserts the allocation
+// event adds its pod templates and keeps the keys the second event wrote.
+func TestApplyRunSourceAllocationEventAddsPodTemplates(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:source-allocation")
+	g := NewIngester(pool, nil, nil)
+
+	// The second emission: no pod template yet.
+	first := newTestEnvelope(t, runID, "manual:source-allocation", KindRunSource, RunSourcePayload{
+		Seq:            2,
+		Branch:         strPtr("main"),
+		DefinitionPath: "Jenkinsfile",
+		Libraries:      []SourceLibrary{{Name: "shared-lib", Version: "1.2.0"}},
+	})
+	if _, err := g.Apply(context.Background(), first); err != nil {
+		t.Fatalf("apply the second emission: %v", err)
+	}
+
+	// The allocation emission: one pod template, and no definition path or libraries.
+	second := newTestEnvelope(t, runID, "manual:source-allocation", KindRunSource, RunSourcePayload{
+		Seq:          3,
+		PodTemplates: []SourcePodTemplate{{Name: "probe-agent", Label: "probe-agent", Image: "agent:1"}},
+	})
+	res, err := g.Apply(context.Background(), second)
+	if err != nil {
+		t.Fatalf("apply the allocation emission: %v", err)
+	}
+	if res.RefusedSource {
+		t.Fatal("the allocation emission was refused, want applied")
+	}
+
+	// The row keeps the earlier keys and gains the pod template.
+	source, sourceSeq := readRunSourceRow(t, db, runID)
+	var definitionPath string
+	storedSourceField(t, source, "definition_path", &definitionPath)
+	if definitionPath != "Jenkinsfile" {
+		t.Fatalf("definition_path = %q, want Jenkinsfile", definitionPath)
+	}
+	var libraries []SourceLibrary
+	storedSourceField(t, source, "libraries", &libraries)
+	if len(libraries) != 1 || libraries[0].Name != "shared-lib" {
+		t.Fatalf("libraries = %+v, want one shared-lib entry", libraries)
+	}
+	var pods []SourcePodTemplate
+	storedSourceField(t, source, "pod_templates", &pods)
+	if len(pods) != 1 || pods[0].Name != "probe-agent" || pods[0].Label != "probe-agent" {
+		t.Fatalf("pod_templates = %+v, want one probe-agent entry", pods)
+	}
+	if sourceSeq != "3" {
+		t.Fatalf("source_seq = %q, want 3", sourceSeq)
+	}
+	if branch, _ := readRunColumns(t, db, runID); branch != "main" {
+		t.Fatalf("branch = %q, want main", branch)
+	}
+
+	// A late second emission changes nothing.
+	late := newTestEnvelope(t, runID, "manual:source-allocation", KindRunSource, RunSourcePayload{
+		Seq:            2,
+		DefinitionPath: "Jenkinsfile",
+		Libraries:      []SourceLibrary{{Name: "other-lib", Version: "9.9.9"}},
+	})
+	lateRes, err := g.Apply(context.Background(), late)
+	if err != nil {
+		t.Fatalf("apply the late second emission: %v", err)
+	}
+	if !lateRes.RefusedSource {
+		t.Fatal("the late second emission applied, want refused")
+	}
+	lateSource, lateSeq := readRunSourceRow(t, db, runID)
+	var lateLibraries []SourceLibrary
+	storedSourceField(t, lateSource, "libraries", &lateLibraries)
+	if len(lateLibraries) != 1 || lateLibraries[0].Name != "shared-lib" {
+		t.Fatalf("libraries after the late write = %+v, want one shared-lib entry", lateLibraries)
+	}
+	var latePods []SourcePodTemplate
+	storedSourceField(t, lateSource, "pod_templates", &latePods)
+	if len(latePods) != 1 || latePods[0].Name != "probe-agent" {
+		t.Fatalf("pod_templates after the late write = %+v, want one probe-agent entry", latePods)
+	}
+	if lateSeq != "3" {
+		t.Fatalf("source_seq after the late write = %q, want 3", lateSeq)
+	}
+}
+
 // TestApplyRunSourceLowerSeqChangesNothing asserts a lower seq applies
 // the accepted-key strip alone, and the stored values stay.
 func TestApplyRunSourceLowerSeqChangesNothing(t *testing.T) {
