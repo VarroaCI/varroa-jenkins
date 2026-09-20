@@ -10,7 +10,7 @@ export interface SSEEvent<T> {
  * Options for useEventStream beyond the positional baseUrl/scope/eventNames
  * arguments.
  */
-export interface UseEventStreamOptions {
+export interface UseEventStreamOptions<T = unknown> {
   /**
    * Called on every reconnect attempt (after an error or a closed
    * connection), never on the first connect. A returned URL replaces
@@ -20,6 +20,16 @@ export interface UseEventStreamOptions {
    * omitting the option keeps reconnecting to baseUrl.
    */
   resumeUrl?: () => string | null;
+
+  /**
+   * Called for every parsed frame, named or unnamed, after the hook sets
+   * lastEvent. A burst of frames arrives between two renders, and React
+   * renders once for the whole burst, so lastEvent keeps only the last frame
+   * of that burst. A caller that must keep every frame collects them here.
+   * The hook calls this option synchronously, so a caller can keep the
+   * frames in a ref and count them.
+   */
+  onEvent?: (ev: SSEEvent<T>) => void;
 }
 
 interface StreamTicket {
@@ -53,12 +63,18 @@ interface StreamTicket {
  *
  * `options.resumeUrl` is optional and defaults to no resume: every existing
  * call site keeps reconnecting to baseUrl unchanged.
+ *
+ * `options.onEvent` is optional and defaults to nothing. A caller that must
+ * keep every frame of a burst passes it, because lastEvent drops all but the
+ * last frame of that burst. The hook sets lastEvent first, then calls onEvent.
+ * Both options are read through a ref, so a caller can pass a fresh closure on
+ * every render without restarting the stream.
  */
 export function useEventStream<T>(
   baseUrl: string | null,
   scope: string | null,
   eventNames: string[] = [],
-  options: UseEventStreamOptions = {},
+  options: UseEventStreamOptions<T> = {},
 ): { lastEvent: SSEEvent<T> | null; readyState: string; error: Error | null } {
   const [lastEvent, setLastEvent] = useState<SSEEvent<T> | null>(null);
   const [readyState, setReadyState] = useState<string>("closed");
@@ -78,6 +94,12 @@ export function useEventStream<T>(
   const resumeUrlRef = useRef(options.resumeUrl);
   resumeUrlRef.current = options.resumeUrl;
 
+  // onEvent gets the same treatment: the frame handlers run outside the
+  // render, so they must read the latest closure without the effect below
+  // depending on it.
+  const onEventRef = useRef(options.onEvent);
+  onEventRef.current = options.onEvent;
+
   useEffect(() => {
     if (!baseUrl || !scope) {
       setReadyState("closed");
@@ -88,6 +110,24 @@ export function useEventStream<T>(
     let cancelled = false;
     let backoff = 1000;
     let timer: ReturnType<typeof setTimeout> | null = null;
+
+    // Every parsed frame reaches lastEvent first, and the caller's onEvent
+    // second. A throw from onEvent therefore cannot drop the frame from
+    // lastEvent.
+    const deliver = (ev: SSEEvent<T>) => {
+      setLastEvent(ev);
+      onEventRef.current?.(ev);
+    };
+
+    // A malformed frame carries no event, so it reports null and the caller
+    // drops it.
+    const parseFrame = (raw: string): T | null => {
+      try {
+        return JSON.parse(raw) as T;
+      } catch {
+        return null;
+      }
+    };
 
     const scheduleReconnect = () => {
       if (cancelled) return;
@@ -117,11 +157,9 @@ export function useEventStream<T>(
         const namedEvents = eventNamesKey ? eventNamesKey.split(",") : [];
         for (const name of namedEvents) {
           es.addEventListener(name, (e: MessageEvent) => {
-            try {
-              setLastEvent({ type: name, data: JSON.parse(e.data) as T });
-            } catch {
-              /* ignore malformed frame */
-            }
+            const data = parseFrame(e.data);
+            if (data === null) return;
+            deliver({ type: name, data });
           });
         }
 
@@ -131,11 +169,9 @@ export function useEventStream<T>(
           backoff = 1000;
         };
         es.onmessage = (e: MessageEvent) => {
-          try {
-            setLastEvent(JSON.parse(e.data) as SSEEvent<T>);
-          } catch {
-            /* ignore malformed frame */
-          }
+          const ev = parseFrame(e.data) as SSEEvent<T> | null;
+          if (ev === null) return;
+          deliver(ev);
         };
         es.onerror = () => {
           setReadyState("closed");

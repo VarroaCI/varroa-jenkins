@@ -29,8 +29,18 @@ export interface RunLogViewerEvent {
 
 export interface RunLogViewerProps {
   runId: string;
-  /** The build page's shared log-stream frame. */
-  lastEvent?: RunLogViewerEvent | null;
+  /**
+   * Every log frame the page has received, oldest first. The viewer reads the
+   * frames the page hands it, so a frame survives a switch to another tab and
+   * back.
+   */
+  frames: readonly RunLogViewerEvent[];
+  /**
+   * Counts the frames the page has appended. The viewer applies the frames it
+   * has not applied yet when this value changes, so no frame of a burst is
+   * lost.
+   */
+  version: number;
   /** True once the run has stopped, whether or not the log has finalized. */
   runTerminal: boolean;
 }
@@ -73,7 +83,7 @@ function permalinkLine(): number | null {
 }
 
 export const RunLogViewer = forwardRef<RunLogViewerHandle, RunLogViewerProps>(
-  function RunLogViewer({ runId, lastEvent, runTerminal }, ref) {
+  function RunLogViewer({ runId, frames, version, runTerminal }, ref) {
     const [rows, setRows] = useState<LogRow[]>([]);
     const [meta, setMeta] = useState<RunLogMetaEvent | null>(null);
     const [live, setLive] = useState(false);
@@ -88,6 +98,10 @@ export const RunLogViewer = forwardRef<RunLogViewerHandle, RunLogViewerProps>(
     const searchRef = useRef<HTMLInputElement>(null);
     const lastScrollTopRef = useRef(0);
 
+    // The count of frames this viewer has applied. The count starts at zero,
+    // so a remount replays every frame the page holds.
+    const appliedRef = useRef(0);
+
     const virtualizer = useVirtualizer({
       count: rows.length,
       getScrollElement: () => scrollRef.current,
@@ -95,24 +109,54 @@ export const RunLogViewer = forwardRef<RunLogViewerHandle, RunLogViewerProps>(
       overscan: 20,
     });
 
-    useEffect(() => {
-      if (!lastEvent) return;
-      if (lastEvent.type === "meta") {
-        setMeta(lastEvent.data as RunLogMetaEvent);
-      } else if (lastEvent.type === "line") {
-        const ev = lastEvent.data as RunLogLineEvent;
-        setRows((prev) => [...prev, { kind: "line", ...ev }]);
-      } else if (lastEvent.type === "stage") {
-        setRows((prev) => applyStageEvent(prev, lastEvent.data as RunLogStageEvent));
-      } else if (lastEvent.type === "gap") {
-        const ev = lastEvent.data as RunLogGapEvent;
-        setRows((prev) => [...prev, { kind: "gap", seq: ev.seq, off: ev.off }]);
-      } else if (lastEvent.type === "live") {
-        setLive((lastEvent.data as RunLogLiveEvent).active);
-      } else if (lastEvent.type === "end") {
-        setEnded(lastEvent.data as RunLogEndEvent);
+    // The frames that carry no log row: the manifest, a stage boundary, the
+    // live flag, and the closing frame.
+    const applyFrame = useCallback((frame: RunLogViewerEvent) => {
+      if (frame.type === "meta") {
+        setMeta(frame.data as RunLogMetaEvent);
+      } else if (frame.type === "stage") {
+        setRows((prev) => applyStageEvent(prev, frame.data as RunLogStageEvent));
+      } else if (frame.type === "live") {
+        setLive((frame.data as RunLogLiveEvent).active);
+      } else if (frame.type === "end") {
+        setEnded(frame.data as RunLogEndEvent);
       }
-    }, [lastEvent]);
+    }, []);
+
+    // One render carries a whole burst of frames, so the viewer applies every
+    // frame it has not applied yet, in order, when the version changes. The
+    // count moves to the end of the list, so the next run applies only the
+    // frames after it, and a shorter list leaves no stale count behind.
+    useEffect(() => {
+      const pending = frames.slice(appliedRef.current);
+      appliedRef.current = frames.length;
+
+      // A run of line and gap frames becomes one rows commit. A remount
+      // replays a whole log in one render, and one commit per frame would copy
+      // the row list once per frame. A stage frame commits the frames already
+      // collected before it, so its header lands after their rows.
+      let appended: LogRow[] = [];
+      const flush = () => {
+        if (appended.length === 0) return;
+        const batch = appended;
+        appended = [];
+        setRows((prev) => [...prev, ...batch]);
+      };
+
+      for (const frame of pending) {
+        if (frame.type === "line") {
+          const ev = frame.data as RunLogLineEvent;
+          appended.push({ kind: "line", ...ev });
+        } else if (frame.type === "gap") {
+          const ev = frame.data as RunLogGapEvent;
+          appended.push({ kind: "gap", seq: ev.seq, off: ev.off });
+        } else {
+          flush();
+          applyFrame(frame);
+        }
+      }
+      flush();
+    }, [version, frames, applyFrame]);
 
     // Follow keeps the viewport at the newest line as rows arrive.
     useEffect(() => {

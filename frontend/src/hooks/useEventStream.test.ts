@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
-import { useEventStream } from "./useEventStream";
+import { useEventStream, type SSEEvent } from "./useEventStream";
 import { bffFetch } from "./useApi";
 
 vi.mock("./useApi", () => ({ bffFetch: vi.fn() }));
@@ -219,5 +219,108 @@ describe("useEventStream", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("passes every frame of one burst to onEvent, in order, and keeps the last one as lastEvent", async () => {
+    const onEvent = vi.fn();
+    const { result } = renderHook(() =>
+      useEventStream<{ x: number }>("/u", "activity", ["activity"], { onEvent }),
+    );
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    const es = MockEventSource.instances[0];
+
+    act(() => {
+      es.emitOpen();
+      es.emitNamedEvent("activity", JSON.stringify({ x: 1 }));
+      es.emitNamedEvent("activity", JSON.stringify({ x: 2 }));
+      es.emitNamedEvent("activity", JSON.stringify({ x: 3 }));
+    });
+
+    // One render covers the whole burst, so lastEvent keeps only the last
+    // frame of it. onEvent is the only path that sees all three.
+    expect(onEvent).toHaveBeenCalledTimes(3);
+    const seen = (onEvent.mock.calls as [SSEEvent<{ x: number }>][]).map(([ev]) => ev.data.x);
+    expect(seen).toEqual([1, 2, 3]);
+    expect(result.current.lastEvent?.data).toEqual({ x: 3 });
+  });
+
+  it("keeps the frame in lastEvent when onEvent throws", async () => {
+    const onEvent = vi.fn(() => {
+      throw new Error("subscriber failed");
+    });
+    const { result } = renderHook(() =>
+      useEventStream<{ x: number }>("/u", "activity", ["activity"], { onEvent }),
+    );
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    const es = MockEventSource.instances[0];
+
+    // The hook sets lastEvent before it calls onEvent, so a throw from a
+    // caller cannot drop the frame from lastEvent.
+    let thrown: unknown = null;
+    act(() => {
+      try {
+        es.emitNamedEvent("activity", JSON.stringify({ x: 7 }));
+      } catch (err) {
+        thrown = err;
+      }
+    });
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(result.current.lastEvent?.data).toEqual({ x: 7 }));
+  });
+
+  it("passes an unnamed onmessage frame to onEvent too", async () => {
+    const onEvent = vi.fn();
+    const { result } = renderHook(() =>
+      useEventStream<{ line: string }>("/u", "logs", ["status"], { onEvent }),
+    );
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    const es = MockEventSource.instances[0];
+
+    act(() => {
+      es.emitMessage(JSON.stringify({ type: "log", data: { line: "b" } }));
+    });
+
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect((onEvent.mock.calls[0][0] as SSEEvent<{ line: string }>).type).toBe("log");
+    await waitFor(() => expect(result.current.lastEvent?.data).toEqual({ line: "b" }));
+  });
+
+  it("drops a malformed frame without calling onEvent", async () => {
+    const onEvent = vi.fn();
+    renderHook(() => useEventStream<{ x: number }>("/u", "activity", ["activity"], { onEvent }));
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    const es = MockEventSource.instances[0];
+
+    act(() => {
+      es.emitNamedEvent("activity", "{not json");
+      es.emitMessage("{not json");
+    });
+
+    expect(onEvent).not.toHaveBeenCalled();
+  });
+
+  it("reads the latest onEvent closure without restarting the stream", async () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const { rerender } = renderHook(
+      ({ onEvent }: { onEvent: (ev: SSEEvent<{ x: number }>) => void }) =>
+        useEventStream<{ x: number }>("/u", "activity", ["activity"], { onEvent }),
+      { initialProps: { onEvent: first } },
+    );
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+
+    // Call sites pass a fresh closure on every render, so the hook reads the
+    // frame through a ref instead of restarting the stream.
+    rerender({ onEvent: second });
+    const es = MockEventSource.instances[0];
+    act(() => {
+      es.emitNamedEvent("activity", JSON.stringify({ x: 5 }));
+    });
+
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(MockEventSource.instances).toHaveLength(1);
   });
 });

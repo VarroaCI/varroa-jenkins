@@ -182,16 +182,23 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   team), `TeamHome.tsx` (`/pipelines/:team`, the jobs folder tree plus a
   Running now strip), `PipelinePage.tsx` (`/pipelines/:team/:job`, one job's
   health, definition, and run list, and hosts `RunDrawer.tsx`'s parameter form),
-  `BuildPage.tsx` (`/pipelines/:team/:job/:run`, one run's detail; owns the
-  single `useEventStream` call for the run and passes `lastEvent` down to
-  `StageGraph.tsx` and `RunLogViewer.tsx` as a prop). `StageGraph.tsx` renders
+  `BuildPage.tsx` (`/pipelines/:team/:job/:run`, one run's detail; owns both
+  `useEventStream` calls, the team run stream and the run log stream). It keeps
+  every log frame in a ref, hands `RunLogViewer.tsx` the frames plus a version
+  counter, and passes the log stream's `lastEvent` down to `StageGraph.tsx` as
+  a prop. The version counter changes on every frame, because one render can
+  cover a whole burst of frames and `lastEvent` keeps only the last frame of
+  that burst. A log frame arrives at the page through `options.onEvent`, not
+  through `lastEvent`, so no frame of a burst is lost. `StageGraph.tsx` renders
   a run's stages from `GetRun`'s stage list plus live `stage` frames.
   `BuildPage.tsx` also renders one terminal card, in its own early return
   after the `!run` guard, for a run whose `result` is `TRIGGER_FAILED`: the
   record exists, so the `requested` and `notStarted` blocks never run for it.
   `RunLogViewer.tsx` renders the log stream: search, virtualized scroll, and
-  ANSI colour via `ansi.ts`'s `parseAnsiLine`. `RunLogViewer` is a pure
-  renderer of the `lastEvent` prop; it never calls `useEventStream` itself.
+  ANSI colour via `ansi.ts`'s `parseAnsiLine`. `RunLogViewer` applies the
+  frames the page hands it, in order, and it never calls `useEventStream`
+  itself. It unmounts while another tab is active, so the page holds the
+  frames, not the viewer.
   `src/components/Console.tsx` is a different, generic log-line component and
   is not the log viewer for this page — do not route pipeline log rendering
   through it. `TeamCellCard.tsx` heads `TeamHome.tsx` with the team's own cell.
@@ -250,7 +257,13 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   byte offset, a cursor) reconnects past what it already read instead of
   replaying the stream from the start. `BuildPage.tsx` is the one caller
   that passes it, to resume the run log stream past its last-read byte
-  offset. `useControllers.ts` carries
+  offset. `useEventStream`'s optional `options.onEvent` callback runs for
+  every parsed frame, named or unnamed, after the hook sets `lastEvent`. One
+  render can cover a whole burst of frames, so `lastEvent` keeps only the last
+  frame of that burst; a caller that must keep every frame reads them here.
+  The hook reads both options through a ref, so a caller can pass a fresh
+  closure on every render without restarting the stream.
+  `useControllers.ts` carries
   the hand-maintained `ControllerDetail` TypeScript interface (not generated)
   — new backend fields such as `pluginInventory`, `PluginInventorySummary`,
   and `PluginInventoryDriftEntry` must be added here in the same change or

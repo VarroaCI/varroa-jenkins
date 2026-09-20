@@ -20,7 +20,10 @@ const mockUseEventStream = vi.fn(
     _baseUrl?: string | null,
     _scope?: string | null,
     _eventNames?: string[],
-    _options?: { resumeUrl?: () => string | null },
+    _options?: {
+      resumeUrl?: () => string | null;
+      onEvent?: (ev: { type: string; data: unknown }) => void;
+    },
   ): { lastEvent: unknown; readyState: string; error: Error | null } => ({
     lastEvent: null,
     readyState: "closed",
@@ -268,11 +271,26 @@ describe("BuildPage — pending and not-found states", () => {
 });
 
 describe("BuildPage — log stream resume", () => {
+  /** logStreamCall returns the arguments of the last useEventStream call for
+   * the run log stream, which the team run stream does not share. */
+  function logStreamCall(): Parameters<typeof mockUseEventStream> {
+    const calls = mockUseEventStream.mock.calls.filter((args) => args[1] === "run:run-1");
+    const args = calls[calls.length - 1];
+    if (!args) throw new Error("useEventStream was not called for the run log stream");
+    return args;
+  }
+
   function latestResumeUrl(): () => string | null {
-    const calls = mockUseEventStream.mock.calls;
-    const options = calls[calls.length - 1]?.[3];
+    const options = logStreamCall()[3];
     if (!options?.resumeUrl) throw new Error("useEventStream was not called with a resumeUrl option");
     return options.resumeUrl;
+  }
+
+  /** logFrame hands the page one log frame the way the hook's onEvent does. */
+  function logFrame(frame: { type: string; data: unknown }) {
+    const options = logStreamCall()[3];
+    if (!options?.onEvent) throw new Error("useEventStream was not called with an onEvent option");
+    options.onEvent(frame);
   }
 
   it("passes useEventStream a resumeUrl with no offset before any log frame arrives", async () => {
@@ -285,19 +303,14 @@ describe("BuildPage — log stream resume", () => {
 
   it("carries one byte past the last line frame from the last line frame on reconnect", async () => {
     mockGetRun.mockResolvedValue(baseRun());
-    renderPage();
+    const { repaint } = renderPage();
     await screen.findByText(/Build #42/);
 
-    mockUseEventStream.mockReturnValue({
-      lastEvent: { type: "line", data: { n: 7, off: 512, ts: 1700000000000, text: "building" } },
-      readyState: "open",
-      error: null,
-    });
-    // Any state change re-renders BuildPage, which calls useEventStream again
-    // (picking up the new mocked lastEvent) and flushes the effect that
-    // tracks the watermark from it.
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /^Artifacts/ }));
+      logFrame({ type: "line", data: { n: 7, off: 512, ts: 1700000000000, text: "building" } });
+    });
+    await act(async () => {
+      repaint();
     });
 
     expect(latestResumeUrl()()).toBe("/api/v1/runs/run-1/log?from=513&fromLine=8");
@@ -305,19 +318,35 @@ describe("BuildPage — log stream resume", () => {
 
   it("carries from=<offset> with no fromLine from the last gap frame on reconnect", async () => {
     mockGetRun.mockResolvedValue(baseRun());
-    renderPage();
+    const { repaint } = renderPage();
     await screen.findByText(/Build #42/);
 
-    mockUseEventStream.mockReturnValue({
-      lastEvent: { type: "gap", data: { seq: 4, off: 900 } },
-      readyState: "open",
-      error: null,
+    await act(async () => {
+      logFrame({ type: "gap", data: { seq: 4, off: 900 } });
     });
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /^Artifacts/ }));
+      repaint();
     });
 
     expect(latestResumeUrl()()).toBe("/api/v1/runs/run-1/log?from=900");
+  });
+
+  it("closes the run log stream on the end frame, so the page stops reconnecting", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ status: "RUNNING", result: undefined }));
+    const { repaint } = renderPage();
+    await screen.findByText(/Build #42/);
+    expect(logStreamCall()[0]).toBe("/api/v1/runs/run-1/log");
+
+    await act(async () => {
+      logFrame({ type: "end", data: { result: "SUCCESS", logComplete: true } });
+    });
+    await act(async () => {
+      repaint();
+    });
+
+    // A null base URL keeps the hook closed, so it mints no further ticket and
+    // the page never resumes a log that already ended.
+    expect(logStreamCall()[0]).toBeNull();
   });
 });
 

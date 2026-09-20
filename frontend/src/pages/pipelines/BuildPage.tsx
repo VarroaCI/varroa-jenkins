@@ -15,7 +15,7 @@ import {
   downloadRunArtifact,
 } from "../../api/client";
 import { ApiError } from "../../hooks/useApi";
-import { useEventStream } from "../../hooks/useEventStream";
+import { useEventStream, type SSEEvent } from "../../hooks/useEventStream";
 import { canAccessTenantPipeline, usePermissions } from "../../hooks/usePermissions";
 import { useToast } from "../../components/Toast";
 import { Button } from "../../components/Button";
@@ -37,6 +37,15 @@ import { stripTenantFolder } from "./jobPath";
 import { StageGraph } from "./StageGraph";
 import { RunLogViewer, type RunLogViewerHandle } from "./RunLogViewer";
 import styles from "./BuildPage.module.css";
+
+/** The frames the run log stream carries. */
+type RunLogFrame =
+  | RunLogMetaEvent
+  | RunLogStageEvent
+  | RunLogLineEvent
+  | RunLogGapEvent
+  | RunLogLiveEvent
+  | RunLogEndEvent;
 
 type RunPageStatus =
   | "loading"
@@ -214,7 +223,19 @@ export default function BuildPage() {
   const folderRelativeJobPath = run ? stripTenantFolder(run.tenantFolder, run.jobPath) : undefined;
   const canWrite = run ? canAccessTenantPipeline(permissions, run.tenant, "write", folderRelativeJobPath) : false;
 
-  const logStreamUrl = run ? runLogUrl(run.runId) : null;
+  // The log tab keeps every log frame, because the viewer unmounts while
+  // another tab is active and one render can cover a whole burst of frames.
+  // A ref holds the frames, and a counter tells the viewer how many of them
+  // are new.
+  const logFramesRef = useRef<SSEEvent<RunLogFrame>[]>([]);
+  const [logVersion, setLogVersion] = useState(0);
+  const [logEnded, setLogEnded] = useState(false);
+  const logRunId = run?.runId;
+
+  // The `end` frame is the log's last frame, so the page closes the stream on
+  // it. A null URL keeps the stream closed, and the hook mints no further
+  // ticket, so a finished log never reconnects.
+  const logStreamUrl = logRunId && !logEnded ? runLogUrl(logRunId) : null;
 
   // The byte offset (and line number) of the last log-stream event this
   // browser read. A ref, not state: it must survive a reconnect without
@@ -222,34 +243,46 @@ export default function BuildPage() {
   // resumeLogUrl only when a reconnect happens.
   const logWatermarkRef = useRef<{ from: number; fromLine?: number } | null>(null);
   const resumeLogUrl = useCallback((): string | null => {
-    if (!run) return null;
+    if (!logRunId) return null;
     const watermark = logWatermarkRef.current;
-    return runLogUrl(run.runId, watermark ? { from: watermark.from, fromLine: watermark.fromLine } : undefined);
-  }, [run]);
+    return runLogUrl(logRunId, watermark ? { from: watermark.from, fromLine: watermark.fromLine } : undefined);
+  }, [logRunId]);
 
-  const { lastEvent } = useEventStream<
-    RunLogMetaEvent | RunLogStageEvent | RunLogLineEvent | RunLogGapEvent | RunLogLiveEvent | RunLogEndEvent
-  >(logStreamUrl, run ? `run:${run.runId}` : null, ["meta", "stage", "line", "gap", "live", "end"], {
-    resumeUrl: resumeLogUrl,
-  });
-
-  // Track the watermark from the stream itself so a reconnect resumes past
-  // what was already read instead of replaying the log from byte zero. A
-  // `gap` event still names an offset the client has effectively consumed
-  // (the bytes are unrecoverable), so it advances the watermark too.
-  useEffect(() => {
-    if (!lastEvent) return;
-    if (lastEvent.type === "line") {
-      const ev = lastEvent.data as RunLogLineEvent;
+  // The hook calls onEvent for every frame, including each frame of a burst
+  // that reaches React as one render. The handler keeps the frame, advances
+  // the watermark, and closes the stream on the closing frame.
+  const onLogFrame = useCallback((frame: SSEEvent<RunLogFrame>) => {
+    if (frame.type === "line") {
+      const ev = frame.data as RunLogLineEvent;
       // The server resumes at the first line whose start offset is at or
       // after `from`. One byte past this line's start selects the next
       // line, so a reconnect never replays the line already rendered.
       logWatermarkRef.current = { from: ev.off + 1, fromLine: ev.n + 1 };
-    } else if (lastEvent.type === "gap") {
-      const ev = lastEvent.data as RunLogGapEvent;
-      logWatermarkRef.current = { from: ev.off };
+    } else if (frame.type === "gap") {
+      // A gap event names an offset the client has consumed, because the
+      // bytes it reports are unrecoverable. It advances the watermark too.
+      logWatermarkRef.current = { from: (frame.data as RunLogGapEvent).off };
     }
-  }, [lastEvent]);
+    logFramesRef.current.push(frame);
+    setLogVersion((v) => v + 1);
+    if (frame.type === "end") setLogEnded(true);
+  }, []);
+
+  const { lastEvent } = useEventStream<RunLogFrame>(
+    logStreamUrl,
+    logRunId ? `run:${logRunId}` : null,
+    ["meta", "stage", "line", "gap", "live", "end"],
+    { resumeUrl: resumeLogUrl, onEvent: onLogFrame },
+  );
+
+  // A new run starts a new log, so the frames, the version, the end flag, and
+  // the watermark of the run before it go.
+  useEffect(() => {
+    logFramesRef.current = [];
+    logWatermarkRef.current = null;
+    setLogVersion(0);
+    setLogEnded(false);
+  }, [logRunId]);
 
   // A stage frame and a run frame both change the record, so the page
   // refetches the record for either one. The page renders the record, never
@@ -570,7 +603,14 @@ export default function BuildPage() {
       <Tabs tabs={tabs} activeTab={activeTab} onSelect={(id) => setActiveTab(id as TabId)} />
 
       {activeTab === "log" && (
-        <RunLogViewer ref={logViewerRef} runId={run.runId} lastEvent={lastEvent} runTerminal={isTerminal(run)} />
+        <RunLogViewer
+          key={run.runId}
+          ref={logViewerRef}
+          runId={run.runId}
+          frames={logFramesRef.current}
+          version={logVersion}
+          runTerminal={isTerminal(run)}
+        />
       )}
 
       {activeTab === "artifacts" && (
