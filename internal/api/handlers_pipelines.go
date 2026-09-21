@@ -1322,7 +1322,8 @@ func (s *Server) listTeamFleetLocks(ctx context.Context, claims *auth.Claims, re
 }
 
 // fleetLockRows maps the record store's rows onto the response shape and
-// decides each row's own run link.
+// decides each row's own run link. A row whose job path is empty carries
+// no run link, because a run page path needs a job path.
 func (s *Server) fleetLockRows(claims *auth.Claims, refs []TenantRef, locks []recordstore.FleetLock) []fleetLockJSON {
 	cache := make(map[string]fleetLockGrant)
 	rows := make([]fleetLockJSON, 0, len(locks))
@@ -1337,7 +1338,7 @@ func (s *Server) fleetLockRows(claims *auth.Claims, refs []TenantRef, locks []re
 			AcquiredAt:   lock.AcquiredAt,
 		}
 		grant := s.fleetLockGrantFor(claims, refs, cache, lock.Tenant)
-		if grant.granted && grantsAllow(grant.grants, grant.folder, lock.JobPath, "read") {
+		if lock.JobPath != "" && grant.granted && grantsAllow(grant.grants, grant.folder, lock.JobPath, "read") {
 			link := searchRunLink(grant.team, lock.JobPath, lock.RunID)
 			row.RunLink = &link
 		}

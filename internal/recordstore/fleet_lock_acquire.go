@@ -53,7 +53,7 @@ func handleCrossTenantLockAcquire(ctx context.Context, deps CrossTenantDeps, req
 		}
 	}
 
-	cellInstance, err := readTenantCellInstance(ctx, deps.Pool, req.Cluster, req.CallerTenant, req.JobPath)
+	cellInstance, err := readTenantCellInstance(ctx, deps.Pool, req.Cluster, req.CallerTenant, req.CallerJobPath)
 	if err != nil {
 		return CrossTenantResponse{}, err
 	}
@@ -68,7 +68,7 @@ func handleCrossTenantLockAcquire(ctx context.Context, deps CrossTenantDeps, req
 		RunID:               req.RunID,
 		Cluster:             req.Cluster,
 		Tenant:              req.CallerTenant,
-		JobPath:             req.JobPath,
+		JobPath:             req.CallerJobPath,
 		CellInstance:        cellInstance,
 		PlacementGeneration: req.PlacementGeneration,
 		Lease:               time.Duration(lease) * time.Second,

@@ -57,6 +57,11 @@ type CrossTenantRequest struct {
 	Kind                string    `json:"kind"`
 	RequestedAt         time.Time `json:"requested_at"`
 
+	// CallerJobPath is the caller's own job path. Every kind sends it.
+	// The gateway keeps it as sent, unlike the identity block, which the
+	// gateway overwrites. A lock row stores it as the row's job_path.
+	CallerJobPath string `json:"caller_job_path,omitempty"`
+
 	// build
 	CallerRunID  string          `json:"caller_run_id,omitempty"`
 	Seq          string          `json:"seq,omitempty"`

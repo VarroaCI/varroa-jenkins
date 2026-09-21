@@ -275,6 +275,53 @@ func TestHandleListAllFleetLocks_OperatorRoute(t *testing.T) {
 	})
 }
 
+// TestHandleListTeamFleetLocks_EmptyJobPathCarriesNoRunLink asserts a
+// row whose jobPath is empty carries no runLink, even under a grant that
+// reads its tenant and would carry the link of a named job path.
+func TestHandleListTeamFleetLocks_EmptyJobPathCarriesNoRunLink(t *testing.T) {
+	client := lockTeamClient(t)
+	reader := newFakeRecordReader()
+	reader.locksByTenant["core/ns-a/ctrl-a"] = []recordstore.FleetLock{
+		lockRow("ns-a/ctrl-a/deploy", "run-empty", "ns-a/ctrl-a", "", "held", lockTestBase),
+		lockRow("ns-a/ctrl-a/gate", "run-named", "ns-a/ctrl-a", "ns-a/ctrl-a/release", "held", lockTestBase.Add(time.Minute)),
+	}
+	srv := pipelinesTestServer(client, pipelineGrantAuthorizer([]string{"read"}, "ns-a/ctrl-a"), reader, nil)
+
+	rec := doPipelinesRequest(t, srv.handleListTeamFleetLocks, "/pipelines/ops/locks", map[string]string{"team": "ops"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	byRun := map[string]fleetLockJSON{}
+	for _, item := range decodeLockItems(t, rec.Body.Bytes()) {
+		byRun[item.RunID] = item
+	}
+	if len(byRun) != 2 {
+		t.Fatalf("rows = %d, want 2: %s", len(byRun), rec.Body.String())
+	}
+
+	empty, ok := byRun["run-empty"]
+	if !ok {
+		t.Fatalf("the row with no job path is absent: %s", rec.Body.String())
+	}
+	if empty.JobPath != "" {
+		t.Errorf("jobPath = %q, want the empty value the row stores", empty.JobPath)
+	}
+	if empty.RunLink != nil {
+		t.Errorf("runLink = %q, want no link for an empty jobPath", *empty.RunLink)
+	}
+
+	// The grant would carry a link for a row that names its job path, so
+	// the absence above is the empty path's own rule.
+	named, ok := byRun["run-named"]
+	if !ok {
+		t.Fatalf("the row with a job path is absent: %s", rec.Body.String())
+	}
+	wantNamed := "/pipelines/ctrl-a/ns-a%2Fctrl-a%2Frelease/run-named"
+	if named.RunLink == nil || *named.RunLink != wantNamed {
+		t.Errorf("runLink = %v, want %s", named.RunLink, wantNamed)
+	}
+}
+
 // TestLockRoutes_CarryNoQueuePositionOrHolderField asserts neither route
 // answers a field beyond the frozen row shape: no queue position, and no
 // derived holder.

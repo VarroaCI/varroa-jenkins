@@ -482,6 +482,74 @@ func TestFleetLockAcquire_ExpiryDeletePublishesOnePerRow(t *testing.T) {
 	}
 }
 
+// TestFleetLockAcquire_StoresCallerJobPathOnTheRowAndItsNotifications
+// asserts a request's caller_job_path reaches the row's own job_path
+// column, the cell-instance read, and both of the caller's own
+// notifications.
+func TestFleetLockAcquire_StoresCallerJobPathOnTheRowAndItsNotifications(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	// Two members, so the caller's job path is homed on slot 1 rather
+	// than slot 0: a stored cell_instance of pod-b proves the read
+	// resolved the caller's own job path.
+	seedTenantPlacementMembers(t, db, "alpha", 0, []member{
+		{Cell: "cell-a", Namespace: "ns-alpha", Role: MemberRoleActive, Slot: slotPtr(0),
+			Instance: "pod-a", RehydratedInstance: "pod-a"},
+		{Cell: "cell-b", Namespace: "ns-alpha", Role: MemberRoleActive, Slot: slotPtr(1),
+			Instance: "pod-b", RehydratedInstance: "pod-b"},
+	}, map[string]int32{"alpha/release": 1})
+
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	deps.LockNotifier = notifier
+
+	runID := newTestUUIDv7String()
+	resp, err := handleCrossTenantLockAcquire(context.Background(), deps, CrossTenantRequest{
+		Cluster:       testCluster,
+		Namespace:     "ns-alpha",
+		Cell:          "cell-a",
+		CallerTenant:  "alpha",
+		CallerJobPath: "alpha/release",
+		Name:          fleetLockTestName,
+		RunID:         runID,
+	})
+	if err != nil {
+		t.Fatalf("handleCrossTenantLockAcquire: %v", err)
+	}
+	if resp.State != FleetLockStateHeld {
+		t.Fatalf("state: got %q, want %q", resp.State, FleetLockStateHeld)
+	}
+
+	var jobPath, cellInstance string
+	if err := db.QueryRow(`SELECT job_path, cell_instance FROM varroa.fleet_locks WHERE name = $1 AND run_id = $2`,
+		"alpha/"+fleetLockTestName, runID).Scan(&jobPath, &cellInstance); err != nil {
+		t.Fatalf("read fleet lock row: %v", err)
+	}
+	if jobPath != "alpha/release" {
+		t.Fatalf("row job_path = %q, want the caller's own job path", jobPath)
+	}
+	if cellInstance != "pod-b" {
+		t.Fatalf("row cell_instance = %q, want pod-b, the member the caller's own job path is homed on", cellInstance)
+	}
+
+	if got := sent.count(); got != 1 {
+		t.Fatalf("published %d notifications inside the interval, want 1", got)
+	}
+	waiting := sent.payload(0)
+	if waiting.State != FleetLockStateWaiting || waiting.JobPath != "alpha/release" {
+		t.Fatalf("waiting notification = state %q job_path %q, want waiting/alpha/release", waiting.State, waiting.JobPath)
+	}
+
+	notifier.now = func() time.Time { return notifyClockStart.Add(2 * notifier.interval) }
+	notifier.flush(runID)
+	if got := sent.count(); got != 2 {
+		t.Fatalf("published %d notifications after the interval, want 2", got)
+	}
+	held := sent.payload(1)
+	if held.State != FleetLockStateHeld || held.JobPath != "alpha/release" {
+		t.Fatalf("held notification = state %q job_path %q, want held/alpha/release", held.State, held.JobPath)
+	}
+}
+
 // TestFleetLockAcquire_NilNotifierPublishesNothing asserts an acquire
 // with no notifier completes and panics nothing.
 func TestFleetLockAcquire_NilNotifierPublishesNothing(t *testing.T) {
