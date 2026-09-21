@@ -38,9 +38,11 @@ const maxDeadInstances = 10
 // marking and publishing counting nothing.
 //
 // grace is the confirmed-gone grace the announce hook's own marking,
-// fleet-lock release, and intent re-fire apply.
+// fleet-lock release, and intent re-fire apply. notifier publishes the
+// lock notifications the announce hook's fleet-lock release owes, and a
+// nil notifier publishes nothing.
 func RegisterTenantSyncResponder(conn *bus.Conn, pool *pgxpool.Pool, grace time.Duration,
-	stateDeleter ObjectDeleter, logger *slog.Logger) (*bus.Sub, error) {
+	stateDeleter ObjectDeleter, notifier *RunNotifier, logger *slog.Logger) (*bus.Sub, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -53,7 +55,7 @@ func RegisterTenantSyncResponder(conn *bus.Conn, pool *pgxpool.Pool, grace time.
 		logger.Warn("action metrics registration failed; the tenant sync responder starts anyway", "error", err)
 	}
 	handler := func(data []byte) []byte {
-		return handleTenantSync(conn, logger, pool, metrics, actionMetrics, stateDeleter, grace, data)
+		return handleTenantSync(conn, logger, pool, metrics, actionMetrics, stateDeleter, grace, notifier, data)
 	}
 	return conn.SubscribeRequest(bus.TenantSyncSubject, tenantSyncQueueGroup, handler)
 }
@@ -62,7 +64,8 @@ func RegisterTenantSyncResponder(conn *bus.Conn, pool *pgxpool.Pool, grace time.
 // Kind. A body the decoder rejects, and a kind outside the three known
 // values, both answer an error reply and write nothing.
 func handleTenantSync(conn *bus.Conn, logger *slog.Logger, pool *pgxpool.Pool, metrics *InterruptedMetrics,
-	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, grace time.Duration, data []byte) []byte {
+	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, grace time.Duration,
+	notifier *RunNotifier, data []byte) []byte {
 	var req TenantSyncRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		logger.Warn("tenant sync request decode failed", "error", err)
@@ -74,7 +77,7 @@ func handleTenantSync(conn *bus.Conn, logger *slog.Logger, pool *pgxpool.Pool, m
 
 	switch req.Kind {
 	case TenantSyncKindAnnounce:
-		resp, err := handleTenantSyncAnnounce(ctx, conn, pool, metrics, actionMetrics, stateDeleter, grace, logger, req)
+		resp, err := handleTenantSyncAnnounce(ctx, conn, pool, metrics, actionMetrics, stateDeleter, grace, notifier, logger, req)
 		if err != nil {
 			logger.Error("tenant sync announce failed", "cluster", req.Cluster, "tenant", req.Tenant, "error", err)
 			return marshalTenantSyncResponse(logger, TenantSyncResponse{Error: "tenant sync announce failed"})
@@ -192,10 +195,12 @@ type tenantPlacementRow struct {
 // stored before this call runs the interrupted-run moved test for every
 // RUNNING run of the tenant, once the write commits, and reports the
 // count in the response's InterruptedMarked field (design D9). conn and
-// metrics feed that marking; a nil metrics counts nothing.
+// metrics feed that marking; a nil metrics counts nothing. notifier
+// carries the fleet-lock release's own lock notifications, and a nil
+// notifier publishes nothing.
 func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool.Pool, metrics *InterruptedMetrics,
-	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, grace time.Duration, logger *slog.Logger,
-	req TenantSyncRequest) (TenantSyncResponse, error) {
+	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, grace time.Duration,
+	notifier *RunNotifier, logger *slog.Logger, req TenantSyncRequest) (TenantSyncResponse, error) {
 	if req.Cluster == "" || req.Tenant == "" {
 		return TenantSyncResponse{}, errors.New("announce request needs a cluster and a tenant")
 	}
@@ -356,7 +361,7 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 	// same cell, and dead_instances can gain an entry either way. This
 	// runs on every announce, against the row this announce just wrote.
 	if _, releaseErr := ReleaseConfirmedFleetLocks(ctx, pool, req.Cluster, req.Tenant, row, time.Now(),
-		grace, logger); releaseErr != nil {
+		grace, notifier, logger); releaseErr != nil {
 		logger.Error("fleet lock release confirmation after announce failed",
 			"cluster", req.Cluster, "tenant", req.Tenant, "error", releaseErr)
 	}

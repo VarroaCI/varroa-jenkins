@@ -20,6 +20,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	"github.com/varroaci/varroa-jenkins/internal/rbac"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
@@ -1211,4 +1212,171 @@ func (s *Server) teamCellState(cr *v1alpha1.Controller, ref TenantRef, reason st
 		}
 	}
 	return teamCellRehydrating
+}
+
+// --- Fleet locks (components/schemas.yaml#FleetLock) ---
+
+// fleetLockJSON is one row of either lock response. tenant and jobPath
+// are always present, so a caller learns which tenant holds a lock even
+// when it may not read that tenant's runs. runLink is present only when
+// the caller's own grant reads the row's own run. No other field
+// exists: a consumer that wants a lock's holder groups the rows of one
+// name itself.
+type fleetLockJSON struct {
+	Name         string     `json:"name"`
+	Tenant       string     `json:"tenant"`
+	JobPath      string     `json:"jobPath"`
+	State        string     `json:"state"`
+	RunID        string     `json:"runId"`
+	RunLink      *string    `json:"runLink,omitempty"`
+	WaitingSince time.Time  `json:"waitingSince"`
+	AcquiredAt   *time.Time `json:"acquiredAt,omitempty"`
+}
+
+// fleetLockGrant is one tenant's own read decision. It is held for the
+// length of one request, so a page of rows sharing few tenants resolves
+// few grants. team is the resolved ref's own team, the first segment of
+// the run link the grant allows.
+type fleetLockGrant struct {
+	folder  string
+	team    string
+	grants  []rbac.TenantGrant
+	granted bool
+}
+
+// fleetLockMergeKey is one row's own place in a merged list: the
+// ordering triple both reads share. The read of one tenant can answer a
+// row twice for a team of two tenants, once by the lock name's own
+// prefix and once by the row's tenant column, so the merge de-duplicates
+// by this triple.
+type fleetLockMergeKey struct {
+	name         string
+	waitingSince time.Time
+	runID        string
+}
+
+// handleListTeamFleetLocks serves GET /pipelines/{team}/locks. It
+// answers what the list_fleet_locks MCP tool answers for the same team,
+// because both call ListFleetLocks.
+func (s *Server) handleListTeamFleetLocks(w http.ResponseWriter, r *http.Request) {
+	claims := auth.ClaimsFromContext(r.Context())
+	rows, serr := s.ListFleetLocks(r.Context(), claims, r.PathValue("team"))
+	if serr != nil {
+		s.writeJSONError(w, serr.Status, serr.Message)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, itemsEnvelope(rows))
+}
+
+// handleListAllFleetLocks serves GET /locks, the fleet-wide read. The
+// gate admits only a cluster-wide fleetlocks:read binding, and the
+// answer carries every tenant's rows.
+func (s *Server) handleListAllFleetLocks(w http.ResponseWriter, r *http.Request) {
+	if s.deps.RecordStore == nil {
+		s.pipelinesUnavailable(w)
+		return
+	}
+	claims := auth.ClaimsFromContext(r.Context())
+	if s.deps.Authorizer == nil || !s.deps.Authorizer.CanReadFleetLocks(claims) {
+		s.writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	locks, err := s.deps.RecordStore.ListAllFleetLocks(r.Context(), s.cellUsageCluster(r))
+	if s.handleReaderError(w, err, "list fleet locks") {
+		return
+	}
+	s.writeJSON(w, http.StatusOK, itemsEnvelope(s.fleetLockRows(claims, nil, locks)))
+}
+
+// listTeamFleetLocks reads every admitted tenant's locks and merges them
+// into one list. The order is (name, waiting_since, run_id), the order
+// one read answers with, so the merge keeps a holder ahead of its
+// waiters.
+func (s *Server) listTeamFleetLocks(ctx context.Context, claims *auth.Claims, refs []TenantRef) ([]fleetLockJSON, error) {
+	seen := make(map[fleetLockMergeKey]bool)
+	var merged []recordstore.FleetLock
+	for _, ref := range refs {
+		locks, err := s.deps.RecordStore.ListFleetLocks(ctx, ref.Cluster, ref.Tenant)
+		if err != nil {
+			return nil, err
+		}
+		for _, lock := range locks {
+			key := fleetLockMergeKey{name: lock.Name, waitingSince: lock.WaitingSince, runID: lock.RunID}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			merged = append(merged, lock)
+		}
+	}
+	sort.Slice(merged, func(i, j int) bool {
+		if merged[i].Name != merged[j].Name {
+			return merged[i].Name < merged[j].Name
+		}
+		if !merged[i].WaitingSince.Equal(merged[j].WaitingSince) {
+			return merged[i].WaitingSince.Before(merged[j].WaitingSince)
+		}
+		return merged[i].RunID < merged[j].RunID
+	})
+	return s.fleetLockRows(claims, refs, merged), nil
+}
+
+// fleetLockRows maps the record store's rows onto the response shape and
+// decides each row's own run link.
+func (s *Server) fleetLockRows(claims *auth.Claims, refs []TenantRef, locks []recordstore.FleetLock) []fleetLockJSON {
+	cache := make(map[string]fleetLockGrant)
+	rows := make([]fleetLockJSON, 0, len(locks))
+	for _, lock := range locks {
+		row := fleetLockJSON{
+			Name:         lock.Name,
+			Tenant:       lock.Tenant,
+			JobPath:      lock.JobPath,
+			State:        lock.State,
+			RunID:        lock.RunID,
+			WaitingSince: lock.WaitingSince,
+			AcquiredAt:   lock.AcquiredAt,
+		}
+		grant := s.fleetLockGrantFor(claims, refs, cache, lock.Tenant)
+		if grant.granted && grantsAllow(grant.grants, grant.folder, lock.JobPath, "read") {
+			link := searchRunLink(grant.team, lock.JobPath, lock.RunID)
+			row.RunLink = &link
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// fleetLockGrantFor answers the read decision of one row's own tenant. A
+// tenant one of refs already names reuses that ref's folder and grants,
+// so the team route resolves no grant twice. Every other tenant resolves
+// through TenantRefFromTenant alone: a pure parse, and no resolver round
+// trip. The result is cached per tenant string, because a page holds
+// many rows and few tenants. A tenant value that does not parse answers
+// no grant, so its row carries tenant and jobPath, carries no run link,
+// and raises no error.
+func (s *Server) fleetLockGrantFor(claims *auth.Claims, refs []TenantRef, cache map[string]fleetLockGrant, tenant string) fleetLockGrant {
+	if grant, ok := cache[tenant]; ok {
+		return grant
+	}
+	var grant fleetLockGrant
+	matched := false
+	for _, ref := range refs {
+		if ref.Tenant != tenant {
+			continue
+		}
+		grant.folder = ref.Folder
+		grant.team = ref.Team
+		grant.grants, grant.granted = s.deps.Authorizer.tenantGrants(claims, ref.Tenant, ref.Folder)
+		matched = true
+		break
+	}
+	if !matched {
+		if ref, err := TenantRefFromTenant(tenant); err == nil {
+			grant.folder = ref.Folder
+			grant.team = ref.Team
+			grant.grants, grant.granted = s.deps.Authorizer.tenantGrants(claims, tenant, ref.Folder)
+		}
+	}
+	cache[tenant] = grant
+	return grant
 }

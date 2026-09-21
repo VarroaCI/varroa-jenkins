@@ -39,6 +39,9 @@ func NewRouter(deps *Dependencies) http.Handler {
 	mux.HandleFunc("/runners/", srv.HandleRunnerDispatch)
 	mux.HandleFunc("/cellpools", srv.HandleCellPools)
 	mux.HandleFunc("/cellpools/", srv.HandleCellPoolDispatch)
+	// Fleet locks: the cluster-wide lock list, beside the cell-pool
+	// family because both are flat fleet views.
+	mux.HandleFunc("GET /locks", srv.handleListAllFleetLocks)
 	// Controllers: GET list (creation is declarative via the Kubernetes API).
 	mux.HandleFunc("/controllers", srv.HandleControllers)
 	// Clusters: GET list, + cluster-scoped dispatch.
@@ -101,6 +104,7 @@ func NewRouter(deps *Dependencies) http.Handler {
 	mux.HandleFunc("POST /pipelines/{team}/jobs/{job}/runs", srv.handleCreateRun)
 	mux.HandleFunc("POST /pipelines/{team}/markers/validate", srv.handleValidatePipelineMarker)
 	mux.HandleFunc("GET /pipelines/{team}/cell", srv.handleGetTeamCell)
+	mux.HandleFunc("GET /pipelines/{team}/locks", srv.handleListTeamFleetLocks)
 	mux.HandleFunc("GET /pipelines/{team}/stream", srv.handleTeamRunStream)
 	// Runs: detail, log stream, artifacts, tests, changes, cancel, rerun.
 	mux.HandleFunc("GET /runs/{run}", srv.handleGetRun)

@@ -75,12 +75,12 @@ func TestFleetLockStateMachine_MoveLeavesReleasingPromotesNoWaiter(t *testing.T)
 	insertFleetLockRow(t, db, fleetLockStateMachineTestName, waiterRunID, FleetLockStateWaiting,
 		now.Add(-30*time.Second), now.Add(5*time.Minute))
 
-	moved, err := moveInterruptedHoldersToReleasing(context.Background(), pool, fleetLockStateMachineTestName, now)
+	moved, _, err := moveInterruptedHoldersToReleasing(context.Background(), pool, fleetLockStateMachineTestName, now)
 	if err != nil {
 		t.Fatalf("moveInterruptedHoldersToReleasing: %v", err)
 	}
-	if moved != 1 {
-		t.Fatalf("moved = %d, want 1", moved)
+	if len(moved) != 1 || moved[0].runID != holderRunID {
+		t.Fatalf("moved rows = %+v, want the holder's own row alone", moved)
 	}
 
 	state, releasingSince, found := fleetLockRowState(t, db, holderRunID)
@@ -165,7 +165,7 @@ func TestFleetLockStateMachine_DeadInstanceEntryReleasesRow(t *testing.T) {
 		cellAlive:     true,
 		deadInstances: []TenantSyncDeadInstance{{Instance: "pod-a", LastSeenAt: staleSeen}},
 	}
-	released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha", row, now, testGrace, nil)
+	released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha", row, now, testGrace, nil, nil)
 	if err != nil {
 		t.Fatalf("ReleaseConfirmedFleetLocks: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestFleetLockStateMachine_TenantMoveWithNoDeadInstanceKeepsRow(t *testing.T
 
 	// The tenant moved to pod-b, but pod-a is absent from dead_instances.
 	row := tenantPlacementLivenessRow{cellInstance: "pod-b", cellAlive: true}
-	released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha", row, now, testGrace, nil)
+	released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha", row, now, testGrace, nil, nil)
 	if err != nil {
 		t.Fatalf("ReleaseConfirmedFleetLocks: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestFleetLockStateMachine_StaleCellAliveAtKeepsRow(t *testing.T) {
 		cellAliveAt:    &staleAliveAt,
 		cellLastSeenAt: &lastSeen,
 	}
-	released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha", row, now, testGrace, nil)
+	released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha", row, now, testGrace, nil, nil)
 	if err != nil {
 		t.Fatalf("ReleaseConfirmedFleetLocks: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestFleetLockStateMachine_OwnerDiedWithPodReleasedWithoutCancel(t *testing.
 		cellAlive:     true,
 		deadInstances: []TenantSyncDeadInstance{{Instance: "pod-dead", LastSeenAt: staleSeen}},
 	}
-	released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha", row, now, testGrace, nil)
+	released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha", row, now, testGrace, nil, nil)
 	if err != nil {
 		t.Fatalf("ReleaseConfirmedFleetLocks: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestFleetLockStateMachine_PodReadConfirmationReleasesInSeconds(t *testing.T
 				}},
 			}
 			released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha",
-				row, now, testGrace, nil)
+				row, now, testGrace, nil, nil)
 			if err != nil {
 				t.Fatalf("ReleaseConfirmedFleetLocks: %v", err)
 			}
@@ -341,7 +341,7 @@ func TestFleetLockStateMachine_RestartReachesReleasingThroughMaintenance(t *test
 	insertFleetLockRow(t, db, fleetLockStateMachineTestName, runID, FleetLockStateHeld,
 		now.Add(-20*time.Minute), now.Add(-time.Minute))
 
-	moved, expired, err := sweepFleetLocks(context.Background(), pool, now)
+	moved, expired, err := sweepFleetLocks(context.Background(), pool, now, nil)
 	if err != nil {
 		t.Fatalf("sweepFleetLocks: %v", err)
 	}
@@ -381,7 +381,7 @@ func TestFleetLockStateMachine_NextWaiterPromotedAfterRelease(t *testing.T) {
 	insertFleetLockRow(t, db, fleetLockStateMachineTestName, waiterRunID, FleetLockStateWaiting,
 		now.Add(-time.Minute), now.Add(5*time.Minute))
 
-	if _, err := moveInterruptedHoldersToReleasing(context.Background(), pool, fleetLockStateMachineTestName, now); err != nil {
+	if _, _, err := moveInterruptedHoldersToReleasing(context.Background(), pool, fleetLockStateMachineTestName, now); err != nil {
 		t.Fatalf("moveInterruptedHoldersToReleasing: %v", err)
 	}
 	if state, _, found := fleetLockRowState(t, db, holderRunID); !found || state != FleetLockStateReleasing {
@@ -394,7 +394,7 @@ func TestFleetLockStateMachine_NextWaiterPromotedAfterRelease(t *testing.T) {
 		t.Fatalf("release holder row: %v", err)
 	}
 
-	outcome, err := acquireFleetLock(context.Background(), pool, nil, fleetLockAcquireParams{
+	outcome, err := acquireFleetLock(context.Background(), pool, nil, nil, fleetLockAcquireParams{
 		Name:    fleetLockStateMachineTestName,
 		RunID:   waiterRunID,
 		Cluster: testCluster,

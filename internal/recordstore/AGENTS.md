@@ -344,9 +344,16 @@ of the fleet's audit activity, once a controller becomes disposable.
   fields `ledger_fence_placement.go`'s direct type conversion depends
   on); `dispatchCrossTenant` records both on every call.
 - **Fleet locks** (`fleet_lock_acquire.go`, `fleet_lock_renew.go`,
-  `fleet_lock_release.go`, `fleet_lock_metrics.go`) — the cross-tenant
-  responder's `lock_acquire`/`lock_renew`/`lock_release` kinds over
-  `varroa.fleet_locks` (migration `00006`). `splitLockName` resolves a
+  `fleet_lock_release.go`, `fleet_lock_metrics.go`,
+  `reader_fleetlocks.go`) — the cross-tenant responder's
+  `lock_acquire`/`lock_renew`/`lock_release` kinds over
+  `varroa.fleet_locks` (migration `00006`). `reader_fleetlocks.go`
+  answers the two reads a consumer sees the table through:
+  `Reader.ListFleetLocks` answers one tenant's own name prefix plus
+  every row its own runs hold or wait on, and
+  `Reader.ListAllFleetLocks` answers one cluster. Both order by
+  `(name, waiting_since, run_id)`, so a holder sorts before its
+  waiters, and neither answers a queue position. `splitLockName` resolves a
   wire-level lock name to its owning tenant and bare name: a name with no `/`
   is the caller's own; a name holding one is another tenant's namespace, and
   an acquire or a renew across that boundary also calls `GrantEvaluator.Check`
@@ -358,20 +365,35 @@ of the fleet's audit activity, once a controller becomes disposable.
   `waiting` with no further attempt. A release deletes the caller's row
   unconditionally and carries no fence: only acquire and renew do.
   `moveInterruptedHoldersToReleasing` (`fleet_lock_acquire.go`) is the one
-  shared implementation of the derived move, behind the narrow
-  `fleetLockExecer` interface: the acquire transaction's own step calls it
-  with one lock name, and the maintenance round's `sweepFleetLocks`
-  (`retention_fleet_locks.go`) calls it with an empty name to move every
-  held row of an interrupted run fleet-wide, before its own bounded-batch
-  expiry delete, which skips a `releasing` row exactly as the acquire's own
-  expiry delete does. A `releasing` row leaves the table on exactly two
+  shared implementation of the derived move, behind the `fleetLockExecer`
+  interface, which declares `Query` beside `Exec`: the acquire
+  transaction's own step calls it with one lock name, and the maintenance
+  round's `sweepFleetLocks` (`retention_fleet_locks.go`) calls it with an
+  empty name to move every held row of an interrupted run fleet-wide,
+  before its own bounded-batch expiry delete, which skips a `releasing`
+  row exactly as the acquire's own expiry delete does. It answers every
+  moved row's own identity beside the count, because each moved row earns
+  its own notification. A `releasing` row leaves the table on exactly two
   confirmations: an ingested terminal `run.completed` for the holder
   (`ingest_completed.go`'s own `applyRunCompleted`, gated on the owner
   test, in the same transaction as the `runs` write, so a crash after
   commit never strands the lock), or `ReleaseConfirmedFleetLocks`
   (`fleet_lock_release.go`), the tenant-sync responder's own hook, which
   reuses `cell_liveness.go`'s `deadInstanceGone`/`currentInstanceGone`
-  readings with no anchor test. `FleetLockMetrics`
+  readings with no anchor test.
+  **Every lock write publishes one `lock` notification per changed row,
+  after its own transaction commits, through the `RunNotifier` the
+  recorder wires (`CrossTenantDeps.LockNotifier`,
+  `MaintenanceConfig.LockNotifier`, `Ingester.SetRunNotifier`).** Each
+  notification carries the changed row's own cluster, tenant, job path,
+  name, and run id, read by `RETURNING` or written under the caller's own
+  primary key, and never assumed from the caller's request. A statement
+  that affects no row publishes nothing, so a repeat poll, a repeat sweep,
+  and a second release all stay silent; a rolled-back attempt publishes
+  nothing either. A renew publishes nothing (it changes only
+  `expires_at` and `placement_generation`), and a mesh takeover publishes
+  nothing (it changes only `cell_instance`), because neither changes a
+  state a reader renders. `FleetLockMetrics`
   (`fleet_lock_metrics.go`) holds three observable gauges
   (`recorder_fleet_lock_held`/`_waiting`/`_releasing`, each a live
   `count(*)` read) and `recorder_fleet_lock_expired_total`, one instance
@@ -446,9 +468,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   `applyRunCompleted` (`ingest_completed.go`) reports `owner`, whether its
   write was the run's real terminal write, not a foreign instance's
   payload-only merge; on `owner`, in the same transaction as the `runs`
-  write, it deletes this run's `held`/`releasing` fleet_locks row, the
-  first of the two release confirmations `fleet_lock_release.go`'s own
-  bullet names. `Ingester.SetUpstreamFanout` (`ingest_apply.go`) is an
+  write, it deletes this run's `held`/`releasing` fleet_locks rows and
+  reports each deleted row's own identity, the first of the two release
+  confirmations `fleet_lock_release.go`'s own bullet names. `Apply`
+  carries those rows onto `ApplyResult.ReleasedFleetLocks`, and
+  `Ingester.notify` publishes one `lock` notification per row beside the
+  run notification, whether or not the kind earns one. `Ingester.SetUpstreamFanout` (`ingest_apply.go`) is an
   optional setter, matching `Ledger.SetConcurrencyCancel`'s own
   convention: an `Ingester` no caller wires runs no fan-out. When wired,
   `Apply` calls `RunUpstreamFanout` (`upstream_fanout.go`) after the
@@ -559,8 +584,14 @@ of the fleet's audit activity, once a controller becomes disposable.
   every `held` fleet_locks row of an `INTERRUPTED` run to `releasing`
   fleet-wide, then deletes every expired row that is not `releasing`, in
   `deleteBatched`'s own bounded batches; see the Fleet locks bullet for
-  the shared move it calls. `MaintenanceConfig.FleetLockMetrics` counts
-  the round's own expired-row deletes. Step 5a
+  the shared move it calls. This sweep does **not** use `deleteBatched`:
+  it calls `deleteExpiredFleetLocksNotifying`, which issues the same
+  bounded delete through `Query` with `RETURNING` and publishes one `lock`
+  notification per deleted row, and drains each batch's rows before the
+  next statement runs on the round's one held connection.
+  `MaintenanceConfig.FleetLockMetrics` counts
+  the round's own expired-row deletes, and `MaintenanceConfig.LockNotifier`
+  publishes the moved and deleted rows' own notifications. Step 5a
   (`retention_activity.go`) deletes expired `activity` rows in batches of
   5000, then step 5b drops every fully expired `activity` partition; both
   run against `recordStore.retention.activity`, which C1's numbering

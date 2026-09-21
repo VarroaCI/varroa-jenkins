@@ -56,7 +56,7 @@ reads both numbers on the cell page.
 
 ## Read the pipelines tree
 
-Two cards follow the page head: **Running now** and **Pipelines**.
+Three cards follow the page head: **Running now**, **Pipelines**, and **Locks**.
 
 **Running now** holds one tile per build in progress: the job name, the build number, the
 current stage, the branch, and a progress bar against the job's usual duration. The stage line
@@ -178,6 +178,29 @@ build number.
 The setting is per tenant, and the group it cancels within is the job path itself, not the
 build. A multibranch child job's path includes its branch, so a new build on one branch never
 cancels another branch's build.
+
+## Fleet locks
+
+A job that must not run twice at the same time takes a fleet lock. The `varroa.lock` step holds
+the lock, and a second run waits for it. See
+[Cross-tenant pipelines](../config/cross-tenant-pipelines.md) for the lock name form, the three
+lock states, and the timeout budget. This page does not repeat them.
+
+The **Locks** card on the team home lists the locks your tenant holds and the locks its runs wait
+on. A row names the lock, the state, the holder, and the time since the wait or the acquisition
+started. The card reads the locks again on a `lock` event from the run stream, at most once every
+two seconds. It shows no queue position.
+
+An operator opens `/locks` to list every lock of the cluster, across every tenant. That page needs
+the `fleetlocks:read` verb, which `varroa:operator` and `varroa:admin` hold. The page polls and
+opens no stream.
+
+Both views are read-only, so neither page releases a lock. A stuck lock frees itself in three
+ways:
+
+- The holder's step releases the lock when its block ends.
+- The holder's run reaches a terminal state.
+- The Varroa operator confirms that the holder's cell instance is gone.
 
 ## Call a job on another tenant
 

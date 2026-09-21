@@ -170,6 +170,18 @@
 }
 
 
+/* ---- Locks table ---- */
+
+/* A job path is long and wraps rather than widening the table. */
+.lockJob {
+  overflow-wrap: anywhere;
+}
+
+/* The elapsed time is a number that reads in a column. */
+.lockSince {
+  font-variant-numeric: tabular-nums;
+}
+
 .connectedYes {
   color: var(--ok-text);
   font-weight: 600;

@@ -5627,6 +5627,58 @@ components:
           description: Absent means enabled.
           type: boolean
       type: object
+    components_schemas_FleetLock:
+      additionalProperties: false
+      description: |
+        One fleet lock row, from a varroa.lock step. tenant and jobPath are always present, whichever tenant the row belongs to. runLink is present only when the reading caller can read that row's own run. The row reports its own state and its own waitingSince or acquiredAt. It carries no queue position and no derived holder: a consumer groups the rows it already has by name.
+      properties:
+        acquiredAt:
+          format: date-time
+          type: string
+        jobPath:
+          description: The job path of the run that holds or waits on the lock.
+          type: string
+        name:
+          description: The qualified lock name, in the form tenant/name.
+          type: string
+        runId:
+          type: string
+        runLink:
+          description: |
+            The run's own page path, /pipelines/{team}/{jobPath}/{runId}, the same link a run search result carries. Absent, not null, when the caller's own grant cannot read the row's own run.
+          type: string
+        state:
+          enum:
+          - waiting
+          - held
+          - releasing
+          type: string
+        tenant:
+          description: The tenant of the run that holds or waits on the lock.
+          type: string
+        waitingSince:
+          format: date-time
+          type: string
+      required:
+      - name
+      - tenant
+      - jobPath
+      - state
+      - runId
+      - waitingSince
+      type: object
+    components_schemas_FleetLockListResponse:
+      additionalProperties: false
+      description: |
+        GET /pipelines/{team}/locks and GET /locks. Both routes answer the rows in (name, waitingSince, runId) order, so the holder of a lock name comes before its waiters.
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/components_schemas_FleetLock'
+          type: array
+      required:
+      - items
+      type: object
     components_schemas_FleetPluginClassCount:
       additionalProperties: false
       properties:
@@ -11851,6 +11903,30 @@ paths:
       summary: Returns identity/OIDC configuration (admin only).
       tags:
       - identity
+  /api/v1/locks:
+    get:
+      description: |
+        Reads the cluster the optional cluster query parameter names, and the BFF's own local cluster when the parameter is absent. Each row carries its own tenant and jobPath, whichever tenant it belongs to. A row carries runLink only when the caller's own grant can read that row's own run. A row reports its own state and its own waitingSince or acquiredAt. It carries no queue position and no derived holder.
+      operationId: listAllFleetLocks
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_clusterQuery'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_FleetLockListResponse'
+          description: Every fleet lock of the cluster (items envelope).
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Lists every fleet lock of one cluster, across every tenant. Requires
+        the fleetlocks:read verb on a cluster-wide binding.
+      tags:
+      - Pipelines
   /api/v1/login:
     post:
       operationId: login
@@ -12333,6 +12409,29 @@ paths:
           $ref: '#/components/responses/components_responses_ServiceUnavailable'
       summary: Requests a new build. Fire and forget — the BFF does not claim the
         build number.
+      tags:
+      - Pipelines
+  /api/v1/pipelines/{team}/locks:
+    get:
+      description: |
+        Resolves {team} onto one or more record-store tenants, applies the tenant read check to each, reads each tenant's locks, and merges the answers by (name, waitingSince, runId). Each row carries its own tenant and jobPath, whichever tenant it belongs to. A row carries runLink only when the caller's own grant can read that row's own run. A row reports its own state and its own waitingSince or acquiredAt. It carries no queue position.
+      operationId: listTeamFleetLocks
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_team'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_FleetLockListResponse'
+          description: The team's fleet locks, in (name, waitingSince, runId) order.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Lists the fleet locks a team's tenants own, hold, or wait on.
       tags:
       - Pipelines
   /api/v1/pipelines/{team}/markers/validate:

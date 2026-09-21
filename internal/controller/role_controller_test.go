@@ -240,3 +240,84 @@ func buildRoleForTest(t *testing.T, name string) *v1alpha1.VarroaRole {
 	t.Fatalf("builtinRoles() missing role %s", name)
 	return nil
 }
+
+// TestBuiltinRoles_FleetLockVerbMatrix proves the fleet-lock verbs:
+// operator holds read, admin holds it through its wildcard and carries no
+// fleetlocks rule, and developer and viewer carry no rule at all. One
+// fleet-wide lock read discloses every tenant's lock names and job paths
+// at once, so a read verb for a developer or a viewer would disclose a
+// fleet view to a caller who sees one tenant.
+func TestBuiltinRoles_FleetLockVerbMatrix(t *testing.T) {
+	roles := make(map[string]*v1alpha1.VarroaRole)
+	for _, role := range builtinRoles() {
+		roles[role.Name] = role
+	}
+
+	operator, ok := roles["operator"]
+	if !ok {
+		t.Fatal("builtinRoles() missing role operator")
+	}
+	rule := findAPIRule(operator.Spec.APIRules, "fleetlocks")
+	if rule == nil {
+		t.Fatal("role operator: expected a fleetlocks rule, found none")
+	}
+	if !stringSlicesEqual(rule.Verbs, []string{"read"}) {
+		t.Errorf("role operator: fleetlocks verbs = %v, want [read]", rule.Verbs)
+	}
+
+	for _, name := range []string{"admin", "developer", "viewer"} {
+		role, ok := roles[name]
+		if !ok {
+			t.Fatalf("builtinRoles() missing role %s", name)
+		}
+		if rule := findAPIRule(role.Spec.APIRules, "fleetlocks"); rule != nil {
+			t.Errorf("role %s: expected no fleetlocks rule, got %v", name, rule)
+		}
+	}
+
+	wildcard := findAPIRule(roles["admin"].Spec.APIRules, "*")
+	if wildcard == nil {
+		t.Fatal("role admin: expected a wildcard rule, found none")
+	}
+	if !stringSlicesEqual(wildcard.Verbs, []string{"*"}) {
+		t.Errorf("role admin: wildcard verbs = %v, want [*]", wildcard.Verbs)
+	}
+}
+
+// TestRoleReconciler_RewritesDriftedFleetLockRule proves the reconciler
+// repairs a built-in role whose fleetlocks rule was removed, so an
+// upgraded install converges with no migration step.
+func TestRoleReconciler_RewritesDriftedFleetLockRule(t *testing.T) {
+	ctx := context.Background()
+	st := crdstore.NewFake()
+
+	want := buildRoleForTest(t, "operator")
+	drifted := want.DeepCopy()
+	kept := make([]v1alpha1.APIRule, 0, len(drifted.Spec.APIRules))
+	for _, r := range drifted.Spec.APIRules {
+		if len(r.Resources) == 1 && r.Resources[0] == "fleetlocks" {
+			continue
+		}
+		kept = append(kept, r)
+	}
+	drifted.Spec.APIRules = kept
+	crdstore.MustSeed(st, drifted)
+
+	r := NewRoleReconciler(nil, st)
+	r.Logger = testLogger()
+	if err := r.reconcileVarroaRoles(ctx); err != nil {
+		t.Fatalf("reconcileVarroaRoles: %v", err)
+	}
+
+	got, err := crdstore.Get[v1alpha1.VarroaRole](ctx, st, "operator", "")
+	if err != nil {
+		t.Fatalf("get operator role: %v", err)
+	}
+	rule := findAPIRule(got.Spec.APIRules, "fleetlocks")
+	if rule == nil {
+		t.Fatal("expected the reconciler to restore the fleetlocks rule, found none")
+	}
+	if !stringSlicesEqual(rule.Verbs, []string{"read"}) {
+		t.Errorf("restored fleetlocks verbs = %v, want [read]", rule.Verbs)
+	}
+}

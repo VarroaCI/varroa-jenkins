@@ -100,6 +100,11 @@ type ApplyResult struct {
 	// place, so the caller acknowledges the message and publishes
 	// nothing.
 	RefusedSource bool
+
+	// ReleasedFleetLocks names every fleet lock a terminal run.completed
+	// write released, one entry per deleted row, so notify publishes one
+	// lock notification per row. Every other kind releases none.
+	ReleasedFleetLocks []ReleasedFleetLock
 }
 
 // Ingester applies one IngestEnvelope to the record tables inside a
@@ -164,18 +169,22 @@ func (g *Ingester) SetRunNotifier(n *RunNotifier) {
 	g.notifier = n
 }
 
-// notify publishes one ingest envelope's live notification. It publishes
-// nothing for a nil notifier, a failed write, or a kind that changes no
-// run state.
+// notify publishes one ingest envelope's live notifications: the run
+// notification the kind earns, and one lock notification per fleet lock
+// the write released. It publishes nothing for a nil notifier or a
+// failed write. The two families are independent facts about one
+// commit, so a write that earns no run notification still publishes the
+// lock notifications it owes.
 func (g *Ingester) notify(env IngestEnvelope, res ApplyResult, err error) {
 	if err != nil || g.notifier == nil {
 		return
 	}
-	n, ok := notificationFor(env, res)
-	if !ok {
-		return
+	if n, ok := notificationFor(env, res); ok {
+		g.notifier.Notify(n)
 	}
-	g.notifier.Notify(n)
+	for _, lock := range res.ReleasedFleetLocks {
+		g.notifier.Notify(lockNotification(lock.Cluster, lock.Tenant, lock.JobPath, lock.LockName, env.RunID, FleetLockStateReleased))
+	}
 }
 
 // Apply writes env to the record tables. It returns ErrIntentMissing
@@ -254,6 +263,7 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 	if dispatched.refusedSource {
 		result.RefusedSource = true
 	}
+	result.ReleasedFleetLocks = dispatched.releasedFleetLocks
 
 	if dispatched.action != nil && g.conn != nil {
 		if perr := PublishLedgerAction(g.conn, *dispatched.action); perr != nil {
@@ -305,8 +315,10 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 // for a run.completed write that was this run's real terminal write,
 // the producer identity Apply feeds the fan-out round, for a
 // run.started that described a superseded grant, the superseded fields
-// Apply copies onto its ApplyResult, and for a run.source write the
-// guard refused, the refusal flag Apply copies onto its ApplyResult.
+// Apply copies onto its ApplyResult, for a run.source write the
+// guard refused, the refusal flag Apply copies onto its ApplyResult,
+// and for a terminal run.completed write the fleet locks it released,
+// which Apply copies onto its ApplyResult too.
 type dispatchResult struct {
 	action *LedgerAction
 	fanout *FanoutProducer
@@ -332,6 +344,12 @@ type dispatchResult struct {
 	// the stored source_seq, so the merge changed no stored value. The
 	// kind raises no ledger action either way.
 	refusedSource bool
+
+	// releasedFleetLocks names every fleet lock a terminal run.completed
+	// write released, one entry per deleted row. Apply copies it onto
+	// its ApplyResult, the same two-hop path supersededStart and
+	// refusedSource already take.
+	releasedFleetLocks []ReleasedFleetLock
 }
 
 // applyOnce runs one attempt of env's write in its own transaction.
@@ -368,14 +386,14 @@ func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, e
 	case KindRunStage:
 		return dispatchResult{}, applyRunStage(ctx, tx, intent, env)
 	case KindRunCompleted:
-		owner, payload, err := applyRunCompleted(ctx, tx, intent, env)
+		owner, payload, releasedLocks, err := applyRunCompleted(ctx, tx, intent, env)
 		if err != nil {
 			return dispatchResult{}, err
 		}
 		if !owner {
 			return dispatchResult{}, nil
 		}
-		res := dispatchResult{stateCleanup: intent.runID.String()}
+		res := dispatchResult{stateCleanup: intent.runID.String(), releasedFleetLocks: releasedLocks}
 		if payload.Result != nil {
 			// The fan-out round is the one part of the terminal path
 			// that is not idempotent, so it runs behind its own

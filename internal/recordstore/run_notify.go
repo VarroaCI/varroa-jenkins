@@ -39,10 +39,36 @@ type RunNotification struct {
 	// Result carries the payload's result for a completed run, and the
 	// TRIGGER_FAILED code for a refused trigger.
 	Result string `json:"result"`
+	// LockName is the qualified name of the fleet lock a fleet_locks
+	// write changed, of the form <tenant>/<bare-name>. It stays empty for
+	// every other kind, and the body then omits it.
+	LockName string `json:"lock_name,omitempty"`
+	// State is that lock's own state after the write: waiting, held,
+	// releasing, or released. It stays empty for every other kind, and
+	// the body then omits it.
+	State string `json:"state,omitempty"`
 	// Seq numbers the notifications of one publish, and At holds the
 	// publish time.
 	Seq uint64    `json:"seq"`
 	At  time.Time `json:"at"`
+}
+
+// lockNotification builds the notification one fleet_locks write
+// publishes. cluster, tenant, jobPath, lockName, and runID name the row
+// the statement changed, never the caller's own request: the affected row
+// can belong to another cluster, tenant, or run. state is that row's own
+// state after the write. Seq and At stay zero, because Notify stamps both
+// under its own lock.
+func lockNotification(cluster, tenant, jobPath, lockName, runID, state string) RunNotification {
+	return RunNotification{
+		Kind:     "lock",
+		Cluster:  cluster,
+		Tenant:   tenant,
+		JobPath:  jobPath,
+		RunID:    runID,
+		LockName: lockName,
+		State:    state,
+	}
 }
 
 // notificationFor builds the notification one ingest envelope publishes.
@@ -175,8 +201,12 @@ func NewRunNotifier(conn *bus.Conn, logger *slog.Logger) *RunNotifier {
 // Notify publishes n now or holds it for the end of its run's interval.
 // Three rules decide, in this order: a terminal state publishes at once, a
 // run outside its interval publishes at once, and anything else becomes
-// the run's newest held state.
+// the run's newest held state. A nil notifier publishes nothing, so a
+// caller needs no guard of its own.
 func (r *RunNotifier) Notify(n RunNotification) {
+	if r == nil {
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// The clock read happens under the lock, so seq and at order

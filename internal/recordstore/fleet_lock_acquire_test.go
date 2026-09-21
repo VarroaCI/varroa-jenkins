@@ -330,3 +330,167 @@ func TestFleetLockAcquire_RepeatedViolationAnswersWaiting(t *testing.T) {
 		t.Fatalf("holder: got %q, want %q", outcome.holder, "winner-run")
 	}
 }
+
+// TestFleetLockAcquire_PublishesWaitingThenHeld asserts a fresh acquire
+// publishes the caller's own waiting notification, and then the held one
+// when the promotion lands. The held notification follows the notifier's
+// own coalescing rule, so the test ends the run's interval before it
+// counts.
+func TestFleetLockAcquire_PublishesWaitingThenHeld(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	deps.LockNotifier = notifier
+
+	runID := newTestUUIDv7String()
+	resp := acquireForCaller(t, deps, runID)
+	if resp.State != FleetLockStateHeld {
+		t.Fatalf("state: got %q, want %q", resp.State, FleetLockStateHeld)
+	}
+
+	if got := sent.count(); got != 1 {
+		t.Fatalf("published %d notifications inside the interval, want 1", got)
+	}
+	first := sent.payload(0)
+	if first.Kind != "lock" || first.State != FleetLockStateWaiting {
+		t.Fatalf("first notification = kind %q state %q, want lock/waiting", first.Kind, first.State)
+	}
+	if first.RunID != runID || first.LockName != "alpha/deploy-prod" {
+		t.Fatalf("first notification names %s/%s, want the caller's own row", first.RunID, first.LockName)
+	}
+	if first.Cluster != testCluster || first.Tenant != "alpha" {
+		t.Fatalf("first notification coordinates = %s/%s, want %s/alpha", first.Cluster, first.Tenant, testCluster)
+	}
+
+	notifier.now = func() time.Time { return notifyClockStart.Add(2 * notifier.interval) }
+	notifier.flush(runID)
+	if got := sent.count(); got != 2 {
+		t.Fatalf("published %d notifications after the interval, want 2", got)
+	}
+	second := sent.payload(1)
+	if second.Kind != "lock" || second.State != FleetLockStateHeld {
+		t.Fatalf("second notification = kind %q state %q, want lock/held", second.Kind, second.State)
+	}
+	if second.LockName != "alpha/deploy-prod" || second.RunID != runID {
+		t.Fatalf("second notification names %s/%s, want the caller's own row", second.RunID, second.LockName)
+	}
+}
+
+// TestFleetLockAcquire_RepeatPollPublishesNothing asserts a second
+// acquire that only refreshes the row's expiry publishes nothing,
+// because the row's state did not change.
+func TestFleetLockAcquire_RepeatPollPublishesNothing(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
+	now := time.Now().UTC()
+	// Another run holds the lock, so this caller only ever waits.
+	insertFleetLockRow(t, db, "alpha/deploy-prod", "holder-run", FleetLockStateHeld,
+		now.Add(-time.Minute), now.Add(time.Hour))
+
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	deps.LockNotifier = notifier
+
+	runID := newTestUUIDv7String()
+	if resp := acquireForCaller(t, deps, runID); resp.State != FleetLockStateWaiting {
+		t.Fatalf("first poll state: got %q, want %q", resp.State, FleetLockStateWaiting)
+	}
+	if got := sent.count(); got != 1 {
+		t.Fatalf("published %d notifications for the first insert, want 1", got)
+	}
+
+	notifier.now = func() time.Time { return notifyClockStart.Add(2 * notifier.interval) }
+	if resp := acquireForCaller(t, deps, runID); resp.State != FleetLockStateWaiting {
+		t.Fatalf("repeat poll state: got %q, want %q", resp.State, FleetLockStateWaiting)
+	}
+	notifier.flush(runID)
+	if got := sent.count(); got != 1 {
+		t.Fatalf("published %d notifications after a repeat poll, want 1", got)
+	}
+}
+
+// TestFleetLockAcquire_PromotionIntoAHeldRowPublishesNothing asserts a
+// promotion whose own predicate matches no row publishes nothing: the
+// other run still holds the lock, so this caller's poll writes no state.
+func TestFleetLockAcquire_PromotionIntoAHeldRowPublishesNothing(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
+	now := time.Now().UTC()
+	insertFleetLockRow(t, db, "alpha/deploy-prod", "holder-run", FleetLockStateHeld,
+		now.Add(-time.Minute), now.Add(4*time.Hour))
+
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	deps.LockNotifier = notifier
+
+	runID := newTestUUIDv7String()
+	// The first poll inserts this run's own waiting row and publishes.
+	if resp := acquireForCaller(t, deps, runID); resp.State != FleetLockStateWaiting {
+		t.Fatalf("first poll state: got %q, want %q", resp.State, FleetLockStateWaiting)
+	}
+	if got := sent.count(); got != 1 {
+		t.Fatalf("published %d notifications for the first insert, want 1", got)
+	}
+
+	// A later poll re-tests the promotion predicate against a row the
+	// holder still holds, so the transaction promotes nothing.
+	notifier.now = func() time.Time { return notifyClockStart.Add(time.Hour) }
+	if resp := acquireForCaller(t, deps, runID); resp.State != FleetLockStateWaiting {
+		t.Fatalf("second poll state: got %q, want %q", resp.State, FleetLockStateWaiting)
+	}
+	notifier.flush(runID)
+	if got := sent.count(); got != 1 {
+		t.Fatalf("published %d notifications after an unpromoted poll, want 1", got)
+	}
+}
+
+// TestFleetLockAcquire_ExpiryDeletePublishesOnePerRow asserts one
+// transaction's expiry delete of two waiters publishes two released
+// notifications, each naming its own row.
+func TestFleetLockAcquire_ExpiryDeletePublishesOnePerRow(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
+	now := time.Now().UTC()
+	// Two waiters whose leases already expired.
+	insertFleetLockRow(t, db, "alpha/deploy-prod", "waiter-1", FleetLockStateWaiting,
+		now.Add(-time.Hour), now.Add(-time.Minute))
+	insertFleetLockRow(t, db, "alpha/deploy-prod", "waiter-2", FleetLockStateWaiting,
+		now.Add(-time.Hour), now.Add(-time.Minute))
+
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	deps.LockNotifier = notifier
+
+	resp := acquireForCaller(t, deps, newTestUUIDv7String())
+	if resp.State != FleetLockStateHeld {
+		t.Fatalf("state: got %q, want %q", resp.State, FleetLockStateHeld)
+	}
+
+	// The two released notifications carry distinct run ids, so neither
+	// coalesces; the caller's own held notification is held for the
+	// interval and is not part of this count.
+	released := map[string]bool{}
+	for i := 0; i < sent.count(); i++ {
+		got := sent.payload(i)
+		if got.State == FleetLockStateReleased {
+			released[got.RunID] = true
+		}
+	}
+	if !released["waiter-1"] || !released["waiter-2"] {
+		t.Fatalf("released notifications = %v, want one per expired waiter", released)
+	}
+}
+
+// TestFleetLockAcquire_NilNotifierPublishesNothing asserts an acquire
+// with no notifier completes and panics nothing.
+func TestFleetLockAcquire_NilNotifierPublishesNothing(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
+	deps.LockNotifier = nil
+
+	resp := acquireForCaller(t, deps, newTestUUIDv7String())
+	if resp.State != FleetLockStateHeld {
+		t.Fatalf("state: got %q, want %q", resp.State, FleetLockStateHeld)
+	}
+}

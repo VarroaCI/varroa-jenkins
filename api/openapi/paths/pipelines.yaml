@@ -131,6 +131,35 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
+/api/v1/pipelines/{team}/locks:
+  get:
+    operationId: listTeamFleetLocks
+    tags: [Pipelines]
+    summary: Lists the fleet locks a team's tenants own, hold, or wait on.
+    description: >
+      Resolves {team} onto one or more record-store tenants, applies the
+      tenant read check to each, reads each tenant's locks, and merges the
+      answers by (name, waitingSince, runId). Each row carries its own
+      tenant and jobPath, whichever tenant it belongs to. A row carries
+      runLink only when the caller's own grant can read that row's own
+      run. A row reports its own state and its own waitingSince or
+      acquiredAt. It carries no queue position.
+    parameters:
+      - $ref: '../components/parameters.yaml#/team'
+    responses:
+      "200":
+        description: The team's fleet locks, in (name, waitingSince, runId) order.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/FleetLockListResponse'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
 /api/v1/pipelines/{team}/markers/validate:
   post:
     operationId: validatePipelineMarker

@@ -197,6 +197,7 @@ func run(ctx context.Context, cfg Config) error {
 		Liveness:          recordstore.NewPlacementLiveness(pool, confirmedGoneGrace),
 		FinalizeWait:      cfg.FinalizeWait,
 		FleetLockMetrics:  fleetLockMetrics,
+		LockNotifier:      runNotifier,
 	}
 
 	goroutineCtx, cancelGoroutines := context.WithCancel(ctx)
@@ -233,7 +234,7 @@ func run(ctx context.Context, cfg Config) error {
 		return sub.Unsubscribe()
 	}
 	tenantSyncResponderFn := func(ctx context.Context) error {
-		sub, err := recordstore.RegisterTenantSyncResponder(busConn, pool, confirmedGoneGrace, store, logger)
+		sub, err := recordstore.RegisterTenantSyncResponder(busConn, pool, confirmedGoneGrace, store, runNotifier, logger)
 		if err != nil {
 			return err
 		}
@@ -241,7 +242,7 @@ func run(ctx context.Context, cfg Config) error {
 		return sub.Unsubscribe()
 	}
 	crossTenantResponderFn := func(ctx context.Context) error {
-		sub, err := recordstore.RegisterCrossTenantResponder(busConn, pool, store, fleetLockMetrics, logger)
+		sub, err := recordstore.RegisterCrossTenantResponder(busConn, pool, store, fleetLockMetrics, runNotifier, logger)
 		if err != nil {
 			return err
 		}

@@ -136,7 +136,7 @@ reading each package's entry point):
   CR, so omitting it 404s; (3) credential stripping happens inside `resultJSON`
   via `api.SanitizeObject`, shared with the REST layer — it is deliberately at
   that one chokepoint rather than per tool, because a per-call-site omission
-  is exactly the failure mode a 64-tool surface makes inevitable, so a tool
+  is exactly the failure mode a broad tool surface makes inevitable, so a tool
   that bypasses `resultJSON` bypasses redaction; (4) register tools through `addTool`
   with a `toolKind`, never `mcpServer.AddTool` — mcp-go's `NewTool` defaults
   every annotation to its most alarming value (`destructiveHint` and
@@ -197,10 +197,11 @@ reading each package's entry point):
   `oneOf` requires exactly one match and the shapes overlap. Output schemas are
   **not** server-validated — `handler.go` enables input validation only — so
   they are asserted in tests.
-  `tools_pipelines.go` registers four pipeline tools: `run_pipeline` (action),
-  `list_runs`, `get_run`, and `get_run_log` (read). Each calls the same
-  `internal/api` service method (`pipelines_service.go`'s `RunPipeline`,
-  `ListRuns`, `GetRun`, `GetRunLog`) the matching HTTP handler calls, so the
+  `tools_pipelines.go` registers five pipeline tools: `run_pipeline` (action),
+  `list_runs`, `get_run`, `get_run_log`, and `list_fleet_locks` (read). Each
+  calls the same `internal/api` service method (`pipelines_service.go`'s
+  `RunPipeline`, `ListRuns`, `GetRun`, `GetRunLog`, `ListFleetLocks`) the
+  matching HTTP handler calls, so the
   MCP surface and the REST surface authorize and read identically; no tool
   here issues an HTTP request to the BFF or calls a controller-scoped check.
   `get_run_log` returns a bounded tail (`tailLines`, default 100, clamped 1

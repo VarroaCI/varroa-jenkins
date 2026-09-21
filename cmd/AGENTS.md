@@ -85,6 +85,11 @@ stating what it is/is not responsible for:
   and feeds it to the tenant-sync responder, the backstop round, and the
   retention liveness seam; it does not reuse `envDurationMillis`, whose
   millisecond integer reads badly in a chart value.
+  One `recordstore.NewRunNotifier` value serves the whole process: the
+  ingest path takes it through `SetRunNotifier`, the cross-tenant and
+  tenant-sync responders take it as their own argument, and
+  `MaintenanceConfig.LockNotifier` carries it into the hourly round, so
+  every lock write publishes on one coalescing counter and one clock.
   Needs no Kubernetes API access. `run(ctx, cfg)` in `run.go` holds the
   whole wiring and shutdown sequence, so a test drives it without
   `main`'s flag parsing. Does not serve any REST or MCP surface — that is

@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getTeamCell, listPipelines, listRunners, teamRunStreamUrl } from "../../api/client";
+import { getTeamCell, listFleetLocks, listPipelines, listRunners, teamRunStreamUrl } from "../../api/client";
 import { ApiError } from "../../hooks/useApi";
 import { useEventStream } from "../../hooks/useEventStream";
 import { ForbiddenPage, GenericErrorPage, NotFoundPage, RecordStoreDisabledPage } from "../../components/RecoveryState";
 import { Card } from "../../components/Card";
 import { age } from "../../components/activityTimeline.util";
-import type { RunNotification, RunnerEntry, RunningRun } from "../../types";
+import { holderOf, holdsLock } from "../../lib/fleetLocks";
+import type { FleetLock, RunNotification, RunnerEntry, RunningRun } from "../../types";
 import JobTree, { formatDuration } from "./JobTree";
 import TeamCellCard, { CELL_STATE_LABELS } from "./TeamCellCard";
 import { buildJobTree, defaultOpenPaths, visibleRows } from "./jobTree";
@@ -102,6 +103,50 @@ function RunnerRow({ item }: { item: RunnerEntry }) {
   );
 }
 
+/**
+ * LockRow renders one lock. A held or a releasing row names its own run. A
+ * waiting row names the row of the same lock name that holds the lock, and
+ * the page groups that row from the list it already holds. When this list
+ * carries no holder row, the row states that the lock is held elsewhere.
+ * The row shows no queue position, because no read answers one.
+ */
+function LockRow({ items, row }: { items: FleetLock[]; row: FleetLock }) {
+  const waiting = row.state === "waiting";
+  const holder = waiting ? holderOf(items, row) : holdsLock(row) ? row : undefined;
+  return (
+    <tr>
+      <td className={styles.nameCell}>{row.name}</td>
+      <td>{row.state}</td>
+      <td>
+        {holder ? (
+          <HolderRun row={holder} />
+        ) : waiting ? (
+          <span className={styles.dim}>held elsewhere</span>
+        ) : (
+          <span className={styles.dim}>—</span>
+        )}
+      </td>
+      <td className={styles.lockSince}>
+        {age(waiting ? row.waitingSince : row.acquiredAt ?? row.waitingSince)}
+      </td>
+    </tr>
+  );
+}
+
+/**
+ * HolderRun names the run that holds a lock. The cell links to the run
+ * when the response carries a runLink. A lock the caller cannot read
+ * states its job path as plain text.
+ */
+function HolderRun({ row }: { row: FleetLock }) {
+  if (!row.runLink) return <span className={styles.lockJob}>{row.jobPath}</span>;
+  return (
+    <Link to={row.runLink} className={styles.lockJob}>
+      {row.jobPath}
+    </Link>
+  );
+}
+
 export default function TeamHome() {
   const { team } = useParams<{ team: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -112,29 +157,33 @@ export default function TeamHome() {
     enabled: !!team,
   });
 
-  // The team's stream carries every run of every tenant of that team.
+  // The team's stream carries every run and every lock of every tenant of
+  // that team.
   const { lastEvent, readyState } = useEventStream<RunNotification>(
     team ? teamRunStreamUrl(team) : null,
     team ? `pipelines:${team}` : null,
-    ["run", "stage"],
+    ["run", "stage", "lock"],
   );
 
-  const invalidateTeam = useCallback(() => {
+  // One window drives both reads: a run frame and a stage frame change a
+  // tile, and a lock frame changes a lock row. The page reads its own
+  // lists and it renders no payload field.
+  const refreshReads = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["pipelines", team] });
+    void queryClient.invalidateQueries({ queryKey: ["fleet-locks", team] });
   }, [queryClient, team]);
 
-  // The run-event effect reads the invalidator through this ref, so it runs
+  // The run-event effect reads the refresher through this ref, so it runs
   // for one frame only and never replays a frame a team change leaves
   // behind.
-  const invalidateTeamRef = useRef(invalidateTeam);
-  invalidateTeamRef.current = invalidateTeam;
+  const refreshReadsRef = useRef(refreshReads);
+  refreshReadsRef.current = refreshReads;
 
-  // One read holds the running strip and the aggregates both, so the page
-  // refetches that read and renders no payload field. A reconnect
-  // refetches too, because the stream replays nothing.
+  // A reconnect reads both lists again, because the stream replays
+  // nothing.
   useEffect(() => {
-    if (readyState === "open") invalidateTeam();
-  }, [readyState, invalidateTeam]);
+    if (readyState === "open") refreshReads();
+  }, [readyState, refreshReads]);
 
   const lastRunEventAtRef = useRef(0);
   const windowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -152,11 +201,13 @@ export default function TeamHome() {
   }, [team]);
   useEffect(() => {
     // A run frame and a stage frame both change a tile, and a run's first
-    // stage row can land after the frame that started the run. The page
-    // reads the team once per window: a frame outside the window reads at
-    // once, and a frame inside it arms one timer that reads when the
-    // window ends, so no frame is lost.
-    if (lastEvent?.type !== "run" && lastEvent?.type !== "stage") return;
+    // stage row can land after the frame that started the run. A lock
+    // frame changes a lock row. The page reads its lists once per window: a
+    // frame outside the window reads at once, and a frame inside it arms
+    // one timer that reads when the window ends, so no frame is lost.
+    if (lastEvent?.type !== "run" && lastEvent?.type !== "stage" && lastEvent?.type !== "lock") {
+      return;
+    }
     const now = Date.now();
     const waitMs = RUN_EVENT_WINDOW_MS - (now - lastRunEventAtRef.current);
     if (waitMs <= 0) {
@@ -168,14 +219,14 @@ export default function TeamHome() {
         windowTimerRef.current = null;
       }
       lastRunEventAtRef.current = now;
-      invalidateTeamRef.current();
+      refreshReadsRef.current();
       return;
     }
     if (windowTimerRef.current !== null) return;
     windowTimerRef.current = setTimeout(() => {
       windowTimerRef.current = null;
       lastRunEventAtRef.current = Date.now();
-      invalidateTeamRef.current();
+      refreshReadsRef.current();
     }, waitMs);
   }, [lastEvent]);
 
@@ -183,6 +234,16 @@ export default function TeamHome() {
     queryKey: ["runners", team],
     queryFn: () => listRunners(team!),
     enabled: !!team,
+  });
+  // The team stream carries a lock frame for this tenant's own locks only.
+  // A lock under this tenant's prefix that another tenant's run holds
+  // publishes on the holder's subject, so the card also polls on the cells
+  // cadence.
+  const locksQuery = useQuery({
+    queryKey: ["fleet-locks", team],
+    queryFn: () => listFleetLocks(team!),
+    enabled: !!team,
+    refetchInterval: 15_000,
   });
   // This call shares its query key with TeamCellCard's own call, so React
   // Query dedupes the two into one request.
@@ -211,6 +272,8 @@ export default function TeamHome() {
   }, [searchParams, tree]);
 
   const rows = useMemo(() => visibleRows(tree, openPaths), [tree, openPaths]);
+
+  const lockItems = useMemo(() => locksQuery.data?.items ?? [], [locksQuery.data]);
 
   // A fold is a view setting, not a navigation step, so it replaces the
   // current history entry. The browser back button then leaves the page
@@ -311,6 +374,33 @@ export default function TeamHome() {
             </thead>
             <tbody>
               <JobTree team={team!} rows={rows} openPaths={openPaths} onToggle={toggleFold} />
+            </tbody>
+          </table>
+        </Card>
+      )}
+
+      <div className={styles.sectionTitle}>Locks</div>
+      {locksQuery.isLoading ? (
+        <div className={styles.loading}>Loading locks…</div>
+      ) : locksQuery.isError ? (
+        <div className={styles.empty}>Unable to load locks.</div>
+      ) : lockItems.length === 0 ? (
+        <div className={styles.empty}>The tenant holds no lock and waits on none.</div>
+      ) : (
+        <Card>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>Lock</th>
+                <th>State</th>
+                <th>Holder</th>
+                <th>Since</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lockItems.map((row) => (
+                <LockRow key={`${row.name}/${row.runId}`} items={lockItems} row={row} />
+              ))}
             </tbody>
           </table>
         </Card>

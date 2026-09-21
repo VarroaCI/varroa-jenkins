@@ -44,6 +44,10 @@ type CrossTenantDeps struct {
 	Conn        *bus.Conn
 	Metrics     *CrossTenantMetrics
 	LockMetrics *FleetLockMetrics
+	// LockNotifier publishes the lock notifications the responder's lock
+	// kinds owe after their own transaction commits. A nil LockNotifier
+	// publishes nothing, so a test with no bus keeps working.
+	LockNotifier *RunNotifier
 }
 
 // RegisterCrossTenantResponder subscribes to bus.LedgerCrossTenantSubject
@@ -54,8 +58,9 @@ type CrossTenantDeps struct {
 // FleetLockMetrics the caller also wires into the maintenance round's
 // MaintenanceConfig: the three gauges and the expired counter are one
 // shared instrument set, registered once, never twice on the same
-// meter.
-func RegisterCrossTenantResponder(conn *bus.Conn, pool *pgxpool.Pool, store crossTenantBlobSigner, lockMetrics *FleetLockMetrics, logger *slog.Logger) (*bus.Sub, error) {
+// meter. notifier publishes the lock notifications of the three lock
+// kinds, and a nil notifier publishes nothing.
+func RegisterCrossTenantResponder(conn *bus.Conn, pool *pgxpool.Pool, store crossTenantBlobSigner, lockMetrics *FleetLockMetrics, notifier *RunNotifier, logger *slog.Logger) (*bus.Sub, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -64,13 +69,14 @@ func RegisterCrossTenantResponder(conn *bus.Conn, pool *pgxpool.Pool, store cros
 		logger.Warn("cross-tenant metrics registration failed; the cross-tenant responder starts anyway", "error", err)
 	}
 	deps := CrossTenantDeps{
-		Pool:        pool,
-		Evaluator:   NewGrantEvaluator(pool),
-		Reader:      NewReader(pool),
-		Blob:        store,
-		Conn:        conn,
-		Metrics:     metrics,
-		LockMetrics: lockMetrics,
+		Pool:         pool,
+		Evaluator:    NewGrantEvaluator(pool),
+		Reader:       NewReader(pool),
+		Blob:         store,
+		Conn:         conn,
+		Metrics:      metrics,
+		LockMetrics:  lockMetrics,
+		LockNotifier: notifier,
 	}
 	handler := func(data []byte) []byte {
 		return handleCrossTenantBytes(logger, deps, data)

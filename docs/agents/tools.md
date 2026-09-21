@@ -46,14 +46,18 @@ Authorization runs before a result enters the list, so a hidden controller,
 job, or run never appears. The last three kinds need the record store; when
 it is not wired, `search` still returns the first four.
 
-The MCP server also exposes four pipeline tools: `run_pipeline`, `list_runs`,
-`get_run`, and `get_run_log`. They operate on the build record store. The
-`run_pipeline` tool starts a build and returns a `runId` and an `intentKey`.
+The MCP server also exposes five pipeline tools: `run_pipeline`, `list_runs`,
+`get_run`, `get_run_log`, and `list_fleet_locks`. They operate on the build
+record store. The `run_pipeline` tool starts a build and returns a `runId`
+and an `intentKey`.
 The `list_runs` tool takes `limit` with the same default of 50 and the same
 maximum of 200 as `list_activity`. The `get_run` tool returns one run's
 detail. The `get_run_log` tool returns a bounded tail of the run's console
 log, never a stream; `tailLines` defaults to 100 and clamps between 1 and
-500. An agent that needs live output calls `get_run_log` again.
+500. An agent that needs live output calls `get_run_log` again. The
+`list_fleet_locks` tool takes `team` and answers the locks that team's
+tenants own, hold, or wait on, with the same rows
+`GET /pipelines/{team}/locks` answers.
 
 The server also exposes one cell read tool, `get_cell_usage`. It takes
 `namespace`, `name`, and an optional `cluster` that defaults to the local

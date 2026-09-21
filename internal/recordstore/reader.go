@@ -109,6 +109,17 @@ type Reader interface {
 	// retryable hold, because a trigger sent to the wrong member answers
 	// the permanent NOT_HOME and cancels the build.
 	JobHome(ctx context.Context, cluster, tenant, jobPath string) (JobHome, error)
+
+	// ListFleetLocks answers every fleet_locks row of cluster whose name
+	// prefix is tenant plus "/", plus every row of cluster whose own
+	// tenant column is tenant, as one de-duplicated set. The caller
+	// decides whether a row of another tenant also discloses a link to
+	// its run.
+	ListFleetLocks(ctx context.Context, cluster, tenant string) ([]FleetLock, error)
+
+	// ListAllFleetLocks answers every fleet_locks row of cluster, with
+	// no tenant filter.
+	ListAllFleetLocks(ctx context.Context, cluster string) ([]FleetLock, error)
 }
 
 // JobHome is one job's home member. Placed reports whether the tenant

@@ -14,13 +14,15 @@ import (
 )
 
 // =============================================================================
-// Pipeline tools (4): run_pipeline, list_runs, get_run, get_run_log
+// Pipeline tools (5): run_pipeline, list_runs, get_run, get_run_log,
+// list_fleet_locks
 //
-// Design D1a: these four tools call the same internal services the
+// Design D1a: these tools call the same internal services the
 // pipelines HTTP handlers call (internal/api's RunPipeline, ListRuns,
-// GetRun, GetRunLog), so each tool authorizes and reads exactly as its
-// HTTP counterpart does. No tool here calls a controller-scoped check;
-// the authorization table lives in specs/pipelines-api.
+// GetRun, GetRunLog, ListFleetLocks), so each tool authorizes and reads
+// exactly as its HTTP counterpart does. No tool here calls a
+// controller-scoped check; the authorization table lives in
+// specs/pipelines-api.
 // =============================================================================
 
 // defaultListRunsLimit and maxListRunsLimit match list_activity's clamp
@@ -40,6 +42,7 @@ func registerPipelinesTools(mcpServer *server.MCPServer, deps *api.Dependencies)
 	registerListRunsTool(mcpServer, deps)
 	registerGetRunTool(mcpServer, deps)
 	registerGetRunLogTool(mcpServer, deps)
+	registerListFleetLocksTool(mcpServer, deps)
 }
 
 // requirePipelineCaller guards a nil authorizer and requires claims, the
@@ -226,4 +229,42 @@ var runListOutputSchema = listOutputSchema("Run summary.", []schemaField{
 	{Name: "startedAt", Type: "string", Desc: "Start time, RFC3339."},
 	{Name: "endedAt", Type: "string", Desc: "End time, RFC3339."},
 	{Name: "durationMs", Type: "integer", Desc: "Duration in milliseconds, once ended."},
+})
+
+func registerListFleetLocksTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
+	listFleetLocksTool := mcp.NewTool("list_fleet_locks",
+		mcp.WithDescription("List the fleet locks a team's tenants own, hold, or wait on. "+
+			"A lock under another tenant's prefix appears when one of the team's own runs "+
+			"holds or waits on it."),
+		mcp.WithString("team", mcp.Required(), mcp.Description("Team, or the controller name for a single-controller tenant")),
+		withListOutput(fleetLockListOutputSchema),
+	)
+	addTool(mcpServer, kindRead, listFleetLocksTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		claims, toolErr := requirePipelineCaller(ctx, deps)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		team := strArg(getArgs(req), "team")
+		if team == "" {
+			return mcp.NewToolResultError("team is required"), nil
+		}
+		items, serr := api.NewServer(deps).ListFleetLocks(ctx, claims, team)
+		if serr != nil {
+			return mcp.NewToolResultError(serr.Error()), nil
+		}
+		return resultJSON(map[string]any{"items": items, "count": len(items)})
+	})
+}
+
+// fleetLockListOutputSchema describes list_fleet_locks' items:
+// api.FleetLockRow serializes directly.
+var fleetLockListOutputSchema = listOutputSchema("Fleet lock.", []schemaField{
+	{Name: "name", Type: "string", Desc: "Qualified lock name, <tenant>/<name>."},
+	{Name: "tenant", Type: "string", Desc: "Tenant whose run holds or waits on the lock."},
+	{Name: "jobPath", Type: "string", Desc: "Full job path of the holder's or waiter's run."},
+	{Name: "state", Type: "string", Desc: "waiting, held, or releasing."},
+	{Name: "runId", Type: "string", Desc: "Run that holds or waits on the lock."},
+	{Name: "runLink", Type: "string", Desc: "Run link, present only when the caller may read that run."},
+	{Name: "waitingSince", Type: "string", Desc: "Time the row began to wait, RFC3339."},
+	{Name: "acquiredAt", Type: "string", Desc: "Time the lock was acquired, once held."},
 })

@@ -12,7 +12,7 @@ import (
 // It exists because mcp-go's NewTool defaults every annotation to the most
 // alarming possible value — readOnlyHint:false, destructiveHint:true,
 // idempotentHint:false, openWorldHint:true — and a tool that never sets them
-// ships those defaults. That made all 64 tools indistinguishable: get_controller
+// ships those defaults. That made every tool indistinguishable: get_controller
 // advertised itself exactly as destructively as delete_controller, so a client
 // either prompts on every read or trusts none of the hints.
 type toolKind int

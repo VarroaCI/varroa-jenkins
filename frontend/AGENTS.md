@@ -138,10 +138,14 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   matching `*.module.css` and `*.test.tsx` (e.g. `Controllers.tsx`,
   `ControllerDetail.tsx`, `CatalogBrowser.tsx`, `Roles.tsx`, `JenkinsRoles*`,
   `Teams*`, `PluginsTab.tsx`, `FleetPlugins.tsx`, `Cells.tsx`,
-  `CellTab.tsx`). Registered in `src/App.tsx` / `src/routing.ts`.
+  `CellTab.tsx`, `Locks.tsx`). Registered in `src/App.tsx` / `src/routing.ts`.
   `Cells.tsx` is the fleet Cells page at `/cells`, behind a cluster-wide
   `cellpools:read` gate (`canCellsRow` in `src/lib/navPermissions.ts`, which
-  the sidebar and the More sheet both read). `CellTab.tsx` is the Cell tab of
+  the sidebar and the More sheet both read). `Locks.tsx` is the fleet locks
+  page at `/locks`, behind the cluster-wide `fleetlocks:read` gate, and it
+  carries **no** sidebar row and no `navPermissions.ts` door: a caller
+  reaches it by its own URL. It polls `GET /locks` on the cells cadence and
+  opens no stream. `CellTab.tsx` is the Cell tab of
   `ControllerDetail.tsx`, rendered only when the detail response reports
   `kind` `cell`. Its two Team-derived columns take the **wildcard admin
   gate** (`canDoGlobal(perms, "*", "*")`, the rule the Access page uses):
@@ -179,8 +183,13 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   it; a second browser implementation is not permitted.
 - `src/pages/pipelines/` — the pipelines route tree: `PipelinesIndex.tsx`
   (`/pipelines`, redirects when the caller's grants resolve to exactly one
-  team), `TeamHome.tsx` (`/pipelines/:team`, the jobs folder tree plus a
-  Running now strip), `PipelinePage.tsx` (`/pipelines/:team/:job`, one job's
+  team), `TeamHome.tsx` (`/pipelines/:team`, the jobs folder tree, a Running
+  now strip, and a `Locks` card that reads `GET /pipelines/{team}/locks`,
+  refetches on a `lock` stream frame under the same 2-second window a `run` or
+  a `stage` frame uses, and polls that read on the cells cadence, because a
+  lock under the team's own prefix that another tenant's run holds publishes
+  its `lock` notification on the holder's subject, which the team stream does
+  not carry), `PipelinePage.tsx` (`/pipelines/:team/:job`, one job's
   health, definition, and run list, and hosts `RunDrawer.tsx`'s parameter form),
   `BuildPage.tsx` (`/pipelines/:team/:job/:run`, one run's detail; owns both
   `useEventStream` calls, the team run stream and the run log stream). It keeps
@@ -301,7 +310,11 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   `uuidv7.ts` (`uuidv7`: mints a UUID version 7 client token, layout matching
   the server's own reader in `internal/api/handlers_pipelines_write.go`;
   `RunDrawer.tsx` mints one token per drawer open, so a repeated submit
-  carries the same token and the BFF answers with one run).
+  carries the same token and the BFF answers with one run), `fleetLocks.ts`
+  (`holderOf`/`holdsLock`: the single holder-grouping rule for both lock
+  tables — a waiting row's holder is the row of the same lock name in the
+  fetched list whose state is `held` or `releasing`, and no read answers a
+  holder or a queue position).
 - `src/api/` — `client.ts`, the single hand-written fetch client typed
   against `src/types/index.ts` (mirrors CRD/API shapes: `Controller`,
   `ComposedBundle`, `VarroaRole`, `JenkinsRole`, `BroodRun`, etc.).

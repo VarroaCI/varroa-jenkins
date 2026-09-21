@@ -255,3 +255,55 @@ func (s *Server) GetRunLog(ctx context.Context, claims *auth.Claims, runID strin
 	}
 	return strings.Join(texts, "\n"), total, nil
 }
+
+// FleetLockRow is one row of a fleet lock list: the same shape both lock
+// routes serialize (components/schemas.yaml#FleetLock). The response
+// carries no holder field and no queue position, so a consumer that
+// wants either groups the rows it already has by name.
+type FleetLockRow struct {
+	Name         string     `json:"name"`
+	Tenant       string     `json:"tenant"`
+	JobPath      string     `json:"jobPath"`
+	State        string     `json:"state"`
+	RunID        string     `json:"runId"`
+	RunLink      *string    `json:"runLink,omitempty"`
+	WaitingSince time.Time  `json:"waitingSince"`
+	AcquiredAt   *time.Time `json:"acquiredAt,omitempty"`
+}
+
+// ListFleetLocks is the list_fleet_locks MCP tool's entry into the team
+// lock read. It is the same read GET /pipelines/{team}/locks serves, so
+// the tool and the route authorize a caller and shape a row
+// identically. The tenant read check answers for every resolved tenant,
+// and a team the caller may read on no tenant answers not found.
+func (s *Server) ListFleetLocks(ctx context.Context, claims *auth.Claims, team string) ([]FleetLockRow, *ServiceError) {
+	if s.deps.RecordStore == nil {
+		return nil, &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}
+	}
+	refs, serr := s.resolveTeamTenants(ctx, claims, team)
+	if serr != nil {
+		return nil, serr
+	}
+	var admitted []TenantRef
+	for _, ref := range refs {
+		if s.canReadPipeline(claims, ref, "") {
+			admitted = append(admitted, ref)
+		}
+	}
+	if len(admitted) == 0 {
+		return nil, &ServiceError{Status: http.StatusNotFound, Message: "team not found"}
+	}
+
+	rows, err := s.listTeamFleetLocks(ctx, claims, admitted)
+	if serr := s.readerServiceError(err, "list fleet locks"); serr != nil {
+		return nil, serr
+	}
+	out, cerr := convertJSON[[]FleetLockRow](rows)
+	if cerr != nil {
+		return nil, &ServiceError{Status: http.StatusInternalServerError, Message: "encode fleet locks failed"}
+	}
+	if out == nil {
+		out = []FleetLockRow{}
+	}
+	return out, nil
+}

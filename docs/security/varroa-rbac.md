@@ -95,6 +95,23 @@ A pool's `status.tenants` lists every tenant on the pool, and the Teams API is a
 verb for a developer or a viewer would therefore disclose the tenant list to a caller who may not
 list Teams. `CellPool` is cluster-scoped, so a namespace-scoped binding satisfies neither verb.
 
+## Read the fleet locks
+
+`fleetlocks` carries one verb, `read`. That verb lists every fleet lock of a cluster on the
+`/locks` page and through `GET /locks`. See [Fleet locks](../tutorials/pipelines.md#fleet-locks) for
+both lock views. There is no write verb, because the view is read-only.
+
+| Role | `fleetlocks` verbs |
+|---|---|
+| `admin` | The verb, through the wildcard rule |
+| `operator` | `read` |
+| `developer` | None |
+| `viewer` | None |
+
+A fleet-wide lock list names every tenant's lock names and job paths at once. The verb therefore
+stays with the operator role. That is the same rule `cellpools` follows. A tenant sees its own
+locks on the team home, and it needs no verb for that.
+
 ## Grant break-glass access
 
 `break-glass` is a `controllers` verb. It lets a caller request a temporary admin session on a

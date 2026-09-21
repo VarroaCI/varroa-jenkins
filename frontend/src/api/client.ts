@@ -65,6 +65,7 @@ import type {
   CellPoolListResponse,
   CellPoolScaleRequest,
   CellGrants,
+  FleetLockListResponse,
 } from "../types";
 import type { ControllerDetail } from "../hooks/useControllers";
 import type { Permissions } from "../types/auth";
@@ -1099,6 +1100,22 @@ export function getPipelineJob(team: string, jobPath: string): Promise<PipelineJ
  */
 export function getTeamCell(team: string): Promise<TeamCell> {
   return bffFetch<TeamCell>(`${pipelinesBase(team)}/cell`);
+}
+
+/**
+ * Lists the fleet locks a team's own tenants own or wait on. A team that
+ * spans two tenants answers both tenants' rows in one list.
+ */
+export function listFleetLocks(team: string): Promise<FleetLockListResponse> {
+  return bffFetch<FleetLockListResponse>(`${pipelinesBase(team)}/locks`);
+}
+
+/**
+ * Lists every tenant's fleet locks. The operator page reads this route,
+ * and the read covers the local cluster.
+ */
+export function listAllFleetLocks(): Promise<FleetLockListResponse> {
+  return bffFetch<FleetLockListResponse>("/locks");
 }
 
 /**

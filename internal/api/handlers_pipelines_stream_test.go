@@ -357,6 +357,39 @@ func TestHandleTeamRunStream_EmptyJobPathIsDropped(t *testing.T) {
 	})
 }
 
+// TestHandleTeamRunStream_ForwardsALockNotification proves a lock
+// notification meets the same tenant set and job-grant filter a run
+// notification meets: one whose job path the caller reads is forwarded
+// with its own fields unchanged, and one whose job path is empty is
+// dropped.
+func TestHandleTeamRunStream_ForwardsALockNotification(t *testing.T) {
+	stub := &runFanoutStub{}
+	srv := streamTestServer(
+		fixedTenantResolver{refs: []TenantRef{{Cluster: "core", Tenant: "team-a", Folder: "team-a"}}},
+		pipelineGrantAuthorizer([]string{"read"}, "team-a"),
+		stub,
+	)
+
+	rec, stop := startTeamRunStream(t, srv, "team-a")
+	defer stop()
+	stub.waitForSubscription(t)
+
+	if stub.deliver(notification("lock", "team-a", "")) {
+		t.Error("a lock notification with an empty job path passed the filter")
+	}
+	rec.expectNoFrame(t, `"kind":"lock"`)
+
+	locked := notification("lock", "team-a", "team-a/release/app")
+	locked.LockName = "team-a/gate"
+	locked.State = "released"
+	if !stub.deliver(locked) {
+		t.Fatal("a lock notification with a readable job path was refused")
+	}
+	rec.waitForFrame(t, `"kind":"lock"`)
+	rec.waitForFrame(t, `"lock_name":"team-a/gate"`)
+	rec.waitForFrame(t, `"state":"released"`)
+}
+
 // TestHandleTeamRunStream_ReconnectReceivesNoEarlierEvent proves the stream
 // replays nothing: a second connection sees only what arrives after it.
 func TestHandleTeamRunStream_ReconnectReceivesNoEarlierEvent(t *testing.T) {

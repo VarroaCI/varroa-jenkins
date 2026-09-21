@@ -14,10 +14,12 @@ import TeamHome from "./TeamHome";
 const mockListPipelines = vi.fn();
 const mockListRunners = vi.fn();
 const mockGetTeamCell = vi.fn();
+const mockListFleetLocks = vi.fn();
 vi.mock("../../api/client", () => ({
   listPipelines: (...args: unknown[]) => mockListPipelines(...args),
   listRunners: (...args: unknown[]) => mockListRunners(...args),
   getTeamCell: (...args: unknown[]) => mockGetTeamCell(...args),
+  listFleetLocks: (...args: unknown[]) => mockListFleetLocks(...args),
   teamRunStreamUrl: (team: string) => `/api/v1/pipelines/${encodeURIComponent(team)}/stream`,
 }));
 
@@ -722,7 +724,7 @@ describe("TeamHome — live run events", () => {
     mockListPipelines.mockResolvedValue(pipelineList("payments", ["payments/checkout-api"]));
   });
 
-  it("subscribes to the team's own stream with both event names", async () => {
+  it("subscribes to the team's own stream with every event name", async () => {
     renderPage("/pipelines/payments");
     await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(1));
 
@@ -731,7 +733,7 @@ describe("TeamHome — live run events", () => {
     expect(mockUseEventStream).toHaveBeenCalledWith(
       "/api/v1/pipelines/payments/stream",
       "pipelines:payments",
-      ["run", "stage"],
+      ["run", "stage", "lock"],
     );
   });
 

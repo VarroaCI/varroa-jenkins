@@ -205,3 +205,71 @@ func TestApplyRunCompletedKeepsSetRevision(t *testing.T) {
 		t.Fatalf("scm_revision = %v, want %q", revisionGot, claimRevision)
 	}
 }
+
+// TestApplyRunCompletedReportsReleasedLocks asserts the owner write
+// reports one entry per fleet lock it deleted, each naming that row's
+// own values, and that a run holding two nested locks reports both.
+func TestApplyRunCompletedReportsReleasedLocks(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:completed-release")
+	g := NewIngester(pool, nil, nil)
+
+	now := time.Now()
+	insertFleetLockRow(t, db, "alpha/deploy-prod", runID.String(), FleetLockStateHeld,
+		now.Add(-time.Minute), now.Add(5*time.Minute))
+	insertFleetLockRow(t, db, "alpha/deploy-gate", runID.String(), FleetLockStateHeld,
+		now.Add(-time.Minute), now.Add(5*time.Minute))
+
+	completed := newTestEnvelope(t, runID, "manual:completed-release", KindRunCompleted,
+		RunCompletedPayload{Result: strPtr("SUCCESS")})
+	res, err := g.Apply(context.Background(), completed)
+	if err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+	if len(res.ReleasedFleetLocks) != 2 {
+		t.Fatalf("released locks = %+v, want one entry per deleted row", res.ReleasedFleetLocks)
+	}
+	names := map[string]string{}
+	for _, lock := range res.ReleasedFleetLocks {
+		names[lock.LockName] = lock.JobPath
+		if lock.Cluster != testCluster || lock.Tenant != "alpha" {
+			t.Errorf("released lock coordinates = %s/%s, want %s/alpha", lock.Cluster, lock.Tenant, testCluster)
+		}
+	}
+	for _, want := range []string{"alpha/deploy-prod", "alpha/deploy-gate"} {
+		if names[want] != "alpha/release" {
+			t.Errorf("released lock %s = %q, want the deleted row's own job path", want, names[want])
+		}
+	}
+}
+
+// TestApplyRunCompletedForeignInstanceReportsNoReleasedLock asserts a
+// foreign completion releases nothing and reports no entry.
+func TestApplyRunCompletedForeignInstanceReportsNoReleasedLock(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:completed-foreign-lock")
+	g := NewIngester(pool, nil, nil)
+
+	now := time.Now()
+	insertFleetLockRow(t, db, "alpha/deploy-prod", runID.String(), FleetLockStateHeld,
+		now.Add(-time.Minute), now.Add(5*time.Minute))
+
+	completed := newTestEnvelope(t, runID, "manual:completed-foreign-lock", KindRunCompleted,
+		RunCompletedPayload{Result: strPtr("SUCCESS")})
+	completed.CellInstance = "pod-other"
+	res, err := g.Apply(context.Background(), completed)
+	if err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+	if len(res.ReleasedFleetLocks) != 0 {
+		t.Fatalf("released locks = %+v, want none for a foreign completion", res.ReleasedFleetLocks)
+	}
+	var state string
+	if err := db.QueryRow(`SELECT state FROM varroa.fleet_locks WHERE name = $1 AND run_id = $2`,
+		"alpha/deploy-prod", runID.String()).Scan(&state); err != nil {
+		t.Fatalf("read fleet lock row: %v", err)
+	}
+	if state != FleetLockStateHeld {
+		t.Fatalf("state = %q, want the row held: a foreign completion releases nothing", state)
+	}
+}

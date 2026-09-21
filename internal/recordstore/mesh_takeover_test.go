@@ -469,3 +469,54 @@ func TestDispatchMeshResumeReadsTheRecordedEpoch(t *testing.T) {
 		}
 	}
 }
+
+// TestTakeOverLostRunsPublishesNoLockNotification asserts a takeover that
+// rewrites a held lock's cell_instance produces no lock notification. The
+// takeover takes no notifier of its own, and the next maintenance round
+// publishes nothing for the row either, because the row's own state did
+// not change: it stays held.
+func TestTakeOverLostRunsPublishesNoLockNotification(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestActionConn(t)
+	useManualMeter(t)
+
+	runID := seedMeshRunningRun(t, pool, db)
+	seedMeshFleetLock(t, db, runID)
+	seedMeshPlacement(t, db, "pod-live", "pod-live")
+
+	metrics, err := NewInterruptedMetrics()
+	if err != nil {
+		t.Fatalf("new interrupted metrics: %v", err)
+	}
+	actionMetrics, err := NewActionMetrics()
+	if err != nil {
+		t.Fatalf("new action metrics: %v", err)
+	}
+	if got := runTakeover(t, pool, conn, metrics, actionMetrics); got != 1 {
+		t.Fatalf("published = %d, want 1", got)
+	}
+
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+
+	now := time.Now().UTC()
+	moved, expired, err := sweepFleetLocks(context.Background(), pool, now, notifier)
+	if err != nil {
+		t.Fatalf("sweepFleetLocks: %v", err)
+	}
+	if moved != 0 || expired != 0 {
+		t.Fatalf("moved = %d, expired = %d, want 0 and 0: the takeover moved the lock, not the sweep", moved, expired)
+	}
+	if got := sent.count(); got != 0 {
+		t.Fatalf("published %d notifications, want 0: a takeover changes no lock state", got)
+	}
+
+	var state, instance string
+	if err := db.QueryRow(`SELECT state, cell_instance FROM varroa.fleet_locks WHERE run_id = $1`, runID.String()).
+		Scan(&state, &instance); err != nil {
+		t.Fatalf("read fleet_locks: %v", err)
+	}
+	if state != FleetLockStateHeld || instance != "pod-live" {
+		t.Fatalf("lock state=%q instance=%q, want held on pod-live", state, instance)
+	}
+}

@@ -212,6 +212,10 @@ func builtinRoles() []*v1alpha1.VarroaRole {
 				// A cell pool is read and scale only. Create and delete stay
 				// with kubectl and GitOps, so the role carries neither verb.
 				{Resources: []string{"cellpools"}, Verbs: []string{"read", "update"}},
+				// A fleet lock read is the whole capability. The BFF and
+				// MCP serve no write path for varroa.fleet_locks, so the
+				// role carries no other verb.
+				{Resources: []string{"fleetlocks"}, Verbs: []string{"read"}},
 				{Resources: []string{"version-profiles"}, Verbs: []string{"read", "create", "update", "delete"}},
 				{Resources: []string{"updatecenter"}, Verbs: []string{"upload"}},
 				{Resources: []string{"pipelines"}, Verbs: []string{"read", "write", "admin"}},

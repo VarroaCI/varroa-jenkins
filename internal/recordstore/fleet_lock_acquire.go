@@ -63,7 +63,7 @@ func handleCrossTenantLockAcquire(ctx context.Context, deps CrossTenantDeps, req
 		lease = fleetLockDefaultLeaseSeconds
 	}
 
-	outcome, err := acquireFleetLock(ctx, deps.Pool, deps.LockMetrics, fleetLockAcquireParams{
+	outcome, err := acquireFleetLock(ctx, deps.Pool, deps.LockMetrics, deps.LockNotifier, fleetLockAcquireParams{
 		Name:                ownerTenant + "/" + bareName,
 		RunID:               req.RunID,
 		Cluster:             req.Cluster,
@@ -185,9 +185,10 @@ type fleetLockAcquireOutcome struct {
 // fleet_locks_one_holder. A second violation answers "waiting" with no
 // further attempt: the winner now holds a row step 4 can see. metrics
 // counts every row the transaction's own expiry delete removes; a nil
-// metrics counts nothing.
-func acquireFleetLock(ctx context.Context, pool *pgxpool.Pool, metrics *FleetLockMetrics, p fleetLockAcquireParams) (fleetLockAcquireOutcome, error) {
-	outcome, err := acquireFleetLockOnce(ctx, pool, metrics, p)
+// metrics counts nothing. notifier publishes the lock notifications a
+// committed attempt owes, and a nil notifier publishes nothing.
+func acquireFleetLock(ctx context.Context, pool *pgxpool.Pool, metrics *FleetLockMetrics, notifier *RunNotifier, p fleetLockAcquireParams) (fleetLockAcquireOutcome, error) {
+	outcome, err := acquireFleetLockOnce(ctx, pool, metrics, notifier, p)
 	if err == nil {
 		return outcome, nil
 	}
@@ -195,7 +196,7 @@ func acquireFleetLock(ctx context.Context, pool *pgxpool.Pool, metrics *FleetLoc
 		return fleetLockAcquireOutcome{}, err
 	}
 
-	outcome, err = acquireFleetLockOnce(ctx, pool, metrics, p)
+	outcome, err = acquireFleetLockOnce(ctx, pool, metrics, notifier, p)
 	if err == nil {
 		return outcome, nil
 	}
@@ -207,8 +208,10 @@ func acquireFleetLock(ctx context.Context, pool *pgxpool.Pool, metrics *FleetLoc
 }
 
 // acquireFleetLockOnce runs one attempt of the five-step acquire
-// transaction.
-func acquireFleetLockOnce(ctx context.Context, pool *pgxpool.Pool, metrics *FleetLockMetrics, p fleetLockAcquireParams) (fleetLockAcquireOutcome, error) {
+// transaction. It collects each affected row's own identity as it goes,
+// and it publishes those rows' notifications after the commit alone, so
+// no reader learns of a row a rolled-back attempt touched.
+func acquireFleetLockOnce(ctx context.Context, pool *pgxpool.Pool, metrics *FleetLockMetrics, notifier *RunNotifier, p fleetLockAcquireParams) (fleetLockAcquireOutcome, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return fleetLockAcquireOutcome{}, fmt.Errorf("begin fleet lock acquire: %w", err)
@@ -217,26 +220,21 @@ func acquireFleetLockOnce(ctx context.Context, pool *pgxpool.Pool, metrics *Flee
 
 	now := time.Now().UTC()
 
-	if _, err := moveInterruptedHoldersToReleasing(ctx, tx, p.Name, now); err != nil {
+	moved, _, err := moveInterruptedHoldersToReleasing(ctx, tx, p.Name, now)
+	if err != nil {
 		return fleetLockAcquireOutcome{}, err
 	}
 
-	expiredTag, err := tx.Exec(ctx, `
-		DELETE FROM varroa.fleet_locks WHERE name = $1 AND expires_at < $2 AND state <> 'releasing'
-	`, p.Name, now)
+	expiredRows, err := deleteExpiredFleetLockRows(ctx, tx, p.Name, now)
 	if err != nil {
-		return fleetLockAcquireOutcome{}, fmt.Errorf("delete expired fleet lock rows: %w", err)
+		return fleetLockAcquireOutcome{}, err
 	}
-	metrics.addExpired(ctx, int(expiredTag.RowsAffected()))
+	metrics.addExpired(ctx, len(expiredRows))
 
 	expiresAt := now.Add(p.Lease)
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO varroa.fleet_locks
-			(name, run_id, cluster, tenant, job_path, state, waiting_since, expires_at, placement_generation)
-		VALUES ($1, $2, $3, $4, $5, 'waiting', $6, $7, $8)
-		ON CONFLICT (name, run_id) DO UPDATE SET expires_at = EXCLUDED.expires_at
-	`, p.Name, p.RunID, p.Cluster, p.Tenant, p.JobPath, now, expiresAt, p.PlacementGeneration); err != nil {
-		return fleetLockAcquireOutcome{}, fmt.Errorf("insert waiting fleet lock row: %w", err)
+	inserted, err := insertWaitingFleetLockRow(ctx, tx, p, now, expiresAt)
+	if err != nil {
+		return fleetLockAcquireOutcome{}, err
 	}
 
 	var fenceToken int64
@@ -261,6 +259,7 @@ func acquireFleetLockOnce(ctx context.Context, pool *pgxpool.Pool, metrics *Flee
 		if commitErr := tx.Commit(ctx); commitErr != nil {
 			return fleetLockAcquireOutcome{}, fmt.Errorf("commit fleet lock acquire: %w", commitErr)
 		}
+		publishAcquireNotifications(notifier, moved, expiredRows, inserted, true, p)
 		return fleetLockAcquireOutcome{state: FleetLockStateHeld, fenceToken: fenceToken, expiresAt: expiresAt}, nil
 	case errors.Is(err, pgx.ErrNoRows):
 		// Not promoted: fall through to the waiting answer below.
@@ -275,17 +274,75 @@ func acquireFleetLockOnce(ctx context.Context, pool *pgxpool.Pool, metrics *Flee
 	if err := tx.Commit(ctx); err != nil {
 		return fleetLockAcquireOutcome{}, fmt.Errorf("commit fleet lock wait: %w", err)
 	}
+	publishAcquireNotifications(notifier, moved, expiredRows, inserted, false, p)
 	return fleetLockAcquireOutcome{state: FleetLockStateWaiting, holder: holder, position: position, expiresAt: expiresAt}, nil
 }
 
+// deleteExpiredFleetLockRows deletes every expired row of one lock name
+// that is not releasing, and answers each deleted row's own identity.
+// The caller counts the slice it publishes, so the expiry metric and the
+// publish set never disagree.
+func deleteExpiredFleetLockRows(ctx context.Context, tx pgx.Tx, name string, now time.Time) ([]movedFleetLockRow, error) {
+	rows, err := tx.Query(ctx, `
+		DELETE FROM varroa.fleet_locks
+		WHERE name = $1 AND expires_at < $2 AND state <> 'releasing'
+		RETURNING cluster, tenant, job_path, name, run_id
+	`, name, now)
+	if err != nil {
+		return nil, fmt.Errorf("delete expired fleet lock rows: %w", err)
+	}
+	return scanMovedFleetLockRows(rows, "delete expired fleet lock rows")
+}
+
+// insertWaitingFleetLockRow inserts the caller's own row, or refreshes
+// its expiry when the row already exists. It reports whether the
+// statement inserted the row: the conflict arm's own xmax names an
+// existing tuple version, so xmax = 0 tells a genuine insert from a
+// refresh. Only a genuine insert changes the row's state.
+func insertWaitingFleetLockRow(ctx context.Context, tx pgx.Tx, p fleetLockAcquireParams, now, expiresAt time.Time) (bool, error) {
+	var inserted bool
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO varroa.fleet_locks
+			(name, run_id, cluster, tenant, job_path, state, waiting_since, expires_at, placement_generation)
+		VALUES ($1, $2, $3, $4, $5, 'waiting', $6, $7, $8)
+		ON CONFLICT (name, run_id) DO UPDATE SET expires_at = EXCLUDED.expires_at
+		RETURNING (xmax = 0) AS inserted
+	`, p.Name, p.RunID, p.Cluster, p.Tenant, p.JobPath, now, expiresAt, p.PlacementGeneration).Scan(&inserted); err != nil {
+		return false, fmt.Errorf("insert waiting fleet lock row: %w", err)
+	}
+	return inserted, nil
+}
+
+// publishAcquireNotifications publishes the lock notifications one
+// committed acquire attempt owes: each interruption move the transaction
+// made, each expired row it deleted, then the caller's own row. The
+// caller's own row is the row the transaction wrote under the caller's
+// own primary key, so the two sets of fields name the same values.
+func publishAcquireNotifications(notifier *RunNotifier, moved, expired []movedFleetLockRow, inserted, held bool, p fleetLockAcquireParams) {
+	for _, row := range moved {
+		notifier.Notify(lockNotification(row.cluster, row.tenant, row.jobPath, row.name, row.runID, FleetLockStateReleasing))
+	}
+	for _, row := range expired {
+		notifier.Notify(lockNotification(row.cluster, row.tenant, row.jobPath, row.name, row.runID, FleetLockStateReleased))
+	}
+	if inserted {
+		notifier.Notify(lockNotification(p.Cluster, p.Tenant, p.JobPath, p.Name, p.RunID, FleetLockStateWaiting))
+	}
+	if held {
+		notifier.Notify(lockNotification(p.Cluster, p.Tenant, p.JobPath, p.Name, p.RunID, FleetLockStateHeld))
+	}
+}
+
 // fleetLockExecer is the subset of pgx.Tx, *pgxpool.Pool, *pgxpool.Conn,
-// and maintDB that moveInterruptedHoldersToReleasing needs: one Exec
-// call. Every caller of the derived held-to-releasing move satisfies it,
-// so the acquire transaction (task 3.8) and the maintenance round (task
-// 4.4) share one implementation of design.md D11's move, never two
-// copies of its SQL.
+// and maintDB that moveInterruptedHoldersToReleasing needs. The move
+// answers each row's own identity, so the interface declares Query
+// beside Exec, and every caller of the derived held-to-releasing move
+// satisfies it with no wrapper. The acquire transaction and the
+// maintenance round therefore share one implementation of the move,
+// never two copies of its SQL.
 type fleetLockExecer interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
 // moveInterruptedHoldersToReleasing implements the derived held-to-
@@ -298,21 +355,55 @@ type fleetLockExecer interface {
 // at once, for the maintenance round's own first step. Because the move
 // re-derives wherever the table is read, a recorder that stops between
 // the interruption marking and this move loses nothing: the next
-// acquire or the next maintenance round reaches the same state. It
-// answers how many rows it moved.
-func moveInterruptedHoldersToReleasing(ctx context.Context, db fleetLockExecer, name string, now time.Time) (int, error) {
-	tag, err := db.Exec(ctx, `
+// acquire or the next maintenance round reaches the same state.
+//
+// It answers every moved row's own identity beside the count, so a
+// caller publishes one notification per moved row.
+func moveInterruptedHoldersToReleasing(ctx context.Context, db fleetLockExecer, name string, now time.Time) ([]movedFleetLockRow, int, error) {
+	rows, err := db.Query(ctx, `
 		UPDATE varroa.fleet_locks fl
 		SET state = 'releasing', releasing_since = $2
 		FROM varroa.runs r
 		WHERE fl.state = 'held' AND r.run_id::text = fl.run_id
 		  AND r.status = 'COMPLETED' AND r.result = 'INTERRUPTED'
 		  AND ($1 = '' OR fl.name = $1)
+		RETURNING fl.cluster, fl.tenant, fl.job_path, fl.name, fl.run_id
 	`, name, now)
 	if err != nil {
-		return 0, fmt.Errorf("move interrupted holders to releasing: %w", err)
+		return nil, 0, fmt.Errorf("move interrupted holders to releasing: %w", err)
 	}
-	return int(tag.RowsAffected()), nil
+	moved, err := scanMovedFleetLockRows(rows, "move interrupted holders to releasing")
+	if err != nil {
+		return nil, 0, err
+	}
+	return moved, len(moved), nil
+}
+
+// movedFleetLockRow is one fleet_locks row a statement changed, carried
+// up for that row's own lock notification: the row's own cluster,
+// tenant, job path, name, and run id, in that order.
+type movedFleetLockRow struct {
+	cluster, tenant, jobPath, name, runID string
+}
+
+// scanMovedFleetLockRows reads rows shaped by a RETURNING clause of
+// cluster, tenant, job_path, name, run_id. It drains and closes the
+// rows, which frees the caller's one database connection for its next
+// statement.
+func scanMovedFleetLockRows(rows pgx.Rows, action string) ([]movedFleetLockRow, error) {
+	defer rows.Close()
+	var out []movedFleetLockRow
+	for rows.Next() {
+		var row movedFleetLockRow
+		if err := rows.Scan(&row.cluster, &row.tenant, &row.jobPath, &row.name, &row.runID); err != nil {
+			return nil, fmt.Errorf("%s: %w", action, err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("%s: %w", action, err)
+	}
+	return out, nil
 }
 
 // readFleetLockWaitStatus reads the current holder (a "held" or a

@@ -40,6 +40,7 @@ import BroodSchedules from "./pages/BroodSchedules";
 import BroodScheduleDetail from "./pages/BroodScheduleDetail";
 import FleetPlugins from "./pages/FleetPlugins";
 import Cells from "./pages/Cells";
+import Locks from "./pages/Locks";
 import PipelinesIndex from "./pages/pipelines/PipelinesIndex";
 import TeamHome from "./pages/pipelines/TeamHome";
 import PipelinePage from "./pages/pipelines/PipelinePage";
@@ -124,6 +125,16 @@ function AppRoutes() {
                     }
                   />
                   <Route path="clusters" element={<Clusters />} />
+                  {/* The lock page carries no sidebar row: a caller reaches
+                      it by its own URL. */}
+                  <Route
+                    path="locks"
+                    element={
+                      <PermissionRoute resource="fleetlocks" verb="read" globalOnly>
+                        <Locks />
+                      </PermissionRoute>
+                    }
+                  />
 
                   {/* Settings area shell — list routes only */}
                   <Route element={<AreaShell items={SETTINGS_ITEMS} title="Admin & access" />}>

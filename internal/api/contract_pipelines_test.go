@@ -121,4 +121,31 @@ func init() {
 			WantStatus: http.StatusServiceUnavailable,
 		},
 	)
+
+	// ── Fleet locks (add-fleet-locks-view) ───────────────────────────────
+	//
+	// Both lock reads answer from the record store, and newContractServer
+	// wires none, so each route answers the same uniform 503 the pipelines
+	// paths above answer: ListFleetLocks checks the store before it
+	// resolves the team, and the fleet-wide read checks it before the
+	// gate. That proves both routes are wired to their handler and their
+	// response matches the spec's ServiceUnavailable shape.
+	// handlers_pipelines_locks_test.go covers the 200 shape, the row key
+	// set, and the fleetlocks:read gate over a fakeRecordReader.
+	registerContractCases(
+		contractCase{
+			Name:       "listTeamFleetLocks-recordStoreDisabled",
+			Method:     "GET",
+			Path:       "/api/v1/pipelines/payments/locks",
+			Claims:     adminClaims,
+			WantStatus: http.StatusServiceUnavailable,
+		},
+		contractCase{
+			Name:       "listAllFleetLocks-recordStoreDisabled",
+			Method:     "GET",
+			Path:       "/api/v1/locks",
+			Claims:     adminClaims,
+			WantStatus: http.StatusServiceUnavailable,
+		},
+	)
 }

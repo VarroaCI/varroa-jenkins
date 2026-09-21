@@ -393,3 +393,86 @@ func TestRunNotifierLogsFailedSendAndKeepsWorking(t *testing.T) {
 		t.Fatalf("logged %d publish failures after the second write, want 1\n%s", got, logs.String())
 	}
 }
+
+// TestLockNotificationJSONShape asserts the lock fields reach the wire
+// for a lock notification alone, and that a lock notification still
+// carries an empty status and result.
+func TestLockNotificationJSONShape(t *testing.T) {
+	t.Run("a lock notification carries lock_name and state", func(t *testing.T) {
+		lockName := testTenant + "/smoke-lock"
+		n := lockNotification(testCluster, testTenant, testJobPath, lockName, "run-1", FleetLockStateHeld)
+		body := marshalNotification(t, n)
+
+		if got := body["kind"]; got != "lock" {
+			t.Errorf("kind = %v, want lock", got)
+		}
+		if got := body["lock_name"]; got != lockName {
+			t.Errorf("lock_name = %v, want %s", got, lockName)
+		}
+		if got := body["state"]; got != FleetLockStateHeld {
+			t.Errorf("state = %v, want %s", got, FleetLockStateHeld)
+		}
+		if got := body["cluster"]; got != testCluster {
+			t.Errorf("cluster = %v, want %s", got, testCluster)
+		}
+		if got := body["tenant"]; got != testTenant {
+			t.Errorf("tenant = %v, want %s", got, testTenant)
+		}
+		if got := body["job_path"]; got != testJobPath {
+			t.Errorf("job_path = %v, want %s", got, testJobPath)
+		}
+		if got := body["run_id"]; got != "run-1" {
+			t.Errorf("run_id = %v, want run-1", got)
+		}
+
+		// A lock write changes no run state, so both fields are present
+		// as the empty string, never omitted.
+		for _, key := range []string{"status", "result"} {
+			value, present := body[key]
+			if !present {
+				t.Errorf("%s is absent, want the empty string", key)
+				continue
+			}
+			if value != "" {
+				t.Errorf("%s = %v, want the empty string", key, value)
+			}
+		}
+		if value, present := body["build_number"]; present {
+			t.Errorf("build_number = %v, want the field absent", value)
+		}
+	})
+
+	t.Run("a run or stage notification carries neither key", func(t *testing.T) {
+		for _, kind := range []string{"run", "stage"} {
+			body := marshalNotification(t, notifyOne("run-1", kind, "RUNNING"))
+			for _, key := range []string{"lock_name", "state"} {
+				if value, present := body[key]; present {
+					t.Errorf("%s notification carries %s = %v, want the field absent", kind, key, value)
+				}
+			}
+		}
+	})
+}
+
+// TestRunNotifierNilReceiverPublishesNothing asserts a nil notifier
+// accepts a notification and publishes nothing, so no caller guards
+// against a nil notifier of its own.
+func TestRunNotifierNilReceiverPublishesNothing(t *testing.T) {
+	var n *RunNotifier
+	n.Notify(lockNotification(testCluster, testTenant, testJobPath, testTenant+"/smoke-lock", "run-1", "released"))
+}
+
+// marshalNotification decodes one notification's own JSON body, so a
+// test reads the keys the wire carries rather than the struct's fields.
+func marshalNotification(t *testing.T, n RunNotification) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(n)
+	if err != nil {
+		t.Fatalf("marshal notification: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("decode notification: %v", err)
+	}
+	return body
+}

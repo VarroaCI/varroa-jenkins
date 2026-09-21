@@ -26,22 +26,25 @@ import (
 // foreign completion leaves every stored key in place.
 //
 // owner reports whether this write was the real terminal write: only
-// then does the caller run the fan-out round and release this run's
-// fleet locks. A foreign completion changes no terminal column, so it
-// is not "an ingested run.completed" in the sense the fleet-locks and
-// cross-tenant-upstream-trigger capabilities mean: it would double-fire
-// a downstream trigger or release a lock still protected by a live
-// deployment.
-func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) (owner bool, payload RunCompletedPayload, err error) {
+// then does the caller run the fan-out round. A foreign completion
+// changes no terminal column, so it is not "an ingested run.completed"
+// in the sense the fleet-locks and cross-tenant-upstream-trigger
+// capabilities mean: it would double-fire a downstream trigger or
+// release a lock still protected by a live deployment.
+//
+// releasedLocks names every fleet lock the owner arm deleted, one entry
+// per row, so the caller publishes one lock notification per released
+// row. A foreign completion releases nothing and answers no entry.
+func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) (owner bool, payload RunCompletedPayload, releasedLocks []ReleasedFleetLock, err error) {
 	if unmarshalErr := json.Unmarshal(env.Payload, &payload); unmarshalErr != nil {
-		return false, RunCompletedPayload{}, fmt.Errorf("%w: decode run.completed payload: %v", ErrMalformedEnvelope, unmarshalErr)
+		return false, RunCompletedPayload{}, nil, fmt.Errorf("%w: decode run.completed payload: %v", ErrMalformedEnvelope, unmarshalErr)
 	}
 
 	owner = intent.cellInstance != nil && *intent.cellInstance != "" && env.CellInstance == *intent.cellInstance
 
 	envelopeJSON, err := json.Marshal(env)
 	if err != nil {
-		return false, RunCompletedPayload{}, fmt.Errorf("marshal envelope: %w", err)
+		return false, RunCompletedPayload{}, nil, fmt.Errorf("marshal envelope: %w", err)
 	}
 
 	_, err = tx.Exec(ctx, `
@@ -86,7 +89,7 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 		owner, payload.SCMRevision,
 	)
 	if err != nil {
-		return false, RunCompletedPayload{}, fmt.Errorf("upsert completed run: %w", err)
+		return false, RunCompletedPayload{}, nil, fmt.Errorf("upsert completed run: %w", err)
 	}
 
 	// The fleet lock's first release confirmation (design.md D11): a
@@ -96,12 +99,48 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 	// it confirms, so a crash after commit never strands a lock a
 	// finished run no longer protects.
 	if owner {
-		if _, err := tx.Exec(ctx, `
-			DELETE FROM varroa.fleet_locks WHERE run_id = $1 AND state IN ('held', 'releasing')
-		`, intent.runID.String()); err != nil {
-			return false, RunCompletedPayload{}, fmt.Errorf("release fleet locks for terminal run: %w", err)
+		releasedLocks, err = deleteHeldFleetLocksForRun(ctx, tx, intent.runID.String())
+		if err != nil {
+			return false, RunCompletedPayload{}, nil, err
 		}
 	}
 
-	return owner, payload, nil
+	return owner, payload, releasedLocks, nil
+}
+
+// ReleasedFleetLock is one fleet_locks row a terminal run.completed
+// write deleted, carried up to Ingester.notify for that row's own lock
+// notification. Each field is the deleted row's own value.
+type ReleasedFleetLock struct {
+	Cluster, Tenant, JobPath, LockName string
+}
+
+// deleteHeldFleetLocksForRun deletes every held or releasing fleet_locks
+// row of one run, and answers each deleted row's own identity. The
+// statement's own affected-row count cannot name a row, and the
+// notification needs the deleted row's own cluster, tenant, job path,
+// and qualified lock name. It drains and closes its rows before it
+// returns, so the caller's transaction can commit.
+func deleteHeldFleetLocksForRun(ctx context.Context, tx pgx.Tx, runID string) ([]ReleasedFleetLock, error) {
+	rows, err := tx.Query(ctx, `
+		DELETE FROM varroa.fleet_locks WHERE run_id = $1 AND state IN ('held', 'releasing')
+		RETURNING cluster, tenant, job_path, name
+	`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("release fleet locks for terminal run: %w", err)
+	}
+	defer rows.Close()
+
+	var released []ReleasedFleetLock
+	for rows.Next() {
+		var lock ReleasedFleetLock
+		if err := rows.Scan(&lock.Cluster, &lock.Tenant, &lock.JobPath, &lock.LockName); err != nil {
+			return nil, fmt.Errorf("scan released fleet lock: %w", err)
+		}
+		released = append(released, lock)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("release fleet locks for terminal run: %w", err)
+	}
+	return released, nil
 }

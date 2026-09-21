@@ -4629,6 +4629,62 @@ RunListResponse:
       type: string
   additionalProperties: false
 
+# --- Fleet lock schemas (add-fleet-locks-view) ---
+
+FleetLock:
+  type: object
+  description: >
+    One fleet lock row, from a varroa.lock step. tenant and jobPath are
+    always present, whichever tenant the row belongs to. runLink is
+    present only when the reading caller can read that row's own run. The
+    row reports its own state and its own waitingSince or acquiredAt. It
+    carries no queue position and no derived holder: a consumer groups the
+    rows it already has by name.
+  required: [name, tenant, jobPath, state, runId, waitingSince]
+  properties:
+    name:
+      type: string
+      description: The qualified lock name, in the form tenant/name.
+    tenant:
+      type: string
+      description: The tenant of the run that holds or waits on the lock.
+    jobPath:
+      type: string
+      description: The job path of the run that holds or waits on the lock.
+    state:
+      type: string
+      enum: [waiting, held, releasing]
+    runId:
+      type: string
+    runLink:
+      type: string
+      description: >
+        The run's own page path,
+        /pipelines/{team}/{jobPath}/{runId}, the same link a run search
+        result carries. Absent, not null, when the caller's own grant
+        cannot read the row's own run.
+    waitingSince:
+      type: string
+      format: date-time
+    acquiredAt:
+      type: string
+      format: date-time
+  additionalProperties: false
+
+FleetLockListResponse:
+  type: object
+  description: >
+    GET /pipelines/{team}/locks and GET /locks. Both routes answer the
+    rows in (name, waitingSince, runId) order, so the holder of a lock
+    name comes before its waiters.
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/FleetLock'
+  additionalProperties: false
+
 CreateRunRequest:
   type: object
   description: >

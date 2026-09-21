@@ -1870,13 +1870,14 @@ export interface RunChangeListResponse {
 // ---- Live run notifications (the team run stream) ----
 
 /**
- * One frame of the team run stream, named "run" or "stage". The recorder
- * publishes the frame, so every field keeps its snake_case name. The
- * stream sends no first frame and replays nothing, so a page refetches
- * when its stream opens.
+ * One frame of the team run stream, named "run", "stage", or "lock". The
+ * recorder publishes the frame, so every field keeps its snake_case name.
+ * The stream sends no first frame and replays nothing, so a page refetches
+ * when its stream opens. A page reads a frame to decide which read to
+ * refresh, and it renders no field of the payload.
  */
 export interface RunNotification {
-  kind: "run" | "stage";
+  kind: "run" | "stage" | "lock";
   cluster: string;
   tenant: string;
   job_path: string;
@@ -1888,8 +1889,40 @@ export interface RunNotification {
   status?: string;
   /** Empty unless the run ended. No page renders it. */
   result?: string;
+  /** The qualified lock name, as <tenant>/<bare-name>. Present on a "lock"
+   * frame only. */
+  lock_name?: string;
+  /** The lock's state after the write. Present on a "lock" frame only. */
+  state?: string;
   seq: number;
   at: string;
+}
+
+// ---- Fleet locks ----
+
+/**
+ * One fleet lock row. The BFF answers this shape and nothing wider: the
+ * row carries no holder field, because a page groups the list it already
+ * holds, and no queue position, because neither read answers one.
+ */
+export interface FleetLock {
+  /** The qualified name, as <tenant>/<bare-name>. */
+  name: string;
+  /** The tenant of the run that holds or waits on the lock. */
+  tenant: string;
+  jobPath: string;
+  /** "waiting", "held", or "releasing". A released row is deleted, so no read answers it. */
+  state: string;
+  runId: string;
+  /** The holder run's page. Absent when the caller cannot read that run. */
+  runLink?: string;
+  waitingSince: string;
+  acquiredAt?: string;
+}
+
+/** The items envelope of GET /pipelines/{team}/locks and GET /locks. */
+export interface FleetLockListResponse {
+  items: FleetLock[];
 }
 
 // The run log SSE stream (D5) carries six named event kinds. The event

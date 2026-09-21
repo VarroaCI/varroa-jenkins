@@ -31,7 +31,7 @@ import (
 //
 // Second, no result may carry a credential. Sanitization happens here rather
 // than per tool because this is the one chokepoint every tool result already
-// passes through: doing it at the call sites would mean 64 places to forget.
+// passes through: doing it at the call sites would mean one place per tool to forget.
 // Route every tool result through this helper rather than mcp.NewToolResultJSON
 // so neither invariant can regress.
 func resultJSON(v any) (*mcp.CallToolResult, error) {

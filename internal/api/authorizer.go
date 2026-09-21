@@ -341,6 +341,18 @@ func (a *Authorizer) CanUpdateCellPools(claims *auth.Claims) bool {
 	return hasVerb(a.globalEffective(claims), "cellpools", "update")
 }
 
+// CanReadFleetLocks checks if the caller can read the fleet-wide lock
+// list. varroa.fleet_locks is a Postgres table and not a CRD, and the
+// decision takes the cluster-wide partition anyway: one fleet-wide read
+// discloses every tenant's lock names and job paths at once, which is
+// the disclosure CanReadCellPools guards against.
+func (a *Authorizer) CanReadFleetLocks(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "fleetlocks", "read")
+}
+
 // CanReadCatalogSources checks if the caller can read CatalogSources.
 func (a *Authorizer) CanReadCatalogSources(claims *auth.Claims) bool {
 	if claims == nil {

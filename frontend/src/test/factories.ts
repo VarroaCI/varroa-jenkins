@@ -27,6 +27,7 @@ import type {
   ControllerCondition,
   PipelineSummary,
   RunningRun,
+  FleetLock,
 } from "../types";
 import type { Permissions, MeResponse, AuthConfig } from "../types/auth";
 import type { ControllerListItem, ControllerDetail } from "../hooks/useControllers";
@@ -462,6 +463,23 @@ export function createRunningRun(overrides?: Partial<RunningRun>): RunningRun {
     runId: nextId("run"),
     jobPath: "payments/app-a",
     status: "RUNNING",
+    ...overrides,
+  };
+}
+
+// ---- Fleet locks ----
+
+/** createFleetLock sets every required field of FleetLock. runLink is
+ * absent by default, because the BFF sends it only to a caller whose
+ * grant covers the run. */
+export function createFleetLock(overrides?: Partial<FleetLock>): FleetLock {
+  return {
+    name: "payments/smoke-lock",
+    tenant: "payments",
+    jobPath: "payments/app-a",
+    state: "held",
+    runId: nextId("run"),
+    waitingSince: "2026-01-01T00:00:00Z",
     ...overrides,
   };
 }

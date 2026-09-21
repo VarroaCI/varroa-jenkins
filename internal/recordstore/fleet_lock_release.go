@@ -37,9 +37,10 @@ func fleetLockOwnerConfirmedGone(row tenantPlacementLivenessRow, cellInstance st
 }
 
 // releasingFleetLock is one releasing fleet_locks row
-// ReleaseConfirmedFleetLocks reads.
+// ReleaseConfirmedFleetLocks reads. jobPath travels with the row,
+// because the row's own release notification carries it.
 type releasingFleetLock struct {
-	name, runID, cellInstance string
+	name, runID, cellInstance, jobPath string
 }
 
 // ReleaseConfirmedFleetLocks deletes every releasing fleet_locks row of
@@ -51,14 +52,19 @@ type releasingFleetLock struct {
 // once per announce, against the row that announce just wrote, is
 // enough; the maintenance round adds nothing this test could not already
 // see at the last announce. It answers how many rows it released.
+//
+// It publishes one lock notification per row it deletes, through
+// notifier. A row whose delete affects nothing publishes nothing, which
+// covers a repeat sweep of a row another path already removed. A nil
+// notifier publishes nothing.
 func ReleaseConfirmedFleetLocks(ctx context.Context, pool *pgxpool.Pool, cluster, tenant string,
-	row tenantPlacementLivenessRow, now time.Time, grace time.Duration, logger *slog.Logger) (int, error) {
+	row tenantPlacementLivenessRow, now time.Time, grace time.Duration, notifier *RunNotifier, logger *slog.Logger) (int, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
 	rows, err := pool.Query(ctx, `
-		SELECT name, run_id, cell_instance FROM varroa.fleet_locks
+		SELECT name, run_id, cell_instance, job_path FROM varroa.fleet_locks
 		WHERE cluster = $1 AND tenant = $2 AND state = 'releasing'
 	`, cluster, tenant)
 	if err != nil {
@@ -81,7 +87,11 @@ func ReleaseConfirmedFleetLocks(ctx context.Context, pool *pgxpool.Pool, cluster
 			logger.Warn("release confirmed fleet lock failed", "name", c.name, "run_id", c.runID, "error", err)
 			continue
 		}
+		if tag.RowsAffected() == 0 {
+			continue
+		}
 		released += int(tag.RowsAffected())
+		notifier.Notify(lockNotification(cluster, tenant, c.jobPath, c.name, c.runID, FleetLockStateReleased))
 	}
 	return released, nil
 }
@@ -93,7 +103,7 @@ func scanReleasingFleetLocks(rows pgx.Rows) ([]releasingFleetLock, error) {
 	var out []releasingFleetLock
 	for rows.Next() {
 		var c releasingFleetLock
-		if err := rows.Scan(&c.name, &c.runID, &c.cellInstance); err != nil {
+		if err := rows.Scan(&c.name, &c.runID, &c.cellInstance, &c.jobPath); err != nil {
 			return nil, fmt.Errorf("scan releasing fleet lock: %w", err)
 		}
 		out = append(out, c)

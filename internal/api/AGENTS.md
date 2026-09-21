@@ -38,9 +38,11 @@ federation, activity persistence, and SSE fanout.
   `contract_cases_test.go`, which validate real handler responses against
   `api/openapi.SpecJSON` via `getkin/kin-openapi`'s `openapi3filter`.
   `contract_test.go` also hand-maintains `routeManifest` (a method×path mirror of
-  `router.go`'s registrations) as a coverage gate — **adding or removing a route in
-  `router.go` requires updating `routeManifest` in the same change**, or the contract
-  test fails. `contractCase` carries `RawBody`/`ContentType` for non-JSON request
+  `router.go`'s registrations) as a coverage gate. The gate compares each manifest
+  entry with the OpenAPI paths, so an entry that names no spec path fails the contract
+  test: a new route needs an edit to `router.go`, to `api/openapi/paths`, and to
+  `routeManifest` in the same change.
+  `contractCase` carries `RawBody`/`ContentType` for non-JSON request
   bodies, so a `multipart/form-data` operation is exercised as its real request shape. `make check-client` (CI) only guards `pkg/client`, not these handlers —
   a path/shape change here must land in `api/openapi/paths|components` first, then
   `make generate-client`, for both `check-client` and the contract tests to pass.
@@ -113,6 +115,19 @@ federation, activity persistence, and SSE fanout.
   `rbac.TenantGrantSourcesTruncated`), reads no record store, and therefore
   answers no `503`. `jobs` carries `omitempty` and is never an empty array:
   an absent list narrows nothing.
+- **Fleet locks** (`handleListTeamFleetLocks`/`handleListAllFleetLocks`,
+  `handlers_pipelines.go`; `Server.ListFleetLocks`, `pipelines_service.go`)
+  serves `GET /pipelines/{team}/locks` and `GET /locks` over
+  `Reader.ListFleetLocks`/`ListAllFleetLocks`. `GET /locks` is the fleet-wide
+  read: it requires a cluster-wide `CanReadFleetLocks`, and it resolves its
+  cluster exactly as the cell-usage paths resolve theirs.
+  `Server.ListFleetLocks` is the one implementation the team route and the
+  `list_fleet_locks` MCP tool share, so both authorize a caller and shape a
+  row identically. Every row always carries `tenant` and `jobPath`, and
+  carries `runLink` only when the caller's own grant reads that row's run,
+  through the same `tenantGrants`/`grantsAllow` pair the team listing uses.
+  The row shape carries no holder and no queue position: a consumer that
+  wants a lock's holder groups the rows it already has by name.
 - **The team cell read** (`handleGetTeamCell`, `handlers_pipelines.go`) serves
   `GET /pipelines/{team}/cell`. It reads the `Team` object first and falls
   back to `TenantResolver`, so a pipelines Team awaiting its first cell

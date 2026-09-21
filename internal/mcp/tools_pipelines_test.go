@@ -32,6 +32,11 @@ type fakePipelineReader struct {
 	stages  map[string][]recordstore.Stage
 	intents map[string]recordstore.Intent
 
+	// locksByTenant is keyed by tenant, for ListFleetLocks. Every test
+	// in this file scopes to one tenant, so the cluster is not part of
+	// the key.
+	locksByTenant map[string][]recordstore.FleetLock
+
 	// lastQuery captures the RunQuery ListRuns was last called with, so
 	// a test can assert on the clamped Limit without a real store.
 	lastQuery recordstore.RunQuery
@@ -48,9 +53,10 @@ func (f *fakePipelineReader) JobHome(_ context.Context, _, _, _ string) (records
 
 func newFakePipelineReader() *fakePipelineReader {
 	return &fakePipelineReader{
-		runs:    map[string]recordstore.Run{},
-		stages:  map[string][]recordstore.Stage{},
-		intents: map[string]recordstore.Intent{},
+		runs:          map[string]recordstore.Run{},
+		stages:        map[string][]recordstore.Stage{},
+		intents:       map[string]recordstore.Intent{},
+		locksByTenant: map[string][]recordstore.FleetLock{},
 	}
 }
 
@@ -444,5 +450,88 @@ func TestGetRunLogStartsNoTail(t *testing.T) {
 	tr := callPipelineTool(t, getRunLogDeps(reader, store), "get_run_log", map[string]interface{}{"run": "run-a"})
 	if tr.IsError {
 		t.Fatalf("get_run_log returned error: %v", tr.Content)
+	}
+}
+
+// --- list_fleet_locks reads the same team lock list GET
+// /pipelines/{team}/locks serves. ---
+
+// ListFleetLocks answers the seeded rows for one tenant.
+func (f *fakePipelineReader) ListFleetLocks(_ context.Context, _, tenant string) ([]recordstore.FleetLock, error) {
+	return f.locksByTenant[tenant], nil
+}
+
+// TestListFleetLocksAnswersTheTeamRows proves the tool answers the
+// team's lock rows, in the holder-then-waiters order the record store
+// answers with, each row carrying the run link the caller's own read
+// grant allows.
+func TestListFleetLocksAnswersTheTeamRows(t *testing.T) {
+	reader := newFakePipelineReader()
+	reader.locksByTenant["team-a"] = []recordstore.FleetLock{
+		{Name: "team-a/deploy", RunID: "run-a", Tenant: "team-a", JobPath: "team-a/build", State: "held"},
+		{Name: "team-a/deploy", RunID: "run-b", Tenant: "team-a", JobPath: "team-a/build", State: "waiting"},
+	}
+	deps := &api.Dependencies{
+		Authorizer:     pipelinesTestAuthorizer("read"),
+		RecordStore:    reader,
+		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", Team: "team-a", Folder: "team-a"}}},
+	}
+
+	tr := callPipelineTool(t, deps, "list_fleet_locks", map[string]interface{}{"team": "team-a"})
+	if tr.IsError {
+		t.Fatalf("list_fleet_locks returned error: %v", tr.Content)
+	}
+
+	var payload struct {
+		Items []struct {
+			Name    string `json:"name"`
+			Tenant  string `json:"tenant"`
+			JobPath string `json:"jobPath"`
+			State   string `json:"state"`
+			RunID   string `json:"runId"`
+			RunLink string `json:"runLink"`
+		} `json:"items"`
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal(tr.StructuredContent, &payload); err != nil {
+		t.Fatalf("unmarshal structuredContent: %v", err)
+	}
+	if payload.Count != 2 || len(payload.Items) != 2 {
+		t.Fatalf("count = %d, items = %d, want 2", payload.Count, len(payload.Items))
+	}
+	if payload.Items[0].State != "held" || payload.Items[1].State != "waiting" {
+		t.Errorf("items = %+v, want the holder before its waiter", payload.Items)
+	}
+	for _, item := range payload.Items {
+		if item.Name != "team-a/deploy" || item.Tenant != "team-a" || item.JobPath != "team-a/build" {
+			t.Errorf("row = %+v, want the seeded lock's own identity", item)
+		}
+		// The link is the run's own page, /pipelines/{team}/{jobPath}/{runId},
+		// with the job path's own slash escaped, as a run search result carries it.
+		if want := "/pipelines/team-a/team-a%2Fbuild/" + item.RunID; item.RunLink != want {
+			t.Errorf("row %s runLink = %q, want %s", item.RunID, item.RunLink, want)
+		}
+	}
+}
+
+// TestListFleetLocksDeniesAnUnreadableTeam proves the tool denies a
+// caller whose own grant reads no tenant of the team.
+func TestListFleetLocksDeniesAnUnreadableTeam(t *testing.T) {
+	reader := newFakePipelineReader()
+	reader.locksByTenant["team-b"] = []recordstore.FleetLock{
+		{Name: "team-b/deploy", RunID: "run-b", Tenant: "team-b", JobPath: "team-b/build", State: "held"},
+	}
+	deps := &api.Dependencies{
+		Authorizer:     pipelinesTestAuthorizer("read"),
+		RecordStore:    reader,
+		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-b", Team: "team-b", Folder: "team-b"}}},
+	}
+
+	tr := callPipelineTool(t, deps, "list_fleet_locks", map[string]interface{}{"team": "team-b"})
+	if !tr.IsError {
+		t.Fatal("expected list_fleet_locks to deny a caller with no read grant on the team")
+	}
+	if got := toolText(tr); got != "team not found" {
+		t.Errorf("error text = %q, want %q", got, "team not found")
 	}
 }

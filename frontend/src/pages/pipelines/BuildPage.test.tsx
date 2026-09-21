@@ -624,6 +624,20 @@ describe("BuildPage — live run events", () => {
     expect(document.getElementById("node-stage-s1")).toBeTruthy();
   });
 
+  it("refetches the record for a lock event of this run, which the notifier can send in place of a stage event", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    const { repaint } = renderPage();
+    await screen.findByText(/Build #42/);
+    const before = mockGetRun.mock.calls.length;
+
+    runStream({ type: "lock", data: notification({ kind: "lock", lock_name: "payments/deploy", state: "HELD" }) });
+    await act(async () => {
+      repaint();
+    });
+
+    expect(mockGetRun.mock.calls.length).toBeGreaterThan(before);
+  });
+
   it("refetches nothing for an event of another run", async () => {
     mockGetRun.mockResolvedValue(baseRun());
     const { repaint } = renderPage();

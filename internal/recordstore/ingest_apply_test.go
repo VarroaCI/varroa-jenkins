@@ -318,3 +318,126 @@ func TestIngestConsumerAcknowledgesBuildEventWhenPublishFails(t *testing.T) {
 		return err == nil && info.State.Msgs == 0
 	})
 }
+
+// countNotifications answers how many published notifications of each
+// kind the notifier recorded, after the run's own interval ends.
+func countNotifications(t *testing.T, notifier *RunNotifier, sent *captureSend, runID string) (runCount, lockCount int) {
+	t.Helper()
+	// The run's terminal notification ends its own interval, so the lock
+	// notifications that follow it are the ones a flush reaches.
+	notifier.now = func() time.Time { return notifyClockStart.Add(2 * notifier.interval) }
+	notifier.flush(runID)
+	for i := 0; i < sent.count(); i++ {
+		switch sent.payload(i).Kind {
+		case "run":
+			runCount++
+		case "lock":
+			lockCount++
+		}
+	}
+	return runCount, lockCount
+}
+
+// TestIngestNotifyPublishesOneRunAndOneLockNotification asserts a
+// terminal run.completed that holds one lock publishes one run
+// notification and one lock notification, the second naming the deleted
+// row's own lock name and job path.
+func TestIngestNotifyPublishesOneRunAndOneLockNotification(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:lock-notify-one")
+
+	now := time.Now()
+	insertFleetLockRow(t, db, "alpha/deploy-prod", runID.String(), FleetLockStateHeld,
+		now.Add(-time.Minute), now.Add(5*time.Minute))
+
+	g := NewIngester(pool, nil, nil)
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	g.SetRunNotifier(notifier)
+
+	env := newTestEnvelope(t, runID, "manual:lock-notify-one", KindRunCompleted,
+		RunCompletedPayload{Result: strPtr("SUCCESS")})
+	if _, err := g.Apply(context.Background(), env); err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+
+	runCount, lockCount := countNotifications(t, notifier, sent, env.RunID)
+	if runCount != 1 || lockCount != 1 {
+		t.Fatalf("published %d run and %d lock notifications, want 1 and 1", runCount, lockCount)
+	}
+	for i := 0; i < sent.count(); i++ {
+		got := sent.payload(i)
+		if got.Kind != "lock" {
+			continue
+		}
+		if got.State != FleetLockStateReleased || got.LockName != "alpha/deploy-prod" {
+			t.Fatalf("lock notification = state %q name %q, want released/alpha/deploy-prod", got.State, got.LockName)
+		}
+		if got.RunID != env.RunID || got.JobPath != "alpha/release" {
+			t.Fatalf("lock notification names run %s job %s, want the deleted row's own values", got.RunID, got.JobPath)
+		}
+	}
+}
+
+// TestIngestNotifyPublishesTwoLockNotificationsForNestedLocks asserts a
+// terminal run.completed that holds two locks publishes one run
+// notification and one lock notification per released row.
+func TestIngestNotifyPublishesTwoLockNotificationsForNestedLocks(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:lock-notify-two")
+
+	now := time.Now()
+	insertFleetLockRow(t, db, "alpha/deploy-prod", runID.String(), FleetLockStateHeld,
+		now.Add(-time.Minute), now.Add(5*time.Minute))
+	insertFleetLockRow(t, db, "alpha/deploy-gate", runID.String(), FleetLockStateHeld,
+		now.Add(-time.Minute), now.Add(5*time.Minute))
+
+	g := NewIngester(pool, nil, nil)
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	g.SetRunNotifier(notifier)
+
+	env := newTestEnvelope(t, runID, "manual:lock-notify-two", KindRunCompleted,
+		RunCompletedPayload{Result: strPtr("SUCCESS")})
+	if _, err := g.Apply(context.Background(), env); err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+
+	runCount, lockCount := countNotifications(t, notifier, sent, env.RunID)
+	if runCount != 1 || lockCount != 2 {
+		t.Fatalf("published %d run and %d lock notifications, want 1 and 2", runCount, lockCount)
+	}
+	names := map[string]bool{}
+	for i := 0; i < sent.count(); i++ {
+		if got := sent.payload(i); got.Kind == "lock" {
+			names[got.LockName] = true
+		}
+	}
+	if !names["alpha/deploy-prod"] || !names["alpha/deploy-gate"] {
+		t.Fatalf("published lock names = %v, want one notification per released row", names)
+	}
+}
+
+// TestIngestNotifyPublishesOnlyTheRunNotificationWithNoLock asserts a
+// terminal run.completed that holds no lock publishes the run
+// notification alone.
+func TestIngestNotifyPublishesOnlyTheRunNotificationWithNoLock(t *testing.T) {
+	pool, _ := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:lock-notify-none")
+
+	g := NewIngester(pool, nil, nil)
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	g.SetRunNotifier(notifier)
+
+	env := newTestEnvelope(t, runID, "manual:lock-notify-none", KindRunCompleted,
+		RunCompletedPayload{Result: strPtr("SUCCESS")})
+	if _, err := g.Apply(context.Background(), env); err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+
+	runCount, lockCount := countNotifications(t, notifier, sent, env.RunID)
+	if runCount != 1 || lockCount != 0 {
+		t.Fatalf("published %d run and %d lock notifications, want 1 and 0", runCount, lockCount)
+	}
+}

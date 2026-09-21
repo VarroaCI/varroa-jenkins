@@ -79,12 +79,30 @@ func handleCrossTenantLockRenew(ctx context.Context, deps CrossTenantDeps, req C
 // deletes the caller's row, whatever its state, and answers "released"
 // even when no row remains. Release carries no fence: a caller
 // releasing its own row needs no authorization to do so.
+//
+// The delete reads the deleted row's own tenant and job path, because a
+// cross-tenant release can carry a tenant the request does not: a grant
+// let the caller hold that row under another tenant's prefix. The row's
+// own cluster and run id need no second read: name and run_id are both
+// the caller's own values, so the deleted row is the caller's own row by
+// primary key. A delete that affects no row publishes nothing.
 func handleCrossTenantLockRelease(ctx context.Context, deps CrossTenantDeps, req CrossTenantRequest) (CrossTenantResponse, error) {
 	ownerTenant, bareName, _ := splitLockName(req.Name, req.CallerTenant)
 	name := ownerTenant + "/" + bareName
-	if _, err := deps.Pool.Exec(ctx, `DELETE FROM varroa.fleet_locks WHERE name = $1 AND run_id = $2`, name, req.RunID); err != nil {
+
+	var tenant, jobPath string
+	err := deps.Pool.QueryRow(ctx, `
+		DELETE FROM varroa.fleet_locks WHERE name = $1 AND run_id = $2
+		RETURNING tenant, job_path
+	`, name, req.RunID).Scan(&tenant, &jobPath)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return CrossTenantResponse{State: FleetLockStateReleased}, nil
+	case err != nil:
 		return CrossTenantResponse{}, fmt.Errorf("release fleet lock: %w", err)
 	}
+
+	deps.LockNotifier.Notify(lockNotification(req.Cluster, tenant, jobPath, name, req.RunID, FleetLockStateReleased))
 	return CrossTenantResponse{State: FleetLockStateReleased}, nil
 }
 

@@ -55,6 +55,15 @@ type fakeRecordReader struct {
 	jobHomes map[string]jobHomeAnswer
 	// jobHomeErr makes every JobHome call fail, for the read-error case.
 	jobHomeErr error
+
+	// locksByTenant is keyed by "<cluster>/<tenant>", for
+	// ListFleetLocks. It is seeded whole, so a test decides exactly
+	// which rows one tenant's read answers.
+	locksByTenant map[string][]recordstore.FleetLock
+	// locksByCluster is keyed by cluster, for ListAllFleetLocks.
+	locksByCluster map[string][]recordstore.FleetLock
+	// locksErr makes both lock reads fail.
+	locksErr error
 }
 
 // jobHomeAnswer is one fake JobHome result.
@@ -76,6 +85,22 @@ func (f *fakeRecordReader) JobHome(_ context.Context, cluster, tenant, jobPath s
 	return recordstore.JobHome{Placed: true, Namespace: home.namespace, Cell: home.cell}, nil
 }
 
+// ListFleetLocks answers the seeded rows for one tenant.
+func (f *fakeRecordReader) ListFleetLocks(_ context.Context, cluster, tenant string) ([]recordstore.FleetLock, error) {
+	if f.locksErr != nil {
+		return nil, f.locksErr
+	}
+	return f.locksByTenant[f.tenantKey(cluster, tenant)], nil
+}
+
+// ListAllFleetLocks answers the seeded rows of one cluster.
+func (f *fakeRecordReader) ListAllFleetLocks(_ context.Context, cluster string) ([]recordstore.FleetLock, error) {
+	if f.locksErr != nil {
+		return nil, f.locksErr
+	}
+	return f.locksByCluster[cluster], nil
+}
+
 func newFakeRecordReader() *fakeRecordReader {
 	return &fakeRecordReader{
 		jobSummaries:    map[string][]recordstore.JobSummary{},
@@ -88,6 +113,8 @@ func newFakeRecordReader() *fakeRecordReader {
 		intents:         map[string]recordstore.Intent{},
 		windowStats:     map[string]recordstore.JobWindowStats{},
 		jobDependencies: map[string]recordstore.JobDependencies{},
+		locksByTenant:   map[string][]recordstore.FleetLock{},
+		locksByCluster:  map[string][]recordstore.FleetLock{},
 	}
 }
 

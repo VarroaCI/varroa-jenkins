@@ -230,3 +230,88 @@ func TestFleetLockRenew_ReleasingRowExtendsTheLease(t *testing.T) {
 		t.Fatalf("expires_at: got %v, want an extension past %v", resp.ExpiresAt, originalExpiry)
 	}
 }
+
+// TestFleetLockRelease_PublishesOnceAndNoOpPublishesNothing asserts an
+// explicit release of an existing row publishes one released
+// notification, and a second release, which finds no row, publishes
+// nothing.
+func TestFleetLockRelease_PublishesOnceAndNoOpPublishesNothing(t *testing.T) {
+	deps, db := lockTestDeps(t)
+
+	now := time.Now().UTC()
+	insertFleetLockRow(t, db, "alpha/deploy-prod", "run-1", FleetLockStateHeld,
+		now.Add(-time.Minute), now.Add(5*time.Minute))
+
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	deps.LockNotifier = notifier
+
+	if resp := handleCrossTenantLockReleaseForTest(t, deps, "run-1"); resp.State != FleetLockStateReleased {
+		t.Fatalf("release state: got %q, want %q", resp.State, FleetLockStateReleased)
+	}
+	if got := sent.count(); got != 1 {
+		t.Fatalf("published %d notifications for the release, want 1", got)
+	}
+	got := sent.payload(0)
+	if got.Kind != "lock" || got.State != FleetLockStateReleased {
+		t.Fatalf("notification = kind %q state %q, want lock/released", got.Kind, got.State)
+	}
+	if got.LockName != "alpha/deploy-prod" || got.RunID != "run-1" || got.JobPath != "alpha/release" {
+		t.Fatalf("notification names %s/%s/%s, want the deleted row's own values",
+			got.LockName, got.RunID, got.JobPath)
+	}
+
+	if resp := handleCrossTenantLockReleaseForTest(t, deps, "run-1"); resp.State != FleetLockStateReleased {
+		t.Fatalf("second release state: got %q, want %q", resp.State, FleetLockStateReleased)
+	}
+	if got := sent.count(); got != 1 {
+		t.Fatalf("published %d notifications after a no-op release, want 1", got)
+	}
+}
+
+// TestFleetLockRenew_PublishesNothing asserts a renew publishes nothing,
+// whatever it answers: it changes only values no reader renders.
+func TestFleetLockRenew_PublishesNothing(t *testing.T) {
+	cases := []struct {
+		name  string
+		state string
+	}{
+		{name: "a held row", state: FleetLockStateHeld},
+		{name: "a releasing row", state: FleetLockStateReleasing},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, db := lockTestDeps(t)
+			seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
+
+			now := time.Now().UTC()
+			insertFleetLockRow(t, db, "alpha/deploy-prod", "run-1", tc.state,
+				now.Add(-time.Minute), now.Add(5*time.Minute))
+
+			notifier, sent, _ := newCaptureNotifier(t)
+			defer notifier.Close()
+			deps.LockNotifier = notifier
+
+			resp, err := handleCrossTenantLockRenew(context.Background(), deps, CrossTenantRequest{
+				Cluster:      testCluster,
+				Namespace:    "ns-alpha",
+				Cell:         "cell-alpha",
+				CallerTenant: "alpha",
+				Name:         "deploy-prod",
+				RunID:        "run-1",
+				LeaseSeconds: 300,
+			})
+			if err != nil {
+				t.Fatalf("handleCrossTenantLockRenew: %v", err)
+			}
+			if resp.State != tc.state {
+				t.Fatalf("state: got %q, want %q", resp.State, tc.state)
+			}
+			notifier.flush("run-1")
+			if got := sent.count(); got != 0 {
+				t.Fatalf("a renew published %d notifications, want 0", got)
+			}
+		})
+	}
+}

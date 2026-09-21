@@ -160,6 +160,8 @@ paths:
     $ref: './paths/cellpools.yaml#/~1api~1v1~1cellpools'
   /api/v1/cellpools/{name}:
     $ref: './paths/cellpools.yaml#/~1api~1v1~1cellpools~1{name}'
+  /api/v1/locks:
+    $ref: './paths/locks.yaml#/~1api~1v1~1locks'
   /api/v1/identity-settings:
     $ref: './paths/users.yaml#/~1api~1v1~1identity-settings'
   /api/v1/builtin-roles:
@@ -312,6 +314,8 @@ paths:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}'
   /api/v1/pipelines/{team}/jobs/{job}/runs:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}~1runs'
+  /api/v1/pipelines/{team}/locks:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1locks'
   /api/v1/pipelines/{team}/markers/validate:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1markers~1validate'
   /api/v1/pipelines/{team}/cell:

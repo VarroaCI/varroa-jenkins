@@ -52,6 +52,10 @@ type MaintenanceConfig struct {
 	// FleetLockMetrics counts an expired fleet_locks row this round's
 	// sweep deletes. A nil FleetLockMetrics counts nothing.
 	FleetLockMetrics *FleetLockMetrics
+	// LockNotifier publishes one lock notification per fleet_locks row
+	// this round's sweep moves or deletes. A nil LockNotifier publishes
+	// nothing, which a test with no bus relies on.
+	LockNotifier *RunNotifier
 	// Now returns the round's reference time. A nil Now defaults to
 	// time.Now, so a test can pin the round to a fixed instant.
 	Now func() time.Time
@@ -167,7 +171,7 @@ func runMaintenanceSteps(ctx context.Context, db maintDB, cfg MaintenanceConfig)
 		return fmt.Errorf("finalize stale logs: %w", err)
 	}
 
-	_, expiredLocks, err := sweepFleetLocks(ctx, db, now)
+	_, expiredLocks, err := sweepFleetLocks(ctx, db, now, cfg.LockNotifier)
 	if err != nil {
 		return fmt.Errorf("sweep fleet locks: %w", err)
 	}

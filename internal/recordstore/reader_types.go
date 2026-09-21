@@ -77,6 +77,27 @@ type TestSuite struct {
 	DurationMs *int64
 }
 
+// FleetLock is one row of varroa.fleet_locks, in the shape both lock
+// reads return it. It carries no queue position: a position is a count
+// over other tenants' rows of one lock name, and neither read path
+// computes one.
+type FleetLock struct {
+	Name    string `json:"name"`
+	RunID   string `json:"runId"`
+	Cluster string `json:"cluster"`
+	Tenant  string `json:"tenant"`
+	JobPath string `json:"jobPath"`
+	State   string `json:"state"`
+	// FenceToken stays zero on a waiting row, because the promotion
+	// stamps it.
+	FenceToken int64 `json:"fenceToken,omitempty"`
+	// WaitingSince carries no omitempty. The first insert sets the
+	// column on every row, and nothing clears it.
+	WaitingSince time.Time  `json:"waitingSince"`
+	AcquiredAt   *time.Time `json:"acquiredAt,omitempty"`
+	ExpiresAt    time.Time  `json:"expiresAt"`
+}
+
 // JobSchedule is one row of varroa.job_schedules, in the shape a reader
 // returns it: the job path, the trigger type, the trigger specification,
 // the time zone, the disabled state, the exported occurrences in order,
