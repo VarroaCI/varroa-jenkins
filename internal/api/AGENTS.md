@@ -260,7 +260,10 @@ federation, activity persistence, and SSE fanout.
   `multibranch` replaces a stored `pipeline`, and the assembly loop defaults an
   absent entry to `unknown`. Every handler on this surface answers `503` when `deps.RecordStore` is nil,
   through `pipelinesUnavailable`; a handler that also reads console log or artifact
-  bytes answers the same `503` when `deps.BlobStore` is nil. The live log tail
+  bytes answers the same `503` when `deps.BlobStore` is nil. `GET /runs/{run}` is the stated
+  exception: `run_digest.go` reads the console log for the digest's `logTail`, and a nil blob
+  store or an undecodable log index degrades `logTail` to absent instead, so the run detail
+  answers either way. The live log tail
   (`GET /runs/{run}/log`) authenticates over SSE's `?ticket=` query param with scope
   `run:<run_id>`, minted by `POST /stream/ticket`, never a bearer token. `runTailRegistry`
   (`runlog_tail.go`) is this BFF replica's shared lease table: at most one lease and one

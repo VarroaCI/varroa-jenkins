@@ -39,6 +39,11 @@ class Varroa implements Serializable {
         return script.varroaLock(args) { body() }
     }
 
+    /** Attaches one summary line to this run, cut at 512 bytes. */
+    def summary(String text) {
+        script.varroaSummary(text)
+    }
+
     /**
      * Backs the read-only property {@code varroa.lock.token}: {@code
      * varroa.lock} is always a map carrying {@code name} and {@code

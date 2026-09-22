@@ -144,14 +144,18 @@ the root AGENTS.md greenfield rule.
   running pipeline; `Graph` (`GraphListener`) emits `STAGE_STARTED` on a labelled block
   start and `STAGE` on its end, with the stage status derived from node actions, not from
   a chunk-status call. A per-run state map (bounded 512 entries, keyed by `<job full
-  name>#<build number>`) holds each run's identity and sequence counter; a daemon timer
+  name>#<build number>`) holds each run's identity and sequence counter, which an
+  attach to a resumed build seeds from the wall clock; a daemon timer
   emits one `HEARTBEAT` event per live run every `VARROA_RUN_HEARTBEAT_SECONDS` (default
-  60 s), identity fields only. The wire model is `BuildEvent.java`/`BuildStage.java`/
+  60 s), the identity fields and the run's `summary` text when its pipeline set one.
+  The wire model is `BuildEvent.java`/`BuildStage.java`/
   `BuildChange.java`; size caps and an oversize ladder keep one serialized event under
   512 KiB, and never truncate an identifier field. `BuildEvent` fields 38 to 41
   (`template_name`, `template_version`, `marker_path`, `marker_revision`) come from the
   run's `template.VarroaTemplateValuesAction`, empty for a run with no template; a
-  `HEARTBEAT` event never carries them. `RunListener.onStarted` can fire before a Varroa
+  `HEARTBEAT` event never carries them. Field 46, `summary`, comes from the run's own
+  `VarroaSummaryAction.java`, and a `HEARTBEAT` event carries it only when it is not
+  empty. `RunListener.onStarted` can fire before a Varroa
   template flow definition attaches that action, so `Runs` holds the `STARTED` event for
   such a run (named by `FlowDefinition` class, since this package holds no compile
   dependency on `template`'s flow definitions) until the action attaches, in either state,
@@ -211,7 +215,7 @@ the root AGENTS.md greenfield rule.
   the pipeline's own `GroovyClassLoader` on first use — that shell's `loadClass` cannot
   find these resources on its own source path, so the source text is read via this
   plugin's own classloader and handed to `GroovyClassLoader.parseClass(String, String)`
-  directly. `Varroa.groovy` exposes `build`, `lastSuccessful`, `lock`, and the read-only
+  directly. `Varroa.groovy` exposes `build`, `lastSuccessful`, `lock`, `summary`, and the
   `lock.token` property (backed by `VarroaCrossTenantBridge.currentLockToken`, `@Whitelisted`
   for sandboxed pipelines); `VarroaRunHandle.groovy` is the returned run handle, plus
   `refresh()` (backed by `VarroaCrossTenantBridge.refresh`, since D1 lists no public status
@@ -220,6 +224,8 @@ the root AGENTS.md greenfield rule.
   thread while waiting: both reschedule themselves on `jenkins.util.Timer` between polls,
   on the shared cadence in `VarroaPollPolicy.java`. `VarroaLastSuccessfulStep.java` and
   `VarroaArtifactStep.java` are synchronous steps (`SynchronousNonBlockingStepExecution`);
+  `VarroaSummaryStep.java` uses `SynchronousStepExecution`, because its whole body is one
+  local action attach on the run and one cache update.
   `VarroaArtifactStep` downloads a signed URL through a `MasterToSlaveFileCallable` on the
   agent's own workspace channel, so the artifact's bytes never transit the controller.
   `VarroaLockStep.java` records the acquired lock on `VarroaActiveLocksAction.java` (a

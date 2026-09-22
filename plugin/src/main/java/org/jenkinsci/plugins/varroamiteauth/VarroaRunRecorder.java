@@ -156,6 +156,12 @@ public final class VarroaRunRecorder {
          * held.
          */
         private volatile Run<?, ?> heldStartedRun;
+        /**
+         * The run's latest {@code varroa.summary} text. Empty until the
+         * pipeline calls that step. The heartbeat timer holds no
+         * reference to the run, so it reads this cache and not the run.
+         */
+        private volatile String summary = "";
 
         RunState(String runId, String intentKey, String jobPath, long buildNumber) {
             this.runId = runId;
@@ -166,6 +172,16 @@ public final class VarroaRunRecorder {
 
         long nextSeq() {
             return seq.getAndIncrement();
+        }
+
+        /**
+         * Sets the counter to {@code floor} when {@code floor} is above the
+         * current value. A resumed build seeds its counter above every value
+         * the previous process used, so its events order after that process's
+         * events on the record store's per-run watermarks.
+         */
+        void seedSeq(long floor) {
+            seq.accumulateAndGet(floor, Math::max);
         }
     }
 
@@ -184,6 +200,20 @@ public final class VarroaRunRecorder {
     private static RunState stateFor(String jobPath, long buildNumber) {
         synchronized (RUN_STATE) {
             return RUN_STATE.get(stateKey(jobPath, buildNumber));
+        }
+    }
+
+    /**
+     * Caches one run's summary text for its next heartbeat. The heartbeat
+     * timer holds no reference to the run, so it reads this cache instead
+     * of the run on every tick. A run with no live state keeps the text
+     * in its own action alone: the gate is off, the run holds no claim,
+     * or the run already ended.
+     */
+    static void recordSummary(Run<?, ?> run, String cutText) {
+        RunState state = stateFor(safeJobPath(run), run.getNumber());
+        if (state != null) {
+            state.summary = cutText;
         }
     }
 
@@ -347,15 +377,19 @@ public final class VarroaRunRecorder {
 
     /** Emits one {@code HEARTBEAT} event for one run. */
     private static void emitHeartbeat(RunState state) {
-        emit(BuildEvent.builder()
+        BuildEvent.Builder b = BuildEvent.builder()
                 .phase(BuildEvent.PHASE_HEARTBEAT)
                 .seq(state.nextSeq())
                 .emittedAtMillis(System.currentTimeMillis())
                 .runId(state.runId)
                 .intentKey(state.intentKey)
                 .jobPath(state.jobPath)
-                .buildNumber(state.buildNumber)
-                .build());
+                .buildNumber(state.buildNumber);
+        String summary = state.summary;
+        if (!summary.isEmpty()) {
+            b.summary(summary);
+        }
+        emit(b.build());
     }
 
     /**
@@ -402,6 +436,17 @@ public final class VarroaRunRecorder {
             return false;
         }
         RunState state = registerRun(jobPath, buildNumber, resolveRunId(action), action.getIntentKey());
+        // The wall clock holds more than every count the previous process
+        // reached, and a later resume seeds it higher again, so the record
+        // store accepts the events of this process.
+        state.seedSeq(System.currentTimeMillis());
+        // The new process holds no summary of its own. The run's own
+        // action carries the text, so the first heartbeat reports it
+        // before the pipeline calls varroa.summary again.
+        VarroaSummaryAction summaryAction = run.getAction(VarroaSummaryAction.class);
+        if (summaryAction != null) {
+            state.summary = summaryAction.getSummary();
+        }
         ensureHeartbeatStarted();
         emitHeartbeat(state);
         LOGGER.log(Level.INFO, () -> "VarroaRunRecorder: attached to the resumed build "
@@ -468,7 +513,10 @@ public final class VarroaRunRecorder {
                     releaseHeld(run, state, action, null);
                 }
                 String runId = resolveRunId(action);
-                long seq = state != null ? state.nextSeq() : 0L;
+                // A completion with no live state still orders after every
+                // earlier event of the run, so it stamps the wall clock and
+                // not a fresh counter.
+                long seq = state != null ? state.nextSeq() : System.currentTimeMillis();
 
                 BuildEvent.Builder b = BuildEvent.builder()
                         .phase(BuildEvent.PHASE_COMPLETED)
@@ -486,6 +534,13 @@ public final class VarroaRunRecorder {
                 b.artifacts(ArtifactCollector.collect(run));
                 b.logSummary(finishLogStorage(runId));
                 applyTemplateFields(b, run);
+                // The completion reads the run's own action and never the
+                // cached value, so a run that lost its heartbeat still
+                // reports its summary.
+                VarroaSummaryAction summaryAction = run.getAction(VarroaSummaryAction.class);
+                if (summaryAction != null && !summaryAction.getSummary().isEmpty()) {
+                    b.summary(summaryAction.getSummary());
+                }
                 emitCapped(b.build());
             } catch (Exception e) {
                 LOGGER.log(Level.WARNING, "VarroaRunRecorder.Runs: failed to emit COMPLETED", e);
@@ -1991,5 +2046,31 @@ public final class VarroaRunRecorder {
             return "";
         }
         return s.length() > max ? s.substring(0, max) : s;
+    }
+
+    /**
+     * Cuts {@code s} to at most {@code maxBytes} UTF-8 bytes, at the
+     * largest whole character boundary at or under that limit. The
+     * summary value crosses the wire as a proto3 string, and the wire
+     * format requires a valid UTF-8 encoding, so a plain byte cut can
+     * split a multi-byte character and make the event fail to encode.
+     */
+    static String truncateUtf8Bytes(String s, int maxBytes) {
+        if (s == null) {
+            return "";
+        }
+        byte[] bytes = s.getBytes(StandardCharsets.UTF_8);
+        if (bytes.length <= maxBytes) {
+            return s;
+        }
+        int end = maxBytes;
+        // The byte at "end" is the first byte the cut drops. A byte whose
+        // top two bits are 10 is a continuation byte, so a character
+        // starts before it. The loop backs up to the nearest lead byte or
+        // ASCII byte.
+        while (end > 0 && (bytes[end] & 0xC0) == 0x80) {
+            end--;
+        }
+        return new String(bytes, 0, end, StandardCharsets.UTF_8);
     }
 }

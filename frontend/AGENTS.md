@@ -192,7 +192,10 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   not carry), `PipelinePage.tsx` (`/pipelines/:team/:job`, one job's
   health, definition, and run list, and hosts `RunDrawer.tsx`'s parameter form),
   `BuildPage.tsx` (`/pipelines/:team/:job/:run`, one run's detail; owns both
-  `useEventStream` calls, the team run stream and the run log stream). It keeps
+  `useEventStream` calls, the team run stream and the run log stream; renders
+  the run's `summary` as a header row, and renders its failure `digest` in a
+  `Digest` card above the `Pipeline` card and below the interrupted banner).
+  It keeps
   every log frame in a ref, hands `RunLogViewer.tsx` the frames plus a version
   counter, and passes the log stream's `lastEvent` down to `StageGraph.tsx` as
   a prop. The version counter changes on every frame, because one render can

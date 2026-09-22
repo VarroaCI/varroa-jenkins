@@ -120,6 +120,11 @@ type RunStartedPayload struct {
 }
 
 // RunCompletedPayload is the payload of a run.completed envelope.
+//
+// Summary stays nil when the payload carries no summary value, and that
+// nil is the gate that leaves both the summary column and the payload's
+// summary_seq key untouched. Seq orders the summary raise against the
+// stored watermark.
 type RunCompletedPayload struct {
 	Result     *string    `json:"result,omitempty"`
 	EndedAt    *time.Time `json:"ended_at,omitempty"`
@@ -128,6 +133,8 @@ type RunCompletedPayload struct {
 	// run.completed write fills an absent runs.scm_revision from it,
 	// and never replaces a stored value.
 	SCMRevision *string `json:"scm_revision,omitempty"`
+	Summary     *string `json:"summary,omitempty"`
+	Seq         int64   `json:"seq"`
 }
 
 // RunStatePayload is the payload of a run.state envelope. It takes one

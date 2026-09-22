@@ -11,8 +11,8 @@ the plugin image: the recorder accepts the forwarded key before the plugin sends
 
 ## The varroa global variable
 
-`varroa` exposes four entry points. Each call resolves the target tenant's own cell, whatever
-cluster it runs in.
+`varroa` exposes five entry points. A cross-tenant call resolves the target tenant's own cell,
+whatever cluster it runs in.
 
 | Call | Returns | What it does |
 |---|---|---|
@@ -20,6 +20,7 @@ cluster it runs in.
 | `varroa.lastSuccessful(tenant:, job:)` | a run handle, or `null` | reads the last successful run |
 | `handle.copyArtifact(path:, target:)` | the copied file's path | copies one artifact from a run the caller already holds a handle for |
 | `varroa.lock(name:, timeout:) { ... }` | the block's return value | acquires a fleet lock around the block |
+| `varroa.summary(text)` | nothing | attaches one line of text to the calling run |
 
 ### Start a build on another tenant
 

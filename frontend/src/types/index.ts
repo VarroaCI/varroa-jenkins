@@ -1810,6 +1810,27 @@ export interface RunDetail {
   /** How the run was defined, from the record's source column. Absent until
    * a run.source event arrives. */
   source?: RunSource;
+  /** The one-line run summary. Absent until the run sets one. */
+  summary?: string;
+  /** The run's failure digest. Each part is absent when the record omits it. */
+  digest?: RunDigest;
+}
+
+/** The failed-test counts of a run digest. */
+export interface RunDigestFailedTests {
+  failed: number;
+  skipped?: number;
+  total?: number;
+}
+
+/** The failure digest of a run. This is not the content digest of an
+ * artifact: RunArtifact.digest is a hash, and this is the run's own failure
+ * report. */
+export interface RunDigest {
+  stage?: string;
+  error?: string;
+  logTail?: string;
+  failedTests?: RunDigestFailedTests;
 }
 
 /** One shared library a run was defined with. */

@@ -133,6 +133,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   the `metadata.uid` of the tenant object the row describes. It defaults to
   the empty string, which means unknown, and a row keeps that value until
   its tenant announces again.
+  `00015_runs_summary.sql` adds the nullable `runs.summary`, the one-line
+  text a run attaches to itself through `varroa.summary`. It carries no
+  default and no index, and no reader treats NULL as an empty string.
   A later migration never edits an applied one. `migrationsFS` (`migrations.go`) embeds
   every file under `migrations/` into the binary through `embed.FS`, so
   the recorder needs no separate deploy artifact. Monthly partition
@@ -426,7 +429,11 @@ of the fleet's audit activity, once a controller becomes disposable.
   expression the sweep reads. The target a dispatched `mesh.resume`
   names also raises them, because that target's first heartbeat proves
   the resume. A heartbeat from any other instance changes no column, and
-  the recorder logs it at debug level. Two cases hold the unconditional
+  the recorder logs it at debug level. A heartbeat whose payload carries a
+  `summary` value also raises `runs.summary` and the payload's
+  `summary_seq` key, under the guard `summaryHeartbeatGuardSQL` states;
+  one whose payload carries no `summary` value changes neither.
+  Two cases hold the unconditional
   raise, because the test needs a name on each side: an envelope that
   names no sender, and a run that no source names an owner for. Without
   the owner rule a dead owner's

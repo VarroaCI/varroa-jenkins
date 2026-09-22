@@ -693,3 +693,85 @@ describe("BuildPage — live run events", () => {
     }
   });
 });
+
+describe("BuildPage — run summary and failure digest", () => {
+  it("renders the summary row when the record carries a summary", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ summary: "flaky on the first attempt" }));
+    renderPage();
+
+    expect(await screen.findByText("flaky on the first attempt")).toBeInTheDocument();
+    expect(screen.getByText("Summary")).toBeInTheDocument();
+  });
+
+  it("renders no summary row when the record carries no summary", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.queryByText("Summary")).toBeNull();
+  });
+
+  it("renders every part of a full digest", async () => {
+    mockGetRun.mockResolvedValue(
+      baseRun({
+        result: "FAILURE",
+        digest: {
+          stage: "Integration Test",
+          error: "three tests failed",
+          failedTests: { failed: 2, skipped: 1, total: 10 },
+          logTail: "Traceback\n  at job.groovy:12",
+        },
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByText("Integration Test")).toBeInTheDocument();
+    expect(screen.getByText(/: three tests failed/)).toBeInTheDocument();
+    expect(screen.getByText("2 failed, 1 skipped of 10")).toBeInTheDocument();
+    expect(screen.getByText(/at job\.groovy:12/).tagName).toBe("PRE");
+  });
+
+  it("renders the digest card for a log tail alone, with no stage line and no counts", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ digest: { logTail: "boom" } }));
+    renderPage();
+
+    expect(await screen.findByText("Digest")).toBeInTheDocument();
+    const tail = screen.getByText("boom");
+    expect(tail.tagName).toBe("PRE");
+    // The card body holds the tail alone: no stage line and no test counts.
+    expect(tail.parentElement?.textContent).toBe("boom");
+    expect(screen.queryByText(/\bfailed\b/)).toBeNull();
+    expect(screen.queryByText(/skipped/)).toBeNull();
+  });
+
+  it("renders no digest card when the record carries no digest", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.queryByText("Digest")).toBeNull();
+  });
+
+  it("renders a lone failed count with no skipped count and no total", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ result: "FAILURE", digest: { failedTests: { failed: 1 } } }));
+    renderPage();
+
+    expect(await screen.findByText("1 failed")).toBeInTheDocument();
+    expect(screen.queryByText(/skipped/)).toBeNull();
+    expect(screen.queryByText(/of \d/)).toBeNull();
+  });
+
+  it("shows the interrupted banner, then the digest card, then the pipeline card", async () => {
+    mockGetRun.mockResolvedValue(
+      baseRun({ result: "INTERRUPTED", interruptedReason: "node lost", digest: { stage: "Deploy" } }),
+    );
+    renderPage();
+
+    const banner = await screen.findByRole("alert");
+    const digestTitle = screen.getByText("Digest");
+    const pipelineTitle = screen.getByText("Pipeline");
+
+    expect(banner.compareDocumentPosition(digestTitle)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(digestTitle.compareDocumentPosition(pipelineTitle)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+});

@@ -47,6 +47,10 @@ func TestHandleGetRun_CarriesTheTriggerFailure(t *testing.T) {
 	if _, ok := raw["triggerHttpStatus"]; ok {
 		t.Fatal("the response carries the stored http status, which it must not")
 	}
+	// A refused trigger carries no digest: it never reached Jenkins.
+	if _, ok := raw["digest"]; ok {
+		t.Fatal("the response carries a digest for a refused trigger")
+	}
 }
 
 // TestHandleGetRun_OmitsTheTriggerFailure asserts a run with no such value

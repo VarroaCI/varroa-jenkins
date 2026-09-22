@@ -273,3 +273,138 @@ func TestApplyRunCompletedForeignInstanceReportsNoReleasedLock(t *testing.T) {
 		t.Fatalf("state = %q, want the row held: a foreign completion releases nothing", state)
 	}
 }
+
+// --- summary: the run.completed merge ---
+
+// TestApplyRunCompletedRaisesTheSummaryAndItsWatermark proves a
+// completion whose payload carries a summary value writes both the
+// summary column and the payload's summary_seq key, and that a seq above
+// a prior heartbeat's watermark wins.
+func TestApplyRunCompletedRaisesTheSummaryAndItsWatermark(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	const intentKey = "manual:completed-summary-1"
+	runID := seedGrantedIntent(t, pool, intentKey)
+	g := NewIngester(pool, nil, nil)
+	startRunForSummary(t, pool, runID, intentKey)
+
+	applySummaryHeartbeat(t, pool, runID, intentKey, map[string]any{"summary": "from the heartbeat", "seq": int64(3)})
+
+	completed := newTestEnvelope(t, runID, intentKey, KindRunCompleted, RunCompletedPayload{
+		Result:  strPtr("FAILURE"),
+		Summary: strPtr("from the completion"),
+		Seq:     5,
+	})
+	if _, err := g.Apply(context.Background(), completed); err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+
+	text, seq := readRunSummary(t, db, runID)
+	if !text.Valid || text.String != "from the completion" {
+		t.Fatalf("summary = %v, want the completion's text", text)
+	}
+	if !seq.Valid || seq.String != "5" {
+		t.Fatalf("summary_seq = %v, want 5", seq)
+	}
+}
+
+// TestApplyRunCompletedStaleSummaryCannotLowerTheWatermark proves a
+// completion whose seq sits below the stored summary_seq, and one from a
+// non-owning instance, leave both the summary column and the watermark at
+// their stored values.
+func TestApplyRunCompletedStaleSummaryCannotLowerTheWatermark(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	const intentKey = "manual:completed-summary-stale-1"
+	runID := seedGrantedIntent(t, pool, intentKey)
+	g := NewIngester(pool, nil, nil)
+	startRunForSummary(t, pool, runID, intentKey)
+
+	newer := newTestEnvelope(t, runID, intentKey, KindRunCompleted, RunCompletedPayload{
+		Result:  strPtr("FAILURE"),
+		Summary: strPtr("newer line"),
+		Seq:     9,
+	})
+	if _, err := g.Apply(context.Background(), newer); err != nil {
+		t.Fatalf("apply the newer completion: %v", err)
+	}
+
+	stale := newTestEnvelope(t, runID, intentKey, KindRunCompleted, RunCompletedPayload{
+		Result:  strPtr("ABORTED"),
+		Summary: strPtr("older line"),
+		Seq:     2,
+	})
+	stale.CellInstance = "pod-b" // differs from the intent's "pod-a"
+	if _, err := g.Apply(context.Background(), stale); err != nil {
+		t.Fatalf("apply the stale completion: %v", err)
+	}
+
+	text, seq := readRunSummary(t, db, runID)
+	if !text.Valid || text.String != "newer line" {
+		t.Fatalf("summary = %v, want the newer line", text)
+	}
+	if !seq.Valid || seq.String != "9" {
+		t.Fatalf("summary_seq = %v, want 9", seq)
+	}
+}
+
+// TestApplyRunCompletedWithoutASummaryWritesNoWatermark proves a
+// completion whose payload carries no summary value writes neither the
+// summary column nor a summary_seq key.
+func TestApplyRunCompletedWithoutASummaryWritesNoWatermark(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	const intentKey = "manual:completed-summary-absent-1"
+	runID := seedGrantedIntent(t, pool, intentKey)
+	g := NewIngester(pool, nil, nil)
+	startRunForSummary(t, pool, runID, intentKey)
+
+	completed := newTestEnvelope(t, runID, intentKey, KindRunCompleted, RunCompletedPayload{
+		Result: strPtr("FAILURE"),
+		Seq:    4,
+	})
+	if _, err := g.Apply(context.Background(), completed); err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+
+	text, seq := readRunSummary(t, db, runID)
+	if text.Valid {
+		t.Fatalf("summary = %v, want null", text)
+	}
+	if seq.Valid {
+		t.Fatalf("summary_seq = %v, want null", seq)
+	}
+	var hasKey bool
+	if err := db.QueryRow(`SELECT payload ? 'summary_seq' FROM varroa.runs WHERE run_id = $1`, runID).Scan(&hasKey); err != nil {
+		t.Fatalf("read the payload: %v", err)
+	}
+	if hasKey {
+		t.Fatal("the payload carries a summary_seq key for a completion with no summary value")
+	}
+}
+
+// TestApplyRunCompletedInsertsTheSummaryForANewRow proves a completion
+// that inserts the row, because no earlier event wrote one, writes the
+// summary text and the summary_seq key in that same insert.
+func TestApplyRunCompletedInsertsTheSummaryForANewRow(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	const intentKey = "manual:completed-summary-insert-1"
+	runID := seedGrantedIntent(t, pool, intentKey)
+	g := NewIngester(pool, nil, nil)
+
+	// No run.started and no heartbeat: the completion itself inserts the
+	// runs row.
+	completed := newTestEnvelope(t, runID, intentKey, KindRunCompleted, RunCompletedPayload{
+		Result:  strPtr("FAILURE"),
+		Summary: strPtr("summary on the insert path"),
+		Seq:     7,
+	})
+	if _, err := g.Apply(context.Background(), completed); err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+
+	text, seq := readRunSummary(t, db, runID)
+	if !text.Valid || text.String != "summary on the insert path" {
+		t.Fatalf("summary = %v, want the completion's text", text)
+	}
+	if !seq.Valid || seq.String != "7" {
+		t.Fatalf("summary_seq = %v, want 7", seq)
+	}
+}

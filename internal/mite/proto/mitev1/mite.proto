@@ -410,6 +410,7 @@ message BuildEvent {
   repeated BuildLibrary libraries = 43;
   string definition_path = 44;
   repeated BuildPodTemplate pod_templates = 45;
+  string summary = 46;
 }
 
 message ClaimRequest {

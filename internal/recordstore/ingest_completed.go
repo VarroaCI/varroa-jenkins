@@ -8,6 +8,14 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// summaryCompletedGuardSQL is the guard the run.completed summary raise
+// reads. $15 is the payload's summary value and $16 is its seq. The
+// raise applies only when the payload carries a summary value at all,
+// and only when its seq sits at or above the stored summary_seq. The
+// floor is zero, so a first summary write whose seq is zero applies.
+const summaryCompletedGuardSQL = `$15::text IS NOT NULL
+	AND $16::bigint >= COALESCE((runs.payload->>'summary_seq')::bigint, 0)`
+
 // applyRunCompleted upserts the runs row for a run.completed envelope
 // under Contract G1's terminal-precedence rule. A real terminal event —
 // one whose cell_instance equals the intent's owning cell_instance —
@@ -24,6 +32,13 @@ import (
 // removes the accepted keys from every owner write, whether or not the
 // stored row held them, because the owner arm is always a real write. A
 // foreign completion leaves every stored key in place.
+//
+// A completion whose payload carries a summary value raises the summary
+// column and the payload's summary_seq key, under the guard
+// summaryCompletedGuardSQL states. The stored watermark can only rise,
+// so a stale or a foreign completion never lowers it. A completion whose
+// payload carries no summary value changes neither the column nor the
+// key.
 //
 // owner reports whether this write was the real terminal write: only
 // then does the caller run the fan-out round. A foreign completion
@@ -50,7 +65,7 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 	_, err = tx.Exec(ctx, `
 		INSERT INTO varroa.runs (
 			run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path,
-			status, result, ended_at, duration_ms, scm_revision, payload
+			status, result, ended_at, duration_ms, scm_revision, payload, summary
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
 			CASE WHEN $13 THEN 'COMPLETED' ELSE 'QUEUED' END,
@@ -59,6 +74,10 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 			CASE WHEN $13 THEN $11::bigint ELSE NULL::bigint END,
 			$14,
 			CASE WHEN $13 THEN jsonb_build_object('run.completed', $12::jsonb) ELSE jsonb_build_object('foreign_completion', $12::jsonb) END
+				|| CASE WHEN $15::text IS NOT NULL
+				        THEN jsonb_build_object('summary_seq', $16::bigint)
+				        ELSE '{}'::jsonb END,
+			$15::text
 		)
 		ON CONFLICT (created_at, run_id) DO UPDATE SET
 			status = `+runsStatusMergeSQL("$13")+`,
@@ -73,20 +92,36 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 			-- newest changelog entry's revision, whatever the seq. A set
 			-- value stays, so the rule never rewrites a known commit.
 			scm_revision = COALESCE(NULLIF(runs.scm_revision, ''), EXCLUDED.scm_revision),
+			-- The summary raise reads the stored watermark too, unlike the
+			-- fill-only revision rule above: the visible text takes a
+			-- value only at or above that watermark, so a stale or a
+			-- foreign completion never regresses it.
+			summary = CASE WHEN `+summaryCompletedGuardSQL+`
+			               THEN $15::text ELSE runs.summary END,
 			interrupted_superseded_at = CASE
 				WHEN $13 AND runs.result = 'INTERRUPTED' THEN now()
 				ELSE runs.interrupted_superseded_at
 			END,
+			-- The merge strips the summary_seq key the VALUES clause seeds
+			-- and re-applies it as the greater of the incoming and the
+			-- stored value. It re-applies that value only when the payload
+			-- carries a summary value, because an ungated GREATEST would
+			-- write a watermark on a completion that sets no summary.
 			payload = (CASE
 			                WHEN runs.result IS NOT DISTINCT FROM '`+ResultTriggerFailed+`' AND $13 THEN COALESCE(runs.payload, '{}'::jsonb) `+triggerPayloadKeysSQL+`
 			                WHEN COALESCE(runs.payload ? 'accepted_at', false) AND $13 THEN COALESCE(runs.payload, '{}'::jsonb) `+acceptedSupersedeKeysSQL+`
 			                WHEN $13 THEN COALESCE(runs.payload, '{}'::jsonb) `+acceptedPayloadKeysSQL+`
-			                ELSE COALESCE(runs.payload, '{}'::jsonb) END) || EXCLUDED.payload
+			                ELSE COALESCE(runs.payload, '{}'::jsonb) END)
+			          || (EXCLUDED.payload - 'summary_seq')
+			          || CASE WHEN $15::text IS NOT NULL
+			                  THEN jsonb_build_object('summary_seq',
+			                           GREATEST($16::bigint, COALESCE((runs.payload->>'summary_seq')::bigint, $16::bigint)))
+			                  ELSE '{}'::jsonb END
 	`,
 		intent.runID, intent.createdAt, intent.intentKey, intent.cluster, intent.namespace,
 		intent.cellValue(), intent.tenant, intent.jobPath,
 		payload.Result, payload.EndedAt, payload.DurationMs, string(envelopeJSON),
-		owner, payload.SCMRevision,
+		owner, payload.SCMRevision, payload.Summary, payload.Seq,
 	)
 	if err != nil {
 		return false, RunCompletedPayload{}, nil, fmt.Errorf("upsert completed run: %w", err)

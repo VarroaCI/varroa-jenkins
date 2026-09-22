@@ -98,7 +98,7 @@ list Teams. `CellPool` is cluster-scoped, so a namespace-scoped binding satisfie
 ## Read the fleet locks
 
 `fleetlocks` carries one verb, `read`. That verb lists every fleet lock of a cluster on the
-`/locks` page and through `GET /locks`. See [Fleet locks](../tutorials/pipelines.md#fleet-locks) for
+`/locks` page and through `GET /locks`. See [Fleet locks](../tutorials/run-operations.md#fleet-locks) for
 both lock views. There is no write verb, because the view is read-only.
 
 | Role | `fleetlocks` verbs |

@@ -89,6 +89,8 @@ type runDetailJSON struct {
 	RetryRunID        string            `json:"retryRunId,omitempty"`
 	Stages            []runStageJSON    `json:"stages,omitempty"`
 	Source            *runSourceJSON    `json:"source,omitempty"`
+	Summary           string            `json:"summary,omitempty"`
+	Digest            *runDigestJSON    `json:"digest,omitempty"`
 }
 
 type runArtifactJSON struct {
@@ -250,6 +252,12 @@ func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID,
 			d.Source = buildRunSource(stored)
 		}
 	}
+	// A NULL summary column leaves the response key absent. The digest
+	// stays the zero value here: it needs the blob store, so Server.GetRun
+	// sets it after this function returns.
+	if run.Summary != nil {
+		d.Summary = *run.Summary
+	}
 	if len(run.Params) > 0 {
 		var params map[string]string
 		if json.Unmarshal(run.Params, &params) == nil {
@@ -289,6 +297,11 @@ func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID,
 	return d
 }
 
+// handleGetRun serves GET /runs/{run} from Server.GetRun, the one read
+// path the get_run MCP tool also calls, so the REST and the MCP surfaces
+// answer the same bytes. It keeps its own early 503 on a nil record
+// store, which is the response this surface gives a nil store for every
+// run-scoped route.
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	if s.deps.RecordStore == nil {
 		s.pipelinesUnavailable(w)
@@ -296,24 +309,12 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	claims := auth.ClaimsFromContext(ctx)
-	run, stages, ok := s.resolveRunOrNotFound(w, r, claims, r.PathValue("run"))
-	if !ok {
+	detail, serr := s.GetRun(ctx, claims, r.PathValue("run"))
+	if serr != nil {
+		s.writeServiceError(w, serr)
 		return
 	}
-
-	retryRunID := ""
-	if intent, found, err := s.deps.RecordStore.GetIntentByKey(ctx, "retry:"+run.RunID); err == nil && found {
-		retryRunID = intent.RunID
-	}
-
-	tenantFolder := ""
-	if ref, err := TenantRefFromRow(run.Cluster, run.Namespace, run.Cell, run.Tenant); err == nil {
-		tenantFolder = ref.Folder
-	} else {
-		s.deps.Logger.Warn("resolve run tenant folder failed", "runId", run.RunID, "error", err)
-	}
-
-	s.writeJSON(w, http.StatusOK, buildRunDetail(run, stages, retryRunID, tenantFolder))
+	s.writeJSON(w, http.StatusOK, detail)
 }
 
 // --- GET /runs/{run}/artifacts ---

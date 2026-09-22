@@ -538,6 +538,14 @@ export default function BuildPage() {
           {run.startedAt && <span>{new Date(run.startedAt).toLocaleString()}</span>}
           {typeof run.durationMs === "number" && <span>{Math.round(run.durationMs / 1000)}s</span>}
         </div>
+        {/* The summary row renders the run's own summary line. It hides
+            itself when the record carries no summary. */}
+        {run.summary && (
+          <div className={styles.ranWith}>
+            <span className={styles.ranWithLabel}>Summary</span>
+            <span>{run.summary}</span>
+          </div>
+        )}
         {/* The row lists how the run was defined. It hides itself when the
             record carries no definition path, no library, and no pod template. */}
         {run.source &&
@@ -591,6 +599,19 @@ export default function BuildPage() {
           )}
           {!run.startedAt && <p>Re-run starts with each parameter&apos;s declared default.</p>}
         </div>
+      )}
+
+      {/* The digest card sits above the Pipeline card and under the
+          interrupted banner. Each part renders on its own, so a digest that
+          carries one part shows that part alone. */}
+      {run.digest && (
+        <Card title="Digest">
+          {run.digest.stage && <p><strong>{run.digest.stage}</strong>{run.digest.error ? `: ${run.digest.error}` : ""}</p>}
+          {run.digest.failedTests && (
+            <p>{run.digest.failedTests.failed} failed{typeof run.digest.failedTests.skipped === "number" ? `, ${run.digest.failedTests.skipped} skipped` : ""}{typeof run.digest.failedTests.total === "number" ? ` of ${run.digest.failedTests.total}` : ""}</p>
+          )}
+          {run.digest.logTail && <pre className={`${styles.mono} ${styles.digestTail}`}>{run.digest.logTail}</pre>}
+        </Card>
       )}
 
       <Card title="Pipeline">

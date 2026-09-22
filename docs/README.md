@@ -32,6 +32,7 @@ Commands use `kubectl` and `helm`. Replace values in `<angle-brackets>` before r
 - [Create your first controller](tutorials/first-controller.md)
 - [Author a bundle](tutorials/custom-bundle.md)
 - [Read and run pipelines](tutorials/pipelines.md)
+- [Operate a run](tutorials/run-operations.md)
 
 ## Configuration
 

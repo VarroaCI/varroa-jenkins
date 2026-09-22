@@ -408,6 +408,44 @@ func TestTemplateFields_OmittedForNoTemplateAndHeartbeat(t *testing.T) {
 	}
 }
 
+// --- summary: the two carrier payloads ---
+
+// TestSummaryPayload_CarriersWriteSummaryOnlyWhenSet proves both carrier
+// payloads write the summary key only for a non-empty value, and write
+// seq unconditionally, including the value zero. The recorder's summary
+// guard reads seq on every heartbeat, so a zero seq stays on the wire.
+func TestSummaryPayload_CarriersWriteSummaryOnlyWhenSet(t *testing.T) {
+	const text = "deployed canary to 10%"
+	for _, tc := range []struct {
+		name    string
+		phase   string
+		payload func(*mitev1.BuildEvent) map[string]interface{}
+	}{
+		{"run.heartbeat", phaseHeartbeat, heartbeatPayload},
+		{"run.completed", phaseCompleted, completedPayload},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withSummary := tc.payload(&mitev1.BuildEvent{
+				Phase:   tc.phase,
+				RunId:   "run-1",
+				Seq:     4,
+				Summary: text,
+			})
+			if got := withSummary["summary"]; got != text {
+				t.Errorf("summary = %v, want %q", got, text)
+			}
+
+			withoutSummary := tc.payload(&mitev1.BuildEvent{Phase: tc.phase, RunId: "run-1"})
+			if _, ok := withoutSummary["summary"]; ok {
+				t.Errorf("payload carries a summary key for an empty value: %+v", withoutSummary)
+			}
+			if got := withoutSummary["seq"]; got != int64(0) {
+				t.Errorf("seq = %v, want the value zero written unconditionally", got)
+			}
+		})
+	}
+}
+
 // TestOnBuildEvent_TemplateFieldsReachPublishedEnvelope is the end-to-end
 // gateway mapping test: a STARTED BuildEvent's template fields must reach
 // the published run.started envelope's payload.

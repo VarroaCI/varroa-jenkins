@@ -74,6 +74,7 @@ type BuildEvent struct {
 	Libraries               []*BuildLibrary     `json:"libraries,omitempty"`
 	DefinitionPath          string              `json:"definition_path,omitempty"`
 	PodTemplates            []*BuildPodTemplate `json:"pod_templates,omitempty"`
+	Summary                 string              `json:"summary,omitempty"`
 }
 
 type BuildLibrary struct {

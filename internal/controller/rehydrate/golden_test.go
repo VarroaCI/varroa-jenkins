@@ -80,6 +80,10 @@ func TestRenderBuildXML_GoldenFixtures(t *testing.T) {
 					t.Errorf("rendered %s carries the source field %q", goldenPath, field)
 				}
 			}
+			// A run summary and a failure digest reach no rehydration
+			// path: this package reads neither, so neither reaches the
+			// rendered document. The byte comparison above pins that
+			// absence.
 		})
 	}
 }

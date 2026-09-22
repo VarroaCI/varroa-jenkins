@@ -2409,6 +2409,38 @@ components:
           type: integer
         cause:
           type: string
+        digest:
+          additionalProperties: false
+          description: |
+            Why a run that did not succeed failed. The server computes this object on every read, from the stored rows and the stored log. The field is absent for a run with no result, for a SUCCESS or TRIGGER_FAILED result, or for a run with no start time.
+          properties:
+            error:
+              description: |
+                The stored error text of that stage. Absent when no stage failed, and when the stage carries no error.
+              type: string
+            failedTests:
+              additionalProperties: false
+              description: |
+                The run's aggregate test counts. The field is present only when the run reports at least one failed test.
+              properties:
+                failed:
+                  type: integer
+                skipped:
+                  type: integer
+                total:
+                  type: integer
+              required:
+              - failed
+              type: object
+            logTail:
+              description: |
+                The last 50 console log lines that carry the failed stage's attribution. The field falls back to the last 50 lines of the whole log when no log-index entry names the failed stage. It is absent when the server holds no blob store and when a log-index entry fails to decode.
+              type: string
+            stage:
+              description: |
+                The name of the first stage whose status is FAILURE. Absent when no stage failed.
+              type: string
+          type: object
         durationMs:
           format: int64
           type: integer
@@ -2484,6 +2516,10 @@ components:
           format: date-time
           type: string
         status:
+          type: string
+        summary:
+          description: |
+            The one-line text the run attached to itself through varroa.summary. The plugin cuts the text at 512 UTF-8 bytes. This field is absent until the run calls varroa.summary.
           type: string
         tenant:
           description: |
@@ -7517,6 +7553,38 @@ components:
           type: integer
         cause:
           type: string
+        digest:
+          additionalProperties: false
+          description: |
+            Why a run that did not succeed failed. The server computes this object on every read, from the stored rows and the stored log. The field is absent for a run with no result, for a SUCCESS or TRIGGER_FAILED result, or for a run with no start time.
+          properties:
+            error:
+              description: |
+                The stored error text of that stage. Absent when no stage failed, and when the stage carries no error.
+              type: string
+            failedTests:
+              additionalProperties: false
+              description: |
+                The run's aggregate test counts. The field is present only when the run reports at least one failed test.
+              properties:
+                failed:
+                  type: integer
+                skipped:
+                  type: integer
+                total:
+                  type: integer
+              required:
+              - failed
+              type: object
+            logTail:
+              description: |
+                The last 50 console log lines that carry the failed stage's attribution. The field falls back to the last 50 lines of the whole log when no log-index entry names the failed stage. It is absent when the server holds no blob store and when a log-index entry fails to decode.
+              type: string
+            stage:
+              description: |
+                The name of the first stage whose status is FAILURE. Absent when no stage failed.
+              type: string
+          type: object
         durationMs:
           format: int64
           type: integer
@@ -7592,6 +7660,10 @@ components:
           format: date-time
           type: string
         status:
+          type: string
+        summary:
+          description: |
+            The one-line text the run attached to itself through varroa.summary. The plugin cuts the text at 512 UTF-8 bytes. This field is absent until the run calls varroa.summary.
           type: string
         tenant:
           description: |

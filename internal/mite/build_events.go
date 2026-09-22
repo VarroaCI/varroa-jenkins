@@ -409,11 +409,14 @@ func stagePayload(st *mitev1.BuildStage) map[string]interface{} {
 }
 
 // heartbeatPayload maps a HEARTBEAT BuildEvent onto a run.heartbeat
-// payload.
+// payload. It writes seq unconditionally, including the value zero: the
+// recorder's summary guard reads that value and needs it present on
+// every heartbeat. It writes summary only for a non-empty value, so a
+// run that sets no summary carries no summary key.
 func heartbeatPayload(evt *mitev1.BuildEvent) map[string]interface{} {
-	p := map[string]interface{}{}
-	if evt.Seq != 0 {
-		p["seq"] = evt.Seq
+	p := map[string]interface{}{"seq": evt.Seq}
+	if evt.Summary != "" {
+		p["summary"] = evt.Summary
 	}
 	return p
 }
@@ -513,9 +516,11 @@ func testsPayload(evt *mitev1.BuildEvent) map[string]interface{} {
 }
 
 // completedPayload maps a COMPLETED BuildEvent onto a run.completed
-// payload.
+// payload. It writes seq unconditionally, including the value zero, for
+// the same reason heartbeatPayload does. It writes summary only for a
+// non-empty value.
 func completedPayload(evt *mitev1.BuildEvent) map[string]interface{} {
-	p := map[string]interface{}{}
+	p := map[string]interface{}{"seq": evt.Seq}
 	if evt.Result != "" {
 		p["result"] = evt.Result
 	}
@@ -525,13 +530,13 @@ func completedPayload(evt *mitev1.BuildEvent) map[string]interface{} {
 	if evt.DurationMillis != 0 {
 		p["duration_ms"] = evt.DurationMillis
 	}
-	if evt.Seq != 0 {
-		p["seq"] = evt.Seq
-	}
 	if evt.ScmRevision != "" {
 		p["scm_revision"] = evt.ScmRevision
 	}
 	addTemplateFields(p, evt)
+	if evt.Summary != "" {
+		p["summary"] = evt.Summary
+	}
 	return p
 }
 

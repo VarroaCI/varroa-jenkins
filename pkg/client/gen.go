@@ -2943,12 +2943,31 @@ type ComponentsSchemasRunChangeListResponse struct {
 
 // ComponentsSchemasRunDetail GET /runs/{run}.
 type ComponentsSchemasRunDetail struct {
-	Actor       *string    `json:"actor,omitempty"`
-	Branch      *string    `json:"branch,omitempty"`
-	BuildNumber *int64     `json:"buildNumber,omitempty"`
-	Cause       *string    `json:"cause,omitempty"`
-	DurationMs  *int64     `json:"durationMs,omitempty"`
-	EndedAt     *time.Time `json:"endedAt,omitempty"`
+	Actor       *string `json:"actor,omitempty"`
+	Branch      *string `json:"branch,omitempty"`
+	BuildNumber *int64  `json:"buildNumber,omitempty"`
+	Cause       *string `json:"cause,omitempty"`
+
+	// Digest Why a run that did not succeed failed. The server computes this object on every read, from the stored rows and the stored log. The field is absent for a run with no result, for a SUCCESS or TRIGGER_FAILED result, or for a run with no start time.
+	Digest *struct {
+		// Error The stored error text of that stage. Absent when no stage failed, and when the stage carries no error.
+		Error *string `json:"error,omitempty"`
+
+		// FailedTests The run's aggregate test counts. The field is present only when the run reports at least one failed test.
+		FailedTests *struct {
+			Failed  int  `json:"failed"`
+			Skipped *int `json:"skipped,omitempty"`
+			Total   *int `json:"total,omitempty"`
+		} `json:"failedTests,omitempty"`
+
+		// LogTail The last 50 console log lines that carry the failed stage's attribution. The field falls back to the last 50 lines of the whole log when no log-index entry names the failed stage. It is absent when the server holds no blob store and when a log-index entry fails to decode.
+		LogTail *string `json:"logTail,omitempty"`
+
+		// Stage The name of the first stage whose status is FAILURE. Absent when no stage failed.
+		Stage *string `json:"stage,omitempty"`
+	} `json:"digest,omitempty"`
+	DurationMs *int64     `json:"durationMs,omitempty"`
+	EndedAt    *time.Time `json:"endedAt,omitempty"`
 
 	// InterruptedReason Set only when result is INTERRUPTED.
 	InterruptedReason *string `json:"interruptedReason,omitempty"`
@@ -2986,6 +3005,9 @@ type ComponentsSchemasRunDetail struct {
 	Stages    *[]ComponentsSchemasRunStage `json:"stages,omitempty"`
 	StartedAt *time.Time                   `json:"startedAt,omitempty"`
 	Status    string                       `json:"status"`
+
+	// Summary The one-line text the run attached to itself through varroa.summary. The plugin cuts the text at 512 UTF-8 bytes. This field is absent until the run calls varroa.summary.
+	Summary *string `json:"summary,omitempty"`
 
 	// Tenant The tenant noun the server authorizes against: the run row's stored tenant column. A Team name for a Team tenant, or "<namespace>/<controller>" for a synthetic tenant.
 	Tenant string `json:"tenant"`

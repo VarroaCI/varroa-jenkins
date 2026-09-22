@@ -101,6 +101,8 @@ type RunDetail struct {
 	RetryRunID        string            `json:"retryRunId,omitempty"`
 	Stages            []RunStage        `json:"stages,omitempty"`
 	Source            *runSourceJSON    `json:"source,omitempty"`
+	Summary           string            `json:"summary,omitempty"`
+	Digest            *runDigestJSON    `json:"digest,omitempty"`
 }
 
 // convertJSON re-shapes in into a T by round-tripping through JSON. Every
@@ -209,7 +211,9 @@ func (s *Server) GetRun(ctx context.Context, claims *auth.Claims, runID string) 
 	} else {
 		s.deps.Logger.Warn("resolve run tenant folder failed", "runId", run.RunID, "error", err)
 	}
-	out, cerr := convertJSON[RunDetail](buildRunDetail(run, stages, retryRunID, tenantFolder))
+	detail := buildRunDetail(run, stages, retryRunID, tenantFolder)
+	detail.Digest = computeRunDigest(ctx, s.deps.BlobStore, run, stages)
+	out, cerr := convertJSON[RunDetail](detail)
 	if cerr != nil {
 		return RunDetail{}, &ServiceError{Status: http.StatusInternalServerError, Message: "encode run detail failed"}
 	}

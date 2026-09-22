@@ -24,6 +24,11 @@ import java.util.Map;
  * <p>Fields 43 to 45 — {@code libraries}, {@code definition_path}, and
  * {@code pod_templates} — are empty for a run whose source the plugin did
  * not read. {@link #toJson()} then writes no key for them.
+ *
+ * <p>Field 46, {@code summary}, is empty for a run whose pipeline never
+ * called {@code varroa.summary}. Only a {@code HEARTBEAT} and a {@code
+ * COMPLETED} event carry it. {@link #toJson()} writes no key for it when
+ * it is empty.
  */
 public final class BuildEvent implements PostableEvent {
 
@@ -81,6 +86,7 @@ public final class BuildEvent implements PostableEvent {
     private final List<BuildLibrary> libraries;
     private final String definitionPath;
     private final List<BuildPodTemplate> podTemplates;
+    private final String summary;
 
     private BuildEvent(Builder b) {
         this.phase = orEmpty(b.phase);
@@ -128,6 +134,7 @@ public final class BuildEvent implements PostableEvent {
         this.libraries = List.copyOf(b.libraries);
         this.definitionPath = orEmpty(b.definitionPath);
         this.podTemplates = List.copyOf(b.podTemplates);
+        this.summary = orEmpty(b.summary);
     }
 
     private static String orEmpty(String s) {
@@ -334,6 +341,11 @@ public final class BuildEvent implements PostableEvent {
         return podTemplates;
     }
 
+    /** Field 46: the run's summary text. Empty for a run whose pipeline set none. */
+    public String getSummary() {
+        return summary;
+    }
+
     /**
      * Serializes the event to a {@link JSONObject} using proto JSON field
      * names, ready to post to {@code /v1/events}.
@@ -417,6 +429,9 @@ public final class BuildEvent implements PostableEvent {
             }
             o.put("pod_templates", podTemplatesArr);
         }
+        if (!summary.isEmpty()) {
+            o.put("summary", summary);
+        }
         return o;
     }
 
@@ -479,7 +494,8 @@ public final class BuildEvent implements PostableEvent {
                 .markerRevision(markerRevision)
                 .libraries(libraries)
                 .definitionPath(definitionPath)
-                .podTemplates(podTemplates);
+                .podTemplates(podTemplates)
+                .summary(summary);
     }
 
     public static final class Builder {
@@ -528,6 +544,7 @@ public final class BuildEvent implements PostableEvent {
         private List<BuildLibrary> libraries = new ArrayList<>();
         private String definitionPath;
         private List<BuildPodTemplate> podTemplates = new ArrayList<>();
+        private String summary;
 
         private Builder() {
         }
@@ -763,6 +780,12 @@ public final class BuildEvent implements PostableEvent {
         /** Field 45: one entry per pod template the run allocated. */
         public Builder podTemplates(List<BuildPodTemplate> v) {
             this.podTemplates = v != null ? new ArrayList<>(v) : new ArrayList<>();
+            return this;
+        }
+
+        /** Field 46: the run's summary text. */
+        public Builder summary(String v) {
+            this.summary = v;
             return this;
         }
 

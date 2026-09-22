@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -237,7 +238,8 @@ func TestPipelinesPaths_Answer503(t *testing.T) {
 		{"listRunChanges-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListRunChanges }, "/runs/r1/changes", map[string]string{"run": "r1"}, http.StatusServiceUnavailable},
 		{"downloadRunArtifact-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleDownloadRunArtifact }, "/runs/r1/artifacts/a.txt", map[string]string{"run": "r1", "path": "a.txt"}, http.StatusServiceUnavailable},
 
-		// A plain run read needs no blob store.
+		// A plain run read needs no blob store: a nil store only drops the
+		// digest's log tail, so the run detail still answers.
 		{"getRun-nilBlobStoreStillOK", newFakeRecordReaderWithRun(), nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleGetRun }, "/runs/r1", map[string]string{"run": "r1"}, http.StatusOK},
 		// The artifact download needs one.
 		{"downloadRunArtifact-nilBlobStore", newFakeRecordReaderWithRun(), nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleDownloadRunArtifact }, "/runs/r1/artifacts/a.txt", map[string]string{"run": "r1", "path": "a.txt"}, http.StatusServiceUnavailable},
@@ -332,5 +334,140 @@ func TestHandleDownloadRunArtifact_PluginWrittenObjectNoPart(t *testing.T) {
 	}
 	if got := rec.Body.String(); got != "byte" {
 		t.Fatalf("body = %q, want %q", got, "byte")
+	}
+}
+
+// --- the run's summary line and its digest object ---
+
+// TestHandleGetRun_CarriesSummaryAndDigest seeds a failed run with a
+// summary line, a failed stage, that stage's log lines, and test counts,
+// then asserts the response carries all four.
+func TestHandleGetRun_CarriesSummaryAndDigest(t *testing.T) {
+	started := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	failed, skipped, total := int32(2), int32(1), int32(11)
+	reader := newFakeRecordReader()
+	reader.runs["r1"] = recordstore.Run{
+		RunID: "r1", Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: "COMPLETED",
+		Result: strPtr("FAILURE"), StartedAt: &started, Summary: strPtr("shipping a hotfix"),
+		TestsFailed: &failed, TestsSkipped: &skipped, TestsTotal: &total,
+	}
+	reader.stages["r1"] = []recordstore.Stage{
+		{RunID: "r1", StageID: "s1", Name: "Build", Status: "SUCCESS"},
+		{RunID: "r1", StageID: "s2", Name: "Deploy", Status: "FAILURE", Error: strPtr("deploy refused")},
+	}
+
+	store := newRunLogTestStore(t)
+	putRunLogConsole(t, store, "r1", []byte("prepare\ndeploy refused\n"))
+	putRunLogIndex(t, store, "r1", []runLogIndexEntry{
+		{Seq: 0, StageID: "s1", Offset: 0, Len: 8},
+		{Seq: 1, StageID: "s2", Offset: 8, Len: 15, Final: true},
+	})
+
+	srv := newRunFixtureServer(reader, store)
+	rec := doRunRequest(t, srv.handleGetRun, "/runs/r1", map[string]string{"run": "r1"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	var detail runDetailJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if detail.Summary != "shipping a hotfix" {
+		t.Errorf("summary = %q, want %q", detail.Summary, "shipping a hotfix")
+	}
+	if detail.Digest == nil {
+		t.Fatalf("digest is absent, body = %s", rec.Body.String())
+	}
+	if detail.Digest.Stage != "Deploy" || detail.Digest.Error != "deploy refused" {
+		t.Errorf("digest stage/error = %q/%q, want Deploy/deploy refused", detail.Digest.Stage, detail.Digest.Error)
+	}
+	if detail.Digest.LogTail != "deploy refused" {
+		t.Errorf("digest logTail = %q, want %q", detail.Digest.LogTail, "deploy refused")
+	}
+	wantTests := digestFailedTestsJSON{Failed: 2, Skipped: 1, Total: 11}
+	if detail.Digest.FailedTests == nil || *detail.Digest.FailedTests != wantTests {
+		t.Errorf("digest failedTests = %+v, want %+v", detail.Digest.FailedTests, wantTests)
+	}
+	for _, key := range []string{`"summary"`, `"digest"`} {
+		if !strings.Contains(rec.Body.String(), key) {
+			t.Errorf("body = %s, want the key %s", rec.Body.String(), key)
+		}
+	}
+}
+
+// TestHandleGetRun_OmitsSummaryAndDigestWhenNothingSetsThem proves a
+// successful run with no summary column answers neither key.
+func TestHandleGetRun_OmitsSummaryAndDigestWhenNothingSetsThem(t *testing.T) {
+	reader := newFakeRecordReader()
+	reader.runs["r1"] = recordstore.Run{
+		RunID: "r1", Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: "COMPLETED",
+		Result: strPtr("SUCCESS"),
+	}
+	srv := newRunFixtureServer(reader, nil)
+
+	rec := doRunRequest(t, srv.handleGetRun, "/runs/r1", map[string]string{"run": "r1"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	for _, key := range []string{`"summary"`, `"digest"`} {
+		if strings.Contains(rec.Body.String(), key) {
+			t.Errorf("body = %s, want no %s key", rec.Body.String(), key)
+		}
+	}
+}
+
+// TestHandleGetRun_DigestHardReadFailure proves the digest survives a
+// hard log read failure: a nil blob store and an undecodable log index
+// both answer the run, with the failed stage and no log tail.
+//
+// A 500 "encode run detail failed" stays out of reach from the HTTP
+// path: a run detail holds only strings, numbers, and time values, so
+// the re-encoding convertJSON performs cannot fail. No case covers it.
+func TestHandleGetRun_DigestHardReadFailure(t *testing.T) {
+	started := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	newFailedReader := func() *fakeRecordReader {
+		reader := newFakeRecordReader()
+		reader.runs["r1"] = recordstore.Run{
+			RunID: "r1", Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: "COMPLETED",
+			Result: strPtr("FAILURE"), StartedAt: &started,
+		}
+		reader.stages["r1"] = []recordstore.Stage{
+			{RunID: "r1", StageID: "s2", Name: "Deploy", Status: "FAILURE", Error: strPtr("deploy refused")},
+		}
+		return reader
+	}
+
+	t.Run("nilBlobStore", func(t *testing.T) {
+		assertStageWithoutLogTail(t, newRunFixtureServer(newFailedReader(), nil))
+	})
+
+	t.Run("undecodableLogIndex", func(t *testing.T) {
+		store := newRunLogTestStore(t)
+		putRunLogConsole(t, store, "r1", []byte("deploy refused\n"))
+		putRawRunLogObject(t, store, blob.LogIndexKey("r1"), []byte("{not-json}\n"))
+		assertStageWithoutLogTail(t, newRunFixtureServer(newFailedReader(), store))
+	})
+}
+
+// assertStageWithoutLogTail asserts one GET /runs/{run} answer carries a
+// digest naming the failed stage, with no log tail and no 503.
+func assertStageWithoutLogTail(t *testing.T, srv *Server) {
+	t.Helper()
+	rec := doRunRequest(t, srv.handleGetRun, "/runs/r1", map[string]string{"run": "r1"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200: a hard log read must not fail the run read", rec.Code, rec.Body.String())
+	}
+	var detail runDetailJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if detail.Digest == nil {
+		t.Fatalf("digest is absent, body = %s", rec.Body.String())
+	}
+	if detail.Digest.Stage != "Deploy" || detail.Digest.Error != "deploy refused" {
+		t.Errorf("digest stage/error = %q/%q, want Deploy/deploy refused", detail.Digest.Stage, detail.Digest.Error)
+	}
+	if strings.Contains(rec.Body.String(), `"logTail"`) {
+		t.Errorf("body = %s, want no logTail key", rec.Body.String())
 	}
 }

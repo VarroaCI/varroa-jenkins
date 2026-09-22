@@ -103,5 +103,7 @@ public class RunHeartbeatTest {
         assertFalse(json.containsKey("libraries"));
         assertFalse(json.containsKey("definition_path"));
         assertFalse(json.containsKey("pod_templates"));
+        assertEquals("", e.getSummary());
+        assertFalse(json.containsKey("summary"));
     }
 }

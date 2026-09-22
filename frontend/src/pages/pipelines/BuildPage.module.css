@@ -87,6 +87,15 @@
   font-family: var(--mono);
 }
 
+/* The digest card's log tail wraps, and a long tail scrolls inside the card. */
+.digestTail {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 24em;
+  overflow-y: auto;
+  margin: 0;
+}
+
 .actions {
   display: flex;
   gap: 8px;

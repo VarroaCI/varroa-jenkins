@@ -31,6 +31,15 @@ func TestHandleGetRun_CarriesTheInterruptedReason(t *testing.T) {
 	if detail.InterruptedReason != "no-heartbeat" {
 		t.Fatalf("interruptedReason = %q, want no-heartbeat", detail.InterruptedReason)
 	}
+
+	// A run that never started carries no digest.
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw: %v", err)
+	}
+	if _, ok := raw["digest"]; ok {
+		t.Fatal("the response carries a digest for a run that never started")
+	}
 }
 
 // TestHandleGetRun_OmitsTheInterruptedReason asserts a run with no such

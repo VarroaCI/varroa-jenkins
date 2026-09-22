@@ -30,6 +30,7 @@ type Run struct {
 	Params                  json.RawMessage
 	Changes                 json.RawMessage
 	Source                  json.RawMessage
+	Summary                 *string
 	TestsTotal              *int32
 	TestsFailed             *int32
 	TestsSkipped            *int32

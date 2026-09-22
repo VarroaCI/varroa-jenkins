@@ -5,9 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -533,5 +537,100 @@ func TestListFleetLocksDeniesAnUnreadableTeam(t *testing.T) {
 	}
 	if got := toolText(tr); got != "team not found" {
 		t.Errorf("error text = %q, want %q", got, "team not found")
+	}
+}
+
+// --- get_run and GET /runs/{run} answer the same record, so the
+// two must agree on summary and digest. ---
+
+// TestGetRunParityWithHTTPRunDetail reads one run through both surfaces
+// and asserts the summary text and the digest object are equal, so a
+// field the read sets reaches the MCP result and the HTTP response
+// alike. The run is a failed one, so the digest it compares is a full
+// one: the stage, its error, the attributed log tail, and the counts.
+func TestGetRunParityWithHTTPRunDetail(t *testing.T) {
+	started := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	summary := "shipping a hotfix"
+	result := "FAILURE"
+	stageError := "deploy refused"
+	failed, skipped, total := int32(2), int32(1), int32(11)
+
+	reader := newFakePipelineReader()
+	reader.runs["run-a"] = recordstore.Run{
+		RunID: "run-a", Tenant: "team-a", JobPath: "team-a/build", Status: "COMPLETED",
+		Result: &result, StartedAt: &started, Summary: &summary,
+		TestsFailed: &failed, TestsSkipped: &skipped, TestsTotal: &total,
+	}
+	reader.stages["run-a"] = []recordstore.Stage{
+		{RunID: "run-a", StageID: "s1", Name: "Build", Status: "SUCCESS"},
+		{RunID: "run-a", StageID: "s2", Name: "Deploy", Status: "FAILURE", Error: &stageError},
+	}
+
+	ctx := context.Background()
+	store, err := blob.Open(ctx, "file://"+t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("open blob store: %v", err)
+	}
+	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: time.Now()}
+	if err := store.Put(ctx, blob.LogKey("run-a"), strings.NewReader("prepare\ndeploy refused\n"), opts); err != nil {
+		t.Fatalf("put console: %v", err)
+	}
+	index := `{"seq":0,"stageId":"s1","offset":0,"len":8}` + "\n" +
+		`{"seq":1,"stageId":"s2","offset":8,"len":15,"final":true}` + "\n"
+	if err := store.Put(ctx, blob.LogIndexKey("run-a"), strings.NewReader(index), opts); err != nil {
+		t.Fatalf("put index: %v", err)
+	}
+
+	deps := &api.Dependencies{
+		Authorizer:     pipelinesTestAuthorizer("read"),
+		RecordStore:    reader,
+		BlobStore:      store,
+		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", Team: "team-a", Folder: "team-a"}}},
+	}
+
+	// The HTTP surface: the router wires GET /runs/{run} to the same read.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/runs/run-a", nil)
+	req = req.WithContext(auth.ContextWithClaims(req.Context(), pipelinesTestClaims))
+	rec := httptest.NewRecorder()
+	api.NewRouter(deps).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("HTTP status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	var httpDetail map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &httpDetail); err != nil {
+		t.Fatalf("decode the HTTP body: %v", err)
+	}
+
+	tr := callPipelineTool(t, deps, "get_run", map[string]interface{}{"run": "run-a"})
+	if tr.IsError {
+		t.Fatalf("get_run returned error: %v", tr.Content)
+	}
+	var mcpDetail map[string]any
+	if err := json.Unmarshal(tr.StructuredContent, &mcpDetail); err != nil {
+		t.Fatalf("decode the get_run result: %v", err)
+	}
+
+	for _, key := range []string{"summary", "digest"} {
+		want, ok := httpDetail[key]
+		if !ok {
+			t.Fatalf("the HTTP response carries no %s: %s", key, rec.Body.String())
+		}
+		got, ok := mcpDetail[key]
+		if !ok {
+			t.Fatalf("the get_run result carries no %s: %s", key, tr.StructuredContent)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s = %#v from get_run, want %#v from the HTTP response", key, got, want)
+		}
+	}
+
+	digest, ok := httpDetail["digest"].(map[string]any)
+	if !ok {
+		t.Fatalf("digest = %#v, want an object", httpDetail["digest"])
+	}
+	for _, key := range []string{"stage", "error", "logTail", "failedTests"} {
+		if _, ok := digest[key]; !ok {
+			t.Errorf("the digest carries no %s: %#v", key, digest)
+		}
 	}
 }

@@ -2,6 +2,7 @@ package recordstore
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -27,6 +28,28 @@ const heartbeatOwnerSQL = `
 	OR COALESCE(NULLIF($10::text, ''), runs.payload->>'accepted_instance') IS NULL
 	OR $9::text = COALESCE(NULLIF($10::text, ''), runs.payload->>'accepted_instance')
 	OR $9::text = runs.payload->'mesh'->'resume'->>'instance'`
+
+// summaryHeartbeatGuardSQL is the guard the heartbeat summary raise
+// reads. $13 is the payload's summary value and $14 is its seq. The
+// raise applies only when the payload carries a summary value at all,
+// and only when its seq sits at or above the stored summary_seq. The
+// floor is zero, so a first summary write whose seq is zero applies.
+//
+// The guard gates the whole payload expression, never one operand of a
+// concatenation. runs.payload is null on a row a first heartbeat
+// inserted, and jsonb || and jsonb - are both strict, so a guard inside
+// the concatenation would drop the summary_seq key on exactly that row.
+const summaryHeartbeatGuardSQL = `$13::text IS NOT NULL
+	AND $14::bigint >= COALESCE((runs.payload->>'summary_seq')::bigint, 0)`
+
+// heartbeatSummary is the part of a run.heartbeat payload the summary
+// raise reads. Summary stays nil when the payload carries no summary
+// key, and that nil is the gate that leaves both the summary column and
+// the payload's summary_seq key untouched.
+type heartbeatSummary struct {
+	Summary *string `json:"summary,omitempty"`
+	Seq     int64   `json:"seq"`
+}
 
 // applyRunHeartbeat raises the run's two heartbeat columns. It raises
 // last_heartbeat_at to the envelope's occurred_at, which a Jenkins pod
@@ -60,9 +83,18 @@ const heartbeatOwnerSQL = `
 // the update clause. Postgres resolves EXCLUDED from the insert's own
 // column list, so a column the insert omits reads as null in EXCLUDED
 // and the CASE would keep the stored value forever.
+//
+// A heartbeat whose payload carries a summary value also raises the
+// summary column and the payload's summary_seq key, under the guard
+// summaryHeartbeatGuardSQL states. A heartbeat whose payload carries no
+// summary value changes neither the column nor the key.
 func applyRunHeartbeat(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope,
 	logger *slog.Logger) error {
 	receivedAt := time.Now().UTC()
+	var summary heartbeatSummary
+	if err := json.Unmarshal(env.Payload, &summary); err != nil {
+		return fmt.Errorf("%w: decode run.heartbeat payload: %v", ErrMalformedEnvelope, err)
+	}
 	tag, err := tx.Exec(ctx, `
 		INSERT INTO varroa.runs (
 			run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path,
@@ -83,12 +115,18 @@ func applyRunHeartbeat(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 				THEN EXCLUDED.heartbeat_received_at
 				ELSE runs.heartbeat_received_at
 			END,
-			payload = runs.payload `+acceptedPayloadKeysSQL+`
+			summary = CASE WHEN `+summaryHeartbeatGuardSQL+`
+				THEN $13::text ELSE runs.summary END,
+			payload = CASE WHEN `+summaryHeartbeatGuardSQL+`
+				THEN (COALESCE(runs.payload, '{}'::jsonb) `+acceptedPayloadKeysSQL+`)
+					|| jsonb_build_object('summary_seq', $14::bigint)
+				ELSE runs.payload `+acceptedPayloadKeysSQL+` END
 		 WHERE `+heartbeatOwnerSQL+`
 	`,
 		intent.runID, intent.createdAt, intent.intentKey, intent.cluster, intent.namespace,
 		intent.cellValue(), intent.tenant, intent.jobPath,
 		env.CellInstance, intent.cellInstanceValue(), env.OccurredAt, receivedAt,
+		summary.Summary, summary.Seq,
 	)
 	if err != nil {
 		return fmt.Errorf("raise the heartbeat columns: %w", err)
