@@ -866,6 +866,100 @@ func TestBuildPayloadGroup_RunSourceWithoutChanges(t *testing.T) {
 	}
 }
 
+// TestBuildPayloadGroup_RunInputMapsOneEnvelope proves a run.input event
+// maps onto exactly one run.input envelope. The payload carries seq even
+// for the value zero, and it carries the inputs key with the entry.
+func TestBuildPayloadGroup_RunInputMapsOneEnvelope(t *testing.T) {
+	evt := &mitev1.BuildEvent{
+		Phase: phaseRunInput,
+		RunId: "run-1",
+		Inputs: []*mitev1.BuildInput{{
+			Id:                 "input-1",
+			Message:            "Deploy?",
+			Ok:                 "Ship it",
+			Submitter:          "varroa-payments",
+			SubmitterParameter: "APPROVER",
+			Parameters: []*mitev1.BuildInputParameter{{
+				Name:         "ENV",
+				Type:         "ChoiceParameterDefinition",
+				Description:  "target",
+				DefaultValue: "staging",
+				Choices:      []string{"staging", "prod"},
+			}},
+		}},
+	}
+	h := newBuildEventTestHandler(nil)
+	kps, err := h.buildPayloadGroup(evt)
+	if err != nil {
+		t.Fatalf("buildPayloadGroup: %v", err)
+	}
+	if len(kps) != 1 || kps[0].kind != kindRunInput {
+		t.Fatalf("kps = %+v, want exactly one run.input envelope", kps)
+	}
+	p := kps[0].payload
+	if p["seq"] != int64(0) {
+		t.Fatalf("seq = %v, want the value zero written unconditionally", p["seq"])
+	}
+	entries, ok := p["inputs"].([]inputEntry)
+	if !ok || len(entries) != 1 {
+		t.Fatalf("inputs = %+v, want one entry", p["inputs"])
+	}
+	entry := entries[0]
+	if entry.ID != "input-1" || entry.Message != "Deploy?" || entry.OK != "Ship it" ||
+		entry.Submitter != "varroa-payments" || entry.SubmitterParameter != "APPROVER" {
+		t.Fatalf("entry = %+v", entry)
+	}
+	if len(entry.Parameters) != 1 || entry.Parameters[0].Name != "ENV" ||
+		entry.Parameters[0].DefaultValue != "staging" || len(entry.Parameters[0].Choices) != 2 {
+		t.Fatalf("parameters = %+v", entry.Parameters)
+	}
+}
+
+// TestBuildPayloadGroup_RunInputWritesEmptySet proves an empty pending set
+// still reaches the envelope as a present key holding zero entries, so the
+// recorder can clear the stored set.
+func TestBuildPayloadGroup_RunInputWritesEmptySet(t *testing.T) {
+	h := newBuildEventTestHandler(nil)
+	kps, err := h.buildPayloadGroup(&mitev1.BuildEvent{Phase: phaseRunInput, RunId: "run-1"})
+	if err != nil {
+		t.Fatalf("buildPayloadGroup: %v", err)
+	}
+	if len(kps) != 1 {
+		t.Fatalf("kps = %+v, want exactly one envelope", kps)
+	}
+	entries, ok := kps[0].payload["inputs"].([]inputEntry)
+	if !ok {
+		t.Fatalf("inputs = %#v, want a present slice", kps[0].payload["inputs"])
+	}
+	if len(entries) != 0 {
+		t.Fatalf("inputs = %+v, want an empty set", entries)
+	}
+}
+
+// TestHeartbeatPayload_WritesInputsKeyForEverySet proves a heartbeat
+// payload carries the inputs key for an empty set and for a carried set.
+// The recorder reads that key to repair a lost clearing event.
+func TestHeartbeatPayload_WritesInputsKeyForEverySet(t *testing.T) {
+	empty := heartbeatPayload(&mitev1.BuildEvent{Phase: phaseHeartbeat, RunId: "run-1"})
+	entries, ok := empty["inputs"].([]inputEntry)
+	if !ok {
+		t.Fatalf("inputs = %#v, want a present slice", empty["inputs"])
+	}
+	if len(entries) != 0 {
+		t.Fatalf("inputs = %+v, want an empty set", entries)
+	}
+
+	carried := heartbeatPayload(&mitev1.BuildEvent{
+		Phase:  phaseHeartbeat,
+		RunId:  "run-1",
+		Inputs: []*mitev1.BuildInput{{Id: "input-1", Message: "Deploy?"}},
+	})
+	entries, ok = carried["inputs"].([]inputEntry)
+	if !ok || len(entries) != 1 || entries[0].ID != "input-1" {
+		t.Fatalf("inputs = %+v, want one entry", carried["inputs"])
+	}
+}
+
 func TestShrinkToBudget_DropsOldestPodTemplatesThenLibraries(t *testing.T) {
 	const entryCount = 8
 	libs := make([]libraryEntry, 0, entryCount)

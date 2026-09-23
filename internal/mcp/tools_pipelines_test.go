@@ -634,3 +634,219 @@ func TestGetRunParityWithHTTPRunDetail(t *testing.T) {
 		}
 	}
 }
+
+// --- The two run input tools publish the same command the matching
+// HTTP route publishes. ---
+
+// runInputDeps wires the deps the two input tools and the two input
+// routes share, over one RUNNING run of tenant "team-a" whose own
+// namespace and cell columns name the member the command reaches.
+func runInputDeps(reader *fakePipelineReader, mt transport.Transport, verb string) *api.Dependencies {
+	buildNumber := int64(7)
+	reader.runs["run-a"] = recordstore.Run{
+		RunID: "run-a", Cluster: "core", Namespace: "cell-ns", Cell: "cell-a",
+		Tenant: "team-a", JobPath: "team-a/build", Status: "RUNNING", BuildNumber: &buildNumber,
+	}
+	return &api.Dependencies{
+		Authorizer:     pipelinesTestAuthorizer(verb),
+		RecordStore:    reader,
+		MiteRegistry:   mt,
+		TenantResolver: &fakePipelineTenantResolver{},
+	}
+}
+
+// postRunInputRoute posts to one of the two input routes through the real
+// router, the way a dashboard caller reaches them.
+func postRunInputRoute(t *testing.T, deps *api.Dependencies, runID, inputID, action, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	var reader io.Reader
+	if body != "" {
+		reader = strings.NewReader(body)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/"+runID+"/inputs/"+inputID+"/"+action, reader)
+	req = req.WithContext(auth.ContextWithClaims(req.Context(), pipelinesTestClaims))
+	rec := httptest.NewRecorder()
+	api.NewRouter(deps).ServeHTTP(rec, req)
+	return rec
+}
+
+func TestRunInputToolsPublishTheHTTPCommand(t *testing.T) {
+	cases := []struct {
+		tool   string
+		action string
+		args   map[string]interface{}
+		body   string
+	}{
+		{
+			tool: "proceed_run_input", action: "proceed",
+			args: map[string]interface{}{"run": "run-a", "input": "in-1", "parameters": map[string]interface{}{"env": "prod"}},
+			body: `{"parameters":{"env":"prod"}}`,
+		},
+		{
+			tool: "abort_run_input", action: "abort",
+			args: map[string]interface{}{"run": "run-a", "input": "in-1"},
+			body: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.tool, func(t *testing.T) {
+			sent := &fakePipelineTransport{}
+			deps := runInputDeps(newFakePipelineReader(), sent, "write")
+
+			tr := callPipelineTool(t, deps, tc.tool, tc.args)
+			if tr.IsError {
+				t.Fatalf("%s returned error: %v", tc.tool, tr.Content)
+			}
+			var payload map[string]string
+			if err := json.Unmarshal(tr.StructuredContent, &payload); err != nil {
+				t.Fatalf("unmarshal structuredContent: %v", err)
+			}
+			if payload["state"] != "requested" {
+				t.Errorf("state = %q, want requested", payload["state"])
+			}
+			if len(sent.sent) != 1 {
+				t.Fatalf("the tool published %d commands, want 1", len(sent.sent))
+			}
+			toolCmd := sent.sent[0]
+
+			sent.sent = nil
+			rec := postRunInputRoute(t, deps, "run-a", "in-1", tc.action, tc.body)
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("HTTP status = %d, body = %s, want 202", rec.Code, rec.Body.String())
+			}
+			if len(sent.sent) != 1 {
+				t.Fatalf("the HTTP route published %d commands, want 1", len(sent.sent))
+			}
+			if !reflect.DeepEqual(toolCmd, sent.sent[0]) {
+				t.Errorf("%s published %+v, want the HTTP route's own command %+v", tc.tool, toolCmd, sent.sent[0])
+			}
+		})
+	}
+}
+
+func TestRunInputToolsDenyReadOnlyCaller(t *testing.T) {
+	for _, tool := range []string{"proceed_run_input", "abort_run_input"} {
+		t.Run(tool, func(t *testing.T) {
+			sent := &fakePipelineTransport{}
+			deps := runInputDeps(newFakePipelineReader(), sent, "read")
+
+			tr := callPipelineTool(t, deps, tool, map[string]interface{}{"run": "run-a", "input": "in-1"})
+			if !tr.IsError {
+				t.Fatalf("expected %s to deny a read-only caller", tool)
+			}
+			if got := toolText(tr); got != "forbidden" {
+				t.Errorf("error text = %q, want %q", got, "forbidden")
+			}
+			if len(sent.sent) != 0 {
+				t.Errorf("a denied call published %d commands, want 0", len(sent.sent))
+			}
+		})
+	}
+}
+
+func TestRunInputToolsAnswerNotFoundForAnUnknownRun(t *testing.T) {
+	for _, tool := range []string{"proceed_run_input", "abort_run_input"} {
+		t.Run(tool, func(t *testing.T) {
+			sent := &fakePipelineTransport{}
+			deps := runInputDeps(newFakePipelineReader(), sent, "write")
+
+			tr := callPipelineTool(t, deps, tool, map[string]interface{}{"run": "absent", "input": "in-1"})
+			if !tr.IsError {
+				t.Fatalf("expected %s to refuse an unknown run", tool)
+			}
+			if got := toolText(tr); got != "run not found" {
+				t.Errorf("error text = %q, want %q", got, "run not found")
+			}
+			if len(sent.sent) != 0 {
+				t.Errorf("an unknown run published %d commands, want 0", len(sent.sent))
+			}
+		})
+	}
+}
+
+func TestRunInputToolsDenyANilAuthorizer(t *testing.T) {
+	for _, tool := range []string{"proceed_run_input", "abort_run_input"} {
+		t.Run(tool, func(t *testing.T) {
+			deps := &api.Dependencies{RecordStore: newFakePipelineReader()}
+			tr := callPipelineTool(t, deps, tool, map[string]interface{}{"run": "run-a", "input": "in-1"})
+			if !tr.IsError {
+				t.Fatalf("expected %s to deny a nil authorizer", tool)
+			}
+			if got := toolText(tr); !strings.Contains(got, "authorizer") {
+				t.Errorf("error text = %q, want it to name the authorizer", got)
+			}
+		})
+	}
+}
+
+func TestRunInputToolsNameAnUnconfiguredRecordStore(t *testing.T) {
+	for _, tool := range []string{"proceed_run_input", "abort_run_input"} {
+		t.Run(tool, func(t *testing.T) {
+			deps := &api.Dependencies{Authorizer: pipelinesTestAuthorizer("write")}
+			tr := callPipelineTool(t, deps, tool, map[string]interface{}{"run": "run-a", "input": "in-1"})
+			if !tr.IsError {
+				t.Fatalf("expected %s to refuse an unconfigured record store", tool)
+			}
+			if got := toolText(tr); !strings.Contains(got, "record store") {
+				t.Errorf("error text = %q, want it to name the record store", got)
+			}
+		})
+	}
+}
+
+// TestGetRunParityWithHTTPInputs reads one run whose column holds two
+// pending inputs through both surfaces and asserts the two arrays agree,
+// so a field the read sets reaches the MCP result and the HTTP response
+// alike.
+func TestGetRunParityWithHTTPInputs(t *testing.T) {
+	reader := newFakePipelineReader()
+	reader.runs["run-a"] = recordstore.Run{
+		RunID: "run-a", Tenant: "team-a", JobPath: "team-a/build", Status: "RUNNING",
+		Inputs: json.RawMessage(`[` +
+			`{"id":"in-1","message":"Deploy?","ok":"Ship it","submitter":"deployers","submitter_parameter":"APPROVER",` +
+			`"parameters":[{"name":"ENV","type":"ChoiceParameterDefinition","default_value":"staging","choices":["staging","prod"]}]},` +
+			`{"id":"in-2","message":"Resume?"}]`),
+	}
+	deps := &api.Dependencies{
+		Authorizer:  pipelinesTestAuthorizer("read"),
+		RecordStore: reader,
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/runs/run-a", nil)
+	req = req.WithContext(auth.ContextWithClaims(req.Context(), pipelinesTestClaims))
+	rec := httptest.NewRecorder()
+	api.NewRouter(deps).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("HTTP status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	var httpDetail map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &httpDetail); err != nil {
+		t.Fatalf("decode the HTTP body: %v", err)
+	}
+
+	tr := callPipelineTool(t, deps, "get_run", map[string]interface{}{"run": "run-a"})
+	if tr.IsError {
+		t.Fatalf("get_run returned error: %v", tr.Content)
+	}
+	var mcpDetail map[string]any
+	if err := json.Unmarshal(tr.StructuredContent, &mcpDetail); err != nil {
+		t.Fatalf("decode the get_run result: %v", err)
+	}
+
+	want, ok := httpDetail["inputs"]
+	if !ok {
+		t.Fatalf("the HTTP response carries no inputs: %s", rec.Body.String())
+	}
+	entries, ok := want.([]any)
+	if !ok || len(entries) != 2 {
+		t.Fatalf("HTTP inputs = %#v, want two entries", want)
+	}
+	got, ok := mcpDetail["inputs"]
+	if !ok {
+		t.Fatalf("the get_run result carries no inputs: %s", tr.StructuredContent)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("inputs = %#v from get_run, want %#v from the HTTP response", got, want)
+	}
+}

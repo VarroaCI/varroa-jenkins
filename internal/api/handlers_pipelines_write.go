@@ -1,6 +1,8 @@
 // Package api: the pipelines write paths (design D3, D3a): POST
-// /pipelines/{team}/jobs/{job}/runs, POST /runs/{run}/cancel, and POST
-// /runs/{run}/rerun. The BFF mints or validates the run identity, then
+// /pipelines/{team}/jobs/{job}/runs, POST /runs/{run}/cancel, POST
+// /runs/{run}/rerun, and the two run input routes POST
+// /runs/{run}/inputs/{input}/proceed and .../abort. The BFF mints or
+// validates the run identity, then
 // publishes one imperative command through the mite transport. It never
 // claims the build-record ledger: the ledger row records the claiming
 // cell's instance and its placement generation, and the BFF holds
@@ -238,34 +240,45 @@ func (s *Server) homeRef(ctx context.Context, ref TenantRef, jobPath string) (Te
 	return out, nil
 }
 
-// resolveRunForWrite reads runID and authorizes it with the tenant
-// write check on the run's own TenantRef (pipelines-api's authorization
-// table: cancel and rerun authorize by tenant and job path, not by the
-// run read check). An unknown run answers 404. A run the caller may not
-// write answers 403 and publishes no command.
-func (s *Server) resolveRunForWrite(w http.ResponseWriter, r *http.Request, claims *auth.Claims, runID string) (recordstore.Run, TenantRef, bool) {
+// runForWrite reads runID and authorizes it with the tenant write check
+// on the run's own TenantRef (pipelines-api's authorization table:
+// cancel, rerun, and the two input routes authorize by tenant and job
+// path, not by the run read check). It reports a *ServiceError instead
+// of writing a response, so the MCP tools and the HTTP handlers share
+// one lookup. An unknown run answers 404. A run the caller may not
+// write answers 403, and no command is published.
+func (s *Server) runForWrite(ctx context.Context, claims *auth.Claims, runID string) (recordstore.Run, TenantRef, *ServiceError) {
 	if s.deps.TenantResolver == nil {
-		s.pipelinesUnavailable(w)
-		return recordstore.Run{}, TenantRef{}, false
+		return recordstore.Run{}, TenantRef{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}
 	}
-	ctx := r.Context()
 	run, _, err := s.deps.RecordStore.GetRun(ctx, runID)
 	if err != nil {
 		if errors.Is(err, recordstore.ErrRunNotFound) {
-			s.writeJSONError(w, http.StatusNotFound, "run not found")
-			return recordstore.Run{}, TenantRef{}, false
+			return recordstore.Run{}, TenantRef{}, &ServiceError{Status: http.StatusNotFound, Message: "run not found"}
 		}
-		s.handleReaderError(w, err, "get run")
-		return recordstore.Run{}, TenantRef{}, false
+		if errors.Is(err, recordstore.ErrSchemaTooOld) {
+			return recordstore.Run{}, TenantRef{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}
+		}
+		s.deps.Logger.Error("get run", "error", err)
+		return recordstore.Run{}, TenantRef{}, &ServiceError{Status: http.StatusInternalServerError, Message: "get run failed"}
 	}
 	ref, err := s.deps.TenantResolver.ResolveRun(ctx, claims, run)
 	if err != nil {
 		s.deps.Logger.Error("resolve run tenant", "error", err)
-		s.writeJSONError(w, http.StatusInternalServerError, "resolve run tenant failed")
-		return recordstore.Run{}, TenantRef{}, false
+		return recordstore.Run{}, TenantRef{}, &ServiceError{Status: http.StatusInternalServerError, Message: "resolve run tenant failed"}
 	}
 	if !s.canWritePipeline(claims, ref, run.JobPath) {
-		s.writeJSONError(w, http.StatusForbidden, "forbidden")
+		return recordstore.Run{}, TenantRef{}, &ServiceError{Status: http.StatusForbidden, Message: "forbidden"}
+	}
+	return run, ref, nil
+}
+
+// resolveRunForWrite is the HTTP wrapper over runForWrite. It writes the
+// service error and reports whether the caller continues.
+func (s *Server) resolveRunForWrite(w http.ResponseWriter, r *http.Request, claims *auth.Claims, runID string) (recordstore.Run, TenantRef, bool) {
+	run, ref, serr := s.runForWrite(r.Context(), claims, runID)
+	if serr != nil {
+		s.writeServiceError(w, serr)
 		return recordstore.Run{}, TenantRef{}, false
 	}
 	return run, ref, true
@@ -451,4 +464,119 @@ func (s *Server) handleRerunRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeJSON(w, http.StatusAccepted, runActionResponse{RunID: runID, IntentKey: intentKey, State: "requested"})
+}
+
+// --- The two run input routes ---
+
+// proceedRunInputRequest is the proceed route's body: one optional
+// parameters object of string values, keyed by parameter name.
+type proceedRunInputRequest struct {
+	Parameters map[string]string `json:"parameters,omitempty"`
+}
+
+// actingUserFrom builds the acting-user value an input command carries,
+// beside ActorFrom. A nil claims answers nil, because no caller acts.
+// The groups travel with the name, because the plugin rebuilds the
+// submitter from them.
+func actingUserFrom(claims *auth.Claims) *mitev1.ActingUser {
+	if claims == nil {
+		return nil
+	}
+	return &mitev1.ActingUser{
+		Name:   ActorFrom(claims),
+		Email:  claims.Email,
+		Groups: claims.Groups,
+	}
+}
+
+// answerRunInput resolves the run, authorizes it, builds one imperative
+// command, and publishes it. commandType selects PROCEED_INPUT or
+// ABORT_INPUT; parameters is nil for an abort, which carries none. The
+// command goes to the run's own TenantRef: the run row already names the
+// cell the build runs on, so an input answers the build in place. The
+// tenant write check runs before the command is built. An empty inputID
+// answers 400. A run whose record holds no build number answers 404,
+// because an input exists only on a running build. It answers the cluster
+// the command went to, so an audit event names the run's own cluster.
+func (s *Server) answerRunInput(ctx context.Context, claims *auth.Claims, runID, inputID string, commandType mitev1.CommandType, parameters map[string]string) (string, *ServiceError) {
+	if s.deps.RecordStore == nil {
+		return "", &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}
+	}
+	if inputID == "" {
+		return "", &ServiceError{Status: http.StatusBadRequest, Message: "input id is required"}
+	}
+	run, ref, serr := s.runForWrite(ctx, claims, runID)
+	if serr != nil {
+		return "", serr
+	}
+	if run.BuildNumber == nil {
+		return "", &ServiceError{Status: http.StatusNotFound, Message: "run holds no build number"}
+	}
+
+	acting := actingUserFrom(claims)
+	cmd := &mitev1.ImperativeCommand{}
+	if commandType == mitev1.CommandTypeAbortInput {
+		cmd.CommandId = "abort-input-" + run.RunID + "-" + inputID
+		cmd.Type = mitev1.CommandTypeAbortInput
+		cmd.AbortInput = &mitev1.AbortInputPayload{
+			RunId:       run.RunID,
+			JobPath:     run.JobPath,
+			BuildNumber: *run.BuildNumber,
+			InputId:     inputID,
+			ActingUser:  acting,
+		}
+	} else {
+		cmd.CommandId = "proceed-input-" + run.RunID + "-" + inputID
+		cmd.Type = mitev1.CommandTypeProceedInput
+		cmd.ProceedInput = &mitev1.ProceedInputPayload{
+			RunId:       run.RunID,
+			JobPath:     run.JobPath,
+			BuildNumber: *run.BuildNumber,
+			InputId:     inputID,
+			Parameters:  parameters,
+			ActingUser:  acting,
+		}
+	}
+	if err := s.publishImperative(ctx, ref, cmd); err != nil {
+		s.deps.Logger.Error("publish run input", "run", run.RunID, "input", inputID, "error", err)
+		return "", &ServiceError{Status: http.StatusInternalServerError, Message: "publish run input failed"}
+	}
+	return ref.Cluster, nil
+}
+
+// handleProceedRunInput answers POST /runs/{run}/inputs/{input}/proceed:
+// it decodes the body and publishes one PROCEED_INPUT command.
+func (s *Server) handleProceedRunInput(w http.ResponseWriter, r *http.Request) {
+	if s.deps.RecordStore == nil {
+		s.pipelinesUnavailable(w)
+		return
+	}
+	var req proceedRunInputRequest
+	if err := decodeJSONBody(r.Body, &req); err != nil {
+		s.writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	claims := auth.ClaimsFromContext(r.Context())
+	_, serr := s.answerRunInput(r.Context(), claims, r.PathValue("run"), r.PathValue("input"), mitev1.CommandTypeProceedInput, req.Parameters)
+	if serr != nil {
+		s.writeServiceError(w, serr)
+		return
+	}
+	s.writeJSON(w, http.StatusAccepted, map[string]string{"state": "requested"})
+}
+
+// handleAbortRunInput answers POST /runs/{run}/inputs/{input}/abort. The
+// route takes no body, so the handler decodes none.
+func (s *Server) handleAbortRunInput(w http.ResponseWriter, r *http.Request) {
+	if s.deps.RecordStore == nil {
+		s.pipelinesUnavailable(w)
+		return
+	}
+	claims := auth.ClaimsFromContext(r.Context())
+	_, serr := s.answerRunInput(r.Context(), claims, r.PathValue("run"), r.PathValue("input"), mitev1.CommandTypeAbortInput, nil)
+	if serr != nil {
+		s.writeServiceError(w, serr)
+		return
+	}
+	s.writeJSON(w, http.StatusAccepted, map[string]string{"state": "requested"})
 }

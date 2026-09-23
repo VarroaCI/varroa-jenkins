@@ -315,6 +315,25 @@ message BuildPodTemplate {
   string image = 3;
 }
 
+message BuildInputParameter {
+  // @required
+  string name = 1;
+  string type = 2;
+  string description = 3;
+  string default_value = 4;
+  repeated string choices = 5;
+}
+
+message BuildInput {
+  // @required
+  string id = 1;
+  string message = 2;
+  string ok = 3;
+  string submitter = 4;
+  string submitter_parameter = 5;
+  repeated BuildInputParameter parameters = 6;
+}
+
 message BuildStage {
   // @required
   string stage_id = 1;
@@ -411,6 +430,7 @@ message BuildEvent {
   string definition_path = 44;
   repeated BuildPodTemplate pod_templates = 45;
   string summary = 46;
+  repeated BuildInput inputs = 47;
 }
 
 message ClaimRequest {
@@ -652,6 +672,8 @@ enum CommandType {
   TRIGGER_BUILD = 5;
   CANCEL_BUILD = 6;
   COMMAND_TYPE_RESUME_BUILD = 7;
+  PROCEED_INPUT = 8;
+  ABORT_INPUT = 9;
 }
 
 message ImperativeCommand {
@@ -666,6 +688,8 @@ message ImperativeCommand {
   TriggerBuildPayload trigger_build = 7;
   CancelBuildPayload cancel_build = 8;
   ResumeBuildPayload resume_build = 9;
+  ProceedInputPayload proceed_input = 10;
+  AbortInputPayload abort_input = 11;
 }
 
 message ReplayWebhookPayload {
@@ -685,6 +709,36 @@ message TriggerBuildPayload {
   string job_path = 3;
   map<string, string> parameters = 4;
   string actor = 5;
+}
+
+message ActingUser {
+  // @required
+  string name = 1;
+  string email = 2;
+  repeated string groups = 3;
+}
+
+message ProceedInputPayload {
+  // @required
+  string run_id = 1;
+  // @required
+  string job_path = 2;
+  int64 build_number = 3;
+  // @required
+  string input_id = 4;
+  map<string, string> parameters = 5;
+  ActingUser acting_user = 6;
+}
+
+message AbortInputPayload {
+  // @required
+  string run_id = 1;
+  // @required
+  string job_path = 2;
+  int64 build_number = 3;
+  // @required
+  string input_id = 4;
+  ActingUser acting_user = 5;
 }
 
 message CancelBuildPayload {

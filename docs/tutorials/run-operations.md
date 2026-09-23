@@ -1,7 +1,7 @@
 # Operate a Run
 
-Hold a fleet lock across tenants, read why a build failed, attach a summary line to a run, and
-call a job on another tenant.
+Hold a fleet lock across tenants, read why a build failed, attach a summary line to a run, answer
+a paused input, and call a job on another tenant.
 
 ## Prerequisite
 
@@ -76,6 +76,43 @@ under that limit, so the stored text stays valid UTF-8. Text under the limit sta
 
 The call touches the run's own object and needs no network round trip. Call it in an early stage
 to show the line while the run continues.
+
+## Answer a paused input
+
+A pipeline that calls `input` stops and waits for a person. The run reports a running status
+while the step waits.
+
+```groovy
+input message: 'Deploy to production?',
+      ok: 'Deploy',
+      submitter: 'varroa-payments',
+      parameters: [choice(name: 'ENV', choices: ['staging', 'prod'])]
+```
+
+The card appears a few seconds after the step pauses. It holds the message, the `ok` label, a
+form built from the step's parameters, and an abort control. A parameter with a choices list
+becomes a select. A boolean parameter becomes a checkbox. A password parameter becomes a password
+field. Every other parameter becomes a text field. The card names the `submitter` when the step
+declares one. A caller without the tenant write grant sees the card and no control.
+
+Answer the step from the card, or from an MCP client.
+
+| Tool | Arguments |
+|---|---|
+| `proceed_run_input` | `run`, `input`, and an optional `parameters` map |
+| `abort_run_input` | `run` and `input` |
+
+Both tools apply the tenant write check on the run's own tenant and job path.
+
+Fill the form and select **Deploy**. The page reports that the request was sent. The card leaves
+when the run record no longer carries the input. A run reports no success from the request
+itself, because the plugin answers the step on the controller.
+
+Jenkins writes the approving user to the run's own build log. The **Log** tab therefore names
+who answered the step. Varroa keeps no separate record of the approval.
+
+A step's `submitter` accepts a user name or a Varroa group name. A `submitter` that names a
+Varroa group admits any caller who holds that group.
 
 ## Call a job on another tenant
 

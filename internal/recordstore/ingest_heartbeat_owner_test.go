@@ -132,15 +132,110 @@ func TestHeartbeatFromTheOwnerRaisesTheStamps(t *testing.T) {
 // TestHeartbeatWithNoInstanceRaisesTheStamps proves an envelope that
 // names no sender still counts. The owner test needs a name on both
 // sides, so an unnamed heartbeat keeps the earlier behaviour.
-func TestHeartbeatWithNoInstanceRaisesTheStamps(t *testing.T) {
+// applyHeartbeatWithInputs applies one run.heartbeat envelope that carries
+// a pending set and a seq. A nil inputs writes no inputs key at all.
+func applyHeartbeatWithInputs(t *testing.T, pool *pgxpool.Pool, runID uuid.UUID, seq int64, inputs []StoredRunInput) {
+	t.Helper()
+	var intentKey string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT intent_key FROM varroa.run_intents WHERE run_id = $1`, runID).Scan(&intentKey); err != nil {
+		t.Fatalf("read the intent key: %v", err)
+	}
+	payload := map[string]any{"seq": seq}
+	if inputs != nil {
+		payload["inputs"] = inputs
+	}
+	beat := newTestEnvelope(t, runID, intentKey, KindRunHeartbeat, payload)
+	if _, err := NewIngester(pool, nil, nil).Apply(context.Background(), beat); err != nil {
+		t.Fatalf("apply run.heartbeat: %v", err)
+	}
+}
+
+// TestHeartbeatRaisesAndClearsThePendingSet proves a heartbeat whose set
+// differs from the stored one raises the column and the watermark, in
+// both directions.
+func TestHeartbeatRaisesAndClearsThePendingSet(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedRunningRun(t, pool, newTestClaimRequest(intentKey, 0))
 
-	applyHeartbeatFrom(t, pool, runID, "")
+	applyHeartbeatWithInputs(t, pool, runID, 4, []StoredRunInput{{ID: "input-1"}})
 
-	last, received := readHeartbeatStamps(t, db, runID)
-	if !last.Valid || !received.Valid {
-		t.Fatalf("last_heartbeat_at = %v, heartbeat_received_at = %v, want both set", last, received)
+	inputs, inputsSeq := readRunInputsRow(t, db, runID)
+	if entries := storedRunInputs(t, inputs); len(entries) != 1 || entries[0].ID != "input-1" {
+		t.Fatalf("stored inputs = %+v, want one entry", entries)
+	}
+	if inputsSeq != "4" {
+		t.Fatalf("inputs_seq = %q, want 4", inputsSeq)
+	}
+
+	// The clearing direction: an empty set clears the column and raises
+	// the watermark.
+	applyHeartbeatWithInputs(t, pool, runID, 5, []StoredRunInput{})
+	inputs, inputsSeq = readRunInputsRow(t, db, runID)
+	if inputs != "" {
+		t.Fatalf("stored inputs = %q, want NULL", inputs)
+	}
+	if inputsSeq != "5" {
+		t.Fatalf("inputs_seq = %q, want 5", inputsSeq)
+	}
+}
+
+// TestHeartbeatWithMatchingSetChangesNeitherColumn proves the
+// distinctness test stops the write churn of a run whose set never
+// changed.
+func TestHeartbeatWithMatchingSetChangesNeitherColumn(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	intentKey := "manual:" + newTestUUIDv7String()
+	runID := seedRunningRun(t, pool, newTestClaimRequest(intentKey, 0))
+
+	set := []StoredRunInput{{ID: "input-1", Message: "Deploy?"}}
+	applyHeartbeatWithInputs(t, pool, runID, 4, set)
+	applyHeartbeatWithInputs(t, pool, runID, 5, set)
+
+	inputs, inputsSeq := readRunInputsRow(t, db, runID)
+	if entries := storedRunInputs(t, inputs); len(entries) != 1 || entries[0].ID != "input-1" {
+		t.Fatalf("stored inputs = %+v, want one entry", entries)
+	}
+	if inputsSeq != "4" {
+		t.Fatalf("inputs_seq = %q, want the first write's 4", inputsSeq)
+	}
+}
+
+// TestHeartbeatOnARunThatNeverPausedWritesNoWatermark proves a run that
+// always carried an empty set keeps no inputs_seq key, so a heartbeat
+// changes neither column for it.
+func TestHeartbeatOnARunThatNeverPausedWritesNoWatermark(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	intentKey := "manual:" + newTestUUIDv7String()
+	runID := seedRunningRun(t, pool, newTestClaimRequest(intentKey, 0))
+
+	applyHeartbeatWithInputs(t, pool, runID, 4, []StoredRunInput{})
+
+	inputs, inputsSeq := readRunInputsRow(t, db, runID)
+	if inputs != "" {
+		t.Fatalf("stored inputs = %q, want NULL", inputs)
+	}
+	if inputsSeq != "" {
+		t.Fatalf("inputs_seq = %q, want no key", inputsSeq)
+	}
+}
+
+// TestHeartbeatWithoutTheInputsKeyChangesNeitherColumn proves a heartbeat
+// that carries no inputs key leaves a stored set and its watermark alone.
+func TestHeartbeatWithoutTheInputsKeyChangesNeitherColumn(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	intentKey := "manual:" + newTestUUIDv7String()
+	runID := seedRunningRun(t, pool, newTestClaimRequest(intentKey, 0))
+
+	applyHeartbeatWithInputs(t, pool, runID, 4, []StoredRunInput{{ID: "input-1"}})
+	applyHeartbeatWithInputs(t, pool, runID, 5, nil)
+
+	inputs, inputsSeq := readRunInputsRow(t, db, runID)
+	if entries := storedRunInputs(t, inputs); len(entries) != 1 || entries[0].ID != "input-1" {
+		t.Fatalf("stored inputs = %+v, want the stored set", entries)
+	}
+	if inputsSeq != "4" {
+		t.Fatalf("inputs_seq = %q, want 4", inputsSeq)
 	}
 }

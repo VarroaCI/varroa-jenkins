@@ -106,7 +106,8 @@ func NewRouter(deps *Dependencies) http.Handler {
 	mux.HandleFunc("GET /pipelines/{team}/cell", srv.handleGetTeamCell)
 	mux.HandleFunc("GET /pipelines/{team}/locks", srv.handleListTeamFleetLocks)
 	mux.HandleFunc("GET /pipelines/{team}/stream", srv.handleTeamRunStream)
-	// Runs: detail, log stream, artifacts, tests, changes, cancel, rerun.
+	// Runs: detail, log stream, artifacts, tests, changes, cancel, rerun,
+	// and the two input routes.
 	mux.HandleFunc("GET /runs/{run}", srv.handleGetRun)
 	mux.HandleFunc("GET /runs/{run}/log", srv.handleStreamRunLog)
 	mux.HandleFunc("GET /runs/{run}/artifacts", srv.handleListRunArtifacts)
@@ -115,6 +116,8 @@ func NewRouter(deps *Dependencies) http.Handler {
 	mux.HandleFunc("GET /runs/{run}/changes", srv.handleListRunChanges)
 	mux.HandleFunc("POST /runs/{run}/cancel", srv.handleCancelRun)
 	mux.HandleFunc("POST /runs/{run}/rerun", srv.handleRerunRun)
+	mux.HandleFunc("POST /runs/{run}/inputs/{input}/proceed", srv.handleProceedRunInput)
+	mux.HandleFunc("POST /runs/{run}/inputs/{input}/abort", srv.handleAbortRunInput)
 
 	return http.StripPrefix("/api/v1", mux)
 }

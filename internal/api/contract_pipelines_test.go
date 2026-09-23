@@ -95,6 +95,21 @@ func init() {
 			Claims:     adminClaims,
 			WantStatus: http.StatusServiceUnavailable,
 		},
+		contractCase{
+			Name:       "proceedRunInput-recordStoreDisabled",
+			Method:     "POST",
+			Path:       "/api/v1/runs/0194f6b2-0000-7000-8000-000000000000/inputs/in-1/proceed",
+			Body:       map[string]any{"parameters": map[string]string{}},
+			Claims:     adminClaims,
+			WantStatus: http.StatusServiceUnavailable,
+		},
+		contractCase{
+			Name:       "abortRunInput-recordStoreDisabled",
+			Method:     "POST",
+			Path:       "/api/v1/runs/0194f6b2-0000-7000-8000-000000000000/inputs/in-1/abort",
+			Claims:     adminClaims,
+			WantStatus: http.StatusServiceUnavailable,
+		},
 
 		// The marker lint endpoint contacts no cell and reads no
 		// record-store data, but it still resolves {team} through

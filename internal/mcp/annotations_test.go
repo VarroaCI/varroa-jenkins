@@ -111,11 +111,13 @@ var expectedToolKinds = map[string]toolKind{
 	"call_jenkins_tool":        kindProxy,
 
 	// Pipelines
-	"run_pipeline":     kindAction,
-	"list_runs":        kindRead,
-	"get_run":          kindRead,
-	"get_run_log":      kindRead,
-	"list_fleet_locks": kindRead,
+	"run_pipeline":      kindAction,
+	"list_runs":         kindRead,
+	"get_run":           kindRead,
+	"get_run_log":       kindRead,
+	"list_fleet_locks":  kindRead,
+	"proceed_run_input": kindAction,
+	"abort_run_input":   kindAction,
 
 	// Cell pools
 	"list_cell_pools":  kindRead,

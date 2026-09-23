@@ -412,17 +412,18 @@ public class VarroaRunTriggerActionTest {
     }
 
     @Test
-    public void theEndpointExposesOnlyItsFourRoutes() {
+    public void theEndpointExposesOnlyItsSixRoutes() {
         int doMethods = 0;
         for (java.lang.reflect.Method m : VarroaRunTriggerAction.class.getDeclaredMethods()) {
             if (m.getName().startsWith("do") && java.lang.reflect.Modifier.isPublic(m.getModifiers())) {
                 doMethods++;
                 assertTrue("unexpected route method " + m.getName(),
                         m.getName().equals("doTrigger") || m.getName().equals("doCancel")
-                                || m.getName().equals("doAdoptNode") || m.getName().equals("doLoadBuild"));
+                                || m.getName().equals("doAdoptNode") || m.getName().equals("doLoadBuild")
+                                || m.getName().equals("doProceedInput") || m.getName().equals("doAbortInput"));
             }
         }
-        assertEquals(4, doMethods);
+        assertEquals(6, doMethods);
     }
 
     // ---- D13 adopt-node route ----

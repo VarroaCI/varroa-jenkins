@@ -270,8 +270,8 @@ federation, activity persistence, and SSE fanout.
   bus subscription per run per replica, reference-counted across every local viewer,
   renewed every 30 seconds, released on every disconnect. `pipelines_service.go`
   (`internal/mcp`'s non-HTTP entry point) wraps the same unexported handler logic —
-  `listRunsMerged`, `resolveTeamTenants`, `createRun`, `runByID` — so the MCP tools and
-  the REST paths share one implementation of every rule.
+  `listRunsMerged`, `resolveTeamTenants`, `createRun`, `runByID`, `answerRunInput` — so the
+  MCP tools and the REST paths share one implementation of every rule.
   The run detail carries `triggerError`, `triggerReasonCode`, and
   `interruptedReason`, read out of `runs.payload` in `buildRunDetail`
   alongside the log summary. The stored `trigger_http_status` reaches no

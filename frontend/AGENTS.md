@@ -193,8 +193,11 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   health, definition, and run list, and hosts `RunDrawer.tsx`'s parameter form),
   `BuildPage.tsx` (`/pipelines/:team/:job/:run`, one run's detail; owns both
   `useEventStream` calls, the team run stream and the run log stream; renders
-  the run's `summary` as a header row, and renders its failure `digest` in a
-  `Digest` card above the `Pipeline` card and below the interrupted banner).
+  the run's `summary` as a header row, renders its failure `digest` in a
+  `Digest` card above the `Pipeline` card and below the interrupted banner, and
+  renders a pending input step in `PendingInputCard.tsx`, which has its own
+  `PendingInputCard.module.css`, in a `Pending input` card between the
+  `Digest` card and the `Pipeline` card).
   It keeps
   every log frame in a ref, hands `RunLogViewer.tsx` the frames plus a version
   counter, and passes the log stream's `lastEvent` down to `StageGraph.tsx` as

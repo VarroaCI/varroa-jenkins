@@ -1485,6 +1485,47 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 			} else {
 				success = true
 			}
+		case mitev1.CommandTypeProceedInput:
+			payload := cmd.ProceedInput
+			if payload == nil {
+				errStr = "proceed_input payload is nil"
+				break
+			}
+			jenkinsClient := a.getJenkinsClient()
+			proceedStatus, proceedErr := jenkinsClient.ProceedInput(cctx, jenkins.ProceedInputRequest{
+				RunID:       payload.RunId,
+				JobPath:     payload.JobPath,
+				BuildNumber: payload.BuildNumber,
+				InputID:     payload.InputId,
+				Parameters:  payload.Parameters,
+				ActingUser:  actingUserOf(payload.ActingUser),
+			})
+			httpStatus = proceedStatus
+			if proceedErr != nil {
+				errStr = proceedErr.Error()
+			} else {
+				success = true
+			}
+		case mitev1.CommandTypeAbortInput:
+			payload := cmd.AbortInput
+			if payload == nil {
+				errStr = "abort_input payload is nil"
+				break
+			}
+			jenkinsClient := a.getJenkinsClient()
+			abortStatus, abortErr := jenkinsClient.AbortInput(cctx, jenkins.AbortInputRequest{
+				RunID:       payload.RunId,
+				JobPath:     payload.JobPath,
+				BuildNumber: payload.BuildNumber,
+				InputID:     payload.InputId,
+				ActingUser:  actingUserOf(payload.ActingUser),
+			})
+			httpStatus = abortStatus
+			if abortErr != nil {
+				errStr = abortErr.Error()
+			} else {
+				success = true
+			}
 		case mitev1.CommandTypeResumeBuild:
 			if resumeErr := a.applyResumeBuild(cctx, cmd.ResumeBuild); resumeErr != nil {
 				errStr = resumeErr.Error()
@@ -1509,6 +1550,16 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 			return
 		}
 	}
+}
+
+// actingUserOf maps an imperative command's acting user onto the Jenkins
+// request value. An absent command value answers an empty user, which the
+// plugin answers with a 400 status.
+func actingUserOf(user *mitev1.ActingUser) jenkins.ActingUser {
+	if user == nil {
+		return jenkins.ActingUser{}
+	}
+	return jenkins.ActingUser{Name: user.Name, Email: user.Email, Groups: user.Groups}
 }
 
 // handleDesiredState applies a desired-state command: JCasC configuration,

@@ -271,6 +271,7 @@ func markInterrupted(ctx context.Context, pool *pgxpool.Pool, run runInterruptCa
 		SET status = 'COMPLETED',
 		    result = 'INTERRUPTED',
 		    ended_at = $2,
+		    inputs = NULL,
 		    payload = (COALESCE(payload, '{}'::jsonb) || jsonb_build_object('interrupted_reason', $3::text))
 		        || jsonb_build_object('log_summary',
 		             CASE

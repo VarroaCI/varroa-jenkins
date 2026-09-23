@@ -3,6 +3,8 @@ package org.jenkinsci.plugins.varroamiteauth;
 import hudson.Extension;
 import hudson.model.Action;
 import hudson.model.CauseAction;
+import hudson.model.Failure;
+import hudson.model.FileParameterDefinition;
 import hudson.model.Item;
 import hudson.model.Job;
 import hudson.model.Node;
@@ -13,6 +15,8 @@ import hudson.model.ParametersDefinitionProperty;
 import hudson.model.Queue;
 import hudson.model.RootAction;
 import hudson.model.Run;
+import hudson.security.ACL;
+import hudson.security.ACLContext;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -21,7 +25,9 @@ import java.io.InputStream;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -46,7 +52,8 @@ import org.springframework.security.core.GrantedAuthority;
 
 /**
  * Protected {@link RootAction} at {@code /varroa-run}, the mite's local call for a
- * manual build trigger and a manual build cancel (D3, D4, run-trigger-endpoint).
+ * manual build trigger, a manual build cancel, and the two input-approval commands
+ * (D3, D4, D10, D11, run-trigger-endpoint).
  *
  * <p>Requires the authority {@code ROLE:varroa:system-mite}, the same check {@link
  * ActivityEndpoint} performs. Only the mite calls these routes, over the Jenkins
@@ -65,6 +72,12 @@ import org.springframework.security.core.GrantedAuthority;
  * caller's key instead of minting its own. {@code POST /varroa-run/cancel} resolves
  * its target by run identifier, never by job path alone, because one job can hold
  * several queued items and several running builds.
+ *
+ * <p>{@code POST /varroa-run/proceed-input} answers one pending {@code input} step as
+ * the acting user, and {@code POST /varroa-run/abort-input} rejects one. Both read
+ * the acting user from the body, because the request authenticates the mite and never
+ * the person, and both run every Jenkins call after the resolution inside that user's
+ * own authentication.
  */
 @Extension
 public class VarroaRunTriggerAction implements RootAction {
@@ -336,6 +349,277 @@ public class VarroaRunTriggerAction implements RootAction {
     private static void stopRun(Run<?, ?> run) throws Exception {
         Method m = run.getClass().getMethod("doStop");
         m.invoke(run);
+    }
+
+    // ---- Input-approval routes ----
+
+    /**
+     * Handles {@code POST /varroa-run/proceed-input}. Reads {@code runId},
+     * {@code jobPath}, {@code buildNumber}, {@code inputId}, {@code
+     * parameters}, and {@code actingUser}, resolves the build by its run
+     * identifier and the execution by its input identifier, and answers that
+     * input (D10, D11).
+     *
+     * <p>The route reads the acting user from the body, because the request
+     * authenticates the mite and never the person. Every Jenkins call after
+     * the resolution runs inside that user's own authentication, so the input
+     * step's {@code submitter} check reads the acting user's name and its one
+     * authority per group.
+     *
+     * <p>Answers {@code 405} for a method other than {@code POST},
+     * {@code 403} without the mite authority and for an input the acting user
+     * may not answer, {@code 400} for a body that does not decode and for a
+     * body that names no run, no input, or no acting user, {@code 404} for no
+     * build that carries the run identifier and for an input identifier the
+     * run does not hold, {@code 409} for a settled input, and {@code 202} on
+     * success. The {@code 202} body names every supplied parameter the route
+     * dropped.
+     */
+    @WebMethod(name = "proceed-input")
+    public void doProceedInput(StaplerRequest2 req, StaplerResponse2 rsp) {
+        try {
+            if (!"POST".equalsIgnoreCase(req.getMethod())) {
+                rsp.sendError(405, "Method Not Allowed: only POST is served");
+                return;
+            }
+            if (!isMitePrincipal()) {
+                rsp.sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                return;
+            }
+
+            JSONObject body;
+            try {
+                body = readBody(req);
+            } catch (Exception e) {
+                rsp.sendError(400, "Bad Request: body does not decode");
+                return;
+            }
+
+            String runId = body.optString("runId", "");
+            String jobPath = body.optString("jobPath", "");
+            long buildNumber = body.optLong("buildNumber", 0L);
+            String inputId = body.optString("inputId", "");
+            VarroaActingUser actingUser = VarroaActingUser.fromJson(body);
+            if (runId.isEmpty() || inputId.isEmpty() || actingUser == null) {
+                rsp.sendError(400, "Bad Request: the body names no run, no input, or no acting user");
+                return;
+            }
+
+            Run<?, ?> run = resolveRunByRunId(jobPath, buildNumber, runId);
+            if (run == null) {
+                rsp.sendError(404, "Not Found: no build carries run id " + runId);
+                return;
+            }
+            Object execution = VarroaRunInputs.executionFor(VarroaRunInputs.inputActionOf(run), inputId);
+            if (execution == null) {
+                rsp.sendError(404, "Not Found: no input carries id " + inputId);
+                return;
+            }
+
+            JSONObject supplied = body.optJSONObject("parameters");
+            List<String> dropped = new ArrayList<>();
+            try (ACLContext ignored = ACL.as2(actingUser.authentication())) {
+                // The explicit settled read separates a 409 from the 403 the
+                // submission check answers for the same input, so it runs first.
+                if (VarroaRunInputs.isSettled(execution)) {
+                    rsp.sendError(409, "Conflict: the input is already settled");
+                    return;
+                }
+                try {
+                    VarroaRunInputs.preSubmissionCheck(execution);
+                } catch (Failure refused) {
+                    rsp.sendError(403, "Forbidden: the acting user may not answer the input");
+                    return;
+                }
+                VarroaRunInputs.proceed(execution, inputParameterValues(req, execution, supplied, dropped));
+            }
+
+            VarroaRunRecorder.recheckInputs(run);
+
+            JSONObject out = new JSONObject();
+            out.put("runId", runId);
+            JSONArray droppedParameters = new JSONArray();
+            droppedParameters.addAll(dropped);
+            out.put("droppedParameters", droppedParameters);
+
+            rsp.setContentType("application/json");
+            rsp.setStatus(202);
+            rsp.getWriter().write(out.toString());
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "VarroaRunTriggerAction.doProceedInput caught exception", e);
+            try {
+                rsp.sendError(500, "Internal server error");
+            } catch (Exception ignored) {
+                // Best-effort error response.
+            }
+        }
+    }
+
+    /**
+     * Handles {@code POST /varroa-run/abort-input}. Reads {@code runId},
+     * {@code jobPath}, {@code buildNumber}, {@code inputId}, and {@code
+     * actingUser}, resolves the build and the execution the way the proceed
+     * route resolves them, and rejects that input.
+     *
+     * <p>The route runs no permission check of its own. The input step's own
+     * abort path checks the build-cancel permission and the submitter
+     * identity, and a copy of that rule here would drift from it.
+     *
+     * <p>Answers the same codes the proceed route answers, without a
+     * {@code parameters} field and without a response body.
+     */
+    @WebMethod(name = "abort-input")
+    public void doAbortInput(StaplerRequest2 req, StaplerResponse2 rsp) {
+        try {
+            if (!"POST".equalsIgnoreCase(req.getMethod())) {
+                rsp.sendError(405, "Method Not Allowed: only POST is served");
+                return;
+            }
+            if (!isMitePrincipal()) {
+                rsp.sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                return;
+            }
+
+            JSONObject body;
+            try {
+                body = readBody(req);
+            } catch (Exception e) {
+                rsp.sendError(400, "Bad Request: body does not decode");
+                return;
+            }
+
+            String runId = body.optString("runId", "");
+            String jobPath = body.optString("jobPath", "");
+            long buildNumber = body.optLong("buildNumber", 0L);
+            String inputId = body.optString("inputId", "");
+            VarroaActingUser actingUser = VarroaActingUser.fromJson(body);
+            if (runId.isEmpty() || inputId.isEmpty() || actingUser == null) {
+                rsp.sendError(400, "Bad Request: the body names no run, no input, or no acting user");
+                return;
+            }
+
+            Run<?, ?> run = resolveRunByRunId(jobPath, buildNumber, runId);
+            if (run == null) {
+                rsp.sendError(404, "Not Found: no build carries run id " + runId);
+                return;
+            }
+            Object execution = VarroaRunInputs.executionFor(VarroaRunInputs.inputActionOf(run), inputId);
+            if (execution == null) {
+                rsp.sendError(404, "Not Found: no input carries id " + inputId);
+                return;
+            }
+
+            try (ACLContext ignored = ACL.as2(actingUser.authentication())) {
+                if (VarroaRunInputs.isSettled(execution)) {
+                    rsp.sendError(409, "Conflict: the input is already settled");
+                    return;
+                }
+                try {
+                    VarroaRunInputs.abort(execution);
+                } catch (Failure refused) {
+                    rsp.sendError(403, "Forbidden: the acting user may not reject the input");
+                    return;
+                }
+            }
+
+            VarroaRunRecorder.recheckInputs(run);
+            rsp.setStatus(202);
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "VarroaRunTriggerAction.doAbortInput caught exception", e);
+            try {
+                rsp.sendError(500, "Internal server error");
+            } catch (Exception ignored) {
+                // Best-effort error response.
+            }
+        }
+    }
+
+    /**
+     * Resolves the run one of the two input routes acts on, the way the cancel
+     * route resolves its target. It reads the numbered build of the named job,
+     * and the build answers only when its own {@link VarroaIntentAction}
+     * carries the caller's run identifier.
+     *
+     * <p>A job path that is empty, a build number at or below zero, a job or a
+     * build that does not resolve, and an identity that does not match each
+     * answer null, and the route then answers {@code 404}. An input exists only
+     * on a running build, never on a queue item.
+     */
+    private static Run<?, ?> resolveRunByRunId(String jobPath, long buildNumber, String runId) {
+        if (jobPath.isEmpty() || buildNumber <= 0) {
+            return null;
+        }
+        Job<?, ?> job = Jenkins.get().getItemByFullName(jobPath, Job.class);
+        if (job == null) {
+            return null;
+        }
+        Run<?, ?> run = job.getBuildByNumber((int) buildNumber);
+        if (run == null) {
+            return null;
+        }
+        VarroaIntentAction action = run.getAction(VarroaIntentAction.class);
+        return action != null && runId.equals(action.getRunId()) ? run : null;
+    }
+
+    /**
+     * Builds the values the input step proceeds with, from the step's own
+     * parameter definitions and never the job's.
+     *
+     * <p>A supplied name the step declares is bound through that name's own
+     * definition, and a name the request omits takes the declared default. The
+     * map holds each definition's resolved value and never its
+     * {@link ParameterValue} wrapper, because that is what the step's proceed
+     * path expects.
+     *
+     * <p>A supplied name the step does not declare is dropped and named in
+     * {@code dropped}. A supplied value whose definition takes a file is
+     * dropped and named too, because a file value cannot ride a map of strings.
+     *
+     * <p>The step's submitter parameter is added last, valued with the current
+     * authentication's name. That read runs inside the acting scope, so it
+     * answers the acting user's own name.
+     */
+    private static Map<String, Object> inputParameterValues(StaplerRequest2 req, Object execution,
+            JSONObject supplied, List<String> dropped) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        List<String> declared = new ArrayList<>();
+        for (ParameterDefinition definition : VarroaRunInputs.parameterDefinitions(execution)) {
+            String name = definition.getName();
+            declared.add(name);
+            if (definition instanceof FileParameterDefinition) {
+                // A file parameter carries a binary value the step copies from
+                // its own upload. A supplied value for such a name is dropped.
+                if (supplied != null && supplied.has(name)) {
+                    dropped.add(name);
+                }
+                continue;
+            }
+            ParameterValue value;
+            if (supplied != null && supplied.has(name)) {
+                JSONObject jo = new JSONObject();
+                jo.put("name", name);
+                jo.put("value", supplied.getString(name));
+                value = definition.createValue(req, jo);
+            } else {
+                value = definition.getDefaultParameterValue();
+            }
+            if (value != null) {
+                values.put(name, value.getValue());
+            }
+        }
+        if (supplied != null) {
+            for (Object key : supplied.keySet()) {
+                String name = String.valueOf(key);
+                if (!declared.contains(name)) {
+                    dropped.add(name);
+                }
+            }
+        }
+        String submitterParameter = VarroaRunInputs.submitterParameter(execution);
+        if (!submitterParameter.isEmpty()) {
+            values.put(submitterParameter, Jenkins.getAuthentication2().getName());
+        }
+        return values;
     }
 
     /**

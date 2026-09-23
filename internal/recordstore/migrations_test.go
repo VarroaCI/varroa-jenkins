@@ -26,6 +26,7 @@ func TestMigrationsFSListsEveryFile(t *testing.T) {
 		"00013_tenant_placement_incarnation.sql": false,
 		"00014_runs_source.sql":                  false,
 		"00015_runs_summary.sql":                 false,
+		"00016_runs_inputs.sql":                  false,
 	}
 	for _, entry := range entries {
 		if _, ok := want[entry.Name()]; !ok {

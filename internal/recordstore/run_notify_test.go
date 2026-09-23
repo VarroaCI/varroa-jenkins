@@ -256,6 +256,7 @@ func TestNotificationForMapsEveryKind(t *testing.T) {
 		{KindRunState, map[string]any{"build_number": 7}, "", "", "", 0, false},
 		{KindRunResumeFailed, map[string]any{"build_number": 7}, "run", "", "", 0, true},
 		{KindRunSource, RunSourcePayload{Seq: 0}, "run", "", "", 0, true},
+		{KindRunInput, RunInputPayload{Seq: inputSeqPtr(3), Inputs: runInputSet("input-1")}, "input", "", "", 0, true},
 		{KindRunTriggerAccepted, map[string]any{}, "run", "QUEUED", "", 0, true},
 		{KindRunTriggerFailed, map[string]any{}, "run", "COMPLETED", "TRIGGER_FAILED", 0, true},
 		{KindRunArtifacts, map[string]any{}, "", "", "", 0, false},
@@ -299,6 +300,15 @@ func TestNotificationForMapsEveryKind(t *testing.T) {
 		"manual:notify-superseded", KindRunStarted, RunStartedPayload{BuildNumber: &buildNumber})
 	if _, ok := notificationFor(superseded, ApplyResult{SupersededStart: true}); ok {
 		t.Fatal("notificationFor reported a superseded run.started, want no notification")
+	}
+
+	// A refused run.input write changed no stored set, so it publishes
+	// nothing.
+	refused := newTestEnvelope(t, uuid.MustParse(newTestUUIDv7String()),
+		"manual:notify-input-refused", KindRunInput,
+		RunInputPayload{Seq: inputSeqPtr(1), Inputs: runInputSet("input-1")})
+	if _, ok := notificationFor(refused, ApplyResult{RefusedInput: true}); ok {
+		t.Fatal("notificationFor reported a refused run.input, want no notification")
 	}
 }
 

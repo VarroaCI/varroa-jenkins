@@ -11,6 +11,20 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+type AbortInputPayload struct {
+	RunId       string      `json:"run_id"`
+	JobPath     string      `json:"job_path"`
+	BuildNumber int64       `json:"build_number,omitempty"`
+	InputId     string      `json:"input_id"`
+	ActingUser  *ActingUser `json:"acting_user,omitempty"`
+}
+
+type ActingUser struct {
+	Name   string   `json:"name"`
+	Email  string   `json:"email,omitempty"`
+	Groups []string `json:"groups,omitempty"`
+}
+
 type BuildArtifact struct {
 	Path        string `json:"path"`
 	DisplayPath string `json:"display_path,omitempty"`
@@ -75,6 +89,24 @@ type BuildEvent struct {
 	DefinitionPath          string              `json:"definition_path,omitempty"`
 	PodTemplates            []*BuildPodTemplate `json:"pod_templates,omitempty"`
 	Summary                 string              `json:"summary,omitempty"`
+	Inputs                  []*BuildInput       `json:"inputs,omitempty"`
+}
+
+type BuildInput struct {
+	Id                 string                 `json:"id"`
+	Message            string                 `json:"message,omitempty"`
+	Ok                 string                 `json:"ok,omitempty"`
+	Submitter          string                 `json:"submitter,omitempty"`
+	SubmitterParameter string                 `json:"submitter_parameter,omitempty"`
+	Parameters         []*BuildInputParameter `json:"parameters,omitempty"`
+}
+
+type BuildInputParameter struct {
+	Name         string   `json:"name"`
+	Type         string   `json:"type,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	DefaultValue string   `json:"default_value,omitempty"`
+	Choices      []string `json:"choices,omitempty"`
 }
 
 type BuildLibrary struct {
@@ -318,6 +350,8 @@ type ImperativeCommand struct {
 	TriggerBuild    *TriggerBuildPayload  `json:"trigger_build,omitempty"`
 	CancelBuild     *CancelBuildPayload   `json:"cancel_build,omitempty"`
 	ResumeBuild     *ResumeBuildPayload   `json:"resume_build,omitempty"`
+	ProceedInput    *ProceedInputPayload  `json:"proceed_input,omitempty"`
+	AbortInput      *AbortInputPayload    `json:"abort_input,omitempty"`
 }
 
 type InstalledPlugin struct {
@@ -1011,6 +1045,15 @@ type PluginInventory struct {
 	Warnings             []string           `json:"warnings,omitempty"`
 }
 
+type ProceedInputPayload struct {
+	RunId       string            `json:"run_id"`
+	JobPath     string            `json:"job_path"`
+	BuildNumber int64             `json:"build_number,omitempty"`
+	InputId     string            `json:"input_id"`
+	Parameters  map[string]string `json:"parameters,omitempty"`
+	ActingUser  *ActingUser       `json:"acting_user,omitempty"`
+}
+
 type RegisterRequest struct {
 	ControllerName string `json:"controller_name"`
 	Namespace      string `json:"namespace"`
@@ -1176,6 +1219,8 @@ const (
 	CommandTypeTriggerBuild           CommandType = 5
 	CommandTypeCancelBuild            CommandType = 6
 	CommandTypeResumeBuild            CommandType = 7
+	CommandTypeProceedInput           CommandType = 8
+	CommandTypeAbortInput             CommandType = 9
 )
 
 // MiteServer is the server-side interface for the Mite service.

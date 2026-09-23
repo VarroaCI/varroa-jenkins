@@ -46,10 +46,10 @@ Authorization runs before a result enters the list, so a hidden controller,
 job, or run never appears. The last three kinds need the record store; when
 it is not wired, `search` still returns the first four.
 
-The MCP server also exposes five pipeline tools: `run_pipeline`, `list_runs`,
-`get_run`, `get_run_log`, and `list_fleet_locks`. They operate on the build
-record store. The `run_pipeline` tool starts a build and returns a `runId`
-and an `intentKey`.
+The MCP server also exposes seven pipeline tools: `run_pipeline`, `list_runs`,
+`get_run`, `get_run_log`, `list_fleet_locks`, `proceed_run_input`, and
+`abort_run_input`. They operate on the build record store. The `run_pipeline`
+tool starts a build and returns a `runId` and an `intentKey`.
 The `list_runs` tool takes `limit` with the same default of 50 and the same
 maximum of 200 as `list_activity`. The `get_run` tool returns one run's
 detail. The `get_run_log` tool returns a bounded tail of the run's console
@@ -58,6 +58,12 @@ log, never a stream; `tailLines` defaults to 100 and clamps between 1 and
 `list_fleet_locks` tool takes `team` and answers the locks that team's
 tenants own, hold, or wait on, with the same rows
 `GET /pipelines/{team}/locks` answers.
+
+The `proceed_run_input` tool answers a paused input step of a run. It takes
+`run`, `input`, and an optional `parameters` object of name to string value.
+The `abort_run_input` tool rejects that step, and takes `run` and `input`. An
+agent reads the run's `inputs` array with `get_run` first. Both tools answer
+that the request was sent, so the agent reads the run again for the outcome.
 
 The server also exposes one cell read tool, `get_cell_usage`. It takes
 `namespace`, `name`, and an optional `cluster` that defaults to the local
@@ -104,8 +110,9 @@ pool's status lists every tenant on it.
 Each tool applies the same authorization as its REST counterpart. Triggering
 a run checks the write grant on the resolved team and job. Listing runs
 checks the read grant on the same pair. Reading a run or its log checks the
-read grant on the run's own tenant and job path. A caller who may not read a
-run gets a not-found error, not a forbidden error.
+read grant on the run's own tenant and job path. Answering a run input checks
+the write grant on the run's own tenant and job path. A caller who may not
+read a run gets a not-found error, not a forbidden error.
 
 ## Account for redaction
 

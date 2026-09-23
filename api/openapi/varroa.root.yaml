@@ -344,6 +344,10 @@ paths:
     $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1cancel'
   /api/v1/runs/{run}/rerun:
     $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1rerun'
+  /api/v1/runs/{run}/inputs/{input}/proceed:
+    $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1inputs~1{input}~1proceed'
+  /api/v1/runs/{run}/inputs/{input}/abort:
+    $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1inputs~1{input}~1abort'
 components:
   securitySchemes:
     bearerAuth:
@@ -560,6 +564,10 @@ components:
       $ref: './components/schemas.yaml#/CancelRunResponse'
     RunStage:
       $ref: './components/schemas.yaml#/RunStage'
+    RunInput:
+      $ref: './components/schemas.yaml#/RunInput'
+    RunInputParameter:
+      $ref: './components/schemas.yaml#/RunInputParameter'
     RunDetail:
       $ref: './components/schemas.yaml#/RunDetail'
     RunArtifact:

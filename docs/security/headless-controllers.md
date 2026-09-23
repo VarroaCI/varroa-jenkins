@@ -48,6 +48,11 @@ The Jenkins filter keeps these paths open on every headless controller, for ever
 The filter allows no other path. It never grants a Jenkins permission on an allowed path. The
 authorization strategy still applies there.
 
+A headless tenant answers an `input` step from the Pipelines build page. The mite sends the
+answer over the Jenkins loopback inside the pod, so the request never leaves the pod. The
+allowlist above already carries the `/varroa-run` prefix. This action needs no new allowlist
+entry and no ingress rule change.
+
 ## Make a controller headless
 
 Add `spec.headless: true` to a one-tenant controller.

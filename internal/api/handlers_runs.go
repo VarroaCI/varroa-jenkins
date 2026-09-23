@@ -61,6 +61,29 @@ type runSourceJSON struct {
 	PodTemplates   []runSourcePodTemplateJSON `json:"podTemplates,omitempty"`
 }
 
+// runInputParameterJSON is one parameter definition of a pending input step.
+// It carries the response's camelCase key names, never the stored column's
+// snake_case key names.
+type runInputParameterJSON struct {
+	Name         string   `json:"name"`
+	Type         string   `json:"type,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	DefaultValue string   `json:"defaultValue,omitempty"`
+	Choices      []string `json:"choices,omitempty"`
+}
+
+// runInputJSON is one pending input step of a run. The recorder stores these
+// facts under snake_case keys, so buildRunInputs maps the stored shape into
+// this type field by field.
+type runInputJSON struct {
+	ID                 string                  `json:"id"`
+	Message            string                  `json:"message,omitempty"`
+	OK                 string                  `json:"ok,omitempty"`
+	Submitter          string                  `json:"submitter,omitempty"`
+	SubmitterParameter string                  `json:"submitterParameter,omitempty"`
+	Parameters         []runInputParameterJSON `json:"parameters,omitempty"`
+}
+
 type runDetailJSON struct {
 	RunID             string            `json:"runId"`
 	JobPath           string            `json:"jobPath"`
@@ -91,6 +114,7 @@ type runDetailJSON struct {
 	Source            *runSourceJSON    `json:"source,omitempty"`
 	Summary           string            `json:"summary,omitempty"`
 	Digest            *runDigestJSON    `json:"digest,omitempty"`
+	Inputs            []runInputJSON    `json:"inputs,omitempty"`
 }
 
 type runArtifactJSON struct {
@@ -219,6 +243,35 @@ func buildRunSource(stored recordstore.StoredRunSource) *runSourceJSON {
 	return out
 }
 
+// buildRunInputs maps the stored column shape into the response shape, field
+// by field. It answers nil when the column carries no input.
+func buildRunInputs(stored []recordstore.StoredRunInput) []runInputJSON {
+	if len(stored) == 0 {
+		return nil
+	}
+	out := make([]runInputJSON, 0, len(stored))
+	for _, in := range stored {
+		entry := runInputJSON{
+			ID:                 in.ID,
+			Message:            in.Message,
+			OK:                 in.OK,
+			Submitter:          in.Submitter,
+			SubmitterParameter: in.SubmitterParameter,
+		}
+		for _, p := range in.Parameters {
+			entry.Parameters = append(entry.Parameters, runInputParameterJSON{
+				Name:         p.Name,
+				Type:         p.Type,
+				Description:  p.Description,
+				DefaultValue: p.DefaultValue,
+				Choices:      p.Choices,
+			})
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
 func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID, tenantFolder string) runDetailJSON {
 	d := runDetailJSON{RunID: run.RunID, JobPath: run.JobPath, TenantFolder: tenantFolder, Tenant: run.Tenant, Status: run.Status, RetryRunID: retryRunID}
 	if run.BuildNumber != nil {
@@ -250,6 +303,17 @@ func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID,
 		var stored recordstore.StoredRunSource
 		if json.Unmarshal(run.Source, &stored) == nil {
 			d.Source = buildRunSource(stored)
+		}
+	}
+	// The column holds snake_case keys, so decode it into the store shape.
+	// buildRunInputs then maps the fields one by one. A NULL column, a
+	// malformed column, and an empty array all leave the slice nil. The
+	// block tests no status: a terminal row holds no input on the write
+	// side, so the read hides no live input.
+	if len(run.Inputs) > 0 {
+		var stored []recordstore.StoredRunInput
+		if json.Unmarshal(run.Inputs, &stored) == nil {
+			d.Inputs = buildRunInputs(stored)
 		}
 	}
 	// A NULL summary column leaves the response key absent. The digest

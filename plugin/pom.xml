@@ -173,6 +173,16 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- The `input` step, test scope only (D15a): the recorder finds the
+             step's action and its executions by class name, so a test that
+             proves a pending input reached an event needs the real classes.
+             No main-scope class names the step. The BOM manages the version. -->
+        <dependency>
+            <groupId>org.jenkins-ci.plugins</groupId>
+            <artifactId>pipeline-input-step</artifactId>
+            <scope>test</scope>
+        </dependency>
+
         <!-- Real folders for the D12 tenant-isolation tests (task 10.3c): MockFolder
              carries no folder-property support, so a folder-scoped credential needs
              the real Folder class. Compile scope, not test: WorkflowMultiBranchProject

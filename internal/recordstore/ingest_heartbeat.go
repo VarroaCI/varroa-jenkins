@@ -51,6 +51,63 @@ type heartbeatSummary struct {
 	Seq     int64   `json:"seq"`
 }
 
+// inputsHeartbeatGuardSQL is the guard the heartbeat inputs raise reads.
+// $15 is the payload's own presence, $16 is its pending set, and $17 is
+// its seq. The raise applies only when the payload carries an inputs key
+// at all, only when the payload's seq sits at or above the stored
+// inputs_seq, only when its set differs from the stored one, and never on
+// a completed row. A completed run holds no pending input, so a heartbeat
+// that races the completion must not restore the set the completion
+// cleared.
+//
+// The distinctness test is what stops the churn. Every heartbeat carries
+// the key, and a run that never paused holds NULL beside an empty set,
+// which the payload maps to NULL too. Such a run therefore leaves both
+// the column and the key untouched.
+const inputsHeartbeatGuardSQL = `$15::boolean
+	AND runs.status <> 'COMPLETED'
+	AND $17::bigint >= COALESCE((runs.payload->>'inputs_seq')::bigint, 0)
+	AND runs.inputs IS DISTINCT FROM $16::jsonb`
+
+// heartbeatInputs is the part of a run.heartbeat payload the inputs raise
+// reads. Present is false when the payload carries no inputs key, and the
+// raise then changes neither the column nor the payload's inputs_seq key.
+type heartbeatInputs struct {
+	Present bool
+	Inputs  any
+	Seq     int64
+}
+
+// heartbeatInputsFrom reads the heartbeat payload's inputs key. It
+// answers Present false for a payload that carries no key, and it answers
+// a null Inputs for an empty set, which is what the column stores.
+func heartbeatInputsFrom(env IngestEnvelope) (heartbeatInputs, error) {
+	var raw struct {
+		Inputs *json.RawMessage `json:"inputs"`
+		Seq    int64            `json:"seq"`
+	}
+	if err := json.Unmarshal(env.Payload, &raw); err != nil {
+		return heartbeatInputs{}, fmt.Errorf("%w: decode run.heartbeat payload: %v", ErrMalformedEnvelope, err)
+	}
+	if raw.Inputs == nil {
+		return heartbeatInputs{Seq: raw.Seq}, nil
+	}
+	var entries []StoredRunInput
+	if err := json.Unmarshal(*raw.Inputs, &entries); err != nil {
+		return heartbeatInputs{}, fmt.Errorf("%w: decode run.heartbeat inputs: %v", ErrMalformedEnvelope, err)
+	}
+	found := heartbeatInputs{Present: true, Seq: raw.Seq}
+	if len(entries) == 0 {
+		return found, nil
+	}
+	encoded, err := json.Marshal(entries)
+	if err != nil {
+		return heartbeatInputs{}, fmt.Errorf("marshal the heartbeat's pending inputs: %w", err)
+	}
+	found.Inputs = string(encoded)
+	return found, nil
+}
+
 // applyRunHeartbeat raises the run's two heartbeat columns. It raises
 // last_heartbeat_at to the envelope's occurred_at, which a Jenkins pod
 // stamps, and heartbeat_received_at to the recorder's own receive time.
@@ -88,12 +145,21 @@ type heartbeatSummary struct {
 // summary column and the payload's summary_seq key, under the guard
 // summaryHeartbeatGuardSQL states. A heartbeat whose payload carries no
 // summary value changes neither the column nor the key.
+//
+// A heartbeat whose payload carries an inputs key also raises the run's
+// pending set and the payload's inputs_seq key, under the guard
+// inputsHeartbeatGuardSQL states. A heartbeat whose set matches the
+// stored one changes neither the column nor the key.
 func applyRunHeartbeat(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope,
 	logger *slog.Logger) error {
 	receivedAt := time.Now().UTC()
 	var summary heartbeatSummary
 	if err := json.Unmarshal(env.Payload, &summary); err != nil {
 		return fmt.Errorf("%w: decode run.heartbeat payload: %v", ErrMalformedEnvelope, err)
+	}
+	inputs, err := heartbeatInputsFrom(env)
+	if err != nil {
+		return err
 	}
 	tag, err := tx.Exec(ctx, `
 		INSERT INTO varroa.runs (
@@ -117,16 +183,21 @@ func applyRunHeartbeat(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 			END,
 			summary = CASE WHEN `+summaryHeartbeatGuardSQL+`
 				THEN $13::text ELSE runs.summary END,
-			payload = CASE WHEN `+summaryHeartbeatGuardSQL+`
-				THEN (COALESCE(runs.payload, '{}'::jsonb) `+acceptedPayloadKeysSQL+`)
-					|| jsonb_build_object('summary_seq', $14::bigint)
-				ELSE runs.payload `+acceptedPayloadKeysSQL+` END
+			inputs = CASE WHEN `+inputsHeartbeatGuardSQL+`
+				THEN $16::jsonb ELSE runs.inputs END,
+			payload = (CASE WHEN `+summaryHeartbeatGuardSQL+`
+					THEN (COALESCE(runs.payload, '{}'::jsonb) `+acceptedPayloadKeysSQL+`)
+						|| jsonb_build_object('summary_seq', $14::bigint)
+					ELSE runs.payload `+acceptedPayloadKeysSQL+` END)
+				|| CASE WHEN `+inputsHeartbeatGuardSQL+`
+					THEN jsonb_build_object('inputs_seq', $17::bigint)
+					ELSE '{}'::jsonb END
 		 WHERE `+heartbeatOwnerSQL+`
 	`,
 		intent.runID, intent.createdAt, intent.intentKey, intent.cluster, intent.namespace,
 		intent.cellValue(), intent.tenant, intent.jobPath,
 		env.CellInstance, intent.cellInstanceValue(), env.OccurredAt, receivedAt,
-		summary.Summary, summary.Seq,
+		summary.Summary, summary.Seq, inputs.Present, inputs.Inputs, inputs.Seq,
 	)
 	if err != nil {
 		return fmt.Errorf("raise the heartbeat columns: %w", err)

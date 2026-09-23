@@ -42,6 +42,14 @@ components:
       name: force
       schema:
         type: boolean
+    components_parameters_input:
+      description: |
+        Percent-encoded input step identifier, one path segment. The router reads it with PathValue, which returns the decoded value.
+      in: path
+      name: input
+      required: true
+      schema:
+        type: string
     components_parameters_job:
       description: |
         Percent-encoded job path, one path segment. The router reads it with PathValue, which returns the decoded value, so the job path's slashes reach the handler intact.
@@ -557,7 +565,8 @@ components:
       type: object
     CancelRunResponse:
       additionalProperties: false
-      description: 202 response for a cancel request. Cancel is fire and forget.
+      description: |
+        202 response for a fire-and-forget run action: a cancel, an input proceed, or an input abort. The BFF publishes one command and waits for no result.
       properties:
         state:
           enum:
@@ -2447,6 +2456,12 @@ components:
         endedAt:
           format: date-time
           type: string
+        inputs:
+          description: |
+            The input steps the run waits on, read from the run's stored inputs column. This field is absent until a run.input event arrives, and absent for a run that holds no pending input.
+          items:
+            $ref: '#/components/schemas/components_schemas_RunInput'
+          type: array
         interruptedReason:
           description: Set only when result is INTERRUPTED.
           type: string
@@ -2549,6 +2564,67 @@ components:
       - status
       - tenantFolder
       - tenant
+      type: object
+    RunInput:
+      additionalProperties: false
+      description: One input step a run waits on, read from the run's stored inputs
+        column.
+      properties:
+        id:
+          description: The input step's own identifier. Both input routes address
+            this value.
+          type: string
+        message:
+          description: The message the step shows. Absent when the step declares none.
+          type: string
+        ok:
+          description: The label of the step's proceed control. Absent when the step
+            declares none.
+          type: string
+        parameters:
+          description: |
+            The step's own parameter definitions, in declaration order. Absent when the step declares none.
+          items:
+            $ref: '#/components/schemas/components_schemas_RunInputParameter'
+          type: array
+        submitter:
+          description: |
+            The users and groups the step admits. Absent when the step declares none.
+          type: string
+        submitterParameter:
+          description: |
+            The parameter name that holds the answering user's name. Absent when the step declares none.
+          type: string
+      required:
+      - id
+      type: object
+    RunInputParameter:
+      additionalProperties: false
+      description: One parameter an input step declares, read from its definition.
+      properties:
+        choices:
+          description: The definition's choices. Absent when the definition declares
+            none.
+          items:
+            type: string
+          type: array
+        defaultValue:
+          description: |
+            The definition's default value, rendered as text. Absent when the definition declares none.
+          type: string
+        description:
+          description: The definition's description. Absent when the definition declares
+            none.
+          type: string
+        name:
+          description: The definition's name.
+          type: string
+        type:
+          description: |
+            The Java simple name of the parameter definition, such as StringParameterDefinition or ChoiceParameterDefinition.
+          type: string
+      required:
+      - name
       type: object
     RunListResponse:
       additionalProperties: false
@@ -3859,7 +3935,8 @@ components:
       type: object
     components_schemas_CancelRunResponse:
       additionalProperties: false
-      description: 202 response for a cancel request. Cancel is fire and forget.
+      description: |
+        202 response for a fire-and-forget run action: a cancel, an input proceed, or an input abort. The BFF publishes one command and waits for no result.
       properties:
         state:
           enum:
@@ -7591,6 +7668,12 @@ components:
         endedAt:
           format: date-time
           type: string
+        inputs:
+          description: |
+            The input steps the run waits on, read from the run's stored inputs column. This field is absent until a run.input event arrives, and absent for a run that holds no pending input.
+          items:
+            $ref: '#/components/schemas/components_schemas_RunInput'
+          type: array
         interruptedReason:
           description: Set only when result is INTERRUPTED.
           type: string
@@ -7693,6 +7776,67 @@ components:
       - status
       - tenantFolder
       - tenant
+      type: object
+    components_schemas_RunInput:
+      additionalProperties: false
+      description: One input step a run waits on, read from the run's stored inputs
+        column.
+      properties:
+        id:
+          description: The input step's own identifier. Both input routes address
+            this value.
+          type: string
+        message:
+          description: The message the step shows. Absent when the step declares none.
+          type: string
+        ok:
+          description: The label of the step's proceed control. Absent when the step
+            declares none.
+          type: string
+        parameters:
+          description: |
+            The step's own parameter definitions, in declaration order. Absent when the step declares none.
+          items:
+            $ref: '#/components/schemas/components_schemas_RunInputParameter'
+          type: array
+        submitter:
+          description: |
+            The users and groups the step admits. Absent when the step declares none.
+          type: string
+        submitterParameter:
+          description: |
+            The parameter name that holds the answering user's name. Absent when the step declares none.
+          type: string
+      required:
+      - id
+      type: object
+    components_schemas_RunInputParameter:
+      additionalProperties: false
+      description: One parameter an input step declares, read from its definition.
+      properties:
+        choices:
+          description: The definition's choices. Absent when the definition declares
+            none.
+          items:
+            type: string
+          type: array
+        defaultValue:
+          description: |
+            The definition's default value, rendered as text. Absent when the definition declares none.
+          type: string
+        description:
+          description: The definition's description. Absent when the definition declares
+            none.
+          type: string
+        name:
+          description: The definition's name.
+          type: string
+        type:
+          description: |
+            The Java simple name of the parameter definition, such as StringParameterDefinition or ChoiceParameterDefinition.
+          type: string
+      required:
+      - name
       type: object
     components_schemas_RunListResponse:
       additionalProperties: false
@@ -13074,6 +13218,93 @@ paths:
         "503":
           $ref: '#/components/responses/components_responses_ServiceUnavailable'
       summary: Lists one run's SCM changes.
+      tags:
+      - Pipelines
+  /api/v1/runs/{run}/inputs/{input}/abort:
+    post:
+      description: |
+        The BFF publishes one ABORT_INPUT command and does not wait for Jenkins. The abort path takes no body.
+      operationId: abortRunInput
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_run'
+      - $ref: '#/components/parameters/components_parameters_input'
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_CancelRunResponse'
+          description: The abort was requested.
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The input identifier is empty.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The run does not exist, or the caller may not read it.
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Rejects one pending input step as the calling user. Fire and forget.
+      tags:
+      - Pipelines
+  /api/v1/runs/{run}/inputs/{input}/proceed:
+    post:
+      description: |
+        The BFF publishes one PROCEED_INPUT command and does not wait for Jenkins. The plugin applies the step's own declared defaults for every parameter the request omits.
+      operationId: proceedRunInput
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_run'
+      - $ref: '#/components/parameters/components_parameters_input'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: false
+              properties:
+                parameters:
+                  additionalProperties:
+                    type: string
+                  description: |
+                    Input parameter values, as a map of name to string value. A name the step does not declare is dropped.
+                  type: object
+              type: object
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_CancelRunResponse'
+          description: The proceed was requested.
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The input identifier is empty, or the request body does not
+            decode.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The run does not exist, or the caller may not read it.
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Answers one pending input step as the calling user. Fire and forget.
       tags:
       - Pipelines
   /api/v1/runs/{run}/log:

@@ -101,6 +101,12 @@ type ApplyResult struct {
 	// nothing.
 	RefusedSource bool
 
+	// RefusedInput is true when a run.input write carried a seq below
+	// the stored inputs_seq, and when the run already holds a terminal
+	// status. The write then left every stored value in place, so the
+	// caller acknowledges the message and publishes nothing.
+	RefusedInput bool
+
 	// ReleasedFleetLocks names every fleet lock a terminal run.completed
 	// write released, one entry per deleted row, so notify publishes one
 	// lock notification per row. Every other kind releases none.
@@ -263,6 +269,9 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 	if dispatched.refusedSource {
 		result.RefusedSource = true
 	}
+	if dispatched.refusedInput {
+		result.RefusedInput = true
+	}
 	result.ReleasedFleetLocks = dispatched.releasedFleetLocks
 
 	if dispatched.action != nil && g.conn != nil {
@@ -344,6 +353,11 @@ type dispatchResult struct {
 	// the stored source_seq, so the merge changed no stored value. The
 	// kind raises no ledger action either way.
 	refusedSource bool
+
+	// refusedInput is true when a run.input write carried a seq below the
+	// stored inputs_seq, and when the run already holds a terminal
+	// status, so the write changed no stored set.
+	refusedInput bool
 
 	// releasedFleetLocks names every fleet lock a terminal run.completed
 	// write released, one entry per deleted row. Apply copies it onto
@@ -429,6 +443,12 @@ func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, e
 			return dispatchResult{}, err
 		}
 		return dispatchResult{refusedSource: refused}, nil
+	case KindRunInput:
+		refused, err := applyRunInput(ctx, tx, intent, env)
+		if err != nil {
+			return dispatchResult{}, err
+		}
+		return dispatchResult{refusedInput: refused}, nil
 	case KindRunState:
 		return applyRunState(ctx, tx, intent, env)
 	default:

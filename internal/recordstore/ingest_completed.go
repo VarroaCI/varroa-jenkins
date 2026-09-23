@@ -88,6 +88,10 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 			result = CASE WHEN $13 THEN EXCLUDED.result ELSE COALESCE(EXCLUDED.result, runs.result) END,
 			ended_at = CASE WHEN $13 THEN EXCLUDED.ended_at ELSE COALESCE(EXCLUDED.ended_at, runs.ended_at) END,
 			duration_ms = CASE WHEN $13 THEN EXCLUDED.duration_ms ELSE COALESCE(EXCLUDED.duration_ms, runs.duration_ms) END,
+			-- A completed run holds no pending input, so the owner arm
+			-- clears the run's whole pending set. A foreign completion
+			-- keeps the stored set.
+			inputs = CASE WHEN $13 THEN NULL ELSE runs.inputs END,
 			-- The fill-only revision rule: an absent value takes the
 			-- newest changelog entry's revision, whatever the seq. A set
 			-- value stays, so the rule never rewrites a known commit.
@@ -107,6 +111,11 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 			-- stored value. It re-applies that value only when the payload
 			-- carries a summary value, because an ungated GREATEST would
 			-- write a watermark on a completion that sets no summary.
+			--
+			-- It raises the inputs_seq watermark on the owner arm alone,
+			-- whatever the payload carries: the clear above fences every
+			-- earlier run.input envelope, and a foreign completion changes
+			-- no terminal column at all.
 			payload = (CASE
 			                WHEN runs.result IS NOT DISTINCT FROM '`+ResultTriggerFailed+`' AND $13 THEN COALESCE(runs.payload, '{}'::jsonb) `+triggerPayloadKeysSQL+`
 			                WHEN COALESCE(runs.payload ? 'accepted_at', false) AND $13 THEN COALESCE(runs.payload, '{}'::jsonb) `+acceptedSupersedeKeysSQL+`
@@ -116,6 +125,10 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 			          || CASE WHEN $15::text IS NOT NULL
 			                  THEN jsonb_build_object('summary_seq',
 			                           GREATEST($16::bigint, COALESCE((runs.payload->>'summary_seq')::bigint, $16::bigint)))
+			                  ELSE '{}'::jsonb END
+			          || CASE WHEN $13
+			                  THEN jsonb_build_object('inputs_seq',
+			                           GREATEST($16::bigint, COALESCE((runs.payload->>'inputs_seq')::bigint, $16::bigint)))
 			                  ELSE '{}'::jsonb END
 	`,
 		intent.runID, intent.createdAt, intent.intentKey, intent.cluster, intent.namespace,

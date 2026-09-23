@@ -63,11 +63,17 @@ func (f *fakeTriggerTransport) calls() []triggerCall {
 // folder), granted read and write, over the caller's record store and
 // mite transport.
 func writeTestServer(reader recordstore.Reader, mt transport.Transport) *Server {
+	return writeTestServerWithVerbs(reader, mt, []string{"read", "write"})
+}
+
+// writeTestServerWithVerbs is writeTestServer with the fixture tenant's
+// own verbs, so a case can hold the read grant alone.
+func writeTestServerWithVerbs(reader recordstore.Reader, mt transport.Transport, verbs []string) *Server {
 	client := newFakeResourceClient()
 	client.controllers = map[string]*v1alpha1.Controller{
 		"ci": {ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "test-ns"}},
 	}
-	authz := pipelineGrantAuthorizer([]string{"read", "write"}, "test-ns/ci")
+	authz := pipelineGrantAuthorizer(verbs, "test-ns/ci")
 	store := storeFromFake(client)
 	brood := newFakeBrood(client)
 	deps := &Dependencies{
@@ -701,5 +707,221 @@ func TestPipelinesNoLedgerClaim(t *testing.T) {
 	srv.handleRerunRun(rerunRec, rerunReq)
 	if rerunRec.Code != http.StatusAccepted {
 		t.Fatalf("rerunRun status = %d, want 202", rerunRec.Code)
+	}
+}
+
+// --- The two run input routes ---
+
+// actingClaims is testClaims plus the identity and the groups the two
+// input routes carry into the command.
+func actingClaims() *auth.Claims {
+	return &auth.Claims{
+		Subject:           "u",
+		PreferredUsername: "ada",
+		Email:             "ada@example.test",
+		Groups:            []string{"deployers"},
+	}
+}
+
+// runInputServer wires a server over one RUNNING run of the fixture
+// tenant, carrying the build number an input needs, with the caller's
+// own verbs for that tenant. The run's own namespace and cell columns
+// name the member the command must reach.
+func runInputServer(t *testing.T, mt transport.Transport, verbs []string) *Server {
+	t.Helper()
+	reader := newFakeRecordReader()
+	buildNumber := int64(7)
+	reader.runs["r1"] = recordstore.Run{
+		RunID: "r1", Cluster: "core", Namespace: "run-ns", Cell: "run-cell",
+		Tenant: "test-ns/ci", JobPath: "svc/main", Status: "RUNNING", BuildNumber: &buildNumber,
+	}
+	return writeTestServerWithVerbs(reader, mt, verbs)
+}
+
+// postRunInput posts to one of the two input routes for the given run and
+// input identifiers.
+func postRunInput(srv *Server, runID, inputID, action string, claims *auth.Claims, body any) *httptest.ResponseRecorder {
+	req := doWriteRequest("/runs/"+runID+"/inputs/"+inputID+"/"+action,
+		map[string]string{"run": runID, "input": inputID}, claims, body)
+	rec := httptest.NewRecorder()
+	if action == "proceed" {
+		srv.handleProceedRunInput(rec, req)
+	} else {
+		srv.handleAbortRunInput(rec, req)
+	}
+	return rec
+}
+
+func TestHandleProceedRunInput_PublishesTheCommandToTheRunsOwnTenant(t *testing.T) {
+	mt := &fakeTriggerTransport{}
+	srv := runInputServer(t, mt, []string{"read", "write"})
+
+	rec := postRunInput(srv, "r1", "in-1", "proceed", actingClaims(),
+		proceedRunInputRequest{Parameters: map[string]string{"env": "prod"}})
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s, want 202", rec.Code, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["state"] != "requested" {
+		t.Fatalf("state = %q, want requested", body["state"])
+	}
+
+	calls := mt.calls()
+	if len(calls) != 1 {
+		t.Fatalf("published %d commands, want 1", len(calls))
+	}
+	if calls[0].ns != "run-ns" || calls[0].name != "run-cell" {
+		t.Fatalf("published to %s/%s, want the run's own run-ns/run-cell", calls[0].ns, calls[0].name)
+	}
+	cmd := calls[0].cmd
+	if cmd.Type != mitev1.CommandTypeProceedInput {
+		t.Fatalf("command type = %v, want PROCEED_INPUT", cmd.Type)
+	}
+	p := cmd.ProceedInput
+	if p == nil {
+		t.Fatalf("the proceed payload is nil")
+	}
+	if p.RunId != "r1" || p.JobPath != "svc/main" || p.BuildNumber != 7 || p.InputId != "in-1" {
+		t.Fatalf("payload = %+v, want run_id=r1 job_path=svc/main build_number=7 input_id=in-1", p)
+	}
+	if p.Parameters["env"] != "prod" {
+		t.Fatalf("payload parameters = %+v, want env=prod", p.Parameters)
+	}
+	if p.ActingUser == nil {
+		t.Fatalf("the command carries no acting user")
+	}
+	if p.ActingUser.Name != "ada" || p.ActingUser.Email != "ada@example.test" {
+		t.Fatalf("acting user = %+v, want the caller's own name and email", p.ActingUser)
+	}
+	if len(p.ActingUser.Groups) != 1 || p.ActingUser.Groups[0] != "deployers" {
+		t.Fatalf("acting user groups = %v, want [deployers]", p.ActingUser.Groups)
+	}
+}
+
+func TestHandleAbortRunInput_PublishesTheActingUser(t *testing.T) {
+	mt := &fakeTriggerTransport{}
+	srv := runInputServer(t, mt, []string{"read", "write"})
+
+	rec := postRunInput(srv, "r1", "in-1", "abort", actingClaims(), nil)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s, want 202", rec.Code, rec.Body.String())
+	}
+	calls := mt.calls()
+	if len(calls) != 1 {
+		t.Fatalf("published %d commands, want 1", len(calls))
+	}
+	cmd := calls[0].cmd
+	if cmd.Type != mitev1.CommandTypeAbortInput {
+		t.Fatalf("command type = %v, want ABORT_INPUT", cmd.Type)
+	}
+	p := cmd.AbortInput
+	if p == nil {
+		t.Fatalf("the abort payload is nil")
+	}
+	if p.RunId != "r1" || p.JobPath != "svc/main" || p.BuildNumber != 7 || p.InputId != "in-1" {
+		t.Fatalf("payload = %+v, want run_id=r1 job_path=svc/main build_number=7 input_id=in-1", p)
+	}
+	if p.ActingUser == nil || p.ActingUser.Name != "ada" {
+		t.Fatalf("acting user = %+v, want the caller's own name", p.ActingUser)
+	}
+}
+
+func TestHandleRunInputRoutes_ReadOnlyCallerIs403(t *testing.T) {
+	for _, action := range []string{"proceed", "abort"} {
+		t.Run(action, func(t *testing.T) {
+			mt := &fakeTriggerTransport{}
+			srv := runInputServer(t, mt, []string{"read"})
+
+			rec := postRunInput(srv, "r1", "in-1", action, actingClaims(), proceedRunInputRequest{})
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, body = %s, want 403", rec.Code, rec.Body.String())
+			}
+			if n := len(mt.calls()); n != 0 {
+				t.Fatalf("a forbidden call published %d commands, want 0", n)
+			}
+		})
+	}
+}
+
+func TestHandleRunInputRoutes_UnknownRunIs404(t *testing.T) {
+	for _, action := range []string{"proceed", "abort"} {
+		t.Run(action, func(t *testing.T) {
+			mt := &fakeTriggerTransport{}
+			srv := runInputServer(t, mt, []string{"read", "write"})
+
+			rec := postRunInput(srv, "absent", "in-1", action, actingClaims(), proceedRunInputRequest{})
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, body = %s, want 404", rec.Code, rec.Body.String())
+			}
+			if n := len(mt.calls()); n != 0 {
+				t.Fatalf("an unknown run published %d commands, want 0", n)
+			}
+		})
+	}
+}
+
+func TestHandleRunInputRoutes_EmptyInputIdIs400(t *testing.T) {
+	mt := &fakeTriggerTransport{}
+	srv := runInputServer(t, mt, []string{"read", "write"})
+
+	rec := postRunInput(srv, "r1", "", "proceed", actingClaims(), proceedRunInputRequest{})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s, want 400", rec.Code, rec.Body.String())
+	}
+	if n := len(mt.calls()); n != 0 {
+		t.Fatalf("an empty input id published %d commands, want 0", n)
+	}
+}
+
+func TestHandleRunInputRoutes_RunWithoutBuildNumberIs404(t *testing.T) {
+	mt := &fakeTriggerTransport{}
+	reader := newFakeRecordReader()
+	reader.runs["r1"] = recordstore.Run{RunID: "r1", Tenant: "test-ns/ci", JobPath: "svc/main", Status: "QUEUED"}
+	srv := writeTestServer(reader, mt)
+
+	rec := postRunInput(srv, "r1", "in-1", "proceed", actingClaims(), proceedRunInputRequest{})
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s, want 404", rec.Code, rec.Body.String())
+	}
+	if n := len(mt.calls()); n != 0 {
+		t.Fatalf("a run with no build number published %d commands, want 0", n)
+	}
+}
+
+// TestRunForWriteStatuses_UnchangedByTheSplit asserts the run lookup the
+// two input routes share answers the statuses the cancel and rerun paths
+// answered before runForWrite was split out of it.
+func TestRunForWriteStatuses_UnchangedByTheSplit(t *testing.T) {
+	schemaTooOld := newFakeRecordReader()
+	schemaTooOld.schemaTooOld = true
+
+	reader := newFakeRecordReader()
+	reader.runs["r1"] = recordstore.Run{RunID: "r1", Tenant: "test-ns/ci", JobPath: "svc/main", Status: "RUNNING"}
+	reader.runs["cross"] = recordstore.Run{RunID: "cross", Tenant: "other-ns/other-cell", JobPath: "svc/main", Status: "RUNNING"}
+
+	cases := []struct {
+		name  string
+		srv   *Server
+		runID string
+		want  int
+	}{
+		{name: "an unknown run", srv: writeTestServer(reader, &fakeTriggerTransport{}), runID: "absent", want: http.StatusNotFound},
+		{name: "a run of another tenant", srv: writeTestServer(reader, &fakeTriggerTransport{}), runID: "cross", want: http.StatusForbidden},
+		{name: "a record store that is too old", srv: writeTestServer(schemaTooOld, &fakeTriggerTransport{}), runID: "r1", want: http.StatusServiceUnavailable},
+		{name: "no tenant resolver", srv: NewServer(&Dependencies{RecordStore: reader, Logger: slog.Default()}), runID: "r1", want: http.StatusServiceUnavailable},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := doWriteRequest("/runs/"+tc.runID+"/cancel", map[string]string{"run": tc.runID}, testClaims(), nil)
+			rec := httptest.NewRecorder()
+			tc.srv.handleCancelRun(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, body = %s, want %d", rec.Code, rec.Body.String(), tc.want)
+			}
+		})
 	}
 }

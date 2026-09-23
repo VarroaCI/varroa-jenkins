@@ -307,6 +307,111 @@ func TestApplyRunCompletedRaisesTheSummaryAndItsWatermark(t *testing.T) {
 	}
 }
 
+// TestApplyRunCompletedClearsThePendingSet proves an owning completion
+// clears the run's pending set and raises the inputs watermark, so a later
+// run.input changes nothing.
+func TestApplyRunCompletedClearsThePendingSet(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	const intentKey = "manual:completed-inputs-1"
+	runID := seedGrantedIntent(t, pool, intentKey)
+	g := NewIngester(pool, nil, nil)
+	startRunForSummary(t, pool, runID, intentKey)
+
+	pending := newTestEnvelope(t, runID, intentKey, KindRunInput,
+		RunInputPayload{Seq: inputSeqPtr(3), Inputs: runInputSet("input-1")})
+	if _, err := g.Apply(context.Background(), pending); err != nil {
+		t.Fatalf("apply run.input: %v", err)
+	}
+
+	completed := newTestEnvelope(t, runID, intentKey, KindRunCompleted, RunCompletedPayload{
+		Result: strPtr("SUCCESS"),
+		Seq:    5,
+	})
+	if _, err := g.Apply(context.Background(), completed); err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+
+	inputs, inputsSeq := readRunInputsRow(t, db, runID)
+	if inputs != "" {
+		t.Fatalf("stored inputs = %q, want NULL after the completion", inputs)
+	}
+	if inputsSeq != "5" {
+		t.Fatalf("inputs_seq = %q, want 5", inputsSeq)
+	}
+
+	late := newTestEnvelope(t, runID, intentKey, KindRunInput,
+		RunInputPayload{Seq: inputSeqPtr(9), Inputs: runInputSet("input-9")})
+	res, err := g.Apply(context.Background(), late)
+	if err != nil {
+		t.Fatalf("apply late run.input: %v", err)
+	}
+	if !res.RefusedInput {
+		t.Fatal("a completed run took a pending set, want refused")
+	}
+}
+
+// TestHeartbeatOnACompletedRunRestoresNoPendingSet proves a heartbeat that
+// races an owning completion cannot restore the set the completion
+// cleared, whatever seq the heartbeat carries.
+func TestHeartbeatOnACompletedRunRestoresNoPendingSet(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	const intentKey = "manual:completed-inputs-2"
+	runID := seedGrantedIntent(t, pool, intentKey)
+	g := NewIngester(pool, nil, nil)
+	startRunForSummary(t, pool, runID, intentKey)
+
+	completed := newTestEnvelope(t, runID, intentKey, KindRunCompleted, RunCompletedPayload{
+		Result: strPtr("SUCCESS"),
+		Seq:    5,
+	})
+	if _, err := g.Apply(context.Background(), completed); err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+
+	applyHeartbeatWithInputs(t, pool, runID, 9, []StoredRunInput{{ID: "input-9"}})
+
+	inputs, inputsSeq := readRunInputsRow(t, db, runID)
+	if inputs != "" {
+		t.Fatalf("stored inputs = %q, want NULL on a completed run", inputs)
+	}
+	if inputsSeq != "5" {
+		t.Fatalf("inputs_seq = %q, want the completion's 5", inputsSeq)
+	}
+}
+
+// TestApplyRunCompletedForeignInstanceKeepsThePendingSet proves a foreign
+// completion clears nothing and raises nothing.
+func TestApplyRunCompletedForeignInstanceKeepsThePendingSet(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	const intentKey = "manual:completed-inputs-foreign-1"
+	runID := seedGrantedIntent(t, pool, intentKey)
+	g := NewIngester(pool, nil, nil)
+	startRunForSummary(t, pool, runID, intentKey)
+
+	pending := newTestEnvelope(t, runID, intentKey, KindRunInput,
+		RunInputPayload{Seq: inputSeqPtr(3), Inputs: runInputSet("input-1")})
+	if _, err := g.Apply(context.Background(), pending); err != nil {
+		t.Fatalf("apply run.input: %v", err)
+	}
+
+	foreign := newTestEnvelope(t, runID, intentKey, KindRunCompleted, RunCompletedPayload{
+		Result: strPtr("SUCCESS"),
+		Seq:    5,
+	})
+	foreign.CellInstance = "pod-b" // differs from the intent's own instance
+	if _, err := g.Apply(context.Background(), foreign); err != nil {
+		t.Fatalf("apply the foreign run.completed: %v", err)
+	}
+
+	inputs, inputsSeq := readRunInputsRow(t, db, runID)
+	if entries := storedRunInputs(t, inputs); len(entries) != 1 || entries[0].ID != "input-1" {
+		t.Fatalf("stored inputs = %+v, want the stored set", entries)
+	}
+	if inputsSeq != "3" {
+		t.Fatalf("inputs_seq = %q, want 3", inputsSeq)
+	}
+}
+
 // TestApplyRunCompletedStaleSummaryCannotLowerTheWatermark proves a
 // completion whose seq sits below the stored summary_seq, and one from a
 // non-owning instance, leave both the summary column and the watermark at

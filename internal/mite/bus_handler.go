@@ -618,6 +618,18 @@ func (h *BusHandler) recordCommandOutcome(ns, name string, pendingMsg *nats.Msg,
 			h.publishResumeFailed(ns, name, imp.ResumeBuild, result)
 		}
 		return true
+	case mitev1.CommandTypeProceedInput, mitev1.CommandTypeAbortInput:
+		// An input answer publishes no record: the plugin re-reads the
+		// run's pending set and reports the outcome itself. The caller
+		// already holds a 202, so a refusal is visible here alone.
+		if !result.Success {
+			h.log().Warn("run input command refused",
+				"controller", ns+"/"+name,
+				"command_id", result.CommandId,
+				"http_status", result.HttpStatus,
+				"error", result.Error)
+		}
+		return true
 	default:
 		return true
 	}

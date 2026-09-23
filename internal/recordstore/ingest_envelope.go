@@ -27,6 +27,12 @@ const (
 	// path, its libraries, and its pod templates. The merge writes one
 	// StoredRunSource value into the runs.source column.
 	KindRunSource = "run.source"
+	// KindRunInput records the pending input steps of a run. The write
+	// replaces the whole runs.inputs value, because the event carries
+	// the run's whole pending set and never a delta. A paused build
+	// always holds an intent row, so the recorder routes it after the
+	// intent read, beside run.source.
+	KindRunInput = "run.input"
 	// KindRunTriggerFailed records a build trigger Jenkins refused. Such a
 	// run holds no intent row, so the recorder routes it before the intent
 	// read.
@@ -60,6 +66,7 @@ var ingestKinds = map[string]bool{
 	KindRunLog:             true,
 	KindRunHeartbeat:       true,
 	KindRunSource:          true,
+	KindRunInput:           true,
 	KindRunTriggerFailed:   true,
 	KindRunTriggerAccepted: true,
 	KindRunResumeFailed:    true,
@@ -257,6 +264,37 @@ type StoredRunSource struct {
 	DefinitionPath string              `json:"definition_path,omitempty"`
 	Libraries      []SourceLibrary     `json:"libraries,omitempty"`
 	PodTemplates   []SourcePodTemplate `json:"pod_templates,omitempty"`
+}
+
+// RunInputPayload is the payload of a run.input envelope. It carries the
+// run's whole pending set. A nil Inputs and an empty Inputs both clear
+// the stored set, because the event never carries a delta.
+type RunInputPayload struct {
+	Seq    *int64           `json:"seq"`
+	Inputs []StoredRunInput `json:"inputs"`
+}
+
+// StoredRunInput is one element of the runs.inputs column. The recorder
+// marshals it on the write, and the BFF unmarshals it on the read, so
+// one type owns the column's key names on both sides. The keys are the
+// column's own snake_case names, never the response's camelCase names.
+type StoredRunInput struct {
+	ID                 string                    `json:"id"`
+	Message            string                    `json:"message,omitempty"`
+	OK                 string                    `json:"ok,omitempty"`
+	Submitter          string                    `json:"submitter,omitempty"`
+	SubmitterParameter string                    `json:"submitter_parameter,omitempty"`
+	Parameters         []StoredRunInputParameter `json:"parameters,omitempty"`
+}
+
+// StoredRunInputParameter is one parameter definition of a stored pending
+// input.
+type StoredRunInputParameter struct {
+	Name         string   `json:"name"`
+	Type         string   `json:"type,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	DefaultValue string   `json:"default_value,omitempty"`
+	Choices      []string `json:"choices,omitempty"`
 }
 
 // JobSchedulesPayload is the payload of a job.schedules envelope,

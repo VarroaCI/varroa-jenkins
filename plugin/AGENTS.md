@@ -147,15 +147,20 @@ the root AGENTS.md greenfield rule.
   name>#<build number>`) holds each run's identity and sequence counter, which an
   attach to a resumed build seeds from the wall clock; a daemon timer
   emits one `HEARTBEAT` event per live run every `VARROA_RUN_HEARTBEAT_SECONDS` (default
-  60 s), the identity fields and the run's `summary` text when its pipeline set one.
-  The wire model is `BuildEvent.java`/`BuildStage.java`/
+  60 s), the identity fields, the run's `summary` text when its pipeline set one, and the
+  run's cached pending input set. The wire model is `BuildEvent.java`/`BuildStage.java`/
   `BuildChange.java`; size caps and an oversize ladder keep one serialized event under
   512 KiB, and never truncate an identifier field. `BuildEvent` fields 38 to 41
   (`template_name`, `template_version`, `marker_path`, `marker_revision`) come from the
   run's `template.VarroaTemplateValuesAction`, empty for a run with no template; a
   `HEARTBEAT` event never carries them. Field 46, `summary`, comes from the run's own
   `VarroaSummaryAction.java`, and a `HEARTBEAT` event carries it only when it is not
-  empty. `RunListener.onStarted` can fire before a Varroa
+  empty. Field 47, `inputs`, holds the run's pending `input` steps: `VarroaRunInputs.java`
+  reads them by class name, because `pipeline-input-step` is a test-scope dependency, and
+  `Graph.onNewHead` schedules one deferred re-check per arriving node on a daemon timer,
+  because the step attaches its action to the run after the node exists. The re-check
+  emits `run.input` with the run's whole pending set, and only on a set that changed; the
+  `HEARTBEAT` event carries the cached set alone. `RunListener.onStarted` can fire before a Varroa
   template flow definition attaches that action, so `Runs` holds the `STARTED` event for
   such a run (named by `FlowDefinition` class, since this package holds no compile
   dependency on `template`'s flow definitions) until the action attaches, in either state,
@@ -207,8 +212,9 @@ the root AGENTS.md greenfield rule.
   the line to the caller run's own console, reached through the item's
   `Cause.UpstreamCause` and `FlowExecutionOwner`, and falls back to the system log.
   The five counters are `varroa_plugin_forwarded_{scm,cron,api,other}`, keyed by the
-  intent key's scheme, and `varroa_plugin_forward_refused`. `pipeline-build-step` is a
-  **test-scope** dependency only: no main-scope class names the step or its action.
+  intent key's scheme, and `varroa_plugin_forward_refused`. `pipeline-build-step` and
+  `pipeline-input-step` are **test-scope** dependencies only: no main-scope class names
+  either step or its action.
 - **Cross-tenant pipeline API** (the `varroa` global variable; D1, D2, D11, D12):
   `VarroaGlobalVariable.java` compiles `varroa/Varroa.groovy` and
   `varroa/VarroaRunHandle.groovy` (plugin resources, not classpath `.class` files) into
@@ -329,8 +335,9 @@ the root AGENTS.md greenfield rule.
   `getAffectedPaths()` always answers empty — the record store carries only
   an affected-path count, never the paths themselves, so the operator never
   has real paths to write into the document.
-- **Run trigger endpoint** (the mite's local call for a manual build trigger and
-  cancel; D3, D4, run-trigger-endpoint): `VarroaRunTriggerAction.java`, a protected
+- **Run trigger endpoint** (the mite's local call for a manual build trigger, a cancel,
+  and the two input-approval commands; D3, D4, D10, D11, run-trigger-endpoint):
+  `VarroaRunTriggerAction.java`, a protected
   `RootAction` at `/varroa-run`, requires `ROLE:varroa:system-mite`. `POST
   /varroa-run/trigger` reads `runId`, `intentKey`, `jobPath`, `parameters`, and
   `actor`; stamps a `VarroaIntentAction` carrying the caller's run identifier, intent
@@ -359,12 +366,39 @@ the root AGENTS.md greenfield rule.
   builds, and loads nothing, which is how the mite makes a redelivered
   resume touch nothing; a probe answers `404` for an unknown job alone,
   and reports a build that ended in this process as `finished`.
+  `POST /varroa-run/proceed-input` reads `runId`, `jobPath`, `buildNumber`,
+  `inputId`, `parameters`, and `actingUser`; it resolves the build by run
+  identifier and the input through the run's own input action, and it answers
+  `400` for a body that does not decode and for a body that names no run, no
+  input, or no acting name, `404` for no build carrying the run identifier and
+  for an input id the run does not hold, `409` for a settled input, `403` for a
+  submitter the acting user fails, and `202` with a `droppedParameters` list. A
+  supplied name the step does not declare is dropped and named, a file
+  parameter's supplied value is dropped and named, a name the request omits
+  takes the step's declared default, and the step's submitter parameter takes
+  the acting name last. `POST /varroa-run/abort-input` reads the same body
+  without `parameters`, answers the same codes, and runs no permission check of
+  its own: the input step's own abort path admits a caller holding the
+  build-cancel permission or the step's own submitter identity. Both routes
+  re-read the run's pending set after a `202`, before they write it.
   **A route of more than one word needs `@WebMethod(name = "...")`.** Stapler
   derives the URL token from the method name and never writes a dash, so
   `doLoadBuild` serves `loadBuild` and the dashed name every caller uses answers
   `404`. A test posts to each `/varroa-run` route over HTTP, with the crumb
   issuer cleared, because the crumb filter answers `403` before Stapler routes
   and would hide an unmapped route.
+- **The acting-user seam** (D10, run-input-approval): every mite-delivered command that
+  acts as a person reads its user from the request body, never from the request
+  authentication, and runs every Jenkins call after its resolution inside
+  `ACL.as2(user.authentication())`. The request authenticates the mite, and the body
+  names the person. `VarroaActingUser.java` is the one builder of that authentication: a
+  Spring Security `UsernamePasswordAuthenticationToken` whose principal is the acting name
+  and whose authorities are `authenticated` plus one per non-empty group. Jenkins bridges
+  it to the acegi read the input step's `submitter` check performs, so a Varroa group name
+  in `submitter` admits any acting user whose command carries that group. A persisted
+  user's impersonation carries `authenticated` alone and would refuse every group-scoped
+  check, so no route uses one. A blank name is refused, and the route answers `400`. The
+  `email` reaches no authority and no check.
 - **A resumed build attaches through `Flows.onResumed`.** `RunListener.onStarted`
   fires in the process that began a build, so a build the mesh moves to another
   JVM has no per-run state, no heartbeat, no stage events, and no sequence

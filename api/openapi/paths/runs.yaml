@@ -250,3 +250,93 @@
               $ref: '../components/schemas.yaml#/Error'
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/runs/{run}/inputs/{input}/proceed:
+  post:
+    operationId: proceedRunInput
+    tags: [Pipelines]
+    summary: Answers one pending input step as the calling user. Fire and forget.
+    description: >
+      The BFF publishes one PROCEED_INPUT command and does not wait for
+      Jenkins. The plugin applies the step's own declared defaults for
+      every parameter the request omits.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+      - $ref: '../components/parameters.yaml#/input'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              parameters:
+                type: object
+                description: >
+                  Input parameter values, as a map of name to string
+                  value. A name the step does not declare is dropped.
+                additionalProperties:
+                  type: string
+    responses:
+      "202":
+        description: The proceed was requested.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/CancelRunResponse'
+      "400":
+        description: The input identifier is empty, or the request body does not decode.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        description: The run does not exist, or the caller may not read it.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/runs/{run}/inputs/{input}/abort:
+  post:
+    operationId: abortRunInput
+    tags: [Pipelines]
+    summary: Rejects one pending input step as the calling user. Fire and forget.
+    description: >
+      The BFF publishes one ABORT_INPUT command and does not wait for
+      Jenkins. The abort path takes no body.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+      - $ref: '../components/parameters.yaml#/input'
+    responses:
+      "202":
+        description: The abort was requested.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/CancelRunResponse'
+      "400":
+        description: The input identifier is empty.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        description: The run does not exist, or the caller may not read it.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'

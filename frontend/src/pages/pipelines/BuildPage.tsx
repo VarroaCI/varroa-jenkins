@@ -3,12 +3,14 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { RotateCcw, XCircle } from "lucide-react";
 import {
+  abortRunInput,
   cancelRun,
   getRun,
   listRunArtifacts,
   listRunChanges,
   listRuns,
   listRunTests,
+  proceedRunInput,
   rerunRun,
   runLogUrl,
   teamRunStreamUrl,
@@ -36,6 +38,7 @@ import type {
 import { stripTenantFolder } from "./jobPath";
 import { StageGraph } from "./StageGraph";
 import { RunLogViewer, type RunLogViewerHandle } from "./RunLogViewer";
+import { PendingInputCard } from "./PendingInputCard";
 import styles from "./BuildPage.module.css";
 
 /** The frames the run log stream carries. */
@@ -216,7 +219,7 @@ export default function BuildPage() {
   const { lastEvent: runEvent, readyState: runStreamReady } = useEventStream<RunNotification>(
     team ? teamRunStreamUrl(team) : null,
     team ? `pipelines:${team}` : null,
-    ["run", "stage", "lock"],
+    ["run", "stage", "lock", "input"],
   );
   const streamOpen = runStreamReady === "open";
   const { run, status, refetch } = useRunRecord(runId, requested, streamOpen);
@@ -286,12 +289,19 @@ export default function BuildPage() {
     setLogEnded(false);
   }, [logRunId]);
 
-  // A stage frame, a run frame, and a lock frame all change the record, so
-  // the page refetches the record for any of them. The page renders the
-  // record, never a payload field.
+  // A stage frame, a run frame, a lock frame, and an input frame all change
+  // the record, so the page refetches the record on any of them. The page
+  // renders the record, never a payload field.
   useEffect(() => {
     if (!runEvent) return;
-    if (runEvent.type !== "run" && runEvent.type !== "stage" && runEvent.type !== "lock") return;
+    if (
+      runEvent.type !== "run" &&
+      runEvent.type !== "stage" &&
+      runEvent.type !== "lock" &&
+      runEvent.type !== "input"
+    ) {
+      return;
+    }
     const notification = runEvent.data;
     if (!notification || notification.run_id !== runId) return;
     void refetch();
@@ -334,6 +344,27 @@ export default function BuildPage() {
       refetch();
     },
     onError: () => toast("Cancel failed"),
+  });
+
+  // The write routes answer 202 with a request, not an outcome, so each toast
+  // says "requested". Only the refetched record clears an entry.
+  const proceedInputMutation = useMutation({
+    mutationFn: (v: { inputId: string; parameters: Record<string, string> }) =>
+      proceedRunInput(run!.runId, v.inputId, v.parameters),
+    onSuccess: () => {
+      toast("Proceed requested");
+      refetch();
+    },
+    onError: () => toast("Proceed failed"),
+  });
+
+  const abortInputMutation = useMutation({
+    mutationFn: (inputId: string) => abortRunInput(run!.runId, inputId),
+    onSuccess: () => {
+      toast("Abort requested");
+      refetch();
+    },
+    onError: () => toast("Abort failed"),
   });
 
   const rerunMutation = useMutation({
@@ -612,6 +643,25 @@ export default function BuildPage() {
           )}
           {run.digest.logTail && <pre className={`${styles.mono} ${styles.digestTail}`}>{run.digest.logTail}</pre>}
         </Card>
+      )}
+
+      {/* A pending input sits under the digest card and above the Pipeline
+          card. The write gate is the page's own, so a caller who cannot
+          write sees the answer controls gone. */}
+      {!!run.inputs?.length && (
+        <PendingInputCard
+          inputs={run.inputs}
+          canWrite={canWrite}
+          busyInputId={
+            proceedInputMutation.isPending
+              ? proceedInputMutation.variables?.inputId
+              : abortInputMutation.isPending
+                ? abortInputMutation.variables
+                : null
+          }
+          onProceed={(inputId, parameters) => proceedInputMutation.mutate({ inputId, parameters })}
+          onAbort={(inputId) => abortInputMutation.mutate(inputId)}
+        />
       )}
 
       <Card title="Pipeline">

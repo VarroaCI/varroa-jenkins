@@ -1814,6 +1814,8 @@ export interface RunDetail {
   summary?: string;
   /** The run's failure digest. Each part is absent when the record omits it. */
   digest?: RunDigest;
+  /** The run's pending input steps. Absent when the run holds none. */
+  inputs?: RunInput[];
 }
 
 /** The failed-test counts of a run digest. */
@@ -1856,6 +1858,40 @@ export interface RunSource {
   podTemplates?: RunSourcePodTemplate[];
 }
 
+/** One parameter a pending input step declares. The BFF answers these
+ * fields in camel case, whatever the raw run.input envelope carries. */
+export interface RunInputParameter {
+  name: string;
+  /** The Java simple name of the definition class. The card picks its
+   * control from this value. */
+  type: string;
+  description?: string;
+  /** The declared default, rendered as text. Each control starts here. */
+  defaultValue?: string;
+  /** The declared choices. A non-empty list renders a select, whatever
+   * the type. */
+  choices?: string[];
+}
+
+/** One input step a run waits on, as GET /runs/{run} reports it. */
+export interface RunInput {
+  /** The step execution's identifier. A write route addresses the input
+   * by this value. */
+  id: string;
+  /** The step's message. The card shows a fallback when it is absent. */
+  message?: string;
+  /** The step's proceed label. The card falls back to "Proceed". */
+  ok?: string;
+  /** The step's submitter specification. The card names it. */
+  submitter?: string;
+  /** The step's submitter parameter name. The card reads it and renders
+   * nothing for it. */
+  submitterParameter?: string;
+  /** The step's own parameter definitions. An empty list renders no
+   * form. */
+  parameters?: RunInputParameter[];
+}
+
 export interface RunArtifact {
   path: string;
   sizeBytes: number;
@@ -1891,14 +1927,14 @@ export interface RunChangeListResponse {
 // ---- Live run notifications (the team run stream) ----
 
 /**
- * One frame of the team run stream, named "run", "stage", or "lock". The
- * recorder publishes the frame, so every field keeps its snake_case name.
- * The stream sends no first frame and replays nothing, so a page refetches
- * when its stream opens. A page reads a frame to decide which read to
- * refresh, and it renders no field of the payload.
+ * One frame of the team run stream, named "run", "stage", "lock", or
+ * "input". The recorder publishes the frame, so every field keeps its
+ * snake_case name. The stream sends no first frame and replays nothing, so
+ * a page refetches when its stream opens. A page reads a frame to decide
+ * which read to refresh, and it renders no field of the payload.
  */
 export interface RunNotification {
-  kind: "run" | "stage" | "lock";
+  kind: "run" | "stage" | "lock" | "input";
   cluster: string;
   tenant: string;
   job_path: string;

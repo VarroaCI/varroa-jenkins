@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
@@ -103,6 +104,7 @@ type RunDetail struct {
 	Source            *runSourceJSON    `json:"source,omitempty"`
 	Summary           string            `json:"summary,omitempty"`
 	Digest            *runDigestJSON    `json:"digest,omitempty"`
+	Inputs            []runInputJSON    `json:"inputs,omitempty"`
 }
 
 // convertJSON re-shapes in into a T by round-tripping through JSON. Every
@@ -149,6 +151,22 @@ func (s *Server) readerServiceError(err error, action string) *ServiceError {
 func (s *Server) RunPipeline(ctx context.Context, claims *auth.Claims, team, jobPath, cluster string, parameters map[string]string) (runID, intentKey, targetCluster string, serr *ServiceError) {
 	runID, intentKey, ref, serr := s.createRun(ctx, claims, team, jobPath, "", cluster, parameters)
 	return runID, intentKey, ref.Cluster, serr
+}
+
+// ProceedRunInput is the proceed_run_input MCP tool's entry into the
+// proceed route. It authorizes with the tenant write check on the run's
+// own tenant, exactly as POST /runs/{run}/inputs/{input}/proceed does,
+// and reports no outcome: the caller reads the run again to learn it. It
+// answers the cluster the command went to, for the tool's audit event.
+func (s *Server) ProceedRunInput(ctx context.Context, claims *auth.Claims, runID, inputID string, parameters map[string]string) (targetCluster string, serr *ServiceError) {
+	return s.answerRunInput(ctx, claims, runID, inputID, mitev1.CommandTypeProceedInput, parameters)
+}
+
+// AbortRunInput is the abort_run_input MCP tool's entry into the abort
+// route. It authorizes the same way ProceedRunInput does, and carries no
+// parameters.
+func (s *Server) AbortRunInput(ctx context.Context, claims *auth.Claims, runID, inputID string) (targetCluster string, serr *ServiceError) {
+	return s.answerRunInput(ctx, claims, runID, inputID, mitev1.CommandTypeAbortInput, nil)
 }
 
 // ListRuns is the list_runs MCP tool's entry into design D1's

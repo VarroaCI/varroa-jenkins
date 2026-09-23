@@ -180,7 +180,7 @@ func (r *pgReader) checkSchema(ctx context.Context) error {
 // runColumns lists varroa.runs' columns in the order scanRun expects.
 const runColumns = `run_id, created_at, cluster, namespace, cell, tenant, job_path, build_number, branch,
 	scm_revision, status, result, queued_at, started_at, ended_at, last_heartbeat_at,
-	interrupted_superseded_at, duration_ms, actor, cause, params, changes, source, summary,
+	interrupted_superseded_at, duration_ms, actor, cause, params, changes, source, inputs, summary,
 	tests_total, tests_failed, tests_skipped, payload`
 
 // qualifiedRunColumns is the same columns as runColumns, each qualified
@@ -190,7 +190,7 @@ const qualifiedRunColumns = `runs.run_id, runs.created_at, runs.cluster, runs.na
 	runs.job_path, runs.build_number, runs.branch, runs.scm_revision, runs.status, runs.result,
 	runs.queued_at, runs.started_at, runs.ended_at, runs.last_heartbeat_at,
 	runs.interrupted_superseded_at, runs.duration_ms, runs.actor, runs.cause, runs.params,
-	runs.changes, runs.source, runs.summary, runs.tests_total, runs.tests_failed,
+	runs.changes, runs.source, runs.inputs, runs.summary, runs.tests_total, runs.tests_failed,
 	runs.tests_skipped, runs.payload`
 
 // scanRun scans one row shaped by runColumns into a Run.
@@ -201,7 +201,7 @@ func scanRun(row pgx.Row) (Run, error) {
 		&runID, &run.CreatedAt, &run.Cluster, &run.Namespace, &run.Cell, &run.Tenant, &run.JobPath,
 		&run.BuildNumber, &run.Branch, &run.SCMRevision, &run.Status, &run.Result, &run.QueuedAt,
 		&run.StartedAt, &run.EndedAt, &run.LastHeartbeatAt, &run.InterruptedSupersededAt, &run.DurationMs,
-		&run.Actor, &run.Cause, &run.Params, &run.Changes, &run.Source, &run.Summary,
+		&run.Actor, &run.Cause, &run.Params, &run.Changes, &run.Source, &run.Inputs, &run.Summary,
 		&run.TestsTotal, &run.TestsFailed, &run.TestsSkipped, &run.Payload,
 	)
 	if err != nil {

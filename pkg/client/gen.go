@@ -878,7 +878,7 @@ type ComponentsSchemasBundleRef struct {
 	Namespace string `json:"namespace"`
 }
 
-// ComponentsSchemasCancelRunResponse 202 response for a cancel request. Cancel is fire and forget.
+// ComponentsSchemasCancelRunResponse 202 response for a fire-and-forget run action: a cancel, an input proceed, or an input abort. The BFF publishes one command and waits for no result.
 type ComponentsSchemasCancelRunResponse struct {
 	State ComponentsSchemasCancelRunResponseState `json:"state"`
 }
@@ -2969,6 +2969,9 @@ type ComponentsSchemasRunDetail struct {
 	DurationMs *int64     `json:"durationMs,omitempty"`
 	EndedAt    *time.Time `json:"endedAt,omitempty"`
 
+	// Inputs The input steps the run waits on, read from the run's stored inputs column. This field is absent until a run.input event arrives, and absent for a run that holds no pending input.
+	Inputs *[]ComponentsSchemasRunInput `json:"inputs,omitempty"`
+
 	// InterruptedReason Set only when result is INTERRUPTED.
 	InterruptedReason *string `json:"interruptedReason,omitempty"`
 	JobPath           string  `json:"jobPath"`
@@ -3023,6 +3026,45 @@ type ComponentsSchemasRunDetail struct {
 
 	// TriggerReasonCode Why the controller refused the build trigger. One of JOB_NOT_FOUND, JOB_NOT_BUILDABLE, and TRIGGER_REJECTED. Set only when result is TRIGGER_FAILED.
 	TriggerReasonCode *string `json:"triggerReasonCode,omitempty"`
+}
+
+// ComponentsSchemasRunInput One input step a run waits on, read from the run's stored inputs column.
+type ComponentsSchemasRunInput struct {
+	// Id The input step's own identifier. Both input routes address this value.
+	Id string `json:"id"`
+
+	// Message The message the step shows. Absent when the step declares none.
+	Message *string `json:"message,omitempty"`
+
+	// Ok The label of the step's proceed control. Absent when the step declares none.
+	Ok *string `json:"ok,omitempty"`
+
+	// Parameters The step's own parameter definitions, in declaration order. Absent when the step declares none.
+	Parameters *[]ComponentsSchemasRunInputParameter `json:"parameters,omitempty"`
+
+	// Submitter The users and groups the step admits. Absent when the step declares none.
+	Submitter *string `json:"submitter,omitempty"`
+
+	// SubmitterParameter The parameter name that holds the answering user's name. Absent when the step declares none.
+	SubmitterParameter *string `json:"submitterParameter,omitempty"`
+}
+
+// ComponentsSchemasRunInputParameter One parameter an input step declares, read from its definition.
+type ComponentsSchemasRunInputParameter struct {
+	// Choices The definition's choices. Absent when the definition declares none.
+	Choices *[]string `json:"choices,omitempty"`
+
+	// DefaultValue The definition's default value, rendered as text. Absent when the definition declares none.
+	DefaultValue *string `json:"defaultValue,omitempty"`
+
+	// Description The definition's description. Absent when the definition declares none.
+	Description *string `json:"description,omitempty"`
+
+	// Name The definition's name.
+	Name string `json:"name"`
+
+	// Type The Java simple name of the parameter definition, such as StringParameterDefinition or ChoiceParameterDefinition.
+	Type *string `json:"type,omitempty"`
 }
 
 // ComponentsSchemasRunListResponse GET /pipelines/{team}/jobs/{job}/runs, cross-tenant cursor-merged.
@@ -3823,6 +3865,9 @@ type ComponentsParametersClusterQuery = string
 // ComponentsParametersForce defines model for components_parameters_force.
 type ComponentsParametersForce = bool
 
+// ComponentsParametersInput defines model for components_parameters_input.
+type ComponentsParametersInput = string
+
 // ComponentsParametersJob defines model for components_parameters_job.
 type ComponentsParametersJob = string
 
@@ -4106,6 +4151,12 @@ type DownloadRunArtifactParams struct {
 	Range *string `json:"Range,omitempty"`
 }
 
+// ProceedRunInputJSONBody defines parameters for ProceedRunInput.
+type ProceedRunInputJSONBody struct {
+	// Parameters Input parameter values, as a map of name to string value. A name the step does not declare is dropped.
+	Parameters *map[string]string `json:"parameters,omitempty"`
+}
+
 // StreamRunLogParams defines parameters for StreamRunLog.
 type StreamRunLogParams struct {
 	// From Byte offset of the first unread byte.
@@ -4278,6 +4329,9 @@ type CreateRunnerJSONRequestBody = ComponentsSchemasRunnerCreateRequest
 
 // PatchRunnerApplicationMergePatchPlusJSONRequestBody defines body for PatchRunner for application/merge-patch+json ContentType.
 type PatchRunnerApplicationMergePatchPlusJSONRequestBody PatchRunnerApplicationMergePatchPlusJSONBody
+
+// ProceedRunInputJSONRequestBody defines body for ProceedRunInput for application/json ContentType.
+type ProceedRunInputJSONRequestBody ProceedRunInputJSONBody
 
 // CreateStreamTicketJSONRequestBody defines body for CreateStreamTicket for application/json ContentType.
 type CreateStreamTicketJSONRequestBody CreateStreamTicketJSONBody
@@ -5273,6 +5327,14 @@ type ClientInterface interface {
 
 	// ListRunChanges request
 	ListRunChanges(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// AbortRunInput request
+	AbortRunInput(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ProceedRunInputWithBody request with any body
+	ProceedRunInputWithBody(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ProceedRunInput(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, body ProceedRunInputJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// StreamRunLog request
 	StreamRunLog(ctx context.Context, run ComponentsParametersRun, params *StreamRunLogParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -7404,6 +7466,42 @@ func (c *Client) CancelRun(ctx context.Context, run ComponentsParametersRun, req
 
 func (c *Client) ListRunChanges(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListRunChangesRequest(c.Server, run)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) AbortRunInput(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAbortRunInputRequest(c.Server, run, input)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ProceedRunInputWithBody(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewProceedRunInputRequestWithBody(c.Server, run, input, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ProceedRunInput(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, body ProceedRunInputJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewProceedRunInputRequest(c.Server, run, input, body)
 	if err != nil {
 		return nil, err
 	}
@@ -13987,6 +14085,101 @@ func NewListRunChangesRequest(server string, run ComponentsParametersRun) (*http
 	return req, nil
 }
 
+// NewAbortRunInputRequest generates requests for AbortRunInput
+func NewAbortRunInputRequest(server string, run ComponentsParametersRun, input ComponentsParametersInput) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "input", runtime.ParamLocationPath, input)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/inputs/%s/abort", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewProceedRunInputRequest calls the generic ProceedRunInput builder with application/json body
+func NewProceedRunInputRequest(server string, run ComponentsParametersRun, input ComponentsParametersInput, body ProceedRunInputJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewProceedRunInputRequestWithBody(server, run, input, "application/json", bodyReader)
+}
+
+// NewProceedRunInputRequestWithBody generates requests for ProceedRunInput with any type of body
+func NewProceedRunInputRequestWithBody(server string, run ComponentsParametersRun, input ComponentsParametersInput, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "input", runtime.ParamLocationPath, input)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/inputs/%s/proceed", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewStreamRunLogRequest generates requests for StreamRunLog
 func NewStreamRunLogRequest(server string, run ComponentsParametersRun, params *StreamRunLogParams) (*http.Request, error) {
 	var err error
@@ -15469,6 +15662,14 @@ type ClientWithResponsesInterface interface {
 
 	// ListRunChangesWithResponse request
 	ListRunChangesWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*ListRunChangesResponse, error)
+
+	// AbortRunInputWithResponse request
+	AbortRunInputWithResponse(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, reqEditors ...RequestEditorFn) (*AbortRunInputResponse, error)
+
+	// ProceedRunInputWithBodyWithResponse request with any body
+	ProceedRunInputWithBodyWithResponse(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ProceedRunInputResponse, error)
+
+	ProceedRunInputWithResponse(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, body ProceedRunInputJSONRequestBody, reqEditors ...RequestEditorFn) (*ProceedRunInputResponse, error)
 
 	// StreamRunLogWithResponse request
 	StreamRunLogWithResponse(ctx context.Context, run ComponentsParametersRun, params *StreamRunLogParams, reqEditors ...RequestEditorFn) (*StreamRunLogResponse, error)
@@ -18861,6 +19062,60 @@ func (r ListRunChangesResponse) StatusCode() int {
 	return 0
 }
 
+type AbortRunInputResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON202      *ComponentsSchemasCancelRunResponse
+	JSON400      *ComponentsSchemasError
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r AbortRunInputResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r AbortRunInputResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ProceedRunInputResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON202      *ComponentsSchemasCancelRunResponse
+	JSON400      *ComponentsSchemasError
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ProceedRunInputResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ProceedRunInputResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type StreamRunLogResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -21004,6 +21259,32 @@ func (c *ClientWithResponses) ListRunChangesWithResponse(ctx context.Context, ru
 		return nil, err
 	}
 	return ParseListRunChangesResponse(rsp)
+}
+
+// AbortRunInputWithResponse request returning *AbortRunInputResponse
+func (c *ClientWithResponses) AbortRunInputWithResponse(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, reqEditors ...RequestEditorFn) (*AbortRunInputResponse, error) {
+	rsp, err := c.AbortRunInput(ctx, run, input, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAbortRunInputResponse(rsp)
+}
+
+// ProceedRunInputWithBodyWithResponse request with arbitrary body returning *ProceedRunInputResponse
+func (c *ClientWithResponses) ProceedRunInputWithBodyWithResponse(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ProceedRunInputResponse, error) {
+	rsp, err := c.ProceedRunInputWithBody(ctx, run, input, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseProceedRunInputResponse(rsp)
+}
+
+func (c *ClientWithResponses) ProceedRunInputWithResponse(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, body ProceedRunInputJSONRequestBody, reqEditors ...RequestEditorFn) (*ProceedRunInputResponse, error) {
+	rsp, err := c.ProceedRunInput(ctx, run, input, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseProceedRunInputResponse(rsp)
 }
 
 // StreamRunLogWithResponse request returning *StreamRunLogResponse
@@ -27191,6 +27472,128 @@ func ParseListRunChangesResponse(rsp *http.Response) (*ListRunChangesResponse, e
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseAbortRunInputResponse parses an HTTP response from a AbortRunInputWithResponse call
+func ParseAbortRunInputResponse(rsp *http.Response) (*AbortRunInputResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AbortRunInputResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest ComponentsSchemasCancelRunResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseProceedRunInputResponse parses an HTTP response from a ProceedRunInputWithResponse call
+func ParseProceedRunInputResponse(rsp *http.Response) (*ProceedRunInputResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ProceedRunInputResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest ComponentsSchemasCancelRunResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest ComponentsSchemasError

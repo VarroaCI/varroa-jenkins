@@ -207,6 +207,115 @@ func TestHandleGetRun_OmitsSourceWhenColumnCarriesNone(t *testing.T) {
 	}
 }
 
+// --- the run's inputs column and its response array ---
+
+// runInputsColumnJSON is the snake_case JSON the recorder's input write
+// stores in the runs.inputs column: the store's key names, never the
+// camelCase names the response carries.
+const runInputsColumnJSON = `[` +
+	`{"id":"in-1","message":"Deploy?","ok":"Ship it","submitter":"deployers","submitter_parameter":"APPROVER",` +
+	`"parameters":[{"name":"ENV","type":"ChoiceParameterDefinition","description":"target environment","default_value":"staging","choices":["staging","prod"]}]},` +
+	`{"id":"in-2","message":"Resume?","parameters":[{"name":"NOTE","type":"StringParameterDefinition"}]}]`
+
+// TestHandleGetRun_CarriesInputs seeds the column with the recorder's own
+// shape and asserts the response answers both entries with the camelCase
+// key names.
+func TestHandleGetRun_CarriesInputs(t *testing.T) {
+	reader := newFakeRecordReader()
+	reader.runs["r1"] = recordstore.Run{
+		RunID: "r1", Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: "RUNNING",
+		Inputs: json.RawMessage(runInputsColumnJSON),
+	}
+	srv := newRunFixtureServer(reader, nil)
+
+	rec := doRunRequest(t, srv.handleGetRun, "/runs/r1", map[string]string{"run": "r1"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, key := range []string{`"inputs"`, `"submitterParameter"`, `"defaultValue"`} {
+		if !strings.Contains(body, key) {
+			t.Errorf("body = %s, want the camelCase key %s", body, key)
+		}
+	}
+	if strings.Contains(body, `"default_value"`) || strings.Contains(body, `"submitter_parameter"`) {
+		t.Errorf("body = %s, want no snake_case column key", body)
+	}
+	if strings.Contains(body, `"description":""`) {
+		t.Errorf("body = %s, want an omitted value absent rather than an empty string", body)
+	}
+
+	var detail runDetailJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(detail.Inputs) != 2 {
+		t.Fatalf("inputs = %+v, want two entries", detail.Inputs)
+	}
+	first := detail.Inputs[0]
+	if first.ID != "in-1" || first.Message != "Deploy?" || first.OK != "Ship it" {
+		t.Errorf("inputs[0] = %+v, want in-1, Deploy?, Ship it", first)
+	}
+	if first.Submitter != "deployers" || first.SubmitterParameter != "APPROVER" {
+		t.Errorf("inputs[0] submitter = %q/%q, want deployers/APPROVER", first.Submitter, first.SubmitterParameter)
+	}
+	if len(first.Parameters) != 1 {
+		t.Fatalf("inputs[0] parameters = %+v, want one entry", first.Parameters)
+	}
+	p := first.Parameters[0]
+	if p.Name != "ENV" || p.Type != "ChoiceParameterDefinition" || p.Description != "target environment" {
+		t.Errorf("parameter = %+v, want ENV, ChoiceParameterDefinition, target environment", p)
+	}
+	if p.DefaultValue != "staging" || len(p.Choices) != 2 || p.Choices[1] != "prod" {
+		t.Errorf("parameter default/choices = %q/%v, want staging and [staging prod]", p.DefaultValue, p.Choices)
+	}
+	if len(detail.Inputs[1].Parameters) != 1 || detail.Inputs[1].Parameters[0].Name != "NOTE" {
+		t.Errorf("inputs[1] = %+v, want one NOTE parameter", detail.Inputs[1])
+	}
+}
+
+// TestHandleGetRun_OmitsInputsWhenColumnCarriesNone covers the three
+// empty cases: a NULL column, an empty array, and a column that fails to
+// decode. Each one still answers the run.
+func TestHandleGetRun_OmitsInputsWhenColumnCarriesNone(t *testing.T) {
+	cases := []struct {
+		name   string
+		inputs json.RawMessage
+	}{
+		{"null column", nil},
+		{"empty array", json.RawMessage(`[]`)},
+		{"undecodable column", json.RawMessage(`[{"id":`)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			reader := newFakeRecordReader()
+			reader.runs["r1"] = recordstore.Run{
+				RunID: "r1", Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: "RUNNING",
+				Inputs: c.inputs,
+			}
+			srv := newRunFixtureServer(reader, nil)
+
+			rec := doRunRequest(t, srv.handleGetRun, "/runs/r1", map[string]string{"run": "r1"}, nil)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+			}
+			var detail runDetailJSON
+			if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if detail.RunID != "r1" {
+				t.Fatalf("runId = %q, want r1: one unreadable column must not hide the run", detail.RunID)
+			}
+			if detail.Inputs != nil {
+				t.Fatalf("inputs = %+v, want it absent", detail.Inputs)
+			}
+			if strings.Contains(rec.Body.String(), `"inputs"`) {
+				t.Fatalf("body = %s, want no inputs key", rec.Body.String())
+			}
+		})
+	}
+}
+
 // --- 3.9: nil RecordStore / nil BlobStore / ErrSchemaTooOld -> 503 ---
 
 func newFakeRecordReaderWithRun() *fakeRecordReader {

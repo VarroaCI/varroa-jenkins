@@ -22,8 +22,9 @@ import (
 
 // guardRecordReader is a non-nil recordstore.Reader for the one method a
 // guarded tool calls before its activity emit. run_pipeline resolves the
-// job's home member, so JobHome is implemented here; every other method
-// comes from the embedded nil interface and must stay uncalled.
+// job's home member, so JobHome is implemented here; the two run input
+// tools read the run they answer, so GetRun answers one. Every other
+// method comes from the embedded nil interface and must stay uncalled.
 type guardRecordReader struct{ recordstore.Reader }
 
 // JobHome answers slot 0, which is the tenant reference the guard's own
@@ -32,6 +33,17 @@ type guardRecordReader struct{ recordstore.Reader }
 // unchanged.
 func (guardRecordReader) JobHome(_ context.Context, _, _, _ string) (recordstore.JobHome, error) {
 	return recordstore.JobHome{}, nil
+}
+
+// GetRun answers one RUNNING run for any identifier. The tenant matches
+// the guard resolver's fixed reference, and the build number is the one
+// an input answers.
+func (guardRecordReader) GetRun(_ context.Context, runID string) (recordstore.Run, []recordstore.Stage, error) {
+	buildNumber := int64(7)
+	return recordstore.Run{
+		RunID: runID, Cluster: "core", Namespace: "team-a", Cell: "obj",
+		Tenant: "team-a/obj", JobPath: "build", Status: "RUNNING", BuildNumber: &buildNumber,
+	}, nil, nil
 }
 
 // guardTenantResolver is a fixed-answer api.TenantResolver for
@@ -261,7 +273,9 @@ func guardArgsFor(name string) map[string]interface{} {
 		// ProfileCandidates (cluster-scoped, direct store)
 		"promote_version_candidate": {"name": obj},
 		// Pipelines (record store + tenant resolver + mite transport)
-		"run_pipeline": {"team": "team-a", "job": "build"},
+		"run_pipeline":      {"team": "team-a", "job": "build"},
+		"proceed_run_input": {"run": obj, "input": "in-1"},
+		"abort_run_input":   {"run": obj, "input": "in-1"},
 		// CellPools (cluster-scoped, direct store)
 		"update_cell_pool": {"name": obj, "warm": 2},
 	}

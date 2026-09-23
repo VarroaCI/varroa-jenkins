@@ -26,6 +26,7 @@ const (
 	phaseHeartbeat    = "HEARTBEAT"
 	phaseCompleted    = "COMPLETED"
 	phaseRunSource    = "run.source"
+	phaseRunInput     = "run.input"
 )
 
 // Ingest kinds the recorder accepts on builds.<cluster>.<ns>.<cell>. The
@@ -40,6 +41,7 @@ const (
 	kindRunLog       = "run.log"
 	kindRunHeartbeat = "run.heartbeat"
 	kindRunSource    = "run.source"
+	kindRunInput     = "run.input"
 	// kindRunTriggerFailed records a build trigger Jenkins refused. The
 	// gateway publishes it from a failed TRIGGER_BUILD result, not from a
 	// BuildEvent.
@@ -221,6 +223,27 @@ type podTemplateEntry struct {
 	Name  string `json:"name"`
 	Label string `json:"label,omitempty"`
 	Image string `json:"image,omitempty"`
+}
+
+// inputEntry is one entry of a run.input envelope's payload["inputs"]
+// array. The key names match the ones the runs.inputs column holds.
+type inputEntry struct {
+	ID                 string                `json:"id"`
+	Message            string                `json:"message,omitempty"`
+	OK                 string                `json:"ok,omitempty"`
+	Submitter          string                `json:"submitter,omitempty"`
+	SubmitterParameter string                `json:"submitter_parameter,omitempty"`
+	Parameters         []inputParameterEntry `json:"parameters,omitempty"`
+}
+
+// inputParameterEntry is one parameter definition of a run.input
+// envelope's input entry.
+type inputParameterEntry struct {
+	Name         string   `json:"name"`
+	Type         string   `json:"type,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	DefaultValue string   `json:"default_value,omitempty"`
+	Choices      []string `json:"choices,omitempty"`
 }
 
 // kindPayload is one mapped envelope's kind and payload, before the
@@ -412,9 +435,12 @@ func stagePayload(st *mitev1.BuildStage) map[string]interface{} {
 // payload. It writes seq unconditionally, including the value zero: the
 // recorder's summary guard reads that value and needs it present on
 // every heartbeat. It writes summary only for a non-empty value, so a
-// run that sets no summary carries no summary key.
+// run that sets no summary carries no summary key. It writes the inputs
+// key for every event, including an empty set: the recorder reads that
+// key to repair a lost clearing event.
 func heartbeatPayload(evt *mitev1.BuildEvent) map[string]interface{} {
 	p := map[string]interface{}{"seq": evt.Seq}
+	p["inputs"] = inputEntries(evt.Inputs)
 	if evt.Summary != "" {
 		p["summary"] = evt.Summary
 	}
@@ -500,6 +526,51 @@ func podTemplateEntries(in []*mitev1.BuildPodTemplate) []podTemplateEntry {
 		out = append(out, podTemplateEntry{Name: t.Name, Label: t.Label, Image: t.Image})
 	}
 	return out
+}
+
+// inputEntries maps the event's pending inputs onto payload entries. It
+// skips a nil element, and an absent list answers an empty slice. The
+// slice is never nil, because the recorder reads the key's presence.
+func inputEntries(in []*mitev1.BuildInput) []inputEntry {
+	out := make([]inputEntry, 0, len(in))
+	for _, i := range in {
+		if i == nil {
+			continue
+		}
+		entry := inputEntry{
+			ID:                 i.Id,
+			Message:            i.Message,
+			OK:                 i.Ok,
+			Submitter:          i.Submitter,
+			SubmitterParameter: i.SubmitterParameter,
+		}
+		for _, p := range i.Parameters {
+			if p == nil {
+				continue
+			}
+			entry.Parameters = append(entry.Parameters, inputParameterEntry{
+				Name:         p.Name,
+				Type:         p.Type,
+				Description:  p.Description,
+				DefaultValue: p.DefaultValue,
+				Choices:      p.Choices,
+			})
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// inputsPayload maps a run.input BuildEvent onto a run.input payload. It
+// writes seq unconditionally, including the value zero, because the
+// recorder's inputs guard reads that value. It writes the inputs key for
+// every set, empty or not: the recorder replaces its stored set with the
+// payload's set, and an empty set clears the stored set.
+func inputsPayload(evt *mitev1.BuildEvent) map[string]interface{} {
+	return map[string]interface{}{
+		"seq":    evt.Seq,
+		"inputs": inputEntries(evt.Inputs),
+	}
 }
 
 // testsPayload maps a COMPLETED BuildEvent's test counters onto the
@@ -615,6 +686,9 @@ func (h *BusHandler) buildPayloadGroup(evt *mitev1.BuildEvent) ([]kindPayload, e
 			out = append(out, kindPayload{kindRunChanges, changesPayload(evt)})
 		}
 		return out, nil
+
+	case phaseRunInput:
+		return []kindPayload{{kindRunInput, inputsPayload(evt)}}, nil
 
 	case phaseCompleted:
 		out := make([]kindPayload, 0, len(evt.Stages)+len(evt.Artifacts)+4)

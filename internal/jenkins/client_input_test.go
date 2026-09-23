@@ -1,0 +1,156 @@
+package jenkins
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+// inputRouteRecorder captures one route call's path and decoded body.
+type inputRouteRecorder struct {
+	path string
+	body map[string]interface{}
+}
+
+// newInputRouteServer answers every route with the given status, and it
+// records the path and the JSON body of the first call it serves. The
+// crumb probe answers 404, so the client posts without a crumb.
+func newInputRouteServer(t *testing.T, status int) (*httptest.Server, *inputRouteRecorder) {
+	t.Helper()
+	rec := &inputRouteRecorder{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/crumbIssuer/api/json" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		rec.path = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &rec.body)
+		if status >= http.StatusBadRequest {
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte("refused"))
+			return
+		}
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, rec
+}
+
+// TestProceedInputPostsTheRequestedBody asserts the proceed method posts
+// the acting user and the parameters to the plugin's own route.
+func TestProceedInputPostsTheRequestedBody(t *testing.T) {
+	srv, rec := newInputRouteServer(t, http.StatusAccepted)
+	c := NewClient(srv.URL, "user", "token")
+	status, err := c.ProceedInput(context.Background(), ProceedInputRequest{
+		RunID:       "0199d0b7-0000-7000-8000-000000000001",
+		JobPath:     "team/job",
+		BuildNumber: 7,
+		InputID:     "input-1",
+		Parameters:  map[string]string{"ENV": "prod"},
+		ActingUser: ActingUser{
+			Name:   "ana",
+			Email:  "ana@example.invalid",
+			Groups: []string{"varroa-payments"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ProceedInput: %v", err)
+	}
+	if status != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", status, http.StatusAccepted)
+	}
+	if rec.path != "/varroa-run/proceed-input" {
+		t.Fatalf("path = %q, want /varroa-run/proceed-input", rec.path)
+	}
+	if rec.body["runId"] != "0199d0b7-0000-7000-8000-000000000001" || rec.body["inputId"] != "input-1" {
+		t.Fatalf("body = %+v", rec.body)
+	}
+	if rec.body["buildNumber"] != float64(7) || rec.body["jobPath"] != "team/job" {
+		t.Fatalf("body = %+v", rec.body)
+	}
+	params, ok := rec.body["parameters"].(map[string]interface{})
+	if !ok || params["ENV"] != "prod" {
+		t.Fatalf("parameters = %+v", rec.body["parameters"])
+	}
+	acting, ok := rec.body["actingUser"].(map[string]interface{})
+	if !ok || acting["name"] != "ana" || acting["email"] != "ana@example.invalid" {
+		t.Fatalf("actingUser = %+v", rec.body["actingUser"])
+	}
+	groups, ok := acting["groups"].([]interface{})
+	if !ok || len(groups) != 1 || groups[0] != "varroa-payments" {
+		t.Fatalf("groups = %+v", acting["groups"])
+	}
+}
+
+// TestAbortInputPostsTheRequestedBody asserts the abort method posts the
+// acting user to the plugin's own route, and carries no parameters.
+func TestAbortInputPostsTheRequestedBody(t *testing.T) {
+	srv, rec := newInputRouteServer(t, http.StatusAccepted)
+	c := NewClient(srv.URL, "user", "token")
+	status, err := c.AbortInput(context.Background(), AbortInputRequest{
+		RunID:       "0199d0b7-0000-7000-8000-000000000002",
+		JobPath:     "team/job",
+		BuildNumber: 8,
+		InputID:     "input-2",
+		ActingUser:  ActingUser{Name: "bo"},
+	})
+	if err != nil {
+		t.Fatalf("AbortInput: %v", err)
+	}
+	if status != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", status, http.StatusAccepted)
+	}
+	if rec.path != "/varroa-run/abort-input" {
+		t.Fatalf("path = %q, want /varroa-run/abort-input", rec.path)
+	}
+	if rec.body["inputId"] != "input-2" || rec.body["buildNumber"] != float64(8) {
+		t.Fatalf("body = %+v", rec.body)
+	}
+	if _, ok := rec.body["parameters"]; ok {
+		t.Fatalf("body carries a parameters key: %+v", rec.body)
+	}
+	acting, ok := rec.body["actingUser"].(map[string]interface{})
+	if !ok || acting["name"] != "bo" {
+		t.Fatalf("actingUser = %+v", rec.body["actingUser"])
+	}
+}
+
+// TestInputRoutesReportTheUpstreamStatus asserts both methods report the
+// upstream status beside the error, so the gateway can log it on the
+// command result.
+func TestInputRoutesReportTheUpstreamStatus(t *testing.T) {
+	srv, _ := newInputRouteServer(t, http.StatusForbidden)
+	c := NewClient(srv.URL, "user", "token")
+
+	proceedStatus, proceedErr := c.ProceedInput(context.Background(), ProceedInputRequest{
+		RunID:       "0199d0b7-0000-7000-8000-000000000003",
+		JobPath:     "team/job",
+		BuildNumber: 9,
+		InputID:     "input-3",
+		ActingUser:  ActingUser{Name: "ana"},
+	})
+	if proceedErr == nil {
+		t.Fatal("expected an error for a 403 response")
+	}
+	if proceedStatus != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", proceedStatus, http.StatusForbidden)
+	}
+
+	abortStatus, abortErr := c.AbortInput(context.Background(), AbortInputRequest{
+		RunID:       "0199d0b7-0000-7000-8000-000000000004",
+		JobPath:     "team/job",
+		BuildNumber: 10,
+		InputID:     "input-4",
+		ActingUser:  ActingUser{Name: "ana"},
+	})
+	if abortErr == nil {
+		t.Fatal("expected an error for a 403 response")
+	}
+	if abortStatus != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", abortStatus, http.StatusForbidden)
+	}
+}

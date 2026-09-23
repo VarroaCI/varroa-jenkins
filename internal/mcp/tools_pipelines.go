@@ -14,15 +14,15 @@ import (
 )
 
 // =============================================================================
-// Pipeline tools (5): run_pipeline, list_runs, get_run, get_run_log,
-// list_fleet_locks
+// Pipeline tools (7): run_pipeline, list_runs, get_run, get_run_log,
+// list_fleet_locks, proceed_run_input, abort_run_input
 //
 // Design D1a: these tools call the same internal services the
 // pipelines HTTP handlers call (internal/api's RunPipeline, ListRuns,
-// GetRun, GetRunLog, ListFleetLocks), so each tool authorizes and reads
-// exactly as its HTTP counterpart does. No tool here calls a
-// controller-scoped check; the authorization table lives in
-// specs/pipelines-api.
+// GetRun, GetRunLog, ListFleetLocks, ProceedRunInput, AbortRunInput), so
+// each tool authorizes and reads exactly as its HTTP counterpart does.
+// No tool here calls a controller-scoped check; the authorization table
+// lives in specs/pipelines-api.
 // =============================================================================
 
 // defaultListRunsLimit and maxListRunsLimit match list_activity's clamp
@@ -43,6 +43,8 @@ func registerPipelinesTools(mcpServer *server.MCPServer, deps *api.Dependencies)
 	registerGetRunTool(mcpServer, deps)
 	registerGetRunLogTool(mcpServer, deps)
 	registerListFleetLocksTool(mcpServer, deps)
+	registerProceedRunInputTool(mcpServer, deps)
+	registerAbortRunInputTool(mcpServer, deps)
 }
 
 // requirePipelineCaller guards a nil authorizer and requires claims, the
@@ -96,6 +98,84 @@ func registerRunPipelineTool(mcpServer *server.MCPServer, deps *api.Dependencies
 			Message: fmt.Sprintf("Pipeline run requested for %s (run %s)", job, runID),
 		})
 		return resultJSON(map[string]any{"runId": runID, "intentKey": intentKey})
+	})
+}
+
+// registerProceedRunInputTool registers proceed_run_input: it answers one
+// paused input step of a run as the calling user, publishes one
+// PROCEED_INPUT command, and reports no outcome. The caller reads the run
+// again to learn the result.
+func registerProceedRunInputTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
+	proceedTool := mcp.NewTool("proceed_run_input",
+		mcp.WithDescription("Answer a paused input step of a run, as the calling user. "+
+			"The BFF publishes a PROCEED_INPUT command and does not wait for Jenkins. "+
+			"Use get_run to read the run's remaining inputs."),
+		mcp.WithString("run", mcp.Required(), mcp.Description("Run identifier")),
+		mcp.WithString("input", mcp.Required(), mcp.Description("Input identifier, from get_run's inputs list")),
+		mcp.WithObject("parameters", mcp.Description("Input parameters, as name to string value")),
+	)
+	addTool(mcpServer, kindAction, proceedTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		claims, toolErr := requirePipelineCaller(ctx, deps)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		args := getArgs(req)
+		run := strArg(args, "run")
+		input := strArg(args, "input")
+		if run == "" || input == "" {
+			return mcp.NewToolResultError("run and input are required"), nil
+		}
+		var parameters map[string]string
+		if raw := args["parameters"]; raw != nil {
+			if err := marshalUnmarshal(raw, &parameters); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("invalid parameters: %v", err)), nil
+			}
+		}
+		targetCluster, serr := api.NewServer(deps).ProceedRunInput(ctx, claims, run, input, parameters)
+		if serr != nil {
+			return mcp.NewToolResultError(serr.Error()), nil
+		}
+		// One activity event records the request, on the run's own
+		// cluster, which can differ from the cluster this BFF serves.
+		emitActivityForCluster(deps, claims, targetCluster, activity.Event{
+			Type:    "pipeline.run_input_proceeded",
+			Message: fmt.Sprintf("Run %s input %s proceed requested", run, input),
+		})
+		return resultJSON(map[string]any{"state": "requested"})
+	})
+}
+
+// registerAbortRunInputTool registers abort_run_input: it aborts one
+// paused input step of a run as the calling user, publishes one
+// ABORT_INPUT command, and reports no outcome.
+func registerAbortRunInputTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
+	abortTool := mcp.NewTool("abort_run_input",
+		mcp.WithDescription("Abort a paused input step of a run, as the calling user. "+
+			"The BFF publishes an ABORT_INPUT command and does not wait for Jenkins. "+
+			"Use get_run to read the run's remaining inputs."),
+		mcp.WithString("run", mcp.Required(), mcp.Description("Run identifier")),
+		mcp.WithString("input", mcp.Required(), mcp.Description("Input identifier, from get_run's inputs list")),
+	)
+	addTool(mcpServer, kindAction, abortTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		claims, toolErr := requirePipelineCaller(ctx, deps)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		args := getArgs(req)
+		run := strArg(args, "run")
+		input := strArg(args, "input")
+		if run == "" || input == "" {
+			return mcp.NewToolResultError("run and input are required"), nil
+		}
+		targetCluster, serr := api.NewServer(deps).AbortRunInput(ctx, claims, run, input)
+		if serr != nil {
+			return mcp.NewToolResultError(serr.Error()), nil
+		}
+		emitActivityForCluster(deps, claims, targetCluster, activity.Event{
+			Type:    "pipeline.run_input_aborted",
+			Message: fmt.Sprintf("Run %s input %s abort requested", run, input),
+		})
+		return resultJSON(map[string]any{"state": "requested"})
 	})
 }
 

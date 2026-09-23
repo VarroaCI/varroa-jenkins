@@ -120,6 +120,35 @@ func TestMarkInterruptedWritesTerminalRecordReasonAndActivity(t *testing.T) {
 	}
 }
 
+// TestMarkInterruptedClearsThePendingSet proves the sweep's marking write
+// clears a paused run's pending set, so a run that ends while paused
+// holds none.
+func TestMarkInterruptedClearsThePendingSet(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	intentKey := "manual:" + newTestUUIDv7String()
+	runID := startRunForFinalize(t, pool, intentKey)
+
+	pending := newTestEnvelope(t, runID, intentKey, KindRunInput,
+		RunInputPayload{Seq: inputSeqPtr(3), Inputs: runInputSet("input-1")})
+	if _, err := NewIngester(pool, nil, nil).Apply(context.Background(), pending); err != nil {
+		t.Fatalf("apply run.input: %v", err)
+	}
+
+	c := fetchRunningCandidate(t, pool, runID)
+	changed, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now())
+	if err != nil {
+		t.Fatalf("markInterrupted: %v", err)
+	}
+	if !changed {
+		t.Fatal("want the row changed")
+	}
+
+	inputs, _ := readRunInputsRow(t, db, runID)
+	if inputs != "" {
+		t.Fatalf("stored inputs = %q, want NULL after the mark", inputs)
+	}
+}
+
 // TestMarkInterruptedRollsBackWhenActivityInsertFails asserts design
 // D9's whole-transaction contract (gap 9.6a): when the terminal run
 // update succeeds but the activity insert then fails, the transaction

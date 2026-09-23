@@ -29,6 +29,12 @@ import java.util.Map;
  * called {@code varroa.summary}. Only a {@code HEARTBEAT} and a {@code
  * COMPLETED} event carry it. {@link #toJson()} writes no key for it when
  * it is empty.
+ *
+ * <p>Field 47, {@code inputs}, holds the run's pending {@code input}
+ * steps. Only a {@code run.input} event and a {@code HEARTBEAT} event
+ * carry it, and only a {@code HEARTBEAT} event carries an empty list.
+ * {@link #toJson()} writes no key for an empty list, and the gateway
+ * writes the key for every set.
  */
 public final class BuildEvent implements PostableEvent {
 
@@ -40,6 +46,8 @@ public final class BuildEvent implements PostableEvent {
     public static final String PHASE_COMPLETED = "COMPLETED";
     /** Phase value of the two run-source emissions. The registry allocates the lower-case literal. */
     public static final String PHASE_RUN_SOURCE = "run.source";
+    /** Phase value of a pending-input report. The registry allocates the lower-case literal. */
+    public static final String PHASE_RUN_INPUT = "run.input";
 
     private final String phase;
     private final long seq;
@@ -87,6 +95,7 @@ public final class BuildEvent implements PostableEvent {
     private final String definitionPath;
     private final List<BuildPodTemplate> podTemplates;
     private final String summary;
+    private final List<BuildInput> inputs;
 
     private BuildEvent(Builder b) {
         this.phase = orEmpty(b.phase);
@@ -135,6 +144,7 @@ public final class BuildEvent implements PostableEvent {
         this.definitionPath = orEmpty(b.definitionPath);
         this.podTemplates = List.copyOf(b.podTemplates);
         this.summary = orEmpty(b.summary);
+        this.inputs = List.copyOf(b.inputs);
     }
 
     private static String orEmpty(String s) {
@@ -346,6 +356,11 @@ public final class BuildEvent implements PostableEvent {
         return summary;
     }
 
+    /** Field 47: one entry per pending {@code input} step. Empty for a run that waits on none. */
+    public List<BuildInput> getInputs() {
+        return inputs;
+    }
+
     /**
      * Serializes the event to a {@link JSONObject} using proto JSON field
      * names, ready to post to {@code /v1/events}.
@@ -432,6 +447,13 @@ public final class BuildEvent implements PostableEvent {
         if (!summary.isEmpty()) {
             o.put("summary", summary);
         }
+        if (!inputs.isEmpty()) {
+            JSONArray inputsArr = new JSONArray();
+            for (BuildInput input : inputs) {
+                inputsArr.add(input.toJson());
+            }
+            o.put("inputs", inputsArr);
+        }
         return o;
     }
 
@@ -495,7 +517,8 @@ public final class BuildEvent implements PostableEvent {
                 .libraries(libraries)
                 .definitionPath(definitionPath)
                 .podTemplates(podTemplates)
-                .summary(summary);
+                .summary(summary)
+                .inputs(inputs);
     }
 
     public static final class Builder {
@@ -545,6 +568,7 @@ public final class BuildEvent implements PostableEvent {
         private String definitionPath;
         private List<BuildPodTemplate> podTemplates = new ArrayList<>();
         private String summary;
+        private List<BuildInput> inputs = new ArrayList<>();
 
         private Builder() {
         }
@@ -786,6 +810,16 @@ public final class BuildEvent implements PostableEvent {
         /** Field 46: the run's summary text. */
         public Builder summary(String v) {
             this.summary = v;
+            return this;
+        }
+
+        /**
+         * Field 47: one entry per pending {@code input} step. An empty
+         * list reports a run that waits on none, which a {@code
+         * HEARTBEAT} event states on every tick.
+         */
+        public Builder inputs(List<BuildInput> v) {
+            this.inputs = v != null ? new ArrayList<>(v) : new ArrayList<>();
             return this;
         }
 

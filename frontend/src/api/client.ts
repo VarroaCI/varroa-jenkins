@@ -1240,6 +1240,28 @@ export function rerunRun(runId: string): Promise<RunActionResponse> {
   return bffFetchJSON<RunActionResponse>(`${runBase(runId)}/rerun`, { method: "POST" });
 }
 
+/** Answers a paused input step with parameter values. Sends
+ * { "parameters": { name: value } }. Fire and forget: the response
+ * carries no outcome. */
+export function proceedRunInput(
+  runId: string,
+  inputId: string,
+  parameters: Record<string, string>,
+): Promise<CancelRunResponse> {
+  return bffFetchJSON<CancelRunResponse>(`${runBase(runId)}/inputs/${enc(inputId)}/proceed`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ parameters }),
+  });
+}
+
+/** Stops a paused input step. Takes no body and reports no outcome. */
+export function abortRunInput(runId: string, inputId: string): Promise<CancelRunResponse> {
+  return bffFetchJSON<CancelRunResponse>(`${runBase(runId)}/inputs/${enc(inputId)}/abort`, {
+    method: "POST",
+  });
+}
+
 /**
  * Lists every cell pool. The surface needs the cellpools:read verb on a
  * cluster-wide binding, because CellPool is cluster scoped.

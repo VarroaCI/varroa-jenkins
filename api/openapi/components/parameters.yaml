@@ -94,6 +94,16 @@ run:
     type: string
     format: uuid
 
+input:
+  name: input
+  in: path
+  description: >
+    Percent-encoded input step identifier, one path segment. The router
+    reads it with PathValue, which returns the decoded value.
+  required: true
+  schema:
+    type: string
+
 artifactPath:
   name: path
   in: path

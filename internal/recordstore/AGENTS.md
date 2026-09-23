@@ -136,6 +136,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   `00015_runs_summary.sql` adds the nullable `runs.summary`, the one-line
   text a run attaches to itself through `varroa.summary`. It carries no
   default and no index, and no reader treats NULL as an empty string.
+  `00016_runs_inputs.sql` adds the nullable `runs.inputs`, the pending input
+  steps a `run.input` event reports. It carries no default and no index, and
+  an empty set stores NULL, so no reader tells NULL from an empty array.
   A later migration never edits an applied one. `migrationsFS` (`migrations.go`) embeds
   every file under `migrations/` into the binary through `embed.FS`, so
   the recorder needs no separate deploy artifact. Monthly partition
@@ -418,7 +421,7 @@ of the fleet's audit activity, once a controller becomes disposable.
   its protobuf `BuildEvent` onto its field names. `Ingester.Apply`
   (`ingest_apply.go`) writes one envelope inside one transaction, dispatching
   by `Kind` to one `ingest_<kind>.go` file per D4's write table. Each write
-  is a natural-key upsert. The kind set holds twelve values; `run.state` is
+  is a natural-key upsert. The kind set holds fifteen values; `run.state` is
   the mesh's own kind and writes no typed column, only `payload.mesh`.
   `runsStatusMergeSQL` (`ingest_common.go`) is the
   one CASE expression every `runs` writer reuses to keep `status` monotonic
@@ -433,6 +436,11 @@ of the fleet's audit activity, once a controller becomes disposable.
   `summary` value also raises `runs.summary` and the payload's
   `summary_seq` key, under the guard `summaryHeartbeatGuardSQL` states;
   one whose payload carries no `summary` value changes neither.
+  One whose payload carries an `inputs` key also raises `runs.inputs` and
+  the payload's `inputs_seq` key, under the guard
+  `inputsHeartbeatGuardSQL` states, only when its set differs from the
+  stored one, and never on a completed row; one whose payload carries no
+  `inputs` key changes neither.
   Two cases hold the unconditional
   raise, because the test needs a name on each side: an envelope that
   names no sender, and a run that no source names an owner for. Without

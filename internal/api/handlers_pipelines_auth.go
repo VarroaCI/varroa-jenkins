@@ -12,9 +12,10 @@ func (s *Server) canReadPipeline(claims *auth.Claims, ref TenantRef, jobPath str
 	return s.deps.Authorizer.CanReadPipeline(claims, ref, jobPath)
 }
 
-// canWritePipeline reports whether claims may start, cancel, or rerun a
-// build on ref's tenant at jobPath. It is the one call site the run
-// request, cancel, rerun, the run_pipeline MCP tool, and the Run drawer
+// canWritePipeline reports whether claims may start, cancel, rerun, or
+// answer an input of a build on ref's tenant at jobPath. It is the one
+// call site the run request, cancel, rerun, the two input routes, the
+// run_pipeline MCP tool, the two run input MCP tools, and the Run drawer
 // control use. A nil Authorizer denies.
 func (s *Server) canWritePipeline(claims *auth.Claims, ref TenantRef, jobPath string) bool {
 	return s.deps.Authorizer.CanWritePipeline(claims, ref, jobPath)

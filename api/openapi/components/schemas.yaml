@@ -4724,7 +4724,10 @@ RunActionResponse:
 
 CancelRunResponse:
   type: object
-  description: 202 response for a cancel request. Cancel is fire and forget.
+  description: >
+    202 response for a fire-and-forget run action: a cancel, an input
+    proceed, or an input abort. The BFF publishes one command and waits
+    for no result.
   required: [state]
   properties:
     state:
@@ -4799,6 +4802,67 @@ RunStage:
       format: int64
     error:
       type: string
+  additionalProperties: false
+
+RunInputParameter:
+  type: object
+  description: One parameter an input step declares, read from its definition.
+  required: [name]
+  properties:
+    name:
+      type: string
+      description: The definition's name.
+    type:
+      type: string
+      description: >
+        The Java simple name of the parameter definition, such as
+        StringParameterDefinition or ChoiceParameterDefinition.
+    description:
+      type: string
+      description: The definition's description. Absent when the definition declares none.
+    defaultValue:
+      type: string
+      description: >
+        The definition's default value, rendered as text. Absent when
+        the definition declares none.
+    choices:
+      type: array
+      items:
+        type: string
+      description: The definition's choices. Absent when the definition declares none.
+  additionalProperties: false
+
+RunInput:
+  type: object
+  description: One input step a run waits on, read from the run's stored inputs column.
+  required: [id]
+  properties:
+    id:
+      type: string
+      description: The input step's own identifier. Both input routes address this value.
+    message:
+      type: string
+      description: The message the step shows. Absent when the step declares none.
+    ok:
+      type: string
+      description: The label of the step's proceed control. Absent when the step declares none.
+    submitter:
+      type: string
+      description: >
+        The users and groups the step admits. Absent when the step
+        declares none.
+    submitterParameter:
+      type: string
+      description: >
+        The parameter name that holds the answering user's name. Absent
+        when the step declares none.
+    parameters:
+      type: array
+      items:
+        $ref: '#/RunInputParameter'
+      description: >
+        The step's own parameter definitions, in declaration order.
+        Absent when the step declares none.
   additionalProperties: false
 
 RunDetail:
@@ -4961,6 +5025,14 @@ RunDetail:
               type: integer
             total:
               type: integer
+    inputs:
+      type: array
+      description: >
+        The input steps the run waits on, read from the run's stored
+        inputs column. This field is absent until a run.input event
+        arrives, and absent for a run that holds no pending input.
+      items:
+        $ref: '#/RunInput'
     stages:
       type: array
       items:

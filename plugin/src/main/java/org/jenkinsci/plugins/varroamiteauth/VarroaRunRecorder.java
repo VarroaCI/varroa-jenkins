@@ -34,6 +34,7 @@ import java.util.Timer;
 import java.util.TimerTask;
 import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -52,6 +53,7 @@ import org.jenkinsci.plugins.workflow.actions.TimingAction;
 import org.jenkinsci.plugins.workflow.actions.WarningAction;
 import org.jenkinsci.plugins.workflow.actions.WorkspaceAction;
 import org.jenkinsci.plugins.workflow.flow.FlowDefinition;
+import org.jenkinsci.plugins.workflow.cps.nodes.StepAtomNode;
 import org.jenkinsci.plugins.workflow.flow.FlowExecution;
 import org.jenkinsci.plugins.workflow.flow.FlowExecutionListener;
 import org.jenkinsci.plugins.workflow.flow.FlowExecutionOwner;
@@ -64,6 +66,7 @@ import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.jenkinsci.plugins.workflow.pipelinegraphanalysis.GenericStatus;
 import org.jenkinsci.plugins.workflow.pipelinegraphanalysis.StatusAndTiming;
+import org.jenkinsci.plugins.workflow.steps.StepDescriptor;
 
 import org.jenkinsci.plugins.varroamiteauth.template.VarroaTemplateValuesAction;
 
@@ -122,6 +125,19 @@ public final class VarroaRunRecorder {
     private static final int LADDER_ERROR_LIMIT = 512;
     private static final int MAX_EVENT_BYTES = 512 * 1024;
 
+    // --- The pending-input re-check (D1, D2) ---
+
+    /** The delay of each attempt. The attempts back off, so attempt 1 is the shortest. */
+    private static final long[] RECHECK_DELAYS_MILLIS = {250L, 1000L, 4000L};
+    /** The attempts one arriving node buys. */
+    private static final int MAX_RECHECK_RETRIES = 2;
+    /**
+     * Runs the deferred re-checks. The reads stay off the flow's own
+     * thread, because the input action's {@code getExecutions} read is
+     * synchronized and can time out.
+     */
+    private static final Timer INPUT_TIMER = new Timer("varroa-run-input-recheck", true);
+
     // --- Per-run state (D1) ---
 
     private static final int RUN_STATE_CAPACITY = 512;
@@ -162,6 +178,16 @@ public final class VarroaRunRecorder {
          * reference to the run, so it reads this cache and not the run.
          */
         private volatile String summary = "";
+        /**
+         * The run's pending input set (D1). Empty until a read finds one.
+         * The heartbeat timer holds no reference to the run, so it reads
+         * this cache and not the run.
+         */
+        private volatile List<BuildInput> pendingInputs = List.of();
+        /** Set while one re-check task is scheduled or runs. */
+        final AtomicBoolean inputRecheckArmed = new AtomicBoolean();
+        /** The attempts left for the current node arrival. */
+        final AtomicInteger inputRecheckRetries = new AtomicInteger();
 
         RunState(String runId, String intentKey, String jobPath, long buildNumber) {
             this.runId = runId;
@@ -215,6 +241,141 @@ public final class VarroaRunRecorder {
         if (state != null) {
             state.summary = cutText;
         }
+    }
+
+    // --- The pending-input re-check (D1, D2, D3) ---
+
+    /**
+     * The delay of the attempt the counter names. A counter of
+     * {@link #MAX_RECHECK_RETRIES} answers the first, shortest delay, and
+     * a counter of zero answers the last.
+     */
+    private static long delayFor(int retriesRemaining) {
+        int index = MAX_RECHECK_RETRIES - Math.max(0, Math.min(retriesRemaining, MAX_RECHECK_RETRIES));
+        return RECHECK_DELAYS_MILLIS[index];
+    }
+
+    /**
+     * Schedules the run's next pending-input re-check, and resets the
+     * attempt counter. Every arriving node buys a full set of attempts, so
+     * a second parallel input step is never folded into a read that ran
+     * before its own execution attached. The counter resets on every call,
+     * so a clearing read waits the shortest delay and not the longest.
+     *
+     * <p>At most one task runs per run: the flag is the run's single
+     * scheduled attempt.
+     */
+    private static void scheduleInputRecheck(Run<?, ?> run, RunState state) {
+        state.inputRecheckRetries.set(MAX_RECHECK_RETRIES);
+        if (!state.inputRecheckArmed.compareAndSet(false, true)) {
+            return;
+        }
+        armNext(run, state);
+    }
+
+    /**
+     * Arms one timer task. The task takes its own attempt off the counter
+     * and clears the armed flag in a {@code finally} block, before it tests
+     * the attempts left, so a node that arrives during the read arms the
+     * next task first and this task adds no second one. The counter moves
+     * before the flag clears, so a node that arrives between the two keeps
+     * the full set of attempts it bought.
+     */
+    private static void armNext(Run<?, ?> run, RunState state) {
+        INPUT_TIMER.schedule(new TimerTask() {
+            @Override
+            public void run() {
+                int remaining;
+                try {
+                    recheckInputsNow(run, state);
+                } finally {
+                    remaining = state.inputRecheckRetries.getAndUpdate(v -> v > 0 ? v - 1 : 0);
+                    state.inputRecheckArmed.set(false);
+                }
+                if (remaining > 0 && state.inputRecheckArmed.compareAndSet(false, true)) {
+                    armNext(run, state);
+                }
+            }
+        }, delayFor(state.inputRecheckRetries.get()));
+    }
+
+    /**
+     * Re-reads the run's pending inputs, stores the result, and emits one
+     * {@code run.input} event when the set changed.
+     *
+     * <p>A task can outlive its run. Such a task emits nothing: its
+     * sequence number would sit above the completion event's, and the
+     * recorder would restore a set the run already cleared. This method
+     * reads nothing and throws nothing for such a run.
+     */
+    private static void recheckInputsNow(Run<?, ?> run, RunState state) {
+        try {
+            if (stateFor(state.jobPath, state.buildNumber) != state || !run.isBuilding()) {
+                return;
+            }
+            // The timer task and a route's request thread both reach this
+            // read. The read, the compare, and the write hold one lock, so
+            // the last read wins and a stale read never emits a settled
+            // input again with a higher sequence number.
+            synchronized (state) {
+                List<BuildInput> found = VarroaRunInputs.readPendingInputs(run);
+                if (found.equals(state.pendingInputs)) {
+                    return;
+                }
+                state.pendingInputs = found;
+                emitRunInput(run, state, found);
+            }
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "VarroaRunRecorder: failed to re-check the pending inputs", e);
+        }
+    }
+
+    /**
+     * Re-reads the run's pending inputs for a caller outside this class,
+     * in the shape {@link #recordSummary} uses. The two plugin routes call
+     * it after the input step settled, so the record loses the input
+     * without waiting for a node or a heartbeat. A no-op for a run with no
+     * live state.
+     */
+    static void recheckInputs(Run<?, ?> run) {
+        RunState state = stateFor(safeJobPath(run), run.getNumber());
+        if (state != null) {
+            recheckInputsNow(run, state);
+        }
+    }
+
+    /**
+     * Reports whether the arriving node is the {@code input} step's own
+     * atom node. The read covers the node alone and walks no graph. The
+     * plugin needs no class of the input-step plugin for this test: the
+     * descriptor's function name alone names the step.
+     */
+    private static boolean isInputNode(FlowNode node) {
+        if (!(node instanceof StepAtomNode)) {
+            return false;
+        }
+        StepDescriptor descriptor = ((StepAtomNode) node).getDescriptor();
+        return descriptor != null && "input".equals(descriptor.getFunctionName());
+    }
+
+    /**
+     * Emits one {@code run.input} event carrying the run's whole pending
+     * set. The event carries the run identity, the ordering fields, the
+     * four template fields, and the set alone: it reads no changeset and
+     * no test counter, so it calls no metadata helper.
+     */
+    private static void emitRunInput(Run<?, ?> run, RunState state, List<BuildInput> inputs) {
+        BuildEvent.Builder b = BuildEvent.builder()
+                .phase(BuildEvent.PHASE_RUN_INPUT)
+                .seq(state.nextSeq())
+                .emittedAtMillis(System.currentTimeMillis())
+                .runId(state.runId)
+                .intentKey(state.intentKey)
+                .jobPath(state.jobPath)
+                .buildNumber(state.buildNumber)
+                .inputs(inputs);
+        applyTemplateFields(b, run);
+        emitCapped(b.build());
     }
 
     private static void removeState(String jobPath, long buildNumber) {
@@ -375,7 +536,13 @@ public final class VarroaRunRecorder {
         }
     }
 
-    /** Emits one {@code HEARTBEAT} event for one run. */
+    /**
+     * Emits one {@code HEARTBEAT} event for one run. The event carries the
+     * run's cached pending input set on every tick, including an empty one:
+     * the heartbeat is the reconciliation path for a lost {@code run.input}
+     * event, and a lost event can be a clearing one. The event reads no run
+     * to build that set.
+     */
     private static void emitHeartbeat(RunState state) {
         BuildEvent.Builder b = BuildEvent.builder()
                 .phase(BuildEvent.PHASE_HEARTBEAT)
@@ -389,7 +556,8 @@ public final class VarroaRunRecorder {
         if (!summary.isEmpty()) {
             b.summary(summary);
         }
-        emit(b.build());
+        b.inputs(state.pendingInputs);
+        emitCapped(b.build());
     }
 
     /**
@@ -447,6 +615,10 @@ public final class VarroaRunRecorder {
         if (summaryAction != null) {
             state.summary = summaryAction.getSummary();
         }
+        // The new process holds no pending input set of its own, so it
+        // reads the run once. A build that resumes while it waits on an
+        // input therefore reports that input from this process at once.
+        recheckInputsNow(run, state);
         ensureHeartbeatStarted();
         emitHeartbeat(state);
         LOGGER.log(Level.INFO, () -> "VarroaRunRecorder: attached to the resumed build "
@@ -1063,8 +1235,13 @@ public final class VarroaRunRecorder {
         return new SourceFacts(branch, branch, revision, url, "", List.of(), List.of());
     }
 
-    /** Finds the first action of a run whose class name matches exactly. */
-    private static Object findActionByClassName(Run<?, ?> run, String className) {
+    /**
+     * Finds the first action of a run whose class name matches exactly.
+     * {@link VarroaRunInputs} reads the input step's action through this
+     * method, because the plugin holds no compile dependency on that
+     * plugin.
+     */
+    static Object findActionByClassName(Run<?, ?> run, String className) {
         for (Action action : run.getAllActions()) {
             if (action.getClass().getName().equals(className)) {
                 return action;
@@ -1469,6 +1646,19 @@ public final class VarroaRunRecorder {
                                 "VarroaRunRecorder.Graph: failed to emit the allocation source event", e);
                     }
                 }
+                // A paused input is discovered after the node is created,
+                // because the step attaches its action to the run after
+                // that node exists. A node that arrives while a set is
+                // cached settles or clears that set, so both cases
+                // schedule the same re-check.
+                if (isInputNode(node) || !state.pendingInputs.isEmpty()) {
+                    try {
+                        scheduleInputRecheck(run, state);
+                    } catch (Exception e) {
+                        LOGGER.log(Level.WARNING,
+                                "VarroaRunRecorder.Graph: failed to schedule the input re-check", e);
+                    }
+                }
                 // The push is scheduled, never performed, on this call:
                 // this listener runs on the flow's own thread. A failure
                 // of any kind leaves the build running and emits no
@@ -1852,27 +2042,40 @@ public final class VarroaRunRecorder {
             b.definitionPath(definitionPath);
             changed = true;
         }
+        List<BuildInput> inputs = VarroaRunInputs.capInputs(event.getInputs());
+        if (!inputs.equals(event.getInputs())) {
+            b.inputs(inputs);
+            changed = true;
+        }
         return changed ? b.build() : event;
     }
 
     /**
-     * While the serialized event stays above 512 KiB, drops {@code
-     * stages} entries from the oldest, then {@code changes} entries, then
-     * {@code parameters} entries, then {@code pod_templates} entries,
-     * then {@code libraries} entries, then truncates every remaining
-     * stage's error to 512 characters (D11). Because the stage rung
+     * While the serialized event stays above 512 KiB, clears the parameter
+     * lists of its {@code inputs} oldest first, then drops {@code stages}
+     * entries from the oldest, then {@code changes} entries, then {@code
+     * parameters} entries, then {@code pod_templates} entries, then {@code
+     * libraries} entries, then truncates every remaining stage's error to
+     * 512 characters (D11). Because the stage rung
      * fully drains {@code stages} before the error rung runs, the error
      * rung has no effect once the stage list is already empty. When the
      * event is still above 512 KiB, replaces it with a reduced,
      * identity-only event. When even that reduced event is above the
      * loopback's 1 MiB body limit — an identifier field the ladder
      * cannot shrink — drops it instead of returning it (ruling o).
+     *
+     * <p>The input rung drops no input entry. An input with no parameter
+     * list holds five bounded strings, so twenty such inputs always fit
+     * and the rung terminates.
      */
     private static BuildEvent applyOversizeLadder(BuildEvent event) {
         if (serializedSize(event) <= MAX_EVENT_BYTES) {
             return event;
         }
         BuildEvent current = event;
+        while (serializedSize(current) > MAX_EVENT_BYTES && hasInputParameters(current)) {
+            current = current.toBuilder().inputs(clearOldestInputParameters(current.getInputs())).build();
+        }
         while (serializedSize(current) > MAX_EVENT_BYTES && !current.getStages().isEmpty()) {
             current = current.toBuilder().stages(dropOldest(current.getStages())).build();
         }
@@ -1921,6 +2124,43 @@ public final class VarroaRunRecorder {
     /** Resets the oversized-drop counter. Package-private for testing. */
     static void resetOversizedDroppedForTesting() {
         OVERSIZED_DROPPED.set(0);
+    }
+
+    /** Reports whether any input of the event carries a parameter list. */
+    private static boolean hasInputParameters(BuildEvent event) {
+        for (BuildInput input : event.getInputs()) {
+            if (!input.getParameters().isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Clears the parameter list of the oldest input that carries one and
+     * keeps every input entry, so the ladder never drops an input and
+     * always terminates. A user can still answer such an input: the
+     * proceed route applies the step's own declared defaults for every
+     * name a request omits.
+     */
+    private static List<BuildInput> clearOldestInputParameters(List<BuildInput> inputs) {
+        List<BuildInput> cleared = new ArrayList<>(inputs.size());
+        boolean clearedOne = false;
+        for (BuildInput input : inputs) {
+            if (!clearedOne && !input.getParameters().isEmpty()) {
+                cleared.add(BuildInput.builder()
+                        .id(input.getId())
+                        .message(input.getMessage())
+                        .ok(input.getOk())
+                        .submitter(input.getSubmitter())
+                        .submitterParameter(input.getSubmitterParameter())
+                        .build());
+                clearedOne = true;
+            } else {
+                cleared.add(input);
+            }
+        }
+        return cleared;
     }
 
     private static <T> List<T> keepNewest(List<T> list, int max) {

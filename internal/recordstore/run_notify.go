@@ -112,6 +112,13 @@ func notificationFor(env IngestEnvelope, res ApplyResult) (RunNotification, bool
 			return RunNotification{}, false
 		}
 		n.Kind = "run"
+	case KindRunInput:
+		// A refused write changed no stored value, so it reports
+		// nothing, like a refused run.source write.
+		if res.RefusedInput {
+			return RunNotification{}, false
+		}
+		n.Kind = "input"
 	case KindRunTriggerAccepted:
 		n.Kind = "run"
 		n.Status = "QUEUED"

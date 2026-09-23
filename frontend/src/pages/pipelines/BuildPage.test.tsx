@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { InitialEntry } from "react-router-dom";
 import BuildPage from "./BuildPage";
 import { ApiError } from "../../hooks/useApi";
-import type { RunDetail } from "../../types";
+import type { RunDetail, RunInput } from "../../types";
 
 const mockGetRun = vi.fn();
 const mockListRunArtifacts = vi.fn();
@@ -14,6 +14,8 @@ const mockListRunChanges = vi.fn();
 const mockListRuns = vi.fn();
 const mockCancelRun = vi.fn();
 const mockRerunRun = vi.fn();
+const mockProceedRunInput = vi.fn();
+const mockAbortRunInput = vi.fn();
 const mockDownloadRunArtifact = vi.fn();
 const mockUseEventStream = vi.fn(
   (
@@ -42,6 +44,8 @@ vi.mock("../../api/client", async () => {
     listRuns: (...args: unknown[]) => mockListRuns(...args),
     cancelRun: (...args: unknown[]) => mockCancelRun(...args),
     rerunRun: (...args: unknown[]) => mockRerunRun(...args),
+    proceedRunInput: (...args: unknown[]) => mockProceedRunInput(...args),
+    abortRunInput: (...args: unknown[]) => mockAbortRunInput(...args),
     downloadRunArtifact: (...args: unknown[]) => mockDownloadRunArtifact(...args),
   };
 });
@@ -773,5 +777,262 @@ describe("BuildPage — run summary and failure digest", () => {
 
     expect(banner.compareDocumentPosition(digestTitle)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(digestTitle.compareDocumentPosition(pipelineTitle)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+});
+
+describe("BuildPage — pending inputs", () => {
+  /** pendingInput builds one input step on top of baseRun's run. */
+  function pendingInput(overrides: Partial<RunInput> = {}): RunInput {
+    return {
+      id: "in-1",
+      message: "Approve the release?",
+      ok: "Ship it",
+      parameters: [
+        {
+          name: "ENV",
+          type: "ChoiceParameterDefinition",
+          defaultValue: "prod",
+          choices: ["prod", "staging"],
+        },
+      ],
+      ...overrides,
+    };
+  }
+
+  /** grantTenantPipelinesRead makes usePermissions report a payments read
+   * grant and no write grant. */
+  function grantTenantPipelinesRead() {
+    vi.mocked(usePermissions).mockReturnValue({
+      data: {
+        global: {},
+        scopes: [],
+        tenants: [{ tenant: "payments", jobs: [], capabilities: { pipelines: { read: true } } }],
+      },
+    } as unknown as ReturnType<typeof usePermissions>);
+  }
+
+  /** notification builds one frame of the team run stream. */
+  function notification(overrides: Record<string, unknown> = {}) {
+    return {
+      kind: "run",
+      cluster: "core",
+      tenant: "payments",
+      job_path: "checkout-api/main",
+      run_id: "run-1",
+      seq: 1,
+      at: "2026-01-01T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  /** runStream makes the page read the given frame off the team run stream,
+   * and holds the run log stream closed. */
+  function runStream(frame: { type: string; data: unknown } | null, readyState = "closed") {
+    mockUseEventStream.mockImplementation((_baseUrl, scope) =>
+      scope === "pipelines:payments"
+        ? { lastEvent: frame, readyState, error: null }
+        : { lastEvent: null, readyState: "closed", error: null },
+    );
+  }
+
+  /** flush settles the request the page started. */
+  async function flush() {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+
+  it("renders the pending input card under the digest card and above the pipeline card", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ digest: { stage: "Deploy" }, inputs: [pendingInput()] }));
+    renderPage();
+
+    const digestTitle = await screen.findByText("Digest");
+    const inputTitle = screen.getByText("Pending input");
+    const pipelineTitle = screen.getByText("Pipeline");
+
+    expect(digestTitle.compareDocumentPosition(inputTitle)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(inputTitle.compareDocumentPosition(pipelineTitle)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("renders the message, the parameter control, the step's own proceed label, and the abort control", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ inputs: [pendingInput()] }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.getByText("Approve the release?")).toBeInTheDocument();
+    expect(screen.getByLabelText("ENV")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ship it" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Abort" })).toBeInTheDocument();
+  });
+
+  it("renders a fallback message for an input that declares none", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ inputs: [pendingInput({ message: undefined })] }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.getByText("This build waits for an answer.")).toBeInTheDocument();
+  });
+
+  it("renders a declared choice list as a select that starts at the declared default", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ inputs: [pendingInput()] }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    const control = screen.getByLabelText("ENV") as HTMLSelectElement;
+    expect(control.tagName).toBe("SELECT");
+    expect(control.value).toBe("prod");
+    expect(screen.getByRole("option", { name: "staging" })).toBeInTheDocument();
+  });
+
+  it("renders a file parameter as a disabled control with an explanation", async () => {
+    mockGetRun.mockResolvedValue(
+      baseRun({
+        inputs: [pendingInput({ parameters: [{ name: "BUNDLE", type: "FileParameterDefinition" }] })],
+      }),
+    );
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.getByLabelText("BUNDLE")).toBeDisabled();
+    expect(
+      screen.getByText("A file parameter cannot be set from this page. The step uses its own value."),
+    ).toBeInTheDocument();
+  });
+
+  it("renders no form for an input that declares no parameter, and sends an empty body", async () => {
+    mockProceedRunInput.mockResolvedValue({ state: "requested" });
+    mockGetRun.mockResolvedValue(baseRun({ inputs: [pendingInput({ parameters: [] })] }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.queryByLabelText("ENV")).toBeNull();
+    // The empty list renders no control at all.
+    const card = screen.getByText("Pending input").parentElement?.parentElement;
+    expect(card!.querySelectorAll("input, select, textarea")).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ship it" }));
+    await flush();
+
+    expect(mockProceedRunInput).toHaveBeenCalledWith("run-1", "in-1", {});
+  });
+
+  it("labels the proceed control Proceed when the step declares no label", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ inputs: [pendingInput({ ok: undefined })] }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.getByRole("button", { name: "Proceed" })).toBeInTheDocument();
+  });
+
+  it("names the declared submitter and renders no control for the submitter parameter", async () => {
+    mockGetRun.mockResolvedValue(
+      baseRun({
+        inputs: [pendingInput({ submitter: "payments/release-managers", submitterParameter: "APPROVER" })],
+      }),
+    );
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.getByText("Only payments/release-managers may answer this input.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("APPROVER")).toBeNull();
+  });
+
+  it("renders a read-only caller the card, no answer control, and every control disabled", async () => {
+    grantTenantPipelinesRead();
+    mockGetRun.mockResolvedValue(baseRun({ inputs: [pendingInput()] }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.getByText("Approve the release?")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ship it" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Abort" })).toBeNull();
+    expect(screen.getByLabelText("ENV")).toBeDisabled();
+  });
+
+  it("refetches the record for an input frame of this run, which the page subscribes to", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ inputs: [pendingInput()] }));
+    const { repaint } = renderPage();
+    await screen.findByText(/Build #42/);
+    const before = mockGetRun.mock.calls.length;
+
+    runStream({ type: "input", data: notification({ kind: "input" }) });
+    await act(async () => {
+      repaint();
+    });
+
+    expect(mockGetRun.mock.calls.length).toBeGreaterThan(before);
+    const teamStream = mockUseEventStream.mock.calls.find((call) => call[1] === "pipelines:payments");
+    expect(teamStream?.[2]).toContain("input");
+  });
+
+  it("sends no value for an untouched control, so the plugin applies the declared default", async () => {
+    mockProceedRunInput.mockResolvedValue({ state: "requested" });
+    mockGetRun.mockResolvedValue(baseRun({ inputs: [pendingInput()] }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ship it" }));
+    await flush();
+
+    expect(mockProceedRunInput).toHaveBeenCalledWith("run-1", "in-1", {});
+  });
+
+  it("shows the requested toast, refetches the record, sends the edited body, and keeps the entry", async () => {
+    mockProceedRunInput.mockResolvedValue({ state: "requested" });
+    mockGetRun.mockResolvedValue(baseRun({ inputs: [pendingInput()] }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+    const before = mockGetRun.mock.calls.length;
+
+    fireEvent.change(screen.getByLabelText("ENV"), { target: { value: "staging" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ship it" }));
+    await flush();
+
+    expect(mockProceedRunInput).toHaveBeenCalledWith("run-1", "in-1", { ENV: "staging" });
+    expect(mockToast).toHaveBeenCalledWith("Proceed requested");
+    expect(mockGetRun.mock.calls.length).toBeGreaterThan(before);
+    // The record still carries the input, so the entry stands.
+    expect(screen.getByText("Approve the release?")).toBeInTheDocument();
+  });
+
+  it("shows the abort requested toast for the abort control", async () => {
+    mockAbortRunInput.mockResolvedValue({ state: "requested" });
+    mockGetRun.mockResolvedValue(baseRun({ inputs: [pendingInput()] }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Abort" }));
+    await flush();
+
+    expect(mockAbortRunInput).toHaveBeenCalledWith("run-1", "in-1");
+    expect(mockToast).toHaveBeenCalledWith("Abort requested");
+  });
+
+  it("disables the controls of the entry while a request is in flight", async () => {
+    mockProceedRunInput.mockReturnValue(new Promise(() => {}));
+    mockGetRun.mockResolvedValue(baseRun({ inputs: [pendingInput()] }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ship it" }));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(mockProceedRunInput).toHaveBeenCalledTimes(1);
+    // The pending request disables the whole entry: both answer controls and
+    // the parameter control.
+    const proceed = screen.getByRole("button", { name: "Ship it" });
+    expect(proceed.outerHTML).toContain("disabled");
+    expect(screen.getByRole("button", { name: "Abort" }).outerHTML).toContain("disabled");
+    expect(screen.getByLabelText("ENV")).toBeDisabled();
+  });
+
+  it("renders no pending input card for a run that holds no input", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.queryByText("Pending input")).toBeNull();
   });
 });

@@ -365,4 +365,118 @@ public class EventCapsTest {
         assertEquals("pod-59", capped.getPodTemplates().get(49).getName());
         assertEquals("image-59", capped.getPodTemplates().get(49).getImage());
     }
+
+    // --- The pending-input rung (D2) ---
+
+    private static BuildInputParameter wideParameter(int choices, int choiceChars) {
+        List<String> values = new ArrayList<>();
+        for (int i = 0; i < choices; i++) {
+            values.add(big(choiceChars));
+        }
+        return BuildInputParameter.builder()
+                .name("ENV")
+                .type("ChoiceParameterDefinition")
+                .description(big(64))
+                .defaultValue(big(64))
+                .choices(values)
+                .build();
+    }
+
+    private static BuildInput wideInput(String id, int parameters) {
+        List<BuildInputParameter> defs = new ArrayList<>();
+        for (int i = 0; i < parameters; i++) {
+            defs.add(wideParameter(20, 400));
+        }
+        return BuildInput.builder()
+                .id(id)
+                .message("Deploy?")
+                .ok("Ship it")
+                .submitter("varroa-payments")
+                .parameters(defs)
+                .build();
+    }
+
+    private static BuildInput narrowInput(String id) {
+        return BuildInput.builder()
+                .id(id)
+                .message("Deploy?")
+                .ok("Ship it")
+                .parameters(List.of(wideParameter(1, 8)))
+                .build();
+    }
+
+    @Test
+    public void anOversizeRunInputEventLosesItsOldestParameterList() {
+        // Four wide inputs hold the event above the size limit, and clearing
+        // the oldest parameter list alone brings it under. The rung therefore
+        // stops after the oldest one and leaves the later lists alone.
+        List<BuildInput> inputs = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            inputs.add(wideInput("in-" + i, 20));
+        }
+        for (int i = 4; i < 20; i++) {
+            inputs.add(narrowInput("in-" + i));
+        }
+        BuildEvent event = BuildEvent.builder()
+                .phase(BuildEvent.PHASE_RUN_INPUT)
+                .runId("run-1")
+                .intentKey("intent-1")
+                .jobPath("job-a")
+                .buildNumber(7)
+                .seq(3)
+                .inputs(inputs)
+                .build();
+        assertTrue("fixture must start oversize", serializedBytes(event) > 512 * 1024);
+
+        BuildEvent shrunk = VarroaRunRecorder.applyCaps(event);
+
+        assertEquals("the rung drops no input entry", 20, shrunk.getInputs().size());
+        assertTrue("the oldest parameter list goes first", shrunk.getInputs().get(0).getParameters().isEmpty());
+        assertFalse("a later parameter list stays", shrunk.getInputs().get(19).getParameters().isEmpty());
+        assertEquals("in-19", shrunk.getInputs().get(19).getId());
+        assertTrue("the shrunk event fits the size limit", serializedBytes(shrunk) <= 512 * 1024);
+    }
+
+    @Test
+    public void anOversizeRunInputEventKeepsEveryInput() {
+        List<BuildInput> inputs = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            inputs.add(wideInput("in-" + i, 20));
+        }
+        BuildEvent event = BuildEvent.builder()
+                .phase(BuildEvent.PHASE_RUN_INPUT)
+                .runId("run-1")
+                .buildNumber(7)
+                .inputs(inputs)
+                .build();
+        assertTrue("fixture must start oversize", serializedBytes(event) > 512 * 1024);
+
+        BuildEvent shrunk = VarroaRunRecorder.applyCaps(event);
+
+        assertEquals("every input survives the ladder", 20, shrunk.getInputs().size());
+        for (int i = 0; i < 20; i++) {
+            assertEquals("in-" + i, shrunk.getInputs().get(i).getId());
+        }
+        assertTrue("the oldest parameter list is empty", shrunk.getInputs().get(0).getParameters().isEmpty());
+        assertTrue("the shrunk event fits the size limit", serializedBytes(shrunk) <= 512 * 1024);
+        assertEquals("the identity fields survive", "run-1", shrunk.getRunId());
+    }
+
+    @Test
+    public void inputsAreCappedAt20KeepingTheOldest() {
+        List<BuildInput> inputs = new ArrayList<>();
+        for (int i = 0; i < 25; i++) {
+            inputs.add(BuildInput.builder().id("in-" + i).message("q" + i).build());
+        }
+        BuildEvent event = BuildEvent.builder()
+                .phase(BuildEvent.PHASE_RUN_INPUT)
+                .inputs(inputs)
+                .build();
+
+        BuildEvent capped = VarroaRunRecorder.applyCaps(event);
+
+        assertEquals(20, capped.getInputs().size());
+        assertEquals("in-0", capped.getInputs().get(0).getId());
+        assertEquals("in-19", capped.getInputs().get(19).getId());
+    }
 }

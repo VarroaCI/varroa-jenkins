@@ -1100,6 +1100,85 @@ func (c *Client) CancelBuild(ctx context.Context, req CancelBuildRequest) error 
 	return nil
 }
 
+// ActingUser is the person a mite-delivered command acts as. The plugin
+// builds a Jenkins authentication from the value and runs the call
+// inside that authentication's scope.
+type ActingUser struct {
+	Name   string   `json:"name"`
+	Email  string   `json:"email,omitempty"`
+	Groups []string `json:"groups,omitempty"`
+}
+
+// ProceedInputRequest is the body posted to the Varroa plugin's
+// /varroa-run/proceed-input route.
+type ProceedInputRequest struct {
+	RunID       string            `json:"runId"`
+	JobPath     string            `json:"jobPath"`
+	BuildNumber int64             `json:"buildNumber"`
+	InputID     string            `json:"inputId"`
+	Parameters  map[string]string `json:"parameters,omitempty"`
+	ActingUser  ActingUser        `json:"actingUser"`
+}
+
+// AbortInputRequest is the body posted to the Varroa plugin's
+// /varroa-run/abort-input route.
+type AbortInputRequest struct {
+	RunID       string     `json:"runId"`
+	JobPath     string     `json:"jobPath"`
+	BuildNumber int64      `json:"buildNumber"`
+	InputID     string     `json:"inputId"`
+	ActingUser  ActingUser `json:"actingUser"`
+}
+
+// ProceedInput answers one pending input step of a run through the
+// Varroa plugin's /varroa-run/proceed-input route. The plugin evaluates
+// the step's submitter check against the acting user's own name and
+// groups, so a refused proceed answers a 403 status.
+//
+// It returns the Jenkins HTTP status beside the error, the way
+// TriggerBuild does. The status is 0 when the call reached no Jenkins.
+func (c *Client) ProceedInput(ctx context.Context, req ProceedInputRequest) (int, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return 0, fmt.Errorf("proceed input %s: marshal request: %w", req.JobPath, err)
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/varroa-run/proceed-input", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return 0, fmt.Errorf("proceed input %s: %w", req.JobPath, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return resp.StatusCode, fmt.Errorf("proceed input %s: HTTP %d: %s", req.JobPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+	}
+	return resp.StatusCode, nil
+}
+
+// AbortInput rejects one pending input step of a run through the
+// Varroa plugin's /varroa-run/abort-input route. The plugin evaluates
+// the caller inside the acting user's own authentication, so a caller
+// who holds neither the cancel permission nor the submitter identity
+// answers a 403 status.
+//
+// It returns the Jenkins HTTP status beside the error, the way
+// ProceedInput does.
+func (c *Client) AbortInput(ctx context.Context, req AbortInputRequest) (int, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return 0, fmt.Errorf("abort input %s: marshal request: %w", req.JobPath, err)
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/varroa-run/abort-input", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return 0, fmt.Errorf("abort input %s: %w", req.JobPath, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return resp.StatusCode, fmt.Errorf("abort input %s: HTTP %d: %s", req.JobPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+	}
+	return resp.StatusCode, nil
+}
+
 // AssignItemRoles assigns RBAC roles on an item path via the role-strategy
 // plugin. Item-level roles are deferred — the role-strategy REST API requires
 // XML payloads that vary by plugin version. Groups are parsed from items.yaml
