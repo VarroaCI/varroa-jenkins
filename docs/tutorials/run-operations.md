@@ -112,7 +112,8 @@ Jenkins writes the approving user to the run's own build log. The **Log** tab th
 who answered the step. Varroa keeps no separate record of the approval.
 
 A step's `submitter` accepts a user name or a Varroa group name. A `submitter` that names a
-Varroa group admits any caller who holds that group.
+Varroa group admits any caller who holds that group. A Jenkins administrator on the controller can answer
+every input, whatever the `submitter` names.
 
 ## Call a job on another tenant
 
