@@ -90,6 +90,49 @@ func insertStubRunsRow(t *testing.T, db *sql.DB, runID string) {
 	}
 }
 
+// startedRunSnapshot is every value a duplicate answer for a started run
+// must leave unchanged: the intent row, the job's watermark, and the
+// run's runs rows.
+type startedRunSnapshot struct {
+	intent   string
+	next     int64
+	runsRows string
+}
+
+// snapshotStartedRun reads a startedRunSnapshot for intentKey and runID.
+func snapshotStartedRun(t *testing.T, db *sql.DB, intentKey, runID string) startedRunSnapshot {
+	t.Helper()
+	var snap startedRunSnapshot
+	if err := db.QueryRow(`
+		SELECT row_to_json(ri)::text FROM varroa.run_intents ri WHERE intent_key = $1
+	`, intentKey).Scan(&snap.intent); err != nil {
+		t.Fatalf("read intent row: %v", err)
+	}
+	snap.next = readNextNumber(t, db)
+	if err := db.QueryRow(`
+		SELECT COALESCE(json_agg(r ORDER BY r.created_at)::text, '[]') FROM varroa.runs r WHERE run_id = $1
+	`, runID).Scan(&snap.runsRows); err != nil {
+		t.Fatalf("read runs rows: %v", err)
+	}
+	return snap
+}
+
+// assertStartedRunUnchanged fails the test when the intent row, the
+// watermark, or the run's runs rows differ from before.
+func assertStartedRunUnchanged(t *testing.T, db *sql.DB, intentKey, runID string, before startedRunSnapshot) {
+	t.Helper()
+	after := snapshotStartedRun(t, db, intentKey, runID)
+	if after.intent != before.intent {
+		t.Fatalf("intent row changed:\nbefore %s\nafter  %s", before.intent, after.intent)
+	}
+	if after.next != before.next {
+		t.Fatalf("next_number moved from %d to %d", before.next, after.next)
+	}
+	if after.runsRows != before.runsRows {
+		t.Fatalf("runs rows changed:\nbefore %s\nafter  %s", before.runsRows, after.runsRows)
+	}
+}
+
 // TestNewKeyGrantedWritesOneRow asserts a new key is granted and writes
 // exactly one run_intents row.
 func TestNewKeyGrantedWritesOneRow(t *testing.T) {
@@ -370,10 +413,11 @@ func TestHigherGenerationBlockedByExistingRunsRow(t *testing.T) {
 	assertStoredRunID(t, db, req.IntentKey, first.RunID)
 }
 
-// TestRepeatConsumedIntentHigherGenerationUnchanged: a repeat of the
-// stored run_id at a higher generation, for an intent run.started
-// already consumed, answers granted with every column unchanged.
-func TestRepeatConsumedIntentHigherGenerationUnchanged(t *testing.T) {
+// TestRepeatConsumedIntentHigherGenerationDuplicate: a repeat of the
+// stored run_id at a higher generation from another instance, for an
+// intent run.started already consumed, answers duplicate and writes
+// nothing.
+func TestRepeatConsumedIntentHigherGenerationDuplicate(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -384,27 +428,17 @@ func TestRepeatConsumedIntentHigherGenerationUnchanged(t *testing.T) {
 	if err := consumeIntent(context.Background(), pool, runID, first.BuildNumber, time.Now().UTC()); err != nil {
 		t.Fatalf("consume intent: %v", err)
 	}
+	before := snapshotStartedRun(t, db, req.IntentKey, first.RunID)
 
 	repeat := req
 	repeat.PlacementGeneration = 5
 	repeat.CellInstance = "pod-different"
 
 	resp := ledger.Claim(context.Background(), repeat)
-	if resp.Decision != DecisionGranted || resp.RunID != first.RunID {
-		t.Fatalf("want granted with unchanged run_id %q, got %+v", first.RunID, resp)
+	if resp.Decision != DecisionDuplicate || resp.RunID != first.RunID || resp.BuildNumber != 0 {
+		t.Fatalf("want duplicate for run_id %q with no build number, got %+v", first.RunID, resp)
 	}
-
-	var cell, cellInstance, state string
-	var generation int64
-	if err := db.QueryRow(`
-		SELECT cell, cell_instance, placement_generation, state FROM varroa.run_intents WHERE intent_key = $1
-	`, req.IntentKey).Scan(&cell, &cellInstance, &generation, &state); err != nil {
-		t.Fatalf("read row: %v", err)
-	}
-	if cell != req.Cell || cellInstance != req.CellInstance || generation != 1 || state != stateConsumed {
-		t.Fatalf("want unchanged cell=%s cell_instance=%s generation=1 state=CONSUMED, got %s/%s/%d/%s",
-			req.Cell, req.CellInstance, cell, cellInstance, generation, state)
-	}
+	assertStartedRunUnchanged(t, db, req.IntentKey, first.RunID, before)
 }
 
 // TestRepeatDifferentCellInstanceMovesOwnership: a repeat of the stored
@@ -661,9 +695,11 @@ func TestRepeatWithoutInstanceNeverRefreshes(t *testing.T) {
 	}
 }
 
-// TestRepeatConsumedIntentKeepsNumber: a consumed intent answers its
-// stored number whatever counter the repeat carries.
-func TestRepeatConsumedIntentKeepsNumber(t *testing.T) {
+// TestRepeatConsumedIntentDuplicate: a repeat claim for a consumed
+// intent from a new pod answers duplicate whatever counter it carries,
+// and writes nothing to run_intents, job_numbers, or runs. A second build
+// of a started run is what the answer prevents.
+func TestRepeatConsumedIntentDuplicate(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -673,29 +709,26 @@ func TestRepeatConsumedIntentKeepsNumber(t *testing.T) {
 	if _, err := db.Exec(`UPDATE varroa.run_intents SET state = 'CONSUMED' WHERE intent_key = $1`, req.IntentKey); err != nil {
 		t.Fatalf("consume intent: %v", err)
 	}
-	before := readNextNumber(t, db)
+	insertStubRunsRow(t, db, first.RunID)
+	before := snapshotStartedRun(t, db, req.IntentKey, first.RunID)
 
-	repeat := req
-	repeat.CellInstance = "pod-b"
-	repeat.JenkinsNextBuildNumber = first.BuildNumber + 5
+	for _, instance := range []string{"pod-b", "pod-a"} {
+		repeat := req
+		repeat.CellInstance = instance
+		repeat.JenkinsNextBuildNumber = first.BuildNumber + 5
 
-	resp := ledger.Claim(context.Background(), repeat)
-	if resp.Decision != DecisionGranted || resp.BuildNumber != first.BuildNumber {
-		t.Fatalf("want stored build_number %d, got %+v", first.BuildNumber, resp)
-	}
-	_, cellInstance, _, number := readIntentOwnerAndNumber(t, db, req.IntentKey)
-	if cellInstance != "pod-a" || number != first.BuildNumber {
-		t.Fatalf("want unchanged pod-a/%d, got %s/%d", first.BuildNumber, cellInstance, number)
-	}
-	if after := readNextNumber(t, db); after != before {
-		t.Fatalf("next_number moved from %d to %d", before, after)
+		resp := ledger.Claim(context.Background(), repeat)
+		if resp.Decision != DecisionDuplicate || resp.RunID != first.RunID || resp.BuildNumber != 0 {
+			t.Fatalf("instance %s: want duplicate for run_id %q, got %+v", instance, first.RunID, resp)
+		}
+		assertStartedRunUnchanged(t, db, req.IntentKey, first.RunID, before)
 	}
 }
 
-// TestRepeatRecordedBuildKeepsNumber: a GRANTED intent whose runs row
-// records a build answers its stored number whatever counter the repeat
-// carries.
-func TestRepeatRecordedBuildKeepsNumber(t *testing.T) {
+// TestRepeatRecordedBuildDuplicate: a GRANTED intent whose runs row
+// records a build answers duplicate to a repeat from a new pod, and the
+// answer leaves the real run's row, the intent, and the watermark alone.
+func TestRepeatRecordedBuildDuplicate(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -706,23 +739,88 @@ func TestRepeatRecordedBuildKeepsNumber(t *testing.T) {
 	if _, err := db.Exec(`UPDATE varroa.runs SET build_number = $1 WHERE run_id = $2`, first.BuildNumber, first.RunID); err != nil {
 		t.Fatalf("record the build: %v", err)
 	}
-	before := readNextNumber(t, db)
+	before := snapshotStartedRun(t, db, req.IntentKey, first.RunID)
 
 	repeat := req
 	repeat.CellInstance = "pod-b"
 	repeat.JenkinsNextBuildNumber = first.BuildNumber + 5
 
 	resp := ledger.Claim(context.Background(), repeat)
-	if resp.Decision != DecisionGranted || resp.BuildNumber != first.BuildNumber {
-		t.Fatalf("want stored build_number %d, got %+v", first.BuildNumber, resp)
+	if resp.Decision != DecisionDuplicate || resp.RunID != first.RunID || resp.BuildNumber != 0 {
+		t.Fatalf("want duplicate for run_id %q, got %+v", first.RunID, resp)
 	}
-	_, cellInstance, _, number := readIntentOwnerAndNumber(t, db, req.IntentKey)
-	if cellInstance != "pod-a" || number != first.BuildNumber {
-		t.Fatalf("want unchanged pod-a/%d, got %s/%d", first.BuildNumber, cellInstance, number)
+	assertStartedRunUnchanged(t, db, req.IntentKey, first.RunID, before)
+}
+
+// TestRepeatQueuedRunRowIsNotStarted: a runs row that holds a QUEUED
+// accepted trigger records no build, so a repeat from a new pod still
+// answers granted and moves the owner. The duplicate answer must never
+// mark that row DUPLICATE either.
+func TestRepeatQueuedRunRowIsNotStarted(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ledger := NewLedger(pool, nil)
+
+	req := newTestClaimRequest("manual:x-accepted", 1)
+	first := mustGrant(t, ledger, req)
+	_, createdAt, err := parseRunUUIDv7(first.RunID)
+	if err != nil {
+		t.Fatalf("parse run id: %v", err)
 	}
-	if after := readNextNumber(t, db); after != before {
-		t.Fatalf("next_number moved from %d to %d", before, after)
+	if _, err := db.Exec(`
+		INSERT INTO varroa.runs (run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path, status, payload)
+		VALUES ($1, $2, $3, $4, $5, 'cell-a', $6, $7, 'QUEUED',
+		        jsonb_build_object('accepted_at', now(), 'accepted_instance', 'pod-a'))
+	`, first.RunID, createdAt, req.IntentKey, testCluster, testNamespace, testTenant, testJobPath); err != nil {
+		t.Fatalf("insert accepted trigger row: %v", err)
 	}
+
+	repeat := req
+	repeat.Cell = "cell-b"
+	repeat.CellInstance = "pod-b"
+
+	resp := ledger.Claim(context.Background(), repeat)
+	if resp.Decision != DecisionGranted || resp.RunID != first.RunID {
+		t.Fatalf("want granted for run_id %q, got %+v", first.RunID, resp)
+	}
+	_, cellInstance, _, _ := readIntentOwnerAndNumber(t, db, req.IntentKey)
+	if cellInstance != "pod-b" {
+		t.Fatalf("want the owner moved to pod-b, got %s", cellInstance)
+	}
+	var status string
+	if err := db.QueryRow(`SELECT status FROM varroa.runs WHERE run_id = $1`, first.RunID).Scan(&status); err != nil {
+		t.Fatalf("read runs status: %v", err)
+	}
+	if status != "QUEUED" {
+		t.Fatalf("want the accepted row still QUEUED, got %s", status)
+	}
+}
+
+// TestRepeatUnstartedIntentFromNewPodStillGranted: the re-fire path sends
+// the same run_id from a replacement pod for a GRANTED intent that no
+// runs row records. The claim answers granted, moves the owner, and
+// refreshes a stale number, so a re-fired build still runs.
+func TestRepeatUnstartedIntentFromNewPodStillGranted(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ledger := NewLedger(pool, nil)
+
+	req := newTestClaimRequest("manual:x-refire", 1)
+	req.JenkinsNextBuildNumber = 1
+	first := mustGrant(t, ledger, req)
+
+	repeat := req
+	repeat.Cell = "cell-b"
+	repeat.CellInstance = "pod-new"
+	repeat.JenkinsNextBuildNumber = first.BuildNumber + 1
+
+	resp := ledger.Claim(context.Background(), repeat)
+	if resp.Decision != DecisionGranted || resp.RunID != first.RunID || resp.BuildNumber != first.BuildNumber+1 {
+		t.Fatalf("want granted run %q with build_number %d, got %+v", first.RunID, first.BuildNumber+1, resp)
+	}
+	cell, cellInstance, _, number := readIntentOwnerAndNumber(t, db, req.IntentKey)
+	if cell != "cell-b" || cellInstance != "pod-new" || number != first.BuildNumber+1 {
+		t.Fatalf("want cell-b/pod-new/%d, got %s/%s/%d", first.BuildNumber+1, cell, cellInstance, number)
+	}
+	assertIntentRowCount(t, db, req.IntentKey, 1)
 }
 
 // TestConcurrentRepeatClaimsRefreshOnce: two repeats with the same

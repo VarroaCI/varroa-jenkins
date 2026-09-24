@@ -196,7 +196,9 @@ the root AGENTS.md greenfield rule.
   cross-tenant trigger, and `VarroaQueueDecisionHandler` derives one from the scheduling
   authentication (`Jenkins.getAuthentication2().getName()`, `anonymous` and
   `ACL.SYSTEM2` normalized to empty) when the action carries none; `VarroaClaimQueue`
-  sends `action.getActor()` as the claim's `actor` field.
+  sends `action.getActor()` as the claim's `actor` field. A `duplicate` decision
+  cancels the item with one `INFO` line: it is the expected answer to a lost race or a
+  redelivered command.
 - **Intra-tenant trigger forwarding** (a job pair split over two tenant slots keeps
   working): `VarroaHomeCache.java` holds the newest answer of `GET /v1/homes`, keyed
   by tenant, with the slot this cell holds, the role, and the tenant's job-path to
@@ -361,7 +363,12 @@ the root AGENTS.md greenfield rule.
   action instead of deriving one), and actor unchanged, plus a `ParametersAction` built from the
   job's declared parameter definitions; an omitted value takes the declared
   default and a supplied name the job does not declare is dropped and reported
-  back in `droppedParameters`. `POST /varroa-run/cancel` reads `runId`, `jobPath`,
+  back in `droppedParameters`. Before it schedules, the trigger and replay routes
+  call `findBuildForRunId`: a build of the job that already carries the run id
+  (newest first, at most 100 builds, stopping at a build scheduled more than five
+  minutes before the UUIDv7 time) makes the route schedule nothing and answer `202`
+  with the unchanged body. The queue fold reads queued items only, and the
+  transport can redeliver a command after its build left the queue. `POST /varroa-run/cancel` reads `runId`, `jobPath`,
   and `buildNumber`; it resolves its target by run identifier, never by job path
   alone, because one job can hold several queued items and several running
   builds — a `buildNumber` greater than zero stops a running build whose
@@ -418,7 +425,8 @@ the root AGENTS.md greenfield rule.
   or check out their own script. It always builds a sandboxed execution, and
   it takes the job's own durability hint. It implements no
   `Queue.QueueAction`, so the intent action's same-run-id guard still folds
-  a redelivered command into one queue item. The recorder writes
+  a redelivered command into one queue item. The build check runs before the
+  permission check, because a repeat schedules nothing. The recorder writes
   `VarroaReplayCause`'s source run into `replay_of` on the `STARTED` event
   alone. `replay` holds one word, so the route needs no `@WebMethod`.
   **A route of more than one word needs `@WebMethod(name = "...")`.** Stapler

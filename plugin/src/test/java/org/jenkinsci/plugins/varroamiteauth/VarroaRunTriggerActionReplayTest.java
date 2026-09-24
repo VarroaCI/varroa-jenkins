@@ -278,6 +278,36 @@ public class VarroaRunTriggerActionReplayTest {
         assertEquals("one queue item must exist for the run identifier", 1, matching);
     }
 
+    @Test
+    public void aReplayRedeliveredAfterTheBuildStartedSchedulesNothing() throws Exception {
+        WorkflowJob job = pipeline("sleep 60\n");
+        useSecurity(job);
+        String json = body("run-replay-13", job.getFullName(), "src-run-1", "sleep 60\n",
+                actingUser("ada"), "{\"EXTRA\":\"x\"}");
+
+        verify(replay(json, new StringWriter())).setStatus(202);
+        WorkflowRun run = awaitBuild(job, 1);
+        long deadline = System.currentTimeMillis() + 30000L;
+        while (!run.isBuilding() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(50L);
+        }
+        assertTrue("the first replay must be building", run.isBuilding());
+
+        StringWriter out = new StringWriter();
+        StaplerResponse2 rsp = replay(json, out);
+
+        verify(rsp).setStatus(202);
+        JSONObject answer = JSONObject.fromObject(out.toString());
+        assertEquals("run-replay-13", answer.getString("runId"));
+        assertEquals(List.of("EXTRA"), new ArrayList<Object>(answer.getJSONArray("droppedParameters")));
+        assertEquals("a repeat must queue nothing", 0, Queue.getInstance().getItems().length);
+
+        run.doStop();
+        j.waitForCompletion(run);
+        j.waitUntilNoActivity();
+        assertEquals("a repeat must start no second build", 1, job.getLastBuild().getNumber());
+    }
+
     // ---- The SCM definition ----
 
     @Test

@@ -26,6 +26,13 @@ import java.util.List;
  * <p>This class also implements {@link Queue.QueueAction} so two granted
  * intents for the same job never collapse into one queue item, and one
  * intent scheduled twice never queues twice (D4).
+ *
+ * <p>That fold reads queued items only. A build that already left the queue
+ * is not a queued item, so a second schedule of its run id passes the fold.
+ * {@link VarroaRunTriggerAction#findBuildForRunId} covers that case on the
+ * JVM that holds the build. The ledger covers it on every other JVM once it
+ * records the start, because it then answers {@code duplicate} to a repeat
+ * claim. A redelivery to another JVM before that record can still build.
  */
 public class VarroaIntentAction extends InvisibleAction implements Queue.QueueAction {
 

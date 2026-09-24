@@ -245,8 +245,10 @@ these three kinds are absent; the other four still answer.
 ## The ledger and intent keys
 
 Every build starts with a claim against the ledger, carrying an intent key that identifies the
-request that caused it. The recorder uses the key to make a retried claim idempotent: the same
-key and run always get the same answer.
+request that caused it. The recorder uses the key to make a retried claim idempotent. Until the
+build starts, the same key and run get the same answer. Once the recorder records the start, a
+repeat claim answers `duplicate`. A redelivery before that record can still build twice on
+another cell.
 
 | Scheme | Shape | Use |
 |---|---|---|

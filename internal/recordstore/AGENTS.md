@@ -206,7 +206,17 @@ of the fleet's audit activity, once a controller becomes disposable.
   `ledger` subpackage. `Ledger.Claim` answers one claim in a single
   transaction: it inserts a new intent, or applies design D2's
   decision table to an existing one, then reserves a build number
-  through `reserveBuildNumber`. `Fence` gates a claim before the
+  through `reserveBuildNumber`. **A repeat claim for the same run
+  identifier answers `duplicate` once the run started** (`intentStarted`:
+  the intent is `CONSUMED`, or a `runs` row records the build), and
+  writes nothing: only a queue item claims, so such a claim is a
+  redelivered command, and `granted` would start the run again on a
+  replacement pod. That answer skips `markDuplicateClaim`, because the
+  row it would mark is the started run's own row. `reanswerSameRun`
+  serves only a run that has not started, which keeps the re-fire and
+  the ownership-move refresh working. A resumed build never claims. The
+  ledger learns of a start only from `run.started`, so a redelivery to
+  another cell before that event lands still reads `granted`. `Fence` gates a claim before the
   transaction opens; `allowAllFence` is the C1 default.
   `RegisterClaimResponder` subscribes `bus.LedgerClaimSubject` with
   queue group `recorder`. `handleClaim` (`ledger_responder.go`) logs a

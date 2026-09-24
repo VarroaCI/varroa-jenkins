@@ -47,6 +47,22 @@ public final class Uuid7 {
         return format(bytes);
     }
 
+    /**
+     * Returns the Unix epoch milliseconds a version-7 UUID string carries,
+     * or {@code -1} for a string that is not a version-7 UUID.
+     */
+    static long timestampMillis(String uuid) {
+        if (uuid == null || uuid.length() != 36 || uuid.charAt(14) != '7') {
+            return -1L;
+        }
+        String hex = uuid.substring(0, 8) + uuid.substring(9, 13);
+        try {
+            return Long.parseLong(hex, 16);
+        } catch (NumberFormatException e) {
+            return -1L;
+        }
+    }
+
     private static String format(byte[] bytes) {
         StringBuilder hex = new StringBuilder(32);
         for (byte b : bytes) {

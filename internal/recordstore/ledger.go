@@ -215,10 +215,19 @@ func existingKeyDecision(ctx context.Context, tx pgx.Tx, req ClaimRequest, reqRu
 		return ClaimResponse{Decision: DecisionVetoed, ReasonCode: ReasonFenced, RunID: row.runID.String()}, nil
 	}
 
-	// Row 2: the stored run_id equals the request's run_id. The answer
-	// is granted; an unstarted intent moves to a new instance, and that
-	// move can refresh a stale build number.
+	// Row 2: the stored run_id equals the request's run_id. A started run
+	// answers duplicate and writes nothing: only a queue item claims, and a
+	// queue item for a run that already started is a redelivered command.
+	// Any other repeat answers granted; an unstarted intent moves to a new
+	// instance, and that move can refresh a stale build number.
 	if row.runID == reqRunID {
+		started, err := intentStarted(ctx, tx, row)
+		if err != nil {
+			return ClaimResponse{}, err
+		}
+		if started {
+			return ClaimResponse{Decision: DecisionDuplicate, RunID: row.runID.String()}, nil
+		}
 		return reanswerSameRun(ctx, tx, req, row)
 	}
 
@@ -264,10 +273,22 @@ func markDuplicateClaim(ctx context.Context, tx pgx.Tx, runID uuid.UUID, created
 	return nil
 }
 
+// intentStarted reports whether the run a stored intent names has
+// started: run.started consumed the intent, or a runs row records the
+// build. A repeat claim for such a run answers duplicate, and the caller
+// must not call markDuplicateClaim, because the row it would test is the
+// real run's own row.
+func intentStarted(ctx context.Context, tx pgx.Tx, row storedIntent) (bool, error) {
+	if row.state == stateConsumed {
+		return true, nil
+	}
+	return runsRowExists(ctx, tx, row.runID)
+}
+
 // reanswerSameRun grants a repeat claim for the run_id the row already
-// holds. It moves the ownership columns only when the caller's cell
-// instance differs, the intent is still GRANTED, and no runs row has
-// recorded the build. Inside that move it also refreshes the build
+// holds, for a run that has not started. It moves the ownership columns
+// only when the caller's cell instance differs and the intent is still
+// GRANTED. Inside that move it also refreshes the build
 // number when the new instance's counter already passed the stored
 // number, because a cell refuses a number below its own counter; the
 // old number stays burned, and a zero counter never refreshes. A request
@@ -281,30 +302,24 @@ func reanswerSameRun(ctx context.Context, tx pgx.Tx, req ClaimRequest, row store
 	buildNumber := derefInt64(row.buildNumber)
 	sameInstance := row.cellInstance != nil && *row.cellInstance == req.CellInstance
 	if !sameInstance && row.state == stateGranted {
-		exists, err := runsRowExists(ctx, tx, row.runID)
-		if err != nil {
-			return ClaimResponse{}, err
+		if _, err := tx.Exec(ctx, `
+			UPDATE varroa.run_intents
+			SET cell = $1, cell_instance = $2, placement_generation = $3
+			WHERE run_id = $4
+		`, nullableString(req.Cell), nullableString(req.CellInstance), req.PlacementGeneration, row.runID); err != nil {
+			return ClaimResponse{}, fmt.Errorf("move ownership: %w", err)
 		}
-		if !exists {
+		if req.CellInstance != "" && req.JenkinsNextBuildNumber > 0 && buildNumber < req.JenkinsNextBuildNumber {
+			fresh, err := reserveBuildNumber(ctx, tx, req.Cluster, req.Tenant, req.JobPath, req.JenkinsNextBuildNumber)
+			if err != nil {
+				return ClaimResponse{}, err
+			}
 			if _, err := tx.Exec(ctx, `
-				UPDATE varroa.run_intents
-				SET cell = $1, cell_instance = $2, placement_generation = $3
-				WHERE run_id = $4
-			`, nullableString(req.Cell), nullableString(req.CellInstance), req.PlacementGeneration, row.runID); err != nil {
-				return ClaimResponse{}, fmt.Errorf("move ownership: %w", err)
+				UPDATE varroa.run_intents SET build_number = $1 WHERE run_id = $2
+			`, fresh, row.runID); err != nil {
+				return ClaimResponse{}, fmt.Errorf("refresh stale build number: %w", err)
 			}
-			if req.CellInstance != "" && req.JenkinsNextBuildNumber > 0 && buildNumber < req.JenkinsNextBuildNumber {
-				fresh, err := reserveBuildNumber(ctx, tx, req.Cluster, req.Tenant, req.JobPath, req.JenkinsNextBuildNumber)
-				if err != nil {
-					return ClaimResponse{}, err
-				}
-				if _, err := tx.Exec(ctx, `
-					UPDATE varroa.run_intents SET build_number = $1 WHERE run_id = $2
-				`, fresh, row.runID); err != nil {
-					return ClaimResponse{}, fmt.Errorf("refresh stale build number: %w", err)
-				}
-				buildNumber = fresh
-			}
+			buildNumber = fresh
 		}
 	}
 	return ClaimResponse{Decision: DecisionGranted, RunID: row.runID.String(), BuildNumber: buildNumber}, nil

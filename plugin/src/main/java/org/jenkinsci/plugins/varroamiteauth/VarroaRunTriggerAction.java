@@ -170,21 +170,23 @@ public class VarroaRunTriggerAction implements RootAction {
                 actions.add(new CauseAction(new VarroaUserCause(actor)));
             }
 
+            // A redelivered command can carry the run id of a build that
+            // already left the queue. The queue fold cannot see that build,
+            // so the route schedules nothing and answers as it did the first time.
+            Run<?, ?> existing = findBuildForRunId(job, runId);
+            if (existing != null) {
+                logRepeat("trigger", runId, existing);
+                writeAccepted(rsp, runId, droppedParameters);
+                return;
+            }
+
             Queue.Item item = ParameterizedJobMixIn.scheduleBuild2(job, 0, actions.toArray(new Action[0]));
             if (item == null) {
                 rsp.sendError(409, "Conflict: the queue refused to schedule " + jobPath);
                 return;
             }
 
-            JSONObject out = new JSONObject();
-            out.put("runId", runId);
-            JSONArray dropped = new JSONArray();
-            dropped.addAll(droppedParameters);
-            out.put("droppedParameters", dropped);
-
-            rsp.setContentType("application/json");
-            rsp.setStatus(202);
-            rsp.getWriter().write(out.toString());
+            writeAccepted(rsp, runId, droppedParameters);
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "VarroaRunTriggerAction.doTrigger caught exception", e);
             try {
@@ -279,6 +281,20 @@ public class VarroaRunTriggerAction implements RootAction {
 
             String actor = VarroaUserCause.normalizeActor(actingUser.getName());
             List<String> droppedParameters = new ArrayList<>();
+
+            // A redelivered replay can name a build that already left the
+            // queue. The check runs before the permission check, because a
+            // repeat schedules nothing.
+            Run<?, ?> existing = findBuildForRunId(job, runId);
+            if (existing != null) {
+                try (ACLContext ignored = ACL.as2(actingUser.authentication())) {
+                    buildParametersAction(job, req, parameters, droppedParameters);
+                }
+                logRepeat("replay", runId, existing);
+                writeAccepted(rsp, runId, droppedParameters);
+                return;
+            }
+
             try (ACLContext ignored = ACL.as2(actingUser.authentication())) {
                 // The check reads the job, not the source build: a cell is
                 // disposable, and the source build can be gone from it.
@@ -305,15 +321,7 @@ public class VarroaRunTriggerAction implements RootAction {
                 }
             }
 
-            JSONObject out = new JSONObject();
-            out.put("runId", runId);
-            JSONArray dropped = new JSONArray();
-            dropped.addAll(droppedParameters);
-            out.put("droppedParameters", dropped);
-
-            rsp.setContentType("application/json");
-            rsp.setStatus(202);
-            rsp.getWriter().write(out.toString());
+            writeAccepted(rsp, runId, droppedParameters);
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "VarroaRunTriggerAction.doReplay caught exception", e);
             try {
@@ -378,6 +386,68 @@ public class VarroaRunTriggerAction implements RootAction {
     }
 
     // ---- Trigger helpers ----
+
+    /** The most builds {@link #findBuildForRunId} reads, newest first. */
+    static final int REPEAT_SCAN_MAX_BUILDS = 100;
+
+    /**
+     * The margin below the run id's own time at which {@link
+     * #findBuildForRunId} stops. It covers clock skew between the minting
+     * host and this Jenkins.
+     */
+    static final long REPEAT_SCAN_MARGIN_MILLIS = 5L * 60 * 1000;
+
+    /**
+     * Returns the build of {@code job} whose {@link VarroaIntentAction}
+     * carries {@code runId}, or {@code null} when no build carries it.
+     *
+     * <p>The walk reads the newest build first. It stops after {@link
+     * #REPEAT_SCAN_MAX_BUILDS} builds, and at the first build scheduled
+     * more than {@link #REPEAT_SCAN_MARGIN_MILLIS} before the time the run
+     * id carries: the run id is minted before its build is scheduled, so no
+     * older build can carry it. A run id that is not a version-7 UUID
+     * applies the count bound alone.
+     */
+    static Run<?, ?> findBuildForRunId(Job<?, ?> job, String runId) {
+        if (runId == null || runId.isEmpty()) {
+            return null;
+        }
+        long minted = Uuid7.timestampMillis(runId);
+        long floor = minted < 0 ? Long.MIN_VALUE : minted - REPEAT_SCAN_MARGIN_MILLIS;
+        int read = 0;
+        for (Run<?, ?> run = job.getLastBuild(); run != null && read < REPEAT_SCAN_MAX_BUILDS;
+                run = run.getPreviousBuild()) {
+            read++;
+            if (run.getTimeInMillis() < floor) {
+                return null;
+            }
+            VarroaIntentAction action = run.getAction(VarroaIntentAction.class);
+            if (action != null && runId.equals(action.getRunId())) {
+                return run;
+            }
+        }
+        return null;
+    }
+
+    /** Logs one info line for a repeated command that scheduled nothing. */
+    private static void logRepeat(String route, String runId, Run<?, ?> existing) {
+        LOGGER.log(Level.INFO, "VarroaRunTriggerAction: {0} for run {1} repeats build {2}; scheduled nothing",
+                new Object[] {route, runId, existing.getExternalizableId()});
+    }
+
+    /** Writes the {@code 202} answer the trigger and replay routes share. */
+    private static void writeAccepted(StaplerResponse2 rsp, String runId, List<String> droppedParameters)
+            throws IOException {
+        JSONObject out = new JSONObject();
+        out.put("runId", runId);
+        JSONArray dropped = new JSONArray();
+        dropped.addAll(droppedParameters);
+        out.put("droppedParameters", dropped);
+
+        rsp.setContentType("application/json");
+        rsp.setStatus(202);
+        rsp.getWriter().write(out.toString());
+    }
 
     /**
      * Stamps a fresh {@link VarroaIntentAction} carrying the caller's run

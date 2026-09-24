@@ -786,4 +786,110 @@ public class VarroaRunTriggerActionTest {
             verify(rsp).sendError(eq(404), contains("run-nowhere"));
         }
     }
+
+    // ---- The redelivery guard ----
+
+    private static StaplerResponse2 trigger(String runId, String jobPath, StringWriter out) throws Exception {
+        try (ACLContext ctx = asMite()) {
+            StaplerResponse2 rsp = responseCapturing(out);
+            new VarroaRunTriggerAction().doTrigger(requestWithBody("{\"runId\":\"" + runId
+                    + "\",\"intentKey\":\"manual:" + runId + "\",\"jobPath\":\"" + jobPath
+                    + "\",\"parameters\":{\"EXTRA\":\"x\"}}"), rsp);
+            return rsp;
+        }
+    }
+
+    @Test
+    public void aTriggerRepeatedAfterTheBuildFinishedSchedulesNothing() throws Exception {
+        j.jenkins.setNumExecutors(1);
+        FreeStyleProject p = j.createFreeStyleProject("repeat-finished");
+        String runId = Uuid7.next();
+
+        verify(trigger(runId, p.getFullName(), new StringWriter())).setStatus(202);
+        j.waitUntilNoActivity();
+        FreeStyleBuild first = p.getLastBuild();
+        assertNotNull("the first trigger must build", first);
+        assertEquals(runId, first.getAction(VarroaIntentAction.class).getRunId());
+
+        StringWriter out = new StringWriter();
+        StaplerResponse2 rsp = trigger(runId, p.getFullName(), out);
+
+        verify(rsp).setStatus(202);
+        JSONObject answer = JSONObject.fromObject(out.toString());
+        assertEquals(runId, answer.getString("runId"));
+        assertEquals(List.of("EXTRA"), new ArrayList<Object>(answer.getJSONArray("droppedParameters")));
+        assertEquals("a repeat must queue nothing", 0, Queue.getInstance().getItems().length);
+        j.waitUntilNoActivity();
+        assertEquals("a repeat must start no second build", 1, p.getLastBuild().getNumber());
+        assertEquals(2, p.getNextBuildNumber());
+    }
+
+    @Test
+    public void aTriggerRepeatedWhileTheBuildRunsSchedulesNothing() throws Exception {
+        j.jenkins.setNumExecutors(2);
+        FreeStyleProject p = j.createFreeStyleProject("repeat-running");
+        p.setConcurrentBuild(true);
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        p.getBuildersList().add(new TestBuilder() {
+            @Override
+            public boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener)
+                    throws InterruptedException {
+                started.countDown();
+                release.await(30, TimeUnit.SECONDS);
+                return true;
+            }
+        });
+        String runId = Uuid7.next();
+
+        FreeStyleBuild build;
+        try {
+            verify(trigger(runId, p.getFullName(), new StringWriter())).setStatus(202);
+            assertTrue("the build must start within 10s", started.await(10, TimeUnit.SECONDS));
+            build = p.getLastBuild();
+            assertTrue(build.isBuilding());
+
+            StaplerResponse2 rsp = trigger(runId, p.getFullName(), new StringWriter());
+
+            verify(rsp).setStatus(202);
+            assertEquals("a repeat must queue nothing", 0, Queue.getInstance().getItems().length);
+        } finally {
+            release.countDown();
+        }
+        j.assertBuildStatusSuccess(j.waitForCompletion(build));
+        j.waitUntilNoActivity();
+        assertEquals("a repeat must start no second build", 1, p.getLastBuild().getNumber());
+    }
+
+    @Test
+    public void aBuildOlderThanTheTimeBoundIsNotAMatch() throws Exception {
+        j.jenkins.setNumExecutors(1);
+        FreeStyleProject p = j.createFreeStyleProject("repeat-bound");
+        // A run id minted ten minutes after the build: the walk stops at the
+        // build, because the build is older than the id's time less the margin.
+        String future = Uuid7.next(System.currentTimeMillis() + 10L * 60 * 1000, new java.security.SecureRandom());
+        String current = Uuid7.next();
+
+        verify(trigger(future, p.getFullName(), new StringWriter())).setStatus(202);
+        j.waitUntilNoActivity();
+        assertNotNull(p.getLastBuild());
+        assertNull("a build older than the bound must not match",
+                VarroaRunTriggerAction.findBuildForRunId(p, future));
+
+        verify(trigger(current, p.getFullName(), new StringWriter())).setStatus(202);
+        j.waitUntilNoActivity();
+        assertEquals(2, p.getLastBuild().getNumber());
+        assertEquals("a build inside the bound must match", p.getLastBuild(),
+                VarroaRunTriggerAction.findBuildForRunId(p, current));
+        assertNull("another run id must not match",
+                VarroaRunTriggerAction.findBuildForRunId(p, Uuid7.next()));
+    }
+
+    @Test
+    public void aRunIdReadsBackItsOwnTime() {
+        long millis = 1_758_000_000_000L;
+        assertEquals(millis, Uuid7.timestampMillis(Uuid7.next(millis, new java.security.SecureRandom())));
+        assertEquals(-1L, Uuid7.timestampMillis("run-real"));
+        assertEquals(-1L, Uuid7.timestampMillis("00000000-0000-4000-8000-000000000000"));
+    }
 }

@@ -236,7 +236,10 @@ public class VarroaClaimQueue {
                 return true;
             case DUPLICATE:
                 DuplicateRegistry.get().record(action.getRunId());
-                LOGGER.log(Level.WARNING, "VarroaClaimQueue: duplicate claim for run {0}", action.getRunId());
+                // A duplicate is an expected answer: a redelivered command
+                // or a lost race. The item is cancelled quietly.
+                LOGGER.log(Level.INFO, "VarroaClaimQueue: duplicate claim for run {0}; cancelled the queue item",
+                        action.getRunId());
                 cancel(item);
                 return true;
             case VETOED_NOT_HOME:

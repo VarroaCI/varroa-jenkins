@@ -66,15 +66,18 @@ and never starts a second build.
 | Decision | Meaning | Claimer action |
 |---|---|---|
 | `granted` | the ledger owns this run and assigned it a build number | apply the build number, start the build |
-| `duplicate` | the intent key already holds a different `run_id` | cancel the queue item, log a `WARNING` |
+| `duplicate` | the intent key already holds a different `run_id`, or the ledger recorded this run's start | cancel the queue item, log one `INFO` line |
 | `vetoed`, reason `NOT_READY` | the ledger is not ready to grant yet | retry on the backoff schedule |
 | `vetoed`, any other reason | the ledger refuses this run permanently | cancel the queue item, log a `WARNING` |
 | empty, with a `code` | the hop that answered could not reach the next one | retry on the backoff schedule |
 
 `duplicate` and `granted` are not the same outcome for a retried request. A retried request
 reads `granted` again when it carries the same `intent_key` and the same `run_id` as an earlier
-granted claim. The ledger recognizes its own retried request. `duplicate` means the intent key
-belongs to a different run entirely, for example two triggers racing on the same commit.
+granted claim, and that run has not started. The ledger recognizes its own retried request.
+`duplicate` means the intent key belongs to a different run entirely, for example two triggers
+racing on the same commit. It also answers a repeat for a run whose start the ledger recorded.
+Only a queued item claims, so that repeat comes from a redelivered command. A redelivery that
+reaches another cell before the ledger records the start still reads `granted`.
 
 A retried request from a new cell instance can carry a fresh build number. The ledger refreshes
 the number when the run never started, the repeat comes from a different cell instance, and the
@@ -100,11 +103,12 @@ apply. A manual `Job.scheduleBuild2` call that bypassed the plugin in that windo
 restore from a backup that replayed old build history in that window is another. An advance
 before a first claim causes no conflict: the claim reports the counter as
 `jenkins_next_build_number`, and the ledger never grants a new number below it. Two repeat
-claims are the exceptions. One from the same cell instance answers the stored number, so a
-second queue item for a run that instance already built reads `NUMBER_CONFLICT` and is
-cancelled, which keeps that run from building twice. One that names no cell instance answers
-the stored number too, because the ledger cannot tell which instance owns the run; a real cell
-always names its instance. Treat any other `NUMBER_CONFLICT` as a sign the Jenkins instance
+claims are the exceptions. One from the same cell instance answers the stored number while the
+ledger has not yet recorded the build's start. A second queue item for a run that instance
+already built then reads `NUMBER_CONFLICT` and is cancelled, which keeps that run from building
+twice. Once the ledger records the start, the repeat answers `duplicate` instead. One that names
+no cell instance answers the stored number too, because the ledger cannot tell which instance
+owns the run; a real cell always names its instance. Treat any other `NUMBER_CONFLICT` as a sign the Jenkins instance
 and the ledger have diverged for that job. The retry schedule will not clear it.
 
 ## Symptoms of a recorder outage
