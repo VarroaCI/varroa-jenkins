@@ -265,6 +265,14 @@ func TestSchemaVersionBelowMinimumFailsEveryMethod(t *testing.T) {
 	if _, err := reader.ListTests(ctx, "00000000-0000-7000-8000-000000000000"); !errors.Is(err, ErrSchemaTooOld) {
 		t.Fatalf("ListTests error = %v, want ErrSchemaTooOld", err)
 	}
+	if _, err := reader.ListTestCases(ctx, "00000000-0000-7000-8000-000000000000"); !errors.Is(err, ErrSchemaTooOld) {
+		t.Fatalf("ListTestCases error = %v, want ErrSchemaTooOld", err)
+	}
+	if _, err := reader.ListTestCaseHistory(ctx, TestCaseHistoryQuery{
+		Cluster: testCluster, Tenant: testTenant, JobPath: testJobPath, ClassName: "c", Name: "n", Limit: 50,
+	}); !errors.Is(err, ErrSchemaTooOld) {
+		t.Fatalf("ListTestCaseHistory error = %v, want ErrSchemaTooOld", err)
+	}
 	if _, _, err := reader.GetIntentByKey(ctx, "manual:whatever"); !errors.Is(err, ErrSchemaTooOld) {
 		t.Fatalf("GetIntentByKey error = %v, want ErrSchemaTooOld", err)
 	}

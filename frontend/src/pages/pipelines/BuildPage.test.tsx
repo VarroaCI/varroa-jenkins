@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { InitialEntry } from "react-router-dom";
 import BuildPage from "./BuildPage";
 import { ApiError } from "../../hooks/useApi";
-import type { RunDetail, RunInput } from "../../types";
+import type { RunDetail, RunInput, RunTestListResponse } from "../../types";
 
 const mockGetRun = vi.fn();
 const mockListRunArtifacts = vi.fn();
@@ -136,10 +136,149 @@ beforeEach(() => {
   mockUseParams.mockReturnValue({ team: "payments", job: "checkout-api/main", run: "run-1" });
   grantTenantPipelinesWrite();
   mockListRunArtifacts.mockResolvedValue({ items: [] });
-  mockListRunTests.mockResolvedValue({ items: [{ suite: "_total", total: 0, failed: 0, skipped: 0 }] });
+  mockListRunTests.mockResolvedValue({ items: [{ suite: "_total", total: 0, failed: 0, skipped: 0 }], cases: [] });
   mockListRunChanges.mockResolvedValue({ items: [] });
   mockListRuns.mockResolvedValue({ items: [] });
   mockUseEventStream.mockReturnValue({ lastEvent: null, readyState: "closed", error: null });
+});
+
+describe("BuildPage — test cases and the test report", () => {
+  /** A tests read whose cases list holds two failed rows and one skipped row.
+   * The skipped row sorts first by name, so an order check proves that the
+   * page keeps the response order. */
+  function testsRead(overrides: Partial<RunTestListResponse> = {}): RunTestListResponse {
+    return {
+      items: [
+        { suite: "_total", total: 12, failed: 2, skipped: 1 },
+        { suite: "unit", total: 12, failed: 2, skipped: 1 },
+      ],
+      cases: [
+        {
+          suite: "unit",
+          className: "com.example.ZedTest",
+          name: "zeta",
+          status: "FAILED",
+          durationMs: 1200,
+          errorDetails: "expected 1 but was 2",
+          caseKey: "com.example.ZedTest/zeta",
+        },
+        {
+          suite: "unit",
+          className: "com.example.MidTest",
+          name: "mu",
+          status: "FAILED",
+          caseKey: "com.example.MidTest/mu",
+        },
+        {
+          suite: "unit",
+          className: "com.example.AlphaTest",
+          name: "alpha",
+          status: "SKIPPED",
+          caseKey: "com.example.AlphaTest/alpha",
+        },
+      ],
+      ...overrides,
+    };
+  }
+
+  async function openTestsTab() {
+    await screen.findByText(/Build #42/);
+    fireEvent.click(screen.getByRole("button", { name: /^Tests/ }));
+  }
+
+  it("renders the case rows in the response order, above the suite table", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ result: "FAILURE" }));
+    mockListRunTests.mockResolvedValue(testsRead());
+    renderPage();
+    await openTestsTab();
+
+    const caseTable = await screen.findByRole("table", { name: "Test cases" });
+    const suiteTable = screen.getByRole("table", { name: "Test suites" });
+    expect(caseTable.compareDocumentPosition(suiteTable)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    const rows = within(caseTable).getAllByRole("row").slice(1);
+    expect(rows.map((r) => within(r).getAllByRole("cell")[2].textContent)).toEqual(["zeta", "mu", "alpha"]);
+    const first = within(rows[0]).getAllByRole("cell").map((c) => c.textContent);
+    expect(first).toEqual(["unit", "com.example.ZedTest", "zeta", "FAILED", "1s", "expected 1 but was 2"]);
+    // A value the record omits renders nothing.
+    const second = within(rows[1]).getAllByRole("cell").map((c) => c.textContent);
+    expect(second[4]).toBe("");
+    expect(second[5]).toBe("");
+  });
+
+  it("links each case row to that case's history with the encoded case key", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ result: "FAILURE" }));
+    mockListRunTests.mockResolvedValue(testsRead());
+    renderPage();
+    await openTestsTab();
+
+    const link = await screen.findByRole("link", { name: "zeta" });
+    expect(link).toHaveAttribute(
+      "href",
+      "/pipelines/payments/checkout-api%2Fmain/tests/com.example.ZedTest%2Fzeta",
+    );
+  });
+
+  it("shows no case table for an empty cases list", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    mockListRunTests.mockResolvedValue(testsRead({ cases: [] }));
+    renderPage();
+    await openTestsTab();
+
+    expect(await screen.findByRole("table", { name: "Test suites" })).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Test cases" })).toBeNull();
+  });
+
+  it("names the report path and size, and downloads it through the artifact path", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    mockListRunTests.mockResolvedValue(
+      testsRead({ report: { path: ".varroa/tests.json", sizeBytes: 2048, caseCount: 40, downloadable: true } }),
+    );
+    mockDownloadRunArtifact.mockResolvedValue(new Blob(["{}"]));
+    const { createObjectURL, revokeObjectURL } = URL;
+    URL.createObjectURL = vi.fn(() => "blob:report");
+    URL.revokeObjectURL = vi.fn();
+    // jsdom does not implement a navigation, so the anchor click does nothing.
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    renderPage();
+    await openTestsTab();
+
+    expect(await screen.findByText(".varroa/tests.json")).toBeInTheDocument();
+    expect(screen.getByText("2048 bytes")).toBeInTheDocument();
+    const download = screen.getByRole("button", { name: "Download" });
+    expect(download).not.toBeDisabled();
+    fireEvent.click(download);
+    await vi.waitFor(() => expect(mockDownloadRunArtifact).toHaveBeenCalledWith("run-1", ".varroa/tests.json"));
+    await vi.waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:report"));
+    expect(click).toHaveBeenCalledTimes(1);
+    click.mockRestore();
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+  });
+
+  it("disables the report download, with an explanation, when the report is local", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    mockListRunTests.mockResolvedValue(
+      testsRead({ report: { path: ".varroa/tests.json", sizeBytes: 10, caseCount: 0, downloadable: false } }),
+    );
+    renderPage();
+    await openTestsTab();
+
+    const download = await screen.findByRole("button", { name: "Download" });
+    expect(download).toBeDisabled();
+    expect(download).toHaveAttribute("title", "Stored locally by Jenkins; not downloadable");
+  });
+
+  it("shows no report line when the read carries no report", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    mockListRunTests.mockResolvedValue(testsRead());
+    renderPage();
+    await openTestsTab();
+
+    await screen.findByRole("table", { name: "Test suites" });
+    expect(screen.queryByText("Test report")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+  });
 });
 
 describe("BuildPage — record and recovery states", () => {
@@ -186,7 +325,8 @@ describe("BuildPage — record and recovery states", () => {
     expect(downloadButtons[0]).not.toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: /^Tests/ }));
-    expect(await screen.findByText("Individual test cases are not stored.")).toBeInTheDocument();
+    expect(await screen.findByText(/failed and skipped cases the run reported, at most 500/)).toBeInTheDocument();
+    expect(screen.getByText(/test report holds every case, including each passed case/)).toBeInTheDocument();
     expect(screen.getByText("unit")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /^Changes/ }));
@@ -733,6 +873,39 @@ describe("BuildPage — run summary and failure digest", () => {
     expect(screen.getByText(/: three tests failed/)).toBeInTheDocument();
     expect(screen.getByText("2 failed, 1 skipped of 10")).toBeInTheDocument();
     expect(screen.getByText(/at job\.groovy:12/).tagName).toBe("PRE");
+  });
+
+  it("names the digest's failed cases beside the counts, each linked to its history", async () => {
+    mockGetRun.mockResolvedValue(
+      baseRun({
+        result: "FAILURE",
+        digest: {
+          failedTests: {
+            failed: 2,
+            total: 10,
+            cases: [
+              { suite: "unit", className: "com.example.FooTest", name: "bar", caseKey: "com.example.FooTest/bar" },
+              { suite: "unit", className: "com.example.FooTest", name: "baz", caseKey: "com.example.FooTest/baz" },
+            ],
+          },
+        },
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByText("2 failed of 10")).toBeInTheDocument();
+    const list = screen.getByRole("list", { name: "Failed test cases" });
+    const links = within(list).getAllByRole("link");
+    expect(links.map((l) => l.textContent)).toEqual(["com.example.FooTest › bar", "com.example.FooTest › baz"]);
+    expect(links[0]).toHaveAttribute("href", "/pipelines/payments/checkout-api%2Fmain/tests/com.example.FooTest%2Fbar");
+  });
+
+  it("shows the counts alone when the digest names no case", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ result: "FAILURE", digest: { failedTests: { failed: 3 } } }));
+    renderPage();
+
+    expect(await screen.findByText("3 failed")).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Failed test cases" })).toBeNull();
   });
 
   it("renders the digest card for a log tail alone, with no stage line and no counts", async () => {

@@ -201,13 +201,37 @@ type RunStagePayload struct {
 }
 
 // RunTestsPayload is the payload of a run.tests envelope, mapped onto
-// run_tests. It reports one suite per envelope.
+// run_tests, run_test_cases, and runs. It reports one suite's counters per
+// envelope. Cases spans every suite, because the plugin sends one bounded
+// set per run. A nil Cases means the key is absent, and the write then
+// changes no case row. An empty non-nil Cases clears the run's stored set.
 type RunTestsPayload struct {
-	Suite      string `json:"suite"`
-	Total      int    `json:"total"`
-	Failed     int    `json:"failed"`
-	Skipped    int    `json:"skipped"`
-	DurationMs *int64 `json:"duration_ms,omitempty"`
+	Suite      string                `json:"suite"`
+	Total      int                   `json:"total"`
+	Failed     int                   `json:"failed"`
+	Skipped    int                   `json:"skipped"`
+	DurationMs *int64                `json:"duration_ms,omitempty"`
+	Cases      []RunTestCasePayload  `json:"cases"`
+	TestReport *RunTestReportPayload `json:"test_report,omitempty"`
+}
+
+// RunTestCasePayload is one entry of a run.tests payload's cases list,
+// mapped onto one run_test_cases row.
+type RunTestCasePayload struct {
+	Suite        string `json:"suite"`
+	ClassName    string `json:"class_name"`
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	DurationMs   *int64 `json:"duration_ms,omitempty"`
+	ErrorDetails string `json:"error_details,omitempty"`
+}
+
+// RunTestReportPayload is a run.tests payload's test_report object. BlobKey
+// is empty for a report that a controller stores locally.
+type RunTestReportPayload struct {
+	BlobKey   string `json:"blob_key"`
+	SizeBytes int64  `json:"size_bytes"`
+	CaseCount int32  `json:"case_count"`
 }
 
 // RunArtifactsPayload is the payload of a run.artifacts envelope, mapped

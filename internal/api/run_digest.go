@@ -1,12 +1,14 @@
 // Package api: the failure digest the run detail carries. A digest
 // names why a run that did not succeed failed: the first failed stage,
-// its error, the tail of its log, and the failed test counts. It is a
+// its error, the tail of its log, the failed test counts, and the first
+// failed test cases. It is a
 // read composition, computed fresh on every read from stored rows and
 // the stored log, never a second stored copy of those facts.
 //
 // A hard read failure — a nil blob store, or an undecodable log-index
 // entry — degrades logTail to absent and never fails the run read, the
-// same way an unreadable source column never fails it. This is a
+// same way an unreadable source column never fails it. A failed case read
+// degrades the failed case list alone, by the same rule. This is a
 // deliberate, named exception to internal/api/AGENTS.md's rule that a
 // handler which reads console log or artifact bytes answers 503 when
 // deps.BlobStore is nil: GET /runs/{run} serves a complete response
@@ -25,6 +27,9 @@ import (
 // carries, counted back from the last line of the attributed set.
 const runDigestTailLines = 50
 
+// runDigestMaxCases bounds how many failed cases a digest names.
+const runDigestMaxCases = 10
+
 type runDigestJSON struct {
 	Stage       string                 `json:"stage,omitempty"`
 	Error       string                 `json:"error,omitempty"`
@@ -34,10 +39,32 @@ type runDigestJSON struct {
 
 // digestFailedTestsJSON is the failed-test part of a digest. Failed is
 // the one count that makes the part present, so it carries no omitempty.
+// The three counts come from the run's aggregate columns, never from the
+// case rows: the rows stop at 500, so a count read from them would
+// understate a larger run. Cases is absent when the run holds no failed
+// case row.
 type digestFailedTestsJSON struct {
-	Failed  int32 `json:"failed"`
-	Skipped int32 `json:"skipped,omitempty"`
-	Total   int32 `json:"total,omitempty"`
+	Failed  int32                  `json:"failed"`
+	Skipped int32                  `json:"skipped,omitempty"`
+	Total   int32                  `json:"total,omitempty"`
+	Cases   []digestFailedCaseJSON `json:"cases,omitempty"`
+}
+
+// digestFailedCaseJSON names one failed case of a digest. CaseKey is the
+// opaque key the case history read takes back unchanged.
+type digestFailedCaseJSON struct {
+	Suite     string `json:"suite"`
+	ClassName string `json:"className"`
+	Name      string `json:"name"`
+	CaseKey   string `json:"caseKey"`
+}
+
+// runTestCaseRead is the result of one ListTestCases call. The run read
+// performs the call once and shares it between the run detail and the
+// digest. A non-nil err means the read failed.
+type runTestCaseRead struct {
+	cases []recordstore.TestCase
+	err   error
 }
 
 // digestApplies reports whether a run carries a digest at all. Each
@@ -67,8 +94,11 @@ func firstFailedStage(stages []recordstore.Stage) *recordstore.Stage {
 
 // computeFailedTests returns the failed-test counts, and nil when the
 // run records no failed test. A count the run omits stays zero, which
-// omitempty renders as an absent key.
-func computeFailedTests(run recordstore.Run) *digestFailedTestsJSON {
+// omitempty renders as an absent key. It names at most runDigestMaxCases
+// cases whose status is not SKIPPED, in the reader's own order. The case
+// table holds failed and skipped rows alone, so that one test is the whole
+// filter. A failed case read leaves the list absent and keeps the counts.
+func computeFailedTests(run recordstore.Run, read runTestCaseRead) *digestFailedTestsJSON {
 	if run.TestsFailed == nil || *run.TestsFailed == 0 {
 		return nil
 	}
@@ -78,6 +108,23 @@ func computeFailedTests(run recordstore.Run) *digestFailedTestsJSON {
 	}
 	if run.TestsTotal != nil {
 		out.Total = *run.TestsTotal
+	}
+	if read.err != nil {
+		return out
+	}
+	for _, c := range read.cases {
+		if len(out.Cases) == runDigestMaxCases {
+			break
+		}
+		if c.Status == "SKIPPED" {
+			continue
+		}
+		out.Cases = append(out.Cases, digestFailedCaseJSON{
+			Suite:     c.Suite,
+			ClassName: c.ClassName,
+			Name:      c.Name,
+			CaseKey:   TestCaseKey(c.ClassName, c.Name),
+		})
 	}
 	return out
 }
@@ -139,12 +186,12 @@ func computeLogTail(ctx context.Context, store blob.Store, runID, stageID string
 // for a run that carries none. Every part is independently optional: a
 // run with no failed stage, no failed test, and an empty log still
 // answers a digest with every key absent.
-func computeRunDigest(ctx context.Context, store blob.Store, run recordstore.Run, stages []recordstore.Stage) *runDigestJSON {
+func computeRunDigest(ctx context.Context, store blob.Store, run recordstore.Run, stages []recordstore.Stage, cases runTestCaseRead) *runDigestJSON {
 	if !digestApplies(run) {
 		return nil
 	}
 	failed := firstFailedStage(stages)
-	d := &runDigestJSON{FailedTests: computeFailedTests(run)}
+	d := &runDigestJSON{FailedTests: computeFailedTests(run, cases)}
 	stageID := ""
 	if failed != nil {
 		d.Stage = failed.Name

@@ -225,6 +225,18 @@ type podTemplateEntry struct {
 	Image string `json:"image,omitempty"`
 }
 
+// testCaseEntry is one entry of a run.tests envelope's payload["cases"]
+// array. The key names match the ones internal/recordstore's
+// RunTestCasePayload decodes.
+type testCaseEntry struct {
+	Suite        string `json:"suite"`
+	ClassName    string `json:"class_name"`
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	DurationMs   int64  `json:"duration_ms,omitempty"`
+	ErrorDetails string `json:"error_details,omitempty"`
+}
+
 // inputEntry is one entry of a run.input envelope's payload["inputs"]
 // array. The key names match the ones the runs.inputs column holds.
 type inputEntry struct {
@@ -528,6 +540,27 @@ func podTemplateEntries(in []*mitev1.BuildPodTemplate) []podTemplateEntry {
 	return out
 }
 
+// testCaseEntries maps the event's test cases onto payload entries. It
+// skips a nil element and keeps the event's order, because the plugin
+// sends the cases in priority order.
+func testCaseEntries(in []*mitev1.BuildTestCase) []testCaseEntry {
+	out := make([]testCaseEntry, 0, len(in))
+	for _, c := range in {
+		if c == nil {
+			continue
+		}
+		out = append(out, testCaseEntry{
+			Suite:        c.Suite,
+			ClassName:    c.ClassName,
+			Name:         c.Name,
+			Status:       c.Status,
+			DurationMs:   c.DurationMs,
+			ErrorDetails: c.ErrorDetails,
+		})
+	}
+	return out
+}
+
 // inputEntries maps the event's pending inputs onto payload entries. It
 // skips a nil element, and an absent list answers an empty slice. The
 // slice is never nil, because the recorder reads the key's presence.
@@ -574,16 +607,28 @@ func inputsPayload(evt *mitev1.BuildEvent) map[string]interface{} {
 }
 
 // testsPayload maps a COMPLETED BuildEvent's test counters onto the
-// aggregate run.tests payload. suite is always the sentinel "_total": C2
-// captures aggregate counters only.
+// aggregate run.tests payload. suite is always the sentinel "_total". The
+// cases list spans every suite, because the plugin sends one set per run.
+// It writes cases and test_report only when the event carries each.
 func testsPayload(evt *mitev1.BuildEvent) map[string]interface{} {
-	return map[string]interface{}{
+	p := map[string]interface{}{
 		"suite":   "_total",
 		"total":   evt.TestTotal,
 		"failed":  evt.TestFailed,
 		"skipped": evt.TestSkipped,
 		"passed":  evt.TestPassed,
 	}
+	if len(evt.TestCases) > 0 {
+		p["cases"] = testCaseEntries(evt.TestCases)
+	}
+	if evt.TestReport != nil {
+		p["test_report"] = map[string]interface{}{
+			"blob_key":   evt.TestReport.BlobKey,
+			"size_bytes": evt.TestReport.SizeBytes,
+			"case_count": evt.TestReport.CaseCount,
+		}
+	}
+	return p
 }
 
 // completedPayload maps a COMPLETED BuildEvent onto a run.completed
@@ -701,7 +746,9 @@ func (h *BusHandler) buildPayloadGroup(evt *mitev1.BuildEvent) ([]kindPayload, e
 		if len(evt.Changes) > 0 {
 			out = append(out, kindPayload{kindRunChanges, changesPayload(evt)})
 		}
-		if evt.TestTotal > 0 {
+		// A report or a case list publishes run.tests on its own: a report
+		// whose case count is zero still reaches the store.
+		if evt.TestTotal > 0 || len(evt.TestCases) > 0 || evt.TestReport != nil {
 			out = append(out, kindPayload{kindRunTests, testsPayload(evt)})
 		}
 		for _, art := range evt.Artifacts {
@@ -721,8 +768,10 @@ func (h *BusHandler) buildPayloadGroup(evt *mitev1.BuildEvent) ([]kindPayload, e
 
 // shrinkToBudget applies the size ladder to env until its marshaled size
 // fits gatewayEnvelopeBudget. It returns false when env still does not
-// fit. The ladder truncates payload["error"] first. It then drops entries
-// from the oldest, in this order: payload["changes"],
+// fit. The ladder truncates payload["error"] first. It then drops
+// payload["cases"] entries from the end, because the list is priority
+// ordered and the first entry is the case a reader needs. It then drops
+// entries from the oldest, in this order: payload["changes"],
 // payload["pod_templates"], payload["libraries"], payload["stages"]. No
 // kind this package emits carries a plural "stages" key today, so the
 // last step stays defensive.
@@ -739,6 +788,23 @@ func shrinkToBudget(env *ingestEnvelope) bool {
 		env.Payload["error"] = truncateRunes(errVal, errorTruncateChars)
 		if fits() {
 			return true
+		}
+	}
+
+	// A rung that empties the list removes the key. The recorder reads an
+	// empty list as an order to clear the run's stored set, and an absent
+	// key as no change to it.
+	if cases, ok := env.Payload["cases"].([]testCaseEntry); ok {
+		for len(cases) > 0 {
+			cases = cases[:len(cases)-1]
+			if len(cases) == 0 {
+				delete(env.Payload, "cases")
+			} else {
+				env.Payload["cases"] = cases
+			}
+			if fits() {
+				return true
+			}
 		}
 	}
 

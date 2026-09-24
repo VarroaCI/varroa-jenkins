@@ -32,10 +32,14 @@ type Run struct {
 	Source                  json.RawMessage
 	Inputs                  json.RawMessage
 	Summary                 *string
-	TestsTotal              *int32
-	TestsFailed             *int32
-	TestsSkipped            *int32
-	Payload                 json.RawMessage
+	// TestReportKey is the blob key of the archived test report. It is
+	// nil when no report reached the store, or when the controller stores
+	// its artifacts locally.
+	TestReportKey *string
+	TestsTotal    *int32
+	TestsFailed   *int32
+	TestsSkipped  *int32
+	Payload       json.RawMessage
 }
 
 // Stage is one row of varroa.run_stages.
@@ -77,6 +81,42 @@ type TestSuite struct {
 	Failed     int32
 	Skipped    int32
 	DurationMs *int64
+}
+
+// TestCase is one row of varroa.run_test_cases, in the shape the run's
+// case read returns it.
+type TestCase struct {
+	Suite        string
+	ClassName    string
+	Name         string
+	Status       string
+	DurationMs   *int64
+	ErrorDetails string
+}
+
+// TestCaseOutcome is one row of the case history read: one run's outcome
+// for one class and test name. BuildNumber and Result come from the
+// run's own runs row.
+type TestCaseOutcome struct {
+	RunID        string
+	BuildNumber  *int64
+	Suite        string
+	Status       string
+	DurationMs   *int64
+	ErrorDetails string
+	CreatedAt    time.Time
+	Result       *string
+}
+
+// TestCaseHistoryQuery selects one test case of one job for the case
+// history read. Limit caps the answered rows.
+type TestCaseHistoryQuery struct {
+	Cluster   string
+	Tenant    string
+	JobPath   string
+	ClassName string
+	Name      string
+	Limit     int
 }
 
 // FleetLock is one row of varroa.fleet_locks, in the shape both lock

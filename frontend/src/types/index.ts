@@ -1816,6 +1816,27 @@ export interface RunDetail {
   digest?: RunDigest;
   /** The run's pending input steps. Absent when the run holds none. */
   inputs?: RunInput[];
+  /** The stored test report. Absent when the run holds no report. */
+  testReport?: RunDetailTestReport;
+  /** The run's failed and skipped test cases, in the reader's order.
+   * Absent when the run holds no case row. */
+  cases?: RunTestCase[];
+}
+
+/** The test report as GET /runs/{run} reports it. */
+export interface RunDetailTestReport {
+  blobKey?: string;
+  sizeBytes: number;
+  caseCount: number;
+}
+
+/** One entry of a digest's failed case list. */
+export interface RunDigestFailedCase {
+  suite: string;
+  className: string;
+  name: string;
+  /** An opaque key. A client passes it back unchanged and never parses it. */
+  caseKey: string;
 }
 
 /** The failed-test counts of a run digest. */
@@ -1823,6 +1844,9 @@ export interface RunDigestFailedTests {
   failed: number;
   skipped?: number;
   total?: number;
+  /** At most ten failed cases, in the reader's order. Absent when the run
+   * holds no case row. */
+  cases?: RunDigestFailedCase[];
 }
 
 /** The failure digest of a run. This is not the content digest of an
@@ -1913,8 +1937,53 @@ export interface RunTestSuite {
   durationMs?: number;
 }
 
+/** One failed or skipped test case of a run. */
+export interface RunTestCase {
+  suite: string;
+  className: string;
+  name: string;
+  status: string;
+  durationMs?: number;
+  errorDetails?: string;
+  /** An opaque key. A client passes it back unchanged and never parses it. */
+  caseKey: string;
+}
+
+/** The run's stored test report, which holds every case. */
+export interface RunTestReport {
+  /** The artifact path of the report, for example ".varroa/tests.json". */
+  path: string;
+  sizeBytes: number;
+  caseCount: number;
+  /** False when the stored blob key is empty; the download path then answers 409. */
+  downloadable: boolean;
+}
+
 export interface RunTestListResponse {
   items: RunTestSuite[];
+  /** The failed cases first, then the skipped cases. Never null. */
+  cases: RunTestCase[];
+  /** Absent when the run holds no report. */
+  report?: RunTestReport;
+}
+
+/** One recent outcome of one test case of one job. */
+export interface TestCaseOutcome {
+  runId: string;
+  buildNumber?: number;
+  suite: string;
+  status: string;
+  durationMs?: number;
+  errorDetails?: string;
+  createdAt: string;
+  result?: string;
+  /** The run's own page path. */
+  runLink: string;
+}
+
+/** GET /pipelines/{team}/jobs/{job}/tests/{case}. Newest first. */
+export interface TestCaseHistoryResponse {
+  items: TestCaseOutcome[];
 }
 
 /** One SCM change entry, passed through from the run's changes column. */

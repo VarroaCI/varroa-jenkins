@@ -139,11 +139,18 @@ func deleteExpiredRunState(ctx context.Context, db maintDB, store ObjectDeleter,
 	}
 }
 
+// TestReportPath is the archived path of a run's per-case test report.
+// The plugin archives the report under this path, and the BFF names it
+// on the run's test read.
+const TestReportPath = ".varroa/tests.json"
+
 // deleteExpiredArtifacts deletes the blob object of every run_artifacts
 // row older than cutoff, then the row itself, in bounded batches. An
 // artifact is one whole object, so this deletes it through Delete on
 // run_artifacts.blob_key and never calls DeletePrefix. A nil store is a
-// no-op.
+// no-op. When the deleted row is the run's test report, the run's
+// test_report_key is cleared too, so a read never offers a download of
+// an object that is gone.
 func deleteExpiredArtifacts(ctx context.Context, db maintDB, store ObjectDeleter, cutoff time.Time) (int, error) {
 	if store == nil {
 		return 0, nil
@@ -184,6 +191,15 @@ func deleteExpiredArtifacts(ctx context.Context, db maintDB, store ObjectDeleter
 		for _, r := range batch {
 			if err := store.Delete(ctx, r.blobKey); err != nil {
 				return total, fmt.Errorf("delete artifact object %s: %w", r.blobKey, err)
+			}
+			// The key clears before the row leaves. A clear that fails keeps
+			// the row, so the next round selects it again and retries.
+			if r.path == TestReportPath {
+				if _, err := db.Exec(ctx, `
+					UPDATE varroa.runs SET test_report_key = NULL WHERE run_id = $1 AND test_report_key = $2
+				`, r.runID, r.blobKey); err != nil {
+					return total, fmt.Errorf("clear test report key: %w", err)
+				}
 			}
 			if _, err := db.Exec(ctx, `
 				DELETE FROM varroa.run_artifacts WHERE run_id = $1 AND path = $2

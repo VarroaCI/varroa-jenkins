@@ -85,6 +85,18 @@ job:
   schema:
     type: string
 
+case:
+  name: case
+  in: path
+  description: >
+    Percent-encoded test case key, one path segment. The key is the
+    caseKey value that GET /runs/{run}/tests returns. Encode the whole
+    key again, because the key holds a literal "/". The router reads it
+    with PathValue, which returns the decoded value.
+  required: true
+  schema:
+    type: string
+
 run:
   name: run
   in: path

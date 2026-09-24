@@ -191,6 +191,25 @@ agent reports no entry.
 `GET /runs/{run}` answers them in one `source` object: `definitionPath`, `libraries[]`,
 `podTemplates[]`.
 
+## Test cases
+
+When a run completes, the plugin writes every junit case, passed cases included, to
+`.varroa/tests.json`. It archives that file as an ordinary run artifact. Download it through
+`GET /runs/{run}/artifacts/.varroa/tests.json`, which answers `409` when Jenkins stored the file
+locally.
+
+The completion event carries the run's failed and skipped cases, at most 500. The recorder
+writes them into the `run_test_cases` table, one row for each case. `GET /runs/{run}/tests`
+serves them in `cases`, failed cases first, and the report file in `report`.
+
+`retention.runs` controls the case rows. `retention.artifacts` controls the report bytes. When
+the report leaves, the tests read answers `downloadable` false.
+
+`GET /pipelines/{team}/jobs/{job}/tests/{case}` answers the recent outcomes of one case, newest
+first. `{case}` is a `caseKey` value from the tests read, encoded again for one path segment.
+The read answers 50 rows, and `limit` accepts at most 200. It covers the `retention.runs`
+window.
+
 ## Job schedules
 
 The `job_schedules` table holds the fleet's cron inventory: one row per job trigger, plus one

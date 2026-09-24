@@ -37,6 +37,13 @@ func init() {
 			WantStatus: http.StatusServiceUnavailable,
 		},
 		contractCase{
+			Name:       "listJobTestCaseHistory-recordStoreDisabled",
+			Method:     "GET",
+			Path:       "/api/v1/pipelines/payments/jobs/checkout-api/tests/com.example.FooTest%2Fbar",
+			Claims:     adminClaims,
+			WantStatus: http.StatusServiceUnavailable,
+		},
+		contractCase{
 			Name:       "getRun-recordStoreDisabled",
 			Method:     "GET",
 			Path:       "/api/v1/runs/0194f6b2-0000-7000-8000-000000000000",

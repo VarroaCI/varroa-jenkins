@@ -263,7 +263,9 @@ federation, activity persistence, and SSE fanout.
   bytes answers the same `503` when `deps.BlobStore` is nil. `GET /runs/{run}` is the stated
   exception: `run_digest.go` reads the console log for the digest's `logTail`, and a nil blob
   store or an undecodable log index degrades `logTail` to absent instead, so the run detail
-  answers either way. The live log tail
+  answers either way. `Server.GetRun` reads `ListTestCases` once and shares it between the
+  run detail's `cases` and the digest's `failedTests.cases`; a failed read leaves both lists
+  absent and the run detail still answers. The live log tail
   (`GET /runs/{run}/log`) authenticates over SSE's `?ticket=` query param with scope
   `run:<run_id>`, minted by `POST /stream/ticket`, never a bearer token. `runTailRegistry`
   (`runlog_tail.go`) is this BFF replica's shared lease table: at most one lease and one
@@ -307,6 +309,13 @@ federation, activity persistence, and SSE fanout.
   (`granted`); an ungranted edge stays visible rather than being dropped. It uses the
   same `tenantForJob` authorization gate every other pipelines path uses — no separate
   check for this field.
+- The case history (`GET /pipelines/{team}/jobs/{job}/tests/{case}`,
+  `handleListJobTestCaseHistory`) applies `canReadPipeline` to each resolved tenant with
+  the decoded job path, reads each admitted tenant, and merges the rows newest first.
+  `{case}` is the opaque key `TestCaseKey` mints and `ParseTestCaseKey` splits; an
+  unparsable key answers `400`. A job with no stored case answers an empty `items` list,
+  never `404`: the case rows hold no job inventory. `limit` defaults to 50 and is clamped
+  at 200.
 - **Marker lint** (`handlers_pipelines_markers.go`, design D13) — `POST
   /pipelines/{team}/markers/validate` resolves the team's delivered
   templates through the same `TenantResolver`/authorization seam as every

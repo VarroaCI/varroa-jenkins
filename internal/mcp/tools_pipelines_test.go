@@ -46,6 +46,14 @@ type fakePipelineReader struct {
 	lastQuery recordstore.RunQuery
 	// listErr, when set, is returned by ListRuns instead of a page.
 	listErr error
+
+	// testCases is keyed by run id, for ListTestCases.
+	testCases map[string][]recordstore.TestCase
+}
+
+// ListTestCases answers the seeded case rows of one run.
+func (f *fakePipelineReader) ListTestCases(_ context.Context, runID string) ([]recordstore.TestCase, error) {
+	return f.testCases[runID], nil
 }
 
 // JobHome answers no placement row, so the trigger write keeps the tenant
@@ -61,6 +69,7 @@ func newFakePipelineReader() *fakePipelineReader {
 		stages:        map[string][]recordstore.Stage{},
 		intents:       map[string]recordstore.Intent{},
 		locksByTenant: map[string][]recordstore.FleetLock{},
+		testCases:     map[string][]recordstore.TestCase{},
 	}
 }
 
@@ -363,6 +372,56 @@ func TestGetRunCarriesSourceObject(t *testing.T) {
 	}
 	if len(detail.Source.PodTemplates) != 1 || detail.Source.PodTemplates[0].Image != "maven:3.9.6" {
 		t.Errorf("podTemplates = %+v, want one maven entry", detail.Source.PodTemplates)
+	}
+}
+
+// --- The get_run tool returns the run's stored test report and its test
+// cases, because it returns the same run detail shape as GET /runs/{run}. ---
+
+func TestGetRunCarriesTestReportAndCases(t *testing.T) {
+	reader := newFakePipelineReader()
+	reportKey := "artifacts/team-a/build/7/artifacts/.varroa/tests.json"
+	reader.runs["run-a"] = recordstore.Run{
+		RunID: "run-a", Tenant: "team-a", JobPath: "team-a/build", Status: "COMPLETED",
+		Payload:       json.RawMessage(`{"test_report":{"size_bytes":4096,"case_count":12}}`),
+		TestReportKey: &reportKey,
+	}
+	reader.testCases["run-a"] = []recordstore.TestCase{
+		{Suite: "unit", ClassName: "com.example.FooTest", Name: "bar", Status: "FAILED", ErrorDetails: "boom"},
+	}
+	deps := &api.Dependencies{
+		Authorizer:  pipelinesTestAuthorizer("read"),
+		RecordStore: reader,
+	}
+
+	tr := callPipelineTool(t, deps, "get_run", map[string]interface{}{"run": "run-a"})
+	if tr.IsError {
+		t.Fatalf("get_run returned error: %v", tr.Content)
+	}
+	var detail struct {
+		TestReport *struct {
+			BlobKey   string `json:"blobKey"`
+			SizeBytes int64  `json:"sizeBytes"`
+			CaseCount int32  `json:"caseCount"`
+		} `json:"testReport"`
+		Cases []struct {
+			ClassName    string `json:"className"`
+			Name         string `json:"name"`
+			Status       string `json:"status"`
+			ErrorDetails string `json:"errorDetails"`
+			CaseKey      string `json:"caseKey"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(tr.StructuredContent, &detail); err != nil {
+		t.Fatalf("unmarshal structuredContent: %v", err)
+	}
+	if detail.TestReport == nil || detail.TestReport.BlobKey != reportKey ||
+		detail.TestReport.SizeBytes != 4096 || detail.TestReport.CaseCount != 12 {
+		t.Fatalf("testReport = %+v, want the stored report", detail.TestReport)
+	}
+	if len(detail.Cases) != 1 || detail.Cases[0].Name != "bar" || detail.Cases[0].Status != "FAILED" ||
+		detail.Cases[0].CaseKey != api.TestCaseKey("com.example.FooTest", "bar") {
+		t.Fatalf("cases = %+v, want the one stored case with its key", detail.Cases)
 	}
 }
 

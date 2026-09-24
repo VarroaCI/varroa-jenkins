@@ -2946,7 +2946,10 @@ type ComponentsSchemasRunDetail struct {
 	Actor       *string `json:"actor,omitempty"`
 	Branch      *string `json:"branch,omitempty"`
 	BuildNumber *int64  `json:"buildNumber,omitempty"`
-	Cause       *string `json:"cause,omitempty"`
+
+	// Cases The run's stored failed and skipped test cases, the same entries GET /runs/{run}/tests serves. The field is absent when the run holds no stored case.
+	Cases *[]ComponentsSchemasRunTestCase `json:"cases,omitempty"`
+	Cause *string                         `json:"cause,omitempty"`
 
 	// Digest Why a run that did not succeed failed. The server computes this object on every read, from the stored rows and the stored log. The field is absent for a run with no result, for a SUCCESS or TRIGGER_FAILED result, or for a run with no start time.
 	Digest *struct {
@@ -2955,6 +2958,14 @@ type ComponentsSchemasRunDetail struct {
 
 		// FailedTests The run's aggregate test counts. The field is present only when the run reports at least one failed test.
 		FailedTests *struct {
+			// Cases The first ten failed cases of the run, in the order the record store answers. A skipped case is not in the list. The field is absent when the run holds no stored case.
+			Cases *[]struct {
+				// CaseKey The opaque case key. Do not parse it. Percent-encode the whole key as one path segment before you use it as {case} on the case history read.
+				CaseKey   string `json:"caseKey"`
+				ClassName string `json:"className"`
+				Name      string `json:"name"`
+				Suite     string `json:"suite"`
+			} `json:"cases,omitempty"`
 			Failed  int  `json:"failed"`
 			Skipped *int `json:"skipped,omitempty"`
 			Total   *int `json:"total,omitempty"`
@@ -3017,15 +3028,30 @@ type ComponentsSchemasRunDetail struct {
 
 	// TenantFolder The tenant's Jenkins folder prefix, from TenantRef.Folder. Empty for a root-hosted tenant.
 	TenantFolder string `json:"tenantFolder"`
-	TestsFailed  *int   `json:"testsFailed,omitempty"`
-	TestsSkipped *int   `json:"testsSkipped,omitempty"`
-	TestsTotal   *int   `json:"testsTotal,omitempty"`
+
+	// TestReport The run's stored test report, on GET /runs/{run}. The field is absent when the run holds no stored report. sizeBytes and caseCount are always present, and zero is a valid value.
+	TestReport   *ComponentsSchemasRunDetailTestReport `json:"testReport,omitempty"`
+	TestsFailed  *int                                  `json:"testsFailed,omitempty"`
+	TestsSkipped *int                                  `json:"testsSkipped,omitempty"`
+	TestsTotal   *int                                  `json:"testsTotal,omitempty"`
 
 	// TriggerError The error text a refused build trigger reported. Set only when result is TRIGGER_FAILED.
 	TriggerError *string `json:"triggerError,omitempty"`
 
 	// TriggerReasonCode Why the controller refused the build trigger. One of JOB_NOT_FOUND, JOB_NOT_BUILDABLE, and TRIGGER_REJECTED. Set only when result is TRIGGER_FAILED.
 	TriggerReasonCode *string `json:"triggerReasonCode,omitempty"`
+}
+
+// ComponentsSchemasRunDetailTestReport The run's stored test report, on GET /runs/{run}. The field is absent when the run holds no stored report. sizeBytes and caseCount are always present, and zero is a valid value.
+type ComponentsSchemasRunDetailTestReport struct {
+	// BlobKey The blob key of the archived report file. The value is empty when Jenkins stored the file locally.
+	BlobKey string `json:"blobKey"`
+
+	// CaseCount The number of cases the report file holds. The file holds every case, including a passed case.
+	CaseCount int32 `json:"caseCount"`
+
+	// SizeBytes The length of the report file in bytes.
+	SizeBytes int64 `json:"sizeBytes"`
 }
 
 // ComponentsSchemasRunInput One input step a run waits on, read from the run's stored inputs column.
@@ -3103,9 +3129,46 @@ type ComponentsSchemasRunSummary struct {
 	Status      string     `json:"status"`
 }
 
-// ComponentsSchemasRunTestListResponse defines model for components_schemas_RunTestListResponse.
+// ComponentsSchemasRunTestCase One stored test case of a run. The record store holds only failed and skipped cases, at most 500 for each run.
+type ComponentsSchemasRunTestCase struct {
+	// CaseKey The opaque case key the server makes from the class name and the test name. Do not parse it. Percent-encode the whole key as one path segment before you use it as {case} on GET /pipelines/{team}/jobs/{job}/tests/{case}.
+	CaseKey   string `json:"caseKey"`
+	ClassName string `json:"className"`
+
+	// DurationMs The case's duration in milliseconds. Absent when the value is zero.
+	DurationMs *int64 `json:"durationMs,omitempty"`
+
+	// ErrorDetails The case's error detail text, cut at 512 bytes. Absent when the case carries no error detail.
+	ErrorDetails *string `json:"errorDetails,omitempty"`
+	Name         string  `json:"name"`
+
+	// Status The reporter's own status name, for example FAILED or REGRESSION. A skipped case carries SKIPPED.
+	Status string `json:"status"`
+	Suite  string `json:"suite"`
+}
+
+// ComponentsSchemasRunTestListResponse GET /runs/{run}/tests. items holds one row for each suite, plus the "_total" sentinel row. cases holds the run's stored failed and skipped cases, failed cases first. cases is always present, and an empty array is a valid value.
 type ComponentsSchemasRunTestListResponse struct {
+	Cases []ComponentsSchemasRunTestCase  `json:"cases"`
 	Items []ComponentsSchemasRunTestSuite `json:"items"`
+
+	// Report The run's archived test report, on GET /runs/{run}/tests. The field is absent when the run holds no stored report. sizeBytes and caseCount are always present, and zero is a valid value.
+	Report *ComponentsSchemasRunTestReport `json:"report,omitempty"`
+}
+
+// ComponentsSchemasRunTestReport The run's archived test report, on GET /runs/{run}/tests. The field is absent when the run holds no stored report. sizeBytes and caseCount are always present, and zero is a valid value.
+type ComponentsSchemasRunTestReport struct {
+	// CaseCount The number of cases the report file holds. The file holds every case, including a passed case.
+	CaseCount int32 `json:"caseCount"`
+
+	// Downloadable False when the stored blob key is empty, because Jenkins stored the file locally. The download path then answers 409.
+	Downloadable bool `json:"downloadable"`
+
+	// Path The archived path of the report file, always .varroa/tests.json. Download the file through GET /runs/{run}/artifacts/{path}.
+	Path string `json:"path"`
+
+	// SizeBytes The length of the report file in bytes.
+	SizeBytes int64 `json:"sizeBytes"`
 }
 
 // ComponentsSchemasRunTestSuite defines model for components_schemas_RunTestSuite.
@@ -3571,6 +3634,36 @@ type ComponentsSchemasTenantScope struct {
 	Name string `json:"name"`
 }
 
+// ComponentsSchemasTestCaseHistoryResponse GET /pipelines/{team}/jobs/{job}/tests/{case}. items holds the case's recent outcomes, newest first, within the record store retention window. The response holds no rate, no trend, and no flake score.
+type ComponentsSchemasTestCaseHistoryResponse struct {
+	Items []ComponentsSchemasTestCaseOutcome `json:"items"`
+}
+
+// ComponentsSchemasTestCaseOutcome One outcome of one test case in one run of the job. A row names its own suite, because two suites can report one class and one name.
+type ComponentsSchemasTestCaseOutcome struct {
+	BuildNumber *int64 `json:"buildNumber,omitempty"`
+
+	// CreatedAt The creation time of the run.
+	CreatedAt time.Time `json:"createdAt"`
+
+	// DurationMs The case's duration in milliseconds. Absent when the case reports no duration.
+	DurationMs *int64 `json:"durationMs,omitempty"`
+
+	// ErrorDetails The case's error detail text, cut at 512 bytes. Absent when the case carries no error detail.
+	ErrorDetails *string `json:"errorDetails,omitempty"`
+
+	// Result The run's own result. Absent when the run holds no result.
+	Result *string `json:"result,omitempty"`
+	RunId  string  `json:"runId"`
+
+	// RunLink The run's own page path, /pipelines/{team}/{jobPath}/{runId}, the same link a fleet lock row carries.
+	RunLink string `json:"runLink"`
+
+	// Status The reporter's own status name. A skipped case carries SKIPPED.
+	Status string `json:"status"`
+	Suite  string `json:"suite"`
+}
+
 // ComponentsSchemasTokenResponse defines model for components_schemas_TokenResponse.
 type ComponentsSchemasTokenResponse struct {
 	// Token The new API key token (shown once).
@@ -3856,6 +3949,9 @@ type ComponentsSchemasWarningItem struct {
 // ComponentsParametersArtifactPath defines model for components_parameters_artifactPath.
 type ComponentsParametersArtifactPath = string
 
+// ComponentsParametersCase defines model for components_parameters_case.
+type ComponentsParametersCase = string
+
 // ComponentsParametersCluster defines model for components_parameters_cluster.
 type ComponentsParametersCluster = string
 
@@ -4132,6 +4228,11 @@ type ListRunsParams struct {
 	Cause  *string `form:"cause,omitempty" json:"cause,omitempty"`
 	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListJobTestCaseHistoryParams defines parameters for ListJobTestCaseHistory.
+type ListJobTestCaseHistoryParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ListRunnersParams defines parameters for ListRunners.
@@ -5244,6 +5345,9 @@ type ClientInterface interface {
 	CreateRunWithBody(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	CreateRun(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body CreateRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListJobTestCaseHistory request
+	ListJobTestCaseHistory(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListTeamFleetLocks request
 	ListTeamFleetLocks(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -7106,6 +7210,18 @@ func (c *Client) CreateRunWithBody(ctx context.Context, team ComponentsParameter
 
 func (c *Client) CreateRun(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body CreateRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateRunRequest(c.Server, team, job, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListJobTestCaseHistory(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListJobTestCaseHistoryRequest(c.Server, team, job, pCase, params)
 	if err != nil {
 		return nil, err
 	}
@@ -13210,6 +13326,76 @@ func NewCreateRunRequestWithBody(server string, team ComponentsParametersTeam, j
 	return req, nil
 }
 
+// NewListJobTestCaseHistoryRequest generates requests for ListJobTestCaseHistory
+func NewListJobTestCaseHistoryRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "job", runtime.ParamLocationPath, job)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithLocation("simple", false, "case", runtime.ParamLocationPath, pCase)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/jobs/%s/tests/%s", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListTeamFleetLocksRequest generates requests for ListTeamFleetLocks
 func NewListTeamFleetLocksRequest(server string, team ComponentsParametersTeam) (*http.Request, error) {
 	var err error
@@ -15579,6 +15765,9 @@ type ClientWithResponsesInterface interface {
 	CreateRunWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateRunResponse, error)
 
 	CreateRunWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body CreateRunJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateRunResponse, error)
+
+	// ListJobTestCaseHistoryWithResponse request
+	ListJobTestCaseHistoryWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*ListJobTestCaseHistoryResponse, error)
 
 	// ListTeamFleetLocksWithResponse request
 	ListTeamFleetLocksWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*ListTeamFleetLocksResponse, error)
@@ -18482,6 +18671,32 @@ func (r CreateRunResponse) StatusCode() int {
 	return 0
 }
 
+type ListJobTestCaseHistoryResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasTestCaseHistoryResponse
+	JSON400      *ComponentsSchemasError
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ListJobTestCaseHistoryResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListJobTestCaseHistoryResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListTeamFleetLocksResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -20996,6 +21211,15 @@ func (c *ClientWithResponses) CreateRunWithResponse(ctx context.Context, team Co
 		return nil, err
 	}
 	return ParseCreateRunResponse(rsp)
+}
+
+// ListJobTestCaseHistoryWithResponse request returning *ListJobTestCaseHistoryResponse
+func (c *ClientWithResponses) ListJobTestCaseHistoryWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*ListJobTestCaseHistoryResponse, error) {
+	rsp, err := c.ListJobTestCaseHistory(ctx, team, job, pCase, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListJobTestCaseHistoryResponse(rsp)
 }
 
 // ListTeamFleetLocksWithResponse request returning *ListTeamFleetLocksResponse
@@ -26423,6 +26647,60 @@ func ParseCreateRunResponse(rsp *http.Response) (*CreateRunResponse, error) {
 			return nil, err
 		}
 		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListJobTestCaseHistoryResponse parses an HTTP response from a ListJobTestCaseHistoryWithResponse call
+func ParseListJobTestCaseHistoryResponse(rsp *http.Response) (*ListJobTestCaseHistoryResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListJobTestCaseHistoryResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasTestCaseHistoryResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest ComponentsResponsesServiceUnavailable

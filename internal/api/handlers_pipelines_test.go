@@ -1048,3 +1048,164 @@ func TestHandleGetPipelineJob_UnresolvableInputKeepsDefinition(t *testing.T) {
 		t.Fatalf("definition = %+v, want %+v: an unresolvable input changes no other field", *detail.Definition, *want)
 	}
 }
+
+// --- GET /pipelines/{team}/jobs/{job}/tests/{case} ---
+
+// newCaseHistoryFixture builds a Server over the team "payments", which
+// resolves to the two controller tenants ns-a/ctrl-a and ns-b/ctrl-b, and
+// grants read on the tenants named in granted.
+func newCaseHistoryFixture(reader *fakeRecordReader, granted ...string) *Server {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "ns-a"}},
+		"ctrl-b": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-b", Namespace: "ns-b"}},
+	}
+	crdstore.MustSeed(client.crdStore, &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"ns-a", "ns-b"}},
+	})
+	return pipelinesTestServer(client, pipelineGrantAuthorizer([]string{"read"}, granted...), reader, nil)
+}
+
+func caseHistoryPath(caseKey, query string) string {
+	p := "/pipelines/payments/jobs/svc%2Fmain/tests/" + url.PathEscape(caseKey)
+	if query != "" {
+		p += "?" + query
+	}
+	return p
+}
+
+func caseHistoryValues(caseKey string) map[string]string {
+	return map[string]string{"team": "payments", "job": "svc/main", "case": caseKey}
+}
+
+func TestHandleListJobTestCaseHistory_MergesTenantsNewestFirst(t *testing.T) {
+	reader := newFakeRecordReader()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	build := func(n int64) *int64 { return &n }
+	className, name := "com.example/FooTest", "bar baz"
+	reader.caseHistory[caseHistoryKey("core", "ns-a/ctrl-a", "svc/main", className, name)] = []recordstore.TestCaseOutcome{
+		{RunID: "a-2", BuildNumber: build(2), Suite: "unit", Status: "FAILED", CreatedAt: base.Add(2 * time.Minute), Result: strPtr("FAILURE")},
+		{RunID: "a-1", BuildNumber: build(1), Suite: "unit", Status: "FAILED", CreatedAt: base, Result: strPtr("FAILURE")},
+	}
+	reader.caseHistory[caseHistoryKey("core", "ns-b/ctrl-b", "svc/main", className, name)] = []recordstore.TestCaseOutcome{
+		{RunID: "b-1", BuildNumber: build(1), Suite: "it", Status: "REGRESSION", CreatedAt: base.Add(time.Minute), ErrorDetails: "boom"},
+	}
+	srv := newCaseHistoryFixture(reader, "ns-a/ctrl-a", "ns-b/ctrl-b")
+
+	key := TestCaseKey(className, name)
+	rec := doPipelinesRequest(t, srv.handleListJobTestCaseHistory, caseHistoryPath(key, ""), caseHistoryValues(key))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp testCaseHistoryResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	ids := make([]string, 0, len(resp.Items))
+	for _, it := range resp.Items {
+		ids = append(ids, it.RunID)
+	}
+	if fmt.Sprint(ids) != "[a-2 b-1 a-1]" {
+		t.Fatalf("order = %v, want newest first across tenants", ids)
+	}
+	mid := resp.Items[1]
+	if mid.Suite != "it" || mid.Status != "REGRESSION" || mid.ErrorDetails != "boom" || mid.BuildNumber != 1 {
+		t.Fatalf("row = %+v", mid)
+	}
+	// The run link names the resolved tenant's own team segment, the rule
+	// the fleet lock rows follow.
+	if resp.Items[0].Result != "FAILURE" || resp.Items[0].RunLink != "/pipelines/ctrl-a/svc%2Fmain/a-2" {
+		t.Fatalf("row = %+v, want the result and the run link", resp.Items[0])
+	}
+	for _, q := range reader.historyQueries {
+		if q.ClassName != className || q.Name != name || q.JobPath != "svc/main" || q.Limit != 50 {
+			t.Fatalf("query = %+v, want the decoded key, the decoded job path, and the default limit", q)
+		}
+	}
+}
+
+func TestHandleListJobTestCaseHistory_ReadsAdmittedTenantsAlone(t *testing.T) {
+	reader := newFakeRecordReader()
+	srv := newCaseHistoryFixture(reader, "ns-a/ctrl-a")
+
+	key := TestCaseKey("C", "n")
+	rec := doPipelinesRequest(t, srv.handleListJobTestCaseHistory, caseHistoryPath(key, ""), caseHistoryValues(key))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if len(reader.historyQueries) != 1 || reader.historyQueries[0].Tenant != "ns-a/ctrl-a" {
+		t.Fatalf("queries = %+v, want one query on the admitted tenant", reader.historyQueries)
+	}
+}
+
+func TestHandleListJobTestCaseHistory_RefusedTeamIs404(t *testing.T) {
+	reader := newFakeRecordReader()
+	reader.caseHistory[caseHistoryKey("core", "ns-a/ctrl-a", "svc/main", "C", "n")] = []recordstore.TestCaseOutcome{
+		{RunID: "a-1", Suite: "unit", Status: "FAILED"},
+	}
+	srv := newCaseHistoryFixture(reader, "other-ns/ctrl-z")
+
+	key := TestCaseKey("C", "n")
+	rec := doPipelinesRequest(t, srv.handleListJobTestCaseHistory, caseHistoryPath(key, ""), caseHistoryValues(key))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s, want 404", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "a-1") || len(reader.historyQueries) != 0 {
+		t.Fatalf("a refused read reached the store: body = %s, queries = %+v", rec.Body.String(), reader.historyQueries)
+	}
+}
+
+func TestHandleListJobTestCaseHistory_MalformedKeyIs400(t *testing.T) {
+	srv := newCaseHistoryFixture(newFakeRecordReader(), "ns-a/ctrl-a")
+	for _, key := range []string{"no-separator", "bad%zz/name"} {
+		rec := doPipelinesRequest(t, srv.handleListJobTestCaseHistory, caseHistoryPath(key, ""), caseHistoryValues(key))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("key %q: status = %d, body = %s, want 400", key, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestHandleListJobTestCaseHistory_EmptyHistoryIsEmptyList(t *testing.T) {
+	srv := newCaseHistoryFixture(newFakeRecordReader(), "ns-a/ctrl-a", "ns-b/ctrl-b")
+	key := TestCaseKey("C", "never-ran")
+	rec := doPipelinesRequest(t, srv.handleListJobTestCaseHistory, caseHistoryPath(key, ""), caseHistoryValues(key))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if strings.TrimSpace(rec.Body.String()) != `{"items":[]}` {
+		t.Fatalf("body = %s, want an empty items list", rec.Body.String())
+	}
+}
+
+func TestHandleListJobTestCaseHistory_ClampsLimit(t *testing.T) {
+	reader := newFakeRecordReader()
+	var rows []recordstore.TestCaseOutcome
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 250; i++ {
+		rows = append(rows, recordstore.TestCaseOutcome{
+			RunID: fmt.Sprintf("a-%03d", 250-i), Suite: "unit", Status: "FAILED",
+			CreatedAt: base.Add(time.Duration(250-i) * time.Minute),
+		})
+	}
+	reader.caseHistory[caseHistoryKey("core", "ns-a/ctrl-a", "svc/main", "C", "n")] = rows
+	srv := newCaseHistoryFixture(reader, "ns-a/ctrl-a")
+	key := TestCaseKey("C", "n")
+
+	rec := doPipelinesRequest(t, srv.handleListJobTestCaseHistory, caseHistoryPath(key, "limit=500"), caseHistoryValues(key))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp testCaseHistoryResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Items) != 200 || reader.historyQueries[0].Limit != 200 {
+		t.Fatalf("items = %d, query limit = %d, want both clamped to 200", len(resp.Items), reader.historyQueries[0].Limit)
+	}
+
+	rec = doPipelinesRequest(t, srv.handleListJobTestCaseHistory, caseHistoryPath(key, "limit=0"), caseHistoryValues(key))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("limit=0: status = %d, want 400", rec.Code)
+	}
+}

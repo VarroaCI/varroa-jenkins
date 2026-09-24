@@ -458,11 +458,75 @@ public class VarroaRunRecorderTest {
         assertEquals("", completed.getScmUrl());
         assertEquals("", completed.getScmHead());
 
-        // The junit plugin is absent: every test counter reads zero.
+        // The run reports no test result: every test counter reads zero.
         assertEquals(0, completed.getTestTotal());
         assertEquals(0, completed.getTestPassed());
         assertEquals(0, completed.getTestFailed());
         assertEquals(0, completed.getTestSkipped());
+    }
+
+    // --- The test case caps ---
+
+    private static BuildTestCase testCase(String name, int textBytes) {
+        String text = "x".repeat(textBytes);
+        return BuildTestCase.builder()
+                .suite(text)
+                .className(text)
+                .name(name)
+                .status("FAILED")
+                .errorDetails(text)
+                .build();
+    }
+
+    private static int serializedBytes(BuildEvent event) {
+        return event.toJson().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    }
+
+    @Test
+    public void theHardCapKeepsTheFirst500TestCases() {
+        List<BuildTestCase> cases = new ArrayList<>();
+        for (int i = 0; i < 900; i++) {
+            cases.add(testCase("case-" + i, 1));
+        }
+        BuildEvent event = BuildEvent.builder().phase(BuildEvent.PHASE_COMPLETED).testCases(cases).build();
+
+        BuildEvent capped = VarroaRunRecorder.applyCaps(event);
+
+        assertEquals(500, capped.getTestCases().size());
+        assertEquals("the cap keeps the head", "case-0", capped.getTestCases().get(0).getName());
+        assertEquals("case-499", capped.getTestCases().get(499).getName());
+    }
+
+    @Test
+    public void theLadderDropsTheLastTestCaseBeforeAnyStage() {
+        List<BuildTestCase> cases = new ArrayList<>();
+        for (int i = 0; i < 500; i++) {
+            cases.add(testCase("case-" + i, 512));
+        }
+        List<BuildStage> stages = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            stages.add(BuildStage.builder().stageId("s" + i).name("stage-" + i).status("SUCCESS").build());
+        }
+        BuildTestReport report = BuildTestReport.builder().blobKey("k").sizeBytes(10).caseCount(900).build();
+        BuildEvent event = BuildEvent.builder()
+                .phase(BuildEvent.PHASE_COMPLETED)
+                .runId("run-1")
+                .stages(stages)
+                .testCases(cases)
+                .testReport(report)
+                .build();
+        assertTrue("fixture must start oversize", serializedBytes(event) > 512 * 1024);
+
+        BuildEvent shrunk = VarroaRunRecorder.applyCaps(event);
+
+        assertTrue("the shrunk event fits the size limit", serializedBytes(shrunk) <= 512 * 1024);
+        assertEquals("no stage is dropped while dropping cases fits", 10, shrunk.getStages().size());
+        int kept = shrunk.getTestCases().size();
+        assertTrue("some cases were dropped, kept=" + kept, kept < 500 && kept > 0);
+        assertEquals("the rung keeps the head", "case-0", shrunk.getTestCases().get(0).getName());
+        assertEquals("the rung drops from the end", "case-" + (kept - 1), shrunk.getTestCases().get(kept - 1).getName());
+        assertNotNull("no rung drops the report pointer", shrunk.getTestReport());
+        assertEquals(900, shrunk.getTestReport().getCaseCount());
     }
 
     private static BuildStage findStageByName(List<BuildStage> stages, String name) {

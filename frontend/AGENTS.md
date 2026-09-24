@@ -197,8 +197,15 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   `Digest` card above the `Pipeline` card and below the interrupted banner, and
   renders a pending input step in `PendingInputCard.tsx`, which has its own
   `PendingInputCard.module.css`, in a `Pending input` card between the
-  `Digest` card and the `Pipeline` card).
-  It keeps
+  `Digest` card and the `Pipeline` card; its `Tests` tab shows the report
+  line, then the case table in the response order, then the suite table),
+  and `TestCaseHistory.tsx` (`/pipelines/:team/:job/tests/:case`, the recent
+  outcomes of one test case). A case key is opaque: `testCaseHref` in
+  `jobPath.ts` encodes it as one segment, and no page parses it. The
+  history page reads the key from the raw URL path, because React Router's
+  own param turns every `%2F` in a segment into `/`. A case link passes the
+  class and the test name as route state, so the page names them.
+  `BuildPage.tsx` keeps
   every log frame in a ref, hands `RunLogViewer.tsx` the frames plus a version
   counter, and passes the log stream's `lastEvent` down to `StageGraph.tsx` as
   a prop. The version counter changes on every frame, because one render can

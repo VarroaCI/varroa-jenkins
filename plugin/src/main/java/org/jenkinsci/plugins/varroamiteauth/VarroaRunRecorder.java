@@ -121,6 +121,8 @@ public final class VarroaRunRecorder {
     private static final int MAX_FIELD_512 = 512;
     private static final int MAX_LIBRARIES = 50;
     private static final int MAX_POD_TEMPLATES = 50;
+    /** The number of test cases one event carries. The list is priority ordered, so the cap keeps the head. */
+    static final int MAX_TEST_CASES = 500;
     private static final int MAX_STAGE_ERROR = 2048;
     private static final int LADDER_ERROR_LIMIT = 512;
     private static final int MAX_EVENT_BYTES = 512 * 1024;
@@ -701,9 +703,29 @@ public final class VarroaRunRecorder {
                         .deliveryId(action.getDeliveryId());
                 applyCommonMetadata(b, run, true);
                 b.stages(rebuildStages(run));
+                // The test report archive runs before the collector, so the
+                // collected list names the report with its own blob key (D2).
+                List<VarroaTestReport.Case> testCases = null;
+                long reportSize = -1L;
+                try {
+                    Object testResult = VarroaTestReport.findResult(run);
+                    if (VarroaTestReport.hasSuites(testResult)) {
+                        testCases = VarroaTestReport.readCases(testResult);
+                        reportSize = VarroaTestReport.archiveReport(run, listener, testCases);
+                    }
+                } catch (Exception e) {
+                    LOGGER.log(Level.WARNING, "VarroaRunRecorder.Runs: failed to archive the test report", e);
+                }
                 // Artifact archiving is complete at this call site (D6), so
                 // the collector sees every entry the run will ever report.
-                b.artifacts(ArtifactCollector.collect(run));
+                List<BuildArtifact> artifacts = ArtifactCollector.collect(run);
+                b.artifacts(artifacts);
+                if (testCases != null) {
+                    b.testCases(VarroaTestReport.boundedCases(testCases));
+                    if (reportSize >= 0) {
+                        b.testReport(VarroaTestReport.reportPointer(artifacts, reportSize, testCases.size()));
+                    }
+                }
                 b.logSummary(finishLogStorage(runId));
                 applyTemplateFields(b, run);
                 // The completion reads the run's own action and never the
@@ -723,7 +745,7 @@ public final class VarroaRunRecorder {
         }
     }
 
-    private static String resolveRunId(VarroaIntentAction action) {
+    static String resolveRunId(VarroaIntentAction action) {
         String fromRegistry = ClaimRegistry.get().runIdFor(action.getIntentKey());
         return fromRegistry != null && !fromRegistry.isEmpty() ? fromRegistry : action.getRunId();
     }
@@ -1084,7 +1106,7 @@ public final class VarroaRunRecorder {
         return v instanceof Number ? ((Number) v).intValue() : 0;
     }
 
-    private static boolean hasSimpleNameInHierarchy(Class<?> clazz, String simpleName) {
+    static boolean hasSimpleNameInHierarchy(Class<?> clazz, String simpleName) {
         Class<?> current = clazz;
         while (current != null && current != Object.class) {
             if (current.getSimpleName().equals(simpleName)) {
@@ -1100,7 +1122,7 @@ public final class VarroaRunRecorder {
         return false;
     }
 
-    private static Object invokeNoArg(Object target, String methodName) {
+    static Object invokeNoArg(Object target, String methodName) {
         try {
             Method method = target.getClass().getMethod(methodName);
             return method.invoke(target);
@@ -2047,12 +2069,17 @@ public final class VarroaRunRecorder {
             b.inputs(inputs);
             changed = true;
         }
+        if (event.getTestCases().size() > MAX_TEST_CASES) {
+            b.testCases(keepFirst(event.getTestCases(), MAX_TEST_CASES));
+            changed = true;
+        }
         return changed ? b.build() : event;
     }
 
     /**
      * While the serialized event stays above 512 KiB, clears the parameter
-     * lists of its {@code inputs} oldest first, then drops {@code stages}
+     * lists of its {@code inputs} oldest first, then drops {@code
+     * test_cases} entries from the end, then drops {@code stages}
      * entries from the oldest, then {@code changes} entries, then {@code
      * parameters} entries, then {@code pod_templates} entries, then {@code
      * libraries} entries, then truncates every remaining stage's error to
@@ -2067,6 +2094,11 @@ public final class VarroaRunRecorder {
      * <p>The input rung drops no input entry. An input with no parameter
      * list holds five bounded strings, so twenty such inputs always fit
      * and the rung terminates.
+     *
+     * <p>The test case rung drops the last entry, and every other rung
+     * drops the oldest. The case list holds the failed cases first, so the
+     * last entry is the case with the lowest priority (D3). No rung drops
+     * {@code test_report}.
      */
     private static BuildEvent applyOversizeLadder(BuildEvent event) {
         if (serializedSize(event) <= MAX_EVENT_BYTES) {
@@ -2075,6 +2107,9 @@ public final class VarroaRunRecorder {
         BuildEvent current = event;
         while (serializedSize(current) > MAX_EVENT_BYTES && hasInputParameters(current)) {
             current = current.toBuilder().inputs(clearOldestInputParameters(current.getInputs())).build();
+        }
+        while (serializedSize(current) > MAX_EVENT_BYTES && !current.getTestCases().isEmpty()) {
+            current = current.toBuilder().testCases(dropLast(current.getTestCases())).build();
         }
         while (serializedSize(current) > MAX_EVENT_BYTES && !current.getStages().isEmpty()) {
             current = current.toBuilder().stages(dropOldest(current.getStages())).build();
@@ -2188,6 +2223,22 @@ public final class VarroaRunRecorder {
             return list;
         }
         return new ArrayList<>(list.subList(1, list.size()));
+    }
+
+    /** Keeps the first {@code max} entries. A priority-ordered list holds its most important entries at the head. */
+    static <T> List<T> keepFirst(List<T> list, int max) {
+        if (list.size() <= max) {
+            return list;
+        }
+        return new ArrayList<>(list.subList(0, max));
+    }
+
+    /** Drops the last entry. A priority-ordered list holds its least important entry at the tail. */
+    static <T> List<T> dropLast(List<T> list) {
+        if (list.isEmpty()) {
+            return list;
+        }
+        return new ArrayList<>(list.subList(0, list.size() - 1));
     }
 
     private static Map<String, String> dropOldestParam(Map<String, String> params) {

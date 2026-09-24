@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { RotateCcw, XCircle } from "lucide-react";
 import {
@@ -35,7 +35,8 @@ import type {
   RunNotification,
   RunStage,
 } from "../../types";
-import { stripTenantFolder } from "./jobPath";
+import { stripTenantFolder, testCaseHref, type TestCaseLinkState } from "./jobPath";
+import { formatDuration } from "./JobTree";
 import { StageGraph } from "./StageGraph";
 import { RunLogViewer, type RunLogViewerHandle } from "./RunLogViewer";
 import { PendingInputCard } from "./PendingInputCard";
@@ -458,6 +459,10 @@ export default function BuildPage() {
     () => testsQuery.data?.items.filter((i) => i.suite !== "_total") ?? [],
     [testsQuery.data],
   );
+  // The response carries the failed cases first and the skipped cases
+  // after. The tab keeps that order and sorts no row.
+  const caseRows = testsQuery.data?.cases ?? [];
+  const testReport = testsQuery.data?.report;
 
   if (status === "loading") {
     return (
@@ -641,6 +646,23 @@ export default function BuildPage() {
           {run.digest.failedTests && (
             <p>{run.digest.failedTests.failed} failed{typeof run.digest.failedTests.skipped === "number" ? `, ${run.digest.failedTests.skipped} skipped` : ""}{typeof run.digest.failedTests.total === "number" ? ` of ${run.digest.failedTests.total}` : ""}</p>
           )}
+          {/* The list names the digest's own failed cases. It holds at most
+              ten entries, and it is absent when the digest names no case. */}
+          {!!run.digest.failedTests?.cases?.length && team && job && (
+            <ul className={styles.digestCases} aria-label="Failed test cases">
+              {run.digest.failedTests.cases.map((c) => (
+                <li key={`${c.suite}/${c.caseKey}`}>
+                  <Link
+                    to={testCaseHref(team, job, c.caseKey)}
+                    state={{ className: c.className, name: c.name } satisfies TestCaseLinkState}
+                    className={styles.mono}
+                  >
+                    {c.className} › {c.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
           {run.digest.logTail && <pre className={`${styles.mono} ${styles.digestTail}`}>{run.digest.logTail}</pre>}
         </Card>
       )}
@@ -717,9 +739,60 @@ export default function BuildPage() {
       )}
 
       {activeTab === "tests" && (
-        <div>
-          <p className={styles.testsNotice}>Individual test cases are not stored.</p>
-          <table className={styles.table}>
+        <div className={styles.testsTab}>
+          <p className={styles.testsNotice}>
+            The case table shows the failed and skipped cases the run reported, at most 500. The
+            test report holds every case, including each passed case.
+          </p>
+          {testReport && (
+            <div className={styles.reportLine}>
+              <span className={styles.ranWithLabel}>Test report</span>
+              <span className={styles.mono}>{testReport.path}</span>
+              <span>{testReport.sizeBytes} bytes</span>
+              <button
+                type="button"
+                disabled={!testReport.downloadable}
+                title={testReport.downloadable ? undefined : "Stored locally by Jenkins; not downloadable"}
+                onClick={() => downloadArtifact(testReport.path)}
+              >
+                Download
+              </button>
+            </div>
+          )}
+          {caseRows.length > 0 && team && job && (
+            <table className={styles.table} aria-label="Test cases">
+              <thead>
+                <tr>
+                  <th>Suite</th>
+                  <th>Class</th>
+                  <th>Test</th>
+                  <th>Status</th>
+                  <th>Duration</th>
+                  <th>Error details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {caseRows.map((c) => (
+                  <tr key={`${c.suite}/${c.caseKey}`}>
+                    <td>{c.suite}</td>
+                    <td className={styles.mono}>{c.className}</td>
+                    <td>
+                      <Link
+                        to={testCaseHref(team, job, c.caseKey)}
+                        state={{ className: c.className, name: c.name } satisfies TestCaseLinkState}
+                      >
+                        {c.name}
+                      </Link>
+                    </td>
+                    <td>{c.status}</td>
+                    <td>{typeof c.durationMs === "number" ? formatDuration(c.durationMs) : null}</td>
+                    <td>{c.errorDetails ? <pre className={`${styles.mono} ${styles.caseError}`}>{c.errorDetails}</pre> : null}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <table className={styles.table} aria-label="Test suites">
             <thead>
               <tr>
                 <th>Suite</th>

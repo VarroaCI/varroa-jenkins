@@ -1,13 +1,17 @@
 // Tests for the run failure digest (internal/api/run_digest.go): the
 // presence rule, the failed-stage choice, the log tail and its two
-// fallbacks, and the failed-test counts. The log cases use the same
-// file-backed blob store and index helpers the log-reader tests use.
+// fallbacks, the failed-test counts, and the failed case list. The log
+// cases use the same file-backed blob store and index helpers the
+// log-reader tests use.
 package api
 
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -57,7 +61,7 @@ func TestComputeRunDigest_PresenceRule(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			run := recordstore.Run{RunID: "r1", Result: c.result, StartedAt: c.started}
-			got := computeRunDigest(context.Background(), nil, run, nil)
+			got := computeRunDigest(context.Background(), nil, run, nil, runTestCaseRead{})
 			if (got != nil) != c.want {
 				t.Fatalf("digest present = %v, want %v", got != nil, c.want)
 			}
@@ -75,13 +79,13 @@ func TestComputeRunDigest_FirstFailedStageWins(t *testing.T) {
 		{RunID: "r1", StageID: "s2", Name: "Build", Status: "FAILURE", Error: strPtr("compiler error")},
 		{RunID: "r1", StageID: "s3", Name: "Test", Status: "FAILURE", Error: strPtr("later error")},
 	}
-	got := computeRunDigest(context.Background(), nil, run, stages)
+	got := computeRunDigest(context.Background(), nil, run, stages, runTestCaseRead{})
 	if got.Stage != "Build" || got.Error != "compiler error" {
 		t.Fatalf("digest stage/error = %q/%q, want Build/compiler error", got.Stage, got.Error)
 	}
 
 	noError := []recordstore.Stage{{RunID: "r1", StageID: "s4", Name: "Deploy", Status: "FAILURE"}}
-	got = computeRunDigest(context.Background(), nil, run, noError)
+	got = computeRunDigest(context.Background(), nil, run, noError, runTestCaseRead{})
 	if got.Stage != "Deploy" || got.Error != "" {
 		t.Fatalf("digest stage/error = %q/%q, want Deploy and no error", got.Stage, got.Error)
 	}
@@ -107,7 +111,7 @@ func TestComputeRunDigest_LogTailNamesTheFailedStage(t *testing.T) {
 		{RunID: runID, StageID: "s1", Name: "Build", Status: "SUCCESS"},
 		{RunID: runID, StageID: "s2", Name: "Deploy", Status: "FAILURE", Error: strPtr("deploy refused")},
 	}
-	got := computeRunDigest(context.Background(), store, run, stages)
+	got := computeRunDigest(context.Background(), store, run, stages, runTestCaseRead{})
 	if got.Stage != "Deploy" || got.Error != "deploy refused" {
 		t.Fatalf("digest stage/error = %q/%q, want Deploy/deploy refused", got.Stage, got.Error)
 	}
@@ -133,7 +137,7 @@ func TestComputeRunDigest_LogTailKeepsTheLastFiftyLines(t *testing.T) {
 
 	run := newDigestRun(runID, "FAILURE")
 	stages := []recordstore.Stage{{RunID: runID, StageID: "s1", Name: "Build", Status: "FAILURE"}}
-	got := computeRunDigest(context.Background(), store, run, stages)
+	got := computeRunDigest(context.Background(), store, run, stages, runTestCaseRead{})
 
 	var want []string
 	for i := 11; i <= 60; i++ {
@@ -165,7 +169,7 @@ func TestComputeRunDigest_WholeLogFallback(t *testing.T) {
 
 		run := newDigestRun(runID, "ABORTED")
 		stages := []recordstore.Stage{{RunID: runID, StageID: "s1", Name: "Build", Status: "SUCCESS"}}
-		got := computeRunDigest(context.Background(), store, run, stages)
+		got := computeRunDigest(context.Background(), store, run, stages, runTestCaseRead{})
 		if got.Stage != "" {
 			t.Fatalf("stage = %q, want no stage", got.Stage)
 		}
@@ -182,7 +186,7 @@ func TestComputeRunDigest_WholeLogFallback(t *testing.T) {
 
 		run := newDigestRun(runID, "FAILURE")
 		stages := []recordstore.Stage{{RunID: runID, StageID: "s3", Name: "Deploy", Status: "FAILURE"}}
-		got := computeRunDigest(context.Background(), store, run, stages)
+		got := computeRunDigest(context.Background(), store, run, stages, runTestCaseRead{})
 		if got.Stage != "Deploy" {
 			t.Fatalf("stage = %q, want Deploy", got.Stage)
 		}
@@ -201,7 +205,7 @@ func TestComputeRunDigest_WholeLogFallback(t *testing.T) {
 
 		run := newDigestRun(runID, "FAILURE")
 		stages := []recordstore.Stage{{RunID: runID, StageID: "s1", Name: "Build", Status: "FAILURE"}}
-		got := computeRunDigest(context.Background(), store, run, stages)
+		got := computeRunDigest(context.Background(), store, run, stages, runTestCaseRead{})
 		if got.LogTail != want {
 			t.Fatalf("logTail = %q, want the whole log %q", got.LogTail, want)
 		}
@@ -217,7 +221,7 @@ func TestComputeRunDigest_HardReadFailure(t *testing.T) {
 
 	t.Run("nilBlobStore", func(t *testing.T) {
 		run := newDigestRun("r1", "FAILURE")
-		got := computeRunDigest(context.Background(), nil, run, stages)
+		got := computeRunDigest(context.Background(), nil, run, stages, runTestCaseRead{})
 		if got == nil {
 			t.Fatal("digest = nil, want a digest with no log tail")
 		}
@@ -237,7 +241,7 @@ func TestComputeRunDigest_HardReadFailure(t *testing.T) {
 
 		run := newDigestRun(runID, "FAILURE")
 		stage := []recordstore.Stage{{RunID: runID, StageID: "s2", Name: "Deploy", Status: "FAILURE", Error: strPtr("deploy refused")}}
-		got := computeRunDigest(context.Background(), store, run, stage)
+		got := computeRunDigest(context.Background(), store, run, stage, runTestCaseRead{})
 		if got == nil {
 			t.Fatal("digest = nil, want a digest with no log tail")
 		}
@@ -254,7 +258,7 @@ func TestComputeRunDigest_HardReadFailure(t *testing.T) {
 		runID := "run-digest-empty-log"
 		run := newDigestRun(runID, "FAILURE")
 		stage := []recordstore.Stage{{RunID: runID, StageID: "s2", Name: "Deploy", Status: "FAILURE"}}
-		got := computeRunDigest(context.Background(), store, run, stage)
+		got := computeRunDigest(context.Background(), store, run, stage, runTestCaseRead{})
 		if got == nil {
 			t.Fatal("digest = nil, want a digest with no log tail")
 		}
@@ -276,14 +280,14 @@ func TestComputeRunDigest_FailedTests(t *testing.T) {
 	t.Run("absentWhenTheRunRecordsNoFailedTest", func(t *testing.T) {
 		run := newDigestRun("r1", "FAILURE")
 		run.TestsFailed = &zero
-		got := computeRunDigest(context.Background(), nil, run, nil)
+		got := computeRunDigest(context.Background(), nil, run, nil, runTestCaseRead{})
 		if got.FailedTests != nil {
 			t.Fatalf("failedTests = %+v, want absent", got.FailedTests)
 		}
 	})
 
 	t.Run("absentWhenTheRunRecordsNoTestCount", func(t *testing.T) {
-		got := computeRunDigest(context.Background(), nil, newDigestRun("r1", "FAILURE"), nil)
+		got := computeRunDigest(context.Background(), nil, newDigestRun("r1", "FAILURE"), nil, runTestCaseRead{})
 		if got.FailedTests != nil {
 			t.Fatalf("failedTests = %+v, want absent", got.FailedTests)
 		}
@@ -292,9 +296,9 @@ func TestComputeRunDigest_FailedTests(t *testing.T) {
 	t.Run("presentWithEveryCount", func(t *testing.T) {
 		run := newDigestRun("r1", "UNSTABLE")
 		run.TestsFailed, run.TestsSkipped, run.TestsTotal = &failed, &skipped, &total
-		got := computeRunDigest(context.Background(), nil, run, nil)
+		got := computeRunDigest(context.Background(), nil, run, nil, runTestCaseRead{})
 		want := &digestFailedTestsJSON{Failed: 3, Skipped: 2, Total: 20}
-		if got.FailedTests == nil || *got.FailedTests != *want {
+		if got.FailedTests == nil || !reflect.DeepEqual(*got.FailedTests, *want) {
 			t.Fatalf("failedTests = %+v, want %+v", got.FailedTests, want)
 		}
 	})
@@ -302,10 +306,111 @@ func TestComputeRunDigest_FailedTests(t *testing.T) {
 	t.Run("presentWithOnlyTheFailedCount", func(t *testing.T) {
 		run := newDigestRun("r1", "UNSTABLE")
 		run.TestsFailed = &failed
-		got := computeRunDigest(context.Background(), nil, run, nil)
+		got := computeRunDigest(context.Background(), nil, run, nil, runTestCaseRead{})
 		want := &digestFailedTestsJSON{Failed: 3}
-		if got.FailedTests == nil || *got.FailedTests != *want {
+		if got.FailedTests == nil || !reflect.DeepEqual(*got.FailedTests, *want) {
 			t.Fatalf("failedTests = %+v, want %+v", got.FailedTests, want)
 		}
 	})
+}
+
+// TestComputeRunDigest_FailedCases proves the failed case list: at most
+// ten entries, SKIPPED rows left out, the reader's own order kept, and the
+// list absent when the run holds no case row or the read fails.
+func TestComputeRunDigest_FailedCases(t *testing.T) {
+	failed := int32(40)
+	newRun := func() recordstore.Run {
+		run := newDigestRun("r1", "UNSTABLE")
+		run.TestsFailed = &failed
+		return run
+	}
+
+	t.Run("boundedAtTen", func(t *testing.T) {
+		var rows []recordstore.TestCase
+		for i := 0; i < 40; i++ {
+			rows = append(rows, recordstore.TestCase{Suite: "unit", ClassName: "C", Name: fmt.Sprintf("t%02d", i), Status: "FAILED"})
+		}
+		rows = append(rows, recordstore.TestCase{Suite: "unit", ClassName: "C", Name: "skipped", Status: "SKIPPED"})
+		got := computeRunDigest(context.Background(), nil, newRun(), nil, runTestCaseRead{cases: rows})
+		if got.FailedTests == nil || len(got.FailedTests.Cases) != 10 {
+			t.Fatalf("failedTests = %+v, want ten cases", got.FailedTests)
+		}
+		if got.FailedTests.Failed != 40 {
+			t.Fatalf("failed = %d, want the aggregate count 40", got.FailedTests.Failed)
+		}
+		first := got.FailedTests.Cases[0]
+		want := digestFailedCaseJSON{Suite: "unit", ClassName: "C", Name: "t00", CaseKey: TestCaseKey("C", "t00")}
+		if first != want || got.FailedTests.Cases[9].Name != "t09" {
+			t.Fatalf("cases = %+v, want the first ten in the reader's order", got.FailedTests.Cases)
+		}
+	})
+
+	t.Run("skippedRowsLeftOut", func(t *testing.T) {
+		rows := []recordstore.TestCase{
+			{Suite: "unit", ClassName: "C", Name: "regressed", Status: "REGRESSION"},
+			{Suite: "unit", ClassName: "C", Name: "skipped", Status: "SKIPPED"},
+		}
+		got := computeRunDigest(context.Background(), nil, newRun(), nil, runTestCaseRead{cases: rows})
+		if got.FailedTests == nil || len(got.FailedTests.Cases) != 1 || got.FailedTests.Cases[0].Name != "regressed" {
+			t.Fatalf("cases = %+v, want the one case that is not SKIPPED", got.FailedTests)
+		}
+	})
+
+	t.Run("absentWithNoCaseRow", func(t *testing.T) {
+		got := computeRunDigest(context.Background(), nil, newRun(), nil, runTestCaseRead{})
+		if got.FailedTests == nil || got.FailedTests.Cases != nil {
+			t.Fatalf("failedTests = %+v, want the counts and no case list", got.FailedTests)
+		}
+	})
+
+	t.Run("absentWhenTheReadFails", func(t *testing.T) {
+		rows := []recordstore.TestCase{{Suite: "unit", ClassName: "C", Name: "t", Status: "FAILED"}}
+		got := computeRunDigest(context.Background(), nil, newRun(), nil, runTestCaseRead{cases: rows, err: fmt.Errorf("read timeout")})
+		if got.FailedTests == nil || got.FailedTests.Failed != 40 || got.FailedTests.Cases != nil {
+			t.Fatalf("failedTests = %+v, want the counts and no case list", got.FailedTests)
+		}
+	})
+}
+
+// TestHandleGetRun_FailedCaseReadDegradesTheListAlone proves a failed case
+// read leaves the run read and the digest standing, with no case list on
+// either.
+func TestHandleGetRun_FailedCaseReadDegradesTheListAlone(t *testing.T) {
+	started := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	failed := int32(1)
+	reader := newFakeRecordReader()
+	reader.runs["r1"] = recordstore.Run{
+		RunID: "r1", Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: "COMPLETED",
+		Result: strPtr("FAILURE"), StartedAt: &started, TestsFailed: &failed,
+	}
+	reader.stages["r1"] = []recordstore.Stage{
+		{RunID: "r1", StageID: "s1", Name: "Test", Status: "FAILURE", Error: strPtr("tests failed")},
+	}
+	reader.testCases["r1"] = []recordstore.TestCase{{Suite: "unit", ClassName: "C", Name: "t", Status: "FAILED"}}
+	reader.testCasesErr = fmt.Errorf("read timeout")
+	srv := newRunFixtureServer(reader, nil)
+
+	rec := doRunRequest(t, srv.handleGetRun, "/runs/r1", map[string]string{"run": "r1"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200: a failed case read must not fail the run read", rec.Code, rec.Body.String())
+	}
+	var detail runDetailJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if detail.Digest == nil || detail.Digest.Stage != "Test" || detail.Digest.FailedTests == nil || detail.Digest.FailedTests.Failed != 1 {
+		t.Fatalf("digest = %+v, want the stage and the counts", detail.Digest)
+	}
+	if detail.Digest.FailedTests.Cases != nil || detail.Cases != nil {
+		t.Fatalf("case lists = %+v / %+v, want both absent", detail.Digest.FailedTests.Cases, detail.Cases)
+	}
+
+	reader.testCasesErr = nil
+	rec = doRunRequest(t, srv.handleGetRun, "/runs/r1", map[string]string{"run": "r1"}, nil)
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(detail.Digest.FailedTests.Cases) != 1 || detail.Digest.FailedTests.Cases[0].CaseKey != "C/t" {
+		t.Fatalf("digest cases = %+v, want the one failed case", detail.Digest.FailedTests.Cases)
+	}
 }

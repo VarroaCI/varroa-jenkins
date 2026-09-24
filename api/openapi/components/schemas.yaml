@@ -5025,6 +5025,29 @@ RunDetail:
               type: integer
             total:
               type: integer
+            cases:
+              type: array
+              description: >
+                The first ten failed cases of the run, in the order the
+                record store answers. A skipped case is not in the list.
+                The field is absent when the run holds no stored case.
+              items:
+                type: object
+                additionalProperties: false
+                required: [suite, className, name, caseKey]
+                properties:
+                  suite:
+                    type: string
+                  className:
+                    type: string
+                  name:
+                    type: string
+                  caseKey:
+                    type: string
+                    description: >
+                      The opaque case key. Do not parse it. Percent-encode
+                      the whole key as one path segment before you use it
+                      as {case} on the case history read.
     inputs:
       type: array
       description: >
@@ -5033,10 +5056,45 @@ RunDetail:
         arrives, and absent for a run that holds no pending input.
       items:
         $ref: '#/RunInput'
+    testReport:
+      $ref: '#/RunDetailTestReport'
+    cases:
+      type: array
+      description: >
+        The run's stored failed and skipped test cases, the same entries
+        GET /runs/{run}/tests serves. The field is absent when the run
+        holds no stored case.
+      items:
+        $ref: '#/RunTestCase'
     stages:
       type: array
       items:
         $ref: '#/RunStage'
+  additionalProperties: false
+
+RunDetailTestReport:
+  type: object
+  description: >
+    The run's stored test report, on GET /runs/{run}. The field is absent
+    when the run holds no stored report. sizeBytes and caseCount are
+    always present, and zero is a valid value.
+  required: [blobKey, sizeBytes, caseCount]
+  properties:
+    blobKey:
+      type: string
+      description: >
+        The blob key of the archived report file. The value is empty when
+        Jenkins stored the file locally.
+    sizeBytes:
+      type: integer
+      format: int64
+      description: The length of the report file in bytes.
+    caseCount:
+      type: integer
+      format: int32
+      description: >
+        The number of cases the report file holds. The file holds every
+        case, including a passed case.
   additionalProperties: false
 
 RunArtifact:
@@ -5086,14 +5144,146 @@ RunTestSuite:
       format: int64
   additionalProperties: false
 
+RunTestCase:
+  type: object
+  description: >
+    One stored test case of a run. The record store holds only failed
+    and skipped cases, at most 500 for each run.
+  required: [suite, className, name, status, caseKey]
+  properties:
+    suite:
+      type: string
+    className:
+      type: string
+    name:
+      type: string
+    status:
+      type: string
+      description: >
+        The reporter's own status name, for example FAILED or REGRESSION.
+        A skipped case carries SKIPPED.
+    durationMs:
+      type: integer
+      format: int64
+      description: The case's duration in milliseconds. Absent when the value is zero.
+    errorDetails:
+      type: string
+      description: >
+        The case's error detail text, cut at 512 bytes. Absent when the
+        case carries no error detail.
+    caseKey:
+      type: string
+      description: >
+        The opaque case key the server makes from the class name and the
+        test name. Do not parse it. Percent-encode the whole key as one
+        path segment before you use it as {case} on
+        GET /pipelines/{team}/jobs/{job}/tests/{case}.
+  additionalProperties: false
+
+RunTestReport:
+  type: object
+  description: >
+    The run's archived test report, on GET /runs/{run}/tests. The field
+    is absent when the run holds no stored report. sizeBytes and
+    caseCount are always present, and zero is a valid value.
+  required: [path, sizeBytes, caseCount, downloadable]
+  properties:
+    path:
+      type: string
+      description: >
+        The archived path of the report file, always .varroa/tests.json.
+        Download the file through GET /runs/{run}/artifacts/{path}.
+    sizeBytes:
+      type: integer
+      format: int64
+      description: The length of the report file in bytes.
+    caseCount:
+      type: integer
+      format: int32
+      description: >
+        The number of cases the report file holds. The file holds every
+        case, including a passed case.
+    downloadable:
+      type: boolean
+      description: >
+        False when the stored blob key is empty, because Jenkins stored
+        the file locally. The download path then answers 409.
+  additionalProperties: false
+
 RunTestListResponse:
   type: object
-  required: [items]
+  description: >
+    GET /runs/{run}/tests. items holds one row for each suite, plus the
+    "_total" sentinel row. cases holds the run's stored failed and
+    skipped cases, failed cases first. cases is always present, and an
+    empty array is a valid value.
+  required: [items, cases]
   properties:
     items:
       type: array
       items:
         $ref: '#/RunTestSuite'
+    cases:
+      type: array
+      items:
+        $ref: '#/RunTestCase'
+    report:
+      $ref: '#/RunTestReport'
+  additionalProperties: false
+
+TestCaseOutcome:
+  type: object
+  description: >
+    One outcome of one test case in one run of the job. A row names its
+    own suite, because two suites can report one class and one name.
+  required: [runId, suite, status, createdAt, runLink]
+  properties:
+    runId:
+      type: string
+    buildNumber:
+      type: integer
+      format: int64
+    suite:
+      type: string
+    status:
+      type: string
+      description: >
+        The reporter's own status name. A skipped case carries SKIPPED.
+    durationMs:
+      type: integer
+      format: int64
+      description: The case's duration in milliseconds. Absent when the case reports no duration.
+    errorDetails:
+      type: string
+      description: >
+        The case's error detail text, cut at 512 bytes. Absent when the
+        case carries no error detail.
+    createdAt:
+      type: string
+      format: date-time
+      description: The creation time of the run.
+    result:
+      type: string
+      description: The run's own result. Absent when the run holds no result.
+    runLink:
+      type: string
+      description: >
+        The run's own page path, /pipelines/{team}/{jobPath}/{runId}, the
+        same link a fleet lock row carries.
+  additionalProperties: false
+
+TestCaseHistoryResponse:
+  type: object
+  description: >
+    GET /pipelines/{team}/jobs/{job}/tests/{case}. items holds the case's
+    recent outcomes, newest first, within the record store retention
+    window. The response holds no rate, no trend, and no flake score.
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/TestCaseOutcome'
   additionalProperties: false
 
 RunChange:

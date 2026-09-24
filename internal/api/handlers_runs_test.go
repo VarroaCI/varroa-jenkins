@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -345,6 +346,7 @@ func TestPipelinesPaths_Answer503(t *testing.T) {
 		{"listRunArtifacts-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListRunArtifacts }, "/runs/r1/artifacts", map[string]string{"run": "r1"}, http.StatusServiceUnavailable},
 		{"listRunTests-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListRunTests }, "/runs/r1/tests", map[string]string{"run": "r1"}, http.StatusServiceUnavailable},
 		{"listRunChanges-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListRunChanges }, "/runs/r1/changes", map[string]string{"run": "r1"}, http.StatusServiceUnavailable},
+		{"listJobTestCaseHistory-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListJobTestCaseHistory }, "/pipelines/ctrl-a/jobs/j/tests/C%2Fn", map[string]string{"team": "ctrl-a", "job": "j", "case": "C/n"}, http.StatusServiceUnavailable},
 		{"downloadRunArtifact-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleDownloadRunArtifact }, "/runs/r1/artifacts/a.txt", map[string]string{"run": "r1", "path": "a.txt"}, http.StatusServiceUnavailable},
 
 		// A plain run read needs no blob store: a nil store only drops the
@@ -354,6 +356,7 @@ func TestPipelinesPaths_Answer503(t *testing.T) {
 		{"downloadRunArtifact-nilBlobStore", newFakeRecordReaderWithRun(), nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleDownloadRunArtifact }, "/runs/r1/artifacts/a.txt", map[string]string{"run": "r1", "path": "a.txt"}, http.StatusServiceUnavailable},
 
 		{"listPipelines-schemaTooOld", schemaTooOldReader, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListPipelines }, "/pipelines/ctrl-a", map[string]string{"team": "ctrl-a"}, http.StatusServiceUnavailable},
+		{"listJobTestCaseHistory-schemaTooOld", schemaTooOldReader, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleListJobTestCaseHistory }, "/pipelines/ctrl-a/jobs/j/tests/C%2Fn", map[string]string{"team": "ctrl-a", "job": "j", "case": "C/n"}, http.StatusServiceUnavailable},
 		{"getRun-schemaTooOld", schemaTooOldReader, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleGetRun }, "/runs/r1", map[string]string{"run": "r1"}, http.StatusServiceUnavailable},
 	}
 
@@ -494,7 +497,7 @@ func TestHandleGetRun_CarriesSummaryAndDigest(t *testing.T) {
 		t.Errorf("digest logTail = %q, want %q", detail.Digest.LogTail, "deploy refused")
 	}
 	wantTests := digestFailedTestsJSON{Failed: 2, Skipped: 1, Total: 11}
-	if detail.Digest.FailedTests == nil || *detail.Digest.FailedTests != wantTests {
+	if detail.Digest.FailedTests == nil || !reflect.DeepEqual(*detail.Digest.FailedTests, wantTests) {
 		t.Errorf("digest failedTests = %+v, want %+v", detail.Digest.FailedTests, wantTests)
 	}
 	for _, key := range []string{`"summary"`, `"digest"`} {
@@ -578,5 +581,160 @@ func assertStageWithoutLogTail(t *testing.T, srv *Server) {
 	}
 	if strings.Contains(rec.Body.String(), `"logTail"`) {
 		t.Errorf("body = %s, want no logTail key", rec.Body.String())
+	}
+}
+
+// --- The run's test cases and its test report ---
+
+// newTestCaseReader seeds run r1 with one suite, two failed cases and one
+// skipped case in the reader's own order, and a stored report whose blob
+// key is blobKey. A nil blobKey stores the report with no key.
+func newTestCaseReader(blobKey *string) *fakeRecordReader {
+	reader := newFakeRecordReader()
+	duration := int64(1250)
+	reader.runs["r1"] = recordstore.Run{
+		RunID: "r1", Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: "COMPLETED",
+		Payload:       json.RawMessage(`{"log_summary":{"finalized":true},"test_report":{"size_bytes":2048,"case_count":7}}`),
+		TestReportKey: blobKey,
+	}
+	reader.tests["r1"] = []recordstore.TestSuite{{RunID: "r1", Suite: "_total", Total: 7, Failed: 2, Skipped: 1}}
+	reader.testCases["r1"] = []recordstore.TestCase{
+		{Suite: "unit", ClassName: "com.example.FooTest", Name: "bar", Status: "FAILED", DurationMs: &duration, ErrorDetails: "boom"},
+		{Suite: "unit", ClassName: "com.example.FooTest", Name: "baz", Status: "REGRESSION"},
+		{Suite: "unit", ClassName: "com.example.FooTest", Name: "qux", Status: "SKIPPED"},
+	}
+	return reader
+}
+
+func TestHandleListRunTests_CarriesCasesAndReport(t *testing.T) {
+	srv := newRunFixtureServer(newTestCaseReader(strPtr("artifacts/core/svc/main/1/artifacts/.varroa/tests.json")), nil)
+	rec := doRunRequest(t, srv.handleListRunTests, "/runs/r1/tests", map[string]string{"run": "r1"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp runTestListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Items) != 1 || resp.Items[0].Suite != "_total" {
+		t.Fatalf("items = %+v, want the suite row unchanged", resp.Items)
+	}
+	names := make([]string, 0, len(resp.Cases))
+	for _, c := range resp.Cases {
+		names = append(names, c.Name)
+	}
+	if strings.Join(names, ",") != "bar,baz,qux" {
+		t.Fatalf("case order = %v, want the reader's own order", names)
+	}
+	first := resp.Cases[0]
+	if first.Suite != "unit" || first.ClassName != "com.example.FooTest" || first.Status != "FAILED" ||
+		first.DurationMs != 1250 || first.ErrorDetails != "boom" || first.CaseKey != TestCaseKey("com.example.FooTest", "bar") {
+		t.Fatalf("first case = %+v", first)
+	}
+	want := runTestReportJSON{Path: ".varroa/tests.json", SizeBytes: 2048, CaseCount: 7, Downloadable: true}
+	if resp.Report == nil || *resp.Report != want {
+		t.Fatalf("report = %+v, want %+v", resp.Report, want)
+	}
+}
+
+func TestHandleListRunTests_LocalReportIsNotDownloadable(t *testing.T) {
+	reader := newTestCaseReader(nil)
+	reader.runs["r1"] = func(run recordstore.Run) recordstore.Run {
+		run.Payload = json.RawMessage(`{"test_report":{"size_bytes":10,"case_count":0}}`)
+		return run
+	}(reader.runs["r1"])
+	srv := newRunFixtureServer(reader, nil)
+	rec := doRunRequest(t, srv.handleListRunTests, "/runs/r1/tests", map[string]string{"run": "r1"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp runTestListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := runTestReportJSON{Path: testReportPath, SizeBytes: 10, CaseCount: 0, Downloadable: false}
+	if resp.Report == nil || *resp.Report != want {
+		t.Fatalf("report = %+v, want %+v", resp.Report, want)
+	}
+	if !strings.Contains(rec.Body.String(), `"caseCount":0`) || !strings.Contains(rec.Body.String(), `"downloadable":false`) {
+		t.Fatalf("body = %s, want caseCount zero and downloadable false present", rec.Body.String())
+	}
+}
+
+func TestHandleListRunTests_NoCaseAndNoReport(t *testing.T) {
+	reader := newFakeRecordReader()
+	reader.runs["r1"] = recordstore.Run{RunID: "r1", Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: "COMPLETED",
+		Payload: json.RawMessage(`{"log_summary":{"finalized":true}}`)}
+	srv := newRunFixtureServer(reader, nil)
+	rec := doRunRequest(t, srv.handleListRunTests, "/runs/r1/tests", map[string]string{"run": "r1"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"cases":[]`) {
+		t.Fatalf("body = %s, want an empty cases array", body)
+	}
+	if strings.Contains(body, `"report"`) {
+		t.Fatalf("body = %s, want no report", body)
+	}
+}
+
+func TestHandleGetRun_CarriesTestReportAndCases(t *testing.T) {
+	srv := newRunFixtureServer(newTestCaseReader(strPtr("artifacts/key")), nil)
+	rec := doRunRequest(t, srv.handleGetRun, "/runs/r1", map[string]string{"run": "r1"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var detail runDetailJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := runTestReportDetailJSON{BlobKey: "artifacts/key", SizeBytes: 2048, CaseCount: 7}
+	if detail.TestReport == nil || *detail.TestReport != want {
+		t.Fatalf("testReport = %+v, want %+v", detail.TestReport, want)
+	}
+	if len(detail.Cases) != 3 || detail.Cases[0].Name != "bar" || detail.Cases[2].Status != "SKIPPED" {
+		t.Fatalf("cases = %+v, want the three stored cases in order", detail.Cases)
+	}
+	if !detail.LogFinalized {
+		t.Fatal("logFinalized = false, want the report merge to leave the other payload keys readable")
+	}
+}
+
+func TestHandleGetRun_OmitsTestReportAndCasesWhenNoneStored(t *testing.T) {
+	reader := newFakeRecordReader()
+	reader.runs["r1"] = recordstore.Run{RunID: "r1", Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: "COMPLETED",
+		Payload: json.RawMessage(`{}`)}
+	srv := newRunFixtureServer(reader, nil)
+	rec := doRunRequest(t, srv.handleGetRun, "/runs/r1", map[string]string{"run": "r1"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	for _, key := range []string{`"testReport"`, `"cases"`} {
+		if strings.Contains(rec.Body.String(), key) {
+			t.Fatalf("body = %s, want no %s", rec.Body.String(), key)
+		}
+	}
+}
+
+func TestTestCaseKey_RoundTripsSeparators(t *testing.T) {
+	className := "com.example/Foo%Test Bar"
+	name := "case/with%odd name"
+	key := TestCaseKey(className, name)
+	if strings.Count(key, "/") != 1 {
+		t.Fatalf("key = %q, want exactly one separator", key)
+	}
+	gotClass, gotName, err := ParseTestCaseKey(key)
+	if err != nil {
+		t.Fatalf("ParseTestCaseKey(%q): %v", key, err)
+	}
+	if gotClass != className || gotName != name {
+		t.Fatalf("round trip = (%q, %q), want (%q, %q)", gotClass, gotName, className, name)
+	}
+
+	for _, bad := range []string{"no-separator", "bad%zz/name", "class/bad%zz"} {
+		if _, _, err := ParseTestCaseKey(bad); err == nil {
+			t.Fatalf("ParseTestCaseKey(%q) answered no error", bad)
+		}
 	}
 }

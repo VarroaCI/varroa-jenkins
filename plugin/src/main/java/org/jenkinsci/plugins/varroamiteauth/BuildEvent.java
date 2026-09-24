@@ -35,6 +35,11 @@ import java.util.Map;
  * carry it, and only a {@code HEARTBEAT} event carries an empty list.
  * {@link #toJson()} writes no key for an empty list, and the gateway
  * writes the key for every set.
+ *
+ * <p>Field 48, {@code test_report}, and field 49, {@code test_cases}, are
+ * set only on the {@code COMPLETED} event. {@link #toJson()} writes no
+ * {@code test_report} key for a null report and no {@code test_cases} key
+ * for an empty list.
  */
 public final class BuildEvent implements PostableEvent {
 
@@ -96,6 +101,8 @@ public final class BuildEvent implements PostableEvent {
     private final List<BuildPodTemplate> podTemplates;
     private final String summary;
     private final List<BuildInput> inputs;
+    private final BuildTestReport testReport;
+    private final List<BuildTestCase> testCases;
 
     private BuildEvent(Builder b) {
         this.phase = orEmpty(b.phase);
@@ -145,6 +152,8 @@ public final class BuildEvent implements PostableEvent {
         this.podTemplates = List.copyOf(b.podTemplates);
         this.summary = orEmpty(b.summary);
         this.inputs = List.copyOf(b.inputs);
+        this.testReport = b.testReport;
+        this.testCases = List.copyOf(b.testCases);
     }
 
     private static String orEmpty(String s) {
@@ -361,6 +370,16 @@ public final class BuildEvent implements PostableEvent {
         return inputs;
     }
 
+    /** Field 48: the pointer to the archived test report. Null for a run that archived none. */
+    public BuildTestReport getTestReport() {
+        return testReport;
+    }
+
+    /** Field 49: the failed cases, then the skipped cases. Empty for a run that reported none. */
+    public List<BuildTestCase> getTestCases() {
+        return testCases;
+    }
+
     /**
      * Serializes the event to a {@link JSONObject} using proto JSON field
      * names, ready to post to {@code /v1/events}.
@@ -454,6 +473,16 @@ public final class BuildEvent implements PostableEvent {
             }
             o.put("inputs", inputsArr);
         }
+        if (testReport != null) {
+            o.put("test_report", testReport.toJson());
+        }
+        if (!testCases.isEmpty()) {
+            JSONArray testCasesArr = new JSONArray();
+            for (BuildTestCase c : testCases) {
+                testCasesArr.add(c.toJson());
+            }
+            o.put("test_cases", testCasesArr);
+        }
         return o;
     }
 
@@ -518,7 +547,9 @@ public final class BuildEvent implements PostableEvent {
                 .definitionPath(definitionPath)
                 .podTemplates(podTemplates)
                 .summary(summary)
-                .inputs(inputs);
+                .inputs(inputs)
+                .testReport(testReport)
+                .testCases(testCases);
     }
 
     public static final class Builder {
@@ -569,6 +600,8 @@ public final class BuildEvent implements PostableEvent {
         private List<BuildPodTemplate> podTemplates = new ArrayList<>();
         private String summary;
         private List<BuildInput> inputs = new ArrayList<>();
+        private BuildTestReport testReport;
+        private List<BuildTestCase> testCases = new ArrayList<>();
 
         private Builder() {
         }
@@ -820,6 +853,18 @@ public final class BuildEvent implements PostableEvent {
          */
         public Builder inputs(List<BuildInput> v) {
             this.inputs = v != null ? new ArrayList<>(v) : new ArrayList<>();
+            return this;
+        }
+
+        /** Field 48: the pointer to the archived test report. Null for no report. */
+        public Builder testReport(BuildTestReport v) {
+            this.testReport = v;
+            return this;
+        }
+
+        /** Field 49: the failed cases, then the skipped cases, in walk order. */
+        public Builder testCases(List<BuildTestCase> v) {
+            this.testCases = v != null ? new ArrayList<>(v) : new ArrayList<>();
             return this;
         }
 

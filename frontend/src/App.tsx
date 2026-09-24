@@ -45,6 +45,7 @@ import PipelinesIndex from "./pages/pipelines/PipelinesIndex";
 import TeamHome from "./pages/pipelines/TeamHome";
 import PipelinePage from "./pages/pipelines/PipelinePage";
 import BuildPage from "./pages/pipelines/BuildPage";
+import TestCaseHistory from "./pages/pipelines/TestCaseHistory";
 
 /**
  * Remounts BuildPage per run id. React Router reuses one element when only
@@ -189,6 +190,8 @@ function AppRoutes() {
                   <Route path="pipelines/:team" element={<TeamHome />} />
                   <Route path="pipelines/:team/:job" element={<PipelinePage />} />
                   <Route path="pipelines/:team/:job/:run" element={<BuildPageRoute />} />
+                  {/* The case route holds five segments and the run route four, so the two never match one URL. */}
+                  <Route path="pipelines/:team/:job/tests/:case" element={<TestCaseHistory />} />
                   <Route path="*" element={<NotFoundPage />} />
                 </Route>
               </Route>

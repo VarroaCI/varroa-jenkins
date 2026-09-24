@@ -48,6 +48,15 @@ type Reader interface {
 
 	ListArtifacts(ctx context.Context, runID string) ([]Artifact, error)
 	ListTests(ctx context.Context, runID string) ([]TestSuite, error)
+
+	// ListTestCases reads the run's run_test_cases rows: every row that
+	// is not SKIPPED first, then every SKIPPED row, each group ordered by
+	// suite, class name, and test name.
+	ListTestCases(ctx context.Context, runID string) ([]TestCase, error)
+	// ListTestCaseHistory reads one test case's outcomes across one job's
+	// runs, newest first, capped at q.Limit.
+	ListTestCaseHistory(ctx context.Context, q TestCaseHistoryQuery) ([]TestCaseOutcome, error)
+
 	GetIntentByKey(ctx context.Context, intentKey string) (Intent, bool, error)
 	NextBuildNumber(ctx context.Context, cluster, tenant, jobPath string) (int64, error)
 	SchemaVersion(ctx context.Context) (int64, error)
@@ -181,7 +190,7 @@ func (r *pgReader) checkSchema(ctx context.Context) error {
 const runColumns = `run_id, created_at, cluster, namespace, cell, tenant, job_path, build_number, branch,
 	scm_revision, status, result, queued_at, started_at, ended_at, last_heartbeat_at,
 	interrupted_superseded_at, duration_ms, actor, cause, params, changes, source, inputs, summary,
-	tests_total, tests_failed, tests_skipped, payload`
+	test_report_key, tests_total, tests_failed, tests_skipped, payload`
 
 // qualifiedRunColumns is the same columns as runColumns, each qualified
 // with the "runs" alias, so ListRuns' query stays unambiguous once it
@@ -190,8 +199,8 @@ const qualifiedRunColumns = `runs.run_id, runs.created_at, runs.cluster, runs.na
 	runs.job_path, runs.build_number, runs.branch, runs.scm_revision, runs.status, runs.result,
 	runs.queued_at, runs.started_at, runs.ended_at, runs.last_heartbeat_at,
 	runs.interrupted_superseded_at, runs.duration_ms, runs.actor, runs.cause, runs.params,
-	runs.changes, runs.source, runs.inputs, runs.summary, runs.tests_total, runs.tests_failed,
-	runs.tests_skipped, runs.payload`
+	runs.changes, runs.source, runs.inputs, runs.summary, runs.test_report_key, runs.tests_total,
+	runs.tests_failed, runs.tests_skipped, runs.payload`
 
 // scanRun scans one row shaped by runColumns into a Run.
 func scanRun(row pgx.Row) (Run, error) {
@@ -202,7 +211,7 @@ func scanRun(row pgx.Row) (Run, error) {
 		&run.BuildNumber, &run.Branch, &run.SCMRevision, &run.Status, &run.Result, &run.QueuedAt,
 		&run.StartedAt, &run.EndedAt, &run.LastHeartbeatAt, &run.InterruptedSupersededAt, &run.DurationMs,
 		&run.Actor, &run.Cause, &run.Params, &run.Changes, &run.Source, &run.Inputs, &run.Summary,
-		&run.TestsTotal, &run.TestsFailed, &run.TestsSkipped, &run.Payload,
+		&run.TestReportKey, &run.TestsTotal, &run.TestsFailed, &run.TestsSkipped, &run.Payload,
 	)
 	if err != nil {
 		return Run{}, err

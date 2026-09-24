@@ -18,17 +18,18 @@ type columnSpec struct {
 	nullable bool
 }
 
-// expectedColumns mirrors the record store's twelve tables, column for
+// expectedColumns mirrors the record store's thirteen tables, column for
 // column: migration 00001's seven, plus migration 00002's "activity",
 // migration 00003's "job_schedules" and "job_schedule_cells", migration
-// 00005's "tenant_placements", and migration 00006's "fleet_locks".
+// 00005's "tenant_placements", migration 00006's "fleet_locks", and
+// migration 00017's "run_test_cases".
 // Migration 00007 adds three columns to "job_schedules" and creates no
 // table. Migration 00011 adds two columns to "tenant_placements" and
 // creates no table. Migration 00012 adds one column to "runs" and creates
 // no table. Migration 00013 adds one column to "tenant_placements" and
 // creates no table. Migration 00015 adds one column to "runs" and creates
 // no table. Migration 00016 adds one column to "runs" and creates no
-// table.
+// table. Migration 00017 also adds one column to "runs".
 var expectedColumns = map[string][]columnSpec{
 	"job_numbers": {
 		{"cluster", "text", false},
@@ -89,6 +90,7 @@ var expectedColumns = map[string][]columnSpec{
 		{"payload", "jsonb", true},
 		{"summary", "text", true},
 		{"inputs", "jsonb", true},
+		{"test_report_key", "text", true},
 	},
 	"run_stages": {
 		{"run_id", "uuid", false},
@@ -114,6 +116,19 @@ var expectedColumns = map[string][]columnSpec{
 		{"failed", "integer", false},
 		{"skipped", "integer", false},
 		{"duration_ms", "bigint", true},
+	},
+	"run_test_cases": {
+		{"run_id", "uuid", false},
+		{"suite", "text", false},
+		{"class_name", "text", false},
+		{"name", "text", false},
+		{"cluster", "text", false},
+		{"tenant", "text", false},
+		{"job_path", "text", false},
+		{"status", "text", false},
+		{"duration_ms", "bigint", true},
+		{"error_details", "text", false},
+		{"created_at", "timestamp with time zone", false},
 	},
 	"run_artifacts": {
 		{"run_id", "uuid", false},
@@ -214,7 +229,7 @@ var expectedColumns = map[string][]columnSpec{
 }
 
 // TestSchemaMatchesDesign runs every migration and compares the resulting
-// schema against the record store's twelve tables, column for column.
+// schema against the record store's thirteen tables, column for column.
 func TestSchemaMatchesDesign(t *testing.T) {
 	db := setupTestDB(t)
 	ctx := context.Background()
@@ -368,7 +383,7 @@ func TestPartitionStrategy(t *testing.T) {
 	}
 }
 
-// TestNonPartitionedTables asserts the other nine tables carry no RANGE
+// TestNonPartitionedTables asserts the other ten tables carry no RANGE
 // partitioning, matching the allocation: only runs, log_chunks, and
 // activity are partitioned.
 func TestNonPartitionedTables(t *testing.T) {
@@ -378,7 +393,7 @@ func TestNonPartitionedTables(t *testing.T) {
 	for _, table := range []string{
 		"job_numbers", "run_intents", "run_stages", "run_tests",
 		"run_artifacts", "job_schedules", "job_schedule_cells", "tenant_placements",
-		"fleet_locks",
+		"fleet_locks", "run_test_cases",
 	} {
 		var relkind string
 		if err := db.QueryRowContext(ctx,
@@ -399,15 +414,16 @@ func TestIndexesExist(t *testing.T) {
 	ctx := context.Background()
 
 	want := map[string][]string{
-		"run_intents":   {"run_intents_conflict_idx", "run_intents_orphan_idx"},
-		"runs":          {"runs_run_id_idx", "runs_job_idx", "runs_tenant_idx", "runs_scm_revision_idx", "runs_search_tsv_idx"},
-		"run_stages":    {"run_stages_created_at_idx"},
-		"run_tests":     {"run_tests_created_at_idx"},
-		"run_artifacts": {"run_artifacts_created_at_idx"},
-		"log_chunks":    {"log_chunks_object_idx", "log_chunks_class_idx"},
-		"activity":      {"activity_namespace_controller_idx", "activity_cluster_idx", "activity_search_tsv_idx"},
-		"job_schedules": {"job_schedules_tenant_trigger_idx", "job_schedules_search_tsv_idx", "job_schedules_upstream_idx"},
-		"fleet_locks":   {"fleet_locks_one_holder"},
+		"run_intents":    {"run_intents_conflict_idx", "run_intents_orphan_idx"},
+		"runs":           {"runs_run_id_idx", "runs_job_idx", "runs_tenant_idx", "runs_scm_revision_idx", "runs_search_tsv_idx"},
+		"run_stages":     {"run_stages_created_at_idx"},
+		"run_tests":      {"run_tests_created_at_idx"},
+		"run_artifacts":  {"run_artifacts_created_at_idx"},
+		"log_chunks":     {"log_chunks_object_idx", "log_chunks_class_idx"},
+		"activity":       {"activity_namespace_controller_idx", "activity_cluster_idx", "activity_search_tsv_idx"},
+		"job_schedules":  {"job_schedules_tenant_trigger_idx", "job_schedules_search_tsv_idx", "job_schedules_upstream_idx"},
+		"fleet_locks":    {"fleet_locks_one_holder"},
+		"run_test_cases": {"run_test_cases_history_idx", "run_test_cases_created_at_idx"},
 	}
 
 	for table, indexes := range want {

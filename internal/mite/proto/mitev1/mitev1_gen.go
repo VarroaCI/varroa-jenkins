@@ -90,6 +90,8 @@ type BuildEvent struct {
 	PodTemplates            []*BuildPodTemplate `json:"pod_templates,omitempty"`
 	Summary                 string              `json:"summary,omitempty"`
 	Inputs                  []*BuildInput       `json:"inputs,omitempty"`
+	TestReport              *BuildTestReport    `json:"test_report,omitempty"`
+	TestCases               []*BuildTestCase    `json:"test_cases,omitempty"`
 }
 
 type BuildInput struct {
@@ -137,6 +139,21 @@ type BuildStage struct {
 	NodeName            string   `json:"node_name,omitempty"`
 	AgentLabel          string   `json:"agent_label,omitempty"`
 	Error               string   `json:"error,omitempty"`
+}
+
+type BuildTestCase struct {
+	Suite        string `json:"suite"`
+	ClassName    string `json:"class_name"`
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	DurationMs   int64  `json:"duration_ms,omitempty"`
+	ErrorDetails string `json:"error_details,omitempty"`
+}
+
+type BuildTestReport struct {
+	BlobKey   string `json:"blob_key,omitempty"`
+	SizeBytes int64  `json:"size_bytes,omitempty"`
+	CaseCount int    `json:"case_count,omitempty"`
 }
 
 type CancelBuildPayload struct {

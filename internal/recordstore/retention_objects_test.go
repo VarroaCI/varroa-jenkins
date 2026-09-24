@@ -172,17 +172,47 @@ func TestDeleteExpiredArtifactsNeverCallsDeletePrefix(t *testing.T) {
 		t.Fatalf("seed run_artifacts row: %v", err)
 	}
 
+	reportKey := "artifacts/" + testCluster + "/" + testNamespace + "/cell-a/" + runID.String() + "/" + TestReportPath
+	if _, err := db.Exec(`
+		INSERT INTO varroa.run_artifacts (run_id, path, created_at, size_bytes, digest, content_type, blob_key)
+		VALUES ($1, $2, $3, 10, NULL, 'application/json', $4)
+	`, runID, TestReportPath, oldCreatedAt, reportKey); err != nil {
+		t.Fatalf("seed report run_artifacts row: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE varroa.runs SET test_report_key = $2 WHERE run_id = $1`, runID, reportKey); err != nil {
+		t.Fatalf("seed runs.test_report_key: %v", err)
+	}
+
 	fake := &recordingBlobStore{t: t}
 	cutoff := time.Now().UTC()
 	n, err := deleteExpiredArtifacts(ctx, pool, fake, cutoff)
 	if err != nil {
 		t.Fatalf("deleteExpiredArtifacts: %v", err)
 	}
-	if n != 1 {
-		t.Fatalf("deleted %d artifacts, want 1", n)
+	if n != 2 {
+		t.Fatalf("deleted %d artifacts, want 2", n)
 	}
-	if len(fake.deleted) != 1 || fake.deleted[0] != blobKey {
-		t.Fatalf("deleted keys = %v, want [%s]; retention must delete run_artifacts.blob_key verbatim", fake.deleted, blobKey)
+	if len(fake.deleted) != 2 {
+		t.Fatalf("deleted keys = %v, want the two stored blob keys verbatim", fake.deleted)
+	}
+	for _, want := range []string{blobKey, reportKey} {
+		found := false
+		for _, got := range fake.deleted {
+			if got == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("deleted keys = %v, want %s; retention must delete run_artifacts.blob_key verbatim", fake.deleted, want)
+		}
+	}
+
+	var storedKey *string
+	if err := db.QueryRow(`SELECT test_report_key FROM varroa.runs WHERE run_id = $1`, runID).Scan(&storedKey); err != nil {
+		t.Fatalf("read runs.test_report_key: %v", err)
+	}
+	if storedKey != nil {
+		t.Fatalf("runs.test_report_key = %q after the report artifact left, want NULL", *storedKey)
 	}
 
 	var remaining int
@@ -253,6 +283,12 @@ func TestMaintenanceRoundAppliesRetentionAcrossFourMonths(t *testing.T) {
 			t.Fatalf("seed run_tests for %s: %v", m.suffix, err)
 		}
 		if _, err := db.Exec(`
+			INSERT INTO varroa.run_test_cases (run_id, suite, class_name, name, status, created_at)
+			VALUES ($1, 'suite-1', 'com.example.FooTest', 'bar', 'FAILED', $2)
+		`, runID, m.runAt); err != nil {
+			t.Fatalf("seed run_test_cases for %s: %v", m.suffix, err)
+		}
+		if _, err := db.Exec(`
 			INSERT INTO varroa.run_artifacts (run_id, path, created_at, size_bytes, blob_key)
 			VALUES ($1, 'build.log', $2, 10, $3)
 		`, runID, m.runAt, "artifacts/"+m.suffix+"/build.log"); err != nil {
@@ -317,15 +353,19 @@ func TestMaintenanceRoundAppliesRetentionAcrossFourMonths(t *testing.T) {
 		}
 	}
 
-	var stagesRemaining, testsRemaining int
+	var stagesRemaining, testsRemaining, casesRemaining int
 	if err := db.QueryRow(`SELECT count(*) FROM varroa.run_stages`).Scan(&stagesRemaining); err != nil {
 		t.Fatalf("count run_stages: %v", err)
 	}
 	if err := db.QueryRow(`SELECT count(*) FROM varroa.run_tests`).Scan(&testsRemaining); err != nil {
 		t.Fatalf("count run_tests: %v", err)
 	}
-	if stagesRemaining != 2 || testsRemaining != 2 {
-		t.Fatalf("run_stages=%d run_tests=%d remaining, want 2 each (March and April only)", stagesRemaining, testsRemaining)
+	if err := db.QueryRow(`SELECT count(*) FROM varroa.run_test_cases`).Scan(&casesRemaining); err != nil {
+		t.Fatalf("count run_test_cases: %v", err)
+	}
+	if stagesRemaining != 2 || testsRemaining != 2 || casesRemaining != 2 {
+		t.Fatalf("run_stages=%d run_tests=%d run_test_cases=%d remaining, want 2 each (March and April only)",
+			stagesRemaining, testsRemaining, casesRemaining)
 	}
 	for _, suffix := range []string{"202403", "202404"} {
 		var count int
@@ -334,6 +374,12 @@ func TestMaintenanceRoundAppliesRetentionAcrossFourMonths(t *testing.T) {
 		}
 		if count != 1 {
 			t.Fatalf("run_stages for %s = %d, want 1 (must survive retention.runs)", suffix, count)
+		}
+		if err := db.QueryRow(`SELECT count(*) FROM varroa.run_test_cases WHERE run_id = $1`, runIDs[suffix]).Scan(&count); err != nil {
+			t.Fatalf("count run_test_cases for %s: %v", suffix, err)
+		}
+		if count != 1 {
+			t.Fatalf("run_test_cases for %s = %d, want 1 (must survive retention.runs)", suffix, count)
 		}
 	}
 

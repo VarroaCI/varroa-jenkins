@@ -1,5 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { stripTenantFolder } from "./jobPath";
+import { stripTenantFolder, testCaseHref } from "./jobPath";
+
+describe("testCaseHref", () => {
+  it("encodes the job path and the case key as one segment each", () => {
+    expect(testCaseHref("payments", "payments/checkout-api/main", "com.example.FooTest/bar")).toBe(
+      "/pipelines/payments/payments%2Fcheckout-api%2Fmain/tests/com.example.FooTest%2Fbar",
+    );
+  });
+
+  it("encodes a percent sign the case key already holds once more", () => {
+    expect(testCaseHref("payments", "main", "a%2Fb/c")).toBe("/pipelines/payments/main/tests/a%252Fb%2Fc");
+  });
+});
 
 describe("stripTenantFolder", () => {
   it("returns jobPath unchanged for a root-hosted tenant", () => {

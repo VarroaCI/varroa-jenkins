@@ -53,6 +53,7 @@ import type {
   RunDetail,
   RunArtifactListResponse,
   RunTestListResponse,
+  TestCaseHistoryResponse,
   RunChangeListResponse,
   TeamPipelines,
   TeamPlacement,
@@ -1221,6 +1222,22 @@ export function downloadRunArtifact(runId: string, path: string): Promise<Blob> 
 
 export function listRunTests(runId: string): Promise<RunTestListResponse> {
   return bffFetch<RunTestListResponse>(`${runBase(runId)}/tests`);
+}
+
+/**
+ * Reads the recent outcomes of one test case of one job, newest first.
+ * caseKey is the opaque key the tests read returned. The key can hold a
+ * "/" and a "%2F", so it is encoded once more as one path segment. The
+ * client never parses the key.
+ */
+export function getTestCaseHistory(
+  team: string,
+  jobPath: string,
+  caseKey: string,
+  limit?: number,
+): Promise<TestCaseHistoryResponse> {
+  const qs = limit != null ? `?limit=${limit}` : "";
+  return bffFetch<TestCaseHistoryResponse>(`${jobBase(team, jobPath)}/tests/${enc(caseKey)}${qs}`);
 }
 
 export function listRunChanges(runId: string): Promise<RunChangeListResponse> {

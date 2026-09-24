@@ -64,6 +64,48 @@ type fakeRecordReader struct {
 	locksByCluster map[string][]recordstore.FleetLock
 	// locksErr makes both lock reads fail.
 	locksErr error
+
+	// testCases is keyed by run id, for ListTestCases. It answers the
+	// seeded order unchanged, so a test seeds the reader's own order.
+	testCases map[string][]recordstore.TestCase
+	// testCasesErr makes every ListTestCases call fail.
+	testCasesErr error
+	// caseHistory is keyed by caseHistoryKey, for ListTestCaseHistory.
+	// Each slice is seeded newest first, the reader's own order.
+	caseHistory map[string][]recordstore.TestCaseOutcome
+	// historyQueries records every ListTestCaseHistory query in call
+	// order.
+	historyQueries []recordstore.TestCaseHistoryQuery
+}
+
+// caseHistoryKey is caseHistory's key for one tenant, job, and case.
+func caseHistoryKey(cluster, tenant, jobPath, className, name string) string {
+	return cluster + "/" + tenant + "/" + jobPath + "/" + className + "/" + name
+}
+
+// ListTestCases answers the seeded case rows of one run.
+func (f *fakeRecordReader) ListTestCases(_ context.Context, runID string) ([]recordstore.TestCase, error) {
+	if f.schemaTooOld {
+		return nil, recordstore.ErrSchemaTooOld
+	}
+	if f.testCasesErr != nil {
+		return nil, f.testCasesErr
+	}
+	return f.testCases[runID], nil
+}
+
+// ListTestCaseHistory answers the seeded outcomes of one case, cut to the
+// query's limit.
+func (f *fakeRecordReader) ListTestCaseHistory(_ context.Context, q recordstore.TestCaseHistoryQuery) ([]recordstore.TestCaseOutcome, error) {
+	if f.schemaTooOld {
+		return nil, recordstore.ErrSchemaTooOld
+	}
+	f.historyQueries = append(f.historyQueries, q)
+	rows := f.caseHistory[caseHistoryKey(q.Cluster, q.Tenant, q.JobPath, q.ClassName, q.Name)]
+	if len(rows) > q.Limit {
+		rows = rows[:q.Limit]
+	}
+	return rows, nil
 }
 
 // jobHomeAnswer is one fake JobHome result.
@@ -115,6 +157,8 @@ func newFakeRecordReader() *fakeRecordReader {
 		jobDependencies: map[string]recordstore.JobDependencies{},
 		locksByTenant:   map[string][]recordstore.FleetLock{},
 		locksByCluster:  map[string][]recordstore.FleetLock{},
+		testCases:       map[string][]recordstore.TestCase{},
+		caseHistory:     map[string][]recordstore.TestCaseOutcome{},
 	}
 }
 

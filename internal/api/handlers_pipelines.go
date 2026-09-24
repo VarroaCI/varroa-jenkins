@@ -745,6 +745,150 @@ func parseRunsLimit(r *http.Request) (int, error) {
 	return n, nil
 }
 
+// --- GET /pipelines/{team}/jobs/{job}/tests/{case} ---
+
+// testCaseHistoryDefaultLimit and testCaseHistoryMaxLimit bound the case
+// history read. A limit above the maximum is clamped, never refused.
+const (
+	testCaseHistoryDefaultLimit = 50
+	testCaseHistoryMaxLimit     = 200
+)
+
+// testCaseOutcomeJSON is one row of the case history read: one run's
+// outcome for one class and test name. RunLink is the run's own page
+// path, which the caller's own tenant read check has already admitted.
+type testCaseOutcomeJSON struct {
+	RunID        string    `json:"runId"`
+	BuildNumber  int64     `json:"buildNumber,omitempty"`
+	Suite        string    `json:"suite"`
+	Status       string    `json:"status"`
+	DurationMs   int64     `json:"durationMs,omitempty"`
+	ErrorDetails string    `json:"errorDetails,omitempty"`
+	CreatedAt    time.Time `json:"createdAt"`
+	Result       string    `json:"result,omitempty"`
+	RunLink      string    `json:"runLink"`
+}
+
+// testCaseHistoryResponse is the case history envelope. Items is never
+// null: a job with no stored case answers an empty array.
+type testCaseHistoryResponse struct {
+	Items []testCaseOutcomeJSON `json:"items"`
+}
+
+// parseTestCaseHistoryLimit reads the optional limit query parameter. It
+// answers the default for an absent value and clamps a larger value to
+// the maximum. A value that is not a positive integer answers an error.
+func parseTestCaseHistoryLimit(r *http.Request) (int, error) {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" {
+		return testCaseHistoryDefaultLimit, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, errors.New("limit must be a positive integer")
+	}
+	if n > testCaseHistoryMaxLimit {
+		n = testCaseHistoryMaxLimit
+	}
+	return n, nil
+}
+
+// handleListJobTestCaseHistory serves one test case's recent outcomes for
+// one job. It resolves the team the way handleListRuns does, applies the
+// tenant read check to each tenant with the decoded job path, and reads
+// only the admitted tenants. A job the store holds no case row for
+// answers an empty list, never 404: the case rows hold no job inventory,
+// and GET /pipelines/{team}/jobs/{job} answers whether a job exists.
+func (s *Server) handleListJobTestCaseHistory(w http.ResponseWriter, r *http.Request) {
+	if s.deps.RecordStore == nil {
+		s.pipelinesUnavailable(w)
+		return
+	}
+	ctx := r.Context()
+	claims := auth.ClaimsFromContext(ctx)
+	team := r.PathValue("team")
+	jobPath := r.PathValue("job")
+
+	refs, serr := s.resolveTeamTenants(ctx, claims, team)
+	if serr != nil {
+		s.writeServiceError(w, serr)
+		return
+	}
+	var admitted []TenantRef
+	for _, ref := range refs {
+		if s.canReadPipeline(claims, ref, jobPath) {
+			admitted = append(admitted, ref)
+		}
+	}
+	if len(admitted) == 0 {
+		s.writeJSONError(w, http.StatusNotFound, "job not found")
+		return
+	}
+
+	className, name, err := ParseTestCaseKey(r.PathValue("case"))
+	if err != nil {
+		s.writeJSONError(w, http.StatusBadRequest, "malformed test case key")
+		return
+	}
+	limit, err := parseTestCaseHistoryLimit(r)
+	if err != nil {
+		s.writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	items := []testCaseOutcomeJSON{}
+	for _, ref := range admitted {
+		outcomes, err := s.deps.RecordStore.ListTestCaseHistory(ctx, recordstore.TestCaseHistoryQuery{
+			Cluster:   ref.Cluster,
+			Tenant:    ref.Tenant,
+			JobPath:   jobPath,
+			ClassName: className,
+			Name:      name,
+			Limit:     limit,
+		})
+		if s.handleReaderError(w, err, "list test case history") {
+			return
+		}
+		for _, o := range outcomes {
+			items = append(items, buildTestCaseOutcome(ref, jobPath, o))
+		}
+	}
+	// Each tenant answers its own rows newest first. The merge keeps that
+	// order across tenants, and the run id orders two rows of one time.
+	sort.SliceStable(items, func(i, j int) bool {
+		if !items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].CreatedAt.After(items[j].CreatedAt)
+		}
+		return items[i].RunID > items[j].RunID
+	})
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	s.writeJSON(w, http.StatusOK, testCaseHistoryResponse{Items: items})
+}
+
+// buildTestCaseOutcome maps one stored outcome onto the response shape.
+func buildTestCaseOutcome(ref TenantRef, jobPath string, o recordstore.TestCaseOutcome) testCaseOutcomeJSON {
+	out := testCaseOutcomeJSON{
+		RunID:        o.RunID,
+		Suite:        o.Suite,
+		Status:       o.Status,
+		ErrorDetails: o.ErrorDetails,
+		CreatedAt:    o.CreatedAt,
+		RunLink:      searchRunLink(ref.Team, jobPath, o.RunID),
+	}
+	if o.BuildNumber != nil {
+		out.BuildNumber = *o.BuildNumber
+	}
+	if o.DurationMs != nil {
+		out.DurationMs = *o.DurationMs
+	}
+	if o.Result != nil {
+		out.Result = *o.Result
+	}
+	return out
+}
+
 // crossTenantCursor is the decoded form of a cross-tenant runs cursor:
 // one recordstore cursor (or crossTenantExhaustedCursor) per tenant key
 // "<cluster>/<tenant>".

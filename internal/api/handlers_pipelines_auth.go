@@ -6,8 +6,8 @@ import (
 
 // canReadPipeline reports whether claims may read ref's tenant, narrowed to
 // jobPath when jobPath is not empty. It is the one call site the team
-// page, the job page, the run list, the job search rows, and the
-// list_runs MCP tool use. A nil Authorizer denies.
+// page, the job page, the run list, the job test case history, the job
+// search rows, and the list_runs MCP tool use. A nil Authorizer denies.
 func (s *Server) canReadPipeline(claims *auth.Claims, ref TenantRef, jobPath string) bool {
 	return s.deps.Authorizer.CanReadPipeline(claims, ref, jobPath)
 }

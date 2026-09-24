@@ -28,6 +28,15 @@
           "type": "string"
         }
       },
+      "components_parameters_case": {
+        "description": "Percent-encoded test case key, one path segment. The key is the caseKey value that GET /runs/{run}/tests returns. Encode the whole key again, because the key holds a literal \"/\". The router reads it with PathValue, which returns the decoded value.\n",
+        "in": "path",
+        "name": "case",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
       "components_parameters_cluster": {
         "description": "Cluster name (DNS-1123 label).",
         "in": "path",
@@ -3326,6 +3335,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "cases": {
+            "description": "The run's stored failed and skipped test cases, the same entries GET /runs/{run}/tests serves. The field is absent when the run holds no stored case.\n",
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_RunTestCase"
+            },
+            "type": "array"
+          },
           "cause": {
             "type": "string"
           },
@@ -3341,6 +3357,35 @@
                 "additionalProperties": false,
                 "description": "The run's aggregate test counts. The field is present only when the run reports at least one failed test.\n",
                 "properties": {
+                  "cases": {
+                    "description": "The first ten failed cases of the run, in the order the record store answers. A skipped case is not in the list. The field is absent when the run holds no stored case.\n",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "caseKey": {
+                          "description": "The opaque case key. Do not parse it. Percent-encode the whole key as one path segment before you use it as {case} on the case history read.\n",
+                          "type": "string"
+                        },
+                        "className": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "suite": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "suite",
+                        "className",
+                        "name",
+                        "caseKey"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
                   "failed": {
                     "type": "integer"
                   },
@@ -3492,6 +3537,9 @@
             "description": "The tenant's Jenkins folder prefix, from TenantRef.Folder. Empty for a root-hosted tenant.\n",
             "type": "string"
           },
+          "testReport": {
+            "$ref": "#/components/schemas/components_schemas_RunDetailTestReport"
+          },
           "testsFailed": {
             "type": "integer"
           },
@@ -3516,6 +3564,32 @@
           "status",
           "tenantFolder",
           "tenant"
+        ],
+        "type": "object"
+      },
+      "RunDetailTestReport": {
+        "additionalProperties": false,
+        "description": "The run's stored test report, on GET /runs/{run}. The field is absent when the run holds no stored report. sizeBytes and caseCount are always present, and zero is a valid value.\n",
+        "properties": {
+          "blobKey": {
+            "description": "The blob key of the archived report file. The value is empty when Jenkins stored the file locally.\n",
+            "type": "string"
+          },
+          "caseCount": {
+            "description": "The number of cases the report file holds. The file holds every case, including a passed case.\n",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sizeBytes": {
+            "description": "The length of the report file in bytes.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "blobKey",
+          "sizeBytes",
+          "caseCount"
         ],
         "type": "object"
       },
@@ -3704,18 +3778,100 @@
         ],
         "type": "object"
       },
+      "RunTestCase": {
+        "additionalProperties": false,
+        "description": "One stored test case of a run. The record store holds only failed and skipped cases, at most 500 for each run.\n",
+        "properties": {
+          "caseKey": {
+            "description": "The opaque case key the server makes from the class name and the test name. Do not parse it. Percent-encode the whole key as one path segment before you use it as {case} on GET /pipelines/{team}/jobs/{job}/tests/{case}.\n",
+            "type": "string"
+          },
+          "className": {
+            "type": "string"
+          },
+          "durationMs": {
+            "description": "The case's duration in milliseconds. Absent when the value is zero.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "errorDetails": {
+            "description": "The case's error detail text, cut at 512 bytes. Absent when the case carries no error detail.\n",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "description": "The reporter's own status name, for example FAILED or REGRESSION. A skipped case carries SKIPPED.\n",
+            "type": "string"
+          },
+          "suite": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "suite",
+          "className",
+          "name",
+          "status",
+          "caseKey"
+        ],
+        "type": "object"
+      },
       "RunTestListResponse": {
         "additionalProperties": false,
+        "description": "GET /runs/{run}/tests. items holds one row for each suite, plus the \"_total\" sentinel row. cases holds the run's stored failed and skipped cases, failed cases first. cases is always present, and an empty array is a valid value.\n",
         "properties": {
+          "cases": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_RunTestCase"
+            },
+            "type": "array"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/components_schemas_RunTestSuite"
             },
             "type": "array"
+          },
+          "report": {
+            "$ref": "#/components/schemas/components_schemas_RunTestReport"
           }
         },
         "required": [
-          "items"
+          "items",
+          "cases"
+        ],
+        "type": "object"
+      },
+      "RunTestReport": {
+        "additionalProperties": false,
+        "description": "The run's archived test report, on GET /runs/{run}/tests. The field is absent when the run holds no stored report. sizeBytes and caseCount are always present, and zero is a valid value.\n",
+        "properties": {
+          "caseCount": {
+            "description": "The number of cases the report file holds. The file holds every case, including a passed case.\n",
+            "format": "int32",
+            "type": "integer"
+          },
+          "downloadable": {
+            "description": "False when the stored blob key is empty, because Jenkins stored the file locally. The download path then answers 409.\n",
+            "type": "boolean"
+          },
+          "path": {
+            "description": "The archived path of the report file, always .varroa/tests.json. Download the file through GET /runs/{run}/artifacts/{path}.\n",
+            "type": "string"
+          },
+          "sizeBytes": {
+            "description": "The length of the report file in bytes.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "sizeBytes",
+          "caseCount",
+          "downloadable"
         ],
         "type": "object"
       },
@@ -4126,6 +4282,72 @@
         "required": [
           "name",
           "namespaces"
+        ],
+        "type": "object"
+      },
+      "TestCaseHistoryResponse": {
+        "additionalProperties": false,
+        "description": "GET /pipelines/{team}/jobs/{job}/tests/{case}. items holds the case's recent outcomes, newest first, within the record store retention window. The response holds no rate, no trend, and no flake score.\n",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_TestCaseOutcome"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "TestCaseOutcome": {
+        "additionalProperties": false,
+        "description": "One outcome of one test case in one run of the job. A row names its own suite, because two suites can report one class and one name.\n",
+        "properties": {
+          "buildNumber": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "createdAt": {
+            "description": "The creation time of the run.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "durationMs": {
+            "description": "The case's duration in milliseconds. Absent when the case reports no duration.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "errorDetails": {
+            "description": "The case's error detail text, cut at 512 bytes. Absent when the case carries no error detail.\n",
+            "type": "string"
+          },
+          "result": {
+            "description": "The run's own result. Absent when the run holds no result.",
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "runLink": {
+            "description": "The run's own page path, /pipelines/{team}/{jobPath}/{runId}, the same link a fleet lock row carries.\n",
+            "type": "string"
+          },
+          "status": {
+            "description": "The reporter's own status name. A skipped case carries SKIPPED.\n",
+            "type": "string"
+          },
+          "suite": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runId",
+          "suite",
+          "status",
+          "createdAt",
+          "runLink"
         ],
         "type": "object"
       },
@@ -10371,6 +10593,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "cases": {
+            "description": "The run's stored failed and skipped test cases, the same entries GET /runs/{run}/tests serves. The field is absent when the run holds no stored case.\n",
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_RunTestCase"
+            },
+            "type": "array"
+          },
           "cause": {
             "type": "string"
           },
@@ -10386,6 +10615,35 @@
                 "additionalProperties": false,
                 "description": "The run's aggregate test counts. The field is present only when the run reports at least one failed test.\n",
                 "properties": {
+                  "cases": {
+                    "description": "The first ten failed cases of the run, in the order the record store answers. A skipped case is not in the list. The field is absent when the run holds no stored case.\n",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "caseKey": {
+                          "description": "The opaque case key. Do not parse it. Percent-encode the whole key as one path segment before you use it as {case} on the case history read.\n",
+                          "type": "string"
+                        },
+                        "className": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "suite": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "suite",
+                        "className",
+                        "name",
+                        "caseKey"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
                   "failed": {
                     "type": "integer"
                   },
@@ -10537,6 +10795,9 @@
             "description": "The tenant's Jenkins folder prefix, from TenantRef.Folder. Empty for a root-hosted tenant.\n",
             "type": "string"
           },
+          "testReport": {
+            "$ref": "#/components/schemas/components_schemas_RunDetailTestReport"
+          },
           "testsFailed": {
             "type": "integer"
           },
@@ -10561,6 +10822,32 @@
           "status",
           "tenantFolder",
           "tenant"
+        ],
+        "type": "object"
+      },
+      "components_schemas_RunDetailTestReport": {
+        "additionalProperties": false,
+        "description": "The run's stored test report, on GET /runs/{run}. The field is absent when the run holds no stored report. sizeBytes and caseCount are always present, and zero is a valid value.\n",
+        "properties": {
+          "blobKey": {
+            "description": "The blob key of the archived report file. The value is empty when Jenkins stored the file locally.\n",
+            "type": "string"
+          },
+          "caseCount": {
+            "description": "The number of cases the report file holds. The file holds every case, including a passed case.\n",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sizeBytes": {
+            "description": "The length of the report file in bytes.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "blobKey",
+          "sizeBytes",
+          "caseCount"
         ],
         "type": "object"
       },
@@ -10749,18 +11036,100 @@
         ],
         "type": "object"
       },
+      "components_schemas_RunTestCase": {
+        "additionalProperties": false,
+        "description": "One stored test case of a run. The record store holds only failed and skipped cases, at most 500 for each run.\n",
+        "properties": {
+          "caseKey": {
+            "description": "The opaque case key the server makes from the class name and the test name. Do not parse it. Percent-encode the whole key as one path segment before you use it as {case} on GET /pipelines/{team}/jobs/{job}/tests/{case}.\n",
+            "type": "string"
+          },
+          "className": {
+            "type": "string"
+          },
+          "durationMs": {
+            "description": "The case's duration in milliseconds. Absent when the value is zero.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "errorDetails": {
+            "description": "The case's error detail text, cut at 512 bytes. Absent when the case carries no error detail.\n",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "description": "The reporter's own status name, for example FAILED or REGRESSION. A skipped case carries SKIPPED.\n",
+            "type": "string"
+          },
+          "suite": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "suite",
+          "className",
+          "name",
+          "status",
+          "caseKey"
+        ],
+        "type": "object"
+      },
       "components_schemas_RunTestListResponse": {
         "additionalProperties": false,
+        "description": "GET /runs/{run}/tests. items holds one row for each suite, plus the \"_total\" sentinel row. cases holds the run's stored failed and skipped cases, failed cases first. cases is always present, and an empty array is a valid value.\n",
         "properties": {
+          "cases": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_RunTestCase"
+            },
+            "type": "array"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/components_schemas_RunTestSuite"
             },
             "type": "array"
+          },
+          "report": {
+            "$ref": "#/components/schemas/components_schemas_RunTestReport"
           }
         },
         "required": [
-          "items"
+          "items",
+          "cases"
+        ],
+        "type": "object"
+      },
+      "components_schemas_RunTestReport": {
+        "additionalProperties": false,
+        "description": "The run's archived test report, on GET /runs/{run}/tests. The field is absent when the run holds no stored report. sizeBytes and caseCount are always present, and zero is a valid value.\n",
+        "properties": {
+          "caseCount": {
+            "description": "The number of cases the report file holds. The file holds every case, including a passed case.\n",
+            "format": "int32",
+            "type": "integer"
+          },
+          "downloadable": {
+            "description": "False when the stored blob key is empty, because Jenkins stored the file locally. The download path then answers 409.\n",
+            "type": "boolean"
+          },
+          "path": {
+            "description": "The archived path of the report file, always .varroa/tests.json. Download the file through GET /runs/{run}/artifacts/{path}.\n",
+            "type": "string"
+          },
+          "sizeBytes": {
+            "description": "The length of the report file in bytes.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "sizeBytes",
+          "caseCount",
+          "downloadable"
         ],
         "type": "object"
       },
@@ -11798,6 +12167,72 @@
         },
         "required": [
           "name"
+        ],
+        "type": "object"
+      },
+      "components_schemas_TestCaseHistoryResponse": {
+        "additionalProperties": false,
+        "description": "GET /pipelines/{team}/jobs/{job}/tests/{case}. items holds the case's recent outcomes, newest first, within the record store retention window. The response holds no rate, no trend, and no flake score.\n",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_TestCaseOutcome"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "components_schemas_TestCaseOutcome": {
+        "additionalProperties": false,
+        "description": "One outcome of one test case in one run of the job. A row names its own suite, because two suites can report one class and one name.\n",
+        "properties": {
+          "buildNumber": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "createdAt": {
+            "description": "The creation time of the run.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "durationMs": {
+            "description": "The case's duration in milliseconds. Absent when the case reports no duration.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "errorDetails": {
+            "description": "The case's error detail text, cut at 512 bytes. Absent when the case carries no error detail.\n",
+            "type": "string"
+          },
+          "result": {
+            "description": "The run's own result. Absent when the run holds no result.",
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "runLink": {
+            "description": "The run's own page path, /pipelines/{team}/{jobPath}/{runId}, the same link a fleet lock row carries.\n",
+            "type": "string"
+          },
+          "status": {
+            "description": "The reporter's own status name. A skipped case carries SKIPPED.\n",
+            "type": "string"
+          },
+          "suite": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runId",
+          "suite",
+          "status",
+          "createdAt",
+          "runLink"
         ],
         "type": "object"
       },
@@ -18015,6 +18450,75 @@
         ]
       }
     },
+    "/api/v1/pipelines/{team}/jobs/{job}/tests/{case}": {
+      "get": {
+        "description": "Resolves {team} onto one or more record-store tenants and applies the tenant read check to each, with the decoded job path. Reads the case history of each admitted tenant, merges the rows newest first, and cuts the list to limit. The history is keyed by class name and test name, so two suites that report one class and one name merge. A job that holds no stored case answers an empty items list. The read answers the record store retention window.\n",
+        "operationId": "listJobTestCaseHistory",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/components_parameters_team"
+          },
+          {
+            "$ref": "#/components/parameters/components_parameters_job"
+          },
+          {
+            "$ref": "#/components/parameters/components_parameters_case"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_TestCaseHistoryResponse"
+                }
+              }
+            },
+            "description": "The case's recent outcomes, newest first."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_Error"
+                }
+              }
+            },
+            "description": "The server cannot split or decode the case key."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_Error"
+                }
+              }
+            },
+            "description": "The team resolves no tenant, or the caller may not read any of its tenants."
+          },
+          "503": {
+            "$ref": "#/components/responses/components_responses_ServiceUnavailable"
+          }
+        },
+        "summary": "Lists the recent outcomes of one test case of a job, across every tenant of the team.",
+        "tags": [
+          "Pipelines"
+        ]
+      }
+    },
     "/api/v1/pipelines/{team}/locks": {
       "get": {
         "description": "Resolves {team} onto one or more record-store tenants, applies the tenant read check to each, reads each tenant's locks, and merges the answers by (name, waitingSince, runId). Each row carries its own tenant and jobPath, whichever tenant it belongs to. A row carries runLink only when the caller's own grant can read that row's own run. A row reports its own state and its own waitingSince or acquiredAt. It carries no queue position.\n",
@@ -19221,7 +19725,7 @@
     },
     "/api/v1/runs/{run}/tests": {
       "get": {
-        "description": "One row per suite, plus the \"_total\" sentinel row. Carries no individual test case.\n",
+        "description": "items holds one row for each suite, plus the \"_total\" sentinel row. cases holds the run's stored failed and skipped cases, at most 500, failed cases first. report describes the archived report file, which holds every case. Download that file through the run's artifact path.\n",
         "operationId": "listRunTests",
         "parameters": [
           {
@@ -19237,7 +19741,7 @@
                 }
               }
             },
-            "description": "The run's test suite totals."
+            "description": "The run's test suite totals, test cases, and test report."
           },
           "401": {
             "$ref": "#/components/responses/components_responses_Unauthorized"
@@ -19256,7 +19760,7 @@
             "$ref": "#/components/responses/components_responses_ServiceUnavailable"
           }
         },
-        "summary": "Lists one run's test suite totals.",
+        "summary": "Lists one run's test suite totals, its stored test cases, and its test report.",
         "tags": [
           "Pipelines"
         ]

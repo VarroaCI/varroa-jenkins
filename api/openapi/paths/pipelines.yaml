@@ -131,6 +131,48 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
+/api/v1/pipelines/{team}/jobs/{job}/tests/{case}:
+  get:
+    operationId: listJobTestCaseHistory
+    tags: [Pipelines]
+    summary: Lists the recent outcomes of one test case of a job, across every tenant of the team.
+    description: >
+      Resolves {team} onto one or more record-store tenants and applies
+      the tenant read check to each, with the decoded job path. Reads the
+      case history of each admitted tenant, merges the rows newest first,
+      and cuts the list to limit. The history is keyed by class name and
+      test name, so two suites that report one class and one name merge.
+      A job that holds no stored case answers an empty items list. The
+      read answers the record store retention window.
+    parameters:
+      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/job'
+      - $ref: '../components/parameters.yaml#/case'
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+    responses:
+      "200":
+        description: The case's recent outcomes, newest first.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/TestCaseHistoryResponse'
+      "400":
+        description: The server cannot split or decode the case key.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        description: The team resolves no tenant, or the caller may not read any of its tenants.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
 /api/v1/pipelines/{team}/locks:
   get:
     operationId: listTeamFleetLocks

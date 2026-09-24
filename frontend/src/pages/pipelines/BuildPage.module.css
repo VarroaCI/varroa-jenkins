@@ -165,6 +165,43 @@
 .testsNotice {
   color: var(--text-2);
   font-size: 13px;
+  margin: 0;
+}
+
+.testsTab {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The report line names the report path and its size, then the download. */
+.reportLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 14px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+/* A stack trace wraps, and a long trace scrolls inside its cell. */
+.caseError {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 12em;
+  overflow-y: auto;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.digestCases {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
 }
 
 .changesList {

@@ -207,6 +207,7 @@ var routeManifest = []route{
 	{Method: "GET", Path: "/api/v1/pipelines/{team}/jobs/{job}"},
 	{Method: "GET", Path: "/api/v1/pipelines/{team}/jobs/{job}/runs"},
 	{Method: "POST", Path: "/api/v1/pipelines/{team}/jobs/{job}/runs"},
+	{Method: "GET", Path: "/api/v1/pipelines/{team}/jobs/{job}/tests/{case}"},
 	// Fleet locks (add-fleet-locks-view): the team read and the
 	// fleet-wide read.
 	{Method: "GET", Path: "/api/v1/pipelines/{team}/locks"},

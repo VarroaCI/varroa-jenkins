@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -115,6 +116,11 @@ type runDetailJSON struct {
 	Summary           string            `json:"summary,omitempty"`
 	Digest            *runDigestJSON    `json:"digest,omitempty"`
 	Inputs            []runInputJSON    `json:"inputs,omitempty"`
+	// TestReport is absent when the run holds no stored report. Cases is
+	// absent when the run holds no case row, unlike the tests read's own
+	// cases array, which is always present.
+	TestReport *runTestReportDetailJSON `json:"testReport,omitempty"`
+	Cases      []runTestCaseJSON        `json:"cases,omitempty"`
 }
 
 type runArtifactJSON struct {
@@ -137,8 +143,116 @@ type runTestSuiteJSON struct {
 	DurationMs int64  `json:"durationMs,omitempty"`
 }
 
+// testReportPath is the archived path of the per-case test report, the
+// one the record store names.
+const testReportPath = recordstore.TestReportPath
+
+// runTestCaseJSON is one stored test case of a run. CaseKey is the opaque
+// key the case history read takes back unchanged.
+type runTestCaseJSON struct {
+	Suite        string `json:"suite"`
+	ClassName    string `json:"className"`
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	DurationMs   int64  `json:"durationMs,omitempty"`
+	ErrorDetails string `json:"errorDetails,omitempty"`
+	CaseKey      string `json:"caseKey"`
+}
+
+// runTestReportJSON is the tests read's report object. SizeBytes and
+// CaseCount carry no omitempty, because a zero case count is a real
+// answer. Downloadable is false when the store holds no blob key.
+type runTestReportJSON struct {
+	Path         string `json:"path"`
+	SizeBytes    int64  `json:"sizeBytes"`
+	CaseCount    int32  `json:"caseCount"`
+	Downloadable bool   `json:"downloadable"`
+}
+
+// runTestReportDetailJSON is the run detail's testReport object. BlobKey
+// is empty for a report that a controller stores locally.
+type runTestReportDetailJSON struct {
+	BlobKey   string `json:"blobKey"`
+	SizeBytes int64  `json:"sizeBytes"`
+	CaseCount int32  `json:"caseCount"`
+}
+
+// runTestListResponse is the tests read. Cases is never null: an empty
+// array is its value for a run with no case row.
 type runTestListResponse struct {
-	Items []runTestSuiteJSON `json:"items"`
+	Items  []runTestSuiteJSON `json:"items"`
+	Cases  []runTestCaseJSON  `json:"cases"`
+	Report *runTestReportJSON `json:"report,omitempty"`
+}
+
+// TestCaseKey mints the opaque case key the tests read returns and the
+// case history read takes back. url.PathEscape escapes a "/" as "%2F", so
+// neither half holds the separator and the split back is unambiguous.
+func TestCaseKey(className, name string) string {
+	return url.PathEscape(className) + "/" + url.PathEscape(name)
+}
+
+// ParseTestCaseKey splits key on the first "/" and unescapes each half. A
+// key with no "/", or a half that does not unescape, answers an error.
+func ParseTestCaseKey(key string) (className, name string, err error) {
+	rawClass, rawName, ok := strings.Cut(key, "/")
+	if !ok {
+		return "", "", errors.New("test case key holds no separator")
+	}
+	if className, err = url.PathUnescape(rawClass); err != nil {
+		return "", "", fmt.Errorf("test case key class name: %w", err)
+	}
+	if name, err = url.PathUnescape(rawName); err != nil {
+		return "", "", fmt.Errorf("test case key test name: %w", err)
+	}
+	return className, name, nil
+}
+
+// buildRunTestCases maps the stored case rows onto the response shape, in
+// the reader's own order. It never answers nil.
+func buildRunTestCases(cases []recordstore.TestCase) []runTestCaseJSON {
+	out := make([]runTestCaseJSON, 0, len(cases))
+	for _, c := range cases {
+		entry := runTestCaseJSON{
+			Suite:        c.Suite,
+			ClassName:    c.ClassName,
+			Name:         c.Name,
+			Status:       c.Status,
+			ErrorDetails: c.ErrorDetails,
+			CaseKey:      TestCaseKey(c.ClassName, c.Name),
+		}
+		if c.DurationMs != nil {
+			entry.DurationMs = *c.DurationMs
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// runTestReportPayload reads the test_report object the recorder merges
+// into Run.Payload. A nil TestReport means the run holds no stored report.
+type runTestReportPayload struct {
+	TestReport *struct {
+		SizeBytes int64 `json:"size_bytes"`
+		CaseCount int32 `json:"case_count"`
+	} `json:"test_report"`
+}
+
+// storedTestReport answers the run's stored report: the size, the case
+// count, and the blob key. found is false when runs.payload holds no
+// test_report object, or when the column does not decode.
+func storedTestReport(run recordstore.Run) (sizeBytes int64, caseCount int32, blobKey string, found bool) {
+	if len(run.Payload) == 0 {
+		return 0, 0, "", false
+	}
+	var payload runTestReportPayload
+	if json.Unmarshal(run.Payload, &payload) != nil || payload.TestReport == nil {
+		return 0, 0, "", false
+	}
+	if run.TestReportKey != nil {
+		blobKey = *run.TestReportKey
+	}
+	return payload.TestReport.SizeBytes, payload.TestReport.CaseCount, blobKey, true
 }
 
 // --- Shared resolution ---
@@ -355,6 +469,9 @@ func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID,
 			d.InterruptedReason = interrupted.InterruptedReason
 		}
 	}
+	if size, count, key, found := storedTestReport(run); found {
+		d.TestReport = &runTestReportDetailJSON{BlobKey: key, SizeBytes: size, CaseCount: count}
+	}
 	for _, st := range stages {
 		d.Stages = append(d.Stages, buildRunStage(st))
 	}
@@ -428,6 +545,10 @@ func (s *Server) handleListRunTests(w http.ResponseWriter, r *http.Request) {
 	if s.handleReaderError(w, err, "list tests") {
 		return
 	}
+	cases, err := s.deps.RecordStore.ListTestCases(ctx, run.RunID)
+	if s.handleReaderError(w, err, "list test cases") {
+		return
+	}
 	out := make([]runTestSuiteJSON, len(suites))
 	for i, ts := range suites {
 		out[i] = runTestSuiteJSON{Suite: ts.Suite, Total: ts.Total, Failed: ts.Failed, Skipped: ts.Skipped}
@@ -435,7 +556,11 @@ func (s *Server) handleListRunTests(w http.ResponseWriter, r *http.Request) {
 			out[i].DurationMs = *ts.DurationMs
 		}
 	}
-	s.writeJSON(w, http.StatusOK, runTestListResponse{Items: out})
+	resp := runTestListResponse{Items: out, Cases: buildRunTestCases(cases)}
+	if size, count, key, found := storedTestReport(run); found {
+		resp.Report = &runTestReportJSON{Path: testReportPath, SizeBytes: size, CaseCount: count, Downloadable: key != ""}
+	}
+	s.writeJSON(w, http.StatusOK, resp)
 }
 
 // --- GET /runs/{run}/changes ---

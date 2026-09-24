@@ -1,0 +1,88 @@
+.table { composes: dataTable from "../tables.module.css"; }
+
+.page {
+  animation: fade 0.3s ease;
+  max-width: 1080px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page {
+    animation: none;
+  }
+}
+
+.pageHead {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.jobLink {
+  font-size: 13px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.pageTitle {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-wrap: anywhere;
+}
+
+/* The class name sits above the test name, in a smaller mono face. */
+.className {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-2);
+}
+
+.testName {
+  font-family: var(--mono);
+}
+
+.pageDesc {
+  margin: 0.25rem 0 0;
+  color: var(--text-2);
+  font-size: 0.875rem;
+}
+
+.notice,
+.empty {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 12px 14px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+/* A duration and an elapsed time are numbers that read in a column. */
+.numeric {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A stack trace wraps, and a long trace scrolls inside its cell. */
+.errorDetails {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 12em;
+  overflow-y: auto;
+  margin: 0;
+}

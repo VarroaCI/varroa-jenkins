@@ -164,7 +164,11 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   (`template_name`, `template_version`, `marker_path`, `marker_revision`)
   onto the `run.started`/`run.completed` payload via `addTemplateFields`,
   omitting any field the event does not carry; a `HEARTBEAT` event never
-  carries them.
+  carries them. A `COMPLETED` event publishes `run.tests` when it carries a
+  test counter, a test case, or a test report, so a report whose case count
+  is zero still reaches the store. `shrinkToBudget`'s `cases` rung runs after
+  the `error` truncation and drops the **last** case, because the plugin
+  sends the cases in priority order.
 - **Command outcomes** (`bus_handler.go`, `build_events.go`) — a
   `CommandResult` for a pending imperative publishes one envelope on the
   same `builds.<cluster>.<ns>.<cell>` subject the build events use.

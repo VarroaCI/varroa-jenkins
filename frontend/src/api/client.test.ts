@@ -99,6 +99,7 @@ import {
   listRunArtifacts,
   downloadRunArtifact,
   listRunTests,
+  getTestCaseHistory,
   listRunChanges,
   cancelRun,
   rerunRun,
@@ -1075,6 +1076,20 @@ describe("Pipelines API", () => {
     await listRunTests("r1");
     const [url] = mockBffFetch.mock.calls[0];
     expect(url).toBe("/runs/r1/tests");
+  });
+
+  it("getTestCaseHistory encodes the job path and the case key as one segment each", async () => {
+    mockBffFetch.mockResolvedValue({ items: [] });
+    await getTestCaseHistory("payments", "checkout-api/main", "a%2Fb/c");
+    const [url] = mockBffFetch.mock.calls[0];
+    expect(url).toBe("/pipelines/payments/jobs/checkout-api%2Fmain/tests/a%252Fb%2Fc");
+  });
+
+  it("getTestCaseHistory sends the limit when one is given", async () => {
+    mockBffFetch.mockResolvedValue({ items: [] });
+    await getTestCaseHistory("payments", "main", "Foo/bar", 20);
+    const [url] = mockBffFetch.mock.calls[0];
+    expect(url).toBe("/pipelines/payments/jobs/main/tests/Foo%2Fbar?limit=20");
   });
 
   it("listRunChanges GETs /runs/{run}/changes", async () => {

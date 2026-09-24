@@ -139,12 +139,18 @@ of the fleet's audit activity, once a controller becomes disposable.
   `00016_runs_inputs.sql` adds the nullable `runs.inputs`, the pending input
   steps a `run.input` event reports. It carries no default and no index, and
   an empty set stores NULL, so no reader tells NULL from an empty array.
+  `00017_run_test_cases.sql` adds the build-record table `run_test_cases`,
+  one row per reported failed or skipped case, keyed
+  `(run_id, suite, class_name, name)`. It carries `cluster`, `tenant`, and
+  `job_path` for the case history index, no CHECK on `status`, no
+  partitioning, and no foreign key to `runs`. It also adds the nullable
+  `runs.test_report_key`, the blob key of the archived test report.
   A later migration never edits an applied one. `migrationsFS` (`migrations.go`) embeds
   every file under `migrations/` into the binary through `embed.FS`, so
   the recorder needs no separate deploy artifact. Monthly partition
   names on `runs`, `log_chunks`, and `activity` follow
   `<table>_p<YYYYMM>`; the retention round that adds later partitions
-  must use the same pattern. The schema holds exactly twelve tables, no
+  must use the same pattern. The schema holds exactly thirteen tables, no
   more and no fewer.
 - **Migration runner** (`migrate.go`) — `RunMigrations` creates schema
   `varroa`, applies pending migrations under a Postgres advisory lock on a
@@ -426,6 +432,14 @@ of the fleet's audit activity, once a controller becomes disposable.
   `runsStatusMergeSQL` (`ingest_common.go`) is the
   one CASE expression every `runs` writer reuses to keep `status` monotonic
   and `DUPLICATE` terminal.
+  `applyRunTests` (`ingest_tests.go`) also writes the payload's `cases` and
+  `test_report` in the same transaction. A `cases` key replaces the run's
+  whole `run_test_cases` set: a delete, then one `unnest` insert of the
+  cases `dedupeCases` keeps. An absent `cases` key changes no case row.
+  `test_report.blob_key` reaches `runs.test_report_key` only when it is
+  not empty, and the size and the case count merge into `runs.payload`
+  under `test_report`. The merge wraps `runs.payload` in `COALESCE`,
+  because `jsonb || jsonb` answers NULL on a NULL operand.
   `applyRunHeartbeat` (`ingest_heartbeat.go`) raises the two liveness
   columns only for the run's own owner. The owner is the intent's
   `cell_instance`, else the stored `accepted_instance`, which is the
@@ -581,6 +595,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   it. Object deletes (`retention_objects.go`) take an `ObjectDeleter`
   (`Delete` plus `DeletePrefix`), a narrow interface over `blob.Store`, and
   call `blob.LogKey`/`blob.LogIndexKey` for the two fixed log keys.
+  `deleteExpiredChildRows` (`retention_childrows.go`) deletes `run_stages`,
+  `run_tests`, and `run_test_cases` rows past the `retention.runs` cutoff,
+  in bounded batches.
   `deleteExpiredRunState` is the mesh's hourly backstop: it removes the
   run-state prefix of every run terminal for more than an hour, over its
   own bounded query, because the log step reads a different cutoff. The
@@ -873,6 +890,11 @@ of the fleet's audit activity, once a controller becomes disposable.
   `DISTINCT job_path`, because `job_schedules` holds one row for each
   trigger type. The window is a fixed 24 hours and no caller chooses
   another. These methods add no migration and no index.
+  `ListTestCases` and `ListTestCaseHistory` (`reader_testcases.go`) read
+  `run_test_cases`. The run read answers every row that is not `SKIPPED`
+  first, then each group by suite, class name, and test name. The history
+  read joins `runs` on its own primary key, answers one class and name of
+  one job newest first, and computes no rate. The caller bounds its limit.
 
 ## Work Guidance
 

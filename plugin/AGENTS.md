@@ -160,7 +160,20 @@ the root AGENTS.md greenfield rule.
   `Graph.onNewHead` schedules one deferred re-check per arriving node on a daemon timer,
   because the step attaches its action to the run after the node exists. The re-check
   emits `run.input` with the run's whole pending set, and only on a set that changed; the
-  `HEARTBEAT` event carries the cached set alone. `RunListener.onStarted` can fire before a Varroa
+  `HEARTBEAT` event carries the cached set alone. Fields 48 and 49, `test_report` and
+  `test_cases` (`BuildTestReport.java`/`BuildTestCase.java`), ride the `COMPLETED` event
+  alone. `VarroaTestReport.java` reads the junit result by method name, because `junit`
+  is a test-scope dependency: it finds the action whose class hierarchy holds the simple
+  name `AbstractTestResultAction`, then walks `getResult()`, `getSuites()`, and each
+  suite's cases once. A result with no `getSuites()` produces no report and no case, and
+  the counters stay. `Runs.onCompleted` writes every case to `.varroa/tests.json` in a
+  temporary directory and archives it through `run.pickArtifactManager().archive(...)`
+  **before** `ArtifactCollector.collect(run)`, so the report's blob key comes from the
+  collected entry; a scan that finds no entry sends an empty key with the size and the
+  case count. A failed archive logs a warning, sends no report pointer, and keeps the
+  event. The event carries the failed cases, then the skipped cases, at most 500
+  (`MAX_TEST_CASES`), every string cut at 512 bytes; the ladder drops the last case
+  before any stage. `RunListener.onStarted` can fire before a Varroa
   template flow definition attaches that action, so `Runs` holds the `STARTED` event for
   such a run (named by `FlowDefinition` class, since this package holds no compile
   dependency on `template`'s flow definitions) until the action attaches, in either state,
@@ -212,9 +225,9 @@ the root AGENTS.md greenfield rule.
   the line to the caller run's own console, reached through the item's
   `Cause.UpstreamCause` and `FlowExecutionOwner`, and falls back to the system log.
   The five counters are `varroa_plugin_forwarded_{scm,cron,api,other}`, keyed by the
-  intent key's scheme, and `varroa_plugin_forward_refused`. `pipeline-build-step` and
-  `pipeline-input-step` are **test-scope** dependencies only: no main-scope class names
-  either step or its action.
+  intent key's scheme, and `varroa_plugin_forward_refused`. `pipeline-build-step`,
+  `pipeline-input-step`, and `junit` are **test-scope** dependencies only: no main-scope
+  class names a type of any of the three.
 - **Cross-tenant pipeline API** (the `varroa` global variable; D1, D2, D11, D12):
   `VarroaGlobalVariable.java` compiles `varroa/Varroa.groovy` and
   `varroa/VarroaRunHandle.groovy` (plugin resources, not classpath `.class` files) into

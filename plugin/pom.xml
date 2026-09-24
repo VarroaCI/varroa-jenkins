@@ -183,6 +183,17 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- junit, test scope only (D14): the recorder reads the test result
+             action and its suites and cases by method name, so a test that
+             proves a real junit report reached the archive needs the real
+             classes. No main-scope class names a junit type. The BOM manages
+             the version. -->
+        <dependency>
+            <groupId>org.jenkins-ci.plugins</groupId>
+            <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+
         <!-- Real folders for the D12 tenant-isolation tests (task 10.3c): MockFolder
              carries no folder-property support, so a folder-scoped credential needs
              the real Folder class. Compile scope, not test: WorkflowMultiBranchProject

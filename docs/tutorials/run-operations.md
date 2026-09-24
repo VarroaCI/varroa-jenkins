@@ -41,7 +41,7 @@ These runs carry a card: `UNSTABLE`, `FAILURE`, `ABORTED`, `NOT_BUILT`, and a st
 `INTERRUPTED`. These runs carry no card: a run with no result yet, a successful run, a refused
 trigger, and an interrupted run that never started.
 
-The card shows up to four parts. Each part appears on its own.
+The card shows up to five parts. Each part appears on its own.
 
 | Part | Meaning |
 |---|---|
@@ -49,6 +49,7 @@ The card shows up to four parts. Each part appears on its own.
 | Error | That stage's own stored error text |
 | Log tail | The last 50 log lines of that stage |
 | Failed tests | The failed, skipped, and total counts of the run's tests |
+| Failed cases | At most ten failed cases by class and test name. Each links to that case's history |
 
 The card uses the whole log for the log tail when no stage reports `FAILURE`. It uses the whole
 log too when the stored log index names no stage. An aborted run and a run with no stages take this
@@ -57,7 +58,7 @@ fallback.
 The card carries no log tail when the server cannot read the log. The **Log** tab then shows what
 the store holds.
 
-A record that holds none of the four parts still shows the card, with no part in it.
+A record that holds none of the five parts still shows the card, with no part in it.
 
 ## Attach a summary line
 

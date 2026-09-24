@@ -314,6 +314,8 @@ paths:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}'
   /api/v1/pipelines/{team}/jobs/{job}/runs:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}~1runs'
+  /api/v1/pipelines/{team}/jobs/{job}/tests/{case}:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}~1tests~1{case}'
   /api/v1/pipelines/{team}/locks:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1locks'
   /api/v1/pipelines/{team}/markers/validate:
@@ -578,6 +580,16 @@ components:
       $ref: './components/schemas.yaml#/RunTestSuite'
     RunTestListResponse:
       $ref: './components/schemas.yaml#/RunTestListResponse'
+    RunTestCase:
+      $ref: './components/schemas.yaml#/RunTestCase'
+    RunTestReport:
+      $ref: './components/schemas.yaml#/RunTestReport'
+    RunDetailTestReport:
+      $ref: './components/schemas.yaml#/RunDetailTestReport'
+    TestCaseOutcome:
+      $ref: './components/schemas.yaml#/TestCaseOutcome'
+    TestCaseHistoryResponse:
+      $ref: './components/schemas.yaml#/TestCaseHistoryResponse'
     RunChange:
       $ref: './components/schemas.yaml#/RunChange'
     RunChangeListResponse:
