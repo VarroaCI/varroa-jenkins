@@ -452,6 +452,7 @@ message BuildEvent {
   repeated BuildInput inputs = 47;
   BuildTestReport test_report = 48;
   repeated BuildTestCase test_cases = 49;
+  string replay_of = 50;
 }
 
 message ClaimRequest {
@@ -695,6 +696,7 @@ enum CommandType {
   COMMAND_TYPE_RESUME_BUILD = 7;
   PROCEED_INPUT = 8;
   ABORT_INPUT = 9;
+  REPLAY_BUILD = 10;
 }
 
 message ImperativeCommand {
@@ -711,6 +713,7 @@ message ImperativeCommand {
   ResumeBuildPayload resume_build = 9;
   ProceedInputPayload proceed_input = 10;
   AbortInputPayload abort_input = 11;
+  ReplayBuildPayload replay_build = 12;
 }
 
 message ReplayWebhookPayload {
@@ -760,6 +763,21 @@ message AbortInputPayload {
   // @required
   string input_id = 4;
   ActingUser acting_user = 5;
+}
+
+message ReplayBuildPayload {
+  // @required
+  string run_id = 1;
+  // @required
+  string intent_key = 2;
+  // @required
+  string job_path = 3;
+  // @required
+  string source_run_id = 4;
+  // @required
+  string script = 5;
+  ActingUser acting_user = 6;
+  map<string, string> parameters = 7;
 }
 
 message CancelBuildPayload {

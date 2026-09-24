@@ -224,8 +224,10 @@ var routeManifest = []route{
 	{Method: "GET", Path: "/api/v1/runs/{run}/artifacts/{path}"},
 	{Method: "GET", Path: "/api/v1/runs/{run}/tests"},
 	{Method: "GET", Path: "/api/v1/runs/{run}/changes"},
+	{Method: "GET", Path: "/api/v1/runs/{run}/script"},
 	{Method: "POST", Path: "/api/v1/runs/{run}/cancel"},
 	{Method: "POST", Path: "/api/v1/runs/{run}/rerun"},
+	{Method: "POST", Path: "/api/v1/runs/{run}/replay"},
 	{Method: "POST", Path: "/api/v1/runs/{run}/inputs/{input}/proceed"},
 	{Method: "POST", Path: "/api/v1/runs/{run}/inputs/{input}/abort"},
 }

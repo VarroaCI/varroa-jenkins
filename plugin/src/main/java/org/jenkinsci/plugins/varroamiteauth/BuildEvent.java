@@ -40,6 +40,10 @@ import java.util.Map;
  * set only on the {@code COMPLETED} event. {@link #toJson()} writes no
  * {@code test_report} key for a null report and no {@code test_cases} key
  * for an empty list.
+ *
+ * <p>Field 50, {@code replay_of}, names the run whose script a replayed
+ * build copied. Only the {@code STARTED} event carries it. {@link
+ * #toJson()} writes no key for it when it is empty.
  */
 public final class BuildEvent implements PostableEvent {
 
@@ -103,6 +107,7 @@ public final class BuildEvent implements PostableEvent {
     private final List<BuildInput> inputs;
     private final BuildTestReport testReport;
     private final List<BuildTestCase> testCases;
+    private final String replayOf;
 
     private BuildEvent(Builder b) {
         this.phase = orEmpty(b.phase);
@@ -154,6 +159,7 @@ public final class BuildEvent implements PostableEvent {
         this.inputs = List.copyOf(b.inputs);
         this.testReport = b.testReport;
         this.testCases = List.copyOf(b.testCases);
+        this.replayOf = orEmpty(b.replayOf);
     }
 
     private static String orEmpty(String s) {
@@ -380,6 +386,11 @@ public final class BuildEvent implements PostableEvent {
         return testCases;
     }
 
+    /** Field 50: the run a replayed build copied its script from. Empty for a build with no source. */
+    public String getReplayOf() {
+        return replayOf;
+    }
+
     /**
      * Serializes the event to a {@link JSONObject} using proto JSON field
      * names, ready to post to {@code /v1/events}.
@@ -483,6 +494,9 @@ public final class BuildEvent implements PostableEvent {
             }
             o.put("test_cases", testCasesArr);
         }
+        if (!replayOf.isEmpty()) {
+            o.put("replay_of", replayOf);
+        }
         return o;
     }
 
@@ -549,7 +563,8 @@ public final class BuildEvent implements PostableEvent {
                 .summary(summary)
                 .inputs(inputs)
                 .testReport(testReport)
-                .testCases(testCases);
+                .testCases(testCases)
+                .replayOf(replayOf);
     }
 
     public static final class Builder {
@@ -602,6 +617,7 @@ public final class BuildEvent implements PostableEvent {
         private List<BuildInput> inputs = new ArrayList<>();
         private BuildTestReport testReport;
         private List<BuildTestCase> testCases = new ArrayList<>();
+        private String replayOf;
 
         private Builder() {
         }
@@ -865,6 +881,12 @@ public final class BuildEvent implements PostableEvent {
         /** Field 49: the failed cases, then the skipped cases, in walk order. */
         public Builder testCases(List<BuildTestCase> v) {
             this.testCases = v != null ? new ArrayList<>(v) : new ArrayList<>();
+            return this;
+        }
+
+        /** Field 50: the run a replayed build copied its script from. */
+        public Builder replayOf(String v) {
+            this.replayOf = v;
             return this;
         }
 

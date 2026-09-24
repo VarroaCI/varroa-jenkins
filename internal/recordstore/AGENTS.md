@@ -50,11 +50,25 @@ of the fleet's audit activity, once a controller becomes disposable.
   cannot answer it, because that array is already the written one. **The
   object key carries the epoch and the generation together**, so a decision
   that supersedes another push sets `dispatchResult.stateKeyCleanup`, and
-  `Apply` deletes that exact key after the commit, beside the existing
-  prefix cleanup. A redelivery repeats both numbers, names the winner's own
+  `Apply` deletes that exact key after the commit, beside the terminal
+  cleanup. A redelivery repeats both numbers, names the winner's own
   key, and deletes nothing. The cap counts the record's entries, one per
   path, so a run's stored objects can hold one superseded push per path
-  until that delete lands; the run's own prefix delete removes the rest.
+  until that delete lands; the retention round's prefix delete removes the
+  rest.
+  **A terminal cleanup keeps the run's build.xml**, because a replay reads
+  it. `deleteRunStateExceptScript` (`retention_objects.go`) deletes every
+  other entry of the record's `mesh.files` list by key, and no prefix
+  listing exists. `RunScriptObjectKey` (`run_script_key.go`) is the one
+  selection of the kept entry (highest epoch, then generation, then the
+  shortest path), and the BFF's script read calls it too. A nil list and a
+  list that names no build record delete the whole prefix. The run-state
+  cap alone passes nil (`dispatchResult.stateCleanupFiles`), because its
+  purpose is to free the run's storage; a terminal write, the interruption
+  marking, and the hourly backstop read the column and pass an empty
+  non-nil list for a NULL one. `deleteRetainedRunScripts` removes the kept
+  object with the run's whole prefix on the `retention.runs` cutoff,
+  immediately before the `runs` partition drop.
   `runMeshRecord.hasState` refuses a record
   holding an entry whose epoch or generation is not positive: such an entry
   names no object, so the run takes the ordinary confirmed-loss path.
@@ -145,6 +159,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   `job_path` for the case history index, no CHECK on `status`, no
   partitioning, and no foreign key to `runs`. It also adds the nullable
   `runs.test_report_key`, the blob key of the archived test report.
+  `00018_runs_replay_of.sql` adds the nullable `runs.replay_of` uuid, the
+  run a replayed build copied its script from. Only `run.started` writes
+  it, through `COALESCE`, and it carries no default and no index.
   A later migration never edits an applied one. `migrationsFS` (`migrations.go`) embeds
   every file under `migrations/` into the binary through `embed.FS`, so
   the recorder needs no separate deploy artifact. Monthly partition
@@ -599,10 +616,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   `run_tests`, and `run_test_cases` rows past the `retention.runs` cutoff,
   in bounded batches.
   `deleteExpiredRunState` is the mesh's hourly backstop: it removes the
-  run-state prefix of every run terminal for more than an hour, over its
-  own bounded query, because the log step reads a different cutoff. The
-  prompt delete runs after the terminal commit instead, from `Apply` and
-  from each `markInterrupted` caller. `finalizeStaleLogs` (`retention_finalize.go`) is step
+  run-state objects of every run terminal for more than an hour, except
+  the kept build.xml, over its own bounded query, because the log step
+  reads a different cutoff. The prompt delete runs after the terminal
+  commit instead, from `Apply` and from each `markInterrupted` caller.
+  `deleteRetainedRunScripts` deletes the whole run-state prefix of every
+  run past the `retention.runs` cutoff, before the `runs` partition drop. `finalizeStaleLogs` (`retention_finalize.go`) is step
   10, the log-finalization sweep C3's `build-log-externalization`
   capability defines; it never lowers a stored `finalized` true. The
   exported `Liveness` interface answers whether a run's owning cell is

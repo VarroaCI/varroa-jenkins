@@ -164,7 +164,8 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   (`template_name`, `template_version`, `marker_path`, `marker_revision`)
   onto the `run.started`/`run.completed` payload via `addTemplateFields`,
   omitting any field the event does not carry; a `HEARTBEAT` event never
-  carries them. A `COMPLETED` event publishes `run.tests` when it carries a
+  carries them. `startedPayload` alone writes `replay_of`, and only for a
+  non-empty value, so no other phase and no ordinary build sends the key. A `COMPLETED` event publishes `run.tests` when it carries a
   test counter, a test case, or a test report, so a report whose case count
   is zero still reaches the store. `shrinkToBudget`'s `cases` rung runs after
   the `error` truncation and drops the **last** case, because the plugin
@@ -178,7 +179,8 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   or `run.trigger_accepted` when `success` is true. `RESUME_BUILD`
   publishes `run.resume_failed` for a failed result and nothing for a
   successful one, because a resumed build proves itself by its own
-  heartbeat. **A resume result always acks, whatever the publish
+  heartbeat. `REPLAY_BUILD` publishes nothing and logs a refused result,
+  because a refused replay leaves no run to record. **A resume result always acks, whatever the publish
   answers**, which is the opposite of the trigger rule below: a
   redelivered resume can succeed while the recorder holds no dispatched
   resume, and only the named target's heartbeat clears a resume record,

@@ -3,6 +3,7 @@ package recordstore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -14,7 +15,6 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
-	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
 
 // Interrupted-run reasons runs.payload.interrupted_reason holds. The
@@ -446,13 +446,29 @@ func afterMark(ctx context.Context, conn *bus.Conn, metrics *InterruptedMetrics,
 
 // deleteRunState removes a marked run's replicated state, after the
 // marking transaction commits and never inside it: a lost object delete
-// must never roll the record back. A nil deleter skips the delete, the
-// same rule the log store follows.
-func deleteRunState(ctx context.Context, store ObjectDeleter, runID string, logger *slog.Logger) {
+// must never roll the record back. The run keeps its build.xml, because a
+// marked run is terminal and a replay reads that file. It reads the run's
+// committed mesh file list, never the candidate's earlier copy, so a push
+// that landed before the mark is deleted too. A nil deleter skips the
+// delete, the same rule the log store follows.
+func deleteRunState(ctx context.Context, pool *pgxpool.Pool, store ObjectDeleter, run runInterruptCandidate, logger *slog.Logger) {
 	if store == nil {
 		return
 	}
-	if err := store.DeletePrefix(ctx, blob.RunStatePrefix(runID)); err != nil {
+	runID := run.runID.String()
+	files := []runStateFile{}
+	var raw []byte
+	err := pool.QueryRow(ctx, `
+		SELECT payload->'mesh'->'files' FROM varroa.runs WHERE run_id = $1 AND created_at = $2
+	`, run.runID, run.createdAt).Scan(&raw)
+	switch {
+	case err == nil:
+		files = runStateFilesOrEmpty(raw)
+	case !errors.Is(err, pgx.ErrNoRows):
+		logger.Warn("read run-state file list after marking failed", "run_id", runID, "error", err)
+		return
+	}
+	if err := deleteRunStateExceptScript(ctx, store, runID, files); err != nil {
 		logger.Warn("delete run state after marking failed", "run_id", runID, "error", err)
 	}
 }
@@ -511,7 +527,7 @@ func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.C
 		if reason == ReasonCellLost {
 			metrics.addCellLoss(ctx, "announce")
 		}
-		deleteRunState(ctx, stateDeleter, c.runID.String(), logger)
+		deleteRunState(ctx, pool, stateDeleter, c, logger)
 		afterMark(ctx, conn, metrics, actionMetrics, c, reason, interruptedRetry, logger)
 		marked++
 	}
@@ -599,7 +615,7 @@ func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 		if reason == ReasonCellLost {
 			metrics.addCellLoss(ctx, "sweep")
 		}
-		deleteRunState(ctx, stateDeleter, c.runID.String(), logger)
+		deleteRunState(ctx, pool, stateDeleter, c, logger)
 		afterMark(ctx, conn, metrics, actionMetrics, c, reason, decodeInterruptedRetry(row.policy), logger)
 		marked++
 	}

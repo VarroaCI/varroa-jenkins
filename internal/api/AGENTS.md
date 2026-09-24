@@ -265,7 +265,17 @@ federation, activity persistence, and SSE fanout.
   store or an undecodable log index degrades `logTail` to absent instead, so the run detail
   answers either way. `Server.GetRun` reads `ListTestCases` once and shares it between the
   run detail's `cases` and the digest's `failedTests.cases`; a failed read leaves both lists
-  absent and the run detail still answers. The live log tail
+  absent and the run detail still answers. `GET /runs/{run}/script` (`run_script.go`,
+  run read check, `503` with a nil reader or a nil blob store) and `POST /runs/{run}/replay`
+  (`replayRun`, tenant write check) share `runScriptSource`, one ordered rule set
+  (`not-terminal`, `template-defined`, `masked-parameter`, `no-replica`, `unreadable`,
+  `not-sandbox`, `script-too-large`), so the control and the endpoint cannot disagree. The
+  read opens the object `recordstore.RunScriptObject` names, tests the recorded size before
+  the open, and parses it with a token decoder that skips the XML 1.1 declaration Jenkins
+  writes. A refused run answers an empty `script` and an empty `loadedScripts`. The replay
+  answers `409` with `run does not replay: <reason>`, `413` over 256 KiB, mints a UUIDv7,
+  keys it `replay:<source>:<new>`, reads no intent, and publishes one `REPLAY_BUILD` to the
+  job's `homeRef`. `GET /runs/{run}` answers `replayOf` from `runs.replay_of`. The live log tail
   (`GET /runs/{run}/log`) authenticates over SSE's `?ticket=` query param with scope
   `run:<run_id>`, minted by `POST /stream/ticket`, never a bearer token. `runTailRegistry`
   (`runlog_tail.go`) is this BFF replica's shared lease table: at most one lease and one

@@ -466,6 +466,118 @@ func (s *Server) handleRerunRun(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusAccepted, runActionResponse{RunID: runID, IntentKey: intentKey, State: "requested"})
 }
 
+// --- POST /runs/{run}/replay ---
+
+// replayRunRequest is POST /runs/{run}/replay's body.
+type replayRunRequest struct {
+	Script string `json:"script"`
+}
+
+// replayRunMaxBodyBytes bounds the replay body the handler decodes. A
+// JSON string can escape each byte of a script into six, so the bound
+// sits above runScriptMaxScriptBytes, and the script bound itself answers
+// 413.
+const replayRunMaxBodyBytes = 8 * runScriptMaxScriptBytes
+
+// replayRun validates the run, mints the new identity, and publishes one
+// REPLAY_BUILD command. It answers a ServiceError instead of writing a
+// response, so the MCP tool and the HTTP handler share one path.
+//
+// The key is replay:<source run>:<new run>, and the new run identifier is
+// a fresh UUIDv7, never a counter: the maintenance round deletes stored
+// intents, so a count would fall and repeat a key. Two replays of one
+// run are therefore two builds, and the write reads no intent.
+//
+// The command goes to the member that holds the job's home slot, never to
+// the source run's own member. A replay is a fresh build of the job, and
+// a trigger on a member that is not the job's home answers NOT_HOME. It
+// answers the home member's cluster, so an audit event names the cluster
+// the command went to.
+func (s *Server) replayRun(ctx context.Context, claims *auth.Claims, runID, script string) (newRunID, intentKey, targetCluster string, serr *ServiceError) {
+	if s.deps.RecordStore == nil || s.deps.BlobStore == nil {
+		return "", "", "", &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}
+	}
+	sourceRun, ref, serr := s.runForWrite(ctx, claims, runID)
+	if serr != nil {
+		return "", "", "", serr
+	}
+	if strings.TrimSpace(script) == "" {
+		return "", "", "", &ServiceError{Status: http.StatusBadRequest, Message: "script is required"}
+	}
+	if len(script) > runScriptMaxScriptBytes {
+		return "", "", "", &ServiceError{
+			Status:  http.StatusRequestEntityTooLarge,
+			Message: fmt.Sprintf("script exceeds %d bytes", runScriptMaxScriptBytes),
+		}
+	}
+	source, err := s.runScriptSource(ctx, sourceRun)
+	if err != nil {
+		s.deps.Logger.Error("read run script", "runId", sourceRun.RunID, "error", err)
+		return "", "", "", &ServiceError{Status: http.StatusInternalServerError, Message: "read run script failed"}
+	}
+	if !source.Replayable {
+		return "", "", "", &ServiceError{Status: http.StatusConflict, Message: "run does not replay: " + source.Reason}
+	}
+
+	id, mintErr := uuid.NewV7()
+	if mintErr != nil {
+		s.deps.Logger.Error("mint replay run id", "error", mintErr)
+		return "", "", "", &ServiceError{Status: http.StatusInternalServerError, Message: "mint run id failed"}
+	}
+	newRunID = id.String()
+	intentKey = "replay:" + sourceRun.RunID + ":" + newRunID
+
+	target, homeErr := s.homeRef(ctx, ref, sourceRun.JobPath)
+	if homeErr != nil {
+		return "", "", "", homeErr
+	}
+	cmd := &mitev1.ImperativeCommand{
+		CommandId: "replay-build-" + newRunID,
+		Type:      mitev1.CommandTypeReplayBuild,
+		ReplayBuild: &mitev1.ReplayBuildPayload{
+			RunId:       newRunID,
+			IntentKey:   intentKey,
+			JobPath:     sourceRun.JobPath,
+			SourceRunId: sourceRun.RunID,
+			Script:      script,
+			ActingUser:  actingUserFrom(claims),
+			Parameters:  runParams(sourceRun.Params),
+		},
+	}
+	if err := s.publishImperative(ctx, target, cmd); err != nil {
+		s.deps.Logger.Error("publish replay", "runId", sourceRun.RunID, "error", err)
+		return "", "", "", &ServiceError{Status: http.StatusInternalServerError, Message: "publish replay build failed"}
+	}
+	return newRunID, intentKey, target.Cluster, nil
+}
+
+// handleReplayRun answers POST /runs/{run}/replay: it decodes the body
+// and publishes one REPLAY_BUILD command. It answers 202 with the new run
+// identifier and reports no outcome.
+func (s *Server) handleReplayRun(w http.ResponseWriter, r *http.Request) {
+	if s.deps.RecordStore == nil || s.deps.BlobStore == nil {
+		s.pipelinesUnavailable(w)
+		return
+	}
+	var req replayRunRequest
+	if err := decodeJSONBody(http.MaxBytesReader(w, r.Body, replayRunMaxBodyBytes), &req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			s.writeJSONError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
+		s.writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	claims := auth.ClaimsFromContext(r.Context())
+	runID, intentKey, _, serr := s.replayRun(r.Context(), claims, r.PathValue("run"), req.Script)
+	if serr != nil {
+		s.writeServiceError(w, serr)
+		return
+	}
+	s.writeJSON(w, http.StatusAccepted, runActionResponse{RunID: runID, IntentKey: intentKey, State: "requested"})
+}
+
 // --- The two run input routes ---
 
 // proceedRunInputRequest is the proceed route's body: one optional

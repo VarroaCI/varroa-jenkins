@@ -412,7 +412,7 @@ public class VarroaRunTriggerActionTest {
     }
 
     @Test
-    public void theEndpointExposesOnlyItsSixRoutes() {
+    public void theEndpointExposesOnlyItsSevenRoutes() {
         int doMethods = 0;
         for (java.lang.reflect.Method m : VarroaRunTriggerAction.class.getDeclaredMethods()) {
             if (m.getName().startsWith("do") && java.lang.reflect.Modifier.isPublic(m.getModifiers())) {
@@ -420,10 +420,11 @@ public class VarroaRunTriggerActionTest {
                 assertTrue("unexpected route method " + m.getName(),
                         m.getName().equals("doTrigger") || m.getName().equals("doCancel")
                                 || m.getName().equals("doAdoptNode") || m.getName().equals("doLoadBuild")
-                                || m.getName().equals("doProceedInput") || m.getName().equals("doAbortInput"));
+                                || m.getName().equals("doProceedInput") || m.getName().equals("doAbortInput")
+                                || m.getName().equals("doReplay"));
             }
         }
-        assertEquals(6, doMethods);
+        assertEquals(7, doMethods);
     }
 
     // ---- D13 adopt-node route ----
@@ -685,7 +686,7 @@ public class VarroaRunTriggerActionTest {
         // Stapler derives a URL token from the method name and writes no
         // dash, so a route of more than one word needs @WebMethod. The
         // mite posts these names and nothing else.
-        for (String route : List.of("trigger", "cancel", "adopt-node", "load-build")) {
+        for (String route : List.of("trigger", "cancel", "adopt-node", "load-build", "replay")) {
             assertNotEquals("route " + route + " is not served at that name",
                     404, postToRoute(route));
         }

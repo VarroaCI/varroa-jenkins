@@ -18,9 +18,10 @@ import org.jenkinsci.plugins.workflow.flow.FlowExecutionOwner;
  * A test double standing in for {@code VarroaMarkerFlowDefinition} and
  * {@code VarroaTemplateFlowDefinition} (D8), neither of which this batch
  * implements. Registered with {@link
- * VarroaRunRecorder#setTemplateDefinitionClassNamesForTesting} so {@link
- * VarroaRunRecorder.Runs#onStarted} holds the {@code STARTED} event the
- * way it would for the real flow definitions.
+ * VarroaTemplateDefinitions#setClassNamesForTesting} so {@link
+ * VarroaRunRecorder.Runs#onStarted} holds the {@code STARTED} event, and
+ * the replay route refuses the job, the way both do for the real flow
+ * definitions.
  */
 final class FakeVarroaFlowDefinition extends FlowDefinition {
 

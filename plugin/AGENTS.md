@@ -173,11 +173,14 @@ the root AGENTS.md greenfield rule.
   case count. A failed archive logs a warning, sends no report pointer, and keeps the
   event. The event carries the failed cases, then the skipped cases, at most 500
   (`MAX_TEST_CASES`), every string cut at 512 bytes; the ladder drops the last case
-  before any stage. `RunListener.onStarted` can fire before a Varroa
-  template flow definition attaches that action, so `Runs` holds the `STARTED` event for
-  such a run (named by `FlowDefinition` class, since this package holds no compile
-  dependency on `template`'s flow definitions) until the action attaches, in either state,
-  or the run completes with none.
+  before any stage. Field 50, `replay_of`, names the source run of a
+  `VarroaReplayCause`; only `startedEventBuilder` sets it, so only `STARTED` carries it,
+  and `toJson()` writes no key for an empty value. `RunListener.onStarted` can fire before
+  a Varroa template flow definition attaches that action, so `Runs` holds the `STARTED`
+  event for such a run until the action attaches, in either state, or the run completes
+  with none. `VarroaTemplateDefinitions.java` decides which run that is. It names the
+  definitions by `FlowDefinition` class, because this package holds no compile dependency
+  on `template`'s flow definitions.
 - **Claim gate** (admits a queue item and claims a run id before dispatch, with no I/O
   under the Jenkins queue lock): `VarroaQueueDecisionHandler.java`
   (`Queue.QueueDecisionHandler`, stamps `VarroaIntentAction.java`), `IntentKey.java`
@@ -349,7 +352,7 @@ the root AGENTS.md greenfield rule.
   an affected-path count, never the paths themselves, so the operator never
   has real paths to write into the document.
 - **Run trigger endpoint** (the mite's local call for a manual build trigger, a cancel,
-  and the two input-approval commands; D3, D4, D10, D11, run-trigger-endpoint):
+  the two input-approval commands, and a replay; D3, D4, D8, D10, D11, run-trigger-endpoint):
   `VarroaRunTriggerAction.java`, a protected
   `RootAction` at `/varroa-run`, requires `ROLE:varroa:system-mite`. `POST
   /varroa-run/trigger` reads `runId`, `intentKey`, `jobPath`, `parameters`, and
@@ -394,6 +397,30 @@ the root AGENTS.md greenfield rule.
   its own: the input step's own abort path admits a caller holding the
   build-cancel permission or the step's own submitter identity. Both routes
   re-read the run's pending set after a `202`, before they write it.
+  `POST /varroa-run/replay` reads `runId`, `intentKey`, `jobPath`,
+  `sourceRunId`, `script`, `parameters`, and `actingUser`. It answers `400`
+  for a body that does not decode and for a body that names no run, no source
+  run, no job, no script, or no acting name. The source run is required,
+  because the record's `replay_of` value comes from it. It answers `404` for no item and `409` for an
+  item that is not a parameterized `WorkflowJob`. It answers `409` for a job
+  that `VarroaTemplateDefinitions.isTemplateDefined` accepts, because a
+  template owns its own script. `VarroaRunRecorder` reads the same class to
+  hold a template run's `STARTED` event, so the two readers cannot disagree.
+  Inside the acting user's own authentication it answers `403` when the user
+  does not hold `ReplayAction.REPLAY` on the job. The check reads the job,
+  because the source build can be gone from a disposable cell. It then
+  schedules one build with the parameters action, the stamped
+  `VarroaIntentAction`, a `CauseAction` holding a `VarroaUserCause` and a
+  `VarroaReplayCause` naming `sourceRunId`, and a
+  `VarroaReplayFlowFactoryAction` over the script, and it answers `202` with
+  `droppedParameters`. The factory action is a `CpsFlowFactoryAction2`, which
+  `CpsFlowDefinition` and `CpsScmFlowDefinition` both honour before they read
+  or check out their own script. It always builds a sandboxed execution, and
+  it takes the job's own durability hint. It implements no
+  `Queue.QueueAction`, so the intent action's same-run-id guard still folds
+  a redelivered command into one queue item. The recorder writes
+  `VarroaReplayCause`'s source run into `replay_of` on the `STARTED` event
+  alone. `replay` holds one word, so the route needs no `@WebMethod`.
   **A route of more than one word needs `@WebMethod(name = "...")`.** Stapler
   derives the URL token from the method name and never writes a dash, so
   `doLoadBuild` serves `loadBuild` and the dashed name every caller uses answers

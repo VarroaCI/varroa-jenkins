@@ -121,6 +121,9 @@ type runDetailJSON struct {
 	// cases array, which is always present.
 	TestReport *runTestReportDetailJSON `json:"testReport,omitempty"`
 	Cases      []runTestCaseJSON        `json:"cases,omitempty"`
+	// ReplayOf names the run a replayed build copied its script from. It
+	// is absent for a build that is not a replay.
+	ReplayOf string `json:"replayOf,omitempty"`
 }
 
 type runArtifactJSON struct {
@@ -436,6 +439,9 @@ func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID,
 	if run.Summary != nil {
 		d.Summary = *run.Summary
 	}
+	if run.ReplayOf != nil {
+		d.ReplayOf = run.ReplayOf.String()
+	}
 	if len(run.Params) > 0 {
 		var params map[string]string
 		if json.Unmarshal(run.Params, &params) == nil {
@@ -634,6 +640,23 @@ func artifactFilename(path string) string {
 		return path[idx+1:]
 	}
 	return path
+}
+
+// handleGetRunScript answers GET /runs/{run}/script: the run's own Groovy
+// script, its loaded scripts, and whether it replays. It applies the run
+// read check, so a run the caller may not read answers 404.
+func (s *Server) handleGetRunScript(w http.ResponseWriter, r *http.Request) {
+	if s.deps.RecordStore == nil || s.deps.BlobStore == nil {
+		s.pipelinesUnavailable(w)
+		return
+	}
+	claims := auth.ClaimsFromContext(r.Context())
+	out, serr := s.GetRunScript(r.Context(), claims, r.PathValue("run"))
+	if serr != nil {
+		s.writeServiceError(w, serr)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleDownloadRunArtifact(w http.ResponseWriter, r *http.Request) {

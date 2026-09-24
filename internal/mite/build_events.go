@@ -143,8 +143,9 @@ const (
 	eventAckRejected = "REJECTED"
 )
 
-// maskedParamValue replaces the value of a sensitive parameter.
-const maskedParamValue = "<masked>"
+// MaskedParamValue replaces the value of a sensitive parameter. The BFF
+// reads the same constant to refuse a replay of a masked run.
+const MaskedParamValue = "<masked>"
 
 // gatewayEnvelopeBudget is the byte budget for one marshaled envelope,
 // matching the plugin-inventory degradation path's headroom below NATS'
@@ -297,7 +298,7 @@ func maskParameters(params map[string]string, masked []string) map[string]string
 	out := make(map[string]string, len(params))
 	for k, v := range params {
 		if maskedSet[k] {
-			out[k] = maskedParamValue
+			out[k] = MaskedParamValue
 		} else {
 			out[k] = v
 		}
@@ -391,6 +392,9 @@ func startedPayload(evt *mitev1.BuildEvent) map[string]interface{} {
 	}
 	if evt.DeliveryId != "" {
 		p["delivery_id"] = evt.DeliveryId
+	}
+	if evt.ReplayOf != "" {
+		p["replay_of"] = evt.ReplayOf
 	}
 	addTemplateFields(p, evt)
 	return p

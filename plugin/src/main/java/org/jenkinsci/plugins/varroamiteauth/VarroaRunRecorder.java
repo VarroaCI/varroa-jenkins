@@ -650,7 +650,7 @@ public final class VarroaRunRecorder {
                 RunState state = registerRun(jobPath, buildNumber, runId, action.getIntentKey());
                 ensureHeartbeatStarted();
 
-                if (isVarroaTemplateDefinition(run)) {
+                if (VarroaTemplateDefinitions.isTemplateDefined(run.getParent())) {
                     // D8a: FlowDefinition.create() can attach a
                     // VarroaTemplateValuesAction after this listener
                     // fires. Hold the STARTED event until the action
@@ -774,50 +774,18 @@ public final class VarroaRunRecorder {
     // --- D8a: the held STARTED event for a marker- or item-declared template run ---
 
     /**
-     * The two {@code FlowDefinition} classes that attach a {@link
-     * VarroaTemplateValuesAction} (D8). Named by class rather than by
-     * type: this class cannot hold a compile dependency on the template
-     * package's flow definitions. Keep this set in sync with every
-     * FlowDefinition that attaches the action.
+     * Reads the source run identifier of a replayed build from {@code run}'s
+     * causes: the first {@link VarroaReplayCause}'s value, or the empty
+     * string when the run carries none. The actor read over the same causes
+     * is independent of this read.
      */
-    private static final Set<String> DEFAULT_TEMPLATE_DEFINITION_CLASSES = Set.of(
-            "org.jenkinsci.plugins.varroamiteauth.template.VarroaMarkerFlowDefinition",
-            "org.jenkinsci.plugins.varroamiteauth.template.VarroaTemplateFlowDefinition");
-
-    private static volatile Set<String> templateDefinitionClassNamesOverrideForTesting;
-
-    /**
-     * Reports whether {@code run}'s job is defined by a Varroa template
-     * flow definition (D8a). {@code RunListener.onStarted} can fire
-     * before such a definition's {@code create} attaches the run action,
-     * so this test decides whether {@link Runs#onStarted} holds the
-     * {@code STARTED} event rather than emitting it at once.
-     */
-    private static boolean isVarroaTemplateDefinition(Run<?, ?> run) {
-        if (!(run.getParent() instanceof WorkflowJob)) {
-            return false;
+    static String replaySourceOf(Run<?, ?> run) {
+        for (Cause cause : run.getCauses()) {
+            if (cause instanceof VarroaReplayCause) {
+                return ((VarroaReplayCause) cause).getSourceRunId();
+            }
         }
-        FlowDefinition definition = ((WorkflowJob) run.getParent()).getDefinition();
-        if (definition == null) {
-            return false;
-        }
-        Set<String> names = templateDefinitionClassNamesOverrideForTesting;
-        if (names == null) {
-            names = DEFAULT_TEMPLATE_DEFINITION_CLASSES;
-        }
-        return names.contains(definition.getClass().getName());
-    }
-
-    /**
-     * Registers the {@code FlowDefinition} class names {@link
-     * #isVarroaTemplateDefinition} treats as holding the {@code STARTED}
-     * event, replacing {@link #DEFAULT_TEMPLATE_DEFINITION_CLASSES}. Pass
-     * {@code null} to restore the default set. Package-private for
-     * testing: a test double stands in for the real flow definitions,
-     * which this package does not depend on.
-     */
-    static void setTemplateDefinitionClassNamesForTesting(Set<String> names) {
-        templateDefinitionClassNamesOverrideForTesting = names;
+        return "";
     }
 
     /** Builds a {@code STARTED} event from {@code run}'s current state. Does not emit it. */
@@ -831,7 +799,8 @@ public final class VarroaRunRecorder {
                 .jobPath(state.jobPath)
                 .buildNumber(state.buildNumber)
                 .deliveryId(action.getDeliveryId())
-                .scmRevision(truncate(action.getRevision(), MAX_FIELD_512));
+                .scmRevision(truncate(action.getRevision(), MAX_FIELD_512))
+                .replayOf(replaySourceOf(run));
         applyCommonMetadata(b, run, false);
         return b;
     }

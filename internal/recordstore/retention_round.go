@@ -151,6 +151,12 @@ func runMaintenanceSteps(ctx context.Context, db maintDB, cfg MaintenanceConfig)
 		return fmt.Errorf("drop expired activity partitions: %w", err)
 	}
 
+	// The retained script replica leaves on the record cutoff, before the
+	// runs partition drop, so no retained object outlives its row.
+	if _, err := deleteRetainedRunScripts(ctx, db, cfg.LogStore, runsCutoff); err != nil {
+		return fmt.Errorf("delete retained run scripts: %w", err)
+	}
+
 	if _, err := dropExpiredPartitions(ctx, db, "runs", runsCutoff); err != nil {
 		return fmt.Errorf("drop expired runs partitions: %w", err)
 	}

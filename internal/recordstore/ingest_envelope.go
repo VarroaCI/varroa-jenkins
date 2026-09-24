@@ -124,6 +124,9 @@ type RunStartedPayload struct {
 	Cause       json.RawMessage `json:"cause,omitempty"`
 	Actor       *string         `json:"actor,omitempty"`
 	Params      json.RawMessage `json:"params,omitempty"`
+	// ReplayOf names the run a replayed build copied its script from. The
+	// gateway writes the key only for a non-empty value, so nil binds NULL.
+	ReplayOf *string `json:"replay_of,omitempty"`
 }
 
 // RunCompletedPayload is the payload of a run.completed envelope.

@@ -21,8 +21,10 @@ const retentionBatchSize = 1000
 type ObjectDeleter interface {
 	Delete(ctx context.Context, key string) error
 	// DeletePrefix removes every object under one prefix. Run state is
-	// the one class Varroa stores under a prefix it owns whole, so a
-	// run's whole set is removed by one call.
+	// the one class Varroa stores under a prefix it owns whole. A
+	// terminal cleanup keeps the run's build.xml and deletes every other
+	// object by key. The retention round, the run-state cap, and a run
+	// whose record names no build record delete the whole prefix.
 	DeletePrefix(ctx context.Context, prefix string) error
 }
 
@@ -80,14 +82,70 @@ func deleteExpiredLogObjects(ctx context.Context, db maintDB, store ObjectDelete
 	}
 }
 
+// deleteRetainedRunScripts deletes the run-state prefix of every run whose
+// created_at passes the record retention cutoff. The terminal cleanup keeps
+// one build.xml for a replay, and this round removes it. The prefix delete
+// also removes a superseded object whose own per-key delete a dispatched
+// resume held.
+//
+// The query tests created_at alone. The same round drops the run's own
+// partition on the same cutoff, so a retained object that survived this
+// call would outlive its row and no later round would find it. A nil
+// store is a no-op.
+func deleteRetainedRunScripts(ctx context.Context, db maintDB, store ObjectDeleter, cutoff time.Time) (int, error) { //nolint:unparam // the count documents the step's work for a test that asserts on it
+	if store == nil {
+		return 0, nil
+	}
+	total := 0
+	offset := 0
+	for {
+		rows, err := db.Query(ctx, `
+			SELECT run_id FROM varroa.runs
+			WHERE created_at < $1
+			ORDER BY created_at, run_id
+			LIMIT $2 OFFSET $3
+		`, cutoff, retentionBatchSize, offset)
+		if err != nil {
+			return total, fmt.Errorf("select runs for retained script expiry: %w", err)
+		}
+		var runIDs []string
+		for rows.Next() {
+			var runID string
+			if err := rows.Scan(&runID); err != nil {
+				rows.Close()
+				return total, fmt.Errorf("scan run id: %w", err)
+			}
+			runIDs = append(runIDs, runID)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return total, fmt.Errorf("select runs for retained script expiry: %w", err)
+		}
+		rows.Close()
+
+		for _, runID := range runIDs {
+			if err := store.DeletePrefix(ctx, blob.RunStatePrefix(runID)); err != nil {
+				return total, fmt.Errorf("delete retained run state for %s: %w", runID, err)
+			}
+			total++
+		}
+
+		if len(runIDs) < retentionBatchSize {
+			return total, nil
+		}
+		offset += retentionBatchSize
+	}
+}
+
 // runStateBackstopAge is how long a run stays terminal before the
 // backstop removes its run-state objects. The prompt delete runs on the
 // terminal commit, so this value only has to cover a recorder that
 // stopped between that commit and the delete.
 const runStateBackstopAge = time.Hour
 
-// deleteExpiredRunState deletes the run-state prefix of every run that
-// has been terminal for longer than runStateBackstopAge. It runs its
+// deleteExpiredRunState deletes the replicated state of every run that
+// has been terminal for longer than runStateBackstopAge, through
+// deleteRunStateExceptScript, so the run keeps its build.xml. It runs its
 // own bounded query over varroa.runs, because the round's log
 // enumeration uses a different cutoff. A nil store is a no-op.
 //
@@ -102,7 +160,7 @@ func deleteExpiredRunState(ctx context.Context, db maintDB, store ObjectDeleter,
 	offset := 0
 	for {
 		rows, err := db.Query(ctx, `
-			SELECT run_id FROM varroa.runs
+			SELECT run_id, payload->'mesh'->'files' FROM varroa.runs
 			WHERE status IN ('COMPLETED', 'DUPLICATE') AND ended_at IS NOT NULL AND ended_at < $1
 			ORDER BY created_at, run_id
 			LIMIT $2 OFFSET $3
@@ -110,14 +168,21 @@ func deleteExpiredRunState(ctx context.Context, db maintDB, store ObjectDeleter,
 		if err != nil {
 			return total, fmt.Errorf("select runs for run-state expiry: %w", err)
 		}
-		var runIDs []string
+		type expiredRun struct {
+			runID string
+			files []runStateFile
+		}
+		var batch []expiredRun
 		for rows.Next() {
-			var runID string
-			if err := rows.Scan(&runID); err != nil {
+			var (
+				runID    string
+				filesRaw []byte
+			)
+			if err := rows.Scan(&runID, &filesRaw); err != nil {
 				rows.Close()
 				return total, fmt.Errorf("scan run id: %w", err)
 			}
-			runIDs = append(runIDs, runID)
+			batch = append(batch, expiredRun{runID: runID, files: runStateFilesOrEmpty(filesRaw)})
 		}
 		if err := rows.Err(); err != nil {
 			rows.Close()
@@ -125,14 +190,14 @@ func deleteExpiredRunState(ctx context.Context, db maintDB, store ObjectDeleter,
 		}
 		rows.Close()
 
-		for _, runID := range runIDs {
-			if err := store.DeletePrefix(ctx, blob.RunStatePrefix(runID)); err != nil {
-				return total, fmt.Errorf("delete run state for %s: %w", runID, err)
+		for _, r := range batch {
+			if err := deleteRunStateExceptScript(ctx, store, r.runID, r.files); err != nil {
+				return total, fmt.Errorf("delete run state for %s: %w", r.runID, err)
 			}
 			total++
 		}
 
-		if len(runIDs) < retentionBatchSize {
+		if len(batch) < retentionBatchSize {
 			return total, nil
 		}
 		offset += retentionBatchSize
@@ -212,4 +277,57 @@ func deleteExpiredArtifacts(ctx context.Context, db maintDB, store ObjectDeleter
 			return total, nil
 		}
 	}
+}
+
+// deleteRunStateExceptScript deletes every object the run's own mesh file
+// list names, except the newest build.xml. The script replica outlives the
+// run, because a replay reads it. The record's file list names each
+// object's epoch and generation, so every delete is one key and the store
+// needs no prefix listing.
+//
+// A nil files deletes the whole prefix: the run-state cap passes nil,
+// because its purpose is to free the run's whole storage. A caller that
+// reads the record passes an empty non-nil list for a NULL or undecodable
+// column. Such a list, like any list that names no build.xml, also
+// deletes the whole prefix. Nothing is retained then, and the prefix
+// delete also removes a superseded object whose own per-key delete a
+// dispatched resume held.
+//
+// A failed delete of one key does not stop the other deletes. The
+// function then answers the first failure, and the error names how many
+// keys failed out of how many it tried, so the caller's one log line
+// carries the whole result. The function itself logs nothing.
+func deleteRunStateExceptScript(ctx context.Context, store ObjectDeleter, runID string, files []runStateFile) error {
+	if files == nil {
+		return store.DeletePrefix(ctx, blob.RunStatePrefix(runID))
+	}
+	kept, ok := retainedScriptEntry(files)
+	if !ok {
+		return store.DeletePrefix(ctx, blob.RunStatePrefix(runID))
+	}
+	var (
+		firstKey string
+		firstErr error
+		failed   int
+		tried    int
+	)
+	for _, f := range files {
+		// An entry whose epoch or generation is not positive names no
+		// object, because the object key carries both numbers.
+		if f.sameObject(kept) || f.Epoch <= 0 || f.StateGen <= 0 {
+			continue
+		}
+		key := blob.RunStateKey(runID, f.Epoch, f.StateGen, f.RelPath)
+		tried++
+		if err := store.Delete(ctx, key); err != nil {
+			failed++
+			if firstErr == nil {
+				firstKey, firstErr = key, err
+			}
+		}
+	}
+	if firstErr == nil {
+		return nil
+	}
+	return fmt.Errorf("delete run-state object %s (%d of %d keys failed): %w", firstKey, failed, tried, firstErr)
 }

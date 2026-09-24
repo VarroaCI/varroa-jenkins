@@ -1,7 +1,7 @@
 # Operate a Run
 
-Hold a fleet lock across tenants, read why a build failed, attach a summary line to a run, answer
-a paused input, and call a job on another tenant.
+Hold a fleet lock across tenants, read why a build failed, and attach a summary line to a run.
+Answer a paused input, replay a build with an edited script, and call a job on another tenant.
 
 ## Prerequisite
 
@@ -115,6 +115,30 @@ who answered the step. Varroa keeps no separate record of the approval.
 A step's `submitter` accepts a user name or a Varroa group name. A `submitter` that names a
 Varroa group admits any caller who holds that group. A Jenkins administrator on the controller can answer
 every input, whatever the `submitter` names.
+
+## Replay a build with an edited script
+
+The **Replay** control on the build page starts a new build of the job with a script you edit. The
+control needs the tenant's `pipelines` write grant.
+
+Select **Replay**. The editor opens with the build's own script. Edit the script, then submit it.
+The editor also shows the library scripts that the build loaded. These scripts are read only. The
+new build loads them again from their library, so a library change reaches the replay.
+
+A build shows the control only when it meets all five conditions:
+
+| Condition | Meaning |
+|---|---|
+| It ended | The build reached a terminal state |
+| It ran on a cell | The cell kept the build record that holds the script |
+| It used the Groovy sandbox | The build ran its script in the sandbox |
+| It declared no template | No pipeline template or marker file defined the job |
+| It used no masked parameter | The build took no password or other masked parameter value |
+
+The new build takes its own build number from the ledger, so each replay is a separate build. The
+run record names the source run in `replayOf`.
+
+A headless tenant sees the same control, because the dashboard is the only surface of that tenant.
 
 ## Call a job on another tenant
 

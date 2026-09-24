@@ -78,6 +78,13 @@ func init() {
 			Claims:     adminClaims,
 			WantStatus: http.StatusServiceUnavailable,
 		},
+		contractCase{
+			Name:       "getRunScript-recordStoreDisabled",
+			Method:     "GET",
+			Path:       "/api/v1/runs/0194f6b2-0000-7000-8000-000000000000/script",
+			Claims:     adminClaims,
+			WantStatus: http.StatusServiceUnavailable,
+		},
 
 		// ── Pipelines write paths (add-pipelines-ui, section 4) ──────────
 		contractCase{
@@ -99,6 +106,14 @@ func init() {
 			Name:       "rerunRun-recordStoreDisabled",
 			Method:     "POST",
 			Path:       "/api/v1/runs/0194f6b2-0000-7000-8000-000000000000/rerun",
+			Claims:     adminClaims,
+			WantStatus: http.StatusServiceUnavailable,
+		},
+		contractCase{
+			Name:       "replayRun-recordStoreDisabled",
+			Method:     "POST",
+			Path:       "/api/v1/runs/0194f6b2-0000-7000-8000-000000000000/replay",
+			Body:       replayRunRequest{Script: "echo 'edited'"},
 			Claims:     adminClaims,
 			WantStatus: http.StatusServiceUnavailable,
 		},

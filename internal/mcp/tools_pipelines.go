@@ -14,12 +14,13 @@ import (
 )
 
 // =============================================================================
-// Pipeline tools (7): run_pipeline, list_runs, get_run, get_run_log,
-// list_fleet_locks, proceed_run_input, abort_run_input
+// Pipeline tools (8): run_pipeline, list_runs, get_run, get_run_log,
+// list_fleet_locks, proceed_run_input, abort_run_input, replay_run
 //
 // Design D1a: these tools call the same internal services the
 // pipelines HTTP handlers call (internal/api's RunPipeline, ListRuns,
-// GetRun, GetRunLog, ListFleetLocks, ProceedRunInput, AbortRunInput), so
+// GetRun, GetRunLog, ListFleetLocks, ProceedRunInput, AbortRunInput,
+// ReplayRun), so
 // each tool authorizes and reads exactly as its HTTP counterpart does.
 // No tool here calls a controller-scoped check; the authorization table
 // lives in specs/pipelines-api.
@@ -45,6 +46,43 @@ func registerPipelinesTools(mcpServer *server.MCPServer, deps *api.Dependencies)
 	registerListFleetLocksTool(mcpServer, deps)
 	registerProceedRunInputTool(mcpServer, deps)
 	registerAbortRunInputTool(mcpServer, deps)
+	registerReplayRunTool(mcpServer, deps)
+}
+
+// registerReplayRunTool registers replay_run: it runs a completed build
+// again with an edited Groovy script as the calling user, publishes one
+// REPLAY_BUILD command, and reports no outcome. No read tool answers a
+// run's script, because a script can reach 256 KiB.
+func registerReplayRunTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
+	replayTool := mcp.NewTool("replay_run",
+		mcp.WithDescription("Run a completed build again with an edited Groovy script, as the "+
+			"calling user. The BFF mints a fresh run identifier and publishes a REPLAY_BUILD "+
+			"command; it does not wait for the build to start. Use get_run to follow it."),
+		mcp.WithString("run", mcp.Required(), mcp.Description("Run identifier of the build to replay")),
+		mcp.WithString("script", mcp.Required(), mcp.Description("The Groovy script the replay runs")),
+	)
+	addTool(mcpServer, kindAction, replayTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		claims, toolErr := requirePipelineCaller(ctx, deps)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		args := getArgs(req)
+		run := strArg(args, "run")
+		if run == "" {
+			return mcp.NewToolResultError("run is required"), nil
+		}
+		runID, intentKey, targetCluster, serr := api.NewServer(deps).ReplayRun(ctx, claims, run, strArg(args, "script"))
+		if serr != nil {
+			return mcp.NewToolResultError(serr.Error()), nil
+		}
+		// One activity event records the request, on the cluster the
+		// command reached, which can differ from the cluster this BFF serves.
+		emitActivityForCluster(deps, claims, targetCluster, activity.Event{
+			Type:    "pipeline.run_replay_requested",
+			Message: fmt.Sprintf("Replay of run %s requested (run %s)", run, runID),
+		})
+		return resultJSON(map[string]any{"runId": runID, "intentKey": intentKey, "state": "requested"})
+	})
 }
 
 // requirePipelineCaller guards a nil authorizer and requires claims, the

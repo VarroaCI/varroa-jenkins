@@ -328,7 +328,7 @@ func TestStartedPayload_MasksParameters(t *testing.T) {
 	if !ok {
 		t.Fatalf("params missing or wrong type: %+v", p)
 	}
-	if params["TOKEN"] != maskedParamValue {
+	if params["TOKEN"] != MaskedParamValue {
 		t.Fatalf("TOKEN = %q, want masked", params["TOKEN"])
 	}
 	if params["BRANCH"] != "main" {
@@ -404,6 +404,48 @@ func TestTemplateFields_OmittedForNoTemplateAndHeartbeat(t *testing.T) {
 	for _, k := range []string{"template_name", "template_version", "marker_path", "marker_revision"} {
 		if _, ok := hp[k]; ok {
 			t.Errorf("run.heartbeat payload carries %q, want none of the four template fields", k)
+		}
+	}
+}
+
+// --- replay_of: the STARTED phase carries it alone ---
+
+// TestStartedPayload_ReplayOf proves run.started writes replay_of for a
+// non-empty value and writes no key for an empty one.
+func TestStartedPayload_ReplayOf(t *testing.T) {
+	const source = "0199aa11-2222-7333-8444-555566667777"
+	replayed := startedPayload(&mitev1.BuildEvent{Phase: phaseStarted, RunId: "run-1", ReplayOf: source})
+	if got, ok := replayed["replay_of"]; !ok || got != source {
+		t.Fatalf("replay_of = %v (present %v), want %q", got, ok, source)
+	}
+
+	ordinary := startedPayload(&mitev1.BuildEvent{Phase: phaseStarted, RunId: "run-1"})
+	if _, ok := ordinary["replay_of"]; ok {
+		t.Fatalf("run.started payload carries replay_of for a build with no source: %+v", ordinary)
+	}
+}
+
+// TestReplayOf_OmittedFromEveryOtherPhase proves no payload function other
+// than startedPayload writes replay_of, even when the event sets it.
+func TestReplayOf_OmittedFromEveryOtherPhase(t *testing.T) {
+	evt := &mitev1.BuildEvent{
+		Phase:    phaseCompleted,
+		RunId:    "run-1",
+		Result:   "SUCCESS",
+		ReplayOf: "0199aa11-2222-7333-8444-555566667777",
+	}
+	payloads := map[string]map[string]interface{}{
+		"run.stage":     stagePayload(&mitev1.BuildStage{Name: "build"}),
+		"run.heartbeat": heartbeatPayload(evt),
+		"run.source":    sourcePayload(evt),
+		"run.changes":   changesPayload(evt),
+		"run.input":     inputsPayload(evt),
+		"run.tests":     testsPayload(evt),
+		"run.completed": completedPayload(evt),
+	}
+	for kind, p := range payloads {
+		if _, ok := p["replay_of"]; ok {
+			t.Errorf("%s payload carries replay_of, want the key on run.started alone", kind)
 		}
 	}
 }

@@ -2,6 +2,7 @@ package org.jenkinsci.plugins.varroamiteauth;
 
 import hudson.Extension;
 import hudson.model.Action;
+import hudson.model.Cause;
 import hudson.model.CauseAction;
 import hudson.model.Failure;
 import hudson.model.FileParameterDefinition;
@@ -36,9 +37,11 @@ import jenkins.model.Jenkins;
 import jenkins.model.ParameterizedJobMixIn;
 import jenkins.model.lazy.LazyBuildMixIn;
 
+import org.jenkinsci.plugins.workflow.cps.replay.ReplayAction;
 import org.jenkinsci.plugins.workflow.flow.FlowExecution;
 import org.jenkinsci.plugins.workflow.flow.FlowExecutionList;
 import org.jenkinsci.plugins.workflow.flow.FlowExecutionOwner;
+import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 
 import net.sf.json.JSONArray;
@@ -52,8 +55,8 @@ import org.springframework.security.core.GrantedAuthority;
 
 /**
  * Protected {@link RootAction} at {@code /varroa-run}, the mite's local call for a
- * manual build trigger, a manual build cancel, and the two input-approval commands
- * (D3, D4, D10, D11, run-trigger-endpoint).
+ * manual build trigger, a manual build cancel, the two input-approval commands, and
+ * a replay with an edited script (D3, D4, D8, D10, D11, run-trigger-endpoint).
  *
  * <p>Requires the authority {@code ROLE:varroa:system-mite}, the same check {@link
  * ActivityEndpoint} performs. Only the mite calls these routes, over the Jenkins
@@ -78,6 +81,11 @@ import org.springframework.security.core.GrantedAuthority;
  * the acting user from the body, because the request authenticates the mite and never
  * the person, and both run every Jenkins call after the resolution inside that user's
  * own authentication.
+ *
+ * <p>{@code POST /varroa-run/replay} schedules one build of a Pipeline job with a
+ * caller-supplied script, as the acting user. It refuses a template-defined job,
+ * because a template owns its own script. The route name holds one word, so it
+ * carries no {@link WebMethod}.
  */
 @Extension
 public class VarroaRunTriggerAction implements RootAction {
@@ -179,6 +187,135 @@ public class VarroaRunTriggerAction implements RootAction {
             rsp.getWriter().write(out.toString());
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "VarroaRunTriggerAction.doTrigger caught exception", e);
+            try {
+                rsp.sendError(500, "Internal server error");
+            } catch (Exception ignored) {
+                // Best-effort error response.
+            }
+        }
+    }
+
+    /**
+     * Handles {@code POST /varroa-run/replay} (D8). Reads {@code runId},
+     * {@code intentKey}, {@code jobPath}, {@code sourceRunId}, {@code script},
+     * {@code parameters}, and {@code actingUser}, narrows the named item to a
+     * parameterized Pipeline job that no Varroa template defines, and then,
+     * inside the acting user's own authentication, checks {@link
+     * ReplayAction#REPLAY} on the job and schedules one build.
+     *
+     * <p>The build carries the parameters action, a stamped {@link
+     * VarroaIntentAction}, a cause action holding a {@link VarroaUserCause}
+     * and a {@link VarroaReplayCause}, and a {@link
+     * VarroaReplayFlowFactoryAction} over the supplied script. The route
+     * trusts no sandbox flag from the body: the execution is always
+     * sandboxed.
+     *
+     * <p>The route name holds one word, so Stapler derives it from the method
+     * name and the method carries no {@link WebMethod}.
+     */
+    public void doReplay(StaplerRequest2 req, StaplerResponse2 rsp) {
+        try {
+            if (!"POST".equalsIgnoreCase(req.getMethod())) {
+                rsp.sendError(405, "Method Not Allowed: only POST is served");
+                return;
+            }
+            if (!isMitePrincipal()) {
+                rsp.sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                return;
+            }
+
+            JSONObject body;
+            try {
+                body = readBody(req);
+            } catch (Exception e) {
+                rsp.sendError(400, "Bad Request: body does not decode");
+                return;
+            }
+
+            String runId = body.optString("runId", "");
+            String intentKey = body.optString("intentKey", "");
+            String jobPath = body.optString("jobPath", "");
+            String sourceRunId = body.optString("sourceRunId", "");
+            String script = body.optString("script", "");
+            JSONObject parameters = body.optJSONObject("parameters");
+            // The request authenticates the mite, so the acting user comes
+            // from the body alone.
+            VarroaActingUser actingUser = VarroaActingUser.fromJson(body);
+            // The record's replay_of value comes from sourceRunId, so a
+            // replay that names no source run is refused.
+            if (runId.isEmpty() || sourceRunId.isEmpty() || jobPath.isEmpty() || script.isEmpty()
+                    || actingUser == null) {
+                rsp.sendError(400, "Bad Request: the body names no run, no source run, no job, no script,"
+                        + " or no acting user");
+                return;
+            }
+
+            // Look the item up untyped: a missing item and an item of the
+            // wrong kind carry different response codes.
+            Item rawItem = Jenkins.get().getItemByFullName(jobPath);
+            if (rawItem == null) {
+                rsp.sendError(404, "Not Found: no item named " + jobPath);
+                return;
+            }
+            if (!(rawItem instanceof Job) || !(rawItem instanceof ParameterizedJobMixIn.ParameterizedJob)) {
+                rsp.sendError(409, "Conflict: " + jobPath + " is a " + rawItem.getClass().getName()
+                        + ", not a parameterized job");
+                return;
+            }
+            if (!(rawItem instanceof WorkflowJob)) {
+                // A replay replaces a Groovy script, and a job of another
+                // kind holds none.
+                rsp.sendError(409, "Conflict: " + jobPath + " is not a pipeline job");
+                return;
+            }
+            Job<?, ?> job = (Job<?, ?>) rawItem;
+            if (VarroaTemplateDefinitions.isTemplateDefined(job)) {
+                // A template definition builds through a core definition that
+                // honours the replay factory action. A replay would therefore
+                // replace the governed template with the caller's script.
+                rsp.sendError(409, "Conflict: " + jobPath + " is template defined");
+                return;
+            }
+
+            String actor = VarroaUserCause.normalizeActor(actingUser.getName());
+            List<String> droppedParameters = new ArrayList<>();
+            try (ACLContext ignored = ACL.as2(actingUser.authentication())) {
+                // The check reads the job, not the source build: a cell is
+                // disposable, and the source build can be gone from it.
+                if (!job.hasPermission(ReplayAction.REPLAY)) {
+                    rsp.sendError(403, "Forbidden: the acting user may not replay this job");
+                    return;
+                }
+
+                List<Action> actions = new ArrayList<>();
+                actions.add(buildParametersAction(job, req, parameters, droppedParameters));
+                actions.add(stampedIntentAction(runId, intentKey, actor));
+                List<Cause> causes = new ArrayList<>();
+                if (!actor.isEmpty()) {
+                    causes.add(new VarroaUserCause(actor));
+                }
+                causes.add(new VarroaReplayCause(sourceRunId));
+                actions.add(new CauseAction(causes.toArray(new Cause[0])));
+                actions.add(new VarroaReplayFlowFactoryAction(script));
+
+                Queue.Item item = ParameterizedJobMixIn.scheduleBuild2(job, 0, actions.toArray(new Action[0]));
+                if (item == null) {
+                    rsp.sendError(409, "Conflict: the queue refused to schedule " + jobPath);
+                    return;
+                }
+            }
+
+            JSONObject out = new JSONObject();
+            out.put("runId", runId);
+            JSONArray dropped = new JSONArray();
+            dropped.addAll(droppedParameters);
+            out.put("droppedParameters", dropped);
+
+            rsp.setContentType("application/json");
+            rsp.setStatus(202);
+            rsp.getWriter().write(out.toString());
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "VarroaRunTriggerAction.doReplay caught exception", e);
             try {
                 rsp.sendError(500, "Internal server error");
             } catch (Exception ignored) {

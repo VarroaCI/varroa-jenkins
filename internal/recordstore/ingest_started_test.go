@@ -576,3 +576,93 @@ func TestLowerNumberFromOwnerTakesOrdinaryPath(t *testing.T) {
 		t.Fatalf("next_number = %d, want %d", next, refreshed.BuildNumber+1)
 	}
 }
+
+// readReplayOf answers the stored replay_of column of one run, and false
+// when the column is NULL.
+func readReplayOf(t *testing.T, db *sql.DB, runID uuid.UUID) (string, bool) {
+	t.Helper()
+	var got sql.NullString
+	if err := db.QueryRow(`SELECT replay_of::text FROM varroa.runs WHERE run_id = $1`, runID).Scan(&got); err != nil {
+		t.Fatalf("read replay_of: %v", err)
+	}
+	return got.String, got.Valid
+}
+
+// TestApplyRunStartedWritesReplayOf asserts a run.started envelope that
+// carries replay_of stores the source run identifier in the column.
+func TestApplyRunStartedWritesReplayOf(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:replay-of-1")
+	g := NewIngester(pool, nil, nil)
+
+	source := "0199aa11-2222-7333-8444-555566667777"
+	buildNumber := int64(1)
+	env := newTestEnvelope(t, runID, "manual:replay-of-1", KindRunStarted, RunStartedPayload{
+		BuildNumber: &buildNumber,
+		ReplayOf:    &source,
+	})
+	if _, err := g.Apply(context.Background(), env); err != nil {
+		t.Fatalf("apply run.started: %v", err)
+	}
+	if got, ok := readReplayOf(t, db, runID); !ok || got != source {
+		t.Fatalf("replay_of = %q (valid %v), want %q", got, ok, source)
+	}
+}
+
+// TestApplyRunStartedLeavesReplayOfNull asserts a run.started envelope with
+// no replay_of key, or with a value that is not a UUID, leaves the column
+// NULL and still records the run.
+func TestApplyRunStartedLeavesReplayOfNull(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	g := NewIngester(pool, nil, nil)
+
+	absentID := seedGrantedIntent(t, pool, "manual:replay-of-2")
+	buildNumber := int64(1)
+	absent := newTestEnvelope(t, absentID, "manual:replay-of-2", KindRunStarted, RunStartedPayload{BuildNumber: &buildNumber})
+	if _, err := g.Apply(context.Background(), absent); err != nil {
+		t.Fatalf("apply run.started: %v", err)
+	}
+	if got, ok := readReplayOf(t, db, absentID); ok {
+		t.Fatalf("replay_of = %q, want NULL for a build with no source", got)
+	}
+
+	malformedID := seedGrantedIntent(t, pool, "manual:replay-of-3")
+	secondNumber := int64(2)
+	bad := "not-a-uuid"
+	malformed := newTestEnvelope(t, malformedID, "manual:replay-of-3", KindRunStarted, RunStartedPayload{
+		BuildNumber: &secondNumber,
+		ReplayOf:    &bad,
+	})
+	if _, err := g.Apply(context.Background(), malformed); err != nil {
+		t.Fatalf("apply run.started with a malformed replay_of: %v", err)
+	}
+	if got, ok := readReplayOf(t, db, malformedID); ok {
+		t.Fatalf("replay_of = %q, want NULL for a value that is not a UUID", got)
+	}
+}
+
+// TestRedeliveredStartKeepsReplayOf asserts a later run.started with no
+// replay_of key keeps the stored source run identifier.
+func TestRedeliveredStartKeepsReplayOf(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:replay-of-4")
+	g := NewIngester(pool, nil, nil)
+
+	source := "0199aa11-2222-7333-8444-555566667777"
+	buildNumber := int64(1)
+	first := newTestEnvelope(t, runID, "manual:replay-of-4", KindRunStarted, RunStartedPayload{
+		BuildNumber: &buildNumber,
+		ReplayOf:    &source,
+	})
+	if _, err := g.Apply(context.Background(), first); err != nil {
+		t.Fatalf("apply first run.started: %v", err)
+	}
+
+	again := newTestEnvelope(t, runID, "manual:replay-of-4", KindRunStarted, RunStartedPayload{BuildNumber: &buildNumber})
+	if _, err := g.Apply(context.Background(), again); err != nil {
+		t.Fatalf("apply redelivered run.started: %v", err)
+	}
+	if got, ok := readReplayOf(t, db, runID); !ok || got != source {
+		t.Fatalf("replay_of = %q (valid %v), want %q kept", got, ok, source)
+	}
+}

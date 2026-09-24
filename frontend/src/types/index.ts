@@ -1810,6 +1810,8 @@ export interface RunDetail {
   /** How the run was defined, from the record's source column. Absent until
    * a run.source event arrives. */
   source?: RunSource;
+  /** The source run this run replays. Absent for a run that is not a replay. */
+  replayOf?: string;
   /** The one-line run summary. Absent until the run sets one. */
   summary?: string;
   /** The run's failure digest. Each part is absent when the record omits it. */
@@ -1828,6 +1830,20 @@ export interface RunDetailTestReport {
   blobKey?: string;
   sizeBytes: number;
   caseCount: number;
+}
+
+/** GET /runs/{run}/script. Every field is always present. A run that does
+ * not replay answers an empty script and an empty loadedScripts map. */
+export interface RunScript {
+  /** The main Groovy script the run ran. */
+  script: string;
+  /** The library scripts the run loaded, by name. Only the main script is editable. */
+  loadedScripts: Record<string, string>;
+  /** "script" or "template". */
+  definitionKind: string;
+  replayable: boolean;
+  /** Why the run does not replay. Empty for a run that replays. */
+  reason: string;
 }
 
 /** One entry of a digest's failed case list. */

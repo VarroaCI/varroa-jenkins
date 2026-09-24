@@ -197,11 +197,15 @@ reading each package's entry point):
   `oneOf` requires exactly one match and the shapes overlap. Output schemas are
   **not** server-validated — `handler.go` enables input validation only — so
   they are asserted in tests.
-  `tools_pipelines.go` registers five pipeline tools: `run_pipeline` (action),
+  `tools_pipelines.go` registers eight pipeline tools: `run_pipeline`,
+  `proceed_run_input`, `abort_run_input`, and `replay_run` (action), and
   `list_runs`, `get_run`, `get_run_log`, and `list_fleet_locks` (read). Each
   calls the same `internal/api` service method (`pipelines_service.go`'s
-  `RunPipeline`, `ListRuns`, `GetRun`, `GetRunLog`, `ListFleetLocks`) the
-  matching HTTP handler calls, so the
+  `RunPipeline`, `ProceedRunInput`, `AbortRunInput`, `ReplayRun`, `ListRuns`,
+  `GetRun`, `GetRunLog`, `ListFleetLocks`) the matching HTTP handler calls
+  (`replay_run` reaches `POST /runs/{run}/replay`; the script read
+  `GET /runs/{run}/script` has no tool, because a script can reach 256 KiB),
+  so the
   MCP surface and the REST surface authorize and read identically; no tool
   here issues an HTTP request to the BFF or calls a controller-scoped check.
   `get_run_log` returns a bounded tail (`tailLines`, default 100, clamped 1
@@ -359,4 +363,4 @@ go test -race -count=1 ./internal/<pkg>/...        # single package
 - [bundle](bundle/AGENTS.md) — ComposedBundle composition, git/catalog resolution, JCasC merge, and the delivered pipeline-template set (`pipelinetemplate/`)
 - [rbac](rbac/AGENTS.md) — VarroaRole/JenkinsRole resolution and role-strategy YAML generation
 - [bus](bus/AGENTS.md) — NATS/JetStream transport: subjects, streams, KV buckets, cluster directory
-- [recordstore](recordstore/AGENTS.md) — build-record Postgres store: schema, migrations, ledger, the placement fence, the cross-tenant grant evaluator and responder, the upstream fan-out, the fleet lock table, the tenant-sync responder, the backstop scheduler, blob abstraction; the `runs` row carries the `source`, `summary`, and `inputs` columns
+- [recordstore](recordstore/AGENTS.md) — build-record Postgres store: schema, migrations, ledger, the placement fence, the cross-tenant grant evaluator and responder, the upstream fan-out, the fleet lock table, the tenant-sync responder, the backstop scheduler, blob abstraction; the `runs` row carries the `source`, `summary`, `inputs`, and `replay_of` columns

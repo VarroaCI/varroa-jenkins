@@ -3,6 +3,8 @@ package recordstore
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Run is one row of varroa.runs, in the shape a reader returns it.
@@ -40,6 +42,9 @@ type Run struct {
 	TestsFailed   *int32
 	TestsSkipped  *int32
 	Payload       json.RawMessage
+	// ReplayOf names the run a replayed build copied its script from. It
+	// is nil for a build that is not a replay.
+	ReplayOf *uuid.UUID
 }
 
 // Stage is one row of varroa.run_stages.

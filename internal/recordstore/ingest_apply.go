@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
-	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
 
 // ErrUnknownKind means an envelope's kind is outside the kinds
@@ -296,14 +295,14 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 	// lost object delete must never roll the record back. The hourly
 	// backstop repairs a recorder that stops between the two.
 	if dispatched.stateCleanup != "" && g.stateDeleter != nil {
-		if delErr := g.stateDeleter.DeletePrefix(ctx, blob.RunStatePrefix(dispatched.stateCleanup)); delErr != nil {
+		if delErr := deleteRunStateExceptScript(ctx, g.stateDeleter, dispatched.stateCleanup, dispatched.stateCleanupFiles); delErr != nil {
 			g.logger.Error("delete run state failed", "runID", dispatched.stateCleanup, "error", delErr)
 		}
 	}
 
 	// The superseded-object delete runs at the same place and for the
 	// same reason. It is best effort: a failed delete leaves one object,
-	// which the run's own prefix delete removes when the run ends.
+	// which the retention round's prefix delete removes with the run's record.
 	if dispatched.stateKeyCleanup != "" && g.stateDeleter != nil {
 		if delErr := g.stateDeleter.Delete(ctx, dispatched.stateKeyCleanup); delErr != nil {
 			g.logger.Error("delete superseded run-state object failed",
@@ -337,6 +336,14 @@ type dispatchResult struct {
 	// write, the same owner test the fan-out uses, and on the recorder's
 	// own cap refusal.
 	stateCleanup string
+
+	// stateCleanupFiles is the run's mesh file list, read inside the same
+	// transaction that sets stateCleanup. The cleanup keeps the entry
+	// RunScriptObjectKey selects and deletes every other entry by key. A
+	// terminal write passes a non-nil list, empty for a NULL or
+	// undecodable column. The run-state cap leaves it nil, so the cleanup
+	// deletes the whole prefix.
+	stateCleanupFiles []runStateFile
 
 	// stateKeyCleanup names one exact run-state object key Apply deletes
 	// after the transaction commits. A run-state upsert that supersedes
@@ -407,7 +414,15 @@ func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, e
 		if !owner {
 			return dispatchResult{}, nil
 		}
-		res := dispatchResult{stateCleanup: intent.runID.String(), releasedFleetLocks: releasedLocks}
+		files, filesErr := readRunStateFiles(ctx, tx, intent)
+		if filesErr != nil {
+			return dispatchResult{}, filesErr
+		}
+		res := dispatchResult{
+			stateCleanup:       intent.runID.String(),
+			stateCleanupFiles:  files,
+			releasedFleetLocks: releasedLocks,
+		}
 		if payload.Result != nil {
 			// The fan-out round is the one part of the terminal path
 			// that is not idempotent, so it runs behind its own
@@ -454,4 +469,22 @@ func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, e
 	default:
 		return dispatchResult{}, fmt.Errorf("%w: %s", ErrUnknownKind, env.Kind)
 	}
+}
+
+// readRunStateFiles reads the run's mesh file list inside tx for the
+// terminal cleanup. A missing row, a NULL column, and an undecodable list
+// all answer an empty non-nil slice, so the cleanup deletes the whole
+// prefix and never reads the list as the run-state cap's nil.
+func readRunStateFiles(ctx context.Context, tx pgx.Tx, intent *intentRow) ([]runStateFile, error) {
+	var raw []byte
+	err := tx.QueryRow(ctx, `
+		SELECT payload->'mesh'->'files' FROM varroa.runs WHERE run_id = $1 AND created_at = $2
+	`, intent.runID, intent.createdAt).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return []runStateFile{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read run-state file list: %w", err)
+	}
+	return runStateFilesOrEmpty(raw), nil
 }

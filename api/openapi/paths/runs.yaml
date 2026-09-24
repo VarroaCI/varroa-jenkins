@@ -254,6 +254,102 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
+/api/v1/runs/{run}/script:
+  get:
+    operationId: getRunScript
+    tags: [Pipelines]
+    summary: Reads one run's own Groovy script and whether the run replays.
+    description: >
+      The BFF reads the build record the run retains in the blob tier.
+      A run that does not replay answers replayable false, the reason,
+      an empty script, and an empty loadedScripts object.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+    responses:
+      "200":
+        description: The run's script, its loaded scripts, and its replay eligibility.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunScript'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        description: The run does not exist, or the caller may not read it.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/runs/{run}/replay:
+  post:
+    operationId: replayRun
+    tags: [Pipelines]
+    summary: Starts a new build of the run's job with an edited script. Fire and forget.
+    description: >
+      The BFF applies the eligibility rules of the script read, mints a
+      new run identifier, and publishes one REPLAY_BUILD command to the
+      job's home member. It does not wait for Jenkins. Each call starts
+      its own build with its own build number.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [script]
+            additionalProperties: false
+            properties:
+              script:
+                type: string
+                description: >
+                  The edited main script, at most 262144 UTF-8 bytes. A
+                  larger script answers 413. The library scripts load again
+                  from their library, so the body holds no library script.
+    responses:
+      "202":
+        description: The replay was requested.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunActionResponse'
+      "400":
+        description: The request body does not decode, or the script is empty.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        description: The run does not exist, or the caller may not read it.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "409":
+        description: >
+          The run does not replay. The message names the reason, one of
+          the reason values of the script read.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "413":
+        description: The script is larger than 256 KiB.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
 /api/v1/runs/{run}/inputs/{input}/proceed:
   post:
     operationId: proceedRunInput

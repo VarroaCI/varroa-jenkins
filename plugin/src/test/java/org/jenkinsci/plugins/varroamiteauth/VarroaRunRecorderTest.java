@@ -288,6 +288,49 @@ public class VarroaRunRecorderTest {
         assertTrue(completed.getDurationMillis() >= 0);
     }
 
+    // --- The replay source on STARTED ---
+
+    @Test
+    public void aReplayedBuildNamesItsSourceOnStartedAlone() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "replayed");
+        job.setDefinition(new CpsFlowDefinition("stage('one') { echo 'one' }\n", true));
+
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction(""),
+                new CauseAction(new VarroaReplayCause("src-run"))));
+
+        BuildEventSink.DrainResult result = BuildEventSink.get().drain(100);
+        List<BuildEvent> started = byPhase(result.events, BuildEvent.PHASE_STARTED);
+        assertEquals(1, started.size());
+        assertEquals("src-run", started.get(0).getReplayOf());
+        assertEquals("src-run", started.get(0).toJson().getString("replay_of"));
+
+        List<String> otherPhases = new ArrayList<>();
+        for (BuildEvent e : result.events) {
+            if (BuildEvent.PHASE_STARTED.equals(e.getPhase())) {
+                continue;
+            }
+            otherPhases.add(e.getPhase());
+            assertEquals("phase " + e.getPhase() + " must carry no source", "", e.getReplayOf());
+            assertFalse("phase " + e.getPhase() + " must write no replay_of key",
+                    e.toJson().containsKey("replay_of"));
+        }
+        assertTrue("the build must emit a COMPLETED event, phases=" + otherPhases,
+                otherPhases.contains(BuildEvent.PHASE_COMPLETED));
+    }
+
+    @Test
+    public void aBuildWithNoReplayCauseCarriesAnEmptySource() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject();
+
+        j.assertBuildStatusSuccess(project.scheduleBuild2(0, grantedAction(""),
+                new CauseAction(new VarroaUserCause("nate"))));
+
+        BuildEventSink.DrainResult result = BuildEventSink.get().drain(100);
+        BuildEvent started = byPhase(result.events, BuildEvent.PHASE_STARTED).get(0);
+        assertEquals("", started.getReplayOf());
+        assertFalse(started.toJson().containsKey("replay_of"));
+    }
+
     // --- 5.10b: the completion rebuild carries every stage and branch ---
 
     @Test

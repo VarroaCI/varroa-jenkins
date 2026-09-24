@@ -323,9 +323,9 @@ const (
 
 // Defines values for ComponentsSchemasPipelineDefinitionSource.
 const (
-	Inline      ComponentsSchemasPipelineDefinitionSource = "inline"
-	Jenkinsfile ComponentsSchemasPipelineDefinitionSource = "jenkinsfile"
-	Template    ComponentsSchemasPipelineDefinitionSource = "template"
+	ComponentsSchemasPipelineDefinitionSourceInline      ComponentsSchemasPipelineDefinitionSource = "inline"
+	ComponentsSchemasPipelineDefinitionSourceJenkinsfile ComponentsSchemasPipelineDefinitionSource = "jenkinsfile"
+	ComponentsSchemasPipelineDefinitionSourceTemplate    ComponentsSchemasPipelineDefinitionSource = "template"
 )
 
 // Defines values for ComponentsSchemasPipelineDependencyEdgeResult.
@@ -395,6 +395,12 @@ const (
 // Defines values for ComponentsSchemasRunActionResponseState.
 const (
 	ComponentsSchemasRunActionResponseStateRequested ComponentsSchemasRunActionResponseState = "requested"
+)
+
+// Defines values for ComponentsSchemasRunScriptDefinitionKind.
+const (
+	ComponentsSchemasRunScriptDefinitionKindScript   ComponentsSchemasRunScriptDefinitionKind = "script"
+	ComponentsSchemasRunScriptDefinitionKindTemplate ComponentsSchemasRunScriptDefinitionKind = "template"
 )
 
 // Defines values for ComponentsSchemasRunnerSpecLauncher.
@@ -2907,7 +2913,7 @@ type ComponentsSchemasRotatePartialFailure struct {
 	NewToken string `json:"newToken"`
 }
 
-// ComponentsSchemasRunActionResponse 202 response for a run request or a rerun. The BFF does not wait for the cell's admission decision; the caller polls the run.
+// ComponentsSchemasRunActionResponse 202 response for a run request, a rerun, or a replay. The BFF does not wait for the cell's admission decision; the caller polls the run.
 type ComponentsSchemasRunActionResponse struct {
 	IntentKey string                                  `json:"intentKey"`
 	RunId     string                                  `json:"runId"`
@@ -2994,7 +3000,10 @@ type ComponentsSchemasRunDetail struct {
 	LogFinalized *bool              `json:"logFinalized,omitempty"`
 	Params       *map[string]string `json:"params,omitempty"`
 	QueuedAt     *time.Time         `json:"queuedAt,omitempty"`
-	Result       *string            `json:"result,omitempty"`
+
+	// ReplayOf The identifier of the run whose script this build replayed. The field is absent for a build that is not a replay.
+	ReplayOf *string `json:"replayOf,omitempty"`
+	Result   *string `json:"result,omitempty"`
 
 	// RetryRunId An existing retry's run id, when one already exists.
 	RetryRunId  *string `json:"retryRunId,omitempty"`
@@ -3098,6 +3107,27 @@ type ComponentsSchemasRunListResponse struct {
 	Items      []ComponentsSchemasRunSummary `json:"items"`
 	NextCursor *string                       `json:"nextCursor,omitempty"`
 }
+
+// ComponentsSchemasRunScript GET /runs/{run}/script. The run's own Groovy script, read from the build record the run retains in the blob tier. Every field is always present. A run that does not replay answers an empty script and an empty loadedScripts object.
+type ComponentsSchemasRunScript struct {
+	// DefinitionKind template when the run's stored payload names a pipeline template or a marker file, and script otherwise.
+	DefinitionKind ComponentsSchemasRunScriptDefinitionKind `json:"definitionKind"`
+
+	// LoadedScripts The library scripts the run loaded, as a map of name to script text. A caller cannot edit them, and a replay loads them again from their library. The object is empty when the run loaded no script or when replayable is false.
+	LoadedScripts map[string]string `json:"loadedScripts"`
+
+	// Reason The name of the first eligibility rule the run fails. The rules run in this order: not-terminal, template-defined, masked-parameter, no-replica, unreadable, not-sandbox, and script-too-large. A replayable run answers the empty string.
+	Reason string `json:"reason"`
+
+	// Replayable True only when the run passes every eligibility rule.
+	Replayable bool `json:"replayable"`
+
+	// Script The main script of the run's flow execution. The value is empty when replayable is false.
+	Script string `json:"script"`
+}
+
+// ComponentsSchemasRunScriptDefinitionKind template when the run's stored payload names a pipeline template or a marker file, and script otherwise.
+type ComponentsSchemasRunScriptDefinitionKind string
 
 // ComponentsSchemasRunStage defines model for components_schemas_RunStage.
 type ComponentsSchemasRunStage struct {
@@ -4270,6 +4300,12 @@ type StreamRunLogParams struct {
 	Raw *bool `form:"raw,omitempty" json:"raw,omitempty"`
 }
 
+// ReplayRunJSONBody defines parameters for ReplayRun.
+type ReplayRunJSONBody struct {
+	// Script The edited main script, at most 262144 UTF-8 bytes. A larger script answers 413. The library scripts load again from their library, so the body holds no library script.
+	Script string `json:"script"`
+}
+
 // SearchParams defines parameters for Search.
 type SearchParams struct {
 	// Q Search query string.
@@ -4433,6 +4469,9 @@ type PatchRunnerApplicationMergePatchPlusJSONRequestBody PatchRunnerApplicationM
 
 // ProceedRunInputJSONRequestBody defines body for ProceedRunInput for application/json ContentType.
 type ProceedRunInputJSONRequestBody ProceedRunInputJSONBody
+
+// ReplayRunJSONRequestBody defines body for ReplayRun for application/json ContentType.
+type ReplayRunJSONRequestBody ReplayRunJSONBody
 
 // CreateStreamTicketJSONRequestBody defines body for CreateStreamTicket for application/json ContentType.
 type CreateStreamTicketJSONRequestBody CreateStreamTicketJSONBody
@@ -5443,8 +5482,16 @@ type ClientInterface interface {
 	// StreamRunLog request
 	StreamRunLog(ctx context.Context, run ComponentsParametersRun, params *StreamRunLogParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ReplayRunWithBody request with any body
+	ReplayRunWithBody(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ReplayRun(ctx context.Context, run ComponentsParametersRun, body ReplayRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// RerunRun request
 	RerunRun(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetRunScript request
+	GetRunScript(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListRunTests request
 	ListRunTests(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -7640,8 +7687,44 @@ func (c *Client) StreamRunLog(ctx context.Context, run ComponentsParametersRun, 
 	return c.Client.Do(req)
 }
 
+func (c *Client) ReplayRunWithBody(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReplayRunRequestWithBody(c.Server, run, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ReplayRun(ctx context.Context, run ComponentsParametersRun, body ReplayRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReplayRunRequest(c.Server, run, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) RerunRun(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRerunRunRequest(c.Server, run)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetRunScript(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetRunScriptRequest(c.Server, run)
 	if err != nil {
 		return nil, err
 	}
@@ -14454,6 +14537,53 @@ func NewStreamRunLogRequest(server string, run ComponentsParametersRun, params *
 	return req, nil
 }
 
+// NewReplayRunRequest calls the generic ReplayRun builder with application/json body
+func NewReplayRunRequest(server string, run ComponentsParametersRun, body ReplayRunJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewReplayRunRequestWithBody(server, run, "application/json", bodyReader)
+}
+
+// NewReplayRunRequestWithBody generates requests for ReplayRun with any type of body
+func NewReplayRunRequestWithBody(server string, run ComponentsParametersRun, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/replay", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewRerunRunRequest generates requests for RerunRun
 func NewRerunRunRequest(server string, run ComponentsParametersRun) (*http.Request, error) {
 	var err error
@@ -14481,6 +14611,40 @@ func NewRerunRunRequest(server string, run ComponentsParametersRun) (*http.Reque
 	}
 
 	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetRunScriptRequest generates requests for GetRunScript
+func NewGetRunScriptRequest(server string, run ComponentsParametersRun) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/script", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -15863,8 +16027,16 @@ type ClientWithResponsesInterface interface {
 	// StreamRunLogWithResponse request
 	StreamRunLogWithResponse(ctx context.Context, run ComponentsParametersRun, params *StreamRunLogParams, reqEditors ...RequestEditorFn) (*StreamRunLogResponse, error)
 
+	// ReplayRunWithBodyWithResponse request with any body
+	ReplayRunWithBodyWithResponse(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReplayRunResponse, error)
+
+	ReplayRunWithResponse(ctx context.Context, run ComponentsParametersRun, body ReplayRunJSONRequestBody, reqEditors ...RequestEditorFn) (*ReplayRunResponse, error)
+
 	// RerunRunWithResponse request
 	RerunRunWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*RerunRunResponse, error)
+
+	// GetRunScriptWithResponse request
+	GetRunScriptWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*GetRunScriptResponse, error)
 
 	// ListRunTestsWithResponse request
 	ListRunTestsWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*ListRunTestsResponse, error)
@@ -19355,6 +19527,35 @@ func (r StreamRunLogResponse) StatusCode() int {
 	return 0
 }
 
+type ReplayRunResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON202      *ComponentsSchemasRunActionResponse
+	JSON400      *ComponentsSchemasError
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsSchemasError
+	JSON409      *ComponentsSchemasError
+	JSON413      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ReplayRunResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReplayRunResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type RerunRunResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -19375,6 +19576,31 @@ func (r RerunRunResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r RerunRunResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetRunScriptResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasRunScript
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r GetRunScriptResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetRunScriptResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -21520,6 +21746,23 @@ func (c *ClientWithResponses) StreamRunLogWithResponse(ctx context.Context, run 
 	return ParseStreamRunLogResponse(rsp)
 }
 
+// ReplayRunWithBodyWithResponse request with arbitrary body returning *ReplayRunResponse
+func (c *ClientWithResponses) ReplayRunWithBodyWithResponse(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReplayRunResponse, error) {
+	rsp, err := c.ReplayRunWithBody(ctx, run, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReplayRunResponse(rsp)
+}
+
+func (c *ClientWithResponses) ReplayRunWithResponse(ctx context.Context, run ComponentsParametersRun, body ReplayRunJSONRequestBody, reqEditors ...RequestEditorFn) (*ReplayRunResponse, error) {
+	rsp, err := c.ReplayRun(ctx, run, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReplayRunResponse(rsp)
+}
+
 // RerunRunWithResponse request returning *RerunRunResponse
 func (c *ClientWithResponses) RerunRunWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*RerunRunResponse, error) {
 	rsp, err := c.RerunRun(ctx, run, reqEditors...)
@@ -21527,6 +21770,15 @@ func (c *ClientWithResponses) RerunRunWithResponse(ctx context.Context, run Comp
 		return nil, err
 	}
 	return ParseRerunRunResponse(rsp)
+}
+
+// GetRunScriptWithResponse request returning *GetRunScriptResponse
+func (c *ClientWithResponses) GetRunScriptWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*GetRunScriptResponse, error) {
+	rsp, err := c.GetRunScript(ctx, run, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetRunScriptResponse(rsp)
 }
 
 // ListRunTestsWithResponse request returning *ListRunTestsResponse
@@ -27932,6 +28184,81 @@ func ParseStreamRunLogResponse(rsp *http.Response) (*StreamRunLogResponse, error
 	return response, nil
 }
 
+// ParseReplayRunResponse parses an HTTP response from a ReplayRunWithResponse call
+func ParseReplayRunResponse(rsp *http.Response) (*ReplayRunResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReplayRunResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest ComponentsSchemasRunActionResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseRerunRunResponse parses an HTTP response from a RerunRunWithResponse call
 func ParseRerunRunResponse(rsp *http.Response) (*RerunRunResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -27966,6 +28293,53 @@ func ParseRerunRunResponse(rsp *http.Response) (*RerunRunResponse, error) {
 			return nil, err
 		}
 		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetRunScriptResponse parses an HTTP response from a GetRunScriptWithResponse call
+func ParseGetRunScriptResponse(rsp *http.Response) (*GetRunScriptResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetRunScriptResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasRunScript
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest ComponentsSchemasError

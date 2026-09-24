@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { RotateCcw, XCircle } from "lucide-react";
+import { Repeat, RotateCcw, XCircle } from "lucide-react";
 import {
   abortRunInput,
   cancelRun,
   getRun,
+  getRunScript,
   listRunArtifacts,
   listRunChanges,
   listRuns,
@@ -40,6 +41,7 @@ import { formatDuration } from "./JobTree";
 import { StageGraph } from "./StageGraph";
 import { RunLogViewer, type RunLogViewerHandle } from "./RunLogViewer";
 import { PendingInputCard } from "./PendingInputCard";
+import { ReplayDrawer } from "./ReplayDrawer";
 import styles from "./BuildPage.module.css";
 
 /** The frames the run log stream carries. */
@@ -332,6 +334,15 @@ export default function BuildPage() {
     queryFn: () => listRunChanges(run!.runId),
     enabled: !!run,
   });
+  // The script read gates the Replay control. It runs only for a finished
+  // run and only for a caller who holds the write grant. A failed read shows
+  // no control and no reason.
+  const scriptQuery = useQuery({
+    queryKey: ["run-script", run?.runId],
+    queryFn: () => getRunScript(run!.runId),
+    enabled: !!run && isTerminal(run) && canWrite,
+  });
+  const [replayOpen, setReplayOpen] = useState(false);
   const neighborsQuery = useQuery({
     queryKey: ["run-neighbors", team, job],
     queryFn: () => listRuns(team!, job!, { limit: 100 }),
@@ -548,6 +559,7 @@ export default function BuildPage() {
   const interrupted = run.result === "INTERRUPTED";
   const rerunDisabled = !!run.retryRunId || !isTerminal(run);
   const cancelable = !isTerminal(run);
+  const replayable = canWrite && isTerminal(run) && scriptQuery.data?.replayable === true;
 
   const tabs = [
     { id: "log", label: "Log" },
@@ -615,6 +627,11 @@ export default function BuildPage() {
             >
               <RotateCcw size={14} aria-hidden="true" /> Re-run
             </Button>
+            {replayable && (
+              <Button variant="ghost" size="sm" onClick={() => setReplayOpen(true)}>
+                <Repeat size={14} aria-hidden="true" /> Replay
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -821,6 +838,26 @@ export default function BuildPage() {
             <li key={i}>{JSON.stringify(c)}</li>
           ))}
         </ul>
+      )}
+
+      {/* The replay response reports no outcome. The page opens the new
+          run in the requested state, the path the re-run control takes. */}
+      {replayOpen && replayable && scriptQuery.data && (
+        <ReplayDrawer
+          runId={run.runId}
+          script={scriptQuery.data.script}
+          loadedScripts={scriptQuery.data.loadedScripts ?? {}}
+          onClose={() => setReplayOpen(false)}
+          onSubmitted={(newRunId) => {
+            setReplayOpen(false);
+            if (team && job) {
+              navigate(
+                `/pipelines/${encodeURIComponent(team)}/${encodeURIComponent(job)}/${encodeURIComponent(newRunId)}`,
+                { state: { requested: true } },
+              );
+            }
+          }}
+        />
       )}
     </div>
   );

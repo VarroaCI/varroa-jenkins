@@ -352,6 +352,9 @@ func TestPipelinesPaths_Answer503(t *testing.T) {
 		// A plain run read needs no blob store: a nil store only drops the
 		// digest's log tail, so the run detail still answers.
 		{"getRun-nilBlobStoreStillOK", newFakeRecordReaderWithRun(), nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleGetRun }, "/runs/r1", map[string]string{"run": "r1"}, http.StatusOK},
+		// The script read needs both the reader and the blob store.
+		{"getRunScript-nilReader", nil, nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleGetRunScript }, "/runs/r1/script", map[string]string{"run": "r1"}, http.StatusServiceUnavailable},
+		{"getRunScript-nilBlobStore", newFakeRecordReaderWithRun(), nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleGetRunScript }, "/runs/r1/script", map[string]string{"run": "r1"}, http.StatusServiceUnavailable},
 		// The artifact download needs one.
 		{"downloadRunArtifact-nilBlobStore", newFakeRecordReaderWithRun(), nil, func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleDownloadRunArtifact }, "/runs/r1/artifacts/a.txt", map[string]string{"run": "r1", "path": "a.txt"}, http.StatusServiceUnavailable},
 

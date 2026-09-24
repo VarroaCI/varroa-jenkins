@@ -30,14 +30,14 @@ public class VarroaRunRecorderTemplateEventsTest {
         VarroaRunRecorder.resetStateForTesting();
         BuildEventSink.get().resetForTesting();
         VarroaRunRecorder.setGateOverrideForTesting("1");
-        VarroaRunRecorder.setTemplateDefinitionClassNamesForTesting(
+        VarroaTemplateDefinitions.setClassNamesForTesting(
                 Set.of(FakeVarroaFlowDefinition.class.getName()));
     }
 
     @After
     public void tearDown() {
         VarroaRunRecorder.setGateOverrideForTesting(null);
-        VarroaRunRecorder.setTemplateDefinitionClassNamesForTesting(null);
+        VarroaTemplateDefinitions.setClassNamesForTesting(null);
     }
 
     private static VarroaIntentAction grantedAction() {

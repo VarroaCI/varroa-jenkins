@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 	"github.com/varroaci/varroa-jenkins/internal/transport"
 )
 
@@ -35,15 +37,37 @@ func (guardRecordReader) JobHome(_ context.Context, _, _, _ string) (recordstore
 	return recordstore.JobHome{}, nil
 }
 
+// guardReplayRunID names the one run the guard answers as a completed,
+// replicated run, which replay_run needs. Every other identifier answers
+// a RUNNING run.
+const guardReplayRunID = "replay-source"
+
 // GetRun answers one RUNNING run for any identifier. The tenant matches
 // the guard resolver's fixed reference, and the build number is the one
-// an input answers.
+// an input answers. guardReplayRunID answers a completed run whose record
+// names one build.xml, which guardBlobStore serves.
 func (guardRecordReader) GetRun(_ context.Context, runID string) (recordstore.Run, []recordstore.Stage, error) {
 	buildNumber := int64(7)
+	if runID == guardReplayRunID {
+		return recordstore.Run{
+			RunID: runID, Cluster: "core", Namespace: "team-a", Cell: "obj",
+			Tenant: "team-a/obj", JobPath: "build", Status: "COMPLETED", BuildNumber: &buildNumber,
+			Payload: json.RawMessage(`{"mesh":{"files":[{"relpath":"build/builds/7/build.xml","bytes":200,"seq":1,"state_gen":1,"epoch":1}]}}`),
+		}, nil, nil
+	}
 	return recordstore.Run{
 		RunID: runID, Cluster: "core", Namespace: "team-a", Cell: "obj",
 		Tenant: "team-a/obj", JobPath: "build", Status: "RUNNING", BuildNumber: &buildNumber,
 	}, nil, nil
+}
+
+// guardBlobStore answers one sandboxed build.xml for every object read,
+// so replay_run's eligibility rules pass.
+type guardBlobStore struct{ blob.Store }
+
+func (guardBlobStore) NewObjectReader(_ context.Context, _ string, _, _ int64) (io.ReadCloser, int64, error) {
+	doc := "<flow-build><execution><script>echo 'source'</script><sandbox>true</sandbox></execution></flow-build>"
+	return io.NopCloser(strings.NewReader(doc)), int64(len(doc)), nil
 }
 
 // guardTenantResolver is a fixed-answer api.TenantResolver for
@@ -154,6 +178,8 @@ func guardEmitDeps(t *testing.T, sink activity.EventSink) *api.Dependencies {
 			Tenant: "team-a/obj", Team: "obj", Namespace: "team-a", Controller: "obj",
 		}},
 		MiteRegistry: &guardTransport{},
+		// replay_run reads the source run's script replica.
+		BlobStore: guardBlobStore{},
 	}
 }
 
@@ -276,6 +302,7 @@ func guardArgsFor(name string) map[string]interface{} {
 		"run_pipeline":      {"team": "team-a", "job": "build"},
 		"proceed_run_input": {"run": obj, "input": "in-1"},
 		"abort_run_input":   {"run": obj, "input": "in-1"},
+		"replay_run":        {"run": guardReplayRunID, "script": "echo 'edited'"},
 		// CellPools (cluster-scoped, direct store)
 		"update_cell_pool": {"name": obj, "warm": 2},
 	}

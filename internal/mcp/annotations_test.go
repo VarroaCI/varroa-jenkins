@@ -118,6 +118,7 @@ var expectedToolKinds = map[string]toolKind{
 	"list_fleet_locks":  kindRead,
 	"proceed_run_input": kindAction,
 	"abort_run_input":   kindAction,
+	"replay_run":        kindAction,
 
 	// Cell pools
 	"list_cell_pools":  kindRead,

@@ -6,10 +6,10 @@ import (
 	"strings"
 )
 
-// IntentScheme names one of the six allocated intent-key schemes.
+// IntentScheme names one of the seven allocated intent-key schemes.
 type IntentScheme string
 
-// The six allocated intent-key schemes. The withdrawn "webhook" scheme
+// The seven allocated intent-key schemes. The withdrawn "webhook" scheme
 // does not parse.
 const (
 	IntentSchemeSCM      IntentScheme = "scm"
@@ -18,6 +18,10 @@ const (
 	IntentSchemeRetry    IntentScheme = "retry"
 	IntentSchemeUpstream IntentScheme = "upstream"
 	IntentSchemeAPI      IntentScheme = "api"
+	// IntentSchemeReplay keys a replayed build as
+	// replay:<source run id>:<new run id>. The second segment is the new
+	// run's own UUIDv7, never a counter, so two replays never share a key.
+	IntentSchemeReplay IntentScheme = "replay"
 )
 
 // maxIntentKeyBytes is the length cap D1 places on run_intents.intent_key.
@@ -39,9 +43,10 @@ var intentKeyTailSegments = map[IntentScheme]int{
 	IntentSchemeRetry:    1,
 	IntentSchemeUpstream: 2,
 	IntentSchemeAPI:      1,
+	IntentSchemeReplay:   2,
 }
 
-// ParseIntentKey validates key against the six allocated intent-key
+// ParseIntentKey validates key against the seven allocated intent-key
 // schemes and returns the matched scheme. It rejects an unknown scheme,
 // an empty segment, and a key longer than 512 bytes.
 func ParseIntentKey(key string) (IntentScheme, error) {

@@ -3236,7 +3236,7 @@
       },
       "RunActionResponse": {
         "additionalProperties": false,
-        "description": "202 response for a run request or a rerun. The BFF does not wait for the cell's admission decision; the caller polls the run.\n",
+        "description": "202 response for a run request, a rerun, or a replay. The BFF does not wait for the cell's admission decision; the caller polls the run.\n",
         "properties": {
           "intentKey": {
             "type": "string"
@@ -3450,6 +3450,10 @@
           },
           "queuedAt": {
             "format": "date-time",
+            "type": "string"
+          },
+          "replayOf": {
+            "description": "The identifier of the run whose script this build replayed. The field is absent for a build that is not a replay.\n",
             "type": "string"
           },
           "result": {
@@ -3679,6 +3683,47 @@
         },
         "required": [
           "items"
+        ],
+        "type": "object"
+      },
+      "RunScript": {
+        "additionalProperties": false,
+        "description": "GET /runs/{run}/script. The run's own Groovy script, read from the build record the run retains in the blob tier. Every field is always present. A run that does not replay answers an empty script and an empty loadedScripts object.\n",
+        "properties": {
+          "definitionKind": {
+            "description": "template when the run's stored payload names a pipeline template or a marker file, and script otherwise.\n",
+            "enum": [
+              "template",
+              "script"
+            ],
+            "type": "string"
+          },
+          "loadedScripts": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The library scripts the run loaded, as a map of name to script text. A caller cannot edit them, and a replay loads them again from their library. The object is empty when the run loaded no script or when replayable is false.\n",
+            "type": "object"
+          },
+          "reason": {
+            "description": "The name of the first eligibility rule the run fails. The rules run in this order: not-terminal, template-defined, masked-parameter, no-replica, unreadable, not-sandbox, and script-too-large. A replayable run answers the empty string.\n",
+            "type": "string"
+          },
+          "replayable": {
+            "description": "True only when the run passes every eligibility rule.",
+            "type": "boolean"
+          },
+          "script": {
+            "description": "The main script of the run's flow execution. The value is empty when replayable is false.\n",
+            "type": "string"
+          }
+        },
+        "required": [
+          "script",
+          "loadedScripts",
+          "definitionKind",
+          "replayable",
+          "reason"
         ],
         "type": "object"
       },
@@ -10494,7 +10539,7 @@
       },
       "components_schemas_RunActionResponse": {
         "additionalProperties": false,
-        "description": "202 response for a run request or a rerun. The BFF does not wait for the cell's admission decision; the caller polls the run.\n",
+        "description": "202 response for a run request, a rerun, or a replay. The BFF does not wait for the cell's admission decision; the caller polls the run.\n",
         "properties": {
           "intentKey": {
             "type": "string"
@@ -10708,6 +10753,10 @@
           },
           "queuedAt": {
             "format": "date-time",
+            "type": "string"
+          },
+          "replayOf": {
+            "description": "The identifier of the run whose script this build replayed. The field is absent for a build that is not a replay.\n",
             "type": "string"
           },
           "result": {
@@ -10937,6 +10986,47 @@
         },
         "required": [
           "items"
+        ],
+        "type": "object"
+      },
+      "components_schemas_RunScript": {
+        "additionalProperties": false,
+        "description": "GET /runs/{run}/script. The run's own Groovy script, read from the build record the run retains in the blob tier. Every field is always present. A run that does not replay answers an empty script and an empty loadedScripts object.\n",
+        "properties": {
+          "definitionKind": {
+            "description": "template when the run's stored payload names a pipeline template or a marker file, and script otherwise.\n",
+            "enum": [
+              "template",
+              "script"
+            ],
+            "type": "string"
+          },
+          "loadedScripts": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The library scripts the run loaded, as a map of name to script text. A caller cannot edit them, and a replay loads them again from their library. The object is empty when the run loaded no script or when replayable is false.\n",
+            "type": "object"
+          },
+          "reason": {
+            "description": "The name of the first eligibility rule the run fails. The rules run in this order: not-terminal, template-defined, masked-parameter, no-replica, unreadable, not-sandbox, and script-too-large. A replayable run answers the empty string.\n",
+            "type": "string"
+          },
+          "replayable": {
+            "description": "True only when the run passes every eligibility rule.",
+            "type": "boolean"
+          },
+          "script": {
+            "description": "The main script of the run's flow execution. The value is empty when replayable is false.\n",
+            "type": "string"
+          }
+        },
+        "required": [
+          "script",
+          "loadedScripts",
+          "definitionKind",
+          "replayable",
+          "reason"
         ],
         "type": "object"
       },
@@ -19677,6 +19767,102 @@
         "x-sse": true
       }
     },
+    "/api/v1/runs/{run}/replay": {
+      "post": {
+        "description": "The BFF applies the eligibility rules of the script read, mints a new run identifier, and publishes one REPLAY_BUILD command to the job's home member. It does not wait for Jenkins. Each call starts its own build with its own build number.\n",
+        "operationId": "replayRun",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/components_parameters_run"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "script": {
+                    "description": "The edited main script, at most 262144 UTF-8 bytes. A larger script answers 413. The library scripts load again from their library, so the body holds no library script.\n",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "script"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_RunActionResponse"
+                }
+              }
+            },
+            "description": "The replay was requested."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_Error"
+                }
+              }
+            },
+            "description": "The request body does not decode, or the script is empty."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_Error"
+                }
+              }
+            },
+            "description": "The run does not exist, or the caller may not read it."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_Error"
+                }
+              }
+            },
+            "description": "The run does not replay. The message names the reason, one of the reason values of the script read.\n"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_Error"
+                }
+              }
+            },
+            "description": "The script is larger than 256 KiB."
+          },
+          "503": {
+            "$ref": "#/components/responses/components_responses_ServiceUnavailable"
+          }
+        },
+        "summary": "Starts a new build of the run's job with an edited script. Fire and forget.",
+        "tags": [
+          "Pipelines"
+        ]
+      }
+    },
     "/api/v1/runs/{run}/rerun": {
       "post": {
         "description": "Reads the ledger by the retry intent key first: when a retry already exists, its run id is returned and no command is published.\n",
@@ -19718,6 +19904,49 @@
           }
         },
         "summary": "Requests a retry of a finished run. One retry per source run, fleet-wide.",
+        "tags": [
+          "Pipelines"
+        ]
+      }
+    },
+    "/api/v1/runs/{run}/script": {
+      "get": {
+        "description": "The BFF reads the build record the run retains in the blob tier. A run that does not replay answers replayable false, the reason, an empty script, and an empty loadedScripts object.\n",
+        "operationId": "getRunScript",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/components_parameters_run"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_RunScript"
+                }
+              }
+            },
+            "description": "The run's script, its loaded scripts, and its replay eligibility."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_Error"
+                }
+              }
+            },
+            "description": "The run does not exist, or the caller may not read it."
+          },
+          "503": {
+            "$ref": "#/components/responses/components_responses_ServiceUnavailable"
+          }
+        },
+        "summary": "Reads one run's own Groovy script and whether the run replays.",
         "tags": [
           "Pipelines"
         ]

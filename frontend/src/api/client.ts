@@ -53,6 +53,7 @@ import type {
   RunDetail,
   RunArtifactListResponse,
   RunTestListResponse,
+  RunScript,
   TestCaseHistoryResponse,
   RunChangeListResponse,
   TeamPipelines,
@@ -1255,6 +1256,23 @@ export function cancelRun(runId: string): Promise<CancelRunResponse> {
  */
 export function rerunRun(runId: string): Promise<RunActionResponse> {
   return bffFetchJSON<RunActionResponse>(`${runBase(runId)}/rerun`, { method: "POST" });
+}
+
+/** Reads the script a finished run ran, and whether the run replays. */
+export function getRunScript(runId: string): Promise<RunScript> {
+  return bffFetch<RunScript>(`${runBase(runId)}/script`);
+}
+
+/**
+ * Requests a fresh build of the run's job with an edited script. Each call
+ * mints a new run identifier, so each call starts its own build.
+ */
+export function replayRun(runId: string, script: string): Promise<RunActionResponse> {
+  return bffFetchJSON<RunActionResponse>(`${runBase(runId)}/replay`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ script }),
+  });
 }
 
 /** Answers a paused input step with parameter values. Sends

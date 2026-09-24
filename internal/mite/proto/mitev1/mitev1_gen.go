@@ -92,6 +92,7 @@ type BuildEvent struct {
 	Inputs                  []*BuildInput       `json:"inputs,omitempty"`
 	TestReport              *BuildTestReport    `json:"test_report,omitempty"`
 	TestCases               []*BuildTestCase    `json:"test_cases,omitempty"`
+	ReplayOf                string              `json:"replay_of,omitempty"`
 }
 
 type BuildInput struct {
@@ -369,6 +370,7 @@ type ImperativeCommand struct {
 	ResumeBuild     *ResumeBuildPayload   `json:"resume_build,omitempty"`
 	ProceedInput    *ProceedInputPayload  `json:"proceed_input,omitempty"`
 	AbortInput      *AbortInputPayload    `json:"abort_input,omitempty"`
+	ReplayBuild     *ReplayBuildPayload   `json:"replay_build,omitempty"`
 }
 
 type InstalledPlugin struct {
@@ -1103,6 +1105,16 @@ type RehydrationFile struct {
 	RawSize     int64  `json:"raw_size,omitempty"`
 }
 
+type ReplayBuildPayload struct {
+	RunId       string            `json:"run_id"`
+	IntentKey   string            `json:"intent_key"`
+	JobPath     string            `json:"job_path"`
+	SourceRunId string            `json:"source_run_id"`
+	Script      string            `json:"script"`
+	ActingUser  *ActingUser       `json:"acting_user,omitempty"`
+	Parameters  map[string]string `json:"parameters,omitempty"`
+}
+
 type ReplayWebhookPayload struct {
 	Path       string            `json:"path,omitempty"`
 	Query      string            `json:"query,omitempty"`
@@ -1238,6 +1250,7 @@ const (
 	CommandTypeResumeBuild            CommandType = 7
 	CommandTypeProceedInput           CommandType = 8
 	CommandTypeAbortInput             CommandType = 9
+	CommandTypeReplayBuild            CommandType = 10
 )
 
 // MiteServer is the server-side interface for the Mite service.

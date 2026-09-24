@@ -29,7 +29,8 @@ type columnSpec struct {
 // no table. Migration 00013 adds one column to "tenant_placements" and
 // creates no table. Migration 00015 adds one column to "runs" and creates
 // no table. Migration 00016 adds one column to "runs" and creates no
-// table. Migration 00017 also adds one column to "runs".
+// table. Migration 00017 also adds one column to "runs". Migration 00018 adds
+// one column to "runs" and creates no table.
 var expectedColumns = map[string][]columnSpec{
 	"job_numbers": {
 		{"cluster", "text", false},
@@ -91,6 +92,7 @@ var expectedColumns = map[string][]columnSpec{
 		{"summary", "text", true},
 		{"inputs", "jsonb", true},
 		{"test_report_key", "text", true},
+		{"replay_of", "uuid", true},
 	},
 	"run_stages": {
 		{"run_id", "uuid", false},

@@ -154,3 +154,47 @@ func TestInputRoutesReportTheUpstreamStatus(t *testing.T) {
 		t.Fatalf("status = %d, want %d", abortStatus, http.StatusForbidden)
 	}
 }
+
+// TestReplayBuildPostsTheRequestedBody asserts the replay method posts the
+// script, the source run, the parameters, and the acting user to the
+// plugin's own route, and reports the upstream status beside the error.
+func TestReplayBuildPostsTheRequestedBody(t *testing.T) {
+	srv, rec := newInputRouteServer(t, http.StatusAccepted)
+	c := NewClient(srv.URL, "user", "token")
+	status, err := c.ReplayBuild(context.Background(), ReplayBuildRequest{
+		RunID:       "0199d0b7-0000-7000-8000-000000000005",
+		IntentKey:   "replay:0199d0b7-0000-7000-8000-000000000001:0199d0b7-0000-7000-8000-000000000005",
+		JobPath:     "team/job",
+		SourceRunID: "0199d0b7-0000-7000-8000-000000000001",
+		Script:      "echo 'edited'",
+		Parameters:  map[string]string{"ENV": "prod"},
+		ActingUser:  &ActingUser{Name: "ana", Groups: []string{"varroa-payments"}},
+	})
+	if err != nil {
+		t.Fatalf("ReplayBuild: %v", err)
+	}
+	if status != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", status, http.StatusAccepted)
+	}
+	if rec.path != "/varroa-run/replay" {
+		t.Fatalf("path = %q, want /varroa-run/replay", rec.path)
+	}
+	if rec.body["script"] != "echo 'edited'" || rec.body["sourceRunId"] != "0199d0b7-0000-7000-8000-000000000001" {
+		t.Fatalf("body = %+v", rec.body)
+	}
+	params, ok := rec.body["parameters"].(map[string]interface{})
+	if !ok || params["ENV"] != "prod" {
+		t.Fatalf("parameters = %+v", rec.body["parameters"])
+	}
+	acting, ok := rec.body["actingUser"].(map[string]interface{})
+	if !ok || acting["name"] != "ana" {
+		t.Fatalf("actingUser = %+v", rec.body["actingUser"])
+	}
+
+	refusedSrv, _ := newInputRouteServer(t, http.StatusConflict)
+	refused := NewClient(refusedSrv.URL, "user", "token")
+	refusedStatus, refusedErr := refused.ReplayBuild(context.Background(), ReplayBuildRequest{JobPath: "team/job"})
+	if refusedErr == nil || refusedStatus != http.StatusConflict {
+		t.Fatalf("status = %d, err = %v; want 409 and an error", refusedStatus, refusedErr)
+	}
+}

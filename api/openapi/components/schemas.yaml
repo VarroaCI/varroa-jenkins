@@ -4709,7 +4709,7 @@ CreateRunRequest:
 RunActionResponse:
   type: object
   description: >
-    202 response for a run request or a rerun. The BFF does not wait for
+    202 response for a run request, a rerun, or a replay. The BFF does not wait for
     the cell's admission decision; the caller polls the run.
   required: [runId, intentKey, state]
   properties:
@@ -4978,6 +4978,11 @@ RunDetail:
                 type: string
               image:
                 type: string
+    replayOf:
+      type: string
+      description: >
+        The identifier of the run whose script this build replayed. The
+        field is absent for a build that is not a replay.
     summary:
       type: string
       description: >
@@ -5229,6 +5234,47 @@ RunTestListResponse:
         $ref: '#/RunTestCase'
     report:
       $ref: '#/RunTestReport'
+  additionalProperties: false
+
+RunScript:
+  type: object
+  description: >
+    GET /runs/{run}/script. The run's own Groovy script, read from the
+    build record the run retains in the blob tier. Every field is always
+    present. A run that does not replay answers an empty script and an
+    empty loadedScripts object.
+  required: [script, loadedScripts, definitionKind, replayable, reason]
+  properties:
+    script:
+      type: string
+      description: >
+        The main script of the run's flow execution. The value is empty
+        when replayable is false.
+    loadedScripts:
+      type: object
+      description: >
+        The library scripts the run loaded, as a map of name to script
+        text. A caller cannot edit them, and a replay loads them again
+        from their library. The object is empty when the run loaded no script or when
+        replayable is false.
+      additionalProperties:
+        type: string
+    definitionKind:
+      type: string
+      enum: [template, script]
+      description: >
+        template when the run's stored payload names a pipeline template
+        or a marker file, and script otherwise.
+    replayable:
+      type: boolean
+      description: True only when the run passes every eligibility rule.
+    reason:
+      type: string
+      description: >
+        The name of the first eligibility rule the run fails. The rules
+        run in this order: not-terminal, template-defined,
+        masked-parameter, no-replica, unreadable, not-sandbox, and
+        script-too-large. A replayable run answers the empty string.
   additionalProperties: false
 
 TestCaseOutcome:

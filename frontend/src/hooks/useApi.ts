@@ -6,6 +6,7 @@ const STATUS_COPY: Record<number, string> = {
   403: "You do not have access to this page.",
   404: "We could not find that page.",
   409: "The request conflicts with the current state.",
+  413: "The script is too large.",
   429: "Too many requests. Please try again shortly.",
 };
 const CODE_COPY: Record<string, string> = { PREFLIGHT_FAILED: "Preflight checks failed." };

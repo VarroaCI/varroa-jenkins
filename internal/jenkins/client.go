@@ -1179,6 +1179,42 @@ func (c *Client) AbortInput(ctx context.Context, req AbortInputRequest) (int, er
 	return resp.StatusCode, nil
 }
 
+// ReplayBuildRequest is the body posted to the Varroa plugin's
+// /varroa-run/replay route.
+type ReplayBuildRequest struct {
+	RunID       string            `json:"runId"`
+	IntentKey   string            `json:"intentKey"`
+	JobPath     string            `json:"jobPath"`
+	SourceRunID string            `json:"sourceRunId"`
+	Script      string            `json:"script"`
+	Parameters  map[string]string `json:"parameters,omitempty"`
+	ActingUser  *ActingUser       `json:"actingUser,omitempty"`
+}
+
+// ReplayBuild schedules a build of the job that runs the given Groovy
+// script, through the Varroa plugin's /varroa-run/replay route. The plugin
+// stamps the run identity onto the queue item before it schedules, so the
+// claim gate sees the caller's key.
+//
+// It returns the Jenkins HTTP status beside the error, the way
+// TriggerBuild does. The status is 0 when the call reached no Jenkins.
+func (c *Client) ReplayBuild(ctx context.Context, req ReplayBuildRequest) (int, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return 0, fmt.Errorf("replay build %s: marshal request: %w", req.JobPath, err)
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/varroa-run/replay", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return 0, fmt.Errorf("replay build %s: %w", req.JobPath, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return resp.StatusCode, fmt.Errorf("replay build %s: HTTP %d: %s", req.JobPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+	}
+	return resp.StatusCode, nil
+}
+
 // AssignItemRoles assigns RBAC roles on an item path via the role-strategy
 // plugin. Item-level roles are deferred — the role-strategy REST API requires
 // XML payloads that vary by plugin version. Groups are parsed from items.yaml

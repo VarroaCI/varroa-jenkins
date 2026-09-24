@@ -1526,6 +1526,33 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 			} else {
 				success = true
 			}
+		case mitev1.CommandTypeReplayBuild:
+			payload := cmd.ReplayBuild
+			if payload == nil {
+				errStr = "replay_build payload is nil"
+				break
+			}
+			var acting *jenkins.ActingUser
+			if payload.ActingUser != nil {
+				user := actingUserOf(payload.ActingUser)
+				acting = &user
+			}
+			jenkinsClient := a.getJenkinsClient()
+			replayStatus, replayErr := jenkinsClient.ReplayBuild(cctx, jenkins.ReplayBuildRequest{
+				RunID:       payload.RunId,
+				IntentKey:   payload.IntentKey,
+				JobPath:     payload.JobPath,
+				SourceRunID: payload.SourceRunId,
+				Script:      payload.Script,
+				Parameters:  payload.Parameters,
+				ActingUser:  acting,
+			})
+			httpStatus = replayStatus
+			if replayErr != nil {
+				errStr = replayErr.Error()
+			} else {
+				success = true
+			}
 		case mitev1.CommandTypeResumeBuild:
 			if resumeErr := a.applyResumeBuild(cctx, cmd.ResumeBuild); resumeErr != nil {
 				errStr = resumeErr.Error()

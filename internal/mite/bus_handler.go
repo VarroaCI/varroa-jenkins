@@ -630,6 +630,18 @@ func (h *BusHandler) recordCommandOutcome(ns, name string, pendingMsg *nats.Msg,
 				"error", result.Error)
 		}
 		return true
+	case mitev1.CommandTypeReplayBuild:
+		// A replay publishes no record: a refused replay leaves no run, and
+		// the caller already holds a 202. The log is the only place that
+		// names the refusal.
+		if !result.Success {
+			h.log().Warn("replay build command refused",
+				"controller", ns+"/"+name,
+				"command_id", result.CommandId,
+				"http_status", result.HttpStatus,
+				"error", result.Error)
+		}
+		return true
 	default:
 		return true
 	}

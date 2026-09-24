@@ -107,6 +107,7 @@ type RunDetail struct {
 	Inputs            []runInputJSON           `json:"inputs,omitempty"`
 	TestReport        *runTestReportDetailJSON `json:"testReport,omitempty"`
 	Cases             []runTestCaseJSON        `json:"cases,omitempty"`
+	ReplayOf          string                   `json:"replayOf,omitempty"`
 }
 
 // convertJSON re-shapes in into a T by round-tripping through JSON. Every
@@ -153,6 +154,35 @@ func (s *Server) readerServiceError(err error, action string) *ServiceError {
 func (s *Server) RunPipeline(ctx context.Context, claims *auth.Claims, team, jobPath, cluster string, parameters map[string]string) (runID, intentKey, targetCluster string, serr *ServiceError) {
 	runID, intentKey, ref, serr := s.createRun(ctx, claims, team, jobPath, "", cluster, parameters)
 	return runID, intentKey, ref.Cluster, serr
+}
+
+// GetRunScript is GET /runs/{run}/script's service entry. It authorizes
+// with the run read check, so a run the caller may not read answers 404,
+// and it answers the same shape the HTTP path serializes.
+func (s *Server) GetRunScript(ctx context.Context, claims *auth.Claims, runID string) (RunScript, *ServiceError) {
+	if s.deps.RecordStore == nil || s.deps.BlobStore == nil {
+		return RunScript{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}
+	}
+	run, _, serr := s.runByID(ctx, claims, runID)
+	if serr != nil {
+		return RunScript{}, serr
+	}
+	out, err := s.runScriptSource(ctx, run)
+	if err != nil {
+		s.deps.Logger.Error("read run script", "runId", run.RunID, "error", err)
+		return RunScript{}, &ServiceError{Status: http.StatusInternalServerError, Message: "read run script failed"}
+	}
+	return out, nil
+}
+
+// ReplayRun is the replay_run MCP tool's entry into POST
+// /runs/{run}/replay. It authorizes with the tenant write check on the
+// run's own tenant, exactly as the HTTP path does, and reports no outcome:
+// the caller reads the new run to learn it. targetCluster is the cluster
+// of the home member the command reached, for the caller's own activity
+// audit; it is empty whenever serr is set.
+func (s *Server) ReplayRun(ctx context.Context, claims *auth.Claims, runID, script string) (newRunID, intentKey, targetCluster string, serr *ServiceError) {
+	return s.replayRun(ctx, claims, runID, script)
 }
 
 // ProceedRunInput is the proceed_run_input MCP tool's entry into the

@@ -30,9 +30,10 @@ func RunStateKey(runID string, pusherEpoch, stateGen int64, relpath string) stri
 }
 
 // RunStatePrefix returns the key prefix that holds every replicated
-// state file of one run. A cleanup deletes the whole prefix. The epoch
-// and the generation sit inside this prefix, so one delete covers every
-// push of a run.
+// state file of one run. The epoch and the generation sit inside this
+// prefix, so one delete covers every push of a run. A terminal cleanup
+// keeps the run's build.xml and deletes each other object by key. The
+// retention round deletes the whole prefix when the run's record expires.
 func RunStatePrefix(runID string) string {
 	return fmt.Sprintf("runstate/%s/", runID)
 }

@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { InitialEntry } from "react-router-dom";
 import BuildPage from "./BuildPage";
 import { ApiError } from "../../hooks/useApi";
-import type { RunDetail, RunInput, RunTestListResponse } from "../../types";
+import type { RunDetail, RunInput, RunScript, RunTestListResponse } from "../../types";
 
 const mockGetRun = vi.fn();
 const mockListRunArtifacts = vi.fn();
@@ -17,6 +17,26 @@ const mockRerunRun = vi.fn();
 const mockProceedRunInput = vi.fn();
 const mockAbortRunInput = vi.fn();
 const mockDownloadRunArtifact = vi.fn();
+const mockGetRunScript = vi.fn();
+const mockReplayRun = vi.fn();
+
+// jsdom cannot run a real EditorView. The mock view answers the text the
+// test sets in editorText.
+let editorText = "";
+vi.mock("@codemirror/state", () => ({ EditorState: { create: vi.fn(() => ({})) } }));
+vi.mock("@codemirror/view", () => ({
+  EditorView: Object.assign(
+    class MockEditorView {
+      state = { doc: { toString: () => editorText } };
+      destroy = vi.fn();
+      dispatch = vi.fn();
+    },
+    { theme: vi.fn(() => []), updateListener: { of: vi.fn(() => []) } },
+  ),
+  keymap: Object.assign(vi.fn(() => []), { of: vi.fn(() => []) }),
+  lineNumbers: vi.fn(() => []),
+}));
+vi.mock("@codemirror/commands", () => ({ defaultKeymap: [] }));
 const mockUseEventStream = vi.fn(
   (
     _baseUrl?: string | null,
@@ -47,6 +67,8 @@ vi.mock("../../api/client", async () => {
     proceedRunInput: (...args: unknown[]) => mockProceedRunInput(...args),
     abortRunInput: (...args: unknown[]) => mockAbortRunInput(...args),
     downloadRunArtifact: (...args: unknown[]) => mockDownloadRunArtifact(...args),
+    getRunScript: (...args: unknown[]) => mockGetRunScript(...args),
+    replayRun: (...args: unknown[]) => mockReplayRun(...args),
   };
 });
 
@@ -140,6 +162,13 @@ beforeEach(() => {
   mockListRunChanges.mockResolvedValue({ items: [] });
   mockListRuns.mockResolvedValue({ items: [] });
   mockUseEventStream.mockReturnValue({ lastEvent: null, readyState: "closed", error: null });
+  mockGetRunScript.mockResolvedValue({
+    script: "",
+    loadedScripts: {},
+    definitionKind: "script",
+    replayable: false,
+    reason: "not a cell run",
+  });
 });
 
 describe("BuildPage — test cases and the test report", () => {
@@ -1207,5 +1236,102 @@ describe("BuildPage — pending inputs", () => {
     await screen.findByText(/Build #42/);
 
     expect(screen.queryByText("Pending input")).toBeNull();
+  });
+});
+
+describe("BuildPage — replay", () => {
+  function scriptRead(overrides: Partial<RunScript> = {}): RunScript {
+    return {
+      script: "pipeline { agent any }",
+      loadedScripts: {},
+      definitionKind: "script",
+      replayable: true,
+      reason: "",
+      ...overrides,
+    };
+  }
+
+  function grantTenantPipelinesRead() {
+    vi.mocked(usePermissions).mockReturnValue({
+      data: {
+        global: {},
+        scopes: [],
+        tenants: [{ tenant: "payments", jobs: [], capabilities: { pipelines: { read: true } } }],
+      },
+    } as unknown as ReturnType<typeof usePermissions>);
+  }
+
+  it("shows the Replay control for a finished run that replays", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    mockGetRunScript.mockResolvedValue(scriptRead());
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: /Replay/ })).toBeInTheDocument();
+    expect(mockGetRunScript).toHaveBeenCalledWith("run-1");
+    expect(screen.getByRole("button", { name: /Re-run/ })).toBeInTheDocument();
+  });
+
+  it("shows no Replay control and reads no script without the write grant", async () => {
+    grantTenantPipelinesRead();
+    mockGetRun.mockResolvedValue(baseRun());
+    mockGetRunScript.mockResolvedValue(scriptRead());
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.queryByRole("button", { name: /Replay/ })).toBeNull();
+    expect(mockGetRunScript).not.toHaveBeenCalled();
+  });
+
+  it("shows no Replay control and no reason for a run that does not replay", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    mockGetRunScript.mockResolvedValue(scriptRead({ script: "", replayable: false, reason: "The run used a masked parameter." }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+    await waitFor(() => expect(mockGetRunScript).toHaveBeenCalled());
+
+    expect(screen.queryByRole("button", { name: /Replay/ })).toBeNull();
+    expect(screen.queryByText("The run used a masked parameter.")).toBeNull();
+  });
+
+  it("reads no script for a run that has not ended", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ status: "RUNNING", result: undefined }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(mockGetRunScript).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Replay/ })).toBeNull();
+  });
+
+  it("submits the edited script and opens the new run in the requested state", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    mockGetRunScript.mockResolvedValue(scriptRead());
+    mockReplayRun.mockResolvedValue({ runId: "run-9", intentKey: "replay:run-1:run-9", state: "requested" });
+    editorText = "pipeline { agent none }";
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Replay/ }));
+    const drawer = screen.getByRole("dialog", { name: "Replay this build" });
+    fireEvent.click(within(drawer).getByRole("button", { name: "Replay" }));
+
+    await waitFor(() =>
+      expect(mockNavigate).toHaveBeenCalledWith("/pipelines/payments/checkout-api%2Fmain/run-9", {
+        state: { requested: true },
+      }),
+    );
+    expect(mockReplayRun).toHaveBeenCalledWith("run-1", "pipeline { agent none }");
+    expect(mockToast).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Replay this build" })).toBeNull();
+  });
+
+  it("closes the drawer without a request", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    mockGetRunScript.mockResolvedValue(scriptRead());
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Replay/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(screen.queryByRole("dialog", { name: "Replay this build" })).toBeNull();
+    expect(mockReplayRun).not.toHaveBeenCalled();
   });
 });

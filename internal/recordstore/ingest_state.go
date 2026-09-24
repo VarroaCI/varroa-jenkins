@@ -149,7 +149,7 @@ func applyRunStateFile(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 	// A dispatched resume names the pushes it read, and its target
 	// fetches them one at a time. The delete waits while such a resume is
 	// in flight, so it can never remove an object the target still needs.
-	// The run's own prefix delete removes that object when the run ends.
+	// The retention round's prefix delete removes that object with the run's record.
 	var cleanupKey string
 	if !dispatched && superseded.RelPath != "" && !superseded.sameObject(winner) {
 		cleanupKey = blob.RunStateKey(
@@ -286,5 +286,7 @@ func applyRunStateCap(ctx context.Context, tx pgx.Tx, intent *intentRow) (dispat
 	`, intent.runID, intent.createdAt, runStateCapReason); err != nil {
 		return dispatchResult{}, fmt.Errorf("end run-state replication at the cap: %w", err)
 	}
+	// stateCleanupFiles stays nil: the cap keeps no build.xml, so the
+	// cleanup deletes the run's whole prefix.
 	return dispatchResult{stateCleanup: intent.runID.String()}, nil
 }

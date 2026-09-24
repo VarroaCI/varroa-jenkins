@@ -346,6 +346,10 @@ paths:
     $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1cancel'
   /api/v1/runs/{run}/rerun:
     $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1rerun'
+  /api/v1/runs/{run}/script:
+    $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1script'
+  /api/v1/runs/{run}/replay:
+    $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1replay'
   /api/v1/runs/{run}/inputs/{input}/proceed:
     $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1inputs~1{input}~1proceed'
   /api/v1/runs/{run}/inputs/{input}/abort:
@@ -586,6 +590,8 @@ components:
       $ref: './components/schemas.yaml#/RunTestReport'
     RunDetailTestReport:
       $ref: './components/schemas.yaml#/RunDetailTestReport'
+    RunScript:
+      $ref: './components/schemas.yaml#/RunScript'
     TestCaseOutcome:
       $ref: './components/schemas.yaml#/TestCaseOutcome'
     TestCaseHistoryResponse:

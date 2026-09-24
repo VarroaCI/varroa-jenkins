@@ -58,11 +58,13 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 	err = tx.QueryRow(ctx, `
 		INSERT INTO varroa.runs (
 			run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path,
-			build_number, branch, scm_revision, status, queued_at, started_at, actor, cause, params, payload
+			build_number, branch, scm_revision, status, queued_at, started_at, actor, cause, params, payload,
+			replay_of
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
 			$9, $10, $11, 'RUNNING', $12, $13, $14, $15::jsonb, $16::jsonb,
-			jsonb_build_object('run.started', $17::jsonb)
+			jsonb_build_object('run.started', $17::jsonb),
+			$18::uuid
 		)
 		ON CONFLICT (created_at, run_id) DO UPDATE SET
 			build_number = COALESCE(EXCLUDED.build_number, runs.build_number),
@@ -73,6 +75,7 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 			actor        = COALESCE(EXCLUDED.actor, runs.actor),
 			cause        = COALESCE(EXCLUDED.cause, runs.cause),
 			params       = COALESCE(EXCLUDED.params, runs.params),
+			replay_of    = COALESCE(EXCLUDED.replay_of, runs.replay_of),
 			status       = `+runsStatusMergeSQL("TRUE")+`,
 			cell         = CASE WHEN `+supersedeSQL("TRUE")+` THEN EXCLUDED.cell ELSE runs.cell END,
 			result       = CASE WHEN `+supersedeSQL("TRUE")+` THEN NULL::text ELSE runs.result END,
@@ -89,6 +92,7 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 		buildNumber, payload.Branch, payload.SCMRevision,
 		payload.QueuedAt, payload.StartedAt, payload.Actor,
 		jsonArg(payload.Cause), jsonArg(payload.Params), string(envelopeJSON),
+		replayOfArg(payload.ReplayOf),
 	).Scan(&status)
 	if err != nil {
 		return dispatchResult{}, fmt.Errorf("upsert started run: %w", err)
@@ -122,6 +126,21 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 	}
 	action, err := runDuplicateBackstop(ctx, tx, intent, revision)
 	return dispatchResult{action: action}, err
+}
+
+// replayOfArg binds run.started's replay_of value. An absent, empty, or
+// non-UUID value binds NULL, so a malformed source identifier never fails
+// the upsert and never loses the rest of a decodable event.
+func replayOfArg(v *string) *string {
+	if v == nil {
+		return nil
+	}
+	id, err := uuid.Parse(*v)
+	if err != nil {
+		return nil
+	}
+	s := id.String()
+	return &s
 }
 
 // supersededStart reports whether env describes a build of a superseded
