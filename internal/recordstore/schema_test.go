@@ -30,7 +30,8 @@ type columnSpec struct {
 // creates no table. Migration 00015 adds one column to "runs" and creates
 // no table. Migration 00016 adds one column to "runs" and creates no
 // table. Migration 00017 also adds one column to "runs". Migration 00018 adds
-// one column to "runs" and creates no table.
+// one column to "runs" and creates no table. Migration 00019 adds one column
+// to "fleet_locks" and creates no table.
 var expectedColumns = map[string][]columnSpec{
 	"job_numbers": {
 		{"cluster", "text", false},
@@ -227,6 +228,7 @@ var expectedColumns = map[string][]columnSpec{
 		{"releasing_since", "timestamp with time zone", true},
 		{"expires_at", "timestamp with time zone", false},
 		{"placement_generation", "bigint", false},
+		{"owner_tenant", "text", false},
 	},
 }
 
@@ -424,7 +426,7 @@ func TestIndexesExist(t *testing.T) {
 		"log_chunks":     {"log_chunks_object_idx", "log_chunks_class_idx"},
 		"activity":       {"activity_namespace_controller_idx", "activity_cluster_idx", "activity_search_tsv_idx"},
 		"job_schedules":  {"job_schedules_tenant_trigger_idx", "job_schedules_search_tsv_idx", "job_schedules_upstream_idx"},
-		"fleet_locks":    {"fleet_locks_one_holder"},
+		"fleet_locks":    {"fleet_locks_one_holder", "fleet_locks_cluster_owner_tenant"},
 		"run_test_cases": {"run_test_cases_history_idx", "run_test_cases_created_at_idx"},
 	}
 

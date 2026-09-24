@@ -162,6 +162,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   `00018_runs_replay_of.sql` adds the nullable `runs.replay_of` uuid, the
   run a replayed build copied its script from. Only `run.started` writes
   it, through `COALESCE`, and it carries no default and no index.
+  `00019_fleet_locks_owner_tenant.sql` adds `fleet_locks.owner_tenant`,
+  the tenant that owns the lock, backfills it from each name's first
+  segment, and indexes `(cluster, owner_tenant)`.
   A later migration never edits an applied one. `migrationsFS` (`migrations.go`) embeds
   every file under `migrations/` into the binary through `embed.FS`, so
   the recorder needs no separate deploy artifact. Monthly partition
@@ -388,21 +391,33 @@ of the fleet's audit activity, once a controller becomes disposable.
   `lock_acquire`/`lock_renew`/`lock_release` kinds over
   `varroa.fleet_locks` (migration `00006`). `reader_fleetlocks.go`
   answers the two reads a consumer sees the table through:
-  `Reader.ListFleetLocks` answers one tenant's own name prefix plus
-  every row its own runs hold or wait on, and
+  `Reader.ListFleetLocks` answers every row whose `owner_tenant` equals
+  the tenant plus every row its own runs hold or wait on, by equality and
+  never by a name prefix, and
   `Reader.ListAllFleetLocks` answers one cluster. Both order by
   `(name, waiting_since, run_id)`, so a holder sorts before its
-  waiters, and neither answers a queue position. `splitLockName` resolves a
-  wire-level lock name to its owning tenant and bare name: a name with no `/`
-  is the caller's own; a name holding one is another tenant's namespace, and
-  an acquire or a renew across that boundary also calls `GrantEvaluator.Check`
-  with `resource_kind` `lock`. `acquireFleetLock` runs the five-step transaction
+  waiters, and neither answers a queue position. `resolveLockTarget`
+  (`fleet_lock_acquire.go`) resolves one lock call: `name` is the bare
+  name, `target_tenant` is the owner, and an empty `target_tenant` is the
+  gateway-stamped `caller_tenant`. A name that is empty or holds a `/`
+  answers the veto `INVALID_NAME` (`ReasonInvalidName`) and writes no
+  row. Nothing splits a lock name: a controller tenant
+  (`<namespace>/<controller>`) holds a `/` of its own, so the stored
+  `name` is `<owner_tenant>/<bare>` and `owner_tenant` carries the owner.
+  An acquire or a renew whose owner is not the caller also calls
+  `GrantEvaluator.Check` with `resource_kind` `lock` and the bare name.
+  The `lock_acquire` reply carries `tenant`, the resolved owner. `acquireFleetLock` runs the five-step transaction
   (the derived `held`-to-`releasing` move for an `INTERRUPTED` run, the expiry
   delete, the waiting insert, the FIFO promotion by `(waiting_since, run_id)`,
   and the reply) with the one retry `isFleetLockOneHolderViolation` names after
   a unique violation on `fleet_locks_one_holder`; a second violation answers
-  `waiting` with no further attempt. A release deletes the caller's row
-  unconditionally and carries no fence: only acquire and renew do.
+  `waiting` with no further attempt. A release deletes the caller's row,
+  whatever its state, and carries no fence: only acquire and renew do.
+  A run id is visible in the lock reads, so acquire, renew, and release
+  each also match `tenant = caller_tenant`: the acquire's conflict arm
+  refreshes only its own tenant's row (`errFleetLockRunOfOtherTenant`
+  answers `CROSS_TENANT`), a renew of another tenant's row answers
+  `lost`, and such a release deletes nothing.
   `moveInterruptedHoldersToReleasing` (`fleet_lock_acquire.go`) is the one
   shared implementation of the derived move, behind the `fleetLockExecer`
   interface, which declares `Query` beside `Exec`: the acquire

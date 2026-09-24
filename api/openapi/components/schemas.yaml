@@ -389,7 +389,7 @@ TeamExport:
       items:
         type: string
       description: >-
-        Prefix-relative lock-name globs this tenant exports. Exactly one
+        Globs over the bare names of this tenant's own locks. Exactly one
         of job or locks is set.
     callers:
       type: array
@@ -4644,7 +4644,10 @@ FleetLock:
   properties:
     name:
       type: string
-      description: The qualified lock name, in the form tenant/name.
+      description: >
+        The qualified lock name: the owner tenant, a slash, and the bare
+        lock name. A controller tenant holds a slash of its own, so do not
+        split this value to find the owner.
     tenant:
       type: string
       description: The tenant of the run that holds or waits on the lock.

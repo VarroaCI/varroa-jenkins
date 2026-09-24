@@ -19,7 +19,7 @@ whatever cluster it runs in.
 | `varroa.build(tenant:, job:, params:, wait:, propagate:)` | a run handle | starts a build and, by default, waits for it |
 | `varroa.lastSuccessful(tenant:, job:)` | a run handle, or `null` | reads the last successful run |
 | `handle.copyArtifact(path:, target:)` | the copied file's path | copies one artifact from a run the caller already holds a handle for |
-| `varroa.lock(name:, timeout:) { ... }` | the block's return value | acquires a fleet lock around the block |
+| `varroa.lock(name:, tenant:, timeout:) { ... }` | the block's return value | acquires a fleet lock around the block |
 | `varroa.summary(text)` | nothing | attaches one line of text to the calling run |
 
 ### Start a build on another tenant
@@ -77,7 +77,15 @@ varroa.lock(name: 'deploy-prod', timeout: 300) {
 ```
 
 The block runs only after the lock is held. The lock releases when the block ends, on success,
-on failure, or on abort. See [The fleet lock](#the-fleet-lock) for the full contract.
+on failure, or on abort. Add `tenant:` to take a lock that another tenant owns:
+
+```groovy
+varroa.lock(name: 'deploy-prod', tenant: 'platform') {
+    sh 'deploy.sh'
+}
+```
+
+See [The fleet lock](#the-fleet-lock) for the full contract.
 
 ## The run handle
 
@@ -123,13 +131,13 @@ spec:
     exports:
       - job: "release/*"
         callers: ["payments", "search"]
-      - locks: ["deploy-prod", "staging/*"]
+      - locks: ["deploy-prod", "staging-*"]
         callers: ["payments"]
 ```
 
 Each entry names exactly one of two kinds, a `job` glob or a `locks` glob, plus `callers`, the Team
 names allowed to use it. A `job` glob matches the tenant's own job paths. A `locks` glob matches
-its lock names, without the tenant prefix. Three metacharacters apply: `*` matches any characters
+the bare names of the tenant's own locks. Three metacharacters apply: `*` matches any characters
 except `/`, `**` crosses `/`, and `?` matches one character.
 
 An edit to `exports` takes one reconcile tick to reach the record store that enforces it. A caller
@@ -155,9 +163,29 @@ The same data is available over the API:
 
 ## The fleet lock
 
-`varroa.lock` names a lock in the form `<tenant>/<name>`. A bare name, with no `/`, qualifies to
-the caller's own tenant. A caller reaches another tenant's lock namespace only by naming it with
-that tenant's prefix, and only when the owning tenant exports it under `locks`.
+Each tenant owns its own lock namespace. `varroa.lock` names a lock with two arguments:
+
+| Argument | Meaning |
+|---|---|
+| `name` | the bare lock name. It must not contain `/`. |
+| `tenant` | the tenant that owns the lock. Leave it out to use the caller's own tenant. |
+
+A name that contains `/` fails the step before it sends a request. Two tenants that both take
+`deploy-prod` hold two different locks. A caller takes another tenant's lock only when that tenant
+exports the name under `locks`.
+
+The lock list shows each lock as the owner tenant, a `/`, and the bare name. A controller tenant
+is `<namespace>/<controller>`, so its lock `deploy-prod` shows as `team-pay/ci/deploy-prod`.
+
+Inside the block, `varroa.lock.name` reads the bare name, and `varroa.lock.tenant` reads the owner
+tenant. Both read `null` outside a block.
+
+The recorder can refuse a lock call. The step handles each refusal as follows.
+
+| Reason | Step behavior |
+|---|---|
+| `FENCED`, `CROSS_TENANT`, `NOT_HOME`, `INVALID_NAME` | fails the build with the recorder's message, on an acquire or a renew. A renew failure also stops the block. |
+| `NOT_READY`, `THROTTLED` | keeps polling, because the refusal is temporary |
 
 A lock moves through three states.
 

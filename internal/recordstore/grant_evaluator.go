@@ -48,7 +48,7 @@ type PlacementInput struct {
 
 // GrantInput is Check's argument. It embeds PlacementInput and adds the
 // tenant-export-grant capability's own fields. Resource is the job path
-// for a job, and the lock name without its tenant prefix for a lock.
+// for a job, and the bare lock name for a lock.
 type GrantInput struct {
 	PlacementInput
 	CallerTenant    string

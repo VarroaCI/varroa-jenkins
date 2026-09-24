@@ -17,7 +17,7 @@ since the resume.
 A step that is not safe to repeat should hold a fleet lock, whose token survives the resume:
 
 ```groovy
-varroa.lock('deploy/production') {
+varroa.lock(name: 'deploy-production') {
   sh './deploy.sh'
 }
 ```

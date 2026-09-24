@@ -20,7 +20,7 @@ public class VarroaActiveLocksActionTest {
     @Test
     public void theStackIsNullSafeAfterXStreamRestore() {
         VarroaActiveLocksAction action = new VarroaActiveLocksAction();
-        action.push("deploy-prod", 5L);
+        action.push("alpha", "deploy-prod", 5L);
 
         XStream2 xstream = new XStream2();
         String xml = xstream.toXML(action);
@@ -31,12 +31,29 @@ public class VarroaActiveLocksActionTest {
         // that fails the next call.
         assertNull(restored.currentTokenMap());
 
-        restored.push("deploy-prod", 9L);
+        restored.push("alpha", "deploy-prod", 9L);
         Map<String, Object> token = restored.currentTokenMap();
         assertEquals("deploy-prod", token.get("name"));
+        assertEquals("alpha", token.get("tenant"));
         assertEquals(9L, token.get("token"));
 
-        restored.pop("deploy-prod");
+        restored.pop("alpha", "deploy-prod");
         assertNull(restored.currentTokenMap());
+    }
+
+    @Test
+    public void twoOwnersOfOneBareNameStayApart() {
+        VarroaActiveLocksAction action = new VarroaActiveLocksAction();
+        action.push("alpha", "deploy-prod", 1L);
+        action.push("beta", "deploy-prod", 2L);
+
+        // Popping alpha's entry leaves beta's, the innermost, in place.
+        action.pop("alpha", "deploy-prod");
+        Map<String, Object> token = action.currentTokenMap();
+        assertEquals("beta", token.get("tenant"));
+        assertEquals(2L, token.get("token"));
+
+        action.pop("beta", "deploy-prod");
+        assertNull(action.currentTokenMap());
     }
 }

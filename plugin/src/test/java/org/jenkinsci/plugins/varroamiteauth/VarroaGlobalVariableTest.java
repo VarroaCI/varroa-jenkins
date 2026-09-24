@@ -123,6 +123,7 @@ public class VarroaGlobalVariableTest {
                         + "  echo(\"artifacts=${h.artifacts.size()}\")\n"
                         + "  echo(\"intentKey=${h.intentKey}\")\n"
                         + "  echo(\"lockOutside=${varroa.lock.token}\")\n"
+                        + "  echo(\"lockNameOutside=${varroa.lock.name} lockTenantOutside=${varroa.lock.tenant}\")\n"
                         + "  def ls = varroa.lastSuccessful(tenant: 'beta', job: 'beta/never-built')\n"
                         + "  echo(\"lastSuccessful=${ls}\")\n"
                         + "}",
@@ -142,6 +143,7 @@ public class VarroaGlobalVariableTest {
         j.assertLogContains("artifacts=1", run);
         j.assertLogContains("intentKey=upstream::s1", run);
         j.assertLogContains("lockOutside=null", run);
+        j.assertLogContains("lockNameOutside=null lockTenantOutside=null", run);
         j.assertLogContains("lastSuccessful=null", run);
     }
 }

@@ -342,12 +342,18 @@ public class MiteLoopbackClient {
         return post(CROSSTENANT_ARTIFACT_PATH, body.toString());
     }
 
-    /** Kind {@code lock_acquire}, route {@code /v1/cross-tenant/lock}. */
-    public Response crossTenantLockAcquire(String callerJobPath, String name, String runId,
+    /**
+     * Kind {@code lock_acquire}, route {@code /v1/cross-tenant/lock}.
+     * {@code name} is the bare lock name. {@code targetTenant} names the
+     * tenant that owns the lock; an empty value names the caller's own
+     * tenant, and the body then carries no {@code target_tenant}.
+     */
+    public Response crossTenantLockAcquire(String callerJobPath, String targetTenant, String name, String runId,
             long leaseSeconds, String waitingSince) {
         JSONObject body = new JSONObject();
         body.put("kind", "lock_acquire");
         body.put("caller_job_path", callerJobPath);
+        putTargetTenant(body, targetTenant);
         body.put("name", name);
         body.put("run_id", runId);
         body.put("lease_seconds", leaseSeconds);
@@ -355,25 +361,35 @@ public class MiteLoopbackClient {
         return post(CROSSTENANT_LOCK_PATH, body.toString());
     }
 
-    /** Kind {@code lock_renew}, route {@code /v1/cross-tenant/lock}. */
-    public Response crossTenantLockRenew(String callerJobPath, String name, String runId, long leaseSeconds) {
+    /** Kind {@code lock_renew}, route {@code /v1/cross-tenant/lock}; the arguments match the acquire's. */
+    public Response crossTenantLockRenew(String callerJobPath, String targetTenant, String name, String runId,
+            long leaseSeconds) {
         JSONObject body = new JSONObject();
         body.put("kind", "lock_renew");
         body.put("caller_job_path", callerJobPath);
+        putTargetTenant(body, targetTenant);
         body.put("name", name);
         body.put("run_id", runId);
         body.put("lease_seconds", leaseSeconds);
         return post(CROSSTENANT_LOCK_PATH, body.toString());
     }
 
-    /** Kind {@code lock_release}, route {@code /v1/cross-tenant/lock}. */
-    public Response crossTenantLockRelease(String callerJobPath, String name, String runId) {
+    /** Kind {@code lock_release}, route {@code /v1/cross-tenant/lock}; the arguments match the acquire's. */
+    public Response crossTenantLockRelease(String callerJobPath, String targetTenant, String name, String runId) {
         JSONObject body = new JSONObject();
         body.put("kind", "lock_release");
         body.put("caller_job_path", callerJobPath);
+        putTargetTenant(body, targetTenant);
         body.put("name", name);
         body.put("run_id", runId);
         return post(CROSSTENANT_LOCK_PATH, body.toString());
+    }
+
+    /** Adds {@code target_tenant} to a lock body only when the caller names another owner. */
+    private static void putTargetTenant(JSONObject body, String targetTenant) {
+        if (targetTenant != null && !targetTenant.isEmpty()) {
+            body.put("target_tenant", targetTenant);
+        }
     }
 
     // ---- Timeout env parsing ----

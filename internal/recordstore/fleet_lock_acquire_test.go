@@ -3,6 +3,7 @@ package recordstore
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -33,12 +34,14 @@ func insertInterruptedRun(t *testing.T, db *sql.DB, runID string) {
 }
 
 // insertFleetLockRow inserts one varroa.fleet_locks row directly, with
-// full control over every column a task 3.8 test needs.
+// full control over every column a task 3.8 test needs. The owner tenant
+// is the name's first segment, which holds for every cell tenant name
+// these tests use.
 func insertFleetLockRow(t *testing.T, db *sql.DB, name, runID, state string, waitingSince, expiresAt time.Time) {
 	t.Helper()
 	if _, err := db.Exec(`
-		INSERT INTO varroa.fleet_locks (name, run_id, cluster, tenant, job_path, state, waiting_since, expires_at)
-		VALUES ($1, $2, $3, 'alpha', 'alpha/release', $4, $5, $6)
+		INSERT INTO varroa.fleet_locks (name, owner_tenant, run_id, cluster, tenant, job_path, state, waiting_since, expires_at)
+		VALUES ($1, split_part($1, '/', 1), $2, $3, 'alpha', 'alpha/release', $4, $5, $6)
 	`, name, runID, testCluster, state, waitingSince, expiresAt); err != nil {
 		t.Fatalf("insert fleet lock row: %v", err)
 	}
@@ -160,9 +163,9 @@ func TestFleetLockAcquire_StaleCellAnswersFenced(t *testing.T) {
 	}
 }
 
-// TestFleetLockAcquire_UngrantedCrossPrefixAnswersCrossTenant covers
+// TestFleetLockAcquire_UngrantedCrossTenantAnswersCrossTenant covers
 // task 3.8's third acceptance.
-func TestFleetLockAcquire_UngrantedCrossPrefixAnswersCrossTenant(t *testing.T) {
+func TestFleetLockAcquire_UngrantedCrossTenantAnswersCrossTenant(t *testing.T) {
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	seedTenantPlacement(t, db, "beta", "ns-beta", "cell-beta", 0, "pod-b", "pod-b", nil)
@@ -172,7 +175,8 @@ func TestFleetLockAcquire_UngrantedCrossPrefixAnswersCrossTenant(t *testing.T) {
 		Namespace:    "ns-alpha",
 		Cell:         "cell-alpha",
 		CallerTenant: "alpha",
-		Name:         "beta/deploy-prod",
+		TargetTenant: "beta",
+		Name:         "deploy-prod",
 		RunID:        "run-1",
 	})
 	if err != nil {
@@ -560,5 +564,163 @@ func TestFleetLockAcquire_NilNotifierPublishesNothing(t *testing.T) {
 	resp := acquireForCaller(t, deps, newTestUUIDv7String())
 	if resp.State != FleetLockStateHeld {
 		t.Fatalf("state: got %q, want %q", resp.State, FleetLockStateHeld)
+	}
+}
+
+// controllerTenant is a non-cell controller's tenant, spelled as the
+// gateway spells it: the namespace, a "/", and the controller name.
+const controllerTenant = "team-pay/ci"
+
+// readLockOwner reads the stored owner tenant of run-1's row of name.
+// It answers found=false when no such row exists.
+func readLockOwner(t *testing.T, db *sql.DB, name string) (string, bool) {
+	t.Helper()
+	var owner string
+	err := db.QueryRow(`SELECT owner_tenant FROM varroa.fleet_locks WHERE name = $1 AND run_id = 'run-1'`,
+		name).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false
+	}
+	if err != nil {
+		t.Fatalf("read the lock owner: %v", err)
+	}
+	return owner, true
+}
+
+// TestFleetLockAcquire_ControllerTenantTakesItsOwnLock asserts a non-cell
+// controller takes its own lock with no grant. Its tenant holds a "/",
+// and an empty target_tenant still names that whole tenant as the owner.
+func TestFleetLockAcquire_ControllerTenantTakesItsOwnLock(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	seedTenantPlacement(t, db, controllerTenant, "team-pay", "ci", 0, "ci-0", "ci-0", nil)
+
+	resp, err := handleCrossTenantLockAcquire(context.Background(), deps, CrossTenantRequest{
+		Cluster:       testCluster,
+		Namespace:     "team-pay",
+		Cell:          "ci",
+		CallerTenant:  controllerTenant,
+		CallerJobPath: "deploy",
+		Name:          "deploy-prod",
+		RunID:         "run-1",
+	})
+	if err != nil {
+		t.Fatalf("handleCrossTenantLockAcquire: %v", err)
+	}
+	if resp.ReasonCode != "" {
+		t.Fatalf("reason_code: got %q, want no veto (message %q)", resp.ReasonCode, resp.Message)
+	}
+	if resp.State != FleetLockStateHeld {
+		t.Fatalf("state: got %q, want %q", resp.State, FleetLockStateHeld)
+	}
+	if resp.Tenant != controllerTenant {
+		t.Fatalf("reply tenant: got %q, want %q", resp.Tenant, controllerTenant)
+	}
+	owner, found := readLockOwner(t, db, controllerTenant+"/deploy-prod")
+	if !found {
+		t.Fatalf("no row named %s/deploy-prod", controllerTenant)
+	}
+	if owner != controllerTenant {
+		t.Fatalf("owner_tenant: got %q, want %q", owner, controllerTenant)
+	}
+}
+
+// TestFleetLockAcquire_GrantedControllerOwnedLock asserts a cell tenant
+// takes a lock a controller tenant owns through a lock export. The grant
+// matches the bare name, and the row names the whole controller tenant.
+func TestFleetLockAcquire_GrantedControllerOwnedLock(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
+	seedTenantPlacement(t, db, controllerTenant, "team-pay", "ci", 0, "ci-0", "ci-0", nil)
+	if _, err := db.Exec(`UPDATE varroa.tenant_placements SET policy = $1::jsonb WHERE tenant = $2`,
+		`{"exports":[{"locks":["deploy-*"],"callers":["alpha"]}]}`, controllerTenant); err != nil {
+		t.Fatalf("seed the lock export: %v", err)
+	}
+
+	resp, err := handleCrossTenantLockAcquire(context.Background(), deps, CrossTenantRequest{
+		Cluster:      testCluster,
+		Namespace:    "ns-alpha",
+		Cell:         "cell-alpha",
+		CallerTenant: "alpha",
+		TargetTenant: controllerTenant,
+		Name:         "deploy-prod",
+		RunID:        "run-1",
+	})
+	if err != nil {
+		t.Fatalf("handleCrossTenantLockAcquire: %v", err)
+	}
+	if resp.State != FleetLockStateHeld {
+		t.Fatalf("state: got %q, want %q (reason %q, message %q)", resp.State, FleetLockStateHeld, resp.ReasonCode, resp.Message)
+	}
+	owner, found := readLockOwner(t, db, controllerTenant+"/deploy-prod")
+	if !found || owner != controllerTenant {
+		t.Fatalf("owner_tenant: got %q (found %v), want %q", owner, found, controllerTenant)
+	}
+}
+
+// TestFleetLockAcquire_SlashInNameAnswersInvalidName asserts an acquire
+// whose name holds a "/" is vetoed with INVALID_NAME and writes no row.
+func TestFleetLockAcquire_SlashInNameAnswersInvalidName(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
+
+	resp, err := handleCrossTenantLockAcquire(context.Background(), deps, CrossTenantRequest{
+		Cluster:      testCluster,
+		Namespace:    "ns-alpha",
+		Cell:         "cell-alpha",
+		CallerTenant: "alpha",
+		Name:         "beta/deploy-prod",
+		RunID:        "run-1",
+	})
+	if err != nil {
+		t.Fatalf("handleCrossTenantLockAcquire: %v", err)
+	}
+	if resp.ReasonCode != ReasonInvalidName {
+		t.Fatalf("reason_code: got %q, want %q", resp.ReasonCode, ReasonInvalidName)
+	}
+	if resp.Code != "" {
+		t.Fatalf("code: got %q, want none: a veto is not a server fault", resp.Code)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM varroa.fleet_locks`).Scan(&count); err != nil {
+		t.Fatalf("count fleet_locks: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("fleet_locks rows: got %d, want 0", count)
+	}
+}
+
+// TestFleetLockAcquire_OtherTenantRunIDIsRefused asserts an acquire that
+// names another tenant's run id on the same lock is vetoed, and neither
+// refreshes nor promotes that tenant's row.
+func TestFleetLockAcquire_OtherTenantRunIDIsRefused(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	seedTenantPlacement(t, db, "beta", "ns-beta", "cell-beta", 0, "pod-b", "pod-b", nil)
+
+	now := time.Now().UTC()
+	expires := now.Add(time.Minute)
+	insertFleetLockRow(t, db, "beta/deploy-prod", "run-1", "waiting", now.Add(-time.Minute), expires)
+
+	resp, err := handleCrossTenantLockAcquire(context.Background(), deps, CrossTenantRequest{
+		Cluster:      testCluster,
+		Namespace:    "ns-beta",
+		Cell:         "cell-beta",
+		CallerTenant: "beta",
+		Name:         "deploy-prod",
+		RunID:        "run-1",
+	})
+	if err != nil {
+		t.Fatalf("handleCrossTenantLockAcquire: %v", err)
+	}
+	if resp.ReasonCode != ReasonCrossTenant {
+		t.Fatalf("reason_code: got %q, want %q", resp.ReasonCode, ReasonCrossTenant)
+	}
+	var state string
+	var got time.Time
+	if err := db.QueryRow(`SELECT state, expires_at FROM varroa.fleet_locks WHERE name = $1 AND run_id = $2`,
+		"beta/deploy-prod", "run-1").Scan(&state, &got); err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	if state != FleetLockStateWaiting || !got.Equal(expires.Truncate(time.Microsecond)) {
+		t.Fatalf("row changed: state %q expires_at %s, want waiting and %s", state, got, expires)
 	}
 }

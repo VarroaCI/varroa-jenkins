@@ -1390,9 +1390,9 @@ type fleetLockGrant struct {
 
 // fleetLockMergeKey is one row's own place in a merged list: the
 // ordering triple both reads share. The read of one tenant can answer a
-// row twice for a team of two tenants, once by the lock name's own
-// prefix and once by the row's tenant column, so the merge de-duplicates
-// by this triple.
+// row twice for a team of two tenants, once by the row's owner tenant
+// and once by the row's tenant column, so the merge de-duplicates by
+// this triple.
 type fleetLockMergeKey struct {
 	name         string
 	waitingSince time.Time

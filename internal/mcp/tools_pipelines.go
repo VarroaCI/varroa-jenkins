@@ -352,7 +352,7 @@ var runListOutputSchema = listOutputSchema("Run summary.", []schemaField{
 func registerListFleetLocksTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	listFleetLocksTool := mcp.NewTool("list_fleet_locks",
 		mcp.WithDescription("List the fleet locks a team's tenants own, hold, or wait on. "+
-			"A lock under another tenant's prefix appears when one of the team's own runs "+
+			"A lock another tenant owns appears when one of the team's own runs "+
 			"holds or waits on it."),
 		mcp.WithString("team", mcp.Required(), mcp.Description("Team, or the controller name for a single-controller tenant")),
 		withListOutput(fleetLockListOutputSchema),
@@ -377,7 +377,7 @@ func registerListFleetLocksTool(mcpServer *server.MCPServer, deps *api.Dependenc
 // fleetLockListOutputSchema describes list_fleet_locks' items:
 // api.FleetLockRow serializes directly.
 var fleetLockListOutputSchema = listOutputSchema("Fleet lock.", []schemaField{
-	{Name: "name", Type: "string", Desc: "Qualified lock name, <tenant>/<name>."},
+	{Name: "name", Type: "string", Desc: "Qualified lock name, <owner tenant>/<bare name>. The owner can hold a slash."},
 	{Name: "tenant", Type: "string", Desc: "Tenant whose run holds or waits on the lock."},
 	{Name: "jobPath", Type: "string", Desc: "Full job path of the holder's or waiter's run."},
 	{Name: "state", Type: "string", Desc: "waiting, held, or releasing."},

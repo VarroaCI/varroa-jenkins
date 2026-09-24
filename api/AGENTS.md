@@ -94,7 +94,7 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   absence must mean the permissive default.
   `TeamPipelinesSpec.Exports` (`[]TeamExport`, at most 64 entries) lists the
   grants a pipelines tenant makes to other tenants: each entry names exactly
-  one of `job` (a folder-relative job glob) or `locks` (prefix-relative
+  one of `job` (a folder-relative job glob) or `locks` (bare
   lock-name globs), plus `callers` (at least one Team name). The CEL rules on
   `TeamExport` enforce the exactly-one-of, the non-empty job/locks/caller
   entries, and that `job` never starts with `/`; the matching OpenAPI schema

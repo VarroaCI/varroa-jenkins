@@ -185,6 +185,62 @@ func TestCrossTenantTwoConcurrentKindsDoNotCross(t *testing.T) {
 	}
 }
 
+// TestCrossTenantLockForwardsTargetTenantVerbatim asserts the lock route
+// forwards a lock body as sent. The recorder resolves the lock owner from
+// target_tenant and the bare name, so the mite must neither drop nor join
+// the two fields.
+func TestCrossTenantLockForwardsTargetTenantVerbatim(t *testing.T) {
+	agent := NewAgent(Config{})
+	agent.Logger = slog.Default()
+	agent.loopbackToken = "tok"
+	agent.crossTenantTimeout = 2 * time.Second
+
+	sent := make(chan *mitev1.CrossTenantRequest, 1)
+	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+		sent <- m.GetCrossTenantRequest()
+		return nil
+	}}
+
+	body := `{"kind":"lock_acquire","caller_job_path":"deploy","name":"deploy-prod",` +
+		`"target_tenant":"team-pay/ci","run_id":"r","lease_seconds":300}`
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, "/v1/cross-tenant/lock", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer tok")
+		rec := httptest.NewRecorder()
+		agent.crossTenantHandler("lock")(rec, req)
+		done <- rec
+	}()
+
+	var got *mitev1.CrossTenantRequest
+	select {
+	case got = <-sent:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the forwarded lock request")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(got.PayloadJson), &payload); err != nil {
+		t.Fatalf("decode the forwarded payload: %v", err)
+	}
+	if payload["name"] != "deploy-prod" || payload["target_tenant"] != "team-pay/ci" {
+		t.Fatalf("forwarded name %v and target_tenant %v, want deploy-prod and team-pay/ci",
+			payload["name"], payload["target_tenant"])
+	}
+
+	id := *got.RequestId
+	agent.crossTenantWaiters.resolve(&mitev1.CrossTenantResponse{
+		RequestId: &id, Kind: "lock_acquire", PayloadJson: `{"state":"held","tenant":"team-pay/ci"}`,
+	})
+	select {
+	case rec := <-done:
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the lock reply")
+	}
+}
+
 func TestCrossTenant504Timeout(t *testing.T) {
 	agent := NewAgent(Config{})
 	agent.Logger = slog.Default()

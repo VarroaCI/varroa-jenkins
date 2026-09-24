@@ -398,7 +398,7 @@ func TestFleetLockStateMachine_NextWaiterPromotedAfterRelease(t *testing.T) {
 		Name:    fleetLockStateMachineTestName,
 		RunID:   waiterRunID,
 		Cluster: testCluster,
-		Tenant:  testTenant,
+		Tenant:  "alpha", // insertFleetLockRow's own tenant column.
 		JobPath: testJobPath,
 		Lease:   5 * time.Minute,
 	})

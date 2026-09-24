@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -13,13 +14,22 @@ import (
 var readerLockClock = time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)
 
 // seedReaderLock inserts one fleet_locks row directly, with full control
-// over the identity columns the two lock reads filter on.
+// over the identity columns the two lock reads filter on. The owner
+// tenant is the name's first segment, which holds for every cell tenant
+// name this file uses; seedReaderLockOwned names any other owner.
 func seedReaderLock(t *testing.T, db *sql.DB, name, runID, cluster, tenant, jobPath, state string, waitingSince time.Time) {
 	t.Helper()
+	owner, _, _ := strings.Cut(name, "/")
+	seedReaderLockOwned(t, db, name, owner, runID, cluster, tenant, jobPath, state, waitingSince)
+}
+
+// seedReaderLockOwned is seedReaderLock with an explicit owner tenant.
+func seedReaderLockOwned(t *testing.T, db *sql.DB, name, owner, runID, cluster, tenant, jobPath, state string, waitingSince time.Time) {
+	t.Helper()
 	if _, err := db.Exec(`
-		INSERT INTO varroa.fleet_locks (name, run_id, cluster, tenant, job_path, state, waiting_since, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, name, runID, cluster, tenant, jobPath, state, waitingSince, waitingSince.Add(time.Hour)); err != nil {
+		INSERT INTO varroa.fleet_locks (name, owner_tenant, run_id, cluster, tenant, job_path, state, waiting_since, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, name, owner, runID, cluster, tenant, jobPath, state, waitingSince, waitingSince.Add(time.Hour)); err != nil {
 		t.Fatalf("seed fleet lock %s/%s: %v", name, runID, err)
 	}
 }
@@ -181,6 +191,44 @@ func TestReaderListFleetLocks_RowCarriesNoQueuePosition(t *testing.T) {
 				if _, present := row["waitingSince"]; !present {
 					t.Errorf("row %d carries no waitingSince", i)
 				}
+			}
+		})
+	}
+}
+
+// TestReaderListFleetLocks_OwnerIsExactNotPrefix asserts the tenant read
+// matches the owner tenant exactly. Tenant team-pay does not read a lock
+// the controller tenant team-pay/ci owns, and a "_" in a tenant matches
+// no other character.
+func TestReaderListFleetLocks_OwnerIsExactNotPrefix(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	seedReaderLockOwned(t, db, "team-pay/deploy-prod", "team-pay", "run-pay", testCluster,
+		"team-pay", "team-pay/deploy", "held", readerLockClock)
+	seedReaderLockOwned(t, db, "team-pay/ci/deploy-prod", "team-pay/ci", "run-ci", testCluster,
+		"team-pay/ci", "deploy", "held", readerLockClock.Add(time.Minute))
+	seedReaderLockOwned(t, db, "teamXpay/deploy-prod", "teamXpay", "run-x", testCluster,
+		"teamXpay", "teamXpay/deploy", "held", readerLockClock.Add(2*time.Minute))
+
+	cases := []struct {
+		tenant string
+		want   []string
+	}{
+		{"team-pay", []string{"run-pay"}},
+		{"team-pay/ci", []string{"run-ci"}},
+		{"team_pay", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.tenant, func(t *testing.T) {
+			locks, err := NewReader(pool).ListFleetLocks(context.Background(), testCluster, tc.tenant)
+			if err != nil {
+				t.Fatalf("ListFleetLocks: %v", err)
+			}
+			var got []string
+			for _, lock := range locks {
+				got = append(got, lock.RunID)
+			}
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("ListFleetLocks(%q) = %v, want %v", tc.tenant, got, tc.want)
 			}
 		})
 	}

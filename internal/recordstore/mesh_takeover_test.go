@@ -87,8 +87,8 @@ func seedMeshFleetLock(t *testing.T, db *sql.DB, runID uuid.UUID) {
 	t.Helper()
 	if _, err := db.Exec(`
 		INSERT INTO varroa.fleet_locks
-			(name, run_id, cluster, tenant, job_path, cell_instance, state, fence_token, waiting_since, acquired_at, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, 'held', 1, now(), now(), now() + interval '1 hour')
+			(name, owner_tenant, run_id, cluster, tenant, job_path, cell_instance, state, fence_token, waiting_since, acquired_at, expires_at)
+		VALUES ($1, $4, $2, $3, $4, $5, $6, 'held', 1, now(), now(), now() + interval '1 hour')
 	`, testTenant+"/deploy-lock", runID.String(), testCluster, testTenant, testJobPath, meshDeadInstance); err != nil {
 		t.Fatalf("seed fleet lock: %v", err)
 	}

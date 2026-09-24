@@ -88,9 +88,9 @@ public class MiteLoopbackClientTest {
                 c -> c.crossTenantLastSuccessful(callerJobPath, "beta", "beta/deploy"),
                 c -> c.crossTenantArtifactList(callerJobPath, "run-1"),
                 c -> c.crossTenantArtifactUrl(callerJobPath, "run-1", "out/app.jar"),
-                c -> c.crossTenantLockAcquire(callerJobPath, "beta/deploy-prod", "run-1", 300L, "2026-09-11T00:00:00Z"),
-                c -> c.crossTenantLockRenew(callerJobPath, "beta/deploy-prod", "run-1", 300L),
-                c -> c.crossTenantLockRelease(callerJobPath, "beta/deploy-prod", "run-1"));
+                c -> c.crossTenantLockAcquire(callerJobPath, "beta", "deploy-prod", "run-1", 300L, "2026-09-11T00:00:00Z"),
+                c -> c.crossTenantLockRenew(callerJobPath, "beta", "deploy-prod", "run-1", 300L),
+                c -> c.crossTenantLockRelease(callerJobPath, "beta", "deploy-prod", "run-1"));
 
         assertEquals(8, calls.size());
         for (Function<MiteLoopbackClient, MiteLoopbackClient.Response> call : calls) {
@@ -109,13 +109,45 @@ public class MiteLoopbackClientTest {
         client.crossTenantBuild("alpha/j", "run-1", 1, "beta", "beta/deploy", Map.of(), "");
         client.crossTenantLastSuccessful("alpha/j", "beta", "beta/deploy");
         client.crossTenantArtifactUrl("alpha/j", "run-1", "out/app.jar");
-        client.crossTenantLockRenew("alpha/j", "beta/deploy-prod", "run-1", 300L);
+        client.crossTenantLockRenew("alpha/j", "beta", "deploy-prod", "run-1", 300L);
 
         List<String> kinds = new ArrayList<>();
         for (String raw : receivedBodies) {
             kinds.add(JSONObject.fromObject(raw).getString("kind"));
         }
         assertEquals(List.of("build", "last_successful", "artifact_url", "lock_renew"), kinds);
+    }
+
+    // ---- the lock kinds carry the owner in target_tenant, never inside name ----
+
+    @Test
+    public void everyLockKindSendsTheBareNameAndTheTargetTenantApart() throws Exception {
+        MiteLoopbackClient client = client();
+        client.crossTenantLockAcquire("alpha/j", "team-pay/ci", "deploy-prod", "run-1", 300L, "2026-09-11T00:00:00Z");
+        client.crossTenantLockRenew("alpha/j", "team-pay/ci", "deploy-prod", "run-1", 300L);
+        client.crossTenantLockRelease("alpha/j", "team-pay/ci", "deploy-prod", "run-1");
+
+        assertEquals(3, receivedBodies.size());
+        for (String raw : receivedBodies) {
+            JSONObject sent = JSONObject.fromObject(raw);
+            assertEquals("deploy-prod", sent.getString("name"));
+            assertEquals("team-pay/ci", sent.getString("target_tenant"));
+        }
+    }
+
+    @Test
+    public void anOwnLockSendsNoTargetTenant() throws Exception {
+        MiteLoopbackClient client = client();
+        client.crossTenantLockAcquire("alpha/j", "", "deploy-prod", "run-1", 300L, "2026-09-11T00:00:00Z");
+        client.crossTenantLockRenew("alpha/j", null, "deploy-prod", "run-1", 300L);
+        client.crossTenantLockRelease("alpha/j", "", "deploy-prod", "run-1");
+
+        assertEquals(3, receivedBodies.size());
+        for (String raw : receivedBodies) {
+            JSONObject sent = JSONObject.fromObject(raw);
+            assertEquals("deploy-prod", sent.getString("name"));
+            assertFalse("an own lock carries no target_tenant", sent.has("target_tenant"));
+        }
     }
 
     // ---- D6: the build kind's seq travels as the string "s<n>", never a JSON number ----

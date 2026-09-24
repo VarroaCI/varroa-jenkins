@@ -5981,7 +5981,8 @@ components:
           description: The job path of the run that holds or waits on the lock.
           type: string
         name:
-          description: The qualified lock name, in the form tenant/name.
+          description: |
+            The qualified lock name: the owner tenant, a slash, and the bare lock name. A controller tenant holds a slash of its own, so do not split this value to find the owner.
           type: string
         runId:
           type: string
@@ -8849,7 +8850,7 @@ components:
             job or locks is set.
           type: string
         locks:
-          description: Prefix-relative lock-name globs this tenant exports. Exactly
+          description: Globs over the bare names of this tenant's own locks. Exactly
             one of job or locks is set.
           items:
             type: string

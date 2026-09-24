@@ -81,7 +81,10 @@ type CrossTenantRequest struct {
 	// artifact_url
 	Path string `json:"path,omitempty"`
 
-	// lock_acquire, lock_renew, lock_release
+	// lock_acquire, lock_renew, lock_release. Name is the bare lock name
+	// and never holds a "/". TargetTenant, shared with build and
+	// last_successful, names the tenant that owns the lock; an empty
+	// value names the caller's own tenant.
 	Name         string     `json:"name,omitempty"`
 	LeaseSeconds int64      `json:"lease_seconds,omitempty"`
 	WaitingSince *time.Time `json:"waiting_since,omitempty"`
@@ -91,7 +94,8 @@ type CrossTenantRequest struct {
 // call. It is the union of every kind's reply fields (design.md D4).
 // Error and Code follow C1's rule: UNAVAILABLE when Postgres does not
 // answer, INTERNAL for any other fault, and no new code. ReasonCode and
-// Message carry a GrantEvaluator veto, which is never a server fault.
+// Message carry a veto, which is never a server fault: a GrantEvaluator
+// veto, or INVALID_NAME for a lock name that is empty or holds a "/".
 type CrossTenantResponse struct {
 	Kind       string `json:"kind,omitempty"`
 	ReasonCode string `json:"reason_code,omitempty"`
@@ -116,6 +120,9 @@ type CrossTenantResponse struct {
 
 	// artifact_url
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+
+	// lock_acquire. Tenant names the tenant that owns the lock.
+	Tenant string `json:"tenant,omitempty"`
 
 	// lock_acquire, lock_renew
 	Holder     string `json:"holder,omitempty"`

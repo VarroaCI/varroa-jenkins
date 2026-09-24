@@ -14,8 +14,8 @@ func insertLockRowForTenant(t *testing.T, db *sql.DB, name, runID, tenant, jobPa
 	waitingSince, expiresAt time.Time) {
 	t.Helper()
 	if _, err := db.Exec(`
-		INSERT INTO varroa.fleet_locks (name, run_id, cluster, tenant, job_path, state, waiting_since, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO varroa.fleet_locks (name, owner_tenant, run_id, cluster, tenant, job_path, state, waiting_since, expires_at)
+		VALUES ($1, split_part($1, '/', 1), $2, $3, $4, $5, $6, $7, $8)
 	`, name, runID, testCluster, tenant, jobPath, state, waitingSince, expiresAt); err != nil {
 		t.Fatalf("insert fleet lock %s/%s at %s: %v", name, runID, tenant, err)
 	}

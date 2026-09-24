@@ -8093,7 +8093,7 @@
             "type": "string"
           },
           "name": {
-            "description": "The qualified lock name, in the form tenant/name.",
+            "description": "The qualified lock name: the owner tenant, a slash, and the bare lock name. A controller tenant holds a slash of its own, so do not split this value to find the owner.\n",
             "type": "string"
           },
           "runId": {
@@ -11911,7 +11911,7 @@
             "type": "string"
           },
           "locks": {
-            "description": "Prefix-relative lock-name globs this tenant exports. Exactly one of job or locks is set.",
+            "description": "Globs over the bare names of this tenant's own locks. Exactly one of job or locks is set.",
             "items": {
               "type": "string"
             },

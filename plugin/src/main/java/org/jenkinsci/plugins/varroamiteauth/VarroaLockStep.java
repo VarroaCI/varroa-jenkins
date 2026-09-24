@@ -3,7 +3,6 @@ package org.jenkinsci.plugins.varroamiteauth;
 import hudson.AbortException;
 import hudson.EnvVars;
 import hudson.Extension;
-import hudson.model.Job;
 import hudson.model.Run;
 import hudson.model.TaskListener;
 
@@ -15,6 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import org.jenkinsci.plugins.workflow.steps.BodyExecution;
 import org.jenkinsci.plugins.workflow.steps.BodyExecutionCallback;
 import org.jenkinsci.plugins.workflow.steps.EnvironmentExpander;
 import org.jenkinsci.plugins.workflow.steps.Step;
@@ -28,9 +28,13 @@ import jenkins.util.Timer;
 
 /**
  * {@code varroaLock} (D1, D11): a block step that acquires a fleet lock
- * before the body and releases it in a {@code finally}. A bare name is
- * qualified with the calling tenant; a name already holding a {@code /} is
- * used unchanged.
+ * before the body and releases it in a {@code finally}. {@code name} is
+ * always a bare name, and a name that holds a {@code /} fails the step
+ * before any call. {@code tenant} names the tenant that owns the lock. An
+ * empty {@code tenant} names the caller's own tenant, which the recorder
+ * resolves from the identity the gateway stamps. The step never builds a
+ * qualified name itself: a controller tenant holds a {@code /} of its own,
+ * so a qualified name is ambiguous.
  *
  * <p>The waiting phase and the 60-second renewal loop hold no CPS thread
  * and no dedicated thread, the same way {@link VarroaBuildStep} polls: both
@@ -45,6 +49,7 @@ public class VarroaLockStep extends Step {
     private static final Logger LOGGER = Logger.getLogger(VarroaLockStep.class.getName());
 
     private final String name;
+    private String tenant = "";
     private int timeout;
 
     @DataBoundConstructor
@@ -54,6 +59,16 @@ public class VarroaLockStep extends Step {
 
     public String getName() {
         return name;
+    }
+
+    /** The tenant that owns the lock; empty names the caller's own tenant. */
+    public String getTenant() {
+        return tenant;
+    }
+
+    @DataBoundSetter
+    public void setTenant(String tenant) {
+        this.tenant = tenant != null ? tenant : "";
     }
 
     /** Seconds; {@code 0} means unlimited, the default. */
@@ -99,9 +114,13 @@ public class VarroaLockStep extends Step {
         private static final long serialVersionUID = 1L;
 
         private final String nameArg;
+        private final String tenantArg;
         private final int timeoutSeconds;
 
-        private String qualifiedName = "";
+        // The tenant that owns the lock, as the acquire reply names it.
+        // It feeds varroa.lock.tenant and the log lines only, never the
+        // wire: the wire carries tenantArg as the caller wrote it.
+        private String ownerTenant = "";
         private String callerJobPath = "";
         private String runId = "";
         private long acquireStartedAtMillis;
@@ -114,22 +133,35 @@ public class VarroaLockStep extends Step {
         // forever on a stale "not released" read and keep renewing a
         // lease the job already told the recorder to drop.
         private final AtomicBoolean released = new AtomicBoolean(false);
+
+        // Set by renew() when the recorder ends the hold (a lost lease or
+        // a permanent veto). It stops the renewals only. It never marks
+        // the lock released, so the body callback still sends the release
+        // and a waiter does not wait out the lease.
+        private final AtomicBoolean holdEnded = new AtomicBoolean(false);
         private boolean releasingWarned;
 
         private transient Random random;
 
+        // The running body, once the lock is held. A hold that ends early
+        // (a lost lease or a permanent veto) cancels it, so the body stops
+        // its protected side effects instead of running on unfenced.
+        private volatile BodyExecution body;
+
         Execution(VarroaLockStep step, StepContext context) {
             super(context);
             this.nameArg = step.getName();
+            this.tenantArg = step.getTenant();
             this.timeoutSeconds = step.getTimeout();
         }
 
         @Override
         public boolean start() throws Exception {
+            checkName(nameArg);
             Run<?, ?> run = getContext().get(Run.class);
             runId = callerRunId(run);
             callerJobPath = run.getParent().getFullName();
-            qualifiedName = qualify(nameArg, ownTenant(run));
+            ownerTenant = tenantArg;
 
             acquireStartedAtMillis = System.currentTimeMillis();
             attemptAcquire();
@@ -149,7 +181,7 @@ public class VarroaLockStep extends Step {
                 try {
                     Run<?, ?> run = getContext().get(Run.class);
                     if (run != null) {
-                        VarroaActiveLocksAction.of(run).push(qualifiedName, fenceToken);
+                        VarroaActiveLocksAction.of(run).push(ownerTenant, nameArg, fenceToken);
                     }
                 } catch (Exception e) {
                     LOGGER.log(Level.WARNING,
@@ -172,13 +204,20 @@ public class VarroaLockStep extends Step {
         private void attemptAcquire() {
             try {
                 VarroaCrossTenantReply reply = VarroaCrossTenantReply.parse(
-                        VarroaCrossTenantOps.client().crossTenantLockAcquire(callerJobPath, qualifiedName, runId,
+                        VarroaCrossTenantOps.client().crossTenantLockAcquire(callerJobPath, tenantArg, nameArg, runId,
                                 VarroaPollPolicy.LOCK_LEASE_SECONDS, isoInstant(acquireStartedAtMillis)));
                 if (reply.isFailure()) {
                     getContext().onFailure(
                             new AbortException("varroaLock: the recorder did not answer (" + reply.code + ")"));
                     return;
                 }
+                String reasonCode = reply.getString("reason_code", "");
+                if (isPermanentVeto(reasonCode)) {
+                    releaseLock();
+                    getContext().onFailure(vetoFailure(reply, reasonCode));
+                    return;
+                }
+                ownerTenant = reply.getString("tenant", tenantArg);
                 String state = reply.getString("state", "waiting");
                 if ("held".equals(state)) {
                     fenceToken = reply.getLong("fence_token", 0L);
@@ -189,7 +228,7 @@ public class VarroaLockStep extends Step {
                 if (timeoutSeconds > 0 && elapsed >= timeoutSeconds * 1000L) {
                     releaseLock();
                     getContext().onFailure(
-                            new AbortException("varroaLock: timed out waiting for " + qualifiedName));
+                            new AbortException("varroaLock: timed out waiting for " + displayName()));
                     return;
                 }
                 Timer.get().schedule(this::attemptAcquire,
@@ -205,14 +244,16 @@ public class VarroaLockStep extends Step {
 
         private void onAcquired() throws Exception {
             Run<?, ?> run = getContext().get(Run.class);
-            VarroaActiveLocksAction.of(run).push(qualifiedName, fenceToken);
+            VarroaActiveLocksAction.of(run).push(ownerTenant, nameArg, fenceToken);
             EnvironmentExpander original = getContext().get(EnvironmentExpander.class);
             EnvironmentExpander merged = EnvironmentExpander.merge(original, new LockTokenExpander(fenceToken));
-            scheduleRenew();
-            getContext().newBodyInvoker()
+            body = getContext().newBodyInvoker()
                     .withContext(merged)
                     .withCallback(new LockBodyCallback())
                     .start();
+            // Renewals start only after body is set, so endHold always
+            // finds the running body to cancel.
+            scheduleRenew();
         }
 
         private void scheduleRenew() {
@@ -220,36 +261,61 @@ public class VarroaLockStep extends Step {
         }
 
         private void renew() {
-            if (released.get()) {
+            if (released.get() || holdEnded.get()) {
                 return;
             }
             try {
                 VarroaCrossTenantReply reply = VarroaCrossTenantReply.parse(
-                        VarroaCrossTenantOps.client().crossTenantLockRenew(callerJobPath, qualifiedName, runId,
+                        VarroaCrossTenantOps.client().crossTenantLockRenew(callerJobPath, tenantArg, nameArg, runId,
                                 VarroaPollPolicy.LOCK_LEASE_SECONDS));
                 if (reply.isFailure()) {
                     scheduleRenew();
                     return;
                 }
+                String reasonCode = reply.getString("reason_code", "");
+                if (isPermanentVeto(reasonCode)) {
+                    // A revoked grant or a fenced cell never renews again,
+                    // so the hold ends here, the same as a lost lease.
+                    endHold(vetoFailure(reply, reasonCode));
+                    return;
+                }
                 String state = reply.getString("state", "");
                 if ("lost".equals(state)) {
-                    released.set(true);
-                    try {
-                        getContext().onFailure(
-                                new AbortException("varroaLock: the lease for " + qualifiedName + " was lost"));
-                    } catch (Exception ignored) {
-                        // The context is already closed.
-                    }
+                    endHold(new AbortException("varroaLock: the lease for " + displayName() + " was lost"));
                     return;
                 }
                 if ("releasing".equals(state) && !releasingWarned) {
                     releasingWarned = true;
-                    logWarning(qualifiedName + " is releasing after an interruption; "
+                    logWarning(displayName() + " is releasing after an interruption; "
                             + "the body keeps running until it ends or its cell dies");
                 }
                 scheduleRenew();
             } catch (Exception e) {
                 scheduleRenew();
+            }
+        }
+
+        /**
+         * Ends a hold the recorder no longer honors. It cancels the running
+         * body with {@code cause}, and the body callback then releases the
+         * lock and fails the step with it. A body that already completed
+         * keeps its own outcome: it ran while the last renew still held
+         * the lock. With no body, it releases and fails the step directly.
+         */
+        private void endHold(Throwable cause) {
+            if (!holdEnded.compareAndSet(false, true)) {
+                return;
+            }
+            BodyExecution running = body;
+            if (running != null) {
+                running.cancel(cause);
+                return;
+            }
+            releaseLock();
+            try {
+                getContext().onFailure(cause);
+            } catch (Exception ignored) {
+                // The context is already closed.
             }
         }
 
@@ -269,7 +335,7 @@ public class VarroaLockStep extends Step {
                 return;
             }
             try {
-                VarroaCrossTenantOps.client().crossTenantLockRelease(callerJobPath, qualifiedName, runId);
+                VarroaCrossTenantOps.client().crossTenantLockRelease(callerJobPath, tenantArg, nameArg, runId);
             } catch (Exception ignored) {
                 // Best effort: the recorder's own lease expiry is the backstop.
             }
@@ -312,7 +378,7 @@ public class VarroaLockStep extends Step {
                 try {
                     Run<?, ?> run = context.get(Run.class);
                     if (run != null) {
-                        VarroaActiveLocksAction.of(run).pop(qualifiedName);
+                        VarroaActiveLocksAction.of(run).pop(ownerTenant, nameArg);
                     }
                 } catch (Exception ignored) {
                     // Best-effort bookkeeping only.
@@ -341,8 +407,46 @@ public class VarroaLockStep extends Step {
             }
         }
 
-        private static String qualify(String name, String callerTenant) {
-            return name.contains("/") ? name : callerTenant + "/" + name;
+        /**
+         * Refuses a name the recorder would refuse, before any call: an
+         * empty name, or a name that holds a {@code /}. Another tenant's
+         * lock is named through the {@code tenant} argument.
+         */
+        static void checkName(String name) throws AbortException {
+            if (name == null || name.isEmpty()) {
+                throw new AbortException("varroaLock: name must not be empty");
+            }
+            if (name.contains("/")) {
+                throw new AbortException("varroaLock: name '" + name + "' must not contain '/'. "
+                        + "Name another tenant's lock with the tenant argument.");
+            }
+        }
+
+        /**
+         * Reports whether a recorder veto can never turn into a grant by
+         * polling again. {@code NOT_READY} and {@code THROTTLED} are
+         * retryable, so the step keeps polling on them.
+         */
+        static boolean isPermanentVeto(String reasonCode) {
+            switch (reasonCode) {
+                case "FENCED":
+                case "CROSS_TENANT":
+                case "NOT_HOME":
+                case "INVALID_NAME":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private AbortException vetoFailure(VarroaCrossTenantReply reply, String reasonCode) {
+            return new AbortException("varroaLock: the recorder refused " + displayName() + " ("
+                    + reasonCode + "): " + reply.getString("message", ""));
+        }
+
+        /** The lock as a log line names it: the owner tenant, when known, then the bare name. */
+        private String displayName() {
+            return ownerTenant == null || ownerTenant.isEmpty() ? nameArg : ownerTenant + "/" + nameArg;
         }
 
         private static String isoInstant(long epochMillis) {
@@ -352,15 +456,6 @@ public class VarroaLockStep extends Step {
         private static String callerRunId(Run<?, ?> run) {
             VarroaIntentAction action = run.getAction(VarroaIntentAction.class);
             return action != null ? action.getRunId() : "";
-        }
-
-        private static String ownTenant(Run<?, ?> run) {
-            Job<?, ?> job = run.getParent();
-            if (!(job instanceof hudson.model.Queue.Task)) {
-                return "";
-            }
-            String tenant = VarroaTenantResolver.tenantOf((hudson.model.Queue.Task) job);
-            return tenant != null ? tenant : "";
         }
     }
 }

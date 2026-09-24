@@ -1917,7 +1917,7 @@ type ComponentsSchemasFleetLock struct {
 	// JobPath The job path of the run that holds or waits on the lock.
 	JobPath string `json:"jobPath"`
 
-	// Name The qualified lock name, in the form tenant/name.
+	// Name The qualified lock name: the owner tenant, a slash, and the bare lock name. A controller tenant holds a slash of its own, so do not split this value to find the owner.
 	Name  string `json:"name"`
 	RunId string `json:"runId"`
 
@@ -3480,7 +3480,7 @@ type ComponentsSchemasTeamExport struct {
 	// Job Folder-relative job glob this tenant exports. Exactly one of job or locks is set.
 	Job *string `json:"job,omitempty"`
 
-	// Locks Prefix-relative lock-name globs this tenant exports. Exactly one of job or locks is set.
+	// Locks Globs over the bare names of this tenant's own locks. Exactly one of job or locks is set.
 	Locks *[]string `json:"locks,omitempty"`
 }
 

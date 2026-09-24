@@ -21,29 +21,57 @@ const fleetLockDefaultLeaseSeconds = 300
 // concurrent-first-acquire race design.md D11 names.
 const fleetLockOneHolderConstraint = "fleet_locks_one_holder"
 
-// splitLockName splits name, the wire-level lock name a caller supplied,
-// into its owning tenant and bare name. A name holding a "/" already
-// names another tenant's namespace explicitly; a bare name with no "/"
-// names the caller's own namespace, and callerTenant supplies the
-// missing prefix. crossesPrefix is false exactly when the resulting
-// owner is the caller's own tenant.
-func splitLockName(name, callerTenant string) (ownerTenant, bareName string, crossesPrefix bool) {
-	if prefix, rest, ok := strings.Cut(name, "/"); ok {
-		return prefix, rest, prefix != callerTenant
+// ReasonInvalidName vetoes a lock call whose bare name is empty or holds
+// a "/". It is a veto, never a server fault, so it rides ReasonCode, and
+// Code keeps its own C1 rule.
+const ReasonInvalidName = "INVALID_NAME"
+
+// resolveLockTarget resolves one lock call to the tenant that owns the
+// lock and to the bare lock name. Name is always bare: the tenant never
+// rides inside it, because a controller tenant already holds a "/" of
+// its own. TargetTenant names the owning tenant, and an empty value
+// names the caller's own tenant, which the gateway stamps as
+// CallerTenant. crossesTenant is false exactly when the owner is the
+// caller's own tenant. veto is non-nil for a name the call must refuse,
+// and the other results are then empty.
+func resolveLockTarget(req CrossTenantRequest) (ownerTenant, bareName string, crossesTenant bool, veto *CrossTenantResponse) {
+	if req.Name == "" || strings.Contains(req.Name, "/") {
+		return "", "", false, &CrossTenantResponse{
+			ReasonCode: ReasonInvalidName,
+			Message: fmt.Sprintf("Lock name %q is not valid. Supply a bare name with no \"/\", "+
+				"and name another tenant in the tenant field.", req.Name),
+		}
 	}
-	return callerTenant, name, false
+	ownerTenant = req.TargetTenant
+	if ownerTenant == "" {
+		ownerTenant = req.CallerTenant
+	}
+	return ownerTenant, req.Name, ownerTenant != req.CallerTenant, nil
+}
+
+// qualifiedLockName answers the stored fleet_locks.name of one lock: the
+// owner tenant, a "/", and the bare name. The owner tenant can itself
+// hold a "/", so no reader splits this value: owner_tenant carries the
+// owner on its own.
+func qualifiedLockName(ownerTenant, bareName string) string {
+	return ownerTenant + "/" + bareName
 }
 
 // handleCrossTenantLockAcquire implements the lock_acquire kind: the
-// CheckPlacement call, the cross-prefix grant, and the five-step
-// acquire transaction design.md D11 defines.
+// CheckPlacement call, the name check, the cross-tenant grant, and the
+// five-step acquire transaction design.md D11 defines. The reply names
+// the owner tenant, because an empty target_tenant leaves the step with
+// no other source for it.
 func handleCrossTenantLockAcquire(ctx context.Context, deps CrossTenantDeps, req CrossTenantRequest) (CrossTenantResponse, error) {
 	if veto, err := checkCrossTenantLockPlacement(ctx, deps, req); err != nil || veto != nil {
 		return derefCrossTenantResponse(veto), err
 	}
 
-	ownerTenant, bareName, crossesPrefix := splitLockName(req.Name, req.CallerTenant)
-	if crossesPrefix {
+	ownerTenant, bareName, crossesTenant, veto := resolveLockTarget(req)
+	if veto != nil {
+		return *veto, nil
+	}
+	if crossesTenant {
 		grant, err := checkCrossTenantLockGrant(ctx, deps, req, ownerTenant, bareName)
 		if err != nil {
 			return CrossTenantResponse{}, err
@@ -64,7 +92,8 @@ func handleCrossTenantLockAcquire(ctx context.Context, deps CrossTenantDeps, req
 	}
 
 	outcome, err := acquireFleetLock(ctx, deps.Pool, deps.LockMetrics, deps.LockNotifier, fleetLockAcquireParams{
-		Name:                ownerTenant + "/" + bareName,
+		Name:                qualifiedLockName(ownerTenant, bareName),
+		OwnerTenant:         ownerTenant,
 		RunID:               req.RunID,
 		Cluster:             req.Cluster,
 		Tenant:              req.CallerTenant,
@@ -73,11 +102,16 @@ func handleCrossTenantLockAcquire(ctx context.Context, deps CrossTenantDeps, req
 		PlacementGeneration: req.PlacementGeneration,
 		Lease:               time.Duration(lease) * time.Second,
 	})
+	if errors.Is(err, errFleetLockRunOfOtherTenant) {
+		return CrossTenantResponse{ReasonCode: ReasonCrossTenant, Message: crossTenantMessage +
+			" Run " + req.RunID + " already holds or waits on this lock for another tenant."}, nil
+	}
 	if err != nil {
 		return CrossTenantResponse{}, err
 	}
 
 	resp := CrossTenantResponse{
+		Tenant:     ownerTenant,
 		State:      outcome.state,
 		Holder:     outcome.holder,
 		Position:   outcome.position,
@@ -112,7 +146,7 @@ func checkCrossTenantLockPlacement(ctx context.Context, deps CrossTenantDeps, re
 }
 
 // checkCrossTenantLockGrant runs GrantEvaluator.Check for a lock acquire
-// or renew that crosses into another tenant's prefix.
+// or renew whose owner tenant is not the caller's own.
 func checkCrossTenantLockGrant(ctx context.Context, deps CrossTenantDeps, req CrossTenantRequest, ownerTenant, bareName string) (GrantResult, error) {
 	return deps.Evaluator.Check(ctx, GrantInput{
 		PlacementInput: PlacementInput{
@@ -158,10 +192,17 @@ func readTenantCellInstance(ctx context.Context, pool *pgxpool.Pool, cluster, te
 	return memberForJob(row, jobPath).Instance, nil
 }
 
+// errFleetLockRunOfOtherTenant reports that the lock already holds a row
+// under the caller's run id whose tenant column names another tenant.
+// A run id is visible in the lock reads, so the acquire must never touch
+// such a row: a refresh would extend a foreign lease.
+var errFleetLockRunOfOtherTenant = errors.New("fleet lock row belongs to another tenant")
+
 // fleetLockAcquireParams carries one lock_acquire request's identity,
-// already resolved to the qualified lock name.
+// already resolved to the qualified lock name and its owner tenant.
 type fleetLockAcquireParams struct {
 	Name                string
+	OwnerTenant         string
 	RunID               string
 	Cluster             string
 	Tenant              string
@@ -299,15 +340,23 @@ func deleteExpiredFleetLockRows(ctx context.Context, tx pgx.Tx, name string, now
 // statement inserted the row: the conflict arm's own xmax names an
 // existing tuple version, so xmax = 0 tells a genuine insert from a
 // refresh. Only a genuine insert changes the row's state.
+//
+// The conflict arm refreshes only a row of the caller's own tenant. A
+// row of another tenant under the same name and run id answers
+// errFleetLockRunOfOtherTenant, and the transaction writes nothing.
 func insertWaitingFleetLockRow(ctx context.Context, tx pgx.Tx, p fleetLockAcquireParams, now, expiresAt time.Time) (bool, error) {
 	var inserted bool
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO varroa.fleet_locks
-			(name, run_id, cluster, tenant, job_path, state, waiting_since, expires_at, placement_generation)
-		VALUES ($1, $2, $3, $4, $5, 'waiting', $6, $7, $8)
+			(name, owner_tenant, run_id, cluster, tenant, job_path, state, waiting_since, expires_at, placement_generation)
+		VALUES ($1, $2, $3, $4, $5, $6, 'waiting', $7, $8, $9)
 		ON CONFLICT (name, run_id) DO UPDATE SET expires_at = EXCLUDED.expires_at
+			WHERE varroa.fleet_locks.tenant = EXCLUDED.tenant
 		RETURNING (xmax = 0) AS inserted
-	`, p.Name, p.RunID, p.Cluster, p.Tenant, p.JobPath, now, expiresAt, p.PlacementGeneration).Scan(&inserted); err != nil {
+	`, p.Name, p.OwnerTenant, p.RunID, p.Cluster, p.Tenant, p.JobPath, now, expiresAt, p.PlacementGeneration).Scan(&inserted); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, errFleetLockRunOfOtherTenant
+		}
 		return false, fmt.Errorf("insert waiting fleet lock row: %w", err)
 	}
 	return inserted, nil

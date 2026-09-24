@@ -30,7 +30,9 @@ class Varroa implements Serializable {
 
     /**
      * Acquires a fleet lock, runs the body, and releases the lock in a
-     * finally. The step receives a closure created here that calls the
+     * finally. {@code name} is a bare name with no {@code /}. {@code
+     * tenant} names the tenant that owns the lock, and an absent {@code
+     * tenant} names the caller's own tenant. The step receives a closure created here that calls the
      * caller's body, never the caller's closure itself: a nested
      * {@code varroa.lock} block resumes correctly only through this
      * wrapper, the same shape docker-workflow uses for {@code inside}.
@@ -45,13 +47,14 @@ class Varroa implements Serializable {
     }
 
     /**
-     * Backs the read-only property {@code varroa.lock.token}: {@code
-     * varroa.lock} is always a map carrying {@code name} and {@code
-     * token}, with both null with no lock held (D11), so {@code .token}
-     * never throws and reads the innermost active lock's fence token.
+     * Backs the read-only properties {@code varroa.lock.name}, {@code
+     * varroa.lock.tenant}, and {@code varroa.lock.token}: {@code
+     * varroa.lock} is always a map carrying the innermost active lock's
+     * bare {@code name}, its owner {@code tenant}, and its fence {@code
+     * token}, all null with no lock held (D11), so no read throws.
      */
     def getLock() {
         def current = org.jenkinsci.plugins.varroamiteauth.VarroaCrossTenantBridge.currentLockToken(script)
-        return current != null ? current : [name: null, token: null]
+        return current != null ? current : [name: null, tenant: null, token: null]
     }
 }

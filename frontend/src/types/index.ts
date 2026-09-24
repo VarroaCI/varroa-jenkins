@@ -2031,7 +2031,8 @@ export interface RunNotification {
   status?: string;
   /** Empty unless the run ended. No page renders it. */
   result?: string;
-  /** The qualified lock name, as <tenant>/<bare-name>. Present on a "lock"
+  /** The qualified lock name, as <owner-tenant>/<bare-name>. The owner can
+   * hold a slash, so never split this value. Present on a "lock"
    * frame only. */
   lock_name?: string;
   /** The lock's state after the write. Present on a "lock" frame only. */

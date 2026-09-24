@@ -12,8 +12,8 @@ import (
 // transaction.
 func insertFleetLock(ctx context.Context, db *sql.DB, name, runID, state string) error {
 	_, err := db.ExecContext(ctx, `
-		INSERT INTO varroa.fleet_locks (name, run_id, state, waiting_since, expires_at)
-		VALUES ($1, $2, $3, now(), now() + interval '5 minutes')
+		INSERT INTO varroa.fleet_locks (name, owner_tenant, run_id, state, waiting_since, expires_at)
+		VALUES ($1, split_part($1, '/', 1), $2, $3, now(), now() + interval '5 minutes')
 	`, name, runID, state)
 	return err
 }
@@ -109,5 +109,20 @@ func TestFleetLockFenceSeqIsMonotonic(t *testing.T) {
 	}
 	if second <= first {
 		t.Fatalf("want a strictly increasing token, got %d then %d", first, second)
+	}
+}
+
+// TestFleetLocksOwnerTenantHasNoDefault asserts an insert that omits
+// owner_tenant fails. A row with an empty owner would hold its name
+// against every caller and appear in no owner's read.
+func TestFleetLocksOwnerTenantHasNoDefault(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO varroa.fleet_locks (name, run_id, state, waiting_since, expires_at)
+		VALUES ('alpha/deploy-prod', 'run-1', 'waiting', now(), now() + interval '5 minutes')
+	`); err == nil {
+		t.Fatal("want a not-null violation for an insert with no owner_tenant, got none")
 	}
 }

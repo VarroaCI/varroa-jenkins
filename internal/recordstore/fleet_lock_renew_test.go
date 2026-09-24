@@ -138,7 +138,8 @@ func TestFleetLockRenew_RevokedGrantAnswersCrossTenant(t *testing.T) {
 		Namespace:    "ns-alpha",
 		Cell:         "cell-alpha",
 		CallerTenant: "alpha",
-		Name:         "beta/deploy-prod",
+		TargetTenant: "beta",
+		Name:         "deploy-prod",
 		RunID:        "run-1",
 	})
 	if err != nil {
@@ -313,5 +314,94 @@ func TestFleetLockRenew_PublishesNothing(t *testing.T) {
 				t.Fatalf("a renew published %d notifications, want 0", got)
 			}
 		})
+	}
+}
+
+// TestFleetLockRenew_ControllerTenantRenewsItsOwnLock asserts a non-cell
+// controller renews its own lock with no grant and no target tenant.
+func TestFleetLockRenew_ControllerTenantRenewsItsOwnLock(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	seedTenantPlacement(t, db, controllerTenant, "team-pay", "ci", 0, "ci-0", "ci-0", nil)
+
+	req := CrossTenantRequest{
+		Cluster:       testCluster,
+		Namespace:     "team-pay",
+		Cell:          "ci",
+		CallerTenant:  controllerTenant,
+		CallerJobPath: "deploy",
+		Name:          "deploy-prod",
+		RunID:         "run-1",
+	}
+	acquired, err := handleCrossTenantLockAcquire(context.Background(), deps, req)
+	if err != nil || acquired.State != FleetLockStateHeld {
+		t.Fatalf("acquire: state %q, reason %q, err %v", acquired.State, acquired.ReasonCode, err)
+	}
+
+	resp, err := handleCrossTenantLockRenew(context.Background(), deps, req)
+	if err != nil {
+		t.Fatalf("handleCrossTenantLockRenew: %v", err)
+	}
+	if resp.ReasonCode != "" {
+		t.Fatalf("reason_code: got %q, want no veto (message %q)", resp.ReasonCode, resp.Message)
+	}
+	if resp.State != FleetLockStateHeld || resp.FenceToken != acquired.FenceToken {
+		t.Fatalf("renew: state %q token %d, want held with token %d", resp.State, resp.FenceToken, acquired.FenceToken)
+	}
+}
+
+// TestFleetLockRenew_SlashInNameAnswersInvalidName asserts a renew whose
+// name holds a "/" is vetoed with INVALID_NAME.
+func TestFleetLockRenew_SlashInNameAnswersInvalidName(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
+
+	resp, err := handleCrossTenantLockRenew(context.Background(), deps, CrossTenantRequest{
+		Cluster:      testCluster,
+		Namespace:    "ns-alpha",
+		Cell:         "cell-alpha",
+		CallerTenant: "alpha",
+		Name:         "alpha/deploy-prod",
+		RunID:        "run-1",
+	})
+	if err != nil {
+		t.Fatalf("handleCrossTenantLockRenew: %v", err)
+	}
+	if resp.ReasonCode != ReasonInvalidName {
+		t.Fatalf("reason_code: got %q, want %q", resp.ReasonCode, ReasonInvalidName)
+	}
+}
+
+// TestFleetLockRenew_OtherTenantRunIDAnswersLost asserts a renew that
+// names another tenant's run id reads no fence token and extends no
+// lease: the row belongs to another tenant, so the caller gets lost.
+func TestFleetLockRenew_OtherTenantRunIDAnswersLost(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	seedTenantPlacement(t, db, "beta", "ns-beta", "cell-beta", 0, "pod-b", "pod-b", nil)
+
+	now := time.Now().UTC()
+	expires := now.Add(time.Minute)
+	insertFleetLockRow(t, db, "beta/deploy-prod", "run-1", "held", now.Add(-time.Minute), expires)
+
+	resp, err := handleCrossTenantLockRenew(context.Background(), deps, CrossTenantRequest{
+		Cluster:      testCluster,
+		Namespace:    "ns-beta",
+		Cell:         "cell-beta",
+		CallerTenant: "beta",
+		Name:         "deploy-prod",
+		RunID:        "run-1",
+	})
+	if err != nil {
+		t.Fatalf("handleCrossTenantLockRenew: %v", err)
+	}
+	if resp.State != FleetLockStateLost || resp.FenceToken != 0 {
+		t.Fatalf("renew: state %q token %d, want lost with no token", resp.State, resp.FenceToken)
+	}
+	var got time.Time
+	if err := db.QueryRow(`SELECT expires_at FROM varroa.fleet_locks WHERE name = $1 AND run_id = $2`,
+		"beta/deploy-prod", "run-1").Scan(&got); err != nil {
+		t.Fatalf("read expires_at: %v", err)
+	}
+	if !got.Equal(expires.Truncate(time.Microsecond)) {
+		t.Fatalf("expires_at moved from %s to %s", expires, got)
 	}
 }

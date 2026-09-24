@@ -109,3 +109,79 @@ func TestReleaseConfirmedFleetLocks_NilNotifierReleasesWithoutPublishing(t *test
 		t.Fatalf("released = %d, want 1", released)
 	}
 }
+
+// TestFleetLockRelease_ControllerTenantReleasesItsOwnLock asserts a
+// non-cell controller releases its own lock by the bare name alone.
+func TestFleetLockRelease_ControllerTenantReleasesItsOwnLock(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	seedTenantPlacement(t, db, controllerTenant, "team-pay", "ci", 0, "ci-0", "ci-0", nil)
+
+	req := CrossTenantRequest{
+		Cluster:       testCluster,
+		Namespace:     "team-pay",
+		Cell:          "ci",
+		CallerTenant:  controllerTenant,
+		CallerJobPath: "deploy",
+		Name:          "deploy-prod",
+		RunID:         "run-1",
+	}
+	if acquired, err := handleCrossTenantLockAcquire(context.Background(), deps, req); err != nil || acquired.State != FleetLockStateHeld {
+		t.Fatalf("acquire: state %q, reason %q, err %v", acquired.State, acquired.ReasonCode, err)
+	}
+
+	resp, err := handleCrossTenantLockRelease(context.Background(), deps, req)
+	if err != nil {
+		t.Fatalf("handleCrossTenantLockRelease: %v", err)
+	}
+	if resp.State != FleetLockStateReleased {
+		t.Fatalf("state: got %q, want %q", resp.State, FleetLockStateReleased)
+	}
+	if _, found := readLockOwner(t, db, controllerTenant+"/deploy-prod"); found {
+		t.Fatal("the release left the controller tenant's row in place")
+	}
+}
+
+// TestFleetLockRelease_SlashInNameAnswersInvalidName asserts a release
+// whose name holds a "/" is vetoed and deletes nothing.
+func TestFleetLockRelease_SlashInNameAnswersInvalidName(t *testing.T) {
+	deps, db := lockTestDeps(t)
+
+	now := time.Now().UTC()
+	insertFleetLockRow(t, db, "alpha/deploy-prod", "run-1", "held", now.Add(-time.Minute), now.Add(5*time.Minute))
+
+	resp, err := handleCrossTenantLockRelease(context.Background(), deps, CrossTenantRequest{
+		Cluster: testCluster, CallerTenant: "alpha", Name: "alpha/deploy-prod", RunID: "run-1",
+	})
+	if err != nil {
+		t.Fatalf("handleCrossTenantLockRelease: %v", err)
+	}
+	if resp.ReasonCode != ReasonInvalidName {
+		t.Fatalf("reason_code: got %q, want %q", resp.ReasonCode, ReasonInvalidName)
+	}
+	if _, found := readLockOwner(t, db, "alpha/deploy-prod"); !found {
+		t.Fatal("a vetoed release deleted the row")
+	}
+}
+
+// TestFleetLockRelease_OtherTenantCannotRelease asserts a release from a
+// tenant other than the row's own holder deletes nothing, even when it
+// names the lock's owner and the holder's run id.
+func TestFleetLockRelease_OtherTenantCannotRelease(t *testing.T) {
+	deps, db := lockTestDeps(t)
+
+	now := time.Now().UTC()
+	insertFleetLockRow(t, db, "alpha/deploy-prod", "run-1", "held", now.Add(-time.Minute), now.Add(5*time.Minute))
+
+	resp, err := handleCrossTenantLockRelease(context.Background(), deps, CrossTenantRequest{
+		Cluster: testCluster, CallerTenant: "beta", TargetTenant: "alpha", Name: "deploy-prod", RunID: "run-1",
+	})
+	if err != nil {
+		t.Fatalf("handleCrossTenantLockRelease: %v", err)
+	}
+	if resp.State != FleetLockStateReleased {
+		t.Fatalf("state: got %q, want %q", resp.State, FleetLockStateReleased)
+	}
+	if _, found := readLockOwner(t, db, "alpha/deploy-prod"); !found {
+		t.Fatal("another tenant's release deleted alpha's row")
+	}
+}

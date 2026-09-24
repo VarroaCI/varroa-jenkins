@@ -93,3 +93,47 @@ func TestMigrationBackfillsTheReceiveStampForALiveRun(t *testing.T) {
 		t.Fatalf("heartbeat_received_at = %v for a completed run, want null", *terminal)
 	}
 }
+
+// TestMigrationBackfillsTheFleetLockOwner asserts migration 00019 fills
+// owner_tenant from the first segment of each stored lock name. Every row
+// that exists before the migration belongs to a cell tenant.
+func TestMigrationBackfillsTheFleetLockOwner(t *testing.T) {
+	dsn := requireTestDSN(t)
+	ctx := context.Background()
+
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open test connection: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := db.ExecContext(ctx, "DROP SCHEMA IF EXISTS varroa CASCADE"); err != nil {
+		t.Fatalf("drop schema varroa: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, "CREATE SCHEMA varroa"); err != nil {
+		t.Fatalf("create schema varroa: %v", err)
+	}
+	migrateTo(t, db, 18)
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO varroa.fleet_locks (name, run_id, cluster, tenant, state, waiting_since, expires_at)
+		VALUES ('alpha/deploy-prod', 'run-1', 'core', 'alpha', 'held', now(), now() + interval '5 minutes'),
+		       ('beta/deploy-prod', 'run-2', 'core', 'alpha', 'waiting', now(), now() + interval '5 minutes')
+	`); err != nil {
+		t.Fatalf("seed fleet locks: %v", err)
+	}
+
+	migrateTo(t, db, 19)
+
+	want := map[string]string{"run-1": "alpha", "run-2": "beta"}
+	for runID, owner := range want {
+		var got string
+		if err := db.QueryRowContext(ctx,
+			`SELECT owner_tenant FROM varroa.fleet_locks WHERE run_id = $1`, runID).Scan(&got); err != nil {
+			t.Fatalf("read the owner of %s: %v", runID, err)
+		}
+		if got != owner {
+			t.Fatalf("owner_tenant of %s = %q, want %q", runID, got, owner)
+		}
+	}
+}

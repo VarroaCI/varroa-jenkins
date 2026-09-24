@@ -61,12 +61,12 @@ public class VarroaLockStepTest {
     @Before
     public void setUp() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        // varroaLock qualifies a bare name with the caller's own tenant
-        // (VarroaTenantResolver), which needs a role-strategy document
-        // naming the tenant; every job in this file lives under this
-        // "alpha" folder, so its full name is "alpha/<job>". A tenant
-        // build also needs a node reserved for that tenant
-        // (VarroaQueueTaskDispatcher), so every script runs on this node.
+        // Every job in this file lives under this "alpha" folder, so its
+        // full name is "alpha/<job>", and the fake recorder below names
+        // "alpha" as the owner of a lock with no tenant argument. A tenant
+        // build needs a role-strategy document naming the tenant and a
+        // node reserved for that tenant (VarroaQueueTaskDispatcher), so
+        // every script runs on this node.
         tenantFolder = j.jenkins.createProject(Folder.class, "alpha");
         VarroaTenantResolverTest.hostTenants(j, "alpha");
         j.createSlave("alpha-agent", "varroa-tenant-alpha", new hudson.EnvVars());
@@ -278,6 +278,97 @@ public class VarroaLockStepTest {
         assertEquals(1, warnings);
     }
 
+    // ---- the tenant argument and the bare-name rule ----
+
+    @Test
+    public void aSlashInTheNameFailsBeforeAnyCall() throws Exception {
+        FakeLockHandler handler = new FakeLockHandler();
+        installClient(handler);
+
+        WorkflowJob p = newPipeline(
+                "node('varroa-tenant-alpha') { varroa.lock(name: 'beta/deploy-prod') { echo 'unreachable' } }");
+        WorkflowRun run = buildSync(p, "run-1", Result.FAILURE);
+        j.assertLogContains("must not contain '/'", run);
+        j.assertLogNotContains("unreachable", run);
+        assertEquals("no lock call may leave the step", 0, handler.totalCalls());
+    }
+
+    @Test
+    public void theTenantArgumentNamesTheOwnerAndTheBlockReadsBoth() throws Exception {
+        FakeLockHandler handler = new FakeLockHandler();
+        installClient(handler);
+
+        WorkflowJob p = newPipeline(
+                "node('varroa-tenant-alpha') { varroa.lock(name: 'deploy-prod', tenant: 'team-pay/ci') { "
+                        + "echo(\"NAME=${varroa.lock.name} TENANT=${varroa.lock.tenant}\") } }");
+        WorkflowRun run = buildSync(p, "run-1", Result.SUCCESS);
+        assertEquals(1, handler.acquireCount("team-pay/ci/deploy-prod"));
+        assertEquals("team-pay/ci", handler.lastTargetTenant());
+        j.assertLogContains("NAME=deploy-prod TENANT=team-pay/ci", run);
+    }
+
+    @Test
+    public void anOwnLockSendsNoTenantAndReadsTheRecordersOwner() throws Exception {
+        FakeLockHandler handler = new FakeLockHandler();
+        installClient(handler);
+
+        WorkflowJob p = newPipeline(
+                "node('varroa-tenant-alpha') { varroa.lock(name: 'deploy-prod') { "
+                        + "echo(\"NAME=${varroa.lock.name} TENANT=${varroa.lock.tenant}\") } }");
+        WorkflowRun run = buildSync(p, "run-1", Result.SUCCESS);
+        assertEquals(1, handler.acquireCount("alpha/deploy-prod"));
+        assertEquals("", handler.lastTargetTenant());
+        j.assertLogContains("NAME=deploy-prod TENANT=alpha", run);
+    }
+
+    // ---- recorder vetoes ----
+
+    @Test
+    public void aPermanentAcquireVetoFailsTheBuildWithTheRecordersMessage() throws Exception {
+        FakeLockHandler handler = new FakeLockHandler();
+        handler.vetoOnAcquire("beta/deploy-prod", "CROSS_TENANT", Integer.MAX_VALUE);
+        installClient(handler);
+
+        WorkflowJob p = newPipeline(
+                "node('varroa-tenant-alpha') { varroa.lock(name: 'deploy-prod', tenant: 'beta') { echo 'unreachable' } }");
+        WorkflowRun run = buildSync(p, "run-1", Result.FAILURE);
+        j.assertLogContains("CROSS_TENANT", run);
+        j.assertLogContains("vetoed by the fake recorder", run);
+        j.assertLogNotContains("unreachable", run);
+        assertEquals("a permanent veto must not poll again", 1, handler.acquireCount("beta/deploy-prod"));
+    }
+
+    @Test
+    public void aRetryableAcquireVetoKeepsPolling() throws Exception {
+        FakeLockHandler handler = new FakeLockHandler();
+        handler.vetoOnAcquire("alpha/deploy-prod", "NOT_READY", 1);
+        installClient(handler);
+
+        WorkflowJob p = newPipeline(
+                "node('varroa-tenant-alpha') { varroa.lock(name: 'deploy-prod') { echo 'INSIDE' } }");
+        WorkflowRun run = buildSync(p, "run-1", Result.SUCCESS);
+        j.assertLogContains("INSIDE", run);
+        assertEquals(2, handler.acquireCount("alpha/deploy-prod"));
+    }
+
+    @Test
+    public void aPermanentRenewVetoFailsTheBuild() throws Exception {
+        VarroaPollPolicy.setBoundsForTesting(
+                VarroaPollPolicy.PENDING_WARN_MILLIS, VarroaPollPolicy.PENDING_CEILING_MILLIS, 300L);
+        FakeLockHandler handler = new FakeLockHandler();
+        handler.vetoOnRenew("alpha/deploy-prod", "FENCED");
+        installClient(handler);
+
+        WorkflowJob p = newPipeline(
+                "node('varroa-tenant-alpha') { varroa.lock(name: 'deploy-prod') { sleep(time: 30, unit: 'SECONDS'); echo 'AFTER_SLEEP' } }");
+        WorkflowRun run = buildSync(p, "run-1", Result.FAILURE);
+        j.assertLogContains("FENCED", run);
+        j.assertLogNotContains("AFTER_SLEEP", run);
+        assertTrue("the veto must cancel the body, not wait out its sleep",
+                run.getDuration() < 20_000L);
+        assertEquals("the cancelled body must still release its row", 1, handler.releaseCount("alpha/deploy-prod"));
+    }
+
     // ---- D15: onResume restores the held token ----
 
     /**
@@ -304,9 +395,9 @@ public class VarroaLockStepTest {
         VarroaLockStep step = new VarroaLockStep("resume-test");
         VarroaLockStep.Execution exec = new VarroaLockStep.Execution(step, context);
 
-        java.lang.reflect.Field qualifiedNameField = VarroaLockStep.Execution.class.getDeclaredField("qualifiedName");
-        qualifiedNameField.setAccessible(true);
-        qualifiedNameField.set(exec, "alpha/resume-test");
+        java.lang.reflect.Field ownerTenantField = VarroaLockStep.Execution.class.getDeclaredField("ownerTenant");
+        ownerTenantField.setAccessible(true);
+        ownerTenantField.set(exec, "alpha");
 
         java.lang.reflect.Field fenceTokenField = VarroaLockStep.Execution.class.getDeclaredField("fenceToken");
         fenceTokenField.setAccessible(true);
@@ -316,7 +407,8 @@ public class VarroaLockStepTest {
 
         Map<String, Object> token = VarroaActiveLocksAction.currentTokenMap(run);
         assertNotNull("onResume must restore the held lock's entry", token);
-        assertEquals("alpha/resume-test", token.get("name"));
+        assertEquals("resume-test", token.get("name"));
+        assertEquals("alpha", token.get("tenant"));
         assertEquals(42L, token.get("token"));
     }
 
@@ -338,17 +430,11 @@ public class VarroaLockStepTest {
         FakeLockHandler handler = new FakeLockHandler();
         installClient(handler);
 
-        // qualifiedName is normally stamped by start(); this test drives
-        // releaseLock() directly, so it stamps the field itself.
-        java.lang.reflect.Field qualifiedNameField = VarroaLockStep.Execution.class.getDeclaredField("qualifiedName");
-        qualifiedNameField.setAccessible(true);
-
         int threadsPerTrial = 16;
         int trials = 50;
         for (int t = 0; t < trials; t++) {
             VarroaLockStep step = new VarroaLockStep("race");
             VarroaLockStep.Execution exec = new VarroaLockStep.Execution(step, null);
-            qualifiedNameField.set(exec, "race");
             java.util.concurrent.CyclicBarrier barrier = new java.util.concurrent.CyclicBarrier(threadsPerTrial);
             Thread[] racers = new Thread[threadsPerTrial];
             for (int i = 0; i < threadsPerTrial; i++) {
@@ -371,7 +457,7 @@ public class VarroaLockStepTest {
 
         assertEquals("every trial's release must fire exactly once, even with " + threadsPerTrial
                         + " threads calling it at once",
-                trials, handler.releaseCount("race"));
+                trials, handler.releaseCount("alpha/race"));
     }
 
     // ---- helpers ----
@@ -421,6 +507,9 @@ public class VarroaLockStepTest {
             final AtomicInteger renewCount = new AtomicInteger();
             final AtomicInteger releaseCount = new AtomicInteger();
             boolean neverGrant;
+            String vetoOnAcquire;
+            int vetoOnAcquireTimes;
+            String vetoOnRenew;
             boolean loseOnRenew;
             boolean releasingOnRenew;
         }
@@ -429,6 +518,8 @@ public class VarroaLockStepTest {
         // names must not mint the same token on their first acquire.
         private final java.util.concurrent.atomic.AtomicLong fenceSeq = new java.util.concurrent.atomic.AtomicLong();
         private final java.util.Map<String, State> states = new java.util.concurrent.ConcurrentHashMap<>();
+        private final AtomicInteger totalCalls = new AtomicInteger();
+        private volatile String lastTargetTenant;
 
         private State state(String name) {
             return states.computeIfAbsent(name, n -> new State());
@@ -436,6 +527,16 @@ public class VarroaLockStepTest {
 
         void neverGrant(String name) {
             state(name).neverGrant = true;
+        }
+
+        /** Answers {@code times} acquires of {@code name} with the veto {@code code}, then behaves normally. */
+        void vetoOnAcquire(String name, String code, int times) {
+            state(name).vetoOnAcquire = code;
+            state(name).vetoOnAcquireTimes = times;
+        }
+
+        void vetoOnRenew(String name, String code) {
+            state(name).vetoOnRenew = code;
         }
 
         void loseOnRenew(String name) {
@@ -462,13 +563,29 @@ public class VarroaLockStepTest {
             return state(name).fenceToken;
         }
 
+        int totalCalls() {
+            return totalCalls.get();
+        }
+
+        /** The last request's target_tenant, or the empty string when it carried none. */
+        String lastTargetTenant() {
+            return lastTargetTenant;
+        }
+
         @Override
         public void handle(HttpExchange exchange) throws java.io.IOException {
             ByteArrayOutputStream buf = new ByteArrayOutputStream();
             exchange.getRequestBody().transferTo(buf);
             JSONObject req = JSONObject.fromObject(buf.toString(StandardCharsets.UTF_8));
             String kind = req.getString("kind");
-            String name = req.getString("name");
+            // The recorder resolves an absent target_tenant to the caller's
+            // own tenant; every caller in this file is tenant "alpha". The
+            // state map keys on the stored form, owner then bare name.
+            String target = req.optString("target_tenant", "");
+            totalCalls.incrementAndGet();
+            lastTargetTenant = target;
+            String owner = target.isEmpty() ? "alpha" : target;
+            String name = owner + "/" + req.getString("name");
             String runId = req.optString("run_id", "");
             State st = state(name);
             JSONObject out = new JSONObject();
@@ -476,13 +593,18 @@ public class VarroaLockStepTest {
                 switch (kind) {
                     case "lock_acquire":
                         st.acquireCount.incrementAndGet();
-                        if (!st.neverGrant && (Objects.equals(st.holder, runId)
+                        if (st.vetoOnAcquire != null && st.vetoOnAcquireTimes > 0) {
+                            st.vetoOnAcquireTimes--;
+                            out.put("reason_code", st.vetoOnAcquire);
+                            out.put("message", "vetoed by the fake recorder");
+                        } else if (!st.neverGrant && (Objects.equals(st.holder, runId)
                                 || (st.holder == null && (st.waiting.isEmpty() || st.waiting.peek().equals(runId))))) {
                             st.holder = runId;
                             st.waiting.remove(runId);
                             st.fenceToken = fenceSeq.incrementAndGet();
                             out.put("state", "held");
                             out.put("fence_token", st.fenceToken);
+                            out.put("tenant", owner);
                         } else {
                             if (!st.waiting.contains(runId)) {
                                 st.waiting.add(runId);
@@ -492,7 +614,10 @@ public class VarroaLockStepTest {
                         break;
                     case "lock_renew":
                         st.renewCount.incrementAndGet();
-                        if (st.loseOnRenew) {
+                        if (st.vetoOnRenew != null) {
+                            out.put("reason_code", st.vetoOnRenew);
+                            out.put("message", "vetoed by the fake recorder");
+                        } else if (st.loseOnRenew) {
                             out.put("state", "lost");
                         } else if (st.releasingOnRenew) {
                             out.put("state", "releasing");

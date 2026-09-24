@@ -1490,7 +1490,7 @@ type TeamExport struct {
 	// +optional
 	Job string `json:"job,omitempty"`
 
-	// Locks lists prefix-relative lock-name globs this tenant exports.
+	// Locks lists globs over the bare names of this tenant's own locks.
 	// Exactly one of Job or Locks must be set.
 	// +kubebuilder:validation:MaxItems=64
 	// +kubebuilder:validation:items:MaxLength=512
