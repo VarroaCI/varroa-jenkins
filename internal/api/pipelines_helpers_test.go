@@ -380,13 +380,36 @@ func (f *fakeRecordReader) GetIntentByKey(_ context.Context, key string) (record
 
 // --- fakeBlobStore: a minimal, in-memory blob.Store ---
 
+// fakeBlobStore models the two object layouts the bucket store keeps
+// apart. objects holds native objects, which an artifact writer stores at
+// the bare key and NewObjectReader opens. parts holds objects Replace
+// wrote, which the bucket store keeps as part 0 under the key: only
+// NewRangeReader reads them, and NewObjectReader answers
+// ErrObjectNotFound for them.
 type fakeBlobStore struct {
 	blob.Store
 	objects map[string][]byte
+	parts   map[string][]byte
 	err     error
 }
 
-func newFakeBlobStore() *fakeBlobStore { return &fakeBlobStore{objects: map[string][]byte{}} }
+func newFakeBlobStore() *fakeBlobStore {
+	return &fakeBlobStore{objects: map[string][]byte{}, parts: map[string][]byte{}}
+}
+
+// sliceBytes cuts data to [offset, offset+length), where a negative
+// length reads to the end.
+func sliceBytes(data []byte, offset, length int64) []byte {
+	total := int64(len(data))
+	if offset > total {
+		offset = total
+	}
+	end := total
+	if length >= 0 && offset+length < end {
+		end = offset + length
+	}
+	return data[offset:end]
+}
 
 func (f *fakeBlobStore) NewObjectReader(_ context.Context, key string, offset, length int64) (io.ReadCloser, int64, error) {
 	if f.err != nil {
@@ -396,15 +419,34 @@ func (f *fakeBlobStore) NewObjectReader(_ context.Context, key string, offset, l
 	if !ok {
 		return nil, 0, blob.ErrObjectNotFound
 	}
-	total := int64(len(data))
-	if offset > total {
-		offset = total
+	return io.NopCloser(bytes.NewReader(sliceBytes(data, offset, length))), int64(len(data)), nil
+}
+
+// Replace stores the object in the part layout, the way the bucket store
+// writes a run-state object.
+func (f *fakeBlobStore) Replace(_ context.Context, key string, r io.Reader, _ blob.ObjectOptions) error {
+	if f.err != nil {
+		return f.err
 	}
-	end := total
-	if length >= 0 && offset+length < end {
-		end = offset + length
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return err
 	}
-	return io.NopCloser(bytes.NewReader(data[offset:end])), total, nil
+	f.parts[key] = data
+	return nil
+}
+
+// NewRangeReader reads an object Replace wrote. A native object is not a
+// part, so it answers ErrObjectNotFound here.
+func (f *fakeBlobStore) NewRangeReader(_ context.Context, key string, offset, length int64) (io.ReadCloser, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	data, ok := f.parts[key]
+	if !ok {
+		return nil, blob.ErrObjectNotFound
+	}
+	return io.NopCloser(bytes.NewReader(sliceBytes(data, offset, length))), nil
 }
 
 // --- shared authorization fixture ---

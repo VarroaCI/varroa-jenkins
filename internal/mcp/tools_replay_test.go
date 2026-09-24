@@ -16,19 +16,21 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
 
-// fakeScriptBlobStore serves stored objects by key through the native
-// object read, the one read the script source opens.
+// fakeScriptBlobStore serves stored objects by key through the range
+// read, the one read the script source opens: the gateway stores a
+// run-state object through Replace, which the bucket store keeps as
+// parts.
 type fakeScriptBlobStore struct {
 	blob.Store
 	objects map[string][]byte
 }
 
-func (f *fakeScriptBlobStore) NewObjectReader(_ context.Context, key string, _, _ int64) (io.ReadCloser, int64, error) {
+func (f *fakeScriptBlobStore) NewRangeReader(_ context.Context, key string, _, _ int64) (io.ReadCloser, error) {
 	data, ok := f.objects[key]
 	if !ok {
-		return nil, 0, blob.ErrObjectNotFound
+		return nil, blob.ErrObjectNotFound
 	}
-	return io.NopCloser(bytes.NewReader(data)), int64(len(data)), nil
+	return io.NopCloser(bytes.NewReader(data)), nil
 }
 
 // replayToolDeps seeds one replayable run, "run-a" of tenant "team-a",
@@ -152,7 +154,7 @@ func TestReplayRunToolAnswersConflictForATemplateRun(t *testing.T) {
 	reader := newFakePipelineReader()
 	deps := replayToolDeps(t, reader, sent, "write")
 	run := reader.runs["run-a"]
-	run.Payload = json.RawMessage(`{"template_name":"go-service"}`)
+	run.Payload = json.RawMessage(`{"run.started":{"kind":"run.started","payload":{"template_name":"go-service"}}}`)
 	reader.runs["run-a"] = run
 
 	tr := callPipelineTool(t, deps, "replay_run", map[string]interface{}{"run": "run-a", "script": "echo 'edited'"})

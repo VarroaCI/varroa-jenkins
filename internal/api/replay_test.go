@@ -155,7 +155,7 @@ func TestHandleReplayRun_RefusedRunIsAConflict(t *testing.T) {
 	}{
 		{"not terminal", func(r *recordstore.Run) { r.Status = recordstore.StatusRunning }, replayReasonNotTerminal},
 		{"template defined", func(r *recordstore.Run) {
-			r.Payload = mergePayload(t, r.Payload, map[string]any{"template_name": "go-service"})
+			r.Payload = mergePayload(t, r.Payload, startedEnvelope(map[string]any{"template_name": "go-service"}))
 		}, replayReasonTemplateDefined},
 		{"masked parameter", func(r *recordstore.Run) { r.Params = json.RawMessage(`{"TOKEN":"<masked>"}`) }, replayReasonMaskedParameter},
 		{"no replica", func(r *recordstore.Run) { r.Payload = nil }, replayReasonNoReplica},

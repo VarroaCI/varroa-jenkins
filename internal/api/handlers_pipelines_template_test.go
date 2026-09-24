@@ -122,7 +122,8 @@ func TestHandleGetPipelineJob_MarkerDefinedWithRun(t *testing.T) {
 		LastRun: &recordstore.Run{
 			RunID:       "run-1",
 			BuildNumber: &buildNumber,
-			Payload:     json.RawMessage(`{"template_name":"go-service","template_version":"2.1.4","marker_path":".varroa/pipeline.yaml","marker_revision":"abc123"}`),
+			Payload: json.RawMessage(`{"run.started":{"kind":"run.started","payload":` +
+				`{"template_name":"go-service","template_version":"2.1.4","marker_path":".varroa/pipeline.yaml","marker_revision":"abc123"}}}`),
 		},
 	}}
 

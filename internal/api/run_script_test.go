@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
 
 // scriptRunID is the run identifier every script-read case seeds.
@@ -49,14 +51,26 @@ func replicatedRun(t *testing.T, tenant string, bytes int64) recordstore.Run {
 	}
 }
 
-// storeScriptObject stores doc as run's retained build.xml object.
+// storeScriptObject stores doc as run's retained build.xml object through
+// Replace, the call the gateway makes for every run-state object. The
+// fake then serves it through NewRangeReader alone, as the bucket store
+// does.
 func storeScriptObject(t *testing.T, blobs *fakeBlobStore, run recordstore.Run, doc string) {
 	t.Helper()
 	key, ok := recordstore.RunScriptObjectKey(run)
 	if !ok {
 		t.Fatalf("run names no build record")
 	}
-	blobs.objects[key] = []byte(doc)
+	if err := blobs.Replace(context.Background(), key, strings.NewReader(doc), blob.ObjectOptions{}); err != nil {
+		t.Fatalf("store script object: %v", err)
+	}
+}
+
+// startedEnvelope answers the recorder's nesting of one run.started
+// envelope whose payload holds fields, the shape a live runs.payload row
+// carries.
+func startedEnvelope(fields map[string]any) map[string]any {
+	return map[string]any{"run.started": map[string]any{"kind": "run.started", "payload": fields}}
 }
 
 // TestParseRunScript_CellFixture parses a build.xml captured from a real
@@ -226,14 +240,18 @@ func TestGetRunScript_EachRefusalNamesItsReason(t *testing.T) {
 		{
 			name: "template name",
 			mutate: func(r *recordstore.Run) {
-				r.Payload = mergePayload(t, r.Payload, map[string]any{"template_name": "go-service"})
+				r.Payload = mergePayload(t, r.Payload, startedEnvelope(map[string]any{
+					"template_name": "go-service", "template_version": "2.1.3",
+				}))
 			},
 			doc: sandboxed, want: replayReasonTemplateDefined, wantKind: definitionKindTemplate,
 		},
 		{
 			name: "marker path",
 			mutate: func(r *recordstore.Run) {
-				r.Payload = mergePayload(t, r.Payload, map[string]any{"marker_path": ".varroa/pipeline.yaml"})
+				r.Payload = mergePayload(t, r.Payload, startedEnvelope(map[string]any{
+					"marker_path": ".varroa/pipeline.yaml", "marker_revision": "abc123",
+				}))
 			},
 			doc: sandboxed, want: replayReasonTemplateDefined, wantKind: definitionKindTemplate,
 		},
@@ -352,4 +370,134 @@ func mergePayload(t *testing.T, payload json.RawMessage, extra map[string]any) j
 		t.Fatalf("marshal payload: %v", err)
 	}
 	return out
+}
+
+// TestDefinitionKind_ReadsTheStartedEnvelope proves definitionKind reads
+// the template keys at payload -> 'run.started' -> 'payload', the nesting
+// a live row carries, and ignores the same keys at the top level.
+func TestDefinitionKind_ReadsTheStartedEnvelope(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{
+			name:    "live template row",
+			payload: `{"run.started":{"kind":"run.started","payload":{"template_name":"go-service","template_version":"2.1.3"}}}`,
+			want:    definitionKindTemplate,
+		},
+		{
+			name:    "live marker row",
+			payload: `{"run.started":{"kind":"run.started","payload":{"marker_path":".varroa/pipeline.yaml","marker_revision":"abc123"}}}`,
+			want:    definitionKindTemplate,
+		},
+		{
+			name:    "completed copy alone",
+			payload: `{"run.completed":{"kind":"run.completed","payload":{"template_name":"go-service","template_version":"2.1.3"}}}`,
+			want:    definitionKindTemplate,
+		},
+		{
+			name:    "top-level keys alone",
+			payload: `{"template_name":"go-service","marker_path":".varroa/pipeline.yaml"}`,
+			want:    definitionKindScript,
+		},
+		{name: "no payload", payload: ``, want: definitionKindScript},
+		{
+			name:    "no template in either copy",
+			payload: `{"run.started":{"kind":"run.started","payload":{"branch":"main"}},"run.completed":{"kind":"run.completed","payload":{"result":"SUCCESS"}}}`,
+			want:    definitionKindScript,
+		},
+		{name: "undecodable payload", payload: `{"run.started":[1,2]}`, want: definitionKindScript},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := definitionKind(recordstore.Run{Payload: json.RawMessage(tc.payload)})
+			if got != tc.want {
+				t.Fatalf("definitionKind = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRunTemplatePayloadOf_StartedCopyWins proves the started copy wins
+// when both copies name a template, and the completed copy answers when
+// the started copy names none.
+func TestRunTemplatePayloadOf_StartedCopyWins(t *testing.T) {
+	both := `{"run.started":{"kind":"run.started","payload":{"template_name":"go-service","template_version":"2.1.3"}},` +
+		`"run.completed":{"kind":"run.completed","payload":{"template_name":"go-service","template_version":"2.1.4"}}}`
+	if got := runTemplatePayloadOf(json.RawMessage(both)); got.TemplateVersion != "2.1.3" {
+		t.Fatalf("both copies: version = %q, want the started copy's 2.1.3", got.TemplateVersion)
+	}
+
+	startedEmpty := `{"run.started":{"kind":"run.started","payload":{"branch":"main"}},` +
+		`"run.completed":{"kind":"run.completed","payload":{"marker_path":".varroa/pipeline.yaml","marker_revision":"abc123"}}}`
+	got := runTemplatePayloadOf(json.RawMessage(startedEmpty))
+	if got.MarkerPath != ".varroa/pipeline.yaml" || got.MarkerRevision != "abc123" {
+		t.Fatalf("started copy names nothing: got %+v, want the completed copy's marker", got)
+	}
+}
+
+// TestGetRunScript_LiveTemplateRowIsTemplateDefined drives the script
+// read over a payload shaped exactly like a live template-defined row,
+// with a stored replica, and proves the template rule refuses it before
+// any other rule.
+func TestGetRunScript_LiveTemplateRowIsTemplateDefined(t *testing.T) {
+	for name, envelope := range map[string]string{
+		"template": `{"kind":"run.started","payload":{"template_name":"go-service","template_version":"2.1.3"}}`,
+		"marker":   `{"kind":"run.started","payload":{"marker_path":".varroa/pipeline.yaml","marker_revision":"abc123"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			reader := newFakeRecordReader()
+			run := replicatedRun(t, "test-ns/ctrl-a", 300)
+			blobs := newFakeBlobStore()
+			storeScriptObject(t, blobs, run, buildXMLDoc("echo 'hi'", "true"))
+			var doc map[string]json.RawMessage
+			if err := json.Unmarshal(run.Payload, &doc); err != nil {
+				t.Fatalf("decode payload: %v", err)
+			}
+			doc["run.started"] = json.RawMessage(envelope)
+			raw, err := json.Marshal(doc)
+			if err != nil {
+				t.Fatalf("marshal payload: %v", err)
+			}
+			run.Payload = raw
+			reader.runs[scriptRunID] = run
+
+			code, out, body := getRunScript(t, reader, blobs)
+			if code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s, want 200", code, body)
+			}
+			if out.Replayable || out.Reason != replayReasonTemplateDefined || out.DefinitionKind != definitionKindTemplate {
+				t.Fatalf("replayable = %v, reason = %q, kind = %q; want false, template-defined, template",
+					out.Replayable, out.Reason, out.DefinitionKind)
+			}
+		})
+	}
+}
+
+// TestGetRunScript_ReadsThePartLayout proves the read opens the object
+// through the range reader. The bucket store keeps a Replace object as
+// part 0 under the key, so an object stored only at the bare native key
+// is not the replica, and the read answers no-replica for it.
+func TestGetRunScript_ReadsThePartLayout(t *testing.T) {
+	reader := newFakeRecordReader()
+	run := replicatedRun(t, "test-ns/ctrl-a", 300)
+	reader.runs[scriptRunID] = run
+	key, ok := recordstore.RunScriptObjectKey(run)
+	if !ok {
+		t.Fatal("run names no build record")
+	}
+
+	native := newFakeBlobStore()
+	native.objects[key] = []byte(buildXMLDoc("echo 'hi'", "true"))
+	code, out, body := getRunScript(t, reader, native)
+	if code != http.StatusOK || out.Reason != replayReasonNoReplica {
+		t.Fatalf("native object: status = %d, reason = %q, body = %s; want 200 and no-replica", code, out.Reason, body)
+	}
+
+	parts := newFakeBlobStore()
+	storeScriptObject(t, parts, run, buildXMLDoc("echo 'hi'", "true"))
+	code, out, body = getRunScript(t, reader, parts)
+	if code != http.StatusOK || !out.Replayable || out.Script != "echo 'hi'" {
+		t.Fatalf("part object: status = %d, out = %+v, body = %s; want the replica's script", code, out, body)
+	}
 }

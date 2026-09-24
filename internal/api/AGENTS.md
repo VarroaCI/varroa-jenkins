@@ -270,9 +270,13 @@ federation, activity persistence, and SSE fanout.
   (`replayRun`, tenant write check) share `runScriptSource`, one ordered rule set
   (`not-terminal`, `template-defined`, `masked-parameter`, `no-replica`, `unreadable`,
   `not-sandbox`, `script-too-large`), so the control and the endpoint cannot disagree. The
-  read opens the object `recordstore.RunScriptObject` names, tests the recorded size before
-  the open, and parses it with a token decoder that skips the XML 1.1 declaration Jenkins
-  writes. A refused run answers an empty `script` and an empty `loadedScripts`. The replay
+  read opens the object `recordstore.RunScriptObject` names through `NewRangeReader`, because
+  the gateway stores run state through `Replace` and only the range reader reassembles that
+  part layout; it tests the recorded size before the open and parses the body with a token
+  decoder that skips the XML 1.1 declaration Jenkins writes. `runTemplatePayloadOf` reads the
+  template keys at `payload -> 'run.started' -> 'payload'`, the level the record nests every
+  event under, and falls back to the `run.completed` copy, for the script read and the job
+  page alike. A refused run answers an empty `script` and an empty `loadedScripts`. The replay
   answers `409` with `run does not replay: <reason>`, `413` over 256 KiB, mints a UUIDv7,
   keys it `replay:<source>:<new>`, reads no intent, and publishes one `REPLAY_BUILD` to the
   job's `homeRef`. `GET /runs/{run}` answers `replayOf` from `runs.replay_of`. The live log tail

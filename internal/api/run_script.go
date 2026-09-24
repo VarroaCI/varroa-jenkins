@@ -64,15 +64,10 @@ func refusedRunScript(kind, reason string) RunScript {
 }
 
 // definitionKind answers "template" when the run's stored payload names a
-// template or a marker, and "script" otherwise.
+// template or a marker, and "script" otherwise. It reads the keys through
+// runTemplatePayloadOf, which knows the envelope nesting.
 func definitionKind(run recordstore.Run) string {
-	if len(run.Payload) == 0 {
-		return definitionKindScript
-	}
-	var tp runTemplatePayload
-	if json.Unmarshal(run.Payload, &tp) != nil {
-		return definitionKindScript
-	}
+	tp := runTemplatePayloadOf(run.Payload)
 	if tp.TemplateName != "" || tp.MarkerPath != "" {
 		return definitionKindTemplate
 	}
@@ -131,7 +126,11 @@ func (s *Server) runScriptSource(ctx context.Context, run recordstore.Run) (RunS
 	if size > runScriptMaxObjectBytes {
 		return refusedRunScript(kind, replayReasonUnreadable), nil
 	}
-	body, _, err := s.deps.BlobStore.NewObjectReader(ctx, key, 0, -1)
+	// The gateway stores every run-state object through Replace, and the
+	// bucket store writes a Replace object as part 0 under the key. Only
+	// the range reader assembles those parts; the object reader opens the
+	// bare key and finds nothing there.
+	body, err := s.deps.BlobStore.NewRangeReader(ctx, key, 0, -1)
 	if err != nil {
 		if errors.Is(err, blob.ErrObjectNotFound) {
 			return refusedRunScript(kind, replayReasonNoReplica), nil

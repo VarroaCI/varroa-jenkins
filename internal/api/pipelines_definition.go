@@ -433,6 +433,39 @@ type runTemplatePayload struct {
 	MarkerRevision  string `json:"marker_revision"`
 }
 
+// runTemplatePayloadOf reads the four template-resolution keys out of a
+// run's payload column. The recorder stores each event's whole envelope
+// under its kind key, so the keys sit at
+// payload -> 'run.started' -> 'payload' and
+// payload -> 'run.completed' -> 'payload', never at the top level.
+//
+// It answers the started copy when that copy names a template or a
+// marker, and the completed copy otherwise. The completed event carries
+// the same keys, so a run whose start event the store never recorded
+// still reads as template-defined, and the replay refusal holds. An
+// absent or undecodable path answers the zero value, which names no
+// template.
+func runTemplatePayloadOf(payload json.RawMessage) runTemplatePayload {
+	if len(payload) == 0 {
+		return runTemplatePayload{}
+	}
+	var doc struct {
+		Started struct {
+			Payload runTemplatePayload `json:"payload"`
+		} `json:"run.started"`
+		Completed struct {
+			Payload runTemplatePayload `json:"payload"`
+		} `json:"run.completed"`
+	}
+	if json.Unmarshal(payload, &doc) != nil {
+		return runTemplatePayload{}
+	}
+	if started := doc.Started.Payload; started.TemplateName != "" || started.MarkerPath != "" {
+		return started
+	}
+	return doc.Completed.Payload
+}
+
 // runSourcePayload reads the script path a run's source column records.
 // The stored envelope writes snake_case keys, so this type tags the key
 // the envelope carries, not a response DTO's camelCase.
@@ -474,8 +507,8 @@ func (s *Server) buildPipelineTemplateInfo(ctx context.Context, ref TenantRef, j
 	}
 
 	var payload runTemplatePayload
-	if lastRun != nil && len(lastRun.Payload) > 0 {
-		_ = json.Unmarshal(lastRun.Payload, &payload)
+	if lastRun != nil {
+		payload = runTemplatePayloadOf(lastRun.Payload)
 	}
 	if payload.TemplateName != "" || payload.MarkerPath != "" {
 		info := &pipelineTemplateInfoJSON{

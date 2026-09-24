@@ -61,13 +61,14 @@ func (guardRecordReader) GetRun(_ context.Context, runID string) (recordstore.Ru
 	}, nil, nil
 }
 
-// guardBlobStore answers one sandboxed build.xml for every object read,
-// so replay_run's eligibility rules pass.
+// guardBlobStore answers one sandboxed build.xml for every range read,
+// the read a run-state object takes, so replay_run's eligibility rules
+// pass.
 type guardBlobStore struct{ blob.Store }
 
-func (guardBlobStore) NewObjectReader(_ context.Context, _ string, _, _ int64) (io.ReadCloser, int64, error) {
+func (guardBlobStore) NewRangeReader(_ context.Context, _ string, _, _ int64) (io.ReadCloser, error) {
 	doc := "<flow-build><execution><script>echo 'source'</script><sandbox>true</sandbox></execution></flow-build>"
-	return io.NopCloser(strings.NewReader(doc)), int64(len(doc)), nil
+	return io.NopCloser(strings.NewReader(doc)), nil
 }
 
 // guardTenantResolver is a fixed-answer api.TenantResolver for
