@@ -25,11 +25,16 @@ stating what it is/is not responsible for:
   Connected→Failed` phase state machine over NATS and serves the per-controller
   hibernation wake interstitial on `VARROA_WAKE_PORT` (default `8082`) from every
   replica. No gRPC/OIDC. One leader replica queue-subscribes
-  `varroa.ledger.actions.>` (`ledger_action.go`) and filters on each action's
-  own cluster field; `handleLedgerAction` maps `cancel_run`/`retry_run`/
-  `trigger_run` to the matching mite imperative command and `wake_cell` to a
-  direct hibernation wake, and counts an unknown kind rather than acting on
-  it. `trigger_run` wakes a hibernated target through the same hibernation
+  `varroa.ledger.actions.<own cluster>` in the `operator-workers` group
+  (`subscribeLedgerActions` in `ledger_action.go`). Never subscribe the
+  `varroa.ledger.actions.>` wildcard: every cluster's operator shares the
+  core NATS and the group name, so a wildcard puts all of them in one queue
+  group and NATS gives a share of one cluster's actions to the others.
+  `handleLedgerAction` maps `cancel_run`/`retry_run`/`trigger_run` to the
+  matching mite imperative command and `wake_cell` to a direct hibernation
+  wake. It logs at Warn and counts an action that names another cluster
+  (`reason="foreign_cluster"`) or an unknown kind (`reason="unknown_kind"`)
+  rather than acting on it. `trigger_run` wakes a hibernated target through the same hibernation
   call before it sends the command; a connected target is not woken.
   Every replica also subscribes to `events.brood.<cluster>`
   (`brood_watch.go`): a `disconnected` event enqueues an on-demand

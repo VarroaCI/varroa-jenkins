@@ -6,16 +6,20 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
+	"github.com/varroaci/varroa-jenkins/internal/bus"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
-// ledgerActionsRejected counts an action the operator refused (design D15,
-// task 9.1a): an unknown kind. Registered once at package init.
+// ledgerActionsRejected counts an action the operator refused, labelled
+// by reason: "unknown_kind" for a kind the operator does not know, and
+// "foreign_cluster" for an action that names another cluster. Registered
+// once at package init.
 var ledgerActionsRejected metric.Int64Counter
 
 func init() { bindLedgerActionMetrics() }
@@ -32,6 +36,18 @@ func bindLedgerActionMetrics() {
 	if err != nil {
 		panic("failed to register varroa_ledger_actions_rejected_total counter: " + err.Error())
 	}
+}
+
+// subscribeLedgerActions queue-subscribes handler to the ledger-action
+// subject of cluster only. The operators of every cluster share one core
+// NATS and one queue-group name. NATS keeps a separate queue group for
+// each subscription subject, so a subject that names one cluster gives
+// that cluster's actions only to that cluster's operator replicas. A
+// shared wildcard subject would join every cluster to one queue group,
+// and NATS would give a share of one cluster's actions to the other
+// clusters.
+func subscribeLedgerActions(conn *bus.Conn, cluster, queue string, handler nats.MsgHandler) (*nats.Subscription, error) {
+	return conn.QueueSubscribe(bus.LedgerActionSubject(cluster), queue, handler)
 }
 
 // ledgerActionRunner is the narrow slice of *controller.Reconciler the
@@ -97,8 +113,8 @@ const resumeCommandDeadlineSec = 120
 
 // handleLedgerAction implements design D8a/D7 / the mite-command-transport
 // spec's operator subscriber (task 9.1a, task 7.1): it decodes one action
-// published on varroa.ledger.actions.<cluster>, ignores an action naming
-// another cluster, and maps cancel_run/retry_run/trigger_run to the
+// published on varroa.ledger.actions.<cluster>, ignores, logs, and counts
+// an action naming another cluster, and maps cancel_run/retry_run/trigger_run to the
 // matching imperative command or wake_cell to a direct
 // WakeHibernatedController call. trigger_run and resume_run both wake
 // the target through the same call before they send the command. An
@@ -106,13 +122,19 @@ const resumeCommandDeadlineSec = 120
 //
 // The imperative command's subject comes from the action's own namespace
 // and controller fields only — no other field ever names the target.
-func handleLedgerAction(ctx context.Context, logger *slog.Logger, ownCluster string, rec ledgerActionRunner, data []byte) {
+func handleLedgerAction(ctx context.Context, logger *slog.Logger, subject, ownCluster string, rec ledgerActionRunner, data []byte) {
 	var action recordstore.LedgerAction
 	if err := json.Unmarshal(data, &action); err != nil {
 		logger.Warn("ledger action decode failed", "error", err)
 		return
 	}
 	if action.Cluster != ownCluster {
+		// The subscription names this cluster only, so this branch is a
+		// second guard. An action that reaches it shows a publisher or a
+		// subscription fault, and must be visible.
+		logger.Warn("ledger action for another cluster rejected",
+			"subject", subject, "actionCluster", action.Cluster, "ownCluster", ownCluster)
+		ledgerActionsRejected.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", "foreign_cluster")))
 		return
 	}
 

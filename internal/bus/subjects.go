@@ -115,11 +115,6 @@ const (
 	// cluster and the tenant, so the subject needs no cluster token.
 	TenantSyncSubject = "varroa.recordstore.tenant.sync"
 
-	// LedgerActionsWildcard is the wildcard subject an operator leader
-	// subscribes to for every cluster's ledger actions, then filters on
-	// the action's own cluster field.
-	LedgerActionsWildcard = "varroa.ledger.actions.>"
-
 	// BuildsStreamName is the JetStream stream name for the build-event
 	// work queue.
 	BuildsStreamName = "varroa_builds"
@@ -231,8 +226,11 @@ func WakeSubjectWildcard(cluster string) string {
 }
 
 // LedgerActionSubject returns the core-NATS subject the recorder publishes
-// a ledger action on for one cluster. The operator subscribes to
-// LedgerActionsWildcard and filters each action's cluster field.
+// a ledger action on for one cluster. The operator of that cluster
+// queue-subscribes to this subject only. The operators of all clusters
+// share one queue-group name on the core NATS. A wildcard subject with
+// that shared name would put them in one queue group, and NATS would
+// give a share of one cluster's actions to another cluster.
 // Format: varroa.ledger.actions.<cluster>
 func LedgerActionSubject(cluster string) string {
 	return fmt.Sprintf("varroa.ledger.actions.%s", cluster)

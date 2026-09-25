@@ -1542,14 +1542,12 @@ func (r *operatorCommandRunner) Start(ctx context.Context) error {
 	}()
 
 	// Ledger actions: the recorder publishes at-most-once on
-	// varroa.ledger.actions.<cluster> (design D8a, task 9.1a). One
-	// operator leader subscribes to the whole varroa.ledger.actions.>
-	// family and filters on the action's own cluster field, so a cluster
-	// added later needs no grant change. Queue-subscribed so a single
-	// leader replica services each action.
-	ledgerActionSub, err := r.busConn.QueueSubscribe(bus.LedgerActionsWildcard, operatorQueue,
+	// varroa.ledger.actions.<cluster>. Each operator subscribes to the
+	// subject of its own cluster only. The queue group spreads the actions
+	// of one cluster across the replicas of that cluster's operator.
+	ledgerActionSub, err := subscribeLedgerActions(r.busConn, r.cluster, operatorQueue,
 		func(msg *nats.Msg) {
-			handleLedgerAction(context.Background(), r.logger, r.cluster, r.reconciler, msg.Data)
+			handleLedgerAction(context.Background(), r.logger, msg.Subject, r.cluster, r.reconciler, msg.Data)
 		})
 	if err != nil {
 		return fmt.Errorf("subscribe ledger actions: %w", err)

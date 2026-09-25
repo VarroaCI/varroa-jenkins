@@ -84,9 +84,12 @@ control plane's async transport — no other package talks to NATS directly.
   `varroa.ledger.actions.<cluster>`. The recorder never publishes to
   `mite.>` or `wake.>`, and holds no core `activity.>` subscription — a
   pull consumer receives messages on the JetStream API subjects and its
-  own inbox. The operator subscribes to
-  `varroa.ledger.actions.<cluster>` (added by a later change); an action
-  published before that subscriber exists has no consumer and is lost.
+  own inbox. The operator of each cluster queue-subscribes to
+  `LedgerActionSubject(<own cluster>)` only; there is no wildcard
+  constant, because every cluster's operator uses the same queue-group
+  name, and a wildcard subject with that name joins them into one queue
+  group. An action published while no operator
+  of its cluster subscribes has no consumer and is lost.
 - **KV buckets** (`kv.go`, `subjects.go`) — `KVSnapshotBucket = "mite_snapshots"`
   (latest mite state, key `SnapshotKey(cluster, ns, name)`),
   `KVClustersBucket = "varroa_clusters"` (cluster directory, see below), plus

@@ -72,19 +72,19 @@ func TestHandleLedgerAction_UnknownKind_CountsRejection(t *testing.T) {
 	action := recordstore.LedgerAction{Kind: "delete_everything", Cluster: "core", Namespace: "cells-ns", Controller: "cell-a"}
 	data, _ := json.Marshal(action)
 
-	handleLedgerAction(context.Background(), testLogger(), "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), "varroa.ledger.actions.core", "core", rec, data)
 
 	if got := ledgerActionRejectedSum(t, reader, "unknown_kind"); got != 1 {
 		t.Fatalf("expected varroa_ledger_actions_rejected_total{reason=unknown_kind}=1, got %d", got)
 	}
 }
 
-// TestHandleLedgerAction_OtherCluster_CountsNoRejection covers task
-// 9.1a's distinction between "ignore" (an action naming another
-// cluster) and "reject and count" (an unknown kind): the task text
-// states these as two separate rules, so an action for another cluster
-// must leave the counter untouched.
-func TestHandleLedgerAction_OtherCluster_CountsNoRejection(t *testing.T) {
+// TestHandleLedgerAction_OtherCluster_CountsForeignCluster covers the
+// second guard behind the cluster-scoped subscription: an action that
+// names another cluster takes no action, increments
+// varroa_ledger_actions_rejected_total{reason="foreign_cluster"} by one,
+// and leaves the unknown_kind count untouched.
+func TestHandleLedgerAction_OtherCluster_CountsForeignCluster(t *testing.T) {
 	reader := withTestLedgerActionMeter(t)
 	rec := &fakeLedgerActionRunner{}
 	action := recordstore.LedgerAction{
@@ -93,9 +93,15 @@ func TestHandleLedgerAction_OtherCluster_CountsNoRejection(t *testing.T) {
 	}
 	data, _ := json.Marshal(action)
 
-	handleLedgerAction(context.Background(), testLogger(), "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), "varroa.ledger.actions.core", "core", rec, data)
 
+	if rec.wokeCalls != 0 || len(rec.sent) != 0 {
+		t.Fatalf("expected no action for another cluster, got wokeCalls=%d sent=%d", rec.wokeCalls, len(rec.sent))
+	}
+	if got := ledgerActionRejectedSum(t, reader, "foreign_cluster"); got != 1 {
+		t.Fatalf("expected varroa_ledger_actions_rejected_total{reason=foreign_cluster}=1, got %d", got)
+	}
 	if got := ledgerActionRejectedSum(t, reader, "unknown_kind"); got != 0 {
-		t.Fatalf("expected no rejection counted for another cluster's action, got %d", got)
+		t.Fatalf("expected varroa_ledger_actions_rejected_total{reason=unknown_kind}=0, got %d", got)
 	}
 }
