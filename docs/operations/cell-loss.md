@@ -24,6 +24,15 @@ A confirmed loss reaches a mark in about 70 to 130 seconds. Without a confirmati
 falls back to two fixed windows: five minutes for a run whose owning instance changed, and fifteen
 minutes for a silent run on the current instance.
 
+The operator keeps the replaced instance of each cell in `status.cell.previousInstance`, and
+reports it in every announcement. A pod that rolls while the operator restarts, or while the
+recorder is down, is therefore still confirmed. The 70 to 130 seconds start when the recorder
+accepts the next announcement, not when the pod rolled.
+
+The operator keeps one replaced instance per cell. Two rolls of one cell during one recorder
+outage can leave the older instance unconfirmed. A cell deleted while the operator restarts
+leaves no record. A run on such an instance stays `RUNNING` until an operator marks it.
+
 The recorder measures each window on its own clock, and stamps the time each heartbeat arrives.
 A heartbeat from an instance that no longer owns the run moves no window. A drifting cell clock
 therefore moves none.

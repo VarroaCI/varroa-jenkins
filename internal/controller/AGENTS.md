@@ -827,8 +827,15 @@ sections describe.
   instance is gone, so `DeadInstance.ConfirmedGoneAt` (`cells/sync.go`,
   `TenantSyncDeadInstance` on the wire) is stamped **only** by a producer
   standing behind such a read: `maybeReannounce`'s `deadInstanceDelta` call,
-  `announceSingleTenantPlacement`, and `memberDeadInstances` for a member
-  whose cell is still bound. A cell that **left** the candidate set is read
+  `announceSingleTenantPlacement`, `memberDeadInstances` for a member
+  whose cell is still bound, and `cellPreviousInstances`. That last
+  producer reads `status.cell.previousInstance` through
+  `CellCandidate.PreviousInstance` for every cell a current or prior
+  member holds, on both announce paths, so an empty `SyncCache` (an
+  operator restart, a shard move, a recorder outage) still reports a
+  rolled pod. It also stamps a confirmation on an unconfirmed cache entry
+  that names the same instance. `deadInstanceDelta` and
+  `memberDeadInstances` read only the cache. A cell that **left** the candidate set is read
   by `TeamReconciler.departedMemberPods`, which applies the same pod rule to
   every member cell the tenant still names and hands the answers to
   `Inputs.DepartedPods` — the placement pass performs no Kubernetes read of

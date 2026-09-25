@@ -70,10 +70,11 @@ type TeamReconciler struct {
 	// though a single Team's entry is never touched by two goroutines at
 	// once.
 	syncCacheMu sync.Mutex
-	// syncCache is keyed by Team name. Losing an entry (an operator
-	// restart) costs one redundant, harmless announcement — the
-	// tenant_placements row is the durable copy, this is only a
-	// dedup/resync clock.
+	// syncCache is keyed by Team name. It is a dedup and resync clock,
+	// and the only record of each member's last announced instance. An
+	// empty entry forces one announcement, and the cache producers then
+	// report no replaced pod. The placement pass reads each cell's
+	// status.cell.previousInstance to cover that case.
 	syncCache map[string]cells.SyncCache
 }
 
@@ -1021,6 +1022,8 @@ func buildCellCandidate(cr *v1alpha1.Controller, profiles []*v1alpha1.JenkinsVer
 		cand.Tenants = append([]string(nil), cr.Status.Cell.Tenants...)
 		cand.AppliedTenants = append([]string(nil), cr.Status.Cell.AppliedTenants...)
 		cand.Instance = cr.Status.Cell.Instance
+		cand.PreviousInstance = cr.Status.Cell.PreviousInstance
+		cand.PreviousInstanceLastSeen = timeFromMetaV1(cr.Status.Cell.PreviousInstanceLastSeen)
 	}
 	if cr.Status.MiteStatus != nil {
 		cand.MiteConnected = cr.Status.MiteStatus.Connected

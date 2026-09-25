@@ -81,6 +81,15 @@ type CellCandidate struct {
 	// Instance mirrors status.cell.instance: the running Jenkins pod's
 	// metadata.uid, empty when no pod runs (design D6, D13).
 	Instance string
+	// PreviousInstance mirrors status.cell.previousInstance: the pod uid
+	// Instance held before its last change. The Controller reconciler
+	// writes it only after its own pod read proved that pod gone, so it
+	// is a confirmed dead instance.
+	PreviousInstance string
+	// PreviousInstanceLastSeen mirrors
+	// status.cell.previousInstanceLastSeen: the last mite heartbeat
+	// recorded while PreviousInstance ran. It is nil when none was seen.
+	PreviousInstanceLastSeen *time.Time
 	// MiteConnected mirrors status.miteStatus.connected: the operator's
 	// newest mite-presence reading for Instance (design D6's cell_alive).
 	MiteConnected bool
@@ -621,9 +630,10 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 
 	// The announcement is the pre-step (design D6, D7): the record store
 	// must hold the new generation before either Kubernetes write below.
-	// A rolled pod is reported through the moveNone resync path; a deleted
-	// old cell (oldCell nil while wasPlaced) is reported here, because
-	// this is the one tick that still knows its identity.
+	// A deleted old cell (oldCell nil while wasPlaced) is reported here,
+	// because this is the one tick that still knows its identity. A
+	// rolled pod of a cell that stays a candidate is reported through
+	// cellPreviousInstances, on this path and on the moveNone path.
 	policy := SyncPolicyFromPipelines(team.Spec.Pipelines)
 	var dead []DeadInstance
 	if wasPlaced && oldCell == nil {
@@ -639,6 +649,7 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 	members, _ := desiredMembers(in, team, status, newCell, nowT)
 	announced := announceMembers(members)
 	dead = append(dead, memberDeadInstances(in.LastSync, announced, dead, in.DepartedPods, nowT)...)
+	dead = cellPreviousInstances(in, priorMembers, announced, dead, nowT)
 	result, announceErr := sendAnnounce(ctx, in, AnnounceRequest{
 		Cluster:        in.ClusterIdentity,
 		Tenant:         team.Name,
@@ -830,6 +841,7 @@ func maybeReannounce(ctx context.Context, in Inputs, team *v1alpha1.Team, status
 	// so it stamps the confirmation with this tick's clock.
 	dead := deadInstanceDelta(last, status.Placement.Cell, status.Placement.CellNamespace, cell.Instance, &nowT)
 	dead = append(dead, memberDeadInstances(last, announced, dead, in.DepartedPods, nowT)...)
+	dead = cellPreviousInstances(in, status.Placement, announced, dead, nowT)
 
 	result, err := sendAnnounce(ctx, in, AnnounceRequest{
 		Cluster:            in.ClusterIdentity,
@@ -955,6 +967,85 @@ func memberDeadInstances(last *SyncCache, announced []AnnounceMember, reported [
 		out = append(out, entry)
 	}
 	return out
+}
+
+// cellPreviousInstances reports the status.cell.previousInstance of every
+// cell the tenant touches as a dead instance, on every announcement.
+//
+// The cell set is the cells of the announced members and the cells the
+// stored placement names, so a tenant that leaves a live cell still
+// reports the pod that cell replaced.
+//
+// The Controller reconciler writes previousInstance only after its own pod
+// read proved that pod gone, so each entry carries a confirmation stamped
+// with nowT. The record is durable in the Controller status. It does not
+// depend on SyncCache, which an operator restart or a shard move empties,
+// and which a successful announce can fill without the replaced pod.
+//
+// The recorder merges entries by instance and keeps the earliest
+// confirmation, so a repeat of an entry changes nothing. dead is the list
+// the cache producers built. An entry of dead that names a recorded
+// instance with no confirmation takes one, and no second entry is added.
+// Such an entry also takes the recorded heartbeat when it is newer.
+// An instance that a member runs now is never reported. The answer is
+// dead with the new entries appended.
+func cellPreviousInstances(in Inputs, placement *v1alpha1.TeamPlacementStatus,
+	announced []AnnounceMember, dead []DeadInstance, nowT time.Time) []DeadInstance {
+	type cellRef struct{ name, namespace string }
+	var refs []cellRef
+	for _, m := range announced {
+		refs = append(refs, cellRef{m.Cell, m.Namespace})
+	}
+	if placement != nil {
+		refs = append(refs, cellRef{placement.Cell, placement.CellNamespace})
+		for _, m := range placement.Members {
+			refs = append(refs, cellRef{m.Cell, m.CellNamespace})
+		}
+	}
+
+	index := map[string]int{}
+	for i, d := range dead {
+		index[d.Instance] = i
+	}
+	skip := map[string]bool{}
+	for _, m := range announced {
+		if m.Instance != "" {
+			skip[m.Instance] = true
+		}
+	}
+	visited := map[string]bool{}
+	for _, ref := range refs {
+		key := memberKey(ref.namespace, ref.name)
+		if ref.name == "" || visited[key] {
+			continue
+		}
+		visited[key] = true
+		cell, found := lookupCell(in.Cells, ref.name, ref.namespace)
+		if !found {
+			continue
+		}
+		prev := cell.PreviousInstance
+		if prev == "" || prev == cell.Instance || skip[prev] {
+			continue
+		}
+		confirmed := nowT
+		if i, ok := index[prev]; ok {
+			if dead[i].ConfirmedGoneAt == nil {
+				dead[i].ConfirmedGoneAt = &confirmed
+			}
+			if seen := cell.PreviousInstanceLastSeen; seen != nil && seen.After(dead[i].LastSeenAt) {
+				dead[i].LastSeenAt = *seen
+			}
+			continue
+		}
+		seenAt := nowT
+		if cell.PreviousInstanceLastSeen != nil {
+			seenAt = *cell.PreviousInstanceLastSeen
+		}
+		index[prev] = len(dead)
+		dead = append(dead, DeadInstance{Instance: prev, LastSeenAt: seenAt, ConfirmedGoneAt: &confirmed})
+	}
+	return dead
 }
 
 // confirmedGoneAt answers the confirmation stamp for one cell that left the

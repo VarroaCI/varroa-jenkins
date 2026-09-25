@@ -232,13 +232,18 @@ type RecordsResult struct {
 type RecordsFunc func(ctx context.Context, req RecordsRequest) (RecordsResult, error)
 
 // SyncCache is the tenant's last successfully sent AnnounceRequest, kept by
-// the caller across reconcile ticks (in memory; the tenant_placements row
-// itself is the durable copy, so losing this cache costs one redundant,
-// harmless announcement). Place reads it to decide whether a
-// same-generation announcement is due (task 4.4a) and to name a rolled or
-// deleted cell's last-known instance in DeadInstances; the caller stores
-// Outcome.SyncCacheUpdate back under the tenant's key after a successful
-// send.
+// the caller across reconcile ticks in memory only. Place reads it to
+// decide whether a same-generation announcement is due (task 4.4a) and to
+// name a rolled or deleted cell's last-known instance in DeadInstances.
+// The caller stores Outcome.SyncCacheUpdate back under the tenant's key
+// after a successful send.
+//
+// An operator restart, a shard move, or a record store that has refused
+// every announce since the start leaves the cache empty. An empty cache
+// forces one announcement, and the cache producers then report no dead
+// instance. cellPreviousInstances reads each cell's durable
+// status.cell.previousInstance instead, so a pod replaced in that window
+// is still reported. A cell deleted in that window leaves no record.
 type SyncCache struct {
 	Cell               string
 	CellNamespace      string
