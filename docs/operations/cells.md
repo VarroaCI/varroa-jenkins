@@ -107,9 +107,10 @@ Expect `"status":"True","reason":"TenantPlaced"`.
 
 - **Folder.** The tenant's `items.yaml` is wrapped under one top-level folder named after the
   `Team`, then merged with every other tenant's folder into the cell's single manifest. The
-  operator ignores `jenkins.yaml`, `plugins.yaml`, and `rbac.yaml` in a tenant's bundle: a tenant
-  cannot change controller configuration. A job the bundle no longer declares leaves the folder,
-  and its next trigger fails with `JOB_NOT_FOUND`. See [Build records](build-records.md).
+  operator ignores `plugins.yaml`, `rbac.yaml`, and `jenkins.yaml` except its
+  [pod templates](tenant-pod-templates.md): a tenant cannot change controller configuration. A
+  job the bundle no longer declares leaves the folder, and its next trigger fails with
+  `JOB_NOT_FOUND`. See [Build records](build-records.md).
 - **Item role.** The operator synthesizes a role scoped to the folder's subtree, granting build,
   read, and replay permissions, bound to the tenant's service identity.
 - **Service identity.** Every build in the folder runs as `svc-<team>`, an identity the plugin

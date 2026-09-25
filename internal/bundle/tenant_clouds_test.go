@@ -1,11 +1,100 @@
 package bundle
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
+
+func TestInjectTenantClouds_RawTemplate(t *testing.T) {
+	defaultTemplate := TenantCloudTemplate{
+		Name:           "team-a-default",
+		Namespace:      "team-a-ns",
+		ServiceAccount: "varroa-agent-team-a",
+		Labels:         "varroa-tenant-team-a team-a-default",
+		Containers: []TenantCloudContainer{
+			{Name: "jnlp", Image: "jenkins/inbound-agent:3384.v60d89463d9e0-1-jdk21", WorkingDir: "/home/jenkins/agent"},
+		},
+	}
+	rawContainers := []any{map[string]any{"name": "golang", "image": "golang:1.25"}}
+	rawVolumes := []any{map[string]any{"emptyDirVolume": map[string]any{"mountPath": "/go"}}}
+	liftedTemplate := TenantCloudTemplate{
+		Name:           "team-a-golang",
+		Namespace:      "team-a-ns",
+		ServiceAccount: "varroa-agent-team-a",
+		Labels:         "varroa-tenant-team-a team-a-golang",
+		Raw: map[string]any{
+			"containers":     rawContainers,
+			"volumes":        rawVolumes,
+			"idleMinutes":    5,
+			"yaml":           "spec:\n  hostNetwork: false\n",
+			"name":           "golang",
+			"namespace":      "kube-system",
+			"serviceAccount": "admin",
+			"label":          "golang",
+		},
+	}
+
+	out, err := InjectTenantClouds("", []TenantCloud{{
+		Name:      "team-a",
+		Namespace: "team-a-ns",
+		Templates: []TenantCloudTemplate{defaultTemplate, liftedTemplate},
+	}})
+	if err != nil {
+		t.Fatalf("InjectTenantClouds: %v", err)
+	}
+
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	k8s := doc["jenkins"].(map[string]any)["clouds"].([]any)[0].(map[string]any)["kubernetes"].(map[string]any)
+	templates := k8s["templates"].([]any)
+	if len(templates) != 2 {
+		t.Fatalf("expected two templates, got %d: %v", len(templates), templates)
+	}
+
+	wantDefault := map[string]any{
+		"name":           "team-a-default",
+		"namespace":      "team-a-ns",
+		"serviceAccount": "varroa-agent-team-a",
+		"label":          "varroa-tenant-team-a team-a-default",
+		"containers": []any{map[string]any{
+			"name":                  "jnlp",
+			"image":                 "jenkins/inbound-agent:3384.v60d89463d9e0-1-jdk21",
+			"resourceRequestCpu":    "",
+			"resourceRequestMemory": "",
+			"resourceLimitCpu":      "",
+			"resourceLimitMemory":   "",
+			"workingDir":            "/home/jenkins/agent",
+		}},
+	}
+	if !reflect.DeepEqual(templates[0], wantDefault) {
+		t.Errorf("default template changed:\n got %#v\nwant %#v", templates[0], wantDefault)
+	}
+
+	wantLifted := map[string]any{
+		"name":           "team-a-golang",
+		"namespace":      "team-a-ns",
+		"serviceAccount": "varroa-agent-team-a",
+		"label":          "varroa-tenant-team-a team-a-golang",
+		"containers":     rawContainers,
+		"volumes":        rawVolumes,
+		"idleMinutes":    5,
+		"yaml":           "spec:\n  hostNetwork: false\n",
+	}
+	if !reflect.DeepEqual(templates[1], wantLifted) {
+		t.Errorf("lifted template:\n got %#v\nwant %#v", templates[1], wantLifted)
+	}
+	if _, ok := templates[1].(map[string]any)["labels"]; ok {
+		t.Error("expected no labels key on the lifted template")
+	}
+	if liftedTemplate.Raw["name"] != "golang" {
+		t.Error("expected the renderer to leave Raw unchanged")
+	}
+}
 
 func TestInjectTenantClouds_Appends(t *testing.T) {
 	out, err := InjectTenantClouds("", []TenantCloud{

@@ -168,6 +168,66 @@ func TestApplyCellContent_TenantCloudRendering(t *testing.T) {
 	}
 }
 
+// TestApplyCellContent_LiftedTemplateRendering asserts that a tenant
+// bundle's pod template renders after <team>-default with the stamped
+// keys and the singular label, and that a skipped template reaches
+// cr.Status.Cell.TenantWarnings as PodTemplateSkipped.
+func TestApplyCellContent_LiftedTemplateRendering(t *testing.T) {
+	client := newTestClient()
+	team := pipelinesTeam("payments")
+	seedTenantBundleContent(client, team, "payments-bundle", map[string]string{
+		"jenkins.yaml": minimalCloud("- name: golang\n  label: golang\n  labels: golang\n  namespace: kube-system\n  idleMinutes: 5\n- name: default\n"),
+	})
+	crdstore.MustSeed(client.store, team)
+	rec := newTestReconciler(client)
+
+	cr := cellControllerFixture()
+	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"payments"}}
+	mat := &bundle.MaterializedBundle{}
+	if err := rec.applyCellContent(context.Background(), cr, mat, ""); err != nil {
+		t.Fatalf("applyCellContent: %v", err)
+	}
+
+	doc := unmarshalYAMLMap(t, mat.JenkinsYAML)
+	clouds, _ := doc["jenkins"].(map[string]any)["clouds"].([]any)
+	if len(clouds) != 1 {
+		t.Fatalf("expected one tenant cloud, got %d", len(clouds))
+	}
+	templates, _ := clouds[0].(map[string]any)["kubernetes"].(map[string]any)["templates"].([]any)
+	if len(templates) != 2 {
+		t.Fatalf("expected the default and one lifted template, got %d: %+v", len(templates), templates)
+	}
+	if first, _ := templates[0].(map[string]any); first["name"] != "payments-default" {
+		t.Errorf("first template = %v, want payments-default", first["name"])
+	}
+	lifted, _ := templates[1].(map[string]any)
+	want := map[string]any{
+		"name":           "payments-golang",
+		"namespace":      "payments-ns",
+		"serviceAccount": "varroa-agent-payments",
+		"label":          "varroa-tenant-payments payments-golang",
+		"idleMinutes":    5,
+	}
+	for k, v := range want {
+		if lifted[k] != v {
+			t.Errorf("lifted.%s = %v, want %v", k, lifted[k], v)
+		}
+	}
+	if _, ok := lifted["labels"]; ok {
+		t.Error("expected no labels key on the lifted template")
+	}
+
+	var skips []v1alpha1.TenantWarning
+	for _, w := range cr.Status.Cell.TenantWarnings {
+		if w.Reason == v1alpha1.TeamReasonPodTemplateSkipped {
+			skips = append(skips, w)
+		}
+	}
+	if len(skips) != 1 || skips[0].Tenant != "payments" {
+		t.Errorf("expected one PodTemplateSkipped entry for payments, got %+v", cr.Status.Cell.TenantWarnings)
+	}
+}
+
 func containsLabel(labels, want string) bool {
 	for _, l := range splitFields(labels) {
 		if l == want {

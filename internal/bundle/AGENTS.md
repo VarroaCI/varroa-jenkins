@@ -82,7 +82,12 @@ index parsing, and pre-apply content validation.
   `mergeMaps` replaces a list instead of deep-merging it, which would drop
   every cloud the bundle itself declares. It never replaces an existing
   cloud and rejects a name collision, against an existing cloud or between
-  two tenant clouds in the same call.
+  two tenant clouds in the same call. A `TenantCloudTemplate` carries typed
+  keys and an optional `Raw` map, the pass-through keys of a pod template
+  lifted from a tenant bundle. The renderer writes `Raw` first and the typed
+  `name`, `namespace`, `serviceAccount`, and `label` after, so a typed key
+  always wins. It writes typed `containers` only when that field is not
+  empty.
 - **`InjectPipelineTemplates(jenkinsYAML, templatesYAML, folder)`**
   (`pipelinetemplates.go`) — appends every document in `templatesYAML` to
   `unclassified.varroaPipelineTemplates.templates` in `jenkinsYAML`, flattening

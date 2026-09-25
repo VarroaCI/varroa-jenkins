@@ -426,3 +426,302 @@ func TestAssembleCellContent_TenantCloudNamesTheAgentService(t *testing.T) {
 		}
 	}
 }
+
+// seedTenantBundleContent seeds a tenant bundle whose content ConfigMap
+// holds cleanPipelineItemsYAML plus every key of extra.
+func seedTenantBundleContent(client *testClient, team *v1alpha1.Team, bundleName string, extra map[string]string) {
+	seedTenantBundle(client, team, bundleName, cleanPipelineItemsYAML)
+	for k, v := range extra {
+		client.configMapData[bundleName+"-content"][k] = v
+	}
+}
+
+// pipelinesTeam builds a pipelines tenant whose agent namespace is
+// "<name>-ns".
+func pipelinesTeam(name string) *v1alpha1.Team {
+	return &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: v1alpha1.TeamSpec{
+			Namespaces: []string{name + "-ns"},
+			Pipelines:  &v1alpha1.TeamPipelinesSpec{Profile: "lts", AgentNamespace: name + "-ns"},
+		},
+	}
+}
+
+// markDraining gives team the Placed=False/TenantMoving condition and a
+// placement on cr, which makes it a draining tenant of cr.
+func markDraining(team *v1alpha1.Team, cr *v1alpha1.Controller) {
+	team.Status = v1alpha1.TeamStatus{
+		Placement: &v1alpha1.TeamPlacementStatus{Cell: cr.Name, CellNamespace: cr.Namespace},
+		Conditions: []v1alpha1.TeamCondition{
+			{Type: v1alpha1.TeamConditionPlaced, Status: metav1.ConditionFalse, Reason: v1alpha1.TeamReasonTenantMoving},
+		},
+	}
+}
+
+func cloudTemplateNames(state assembleCellState, cloud string) []string {
+	var names []string
+	for _, c := range state.Clouds {
+		if c.Name != cloud {
+			continue
+		}
+		for _, tpl := range c.Templates {
+			names = append(names, tpl.Name)
+		}
+	}
+	return names
+}
+
+func tenantWarningsFor(ws []v1alpha1.TenantWarning, tenant, reason string) []string {
+	var out []string
+	for _, w := range ws {
+		if w.Tenant == tenant && w.Reason == reason {
+			out = append(out, w.Message)
+		}
+	}
+	return out
+}
+
+func folderNames(t *testing.T, itemsYAML string) []string {
+	t.Helper()
+	itemList, _ := unmarshalYAMLMap(t, itemsYAML)["items"].([]any)
+	names := make([]string, 0, len(itemList))
+	for _, it := range itemList {
+		m, _ := it.(map[string]any)
+		names = append(names, fmt.Sprint(m["name"]))
+	}
+	return names
+}
+
+func TestAssembleCellContent_LiftsTenantPodTemplates(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	golang := pipelinesTeam("golang")
+	seedTenantBundleContent(client, golang, "golang-bundle", map[string]string{"jenkins.yaml": minimalCloud(golangPodTemplate)})
+
+	residue := pipelinesTeam("residue")
+	seedTenantBundleContent(client, residue, "residue-bundle", map[string]string{
+		"jenkins.yaml": "jenkins:\n  systemMessage: hi\n",
+	})
+
+	plugins := pipelinesTeam("plugins")
+	seedTenantBundleContent(client, plugins, "plugins-bundle", map[string]string{"plugins.yaml": "plugins:\n  - git\n"})
+
+	skipped := pipelinesTeam("skipped")
+	seedTenantBundleContent(client, skipped, "skipped-bundle", map[string]string{
+		"jenkins.yaml": minimalCloud("- name: default\n- name: node\n"),
+	})
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{golang, residue, plugins, skipped}, "")
+	if err != nil {
+		t.Fatalf("assembleCellContent: %v", err)
+	}
+
+	if got := cloudTemplateNames(state, "golang"); len(got) != 2 || got[0] != "golang-default" || got[1] != "golang-golang" {
+		t.Errorf("golang cloud templates = %v, want [golang-default golang-golang]", got)
+	}
+	if got := tenantWarningsFor(state.Warnings, "golang", v1alpha1.TeamReasonBundleKeysIgnored); len(got) != 0 {
+		t.Errorf("expected no BundleKeysIgnored for a pod-template-only jenkins.yaml, got %q", got)
+	}
+
+	wantResidue := []string{`tenant bundle key "jenkins.yaml" is ignored on a cell except its pod templates: jenkins.systemMessage`}
+	if got := tenantWarningsFor(state.Warnings, "residue", v1alpha1.TeamReasonBundleKeysIgnored); !equalStrings(got, wantResidue) {
+		t.Errorf("residue warnings = %q, want %q", got, wantResidue)
+	}
+
+	wantPlugins := []string{`tenant bundle key "plugins.yaml" is ignored on a cell`}
+	if got := tenantWarningsFor(state.Warnings, "plugins", v1alpha1.TeamReasonBundleKeysIgnored); !equalStrings(got, wantPlugins) {
+		t.Errorf("plugins warnings = %q, want %q", got, wantPlugins)
+	}
+
+	if got := cloudTemplateNames(state, "skipped"); len(got) != 2 || got[1] != "skipped-node" {
+		t.Errorf("skipped cloud templates = %v, want [skipped-default skipped-node]", got)
+	}
+	wantSkip := []string{`pod template "default": the name "default" is reserved`}
+	if got := tenantWarningsFor(state.Warnings, "skipped", v1alpha1.TeamReasonPodTemplateSkipped); !equalStrings(got, wantSkip) {
+		t.Errorf("skip warnings = %q, want %q", got, wantSkip)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestAssembleCellContent_DrainingTenantKeepsLiftedTemplates(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	draining := pipelinesTeam("draining")
+	seedTenantBundleContent(client, draining, "draining-bundle", map[string]string{
+		"jenkins.yaml": "unclassified: {}\n" + minimalCloud(golangPodTemplate),
+	})
+	markDraining(draining, cr)
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{draining}, "")
+	if err != nil {
+		t.Fatalf("assembleCellContent: %v", err)
+	}
+	if got := cloudTemplateNames(state, "draining"); len(got) != 2 || got[1] != "draining-golang" {
+		t.Errorf("draining cloud templates = %v, want [draining-default draining-golang]", got)
+	}
+	if got := folderNames(t, state.ItemsYAML); len(got) != 0 {
+		t.Errorf("expected no folder for a draining tenant, got %v", got)
+	}
+	want := []string{`tenant bundle key "jenkins.yaml" is ignored on a cell except its pod templates: unclassified`}
+	if got := tenantWarningsFor(state.Warnings, "draining", v1alpha1.TeamReasonBundleKeysIgnored); !equalStrings(got, want) {
+		t.Errorf("draining warnings = %q, want %q", got, want)
+	}
+}
+
+func TestAssembleCellContent_DrainingTenantUnreadableBundle(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	draining := pipelinesTeam("draining")
+	seedTenantBundleContent(client, draining, "draining-bundle", map[string]string{"jenkins.yaml": minimalCloud(golangPodTemplate)})
+	delete(client.configMapData, "draining-bundle-content")
+	markDraining(draining, cr)
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{draining}, "")
+	if err != nil {
+		t.Fatalf("expected the assembly to succeed, got %v", err)
+	}
+	if got := cloudTemplateNames(state, "draining"); len(got) != 1 || got[0] != "draining-default" {
+		t.Errorf("draining cloud templates = %v, want [draining-default]", got)
+	}
+}
+
+func TestAssembleCellContent_ActiveTenantUnreadableBundleFails(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	active := pipelinesTeam("active")
+	seedTenantBundleContent(client, active, "active-bundle", nil)
+	delete(client.configMapData, "active-bundle-content")
+
+	if _, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{active}, ""); err == nil {
+		t.Fatal("expected the unreadable bundle of a non-draining tenant to fail the assembly")
+	}
+}
+
+func TestAssembleCellContent_UnparseableJenkinsYAML(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	broken := pipelinesTeam("broken")
+	seedTenantBundleContent(client, broken, "broken-bundle", map[string]string{"jenkins.yaml": "jenkins: [unclosed\n"})
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{broken}, "")
+	if err != nil {
+		t.Fatalf("expected the assembly to succeed, got %v", err)
+	}
+	if got := cloudTemplateNames(state, "broken"); len(got) != 1 || got[0] != "broken-default" {
+		t.Errorf("broken cloud templates = %v, want [broken-default]", got)
+	}
+	got := tenantWarningsFor(state.Warnings, "broken", v1alpha1.TeamReasonBundleKeysIgnored)
+	if len(got) != 1 || !strings.HasPrefix(got[0], `tenant bundle key "jenkins.yaml" does not parse: `) {
+		t.Errorf("unexpected warnings %q", got)
+	}
+}
+
+func TestAssembleCellContent_EveryMemberCellRendersTheSameTemplates(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+
+	team := pipelinesTeam("payments")
+	seedTenantBundleContent(client, team, "payments-bundle", map[string]string{"jenkins.yaml": minimalCloud(golangPodTemplate)})
+	slot0, slot1 := int32(0), int32(1)
+	team.Status.Placement = &v1alpha1.TeamPlacementStatus{
+		Cell: "cell-0", CellNamespace: "ns1",
+		Members: []v1alpha1.TeamMemberStatus{
+			{Cell: "cell-0", CellNamespace: "ns1", Role: v1alpha1.TeamMemberRoleActive, Slot: &slot0},
+			{Cell: "cell-1", CellNamespace: "ns1", Role: v1alpha1.TeamMemberRoleActive, Slot: &slot1},
+			{Cell: "cell-2", CellNamespace: "ns1", Role: v1alpha1.TeamMemberRoleStandby},
+		},
+	}
+
+	for _, cell := range []string{"cell-0", "cell-1", "cell-2"} {
+		cr := cellControllerFixture()
+		cr.Name = cell
+		state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{team}, "")
+		if err != nil {
+			t.Fatalf("%s: assembleCellContent: %v", cell, err)
+		}
+		if got := cloudTemplateNames(state, "payments"); len(got) != 2 || got[1] != "payments-golang" {
+			t.Errorf("%s: payments cloud templates = %v, want [payments-default payments-golang]", cell, got)
+		}
+	}
+}
+
+// TestResolveBundleForController_CellSkipsInterpolatedPodTemplate proves
+// that one tenant's pod template with a cell-side reference cannot fail
+// the cell: the lift skips it, and the other tenant's template renders.
+func TestResolveBundleForController_CellSkipsInterpolatedPodTemplate(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	evil := pipelinesTeam("evil")
+	seedTenantBundleContent(client, evil, "evil-bundle", map[string]string{
+		"jenkins.yaml": minimalCloud("- name: steal\n  yaml: ${readFile:/x}\n"),
+	})
+	good := pipelinesTeam("good")
+	seedTenantBundleContent(client, good, "good-bundle", map[string]string{"jenkins.yaml": minimalCloud(golangPodTemplate)})
+	crdstore.MustSeed(client.store, evil)
+	crdstore.MustSeed(client.store, good)
+	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"evil", "good"}}
+
+	mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	if err != nil {
+		t.Fatalf("resolveBundleForController: %v", err)
+	}
+	if strings.Contains(mat.JenkinsYAML, "evil-steal") || strings.Contains(mat.JenkinsYAML, "readFile:/x") {
+		t.Errorf("expected the skipped template absent, got: %s", mat.JenkinsYAML)
+	}
+	if !strings.Contains(mat.JenkinsYAML, "good-golang") {
+		t.Errorf("expected good-golang in the cell jenkins.yaml, got: %s", mat.JenkinsYAML)
+	}
+	got := tenantWarningsFor(cr.Status.Cell.TenantWarnings, "evil", v1alpha1.TeamReasonPodTemplateSkipped)
+	if len(got) != 1 {
+		t.Errorf("expected one PodTemplateSkipped entry for evil, got %q", got)
+	}
+}
+
+// TestResolveBundleForController_CellResolvesTenantVariable proves that a
+// tenant variable resolves inside a lifted template, and the cell's
+// unresolved-variable check then passes.
+func TestResolveBundleForController_CellResolvesTenantVariable(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	team := pipelinesTeam("payments")
+	seedTenantBundleContent(client, team, "payments-bundle", map[string]string{
+		"jenkins.yaml":   minimalCloud("- name: golang\n  containers:\n    - name: golang\n      image: ${golang_image}\n"),
+		"variables.yaml": "golang_image: golang:1.26-bookworm\n",
+	})
+	crdstore.MustSeed(client.store, team)
+	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"payments"}}
+
+	mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	if err != nil {
+		t.Fatalf("resolveBundleForController: %v", err)
+	}
+	if !strings.Contains(mat.JenkinsYAML, "image: golang:1.26-bookworm") {
+		t.Errorf("expected the resolved image in the cell jenkins.yaml, got: %s", mat.JenkinsYAML)
+	}
+}

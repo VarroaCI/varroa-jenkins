@@ -57,6 +57,24 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 			continue
 		}
 		agentNamespace := team.Spec.Pipelines.AgentNamespace
+		draining := tenantIsDrainingFromCell(team, cr)
+
+		// A draining tenant still reads its bundle, because its cloud keeps
+		// the lifted pod templates. A read fault for a draining tenant
+		// lifts nothing and does not fail the cell.
+		data, err := r.readTenantBundleContent(ctx, team)
+		if err != nil {
+			if !draining {
+				return assembleCellState{}, fmt.Errorf("tenant %q: %w", team.Name, err)
+			}
+			if r.Logger != nil {
+				r.Logger.Warn("cell content: draining tenant bundle unreadable; lifting no pod template",
+					"team", team.Name, "error", err)
+			}
+			data = nil
+		}
+		lifted, bundleWarnings := tenantBundleCloudContent(team.Name, agentNamespace, data)
+		warnings = append(warnings, bundleWarnings...)
 
 		// A draining tenant loses only its folder here. That is what
 		// converges the voluntary move's idle test (design D4): no new
@@ -64,12 +82,11 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 		// credential stay until the tenant leaves status.cell.tenants, so
 		// a build already running when the folder disappeared can still
 		// provision an agent.
-		if !tenantIsDrainingFromCell(team, cr) {
-			tenantManifest, tenantTemplatesYAML, bundleWarnings, err := r.materializeTenantManifest(ctx, team)
+		if !draining {
+			tenantManifest, tenantTemplatesYAML, err := materializeTenantManifest(data)
 			if err != nil {
 				return assembleCellState{}, fmt.Errorf("tenant %q: %w", team.Name, err)
 			}
-			warnings = append(warnings, bundleWarnings...)
 
 			rerooted, err := items.ReRoot(tenantManifest, team.Name)
 			if err != nil {
@@ -100,7 +117,7 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 		// provision from. A standby never launches an agent, because the
 		// claim fence answers NOT_HOME for every job.
 		agentEndpoint := tenantAgentEndpoint(team.Name, cr.Namespace, tenantSlotOnCell(team, cr))
-		clouds = append(clouds, tenantCloudFor(team.Name, agentNamespace, agentEndpoint))
+		clouds = append(clouds, tenantCloudFor(team.Name, agentNamespace, agentEndpoint, lifted))
 		if cred := r.tenantCloudCredentialFor(ctx, team.Name, agentNamespace); cred != nil {
 			creds = append(creds, *cred)
 		}
@@ -129,16 +146,15 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 	}, nil
 }
 
-// materializeTenantManifest reads a tenant's materialized items.yaml and
-// pipeline-templates.yaml (design D7 step 1, tenant-isolation). An unset
-// composedBundleRef, or a ref whose bundle has not materialized yet, gives
-// the tenant an empty folder and no templates rather than failing the whole
-// cell. It records a BundleKeysIgnored warning for each of jenkins.yaml,
-// plugins.yaml, and rbac.yaml the tenant bundle carries.
-func (r *Reconciler) materializeTenantManifest(ctx context.Context, team *v1alpha1.Team) (*items.Manifest, string, []v1alpha1.TenantWarning, error) {
+// readTenantBundleContent reads a tenant's materialized content ConfigMap
+// (design D7 step 1, tenant-isolation). An unset composedBundleRef, a
+// missing bundle, or a bundle that has not materialized yet returns nil
+// data and no error, so the tenant gets an empty folder and no template
+// rather than failing the whole cell.
+func (r *Reconciler) readTenantBundleContent(ctx context.Context, team *v1alpha1.Team) (map[string]string, error) {
 	ref := team.Spec.Pipelines.ComposedBundleRef
 	if ref == nil {
-		return &items.Manifest{}, "", nil, nil
+		return nil, nil
 	}
 
 	cb, err := r.getComposedBundle(ctx, ref.Name, ref.Namespace)
@@ -147,33 +163,48 @@ func (r *Reconciler) materializeTenantManifest(ctx context.Context, team *v1alph
 			r.Logger.Warn("cell content: tenant bundle not found; using an empty folder",
 				"team", team.Name, "bundle", ref.Namespace+"/"+ref.Name, "error", err)
 		}
-		return &items.Manifest{}, "", nil, nil
+		return nil, nil
 	}
 	if cb.Status.ContentRef == "" {
-		return &items.Manifest{}, "", nil, nil
+		return nil, nil
 	}
 
 	data, err := r.client.GetConfigMap(ctx, cb.Status.ContentRef, cb.Namespace)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("read tenant bundle content configmap %s: %w", cb.Status.ContentRef, err)
+		return nil, fmt.Errorf("read tenant bundle content configmap %s: %w", cb.Status.ContentRef, err)
 	}
+	return data, nil
+}
 
-	var warnings []v1alpha1.TenantWarning
-	for _, key := range []string{"jenkins.yaml", "plugins.yaml", "rbac.yaml"} {
+// tenantBundleCloudContent lifts the pod templates of a tenant's
+// jenkins.yaml for its cloud, with the tenant's own variables.yaml, and
+// returns the lift's warnings. It also records a BundleKeysIgnored warning
+// for a non-empty plugins.yaml or rbac.yaml, which a cell never applies.
+// It runs for a draining tenant too.
+func tenantBundleCloudContent(team, agentNamespace string, data map[string]string) ([]bundle.TenantCloudTemplate, []v1alpha1.TenantWarning) {
+	lift := liftTenantPodTemplates(team, agentNamespace, data["jenkins.yaml"], parseBundleVariables(data["variables.yaml"]))
+	warnings := lift.Warnings
+	for _, key := range []string{"plugins.yaml", "rbac.yaml"} {
 		if strings.TrimSpace(data[key]) != "" {
 			warnings = append(warnings, v1alpha1.TenantWarning{
-				Tenant:  team.Name,
+				Tenant:  team,
 				Reason:  v1alpha1.TeamReasonBundleKeysIgnored,
 				Message: fmt.Sprintf("tenant bundle key %q is ignored on a cell", key),
 			})
 		}
 	}
+	return lift.Templates, warnings
+}
 
+// materializeTenantManifest parses a tenant's items.yaml and returns it
+// with the tenant's pipeline-templates.yaml. Nil data gives an empty
+// manifest and no template.
+func materializeTenantManifest(data map[string]string) (*items.Manifest, string, error) {
 	manifest, err := items.Parse(data["items.yaml"])
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("parse tenant items.yaml: %w", err)
+		return nil, "", fmt.Errorf("parse tenant items.yaml: %w", err)
 	}
-	return manifest, data["pipeline-templates.yaml"], warnings, nil
+	return manifest, data["pipeline-templates.yaml"], nil
 }
 
 // tenantCloudCredentialFor reads the tenant agent's ServiceAccount token
@@ -199,15 +230,18 @@ func findingsSummary(findings []lint.Finding) string {
 }
 
 // recordCellTenantWarnings rebuilds cr.Status.Cell.TenantWarnings' entries
-// for reasons BundleKeysIgnored and CredentialSkipped from fresh, leaving
-// every other reason's entries (e.g. HibernationIgnored) untouched (design
-// D4: "Both reconcilers rebuild their whole list each tick").
+// for reasons BundleKeysIgnored, PodTemplateSkipped, and CredentialSkipped
+// from fresh, leaving every other reason's entries (e.g.
+// HibernationIgnored) untouched (design D4: "Both reconcilers rebuild their
+// whole list each tick").
 func recordCellTenantWarnings(cr *v1alpha1.Controller, fresh []v1alpha1.TenantWarning) {
 	if cr.Status.Cell == nil {
 		cr.Status.Cell = &v1alpha1.CellStatus{}
 	}
 	cr.Status.Cell.TenantWarnings = replaceTenantWarnings(cr.Status.Cell.TenantWarnings,
 		v1alpha1.TeamReasonBundleKeysIgnored, filterTenantWarnings(fresh, v1alpha1.TeamReasonBundleKeysIgnored))
+	cr.Status.Cell.TenantWarnings = replaceTenantWarnings(cr.Status.Cell.TenantWarnings,
+		v1alpha1.TeamReasonPodTemplateSkipped, filterTenantWarnings(fresh, v1alpha1.TeamReasonPodTemplateSkipped))
 	cr.Status.Cell.TenantWarnings = replaceTenantWarnings(cr.Status.Cell.TenantWarnings,
 		v1alpha1.TeamReasonCredentialSkipped, filterTenantWarnings(fresh, v1alpha1.TeamReasonCredentialSkipped))
 }

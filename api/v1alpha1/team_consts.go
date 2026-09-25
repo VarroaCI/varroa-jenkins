@@ -74,7 +74,10 @@ const (
 
 // TenantWarnings reasons.
 const (
-	TeamReasonBundleKeysIgnored  = "BundleKeysIgnored"
+	TeamReasonBundleKeysIgnored = "BundleKeysIgnored"
+	// TeamReasonPodTemplateSkipped reports a tenant bundle pod template
+	// that the operator does not lift onto the tenant cloud.
+	TeamReasonPodTemplateSkipped = "PodTemplateSkipped"
 	TeamReasonCredentialSkipped  = "CredentialSkipped"
 	TeamReasonHibernationIgnored = "HibernationIgnored"
 )

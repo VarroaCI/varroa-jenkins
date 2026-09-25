@@ -47,13 +47,14 @@ func tenantAgentEndpoint(team, namespace string, slot int32) string {
 }
 
 // tenantCloudFor builds the one kubernetes cloud a placed tenant gets
-// (design D11): usageRestricted, one jnlp pod template carrying the
-// tenant's ServiceAccount and the reserved node label the agent fence
-// reads. The "<team>-" template-name prefix is readability only and
-// carries no authorization meaning. agentEndpoint is the tenant's own agent
-// Service, never the cell's own endpoint.
-func tenantCloudFor(team, agentNamespace, agentEndpoint string) bundle.TenantCloud {
-	return bundle.TenantCloud{
+// (design D11): usageRestricted, the operator's jnlp pod template first,
+// then the pod templates lifted from the tenant's bundle in bundle order.
+// Every template carries the tenant's ServiceAccount and the reserved node
+// label the agent fence reads. The "<team>-" template-name prefix is
+// readability only and carries no authorization meaning. agentEndpoint is
+// the tenant's own agent Service, never the cell's own endpoint.
+func tenantCloudFor(team, agentNamespace, agentEndpoint string, lifted []bundle.TenantCloudTemplate) bundle.TenantCloud {
+	cloud := bundle.TenantCloud{
 		Name:            team,
 		Namespace:       agentNamespace,
 		JenkinsURL:      agentEndpoint,
@@ -76,6 +77,8 @@ func tenantCloudFor(team, agentNamespace, agentEndpoint string) bundle.TenantClo
 			}},
 		}},
 	}
+	cloud.Templates = append(cloud.Templates, lifted...)
+	return cloud
 }
 
 // tenantNodeLabel returns the reserved node label design D12's agent fence
@@ -175,9 +178,9 @@ func injectTenantCloudCredentials(yamlDoc string, creds []tenantCloudCredential)
 }
 
 // applyCellContent assembles a cell's tenant items and clouds onto mat, and
-// merges them in (design D7, D10, D11). It records the BundleKeysIgnored
-// and CredentialSkipped tenantWarnings on cr.Status.Cell. A no-op for a
-// controller that is not a cell.
+// merges them in (design D7, D10, D11). It records the BundleKeysIgnored,
+// PodTemplateSkipped, and CredentialSkipped tenantWarnings on
+// cr.Status.Cell. A no-op for a controller that is not a cell.
 //
 // It does NOT merge each tenant's pipeline-template fragment into
 // mat.JenkinsYAML. It only carries them on mat.CellTemplateFragments, for

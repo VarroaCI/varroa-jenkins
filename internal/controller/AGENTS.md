@@ -763,13 +763,30 @@ sections describe.
     own `durabilityHint` property (`items.DurabilityHint`) overrides this
     default; the plugin's `RunStatePusher` then pushes no state for that
     job, so a lower hint opts a job fully out of the mesh, not partway. And
-    `tenantCloudFor`, the
-    operator's constant agent pod template per tenant), `cell_items_assembly.go`
+    `tenantCloudFor`, which builds a tenant's cloud from the operator's
+    constant `<team>-default` pod template followed by the lifted templates
+    it receives), `cell_pod_templates.go` (`liftTenantPodTemplates` reads
+    every kubernetes cloud's `templates` list of a tenant's `jenkins.yaml` in
+    bundle order. It resolves the tenant's own `variables.yaml`
+    (`parseBundleVariables`, shared with `resolveBundleForController`) once,
+    then applies the six skip rules in fixed order, each a
+    `PodTemplateSkipped` warning. It stamps `name`, `namespace`,
+    `serviceAccount`, and `label`, drops `labels`, rewrites `inheritFrom`,
+    and puts every other key on `TenantCloudTemplate.Raw`. It never lifts a
+    template that holds `${` after that resolve, because the cell's
+    `ResolveVars` and unresolved-variable check run over the lifted text. Any
+    other `jenkins.yaml` content is residue: one `BundleKeysIgnored` warning
+    naming each sorted path, never a cell failure), `cell_items_assembly.go`
     (`assembleCellContent` runs the tenant items pipeline — `items.ReRoot`
     then `items.Merge` per tenant, `lint.Run` against `cellLintRules`
     (`NoPollSCMRule`, `NoGlobalCredentialsRule`,
     `NoControllerConfigDependencyRule`) before a push — plus tenant cloud,
-    credential, and pipeline-template fragment assembly: a non-draining
+    credential, and pipeline-template fragment assembly. Per tenant it calls
+    `readTenantBundleContent`, then `tenantBundleCloudContent` (the lift plus
+    the `plugins.yaml`/`rbac.yaml` warnings), then, for a non-draining
+    tenant only, `materializeTenantManifest` and the folder. A draining
+    tenant keeps its lifted templates, and a read fault for it logs and
+    lifts nothing instead of failing the cell. A non-draining
     tenant's own materialized `PipelineTemplatesYAML`, when non-blank, becomes
     one `bundle.CellTemplateFragment{Folder: team.Name, ...}` entry, returned
     on `assembleCellState.TemplateFragments` for the caller to merge via

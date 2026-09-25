@@ -2244,3 +2244,48 @@ func TestTeamReconciler_AgentService_TeardownHoldsFinalizerUntilTheDrain(t *test
 		t.Errorf("the stale namespaces are %v, want none", got)
 	}
 }
+
+// foldTenantWarnings runs setTenantWarningsCondition for the Team payments
+// placed on cell-a, whose tenantWarnings list is entries, and returns the
+// TenantWarnings condition.
+func foldTenantWarnings(t *testing.T, entries []v1alpha1.TenantWarning) v1alpha1.TeamCondition {
+	t.Helper()
+	cell := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "cell-a", Namespace: "cells-ns"},
+		Status:     v1alpha1.ControllerStatus{Cell: &v1alpha1.CellStatus{TenantWarnings: entries}},
+	}
+	team := &v1alpha1.Team{ObjectMeta: metav1.ObjectMeta{Name: "payments"}}
+	status := &v1alpha1.TeamStatus{Placement: &v1alpha1.TeamPlacementStatus{Cell: "cell-a", CellNamespace: "cells-ns"}}
+	rec := &TeamReconciler{}
+	rec.setTenantWarningsCondition(status, team, map[string]*v1alpha1.Controller{teamCellKey("cells-ns", "cell-a"): cell})
+	for _, c := range status.Conditions {
+		if c.Type == v1alpha1.TeamConditionTenantWarnings {
+			return c
+		}
+	}
+	t.Fatal("expected a TenantWarnings condition")
+	return v1alpha1.TeamCondition{}
+}
+
+func TestSetTenantWarningsCondition_BundleKeysIgnoredOutranksPodTemplateSkipped(t *testing.T) {
+	cond := foldTenantWarnings(t, []v1alpha1.TenantWarning{
+		{Tenant: "payments", Reason: v1alpha1.TeamReasonPodTemplateSkipped, Message: `pod template "default": the name "default" is reserved`},
+		{Tenant: "payments", Reason: v1alpha1.TeamReasonBundleKeysIgnored, Message: `tenant bundle key "plugins.yaml" is ignored on a cell`},
+	})
+	if cond.Reason != v1alpha1.TeamReasonBundleKeysIgnored {
+		t.Errorf("expected reason BundleKeysIgnored, got %q", cond.Reason)
+	}
+	if !strings.Contains(cond.Message, "BundleKeysIgnored: ") || !strings.Contains(cond.Message, "PodTemplateSkipped: ") {
+		t.Errorf("expected both entries in the message, got %q", cond.Message)
+	}
+}
+
+func TestSetTenantWarningsCondition_PodTemplateSkippedOutranksCredentialSkipped(t *testing.T) {
+	cond := foldTenantWarnings(t, []v1alpha1.TenantWarning{
+		{Tenant: "payments", Reason: v1alpha1.TeamReasonCredentialSkipped, Message: "duplicate credential id"},
+		{Tenant: "payments", Reason: v1alpha1.TeamReasonPodTemplateSkipped, Message: `pod template "golang": label is not a string`},
+	})
+	if cond.Reason != v1alpha1.TeamReasonPodTemplateSkipped {
+		t.Errorf("expected reason PodTemplateSkipped, got %q", cond.Reason)
+	}
+}

@@ -25,6 +25,10 @@ type TenantCloudTemplate struct {
 	ServiceAccount string
 	Labels         string
 	Containers     []TenantCloudContainer
+	// Raw holds the pass-through keys of a pod template lifted from a
+	// tenant bundle. The renderer writes Raw first, and the typed keys
+	// then win, so a tenant key never replaces a stamped key.
+	Raw map[string]any
 }
 
 // TenantCloud is one kubernetes cloud entry appended to jenkins.clouds for
@@ -138,15 +142,21 @@ func tenantCloudMap(tc TenantCloud) map[string]any {
 	return m
 }
 
+// tenantCloudTemplateMap renders one pod template. It starts from a
+// shallow copy of t.Raw and then writes the typed keys, so a typed key
+// always wins over the same key in Raw. It writes containers from the
+// typed field only when that field is not empty.
 func tenantCloudTemplateMap(t TenantCloudTemplate) map[string]any {
-	m := map[string]any{
-		"name":           t.Name,
-		"namespace":      t.Namespace,
-		"serviceAccount": t.ServiceAccount,
-		// The kubernetes plugin's PodTemplate attribute is the singular
-		// "label"; a "labels" key fails the whole JCasC reload.
-		"label": t.Labels,
+	m := make(map[string]any, len(t.Raw)+5)
+	for k, v := range t.Raw {
+		m[k] = v
 	}
+	m["name"] = t.Name
+	m["namespace"] = t.Namespace
+	m["serviceAccount"] = t.ServiceAccount
+	// The kubernetes plugin's PodTemplate attribute is the singular
+	// "label"; a "labels" key fails the whole JCasC reload.
+	m["label"] = t.Labels
 	if len(t.Containers) > 0 {
 		containers := make([]any, 0, len(t.Containers))
 		for _, c := range t.Containers {

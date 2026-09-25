@@ -523,19 +523,7 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 	}
 
 	// Restore bundle-defined variables from the ConfigMap.
-	vars := make(bundle.Variables)
-	if varYAML := data["variables.yaml"]; varYAML != "" {
-		for _, line := range strings.Split(varYAML, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				vars[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
-			}
-		}
-	}
+	vars := parseBundleVariables(data["variables.yaml"])
 
 	// Inject varroa_controller_* variables (highest priority).
 	// The endpoint must point at the UID-named Service (controllerPrefix(cr)+"-svc",
@@ -721,6 +709,25 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 	clearBundleFailed(cr)
 
 	return mat, cb.Status.ResolvedHash, ident, artifactCond, nil
+}
+
+// parseBundleVariables reads the "name: value" lines of a content
+// ConfigMap's variables.yaml. It skips blank lines and "#" comments. The
+// controller's own bundle and a cell tenant's pod-template lift both use
+// it, so both read one format the same way.
+func parseBundleVariables(varYAML string) bundle.Variables {
+	vars := make(bundle.Variables)
+	for _, line := range strings.Split(varYAML, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) == 2 {
+			vars[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		}
+	}
+	return vars
 }
 
 // findUnresolvedVars scans content for remaining ${var} placeholders.
