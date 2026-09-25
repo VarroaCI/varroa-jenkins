@@ -52,11 +52,6 @@ items:
           name: freestyle-params-triggers
           displayName: FreeStyle Parameters and Triggers
           description: FreeStyle job with build parameters and SCM trigger
-          triggers:
-            - pollSCM:
-                scmpoll_spec: H/5 * * * *
-            - cron:
-                spec: 0 2 * * *
           parameters:
             - string:
                 name: BRANCH
@@ -73,6 +68,11 @@ items:
             - booleanParam:
                 name: DRY_RUN
                 description: Dry run only
+          triggers:
+            - pollSCM:
+                scmpoll_spec: H/5 * * * *
+            - cron:
+                spec: 0 2 * * *
     - kind: folder
       name: challenge-freestyle-varroa-upstream-trigger
       items:
@@ -355,6 +355,29 @@ items:
             - kubernetes:
                 permittedClouds:
                     - team-a
+    - kind: folder
+      name: challenge-credential-type-sshprivatekey
+      items:
+        - kind: folder
+          name: credential-type-sshprivatekey
+          displayName: Folder with an SSH Credential
+          description: Folder with a basicSSHUserPrivateKey credential
+          properties:
+            - folderCredentialsProperty:
+                folderCredentials:
+                    - credentials:
+                        - basicSSHUserPrivateKey:
+                            id: deploy-key
+                            scope: GLOBAL
+                            description: GitHub deploy key
+                            username: git
+                            passphrase: fixture-passphrase
+                            privateKeySource:
+                                directEntry:
+                                    privateKey: |
+                                        -----BEGIN FIXTURE KEY-----
+                                        RklYVFVSRS1PTkxZLU5PVC1BLVJFQUwtS0VZ
+                                        -----END FIXTURE KEY-----
     - kind: folder
       name: challenge-deep-nested-folders
       items:

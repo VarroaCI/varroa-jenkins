@@ -574,8 +574,29 @@ type DomainConfig struct{}
 
 // FolderCredential is a union of credential types.
 type FolderCredential struct {
-	UsernamePassword *UsernamePasswordCredential `yaml:"usernamePassword,omitempty"`
-	SecretText       *SecretTextCredential       `yaml:"secretText,omitempty"`
+	UsernamePassword       *UsernamePasswordCredential       `yaml:"usernamePassword,omitempty"`
+	SecretText             *SecretTextCredential             `yaml:"secretText,omitempty"`
+	BasicSSHUserPrivateKey *BasicSSHUserPrivateKeyCredential `yaml:"basicSSHUserPrivateKey,omitempty"`
+}
+
+// BasicSSHUserPrivateKeyCredential is an SSH username and private key credential.
+type BasicSSHUserPrivateKeyCredential struct {
+	ID               string           `yaml:"id"`
+	Scope            string           `yaml:"scope,omitempty"`
+	Description      string           `yaml:"description,omitempty"`
+	Username         string           `yaml:"username"`
+	Passphrase       string           `yaml:"passphrase,omitempty"`
+	PrivateKeySource PrivateKeySource `yaml:"privateKeySource"`
+}
+
+// PrivateKeySource is a union of private key sources; only direct entry is supported.
+type PrivateKeySource struct {
+	DirectEntry *DirectEntryPrivateKeySource `yaml:"directEntry,omitempty"`
+}
+
+// DirectEntryPrivateKeySource holds the private key text itself.
+type DirectEntryPrivateKeySource struct {
+	PrivateKey string `yaml:"privateKey"`
 }
 
 // UsernamePasswordCredential is a username/password credential.

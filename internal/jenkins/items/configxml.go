@@ -859,8 +859,29 @@ type domainXML struct {
 type domainSpecificationsXML struct{}
 
 type credentialListXML struct {
-	UsernamePassword []*usernamePasswordCredXML `xml:"com.cloudbees.plugins.credentials.impl.UsernamePasswordCredentialsImpl,omitempty"`
-	SecretText       []*secretTextCredXML       `xml:"org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl,omitempty"`
+	UsernamePassword       []*usernamePasswordCredXML       `xml:"com.cloudbees.plugins.credentials.impl.UsernamePasswordCredentialsImpl,omitempty"`
+	SecretText             []*secretTextCredXML             `xml:"org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl,omitempty"`
+	BasicSSHUserPrivateKey []*basicSSHUserPrivateKeyCredXML `xml:"com.cloudbees.jenkins.plugins.sshcredentials.impl.BasicSSHUserPrivateKey,omitempty"`
+}
+
+// directEntryPrivateKeySourceClass is the XStream class of a direct-entry
+// key source. Jenkins cannot read the key source without it.
+const directEntryPrivateKeySourceClass = "com.cloudbees.jenkins.plugins.sshcredentials.impl.BasicSSHUserPrivateKey$DirectEntryPrivateKeySource"
+
+// basicSSHUserPrivateKeyCredXML always renders the passphrase element, so
+// XStream reads an empty Secret and never a null field.
+type basicSSHUserPrivateKeyCredXML struct {
+	Scope            string              `xml:"scope"`
+	ID               string              `xml:"id"`
+	Description      string              `xml:"description,omitempty"`
+	Username         string              `xml:"username"`
+	PrivateKeySource privateKeySourceXML `xml:"privateKeySource"`
+	Passphrase       string              `xml:"passphrase"`
+}
+
+type privateKeySourceXML struct {
+	Class      string `xml:"class,attr"`
+	PrivateKey string `xml:"privateKey"`
 }
 
 type usernamePasswordCredXML struct {
@@ -952,6 +973,22 @@ func buildFolderProperties(item Item) (*folderPropertiesXML, error) {
 							ID:          c.SecretText.ID,
 							Description: c.SecretText.Description,
 							Secret:      c.SecretText.Secret,
+						})
+					case c.BasicSSHUserPrivateKey != nil:
+						k := c.BasicSSHUserPrivateKey
+						if k.PrivateKeySource.DirectEntry == nil {
+							return nil, fmt.Errorf("basicSSHUserPrivateKey credential %q has no directEntry private key source", k.ID)
+						}
+						creds.BasicSSHUserPrivateKey = append(creds.BasicSSHUserPrivateKey, &basicSSHUserPrivateKeyCredXML{
+							Scope:       k.Scope,
+							ID:          k.ID,
+							Description: k.Description,
+							Username:    k.Username,
+							PrivateKeySource: privateKeySourceXML{
+								Class:      directEntryPrivateKeySourceClass,
+								PrivateKey: k.PrivateKeySource.DirectEntry.PrivateKey,
+							},
+							Passphrase: k.Passphrase,
 						})
 					default:
 						return nil, fmt.Errorf("folder credential entry has no recognized credential type")

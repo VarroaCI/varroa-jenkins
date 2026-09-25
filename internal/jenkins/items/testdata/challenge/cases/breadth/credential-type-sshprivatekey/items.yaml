@@ -1,0 +1,21 @@
+items:
+  - kind: folder
+    name: credential-type-sshprivatekey
+    displayName: "Folder with an SSH Credential"
+    description: "Folder with a basicSSHUserPrivateKey credential"
+    properties:
+      - folderCredentialsProperty:
+          folderCredentials:
+            - credentials:
+                - basicSSHUserPrivateKey:
+                    id: deploy-key
+                    scope: GLOBAL
+                    description: "GitHub deploy key"
+                    username: git
+                    passphrase: fixture-passphrase
+                    privateKeySource:
+                      directEntry:
+                        privateKey: |
+                          -----BEGIN FIXTURE KEY-----
+                          RklYVFVSRS1PTkxZLU5PVC1BLVJFQUwtS0VZ
+                          -----END FIXTURE KEY-----

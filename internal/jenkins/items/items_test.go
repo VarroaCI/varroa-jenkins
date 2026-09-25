@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/varroaci/varroa-jenkins/internal/jenkins"
 )
 
@@ -797,5 +799,125 @@ items:
 				}
 			}
 		})
+	}
+}
+
+func sshCredentialFolder(cred BasicSSHUserPrivateKeyCredential) Item {
+	return Item{
+		Kind: "folder",
+		Name: "tenant",
+		Properties: []Property{
+			{FolderCredentialsProperty: &FolderCredentialsProperty{
+				FolderCredentials: []FolderCredentialEntry{{
+					Credentials: []FolderCredential{{BasicSSHUserPrivateKey: &cred}},
+				}},
+			}},
+		},
+	}
+}
+
+func TestBasicSSHUserPrivateKey_MarshalsJCasCShape(t *testing.T) {
+	cred := FolderCredential{BasicSSHUserPrivateKey: &BasicSSHUserPrivateKeyCredential{
+		ID:               "deploy-key",
+		Scope:            "GLOBAL",
+		Username:         "git",
+		PrivateKeySource: PrivateKeySource{DirectEntry: &DirectEntryPrivateKeySource{PrivateKey: "KEY"}},
+	}}
+	out, err := yaml.Marshal(cred)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("unmarshal into a map: %v", err)
+	}
+	ssh, _ := doc["basicSSHUserPrivateKey"].(map[string]any)
+	if ssh == nil {
+		t.Fatalf("marshalled YAML has no basicSSHUserPrivateKey key:\n%s", out)
+	}
+	if ssh["id"] != "deploy-key" || ssh["scope"] != "GLOBAL" || ssh["username"] != "git" {
+		t.Errorf("unexpected credential fields: %v", ssh)
+	}
+	source, _ := ssh["privateKeySource"].(map[string]any)
+	direct, _ := source["directEntry"].(map[string]any)
+	if direct == nil || direct["privateKey"] != "KEY" {
+		t.Errorf("privateKeySource.directEntry.privateKey is not KEY:\n%s", out)
+	}
+	if _, ok := ssh["passphrase"]; ok {
+		t.Errorf("an empty passphrase must be omitted:\n%s", out)
+	}
+
+	var back FolderCredential
+	if err := yaml.Unmarshal(out, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back.BasicSSHUserPrivateKey == nil || back.BasicSSHUserPrivateKey.PrivateKeySource.DirectEntry == nil ||
+		back.BasicSSHUserPrivateKey.PrivateKeySource.DirectEntry.PrivateKey != "KEY" {
+		t.Errorf("round trip lost the key: %+v", back)
+	}
+}
+
+func TestBuildFolderProperties_BasicSSHUserPrivateKey(t *testing.T) {
+	key := "-----BEGIN FIXTURE KEY-----\nabc<def&ghi\n-----END FIXTURE KEY-----"
+	cases := []struct {
+		name       string
+		passphrase string
+		wantPass   string
+	}{
+		{"with passphrase", "s3cret", "<passphrase>s3cret</passphrase>"},
+		{"no passphrase", "", "<passphrase></passphrase>"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			item := sshCredentialFolder(BasicSSHUserPrivateKeyCredential{
+				ID:               "deploy-key",
+				Scope:            "GLOBAL",
+				Description:      "GitHub deploy key",
+				Username:         "git",
+				Passphrase:       tc.passphrase,
+				PrivateKeySource: PrivateKeySource{DirectEntry: &DirectEntryPrivateKeySource{PrivateKey: key}},
+			})
+			got, err := GenerateConfigXML(item)
+			if err != nil {
+				t.Fatalf("GenerateConfigXML: %v", err)
+			}
+			for _, want := range []string{
+				"<com.cloudbees.jenkins.plugins.sshcredentials.impl.BasicSSHUserPrivateKey>",
+				`<privateKeySource class="com.cloudbees.jenkins.plugins.sshcredentials.impl.BasicSSHUserPrivateKey$DirectEntryPrivateKeySource">`,
+				"abc&lt;def&amp;ghi",
+				tc.wantPass,
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("config.xml lacks %q:\n%s", want, got)
+				}
+			}
+			last := -1
+			for _, el := range []string{
+				"<scope>GLOBAL</scope>",
+				"<id>deploy-key</id>",
+				"<description>GitHub deploy key</description>",
+				"<username>git</username>",
+				"<privateKeySource",
+				"<passphrase>",
+			} {
+				idx := strings.Index(got, el)
+				if idx <= last {
+					t.Fatalf("element %q is missing or out of order in:\n%s", el, got)
+				}
+				last = idx
+			}
+		})
+	}
+}
+
+func TestBuildFolderProperties_BasicSSHUserPrivateKeyNoKeySource(t *testing.T) {
+	item := sshCredentialFolder(BasicSSHUserPrivateKeyCredential{ID: "deploy-key", Scope: "GLOBAL", Username: "git"})
+	_, err := GenerateConfigXML(item)
+	if err == nil {
+		t.Fatal("expected an error for a credential with no directEntry key source")
+	}
+	want := `basicSSHUserPrivateKey credential "deploy-key" has no directEntry private key source`
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error %q does not contain %q", err, want)
 	}
 }

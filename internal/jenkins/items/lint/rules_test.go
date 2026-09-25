@@ -107,6 +107,43 @@ func TestNoGlobalCredentialsRule_AllowsFolderGlobalScope(t *testing.T) {
 	}
 }
 
+func sshCredentialTenantFolder(scope string) items.Item {
+	return items.Item{
+		Kind: "folder",
+		Name: "tenant",
+		Properties: []items.Property{
+			{FolderCredentialsProperty: &items.FolderCredentialsProperty{
+				FolderCredentials: []items.FolderCredentialEntry{{
+					Credentials: []items.FolderCredential{{BasicSSHUserPrivateKey: &items.BasicSSHUserPrivateKeyCredential{
+						ID:       "deploy-key",
+						Scope:    scope,
+						Username: "git",
+						PrivateKeySource: items.PrivateKeySource{
+							DirectEntry: &items.DirectEntryPrivateKeySource{PrivateKey: "k"},
+						},
+					}}},
+				}},
+			}},
+		},
+	}
+}
+
+func TestNoGlobalCredentialsRule_AllowsSSHPrivateKeyGlobalScope(t *testing.T) {
+	if findings := (NoGlobalCredentialsRule{}).Check(sshCredentialTenantFolder("GLOBAL"), "tenant"); len(findings) != 0 {
+		t.Errorf("expected no findings for a GLOBAL SSH credential on a folder, got %+v", findings)
+	}
+}
+
+func TestNoGlobalCredentialsRule_RejectsSSHPrivateKeySystemScope(t *testing.T) {
+	findings := NoGlobalCredentialsRule{}.Check(sshCredentialTenantFolder("SYSTEM"), "tenant")
+	if len(findings) != 1 {
+		t.Fatalf("expected one finding, got %d: %+v", len(findings), findings)
+	}
+	if findings[0].Rule != "no-global-credentials" {
+		t.Errorf("unexpected rule id: %q", findings[0].Rule)
+	}
+}
+
 func TestNoControllerConfigDependencyRule_AllowsEveryExistingPropertyField(t *testing.T) {
 	item := items.Item{
 		Kind: "folder",

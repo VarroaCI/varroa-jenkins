@@ -76,13 +76,16 @@ func (r NoGlobalCredentialsRule) Check(item items.Item, path string) []Finding {
 }
 
 // credentialScope returns the scope of whichever credential kind is set, or
-// the empty string when neither is.
+// the empty string when no kind is set. A kind missing here passes the
+// no-global-credentials check with any scope.
 func credentialScope(c items.FolderCredential) string {
 	switch {
 	case c.UsernamePassword != nil:
 		return c.UsernamePassword.Scope
 	case c.SecretText != nil:
 		return c.SecretText.Scope
+	case c.BasicSSHUserPrivateKey != nil:
+		return c.BasicSSHUserPrivateKey.Scope
 	default:
 		return ""
 	}

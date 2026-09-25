@@ -9,7 +9,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
 )
 
-// Tenant-credential Secret label, annotations, and kinds (design D8).
+// Tenant-credential Secret label, annotations, and the three credential kinds.
 const (
 	tenantCredentialLabelSelector = "varroa.dev/tenant-credential=true"
 
@@ -19,6 +19,7 @@ const (
 
 	credentialKindUsernamePassword = "usernamePassword"
 	credentialKindSecretText       = "secretText"
+	credentialKindSSHPrivateKey    = "sshPrivateKey"
 )
 
 // projectTenantCredentials lists agentNamespace's tenant-credential Secrets
@@ -117,6 +118,25 @@ func (r *Reconciler) buildTenantCredential(ctx context.Context, tenant, agentNam
 			Scope:       "GLOBAL",
 			Description: ann[annotationCredentialDescription],
 			Secret:      string(secret),
+		}
+	case credentialKindSSHPrivateKey:
+		privateKey, username := data["privateKey"], data["username"]
+		if len(privateKey) == 0 {
+			return nil, skip("sshPrivateKey secret missing the privateKey data key")
+		}
+		if len(username) == 0 {
+			return nil, skip("sshPrivateKey secret missing the username data key")
+		}
+		// An empty or missing passphrase means a key with no passphrase.
+		cred.BasicSSHUserPrivateKey = &items.BasicSSHUserPrivateKeyCredential{
+			ID:          id,
+			Scope:       "GLOBAL",
+			Description: ann[annotationCredentialDescription],
+			Username:    string(username),
+			Passphrase:  string(data["passphrase"]),
+			PrivateKeySource: items.PrivateKeySource{
+				DirectEntry: &items.DirectEntryPrivateKeySource{PrivateKey: string(privateKey)},
+			},
 		}
 	default:
 		return nil, skip(fmt.Sprintf("unknown credential-kind %q", kind))

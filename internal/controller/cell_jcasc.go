@@ -25,6 +25,16 @@ unclassified:
     durabilityHint: MAX_SURVIVABILITY
 `
 
+// cellGitHostKeyDefault is the git host-key strategy a cell uses when its
+// composed jenkins.yaml sets none. It is the merge base, so a strategy in
+// the cell bundle wins. A tenant agent pod and the cell home start with no
+// known_hosts file, so the git-client default strategy fails every SSH
+// checkout.
+const cellGitHostKeyDefault = `security:
+  gitHostKeyVerificationConfiguration:
+    sshHostKeyVerificationStrategy: "acceptFirstConnectionStrategy"
+`
+
 // The operator's own constant agent pod template (design D11). A
 // JenkinsVersionProfile carries no pod template, so this mirrors the
 // starter bundle's pinned agent image and resources
@@ -196,6 +206,12 @@ func (r *Reconciler) applyCellContent(ctx context.Context, cr *v1alpha1.Controll
 	if !isCellController(cr) {
 		return nil
 	}
+
+	withDefault, err := bundle.MergeJenkinsYAML(cellGitHostKeyDefault, mat.JenkinsYAML)
+	if err != nil {
+		return fmt.Errorf("merge cell git host-key default: %w", err)
+	}
+	mat.JenkinsYAML = withDefault
 
 	merged, err := bundle.MergeJenkinsYAML(mat.JenkinsYAML, cellJCascDocument)
 	if err != nil {

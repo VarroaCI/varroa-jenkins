@@ -138,9 +138,35 @@ Expect `"status":"True","reason":"TenantPlaced"`.
     secret: <token>
   ```
 
-  `varroa.dev/credential-kind` is `usernamePassword` (data keys `username` and `password`) or
-  `secretText` (data key `secret`). A `Secret` with a missing key, an unknown kind, or a
-  duplicate id is skipped, and the `Team`'s `TenantWarnings` condition records it.
+  `varroa.dev/credential-kind` is `usernamePassword` (data keys `username` and `password`),
+  `secretText` (data key `secret`), or `sshPrivateKey` (data keys `privateKey` and `username`,
+  optional `passphrase`). A `Secret` with a missing key, an unknown kind, or a duplicate id is
+  skipped, and the `Team`'s `TenantWarnings` condition records it. A GitHub deploy key:
+
+  ```yaml
+  apiVersion: v1
+  kind: Secret
+  metadata:
+    name: payments-deploy-key
+    namespace: team-payments
+    labels:
+      varroa.dev/tenant-credential: "true"
+    annotations:
+      varroa.dev/credential-id: github-deploy-key
+      varroa.dev/credential-kind: sshPrivateKey
+  stringData:
+    username: git
+    privateKey: |
+      -----BEGIN FIXTURE KEY-----
+      <key>
+      -----END FIXTURE KEY-----
+  ```
+
+  A [runner](runners.md) credential `Secret` uses the same data keys, but it needs its own
+  `Secret` and label. A cell trusts a git host key on the first connection, because an agent
+  pod has no `known_hosts` file. To pin host keys, set
+  `security.gitHostKeyVerificationConfiguration.sshHostKeyVerificationStrategy` in the cell's own
+  bundle.
 - **Folder libraries.** A tenant bundle may declare `folderLibraries` on the folder item, with
   the source retriever pipeline-groovy-lib needs.
 
@@ -293,22 +319,12 @@ lack one. The claimer retries on its own.
 ## Interrupted runs
 
 The recorder marks a `RUNNING` run interrupted only when its cell process is gone, not because
-its last event is old.
-
-| Test | Condition | Reason |
-|---|---|---|
-| Moved | No heartbeat for 5 minutes, and the run's cell instance differs from the tenant's current one | `cell-rolled` or `tenant-moved` |
-| Silent | No heartbeat for 15 minutes | `no-heartbeat` |
-
-Both tests need a signal naming the run's cell instance gone; a slow cell marks nothing.
-The moved test also covers a single-tenant controller: its replaced pod is reported dead.
+its last event is old. [Cell loss](cell-loss.md) describes the signals, the windows, and the
+reasons. The same marks apply to a single-tenant controller whose pod is replaced.
 
 Marking sets the run's result to `INTERRUPTED` and releases no fleet lock; only a terminal event
 or a confirmed dead instance does. The recorder cancels the build only when its cell instance is
 alive.
-
-The recorder writes one `build.interrupted` activity row per marked run, visible to a live
-subscriber only on its next backfill.
 
 Set `interruptedRetry: automatic` to retry an interrupted run once; the default, `manual`,
 leaves the retry to a user.

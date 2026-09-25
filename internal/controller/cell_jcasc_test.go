@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -84,6 +85,92 @@ func TestApplyCellContent_NotACellIsNoop(t *testing.T) {
 	}
 	if mat.JenkinsYAML != original {
 		t.Errorf("non-cell controller's jenkins.yaml changed: got %q, want %q", mat.JenkinsYAML, original)
+	}
+}
+
+// gitHostKeyStrategyOf returns
+// security.gitHostKeyVerificationConfiguration.sshHostKeyVerificationStrategy
+// from a JCasC document, and whether the path exists.
+func gitHostKeyStrategyOf(t *testing.T, jenkinsYAML string) (any, bool) {
+	t.Helper()
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(jenkinsYAML), &doc); err != nil {
+		t.Fatalf("unmarshal jcasc: %v", err)
+	}
+	security, _ := doc["security"].(map[string]any)
+	config, _ := security["gitHostKeyVerificationConfiguration"].(map[string]any)
+	if config == nil {
+		return nil, false
+	}
+	strategy, ok := config["sshHostKeyVerificationStrategy"]
+	return strategy, ok
+}
+
+func TestApplyCellContent_DefaultGitHostKeyStrategy(t *testing.T) {
+	for name, jenkinsYAML := range map[string]string{
+		"empty bundle":               "",
+		"bundle with no strategy":    "jenkins:\n  systemMessage: hi\n",
+		"bundle with other security": "security:\n  scriptApproval:\n    approvedSignatures: []\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := newTestReconciler(newTestClient())
+			mat := &bundle.MaterializedBundle{JenkinsYAML: jenkinsYAML}
+			if err := rec.applyCellContent(context.Background(), cellControllerFixture(), mat, "http://cell1-svc.ns1.svc.cluster.local:8080"); err != nil {
+				t.Fatalf("applyCellContent: %v", err)
+			}
+			strategy, ok := gitHostKeyStrategyOf(t, mat.JenkinsYAML)
+			if !ok || strategy != "acceptFirstConnectionStrategy" {
+				t.Errorf("sshHostKeyVerificationStrategy = %v (present %v), want acceptFirstConnectionStrategy:\n%s", strategy, ok, mat.JenkinsYAML)
+			}
+			if strings.Contains(jenkinsYAML, "scriptApproval") && !strings.Contains(mat.JenkinsYAML, "scriptApproval") {
+				t.Errorf("the bundle's other security keys did not survive the merge:\n%s", mat.JenkinsYAML)
+			}
+		})
+	}
+}
+
+func TestApplyCellContent_BundleGitHostKeyStrategyWins(t *testing.T) {
+	t.Run("string", func(t *testing.T) {
+		rec := newTestReconciler(newTestClient())
+		mat := &bundle.MaterializedBundle{JenkinsYAML: "security:\n  gitHostKeyVerificationConfiguration:\n    sshHostKeyVerificationStrategy: noHostKeyVerificationStrategy\n"}
+		if err := rec.applyCellContent(context.Background(), cellControllerFixture(), mat, "http://cell1-svc.ns1.svc.cluster.local:8080"); err != nil {
+			t.Fatalf("applyCellContent: %v", err)
+		}
+		strategy, _ := gitHostKeyStrategyOf(t, mat.JenkinsYAML)
+		if strategy != "noHostKeyVerificationStrategy" {
+			t.Errorf("sshHostKeyVerificationStrategy = %v, want the bundle's noHostKeyVerificationStrategy", strategy)
+		}
+	})
+	t.Run("map", func(t *testing.T) {
+		rec := newTestReconciler(newTestClient())
+		mat := &bundle.MaterializedBundle{JenkinsYAML: "security:\n  gitHostKeyVerificationConfiguration:\n    sshHostKeyVerificationStrategy:\n      manuallyProvidedKeyVerificationStrategy:\n        approvedHostKeys: \"github.com ssh-ed25519 AAAA\"\n"}
+		if err := rec.applyCellContent(context.Background(), cellControllerFixture(), mat, "http://cell1-svc.ns1.svc.cluster.local:8080"); err != nil {
+			t.Fatalf("applyCellContent: %v", err)
+		}
+		strategy, _ := gitHostKeyStrategyOf(t, mat.JenkinsYAML)
+		m, ok := strategy.(map[string]any)
+		if !ok {
+			t.Fatalf("sshHostKeyVerificationStrategy = %v, want the bundle's map", strategy)
+		}
+		manual, _ := m["manuallyProvidedKeyVerificationStrategy"].(map[string]any)
+		if manual == nil || manual["approvedHostKeys"] != "github.com ssh-ed25519 AAAA" {
+			t.Errorf("the bundle's manual strategy did not survive the merge: %v", m)
+		}
+		if strings.Contains(mat.JenkinsYAML, "acceptFirstConnectionStrategy") {
+			t.Errorf("the default strategy leaked next to the bundle's map:\n%s", mat.JenkinsYAML)
+		}
+	})
+}
+
+func TestApplyCellContent_NonCellGetsNoGitHostKeyDefault(t *testing.T) {
+	rec := newTestReconciler(newTestClient())
+	cr := testController("normal", "ns1", v1alpha1.ControllerPhaseConnected)
+	mat := &bundle.MaterializedBundle{JenkinsYAML: "jenkins:\n  systemMessage: hi\n"}
+	if err := rec.applyCellContent(context.Background(), cr, mat, ""); err != nil {
+		t.Fatalf("applyCellContent: %v", err)
+	}
+	if strings.Contains(mat.JenkinsYAML, "gitHostKeyVerificationConfiguration") {
+		t.Errorf("a controller that is not a cell got the git host-key default:\n%s", mat.JenkinsYAML)
 	}
 }
 

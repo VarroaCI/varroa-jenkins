@@ -176,6 +176,167 @@ func TestProjectTenantCredentials_DuplicateIDSkipped(t *testing.T) {
 	}
 }
 
+const testSSHPrivateKey = "-----BEGIN FIXTURE KEY-----\nZmFrZQ==\n-----END FIXTURE KEY-----\n"
+
+// projectedCredentials returns the credentials of folder's single
+// folder-credentials entry, or nil when folder has none.
+func projectedCredentials(t *testing.T, folder *items.Item) []items.FolderCredential {
+	t.Helper()
+	for _, p := range folder.Properties {
+		if p.FolderCredentialsProperty != nil {
+			if len(p.FolderCredentialsProperty.FolderCredentials) != 1 {
+				t.Fatalf("expected one folder-credentials entry, got %+v", p.FolderCredentialsProperty)
+			}
+			return p.FolderCredentialsProperty.FolderCredentials[0].Credentials
+		}
+	}
+	return nil
+}
+
+func sshCredentialAnnotations(id string) map[string]string {
+	return map[string]string{
+		"varroa.dev/credential-id":          id,
+		"varroa.dev/credential-kind":        "sshPrivateKey",
+		"varroa.dev/credential-description": "GitHub deploy key",
+	}
+}
+
+func TestProjectTenantCredentials_SSHPrivateKey(t *testing.T) {
+	client := newTestClient()
+	seedTenantCredentialSecret(t, client, "deploy-key", sshCredentialAnnotations("varroa-ci-deploy-key"),
+		map[string][]byte{
+			"privateKey": []byte(testSSHPrivateKey),
+			"username":   []byte("git"),
+			"passphrase": []byte("s3cret"),
+		},
+	)
+	rec := newTestReconciler(client)
+	folder := newFolderItem(t)
+
+	warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %+v", warnings)
+	}
+	creds := projectedCredentials(t, folder)
+	if len(creds) != 1 || creds[0].BasicSSHUserPrivateKey == nil {
+		t.Fatalf("expected one basicSSHUserPrivateKey credential, got %+v", creds)
+	}
+	got := creds[0].BasicSSHUserPrivateKey
+	if got.ID != "varroa-ci-deploy-key" || got.Scope != "GLOBAL" || got.Description != "GitHub deploy key" ||
+		got.Username != "git" || got.Passphrase != "s3cret" {
+		t.Errorf("unexpected credential: %+v", got)
+	}
+	if got.PrivateKeySource.DirectEntry == nil || got.PrivateKeySource.DirectEntry.PrivateKey != testSSHPrivateKey {
+		t.Errorf("unexpected private key source: %+v", got.PrivateKeySource)
+	}
+}
+
+func TestProjectTenantCredentials_SSHPrivateKeyNoPassphrase(t *testing.T) {
+	cases := map[string]map[string][]byte{
+		"no passphrase key": {
+			"privateKey": []byte(testSSHPrivateKey),
+			"username":   []byte("git"),
+		},
+		"empty passphrase key": {
+			"privateKey": []byte(testSSHPrivateKey),
+			"username":   []byte("git"),
+			"passphrase": []byte(""),
+		},
+	}
+	for name, data := range cases {
+		t.Run(name, func(t *testing.T) {
+			client := newTestClient()
+			seedTenantCredentialSecret(t, client, "deploy-key", sshCredentialAnnotations("deploy"), data)
+			rec := newTestReconciler(client)
+			folder := newFolderItem(t)
+
+			warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
+			if len(warnings) != 0 {
+				t.Fatalf("expected no warnings, got %+v", warnings)
+			}
+			creds := projectedCredentials(t, folder)
+			if len(creds) != 1 || creds[0].BasicSSHUserPrivateKey == nil {
+				t.Fatalf("expected one basicSSHUserPrivateKey credential, got %+v", creds)
+			}
+			if creds[0].BasicSSHUserPrivateKey.Passphrase != "" {
+				t.Errorf("expected an empty passphrase, got %q", creds[0].BasicSSHUserPrivateKey.Passphrase)
+			}
+		})
+	}
+}
+
+func TestProjectTenantCredentials_SSHPrivateKeyMissingPrivateKey(t *testing.T) {
+	cases := map[string]map[string][]byte{
+		"missing":             {"username": []byte("git")},
+		"empty":               {"privateKey": []byte(""), "username": []byte("git")},
+		"missing both fields": {},
+	}
+	for name, data := range cases {
+		t.Run(name, func(t *testing.T) {
+			client := newTestClient()
+			seedTenantCredentialSecret(t, client, "deploy-key", sshCredentialAnnotations("deploy"), data)
+			rec := newTestReconciler(client)
+			folder := newFolderItem(t)
+
+			warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
+			want := `secret "deploy-key": sshPrivateKey secret missing the privateKey data key`
+			if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TeamReasonCredentialSkipped || warnings[0].Message != want {
+				t.Fatalf("expected one CredentialSkipped warning %q, got %+v", want, warnings)
+			}
+			if creds := projectedCredentials(t, folder); len(creds) != 0 {
+				t.Errorf("expected no projected credential, got %+v", creds)
+			}
+		})
+	}
+}
+
+func TestProjectTenantCredentials_SSHPrivateKeyMissingUsername(t *testing.T) {
+	cases := map[string]map[string][]byte{
+		"missing": {"privateKey": []byte(testSSHPrivateKey)},
+		"empty":   {"privateKey": []byte(testSSHPrivateKey), "username": []byte("")},
+	}
+	for name, data := range cases {
+		t.Run(name, func(t *testing.T) {
+			client := newTestClient()
+			seedTenantCredentialSecret(t, client, "deploy-key", sshCredentialAnnotations("deploy"), data)
+			rec := newTestReconciler(client)
+			folder := newFolderItem(t)
+
+			warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
+			want := `secret "deploy-key": sshPrivateKey secret missing the username data key`
+			if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TeamReasonCredentialSkipped || warnings[0].Message != want {
+				t.Fatalf("expected one CredentialSkipped warning %q, got %+v", want, warnings)
+			}
+			if creds := projectedCredentials(t, folder); len(creds) != 0 {
+				t.Errorf("expected no projected credential, got %+v", creds)
+			}
+		})
+	}
+}
+
+func TestProjectTenantCredentials_SSHPrivateKeyDuplicateID(t *testing.T) {
+	client := newTestClient()
+	seedTenantCredentialSecret(t, client, "cred-a",
+		map[string]string{"varroa.dev/credential-id": "dup", "varroa.dev/credential-kind": "secretText"},
+		map[string][]byte{"secret": []byte("one")},
+	)
+	seedTenantCredentialSecret(t, client, "cred-b", sshCredentialAnnotations("dup"),
+		map[string][]byte{"privateKey": []byte(testSSHPrivateKey), "username": []byte("git")},
+	)
+	rec := newTestReconciler(client)
+	folder := newFolderItem(t)
+
+	warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
+	want := `secret "cred-b": duplicate credential id "dup"`
+	if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TeamReasonCredentialSkipped || warnings[0].Message != want {
+		t.Fatalf("expected one CredentialSkipped warning %q, got %+v", want, warnings)
+	}
+	creds := projectedCredentials(t, folder)
+	if len(creds) != 1 || creds[0].SecretText == nil || creds[0].BasicSSHUserPrivateKey != nil {
+		t.Fatalf("expected only the earlier secretText credential, got %+v", creds)
+	}
+}
+
 func containsSubstr(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {
@@ -206,6 +367,15 @@ func TestApplyCellContent_TenantCredentialsNeverReachAConfigMap(t *testing.T) {
 		map[string]string{"varroa.dev/credential-id": "st-cred", "varroa.dev/credential-kind": "secretText"},
 		map[string][]byte{"secret": []byte(secretValue)},
 	)
+	const keyBody = "c3NoLWtleS1ib2R5LWZpeHR1cmU"
+	const passphrase = "ssh-key-passphrase-value"
+	seedTenantCredentialSecret(t, client, "cred-ssh", sshCredentialAnnotations("ssh-cred"),
+		map[string][]byte{
+			"privateKey": []byte("-----BEGIN FIXTURE KEY-----\n" + keyBody + "\n-----END FIXTURE KEY-----\n"),
+			"username":   []byte("git"),
+			"passphrase": []byte(passphrase),
+		},
+	)
 
 	rec := newTestReconciler(client)
 	cr := cellControllerFixture()
@@ -215,13 +385,17 @@ func TestApplyCellContent_TenantCredentialsNeverReachAConfigMap(t *testing.T) {
 	if err := rec.applyCellContent(context.Background(), cr, mat, "http://cell1-svc.ns1.svc.cluster.local:8080"); err != nil {
 		t.Fatalf("applyCellContent: %v", err)
 	}
-	if !containsSubstr(mat.ItemsYAML, secretValue) {
-		t.Fatalf("expected the credential value in items.yaml (transported over the mTLS mite stream), got:\n%s", mat.ItemsYAML)
+	for _, value := range []string{secretValue, keyBody, passphrase} {
+		if !containsSubstr(mat.ItemsYAML, value) {
+			t.Fatalf("expected %q in items.yaml (transported over the mTLS mite stream), got:\n%s", value, mat.ItemsYAML)
+		}
 	}
 	for name, data := range client.configMapData {
 		for key, val := range data {
-			if containsSubstr(val, secretValue) {
-				t.Errorf("credential value leaked into ConfigMap %q key %q", name, key)
+			for _, value := range []string{secretValue, keyBody, passphrase} {
+				if containsSubstr(val, value) {
+					t.Errorf("credential value %q leaked into ConfigMap %q key %q", value, name, key)
+				}
 			}
 		}
 	}

@@ -762,7 +762,10 @@ sections describe.
     because a lower level writes the flow program at a checkpoint. A job's
     own `durabilityHint` property (`items.DurabilityHint`) overrides this
     default; the plugin's `RunStatePusher` then pushes no state for that
-    job, so a lower hint opts a job fully out of the mesh, not partway. And
+    job, so a lower hint opts a job fully out of the mesh, not partway.
+    `applyCellContent` also merges `cellGitHostKeyDefault`
+    (`acceptFirstConnectionStrategy`) under the composed `jenkins.yaml` as
+    the merge base, so a strategy in the cell bundle wins. And
     `tenantCloudFor`, which builds a tenant's cloud from the operator's
     constant `<team>-default` pod template followed by the lifted templates
     it receives), `cell_pod_templates.go` (`liftTenantPodTemplates` reads
@@ -796,7 +799,9 @@ sections describe.
     `cell_tenant_credentials.go` (`projectTenantCredentials` projects a
     tenant's `varroa.dev/tenant-credential=true` Secrets into its re-rooted
     folder's credentials at `GLOBAL` scope, skipping and warning on a
-    malformed, unknown-kind, or duplicate-id Secret).
+    malformed, unknown-kind, or duplicate-id Secret; the kinds are
+    `usernamePassword`, `secretText`, and `sshPrivateKey`, which becomes a
+    `basicSSHUserPrivateKey` with a direct-entry key).
   - `cells_config.go`'s `ParseCellsConfigFromEnv` reads the operator's seven
     cell-related environment variables into `CellsConfig` (warm-pool
     enable/per-profile, `MaxTenantsPerCell`, `UnreadyGracePeriod`,
