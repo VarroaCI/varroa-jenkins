@@ -213,8 +213,9 @@ window.
 ## Job schedules
 
 The `job_schedules` table holds the fleet's cron inventory: one row per job trigger, plus one
-`none` row for a job with no trigger. A cell's set is that cell's whole job inventory, so a
-branch job with no trigger and no run still holds a row, because no other producer reports it.
+`none` row for a job with no trigger. A cell's set is its whole job inventory: a branch job with
+no trigger and no run still holds a row. After a cell restart, a Jenkinsfile trigger has no row
+until the job builds again.
 
 The plugin computes each cron row's next three occurrences with Jenkins's cron engine, so the
 times match the Jenkins job page. An `scm-poll`, `upstream`, or `other` row, and every `none`

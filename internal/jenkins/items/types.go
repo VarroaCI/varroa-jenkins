@@ -44,6 +44,8 @@ type Item struct {
 	Properties     []Property      `yaml:"properties,omitempty"`
 	BuildDiscarder *BuildDiscarder `yaml:"buildDiscarder,omitempty"`
 	Parameters     []Parameter     `yaml:"parameters,omitempty"`
+	// Triggers is valid on pipeline and freeStyle only.
+	Triggers []Trigger `yaml:"triggers,omitempty"`
 
 	// Pipeline-specific
 	Definition      *PipelineDefinition `yaml:"definition,omitempty"`
@@ -55,7 +57,6 @@ type Item struct {
 	SCM                              *SCM        `yaml:"scm,omitempty"`
 	Builders                         []Builder   `yaml:"builders,omitempty"`
 	PublishersList                   []Publisher `yaml:"publishersList,omitempty"`
-	Triggers                         []Trigger   `yaml:"triggers,omitempty"`
 	BlockBuildWhenDownstreamBuilding bool        `yaml:"blockBuildWhenDownstreamBuilding,omitempty"`
 	BlockBuildWhenUpstreamBuilding   bool        `yaml:"blockBuildWhenUpstreamBuilding,omitempty"`
 	CustomWorkspace                  string      `yaml:"customWorkspace,omitempty"`
@@ -278,17 +279,34 @@ type MailerPublisher struct {
 
 // ---- Triggers ----
 
-// Trigger defines a build trigger.
+// Trigger defines a build trigger. An entry sets exactly one trigger type.
 type Trigger struct {
 	PollSCM        *PollSCMTrigger        `yaml:"pollSCM,omitempty"`
 	Cron           *CronTrigger           `yaml:"cron,omitempty"`
+	GitHubPush     *GitHubPushTrigger     `yaml:"githubPush,omitempty"`
 	VarroaUpstream *VarroaUpstreamTrigger `yaml:"varroaUpstream,omitempty"`
 }
+
+// GitHubPushTrigger starts a build when the github plugin receives a push
+// webhook for the job's repository. It has no fields.
+type GitHubPushTrigger struct{}
 
 // PollSCMTrigger polls SCM on a schedule.
 type PollSCMTrigger struct {
 	IgnorePostCommitHooks bool   `yaml:"ignorePostCommitHooks,omitempty"`
 	ScmpollSpec           string `yaml:"scmpoll_spec,omitempty"`
+}
+
+// defaultPollSCMSpec is the poll schedule of a pollSCM trigger with no spec.
+const defaultPollSCMSpec = "H * * * *"
+
+// EffectiveSpec returns the poll schedule Jenkins runs. A blank spec
+// gives the default schedule. Every reader of the schedule calls it.
+func (p *PollSCMTrigger) EffectiveSpec() string {
+	if spec := strings.TrimSpace(p.ScmpollSpec); spec != "" {
+		return spec
+	}
+	return defaultPollSCMSpec
 }
 
 // CronTrigger triggers builds on a cron schedule.
@@ -320,23 +338,86 @@ type VarroaUpstreamTrigger struct {
 	Result string `yaml:"result,omitempty"`
 }
 
-// validateTriggers rejects a varroaUpstream trigger with an empty tenant,
-// an empty job, or a result outside SUCCESS, UNSTABLE, and FAILURE. An
-// empty result is not an error: the renderer applies the SUCCESS default.
-func validateTriggers(itemName string, triggers []Trigger) error {
-	for _, t := range triggers {
-		if t.VarroaUpstream == nil {
-			continue
+// triggerKinds holds the two item kinds whose renderer writes triggers.
+// No other kind runs builds of its own.
+var triggerKinds = map[string]bool{
+	"pipeline":  true,
+	"freeStyle": true,
+}
+
+// collectTriggers returns every trigger a renderer writes onto one job:
+// the item-level list first, then each pipelineTriggers property in order.
+func collectTriggers(item Item) []Trigger {
+	all := append([]Trigger(nil), item.Triggers...)
+	for _, p := range item.Properties {
+		if p.PipelineTriggers != nil {
+			all = append(all, p.PipelineTriggers.Triggers...)
 		}
-		vu := t.VarroaUpstream
-		if strings.TrimSpace(vu.Tenant) == "" {
-			return fmt.Errorf("item %q: varroaUpstream trigger requires tenant", itemName)
+	}
+	return all
+}
+
+// triggerType returns the YAML name of the one type a trigger entry sets.
+// It returns the empty string when the entry sets none or more than one.
+func triggerType(t Trigger) string {
+	var names []string
+	if t.PollSCM != nil {
+		names = append(names, "pollSCM")
+	}
+	if t.Cron != nil {
+		names = append(names, "cron")
+	}
+	if t.GitHubPush != nil {
+		names = append(names, "githubPush")
+	}
+	if t.VarroaUpstream != nil {
+		names = append(names, "varroaUpstream")
+	}
+	if len(names) != 1 {
+		return ""
+	}
+	return names[0]
+}
+
+// validateTriggers checks the triggers from both spellings together,
+// because the renderer writes them onto one job. Jenkins keeps one
+// trigger per type, so a repeated type is an error. The item-level list
+// is valid on pipeline and freeStyle. The pipelineTriggers property is
+// valid on pipeline only. An empty varroaUpstream result is not an error:
+// the renderer applies the SUCCESS default.
+func validateTriggers(item Item) error {
+	name, kind := item.Name, item.Kind
+	if len(item.Triggers) > 0 && !triggerKinds[kind] {
+		return fmt.Errorf("item %q: triggers are only valid on kind=pipeline and kind=freeStyle, not kind=%s", name, kind)
+	}
+	for _, p := range item.Properties {
+		if p.PipelineTriggers != nil && kind != "pipeline" {
+			return fmt.Errorf("item %q: pipelineTriggers is only valid on kind=pipeline, not kind=%s", name, kind)
 		}
-		if strings.TrimSpace(vu.Job) == "" {
-			return fmt.Errorf("item %q: varroaUpstream trigger requires job", itemName)
+	}
+	seen := make(map[string]bool)
+	for _, t := range collectTriggers(item) {
+		typ := triggerType(t)
+		if typ == "" {
+			return fmt.Errorf("item %q: a trigger requires exactly one of pollSCM, cron, githubPush, and varroaUpstream", name)
 		}
-		if vu.Result != "" && !varroaUpstreamResults[vu.Result] {
-			return fmt.Errorf("item %q: varroaUpstream trigger result %q must be one of SUCCESS, UNSTABLE, FAILURE", itemName, vu.Result)
+		if seen[typ] {
+			return fmt.Errorf("item %q: more than one %s trigger across triggers and pipelineTriggers", name, typ)
+		}
+		seen[typ] = true
+		if t.Cron != nil && strings.TrimSpace(t.Cron.Spec) == "" {
+			return fmt.Errorf("item %q: cron trigger requires spec", name)
+		}
+		if vu := t.VarroaUpstream; vu != nil {
+			if strings.TrimSpace(vu.Tenant) == "" {
+				return fmt.Errorf("item %q: varroaUpstream trigger requires tenant", name)
+			}
+			if strings.TrimSpace(vu.Job) == "" {
+				return fmt.Errorf("item %q: varroaUpstream trigger requires job", name)
+			}
+			if vu.Result != "" && !varroaUpstreamResults[vu.Result] {
+				return fmt.Errorf("item %q: varroaUpstream trigger result %q must be one of SUCCESS, UNSTABLE, FAILURE", name, vu.Result)
+			}
 		}
 	}
 	return nil
@@ -546,7 +627,8 @@ type ThrottleValues struct {
 	DurationName string `yaml:"durationName"`
 }
 
-// PipelineTriggers holds triggers as a pipeline property.
+// PipelineTriggers holds triggers as a pipeline property. The renderer
+// merges them with the item-level triggers into one job property.
 type PipelineTriggers struct {
 	Triggers []Trigger `yaml:"triggers,omitempty"`
 }
@@ -848,7 +930,10 @@ func (i *Item) Validate() error {
 	if strings.TrimSpace(i.Name) == "" {
 		return fmt.Errorf("item missing name")
 	}
-	if err := validateTriggers(i.Name, i.Triggers); err != nil {
+	if i.Kind == "" {
+		return fmt.Errorf("item %q: kind is required", i.Name)
+	}
+	if err := validateTriggers(*i); err != nil {
 		return err
 	}
 	// Validate every parameter a renderer will merge onto one job, together,
@@ -861,8 +946,6 @@ func (i *Item) Validate() error {
 		return err
 	}
 	switch i.Kind {
-	case "":
-		return fmt.Errorf("item %q: kind is required", i.Name)
 	case "folder", "freeStyle":
 		return nil
 	case "pipeline":

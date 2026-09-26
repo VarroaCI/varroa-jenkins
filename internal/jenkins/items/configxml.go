@@ -221,18 +221,69 @@ type jenkinsDiscarderXML struct {
 	ArtifactNumToKeep  int    `xml:"artifactNumToKeep,omitempty"`
 }
 
+// jenkinsTriggersXML is the triggers list of a freeStyle job and of a
+// pipeline job's PipelineTriggersJobProperty. Jenkins reads the same
+// element names in both places.
 type jenkinsTriggersXML struct {
 	PollSCM        []*jenkinsPollSCMXML        `xml:"hudson.triggers.SCMTrigger,omitempty"`
 	Cron           []*jenkinsCronXML           `xml:"hudson.triggers.TimerTrigger,omitempty"`
+	GitHubPush     []*jenkinsGitHubPushXML     `xml:"com.cloudbees.jenkins.GitHubPushTrigger,omitempty"`
 	VarroaUpstream []*jenkinsVarroaUpstreamXML `xml:"org.jenkinsci.plugins.varroamiteauth.VarroaUpstreamTrigger,omitempty"`
 }
 
 type jenkinsPollSCMXML struct {
-	Spec string `xml:"spec"`
+	Spec                  string `xml:"spec"`
+	IgnorePostCommitHooks bool   `xml:"ignorePostCommitHooks"`
 }
 
 type jenkinsCronXML struct {
 	Spec string `xml:"spec"`
+}
+
+// jenkinsGitHubPushXML renders a githubPush trigger. Jenkins writes an
+// empty spec element for this trigger, so the renderer writes one too.
+type jenkinsGitHubPushXML struct {
+	Plugin string `xml:"plugin,attr"`
+	Spec   string `xml:"spec"`
+}
+
+// githubPlugin is the plugin that owns GitHubPushTrigger.
+const githubPlugin = "github"
+
+// buildTriggersXML converts trigger declarations into the triggers list.
+// It returns nil for an empty list, so the caller omits the element.
+func buildTriggersXML(triggers []Trigger) *jenkinsTriggersXML {
+	if len(triggers) == 0 {
+		return nil
+	}
+	t := &jenkinsTriggersXML{}
+	for _, tr := range triggers {
+		if tr.PollSCM != nil {
+			t.PollSCM = append(t.PollSCM, &jenkinsPollSCMXML{
+				Spec:                  tr.PollSCM.EffectiveSpec(),
+				IgnorePostCommitHooks: tr.PollSCM.IgnorePostCommitHooks,
+			})
+		}
+		if tr.Cron != nil {
+			t.Cron = append(t.Cron, &jenkinsCronXML{Spec: tr.Cron.Spec})
+		}
+		if tr.GitHubPush != nil {
+			t.GitHubPush = append(t.GitHubPush, &jenkinsGitHubPushXML{Plugin: githubPlugin})
+		}
+		if tr.VarroaUpstream != nil {
+			result := tr.VarroaUpstream.Result
+			if result == "" {
+				result = varroaUpstreamDefaultResult
+			}
+			t.VarroaUpstream = append(t.VarroaUpstream, &jenkinsVarroaUpstreamXML{
+				Plugin: varroaMiteAuthPlugin,
+				Tenant: tr.VarroaUpstream.Tenant,
+				Job:    tr.VarroaUpstream.Job,
+				Result: result,
+			})
+		}
+	}
+	return t
 }
 
 // jenkinsVarroaUpstreamXML renders a varroaUpstream trigger. Its element
@@ -427,34 +478,7 @@ func freeStyleConfigXML(item Item) xmlConfig {
 			ArtifactNumToKeep:  item.BuildDiscarder.LogRotator.ArtifactNumToKeep,
 		}
 	}
-	if len(item.Triggers) > 0 {
-		t := &jenkinsTriggersXML{}
-		for _, tr := range item.Triggers {
-			if tr.PollSCM != nil {
-				spec := tr.PollSCM.ScmpollSpec
-				if spec == "" {
-					spec = "H * * * *"
-				}
-				t.PollSCM = append(t.PollSCM, &jenkinsPollSCMXML{Spec: spec})
-			}
-			if tr.Cron != nil {
-				t.Cron = append(t.Cron, &jenkinsCronXML{Spec: tr.Cron.Spec})
-			}
-			if tr.VarroaUpstream != nil {
-				result := tr.VarroaUpstream.Result
-				if result == "" {
-					result = varroaUpstreamDefaultResult
-				}
-				t.VarroaUpstream = append(t.VarroaUpstream, &jenkinsVarroaUpstreamXML{
-					Plugin: varroaMiteAuthPlugin,
-					Tenant: tr.VarroaUpstream.Tenant,
-					Job:    tr.VarroaUpstream.Job,
-					Result: result,
-				})
-			}
-		}
-		f.Triggers = t
-	}
+	f.Triggers = buildTriggersXML(item.Triggers)
 	if params := collectParameters(item); len(params) > 0 {
 		f.Properties = &jenkinsParamsPropXML{
 			ParamsDefProp: &paramsDefPropXML{ParameterDefs: convertParameters(params)},
@@ -561,6 +585,14 @@ type pipelinePropertiesXML struct {
 	DisableResume           *disableResumeXML           `xml:"org.jenkinsci.plugins.workflow.job.properties.DisableResumeJobProperty,omitempty"`
 	DurabilityHint          *durabilityHintXML          `xml:"org.jenkinsci.plugins.workflow.job.properties.DurabilityHintJobProperty,omitempty"`
 	ParamsDefProp           *paramsDefPropXML           `xml:"hudson.model.ParametersDefinitionProperty,omitempty"`
+	PipelineTriggers        *pipelineTriggersPropXML    `xml:"org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty,omitempty"`
+}
+
+// pipelineTriggersPropXML holds a pipeline job's triggers. A pipeline job
+// has no top-level triggers element: Jenkins starts only the triggers in
+// this property.
+type pipelineTriggersPropXML struct {
+	Triggers *jenkinsTriggersXML `xml:"triggers"`
 }
 
 type pipelineBuildDiscarderXML struct {
@@ -662,6 +694,12 @@ func pipelineConfigXML(item Item) xmlConfig {
 			p.Properties = &pipelinePropertiesXML{}
 		}
 		p.Properties.ParamsDefProp = &paramsDefPropXML{ParameterDefs: convertParameters(params)}
+	}
+	if t := buildTriggersXML(collectTriggers(item)); t != nil {
+		if p.Properties == nil {
+			p.Properties = &pipelinePropertiesXML{}
+		}
+		p.Properties.PipelineTriggers = &pipelineTriggersPropXML{Triggers: t}
 	}
 	return p
 }

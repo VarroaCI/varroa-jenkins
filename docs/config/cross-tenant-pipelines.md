@@ -103,13 +103,22 @@ See [The fleet lock](#the-fleet-lock) for the full contract.
 ## Declare an upstream trigger
 
 A job can start automatically after another tenant's job finishes. Declare a `varroaUpstream`
-trigger, in a `Jenkinsfile` or in an items YAML entry:
+trigger in the job's items YAML entry:
 
-```groovy
-triggers {
-    varroaUpstream(tenant: 'platform', job: 'release', result: 'SUCCESS')
-}
+```yaml
+- kind: pipeline
+  name: integration
+  triggers:
+    - varroaUpstream:
+        tenant: platform
+        job: release
+        result: SUCCESS
+  definition:
+    script: echo integration
 ```
+
+A `Jenkinsfile` `triggers {}` block also works, but only the items form
+[survives a cell restart](items.md#schedule-a-job).
 
 `result` is a threshold: `SUCCESS`, `UNSTABLE`, or `FAILURE`. The default is `SUCCESS`, meaning
 this result or better. A job declares exactly one `varroaUpstream` trigger. A job that needs

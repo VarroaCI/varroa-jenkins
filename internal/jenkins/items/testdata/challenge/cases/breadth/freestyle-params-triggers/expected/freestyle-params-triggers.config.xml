@@ -6,6 +6,7 @@
   <triggers>
     <hudson.triggers.SCMTrigger>
       <spec>H/5 * * * *</spec>
+      <ignorePostCommitHooks>false</ignorePostCommitHooks>
     </hudson.triggers.SCMTrigger>
     <hudson.triggers.TimerTrigger>
       <spec>0 2 * * *</spec>

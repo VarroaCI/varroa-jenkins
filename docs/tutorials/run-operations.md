@@ -156,12 +156,14 @@ spec:
 
 Apply the `Team` and wait about one reconcile tick for the grant to reach the record store.
 
-On the caller tenant's job, declare a `varroaUpstream` trigger naming the producer:
+On the caller tenant's job item, declare a `varroaUpstream` trigger naming the producer:
 
-```groovy
-triggers {
-    varroaUpstream(tenant: 'platform', job: 'release', result: 'SUCCESS')
-}
+```yaml
+triggers:
+  - varroaUpstream:
+      tenant: platform
+      job: release
+      result: SUCCESS
 ```
 
 Run the producer's job to success. The trigger starts the caller's job.

@@ -619,7 +619,10 @@ func buildPipelineTriggers(item *items.Item) *pipelineTriggersJSON {
 			t.Schedule = trig.Cron.Spec
 			found = true
 		case trig.PollSCM != nil:
-			t.Schedule = trig.PollSCM.ScmpollSpec
+			t.Schedule = trig.PollSCM.EffectiveSpec()
+			found = true
+		case trig.GitHubPush != nil:
+			t.Push = true
 			found = true
 		}
 	}

@@ -921,3 +921,178 @@ func TestBuildFolderProperties_BasicSSHUserPrivateKeyNoKeySource(t *testing.T) {
 		t.Errorf("error %q does not contain %q", err, want)
 	}
 }
+
+func pipelineScriptItem(name string) Item {
+	return Item{Kind: "pipeline", Name: name, Definition: &PipelineDefinition{Script: "echo hi"}}
+}
+
+func TestGenerateConfigXMLPipelineTriggers(t *testing.T) {
+	item := pipelineScriptItem("nightly")
+	item.Triggers = []Trigger{
+		{Cron: &CronTrigger{Spec: "H 2 * * *"}},
+		{VarroaUpstream: &VarroaUpstreamTrigger{Tenant: "platform", Job: "release"}},
+		{GitHubPush: &GitHubPushTrigger{}},
+	}
+	item.Properties = []Property{{PipelineTriggers: &PipelineTriggers{Triggers: []Trigger{
+		{PollSCM: &PollSCMTrigger{ScmpollSpec: "H * * * *"}},
+	}}}}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := `  <properties>
+    <org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty>
+      <triggers>
+        <hudson.triggers.SCMTrigger>
+          <spec>H * * * *</spec>
+          <ignorePostCommitHooks>false</ignorePostCommitHooks>
+        </hudson.triggers.SCMTrigger>
+        <hudson.triggers.TimerTrigger>
+          <spec>H 2 * * *</spec>
+        </hudson.triggers.TimerTrigger>
+        <com.cloudbees.jenkins.GitHubPushTrigger plugin="github">
+          <spec></spec>
+        </com.cloudbees.jenkins.GitHubPushTrigger>
+        <org.jenkinsci.plugins.varroamiteauth.VarroaUpstreamTrigger plugin="varroa-mite-auth">
+          <tenant>platform</tenant>
+          <job>release</job>
+          <result>SUCCESS</result>
+        </org.jenkinsci.plugins.varroamiteauth.VarroaUpstreamTrigger>
+      </triggers>
+    </org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty>
+  </properties>`
+	if !strings.Contains(xml, want) {
+		t.Errorf("pipeline triggers not rendered as PipelineTriggersJobProperty, got:\n%s", xml)
+	}
+}
+
+func TestGenerateConfigXMLPipelineNoTriggersOmitsProperty(t *testing.T) {
+	xml, err := GenerateConfigXML(pipelineScriptItem("plain"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(xml, "PipelineTriggersJobProperty") {
+		t.Errorf("a pipeline with no triggers must not render the property, got:\n%s", xml)
+	}
+}
+
+func TestGenerateConfigXMLFreeStyleTriggersRegression(t *testing.T) {
+	item := Item{Kind: "freeStyle", Name: "nightly-cleanup", Triggers: []Trigger{
+		{Cron: &CronTrigger{Spec: "H 3 * * *"}},
+		{PollSCM: &PollSCMTrigger{ScmpollSpec: "H/5 * * * *", IgnorePostCommitHooks: true}},
+		{GitHubPush: &GitHubPushTrigger{}},
+	}}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{
+		"<triggers>",
+		"<spec>H 3 * * *</spec>",
+		"<ignorePostCommitHooks>true</ignorePostCommitHooks>",
+		`<com.cloudbees.jenkins.GitHubPushTrigger plugin="github">`,
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("freeStyle XML missing %q, got:\n%s", want, xml)
+		}
+	}
+	if strings.Contains(xml, "PipelineTriggersJobProperty") {
+		t.Errorf("freeStyle must not render PipelineTriggersJobProperty, got:\n%s", xml)
+	}
+}
+
+func TestGenerateConfigXMLPollSCMBlankSpecUsesDefault(t *testing.T) {
+	item := pipelineScriptItem("poll")
+	item.Triggers = []Trigger{{PollSCM: &PollSCMTrigger{ScmpollSpec: "  "}}}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(xml, "<spec>H * * * *</spec>") {
+		t.Errorf("blank pollSCM spec must render the default, got:\n%s", xml)
+	}
+}
+
+func TestItemValidateTriggerRules(t *testing.T) {
+	cron := func(spec string) Trigger { return Trigger{Cron: &CronTrigger{Spec: spec}} }
+	propTriggers := func(ts ...Trigger) []Property {
+		return []Property{{PipelineTriggers: &PipelineTriggers{Triggers: ts}}}
+	}
+	withTriggers := func(it Item, ts ...Trigger) Item { it.Triggers = ts; return it }
+	withProps := func(it Item, ps []Property) Item { it.Properties = ps; return it }
+
+	tests := []struct {
+		name    string
+		item    Item
+		wantErr string
+	}{
+		{"pipeline item-level cron", withTriggers(pipelineScriptItem("p"), cron("H 2 * * *")), ""},
+		{"pipeline property cron", withProps(pipelineScriptItem("p"), propTriggers(cron("H 2 * * *"))), ""},
+		{"pipeline githubPush", withTriggers(pipelineScriptItem("p"), Trigger{GitHubPush: &GitHubPushTrigger{}}), ""},
+		{"pipeline two spellings, different types",
+			withProps(withTriggers(pipelineScriptItem("p"), cron("H 2 * * *")),
+				propTriggers(Trigger{PollSCM: &PollSCMTrigger{ScmpollSpec: "H * * * *"}})), ""},
+		{"freeStyle item-level cron", withTriggers(Item{Kind: "freeStyle", Name: "f"}, cron("H 2 * * *")), ""},
+		{"freeStyle pipelineTriggers property",
+			withProps(Item{Kind: "freeStyle", Name: "f"}, propTriggers(cron("H 2 * * *"))),
+			"pipelineTriggers is only valid on kind=pipeline"},
+		{"folder triggers", withTriggers(Item{Kind: "folder", Name: "d"}, cron("H 2 * * *")),
+			"triggers are only valid on kind=pipeline and kind=freeStyle"},
+		{"folder pipelineTriggers property",
+			withProps(Item{Kind: "folder", Name: "d"}, propTriggers(cron("H 2 * * *"))),
+			"pipelineTriggers is only valid on kind=pipeline"},
+		{"multibranch triggers",
+			withTriggers(Item{Kind: "multibranch", Name: "m", SourcesList: []BranchSourceEntry{{}}}, cron("H 2 * * *")),
+			"triggers are only valid on kind=pipeline and kind=freeStyle"},
+		{"organizationFolder triggers",
+			withTriggers(Item{Kind: "organizationFolder", Name: "o", Navigators: []SCMNavigator{{}}}, cron("H 2 * * *")),
+			"triggers are only valid on kind=pipeline and kind=freeStyle"},
+		{"duplicate type in one spelling",
+			withTriggers(pipelineScriptItem("p"), cron("H 2 * * *"), cron("H 4 * * *")),
+			"more than one cron trigger"},
+		{"duplicate type across spellings",
+			withProps(withTriggers(pipelineScriptItem("p"), cron("H 2 * * *")), propTriggers(cron("H 4 * * *"))),
+			"more than one cron trigger"},
+		{"empty cron spec", withTriggers(pipelineScriptItem("p"), cron("  ")), "cron trigger requires spec"},
+		{"empty trigger entry", withTriggers(pipelineScriptItem("p"), Trigger{}),
+			"a trigger requires exactly one of"},
+		{"two types in one entry",
+			withTriggers(pipelineScriptItem("p"), Trigger{Cron: &CronTrigger{Spec: "H 2 * * *"}, GitHubPush: &GitHubPushTrigger{}}),
+			"a trigger requires exactly one of"},
+		{"missing kind with triggers reports kind",
+			withTriggers(Item{Name: "x"}, cron("H 2 * * *")), "kind is required"},
+		{"property varroaUpstream missing tenant",
+			withProps(pipelineScriptItem("p"), propTriggers(Trigger{VarroaUpstream: &VarroaUpstreamTrigger{Job: "release"}})),
+			"varroaUpstream trigger requires tenant"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.item.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseGitHubPushTrigger(t *testing.T) {
+	m, err := Parse(`items:
+  - kind: pipeline
+    name: app
+    definition:
+      script: echo hi
+    triggers:
+      - githubPush: {}`)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(m.Items[0].Triggers) != 1 || m.Items[0].Triggers[0].GitHubPush == nil {
+		t.Fatalf("githubPush trigger not parsed: %+v", m.Items[0].Triggers)
+	}
+}

@@ -331,9 +331,10 @@ leaves the retry to a user.
 
 ## Backstop scheduler
 
-Jenkins computes every cron fire time inside each cell and exports each job's next three
-occurrences. The recorder computes none: once a minute it checks those occurrences against its
-ledger.
+Each cell exports each job's next three cron occurrences. The recorder checks them against its
+ledger every minute. After a cell restart, a
+[Jenkinsfile cron trigger](../config/items.md#schedule-a-job) is not exported until the job
+builds again.
 
 An occurrence becomes a candidate once older than `cronGrace` (default `5m`, range `1m` to
 `60m`) with no matching ledger entry. The recorder triggers the build, keyed by the job path and

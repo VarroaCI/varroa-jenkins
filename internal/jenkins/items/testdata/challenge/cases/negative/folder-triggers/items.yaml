@@ -1,0 +1,8 @@
+items:
+  - kind: folder
+    name: folder-triggers
+    displayName: "Folder with Triggers"
+    description: "Folder item that declares a cron trigger"
+    triggers:
+      - cron:
+          spec: "H 2 * * *"

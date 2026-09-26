@@ -1,0 +1,1 @@
+triggers are only valid on kind=pipeline and kind=freeStyle

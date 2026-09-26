@@ -145,6 +145,30 @@ only) stops that job's run-state replication entirely:
 
 `hint` accepts `PERFORMANCE_OPTIMIZED`, `SURVIVABLE_NONATOMIC`, or `MAX_SURVIVABILITY`.
 
+## Schedule a job
+
+```yaml
+- kind: pipeline
+  name: nightly
+  triggers:
+    - cron:
+        spec: "H 2 * * *"
+    - varroaUpstream:
+        tenant: platform
+        job: release
+    - githubPush: {}
+  definition:
+    script: echo nightly
+```
+
+Trigger types are `cron`, `pollSCM`, `githubPush` (a push webhook through the `github`
+plugin), and [`varroaUpstream`](cross-tenant-pipelines.md). `triggers` is valid on `pipeline`
+and `freeStyle` items. A `pipeline` item also accepts `properties[].pipelineTriggers`, merged
+with `triggers`. A job holds one trigger of each type. `cron.spec` must not be empty.
+
+A cell rewrites each job from `items.yaml` after a restart. A Jenkinsfile `triggers {}` block
+then has no effect until the job builds again. Declare a schedule in `items.yaml`.
+
 ## Control removal
 
 | `removeStrategy.items` | Undeclared items |
@@ -181,3 +205,4 @@ A tenant manifest that fails any rule fails the whole cell's item assembly, and 
 | Setting is absent | Field spelling and indentation |
 | Deletion is pending | Pending path, build state, and approval |
 | Kind is unsupported | Keep it unmanaged |
+| Schedule stops after a cell restart | Move the Jenkinsfile trigger to `triggers` |

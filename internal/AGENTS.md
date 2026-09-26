@@ -94,7 +94,15 @@ reading each package's entry point):
   producer for the cross-tenant fan-out: `Result` defaults to `SUCCESS` and
   is otherwise restricted to `SUCCESS`/`UNSTABLE`/`FAILURE`, and `Job` names
   the producer job relative to the producer tenant's own folder, with no
-  tenant prefix. Two item forms select a delivered pipeline
+  tenant prefix. `buildTriggersXML` is the one trigger renderer: a
+  `freeStyle` job gets a top-level `<triggers>`, and a `pipeline` job gets
+  `PipelineTriggersJobProperty` holding the item-level `triggers` merged
+  with every `properties[].pipelineTriggers`. `validateTriggers` rejects
+  triggers on any other kind, `pipelineTriggers` off `pipeline`, a
+  repeated trigger type across both spellings, and an empty `cron.spec`.
+  A cell rewrites each job from `items.yaml` on a restart, so only an item
+  trigger survives it; a Jenkinsfile `triggers {}` block does not. Two
+  item forms select a delivered pipeline
   template: `definition.varroaTemplate`
   (`VarroaTemplateDefinition{Template, TemplateVersion, Values}`) on a
   regular job renders to

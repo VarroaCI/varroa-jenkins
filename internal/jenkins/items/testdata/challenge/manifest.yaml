@@ -1,5 +1,5 @@
 cases:
-  # Breadth (21, supported)
+  # Breadth (22, supported)
   - name: freestyle-scm-extensions
     tier: breadth
     status: supported
@@ -22,6 +22,9 @@ cases:
     tier: breadth
     status: supported
   - name: pipeline-varroa-template
+    tier: breadth
+    status: supported
+  - name: pipeline-triggers
     tier: breadth
     status: supported
   - name: multibranch-git-source
@@ -78,7 +81,7 @@ cases:
     tier: depth
     status: supported
 
-  # Negative (3 known-gap + 4 promoted supported)
+  # Negative (4 known-gap + 4 promoted supported)
   - name: multibranch-multiple-sources
     tier: negative
     status: supported
@@ -98,5 +101,8 @@ cases:
     tier: negative
     status: known-gap
   - name: freestyle-unknown-builder
+    tier: negative
+    status: known-gap
+  - name: folder-triggers
     tier: negative
     status: known-gap

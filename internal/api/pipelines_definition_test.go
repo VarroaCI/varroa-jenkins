@@ -675,3 +675,28 @@ func TestFindDeclaredItem_BundleRef(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildPipelineTriggersGitHubPushShowsPush(t *testing.T) {
+	item := &items.Item{Kind: "pipeline", Name: "app", Triggers: []items.Trigger{
+		{GitHubPush: &items.GitHubPushTrigger{}},
+	}}
+	got := buildPipelineTriggers(item)
+	if got == nil || !got.Push {
+		t.Fatalf("buildPipelineTriggers() = %+v, want Push true", got)
+	}
+	if got.Schedule != "" {
+		t.Errorf("Schedule = %q, want empty", got.Schedule)
+	}
+}
+
+func TestBuildPipelineTriggersPollSCMDefaultSchedule(t *testing.T) {
+	for _, spec := range []string{"", "  "} {
+		item := &items.Item{Kind: "pipeline", Name: "app", Triggers: []items.Trigger{
+			{PollSCM: &items.PollSCMTrigger{ScmpollSpec: spec}},
+		}}
+		got := buildPipelineTriggers(item)
+		if got == nil || got.Schedule != "H * * * *" {
+			t.Errorf("spec %q: buildPipelineTriggers() = %+v, want Schedule %q", spec, got, "H * * * *")
+		}
+	}
+}
