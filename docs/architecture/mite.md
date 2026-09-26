@@ -110,6 +110,7 @@ kubectl logs -n <namespace> statefulset/<name>-<uid8> -c mite --tail=100
 | Symptom | Check |
 |---|---|
 | Phase remains `Running` | Gateway reachability on TCP 9090, bootstrap token errors, and mite logs. |
+| `MiteConnected=False`, reason `StreamLost` | The stream was lost after connect. Check the gateway pods. |
 | Frequent reconnects | Gateway availability, NetworkPolicy, DNS, and certificate errors. |
 | `MiteStreamDegraded=True` | NATS availability between the gateway and operator. The stream may be connected while commands are delayed. |
 | Commands time out | Jenkins readiness, command deadline, and long-running configuration work. |

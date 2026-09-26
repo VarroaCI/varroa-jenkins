@@ -11,10 +11,11 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 )
 
-// TestGetStatefulSetJenkinsEnv asserts design D3: the method walks the
-// jenkins container's env array through the dynamic client, and reports
-// found=false when the StatefulSet or the container is absent.
-func TestGetStatefulSetJenkinsEnv(t *testing.T) {
+// TestGetStatefulSetContainerEnv asserts that the method walks the named
+// container's env array through the dynamic client. It reports found=false
+// when the StatefulSet or the named container is absent. The cases use the
+// jenkins container.
+func TestGetStatefulSetContainerEnv(t *testing.T) {
 	ctx := context.Background()
 	setup := func(objs ...*unstructured.Unstructured) (*ClientsetClient, *dynamicfake.FakeDynamicClient) {
 		scheme := runtime.NewScheme()
@@ -34,7 +35,7 @@ func TestGetStatefulSetJenkinsEnv(t *testing.T) {
 
 	t.Run("StatefulSet absent", func(t *testing.T) {
 		c, _ := setup()
-		env, found, err := c.GetStatefulSetJenkinsEnv(ctx, "missing-sts", "ns")
+		env, found, err := c.GetStatefulSetContainerEnv(ctx, "missing-sts", "ns", "jenkins")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -55,7 +56,7 @@ func TestGetStatefulSetJenkinsEnv(t *testing.T) {
 		if _, err := dyn.Resource(stsGVR).Namespace("ns").Create(ctx, existing, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
 		}
-		env, found, err := c.GetStatefulSetJenkinsEnv(ctx, "test-sts", "ns")
+		env, found, err := c.GetStatefulSetContainerEnv(ctx, "test-sts", "ns", "jenkins")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -81,7 +82,7 @@ func TestGetStatefulSetJenkinsEnv(t *testing.T) {
 		if _, err := dyn.Resource(stsGVR).Namespace("ns").Create(ctx, existing, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
 		}
-		env, found, err := c.GetStatefulSetJenkinsEnv(ctx, "test-sts", "ns")
+		env, found, err := c.GetStatefulSetContainerEnv(ctx, "test-sts", "ns", "jenkins")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -106,7 +107,7 @@ func TestGetStatefulSetJenkinsEnv(t *testing.T) {
 		if _, err := dyn.Resource(stsGVR).Namespace("ns").Create(ctx, existing, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
 		}
-		env, found, err := c.GetStatefulSetJenkinsEnv(ctx, "test-sts", "ns")
+		env, found, err := c.GetStatefulSetContainerEnv(ctx, "test-sts", "ns", "jenkins")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -133,7 +134,7 @@ func TestGetStatefulSetJenkinsEnv(t *testing.T) {
 		if _, err := dyn.Resource(stsGVR).Namespace("ns").Create(ctx, existing, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
 		}
-		env, found, err := c.GetStatefulSetJenkinsEnv(ctx, "test-sts", "ns")
+		env, found, err := c.GetStatefulSetContainerEnv(ctx, "test-sts", "ns", "jenkins")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

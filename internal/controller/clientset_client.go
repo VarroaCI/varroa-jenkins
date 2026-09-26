@@ -452,9 +452,9 @@ func (c *ClientsetClient) GetStatefulSetContainerSpecs(ctx context.Context, name
 	return computedMiteImage, liveMiteImage, miteResources, jenkinsResources, mitePullPolicy, resourcesSource, true, nil
 }
 
-// GetStatefulSetJenkinsEnv returns the jenkins container's env as a map. found
-// is false when the StatefulSet or the container is absent.
-func (c *ClientsetClient) GetStatefulSetJenkinsEnv(ctx context.Context, name, namespace string) (map[string]string, bool, error) {
+// GetStatefulSetContainerEnv returns the named container's env as a map.
+// found is false when the StatefulSet or the container is absent.
+func (c *ClientsetClient) GetStatefulSetContainerEnv(ctx context.Context, name, namespace, container string) (map[string]string, bool, error) {
 	gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
 	sts, err := c.dynamic.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
@@ -463,7 +463,7 @@ func (c *ClientsetClient) GetStatefulSetJenkinsEnv(ctx context.Context, name, na
 		}
 		return nil, false, err
 	}
-	env, found := stsJenkinsEnvByName(sts, overlay.JenkinsContainerName)
+	env, found := stsContainerEnvByName(sts, container)
 	return env, found, nil
 }
 
@@ -484,11 +484,11 @@ func (c *ClientsetClient) GetStatefulSetArtifactSecretHash(ctx context.Context, 
 	return anns[artifactSecretHashAnnotation], true, nil
 }
 
-// stsJenkinsEnvByName walks spec.template.spec.containers for the named
+// stsContainerEnvByName walks spec.template.spec.containers for the named
 // container and returns its env array as a map. found is false when no
 // container by that name exists. An env entry with no string "value" (for
 // example a valueFrom field reference) is skipped.
-func stsJenkinsEnvByName(sts *unstructured.Unstructured, containerName string) (map[string]string, bool) {
+func stsContainerEnvByName(sts *unstructured.Unstructured, containerName string) (map[string]string, bool) {
 	list, _, _ := unstructured.NestedSlice(sts.Object, "spec", "template", "spec", "containers")
 	for _, c := range list {
 		cm, ok := c.(map[string]interface{})

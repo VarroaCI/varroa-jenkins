@@ -129,11 +129,10 @@ type testClient struct {
 	stsComputedImages map[string]string
 	stsLiveImages     map[string]string
 	stsImagesErr      error
-	// stsJenkinsEnv, stsJenkinsEnvFound, and stsJenkinsEnvErr back
-	// GetStatefulSetJenkinsEnv.
-	stsJenkinsEnv      map[string]string
-	stsJenkinsEnvFound bool
-	stsJenkinsEnvErr   error
+	// stsContainerEnv (keyed by container name) and stsContainerEnvErr back
+	// GetStatefulSetContainerEnv. An absent container key answers found=false.
+	stsContainerEnv    map[string]map[string]string
+	stsContainerEnvErr error
 	// stsArtifactSecretHash, stsArtifactSecretHashFound, and
 	// stsArtifactSecretHashErr back GetStatefulSetArtifactSecretHash.
 	stsArtifactSecretHash      string
@@ -713,8 +712,12 @@ func (t *testClient) GetStatefulSetRollout(_ context.Context, _, _ string) (Stat
 func (t *testClient) GetStatefulSetImages(_ context.Context, _, _ string) (map[string]string, map[string]string, error) {
 	return t.stsComputedImages, t.stsLiveImages, t.stsImagesErr
 }
-func (t *testClient) GetStatefulSetJenkinsEnv(_ context.Context, _, _ string) (map[string]string, bool, error) {
-	return t.stsJenkinsEnv, t.stsJenkinsEnvFound, t.stsJenkinsEnvErr
+func (t *testClient) GetStatefulSetContainerEnv(_ context.Context, _, _, container string) (map[string]string, bool, error) {
+	if t.stsContainerEnvErr != nil {
+		return nil, false, t.stsContainerEnvErr
+	}
+	env, ok := t.stsContainerEnv[container]
+	return env, ok, nil
 }
 func (t *testClient) GetStatefulSetArtifactSecretHash(_ context.Context, _, _ string) (string, bool, error) {
 	return t.stsArtifactSecretHash, t.stsArtifactSecretHashFound, t.stsArtifactSecretHashErr

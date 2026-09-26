@@ -101,7 +101,7 @@ Read `status.phase` and `status.conditions` when operating a controller.
 |---|---|
 | `Pending` | Waiting for reconciliation. |
 | `Provisioning` | Resolving configuration or creating Kubernetes resources. |
-| `Running` | Jenkins is running, but the mite stream is not ready. |
+| `Running` | Jenkins is running, but the mite stream is not ready or is lost. |
 | `Connected` | The mite stream is active. This is the normal steady state. |
 | `Stopped` | `spec.powerState: Stopped` scaled the StatefulSet to zero. |
 | `Hibernated` | Inactivity policy parked the controller. |
@@ -116,8 +116,11 @@ A phase says where the controller is in its lifecycle. It does not say whether t
 | `JenkinsBootFailed` condition | Boot failed | The Jenkins container is crash-looping, or its image cannot be pulled. The message carries the exit code and restart count. Read the container logs. |
 | `PluginRollFailed` condition | Plugin roll failed | The `plugins-init` step failed. |
 | `status.lastApplyResult.succeeded: false` | Apply failed | The mite could not apply the last desired state. |
+| `MiteConnected=False`, reason `StreamLost` | Mite unreachable | The mite stream is lost. The pod stays in place. |
 
 `status.lastReconciledAt` advances on every reconcile pass that completes without error, in every phase. Read the attention signal first, not this timestamp. Most wedged controllers still reconcile cleanly and so keep a fresh stamp: a Boot failed, Plugin roll failed, or Apply failed controller records the problem in its status and the pass still succeeds. The stamp goes stale only for a Blocked controller, whose pass ends in an error, and during a `Failed` phase dwell. Use `lastReconciledAt` for one distinction: a stale value with no attention signal means the operator is not reconciling this controller at all, rather than reconciling it and being blocked.
+
+A lost mite stream keeps the pod and the phase `Running`. The operator rolls the pod only when the gateway CA or endpoint changed. A cell also rolls after its unready grace period.
 
 Reloadable configuration can apply without replacing the pod. Changes to plugins, images, or other restart-class settings can return the controller to `Provisioning` while Varroa rolls it.
 

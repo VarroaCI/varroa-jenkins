@@ -220,6 +220,7 @@ const (
 	ApplyFailed      ComponentsSchemasControllerAttentionKind = "applyFailed"
 	BootFailed       ComponentsSchemasControllerAttentionKind = "bootFailed"
 	Failed           ComponentsSchemasControllerAttentionKind = "failed"
+	MiteUnreachable  ComponentsSchemasControllerAttentionKind = "miteUnreachable"
 	PluginRollFailed ComponentsSchemasControllerAttentionKind = "pluginRollFailed"
 	ReconcileBlocked ComponentsSchemasControllerAttentionKind = "reconcileBlocked"
 )
@@ -1477,7 +1478,7 @@ type ComponentsSchemasConflictResponse struct {
 	Error string `json:"error"`
 }
 
-// ComponentsSchemasControllerAttention Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed > pluginRollFailed > applyFailed.
+// ComponentsSchemasControllerAttention Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed > pluginRollFailed > applyFailed > miteUnreachable.
 type ComponentsSchemasControllerAttention struct {
 	Kind    ComponentsSchemasControllerAttentionKind `json:"kind"`
 	Message *string                                  `json:"message,omitempty"`
@@ -1558,7 +1559,7 @@ type ComponentsSchemasControllerDetail struct {
 	AppliedBundleHash *string                         `json:"appliedBundleHash,omitempty"`
 	ApplyHistory      *[]ComponentsSchemasApplyResult `json:"applyHistory,omitempty"`
 
-	// Attention Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed > pluginRollFailed > applyFailed.
+	// Attention Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed > pluginRollFailed > applyFailed > miteUnreachable.
 	Attention *ComponentsSchemasControllerAttention `json:"attention,omitempty"`
 
 	// Cell The controller detail's projection of status.cell. It declares ten properties. It declares no rehydration property: the cell-controllers capability keeps that key inside the operator.
@@ -1761,7 +1762,7 @@ type ComponentsSchemasControllerSpecPowerState string
 type ComponentsSchemasControllerSummary struct {
 	AppliedBundleHash *string `json:"appliedBundleHash,omitempty"`
 
-	// Attention Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed > pluginRollFailed > applyFailed.
+	// Attention Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed > pluginRollFailed > applyFailed > miteUnreachable.
 	Attention *ComponentsSchemasControllerAttention `json:"attention,omitempty"`
 
 	// CellPool The controller's varroa.dev/cell-pool label. Absent while no label is set.

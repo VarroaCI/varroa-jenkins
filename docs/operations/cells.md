@@ -243,8 +243,7 @@ confirm the folder is idle, then performs the same two-step move.
 other than the three configuration gates, gets its pod deleted once and the reason `CellRolled`.
 
 **Teardown.** Teardown releases the tenant's placement record, so the same name is free at once.
-A `Team` created again under that name owns a fresh record, even when the old teardown finishes
-late.
+A `Team` created again under that name owns a fresh record.
 
 **Eviction.** Past twice that grace period, the operator sets `status.cell.evacuate`, and every
 tenant moves off on its next placement tick. Recovery clears `evacuate`, `unreadySince`, and
@@ -278,7 +277,8 @@ Every `CellReady` reason on a cell `Controller`:
 | `RecordStoreUnsupported` | False | `recordStore.enabled` is false. | Enable the record store. |
 | `BlobTierUnsupported` | False | `recordStore.blobs.mode` is not `s3`. | Set the blob tier to `s3`. |
 | `ArtifactStorageLocal` | False | The `ArtifactStorage` condition is not `External`. | Pin `artifact-manager-s3` and add a pool or per-cell artifact `Secret`. |
-| `NotProvisioned` | False | The cell's phase has not reached `Connected` yet. | Wait, or check pod status if it stays stuck. |
+| `NotProvisioned` | False | The cell's phase has not reached `Connected` yet. | Wait, or check pod status. |
+| `MiteUnreachable` | False | The mite stream is lost. The roll applies. | Check the gateway. |
 | `CellRolled` | False | The operator already deleted the pod once to recover. The condition message names the original fault. | Diagnose the reason in the message. If it recurs, that condition is not self-healing. |
 
 ## Rehydration

@@ -19,8 +19,7 @@ func TestReconcileHeadlessRoll(t *testing.T) {
 
 	t.Run("flip transitions to Provisioning", func(t *testing.T) {
 		client := newTestClient()
-		client.stsJenkinsEnvFound = true
-		client.stsJenkinsEnv = map[string]string{} // no VARROA_HEADLESS entry: live is false
+		client.stsContainerEnv = map[string]map[string]string{"jenkins": {}} // no VARROA_HEADLESS entry: live is false
 		rec := newTestReconciler(client)
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
 		cr.Spec.Headless = true
@@ -42,8 +41,7 @@ func TestReconcileHeadlessRoll(t *testing.T) {
 
 	t.Run("converged is a no-op", func(t *testing.T) {
 		client := newTestClient()
-		client.stsJenkinsEnvFound = true
-		client.stsJenkinsEnv = map[string]string{"VARROA_HEADLESS": "true"}
+		client.stsContainerEnv = map[string]map[string]string{"jenkins": {"VARROA_HEADLESS": "true"}}
 		rec := newTestReconciler(client)
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
 		cr.Spec.Headless = true
@@ -58,7 +56,7 @@ func TestReconcileHeadlessRoll(t *testing.T) {
 
 	t.Run("read error is a no-op", func(t *testing.T) {
 		client := newTestClient()
-		client.stsJenkinsEnvErr = errors.New("boom")
+		client.stsContainerEnvErr = errors.New("boom")
 		rec := newTestReconciler(client)
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
 		cr.Spec.Headless = true
@@ -73,7 +71,7 @@ func TestReconcileHeadlessRoll(t *testing.T) {
 
 	t.Run("found false is a no-op", func(t *testing.T) {
 		client := newTestClient()
-		client.stsJenkinsEnvFound = false // no StatefulSet yet
+		client.stsContainerEnv = nil // no StatefulSet yet
 		rec := newTestReconciler(client)
 		cr := testController("t", "ns", v1alpha1.ControllerPhaseConnected)
 		cr.Spec.Headless = true

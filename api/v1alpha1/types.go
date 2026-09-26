@@ -1131,6 +1131,11 @@ const (
 	// the gateway self-heals by retrying; this condition exists so the failure
 	// is not silent.
 	ConditionMiteStreamDegraded ControllerConditionType = "MiteStreamDegraded"
+	// ConditionMiteConnected reports the mite command stream of a controller
+	// that was Connected. The operator writes it only after the first stream
+	// loss. False/StreamLost holds the controller in Running with the pod
+	// unchanged. True/StreamRestored follows a reconnect.
+	ConditionMiteConnected ControllerConditionType = "MiteConnected"
 	// ConditionMiteImageStale indicates the controller's actually-running mite
 	// image differs from the operator-desired mite image. Detection only —
 	// the operator takes no remediation action based on this condition.
@@ -1192,6 +1197,16 @@ const (
 	ConditionWarmPool ControllerConditionType = "WarmPool"
 )
 
+// MiteConnected reasons.
+const (
+	// ReasonStreamLost is set when the mite stream of a Connected controller
+	// stays lost past the grace period.
+	ReasonStreamLost = "StreamLost"
+	// ReasonStreamRestored is set when the mite reconnects after a
+	// StreamLost.
+	ReasonStreamRestored = "StreamRestored"
+)
+
 // CellReady reasons.
 const (
 	// ReasonRecordStoreUnsupported is set when recordStore.enabled is false.
@@ -1203,6 +1218,9 @@ const (
 	ReasonArtifactStorageLocal = "ArtifactStorageLocal"
 	// ReasonNotProvisioned is set while the phase is below Connected.
 	ReasonNotProvisioned = "NotProvisioned"
+	// ReasonMiteUnreachable is set while the phase is Running and the mite
+	// stream of a controller that was Connected is lost.
+	ReasonMiteUnreachable = "MiteUnreachable"
 	// ReasonConnected is set when the phase is Connected.
 	ReasonConnected = "Connected"
 	// ReasonCellRolled is set when the operator deleted the cell pod to

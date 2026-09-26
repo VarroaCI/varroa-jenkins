@@ -2193,6 +2193,8 @@ const ATTENTION_HINT: Partial<Record<ControllerAttentionKind, string>> = {
     "Jenkins does not reach a healthy boot. Read the Jenkins container logs (Logs tab). A JCasC error such as a cloud without a name, or a plugin dependency that cannot load, fails boot. Fix the bundle. The operator then replaces the pod with the new revision. This applies to the default RollingUpdate strategy with no partition only. An OnDelete or partitioned overlay keeps the manual pod delete.",
   pluginRollFailed:
     "The plugins-init step failed. The message above names the plugin; check that its pin exists in the update center and matches the JenkinsVersionProfile lock.",
+  miteUnreachable:
+    "The mite command stream is lost. The pod stays in place and the controller stays Running. Check the gateway pods and the network path from the pod to the gateway. The controller returns to Connected when the mite reconnects.",
   failed:
     "Reconciliation gave up. Fix the cause named above, then edit the spec or trigger a reconcile to retry.",
 };

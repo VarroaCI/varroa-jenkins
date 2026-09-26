@@ -7,6 +7,7 @@ export const ATTENTION_LABEL: Record<ControllerAttentionKind, string> = {
   bootFailed: "Boot failed",
   pluginRollFailed: "Plugin roll failed",
   applyFailed: "Apply failed",
+  miteUnreachable: "Mite unreachable",
 };
 
 interface StatusPillProps {

@@ -152,16 +152,18 @@ sections describe.
     first ran with the token, and a replaced pod re-mints, since a cell's
     emptyDir home keeps no mite identity across pods; also
     called on every not-connected `handleRunning` tick, because the 15-min TTL
-    routinely expires during long plugins-init and waiting for the Pending
-    reset wedges the mite for minutes), the `<prefix>-plugins` ConfigMap
+    routinely expires during long plugins-init and the mite otherwise wedges
+    until `provisioningTimeout`), the `<prefix>-plugins` ConfigMap
     (**blocks** provisioning with an error if the ComposedBundle hasn't materialized
     yet — a core-only `plugins.txt` baked here would never self-heal once connected),
     runs `EvaluateCoreCompat` (`corecompat.go`) as a bake-time gate before any
     StatefulSet work, then `CreateStatefulSet` (create-or-update semantics).
   - `handleConnected`: syncs StatefulSet OIDC env vars every tick (idempotent, diffed
     against the live StatefulSet); retries a timed-out restart drain; tracks mite
-    connectivity with a 3-tick grace period on disconnect (`staleMiteThreshold`-based)
-    before forcing back to `Pending`; evaluates `ConditionPluginInstallRequired` by
+    connectivity with a 3-tick grace period on disconnect (`staleMiteThreshold`-based);
+    after it, `markStreamLost` sets `Running` (never `Pending`), calls
+    `clearMiteConnection`, and sets `MiteConnected=False/StreamLost`. The pod is
+    unchanged, so a reprovision pass only churns; evaluates `ConditionPluginInstallRequired` by
     comparing the resolved managed-plugin checksum against the baked `plugins.txt`
     ConfigMap — automatic mode or an approved checksum (`ApprovedPluginRollChecksum`)
     transitions `Connected → Provisioning` to roll (**this is the plugin-roll
@@ -170,9 +172,22 @@ sections describe.
     short-circuit (skip push if hash+RBAC unchanged and pushed recently), bypassed by
     `forcePush` (mite reconnect epoch change) or the one-shot force-reprovision
     annotation.
+  - `handleRunning` never changes the phase of a disconnected mite. Its
+    `provisioningTimeout` guard skips a controller whose `StreamLost`
+    transition is later than `ProvisioningStartedAt` (`streamLostSince`); a
+    later provisioning run re-arms the guard. A reconnect writes
+    `MiteConnected=True/StreamRestored` only when the condition already
+    exists. `nextRequeueDuration` requeues a `Running` + `StreamLost`
+    controller at `streamLostRequeue` (15 s); nothing else wakes it on a
+    reconnect.
   - Before dispatching to `handleRunning`/`handleConnected`, `reconcileController`
     runs `reconcileVersionRoll` then (if it didn't already transition)
-    `reconcileContainerSpecRoll`, then `reconcileHeadlessRoll` and
+    `reconcileContainerSpecRoll`, then `reconcileMiteTransportEnvRoll`
+    (`Running` + `StreamLost` + transport still disconnected only: compares the
+    StatefulSet template's mite `VARROA_CA_PEM`/`VARROA_ENDPOINT` via
+    `GetStatefulSetContainerEnv` with `r.caPEM`/`r.varroaEndpoint`, and rolls
+    to Provisioning on a delta or a missing StatefulSet — the CA-regeneration
+    recovery path), then `reconcileHeadlessRoll` and
     `reconcileArtifactSecretRoll` (Connected only; the latter compares the per-cell
     artifact Secret's content hash with the `varroa.dev/artifact-secret-hash`
     pod-template annotation, `artifactcasc.go`) — the jenkins-image check compares an effective
@@ -432,8 +447,8 @@ sections describe.
   (`clientset_client.go`) appends `VARROA_HEADLESS=true` to the jenkins container's env
   only when true, so a non-headless pod template stays byte-identical.
   `reconcileHeadlessRoll` (`controller_controller.go`), called from the `Connected`
-  branch, reads the live env through `GetStatefulSetJenkinsEnv` (a `ResourceClient`
-  method mirroring `GetStatefulSetImages`) and transitions to `Provisioning` on a
+  branch, reads the live jenkins env through `GetStatefulSetContainerEnv` (a
+  `ResourceClient` method that takes the container name) and transitions to `Provisioning` on a
   difference from the desired value; it skips the check when no StatefulSet exists yet
   or the read errors, and treats an absent variable as `false`. `reconcileIngress`
   deletes the controller's Ingress and sets `ConditionNoExternalURL`/`Headless` instead
@@ -773,7 +788,9 @@ sections describe.
     this package, one file per concern: `cell_readiness.go`
     (`isCellController`; `cellConfigGateReason` checks, in fixed order, the
     record store, the s3 blob tier, and C3's `ArtifactStorage=External`
-    condition before a cell may report `CellReady`; `evaluateCellRoll`
+    condition before a cell may report `CellReady`; past the gates the base
+    reason is `MiteUnreachable` for `Running` + `MiteConnected=False/StreamLost`,
+    else `NotProvisioned` below `Connected`; `evaluateCellRoll`
     implements design D6's roll-then-evacuate rule off
     `UnreadySince`/`cellsConfig.UnreadyGracePeriod` — `CellNotReady`
     applies when the pass keeps a placement on a cell reporting

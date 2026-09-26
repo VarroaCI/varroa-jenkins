@@ -197,9 +197,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{RequeueAfter: requeueAfter}, nil
 }
 
+// streamLostRequeue is the requeue base for a Running controller whose mite
+// stream is lost.
+const streamLostRequeue = 15 * time.Second
+
 // nextRequeueDuration returns the duration before the next reconciliation,
 // based on the controller's phase. Unlike the legacy nextSleepDuration, this
 // never returns 0 — active phases get a minimum backoff with jitter.
+//
+// A Running controller that lost its mite stream requeues at
+// streamLostRequeue. Its pod is unchanged, so each tick repeats the same
+// reads; the value bounds how late the operator sees a reconnect.
 func (r *Reconciler) nextRequeueDuration(cr *v1alpha1.Controller) time.Duration {
 	const minBackoff = 1 * time.Second
 
@@ -218,8 +226,13 @@ func (r *Reconciler) nextRequeueDuration(cr *v1alpha1.Controller) time.Duration 
 		// never on this tick. The tick only refreshes the wake
 		// EndpointSlice, so it runs at the regular interval.
 		base = r.effectiveInterval(cr)
+	case v1alpha1.ControllerPhaseRunning:
+		base = minBackoff
+		if isStreamLost(cr) {
+			base = streamLostRequeue
+		}
 	default:
-		// Pending, Provisioning, Running: backoff instead of tight loop.
+		// Pending, Provisioning: backoff instead of tight loop.
 		base = minBackoff
 	}
 

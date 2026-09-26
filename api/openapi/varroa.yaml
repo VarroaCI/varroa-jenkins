@@ -1000,7 +1000,7 @@ components:
       additionalProperties: false
       description: Why the controller needs an operator's attention, if it does. Exactly
         one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed
-        > pluginRollFailed > applyFailed.
+        > pluginRollFailed > applyFailed > miteUnreachable.
       properties:
         kind:
           enum:
@@ -1009,6 +1009,7 @@ components:
           - bootFailed
           - pluginRollFailed
           - applyFailed
+          - miteUnreachable
           type: string
         message:
           type: string
@@ -5350,7 +5351,7 @@ components:
       additionalProperties: false
       description: Why the controller needs an operator's attention, if it does. Exactly
         one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed
-        > pluginRollFailed > applyFailed.
+        > pluginRollFailed > applyFailed > miteUnreachable.
       properties:
         kind:
           enum:
@@ -5359,6 +5360,7 @@ components:
           - bootFailed
           - pluginRollFailed
           - applyFailed
+          - miteUnreachable
           type: string
         message:
           type: string

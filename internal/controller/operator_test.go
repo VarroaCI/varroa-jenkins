@@ -23,3 +23,15 @@ func TestNextRequeueDuration_IdlePhasesUseInterval(t *testing.T) {
 		t.Fatalf("Provisioning: requeue %s, want the short active backoff", got)
 	}
 }
+
+// TestNextRequeueDuration_StreamLostBacksOff proves a Running controller that
+// lost its mite stream requeues at streamLostRequeue, not the one-second
+// backoff. The pod is unchanged, so a tight loop only repeats the same work.
+func TestNextRequeueDuration_StreamLostBacksOff(t *testing.T) {
+	rec := newTestReconciler(newTestClient())
+	cr := testController("lost", "ns1", v1alpha1.ControllerPhaseRunning)
+	cr.Status.Conditions = []v1alpha1.ControllerCondition{streamLostCond(time.Now())}
+	if got := rec.nextRequeueDuration(cr); got < streamLostRequeue {
+		t.Fatalf("requeue %s, want at least %s", got, streamLostRequeue)
+	}
+}

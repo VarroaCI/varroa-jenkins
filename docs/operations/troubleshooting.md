@@ -11,6 +11,7 @@ kubectl get events -n <namespace> --sort-by=.lastTimestamp
 
 - `Pending` or `Provisioning`: check namespace eligibility, image pull, storage, and ingress events. Correct the missing dependency, then reconcile.
 - Jenkins does not connect: check Pod readiness, gateway reachability, TLS, and network policy.
+- `Running` with the pill Mite unreachable: the mite stream is lost, and the pod stays in place. Check the gateway pods, the pod egress to the gateway on TCP 9090, and the mite log.
 - Bundle change is absent: inspect composed bundle status and any rollout or reconciliation hold. Correct the bundle, then approve or reconcile.
 - `403` or `401`: run `varroactl whoami`, then review [Varroa RBAC](../security/varroa-rbac.md).
 - Lifecycle action waits: inspect pending status for a build, power state, hibernation, or approval. See [Reconciliation](reconciliation.md).

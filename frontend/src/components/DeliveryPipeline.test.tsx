@@ -233,6 +233,40 @@ describe("buildDeliveryNodes", () => {
     expect(model.rails).toEqual({ bundleToApply: "off", applyToJenkins: "off" });
   });
 
+  it("stream lost in Running: bad lamp, mite unreachable line, not 'starting pod…'", () => {
+    const model = buildDeliveryNodes(
+      baseCtrl({
+        phase: "Running",
+        miteConnected: false,
+        lastSeen: "2026-07-17T14:20:00Z",
+        conditions: [{ type: "MiteConnected", status: "False", reason: "StreamLost", message: "mite my-ns/my-ctrl command stream lost" }],
+      }),
+      NOW,
+    );
+    expect(model.kind).toBe("pipeline");
+    if (model.kind !== "pipeline") return;
+    const jenkins = model.nodes[2];
+    expect(jenkins.lamp).toBe("bad");
+    expect(jenkins.line).toBe("mite unreachable");
+    expect(jenkins.sub?.[0].t).toBe("last heartbeat ");
+    expect(jenkins.sub?.[1].t).toBe("5m ago");
+    expect(jenkins.steps).toBeUndefined();
+    expect(model.rails.applyToJenkins).toBe("off");
+  });
+
+  it("restored stream in Running keeps the waking steps", () => {
+    const model = buildDeliveryNodes(
+      baseCtrl({
+        phase: "Running",
+        miteConnected: false,
+        conditions: [{ type: "MiteConnected", status: "True", reason: "StreamRestored" }],
+      }),
+      NOW,
+    );
+    if (model.kind !== "pipeline") throw new Error("expected pipeline");
+    expect(model.nodes[2].line).toBe("starting pod…");
+  });
+
   it("unexpected-offline: bad lamp, mite disconnected line", () => {
     const model = buildDeliveryNodes(baseCtrl({ miteConnected: false, lastSeen: "2026-07-17T14:20:00Z" }), NOW);
     expect(model.kind).toBe("pipeline");

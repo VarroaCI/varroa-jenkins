@@ -24,118 +24,126 @@ func runningCtrl(name string) *v1alpha1.Controller {
 	}
 }
 
-// TestHandleRunning_ProlongedDisconnectResetsToPending asserts that a
-// controller observed in Running whose mite never (re)connects must, after
-// the grace period, reset to Pending so the Pending→Provisioning pass runs a
-// full reprovision (rolling the mite container's CA env) instead of waiting
-// out the 5-minute provisioning timeout.
-func TestHandleRunning_ProlongedDisconnectResetsToPending(t *testing.T) {
+// streamLostCond returns a MiteConnected=False/StreamLost condition that
+// transitioned at the given time.
+func streamLostCond(at time.Time) v1alpha1.ControllerCondition {
+	return v1alpha1.ControllerCondition{
+		Type:               v1alpha1.ConditionMiteConnected,
+		Status:             metav1.ConditionFalse,
+		Reason:             v1alpha1.ReasonStreamLost,
+		LastTransitionTime: metav1.NewTime(at),
+	}
+}
+
+// TestHandleRunning_DisconnectHoldsRunning asserts that a disconnected mite
+// never moves a Running controller back to Pending. A forced Pending resets
+// ProvisioningStartedAt and reprovisions an unchanged pod every few seconds.
+func TestHandleRunning_DisconnectHoldsRunning(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	rec, _ := newTestReconcilerForGate(client)
 
 	cr := runningCtrl("orphan")
+	started := metav1.NewTime(time.Now())
+	cr.Status.ProvisioningStartedAt = &started
 
-	// No mite registered → Info reports disconnected. Ticks 1 and 2 are the
-	// grace period; the controller stays in Running.
-	for i := 1; i <= 2; i++ {
+	for i := 1; i <= 12; i++ {
 		if err := rec.handleRunning(context.Background(), cr); err != nil {
 			t.Fatalf("tick %d: handleRunning error: %v", i, err)
 		}
 		if cr.Status.Phase != v1alpha1.ControllerPhaseRunning {
-			t.Fatalf("tick %d: expected phase Running during grace, got %s", i, cr.Status.Phase)
+			t.Fatalf("tick %d: phase = %s, want Running", i, cr.Status.Phase)
 		}
 	}
-
-	// Tick 3 crosses the grace threshold → reset to Pending.
-	if err := rec.handleRunning(context.Background(), cr); err != nil {
-		t.Fatalf("tick 3: handleRunning error: %v", err)
+	if !cr.Status.ProvisioningStartedAt.Equal(&started) {
+		t.Errorf("ProvisioningStartedAt moved from %v to %v", started, cr.Status.ProvisioningStartedAt)
 	}
-	if cr.Status.Phase != v1alpha1.ControllerPhasePending {
-		t.Fatalf("tick 3: expected phase Pending after prolonged disconnect, got %s", cr.Status.Phase)
-	}
-
-	// Ready=False / MiteDisconnected condition surfaced.
-	var ready *v1alpha1.ControllerCondition
-	for i := range cr.Status.Conditions {
-		if cr.Status.Conditions[i].Type == v1alpha1.ConditionReady {
-			ready = &cr.Status.Conditions[i]
-			break
-		}
-	}
-	if ready == nil {
-		t.Fatal("expected a Ready condition after prolonged disconnect")
-	}
-	if ready.Status != metav1.ConditionFalse || ready.Reason != "MiteDisconnected" {
-		t.Errorf("expected Ready=False/MiteDisconnected, got status=%s reason=%s", ready.Status, ready.Reason)
+	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionMiteConnected); c != nil {
+		t.Errorf("a never-connected mite must carry no MiteConnected condition, got %+v", *c)
 	}
 }
 
-// TestHandleRunning_ReconnectClearsDisconnectTicks verifies the grace counter is
-// cleared when the mite (re)connects, so a later disconnect gets a fresh grace
-// window, and the controller advances to Connected.
-func TestHandleRunning_ReconnectClearsDisconnectTicks(t *testing.T) {
+// TestHandleRunning_StreamLostSkipsProvisioningTimeout asserts that a
+// controller that lost a live stream stays Running past provisioningTimeout.
+// Its ProvisioningStartedAt dates from the last provisioning run, long before
+// the loss, so the guard would fail it on the first Running tick.
+func TestHandleRunning_StreamLostSkipsProvisioningTimeout(t *testing.T) {
+	client := newTestClientWithGateBundle()
+	rec, _ := newTestReconcilerForGate(client)
+
+	cr := runningCtrl("lost")
+	started := metav1.NewTime(time.Now().Add(-time.Hour))
+	cr.Status.ProvisioningStartedAt = &started
+	cr.Status.Conditions = []v1alpha1.ControllerCondition{streamLostCond(time.Now().Add(-10 * time.Minute))}
+
+	for i := 1; i <= 12; i++ {
+		if err := rec.handleRunning(context.Background(), cr); err != nil {
+			t.Fatalf("tick %d: handleRunning error: %v", i, err)
+		}
+		if cr.Status.Phase != v1alpha1.ControllerPhaseRunning {
+			t.Fatalf("tick %d: phase = %s, want Running", i, cr.Status.Phase)
+		}
+	}
+	c := findCondition(cr.Status.Conditions, v1alpha1.ConditionMiteConnected)
+	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != v1alpha1.ReasonStreamLost {
+		t.Fatalf("MiteConnected = %+v, want False/StreamLost kept", c)
+	}
+}
+
+// TestHandleRunning_TimeoutAppliesAfterReprovision asserts the timeout guard
+// still fails a controller whose provisioning run started after the stream
+// loss. A drift roll that brings up a pod whose mite never connects must not
+// wait forever.
+func TestHandleRunning_TimeoutAppliesAfterReprovision(t *testing.T) {
+	client := newTestClientWithGateBundle()
+	rec, _ := newTestReconcilerForGate(client)
+
+	cr := runningCtrl("rolled")
+	started := metav1.NewTime(time.Now().Add(-time.Hour))
+	cr.Status.ProvisioningStartedAt = &started
+	cr.Status.Conditions = []v1alpha1.ControllerCondition{streamLostCond(time.Now().Add(-2 * time.Hour))}
+
+	_ = rec.handleRunning(context.Background(), cr)
+	if cr.Status.Phase != v1alpha1.ControllerPhaseFailed {
+		t.Fatalf("phase = %s, want Failed", cr.Status.Phase)
+	}
+}
+
+// TestHandleRunning_ReconnectAfterStreamLostSetsRestored asserts that a
+// reconnect returns the controller to Connected and records StreamRestored.
+func TestHandleRunning_ReconnectAfterStreamLostSetsRestored(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	rec, registry := newTestReconcilerForGate(client)
 
 	cr := runningCtrl("flap")
+	cr.Status.Conditions = []v1alpha1.ControllerCondition{streamLostCond(time.Now().Add(-time.Minute))}
 
-	// One disconnected tick (within grace).
-	if err := rec.handleRunning(context.Background(), cr); err != nil {
-		t.Fatalf("disconnected tick: %v", err)
-	}
-	if got := rec.disconnectedTicks["ns/flap"]; got != 1 {
-		t.Fatalf("expected 1 disconnected tick, got %d", got)
-	}
-
-	// Mite connects → tick counter cleared and phase advances to Connected.
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
 	if err := rec.handleRunning(context.Background(), cr); err != nil {
 		t.Fatalf("connected tick: %v", err)
 	}
-	if got := rec.disconnectedTicks["ns/flap"]; got != 0 {
-		t.Errorf("expected disconnected ticks cleared on reconnect, got %d", got)
-	}
 	if cr.Status.Phase != v1alpha1.ControllerPhaseConnected {
-		t.Errorf("expected phase Connected after reconnect, got %s", cr.Status.Phase)
+		t.Fatalf("phase = %s, want Connected", cr.Status.Phase)
+	}
+	c := findCondition(cr.Status.Conditions, v1alpha1.ConditionMiteConnected)
+	if c == nil || c.Status != metav1.ConditionTrue || c.Reason != v1alpha1.ReasonStreamRestored {
+		t.Fatalf("MiteConnected = %+v, want True/StreamRestored", c)
 	}
 }
 
-// TestHandleRunning_ForcePendingClearsGraceWindow asserts that when
-// handleRunning forces Pending after the grace period it must
-// clear the disconnected-tick counter, so a Provisioning→Running bounce-back
-// (common while the pod restarts before the mite reconnects) gets a fresh grace
-// window instead of immediately re-forcing Pending — otherwise the controller
-// thrashes Pending↔Provisioning↔Running every tick.
-func TestHandleRunning_ForcePendingClearsGraceWindow(t *testing.T) {
+// TestHandleRunning_FirstConnectWritesNoMiteConnected asserts that a first
+// connection writes no MiteConnected condition. The condition exists only
+// after a loss.
+func TestHandleRunning_FirstConnectWritesNoMiteConnected(t *testing.T) {
 	client := newTestClientWithGateBundle()
-	rec, _ := newTestReconcilerForGate(client)
+	rec, registry := newTestReconcilerForGate(client)
 
-	cr := runningCtrl("thrash")
-
-	// Three disconnected ticks → Pending.
-	for i := 1; i <= 3; i++ {
-		if err := rec.handleRunning(context.Background(), cr); err != nil {
-			t.Fatalf("tick %d: %v", i, err)
-		}
-	}
-	if cr.Status.Phase != v1alpha1.ControllerPhasePending {
-		t.Fatalf("expected Pending after 3 ticks, got %s", cr.Status.Phase)
-	}
-	if got := rec.disconnectedTicks["ns/thrash"]; got != 0 {
-		t.Fatalf("expected disconnected ticks cleared when forcing Pending, got %d", got)
-	}
-
-	// Simulate the Provisioning→Running bounce-back before the mite reconnects:
-	// the next tick must re-enter the grace window (stay Running), not re-Pend.
-	cr.Status.Phase = v1alpha1.ControllerPhaseRunning
+	cr := runningCtrl("first")
+	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
 	if err := rec.handleRunning(context.Background(), cr); err != nil {
-		t.Fatalf("bounce-back tick: %v", err)
+		t.Fatalf("connected tick: %v", err)
 	}
-	if cr.Status.Phase != v1alpha1.ControllerPhaseRunning {
-		t.Fatalf("expected a fresh grace window (Running) after bounce-back, got %s", cr.Status.Phase)
-	}
-	if got := rec.disconnectedTicks["ns/thrash"]; got != 1 {
-		t.Errorf("expected 1 tick in the fresh grace window, got %d", got)
+	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionMiteConnected); c != nil {
+		t.Fatalf("MiteConnected = %+v, want absent", *c)
 	}
 }
 
@@ -143,9 +151,9 @@ func TestHandleRunning_ForcePendingClearsGraceWindow(t *testing.T) {
 // 15-minute bootstrap token routinely expires while the pod is still pulling
 // plugins in init, and by the time the mite first registers the phase has
 // advanced to Running — where no remint ran. The mite then burns
-// Unauthenticated retries until the disconnect-recovery reset thrashes the
-// controller back through Pending, minutes later. A Running tick with a
-// disconnected mite must refresh an expired token immediately.
+// Unauthenticated retries until provisioningTimeout fails the controller.
+// A Running tick with a disconnected mite must refresh an expired token
+// immediately.
 func TestHandleRunning_RemintsExpiredBootstrapToken(t *testing.T) {
 	client := newTestClientWithGateBundle()
 	rec, _ := newTestReconcilerForGate(client)

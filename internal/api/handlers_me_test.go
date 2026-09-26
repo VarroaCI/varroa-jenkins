@@ -526,7 +526,7 @@ func (f *fakeResourceClient) GetStatefulSetRollout(_ context.Context, _, _ strin
 func (f *fakeResourceClient) GetStatefulSetImages(_ context.Context, _, _ string) (map[string]string, map[string]string, error) {
 	return nil, nil, nil
 }
-func (f *fakeResourceClient) GetStatefulSetJenkinsEnv(_ context.Context, _, _ string) (map[string]string, bool, error) {
+func (f *fakeResourceClient) GetStatefulSetContainerEnv(_ context.Context, _, _, _ string) (map[string]string, bool, error) {
 	return nil, false, nil
 }
 func (f *fakeResourceClient) GetStatefulSetContainerSpecs(_ context.Context, _, _ string) (string, string, *corev1.ResourceRequirements, *corev1.ResourceRequirements, string, map[string]string, bool, error) {

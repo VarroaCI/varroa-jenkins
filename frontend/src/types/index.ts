@@ -7,7 +7,8 @@ export type ControllerAttentionKind =
   | "reconcileBlocked"
   | "bootFailed"
   | "pluginRollFailed"
-  | "applyFailed";
+  | "applyFailed"
+  | "miteUnreachable";
 
 /** Why a controller needs an operator's attention; absent when healthy. */
 export interface ControllerAttention {

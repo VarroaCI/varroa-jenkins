@@ -132,7 +132,7 @@ func (s *stubClient) GetStatefulSetRollout(_ context.Context, _, _ string) (cont
 func (s *stubClient) GetStatefulSetImages(_ context.Context, _, _ string) (map[string]string, map[string]string, error) {
 	return nil, nil, nil
 }
-func (s *stubClient) GetStatefulSetJenkinsEnv(_ context.Context, _, _ string) (map[string]string, bool, error) {
+func (s *stubClient) GetStatefulSetContainerEnv(_ context.Context, _, _, _ string) (map[string]string, bool, error) {
 	return nil, false, nil
 }
 func (s *stubClient) GetStatefulSetContainerSpecs(_ context.Context, _, _ string) (string, string, *corev1.ResourceRequirements, *corev1.ResourceRequirements, string, map[string]string, bool, error) {

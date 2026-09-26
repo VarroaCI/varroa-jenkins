@@ -932,9 +932,9 @@ type ResourceClient interface {
 	// by name) of the controller StatefulSet. A missing StatefulSet returns
 	// (nil, nil, nil) — callers treat nil live as "nothing to roll".
 	GetStatefulSetImages(ctx context.Context, name, namespace string) (computed, live map[string]string, err error)
-	// GetStatefulSetJenkinsEnv returns the jenkins container's env as a map.
+	// GetStatefulSetContainerEnv returns the named container's env as a map.
 	// found is false when the StatefulSet or the container is absent.
-	GetStatefulSetJenkinsEnv(ctx context.Context, name, namespace string) (env map[string]string, found bool, err error)
+	GetStatefulSetContainerEnv(ctx context.Context, name, namespace, container string) (env map[string]string, found bool, err error)
 	// GetStatefulSetContainerSpecs returns the mite container's full independently-
 	// editable spec surface — computed-images stamp entry, live image, live
 	// resource requirements (requests+limits for both mite and Jenkins),
@@ -2290,6 +2290,9 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 		if !rolled {
 			rolled = r.reconcileContainerSpecRoll(ctx, cr)
 		}
+		if !rolled {
+			rolled = r.reconcileMiteTransportEnvRoll(ctx, cr)
+		}
 		if !rolled && oldPhase == v1alpha1.ControllerPhaseConnected {
 			rolled = r.reconcileHeadlessRoll(ctx, cr)
 		}
@@ -2625,9 +2628,8 @@ func resourceOverlayIngress(cr *v1alpha1.Controller) string {
 // just Provisioning: the token TTL (15 min) can elapse while the pod is still
 // pulling plugins in init, and by the time the mite first registers the phase
 // has already advanced to Running. Without a remint there, the controller
-// wedges on Unauthenticated registrations until the disconnect-recovery path
-// thrashes it back through Pending — minutes of avoidable downtime. A
-// connected mite never reads the bootstrap token (it holds an mTLS cert), so
+// wedges on Unauthenticated registrations until provisioningTimeout fails it.
+// A connected mite never reads the bootstrap token (it holds an mTLS cert), so
 // reminting outside Connected is always safe.
 //
 // A token also belongs to one pod instance: the Secret's "instance" key
@@ -3261,7 +3263,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		// so it stops being meaningful the moment the mite is gone — including
 		// during the reconnect grace window below. Nothing else clears it
 		// outside the Connected phase, so drop it here rather than leaving a
-		// stale True through the whole Pending/provisioning cycle.
+		// stale True while the controller waits in Running.
 		cr.Status.Conditions = removeConditionByType(cr.Status.Conditions,
 			v1alpha1.ConditionMiteStreamDegraded)
 		if r.disconnectedTicks[key] < 3 {
@@ -3275,17 +3277,8 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		r.miteTokenMu.Lock()
 		delete(r.miteTokens, key)
 		r.miteTokenMu.Unlock()
-		// Reset the disconnected-tick counter so a later re-provision attempt
-		// starts with a fresh grace window (see handleRunning) rather than
-		// immediately re-forcing Pending.
 		delete(r.disconnectedTicks, key)
-		cr.Status.Phase = v1alpha1.ControllerPhasePending
-		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
-			Type:    v1alpha1.ConditionReady,
-			Status:  metav1.ConditionFalse,
-			Reason:  "MiteDisconnected",
-			Message: "mite sidecar disconnected",
-		})
+		markStreamLost(cr, key, lastHeartbeat)
 		return nil
 	}
 	// Reset disconnected counter when mite is connected.
@@ -4317,7 +4310,10 @@ func (r *Reconciler) handleRunning(ctx context.Context, cr *v1alpha1.Controller)
 
 	// Same timeout guard as handleProvisioning — use ProvisioningStartedAt
 	// so an operator restart doesn't immediately fail long-lived controllers.
-	if cr.Status.ProvisioningStartedAt != nil && time.Since(cr.Status.ProvisioningStartedAt.Time) > provisioningTimeout {
+	// A stream lost after the last provisioning run is not a connect timeout:
+	// ProvisioningStartedAt predates the loss, so the guard skips it.
+	if cr.Status.ProvisioningStartedAt != nil && time.Since(cr.Status.ProvisioningStartedAt.Time) > provisioningTimeout &&
+		!streamLostSince(cr, cr.Status.ProvisioningStartedAt.Time) {
 		cr.Status.Phase = v1alpha1.ControllerPhaseFailed
 		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
 			Type:    v1alpha1.ConditionFailed,
@@ -4337,46 +4333,17 @@ func (r *Reconciler) handleRunning(ctx context.Context, cr *v1alpha1.Controller)
 	r.checkPluginRollFailed(ctx, cr, nil, logger)
 
 	version, lastHeartbeat, certExpiry, connected := r.miteTransport.Info(cr.Namespace, cr.Name)
-	key := cr.Namespace + "/" + cr.Name
+	// handleConnected treats a stale heartbeat as a lost stream. The same rule
+	// applies here, or the two handlers flap the phase on one presence record.
+	connected = connected && !heartbeatStale(lastHeartbeat)
 	if !connected {
-		// (Bootstrap token freshness is handled at the top of this function,
-		// before the timeout guard.)
-		// Prolonged-disconnect recovery. A controller observed in Running whose
-		// mite never (re)connects would otherwise only escape via the 5-minute
-		// provisioningTimeout → Failed. Mirror handleConnected: after a short
-		// grace period, reset to Pending so the Pending→Provisioning pass runs
-		// the FULL provisioning reconcile (CreateStatefulSet). That path re-renders
-		// the mite container's VARROA_CA_PEM env and rolls the pod on AlreadyExists
-		// — the recovery route after a control-plane reinstall regenerates the CA
-		// (UpdateStatefulSetOIDCEnv would not, as it only patches the Jenkins
-		// container).
-		r.disconnectedTicks[key]++
-		if r.disconnectedTicks[key] < 3 {
-			// Grace period: mite may be (re)connecting after an operator or
-			// control-plane restart.
-			return nil
-		}
-
-		// Clear the token record so a fresh one is issued on reconnect. The
-		// mite's in-memory token is lost when it restarts.
-		r.miteTokenMu.Lock()
-		delete(r.miteTokens, key)
-		r.miteTokenMu.Unlock()
-		// Reset the disconnected-tick counter so the next Provisioning→Running
-		// attempt gets a fresh grace window instead of immediately re-forcing
-		// Pending (which would thrash Pending↔Provisioning↔Running).
-		delete(r.disconnectedTicks, key)
-		cr.Status.Phase = v1alpha1.ControllerPhasePending
-		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
-			Type:    v1alpha1.ConditionReady,
-			Status:  metav1.ConditionFalse,
-			Reason:  "MiteDisconnected",
-			Message: "mite sidecar disconnected",
-		})
+		// A disconnected mite never moves a Running controller back to
+		// Pending. Reprovisioning an unchanged pod does not reconnect it.
+		// reconcileMiteTransportEnvRoll rolls the pod when its transport env
+		// is stale, and provisioningTimeout fails a pod that never connects.
 		return nil
 	}
-	// Reset disconnected counter when mite is connected.
-	delete(r.disconnectedTicks, key)
+	delete(r.disconnectedTicks, cr.Namespace+"/"+cr.Name)
 
 	// Mite is connected — transition to Connected and populate MiteStatus.
 	cr.Status.Phase = v1alpha1.ControllerPhaseConnected
@@ -4398,7 +4365,113 @@ func (r *Reconciler) handleRunning(ctx context.Context, cr *v1alpha1.Controller)
 		Reason:  "MiteConnected",
 		Message: "mite sidecar connected and streaming",
 	})
+	// MiteConnected exists only after a loss, so a first connect writes none.
+	if existing := findCondition(cr.Status.Conditions, v1alpha1.ConditionMiteConnected); existing != nil {
+		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+			Type:    v1alpha1.ConditionMiteConnected,
+			Status:  metav1.ConditionTrue,
+			Reason:  v1alpha1.ReasonStreamRestored,
+			Message: fmt.Sprintf("mite %s/%s reconnected", cr.Namespace, cr.Name),
+		})
+	}
 	return nil
+}
+
+// markStreamLost moves a Connected controller whose mite stream stays lost to
+// Running. The pod is unchanged, so the controller must not reprovision.
+// lastHeartbeat is the transport's last heartbeat; a zero value falls back to
+// status.miteStatus.lastSeen.
+func markStreamLost(cr *v1alpha1.Controller, key string, lastHeartbeat time.Time) {
+	if lastHeartbeat.IsZero() && cr.Status.MiteStatus != nil && cr.Status.MiteStatus.LastSeen != nil {
+		lastHeartbeat = cr.Status.MiteStatus.LastSeen.Time
+	}
+	last := "never"
+	if !lastHeartbeat.IsZero() {
+		last = lastHeartbeat.UTC().Format(time.RFC3339)
+	}
+	cr.Status.Phase = v1alpha1.ControllerPhaseRunning
+	clearMiteConnection(cr)
+	cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+		Type:    v1alpha1.ConditionReady,
+		Status:  metav1.ConditionFalse,
+		Reason:  "MiteDisconnected",
+		Message: "mite sidecar disconnected",
+	})
+	cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+		Type:    v1alpha1.ConditionMiteConnected,
+		Status:  metav1.ConditionFalse,
+		Reason:  v1alpha1.ReasonStreamLost,
+		Message: fmt.Sprintf("mite %s command stream lost; last heartbeat %s", key, last),
+	})
+}
+
+// heartbeatStale reports whether a transport heartbeat is older than
+// staleMiteThreshold. deriveMiteHealth applies the same rule.
+func heartbeatStale(lastHeartbeat time.Time) bool {
+	return time.Since(lastHeartbeat) > staleMiteThreshold
+}
+
+// streamLostSince reports whether the mite stream is lost and the loss
+// happened after t.
+func streamLostSince(cr *v1alpha1.Controller, t time.Time) bool {
+	c := findCondition(cr.Status.Conditions, v1alpha1.ConditionMiteConnected)
+	return c != nil && c.Status == metav1.ConditionFalse && c.Reason == v1alpha1.ReasonStreamLost &&
+		c.LastTransitionTime.After(t)
+}
+
+// isStreamLost reports whether the controller carries MiteConnected=False
+// with reason StreamLost.
+func isStreamLost(cr *v1alpha1.Controller) bool {
+	c := findCondition(cr.Status.Conditions, v1alpha1.ConditionMiteConnected)
+	return c != nil && c.Status == metav1.ConditionFalse && c.Reason == v1alpha1.ReasonStreamLost
+}
+
+// reconcileMiteTransportEnvRoll rolls the pod of a controller that lost its
+// mite stream only when a reprovision changes the pod. It compares the
+// StatefulSet template's mite VARROA_CA_PEM and VARROA_ENDPOINT with the
+// operator's values, and rolls when either differs or the StatefulSet is gone.
+// A new CA after a control-plane reinstall is the case this catches. An
+// OnDelete or partitioned overlay keeps the old pod, as for every template
+// roll. Returns true when it moved the phase to Provisioning; the caller then
+// skips the phase dispatch this tick.
+func (r *Reconciler) reconcileMiteTransportEnvRoll(ctx context.Context, cr *v1alpha1.Controller) bool {
+	if cr.Status.Phase != v1alpha1.ControllerPhaseRunning || !isStreamLost(cr) {
+		return false
+	}
+	if _, lastHeartbeat, _, connected := r.miteTransport.Info(cr.Namespace, cr.Name); connected && !heartbeatStale(lastHeartbeat) {
+		return false
+	}
+	env, found, err := r.client.GetStatefulSetContainerEnv(ctx, controllerPrefix(cr), cr.Namespace, overlay.MiteContainerName)
+	if err != nil {
+		r.Logger.Warn("mite transport env roll evaluation skipped", "controller", cr.Namespace+"/"+cr.Name, "error", err)
+		return false
+	}
+	var deltas []string
+	switch {
+	case !found:
+		deltas = append(deltas, "StatefulSet or mite container missing")
+	default:
+		if env["VARROA_CA_PEM"] != r.caPEM {
+			deltas = append(deltas, "VARROA_CA_PEM changed")
+		}
+		if env["VARROA_ENDPOINT"] != r.varroaEndpoint {
+			deltas = append(deltas, fmt.Sprintf("VARROA_ENDPOINT %q -> %q", env["VARROA_ENDPOINT"], r.varroaEndpoint))
+		}
+	}
+	if len(deltas) == 0 {
+		return false
+	}
+	now := metav1Now()
+	cr.Status.Phase = v1alpha1.ControllerPhaseProvisioning
+	cr.Status.ProvisioningStartedAt = &now
+	cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+		Type:               v1alpha1.ConditionProvisioning,
+		Status:             metav1.ConditionTrue,
+		LastTransitionTime: now,
+		Reason:             "ProvisioningStarted",
+		Message:            "re-provisioning to apply mite transport change: " + strings.Join(deltas, "; "),
+	})
+	return true
 }
 
 func (r *Reconciler) handleFailed(_ context.Context, cr *v1alpha1.Controller) {
@@ -4986,7 +5059,7 @@ func (r *Reconciler) reconcileVersionRoll(ctx context.Context, cr *v1alpha1.Cont
 // tick). Design section 3.
 func (r *Reconciler) reconcileHeadlessRoll(ctx context.Context, cr *v1alpha1.Controller) bool {
 	desired := v1alpha1.IsHeadless(cr)
-	env, found, err := r.client.GetStatefulSetJenkinsEnv(ctx, controllerPrefix(cr), cr.Namespace)
+	env, found, err := r.client.GetStatefulSetContainerEnv(ctx, controllerPrefix(cr), cr.Namespace, overlay.JenkinsContainerName)
 	if err != nil {
 		r.Logger.Warn("headless-roll evaluation skipped", "controller", cr.Namespace+"/"+cr.Name, "error", err)
 		return false

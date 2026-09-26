@@ -380,7 +380,7 @@ federation, activity persistence, and SSE fanout.
   projection, carried on **both** the list summary (`controllerResponse`) and the
   detail DTO (`controllerDetailResponse`). Exactly one kind is reported, by
   precedence `failed > reconcileBlocked > bootFailed > pluginRollFailed >
-  applyFailed`; a `Hibernated`/`Stopped` controller reports none, because its
+  applyFailed > miteUnreachable` (`MiteConnected=False/StreamLost`); a `Hibernated`/`Stopped` controller reports none, because its
   runtime conditions and `LastApplyResult` are stale until it wakes. Adding a
   kind means extending `buildAttentionJSON`, the `ControllerAttention` enum in
   `api/openapi/components/schemas.yaml`, and `ATTENTION_LABEL` in the frontend

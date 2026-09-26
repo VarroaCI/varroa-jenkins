@@ -195,8 +195,12 @@ func (r *Reconciler) evaluateCellReadiness(ctx context.Context, cr *v1alpha1.Con
 			Type:   v1alpha1.ConditionCellReady,
 			Status: metav1.ConditionFalse,
 		}
+		baseReason := v1alpha1.ReasonNotProvisioned
+		if cr.Status.Phase == v1alpha1.ControllerPhaseRunning && isStreamLost(cr) {
+			baseReason = v1alpha1.ReasonMiteUnreachable
+		}
 		grace := r.cellUnreadyGrace(ctx, cr)
-		roll := evaluateCellRoll(cell, v1alpha1.ReasonNotProvisioned, now, grace)
+		roll := evaluateCellRoll(cell, baseReason, now, grace)
 		cell.UnreadySince = &roll.UnreadySince
 		cell.Evacuate = roll.Evacuate
 		previousRolledAt := cell.RolledAt
@@ -210,7 +214,7 @@ func (r *Reconciler) evaluateCellReadiness(ctx context.Context, cr *v1alpha1.Con
 				// The delete did not happen: revert the tentative roll
 				// marker so the next tick retries instead of skipping it.
 				cell.RolledAt = previousRolledAt
-				cond.Reason, cond.Message = v1alpha1.ReasonNotProvisioned, ""
+				cond.Reason, cond.Message = baseReason, ""
 			} else {
 				r.emitOperatorEvent("cell.rolled", cr,
 					fmt.Sprintf("rolled the cell pod to recover from %s", roll.Message), roll.Message)

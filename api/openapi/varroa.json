@@ -1384,7 +1384,7 @@
       },
       "ControllerAttention": {
         "additionalProperties": false,
-        "description": "Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed \u003e reconcileBlocked \u003e bootFailed \u003e pluginRollFailed \u003e applyFailed.",
+        "description": "Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed \u003e reconcileBlocked \u003e bootFailed \u003e pluginRollFailed \u003e applyFailed \u003e miteUnreachable.",
         "properties": {
           "kind": {
             "enum": [
@@ -1392,7 +1392,8 @@
               "reconcileBlocked",
               "bootFailed",
               "pluginRollFailed",
-              "applyFailed"
+              "applyFailed",
+              "miteUnreachable"
             ],
             "type": "string"
           },
@@ -7250,7 +7251,7 @@
       },
       "components_schemas_ControllerAttention": {
         "additionalProperties": false,
-        "description": "Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed \u003e reconcileBlocked \u003e bootFailed \u003e pluginRollFailed \u003e applyFailed.",
+        "description": "Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed \u003e reconcileBlocked \u003e bootFailed \u003e pluginRollFailed \u003e applyFailed \u003e miteUnreachable.",
         "properties": {
           "kind": {
             "enum": [
@@ -7258,7 +7259,8 @@
               "reconcileBlocked",
               "bootFailed",
               "pluginRollFailed",
-              "applyFailed"
+              "applyFailed",
+              "miteUnreachable"
             ],
             "type": "string"
           },
