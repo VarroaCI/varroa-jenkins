@@ -193,8 +193,14 @@ func (h *BusHandler) clearClaimSlots(ns, name string, connToken int64) {
 }
 
 // respondClaimUnavailable answers a claim with an empty decision and the
-// UNAVAILABLE failure code, echoing requestID.
-func (h *BusHandler) respondClaimUnavailable(send Sender, requestID, errMsg string) {
+// UNAVAILABLE failure code, echoing requestID. It logs each answer at
+// Warn, because the plugin holds the build and retries, and no other
+// component records the failure.
+func (h *BusHandler) respondClaimUnavailable(send Sender, ns, name, requestID, errMsg string) {
+	h.log().Warn("claim answered unavailable",
+		"request_id", requestID,
+		"controller", ns+"/"+name,
+		"error", errMsg)
 	resp := &mitev1.ClaimResponse{
 		RequestId: requestID,
 		Code:      codeUnavailable,
@@ -215,7 +221,7 @@ func (h *BusHandler) respondClaimUnavailable(send Sender, requestID, errMsg stri
 // this connection's CommandStream read loop.
 func (h *BusHandler) OnClaimRequest(name, ns string, connToken int64, req *mitev1.ClaimRequest, send Sender) {
 	if !h.tryReserveClaimSlot(ns, name, connToken) {
-		h.respondClaimUnavailable(send, req.RequestId, "too many in-flight claims for this connection")
+		h.respondClaimUnavailable(send, ns, name, req.RequestId, "too many in-flight claims for this connection")
 		return
 	}
 	go func() {
@@ -236,7 +242,7 @@ func (h *BusHandler) handleClaimRequest(name, ns string, req *mitev1.ClaimReques
 		// and no request at all — the queue then holds the build, which
 		// is the correct outcome for a job the cell should not run.
 		claimsRejected.Add(context.Background(), 1)
-		h.respondClaimUnavailable(send, req.RequestId, unhostedTenantMessage)
+		h.respondClaimUnavailable(send, ns, name, req.RequestId, unhostedTenantMessage)
 		return
 	}
 
@@ -260,20 +266,20 @@ func (h *BusHandler) handleClaimRequest(name, ns string, req *mitev1.ClaimReques
 
 	data, err := json.Marshal(body)
 	if err != nil {
-		h.respondClaimUnavailable(send, req.RequestId, "encode ledger claim request: "+err.Error())
+		h.respondClaimUnavailable(send, ns, name, req.RequestId, "encode ledger claim request: "+err.Error())
 		return
 	}
 
 	timeout := ledgerClaimTimeout()
 	msg, err := h.ledger.RequestWithContext(context.Background(), bus.LedgerClaimSubject, data, timeout)
 	if err != nil {
-		h.respondClaimUnavailable(send, req.RequestId, "ledger claim request failed: "+err.Error())
+		h.respondClaimUnavailable(send, ns, name, req.RequestId, "ledger claim request failed: "+err.Error())
 		return
 	}
 
 	var reply ledgerClaimResponse
 	if err := json.Unmarshal(msg.Data, &reply); err != nil {
-		h.respondClaimUnavailable(send, req.RequestId, "ledger claim reply unparsable: "+err.Error())
+		h.respondClaimUnavailable(send, ns, name, req.RequestId, "ledger claim reply unparsable: "+err.Error())
 		return
 	}
 

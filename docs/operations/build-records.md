@@ -116,8 +116,9 @@ Jenkins can refuse a build trigger. The store then holds one run whose result is
 | `JOB_NOT_FOUND` | The job does not exist on the controller. |
 | `JOB_NOT_BUILDABLE` | The job exists, but it cannot start a build. |
 | `TRIGGER_REJECTED` | The controller refused the trigger for another reason. |
+| `CLAIM_EXPIRED` | The recorder found no claim 75 minutes after acceptance. See [Build claims](build-claims.md). |
 
-The run page also shows the error text the controller reported. Such a run holds no build number,
+The run page also shows the error text the controller or the recorder reported. Such a run holds no build number,
 no log, and no stage. `Re-run` starts a fresh run with each parameter's declared default.
 
 A `TRIGGER_FAILED` run counts in no job statistic: no pass rate, no result count, no median

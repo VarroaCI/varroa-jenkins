@@ -159,7 +159,9 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   tenants. An unresolved tenant is an admission refusal, not a retry: a
   build event is dropped and, for anything but a `HEARTBEAT`, acked
   `REJECTED`; a claim answers at once with the ledger's unavailable code
-  and makes no ledger request. `startedPayload`/`completedPayload`
+  and makes no ledger request. `respondClaimUnavailable` logs every
+  unavailable answer at `WARN` with `request_id`, the controller, and the
+  error text; it is the one gateway record of a failed claim. `startedPayload`/`completedPayload`
   (`build_events.go`) copy `BuildEvent`'s four template-resolution fields
   (`template_name`, `template_version`, `marker_path`, `marker_revision`)
   onto the `run.started`/`run.completed` payload via `addTemplateFields`,

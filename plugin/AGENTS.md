@@ -198,7 +198,11 @@ the root AGENTS.md greenfield rule.
   `ACL.SYSTEM2` normalized to empty) when the action carries none; `VarroaClaimQueue`
   sends `action.getActor()` as the claim's `actor` field. A `duplicate` decision
   cancels the item with one `INFO` line: it is the expected answer to a lost race or a
-  redelivered command.
+  redelivered command. **`parseDecision` reads a missing or `null` `decision` key as an
+  empty decision, then reads `code`**: the mite encodes every failure with no `decision`
+  key, so a body of `request_id`, `error`, and `code` retries on the ladder. An empty
+  decision with no `code` cancels. A test fixture for a failure body carries no
+  `decision` key, the shape the mite sends.
 - **Intra-tenant trigger forwarding** (a job pair split over two tenant slots keeps
   working): `VarroaHomeCache.java` holds the newest answer of `GET /v1/homes`, keyed
   by tenant, with the slot this cell holds, the role, and the tenant's job-path to

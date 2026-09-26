@@ -47,6 +47,14 @@ public class VarroaClaimQueueTest {
 
     private static final int QUIET_PERIOD = 300;
 
+    /**
+     * The failure body the mite sends. The mite encodes a reply with an
+     * empty decision through {@code omitempty}, so the body holds no
+     * {@code decision} key.
+     */
+    private static final String UNAVAILABLE_BODY =
+            "{\"request_id\":\"req-1\",\"error\":\"nats: no responders available for request\",\"code\":\"UNAVAILABLE\"}";
+
     private HttpServer server;
     private final List<String> requestBodies = new CopyOnWriteArrayList<>();
     private final AtomicInteger calls = new AtomicInteger();
@@ -212,11 +220,11 @@ public class VarroaClaimQueueTest {
     }
 
     @Test
-    public void anEmptyDecisionWithACodeRetries() throws Exception {
+    public void aMissingDecisionWithACodeRetries() throws Exception {
         FreeStyleProject project = j.createFreeStyleProject("retry-job");
         Queue.Item item = scheduleItem(project);
         responder = n -> n == 1
-                ? new Reply(503, "{\"decision\":\"\",\"code\":\"UNAVAILABLE\"}")
+                ? new Reply(503, UNAVAILABLE_BODY)
                 : new Reply(200, "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":1}");
 
         List<Long> slept = new CopyOnWriteArrayList<>();
@@ -227,6 +235,81 @@ public class VarroaClaimQueueTest {
         awaitTrue(action::isGranted, "eventual grant after a retry");
         assertEquals(2, calls.get());
         assertEquals(List.of(1000L), slept);
+    }
+
+    @Test
+    public void anEmptyDecisionWithACodeRetries() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("empty-decision-job");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> n == 1
+                ? new Reply(429, "{\"decision\":\"\",\"code\":\"RESOURCE_EXHAUSTED\"}")
+                : new Reply(200, "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":1}");
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, millis -> { });
+        queue.offer(item, project);
+
+        VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
+        awaitTrue(action::isGranted, "eventual grant after a retry");
+        assertEquals(2, calls.get());
+    }
+
+    @Test
+    public void aMissingDecisionWithNoCodeCancels() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("no-code-job");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> new Reply(200, "{\"request_id\":\"req-1\"}");
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, millis -> { });
+        queue.offer(item, project);
+
+        awaitTrue(() -> isCancelled(item), "the item to be cancelled");
+        assertEquals(1, calls.get());
+    }
+
+    @Test
+    public void codeOnlyRepliesRetryUntilTheOneHourBudget() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("code-only-job");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> new Reply(503, UNAVAILABLE_BODY);
+
+        long[] clockMillis = {0L};
+        List<Long> slept = new CopyOnWriteArrayList<>();
+        long[] cancelledAtMillis = {-1L};
+        VarroaClaimQueue.Sleeper sleeper = millis -> {
+            slept.add(millis);
+            clockMillis[0] += millis;
+        };
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), () -> clockMillis[0], sleeper);
+        queue.offer(item, project);
+
+        awaitTrue(() -> isCancelled(item), "the item to be cancelled at the one-hour budget");
+        cancelledAtMillis[0] = clockMillis[0];
+        assertTrue("the item must not be cancelled before the one-hour budget, got " + cancelledAtMillis[0],
+                cancelledAtMillis[0] >= VarroaClaimQueue.LIFETIME_MILLIS);
+        assertTrue("a code-only reply must retry on the ladder", calls.get() > 5);
+        long totalSlept = slept.stream().mapToLong(Long::longValue).sum();
+        assertTrue("the budget is one hour, got " + totalSlept, totalSlept >= 60L * 60 * 1000);
+    }
+
+    @Test
+    public void codeOnlyRepliesThenAGrantClaimOnceAndKeepTheItem() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("code-only-grant-job");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> n <= 3
+                ? new Reply(503, UNAVAILABLE_BODY)
+                : new Reply(200, "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":7}");
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, millis -> { });
+        queue.offer(item, project);
+
+        VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
+        awaitTrue(action::isGranted, "a grant after three code-only replies");
+        assertEquals(4, calls.get());
+        assertEquals(7, project.getNextBuildNumber());
+        assertFalse("a retried claim must keep its queue item", isCancelled(item));
+        String firstIntentKey = extractField(requestBodies.get(0), "intent_key");
+        String lastIntentKey = extractField(requestBodies.get(3), "intent_key");
+        assertEquals(firstIntentKey, lastIntentKey);
     }
 
     @Test
@@ -273,7 +356,7 @@ public class VarroaClaimQueueTest {
         // The 1/2/5/10/30/60s (repeating) ladder needs 15 failures before
         // cumulative backoff passes 600_000 ms.
         responder = n -> n <= 15
-                ? new Reply(503, "{\"decision\":\"\",\"code\":\"UNAVAILABLE\"}")
+                ? new Reply(503, UNAVAILABLE_BODY)
                 : new Reply(200, "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":1}");
 
         long[] clockMillis = {0L};

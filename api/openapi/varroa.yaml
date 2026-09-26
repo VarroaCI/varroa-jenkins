@@ -2599,8 +2599,10 @@ components:
             result is TRIGGER_FAILED.
           type: string
         triggerReasonCode:
-          description: Why the controller refused the build trigger. One of JOB_NOT_FOUND,
-            JOB_NOT_BUILDABLE, and TRIGGER_REJECTED. Set only when result is TRIGGER_FAILED.
+          description: Why no build exists for the trigger. One of JOB_NOT_FOUND,
+            JOB_NOT_BUILDABLE, TRIGGER_REJECTED, and CLAIM_EXPIRED. The first three
+            name a refusal from the controller. CLAIM_EXPIRED names an accepted trigger
+            that no build claim followed. Set only when result is TRIGGER_FAILED.
           type: string
       required:
       - runId
@@ -8034,8 +8036,10 @@ components:
             result is TRIGGER_FAILED.
           type: string
         triggerReasonCode:
-          description: Why the controller refused the build trigger. One of JOB_NOT_FOUND,
-            JOB_NOT_BUILDABLE, and TRIGGER_REJECTED. Set only when result is TRIGGER_FAILED.
+          description: Why no build exists for the trigger. One of JOB_NOT_FOUND,
+            JOB_NOT_BUILDABLE, TRIGGER_REJECTED, and CLAIM_EXPIRED. The first three
+            name a refusal from the controller. CLAIM_EXPIRED names an accepted trigger
+            that no build claim followed. Set only when result is TRIGGER_FAILED.
           type: string
       required:
       - runId

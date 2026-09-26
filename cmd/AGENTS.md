@@ -83,7 +83,7 @@ stating what it is/is not responsible for:
   database read), the hourly retention/maintenance ticker, and the
   once-a-minute backstop scheduler (D9's interrupted sweep and D11's
   cron backstop, one leader-elected round under a third advisory-lock
-  key, plus the unstarted-intent re-fire) (`runWorkers` in `run.go` takes
+  key, plus the claim-expiry sweep and the unstarted-intent re-fire) (`runWorkers` in `run.go` takes
   a variadic `namedWorker` list, so a worker's name travels with its
   function). `confirmedGoneGraceFromEnv` reads
   `VARROA_RECORDSTORE_CONFIRMED_GONE_GRACE` as a **Go duration string**
@@ -93,7 +93,8 @@ stating what it is/is not responsible for:
   One `recordstore.NewRunNotifier` value serves the whole process: the
   ingest path takes it through `SetRunNotifier`, the cross-tenant and
   tenant-sync responders take it as their own argument, and
-  `MaintenanceConfig.LockNotifier` carries it into the hourly round, so
+  `MaintenanceConfig.LockNotifier` carries it into the hourly round, and
+  `BackstopConfig.RunNotifier` carries it into the claim-expiry sweep, so
   every lock write publishes on one coalescing counter and one clock.
   Needs no Kubernetes API access. `run(ctx, cfg)` in `run.go` holds the
   whole wiring and shutdown sequence, so a test drives it without

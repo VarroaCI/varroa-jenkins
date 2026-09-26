@@ -3048,7 +3048,7 @@ type ComponentsSchemasRunDetail struct {
 	// TriggerError The error text a refused build trigger reported. Set only when result is TRIGGER_FAILED.
 	TriggerError *string `json:"triggerError,omitempty"`
 
-	// TriggerReasonCode Why the controller refused the build trigger. One of JOB_NOT_FOUND, JOB_NOT_BUILDABLE, and TRIGGER_REJECTED. Set only when result is TRIGGER_FAILED.
+	// TriggerReasonCode Why no build exists for the trigger. One of JOB_NOT_FOUND, JOB_NOT_BUILDABLE, TRIGGER_REJECTED, and CLAIM_EXPIRED. The first three name a refusal from the controller. CLAIM_EXPIRED names an accepted trigger that no build claim followed. Set only when result is TRIGGER_FAILED.
 	TriggerReasonCode *string `json:"triggerReasonCode,omitempty"`
 }
 

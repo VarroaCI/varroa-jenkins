@@ -396,11 +396,11 @@ public class VarroaClaimQueue {
             return new Decision(Kind.UNKNOWN, 0);
         }
 
+        // The mite encodes an empty decision with omitempty, so a failure
+        // body holds no decision key. A missing key and an empty value
+        // must reach the same failure-code test.
         Object rawDecision = body.get("decision");
-        if (rawDecision == null) {
-            return new Decision(Kind.UNKNOWN, 0);
-        }
-        String decision = String.valueOf(rawDecision);
+        String decision = rawDecision == null ? "" : String.valueOf(rawDecision);
         switch (decision) {
             case DECISION_GRANTED:
                 return new Decision(Kind.GRANTED, toLong(body.get("build_number")));

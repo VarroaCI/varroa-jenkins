@@ -37,6 +37,11 @@ type BackstopConfig struct {
 	BackstopMetrics *BackstopMetrics
 	// ActionMetrics counts every action this round publishes.
 	ActionMetrics *ActionMetrics
+	// ClaimExpiryMetrics counts the runs the claim-expiry sweep marks.
+	ClaimExpiryMetrics *ClaimExpiryMetrics
+	// RunNotifier publishes the live notification of each run the
+	// claim-expiry sweep marks. A nil RunNotifier publishes nothing.
+	RunNotifier *RunNotifier
 	// StateDeleter removes a marked run's replicated state. A nil
 	// StateDeleter skips the delete, the same rule MaintenanceConfig's
 	// LogStore follows. cmd/recorder passes a blob.Store value.
@@ -72,8 +77,8 @@ func (cfg BackstopConfig) grace() time.Duration {
 
 // RunBackstopRound tries the backstop advisory lock on one acquired
 // connection, and on success runs D9's interrupted sweep, then the
-// unstarted-intent re-fire, then D11's backstop cron round, before
-// releasing it. It reports whether this call took the lock; a replica
+// claim-expiry sweep, then the unstarted-intent re-fire, then D11's
+// backstop cron round, before releasing it. It reports whether this call took the lock; a replica
 // that does not returns false, nil.
 func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, cfg BackstopConfig) (bool, error) {
 	pgConn, err := pool.Acquire(ctx)
@@ -106,6 +111,10 @@ func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c
 	if _, err := SweepInterruptedRuns(ctx, pool, conn, cfg.SweepMetrics, cfg.ActionMetrics,
 		cfg.StateDeleter, cfg.MaxSweepPending, now, grace, logger); err != nil {
 		logger.Warn("interrupted sweep failed", "error", err)
+	}
+
+	if _, err := ExpireUnclaimedRuns(ctx, pool, cfg.RunNotifier, cfg.ClaimExpiryMetrics, now, logger); err != nil {
+		logger.Warn("claim-expiry sweep failed", "error", err)
 	}
 
 	if err := runRefireRound(ctx, pool, conn, cfg.SweepMetrics, cfg.ActionMetrics, now, grace, logger); err != nil {

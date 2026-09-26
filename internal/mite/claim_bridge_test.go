@@ -1,9 +1,12 @@
 package mite
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -127,6 +130,43 @@ func TestOnClaimRequest_TransportErrorAnswersUnavailable(t *testing.T) {
 	}
 	if resp.RequestId != "req-2" {
 		t.Fatalf("request_id = %q, want echoed req-2", resp.RequestId)
+	}
+}
+
+// lockedBuffer serializes writes from the claim goroutine and the test's read.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestOnClaimRequest_UnavailableAnswerLogsAWarning(t *testing.T) {
+	ledger := &fakeLedger{err: errors.New("nats: no responders available for request")}
+	h := newClaimTestHandler(ledger)
+	var out lockedBuffer
+	h.Logger = slog.New(slog.NewTextHandler(&out, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	sender := &fakeSender{}
+
+	req := &mitev1.ClaimRequest{RequestId: "req-warn", RunId: "run-warn", JobPath: "team-a/build"}
+	h.OnClaimRequest("ctrl1", "ns1", 1, req, sender.send)
+
+	waitFor(t, func() bool { return sender.count() == 1 }, time.Second, "no claim response sent")
+	got := out.String()
+	for _, want := range []string{"level=WARN", "request_id=req-warn", "controller=ns1/ctrl1", "no responders"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("log output = %q, want it to contain %q", got, want)
+		}
 	}
 }
 

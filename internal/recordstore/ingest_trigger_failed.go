@@ -14,6 +14,11 @@ import (
 // status but 404 and 409, which the two permanent codes take.
 const reasonTriggerRejected = "TRIGGER_REJECTED"
 
+// ReasonClaimExpired is the trigger reason code the claim-expiry sweep
+// writes. No envelope carries it: the recorder itself marks an accepted
+// run that no claim reached within ClaimExpiryAge.
+const ReasonClaimExpired = "CLAIM_EXPIRED"
+
 // applyTriggerFailed writes the one runs row a run.trigger_failed envelope
 // produces, inside its own transaction. It touches run_intents never: the
 // ledger grants every intent, and this trigger reached no claim gate.

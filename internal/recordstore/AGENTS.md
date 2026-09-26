@@ -808,14 +808,37 @@ of the fleet's audit activity, once a controller becomes disposable.
   `reason`. A mark and a re-fire are independent: `markInterrupted`
   writes no `run_intents` row, so the intent survives the mark and the
   re-fired build claims the same run.
+- **Claim-expiry sweep** (`claim_expiry.go`) — `ExpireUnclaimedRuns`
+  marks a `QUEUED` run with a null `build_number`, an
+  `accepted_at` at or before the round time minus `ClaimExpiryAge` (a
+  fixed 75 minutes: the plugin's one-hour claim budget plus a margin),
+  no mesh resume object, and **no `run_intents` row** as `COMPLETED`/
+  `TRIGGER_FAILED` with `trigger_reason_code` `ReasonClaimExpired`
+  (`CLAIM_EXPIRED`). Such a run has no intent, so neither the interrupted
+  sweep (a live cell) nor the re-fire (no intent) can end it. The
+  conditional update repeats `claimExpiryGuardSQL` in its `WHERE` clause,
+  so a claim or a real event that commits between the read and the write
+  keeps the run. The write keeps the accepted keys and writes no
+  `trigger_http_status`; a late `run.started` supersedes it through the
+  ordinary `TRIGGER_FAILED` arm. The same transaction writes one
+  `build.claim_expired` activity row; after the commit the sweep sends one
+  run notification through `BackstopConfig.RunNotifier` and counts
+  `recorder_claim_expired_total`. It writes no intent and publishes no
+  ledger action. `RunBackstopRound` runs it right after
+  `SweepInterruptedRuns`. One round marks at most `claimExpiryBatch`
+  (500) runs, oldest `accepted_at` first, because each mark commits under
+  the backstop lock. The age does not prove a claim attempt: an item that
+  waits in the Jenkins queue past the limit before its first claim (behind
+  a long previous build) is marked too, and its later `run.started`
+  supersedes the row; the activity row and the count stay.
 - **Backstop cron scheduler and the interrupted sweep's round**
   (`backstop_round.go`, `backstop_policy.go`, `backstop_candidates.go`,
   `backstop_fire.go`, `backstop_metrics.go`, `action_metrics.go`,
   `concurrency_metrics.go`, `ledger_concurrency.go`) — design D10 and
   D11. `RunBackstopRound` holds one round on `backstopLockKey`, the third
   fixed advisory-lock key after `migrateLockKey` and `maintenanceLockKey`,
-  and runs `SweepInterruptedRuns` and `runBackstopSchedule` inside the
-  same hold, so one ticker and one lock cover both. The round computes no
+  and runs `SweepInterruptedRuns`, `ExpireUnclaimedRuns`, and
+  `runBackstopSchedule` inside the same hold, so one ticker and one lock cover both. The round computes no
   fire minute of its own: `isBackstopCandidate` admits only an occurrence
   Jenkins itself exported (`JobSchedule.NextFireTimes`) that is past the
   tenant's grace window, not older than 24 hours, holds no

@@ -633,6 +633,7 @@ describe("BuildPage — a refused build trigger", () => {
     ["JOB_NOT_FOUND", "The job does not exist on the controller."],
     ["JOB_NOT_BUILDABLE", "The job cannot start a build."],
     ["TRIGGER_REJECTED", "The controller refused the trigger."],
+    ["CLAIM_EXPIRED", "The build did not get a build number in time, so it did not start."],
   ];
 
   it.each(sentences)("names the reason for %s", async (reasonCode, sentence) => {

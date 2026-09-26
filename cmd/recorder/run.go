@@ -153,12 +153,19 @@ func run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("register backstop metrics: %w", err)
 	}
+	claimExpiryMetrics, err := recordstore.NewClaimExpiryMetrics()
+	if err != nil {
+		return fmt.Errorf("register claim-expiry metrics: %w", err)
+	}
+	runNotifier := recordstore.NewRunNotifier(busConn, logger)
 	backstopCfg := recordstore.BackstopConfig{
 		MaxSweepPending:    cfg.SweepMaxPending,
 		ConfirmedGoneGrace: confirmedGoneGrace,
 		SweepMetrics:       sweepMetrics,
 		BackstopMetrics:    backstopMetrics,
 		ActionMetrics:      actionMetrics,
+		ClaimExpiryMetrics: claimExpiryMetrics,
+		RunNotifier:        runNotifier,
 		StateDeleter:       store,
 		Logger:             logger,
 	}
@@ -185,7 +192,6 @@ func run(ctx context.Context, cfg Config) error {
 	ingester.SetUpstreamFanout(recordstore.NewGrantEvaluator(pool), fanoutMetrics)
 	ingester.SetSweepMetrics(sweepMetrics)
 	ingester.SetStateDeleter(store)
-	runNotifier := recordstore.NewRunNotifier(busConn, logger)
 	ingester.SetRunNotifier(runNotifier)
 
 	maintCfg := recordstore.MaintenanceConfig{

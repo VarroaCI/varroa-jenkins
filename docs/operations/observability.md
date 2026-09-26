@@ -27,10 +27,11 @@ varroactl activity --controller <name> --follow
 
 The activity feed records lifecycle and audit events. It is not a substitute for Jenkins build logs. Use `varroactl logs <namespace>/<name> --follow` for controller logs.
 
-Two [cell](cells.md) pipelines events appear in the feed: `build.interrupted`, when the recorder
-marks a run interrupted, and `build.scheduled.backstop`, when the backstop scheduler fires a
-missed cron build. The recorder writes both directly to the store, so a live subscriber sees
-either event only on its next backfill, never on the live stream.
+Three [cell](cells.md) pipelines events appear in the feed. `build.interrupted` marks an
+interrupted run. `build.scheduled.backstop` marks a missed cron build that the backstop fires.
+`build.claim_expired` marks an accepted run that never claimed a build number. The recorder
+writes all three directly to the store. A live subscriber sees each event only on its next
+backfill, never on the live stream.
 
 ## Read brood health
 

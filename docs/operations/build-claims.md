@@ -70,6 +70,9 @@ and never starts a second build.
 | `vetoed`, reason `NOT_READY` | the ledger is not ready to grant yet | retry on the backoff schedule |
 | `vetoed`, any other reason | the ledger refuses this run permanently | cancel the queue item, log a `WARNING` |
 | empty, with a `code` | the hop that answered could not reach the next one | retry on the backoff schedule |
+| empty, with no `code` | not a claim answer | cancel the queue item, log a `WARNING` |
+
+A missing `decision` key counts as empty. The mite omits the key from every failure body.
 
 `duplicate` and `granted` are not the same outcome for a retried request. A retried request
 reads `granted` again when it carries the same `intent_key` and the same `run_id` as an earlier
@@ -113,21 +116,22 @@ and the ledger have diverged for that job. The retry schedule will not clear it.
 
 ## Symptoms of a recorder outage
 
-A recorder outage means the gateway's request to the ledger never gets an answer. Every claim
-during the outage reads empty, `code` `UNAVAILABLE`, after the gateway's own `VARROA_LEDGER_TIMEOUT_MS`
-budget. The claimer retries on its backoff schedule and gives up after one hour if the outage
-outlasts it.
+During a recorder outage, every claim reads empty, `code` `UNAVAILABLE`. With no recorder
+subscribed, the gateway answers at once ("no responders"). Otherwise it answers after its
+`VARROA_LEDGER_TIMEOUT_MS` budget. The claimer keeps the item and retries for one hour.
 
 Symptoms to check for:
 
 - Jenkins queues fill with items blocked on "awaiting Varroa claim" that never start.
+- The gateway logs `claim answered unavailable` at `WARN` for each failed claim, with the
+  controller and the error text.
 - The mite counters `varroa.mite.claims.failed` and `varroa.mite.claims.vetoed` rise.
-- Build events keep publishing normally as long as NATS itself is healthy: the gateway writes
-  them to the JetStream stream directly and does not need the recorder online to accept them.
-  They queue there until the recorder resumes reading, so `recorder_ingest_backlog_msgs` and
-  `recorder_ingest_backlog_bytes` (see [Build records](build-records.md)) rise during the outage
-  and drain once it recovers.
-- Jenkins logs carry `WARNING` lines from the claim handler for every canceled item.
+- Build events keep publishing normally as long as NATS itself is healthy. They queue in the
+  JetStream stream, so `recorder_ingest_backlog_msgs` and `recorder_ingest_backlog_bytes` (see
+  [Build records](build-records.md)) rise during the outage and drain once it recovers.
 
-Restoring the recorder does not replay canceled queue items. A canceled trigger needs a new
-build request.
+A recorder back within the hour needs no action: the next retry reads `granted`. After one hour
+the claimer cancels the item and logs a `WARNING`. A cancelled trigger needs a new build request.
+The backstop round marks its run `TRIGGER_FAILED`, reason `CLAIM_EXPIRED`, 75 minutes after
+acceptance. One round marks 500 runs at most and counts each in `recorder_claim_expired_total`. An item that waits that long before its first claim is
+marked too, and its real build later replaces the row.

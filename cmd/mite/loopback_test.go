@@ -1191,6 +1191,7 @@ func TestClaim504Timeout(t *testing.T) {
 	if resp.Decision != "" || resp.Code != unavailableCode {
 		t.Errorf("expected empty decision / %s code, got %+v", unavailableCode, resp)
 	}
+	assertUnavailableWireShape(t, rec.Body.Bytes())
 }
 
 func TestClaim429Cap(t *testing.T) {
@@ -1272,7 +1273,65 @@ func TestClaimFailureBodyIsOneShape(t *testing.T) {
 			if resp.Decision != "" || resp.Code != unavailableCode {
 				t.Errorf("expected empty decision / %s code, got %+v", unavailableCode, resp)
 			}
+			assertUnavailableWireShape(t, rec.Body.Bytes())
 		})
+	}
+}
+
+// assertUnavailableWireShape pins the raw failure body the plugin reads.
+// The body holds the failure code and no decision key, because the
+// response type encodes decision with omitempty. A decode into the
+// struct cannot see the difference, so this reads the raw keys.
+func assertUnavailableWireShape(t *testing.T, body []byte) {
+	t.Helper()
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("decode raw body: %v (%s)", err, body)
+	}
+	if raw["code"] != unavailableCode {
+		t.Errorf("raw body code = %v, want %q: %s", raw["code"], unavailableCode, body)
+	}
+	if _, ok := raw["decision"]; ok {
+		t.Errorf("raw body holds a decision key, want none: %s", body)
+	}
+}
+
+func TestClaimRelaysAGatewayUnavailableReplyWithNoDecisionKey(t *testing.T) {
+	agent := NewAgent(Config{})
+	agent.Logger = slog.Default()
+	agent.loopbackToken = "tok"
+	agent.claimTimeout = 2 * time.Second
+
+	captured := make(chan string, 1)
+	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+		captured <- m.GetClaimRequest().RequestId
+		return nil
+	}}
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, "/v1/claim", strings.NewReader(claimRequestBody()))
+		req.Header.Set("Authorization", "Bearer tok")
+		rec := httptest.NewRecorder()
+		agent.handleClaim(rec, req)
+		done <- rec
+	}()
+
+	id := <-captured
+	agent.claimWaiters.resolve(&mitev1.ClaimResponse{
+		RequestId: id,
+		Code:      unavailableCode,
+		Error:     "ledger claim request failed: nats: no responders available for request",
+	})
+
+	select {
+	case rec := <-done:
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		assertUnavailableWireShape(t, rec.Body.Bytes())
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the relayed claim reply")
 	}
 }
 
