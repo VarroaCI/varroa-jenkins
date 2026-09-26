@@ -227,6 +227,13 @@ func TestApplyCellContent_TenantCloudRendering(t *testing.T) {
 			t.Errorf("cloud.kubernetes.%s = %v, want %v", k, got, want)
 		}
 	}
+	gc, _ := k8s["garbageCollection"].(map[string]any)
+	if gc == nil || gc["timeout"] != tenantAgentGCTimeoutSeconds {
+		t.Errorf("cloud.kubernetes.garbageCollection = %#v, want timeout %d", k8s["garbageCollection"], tenantAgentGCTimeoutSeconds)
+	}
+	if _, present := gc["namespaces"]; present {
+		t.Errorf("cloud.kubernetes.garbageCollection carries namespaces %#v, want the key absent", gc["namespaces"])
+	}
 	templates, _ := k8s["templates"].([]any)
 	if len(templates) != 1 {
 		t.Fatalf("expected exactly one pod template, got %d", len(templates))

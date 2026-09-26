@@ -4960,6 +4960,27 @@ func (c *ClientsetClient) DeleteControllerPod(ctx context.Context, namespace, na
 	return nil
 }
 
+// ListTenantAgentPods lists the pods in namespace that carry the kubernetes
+// plugin's default agent pod label. A tenant cloud sets no podLabels, so
+// every agent pod it launches carries that label.
+func (c *ClientsetClient) ListTenantAgentPods(ctx context.Context, namespace string) ([]corev1.Pod, error) {
+	list, err := c.clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: agentPodDefaultLabelKey + "=" + agentPodDefaultLabelValue,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+// DeletePodWithUID deletes one pod only while its UID equals uid. A pod
+// that was created again under the same name answers Conflict and stays.
+func (c *ClientsetClient) DeletePodWithUID(ctx context.Context, namespace, name string, uid types.UID) error {
+	return c.clientset.CoreV1().Pods(namespace).Delete(ctx, name, metav1.DeleteOptions{
+		Preconditions: &metav1.Preconditions{UID: &uid},
+	})
+}
+
 // GetControllerPod returns the Jenkins pod for a controller, or nil when it
 // does not exist.
 func (c *ClientsetClient) GetControllerPod(ctx context.Context, namespace, name string) (*corev1.Pod, error) {

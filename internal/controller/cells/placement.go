@@ -210,6 +210,13 @@ type Inputs struct {
 	// caller builds the map because Place performs no Kubernetes read.
 	DepartedPods map[string]bool
 
+	// AgentPodsPending is true while a tearing-down tenant still has agent
+	// pods in its agent namespace, or while the caller could not count
+	// them. Teardown stage two holds on it, inside the same bounded wait
+	// that holds on the cell drain. The caller deletes the pods and counts
+	// them, because Place performs no Kubernetes read.
+	AgentPodsPending bool
+
 	// LastSync is this tenant's last successfully sent AnnounceRequest,
 	// kept by the caller across reconcile ticks (design D6's five
 	// triggers). Nil when none was sent yet, or when the caller's cache
@@ -1232,7 +1239,12 @@ func teardown(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alp
 	appendTeardownMemberPatches(in, team, status.Placement, out)
 
 	membersDrained := membersDrainedTenant(in, team, status.Placement)
-	if !found && membersDrained {
+	// The bounded wait is the escape from every hold below, the agent
+	// pods included: a pod that never goes still completes the teardown.
+	boundedWaitExpired := nowT.Sub(placedTransitionTime(status)) >= teardownBoundedWait &&
+		placedReason(status) == v1alpha1.TeamReasonTenantTeardownPending
+	podsGone := !in.AgentPodsPending || boundedWaitExpired
+	if !found && membersDrained && podsGone {
 		// A deleted cell never reports an apply, and every other member
 		// has drained, so teardown completes at once. The purge is still
 		// attempted, best effort, but never holds the finalizer: no cell
@@ -1247,9 +1259,10 @@ func teardown(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alp
 	// leave it the tenant folder and a unit of its capacity, and would
 	// remove the retry path that drops them. The bounded wait below is the
 	// escape: a member that never reports still completes the teardown.
-	drained := membersDrained && (!found || cellDrainedTenant(cell, team.Name))
-	boundedWaitExpired := nowT.Sub(placedTransitionTime(status)) >= teardownBoundedWait &&
-		placedReason(status) == v1alpha1.TeamReasonTenantTeardownPending
+	// The finishing tick clears status.pipelines, which holds the only
+	// copy of the agent namespace once spec.pipelines is gone, so the
+	// agent pods hold this stage and not the caller's finalizer release.
+	drained := membersDrained && (!found || cellDrainedTenant(cell, team.Name)) && podsGone
 	if !drained && !boundedWaitExpired {
 		setPlaced(status, metav1.ConditionFalse, v1alpha1.TeamReasonTenantTeardownPending, teardownPendingMessage, nowT)
 		return

@@ -63,6 +63,24 @@ The operator ignores all other content of `jenkins.yaml`. It records one `Bundle
 entry that names each ignored key path. A `jenkins.yaml` that does not parse gives one
 `BundleKeysIgnored` entry and no template.
 
+## Agent pod lifetime
+
+An agent pod can outlive the cell instance that launched it. The new instance holds no node for
+it, so two mechanisms delete such a pod:
+
+| Mechanism | Covers | Deletes a stale pod within |
+| --- | --- | --- |
+| Kubernetes plugin garbage collection on the tenant cloud | A cell roll, a slot move, a standby promotion | About 6 minutes |
+| The operator | An unschedulable slot holder, a removed slot, a plugin fault | About 16 minutes |
+| The operator, during teardown | A dropped `spec.pipelines` or a deleted `Team` | At once |
+
+Every live cell instance refreshes the `kubernetes.jenkins.io/last-refresh` annotation on its own
+agent pods once a minute. The operator deletes only a pod that runs as `varroa-agent-<team>`,
+carries the `kubernetes.jenkins.io/controller` label, and carries a valid refresh annotation.
+Other pods in a shared agent namespace stay. Teardown keeps the `Team` finalizer until the
+tenant's agent pods are gone, or for ten minutes at most. The plugin timeout is 300 seconds and the
+operator timeout is 15 minutes. Each check runs once a minute, and neither timeout is configurable.
+
 ## Security
 
 Varroa does not filter pod specs. A tenant's `yaml` or `volumes` can name a `hostPath`. Pod

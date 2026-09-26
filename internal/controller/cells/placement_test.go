@@ -803,6 +803,73 @@ func TestPlace_Teardown_BoundedWaitCompletes(t *testing.T) {
 	}
 }
 
+func TestPlace_Teardown_AgentPodsHoldStageTwo(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		cells []CellCandidate
+	}{
+		{"drained cell", []CellCandidate{readyCell("cell-a")}},
+		{"absent cell", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			team := testTeam()
+			team.Spec.Pipelines = nil
+			team.Finalizers = []string{v1alpha1.TeamFinalizerTenantPlacement}
+			status := placedStatus(1)
+
+			in := testInputs()
+			in.Cells = tc.cells
+			in.AgentPodsPending = true
+			out, err := Place(context.Background(), in, team, status)
+			if err != nil {
+				t.Fatalf("Place returned error: %v", err)
+			}
+			if out.FinalizerRelease || status.Placement == nil || status.Pipelines == nil {
+				t.Fatalf("a remaining agent pod must hold stage two, got release=%v status=%+v", out.FinalizerRelease, status)
+			}
+			if cond := condition(status); cond == nil || cond.Reason != v1alpha1.TeamReasonTenantTeardownPending {
+				t.Fatalf("Placed = %+v, want TenantTeardownPending", cond)
+			}
+
+			in.AgentPodsPending = false
+			out, err = Place(context.Background(), in, team, status)
+			if err != nil {
+				t.Fatalf("Place returned error: %v", err)
+			}
+			if !out.FinalizerRelease || status.Placement != nil {
+				t.Errorf("teardown must complete once no agent pod remains, got release=%v", out.FinalizerRelease)
+			}
+		})
+	}
+}
+
+func TestPlace_Teardown_BoundedWaitEscapesAgentPods(t *testing.T) {
+	team := testTeam()
+	team.Spec.Pipelines = nil
+	team.Finalizers = []string{v1alpha1.TeamFinalizerTenantPlacement}
+	status := placedStatus(1)
+
+	in := testInputs()
+	in.Cells = nil
+	in.AgentPodsPending = true
+	in.Now = fixedClock(fixedNow)
+	if _, err := Place(context.Background(), in, team, status); err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	if status.Placement == nil {
+		t.Fatal("expected the hold before the bound expires")
+	}
+
+	in.Now = fixedClock(fixedNow.Add(11 * time.Minute))
+	out, err := Place(context.Background(), in, team, status)
+	if err != nil {
+		t.Fatalf("Place returned error: %v", err)
+	}
+	if !out.FinalizerRelease || status.Placement != nil {
+		t.Errorf("the bounded wait must complete teardown over a remaining agent pod, got release=%v", out.FinalizerRelease)
+	}
+}
+
 func TestPlace_Teardown_PurgeFailureHoldsThenGivesUp(t *testing.T) {
 	team := testTeam()
 	team.Spec.Pipelines = nil

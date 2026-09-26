@@ -76,6 +76,13 @@ type TeamReconciler struct {
 	// report no replaced pod. The placement pass reads each cell's
 	// status.cell.previousInstance to cover that case.
 	syncCache map[string]cells.SyncCache
+
+	// reapMu guards lastReap for the same reason syncCacheMu guards
+	// syncCache: reconciles of different Teams run concurrently.
+	reapMu sync.Mutex
+	// lastReap is keyed by Team name. It holds the time of the last
+	// steady-state agent pod list, which the reaper rate-limits.
+	lastReap map[string]time.Time
 }
 
 // NewTeamReconciler creates a new TeamReconciler. The managed set defaults to
@@ -424,6 +431,20 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 			priorCellNamespace = status.Placement.CellNamespace
 		}
 
+		// Teardown deletes every tenant agent pod before the placement pass
+		// runs, because the pass holds stage two on the count. The tenant
+		// ServiceAccount goes in this tick too, and with it the cloud
+		// credential, so no JVM can delete these pods after this point.
+		agentPodsPending := false
+		if teamTearingDown(team) && agentNamespace != "" {
+			remaining, reapErr := r.reapTenantAgentPods(ctx, team.Name, agentNamespace, true)
+			if reapErr != nil {
+				r.logger.Error("tenant agent pod teardown reap failed", "team", team.Name,
+					"namespace", agentNamespace, "error", reapErr)
+			}
+			agentPodsPending = remaining > 0 || reapErr != nil
+		}
+
 		cellCandidates, cellsByKey, err := r.listCellCandidates(ctx)
 		if err != nil {
 			r.logger.Error("failed to list cell candidates", "team", team.Name, "error", err)
@@ -470,7 +491,8 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 			// holds. The pass reports such a member confirmed gone only
 			// on a confirmed absence, and that reading is what arms the
 			// takeover of the member's runs.
-			DepartedPods: r.departedMemberPods(ctx, status, cellsByKey),
+			DepartedPods:     r.departedMemberPods(ctx, status, cellsByKey),
+			AgentPodsPending: agentPodsPending,
 		}
 		outcome, placeErr := cells.Place(ctx, placeInputs, team, status)
 		if placeErr != nil {
@@ -568,6 +590,7 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 			r.syncCacheMu.Lock()
 			delete(r.syncCache, team.Name)
 			r.syncCacheMu.Unlock()
+			r.forgetTenantAgentReap(team.Name)
 		}
 		if childErr != nil {
 			// The failure leaves status.placement alone: the tenant keeps
@@ -1173,6 +1196,12 @@ func tenantAgentServiceName(team string, slot int32) string {
 	return fmt.Sprintf("varroa-agents-%s-%d", team, slot)
 }
 
+// teamTearingDown reports whether a pipelines tenant tears down: its
+// spec.pipelines is gone, or the Team is deleted.
+func teamTearingDown(team *v1alpha1.Team) bool {
+	return team.Spec.Pipelines == nil || (team.DeletionTimestamp != nil && !team.DeletionTimestamp.IsZero())
+}
+
 // tenantServiceWriter is implemented by ResourceClient backends that can
 // write a tenant's agent Service. It is checked with a type assertion rather
 // than added to the ResourceClient interface: that interface has
@@ -1195,8 +1224,19 @@ type tenantServiceWriter interface {
 // drain and for a failed agent Service write, which the caller reports on
 // the Placed condition.
 func (r *TeamReconciler) syncPipelinesChildren(ctx context.Context, team *v1alpha1.Team, status *v1alpha1.TeamStatus, subjects []v1alpha1.SubjectRef, role, agentNamespace, priorCellNamespace string, cellsByKey map[string]*v1alpha1.Controller) error {
-	tearingDown := team.Spec.Pipelines == nil || (team.DeletionTimestamp != nil && !team.DeletionTimestamp.IsZero())
+	tearingDown := teamTearingDown(team)
 	bindingName := pipelinesRoleBindingName(team.Name)
+
+	// The steady-state reaper covers every case where no live JVM holds
+	// the slot's cloud, so the plugin's own garbage collection never runs
+	// for that pod. A reap failure never fails the tick: the pods cost
+	// capacity, not correctness, and the next list retries.
+	if !tearingDown && agentNamespace != "" && r.reapTenantAgentPodsDue(team.Name, time.Now()) {
+		if _, err := r.reapTenantAgentPods(ctx, team.Name, agentNamespace, false); err != nil {
+			r.logger.Warn("tenant agent pod reap failed", "team", team.Name,
+				"namespace", agentNamespace, "error", err)
+		}
+	}
 	var serviceErr error
 
 	// A teardown owes the Service of the namespace the tenant is leaving,

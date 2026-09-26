@@ -87,7 +87,10 @@ index parsing, and pre-apply content validation.
   lifted from a tenant bundle. The renderer writes `Raw` first and the typed
   `name`, `namespace`, `serviceAccount`, and `label` after, so a typed key
   always wins. It writes typed `containers` only when that field is not
-  empty.
+  empty. A `TenantCloud.GarbageCollectionTimeout` above zero writes
+  `garbageCollection: {timeout: <n>}` with no `namespaces` key, so the
+  kubernetes plugin garbage-collects orphan pods in the cloud's own namespace
+  only. Zero writes no key; the caller owns the value.
 - **`InjectPipelineTemplates(jenkinsYAML, templatesYAML, folder)`**
   (`pipelinetemplates.go`) — appends every document in `templatesYAML` to
   `unclassified.varroaPipelineTemplates.templates` in `jenkinsYAML`, flattening

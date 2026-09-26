@@ -656,6 +656,33 @@ sections describe.
     succeeds or `maxPurgeAttempts` (10) is spent, then a bounded
     `teardownBoundedWait` (10 minutes) release, in both cases raising a
     warning event before releasing — warnings order by tenant then reason.
+    Teardown stage two also holds on `cells.Inputs.AgentPodsPending`, inside
+    the same bounded wait. The hold lives in `cells.teardown`, not in a
+    `Reconcile` finalizer hold, because the finishing tick clears
+    `status.pipelines`, the only copy of the agent namespace once
+    `spec.pipelines` is gone.
+  - **Tenant agent pod reaper** (`team_agent_pods.go`). The operator deletes
+    a tenant agent pod that no live JVM refreshes. The kubernetes plugin's
+    own garbage collection (`tenantAgentGCTimeoutSeconds = 300` on each
+    tenant cloud) covers a cell roll, a slot move, and a promotion; the
+    operator covers every case where no live JVM holds the slot's cloud.
+    `orphanTenantAgentPods` is pure: a candidate runs as
+    `varroa-agent-<team>`, carries the `kubernetes.jenkins.io/controller`
+    label, and carries a `kubernetes.jenkins.io/last-refresh` annotation that
+    parses as epoch milliseconds. It goes when older than
+    `tenantAgentReapAfter` (15 minutes, three times the plugin timeout) or at
+    once in teardown. `syncPipelinesChildren` runs the steady-state pass,
+    rate-limited by `reapTenantAgentPodsDue` to one list per Team per
+    `tenantAgentReapInterval` (1 minute), and never fails the tick on it.
+    `Reconcile` runs the teardown pass before `cells.Place`, on the same
+    tick as, and before, the tenant ServiceAccount delete, and feeds the
+    remaining count into `AgentPodsPending`. The client seam is
+    `tenantAgentPodReaper` (`ListTenantAgentPods` with selector
+    `jenkins=slave`, `DeletePodWithUID` with a UID precondition), checked
+    by type assertion like `tenantServiceWriter`, so `ResourceClient` does
+    not grow. RBAC is unchanged: the agent Role already grants pods
+    list/delete/patch, and the operator already holds pods list/delete in
+    every managed namespace.
   - `cells.WarmPoolReconciler` (`cells/warmpool.go`) is a plain
     `Reconcile(ctx) error` ticker reconciler (not controller-runtime,
     interval 60s in `cmd/operator/main.go`), not a per-`Team` reconciler. It
@@ -768,7 +795,8 @@ sections describe.
     the merge base, so a strategy in the cell bundle wins. And
     `tenantCloudFor`, which builds a tenant's cloud from the operator's
     constant `<team>-default` pod template followed by the lifted templates
-    it receives), `cell_pod_templates.go` (`liftTenantPodTemplates` reads
+    it receives, and sets `GarbageCollectionTimeout` to
+    `tenantAgentGCTimeoutSeconds`; no other cloud sets it), `cell_pod_templates.go` (`liftTenantPodTemplates` reads
     every kubernetes cloud's `templates` list of a tenant's `jenkins.yaml` in
     bundle order. It resolves the tenant's own `variables.yaml`
     (`parseBundleVariables`, shared with `resolveBundleForController`) once,

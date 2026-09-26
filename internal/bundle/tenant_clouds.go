@@ -40,7 +40,11 @@ type TenantCloud struct {
 	CredentialsID   string
 	UsageRestricted bool
 	WebSocket       bool
-	Templates       []TenantCloudTemplate
+	// GarbageCollectionTimeout is the orphan-pod timeout of the kubernetes
+	// plugin, in seconds. A value above zero turns on the plugin's own
+	// garbage collection for this cloud. Zero leaves it off.
+	GarbageCollectionTimeout int
+	Templates                []TenantCloudTemplate
 }
 
 // InjectTenantClouds appends one kubernetes cloud per tenant to
@@ -131,6 +135,11 @@ func tenantCloudMap(tc TenantCloud) map[string]any {
 		"credentialsId":   tc.CredentialsID,
 		"usageRestricted": tc.UsageRestricted,
 		"webSocket":       tc.WebSocket,
+	}
+	// The block carries no namespaces key: the plugin then scans the
+	// cloud's own namespace only, which is the tenant agent namespace.
+	if tc.GarbageCollectionTimeout > 0 {
+		m["garbageCollection"] = map[string]any{"timeout": tc.GarbageCollectionTimeout}
 	}
 	if len(tc.Templates) > 0 {
 		templates := make([]any, 0, len(tc.Templates))

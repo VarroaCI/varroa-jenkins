@@ -48,6 +48,14 @@ const (
 	tenantAgentJnlpWorkingDir            = "/home/jenkins/agent"
 )
 
+// tenantAgentGCTimeoutSeconds is the orphan-pod timeout each tenant cloud
+// gives the kubernetes plugin. A cell home is an emptyDir, so a new cell JVM
+// holds no node for an agent pod the old JVM launched. Every live JVM
+// refreshes its own agent pods once a minute, and the plugin deletes a pod
+// of its cloud that no JVM refreshed for this long. The operator reaper
+// (tenantAgentReapAfter) waits three times longer, so the two never race.
+const tenantAgentGCTimeoutSeconds = 300
+
 // tenantAgentEndpoint returns the in-cluster URL of one slot's agent
 // Service. An agent pod outlives the Jenkins JVM that launched it, so its
 // URL names an endpoint the operator can repoint rather than the cell's own
@@ -65,12 +73,13 @@ func tenantAgentEndpoint(team, namespace string, slot int32) string {
 // the tenant's own agent Service, never the cell's own endpoint.
 func tenantCloudFor(team, agentNamespace, agentEndpoint string, lifted []bundle.TenantCloudTemplate) bundle.TenantCloud {
 	cloud := bundle.TenantCloud{
-		Name:            team,
-		Namespace:       agentNamespace,
-		JenkinsURL:      agentEndpoint,
-		CredentialsID:   tenantCloudCredentialID(team),
-		UsageRestricted: true,
-		WebSocket:       true,
+		Name:                     team,
+		Namespace:                agentNamespace,
+		JenkinsURL:               agentEndpoint,
+		CredentialsID:            tenantCloudCredentialID(team),
+		UsageRestricted:          true,
+		WebSocket:                true,
+		GarbageCollectionTimeout: tenantAgentGCTimeoutSeconds,
 		Templates: []bundle.TenantCloudTemplate{{
 			Name:           team + "-default",
 			Namespace:      agentNamespace,

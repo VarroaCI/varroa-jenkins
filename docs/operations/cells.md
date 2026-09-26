@@ -7,8 +7,8 @@ Kubernetes agents.
 ## What a cell is
 
 A cell is a `Controller` with `spec.cell.enabled: true`. Its Jenkins home is an `emptyDir`, so a
-pod roll loses the Jenkins local state and the mite's identity. The operator mints a fresh
-bootstrap token per pod, and [rehydration](#rehydration) restores build history.
+pod roll loses the Jenkins local state and the mite's identity. [Rehydration](#rehydration) restores build
+history, and the new instance [deletes the old agent pods](tenant-pod-templates.md#agent-pod-lifetime).
 `spec.cell.enabled` cannot change after creation. `spec.cell.maxTenants` can, and only caps the
 tenant count.
 

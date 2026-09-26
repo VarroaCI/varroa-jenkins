@@ -255,3 +255,47 @@ func TestInjectTenantClouds_AgentServiceURL(t *testing.T) {
 		}
 	}
 }
+
+// firstTenantCloud injects one cloud and answers its kubernetes map.
+func firstTenantCloud(t *testing.T, cloud TenantCloud) map[string]any {
+	t.Helper()
+	out, err := InjectTenantClouds("", []TenantCloud{cloud})
+	if err != nil {
+		t.Fatalf("InjectTenantClouds: %v", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	jenkins, _ := doc["jenkins"].(map[string]any)
+	clouds, _ := jenkins["clouds"].([]any)
+	if len(clouds) != 1 {
+		t.Fatalf("want one cloud, got %d", len(clouds))
+	}
+	k8s, _ := clouds[0].(map[string]any)["kubernetes"].(map[string]any)
+	if k8s == nil {
+		t.Fatalf("cloud has no kubernetes key: %+v", clouds[0])
+	}
+	return k8s
+}
+
+func TestInjectTenantClouds_GarbageCollectionTimeout(t *testing.T) {
+	k8s := firstTenantCloud(t, TenantCloud{Name: "payments", Namespace: "payments-agents", GarbageCollectionTimeout: 300})
+	gc, ok := k8s["garbageCollection"].(map[string]any)
+	if !ok {
+		t.Fatalf("garbageCollection = %#v, want a map", k8s["garbageCollection"])
+	}
+	if gc["timeout"] != 300 {
+		t.Errorf("garbageCollection.timeout = %#v, want 300", gc["timeout"])
+	}
+	if _, present := gc["namespaces"]; present {
+		t.Errorf("garbageCollection carries namespaces %#v, want the key absent", gc["namespaces"])
+	}
+}
+
+func TestInjectTenantClouds_NoGarbageCollectionAtZero(t *testing.T) {
+	k8s := firstTenantCloud(t, TenantCloud{Name: "payments", Namespace: "payments-agents"})
+	if _, present := k8s["garbageCollection"]; present {
+		t.Errorf("garbageCollection = %#v, want the key absent", k8s["garbageCollection"])
+	}
+}

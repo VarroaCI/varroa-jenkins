@@ -67,6 +67,11 @@ A `cell-lost` mark sends no cancel command, because the pod is gone and holds no
 fleet lock the lost run held is released on the same schedule. A pod read that proved its owner
 gone ends the five-minute wait.
 
+The lost instance's agent pods keep running. When a replacement instance takes the slot, the
+Kubernetes plugin deletes them within about six minutes of their last refresh. When no instance
+takes the slot, the operator deletes them within about 16 minutes. See
+[Agent pod lifetime](tenant-pod-templates.md#agent-pod-lifetime).
+
 ## The re-fire
 
 A build can be granted and never start: the trigger reaches the ledger, the ledger assigns a build
