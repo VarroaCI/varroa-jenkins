@@ -323,7 +323,7 @@ of the fleet's audit activity, once a controller becomes disposable.
   to stamp a row that names no incarnation runs the same delete, once per
   tenant, because such a row can hold a gone tenant's rows at the very
   generation this tenant announces; the live cell exports its own set
-  again on its ten-minute poll; a generation-zero row seeds itself from the announced
+  again on its next poll; a generation-zero row seeds itself from the announced
   cell instance at once; a generation raise or a cell-instance change
   clears `rehydrated_instance` and `pending_jobs`, because the new cell
   holds no seed yet; at the same generation and the same instance
@@ -534,7 +534,17 @@ of the fleet's audit activity, once a controller becomes disposable.
   watermark inside the same transaction, rejects an envelope whose
   `observed_at` is not newer than the stored value, and deletes every row
   of the cell older than the accepted envelope, but only when the
-  envelope is not truncated. `IngestMetrics` also holds
+  envelope is not truncated. The upsert keeps passed occurrences in
+  `next_fire_times`: with an unchanged spec, time zone, and disabled
+  state, it merges each
+  stored occurrence at or before the envelope time and newer than
+  `passedOccurrenceWindow(cronGrace)` (`3 × cronGrace + 2m`), at most
+  `maxPassedOccurrences` (16), with the carried list, deduplicated and
+  sorted. The backstop needs that: the plugin exports future times only,
+  so a plain replace removes a miss before the round can judge it.
+  `cronGrace` comes from `readTenantSchedulePolicy` on the envelope
+  transaction, cached per tenant; that function takes any
+  `schedulePolicyQuerier`, a pool or a transaction. `IngestMetrics` also holds
   `recorder_schedules_truncated_total` and `recorder_schedules_stale_total`.
   `applyRunCompleted` (`ingest_completed.go`) reports `owner`, whether its
   write was the run's real terminal write, not a foreign instance's
@@ -844,8 +854,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   tenant's grace window, not older than 24 hours, holds no
   `cron:<job-path>:<occurrence-minute>` ledger intent, and holds no
   recent `build.scheduled.backstop` activity row (keyed on that row's
-  `reason` field, which holds the occurrence minute). `selectFire`
-  applies `Team.spec.pipelines.cronCatchUp`; `selectReadyFires` applies
+  `reason` field, which holds the occurrence minute).
+  `dropSupersededCandidates` then removes every candidate before the
+  newest `build.scheduled.backstop` occurrence of the job in the last 24
+  hours (the fired occurrence itself stays, so a lost fire can re-fire): a row keeps passed occurrences, so without it each round fires
+  the next older miss. `selectFire` applies
+  `Team.spec.pipelines.cronCatchUp`; `selectReadyFires` applies
   the `sha256(cluster|tenant|job_path) mod grace_seconds` spreading delay
   and the 100-fire-per-round bound. `readTenantSchedulePolicy` answers
   the backstop-scheduler capability's defaults (backstop on, catch-up

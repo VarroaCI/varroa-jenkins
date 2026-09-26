@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // jobScheduleTestCell fixes the cell coordinates every job.schedules test
@@ -746,4 +748,163 @@ func TestListJobSchedules_ListsTenantRowsInOrder(t *testing.T) {
 	if rows[0].JobPath != "acme/a-app" || rows[1].JobPath != "acme/b-app" {
 		t.Errorf("rows = %+v, want ordered by job_path", rows)
 	}
+}
+
+// --- passed occurrences survive a later export ---
+
+// applyCronEnvelope applies one envelope for jsTestCell at occurredAt
+// carrying one acme/app cron row with spec and occurrences.
+func applyCronEnvelope(t *testing.T, g *Ingester, occurredAt time.Time, spec string, occurrences ...time.Time) {
+	t.Helper()
+	fireTimes := make([]string, len(occurrences))
+	for i, occ := range occurrences {
+		fireTimes[i] = occ.UTC().Format(time.RFC3339)
+	}
+	env := newJobScheduleEnvelope(t, jsTestCell, occurredAt, JobSchedulesPayload{
+		Hash: spec,
+		Rows: []JobScheduleRowInput{{
+			Tenant: testTenant, JobPath: "acme/app", TriggerType: "cron", Spec: spec, NextFireTimes: fireTimes,
+		}},
+	})
+	result, err := g.Apply(context.Background(), env)
+	if err != nil {
+		t.Fatalf("apply job.schedules: %v", err)
+	}
+	if result.ScheduleStale {
+		t.Fatalf("envelope at %v was stale", occurredAt)
+	}
+}
+
+// readAppOccurrences reads acme/app's stored occurrences.
+func readAppOccurrences(t *testing.T, pool *pgxpool.Pool) []time.Time {
+	t.Helper()
+	rows, err := NewReader(pool).ListJobSchedules(context.Background(), jsTestCluster, testTenant)
+	if err != nil {
+		t.Fatalf("list job schedules: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1", len(rows))
+	}
+	return rows[0].NextFireTimes
+}
+
+func assertOccurrences(t *testing.T, got, want []time.Time) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("occurrences = %v, want %v", got, want)
+	}
+	for i := range want {
+		if !got[i].Equal(want[i]) {
+			t.Fatalf("occurrences = %v, want %v", got, want)
+		}
+	}
+}
+
+// scheduleBase is a fixed minute the passed-occurrence tests count from.
+func scheduleBase() time.Time {
+	return time.Now().UTC().Truncate(time.Minute).Add(-time.Hour)
+}
+
+func TestApplyJobSchedules_KeepsPassedOccurrences(t *testing.T) {
+	pool, _ := setupLedgerPool(t)
+	g := NewIngester(pool, nil, nil)
+	t0 := scheduleBase()
+	m := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Minute) }
+
+	applyCronEnvelope(t, g, t0, "*/2 * * * *", m(2), m(4), m(6))
+	applyCronEnvelope(t, g, m(5), "*/2 * * * *", m(6), m(8), m(10))
+
+	assertOccurrences(t, readAppOccurrences(t, pool), []time.Time{m(2), m(4), m(6), m(8), m(10)})
+}
+
+func TestApplyJobSchedules_DropsOccurrencesPastTheWindow(t *testing.T) {
+	pool, _ := setupLedgerPool(t)
+	g := NewIngester(pool, nil, nil)
+	t0 := scheduleBase()
+	m := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Minute) }
+
+	// The default grace is five minutes, so the window is seventeen.
+	applyCronEnvelope(t, g, t0, "* * * * *", m(1), m(4))
+	applyCronEnvelope(t, g, m(20), "* * * * *", m(21))
+
+	assertOccurrences(t, readAppOccurrences(t, pool), []time.Time{m(4), m(21)})
+}
+
+func TestApplyJobSchedules_SpecChangeReplacesOccurrences(t *testing.T) {
+	pool, _ := setupLedgerPool(t)
+	g := NewIngester(pool, nil, nil)
+	t0 := scheduleBase()
+	m := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Minute) }
+
+	applyCronEnvelope(t, g, t0, "*/2 * * * *", m(2), m(4))
+	applyCronEnvelope(t, g, m(5), "*/3 * * * *", m(6), m(9))
+
+	assertOccurrences(t, readAppOccurrences(t, pool), []time.Time{m(6), m(9)})
+}
+
+func TestApplyJobSchedules_CapsPassedOccurrences(t *testing.T) {
+	pool, _ := setupLedgerPool(t)
+	g := NewIngester(pool, nil, nil)
+	t0 := scheduleBase()
+	s := func(n int) time.Time { return t0.Add(time.Duration(n) * 30 * time.Second) }
+
+	var first []time.Time
+	for i := 1; i <= 20; i++ {
+		first = append(first, s(i))
+	}
+	applyCronEnvelope(t, g, t0, "* * * * *", first...)
+	applyCronEnvelope(t, g, s(21), "* * * * *", s(22))
+
+	want := append([]time.Time{}, first[4:]...)
+	want = append(want, s(22))
+	assertOccurrences(t, readAppOccurrences(t, pool), want)
+}
+
+func TestApplyJobSchedules_WindowFollowsTenantGrace(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	seedTenantPlacementPolicy(t, db, `{"cronGrace":"1m"}`)
+	if _, err := db.Exec(`UPDATE varroa.tenant_placements SET cell = $1 WHERE cluster = $2 AND tenant = $3`,
+		jsTestCell, testCluster, testTenant); err != nil {
+		t.Fatalf("place tenant on the test cell: %v", err)
+	}
+	g := NewIngester(pool, nil, nil)
+	t0 := scheduleBase()
+	m := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Minute) }
+
+	// A one-minute grace makes the window five minutes.
+	applyCronEnvelope(t, g, t0, "* * * * *", m(1), m(3))
+	applyCronEnvelope(t, g, m(7), "* * * * *", m(8))
+
+	assertOccurrences(t, readAppOccurrences(t, pool), []time.Time{m(3), m(8)})
+}
+
+func TestApplyJobSchedules_DisabledChangeReplacesOccurrences(t *testing.T) {
+	pool, _ := setupLedgerPool(t)
+	g := NewIngester(pool, nil, nil)
+	t0 := scheduleBase()
+	m := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Minute) }
+
+	apply := func(at time.Time, disabled bool, occurrences ...time.Time) {
+		t.Helper()
+		fireTimes := make([]string, len(occurrences))
+		for i, occ := range occurrences {
+			fireTimes[i] = occ.UTC().Format(time.RFC3339)
+		}
+		env := newJobScheduleEnvelope(t, jsTestCell, at, JobSchedulesPayload{
+			Hash: "h",
+			Rows: []JobScheduleRowInput{{
+				Tenant: testTenant, JobPath: "acme/app", TriggerType: "cron", Spec: "*/2 * * * *",
+				Disabled: disabled, NextFireTimes: fireTimes,
+			}},
+		})
+		if _, err := g.Apply(context.Background(), env); err != nil {
+			t.Fatalf("apply job.schedules: %v", err)
+		}
+	}
+	// Jenkins skips the occurrences while the job is disabled, so a
+	// re-enabled row must not keep them.
+	apply(t0, true, m(2), m(4))
+	apply(m(5), false, m(6), m(8))
+
+	assertOccurrences(t, readAppOccurrences(t, pool), []time.Time{m(6), m(8)})
 }

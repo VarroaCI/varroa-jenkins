@@ -81,9 +81,11 @@ func applyJobSchedulesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, pay
 		return ApplyResult{ScheduleStale: true}, nil
 	}
 
-	// homeByTenant caches one placement read for each tenant the envelope
-	// names, so a cell hosting many tenants runs one read for each.
+	// homeByTenant and graceByTenant cache one placement read and one
+	// policy read for each tenant the envelope names, so a cell hosting
+	// many tenants runs one read of each for each tenant.
 	homeByTenant := map[string]placementMembers{}
+	graceByTenant := map[string]time.Duration{}
 
 	for _, row := range payload.Rows {
 		home, known, err := jobScheduleHomeCell(ctx, tx, env.Cluster, row.Tenant, row.JobPath, homeByTenant)
@@ -102,12 +104,30 @@ func applyJobSchedulesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, pay
 		if err != nil {
 			return ApplyResult{}, fmt.Errorf("%w: decode next_fire_times: %v", ErrMalformedEnvelope, err)
 		}
+		grace, cached := graceByTenant[row.Tenant]
+		if !cached {
+			policy, err := readTenantSchedulePolicy(ctx, tx, env.Cluster, row.Tenant)
+			if err != nil {
+				return ApplyResult{}, err
+			}
+			grace = policy.cronGrace
+			graceByTenant[row.Tenant] = grace
+		}
+		keepAfter := env.OccurredAt.Add(-passedOccurrenceWindow(grace))
 		rowJSON, err := json.Marshal(row)
 		if err != nil {
 			return ApplyResult{}, fmt.Errorf("marshal job schedule row: %w", err)
 		}
+		// With an unchanged spec, time zone, and disabled state,
+		// next_fire_times keeps each stored occurrence at or before the
+		// envelope time and newer than keepAfter, at most
+		// maxPassedOccurrences of them. The backstop can judge a missed
+		// occurrence only while the row still holds it, and the new
+		// export names future times only. A disabled-state change drops
+		// the kept times, so a re-enabled job never fires an occurrence
+		// Jenkins skipped while the job was disabled.
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO varroa.job_schedules (
+			INSERT INTO varroa.job_schedules AS js (
 				cluster, namespace, cell, tenant, job_path, trigger_type,
 				spec, timezone, disabled, next_fire_times, observed_at,
 				placement_generation, payload,
@@ -121,7 +141,23 @@ func applyJobSchedulesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, pay
 				spec                 = EXCLUDED.spec,
 				timezone             = EXCLUDED.timezone,
 				disabled             = EXCLUDED.disabled,
-				next_fire_times      = EXCLUDED.next_fire_times,
+				next_fire_times      = CASE
+					WHEN js.spec = EXCLUDED.spec AND js.timezone = EXCLUDED.timezone
+						AND js.disabled = EXCLUDED.disabled THEN ARRAY(
+						SELECT DISTINCT u.t FROM (
+							SELECT p.t FROM (
+								SELECT DISTINCT s.t FROM unnest(js.next_fire_times) AS s(t)
+								WHERE s.t <= EXCLUDED.observed_at AND s.t > $17
+								ORDER BY s.t DESC
+								LIMIT $18
+							) AS p
+							UNION
+							SELECT e.t FROM unnest(EXCLUDED.next_fire_times) AS e(t)
+						) AS u
+						ORDER BY u.t
+					)
+					ELSE EXCLUDED.next_fire_times
+				END,
 				observed_at          = EXCLUDED.observed_at,
 				placement_generation = EXCLUDED.placement_generation,
 				payload              = EXCLUDED.payload,
@@ -133,6 +169,7 @@ func applyJobSchedulesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, pay
 			row.Spec, row.Timezone, row.Disabled, fireTimes, env.OccurredAt,
 			row.PlacementGeneration, string(rowJSON),
 			row.UpstreamTenant, row.UpstreamJob, row.UpstreamResult,
+			keepAfter, maxPassedOccurrences,
 		); err != nil {
 			return ApplyResult{}, fmt.Errorf("upsert job schedule row: %w", err)
 		}
@@ -158,6 +195,23 @@ func applyJobSchedulesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, pay
 	}
 
 	return result, nil
+}
+
+// maxPassedOccurrences bounds how many passed occurrences one row
+// keeps, so a dense cron cannot grow the row without limit.
+const maxPassedOccurrences = 16
+
+// passedOccurrenceSlack is the extra time a passed occurrence stays
+// beyond three grace windows. It covers one backstop round interval
+// and the envelope delay.
+const passedOccurrenceSlack = 2 * time.Minute
+
+// passedOccurrenceWindow answers how long a row keeps a passed
+// occurrence for a tenant with the given cron grace. The backstop
+// judges an occurrence one grace after it and can wait one more grace
+// for its spread delay, so three graces leave one grace of margin.
+func passedOccurrenceWindow(grace time.Duration) time.Duration {
+	return 3*grace + passedOccurrenceSlack
 }
 
 // parseJobScheduleFireTimes parses a job schedule row's RFC 3339

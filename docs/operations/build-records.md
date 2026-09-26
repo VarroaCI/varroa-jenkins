@@ -4,8 +4,8 @@ The build record store keeps build history outside each Jenkins controller. It r
 per build: its stages, its test summary, its artifact index, and a durable build-number ledger.
 It is optional and off by default.
 
-The store holds no job configuration, console log text, or artifact bytes. Logs and artifacts
-live in a separate blob store, and the record store holds only their index. See [Build logs and
+The store holds no job configuration. Logs and artifacts live in a separate blob store, and the
+record store holds only their index. See [Build logs and
 artifacts](build-logs-and-artifacts.md).
 
 ## Enable the store
@@ -67,8 +67,7 @@ kubectl apply --server-side -f \
   https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.30/releases/cnpg-1.30.0.yaml
 ```
 
-Pin the operator version and upgrade it on your schedule. `helm template` renders the
-`Cluster` without the operator, so a render needs no live cluster.
+Pin the operator version and upgrade it on your schedule.
 
 ## Postgres roles
 
@@ -78,13 +77,11 @@ Pin the operator version and upgrade it on your schedule. `helm template` render
 | `varroa_client` | CloudNativePG, as a managed role | the BFF; reads runs, stages, tests, and artifacts |
 | `varroa_gateway` | CloudNativePG, as a managed role | the gateway, only in `postgres` blob mode; reads every table and inserts log chunks |
 
-`varroa_gateway` holds no `UPDATE` or `DELETE` on any table, and no default `INSERT` on future
-tables: it inserts only into `varroa.log_chunks`, and that grant reaches every later partition.
-The recorder alone writes every other table.
+`varroa_gateway` inserts only into `varroa.log_chunks` and its later partitions. The recorder
+alone writes every other table.
 
 `external` mode skips the three roles and uses one DSN for the recorder, the BFF and the
-gateway. Point `existingSecret` at a role that owns schema `varroa`: it creates the schema, runs
-migrations, and reads and writes every table.
+gateway. Point `existingSecret` at a role that owns schema `varroa`.
 
 ## Retention
 
@@ -103,8 +100,7 @@ content independently.
 Retention rounds up to a month boundary, because the recorder drops a whole monthly partition,
 not single rows. A `runs` value of `365d` keeps a build for 365 to 396 days.
 
-The build-number watermark is permanent, and no build number is reused, even after every run of a
-job expires.
+The build-number watermark is permanent: no build number is reused.
 
 ## A trigger that fails
 
@@ -144,22 +140,18 @@ The recorder publishes one notification per run change onto the NATS subject
 The BFF serves one stream per team at `GET /pipelines/{team}/stream`, under the ticket scope
 `pipelines:{team}`, with `run` and `stage` events.
 
-A page treats a notification as a hint: it refetches and renders the record.
+A page treats a notification as a hint and refetches the record.
 
 The recorder coalesces per run: a change waits at most 500 milliseconds, and a terminal state
 publishes at once.
 
-Each page refetches when its stream opens, because the stream sends no first frame. While the
-stream is closed and the run is not terminal, the build page reads the record every 3 seconds.
+Each page also refetches when its stream opens. While the stream is closed and the run is not terminal, the build page reads the record every 3 seconds.
 
 ## Activity history
 
-Activity history rides two stores: a fixed transport buffer in NATS and a durable table in
-Postgres. Every activity event publishes onto the JetStream stream `varroa_activity`, which
-covers lifecycle changes, user actions, and mite-observed changes. That stream holds at most 72
-hours, in code and not in chart values: it lets the recorder catch up after a brief outage, and
-it is no retention tier. The recorder drains the stream and writes each event once into the
-`activity` table. `GET /activity` and the MCP activity readers read that table, never the stream.
+Every activity event publishes onto the JetStream stream `varroa_activity`. That stream holds
+at most 72 hours, so the recorder can catch up after a brief outage; it is no retention tier.
+The recorder writes each event once into the `activity` table. `GET /activity` and the MCP activity readers read that table, never the stream.
 
 ```yaml
 recordStore:
@@ -172,8 +164,7 @@ fleet of 400 controllers writes about 40 MB a day, so `30d` needs about 1.2 GB a
 3.6 GB, plus the sizing above.
 
 Enabling the store against a fleet that ran without one imports history once, from the oldest
-message the 72-hour buffer still holds. An event older than `retention.activity` when read is
-acknowledged and discarded, so a stale backlog creates no row bound for deletion.
+message the 72-hour buffer still holds. It discards an event older than `retention.activity`.
 
 ## Source fields
 
@@ -222,19 +213,25 @@ The plugin computes each cron row's next three occurrences with Jenkins's cron e
 times match the Jenkins job page. An `scm-poll`, `upstream`, or `other` row, and every `none`
 row, carries no occurrence.
 
-Each mite polls its Jenkins every ten minutes and after every reconnect. It sends the set when
-it changed, on a reconnect, or every thirty minutes. The gateway publishes one cell's set in
-one envelope, and the recorder replaces the cell's rows with it or rejects a row whose tenant
-is unresolved.
+The mite sends no set until its Jenkins holds an applied desired state, because a new cell pod's
+empty set would delete the cell's rows. The first apply opens this gate and starts a poll. A
+failed poll retries within a minute. The mite polls again 5 seconds after the next cron
+occurrence, at most once a minute and at least every ten minutes. It sends the set when the set
+changed, on a reconnect, when a sent occurrence has passed, or every thirty minutes. A dense cron
+therefore sends up to one envelope a minute, and each one upserts every row of the cell. The
+recorder replaces the cell's rows with the envelope, or rejects a row whose tenant is unresolved.
+
+A row's `next_fire_times` also keeps its passed occurrences from the last `3 × cronGrace + 2m`,
+at most 16, so the backstop can judge a miss. A changed spec, time zone, or disabled state
+replaces the list.
 
 `job_schedule_cells` holds one watermark row per cell: the time of the newest accepted envelope.
-Read it before you judge a missing occurrence. An occurrence that never fired under a watermark
-no more than thirty minutes old is a missed fire. An old watermark means the cell has not
-reported, likely a disconnected mite or a hibernated controller, and the whole set is stale.
+An occurrence that never fired under a watermark no more than thirty minutes old is a missed
+fire. An older watermark means the cell has not reported, likely a disconnected mite or a
+hibernated controller, and the whole set is stale.
 
 A `truncated: true` set means the plugin's walk stopped early, at 5000 rows or 700 KiB, whichever
-came first. Its rows still hold accurate data; only the count is low. The recorder deletes no
-row, because a partial set would erase schedules the plugin never reached.
+came first. The recorder deletes no row, because a partial set would erase schedules the plugin never reached.
 
 ## Search
 
@@ -278,8 +275,7 @@ percent (512 MiB) and page at 80 percent (819 MiB). A full stream discards new e
 backlog drains.
 
 The activity metric measures the `varroa_activity` stream, which holds at most 1000000 messages.
-Warn at 500000 and page at 800000. A full stream discards its **oldest** message, so a sustained
-backlog loses old history rather than rejecting new events.
+Warn at 500000 and page at 800000. A full stream discards its **oldest** message.
 
 ## Network policy
 
@@ -307,8 +303,7 @@ Both policies apply only when `networkPolicy.enabled` and `recordStore.enabled` 
 
 In `cnpg` mode the chart also renders a policy for the Postgres pods, admitting the recorder, the
 BFF, and the gateway on port 5432, and the CloudNativePG operator on port 8000 from the namespace
-`networkPolicy.recordStoreCNPGOperatorNamespaceSelector` names (default `cnpg-system`). It lets
-the pods reach the API server that the instance manager watches.
+`networkPolicy.recordStoreCNPGOperatorNamespaceSelector` names (default `cnpg-system`).
 
 ## Remove the database
 

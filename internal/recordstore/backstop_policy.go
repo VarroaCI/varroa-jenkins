@@ -78,15 +78,21 @@ func decodeSchedulePolicy(generation int64, raw json.RawMessage) tenantScheduleP
 	return out
 }
 
+// schedulePolicyQuerier is the one method readTenantSchedulePolicy
+// needs. A pool and a transaction both satisfy it.
+type schedulePolicyQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 // readTenantSchedulePolicy reads cluster/tenant's tenant_placements
 // generation and policy. A missing row answers
 // defaultTenantSchedulePolicy: a single-tenant controller.
-func readTenantSchedulePolicy(ctx context.Context, pool *pgxpool.Pool, cluster, tenant string) (tenantSchedulePolicy, error) {
+func readTenantSchedulePolicy(ctx context.Context, q schedulePolicyQuerier, cluster, tenant string) (tenantSchedulePolicy, error) {
 	var (
 		generation int64
 		policyRaw  json.RawMessage
 	)
-	err := pool.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		SELECT generation, policy FROM varroa.tenant_placements WHERE cluster = $1 AND tenant = $2
 	`, cluster, tenant).Scan(&generation, &policyRaw)
 	switch {

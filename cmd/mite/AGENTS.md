@@ -163,17 +163,30 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   result for `sendHeartbeats` to attach; emits
   `varroa.mite.activity.events.{dropped,forwarded}` metrics.
 - **`job_schedule_poller.go`** — `startJobSchedulePoller` polls
-  `GET /varroa-activity/schedules` every `jobSchedulePollInterval` (10
-  minutes) and once immediately on every stream (re)connect, caching the
-  decoded set for `sendHeartbeats` to attach as `StateSnapshot.job_schedules`.
-  The hash gate: `sendHeartbeats` fills that field only when the cached
-  set's hash (`computeJobScheduleHash`, over `jobPath`/`triggerType`/
-  `spec`/`timezone`/`disabled`/`upstreamTenant`/`upstreamJob`/
-  `upstreamResult`, sorted, excluding the fire times) differs
-  from the hash of the last sent set, or the stream reconnected since the
-  last send, or `jobScheduleResendInterval` (30 minutes) has passed. Every
-  other heartbeat leaves the field unset. A poll failure keeps the last
-  known set and hash in place and retries on the next tick. A row's
+  `GET /varroa-activity/schedules` and caches the decoded set for
+  `sendHeartbeats` to attach as `StateSnapshot.job_schedules`.
+  **The export gate** — `scheduleExportOpen` is true once the convergence
+  marker exists or `runCommand` saw a desired-state result with
+  `ItemsSuccess` (`openScheduleExport`). The gate never closes in one
+  process, and only the apply that opens it wakes the poller. While it is closed the mite neither polls nor attaches: a cell's
+  `emptyDir` home answers an empty or partial set before the items apply,
+  and the recorder would delete every row of the cell. `openScheduleExport`
+  wakes the poller through `jobSchedulePollNow`. **The cadence** — a
+  failed poll retries after `jobScheduleRetryBackoff` (5 seconds), doubling
+  up to `jobScheduleMinPollInterval` (1 minute); a successful poll waits
+  `nextJobSchedulePollDelay`: the earlier of `jobSchedulePollInterval` (10
+  minutes) and five seconds after the earliest future occurrence of an
+  enabled `cron` row, never below 1 minute. **The send gate** —
+  `maybeAttachJobSchedules` fills the field only when the gate is open and
+  the cached set's hash (`computeJobScheduleHash`, over `jobPath`/
+  `triggerType`/`spec`/`timezone`/`disabled`/`upstreamTenant`/
+  `upstreamJob`/`upstreamResult`, sorted, excluding the fire times)
+  differs from the hash of the last sent set, or the stream reconnected
+  since the last send, or `jobScheduleResendInterval` (30 minutes) has
+  passed, or the earliest `cron` occurrence of the last sent set has
+  passed and a newer poll exists (`jobScheduleSetSeq` against
+  `jobScheduleLastSentSeq`). Every other heartbeat leaves the field unset.
+  A poll failure keeps the last known set and hash in place. A row's
   `upstreamTenant`/`upstreamJob`/`upstreamResult` carry through to the
   matching `mitev1.JobSchedule` fields unchanged, so an edit to just those
   three values still reopens the send gate. A `varroa-upstream` row sets

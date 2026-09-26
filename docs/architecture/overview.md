@@ -78,12 +78,9 @@ that table through `deps.Backfill`, whenever the
 [build record store](../operations/build-records.md) is enabled. Without it, they answer empty,
 and live SSE is all that remains.
 
-Job schedules travel the build data plane instead. The Jenkins plugin exports each job's trigger
-inventory. The mite polls it and attaches it to a heartbeat. The gateway republishes it as a
-`job.schedules` envelope on the same `varroa_builds` stream the recorder already consumes,
-landing in the `job_schedules` table. See
-[Build records](../operations/build-records.md#job-schedules) for the poll cadence and the
-watermark rule.
+Job schedules travel the build data plane instead: the mite polls the plugin's trigger inventory,
+and the gateway republishes it on the `varroa_builds` stream into the `job_schedules` table. See
+[Build records](../operations/build-records.md#job-schedules).
 
 ## Controller Configuration
 

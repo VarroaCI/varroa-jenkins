@@ -185,21 +185,39 @@ type Agent struct {
 
 	// Job-schedule poll/send state (D8). jobScheduleSet is the last
 	// successfully polled set; a failed poll leaves it unchanged.
-	// jobScheduleLastSentHash and jobScheduleLastSendTime track what was
-	// last attached to an outgoing StateSnapshot. jobScheduleForceSend is
-	// set on every stream (re)connect and cleared by the next attach, so
-	// the first snapshot after a reconnect carries the set even when its
-	// hash is unchanged. jobScheduleInterval and jobScheduleResendAfter
-	// are the poll cadence and the send-timer, overridable in tests.
-	// Guarded by jobScheduleMu because the poller and the snapshot
-	// goroutines run concurrently.
-	jobScheduleMu           sync.Mutex
-	jobScheduleSet          *mitev1.JobScheduleSet
-	jobScheduleLastSentHash string
-	jobScheduleLastSendTime time.Time
-	jobScheduleForceSend    bool
-	jobScheduleInterval     time.Duration
-	jobScheduleResendAfter  time.Duration
+	// jobScheduleSetSeq counts successful polls, and
+	// jobScheduleSetEarliest is the earliest cron occurrence of the
+	// cached set. jobScheduleLastSentHash, jobScheduleLastSendTime,
+	// jobScheduleLastSentSeq, and jobScheduleLastSentEarliest track what
+	// was last attached to an outgoing StateSnapshot.
+	// jobScheduleForceSend is set on every stream (re)connect and cleared
+	// by the next attach, so the first snapshot after a reconnect carries
+	// the set even when its hash is unchanged. jobScheduleInterval,
+	// jobScheduleMinInterval, jobScheduleRetryBase, and
+	// jobScheduleResendAfter are the poll cadence bounds, the retry
+	// backoff start, and the send-timer, overridable in tests. Guarded by
+	// jobScheduleMu because the poller and the snapshot goroutines run
+	// concurrently.
+	jobScheduleMu               sync.Mutex
+	jobScheduleSet              *mitev1.JobScheduleSet
+	jobScheduleSetSeq           uint64
+	jobScheduleSetEarliest      time.Time
+	jobScheduleLastSentHash     string
+	jobScheduleLastSendTime     time.Time
+	jobScheduleLastSentSeq      uint64
+	jobScheduleLastSentEarliest time.Time
+	jobScheduleForceSend        bool
+	jobScheduleInterval         time.Duration
+	jobScheduleMinInterval      time.Duration
+	jobScheduleRetryBase        time.Duration
+	jobScheduleResendAfter      time.Duration
+
+	// jobScheduleExportOpen is the export gate. It opens after an apply
+	// in this process succeeds for the items section. A convergence
+	// marker on disk also opens it. It never closes again.
+	// jobSchedulePollNow wakes the poller at once when the gate opens.
+	jobScheduleExportOpen atomic.Bool
+	jobSchedulePollNow    chan struct{}
 
 	// tenantHomes caches the tenant_homes field of the newest applied
 	// desired state. The loopback route GET /v1/homes serves it. The mite
@@ -289,7 +307,10 @@ func NewAgent(cfg Config) *Agent {
 		version:                version,
 		heartbeatInterval:      15 * time.Second,
 		jobScheduleInterval:    jobSchedulePollInterval,
+		jobScheduleMinInterval: jobScheduleMinPollInterval,
+		jobScheduleRetryBase:   jobScheduleRetryBackoff,
 		jobScheduleResendAfter: jobScheduleResendInterval,
+		jobSchedulePollNow:     make(chan struct{}, 1),
 		miteDir:                varroaMiteDir,
 		jenkinsHomeDir:         jenkinsHome,
 		drainMarkerPath:        defaultDrainMarkerPath,
@@ -1332,6 +1353,9 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 
 	if w.desiredStateCmd != nil {
 		result := a.handleDesiredState(cctx, w.desiredStateCmd)
+		if result.ItemsSuccess {
+			a.openScheduleExport()
+		}
 		if w.span != nil {
 			w.span.End()
 		}

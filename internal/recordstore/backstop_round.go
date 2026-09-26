@@ -180,6 +180,11 @@ func runBackstopSchedule(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn
 				logger.Warn("backstop round: select candidates failed", "job_path", row.JobPath, "error", err)
 				continue
 			}
+			candidates, err = dropSupersededCandidates(ctx, pool, pair.cluster, row.JobPath, candidates, now)
+			if err != nil {
+				logger.Warn("backstop round: read newest fire failed", "job_path", row.JobPath, "error", err)
+				continue
+			}
 
 			fire, missed := selectFire(candidates, policy.cronCatchUp)
 			if missed > 0 {

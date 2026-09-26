@@ -12,7 +12,7 @@ history, and the new instance [deletes the old agent pods](tenant-pod-templates.
 `spec.cell.enabled` cannot change after creation. `spec.cell.maxTenants` can, and only caps the
 tenant count.
 
-A cell hosts each tenant as a top-level folder named after its `Team`. It accepts no ingress host.
+A cell accepts no ingress host.
 Tenant traffic reaches it through the [tenant webhook door](#the-tenant-webhook-door), or through
 builds the plugin authenticates internally.
 
@@ -242,8 +242,7 @@ confirm the folder is idle, then performs the same two-step move.
 **Roll.** A cell that reports `CellReady=False` past `cells.unreadyGracePeriod`, for a reason
 other than the three configuration gates, gets its pod deleted once and the reason `CellRolled`.
 
-**Teardown.** Teardown releases the tenant's placement record, so the same name is free at once.
-A `Team` created again under that name owns a fresh record.
+**Teardown.** Teardown releases the placement record, so the name is free at once.
 
 **Eviction.** Past twice that grace period, the operator sets `status.cell.evacuate`, and every
 tenant moves off on its next placement tick. Recovery clears `evacuate`, `unreadySince`, and
@@ -312,9 +311,8 @@ child seeds only after branch indexing creates it; the operator retries until th
 | `RehydrationTruncated` | False | Seeds exceed one bundle; some jobs hold only a build number. | Wait; number-only bundles cover every job before full records resume. |
 | `RehydrationFailed` | False | The mite rejected the bundle, or `rehydrateDeadline` passed. | Read the message. A give-up needs a fresh generation: move the tenant or roll the cell. |
 
-A build can wait on the claim reason `NOT_READY` even when `Rehydrated` is `True`: its cell
-instance may not be announced yet, the announced seed may name an older instance, or the job may
-lack one. The claimer retries on its own.
+A build can still wait on the claim reason `NOT_READY` while `Rehydrated` is `True`. The
+claimer retries on its own.
 
 ## Interrupted runs
 
@@ -331,8 +329,8 @@ leaves the retry to a user.
 
 ## Backstop scheduler
 
-Each cell exports each job's next three cron occurrences. The recorder checks them against its
-ledger every minute. After a cell restart, a
+Each cell exports each job's next three cron occurrences, and the store keeps recent passed ones.
+The recorder checks them against its ledger every minute. After a cell restart, a
 [Jenkinsfile cron trigger](../config/items.md#schedule-a-job) is not exported until the job
 builds again.
 
@@ -340,10 +338,11 @@ An occurrence becomes a candidate once older than `cronGrace` (default `5m`, ran
 `60m`) with no matching ledger entry. The recorder triggers the build, keyed by the job path and
 the occurrence's minute, so a late cell fire and a backstop fire never both run.
 
-The exported horizon is three occurrences, so a long hibernation can exhaust it.
-`cronCatchUp` decides the outcome: `one` (default) fires the newest miss and counts the rest;
-`none` fires nothing and counts every miss. A fire wakes a hibernated controller, which then
-exports a fresh horizon. A trigger for a controller that never wakes expires after 24 hours.
+`cronCatchUp` decides what several misses of one job fire: `one` (default) fires the newest and
+counts the rest; `none` fires nothing and counts every miss. A long hibernation can exhaust the
+three-occurrence horizon. A fire wakes a hibernated controller, which then exports a fresh
+horizon. A trigger for a controller that never wakes expires after 24 hours. A cell roll loses no
+occurrence.
 
 Each fire writes one `build.scheduled.backstop` row, visible only on the next backfill.
 

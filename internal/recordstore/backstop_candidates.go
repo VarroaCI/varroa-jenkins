@@ -96,3 +96,40 @@ func selectCandidateOccurrences(ctx context.Context, reader Reader, pool *pgxpoo
 	}
 	return out, nil
 }
+
+// dropSupersededCandidates removes every candidate before the newest
+// occurrence the backstop already fired for cluster/jobPath in the last
+// 24 hours. The fired occurrence itself stays: isBackstopCandidate's
+// time-bounded test decides whether a lost fire runs again. A row keeps passed occurrences, so without this
+// rule each round would fire the next older miss, and cronCatchUp
+// "one" would fire once for every kept miss. The first round already
+// counted those older misses.
+func dropSupersededCandidates(ctx context.Context, pool *pgxpool.Pool, cluster, jobPath string, candidates []time.Time, now time.Time) ([]time.Time, error) {
+	if len(candidates) == 0 {
+		return candidates, nil
+	}
+	var newest *string
+	err := pool.QueryRow(ctx, `
+		SELECT max(reason) FROM varroa.activity
+		WHERE type = 'build.scheduled.backstop' AND cluster = $1 AND item_path = $2 AND ts > $3
+	`, cluster, jobPath, now.Add(-maxBackstopOccurrenceAge)).Scan(&newest)
+	if err != nil {
+		return nil, fmt.Errorf("read newest backstop fire: %w", err)
+	}
+	if newest == nil {
+		return candidates, nil
+	}
+	// Every reason fireOne writes is an occurrence minute. A reason that
+	// does not parse supersedes nothing.
+	fired, parseErr := time.Parse(time.RFC3339, *newest)
+	if parseErr != nil {
+		return candidates, nil //nolint:nilerr // an unparsable reason supersedes nothing
+	}
+	out := candidates[:0]
+	for _, occ := range candidates {
+		if !occ.UTC().Truncate(time.Minute).Before(fired) {
+			out = append(out, occ)
+		}
+	}
+	return out, nil
+}

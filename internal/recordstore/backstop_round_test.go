@@ -226,3 +226,106 @@ func TestRunBackstopRoundRunsInterruptedSweepInSameRound(t *testing.T) {
 		t.Fatalf("status=%q result=%q, want COMPLETED/INTERRUPTED", status, result)
 	}
 }
+
+// TestRunBackstopRoundFiresMissAcrossALaterExport asserts an occurrence
+// that passes while a cell rolls stays a candidate after the new pod's
+// first export, which names only future occurrences.
+func TestRunBackstopRoundFiresMissAcrossALaterExport(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+
+	g := NewIngester(pool, nil, nil)
+	jobPath := "acme/missed-during-roll"
+	now := time.Now().UTC()
+	missed := now.Add(-10 * time.Minute).Truncate(time.Minute)
+
+	exportAt := func(occurredAt time.Time, occurrences ...time.Time) {
+		fireTimes := make([]string, len(occurrences))
+		for i, occ := range occurrences {
+			fireTimes[i] = occurrenceRFC3339(occ)
+		}
+		env := newJobScheduleEnvelope(t, "cell-a", occurredAt, JobSchedulesPayload{
+			Hash: jobPath,
+			Rows: []JobScheduleRowInput{{
+				Tenant: testTenant, JobPath: jobPath,
+				TriggerType: "cron", Spec: "H/10 * * * *", NextFireTimes: fireTimes,
+			}},
+		})
+		if _, err := g.Apply(context.Background(), env); err != nil {
+			t.Fatalf("apply job.schedules: %v", err)
+		}
+	}
+	// The old pod exports the occurrence before it passes. The new pod
+	// exports only the next occurrence after the roll.
+	exportAt(missed.Add(-2*time.Minute), missed)
+	exportAt(now.Add(-time.Minute), missed.Add(10*time.Minute), missed.Add(20*time.Minute))
+
+	conn, cleanup := newSweepTestBus(t)
+	defer cleanup()
+	received := make(chan LedgerAction, 4)
+	sub, err := conn.Subscribe(bus.LedgerActionSubject(testCluster), func(msg *nats.Msg) {
+		var a LedgerAction
+		_ = json.Unmarshal(msg.Data, &a)
+		received <- a
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	conn.NATSConn().Flush()
+
+	if _, err := RunBackstopRound(context.Background(), pool, conn, BackstopConfig{}); err != nil {
+		t.Fatalf("RunBackstopRound: %v", err)
+	}
+
+	var retry *LedgerAction
+	for i := 0; i < 2; i++ {
+		select {
+		case a := <-received:
+			if a.Kind == LedgerActionRetryRun {
+				retry = &a
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("want two actions for the missed occurrence")
+		}
+	}
+	if retry == nil || retry.IntentKey != cronIntentKey(jobPath, missed) {
+		t.Fatalf("retry_run = %+v, want intent key %q", retry, cronIntentKey(jobPath, missed))
+	}
+	if n := countBackstopActivity(t, db, jobPath); n != 1 {
+		t.Fatalf("backstop activity rows = %d, want 1", n)
+	}
+}
+
+// TestRunBackstopRoundCatchUpOneFiresOnce asserts cronCatchUp "one"
+// fires one build for a run of kept misses: a later round does not fire
+// an older miss that the earlier fire superseded.
+func TestRunBackstopRoundCatchUpOneFiresOnce(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+
+	g := NewIngester(pool, nil, nil)
+	jobPath := "globex/catch-up-one"
+	now := time.Now().UTC().Truncate(time.Minute)
+	ingestCronSchedule(t, g, "globex", jobPath, 0,
+		now.Add(-14*time.Minute), now.Add(-12*time.Minute), now.Add(-10*time.Minute))
+
+	conn, cleanup := newSweepTestBus(t)
+	defer cleanup()
+
+	for round := 1; round <= 3; round++ {
+		if _, err := RunBackstopRound(context.Background(), pool, conn, BackstopConfig{}); err != nil {
+			t.Fatalf("RunBackstopRound %d: %v", round, err)
+		}
+	}
+	if n := countBackstopActivity(t, db, jobPath); n != 1 {
+		t.Fatalf("backstop activity rows = %d, want 1", n)
+	}
+	var reason string
+	if err := db.QueryRow(`
+		SELECT reason FROM varroa.activity WHERE type = 'build.scheduled.backstop' AND item_path = $1
+	`, jobPath).Scan(&reason); err != nil {
+		t.Fatalf("read backstop activity: %v", err)
+	}
+	if want := occurrenceMinuteKey(now.Add(-10 * time.Minute)); reason != want {
+		t.Fatalf("fired occurrence = %q, want the newest %q", reason, want)
+	}
+}
