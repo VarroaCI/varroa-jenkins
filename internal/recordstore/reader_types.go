@@ -60,8 +60,6 @@ type Stage struct {
 	EndedAt    *time.Time
 	DurationMs *int64
 	Error      *string
-	LogOffset  *int64
-	LogLength  *int64
 	Payload    json.RawMessage
 }
 

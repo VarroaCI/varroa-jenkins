@@ -199,8 +199,6 @@ type RunStagePayload struct {
 	EndedAt    *time.Time `json:"ended_at,omitempty"`
 	DurationMs *int64     `json:"duration_ms,omitempty"`
 	Error      *string    `json:"error,omitempty"`
-	LogOffset  *int64     `json:"log_offset,omitempty"`
-	LogLength  *int64     `json:"log_length,omitempty"`
 }
 
 // RunTestsPayload is the payload of a run.tests envelope, mapped onto

@@ -28,10 +28,10 @@ func applyRunStage(ctx context.Context, tx pgx.Tx, intent *intentRow, env Ingest
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO varroa.run_stages (
 			run_id, stage_id, created_at, parent_id, name, node_type, status,
-			started_at, ended_at, duration_ms, error, log_offset, log_length, payload
+			started_at, ended_at, duration_ms, error, payload
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
-			$8, $9, $10, $11, $12, $13, $14::jsonb
+			$8, $9, $10, $11, $12::jsonb
 		)
 		ON CONFLICT (run_id, stage_id) DO UPDATE SET
 			parent_id   = EXCLUDED.parent_id,
@@ -42,13 +42,11 @@ func applyRunStage(ctx context.Context, tx pgx.Tx, intent *intentRow, env Ingest
 			ended_at    = EXCLUDED.ended_at,
 			duration_ms = EXCLUDED.duration_ms,
 			error       = EXCLUDED.error,
-			log_offset  = EXCLUDED.log_offset,
-			log_length  = EXCLUDED.log_length,
 			payload     = EXCLUDED.payload
 		WHERE NOT (run_stages.status <> 'IN_PROGRESS' AND EXCLUDED.status = 'IN_PROGRESS')
 	`,
 		intent.runID, payload.StageID, intent.createdAt, payload.ParentID, payload.Name, payload.NodeType, payload.Status,
-		payload.StartedAt, payload.EndedAt, payload.DurationMs, payload.Error, payload.LogOffset, payload.LogLength,
+		payload.StartedAt, payload.EndedAt, payload.DurationMs, payload.Error,
 		string(envelopeJSON),
 	); err != nil {
 		return fmt.Errorf("upsert run_stages: %w", err)

@@ -165,6 +165,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   `00019_fleet_locks_owner_tenant.sql` adds `fleet_locks.owner_tenant`,
   the tenant that owns the lock, backfills it from each name's first
   segment, and indexes `(cluster, owner_tenant)`.
+  `00020_run_stages_drop_log_columns.sql` drops `run_stages.log_offset`
+  and `run_stages.log_length`. No writer filled them; a per-stage log
+  resolves through the stage tags of the log index.
   A later migration never edits an applied one. `migrationsFS` (`migrations.go`) embeds
   every file under `migrations/` into the binary through `embed.FS`, so
   the recorder needs no separate deploy artifact. Monthly partition

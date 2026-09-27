@@ -341,7 +341,7 @@ func (r *pgReader) runWithStages(ctx context.Context, runID string, run Run) (Ru
 func (r *pgReader) listStages(ctx context.Context, runID string) ([]Stage, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT run_id, stage_id, created_at, parent_id, name, node_type, status,
-		       started_at, ended_at, duration_ms, error, log_offset, log_length, payload
+		       started_at, ended_at, duration_ms, error, payload
 		FROM varroa.run_stages
 		WHERE run_id = $1
 		ORDER BY started_at ASC NULLS LAST, created_at, length(stage_id), stage_id
@@ -356,7 +356,7 @@ func (r *pgReader) listStages(ctx context.Context, runID string) ([]Stage, error
 		var s Stage
 		var stageRunID uuid.UUID
 		if err := rows.Scan(&stageRunID, &s.StageID, &s.CreatedAt, &s.ParentID, &s.Name, &s.NodeType,
-			&s.Status, &s.StartedAt, &s.EndedAt, &s.DurationMs, &s.Error, &s.LogOffset, &s.LogLength, &s.Payload); err != nil {
+			&s.Status, &s.StartedAt, &s.EndedAt, &s.DurationMs, &s.Error, &s.Payload); err != nil {
 			return nil, fmt.Errorf("scan stage: %w", err)
 		}
 		s.RunID = stageRunID.String()

@@ -31,7 +31,8 @@ type columnSpec struct {
 // no table. Migration 00016 adds one column to "runs" and creates no
 // table. Migration 00017 also adds one column to "runs". Migration 00018 adds
 // one column to "runs" and creates no table. Migration 00019 adds one column
-// to "fleet_locks" and creates no table.
+// to "fleet_locks" and creates no table. Migration 00020 drops two columns
+// from "run_stages" and creates no table.
 var expectedColumns = map[string][]columnSpec{
 	"job_numbers": {
 		{"cluster", "text", false},
@@ -107,8 +108,6 @@ var expectedColumns = map[string][]columnSpec{
 		{"ended_at", "timestamp with time zone", true},
 		{"duration_ms", "bigint", true},
 		{"error", "text", true},
-		{"log_offset", "bigint", true},
-		{"log_length", "bigint", true},
 		{"payload", "jsonb", true},
 	},
 	"run_tests": {
