@@ -9,7 +9,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -264,5 +266,37 @@ func TestCellPools_NoCreateRoute(t *testing.T) {
 		if w.Result().StatusCode != http.StatusMethodNotAllowed {
 			t.Errorf("%s /cellpools/{name}: status = %d, want 405", method, w.Result().StatusCode)
 		}
+	}
+}
+
+// The read path carries all three cellTemplate keys, miteResources included.
+func TestCellPoolEntryFrom_CarriesMiteResources(t *testing.T) {
+	pool := &v1alpha1.CellPool{
+		ObjectMeta: metav1.ObjectMeta{Name: "lts-2-555"},
+		Spec: v1alpha1.CellPoolSpec{
+			ProfileRef: "lts-2-555",
+			CellTemplate: &v1alpha1.CellTemplate{
+				Resources: &corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("6Gi")},
+				},
+				MiteResources: &corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("128Mi")},
+				},
+				PodOverrides: &v1alpha1.PodOverrides{JvmOpts: "-XX:MaxRAMPercentage=50"},
+			},
+		},
+	}
+	tmpl := cellPoolEntryFrom(pool).Spec.CellTemplate
+	if tmpl == nil {
+		t.Fatal("cellTemplate missing from the read")
+	}
+	if got := string(tmpl.MiteResources); got != `{"limits":{"memory":"128Mi"}}` {
+		t.Errorf("miteResources = %s", got)
+	}
+	if got := string(tmpl.Resources); got != `{"limits":{"memory":"6Gi"}}` {
+		t.Errorf("resources = %s", got)
+	}
+	if got := string(tmpl.PodOverrides); got != `{"jvmOpts":"-XX:MaxRAMPercentage=50"}` {
+		t.Errorf("podOverrides = %s", got)
 	}
 }

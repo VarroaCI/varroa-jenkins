@@ -147,6 +147,9 @@ spec:
               value: {{ include "varroa.cells.int" (dict "name" "cells.maxTenantsPerCell" "value" .Values.cells.maxTenantsPerCell) | quote }}
             - name: VARROA_CELLS_UNREADY_GRACE
               value: {{ .Values.cells.unreadyGracePeriod | quote }}
+            {{- /* An empty or null value renders "{}", so the operator reads an explicit opt-out and never falls back to its built-in default. */}}
+            - name: VARROA_CELLS_CELL_TEMPLATE
+              value: {{ .Values.cells.cellTemplate | default dict | toJson | quote }}
             - name: VARROA_NETWORKPOLICY_ENABLED
               value: {{ .Values.networkPolicy.enabled | quote }}
             - name: VARROA_NETWORKPOLICY_APISERVER_EGRESS

@@ -984,6 +984,7 @@ func main() {
 			PerProfile:         cellsConfig.WarmPoolPerProfile,
 			MaxTenantsPerCell:  cellsConfig.MaxTenantsPerCell,
 			UnreadyGracePeriod: cellsConfig.UnreadyGracePeriod,
+			CellTemplate:       cellsConfig.CellTemplate,
 			ClaimGate:          claimGate,
 			BlobTierS3:         controller.BlobstoreIsS3(blobstoreURL),
 			ArtifactSecretBase: artifactSecretBase,

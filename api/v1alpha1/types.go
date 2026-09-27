@@ -1855,6 +1855,11 @@ type CellTemplate struct {
 	// Resources sets the Jenkins container's resource requirements.
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+	// MiteResources sets the mite sidecar's resource requirements. The pool
+	// stamps it on spec.miteSpec.resources and keeps the other miteSpec
+	// fields of the cell.
+	// +optional
+	MiteResources *corev1.ResourceRequirements `json:"miteResources,omitempty"`
 	// PodOverrides sets the pod-level overrides of each cell.
 	// +optional
 	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`

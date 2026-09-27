@@ -872,6 +872,13 @@ type StatefulSetSpec struct {
 	// emptyDir instead of a claim.
 	Cell bool
 
+	// CellPool is the varroa.dev/cell-pool label of a cell, and empty for a
+	// controller that is not a cell. CreateStatefulSet writes it as a pod
+	// template label after every overlay merge, so a pod selector finds the
+	// pods of a pool and no podLabels entry can change the value. The
+	// selector never carries it, because the selector is immutable.
+	CellPool string
+
 	// Headless is v1alpha1.IsHeadless(cr). buildStatefulSet stamps
 	// VARROA_HEADLESS=true on the jenkins container when true, and stamps
 	// nothing when false.

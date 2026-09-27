@@ -91,6 +91,9 @@ the `CellPool` object. See [Cells and pipelines tenants](../operations/cells.md)
 `cells.maxTenantsPerCell` below 1 and a `cells.warmPool.perProfile` below 1 at render time. Each
 of the two must be a whole number that fits a 32-bit integer.
 
+`cells.cellTemplate` seeds the resources and node spread of the cells in a new pool. See
+[Default template](../operations/cell-pools.md#default-template).
+
 ### BFF ConfigMap Access
 
 The BFF is the internet-facing component. Its ClusterRole grants no `configmaps` rule in any mode,

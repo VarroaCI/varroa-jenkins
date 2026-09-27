@@ -1218,6 +1218,11 @@ func (in *CellTemplate) DeepCopyInto(out *CellTemplate) {
 		*out = new(corev1.ResourceRequirements)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.MiteResources != nil {
+		in, out := &in.MiteResources, &out.MiteResources
+		*out = new(corev1.ResourceRequirements)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.PodOverrides != nil {
 		in, out := &in.PodOverrides, &out.PodOverrides
 		*out = new(PodOverrides)

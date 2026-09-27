@@ -1,13 +1,22 @@
 package controller
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
 )
 
 // Default values for the cells feature, matching charts/varroa/values.yaml.
@@ -19,6 +28,53 @@ const (
 )
 
 var defaultCellsUnreadyGracePeriod = 5 * time.Minute
+
+// defaultCellTemplate returns the template the operator seeds on a pool it
+// creates when VARROA_CELLS_CELL_TEMPLATE is absent or does not parse. It
+// must equal the chart default of cells.cellTemplate; a unit test compares
+// the two. Each call returns a new value, so no caller can change the
+// default another caller reads.
+func defaultCellTemplate() *v1alpha1.CellTemplate {
+	return &v1alpha1.CellTemplate{
+		Resources: &corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("1"),
+				corev1.ResourceMemory: resource.MustParse("3Gi"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceMemory: resource.MustParse("6Gi"),
+			},
+		},
+		MiteResources: &corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10m"),
+				corev1.ResourceMemory: resource.MustParse("32Mi"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceMemory: resource.MustParse("128Mi"),
+			},
+		},
+		PodOverrides: &v1alpha1.PodOverrides{
+			JvmOpts: "-XX:MaxRAMPercentage=50",
+			Affinity: &corev1.Affinity{
+				PodAntiAffinity: &corev1.PodAntiAffinity{
+					PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{{
+						Weight: 100,
+						PodAffinityTerm: corev1.PodAffinityTerm{
+							TopologyKey: corev1.LabelHostname,
+							LabelSelector: &metav1.LabelSelector{
+								MatchExpressions: []metav1.LabelSelectorRequirement{{
+									Key:      cells.LabelCellPool,
+									Operator: metav1.LabelSelectorOpExists,
+								}},
+							},
+						},
+					}},
+				},
+			},
+		},
+	}
+}
 
 // APIServerEgress names the kube-apiserver egress CIDRs and ports the cell
 // NetworkPolicy allows. It mirrors chart value networkPolicy.apiServerEgress,
@@ -43,19 +99,23 @@ type CellIsolation struct {
 // the cell NetworkPolicy's ingress/egress shape. ParseCellsConfigFromEnv
 // builds one value once at startup; nothing later mutates it.
 type CellsConfig struct {
-	WarmPoolEnabled      bool
-	WarmPoolPerProfile   int
-	MaxTenantsPerCell    int
-	UnreadyGracePeriod   time.Duration
+	WarmPoolEnabled    bool
+	WarmPoolPerProfile int
+	MaxTenantsPerCell  int
+	UnreadyGracePeriod time.Duration
+	// CellTemplate seeds CellPool.spec.cellTemplate on a pool the operator
+	// creates. Nil seeds a pool with no template.
+	CellTemplate         *v1alpha1.CellTemplate
 	NetworkPolicyEnabled bool
 	APIServerEgress      APIServerEgress
 	CellIsolation        CellIsolation
 }
 
-// ParseCellsConfigFromEnv reads the seven cell-related environment variables
+// ParseCellsConfigFromEnv reads the eight cell-related environment variables
 // the chart stamps on the operator Deployment: VARROA_CELLS_WARM_POOL_ENABLED,
 // VARROA_CELLS_WARM_POOL_PER_PROFILE, VARROA_CELLS_MAX_TENANTS,
-// VARROA_CELLS_UNREADY_GRACE, VARROA_NETWORKPOLICY_ENABLED,
+// VARROA_CELLS_UNREADY_GRACE, VARROA_CELLS_CELL_TEMPLATE,
+// VARROA_NETWORKPOLICY_ENABLED,
 // VARROA_NETWORKPOLICY_APISERVER_EGRESS, and VARROA_CELL_ISOLATION.
 //
 // A missing or unparsable value falls back to its documented default and
@@ -83,6 +143,7 @@ func ParseCellsConfigFromEnv(logger *slog.Logger) CellsConfig {
 	}
 	cfg.MaxTenantsPerCell = parseCellsIntEnv(logger, "VARROA_CELLS_MAX_TENANTS", cfg.MaxTenantsPerCell)
 	cfg.UnreadyGracePeriod = parseCellsDurationEnv(logger, "VARROA_CELLS_UNREADY_GRACE", cfg.UnreadyGracePeriod)
+	cfg.CellTemplate = parseCellTemplateEnv(logger, "VARROA_CELLS_CELL_TEMPLATE")
 	cfg.NetworkPolicyEnabled = parseCellsBoolEnv(logger, "VARROA_NETWORKPOLICY_ENABLED", cfg.NetworkPolicyEnabled)
 
 	if raw := os.Getenv("VARROA_NETWORKPOLICY_APISERVER_EGRESS"); raw != "" {
@@ -143,4 +204,32 @@ func parseCellsDurationEnv(logger *slog.Logger, key string, fallback time.Durati
 		return fallback
 	}
 	return d
+}
+
+// parseCellTemplateEnv reads the pool seed template as JSON. An absent value
+// answers the default. null, {}, or an object that sets no known key answer
+// nil: the chart renders {} for an explicit opt-out, and that opt-out must
+// not read as an absent value. Invalid JSON and an unknown key answer the
+// default with a warning, so a misspelled key is never dropped in silence.
+func parseCellTemplateEnv(logger *slog.Logger, key string) *v1alpha1.CellTemplate {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return defaultCellTemplate()
+	}
+	dec := json.NewDecoder(bytes.NewReader([]byte(raw)))
+	dec.DisallowUnknownFields()
+	var tmpl *v1alpha1.CellTemplate
+	if err := dec.Decode(&tmpl); err != nil {
+		logger.Warn("parse error, using the default cell template", "key", key, "value", raw, "error", err)
+		return defaultCellTemplate()
+	}
+	// A second value after the first is invalid input too, not a template.
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		logger.Warn("trailing data, using the default cell template", "key", key, "value", raw, "error", err)
+		return defaultCellTemplate()
+	}
+	if tmpl == nil || (tmpl.Resources == nil && tmpl.MiteResources == nil && tmpl.PodOverrides == nil) {
+		return nil
+	}
+	return tmpl
 }

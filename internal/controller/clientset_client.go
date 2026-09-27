@@ -35,6 +35,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
 	"github.com/varroaci/varroa-jenkins/internal/overlay"
 	"github.com/varroaci/varroa-jenkins/internal/tenancy"
 )
@@ -2114,6 +2115,23 @@ func (c *ClientsetClient) CreateStatefulSet(ctx context.Context, spec StatefulSe
 		podAnns[artifactSecretHashAnnotation] = spec.ArtifactSecretHash
 		if err := unstructured.SetNestedStringMap(sts.Object, podAnns, "spec", "template", "metadata", "annotations"); err != nil {
 			return fmt.Errorf("set artifact-secret-hash annotation: %w", err)
+		}
+	}
+
+	// Stamp the pool label on the pod template after every overlay merge,
+	// so the operator value replaces a podLabels or overlay value for the
+	// same key. The selector stays unchanged, because it is immutable.
+	if spec.CellPool != "" {
+		podLabels, _, err := unstructured.NestedStringMap(sts.Object, "spec", "template", "metadata", "labels")
+		if err != nil {
+			return fmt.Errorf("read pod labels: %w", err)
+		}
+		if podLabels == nil {
+			podLabels = map[string]string{}
+		}
+		podLabels[cells.LabelCellPool] = spec.CellPool
+		if err := unstructured.SetNestedStringMap(sts.Object, podLabels, "spec", "template", "metadata", "labels"); err != nil {
+			return fmt.Errorf("set cell-pool pod label: %w", err)
 		}
 	}
 

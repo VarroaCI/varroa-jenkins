@@ -59,14 +59,20 @@ the packaged CRDs. Does not own the Go source it packages
   `examples.itemRbac.enabled`).
 - KV watchers require `$JS.FC.KV_<bucket>.>` publish grants.
 - **`cells:`** (`values.yaml`) **seeds a `CellPool`; it configures no live
-  pool.** Each of the four values populates a `CellPool` the operator creates
+  pool.** Each of the five values populates a `CellPool` the operator creates
   for a requested profile, and the operator never rewrites the spec of a pool
   that already exists — so a Helm upgrade never rescales a running pool, and
   an operator's `varroactl scale cellpool` / `kubectl patch` edit survives it.
   `warmPool.enabled` gates **auto-creation only** (off by default; a
   hand-applied `CellPool` still reconciles), `warmPool.perProfile` seeds
   `spec.warm`, `maxTenantsPerCell` seeds `spec.maxTenantsPerCell`, and
-  `unreadyGracePeriod` seeds `spec.unreadyGracePeriod` (a Go duration string).
+  `unreadyGracePeriod` seeds `spec.unreadyGracePeriod` (a Go duration string),
+  and `cellTemplate` seeds `spec.cellTemplate` through `VARROA_CELLS_CELL_TEMPLATE`
+  (`toJson`, rendered `{}` for null). Helm merges a user map into the default
+  map, so `{}` keeps the default: `cells.cellTemplate: null` is the only opt-out,
+  and a single key is removed by setting it to `null`. The default must equal
+  `defaultCellTemplate()` in `internal/controller/cells_config.go` (a Go test
+  compares them); `tests/test-cells-operator-env.sh` asserts the render.
   The last two stay live as the fallback for a cell with no owning pool. The
   operator reads them through `ParseCellsConfigFromEnv`
   (`internal/controller/cells_config.go`), see
@@ -85,7 +91,7 @@ the packaged CRDs. Does not own the Go source it packages
   `patch` and **neither `create` nor `delete`** — the API is a scale control,
   and a pool is created and deleted with kubectl or GitOps. Asserted by
   `tests/test-cellpool-rbac.sh`, which also asserts the packaged CRD and the
-  four `VARROA_CELLS_*` seed values.
+  four scalar `VARROA_CELLS_*` seed values.
   **`networkPolicy.cellIsolation`** (`enabled`, `extraIngress`,
   `extraEgress`) is the paired opt-in, honoured only when
   `networkPolicy.enabled` is also true. **The chart renders no per-cell
@@ -323,6 +329,7 @@ bash charts/varroa/tests/test-mcp-netpol.sh
 bash charts/varroa/tests/test-dex-grpc-disabled.sh
 bash charts/varroa/tests/test-updatecenter-seed-default.sh
 bash charts/varroa/tests/test-cells-guard.sh
+bash charts/varroa/tests/test-cells-operator-env.sh
 bash charts/varroa/tests/test-updatecenter-uploads-nil-guard.sh
 bash charts/varroa/tests/test-updatecenter-archive-url.sh
 bash charts/varroa/tests/test-bff-configmap-rbac.sh

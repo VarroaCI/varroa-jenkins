@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Golden render test: operator Deployment carries the seven cell env vars (D3)
+# Golden render test: operator Deployment carries the eight cell env vars (D3)
 # =============================================================================
 # Verifies VARROA_CELLS_WARM_POOL_ENABLED, VARROA_CELLS_WARM_POOL_PER_PROFILE,
 # VARROA_CELLS_MAX_TENANTS, VARROA_CELLS_UNREADY_GRACE,
+# VARROA_CELLS_CELL_TEMPLATE,
 # VARROA_NETWORKPOLICY_ENABLED, VARROA_NETWORKPOLICY_APISERVER_EGRESS, and
 # VARROA_CELL_ISOLATION on the varroa-operator Deployment: the two JSON-valued
 # vars parse as valid JSON, pool auto-creation stays off on a default render,
+# the cell template carries the default numbers and renders {} when null,
 # and the two NetworkPolicy vars flip on a render with
 # networkPolicy.enabled=true networkPolicy.cellIsolation.enabled=true.
 #
-# The four VARROA_CELLS_* values seed a CellPool the operator creates. They
+# The five VARROA_CELLS_* values seed a CellPool the operator creates. They
 # configure no live pool: an operator scales a live pool by editing the
 # CellPool object.
 # =============================================================================
@@ -93,7 +95,7 @@ assert_valid_json() {
 echo "=== Cell operator env chart golden render assertions (D3, task 3.2) ==="
 
 # ---------------------------------------------------------------------------
-# (a) Default render: all seven vars present, auto-creation off, JSON valid.
+# (a) Default render: all eight vars present, auto-creation off, JSON valid.
 # ---------------------------------------------------------------------------
 echo ""
 echo "--- (a) Default render ---"
@@ -132,6 +134,26 @@ check "the bff container carries VARROA_CELLS_MAX_TENANTS at 10" "$rc"
 UNREADY_GRACE=$(unquoted_value "$(raw_value "$(env_block "VARROA_CELLS_UNREADY_GRACE" "$OPERATOR_DEFAULT")")")
 [[ "$UNREADY_GRACE" == "5m" ]] && rc=0 || rc=1
 check "VARROA_CELLS_UNREADY_GRACE seeds a new pool with 5m" "$rc"
+
+CELL_TEMPLATE_JSON_DEFAULT=$(json_value "$(raw_value "$(env_block "VARROA_CELLS_CELL_TEMPLATE" "$OPERATOR_DEFAULT")")")
+assert_valid_json "VARROA_CELLS_CELL_TEMPLATE is valid JSON (default render)" "$CELL_TEMPLATE_JSON_DEFAULT"
+if python3 -c '
+import json, sys
+t = json.load(sys.stdin)
+assert t["resources"] == {"requests": {"cpu": "1", "memory": "3Gi"}, "limits": {"memory": "6Gi"}}
+assert t["miteResources"] == {"requests": {"cpu": "10m", "memory": "32Mi"}, "limits": {"memory": "128Mi"}}
+po = t["podOverrides"]
+assert po["jvmOpts"] == "-XX:MaxRAMPercentage=50"
+assert "podLabels" not in po
+assert po["affinity"] == {"podAntiAffinity": {"preferredDuringSchedulingIgnoredDuringExecution": [{
+    "weight": 100,
+    "podAffinityTerm": {
+        "topologyKey": "kubernetes.io/hostname",
+        "labelSelector": {"matchExpressions": [{"key": "varroa.dev/cell-pool", "operator": "Exists"}]},
+    },
+}]}}
+' <<< "$CELL_TEMPLATE_JSON_DEFAULT" > /dev/null 2>&1; then rc=0; else rc=1; fi
+check "VARROA_CELLS_CELL_TEMPLATE carries the default requests, limits, jvmOpts, and anti-affinity" "$rc"
 
 NETPOL_ENABLED_DEFAULT=$(unquoted_value "$(raw_value "$(env_block "VARROA_NETWORKPOLICY_ENABLED" "$OPERATOR_DEFAULT")")")
 [[ "$NETPOL_ENABLED_DEFAULT" == "false" ]] && rc=0 || rc=1
@@ -181,6 +203,21 @@ check "VARROA_CELL_ISOLATION reflects cellIsolation.enabled=true" "$rc"
 WARM_ENABLED_NETPOL=$(unquoted_value "$(raw_value "$(env_block "VARROA_CELLS_WARM_POOL_ENABLED" "$OPERATOR_NETPOL")")")
 [[ "$WARM_ENABLED_NETPOL" == "false" ]] && rc=0 || rc=1
 check "VARROA_CELLS_WARM_POOL_ENABLED stays false when only networkPolicy flags change" "$rc"
+
+# ---------------------------------------------------------------------------
+# (c) cells.cellTemplate=null: an explicit opt-out renders {}. A {} override
+# does not opt out, because Helm merges it into the default map.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- (c) cells.cellTemplate=null ---"
+
+RENDER_NULL=$(helm template "$ROOT" $COMMON --set cells.cellTemplate=null 2>/dev/null) || {
+  echo "FAIL: helm template (cells.cellTemplate=null) failed"; exit 1
+}
+OPERATOR_NULL=$(extract_doc "Deployment" "release-name-varroa-operator" "$RENDER_NULL")
+CELL_TEMPLATE_JSON_NULL=$(json_value "$(raw_value "$(env_block "VARROA_CELLS_CELL_TEMPLATE" "$OPERATOR_NULL")")")
+[[ "$CELL_TEMPLATE_JSON_NULL" == "{}" ]] && rc=0 || rc=1
+check "VARROA_CELLS_CELL_TEMPLATE renders {} for cells.cellTemplate=null (got: $CELL_TEMPLATE_JSON_NULL)" "$rc"
 
 # ---------------------------------------------------------------------------
 # Summary

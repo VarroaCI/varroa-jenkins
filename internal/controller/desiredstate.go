@@ -7,6 +7,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/overlay"
 )
@@ -323,8 +324,18 @@ func (r *Reconciler) buildStatefulSetSpec(cr *v1alpha1.Controller, class *v1alph
 		ArtifactSecretHash:        in.ArtifactSecretHash,
 		CellSecretsName:           in.CellSecretsName,
 		Cell:                      v1alpha1.IsCell(cr),
+		CellPool:                  cellPoolLabel(cr),
 		Headless:                  v1alpha1.IsHeadless(cr),
 	}
+}
+
+// cellPoolLabel answers the pool label a cell pod carries: the cell's own
+// varroa.dev/cell-pool label, and empty for a controller that is not a cell.
+func cellPoolLabel(cr *v1alpha1.Controller) string {
+	if !v1alpha1.IsCell(cr) {
+		return ""
+	}
+	return cr.Labels[cells.LabelCellPool]
 }
 
 // miteObservation is everything handleConnected reads from the transport

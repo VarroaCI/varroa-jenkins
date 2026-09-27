@@ -42,10 +42,11 @@ type cellPoolSpecEntry struct {
 
 // cellTemplate mirrors v1alpha1.CellTemplate. The BFF carries it as raw JSON
 // on the read path: the surface is read and scale only, so no handler ever
-// parses its two keys.
+// parses its three keys.
 type cellTemplate struct {
-	Resources    json.RawMessage `json:"resources,omitempty"`
-	PodOverrides json.RawMessage `json:"podOverrides,omitempty"`
+	Resources     json.RawMessage `json:"resources,omitempty"`
+	MiteResources json.RawMessage `json:"miteResources,omitempty"`
+	PodOverrides  json.RawMessage `json:"podOverrides,omitempty"`
 }
 
 // cellPoolStatusEntry mirrors v1alpha1.CellPoolStatus. The four counters
@@ -104,6 +105,11 @@ func cellPoolEntryFrom(pool *v1alpha1.CellPool) cellPoolEntry {
 		if tmpl.Resources != nil {
 			if raw, err := json.Marshal(tmpl.Resources); err == nil {
 				e.Spec.CellTemplate.Resources = raw
+			}
+		}
+		if tmpl.MiteResources != nil {
+			if raw, err := json.Marshal(tmpl.MiteResources); err == nil {
+				e.Spec.CellTemplate.MiteResources = raw
 			}
 		}
 		if tmpl.PodOverrides != nil {

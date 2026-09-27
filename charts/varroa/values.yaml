@@ -74,6 +74,38 @@ cells:
   # unready before the operator rolls its pod. It is also the fallback for a
   # cell that belongs to no pool. Go duration string.
   unreadyGracePeriod: 5m
+  # -- Seeds CellPool.spec.cellTemplate: the shape of each cell a new pool
+  # creates. resources and podOverrides go to the Jenkins container and the
+  # pod; miteResources goes to the mite sidecar. The default gives each cell
+  # a fair CPU share with no CPU limit, a bounded memory, a heap of half the
+  # memory limit, and a preferred spread across nodes. A pool that exists
+  # keeps its own template: edit the CellPool to change it. Set this value to
+  # null to create pools with no template.
+  cellTemplate:
+    resources:
+      requests:
+        cpu: "1"
+        memory: 3Gi
+      limits:
+        memory: 6Gi
+    miteResources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+    podOverrides:
+      jvmOpts: "-XX:MaxRAMPercentage=50"
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchExpressions:
+                    - key: varroa.dev/cell-pool
+                      operator: Exists
 
 # ---------------------------------------------------------------------------
 # Telemetry — OpenTelemetry observability pipeline

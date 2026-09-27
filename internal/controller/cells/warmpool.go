@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -50,6 +51,9 @@ type WarmPoolConfig struct {
 	MaxTenantsPerCell int
 	// UnreadyGracePeriod seeds CellPool.spec.unreadyGracePeriod.
 	UnreadyGracePeriod time.Duration
+	// CellTemplate seeds CellPool.spec.cellTemplate. Nil seeds a pool with
+	// no template. The pass copies it, so no pool shares it.
+	CellTemplate *v1alpha1.CellTemplate
 	// ClaimGate is the operator's own VARROA_CLAIM_GATE. The fill gate
 	// refuses a fill unless this reads "1".
 	ClaimGate string
@@ -201,7 +205,8 @@ func (r *WarmPoolReconciler) createMissingPools(ctx context.Context, teams []*v1
 }
 
 // seededPool builds the pool the operator creates for profile. Its spec
-// comes from the chart values the operator reads at boot.
+// comes from the chart values the operator reads at boot. Only a create
+// writes these values: the pass never writes the spec of a pool that exists.
 func (r *WarmPoolReconciler) seededPool(profile string) *v1alpha1.CellPool {
 	warm := int32(0)
 	if r.Config.PerProfile > 0 {
@@ -221,6 +226,7 @@ func (r *WarmPoolReconciler) seededPool(profile string) *v1alpha1.CellPool {
 			Warm:              warm,
 			MaxCells:          0,
 			MaxTenantsPerCell: maxTenants,
+			CellTemplate:      r.Config.CellTemplate.DeepCopy(),
 		},
 	}
 	if r.Config.UnreadyGracePeriod > 0 {
@@ -660,19 +666,46 @@ func buildPoolCell(operatorNamespace string, pool *v1alpha1.CellPool, version st
 	return cell
 }
 
-// applyCellTemplate copies the pool template's two keys onto a cell spec.
+// applyCellTemplate copies the pool template's three keys onto a cell spec.
+// It owns spec.miteSpec.resources only, and keeps the other miteSpec fields,
+// so an image pin on a cell survives the stamp.
 func applyCellTemplate(spec *v1alpha1.ControllerSpec, tmpl *v1alpha1.CellTemplate) {
+	var miteResources *corev1.ResourceRequirements
 	if tmpl == nil {
 		spec.Resources = nil
 		spec.PodOverrides = nil
+	} else {
+		spec.Resources = tmpl.Resources.DeepCopy()
+		spec.PodOverrides = tmpl.PodOverrides.DeepCopy()
+		miteResources = tmpl.MiteResources.DeepCopy()
+	}
+	if miteResources != nil {
+		if spec.MiteSpec == nil {
+			spec.MiteSpec = &v1alpha1.MiteSpec{}
+		}
+		spec.MiteSpec.Resources = miteResources
 		return
 	}
-	spec.Resources = tmpl.Resources.DeepCopy()
-	spec.PodOverrides = tmpl.PodOverrides.DeepCopy()
+	if spec.MiteSpec == nil {
+		return
+	}
+	spec.MiteSpec.Resources = nil
+	if spec.MiteSpec.Image == "" && spec.MiteSpec.ImagePullPolicy == "" {
+		spec.MiteSpec = nil
+	}
 }
 
-// restampFreeCells sets spec.version, spec.resources, and spec.podOverrides
-// on each free cell, from the profile and from the template. It never edits
+// cellMiteResources reads spec.miteSpec.resources, where a nil miteSpec
+// reads as nil resources.
+func cellMiteResources(spec *v1alpha1.ControllerSpec) *corev1.ResourceRequirements {
+	if spec.MiteSpec == nil {
+		return nil
+	}
+	return spec.MiteSpec.Resources
+}
+
+// restampFreeCells sets spec.version, spec.resources, spec.podOverrides, and
+// spec.miteSpec.resources on each free cell, from the profile and from the template. It never edits
 // a cell that holds a tenant, so a template edit rolls free cells at once and
 // reaches a placed cell only after that cell drains.
 func (r *WarmPoolReconciler) restampFreeCells(ctx context.Context, pool *v1alpha1.CellPool, profile *v1alpha1.JenkinsVersionProfile, free []*v1alpha1.Controller) {
@@ -691,14 +724,15 @@ func (r *WarmPoolReconciler) restampFreeCells(ctx context.Context, pool *v1alpha
 	}
 }
 
-// equalCellShape reports whether the three template-owned fields already
+// equalCellShape reports whether the four template-owned fields already
 // match, so an unchanged cell is never written. It compares with the
 // semantic equality helper, which reads a resource.Quantity by value rather
 // than by its cached string form.
 func equalCellShape(a, b *v1alpha1.ControllerSpec) bool {
 	return a.Version == b.Version &&
 		equality.Semantic.DeepEqual(a.Resources, b.Resources) &&
-		equality.Semantic.DeepEqual(a.PodOverrides, b.PodOverrides)
+		equality.Semantic.DeepEqual(a.PodOverrides, b.PodOverrides) &&
+		equality.Semantic.DeepEqual(cellMiteResources(a), cellMiteResources(b))
 }
 
 // drainSurplus deletes count free cells, highest ordinal first, so the pool

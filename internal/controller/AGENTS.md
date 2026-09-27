@@ -725,7 +725,11 @@ sections describe.
     one member of each other tenant; a free cell offsets nothing either,
     because `len(free)` counts it already) and either fill or drain, never both in a tick, so
     the pass cannot oscillate; re-stamp `spec.version`/`resources`/
-    `podOverrides` on free cells only; write status. A wanted fill first runs
+    `podOverrides`/`miteSpec.resources` on free cells only (`applyCellTemplate`
+    owns `miteSpec.resources` alone and keeps `miteSpec.image` and
+    `imagePullPolicy`; `equalCellShape` compares all four); write status.
+    `seededPool` deep-copies `WarmPoolConfig.CellTemplate` into a pool it
+    creates, and only a create writes it. A wanted fill first runs
     `fillGateReason`, in this order: `ClaimGate != "1"` is
     `RecordStoreUnsupported`; a blob URL that is not S3 is
     `BlobTierUnsupported`; an empty `ArtifactSecretBase`, a nil `Secrets`, or
@@ -765,7 +769,16 @@ sections describe.
     so two pools whose names share a prefix never collide. A `CellPool`
     carries the finalizer `varroa.dev/cellpool-drain`: a delete drains the
     pool's free cells, strips no label, and then releases the finalizer, so a
-    placed cell lives on as a cell with no effective owner. **Both drain
+    placed cell lives on as a cell with no effective owner.
+  - **Pool cell pod label.** `buildStatefulSetSpec` sets
+    `StatefulSetSpec.CellPool` through `cellPoolLabel` (the Controller's
+    `varroa.dev/cell-pool` label, and empty for a non-cell), and
+    `CreateStatefulSet` writes it on the pod template **after** the
+    `podOverrides` merge, the `resourceOverlay` merge, and normalization, so
+    no `podLabels` entry or overlay can change it. The selector never carries
+    it (immutable). No roll detector watches the label: a running cell gets
+    it at its next provisioning pass. The default template's anti-affinity
+    and `kubectl delete pod -l varroa.dev/cell-pool=<pool>` both select on it. **Both drain
     paths delete through `deleteFreeCell`, never from the pass's own free
     snapshot**: a fresh read with no tenant, no live claim on that fresh read
     (`status.cell.pendingTenants`), no fence in the pass's fence snapshot, no
@@ -847,13 +860,19 @@ sections describe.
     malformed, unknown-kind, or duplicate-id Secret; the kinds are
     `usernamePassword`, `secretText`, and `sshPrivateKey`, which becomes a
     `basicSSHUserPrivateKey` with a direct-entry key).
-  - `cells_config.go`'s `ParseCellsConfigFromEnv` reads the operator's seven
+  - `cells_config.go`'s `ParseCellsConfigFromEnv` reads the operator's eight
     cell-related environment variables into `CellsConfig` (warm-pool
     enable/per-profile, `MaxTenantsPerCell`, `UnreadyGracePeriod`,
-    `NetworkPolicyEnabled`, `APIServerEgress`, `CellIsolation`), mirroring
-    chart values `cells.*` and `networkPolicy.cellIsolation`. A missing or
-    unparsable variable falls back to its documented default and only logs
-    a warning — this function never fails the boot. The four `cells.*` values
+    `CellTemplate`, `NetworkPolicyEnabled`, `APIServerEgress`,
+    `CellIsolation`), mirroring chart values `cells.*` and
+    `networkPolicy.cellIsolation`. A missing or unparsable variable falls
+    back to its documented default and only logs a warning — this function
+    never fails the boot. `VARROA_CELLS_CELL_TEMPLATE` is JSON: absent,
+    invalid, or an unknown key (strict decode) answers `defaultCellTemplate()`,
+    and `null`, `{}`, or no known key answers nil (a pool with no template).
+    `defaultCellTemplate()` must equal the chart default of
+    `cells.cellTemplate`; `TestDefaultCellTemplate_MatchesChartDefault`
+    reads `charts/varroa/values.yaml` and fails on drift. The five `cells.*` values
     are **pool seeds**, not live settings: they populate a `CellPool` the
     operator creates, and the operator never rewrites the spec of a pool that
     already exists, so an operator's scale edit survives every tick and every

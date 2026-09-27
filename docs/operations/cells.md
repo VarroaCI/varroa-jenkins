@@ -69,8 +69,9 @@ Expect `"status":"True","reason":"Connected"`.
 
 ## Pools
 
-A `CellPool` sizes one pool of cells for a single version profile. See
-[Cell pools](cell-pools.md), [Cell views](cell-views.md).
+A `CellPool` sizes one pool of cells for a single version profile. An auto-created pool
+gets its cell template from `cells.cellTemplate`. See [Cell pools](cell-pools.md),
+[Cell views](cell-views.md).
 
 ## Make a Team a pipelines tenant
 

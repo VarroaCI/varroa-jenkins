@@ -1133,7 +1133,7 @@ type ComponentsSchemasCellPoolScaleRequest struct {
 
 // ComponentsSchemasCellPoolSpec A CellPool's configuration (spec.*). profileRef is immutable, because a pool's cells carry the profile label they were created with.
 type ComponentsSchemasCellPoolSpec struct {
-	// CellTemplate resources and podOverrides for the cells the pool creates. The pool exposes no raw strategic-merge overlay.
+	// CellTemplate resources, miteResources, and podOverrides for the cells the pool creates. resources and podOverrides go to the Jenkins container and the pod; miteResources goes to the mite sidecar. The pool exposes no raw strategic-merge overlay.
 	CellTemplate *map[string]interface{} `json:"cellTemplate,omitempty"`
 
 	// MaxCells Cap on the pool's cells, placed cells included. 0 means unlimited.

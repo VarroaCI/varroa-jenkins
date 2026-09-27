@@ -5,8 +5,7 @@ template of one pool of cells that serve the pipelines tenants of a single versi
 operator sizes each pool from its own spec on a 60-second ticker, and reports the result in
 `status`.
 
-Read [Cells and pipelines tenants](cells.md) first. That page covers what a cell is and how a
-`Team` becomes a tenant.
+Read [Cells and pipelines tenants](cells.md) first.
 
 ## Spec fields
 
@@ -17,7 +16,7 @@ Read [Cells and pipelines tenants](cells.md) first. That page covers what a cell
 | `maxCells` | int32, default 0 | cap on the pool's cells, placed cells included. 0 means unlimited |
 | `maxTenantsPerCell` | int32, minimum 1, default 10 | capacity a pool cell uses when its own `spec.cell.maxTenants` is zero |
 | `unreadyGracePeriod` | duration, optional | how long a pool cell may stay unready before the operator rolls its pod |
-| `cellTemplate` | object, optional | `resources` and `podOverrides` for the cells the pool creates |
+| `cellTemplate` | object, optional | `resources`, `miteResources`, and `podOverrides` for the cells the pool creates |
 
 `profileRef` is immutable. A pool's cells carry the profile label they were created with, and a
 change would orphan every one of them. To serve another profile, create another pool.
@@ -32,28 +31,24 @@ change would orphan every one of them. To serve another profile, create another 
 | `freeTenantSlots` | spare capacity of the placed cells only |
 | `tenants` | every tenant on the pool, sorted |
 
-`freeTenantSlots` counts placed cells alone. `warmCells` already reports the empty ones.
-
-The `PoolReady` condition carries eight reasons.
+`PoolReady` reasons:
 
 | Reason | Status | Holds when | Action |
 |---|---|---|---|
-| `Ready` | `True` | the profile exists, the pool is below its cap, and no fill precondition refused a fill | None. |
-| `CellCapReached` | `False` | `maxCells` is above zero and the pool owns that many cells | Raise `maxCells`, or leave it: the pool is working as configured. |
 | `ProfileMissing` | `False` | `profileRef` names no `JenkinsVersionProfile` | Create the `JenkinsVersionProfile`, or fix `profileRef`. |
 | `RecordStoreUnsupported` | `False` | `recordStore.enabled` is false | Enable the record store. |
 | `BlobTierUnsupported` | `False` | `recordStore.blobs.mode` is not `s3` | Set the blob tier to `s3`. |
 | `ArtifactSecretMissing` | `False` | `recordStore.blobs.s3.artifactSecret` is unset, or `<artifactSecret>-<pool>` does not exist with non-empty data | Set `recordStore.blobs.s3.artifactSecret`, and create `<artifactSecret>-<pool>`. |
 | `ArtifactPluginMissing` | `False` | the plugin set a cell of the pool's version resolves does not pin `artifact-manager-s3` | Pin `artifact-manager-s3` in the version profile. |
 | `SecretsMissing` | `False` | the pool holds no usable confidential store | Read [Pool secrets](#pool-secrets) below. |
+| `CellCapReached` | `False` | `maxCells` is above zero and the pool owns that many cells | Raise `maxCells`. |
+| `Ready` | `True` | the profile exists, the pool is below its cap, and no fill precondition refused a fill | None. |
 
 The first four precondition reasons report only on a pass that wanted a new cell. A pool at its
 target therefore reports `CellCapReached` or `Ready`, even with a missing artifact Secret.
 `SecretsMissing` is the exception: the store is a property of the pool, not of a fill.
 
-The reasons rank `ProfileMissing`, `RecordStoreUnsupported`, `BlobTierUnsupported`,
-`ArtifactSecretMissing`, `ArtifactPluginMissing`, `SecretsMissing`, `CellCapReached`, then `Ready`.
-The status reports the highest that applies.
+Reasons rank from the top row down. The status reports the highest that applies.
 
 ## Create a pool
 
@@ -69,13 +64,9 @@ cells:
   unreadyGracePeriod: 5m
 ```
 
-Each value is the default of a pool the operator creates. It configures no live pool, and a Helm
-upgrade never rewrites the spec of a pool that already exists.
+Each value seeds a new pool only. A Helm upgrade never rewrites the spec of an existing pool.
 
-The chart refuses a `cells.maxTenantsPerCell` or `cells.warmPool.perProfile` below 1 at render
-time. The first floor matches the CellPool CRD. The second matches the operator, which seeds at
-least one warm cell so placement keeps the last free cell. Each must be a whole number that fits a
-32-bit integer.
+The chart refuses a `cells.maxTenantsPerCell` or `cells.warmPool.perProfile` below 1.
 
 To create a second pool, apply one:
 
@@ -92,6 +83,34 @@ spec:
 
 Creation and deletion are `kubectl` or GitOps operations. The API and the CLI only read and scale
 a pool.
+
+## Default template
+
+`cells.cellTemplate` seeds the `cellTemplate` of each pool the operator creates:
+
+| Key | Default |
+|---|---|
+| `resources` | requests `cpu: 1`, `memory: 3Gi`; limit `memory: 6Gi` |
+| `miteResources` | requests `cpu: 10m`, `memory: 32Mi`; limit `memory: 128Mi` |
+| `podOverrides.jvmOpts` | `-XX:MaxRAMPercentage=50` |
+| `podOverrides.affinity` | preferred pod anti-affinity on `kubernetes.io/hostname` |
+
+The heap takes half the memory limit. The anti-affinity spreads the pods of all pools across
+nodes, and a small cluster still schedules them. Values merge into the default. Set a key to
+`null` to remove it:
+
+```yaml
+cells:
+  cellTemplate:
+    resources:
+      requests: {cpu: "2", memory: 6Gi}
+      limits: {memory: 12Gi}
+    podOverrides:
+      affinity: null
+```
+
+Set `cells.cellTemplate: null` for pools with no template. A pool that exists keeps its own
+template. Edit the pool to change it, as [Template edits](#template-edits) describes.
 
 ## Scale a pool
 
@@ -117,15 +136,10 @@ cell, resolving its capacity from its own `spec.cell.maxTenants` or from `cells.
 
 ### Scale up a pool
 
-A pool fill needs four install-wide gates: the record store enabled, the `s3` blob tier,
-`recordStore.blobs.s3.artifactSecret` set to a base name, and the resolved plugin set pinning
-`artifact-manager-s3`. Once those hold, one Secret per pool,
-`<artifactSecret>-<pool name>` in the release namespace, is the last credential a scale-up needs.
-See [The artifact Secret](build-logs-and-artifacts.md#the-artifact-secret) for its keys and the
-candidate lookup order.
-
-An install holding only per-cell Secrets needs the pool Secret created once before a scale-up
-mints new cells. Existing cells keep their per-cell Secret, and only a new cell needs the pool one.
+A fill needs the install-wide gates of the `PoolReady` table and one Secret per pool,
+`<artifactSecret>-<pool name>` in the release namespace. See
+[The artifact Secret](build-logs-and-artifacts.md#the-artifact-secret) for its keys. A running
+cell keeps its per-cell Secret. Only a new cell needs the pool Secret.
 
 ## Cold start
 
@@ -135,9 +149,10 @@ one to three minutes. Set `warm` to 1 or more to remove that wait.
 
 ## Template edits
 
-The pool re-stamps `spec.version`, `spec.resources`, and `spec.podOverrides` on each free cell
-every tick, and never edits a cell that holds a tenant. A `cellTemplate` edit therefore rolls the
-free cells at once, and reaches a placed cell only after it drains. To grow a placed tenant, move
+The pool re-stamps `spec.version`, `spec.resources`, `spec.podOverrides`, and
+`spec.miteSpec.resources` on each free cell every tick. It keeps the other `spec.miteSpec` fields,
+and never edits a cell that holds a tenant. A `cellTemplate` edit therefore rolls the free cells
+at once, and reaches a placed cell only after it drains. To grow a placed tenant, move
 it to a pool with a larger template.
 
 ## Pool secrets
@@ -182,6 +197,9 @@ becomes unreadable, so re-apply those credentials.
 A cell carries three labels. `varroa.dev/cell-pool` names its pool, `varroa.dev/cell-profile`
 names its profile, and `varroa.dev/warm` records that a pool created it. A pool owns a cell only
 while the pool its label names still exists.
+
+A pool cell's pod also carries `varroa.dev/cell-pool`, set when the operator builds the pod. A
+running cell gets it at its next roll. A `podOverrides.podLabels` entry cannot change it.
 
 A pool whose name equals its own `profileRef` is that profile's default pool. It adopts every cell
 of its profile that carries no pool label. A pool with any other name adopts nothing.

@@ -42,7 +42,8 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   `unreadyCells`, `freeTenantSlots`) carry no `omitempty`, so a merge patch
   writes a count that falls to zero; `tenants` is `omitempty`, so
   `internal/crdstore/registry.go` clears it explicitly. `CellTemplate` reuses
-  `ControllerSpec`'s own `resources` and `podOverrides` types and exposes no
+  `ControllerSpec`'s own `resources`, `podOverrides`, and `miteSpec.resources` types
+  (`miteResources`) and exposes no
   raw strategic-merge overlay, which is why the generated CRD is large.
 - `types.go` — Spec/Status structs with kubebuilder markers. CEL
   `XValidation` rules embedding a regex with literal `\.` **must** use a raw
