@@ -332,15 +332,19 @@ func (r *pgReader) runWithStages(ctx context.Context, runID string, run Run) (Ru
 	return run, stages, nil
 }
 
-// listStages reads every run_stages row for runID, ordered by
-// created_at.
+// listStages reads every run_stages row for runID in stage-start order.
+// Every reader of the stage list relies on this order, so no caller
+// sorts again. Ingest writes the run's created_at on every stage row, so
+// created_at alone gives no order. A row with no started_at comes last.
+// Two rows with the same started_at come in numeric order of their
+// Jenkins node ids, which the length-then-text comparison gives.
 func (r *pgReader) listStages(ctx context.Context, runID string) ([]Stage, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT run_id, stage_id, created_at, parent_id, name, node_type, status,
 		       started_at, ended_at, duration_ms, error, log_offset, log_length, payload
 		FROM varroa.run_stages
 		WHERE run_id = $1
-		ORDER BY created_at
+		ORDER BY started_at ASC NULLS LAST, created_at, length(stage_id), stage_id
 	`, runID)
 	if err != nil {
 		return nil, fmt.Errorf("list stages: %w", err)

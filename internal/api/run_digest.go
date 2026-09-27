@@ -1,5 +1,5 @@
 // Package api: the failure digest the run detail carries. A digest
-// names why a run that did not succeed failed: the first failed stage,
+// names why a run that did not succeed failed: the innermost failed stage,
 // its error, the tail of its log, the failed test counts, and the first
 // failed test cases. It is a
 // read composition, computed fresh on every read from stored rows and
@@ -17,6 +17,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
@@ -79,17 +80,88 @@ func digestApplies(run recordstore.Run) bool {
 		run.StartedAt != nil
 }
 
-// firstFailedStage returns the first stage whose status is FAILURE, in
-// the order the read answers them, and nil when no stage failed. Stages
-// arrive in stage-start order, so the first failure is the earliest one
-// and no re-sort is needed.
-func firstFailedStage(stages []recordstore.Stage) *recordstore.Stage {
+// digestFailedStage returns the stage the digest names, and nil when no
+// stage failed. A failed stage also fails every stage and parallel branch
+// that holds it, so a FAILURE row that holds another FAILURE row only
+// repeats that failure. The function returns the first FAILURE row that
+// holds no other FAILURE row. The reader answers the stages in
+// stage-start order, so the first such row is the earliest one, and the
+// function does not sort again. A failed parallel branch that holds no
+// stage of its own is a valid answer.
+func digestFailedStage(stages []recordstore.Stage) *recordstore.Stage {
+	byID := make(map[string]*recordstore.Stage, len(stages))
 	for i := range stages {
-		if stages[i].Status == "FAILURE" {
+		byID[stages[i].StageID] = &stages[i]
+	}
+	holdsFailure := make(map[string]bool)
+	for i := range stages {
+		if stages[i].Status != "FAILURE" {
+			continue
+		}
+		// The seen set stops the walk on a parent chain that loops.
+		seen := map[string]bool{stages[i].StageID: true}
+		for p := stages[i].ParentID; p != nil && !seen[*p]; {
+			seen[*p] = true
+			holdsFailure[*p] = true
+			parent, ok := byID[*p]
+			if !ok {
+				break
+			}
+			p = parent.ParentID
+		}
+	}
+	for i := range stages {
+		if stages[i].Status == "FAILURE" && !holdsFailure[stages[i].StageID] {
 			return &stages[i]
 		}
 	}
 	return nil
+}
+
+// digestStageName returns the name the digest shows for a stage. Jenkins
+// names a parallel branch row "Branch: <name>", so a parallel row with a
+// stored parallel_branch_name shows that name. Every other row shows its
+// own name.
+func digestStageName(s *recordstore.Stage) string {
+	if s.NodeType != "parallel" || len(s.Payload) == 0 {
+		return s.Name
+	}
+	var env struct {
+		Payload struct {
+			ParallelBranchName string `json:"parallel_branch_name"`
+		} `json:"payload"`
+	}
+	if json.Unmarshal(s.Payload, &env) != nil || env.Payload.ParallelBranchName == "" {
+		return s.Name
+	}
+	return env.Payload.ParallelBranchName
+}
+
+// stageSubtree returns rootID and the id of every stage nested under it,
+// at any depth. An empty rootID returns nil.
+func stageSubtree(stages []recordstore.Stage, rootID string) map[string]bool {
+	if rootID == "" {
+		return nil
+	}
+	children := make(map[string][]string)
+	for _, s := range stages {
+		if s.ParentID != nil {
+			children[*s.ParentID] = append(children[*s.ParentID], s.StageID)
+		}
+	}
+	out := map[string]bool{rootID: true}
+	queue := []string{rootID}
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		for _, c := range children[id] {
+			if !out[c] {
+				out[c] = true
+				queue = append(queue, c)
+			}
+		}
+	}
+	return out
 }
 
 // computeFailedTests returns the failed-test counts, and nil when the
@@ -130,15 +202,17 @@ func computeFailedTests(run recordstore.Run, read runTestCaseRead) *digestFailed
 }
 
 // computeLogTail returns the last runDigestTailLines lines of a run's
-// console log, and a flag that reports a hard read failure. It keeps
-// only the lines the log index attributes to stageID when stageID is
-// not empty, and falls back to every line when that filter names none:
-// a run with no failed stage and a run whose index names no failed
-// stage share that one path. A nil store and an undecodable index entry
-// are hard failures, so the caller drops the log tail and keeps the
-// rest of the digest. An empty log is not a failure: it answers no tail
-// with the flag clear.
-func computeLogTail(ctx context.Context, store blob.Store, runID, stageID string) (tail *string, hardFailure bool) {
+// console log, and a flag that reports a hard read failure. The plugin
+// tags each line with the innermost stage that wrote it. The function
+// keeps only the lines the log index attributes to a stage in stageIDs
+// when stageIDs is not empty. It falls back to every line when that
+// filter names none: a run with no failed stage and a run whose index
+// names no failed stage share that one path. A nil store and an
+// undecodable index entry are hard failures, so the caller drops the log
+// tail and keeps the rest of the digest. An empty log is not a failure:
+// it answers no tail with the flag clear. The tail carries no ANSI escape
+// sequence, because a client shows it as plain text.
+func computeLogTail(ctx context.Context, store blob.Store, runID string, stageIDs map[string]bool) (tail *string, hardFailure bool) {
 	if store == nil {
 		return nil, true
 	}
@@ -152,9 +226,9 @@ func computeLogTail(ctx context.Context, store blob.Store, runID, stageID string
 	}
 	lines := splitRunLogLines(consoleData, entries)
 	var attributed []runLogLine
-	if stageID != "" {
+	if len(stageIDs) > 0 {
 		for _, ln := range lines {
-			if ln.StageID == stageID {
+			if stageIDs[ln.StageID] {
 				attributed = append(attributed, ln)
 			}
 		}
@@ -176,7 +250,7 @@ func computeLogTail(ctx context.Context, store blob.Store, runID, stageID string
 	}
 	texts := make([]string, 0, len(tailLines)-start)
 	for _, ln := range tailLines[start:] {
-		texts = append(texts, ln.Text)
+		texts = append(texts, stripANSIEscapes(ln.Text))
 	}
 	joined := strings.Join(texts, "\n")
 	return &joined, false
@@ -190,19 +264,19 @@ func computeRunDigest(ctx context.Context, store blob.Store, run recordstore.Run
 	if !digestApplies(run) {
 		return nil
 	}
-	failed := firstFailedStage(stages)
+	failed := digestFailedStage(stages)
 	d := &runDigestJSON{FailedTests: computeFailedTests(run, cases)}
-	stageID := ""
+	var stageIDs map[string]bool
 	if failed != nil {
-		d.Stage = failed.Name
+		d.Stage = digestStageName(failed)
 		if failed.Error != nil {
 			d.Error = *failed.Error
 		}
-		stageID = failed.StageID
+		stageIDs = stageSubtree(stages, failed.StageID)
 	}
 	// The hard-failure flag is read and discarded: it only degrades
 	// logTail to absent, and the digest itself still stands.
-	tail, _ := computeLogTail(ctx, store, run.RunID, stageID)
+	tail, _ := computeLogTail(ctx, store, run.RunID, stageIDs)
 	if tail != nil {
 		d.LogTail = *tail
 	}

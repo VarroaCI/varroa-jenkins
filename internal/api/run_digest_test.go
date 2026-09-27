@@ -27,6 +27,43 @@ func newDigestRun(runID, result string) recordstore.Run {
 	return recordstore.Run{RunID: runID, Result: strPtr(result), StartedAt: &started}
 }
 
+// digestAt answers a stage start time minutes after a fixed base.
+func digestAt(minutes int) *time.Time {
+	v := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC).Add(time.Duration(minutes) * time.Minute)
+	return &v
+}
+
+// digestStage builds one stage row. An empty parentID gives a top-level
+// row. A non-empty branchName gives a row whose stored envelope carries
+// that name as parallel_branch_name, the way ingest stores it.
+func digestStage(runID, stageID, name, nodeType, status, parentID, branchName string, startedAt *time.Time) recordstore.Stage {
+	s := recordstore.Stage{RunID: runID, StageID: stageID, Name: name, NodeType: nodeType, Status: status, StartedAt: startedAt}
+	if parentID != "" {
+		s.ParentID = &parentID
+	}
+	if branchName != "" {
+		s.Payload = json.RawMessage(fmt.Sprintf(`{"kind":"run.stage","payload":{"stage_id":%q,"parallel_branch_name":%q}}`, stageID, branchName))
+	}
+	return s
+}
+
+// digestLog stores a console log whose lines carry the given stage ids,
+// one index entry for each line. Each pair is a stage id and a line.
+func digestLog(t *testing.T, store blob.Store, runID string, lines [][2]string) {
+	t.Helper()
+	var console strings.Builder
+	entries := make([]runLogIndexEntry, 0, len(lines))
+	for i, ln := range lines {
+		text := ln[1] + "\n"
+		entries = append(entries, runLogIndexEntry{
+			Seq: int64(i), StageID: ln[0], Offset: int64(console.Len()), Len: int64(len(text)), Final: i == len(lines)-1,
+		})
+		console.WriteString(text)
+	}
+	putRunLogConsole(t, store, runID, []byte(console.String()))
+	putRunLogIndex(t, store, runID, entries)
+}
+
 // putRawRunLogObject writes data as one whole object at key, which a
 // fixture needs to store a log index the index helpers cannot express.
 func putRawRunLogObject(t *testing.T, store blob.Store, key string, data []byte) {
@@ -75,9 +112,9 @@ func TestComputeRunDigest_PresenceRule(t *testing.T) {
 func TestComputeRunDigest_FirstFailedStageWins(t *testing.T) {
 	run := newDigestRun("r1", "FAILURE")
 	stages := []recordstore.Stage{
-		{RunID: "r1", StageID: "s1", Name: "Checkout", Status: "SUCCESS"},
-		{RunID: "r1", StageID: "s2", Name: "Build", Status: "FAILURE", Error: strPtr("compiler error")},
-		{RunID: "r1", StageID: "s3", Name: "Test", Status: "FAILURE", Error: strPtr("later error")},
+		{RunID: "r1", StageID: "s1", Name: "Checkout", Status: "SUCCESS", StartedAt: digestAt(0)},
+		{RunID: "r1", StageID: "s2", Name: "Build", Status: "FAILURE", Error: strPtr("compiler error"), StartedAt: digestAt(1)},
+		{RunID: "r1", StageID: "s3", Name: "Test", Status: "FAILURE", Error: strPtr("later error"), StartedAt: digestAt(2)},
 	}
 	got := computeRunDigest(context.Background(), nil, run, stages, runTestCaseRead{})
 	if got.Stage != "Build" || got.Error != "compiler error" {
@@ -412,5 +449,144 @@ func TestHandleGetRun_FailedCaseReadDegradesTheListAlone(t *testing.T) {
 	}
 	if len(detail.Digest.FailedTests.Cases) != 1 || detail.Digest.FailedTests.Cases[0].CaseKey != "C/t" {
 		t.Fatalf("digest cases = %+v, want the one failed case", detail.Digest.FailedTests.Cases)
+	}
+}
+
+// TestComputeRunDigest_ParallelFailureNamesTheInnerStage proves the live
+// shape: a failed stage inside a parallel branch fails the branch row and
+// the outer stage row too. The digest names the inner stage and its
+// error, and the tail keeps the lines of the inner stage alone.
+func TestComputeRunDigest_ParallelFailureNamesTheInnerStage(t *testing.T) {
+	store := newRunLogTestStore(t)
+	runID := "run-digest-parallel"
+	digestLog(t, store, runID, [][2]string{
+		{"3", "starting CI"},
+		{"8", "lint ok"},
+		{"7", "go build ./..."},
+		{"8", "lint done"},
+		{"7", "main.go:3: undefined: x"},
+	})
+	stages := []recordstore.Stage{
+		digestStage(runID, "3", "CI", "stage", "FAILURE", "", "", digestAt(0)),
+		digestStage(runID, "5", "Branch: Test", "parallel", "FAILURE", "3", "Test", digestAt(1)),
+		digestStage(runID, "6", "Branch: Lint", "parallel", "SUCCESS", "3", "Lint", digestAt(1)),
+		digestStage(runID, "7", "Test", "stage", "FAILURE", "5", "", digestAt(2)),
+		digestStage(runID, "8", "Lint", "stage", "SUCCESS", "6", "", digestAt(2)),
+	}
+	stages[0].Error = strPtr("outer error")
+	stages[1].Error = strPtr("branch error")
+	stages[3].Error = strPtr("script returned exit code 1")
+
+	got := computeRunDigest(context.Background(), store, newDigestRun(runID, "FAILURE"), stages, runTestCaseRead{})
+	if got.Stage != "Test" || got.Error != "script returned exit code 1" {
+		t.Fatalf("digest stage/error = %q/%q, want Test/script returned exit code 1", got.Stage, got.Error)
+	}
+	if want := "go build ./...\nmain.go:3: undefined: x"; got.LogTail != want {
+		t.Fatalf("logTail = %q, want %q", got.LogTail, want)
+	}
+}
+
+// TestComputeRunDigest_EarliestStartedFailedBranchWins proves that of two
+// failed branches the digest names the failure that started first. The
+// stages arrive in the stage-start order of the reader.
+func TestComputeRunDigest_EarliestStartedFailedBranchWins(t *testing.T) {
+	runID := "r1"
+	stages := []recordstore.Stage{
+		digestStage(runID, "3", "CI", "stage", "FAILURE", "", "", digestAt(0)),
+		digestStage(runID, "5", "Branch: Bravo", "parallel", "FAILURE", "3", "Bravo", digestAt(1)),
+		digestStage(runID, "9", "Bravo build", "stage", "FAILURE", "5", "", digestAt(2)),
+		digestStage(runID, "4", "Branch: Alpha", "parallel", "FAILURE", "3", "Alpha", digestAt(3)),
+		digestStage(runID, "11", "Alpha build", "stage", "FAILURE", "4", "", digestAt(4)),
+	}
+	got := computeRunDigest(context.Background(), nil, newDigestRun(runID, "FAILURE"), stages, runTestCaseRead{})
+	if got.Stage != "Bravo build" {
+		t.Fatalf("digest stage = %q, want Bravo build", got.Stage)
+	}
+}
+
+// TestComputeRunDigest_ScriptedBranchWithNoInnerStage proves a failed
+// scripted parallel branch that holds no stage of its own is the failure
+// the digest names, by its branch name. A parallel row with no stored
+// branch name keeps its row name.
+func TestComputeRunDigest_ScriptedBranchWithNoInnerStage(t *testing.T) {
+	store := newRunLogTestStore(t)
+	runID := "run-digest-scripted"
+	digestLog(t, store, runID, [][2]string{
+		{"5", "alpha-1"},
+		{"6", "bravo-1"},
+		{"6", "red"},
+		{"7", "charlie-1"},
+	})
+	stages := []recordstore.Stage{
+		digestStage(runID, "3", "Fan out", "stage", "FAILURE", "", "", digestAt(0)),
+		digestStage(runID, "5", "Branch: Alpha", "parallel", "SUCCESS", "3", "Alpha", digestAt(1)),
+		digestStage(runID, "6", "Branch: Bravo", "parallel", "FAILURE", "3", "Bravo", digestAt(1)),
+		digestStage(runID, "7", "Branch: Charlie", "parallel", "SUCCESS", "3", "Charlie", digestAt(1)),
+	}
+	stages[2].Error = strPtr("script returned exit code 3")
+
+	got := computeRunDigest(context.Background(), store, newDigestRun(runID, "FAILURE"), stages, runTestCaseRead{})
+	if got.Stage != "Bravo" || got.Error != "script returned exit code 3" {
+		t.Fatalf("digest stage/error = %q/%q, want Bravo/script returned exit code 3", got.Stage, got.Error)
+	}
+	if want := "bravo-1\nred"; got.LogTail != want {
+		t.Fatalf("logTail = %q, want %q", got.LogTail, want)
+	}
+
+	stages[2].Payload = nil
+	got = computeRunDigest(context.Background(), nil, newDigestRun(runID, "FAILURE"), stages, runTestCaseRead{})
+	if got.Stage != "Branch: Bravo" {
+		t.Fatalf("digest stage = %q, want the row name Branch: Bravo", got.Stage)
+	}
+}
+
+// TestComputeRunDigest_LogTailKeepsTheNestedStages proves the tail of a
+// failed stage keeps the lines of its nested stages too, and drops the
+// lines of every stage outside it.
+func TestComputeRunDigest_LogTailKeepsTheNestedStages(t *testing.T) {
+	store := newRunLogTestStore(t)
+	runID := "run-digest-subtree"
+	digestLog(t, store, runID, [][2]string{
+		{"2", "checkout"},
+		{"4", "prepare deploy"},
+		{"5", "render manifests"},
+		{"9", "notify"},
+		{"4", "deploy refused"},
+	})
+	stages := []recordstore.Stage{
+		digestStage(runID, "2", "Checkout", "stage", "SUCCESS", "", "", digestAt(0)),
+		digestStage(runID, "4", "Deploy", "stage", "FAILURE", "", "", digestAt(1)),
+		digestStage(runID, "5", "Render", "stage", "SUCCESS", "4", "", digestAt(2)),
+		digestStage(runID, "9", "Notify", "stage", "SUCCESS", "", "", digestAt(3)),
+	}
+	got := computeRunDigest(context.Background(), store, newDigestRun(runID, "FAILURE"), stages, runTestCaseRead{})
+	if got.Stage != "Deploy" {
+		t.Fatalf("digest stage = %q, want Deploy", got.Stage)
+	}
+	if want := "prepare deploy\nrender manifests\ndeploy refused"; got.LogTail != want {
+		t.Fatalf("logTail = %q, want %q", got.LogTail, want)
+	}
+}
+
+// TestComputeRunDigest_LogTailHasNoANSIEscapes proves the tail carries
+// no ANSI escape sequence and no escape byte at all.
+func TestComputeRunDigest_LogTailHasNoANSIEscapes(t *testing.T) {
+	store := newRunLogTestStore(t)
+	runID := "run-digest-ansi"
+	digestLog(t, store, runID, [][2]string{
+		{"4", "\x1b[31mred\x1b[0m"},
+		{"4", "\x1b[1;32mok\x1b[m done"},
+		{"4", "\x1b]0;title\x07plain\x1b[2K"},
+		{"4", "lone escape\x1b"},
+		{"4", "\x1b(Bcharset\x1b7 saved\x1b8"},
+		{"4", "cut\x1b]0;build title"},
+	})
+	stages := []recordstore.Stage{digestStage(runID, "4", "Build", "stage", "FAILURE", "", "", digestAt(0))}
+	got := computeRunDigest(context.Background(), store, newDigestRun(runID, "FAILURE"), stages, runTestCaseRead{})
+	if want := "red\nok done\nplain\nlone escape\ncharset saved\ncut"; got.LogTail != want {
+		t.Fatalf("logTail = %q, want %q", got.LogTail, want)
+	}
+	if strings.ContainsRune(got.LogTail, 0x1b) {
+		t.Fatalf("logTail = %q, want no escape byte", got.LogTail)
 	}
 }

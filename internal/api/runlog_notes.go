@@ -4,7 +4,34 @@
 // unchanged, so every reader of a line strips them at read time.
 package api
 
-import "bytes"
+import (
+	"bytes"
+	"regexp"
+	"strings"
+)
+
+// ansiEscapePattern matches an OSC sequence (ended by BEL, by ESC \, or
+// by the end of the line, because the caller strips one line at a time),
+// a CSI sequence, an escape sequence with optional intermediate bytes
+// (such as the charset select ESC ( B), and a lone escape byte, in that
+// order of preference. The lone-byte branch makes sure no escape byte is
+// left after the strip.
+var ansiEscapePattern = regexp.MustCompile(
+	`\x1b\][^\x07\x1b]*(?:\x07|\x1b\\|$)|` +
+		`\x1b\[[0-?]*[ -/]*[@-~]|` +
+		`\x1b[ -/]*[0-~]|` +
+		`\x1b`,
+)
+
+// stripANSIEscapes removes every ANSI escape sequence from a log line.
+// A caller that shows a line as plain text calls it after
+// stripConsoleNotes, because a console note starts with an escape byte.
+func stripANSIEscapes(s string) string {
+	if strings.IndexByte(s, 0x1b) < 0 {
+		return s
+	}
+	return ansiEscapePattern.ReplaceAllString(s, "")
+}
 
 const (
 	// consoleNotePreamble is ConsoleNote.PREAMBLE_STR: the escape

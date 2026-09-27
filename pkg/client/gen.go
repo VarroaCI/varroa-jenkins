@@ -2978,10 +2978,10 @@ type ComponentsSchemasRunDetail struct {
 			Total   *int `json:"total,omitempty"`
 		} `json:"failedTests,omitempty"`
 
-		// LogTail The last 50 console log lines that carry the failed stage's attribution. The field falls back to the last 50 lines of the whole log when no log-index entry names the failed stage. It is absent when the server holds no blob store and when a log-index entry fails to decode.
+		// LogTail The last 50 console log lines that carry the attribution of the failed stage or of a stage nested under it. The field falls back to the last 50 lines of the whole log when no log-index entry names one of those stages. The lines carry no ANSI escape sequence. It is absent when the server holds no blob store and when a log-index entry fails to decode.
 		LogTail *string `json:"logTail,omitempty"`
 
-		// Stage The name of the first stage whose status is FAILURE. Absent when no stage failed.
+		// Stage The name of the innermost stage whose status is FAILURE, in stage-start order. A stage or a parallel branch that holds a failed stage is never the answer. A parallel branch shows its branch name. Absent when no stage failed.
 		Stage *string `json:"stage,omitempty"`
 	} `json:"digest,omitempty"`
 	DurationMs *int64     `json:"durationMs,omitempty"`
