@@ -269,7 +269,13 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
 - `src/components/` (~87 files) — shared UI building blocks (`Button`,
   `Card`, `Layout`, `Console`, `KVGrid`, `MetricCard`, `ConfigPipeline`,
   `OverlayEditor`, `ActivityTimeline`, route guards `ProtectedRoute` /
-  `PermissionRoute`), each paired with a `.module.css`.
+  `PermissionRoute`), each paired with a `.module.css`. `PermissionRoute`
+  renders `LoadingSpinner` while the auth context's `permissionsLoading` is
+  true, and it renders `ForbiddenPage` only after the permissions query
+  answers. Every permission check answers false before that answer, so a
+  denial before it is not a real answer. A failed read with no earlier
+  answer renders `GenericErrorPage` with a retry (`retryPermissions`); only
+  a `403` from that read renders `ForbiddenPage`.
 - `src/hooks/` — data-fetching hooks wrapping React Query
   (`useControllers`, `useCatalog`, `useClusters`, `useActivityFeed`,
   `useEventStream` for SSE, `usePermissions`, `useFleetPlugins`, `useCells`).

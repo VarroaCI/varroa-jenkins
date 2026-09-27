@@ -23,6 +23,8 @@ function AuthTestComponent() {
       <span data-testid="authenticated">{String(auth.isAuthenticated)}</span>
       <span data-testid="user-name">{auth.user?.name ?? "null"}</span>
       <span data-testid="auth-mode">{auth.authMode ?? "null"}</span>
+      <span data-testid="permissions-loading">{String(auth.permissionsLoading)}</span>
+      <span data-testid="permissions-error">{auth.permissionsError?.message ?? "null"}</span>
       <button data-testid="login-btn" onClick={() => auth.login("testuser", "testpass")}>
         Login
       </button>
@@ -87,6 +89,59 @@ describe("AuthContext", () => {
     });
     expect(screen.getByTestId("authenticated")).toHaveTextContent("false");
     expect(screen.getByTestId("user-name")).toHaveTextContent("null");
+  });
+
+  it("reports permissionsLoading while a signed-in user's permissions are pending", async () => {
+    let resolvePerms: (v: unknown) => void = () => {};
+    mockBffFetch.mockImplementation((path: string) => {
+      if (path === "/auth-config") return Promise.resolve({ mode: "local" });
+      if (path === "/me") return Promise.resolve(createMeResponse());
+      if (path === "/me/permissions") return new Promise((r) => { resolvePerms = r; });
+      return Promise.resolve({});
+    });
+
+    renderWithProviders(<AuthTestComponent />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("authenticated")).toHaveTextContent("true");
+    });
+    expect(screen.getByTestId("permissions-loading")).toHaveTextContent("true");
+
+    resolvePerms({ global: {} });
+    await waitFor(() => {
+      expect(screen.getByTestId("permissions-loading")).toHaveTextContent("false");
+    });
+  });
+
+  it("reports permissionsError and stops loading when the permissions read fails", async () => {
+    mockBffFetch.mockImplementation((path: string) => {
+      if (path === "/auth-config") return Promise.resolve({ mode: "local" });
+      if (path === "/me") return Promise.resolve(createMeResponse());
+      if (path === "/me/permissions") return Promise.reject(new Error("bad gateway"));
+      return Promise.resolve({});
+    });
+
+    renderWithProviders(<AuthTestComponent />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("permissions-error")).toHaveTextContent("bad gateway");
+    });
+    expect(screen.getByTestId("permissions-loading")).toHaveTextContent("false");
+  });
+
+  it("does not report permissionsLoading for a signed-out user", async () => {
+    mockBffFetch.mockImplementation((path: string) => {
+      if (path === "/auth-config") return Promise.resolve({ mode: "local" });
+      if (path === "/me") return Promise.resolve(null);
+      return Promise.resolve({});
+    });
+
+    renderWithProviders(<AuthTestComponent />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("loading")).toHaveTextContent("false");
+    });
+    expect(screen.getByTestId("permissions-loading")).toHaveTextContent("false");
   });
 
   it("reads authMode from /auth-config", async () => {

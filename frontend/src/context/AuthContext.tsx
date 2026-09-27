@@ -21,6 +21,11 @@ interface AuthState {
   isLoading: boolean;
   isAuthenticated: boolean;
   permissions: Permissions | undefined;
+  /** True while a signed-in user's permissions query has no answer yet. */
+  permissionsLoading: boolean;
+  /** The last error of the permissions query, or null. */
+  permissionsError: Error | null;
+  retryPermissions: () => void;
   authMode?: "oidc" | "local" | "ldap";
   /** OIDC error description from provider callback. */
   authError?: string;
@@ -131,7 +136,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [isLoading, user, mode]);
 
   const isAuthenticated = !isLoading && user != null;
-  const { data: permissions } = usePermissions(isAuthenticated);
+  const {
+    data: permissions,
+    isPending: permissionsPending,
+    error: permissionsError,
+    refetch: refetchPermissions,
+  } = usePermissions(isAuthenticated);
+  const retryPermissions = useCallback(() => { void refetchPermissions(); }, [refetchPermissions]);
+  // A disabled query also reports pending, so a signed-out user never loads.
+  const permissionsLoading = isAuthenticated && permissionsPending;
 
   const login = useCallback(async (username?: string, password?: string) => {
     // Local/LDAP auth: POST to /api/v1/login with credentials.
@@ -175,6 +188,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isLoading,
       isAuthenticated,
       permissions,
+      permissionsLoading,
+      permissionsError,
+      retryPermissions,
       authMode: mode,
       authError,
       login,
