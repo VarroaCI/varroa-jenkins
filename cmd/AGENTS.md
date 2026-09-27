@@ -30,9 +30,10 @@ stating what it is/is not responsible for:
   `varroa.ledger.actions.>` wildcard: every cluster's operator shares the
   core NATS and the group name, so a wildcard puts all of them in one queue
   group and NATS gives a share of one cluster's actions to the others.
-  `handleLedgerAction` maps `cancel_run`/`retry_run`/`trigger_run` to the
-  matching mite imperative command and `wake_cell` to a direct hibernation
-  wake. It logs at Warn and counts an action that names another cluster
+  `handleLedgerAction` maps `cancel_run`/`retry_run`/`trigger_run`/`resume_run`
+  to the matching mite imperative command and `wake_cell` to a direct
+  hibernation wake. The one core recorder publishes the actions of every
+  cluster, so a member operator receives its actions over the shared bus. It logs at Warn and counts an action that names another cluster
   (`reason="foreign_cluster"`) or an unknown kind (`reason="unknown_kind"`)
   rather than acting on it. `trigger_run` wakes a hibernated target through the same hibernation
   call before it sends the command; a connected target is not woken.

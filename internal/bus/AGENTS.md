@@ -46,7 +46,8 @@ control plane's async transport — no other package talks to NATS directly.
   `varroa_builds` stream), `varroa.ledger.claim` (core NATS request-reply
   build-number claim, queue group `recorder`),
   `varroa.ledger.actions.<cluster>` (recorder-published actions: kinds
-  `cancel_run`, `retry_run`, `wake_cell`, `trigger_run`),
+  `cancel_run`, `retry_run`, `wake_cell`, `trigger_run`, `resume_run`;
+  `<cluster>` is the target cell's cluster),
   `varroa.ledger.crosstenant` (core NATS request-reply, gateway to
   recorder, queue group `recorder`: a build trigger, a status poll, an
   artifact read, or a fleet lock operation — the request body carries the
@@ -147,13 +148,22 @@ control plane's async transport — no other package talks to NATS directly.
   changing that probe window in the same commit**, or kubelet kills the
   container mid-wait.
 - **Bus state** — `Conn.Connected()` and `Conn.RegisterMetrics(meter, component)`
-  (the `varroa.bus.connected` gauge, 1/0, attribute `component`) are the only
-  bus-state surfaces. Readiness checks and gauges go through them; nothing
-  outside this package reaches into `nc` to ask whether the bus is up.
+  (the `varroa.bus.connected` gauge, 1/0, and the
+  `varroa.bus.permission_violations` counter, both with attribute `component`)
+  are the only bus-state surfaces. Readiness checks and gauges go through them;
+  nothing outside this package reaches into `nc` to ask whether the bus is up.
+- **Permission violations** — a denied core publish returns no error to the
+  caller. The server reports it only through the async error handler, so
+  `Connect`'s `ErrorHandler` classifies `nats.ErrPermissionViolation`, logs
+  `nats permission violation` at Error, and counts it on the `Conn`. The count
+  lives on the `Conn` because the handler can fire before `RegisterMetrics`.
+  Publishes stay fire-and-forget; no caller retries a denied message.
 - **ACLs** — gateway needs `$JS.ACK.varroa.>` publish permission to ack on
   the legacy `varroa` stream; the recorder owns create/update/info,
   consumer, and ack on `varroa_activity` (JetStream API operations for its
-  `activity-recorder` consumer) as well as `varroa_builds`; the gateway
+  `activity-recorder` consumer) as well as `varroa_builds`; the recorder
+  publishes `varroa.ledger.actions.>` and never subscribes it, because one
+  recorder on the core serves every cluster and a member runs none; the gateway
   publishes and the recorder subscribes `varroa.ledger.crosstenant`, both
   gated on `recordStore.enabled` — no other identity holds a grant on it,
   since a mite never holds a NATS identity of its own; the BFF owns

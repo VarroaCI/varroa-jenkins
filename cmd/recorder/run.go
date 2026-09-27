@@ -115,7 +115,7 @@ func run(ctx context.Context, cfg Config) error {
 	}
 	defer busConn.Close()
 	if err := busConn.RegisterMetrics(otel.Meter("varroa-recorder"), "recorder"); err != nil {
-		logger.Warn("failed to register bus connected gauge", "error", err)
+		logger.Warn("failed to register bus metrics", "error", err)
 	}
 	busConn.SetReplicas(cfg.JetStreamReplicas)
 

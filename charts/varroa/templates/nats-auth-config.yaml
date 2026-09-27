@@ -259,7 +259,9 @@ stringData:
           password: "{{ htpasswd "ignored" (include "varroa.nats.recorderPassword" .) | trimPrefix "ignored:" }}"
           permissions: {
             publish: [
-              "varroa.ledger.actions.{{ .Values.cluster.name }}"
+              // One recorder serves every cluster, and a member cluster runs
+              // no recorder. It publishes each action on the target's cluster.
+              "varroa.ledger.actions.>"
               // The claim reply: the gateway owns the request inbox.
               "_INBOX_gateway.>"
               // The tenant purge reply and the tenant sync reply: the

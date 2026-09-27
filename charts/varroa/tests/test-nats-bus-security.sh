@@ -209,7 +209,7 @@ check "recordStore enabled: exactly four identities" $?
 recorder_block=$(awk 'index($0, "user: \"recorder\""){capture=1} capture{print} capture && $0 == "        }"{exit}' <<<"$RS_RENDER")
 
 for subj in \
-  'varroa.ledger.actions.core' \
+  '"varroa.ledger.actions.>"' \
   '_INBOX_gateway.>' \
   '\$JS.API.STREAM.CREATE.varroa_builds' \
   '\$JS.API.STREAM.UPDATE.varroa_builds' \
@@ -235,6 +235,20 @@ for subj in 'varroa.ledger.claim' '_INBOX_recorder.>'; do
   grep -q "$subj" <<<"$recorder_block"
   check "recorder subscribes $subj" $?
 done
+
+# One recorder serves every cluster of the brood, so its ledger-action grant
+# is the wildcard. A grant that names one cluster denies every member's action.
+if grep -q '"varroa.ledger.actions.core"' <<<"$recorder_block"; then
+  check "recorder does NOT hold the single-cluster ledger-action grant" 1
+else
+  check "recorder does NOT hold the single-cluster ledger-action grant" 0
+fi
+recorder_subscribe=$(awk '/subscribe: \[/{capture=1} capture{print} capture && /\]/{exit}' <<<"$recorder_block")
+if grep -q 'varroa.ledger.actions' <<<"$recorder_subscribe"; then
+  check "recorder does NOT subscribe to ledger actions" 1
+else
+  check "recorder does NOT subscribe to ledger actions" 0
+fi
 
 # The recorder holds no core activity.> grant, no KV grant, no mite grant, and
 # no wake grant. The quoted form distinguishes the core "activity.>" subject

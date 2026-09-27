@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -87,6 +89,11 @@ type Conn struct {
 	// VARROA_JETSTREAM_REPLICAS env at process startup. A zero value means
 	// "unset" and is treated as 1 by Replicas().
 	replicas int
+
+	// permissionViolations counts every permission violation the server
+	// reports on this connection. The error handler can fire before
+	// RegisterMetrics runs, so the count lives here and the counter reads it.
+	permissionViolations atomic.Int64
 }
 
 // clampReplicas clamps a JetStream replica count to a sane floor of 1.
@@ -160,6 +167,16 @@ func Connect(url string, cfg ...Config) (*Conn, error) {
 			}
 		}),
 		nats.ErrorHandler(func(_ *nats.Conn, sub *nats.Subscription, err error) {
+			// A denied core publish returns no error to the caller. The
+			// server reports it only here, so this is the one place it can
+			// become visible.
+			if errors.Is(err, nats.ErrPermissionViolation) {
+				c.permissionViolations.Add(1)
+				if c.logger != nil {
+					c.logger.Error("nats permission violation", "error", err)
+				}
+				return
+			}
 			if c.logger == nil {
 				return
 			}
@@ -298,8 +315,20 @@ func (c *Conn) Connected() bool {
 }
 
 // RegisterMetrics exports varroa.bus.connected (1 while connected, 0
-// otherwise) on the given meter, tagged with the calling component.
+// otherwise) and varroa.bus.permission_violations on the given meter,
+// tagged with the calling component.
 func (c *Conn) RegisterMetrics(meter metric.Meter, component string) error {
+	attrs := metric.WithAttributes(attribute.String("component", component))
+	if _, err := meter.Int64ObservableCounter(
+		"varroa.bus.permission_violations",
+		metric.WithDescription("Publish or subscribe operations the NATS server denied on this connection"),
+		metric.WithInt64Callback(func(_ context.Context, obs metric.Int64Observer) error {
+			obs.Observe(c.permissionViolations.Load(), attrs)
+			return nil
+		}),
+	); err != nil {
+		return err
+	}
 	_, err := meter.Int64ObservableGauge(
 		"varroa.bus.connected",
 		metric.WithDescription("1 while the NATS bus connection is established, 0 otherwise"),
@@ -308,7 +337,7 @@ func (c *Conn) RegisterMetrics(meter metric.Meter, component string) error {
 			if c.Connected() {
 				v = 1
 			}
-			obs.Observe(v, metric.WithAttributes(attribute.String("component", component)))
+			obs.Observe(v, attrs)
 			return nil
 		}),
 	)

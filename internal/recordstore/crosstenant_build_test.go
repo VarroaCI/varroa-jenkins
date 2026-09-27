@@ -40,10 +40,16 @@ func buildTestDeps(t *testing.T) (CrossTenantDeps, *sql.DB) {
 	}, db
 }
 
-// subscribeLedgerActions subscribes to bus.LedgerActionSubject(cluster)
+// subscribeLedgerActions subscribes to bus.LedgerActionSubject("core")
 // and returns a channel of every action received during the test.
 func subscribeLedgerActions(t *testing.T, deps CrossTenantDeps) <-chan LedgerAction {
-	cluster := "core"
+	t.Helper()
+	return subscribeLedgerActionsOn(t, deps, "core")
+}
+
+// subscribeLedgerActionsOn subscribes to bus.LedgerActionSubject(cluster)
+// and returns a channel of every action received during the test.
+func subscribeLedgerActionsOn(t *testing.T, deps CrossTenantDeps, cluster string) <-chan LedgerAction {
 	t.Helper()
 	received := make(chan LedgerAction, 8)
 	sub, err := deps.Conn.Subscribe(bus.LedgerActionSubject(cluster), func(msg *nats.Msg) {
@@ -157,6 +163,52 @@ func TestCrossTenantBuild_RelativeJobPathReachesExportedGrant(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for the published trigger_run action")
+	}
+}
+
+// TestCrossTenantBuild_MemberClusterTargetPublishesOnItsCluster asserts
+// a build call from a caller on core to a target placed only on member-a
+// publishes the trigger_run action on member-a's subject. Only the member-a
+// operator subscribes there.
+func TestCrossTenantBuild_MemberClusterTargetPublishesOnItsCluster(t *testing.T) {
+	deps, db := buildTestDeps(t)
+	seedGrantPlacement(t, db, "member-a", "platform", "ns-p", "cell-p", 1,
+		`{"exports":[{"job":"release","callers":["alpha"]}]}`)
+	coreActions := subscribeLedgerActions(t, deps)
+	memberActions := subscribeLedgerActionsOn(t, deps, "member-a")
+
+	req := CrossTenantRequest{
+		Cluster:             "core",
+		Namespace:           "ns-a",
+		Cell:                "cell-a",
+		CallerTenant:        "alpha",
+		PlacementGeneration: 1,
+		Kind:                CrossTenantKindBuild,
+		CallerRunID:         "caller-run-member",
+		Seq:                 "s1",
+		TargetTenant:        "platform",
+		JobPath:             "release",
+	}
+	resp, err := handleCrossTenantBuild(context.Background(), deps, req)
+	if err != nil {
+		t.Fatalf("handleCrossTenantBuild: %v", err)
+	}
+	if resp.ReasonCode != "" || resp.State != CrossTenantStatePending {
+		t.Fatalf("got state %q reason %q, want pending with no reason", resp.State, resp.ReasonCode)
+	}
+
+	select {
+	case action := <-memberActions:
+		if action.Cluster != "member-a" || action.Namespace != "ns-p" || action.Controller != "cell-p" {
+			t.Fatalf("got %s/%s/%s, want member-a/ns-p/cell-p", action.Cluster, action.Namespace, action.Controller)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the trigger_run action on the member-a subject")
+	}
+	select {
+	case action := <-coreActions:
+		t.Fatalf("core subject received %+v, want nothing", action)
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 

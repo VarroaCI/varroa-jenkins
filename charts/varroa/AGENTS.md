@@ -111,7 +111,11 @@ the packaged CRDs. Does not own the Go source it packages
   gated the same way: the gateway publishes `varroa.ledger.crosstenant`
   and the recorder subscribes it, queue group `recorder`, both only when
   `recordStore.enabled` — no other identity (operator, BFF, or a mite
-  itself) holds a grant on this subject. Cell-loss detection adds one
+  itself) holds a grant on this subject. The recorder publishes
+  `varroa.ledger.actions.>`, never one cluster's subject: the one core
+  recorder serves every member cluster, and a member renders no recorder.
+  `tests/test-nats-bus-security.sh` asserts the wildcard and the absence of
+  a single-cluster grant. Cell-loss detection adds one
   ungated grant: the operator **subscribes** `events.brood.>`, so a mite
   disconnect reaches a pod read at once. The operator already publishes
   `events.brood.*`, so its publish list is unchanged, and the recorder

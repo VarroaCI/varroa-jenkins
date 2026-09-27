@@ -2,6 +2,7 @@ package recordstore
 
 import (
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -207,15 +208,13 @@ func TestPublishLedgerActionIntegration(t *testing.T) {
 	}
 }
 
-// TestRecorderCannotPublishMiteOrWakeSubjects starts an embedded NATS
-// server with the recorder's own production permission set (the chart's
-// nats-auth-config.yaml "recorder" user: publish allowed only on
-// varroa.ledger.actions.<cluster> and its own JetStream/inbox subjects),
-// then asserts a raw publish to a mite.> subject and to a wake.> subject
-// are both denied. This is task 9.1's "the recorder SHALL reach no mite
-// subject and no wake subject" acceptance, proved against a fake bus
-// rather than by inspecting the chart.
-func TestRecorderCannotPublishMiteOrWakeSubjects(t *testing.T) {
+// startRecorderACLServer starts an embedded NATS server with the
+// recorder's production permission set (the chart's nats-auth-config.yaml
+// "recorder" user) and an operator user that reads ledger actions. The
+// recorder's ledger-action grant is the wildcard, because one recorder
+// serves every cluster of the brood.
+func startRecorderACLServer(t *testing.T) *server.Server {
+	t.Helper()
 	opts := &server.Options{
 		Port:      -1,
 		JetStream: true,
@@ -227,7 +226,7 @@ func TestRecorderCannotPublishMiteOrWakeSubjects(t *testing.T) {
 				Permissions: &server.Permissions{
 					Publish: &server.SubjectPermission{
 						Allow: []string{
-							"varroa.ledger.actions.core",
+							"varroa.ledger.actions.>",
 							"_INBOX_gateway.>",
 							"_INBOX_operator.>",
 						},
@@ -237,6 +236,15 @@ func TestRecorderCannotPublishMiteOrWakeSubjects(t *testing.T) {
 							"varroa.ledger.claim",
 							"_INBOX_recorder.>",
 						},
+					},
+				},
+			},
+			{
+				Username: "operator",
+				Password: "op_pass",
+				Permissions: &server.Permissions{
+					Subscribe: &server.SubjectPermission{
+						Allow: []string{"varroa.ledger.actions.>"},
 					},
 				},
 			},
@@ -251,38 +259,161 @@ func TestRecorderCannotPublishMiteOrWakeSubjects(t *testing.T) {
 		t.Fatal("server not ready")
 	}
 	t.Cleanup(s.Shutdown)
+	return s
+}
+
+// connectRecorderRaw connects as the recorder and returns a function that
+// answers the last asynchronous error the server reported.
+func connectRecorderRaw(t *testing.T, s *server.Server) (*nats.Conn, func() error) {
+	t.Helper()
+	var (
+		mu       sync.Mutex
+		asyncErr error
+	)
+	nc, err := nats.Connect(s.ClientURL(), nats.UserInfo("recorder", "rec_pass"),
+		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
+			mu.Lock()
+			asyncErr = err
+			mu.Unlock()
+		}),
+	)
+	if err != nil {
+		t.Fatalf("connect as recorder: %v", err)
+	}
+	t.Cleanup(nc.Close)
+	return nc, func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		return asyncErr
+	}
+}
+
+// TestRecorderCannotPublishMiteOrWakeSubjects asserts the recorder's
+// production grant denies a raw publish to a mite.> subject and to a
+// wake.> subject. The recorder reaches a controller only through the
+// operator's ledger-action subscriber.
+func TestRecorderCannotPublishMiteOrWakeSubjects(t *testing.T) {
+	s := startRecorderACLServer(t)
 
 	for _, subject := range []string{"mite.core.team-a.cell-1.out", "wake.core.team-a.cell-1"} {
 		t.Run(subject, func(t *testing.T) {
-			var (
-				mu       sync.Mutex
-				asyncErr error
-			)
-			nc, err := nats.Connect(s.ClientURL(), nats.UserInfo("recorder", "rec_pass"),
-				nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
-					mu.Lock()
-					asyncErr = err
-					mu.Unlock()
-				}),
-			)
-			if err != nil {
-				t.Fatalf("connect as recorder: %v", err)
-			}
-			defer nc.Close()
-
+			nc, lastErr := connectRecorderRaw(t, s)
 			if err := nc.Publish(subject, []byte(`{}`)); err != nil {
 				t.Fatalf("publish itself must succeed (async denial): %v", err)
 			}
-			nc.Flush()
-			time.Sleep(200 * time.Millisecond)
-
-			mu.Lock()
-			got := asyncErr
-			mu.Unlock()
-			if got == nil {
-				t.Fatalf("expected a permissions violation publishing %s as the recorder, got none", subject)
-			}
-			t.Logf("recorder publish %s correctly denied: %v", subject, got)
+			waitPermissionViolation(t, lastErr, "publish "+subject)
 		})
+	}
+}
+
+// waitPermissionViolation waits until lastErr answers a permission
+// violation, and fails the test after five seconds.
+func waitPermissionViolation(t *testing.T, lastErr func() error, what string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if got := lastErr(); got != nil {
+			if !errors.Is(got, nats.ErrPermissionViolation) {
+				t.Fatalf("%s: want a permission violation, got %v", what, got)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: expected the server to deny the recorder, got no error", what)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestRecorderPublishesLedgerActionForMemberCluster asserts the recorder
+// publishes a ledger action for a member cluster that runs no recorder,
+// and that the member's operator receives it. It also asserts the
+// recorder cannot consume that subject.
+func TestRecorderPublishesLedgerActionForMemberCluster(t *testing.T) {
+	s := startRecorderACLServer(t)
+
+	operator, err := bus.Connect(s.ClientURL(), bus.Config{Username: "operator", Password: "op_pass"})
+	if err != nil {
+		t.Fatalf("connect as operator: %v", err)
+	}
+	t.Cleanup(operator.Close)
+	received := make(chan LedgerAction, 1)
+	sub, err := operator.Subscribe(bus.LedgerActionSubject("member-a"), func(msg *nats.Msg) {
+		var a LedgerAction
+		if err := json.Unmarshal(msg.Data, &a); err == nil {
+			received <- a
+		}
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	if err := operator.NATSConn().Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	recorder, err := bus.Connect(s.ClientURL(), bus.Config{Username: "recorder", Password: "rec_pass"})
+	if err != nil {
+		t.Fatalf("connect as recorder: %v", err)
+	}
+	t.Cleanup(recorder.Close)
+	if err := PublishLedgerAction(recorder, LedgerAction{
+		Kind:       LedgerActionWakeCell,
+		Cluster:    "member-a",
+		Namespace:  "team-b",
+		Controller: "cell-b",
+		Actor:      LedgerActionRecorder,
+	}); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	select {
+	case a := <-received:
+		if a.Cluster != "member-a" || a.Kind != LedgerActionWakeCell {
+			t.Fatalf("got %+v, want a member-a wake_cell", a)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the member-a operator received no ledger action")
+	}
+
+	nc, lastErr := connectRecorderRaw(t, s)
+	if _, err := nc.Subscribe(bus.LedgerActionSubject("member-a"), func(*nats.Msg) {}); err != nil {
+		t.Fatalf("subscribe call itself must succeed (async denial): %v", err)
+	}
+	_ = nc.Flush()
+	waitPermissionViolation(t, lastErr, "subscribe "+bus.LedgerActionSubject("member-a"))
+}
+
+// TestPublishLedgerActionRefusesEmptyCluster asserts an action with no
+// cluster never reaches the bus. Its subject names no operator.
+func TestPublishLedgerActionRefusesEmptyCluster(t *testing.T) {
+	s := startLedgerActionTestServer(t)
+	conn, err := bus.Connect(s.ClientURL())
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(conn.Close)
+
+	received := make(chan struct{}, 1)
+	sub, err := conn.Subscribe("varroa.ledger.actions.>", func(*nats.Msg) { received <- struct{}{} })
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	if err := conn.NATSConn().Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	err = PublishLedgerAction(conn, LedgerAction{Kind: LedgerActionWakeCell, Namespace: "team-a", Controller: "cell-1"})
+	if err == nil {
+		t.Fatal("want an error for an action with an empty cluster")
+	}
+	if err := conn.NATSConn().Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	select {
+	case <-received:
+		t.Fatal("an action with an empty cluster reached the bus")
+	case <-time.After(200 * time.Millisecond):
 	}
 }

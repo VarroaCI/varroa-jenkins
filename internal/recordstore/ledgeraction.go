@@ -8,10 +8,8 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
 
-// Ledger-action kinds. The recorder publishes cancel_run today. C6 adds
-// the operator subscriber and the retry_run and wake_cell producers.
-// trigger_run has two producers: the cross-tenant responder's build kind
-// (a step call) and the upstream fan-out.
+// Ledger-action kinds. trigger_run has two producers: the cross-tenant
+// responder's build kind (a step call) and the upstream fan-out.
 const (
 	LedgerActionCancelRun  = "cancel_run"
 	LedgerActionRetryRun   = "retry_run"
@@ -73,10 +71,16 @@ type ResumeFile struct {
 }
 
 // PublishLedgerAction marshals action and publishes it on
-// bus.LedgerActionSubject(action.Cluster) as core NATS, at most once. A
-// publish with no operator leader subscribing is lost; the recorder never
-// republishes it.
+// bus.LedgerActionSubject(action.Cluster) as core NATS, at most once.
+// action.Cluster must name the cluster of the target cell, because only
+// that cluster's operator subscribes to the subject. A publish with no
+// operator leader subscribing is lost; the recorder never republishes it.
+// A publish the server denies returns no error here. The bus counts it on
+// varroa.bus.permission_violations.
 func PublishLedgerAction(conn *bus.Conn, action LedgerAction) error {
+	if action.Cluster == "" {
+		return fmt.Errorf("publish ledger action %s: empty cluster", action.Kind)
+	}
 	data, err := json.Marshal(action)
 	if err != nil {
 		return fmt.Errorf("marshal ledger action: %w", err)

@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nats-io/nats.go"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
@@ -464,5 +465,52 @@ func TestRunUpstreamFanout_ClusterResolutionExcludesOtherClusterSubscriber(t *te
 	}
 	if got := fanoutMetricSum(t, reader, "recorder_upstream_fanout_skipped_total", map[string]string{"reason": FanoutSkipUnplaced}); got != 1 {
 		t.Fatalf("unplaced skips for a cluster mismatch = %d, want 1", got)
+	}
+}
+
+// TestRunUpstreamFanout_MemberClusterSubscriberPublishesOnItsCluster
+// asserts a subscriber on member-a, whose producer tenant is placed only on
+// core, gets its trigger_run action on member-a's subject. Only the member-a
+// operator subscribes there.
+func TestRunUpstreamFanout_MemberClusterSubscriberPublishesOnItsCluster(t *testing.T) {
+	fx := newFanoutFixture(t)
+	fx.setExports([]string{"beta"})
+	seedGrantPlacement(t, fx.db, "member-a", "beta", "jenkins", "cell-b", 1, "{}")
+	fx.seedSubscriber("member-a", "beta", false)
+
+	metrics, err := NewUpstreamFanoutMetrics()
+	if err != nil {
+		t.Fatalf("new fan-out metrics: %v", err)
+	}
+
+	member := make(chan LedgerAction, 1)
+	sub, err := fx.conn.Subscribe(bus.LedgerActionSubject("member-a"), func(msg *nats.Msg) {
+		var a LedgerAction
+		if err := json.Unmarshal(msg.Data, &a); err == nil {
+			member <- a
+		}
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	core := subscribeCancelActions(t, fx.conn, 4)
+
+	if err := RunUpstreamFanout(context.Background(), fx.deps(metrics), fx.producer, time.Now(), nil); err != nil {
+		t.Fatalf("RunUpstreamFanout: %v", err)
+	}
+
+	select {
+	case action := <-member:
+		if action.Cluster != "member-a" || action.Kind != LedgerActionTriggerRun || action.JobPath != "beta/rebuild" {
+			t.Fatalf("got %+v, want a member-a trigger_run for beta/rebuild", action)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for the trigger_run action on the member-a subject")
+	}
+	select {
+	case action := <-core:
+		t.Fatalf("core subject received %+v, want nothing", action)
+	case <-time.After(200 * time.Millisecond):
 	}
 }

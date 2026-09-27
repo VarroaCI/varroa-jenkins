@@ -239,7 +239,7 @@ func main() {
 	}
 	defer busConn.Close()
 	if err := busConn.RegisterMetrics(otel.Meter("varroa-operator"), "operator"); err != nil {
-		logger.Warn("failed to register bus connected gauge", "error", err)
+		logger.Warn("failed to register bus metrics", "error", err)
 	}
 	// JetStream replica count for streams and KV buckets (from the NATS
 	// cluster size, clamped 1..3 by the chart). Streams/KV created below and by

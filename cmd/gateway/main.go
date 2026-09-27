@@ -110,7 +110,7 @@ func main() {
 	}
 	defer busConn.Close()
 	if err := busConn.RegisterMetrics(otel.Meter("varroa-gateway"), "gateway"); err != nil {
-		logger.Warn("failed to register bus connected gauge", "error", err)
+		logger.Warn("failed to register bus metrics", "error", err)
 	}
 	// JetStream replica count for KV buckets and the imperative command stream
 	// (from the NATS cluster size, clamped 1..3 by the chart). Hive-mode

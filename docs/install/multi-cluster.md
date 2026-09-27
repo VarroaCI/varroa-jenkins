@@ -28,6 +28,10 @@ helm upgrade --install varroa charts/varroa \
 
 `cluster.name` must be a DNS-1123 label and unique across the deployment. Configure the member with the same authentication issuer and settings used by controllers that connect to the core identity provider.
 
+## Record store
+
+The core [recorder](../operations/build-records.md) sends each run action, such as a cell wake, to the target cluster's operator over NATS. A member needs no recorder credential.
+
 ## Prepare controller namespaces
 
 Each member provisions controllers using its own cluster resources. Before creating controllers, provide the required storage class, ingress setup, image pull Secrets, deployable namespaces, and `ProvisioningDefaults`. For private bundle sources, also provide the required credentials in the member cluster.

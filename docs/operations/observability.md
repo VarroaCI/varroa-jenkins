@@ -8,9 +8,10 @@ The chart exposes metrics for the operator, gateway, BFF, recorder (when `record
 
 The operator, gateway, BFF, and recorder export `varroa.bus.connected`, tagged with a `component`
 attribute. It reads 1 while the component holds a NATS connection and 0 while it
-does not. Alert on a sustained 0. A brief 0 is expected after a credential
-rotation and clears itself; inspect JetStream streams and consumers in
-[Troubleshooting](troubleshooting.md). The recorder also exports `recorder_fence_veto_total` and
+does not. Alert on a sustained 0. A brief 0 after a credential rotation clears
+itself; see [Troubleshooting](troubleshooting.md). The counter `varroa.bus.permission_violations`, with the
+same attribute, counts publishes and subscribes the NATS server denied. A denied publish returns no
+error, so alert on any increase. The recorder also exports `recorder_fence_veto_total` and
 `recorder_job_home_changed_total`, and logs a refused claim's reason and tenant; see
 [Build claims](build-claims.md).
 
@@ -56,4 +57,5 @@ Every element is a reported fact. The card holds no history: use the activity fe
 | Activity history is missing | `recordStore.enabled` and `VARROA_RECORDSTORE_DSN` on the BFF. |
 | Plugin inventory is incomplete | [Update Center](update-center.md) readiness and version profiles. |
 | `varroa.bus.connected` is 0 | NATS availability, then [Troubleshooting](troubleshooting.md) for credential rotation. |
+| `varroa.bus.permission_violations` increases | The component's NATS grants, in [Troubleshooting](troubleshooting.md). |
 | A controller reads `never seen` | Mite registration and gateway connectivity for that controller. |

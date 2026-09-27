@@ -506,7 +506,10 @@ of the fleet's audit activity, once a controller becomes disposable.
   column again. `ingest_duplicate.go` holds the duplicate
   backstop `run.started` runs in the same transaction, publishing a
   `cancel_run` ledger action (`ledgeraction.go`) through
-  `PublishLedgerAction` on `bus.LedgerActionSubject`. `RunIngestConsumer`
+  `PublishLedgerAction` on `bus.LedgerActionSubject`. Every action's
+  `Cluster` names the target cell's cluster, because only that cluster's
+  operator subscribes; `PublishLedgerAction` refuses an empty `Cluster`.
+  `RunIngestConsumer`
   (`ingest_consumer.go`) is the durable pull consumer named `recorder`
   that applies D4's disposition table; `EnsureBuildsStream`
   (`ingest_stream.go`) creates the `varroa_builds` stream, and

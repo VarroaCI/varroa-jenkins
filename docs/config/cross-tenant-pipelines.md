@@ -12,7 +12,7 @@ the plugin image: the recorder accepts the forwarded key before the plugin sends
 ## The varroa global variable
 
 `varroa` exposes five entry points. A cross-tenant call resolves the target tenant's own cell,
-whatever cluster it runs in.
+on the core or on a member cluster.
 
 | Call | Returns | What it does |
 |---|---|---|
