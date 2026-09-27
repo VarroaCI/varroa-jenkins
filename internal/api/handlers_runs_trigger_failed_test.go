@@ -53,6 +53,37 @@ func TestHandleGetRun_CarriesTheTriggerFailure(t *testing.T) {
 	}
 }
 
+// TestHandleGetRun_CarriesAClaimVeto asserts the run detail of a run the
+// recorder marked on a claim veto carries the veto code and message. The
+// row holds the accepted keys beside the reason fields.
+func TestHandleGetRun_CarriesAClaimVeto(t *testing.T) {
+	reader := newFakeRecordReader()
+	result := recordstore.ResultTriggerFailed
+	reader.runs["r1"] = recordstore.Run{
+		RunID: "r1", Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: "COMPLETED",
+		Result: &result,
+		Payload: json.RawMessage(`{"accepted_at":"2026-09-27T00:00:00Z","accepted_instance":"pod-a",` +
+			`"trigger_error":"job belongs to another tenant","trigger_reason_code":"CROSS_TENANT",` +
+			`"trigger_failed_at":"2026-09-27T00:00:01Z"}`),
+	}
+	srv := newRunFixtureServer(reader, nil)
+
+	rec := doRunRequest(t, srv.handleGetRun, "/runs/r1", map[string]string{"run": "r1"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var detail runDetailJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if detail.TriggerReasonCode != recordstore.ReasonCrossTenant {
+		t.Fatalf("triggerReasonCode = %q, want CROSS_TENANT", detail.TriggerReasonCode)
+	}
+	if detail.TriggerError != "job belongs to another tenant" {
+		t.Fatalf("triggerError = %q", detail.TriggerError)
+	}
+}
+
 // TestHandleGetRun_OmitsTheTriggerFailure asserts a run with no such value
 // carries neither field.
 func TestHandleGetRun_OmitsTheTriggerFailure(t *testing.T) {

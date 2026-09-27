@@ -49,8 +49,11 @@ const claimDecisionGranted = "granted"
 // ledgerClaimRequest is the request body of a varroa.ledger.claim call.
 // Field names and JSON tags mirror internal/recordstore's ClaimRequest
 // exactly; the gateway and the recorder communicate over the wire only.
+// Origin is copied from the mite's request as it is: the recorder marks a
+// vetoed run only when the origin is VARROA_INTENT.
 type ledgerClaimRequest struct {
 	IntentKey              string    `json:"intent_key"`
+	Origin                 string    `json:"origin"`
 	RunID                  string    `json:"run_id"`
 	Cluster                string    `json:"cluster"`
 	Namespace              string    `json:"namespace"`
@@ -248,6 +251,7 @@ func (h *BusHandler) handleClaimRequest(name, ns string, req *mitev1.ClaimReques
 
 	body := ledgerClaimRequest{
 		IntentKey:              req.IntentKey,
+		Origin:                 req.Origin,
 		RunID:                  req.RunId,
 		Cluster:                h.cluster,
 		Namespace:              ns,

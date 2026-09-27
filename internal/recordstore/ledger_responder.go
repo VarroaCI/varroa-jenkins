@@ -33,7 +33,10 @@ func RegisterClaimResponder(conn *bus.Conn, ledger *Ledger, metrics *ClaimMetric
 // handleClaim decodes a ClaimRequest, runs it against ledger, and encodes
 // the ClaimResponse. A body the decoder rejects answers vetoed with
 // reason_code=INVALID_KEY, because a request the recorder cannot read
-// carries no valid key either. Every veto counts once in metrics.
+// carries no valid key either. Every veto counts once in metrics. A
+// permanent veto of a Varroa-dispatched run also marks that run
+// TRIGGER_FAILED before the reply (markVetoedRun). A body the decoder
+// rejects names no run, so it marks nothing.
 func handleClaim(logger *slog.Logger, ledger *Ledger, metrics *ClaimMetrics, data []byte) []byte {
 	var req ClaimRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -63,6 +66,16 @@ func handleClaim(logger *slog.Logger, ledger *Ledger, metrics *ClaimMetrics, dat
 			"job_path", req.JobPath,
 			"cell", req.Cell,
 			"message", resp.Message)
+		// A failed mark never changes the answer: the plugin acts on the
+		// veto either way, and the claim-expiry sweep still ends the run.
+		marked, err := ledger.markVetoedRun(ctx, req, resp)
+		switch {
+		case err != nil:
+			logger.Warn("vetoed run mark failed", "run_id", req.RunID, "reason_code", resp.ReasonCode, "error", err)
+		case marked:
+			metrics.addVetoMarked(ctx, resp.ReasonCode)
+			logger.Info("vetoed run marked", "run_id", req.RunID, "reason_code", resp.ReasonCode)
+		}
 	}
 	out, err := json.Marshal(resp)
 	if err != nil {

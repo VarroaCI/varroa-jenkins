@@ -11,6 +11,7 @@ import (
 func TestClaimRequestJSONFieldNames(t *testing.T) {
 	req := ClaimRequest{
 		IntentKey:              "manual:" + "11111111-1111-7111-8111-111111111111",
+		Origin:                 ClaimOriginVarroaIntent,
 		RunID:                  "11111111-1111-7111-8111-111111111111",
 		Cluster:                "core",
 		Namespace:              "jenkins",
@@ -38,7 +39,7 @@ func TestClaimRequestJSONFieldNames(t *testing.T) {
 	}
 
 	wantFields := []string{
-		"intent_key", "run_id", "cluster", "namespace", "cell", "cell_instance",
+		"intent_key", "origin", "run_id", "cluster", "namespace", "cell", "cell_instance",
 		"tenant", "job_path", "branch", "actor", "cause", "params_digest",
 		"placement_generation", "jenkins_next_build_number", "requested_at",
 	}

@@ -81,6 +81,10 @@ const TRIGGER_REASON_SENTENCES: Record<string, string> = {
   JOB_NOT_BUILDABLE: "The job cannot start a build.",
   TRIGGER_REJECTED: "The controller refused the trigger.",
   CLAIM_EXPIRED: "The build did not get a build number in time, so it did not start.",
+  FENCED: "The controller that received the trigger no longer hosts this team.",
+  CROSS_TENANT: "Another team may not start this job.",
+  INVALID_KEY: "The build request was not valid.",
+  THROTTLED: "The record store refused the build because of a limit.",
 };
 const TRIGGER_REASON_FALLBACK = "The controller refused the trigger.";
 

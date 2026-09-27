@@ -4941,9 +4941,11 @@ RunDetail:
       type: string
       description: >-
         Why no build exists for the trigger. One of JOB_NOT_FOUND,
-        JOB_NOT_BUILDABLE, TRIGGER_REJECTED, and CLAIM_EXPIRED. The first three
-        name a refusal from the controller. CLAIM_EXPIRED names an accepted
-        trigger that no build claim followed. Set only when result is TRIGGER_FAILED.
+        JOB_NOT_BUILDABLE, TRIGGER_REJECTED, CLAIM_EXPIRED, FENCED,
+        CROSS_TENANT, INVALID_KEY, and THROTTLED. The first three name a
+        refusal from the controller. CLAIM_EXPIRED names an accepted trigger
+        that no build claim followed. The last four name a build claim that
+        the record store refused. Set only when result is TRIGGER_FAILED.
     retryRunId:
       type: string
       description: An existing retry's run id, when one already exists.

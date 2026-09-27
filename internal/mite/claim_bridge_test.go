@@ -86,6 +86,7 @@ func TestOnClaimRequest_GrantedPathCopiesReply(t *testing.T) {
 
 	req := &mitev1.ClaimRequest{
 		RequestId:              "req-1",
+		Origin:                 "VARROA_INTENT",
 		IntentKey:              "scm:team-a/build:abc",
 		RunId:                  "run-1",
 		JobPath:                "team-a/build",
@@ -106,6 +107,9 @@ func TestOnClaimRequest_GrantedPathCopiesReply(t *testing.T) {
 	lastReq := ledger.lastRequest()
 	if lastReq.CellInstance != "pod-uid-1" {
 		t.Fatalf("ledger request cell_instance = %q, want pod-uid-1", lastReq.CellInstance)
+	}
+	if lastReq.Origin != "VARROA_INTENT" {
+		t.Fatalf("ledger request origin = %q, want VARROA_INTENT", lastReq.Origin)
 	}
 	if lastReq.JenkinsNextBuildNumber != 41 {
 		t.Fatalf("ledger request jenkins_next_build_number = %d, want 41", lastReq.JenkinsNextBuildNumber)

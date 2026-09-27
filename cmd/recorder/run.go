@@ -162,6 +162,7 @@ func run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("register claim-expiry metrics: %w", err)
 	}
 	runNotifier := recordstore.NewRunNotifier(busConn, logger)
+	ledger.SetVetoMarking(runNotifier)
 	backstopCfg := recordstore.BackstopConfig{
 		MaxSweepPending:    cfg.SweepMaxPending,
 		ConfirmedGoneGrace: confirmedGoneGrace,

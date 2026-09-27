@@ -4,9 +4,11 @@ import "time"
 
 // ClaimRequest is the request body of a varroa.ledger.claim call.
 // CellInstance is the Jenkins pod UID of the calling cell. C2 owns the
-// matching proto field and uses the same JSON names.
+// matching proto field and uses the same JSON names. Origin is the
+// plugin's origin of the queue item, as the mite received it.
 type ClaimRequest struct {
 	IntentKey              string    `json:"intent_key"`
+	Origin                 string    `json:"origin"`
 	RunID                  string    `json:"run_id"`
 	Cluster                string    `json:"cluster"`
 	Namespace              string    `json:"namespace"`
@@ -46,10 +48,14 @@ const (
 	DecisionVetoed = "vetoed"
 )
 
-// Reason codes a ClaimResponse carries in ReasonCode. C1 emits
-// ReasonInvalidKey and ReasonFenced. NOT_READY, CROSS_TENANT, and
-// THROTTLED are reserved for the change that owns the placement
-// authority.
+// ClaimOriginVarroaIntent is the claim origin of a queue item that a
+// Varroa path dispatched: the API trigger, a retry, a replay, or a
+// trigger_run ledger action. Only such a run can hold a runs row that
+// waits for its claim.
+const ClaimOriginVarroaIntent = "VARROA_INTENT"
+
+// Reason codes a ClaimResponse carries in ReasonCode. No code emits
+// THROTTLED yet.
 const (
 	ReasonInvalidKey  = "INVALID_KEY"
 	ReasonFenced      = "FENCED"
@@ -72,6 +78,21 @@ var ReasonCodes = []string{
 	ReasonCrossTenant,
 	ReasonThrottled,
 	ReasonNotHome,
+}
+
+// markableVeto reports whether a veto with this reason code is permanent
+// for the run record. The set mirrors the plugin's VETOED_OTHER branch:
+// the plugin cancels the queue item on every veto but NOT_READY and
+// NOT_HOME, so no later event moves the run. NOT_READY retries, and
+// NOT_HOME forwards the item to the home slot. Change this set and that
+// plugin branch together.
+func markableVeto(code string) bool {
+	switch code {
+	case ReasonFenced, ReasonCrossTenant, ReasonInvalidKey, ReasonThrottled:
+		return true
+	default:
+		return false
+	}
 }
 
 // Failure codes a ClaimResponse carries in Code, following the

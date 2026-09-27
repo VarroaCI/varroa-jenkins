@@ -12,7 +12,8 @@ does not. Alert on a sustained 0. A brief 0 after a credential rotation clears
 itself; see [Troubleshooting](troubleshooting.md). The counter `varroa.bus.permission_violations`, with the
 same attribute, counts publishes and subscribes the NATS server denied. A denied publish returns no
 error, so alert on any increase. The recorder also exports `recorder_fence_veto_total`,
-`recorder_claims_vetoed_total`, and `recorder_job_home_changed_total`, and logs each refused
+`recorder_claims_vetoed_total`, `recorder_claim_veto_marked_total`, and
+`recorder_job_home_changed_total`, and logs each refused
 claim; see [Build claims](build-claims.md).
 
 ## Use activity history
@@ -28,10 +29,11 @@ varroactl activity --controller <name> --follow
 
 The activity feed records lifecycle and audit events. It is not a substitute for Jenkins build logs. Use `varroactl logs <namespace>/<name> --follow` for controller logs.
 
-Three [cell](cells.md) pipelines events appear in the feed. `build.interrupted` marks an
+Four [cell](cells.md) pipelines events appear in the feed. `build.interrupted` marks an
 interrupted run. `build.scheduled.backstop` marks a missed cron build that the backstop fires.
-`build.claim_expired` marks an accepted run that never claimed a build number. The recorder
-writes all three directly to the store. A live subscriber sees each event only on its next
+`build.claim_expired` marks an accepted run that never claimed a build number.
+`build.claim_vetoed` marks a refused claim. The recorder
+writes all four directly to the store. A live subscriber sees each event only on its next
 backfill, never on the live stream.
 
 ## Read brood health

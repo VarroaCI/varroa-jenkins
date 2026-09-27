@@ -151,7 +151,9 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   in-flight per controller connection epoch (never by controller alone, so a
   goroutine that outlives its stream cannot underflow a replacement
   connection's counter), and requests C1's `bus.LedgerClaimSubject` with the
-  `VARROA_LEDGER_TIMEOUT_MS` budget (default 4s). Both methods read
+  `VARROA_LEDGER_TIMEOUT_MS` budget (default 4s). The ledger body copies
+  the mite request's `origin` as it is; the recorder marks a vetoed run
+  only when the origin is `VARROA_INTENT`. Both methods read
   `cell_instance` from the registered identity, never from the event or
   request payload. Both also resolve `tenant` (and, for a claim,
   `placement_generation`) through `CellTenantResolver.ResolveJobTenant`,

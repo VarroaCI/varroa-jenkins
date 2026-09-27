@@ -73,12 +73,22 @@ type claimExpiryCandidate struct {
 // repeats the test, so a claim or a real event that lands between the
 // read and the write keeps the run.
 //
+// The age test is the only part that the veto mark does not share.
+const claimExpiryGuardSQL = `
+	(r.payload->>'accepted_at')::timestamptz <= $1
+	AND ` + unclaimedQueuedRunSQL
+
+// unclaimedQueuedRunSQL matches a run row "r" that waits for its first
+// claim: it is QUEUED, holds no build number, holds no mesh resume
+// record, and has no ledger intent. The claim-expiry sweep and the veto
+// mark both apply it in the write itself, so a claim or a real event
+// that commits first keeps the run.
+//
 // The resume test says IS DISTINCT FROM, never <>: a missing mesh key
 // makes jsonb_typeof answer SQL NULL.
-const claimExpiryGuardSQL = `
+const unclaimedQueuedRunSQL = `
 	r.status = 'QUEUED'
 	AND r.build_number IS NULL
-	AND (r.payload->>'accepted_at')::timestamptz <= $1
 	AND jsonb_typeof(r.payload->'mesh'->'resume') IS DISTINCT FROM 'object'
 	AND NOT EXISTS (SELECT 1 FROM varroa.run_intents ri WHERE ri.run_id = r.run_id)`
 
@@ -165,12 +175,27 @@ func markClaimExpired(ctx context.Context, pool *pgxpool.Pool, c claimExpiryCand
 		ItemPath: c.jobPath,
 		Result:   ResultTriggerFailed,
 	}
+	if err := insertRunActivityTx(ctx, tx, event); err != nil {
+		return false, fmt.Errorf("claim-expiry activity row: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit claim-expiry marking: %w", err)
+	}
+	return true, nil
+}
+
+// insertRunActivityTx normalizes event and writes it as one activity row
+// through db, which is the caller's transaction. The row then commits or
+// rolls back with the run write it records. A row with the same key is
+// kept as it is.
+func insertRunActivityTx(ctx context.Context, db DBTX, event activity.Event) error {
 	event.Normalize()
 	payloadJSON, err := json.Marshal(event)
 	if err != nil {
-		return false, fmt.Errorf("marshal claim-expiry activity payload: %w", err)
+		return fmt.Errorf("marshal activity payload: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `
+	if _, err := db.Exec(ctx, `
 		INSERT INTO varroa.activity
 			(event_key, ts, type, source, severity, cluster, namespace, controller,
 			 actor, message, phase, reason, item_path, build_number, result, url, payload)
@@ -181,13 +206,9 @@ func markClaimExpired(ctx context.Context, pool *pgxpool.Pool, c claimExpiryCand
 		event.Controller, event.Actor, event.Message, event.Phase, event.Reason, event.ItemPath,
 		nullableBuildNumber(event.BuildNumber), event.Result, event.URL, string(payloadJSON),
 	); err != nil {
-		return false, fmt.Errorf("insert claim-expiry activity row: %w", err)
+		return fmt.Errorf("insert activity row: %w", err)
 	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("commit claim-expiry marking: %w", err)
-	}
-	return true, nil
+	return nil
 }
 
 // ExpireUnclaimedRuns marks every accepted run that no claim reached

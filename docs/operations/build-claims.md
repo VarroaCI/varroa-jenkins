@@ -81,11 +81,15 @@ A cancel logs the `WARNING` `claim refused for job <job>, run <run_id>: <reason>
 logs each veto at `INFO` as `claim refused`, with `reason_code`, `tenant`, `run_id`, `job_path`,
 `cell`, and `message`. It counts each veto in `recorder_claims_vetoed_total`, labelled `reason`.
 
+A cancel on `INVALID_KEY`, `FENCED`, `CROSS_TENANT`, or `THROTTLED` ends a Varroa-started run at
+once. The recorder marks it `TRIGGER_FAILED` with the veto code before it replies. A
+Jenkins-native trigger gets no run record, and `NOT_READY` and `NOT_HOME` mark nothing.
+
 A retried request reads `granted` again when it carries the same `intent_key` and the same `run_id` as an earlier
 granted claim, and that run has not started. A `duplicate` means the intent key belongs to a different run entirely, for example two triggers
 racing on the same commit. It also answers a repeat for a run whose start the ledger recorded.
-Only a queued item claims, so that repeat comes from a redelivered command. A redelivery that
-reaches another cell before the ledger records the start still reads `granted`.
+That repeat comes from a redelivered command. A redelivery that reaches another cell before the
+ledger records the start still reads `granted`.
 
 A retried request from a new cell instance can carry a fresh build number. The ledger refreshes
 the number when the run never started, the repeat comes from a different cell instance, and the

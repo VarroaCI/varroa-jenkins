@@ -104,7 +104,7 @@ The build-number watermark is permanent: no build number is reused.
 
 ## A trigger that fails
 
-Jenkins can refuse a build trigger. The store then holds one run whose result is
+Jenkins or the recorder can refuse a build trigger. The store then holds one run whose result is
 `TRIGGER_FAILED`, and the run page names the reason.
 
 | Reason code | What it means |
@@ -113,6 +113,7 @@ Jenkins can refuse a build trigger. The store then holds one run whose result is
 | `JOB_NOT_BUILDABLE` | The job exists, but it cannot start a build. |
 | `TRIGGER_REJECTED` | The controller refused the trigger for another reason. |
 | `CLAIM_EXPIRED` | The recorder found no claim 75 minutes after acceptance. See [Build claims](build-claims.md). |
+| `FENCED`, `CROSS_TENANT`, `INVALID_KEY`, `THROTTLED` | The recorder refused the build claim. |
 
 The run page also shows the error text the controller or the recorder reported. Such a run holds no build number,
 no log, and no stage. `Re-run` starts a fresh run with each parameter's declared default.

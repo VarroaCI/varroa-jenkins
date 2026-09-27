@@ -239,8 +239,29 @@ of the fleet's audit activity, once a controller becomes disposable.
   It never logs `params_digest`, `actor`, or `cause`. `ClaimMetrics`
   (`ledger_claim_metrics.go`) counts every veto in
   `recorder_claims_vetoed_total`, labelled `reason`, the decode-failure
-  `INVALID_KEY` included; a nil `*ClaimMetrics` counts nothing. A
-  `duplicate` decision also marks the
+  `INVALID_KEY` included; a nil `*ClaimMetrics` counts nothing.
+  **A permanent veto marks the vetoed run at once** (`claim_veto.go`).
+  After the refusal log, `handleClaim` calls `Ledger.markVetoedRun`
+  before it replies. The mark runs in its own transaction, after the
+  claim transaction rolled back, so it holds no placement row lock. It
+  marks only a code `markableVeto` admits (`FENCED`, `CROSS_TENANT`,
+  `INVALID_KEY`, `THROTTLED`). That set mirrors the plugin's
+  `VETOED_OTHER` cancel branch, so change both together. It never marks
+  on `NOT_READY` or `NOT_HOME`. It marks only a claim with origin
+  `VARROA_INTENT`, so a Jenkins-native trigger gets no synthetic row. It
+  always names `req.RunID`, never `resp.RunID`: a `FENCED` answer from
+  the intent table names the stored run. One upsert on `runs` covers
+  both orders of the race with `run.trigger_accepted`: the insert writes
+  the failed row, and the update marks a `QUEUED` row. Both halves apply
+  `unclaimedQueuedRunSQL`, the age-free half of the claim-expiry guard,
+  so a run with an intent or a build number stays as it is. The same
+  transaction writes one `build.claim_vetoed` activity row through
+  `insertRunActivityTx`. After the commit it publishes one run
+  notification, and the responder counts the mark in
+  `recorder_claim_veto_marked_total`, labelled `reason`. A failed mark
+  logs at `WARN` and never changes the answer. A `Ledger` that
+  `SetVetoMarking` never touches marks nothing. A `duplicate` decision
+  also marks the
   requesting run's own row `DUPLICATE` through `markDuplicateClaim`, in
   the same transaction and guarded on `status = 'QUEUED'` plus
   `noBuildRecordedSQL`: that run never builds, and the interrupted sweep
@@ -854,7 +875,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   sweep (a live cell) nor the re-fire (no intent) can end it. The
   conditional update repeats `claimExpiryGuardSQL` in its `WHERE` clause,
   so a claim or a real event that commits between the read and the write
-  keeps the run. The write keeps the accepted keys and writes no
+  keeps the run. `claimExpiryGuardSQL` is the age test plus
+  `unclaimedQueuedRunSQL`, which the veto mark shares. A run the veto
+  mark ended is no longer `QUEUED`, so the sweep skips it. The write keeps the accepted keys and writes no
   `trigger_http_status`; a late `run.started` supersedes it through the
   ordinary `TRIGGER_FAILED` arm. The same transaction writes one
   `build.claim_expired` activity row; after the commit the sweep sends one

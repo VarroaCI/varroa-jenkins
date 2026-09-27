@@ -46,6 +46,12 @@ type Ledger struct {
 	concurrencyMetrics       *ConcurrencyMetrics
 	concurrencyActionMetrics *ActionMetrics
 	concurrencyLogger        *slog.Logger
+
+	// vetoMarking and vetoNotifier wire the veto mark. A false
+	// vetoMarking (NewLedger's default, until SetVetoMarking is called)
+	// marks no vetoed run.
+	vetoMarking  bool
+	vetoNotifier *RunNotifier
 }
 
 // NewLedger returns a Ledger over pool. It uses fence to gate a claim, or
