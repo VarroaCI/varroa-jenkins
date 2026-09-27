@@ -1001,13 +1001,18 @@ of the fleet's audit activity, once a controller becomes disposable.
 
 ```bash
 VARROA_TEST_DSN='postgres://user:pass@host:port/db?sslmode=disable' \
-  go test -race -count=1 ./internal/recordstore/...
+  go test -race -count=1 -timeout 30m ./internal/recordstore/...
 go test -race -count=1 ./internal/recordstore/...   # DSN unset: tests skip
 ```
 
 The DSN must be a URL and its role must hold `CREATEDB`: the `blob` test
 binary creates and uses `<db>_blob`, so the two packages run at the same
 time without `-p 1`.
+
+The package runs about 7 minutes with a live DSN. Under runner contention it can
+run longer than Go's default 10-minute test timeout. The `Record store` job in
+`.github/workflows/pr.yaml` sets `-timeout 30m` for this reason. Keep the
+flag on every command that runs `./internal/recordstore/...` with a live DSN.
 
 ## Child DOX Index
 
