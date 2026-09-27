@@ -17,6 +17,7 @@ type InterruptedMetrics struct {
 	cancel         metric.Int64Counter
 	sweepSkipped   metric.Int64Counter
 	retryPublished metric.Int64Counter
+	retrySkipped   metric.Int64Counter
 	cellLoss       metric.Int64Counter
 	intentRefired  metric.Int64Counter
 	runResume      metric.Int64Counter
@@ -27,7 +28,8 @@ type InterruptedMetrics struct {
 // counters: recorder_interrupted_marked_total (labelled "path"),
 // recorder_interrupted_skipped_total, recorder_interrupted_cancel_total,
 // recorder_sweep_skipped_total (labelled "reason"),
-// recorder_retry_published_total, recorder_cell_loss_confirmed_total
+// recorder_retry_published_total, recorder_retry_skipped_total
+// (labelled "reason"), recorder_cell_loss_confirmed_total
 // (labelled "path"), and recorder_intent_refired_total (labelled
 // "outcome" and "reason"). It also registers the pipeline mesh's
 // recorder_run_resume_total (labelled "outcome" and "reason") and
@@ -60,6 +62,11 @@ func NewInterruptedMetrics() (*InterruptedMetrics, error) {
 	if err != nil {
 		return nil, fmt.Errorf("register recorder_retry_published_total: %w", err)
 	}
+	retrySkipped, err := meter.Int64Counter("recorder_retry_skipped_total",
+		metric.WithDescription("Automatic retry_run actions not published, labelled by reason"))
+	if err != nil {
+		return nil, fmt.Errorf("register recorder_retry_skipped_total: %w", err)
+	}
 
 	cellLoss, err := meter.Int64Counter("recorder_cell_loss_confirmed_total",
 		metric.WithDescription("Confirmed cell losses the recorder acted on, labelled by path (announce or sweep)"))
@@ -89,6 +96,7 @@ func NewInterruptedMetrics() (*InterruptedMetrics, error) {
 		cancel:         cancel,
 		sweepSkipped:   sweepSkipped,
 		retryPublished: retryPublished,
+		retrySkipped:   retrySkipped,
 		cellLoss:       cellLoss,
 		intentRefired:  intentRefired,
 		runResume:      runResume,
@@ -139,6 +147,15 @@ func (m *InterruptedMetrics) addRetryPublished(ctx context.Context) {
 		return
 	}
 	m.retryPublished.Add(ctx, 1)
+}
+
+// addRetrySkipped counts one automatic retry the recorder did not
+// publish, labelled by reason. A nil receiver is a no-op.
+func (m *InterruptedMetrics) addRetrySkipped(ctx context.Context, reason string) {
+	if m == nil || m.retrySkipped == nil {
+		return
+	}
+	m.retrySkipped.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", reason)))
 }
 
 // addCellLoss counts one run marked from a confirmed cell loss,

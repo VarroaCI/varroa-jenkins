@@ -325,8 +325,8 @@ Marking sets the run's result to `INTERRUPTED` and releases no fleet lock; only 
 or a confirmed dead instance does. The recorder cancels the build only when its cell instance is
 alive.
 
-Set `interruptedRetry: automatic` to retry an interrupted run once; the default, `manual`,
-leaves the retry to a user.
+Set `interruptedRetry: automatic` to retry an interrupted run once on the job's home slot; the
+default, `manual`, leaves the retry to a user.
 
 ## Backstop scheduler
 

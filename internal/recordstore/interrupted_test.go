@@ -485,7 +485,7 @@ func TestAfterMarkPublishesCancelForDispatchedResumeTimeoutOnly(t *testing.T) {
 		runID: uuid.Must(uuid.NewV7()), cluster: "core", namespace: "team-a", cell: "cell-1", jobPath: "folder/job",
 		mesh: &runMeshRecord{Resume: &runMeshResume{Instance: "pod-live"}},
 	}
-	afterMark(context.Background(), conn, nil, nil, dispatched, ReasonResumeTimeout, "", nil)
+	afterMark(context.Background(), conn, JobHome{}, nil, nil, dispatched, ReasonResumeTimeout, "", nil)
 
 	select {
 	case a := <-received:
@@ -500,7 +500,7 @@ func TestAfterMarkPublishesCancelForDispatchedResumeTimeoutOnly(t *testing.T) {
 		runID: uuid.Must(uuid.NewV7()), cluster: "core", namespace: "team-a", cell: "cell-1", jobPath: "folder/job",
 		mesh: &runMeshRecord{Resume: &runMeshResume{}},
 	}
-	afterMark(context.Background(), conn, nil, nil, armedOnly, ReasonResumeTimeout, "", nil)
+	afterMark(context.Background(), conn, JobHome{}, nil, nil, armedOnly, ReasonResumeTimeout, "", nil)
 	select {
 	case a := <-received:
 		t.Fatalf("want no action for an undispatched resume-timeout, got %+v", a)
@@ -643,7 +643,7 @@ func TestAfterMarkPublishesCancelOnlyForNoHeartbeat(t *testing.T) {
 	run := runInterruptCandidate{
 		runID: uuid.Must(uuid.NewV7()), cluster: "core", namespace: "team-a", cell: "cell-1", jobPath: "folder/job",
 	}
-	afterMark(context.Background(), conn, nil, nil, run, ReasonNoHeartbeat, "", nil)
+	afterMark(context.Background(), conn, JobHome{}, nil, nil, run, ReasonNoHeartbeat, "", nil)
 
 	select {
 	case a := <-received:
@@ -654,7 +654,7 @@ func TestAfterMarkPublishesCancelOnlyForNoHeartbeat(t *testing.T) {
 		t.Fatal("want a cancel_run action for the no-heartbeat reason")
 	}
 
-	afterMark(context.Background(), conn, nil, nil, run, ReasonTenantMoved, "", nil)
+	afterMark(context.Background(), conn, JobHome{}, nil, nil, run, ReasonTenantMoved, "", nil)
 	select {
 	case a := <-received:
 		t.Fatalf("want no action for a moved reason, got %+v", a)
@@ -663,7 +663,7 @@ func TestAfterMarkPublishesCancelOnlyForNoHeartbeat(t *testing.T) {
 
 	// A cell-lost mark proves the pod gone, so no process remains to
 	// stop and the cell that would receive the command no longer runs.
-	afterMark(context.Background(), conn, nil, nil, run, ReasonCellLost, "", nil)
+	afterMark(context.Background(), conn, JobHome{}, nil, nil, run, ReasonCellLost, "", nil)
 	select {
 	case a := <-received:
 		t.Fatalf("want no action for a cell-lost reason, got %+v", a)
@@ -693,7 +693,7 @@ func TestAfterMarkPublishesAutomaticRetry(t *testing.T) {
 	run := runInterruptCandidate{
 		runID: runID, cluster: "core", namespace: "team-a", cell: "cell-1", jobPath: "folder/job", actor: "alice",
 	}
-	afterMark(context.Background(), conn, nil, nil, run, ReasonNoHeartbeat, interruptedRetryAutomatic, nil)
+	afterMark(context.Background(), conn, JobHome{}, nil, nil, run, ReasonNoHeartbeat, interruptedRetryAutomatic, nil)
 
 	var gotCancel, gotRetry bool
 	for i := 0; i < 2; i++ {

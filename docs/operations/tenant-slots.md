@@ -46,8 +46,8 @@ onto the new slot. A new job takes its slot at once.
 
 A change to `members` binds or releases cells, then the recorder recomputes the map. A job whose
 home changed takes its history to the new holder: the recorder refreshes its records and raises
-its build number. A scale moves no running build. A scale-down releases the highest indexes, so
-they stay dense. The operator deletes a released slot's agent pods within about 16 minutes of their
+its build number. A scale moves no running build. A scale-down releases the highest indexes.
+The operator deletes a released slot's agent pods within about 16 minutes of their
 last refresh.
 
 ## Jobs that trigger each other
@@ -56,7 +56,7 @@ Varroa forwards a cross-slot trigger through the ledger.
 
 - A `build job:` step with `wait: false` reaches a job on another slot.
 - A `build job:` step that waits fails at once, and names `varroa.build`, which waits across slots.
-- A native `upstream` trigger, a `varroaUpstream` trigger, and a backstop cron fire reach the job's home slot.
+- A native `upstream` trigger, a `varroaUpstream` trigger, a backstop cron fire, and an automatic retry reach the job's home slot.
 - A cross-slot `build job:` shows no downstream link. `varroa.build` returns a handle instead.
 - A forwarded build keeps its run id and text parameters; a file parameter does not cross a slot.
 

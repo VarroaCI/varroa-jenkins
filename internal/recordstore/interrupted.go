@@ -38,6 +38,10 @@ const (
 // value that makes a mark publish one automatic retry_run action.
 const interruptedRetryAutomatic = "automatic"
 
+// retrySkipUnplaced is recorder_retry_skipped_total's reason for a retry
+// with no home cell to address.
+const retrySkipUnplaced = "unplaced"
+
 // DefaultSweepMaxPending is VARROA_SWEEP_MAX_PENDING's default. The
 // interrupted sweep skips its round when the recorder's own
 // varroa_builds consumer holds at least this many pending messages.
@@ -386,7 +390,13 @@ func decodeInterruptedRetry(policy json.RawMessage) string {
 // A marked QUEUED run publishes neither action: no build ever started,
 // so there is nothing to cancel, and the store holds no parameters to
 // retry with.
-func afterMark(ctx context.Context, conn *bus.Conn, metrics *InterruptedMetrics, actionMetrics *ActionMetrics,
+//
+// The cancel names the run's own cell, which holds the process to stop.
+// The retry names home, the job's home member (retryAddress). The caller
+// answers home through jobHomeOf over the placement its mark decision
+// read, so the mark and the retry read one placement.
+func afterMark(ctx context.Context, conn *bus.Conn, home JobHome,
+	metrics *InterruptedMetrics, actionMetrics *ActionMetrics,
 	run runInterruptCandidate, reason, interruptedRetry string, logger *slog.Logger) {
 	if logger == nil {
 		logger = slog.Default()
@@ -424,11 +434,15 @@ func afterMark(ctx context.Context, conn *bus.Conn, metrics *InterruptedMetrics,
 			logger.Warn("generate automatic retry run id failed", "run_id", run.runID, "error", err)
 			return
 		}
+		namespace, cell, ok := retryAddress(ctx, home, metrics, run, logger)
+		if !ok {
+			return
+		}
 		action := LedgerAction{
 			Kind:       LedgerActionRetryRun,
 			Cluster:    run.cluster,
-			Namespace:  run.namespace,
-			Controller: run.cell,
+			Namespace:  namespace,
+			Controller: cell,
 			Actor:      run.actor,
 			RunID:      retryID.String(),
 			IntentKey:  "retry:" + run.runID.String(),
@@ -442,6 +456,26 @@ func afterMark(ctx context.Context, conn *bus.Conn, metrics *InterruptedMetrics,
 		metrics.addRetryPublished(ctx)
 		actionMetrics.addPublished(ctx, action.Kind)
 	}
+}
+
+// retryAddress answers the namespace and cell an automatic retry of run
+// names. For a placed tenant, they are home, the member of the job's home
+// slot, because the claim fence refuses a claim from any other cell. A
+// tenant with no placement row keeps the run's own coordinate. A home
+// slot with no cell answers ok false and counts one unplaced skip: the
+// recorder never republishes a retry.
+func retryAddress(ctx context.Context, home JobHome, metrics *InterruptedMetrics,
+	run runInterruptCandidate, logger *slog.Logger) (namespace, cell string, ok bool) {
+	if !home.Placed {
+		return run.namespace, run.cell, true
+	}
+	if home.Cell == "" {
+		logger.Warn("automatic retry skipped: the job's home slot holds no cell",
+			"run_id", run.runID, "job_path", run.jobPath)
+		metrics.addRetrySkipped(ctx, retrySkipUnplaced)
+		return "", "", false
+	}
+	return home.Namespace, home.Cell, true
 }
 
 // deleteRunState removes a marked run's replicated state, after the
@@ -528,7 +562,8 @@ func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.C
 			metrics.addCellLoss(ctx, "announce")
 		}
 		deleteRunState(ctx, pool, stateDeleter, c, logger)
-		afterMark(ctx, conn, metrics, actionMetrics, c, reason, interruptedRetry, logger)
+		afterMark(ctx, conn, jobHomeOf(row.members, true, c.jobPath), metrics, actionMetrics, c, reason,
+			interruptedRetry, logger)
 		marked++
 	}
 	return marked, nil
@@ -616,7 +651,8 @@ func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 			metrics.addCellLoss(ctx, "sweep")
 		}
 		deleteRunState(ctx, pool, stateDeleter, c, logger)
-		afterMark(ctx, conn, metrics, actionMetrics, c, reason, decodeInterruptedRetry(row.policy), logger)
+		afterMark(ctx, conn, jobHomeOf(row.members, exists, c.jobPath), metrics, actionMetrics, c, reason,
+			decodeInterruptedRetry(row.policy), logger)
 		marked++
 	}
 	return marked, nil

@@ -91,8 +91,7 @@ The third rule holds a re-fire until a replacement pod reports, which takes minu
 rule is permanent: Varroa stores no parameters for a build that never started, so a re-fire would
 run the job with each declared default.
 
-A marked run and a re-fired build do not conflict. The mark leaves the ledger entry alone, so the
-re-fired build claims the same run identifier.
+A mark leaves the ledger entry alone, so the re-fired build claims the same run identifier.
 
 ## Metrics
 
@@ -101,5 +100,6 @@ re-fired build claims the same run identifier.
 | `recorder_cell_loss_confirmed_total` | `path` | runs marked from a confirmed loss |
 | `recorder_intent_refired_total` | `outcome`, `reason` | re-fire outcomes |
 | `recorder_interrupted_marked_total` | `path`, `status` | every interrupted mark |
+| `recorder_retry_skipped_total` | `reason` | automatic retries with no home cell |
 | `recorder_run_resume_total` | `outcome`, `reason` | mesh resume outcomes |
 | `recorder_run_resume_timeout_total` | none | runs marked on a resume window |

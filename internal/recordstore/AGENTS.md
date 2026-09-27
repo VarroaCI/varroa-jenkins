@@ -136,7 +136,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   (`job_homes.go`) joins `readTenantPlacementMembers` and `memberForJob`
   into one read of a job's home member. `pgReader.JobHome`, the upstream
   fan-out, and the backstop fire call it; the two rounds call it through
-  `jobHomeCache`, which reads each placement once for each round.
+  `jobHomeCache`, which reads each placement once for each round. The
+  interrupted-run automatic retry calls `jobHomeOf` over the placement its
+  mark decision already read.
   `job_schedules.cell` is the home at the last export the ingest accepted.
   It is an input to the ingest delete rule and the cell purge only. An
   action that must reach a job's home never reads it for a placed tenant.
@@ -805,7 +807,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   before either publish for a marked `QUEUED` run — no build ever started
   to cancel, and the store holds no parameters to retry with — and
   otherwise publishes the `cancel_run` and automatic `retry_run` actions a
-  mark triggers. `recorder_interrupted_marked_total` carries a `status`
+  mark triggers. The cancel names the run's own cell, which holds the
+  process. The retry names the job's home member through `retryAddress`
+  and `jobHomeOf`, never `runs.cell`: a home slot with no cell publishes
+  nothing and counts `unplaced` in
+  `recorder_retry_skipped_total`. A tenant with no placement row keeps
+  the run's own coordinate. `recorder_interrupted_marked_total` carries a `status`
   attribute (`queued` or `running`) beside `path`, and
   `recorder_cell_loss_confirmed_total` counts each `cell-lost` mark by
   the same `path`. `liveCellInstances`
