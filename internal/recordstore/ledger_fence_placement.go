@@ -18,7 +18,7 @@ const crossTenantActorPrefix = "svc-"
 
 // crossTenantMessage is the exact message the cross-tenant-veto
 // capability requires.
-const crossTenantMessage = "cross-tenant triggers go through Varroa"
+const crossTenantMessage = "cross-tenant triggers go through Varroa."
 
 // PlacementFence is the placement-fencing capability's Fence
 // implementation. It reads varroa.tenant_placements and applies the

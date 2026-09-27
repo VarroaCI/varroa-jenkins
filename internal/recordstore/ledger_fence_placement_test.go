@@ -268,7 +268,7 @@ func TestCrossTenantVetoMessageIsExact(t *testing.T) {
 	if got.ReasonCode != ReasonCrossTenant {
 		t.Fatalf("ReasonCode = %q, want %q", got.ReasonCode, ReasonCrossTenant)
 	}
-	if got.Message != "cross-tenant triggers go through Varroa" {
+	if got.Message != "cross-tenant triggers go through Varroa." {
 		t.Fatalf("Message = %q, want the exact cross-tenant message", got.Message)
 	}
 }
