@@ -189,8 +189,9 @@ public class VarroaBuildStep extends Step {
                         : VarroaCrossTenantReply.parse(VarroaCrossTenantOps.client()
                                 .crossTenantStatus(callerJobPath, runId));
                 // The step polls by run_id only after a reply named one, and a
-                // reply names one only once its run_intents row exists. A later
-                // NOT_FOUND means the row is gone, and no poll brings it back.
+                // reply names one only once its run_intents row or its
+                // TRIGGER_FAILED row exists. A later NOT_FOUND means the row is
+                // gone, and no poll brings it back.
                 if (reply.isFailure() && VarroaCrossTenantReply.CODE_NOT_FOUND.equals(reply.code)) {
                     getContext().onFailure(new AbortException("varroaBuild: " + reply.describe()));
                     return;
@@ -256,7 +257,8 @@ public class VarroaBuildStep extends Step {
                 String result = reply.getString("result", "");
                 if (propagate && !"SUCCESS".equals(result)) {
                     getContext().onFailure(new AbortException(
-                            "varroaBuild: " + jobPath + " (run " + runId + ") finished " + result));
+                            "varroaBuild: " + jobPath + " (run " + runId + ") finished " + result
+                                    + reply.describeTriggerFailure()));
                     return true;
                 }
                 getContext().onSuccess(handle);

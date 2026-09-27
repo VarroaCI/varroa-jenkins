@@ -91,6 +91,21 @@ final class VarroaCrossTenantReply {
         return text.isEmpty() ? reasonCode() : reasonCode() + ": " + text;
     }
 
+    /**
+     * The trigger failure of a {@code TRIGGER_FAILED} run as
+     * {@code " (<trigger_reason_code>: <trigger_error>)"}, or the empty string
+     * when the reply carries no {@code trigger_reason_code}. A run that failed
+     * to trigger holds no build, so these two fields tell the caller why.
+     */
+    String describeTriggerFailure() {
+        String code = getString("trigger_reason_code", "");
+        if (code.isEmpty()) {
+            return "";
+        }
+        String text = getString("trigger_error", "");
+        return text.isEmpty() ? " (" + code + ")" : " (" + code + ": " + text + ")";
+    }
+
     String getString(String key, String def) {
         Object v = fields.get(key);
         return v != null ? String.valueOf(v) : def;

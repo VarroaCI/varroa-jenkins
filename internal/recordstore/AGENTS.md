@@ -183,6 +183,10 @@ of the fleet's audit activity, once a controller becomes disposable.
   `00020_run_stages_drop_log_columns.sql` drops `run_stages.log_offset`
   and `run_stages.log_length`. No writer filled them; a per-stage log
   resolves through the stage tags of the log index.
+  `00021_runs_trigger_failed_intent_key.sql` adds the partial index
+  `runs_trigger_failed_intent_key_idx` on `runs (intent_key)` for
+  `TRIGGER_FAILED` rows only. A query must name the same literal
+  predicate to use it.
   A later migration never edits an applied one. `migrationsFS` (`migrations.go`) embeds
   every file under `migrations/` into the binary through `embed.FS`, so
   the recorder needs no separate deploy artifact. Monthly partition
@@ -426,7 +430,14 @@ of the fleet's audit activity, once a controller becomes disposable.
   `last_successful` (`crosstenant_status.go`) and `artifact_list`/`artifact_url`
   (`crosstenant_artifact.go`) read a run's tenant and job path
   (`crosstenant_runrecord.go`) and run the `request`-path grant against them
-  through `GrantEvaluator.Check` (`grant_evaluator.go`) before answering;
+  through `GrantEvaluator.Check` (`grant_evaluator.go`) before answering.
+  A run that failed to trigger holds no `run_intents` row, so with no intent
+  row `readCrossTenantRun` reads its `TRIGGER_FAILED` `runs` row by
+  `run_id` or by `intent_key`, in the same statement as the intent read so
+  a redelivered trigger's new intent always wins. The grant then runs against that
+  row's tenant and job path, and a `status` reply carries
+  `trigger_reason_code` and `trigger_error` apart from `reason_code`,
+  which vetoes the request itself;
   `artifact_url` signs the recorded `blob_key`
   through `blob.Store.SignedURL`, mapping `blob.ErrUnsupported` to a message
   naming `recordStore.blobs.mode`. Every reply's `error`/`code` pair follows the
@@ -979,7 +990,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   accepted-only row's finalization anchor is always null, so the sweep
   never selects it, and a cross-tenant poll reads such a row as queued
   while it waits and as interrupted once the sweep marks it, through the
-  ordinary status mapping. The two `status = 'RUNNING'`
+  ordinary status mapping. The cross-tenant read reads a
+  `TRIGGER_FAILED` row only when no intent row names the run. The two `status = 'RUNNING'`
   cell-usage counts (`reader_cellusage.go`) also keep it: a running row
   can hold neither a `TRIGGER_FAILED` result nor an `accepted_at` key, so
   the narrower predicate already excludes everything the wider one would.

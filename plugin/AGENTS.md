@@ -292,7 +292,9 @@ the root AGENTS.md greenfield rule.
   poll (`VarroaCrossTenantReply.isPermanentVeto`: every reason but `NOT_READY` and
   `THROTTLED`) and polls again on a retryable one; `refresh()` fails on any veto. A
   `NOT_FOUND` poll by run id fails the step: a reply names a run id only once its
-  `run_intents` row exists. Every other failure code polls again. `Varroa.groovy` hands the lock step a closure of its own that
+  `run_intents` row or its `TRIGGER_FAILED` row exists. Every other failure code polls
+  again. A `TRIGGER_FAILED` result appends `describeTriggerFailure()`, the reply's
+  `trigger_reason_code` and `trigger_error`, to the `finished` failure. `Varroa.groovy` hands the lock step a closure of its own that
   calls the caller's body, never the caller's closure itself; a nested `varroa.lock` block
   resumes correctly only through that wrapper, the same shape docker-workflow uses for
   `inside`. `VarroaUpstreamTrigger.java` (`Trigger<Job<?, ?>>`, `@Symbol("varroaUpstream")`)

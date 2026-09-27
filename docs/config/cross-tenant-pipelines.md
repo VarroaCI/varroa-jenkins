@@ -43,8 +43,9 @@ timeout(time: 15, unit: 'MINUTES') {
 ```
 
 `propagate` defaults to `true` and fails the caller's build when the target run does not
-succeed. Set `wait: false` to fire and move on: the handle starts in state `pending`, and
-`handle.refresh()` reads the current state.
+succeed. A run the record store refuses ends `TRIGGER_FAILED`, and the failure names the
+refusal code, such as `(FENCED: <text>)`. Set `wait: false` to fire and move on: the handle
+starts in state `pending`, and `handle.refresh()` reads the current state.
 
 ### Read the last successful run
 
@@ -160,7 +161,7 @@ An ungranted call fails with a message that starts "cross-tenant triggers go thr
 A job's page shows its declared upstream and downstream cross-tenant relationships on the
 **Triggers** card, as an **Upstream** row and a **Downstream** row. Each row names the other
 tenant, the other job, and the result threshold, and marks a row **grant missing** when the
-producer has not exported the job. Such an edge still shows; it never disappears.
+producer has not exported the job. Such an edge still shows.
 
 The same data is available over the API:
 
@@ -217,8 +218,7 @@ Every time a lock is acquired, Varroa mints a fencing token, an increasing numbe
 held lock exposes its token two ways inside the block: `varroa.lock.token`, and the environment
 variable `VARROA_LOCK_TOKEN`.
 
-Use the token to protect a resource the lock guards but Varroa does not touch directly, such as
-a deployment target:
+Use the token to protect a resource the lock guards, such as a deployment target:
 
 ```groovy
 varroa.lock(name: 'deploy-prod', timeout: 300) {
@@ -243,8 +243,7 @@ A failed call fails its step with `<step>: <code>: <text>`.
 
 ## Timeout budgets
 
-Four hops each carry their own timeout, from the plugin down to the record store. Each hop's
-budget is shorter than the one outside it.
+Each of four hops carries its own timeout. Each hop's budget is shorter than the one outside it.
 
 | Hop | Variable | Default |
 |---|---|---|
@@ -253,8 +252,8 @@ budget is shorter than the one outside it.
 | the mite's wait for a response | `VARROA_CROSSTENANT_MITE_TIMEOUT_MS` | 9500 ms |
 | the gateway's wait for the record store | `VARROA_CROSSTENANT_GATEWAY_TIMEOUT_MS` | 9000 ms |
 
-Raise the outer budget before an inner one. Varroa logs a warning, and keeps running, when a
-budget is not shorter than the budget inside it.
+Raise the outer budget before an inner one. Varroa logs a warning when a budget is not shorter
+than the budget inside it.
 
 ## Placement requirement
 

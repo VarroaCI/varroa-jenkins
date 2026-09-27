@@ -168,6 +168,19 @@ public class VarroaBuildStepTest {
     }
 
     @Test
+    public void propagateTrueNamesTheTriggerFailureOfAVetoedRun() throws Exception {
+        installClient();
+        server.createContext("/v1/cross-tenant/build", ex -> respond(ex, "{\"state\":\"pending\"}"));
+        server.createContext("/v1/cross-tenant/status", ex -> respond(ex,
+                "{\"run_id\":\"run-1\",\"state\":\"completed\",\"result\":\"TRIGGER_FAILED\","
+                        + "\"trigger_reason_code\":\"FENCED\",\"trigger_error\":\"placement moved\"}"));
+
+        WorkflowRun run = scheduleAndWait(
+                "node { varroa.build(tenant: 'beta', job: 'beta/deploy', propagate: true) }", Result.FAILURE);
+        j.assertLogContains("finished TRIGGER_FAILED (FENCED: placement moved)", run);
+    }
+
+    @Test
     public void propagateFalseReturnsTheHandleWhateverTheResult() throws Exception {
         installClient();
         server.createContext("/v1/cross-tenant/build", ex -> respond(ex, "{\"run_id\":\"run-1\",\"state\":\"running\"}"));

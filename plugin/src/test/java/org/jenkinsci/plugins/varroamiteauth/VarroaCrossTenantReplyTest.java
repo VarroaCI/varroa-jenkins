@@ -55,6 +55,28 @@ public class VarroaCrossTenantReplyTest {
     }
 
     @Test
+    public void aTriggerFailedRunShowsItsReasonAndText() {
+        VarroaCrossTenantReply reply = parse("{\"run_id\":\"run-1\",\"state\":\"completed\","
+                + "\"result\":\"TRIGGER_FAILED\",\"trigger_reason_code\":\"FENCED\","
+                + "\"trigger_error\":\"placement moved\"}");
+        assertFalse(reply.isFailure());
+        assertEquals("", reply.reasonCode());
+        assertEquals(" (FENCED: placement moved)", reply.describeTriggerFailure());
+    }
+
+    @Test
+    public void aTriggerFailureWithNoTextShowsItsReasonAlone() {
+        VarroaCrossTenantReply reply = parse("{\"result\":\"TRIGGER_FAILED\",\"trigger_reason_code\":\"THROTTLED\"}");
+        assertEquals(" (THROTTLED)", reply.describeTriggerFailure());
+    }
+
+    @Test
+    public void aReplyWithNoTriggerReasonShowsNoTriggerFailure() {
+        VarroaCrossTenantReply reply = parse("{\"result\":\"FAILURE\"}");
+        assertEquals("", reply.describeTriggerFailure());
+    }
+
+    @Test
     public void aReplyWithNoReasonCodeIsNoVeto() {
         VarroaCrossTenantReply reply = parse("{\"run_id\":\"run-1\"}");
         assertEquals("", reply.reasonCode());

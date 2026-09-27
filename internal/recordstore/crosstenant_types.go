@@ -113,6 +113,12 @@ type CrossTenantResponse struct {
 	JobPath     string  `json:"job_path,omitempty"`
 	URL         string  `json:"url,omitempty"`
 
+	// status. A run that failed to trigger holds no build, so the reply
+	// carries the stored failure code and text in these fields. They stay
+	// apart from ReasonCode, which vetoes the status request itself.
+	TriggerReasonCode string `json:"trigger_reason_code,omitempty"`
+	TriggerError      string `json:"trigger_error,omitempty"`
+
 	// last_successful
 	StartedAt *time.Time `json:"started_at,omitempty"`
 	EndedAt   *time.Time `json:"ended_at,omitempty"`
