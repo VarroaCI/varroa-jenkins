@@ -289,9 +289,12 @@ func buildTriggersXML(triggers []Trigger) *jenkinsTriggersXML {
 // jenkinsVarroaUpstreamXML renders a varroaUpstream trigger. Its element
 // name is the trigger's full class name, design.md D9. Result always
 // carries an explicit value: the renderer applies the SUCCESS default
-// before it reaches this struct.
+// before it reaches this struct. Spec is always an empty element: Jenkins
+// core's Trigger.readResolve parses spec with no null check, so Jenkins
+// drops a trigger that has no spec element when it loads the job.
 type jenkinsVarroaUpstreamXML struct {
 	Plugin string `xml:"plugin,attr"`
+	Spec   string `xml:"spec"`
 	Tenant string `xml:"tenant"`
 	Job    string `xml:"job"`
 	Result string `xml:"result"`

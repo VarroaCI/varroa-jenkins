@@ -18,6 +18,7 @@
           <spec>H 2 * * *</spec>
         </hudson.triggers.TimerTrigger>
         <org.jenkinsci.plugins.varroamiteauth.VarroaUpstreamTrigger plugin="varroa-mite-auth">
+          <spec></spec>
           <tenant>alpha</tenant>
           <job>release</job>
           <result>SUCCESS</result>

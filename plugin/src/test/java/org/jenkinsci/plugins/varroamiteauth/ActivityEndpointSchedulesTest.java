@@ -3,6 +3,8 @@ package org.jenkinsci.plugins.varroamiteauth;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -20,9 +22,11 @@ import hudson.triggers.TimerTrigger;
 import hudson.triggers.Trigger;
 import jenkins.triggers.ReverseBuildTrigger;
 
+import java.io.ByteArrayInputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -179,6 +183,47 @@ public class ActivityEndpointSchedulesTest {
         }
         assertTrue("expected a cron row among " + types, types.contains("cron"));
         assertTrue("expected a varroa-upstream row among " + types, types.contains("varroa-upstream"));
+    }
+
+    /** The config.xml shape the items renderer writes for a varroaUpstream trigger. */
+    private static String renderedUpstreamJobXml(boolean withSpec) {
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                + "<project>\n"
+                + "  <triggers>\n"
+                + "    <org.jenkinsci.plugins.varroamiteauth.VarroaUpstreamTrigger plugin=\"varroa-mite-auth\">\n"
+                + (withSpec ? "      <spec></spec>\n" : "")
+                + "      <tenant>alpha</tenant>\n"
+                + "      <job>release</job>\n"
+                + "      <result>SUCCESS</result>\n"
+                + "    </org.jenkinsci.plugins.varroamiteauth.VarroaUpstreamTrigger>\n"
+                + "  </triggers>\n"
+                + "</project>\n";
+    }
+
+    @Test
+    public void renderedUpstreamTriggerSurvivesLoadAndExportsItsRow() throws Exception {
+        FreeStyleProject job = (FreeStyleProject) j.jenkins.createProjectFromXML("rendered-upstream-job",
+                new ByteArrayInputStream(renderedUpstreamJobXml(true).getBytes(StandardCharsets.UTF_8)));
+
+        VarroaUpstreamTrigger trigger = job.getTrigger(VarroaUpstreamTrigger.class);
+        assertNotNull("the rendered varroaUpstream trigger must survive the load", trigger);
+
+        List<JSONObject> jobRows = findAllRows(ActivityEndpoint.buildCandidateRows(j.jenkins), job.getFullName());
+        assertEquals(1, jobRows.size());
+        JSONObject row = jobRows.get(0);
+        assertEquals("varroa-upstream", row.getString("triggerType"));
+        assertEquals("alpha", row.getString("upstreamTenant"));
+        assertEquals("release", row.getString("upstreamJob"));
+        assertEquals("SUCCESS", row.getString("upstreamResult"));
+    }
+
+    @Test
+    public void upstreamTriggerWithoutSpecIsDroppedOnLoad() throws Exception {
+        FreeStyleProject job = (FreeStyleProject) j.jenkins.createProjectFromXML("specless-upstream-job",
+                new ByteArrayInputStream(renderedUpstreamJobXml(false).getBytes(StandardCharsets.UTF_8)));
+
+        assertNull("Jenkins core drops a trigger with no spec element",
+                job.getTrigger(VarroaUpstreamTrigger.class));
     }
 
     @Test

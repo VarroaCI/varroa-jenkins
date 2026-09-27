@@ -575,6 +575,9 @@ func TestGenerateConfigXMLFreeStyleWithVarroaUpstream(t *testing.T) {
 	if !strings.Contains(xml, "<org.jenkinsci.plugins.varroamiteauth.VarroaUpstreamTrigger") {
 		t.Errorf("expected VarroaUpstreamTrigger element, got: %s", xml)
 	}
+	if !strings.Contains(xml, "<spec></spec>") {
+		t.Errorf("expected an empty spec element on VarroaUpstreamTrigger, got: %s", xml)
+	}
 	if !strings.Contains(xml, "<tenant>alpha</tenant>") {
 		t.Errorf("expected tenant element, got: %s", xml)
 	}
@@ -954,6 +957,7 @@ func TestGenerateConfigXMLPipelineTriggers(t *testing.T) {
           <spec></spec>
         </com.cloudbees.jenkins.GitHubPushTrigger>
         <org.jenkinsci.plugins.varroamiteauth.VarroaUpstreamTrigger plugin="varroa-mite-auth">
+          <spec></spec>
           <tenant>platform</tenant>
           <job>release</job>
           <result>SUCCESS</result>
