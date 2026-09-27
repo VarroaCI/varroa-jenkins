@@ -43,6 +43,12 @@ export interface RunLogViewerProps {
   version: number;
   /** True once the run has stopped, whether or not the log has finalized. */
   runTerminal: boolean;
+  /**
+   * True when the run record reports the log finalized. The stream sends its
+   * end event only on its first poll tick, so the viewer reads this flag to
+   * keep a finished log from reading as still being written.
+   */
+  logFinalized: boolean;
 }
 
 /** Commands the build page issues into the viewer: keyboard shortcuts and graph selection. */
@@ -83,7 +89,7 @@ function permalinkLine(): number | null {
 }
 
 export const RunLogViewer = forwardRef<RunLogViewerHandle, RunLogViewerProps>(
-  function RunLogViewer({ runId, frames, version, runTerminal }, ref) {
+  function RunLogViewer({ runId, frames, version, runTerminal, logFinalized }, ref) {
     const [rows, setRows] = useState<LogRow[]>([]);
     const [meta, setMeta] = useState<RunLogMetaEvent | null>(null);
     const [live, setLive] = useState(false);
@@ -93,6 +99,9 @@ export const RunLogViewer = forwardRef<RunLogViewerHandle, RunLogViewerProps>(
     const [search, setSearch] = useState("");
     const [highlightedLine, setHighlightedLine] = useState<number | null>(null);
     const [pendingLine, setPendingLine] = useState<number | null>(() => permalinkLine());
+    // The line the URL fragment names. Only that jump also scrolls the page,
+    // because the viewer can sit below the first screen of the build page.
+    const urlLineRef = useRef<number | null>(pendingLine);
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const searchRef = useRef<HTMLInputElement>(null);
@@ -174,6 +183,10 @@ export const RunLogViewer = forwardRef<RunLogViewerHandle, RunLogViewerProps>(
       const idx = rows.findIndex((r) => r.kind === "line" && r.n === pendingLine);
       if (idx !== -1) {
         virtualizer.scrollToIndex(idx, { align: "center" });
+        if (urlLineRef.current === pendingLine) {
+          scrollRef.current?.scrollIntoView?.({ block: "center" });
+        }
+        urlLineRef.current = null;
         setHighlightedLine(pendingLine);
         setPendingLine(null);
       }
@@ -187,6 +200,7 @@ export const RunLogViewer = forwardRef<RunLogViewerHandle, RunLogViewerProps>(
     }, []);
 
     const jumpToLine = useCallback((n: number) => {
+      urlLineRef.current = null;
       setPendingLine(n);
     }, []);
 
@@ -273,7 +287,7 @@ export const RunLogViewer = forwardRef<RunLogViewerHandle, RunLogViewerProps>(
           {live && <span className={styles.liveBadge}>Live</span>}
         </div>
 
-        {runTerminal && !ended && (
+        {runTerminal && !logFinalized && meta !== null && !ended && (
           <p className={styles.notice}>The log is still being written.</p>
         )}
         {ended && !ended.logComplete && (

@@ -727,6 +727,7 @@ export default function BuildPage() {
           frames={logFramesRef.current}
           version={logVersion}
           runTerminal={isTerminal(run)}
+          logFinalized={run.logFinalized === true}
         />
       )}
 

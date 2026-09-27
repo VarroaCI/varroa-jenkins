@@ -221,6 +221,12 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   frames the page hands it, in order, and it never calls `useEventStream`
   itself. It unmounts while another tab is active, so the page holds the
   frames, not the viewer.
+  `BuildPage.tsx` passes the record's `logFinalized` flag to the viewer. The
+  viewer shows its "still being written" notice only for a terminal run with
+  that flag false, after the `meta` frame and before the `end` frame. The
+  stream sends `end` on its first poll tick, so the flag keeps a finished log
+  from showing the notice. A `#L<n>` fragment in the URL also scrolls the page
+  to center the viewer; a search jump and the first-error jump do not.
   `src/components/Console.tsx` is a different, generic log-line component and
   is not the log viewer for this page — do not route pipeline log rendering
   through it. `TeamCellCard.tsx` heads `TeamHome.tsx` with the team's own cell.

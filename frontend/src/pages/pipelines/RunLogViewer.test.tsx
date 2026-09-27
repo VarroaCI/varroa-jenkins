@@ -31,6 +31,11 @@ beforeEach(() => {
   window.location.hash = "";
 });
 
+const metaFrame: RunLogViewerEvent = {
+  type: "meta",
+  data: { runId: "r1", chunkCount: 1, byteCount: 10, droppedBytes: 0, complete: true, status: "SUCCESS" },
+};
+
 function lineEvent(n: number, text: string): RunLogViewerEvent {
   return { type: "line", data: { n, off: n * 10, ts: 1700000000000, text } };
 }
@@ -40,7 +45,7 @@ describe("RunLogViewer", () => {
     render(
       <RunLogViewer
         runId="r1"
-        runTerminal
+        runTerminal logFinalized={false}
         frames={[
           lineEvent(1, "one"),
           lineEvent(2, "two"),
@@ -61,7 +66,7 @@ describe("RunLogViewer", () => {
     render(
       <RunLogViewer
         runId="r1"
-        runTerminal={false}
+        runTerminal={false} logFinalized={false}
         frames={[
           lineEvent(1, "one"),
           lineEvent(2, "two"),
@@ -89,30 +94,30 @@ describe("RunLogViewer", () => {
   it("applies the frames the page already holds when it mounts", () => {
     const frames = [lineEvent(1, "early"), lineEvent(2, "later")];
     const { unmount } = render(
-      <RunLogViewer runId="r1" runTerminal={false} frames={frames} version={2} />,
+      <RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={frames} version={2} />,
     );
     expect(screen.getByText("later")).toBeInTheDocument();
     unmount();
 
     // The page unmounts the viewer while another tab is active, so a mount
     // replays the frames the page kept.
-    render(<RunLogViewer runId="r1" runTerminal={false} frames={frames} version={2} />);
+    render(<RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={frames} version={2} />);
     expect(screen.getByText("early")).toBeInTheDocument();
     expect(screen.getByText("later")).toBeInTheDocument();
   });
 
   it("renders lines from the log stream", () => {
     const { rerender } = render(
-      <RunLogViewer runId="r1" runTerminal={false} frames={[]} version={0} />,
+      <RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[]} version={0} />,
     );
     rerender(
-      <RunLogViewer runId="r1" runTerminal={false} frames={[lineEvent(1, "hello world")]} version={1} />,
+      <RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[lineEvent(1, "hello world")]} version={1} />,
     );
     expect(screen.getByText("hello world")).toBeInTheDocument();
   });
 
   it("turns follow off when the user scrolls up", () => {
-    render(<RunLogViewer runId="r1" runTerminal={false} frames={[]} version={0} />);
+    render(<RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[]} version={0} />);
     const followBtn = screen.getByRole("button", { name: "Follow" });
     expect(followBtn).toHaveAttribute("aria-pressed", "true");
 
@@ -128,15 +133,15 @@ describe("RunLogViewer", () => {
   it("scrolls to and highlights a line permalink", () => {
     window.location.hash = "#L2";
     const { rerender } = render(
-      <RunLogViewer runId="r1" runTerminal={false} frames={[]} version={0} />,
+      <RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[]} version={0} />,
     );
     rerender(
-      <RunLogViewer runId="r1" runTerminal={false} frames={[lineEvent(1, "first")]} version={1} />,
+      <RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[lineEvent(1, "first")]} version={1} />,
     );
     rerender(
       <RunLogViewer
         runId="r1"
-        runTerminal={false}
+        runTerminal={false} logFinalized={false}
         frames={[lineEvent(1, "first"), lineEvent(2, "second")]}
         version={2}
       />,
@@ -153,13 +158,13 @@ describe("RunLogViewer", () => {
       data: { runId: "r1", chunkCount: 1, byteCount: 10, droppedBytes: 0, complete: true, status: "SUCCESS", firstErrorLine: 3 },
     };
     const { rerender } = render(
-      <RunLogViewer runId="r1" runTerminal={false} frames={[]} version={0} />,
+      <RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[]} version={0} />,
     );
-    rerender(<RunLogViewer runId="r1" runTerminal={false} frames={[meta]} version={1} />);
+    rerender(<RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[meta]} version={1} />);
     rerender(
       <RunLogViewer
         runId="r1"
-        runTerminal={false}
+        runTerminal={false} logFinalized={false}
         frames={[meta, lineEvent(3, "boom: error occurred")]}
         version={2}
       />,
@@ -176,15 +181,15 @@ describe("RunLogViewer", () => {
       data: { stageId: "1", name: "Build", status: "IN_PROGRESS", startOffset: 0, startLine: 1 },
     };
     const { rerender } = render(
-      <RunLogViewer runId="r1" runTerminal={false} frames={[]} version={0} />,
+      <RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[]} version={0} />,
     );
-    rerender(<RunLogViewer runId="r1" runTerminal={false} frames={[stage]} version={1} />);
+    rerender(<RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[stage]} version={1} />);
     expect(screen.getAllByText("Build — IN_PROGRESS").length).toBeGreaterThan(0);
 
     rerender(
       <RunLogViewer
         runId="r1"
-        runTerminal={false}
+        runTerminal={false} logFinalized={false}
         frames={[stage, { type: "gap", data: { seq: 4, off: 100 } }]}
         version={2}
       />,
@@ -192,19 +197,112 @@ describe("RunLogViewer", () => {
     expect(screen.getByText("Missing bytes at sequence 4.")).toBeInTheDocument();
   });
 
-  it("states the log is still being written for a stopped run with no end event", () => {
-    render(<RunLogViewer runId="r1" runTerminal frames={[]} version={0} />);
+  it("states the log is still being written for a stopped, unfinalized run after meta and before end", () => {
+    const { rerender } = render(
+      <RunLogViewer runId="r1" runTerminal logFinalized={false} frames={[]} version={0} />,
+    );
+    // No meta event yet: the log state is not known, so no notice renders.
+    expect(screen.queryByText("The log is still being written.")).not.toBeInTheDocument();
+
+    rerender(<RunLogViewer runId="r1" runTerminal logFinalized={false} frames={[metaFrame]} version={1} />);
     expect(screen.getByText("The log is still being written.")).toBeInTheDocument();
+  });
+
+  it("shows no writing notice for a stopped run whose record reports the log finalized", () => {
+    render(<RunLogViewer runId="r1" runTerminal logFinalized frames={[metaFrame, lineEvent(1, "done")]} version={1} />);
+    expect(screen.getByText("done")).toBeInTheDocument();
+    expect(screen.queryByText("The log is still being written.")).not.toBeInTheDocument();
+  });
+
+  it("scrolls the page to the viewer for a URL permalink", () => {
+    const spy = vi.fn();
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = spy;
+    try {
+      window.location.hash = "#L2";
+      render(
+        <RunLogViewer
+          runId="r1"
+          runTerminal={false}
+          logFinalized={false}
+          frames={[lineEvent(1, "first"), lineEvent(2, "second")]}
+          version={1}
+        />,
+      );
+      expect(mockScrollToIndex).toHaveBeenCalledWith(1, { align: "center" });
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith({ block: "center" });
+      expect(spy.mock.contexts[0]).toBe(screen.getByLabelText("Console log"));
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+    }
+  });
+
+  it("does not scroll the page for a toolbar jump to the URL permalink's own line", () => {
+    const spy = vi.fn();
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = spy;
+    try {
+      window.location.hash = "#L2";
+      const meta: RunLogViewerEvent = {
+        type: "meta",
+        data: { ...(metaFrame.data as object), firstErrorLine: 2 },
+      };
+      const { rerender } = render(
+        <RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[meta]} version={1} />,
+      );
+      // The toolbar jump names the same line before its row arrives.
+      fireEvent.click(screen.getByRole("button", { name: "First error · line 2" }));
+      rerender(
+        <RunLogViewer
+          runId="r1"
+          runTerminal={false}
+          logFinalized={false}
+          frames={[meta, lineEvent(1, "first"), lineEvent(2, "boom: error")]}
+          version={2}
+        />,
+      );
+      expect(mockScrollToIndex).toHaveBeenCalledWith(1, { align: "center" });
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+    }
+  });
+
+  it("does not scroll the page for a first-error jump", () => {
+    const spy = vi.fn();
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = spy;
+    try {
+      const meta: RunLogViewerEvent = {
+        type: "meta",
+        data: { ...(metaFrame.data as object), firstErrorLine: 2 },
+      };
+      render(
+        <RunLogViewer
+          runId="r1"
+          runTerminal={false}
+          logFinalized={false}
+          frames={[meta, lineEvent(1, "first"), lineEvent(2, "boom: error")]}
+          version={1}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "First error · line 2" }));
+      expect(mockScrollToIndex).toHaveBeenCalledWith(1, { align: "center" });
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+    }
   });
 
   it("shows an incomplete-log banner naming the reason from the end event", () => {
     const { rerender } = render(
-      <RunLogViewer runId="r1" runTerminal frames={[]} version={0} />,
+      <RunLogViewer runId="r1" runTerminal logFinalized={false} frames={[]} version={0} />,
     );
     rerender(
       <RunLogViewer
         runId="r1"
-        runTerminal
+        runTerminal logFinalized={false}
         frames={[{ type: "end", data: { result: "FAILURE", logComplete: false, incompleteReason: "chunks lost" } }]}
         version={1}
       />,
@@ -216,13 +314,13 @@ describe("RunLogViewer", () => {
   it("exposes scrollToStage on its imperative handle, for the graph's node selection", () => {
     const handleRef = createRef<RunLogViewerHandle>();
     const { rerender } = render(
-      <RunLogViewer ref={handleRef} runId="r1" runTerminal={false} frames={[]} version={0} />,
+      <RunLogViewer ref={handleRef} runId="r1" runTerminal={false} logFinalized={false} frames={[]} version={0} />,
     );
     rerender(
       <RunLogViewer
         ref={handleRef}
         runId="r1"
-        runTerminal={false}
+        runTerminal={false} logFinalized={false}
         frames={[
           { type: "stage", data: { stageId: "19", name: "Unit tests", status: "SUCCESS", startOffset: 0, startLine: 1 } },
         ]}
@@ -236,7 +334,7 @@ describe("RunLogViewer", () => {
   it("exposes focusSearch, toggleFollow, and toggleTimestamps on its imperative handle", () => {
     const handleRef = createRef<RunLogViewerHandle>();
     render(
-      <RunLogViewer ref={handleRef} runId="r1" runTerminal={false} frames={[]} version={0} />,
+      <RunLogViewer ref={handleRef} runId="r1" runTerminal={false} logFinalized={false} frames={[]} version={0} />,
     );
     act(() => handleRef.current?.toggleTimestamps());
     act(() => handleRef.current?.toggleFollow());

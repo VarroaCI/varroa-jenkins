@@ -56,7 +56,7 @@ reads both numbers on the cell page.
 
 ## Read the pipelines tree
 
-Three cards follow the page head: **Running now**, **Pipelines**, and **Locks**.
+Four cards follow the page head: **Running now**, **Pipelines**, **Locks**, and **Runners**.
 
 **Running now** holds one tile per build in progress: the job name, the build number, the
 current stage, the branch, and a progress bar against the job's usual duration. The stage line
@@ -88,6 +88,9 @@ The fold state lives in the page URL, as one `open` value per unfolded folder:
 
 Copy that URL to share the same view. A reload keeps the folds. `?open=` with no value folds
 everything.
+
+**Runners** lists the [external runners](../operations/runners.md) bound to the team. Each row
+shows the launcher, the labels, the cell, the connection state, and the last contact time.
 
 A caller whose grant carries `jobs` globs reads only the matching jobs and running builds. A
 folder holding no readable job does not appear at all. See

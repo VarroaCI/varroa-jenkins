@@ -45,7 +45,14 @@ timeout(time: 15, unit: 'MINUTES') {
 `propagate` defaults to `true` and fails the caller's build when the target run does not
 succeed. A run the record store refuses ends `TRIGGER_FAILED`, and the failure names the
 refusal code, such as `(FENCED: <text>)`. Set `wait: false` to fire and move on: the handle
-starts in state `pending`, and `handle.refresh()` reads the current state.
+starts in state `pending`. `handle.refresh()` reads the current state into a new handle and
+does not change the old one. Assign the result to read it:
+
+```groovy
+def run = varroa.build(tenant: 'platform', job: 'release', wait: false)
+run = run.refresh()
+echo "Platform release state: ${run.state}"
+```
 
 ### Read the last successful run
 
@@ -126,6 +133,9 @@ this result or better. A job declares exactly one `varroaUpstream` trigger. A jo
 two producers calls `varroa.build` from each producer's pipeline instead.
 
 The trigger reaches the subscriber job's home slot.
+
+A new trigger goes live only after the subscriber's cell exports its schedules, up to ten minutes
+later. A producer run that completes before that export starts no subscriber build.
 
 ## The export grant
 

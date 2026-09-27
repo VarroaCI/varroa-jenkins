@@ -166,7 +166,9 @@ triggers:
       result: SUCCESS
 ```
 
-Run the producer's job to success. The trigger starts the caller's job.
+Wait up to ten minutes for the caller's cell to export its schedules. A producer run that
+completes before that export starts nothing. Then run the producer's job to success. The trigger
+starts the caller's job.
 
 Open either job's page and check the **Triggers** card. The caller's job shows an **Upstream**
 row naming the producer job; the producer's job shows a **Downstream** row naming the caller.

@@ -224,7 +224,10 @@ curl -i -X POST \
   "https://<host>/hibernation/<token>/teams/payments/queue/github-webhook/"
 ```
 
-Expect `202 Accepted`, and a build in the `payments` folder shortly after.
+Expect `202 Accepted`, then a build in the `payments` folder.
+
+A push of a built revision only pokes the job. The GitHub plugin polls, finds no change, and
+starts no build.
 
 ## Placement lifecycle
 
