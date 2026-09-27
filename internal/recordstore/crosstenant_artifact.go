@@ -68,7 +68,7 @@ func handleCrossTenantArtifactURL(ctx context.Context, deps CrossTenantDeps, req
 		}
 	}
 	if !found {
-		return CrossTenantResponse{Code: CodeInternal, Error: fmt.Sprintf("no artifact at path %q", req.Path)}, nil
+		return CrossTenantResponse{Code: CodeNotFound, Error: fmt.Sprintf("no artifact at path %q", req.Path)}, nil
 	}
 
 	signed, err := deps.Blob.SignedURL(ctx, blobKey, crossTenantArtifactURLTTL)
@@ -94,7 +94,7 @@ func checkCrossTenantArtifactGrant(ctx context.Context, deps CrossTenantDeps, re
 		return false, CrossTenantResponse{}, err
 	}
 	if !found {
-		return false, CrossTenantResponse{Code: CodeInternal,
+		return false, CrossTenantResponse{Code: CodeNotFound,
 			Error: fmt.Sprintf("unknown run_id %q", req.RunID)}, nil
 	}
 

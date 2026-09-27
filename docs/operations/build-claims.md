@@ -23,9 +23,6 @@ the store is enabled, `0` when it is not. The Jenkins plugin emits build events 
 claims only when the variable is `1`. A controller already running rolls once when the variable
 changes, because it is stamped on the pod template.
 
-The mite's loopback listener runs on every controller, gated or not. It answers no request when
-the plugin never calls it.
-
 ## Timeout budget
 
 Four hops carry a budget each. Every budget shrinks going inward, so the hop closest to the
@@ -43,8 +40,7 @@ The operator stamps the first two overrides together from its own `VARROA_CLAIM_
 value. Leave it unset and both containers use their built-in defaults, 5000 ms and 4500 ms. Set
 it and the operator stamps that value on the Jenkins container and the value minus 500 ms on the
 mite container. A value below 5000 ms is rejected. The operator stamps neither variable and logs
-a warning instead. A smaller value would push the mite budget to or below the gateway's 4 s
-default, breaking the shrink-inward rule.
+a warning instead, because a smaller value breaks the shrink-inward rule.
 
 Raise `VARROA_LEDGER_TIMEOUT_MS` only after raising `VARROA_CLAIM_TIMEOUT_MS` to match. Raising
 the gateway budget alone makes the mite answer `504` while the gateway is still waiting, which
@@ -67,17 +63,26 @@ and never starts a second build.
 |---|---|---|
 | `granted` | the ledger owns this run and assigned it a build number | apply the build number, start the build |
 | `duplicate` | the intent key already holds a different `run_id`, or the ledger recorded this run's start | cancel the queue item, log one `INFO` line |
-| `vetoed`, reason `NOT_READY` | the ledger is not ready to grant yet | retry on the backoff schedule |
-| `vetoed`, any other reason | the ledger refuses this run permanently | cancel the queue item, log a `WARNING` |
+| `vetoed` | a policy refused the claim | see the reason table |
 | empty, with a `code` | the hop that answered could not reach the next one | retry on the backoff schedule |
 | empty, with no `code` | not a claim answer | cancel the queue item, log a `WARNING` |
 
 A missing `decision` key counts as empty. The mite omits the key from every failure body.
 
-`duplicate` and `granted` are not the same outcome for a retried request. A retried request
-reads `granted` again when it carries the same `intent_key` and the same `run_id` as an earlier
-granted claim, and that run has not started. The ledger recognizes its own retried request.
-`duplicate` means the intent key belongs to a different run entirely, for example two triggers
+| Reason | Cause | Claimer action |
+|---|---|---|
+| `INVALID_KEY` | the key or the request does not parse | cancel |
+| `FENCED` | the cell holds no member of the tenant | cancel |
+| `CROSS_TENANT` | the trigger names a job of another tenant | cancel |
+| `NOT_READY` | the placement is missing or behind | retry |
+| `NOT_HOME` | a standby or a slot that is not the home | forward to the home slot |
+
+A cancel logs the `WARNING` `claim refused for job <job>, run <run_id>: <reason>: <message>`. The recorder
+logs each veto at `INFO` as `claim refused`, with `reason_code`, `tenant`, `run_id`, `job_path`,
+`cell`, and `message`. It counts each veto in `recorder_claims_vetoed_total`, labelled `reason`.
+
+A retried request reads `granted` again when it carries the same `intent_key` and the same `run_id` as an earlier
+granted claim, and that run has not started. A `duplicate` means the intent key belongs to a different run entirely, for example two triggers
 racing on the same commit. It also answers a repeat for a run whose start the ledger recorded.
 Only a queued item claims, so that repeat comes from a redelivered command. A redelivery that
 reaches another cell before the ledger records the start still reads `granted`.
@@ -85,9 +90,8 @@ reaches another cell before the ledger records the start still reads `granted`.
 A retried request from a new cell instance can carry a fresh build number. The ledger refreshes
 the number when the run never started, the repeat comes from a different cell instance, and the
 stored number is below that instance's next build number. A trigger lost to a cell roll
-therefore restarts under the same run identifier. The new cell reads its next build number from
-the ledger's watermark, and the repeat claim reports that number. The ledger then grants a
-number the cell can apply. The old number stays burned. A repeat from the same cell instance
+therefore restarts under the same run identifier and a number the new cell can apply. The old
+number stays burned. A repeat from the same cell instance
 keeps its number: that instance's counter passes the stored number only by running the build.
 The recorder drops a late `run.started` from the old cell for the old number and counts it in
 `recorder_ingest_superseded_start_total`.
@@ -102,8 +106,7 @@ different run already claimed it.
 The ledger grants a build number that is not yet used locally. The claimer reads the number back
 from Jenkins right after applying it. `NUMBER_CONFLICT` means that read-back found Jenkins
 already past the granted number. The counter advanced between the claim request and the number
-apply. A manual `Job.scheduleBuild2` call that bypassed the plugin in that window is one cause. A
-restore from a backup that replayed old build history in that window is another. An advance
+apply, for example through a manual `Job.scheduleBuild2` call or a backup restore. An advance
 before a first claim causes no conflict: the claim reports the counter as
 `jenkins_next_build_number`, and the ledger never grants a new number below it. Two repeat
 claims are the exceptions. One from the same cell instance answers the stored number while the
@@ -126,12 +129,11 @@ Symptoms to check for:
 - The gateway logs `claim answered unavailable` at `WARN` for each failed claim, with the
   controller and the error text.
 - The mite counters `varroa.mite.claims.failed` and `varroa.mite.claims.vetoed` rise.
-- Build events keep publishing normally as long as NATS itself is healthy. They queue in the
-  JetStream stream, so `recorder_ingest_backlog_msgs` and `recorder_ingest_backlog_bytes` (see
+- Build events queue in the JetStream stream while NATS is healthy, so `recorder_ingest_backlog_msgs` and `recorder_ingest_backlog_bytes` (see
   [Build records](build-records.md)) rise during the outage and drain once it recovers.
 
 A recorder back within the hour needs no action: the next retry reads `granted`. After one hour
-the claimer cancels the item and logs a `WARNING`. A cancelled trigger needs a new build request.
+the claimer cancels the item and logs a `WARNING` that names the last answer. A cancelled trigger needs a new build request.
 The backstop round marks its run `TRIGGER_FAILED`, reason `CLAIM_EXPIRED`, 75 minutes after
 acceptance. One round marks 500 runs at most and counts each in `recorder_claim_expired_total`. An item that waits that long before its first claim is
 marked too, and its real build later replaces the row.

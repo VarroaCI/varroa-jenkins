@@ -55,7 +55,7 @@ if (last != null) {
 }
 ```
 
-`lastSuccessful` returns `null` when the job has never succeeded.
+`lastSuccessful` returns `null` when the job has never succeeded. A refused grant fails the step.
 
 ### Copy an artifact from another tenant
 
@@ -149,8 +149,7 @@ names allowed to use it. A `job` glob matches the tenant's own job paths. A `loc
 the bare names of the tenant's own locks. Three metacharacters apply: `*` matches any characters
 except `/`, `**` crosses `/`, and `?` matches one character.
 
-An edit to `exports` takes one reconcile tick to reach the record store that enforces it. A caller
-may see the old grant for a few seconds after a save.
+An edit to `exports` reaches the record store that enforces it within one reconcile tick.
 
 An ungranted call fails with a message that starts "cross-tenant triggers go through Varroa."
 
@@ -225,10 +224,20 @@ varroa.lock(name: 'deploy-prod', timeout: 300) {
 }
 ```
 
-`deploy.sh` stores the highest token it has accepted for the target it protects, and refuses a
-lower token. A holder can lose its lock without knowing it, after a slow network partition. Its
-own token stays on any write it still sends, and the current holder's token is higher, so that late
-write is refused.
+`deploy.sh` stores the highest token it accepted and refuses a lower one. A holder can lose its
+lock without knowing it, after a network partition. Its late write carries the old, lower token,
+so the target refuses it.
+
+## Step failures
+
+A failed call fails its step with `<step>: <code>: <text>`.
+
+| Code | Cause |
+|---|---|
+| `UNAVAILABLE` | a hop did not answer |
+| `NOT_FOUND` | unknown run or artifact path |
+| `INTERNAL` | any other recorder fault |
+| a veto reason, for example `CROSS_TENANT` | a refusal; the text is the veto message |
 
 ## Timeout budgets
 

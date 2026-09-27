@@ -93,9 +93,11 @@ type CrossTenantRequest struct {
 // CrossTenantResponse is the reply body of a varroa.ledger.crosstenant
 // call. It is the union of every kind's reply fields (design.md D4).
 // Error and Code follow C1's rule: UNAVAILABLE when Postgres does not
-// answer, INTERNAL for any other fault, and no new code. ReasonCode and
-// Message carry a veto, which is never a server fault: a GrantEvaluator
-// veto, or INVALID_NAME for a lock name that is empty or holds a "/".
+// answer, and INTERNAL for any other fault. NOT_FOUND is the one added
+// code: the request names a run identifier or an artifact path the
+// recorder does not hold. ReasonCode and Message carry a veto, which is
+// never a server fault: a GrantEvaluator veto, or INVALID_NAME for a
+// lock name that is empty or holds a "/".
 type CrossTenantResponse struct {
 	Kind       string `json:"kind,omitempty"`
 	ReasonCode string `json:"reason_code,omitempty"`

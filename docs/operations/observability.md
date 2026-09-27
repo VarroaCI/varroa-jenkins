@@ -11,9 +11,9 @@ attribute. It reads 1 while the component holds a NATS connection and 0 while it
 does not. Alert on a sustained 0. A brief 0 after a credential rotation clears
 itself; see [Troubleshooting](troubleshooting.md). The counter `varroa.bus.permission_violations`, with the
 same attribute, counts publishes and subscribes the NATS server denied. A denied publish returns no
-error, so alert on any increase. The recorder also exports `recorder_fence_veto_total` and
-`recorder_job_home_changed_total`, and logs a refused claim's reason and tenant; see
-[Build claims](build-claims.md).
+error, so alert on any increase. The recorder also exports `recorder_fence_veto_total`,
+`recorder_claims_vetoed_total`, and `recorder_job_home_changed_total`, and logs each refused
+claim; see [Build claims](build-claims.md).
 
 ## Use activity history
 

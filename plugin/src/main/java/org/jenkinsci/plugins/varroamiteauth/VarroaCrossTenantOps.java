@@ -115,7 +115,10 @@ final class VarroaCrossTenantOps {
                 : client().crossTenantStatusByIntentKey(callerJobPath, intentKey);
         VarroaCrossTenantReply reply = VarroaCrossTenantReply.parse(resp);
         if (reply.isFailure()) {
-            throw new IllegalStateException("varroa: refresh failed (" + reply.code + ")");
+            throw new IllegalStateException("varroa.refresh: " + reply.describe());
+        }
+        if (!reply.reasonCode().isEmpty()) {
+            throw new IllegalStateException("varroa.refresh: " + reply.describeVeto());
         }
         return handleMap(reply, tenant, job, callerJobPath, intentKey);
     }

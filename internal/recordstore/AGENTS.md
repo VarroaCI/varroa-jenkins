@@ -223,8 +223,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   transaction opens; `allowAllFence` is the C1 default.
   `RegisterClaimResponder` subscribes `bus.LedgerClaimSubject` with
   queue group `recorder`. `handleClaim` (`ledger_responder.go`) logs a
-  vetoed decision at info level, once, naming only the reason code and
-  the tenant — never the request or response body (issue #666). A
+  vetoed decision at info level, once, as `claim refused` with
+  `reason_code`, `tenant`, `run_id`, `job_path`, `cell`, and `message`.
+  It never logs `params_digest`, `actor`, or `cause`. `ClaimMetrics`
+  (`ledger_claim_metrics.go`) counts every veto in
+  `recorder_claims_vetoed_total`, labelled `reason`, the decode-failure
+  `INVALID_KEY` included; a nil `*ClaimMetrics` counts nothing. A
   `duplicate` decision also marks the
   requesting run's own row `DUPLICATE` through `markDuplicateClaim`, in
   the same transaction and guarded on `status = 'QUEUED'` plus
@@ -263,9 +267,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   reaches them comes from a live member with a stale resolver cache. `FenceMetrics`
   holds `recorder_fence_veto_total`, labelled by reason; a
   `PlacementFence` built with a nil `*FenceMetrics` counts nothing.
-  `cmd/recorder` still constructs its `Ledger` with a nil `Fence`, so
-  `allowAllFence` stays live in production until a later task wires
-  `NewPlacementFence` in.
+  It counts fence vetoes only; `recorder_claims_vetoed_total` counts
+  every veto.
 - **Tenant purge responder** (`tenant_purge.go`) — `RegisterTenantPurgeResponder`
   subscribes `bus.TenantPurgeSubject` with queue group `recorder`. It answers
   the placement pass's request to delete one tenant's `job_schedules` rows
@@ -377,9 +380,13 @@ of the fleet's audit activity, once a controller becomes disposable.
   through `blob.Store.SignedURL`, mapping `blob.ErrUnsupported` to a message
   naming `recordStore.blobs.mode`. Every reply's `error`/`code` pair follows the
   claim path's rule: `UNAVAILABLE` for an unanswering Postgres, `INTERNAL` for
-  every other fault, through the shared `classifyDBError` (`ledger.go`).
+  every other fault, through the shared `classifyDBError` (`ledger.go`). One
+  code is added: `NOT_FOUND` (`CodeNotFound`) answers an unknown `run_id` on
+  `status` and both artifact kinds, and an `artifact_url` path the run did not
+  record. A blob-mode refusal and a malformed request stay `INTERNAL`.
   `CrossTenantMetrics` (`crosstenant_metrics.go`) holds
-  `recorder_crosstenant_requests_total` (labelled `kind`/`outcome`) and
+  `recorder_crosstenant_requests_total` (labelled `kind`/`outcome`, the
+  outcome one of `allowed`, `denied`, `error`, or `not_found`) and
   `recorder_crosstenant_grant_denied_total` (labelled `reason`, from
   `crossTenantGrantDenialReason`'s match on the veto message's added
   clause, since `GrantResult`'s shape stays fixed to the `FenceResult`

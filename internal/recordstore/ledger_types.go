@@ -83,4 +83,8 @@ const (
 	// CodeInternal means a server fault other than an unreachable
 	// dependency.
 	CodeInternal = "INTERNAL"
+	// CodeNotFound means the request names a record the recorder does
+	// not hold: an unknown run identifier or an artifact path the run
+	// did not record. Only the cross-tenant responder answers it.
+	CodeNotFound = "NOT_FOUND"
 )

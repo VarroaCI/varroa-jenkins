@@ -324,6 +324,20 @@ public class VarroaLockStepTest {
     // ---- recorder vetoes ----
 
     @Test
+    public void aFailedAcquireShowsTheRecorderCodeAndText() throws Exception {
+        FakeLockHandler handler = new FakeLockHandler();
+        handler.failOnAcquire("alpha/deploy-prod", "INTERNAL", "acquire fleet lock: boom");
+        installClient(handler);
+
+        WorkflowJob p = newPipeline(
+                "node('varroa-tenant-alpha') { varroa.lock(name: 'deploy-prod') { echo 'unreachable' } }");
+        WorkflowRun run = buildSync(p, "run-1", Result.FAILURE);
+        j.assertLogContains("varroaLock: INTERNAL: acquire fleet lock: boom", run);
+        j.assertLogNotContains("did not answer", run);
+        j.assertLogNotContains("unreachable", run);
+    }
+
+    @Test
     public void aPermanentAcquireVetoFailsTheBuildWithTheRecordersMessage() throws Exception {
         FakeLockHandler handler = new FakeLockHandler();
         handler.vetoOnAcquire("beta/deploy-prod", "CROSS_TENANT", Integer.MAX_VALUE);
@@ -332,8 +346,7 @@ public class VarroaLockStepTest {
         WorkflowJob p = newPipeline(
                 "node('varroa-tenant-alpha') { varroa.lock(name: 'deploy-prod', tenant: 'beta') { echo 'unreachable' } }");
         WorkflowRun run = buildSync(p, "run-1", Result.FAILURE);
-        j.assertLogContains("CROSS_TENANT", run);
-        j.assertLogContains("vetoed by the fake recorder", run);
+        j.assertLogContains("varroaLock: CROSS_TENANT: vetoed by the fake recorder (lock beta/deploy-prod)", run);
         j.assertLogNotContains("unreachable", run);
         assertEquals("a permanent veto must not poll again", 1, handler.acquireCount("beta/deploy-prod"));
     }
@@ -509,6 +522,8 @@ public class VarroaLockStepTest {
             boolean neverGrant;
             String vetoOnAcquire;
             int vetoOnAcquireTimes;
+            String failOnAcquireCode;
+            String failOnAcquireError;
             String vetoOnRenew;
             boolean loseOnRenew;
             boolean releasingOnRenew;
@@ -533,6 +548,12 @@ public class VarroaLockStepTest {
         void vetoOnAcquire(String name, String code, int times) {
             state(name).vetoOnAcquire = code;
             state(name).vetoOnAcquireTimes = times;
+        }
+
+        /** Answers every acquire of {@code name} with the failure {@code code} and {@code error}. */
+        void failOnAcquire(String name, String code, String error) {
+            state(name).failOnAcquireCode = code;
+            state(name).failOnAcquireError = error;
         }
 
         void vetoOnRenew(String name, String code) {
@@ -593,7 +614,10 @@ public class VarroaLockStepTest {
                 switch (kind) {
                     case "lock_acquire":
                         st.acquireCount.incrementAndGet();
-                        if (st.vetoOnAcquire != null && st.vetoOnAcquireTimes > 0) {
+                        if (st.failOnAcquireCode != null) {
+                            out.put("code", st.failOnAcquireCode);
+                            out.put("error", st.failOnAcquireError);
+                        } else if (st.vetoOnAcquire != null && st.vetoOnAcquireTimes > 0) {
                             st.vetoOnAcquireTimes--;
                             out.put("reason_code", st.vetoOnAcquire);
                             out.put("message", "vetoed by the fake recorder");

@@ -22,6 +22,11 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntFunction;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
+import java.util.logging.SimpleFormatter;
 
 import org.junit.After;
 import org.junit.Before;
@@ -203,6 +208,98 @@ public class VarroaClaimQueueTest {
         awaitTrue(() -> isCancelled(item), "the item to be cancelled");
         assertEquals("a FENCED veto must not retry", 1, calls.get());
         assertFalse("a veto must write no DuplicateRegistry entry", DuplicateRegistry.get().contains("run-1"));
+    }
+
+    /**
+     * Captures every formatted line the claimer logs at {@code level} or
+     * above until the test ends.
+     */
+    private List<String> captureClaimQueueLog(Level level) {
+        List<String> lines = new CopyOnWriteArrayList<>();
+        Logger logger = Logger.getLogger(VarroaClaimQueue.class.getName());
+        SimpleFormatter formatter = new SimpleFormatter();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                if (record.getLevel().intValue() >= level.intValue()) {
+                    lines.add(record.getLevel() + " " + formatter.formatMessage(record));
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        logger.addHandler(handler);
+        logHandlers.add(handler);
+        return lines;
+    }
+
+    private final List<Handler> logHandlers = new CopyOnWriteArrayList<>();
+
+    @After
+    public void removeLogHandlers() {
+        Logger logger = Logger.getLogger(VarroaClaimQueue.class.getName());
+        for (Handler handler : logHandlers) {
+            logger.removeHandler(handler);
+        }
+    }
+
+    @Test
+    public void aRefusedClaimLogsTheJobTheRunTheReasonAndTheMessage() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("refused-job");
+        Queue.Item item = scheduleItem(project);
+        List<String> lines = captureClaimQueueLog(Level.WARNING);
+        responder = n -> new Reply(200, "{\"decision\":\"vetoed\",\"reason_code\":\"FENCED\","
+                + "\"message\":\"cell cell-old holds no member of tenant alpha\"}");
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, millis -> { });
+        queue.offer(item, project);
+
+        awaitTrue(() -> isCancelled(item), "the item to be cancelled");
+        awaitTrue(() -> !lines.isEmpty(), "the refusal line");
+        assertEquals("WARNING VarroaClaimQueue: claim refused for job refused-job, run run-1: "
+                + "FENCED: cell cell-old holds no member of tenant alpha", lines.get(0));
+    }
+
+    @Test
+    public void anUnknownDecisionLogsTheUnknownCode() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("unknown-refused-job");
+        Queue.Item item = scheduleItem(project);
+        List<String> lines = captureClaimQueueLog(Level.WARNING);
+        responder = n -> new Reply(200, "{\"request_id\":\"req-1\"}");
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, millis -> { });
+        queue.offer(item, project);
+
+        awaitTrue(() -> isCancelled(item), "the item to be cancelled");
+        awaitTrue(() -> !lines.isEmpty(), "the refusal line");
+        assertTrue(lines.get(0), lines.get(0).startsWith(
+                "WARNING VarroaClaimQueue: claim refused for job unknown-refused-job, run run-1: UNKNOWN"));
+    }
+
+    @Test
+    public void theGiveUpLineNamesTheLastAnswer() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("give-up-job");
+        Queue.Item item = scheduleItem(project);
+        List<String> lines = captureClaimQueueLog(Level.WARNING);
+        responder = n -> new Reply(200, "{\"decision\":\"vetoed\",\"reason_code\":\"NOT_READY\","
+                + "\"message\":\"tenant alpha has no placement row\"}");
+
+        long[] clockMillis = {0L};
+        VarroaClaimQueue.Sleeper sleeper = millis -> clockMillis[0] += millis;
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), () -> clockMillis[0], sleeper);
+        queue.offer(item, project);
+
+        awaitTrue(() -> isCancelled(item), "the item to be cancelled at the one-hour budget");
+        awaitTrue(() -> !lines.isEmpty(), "the give-up line");
+        String line = lines.get(lines.size() - 1);
+        assertTrue(line, line.contains("giving up on job give-up-job after one hour"));
+        assertTrue(line, line.endsWith("last answer NOT_READY: tenant alpha has no placement row"));
     }
 
     @Test

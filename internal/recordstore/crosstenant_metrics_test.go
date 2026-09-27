@@ -28,7 +28,7 @@ func TestCrossTenantGrantDenialReason(t *testing.T) {
 	}
 }
 
-// TestCrossTenantRequestOutcome covers the three outcome values.
+// TestCrossTenantRequestOutcome covers the four outcome values.
 func TestCrossTenantRequestOutcome(t *testing.T) {
 	tests := []struct {
 		resp CrossTenantResponse
@@ -37,6 +37,7 @@ func TestCrossTenantRequestOutcome(t *testing.T) {
 		{CrossTenantResponse{}, crossTenantOutcomeAllowed},
 		{CrossTenantResponse{ReasonCode: ReasonCrossTenant}, crossTenantOutcomeDenied},
 		{CrossTenantResponse{Code: CodeInternal}, crossTenantOutcomeError},
+		{CrossTenantResponse{Code: CodeNotFound}, crossTenantOutcomeNotFound},
 	}
 	for _, tc := range tests {
 		if got := crossTenantRequestOutcome(tc.resp); got != tc.want {

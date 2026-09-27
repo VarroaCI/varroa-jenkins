@@ -106,7 +106,10 @@ public class VarroaArtifactStep extends Step {
             VarroaCrossTenantReply reply = VarroaCrossTenantReply.parse(
                     VarroaCrossTenantOps.client().crossTenantArtifactUrl(callerJobPath, runId, path));
             if (reply.isFailure()) {
-                throw new AbortException("varroaArtifact: the recorder did not answer (" + reply.code + ")");
+                throw new AbortException("varroaArtifact: " + reply.describe());
+            }
+            if (!reply.reasonCode().isEmpty()) {
+                throw new AbortException("varroaArtifact: " + reply.describeVeto());
             }
             String url = reply.getString("url", "");
             if (url.isEmpty()) {

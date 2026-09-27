@@ -202,7 +202,11 @@ the root AGENTS.md greenfield rule.
   empty decision, then reads `code`**: the mite encodes every failure with no `decision`
   key, so a body of `request_id`, `error`, and `code` retries on the ladder. An empty
   decision with no `code` cancels. A test fixture for a failure body carries no
-  `decision` key, the shape the mite sends.
+  `decision` key, the shape the mite sends. A refusal logs one `WARNING`,
+  `claim refused for job <path>, run <id>: <reason>: <text>`: the reason is the
+  `reason_code`, else the `code`, else `UNKNOWN`, and the text is the `message`,
+  else the `error`. The one-hour `giving up` line ends with `last answer`, the newest
+  answer that did not grant, from a claim or a forward.
 - **Intra-tenant trigger forwarding** (a job pair split over two tenant slots keeps
   working): `VarroaHomeCache.java` holds the newest answer of `GET /v1/homes`, keyed
   by tenant, with the slot this cell holds, the role, and the tenant's job-path to
@@ -276,7 +280,15 @@ the root AGENTS.md greenfield rule.
   1000) and `VARROA_CROSSTENANT_READ_TIMEOUT_MS` (default 10000, warns once at or below
   the mite hop's 9500 ms default); `VarroaCrossTenantReply.java` parses a reply into a
   failure code or fields, mapping a transport failure to the same `UNAVAILABLE` code a
-  structured reply carries. `Varroa.groovy` hands the lock step a closure of its own that
+  structured reply carries, with the transport error text as its message. Every step
+  failure reads `<step>: <code>: <text>` through `describe()`, and every veto reads
+  `<step>: <reason_code>: <message>` through `describeVeto()`. `varroaLastSuccessful` and
+  `varroaArtifact` test `reason_code` before they read a field, so a veto never answers
+  `null` or a missing URL. A waiting `varroaBuild` fails on a permanent veto on a status
+  poll (`VarroaCrossTenantReply.isPermanentVeto`: every reason but `NOT_READY` and
+  `THROTTLED`) and polls again on a retryable one; `refresh()` fails on any veto. A
+  `NOT_FOUND` poll by run id fails the step: a reply names a run id only once its
+  `run_intents` row exists. Every other failure code polls again. `Varroa.groovy` hands the lock step a closure of its own that
   calls the caller's body, never the caller's closure itself; a nested `varroa.lock` block
   resumes correctly only through that wrapper, the same shape docker-workflow uses for
   `inside`. `VarroaUpstreamTrigger.java` (`Trigger<Job<?, ?>>`, `@Symbol("varroaUpstream")`)

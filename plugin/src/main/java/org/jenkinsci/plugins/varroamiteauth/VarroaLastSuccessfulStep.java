@@ -90,8 +90,12 @@ public class VarroaLastSuccessfulStep extends Step {
             VarroaCrossTenantReply reply = VarroaCrossTenantReply.parse(
                     VarroaCrossTenantOps.client().crossTenantLastSuccessful(callerJobPath, targetTenant, jobPath));
             if (reply.isFailure()) {
-                throw new AbortException(
-                        "varroaLastSuccessful: the recorder did not answer (" + reply.code + ")");
+                throw new AbortException("varroaLastSuccessful: " + reply.describe());
+            }
+            // A veto carries no run_id. Without this test the step answers
+            // null, and a pipeline reads a refused grant as no successful run.
+            if (!reply.reasonCode().isEmpty()) {
+                throw new AbortException("varroaLastSuccessful: " + reply.describeVeto());
             }
             String runId = reply.getString("run_id", "");
             if (runId.isEmpty()) {

@@ -33,7 +33,7 @@ func handleCrossTenantStatus(ctx context.Context, deps CrossTenantDeps, req Cros
 		return CrossTenantResponse{}, err
 	}
 	if !found {
-		return CrossTenantResponse{Code: CodeInternal, Error: fmt.Sprintf("unknown run_id %q", runID)}, nil
+		return CrossTenantResponse{Code: CodeNotFound, Error: fmt.Sprintf("unknown run_id %q", runID)}, nil
 	}
 
 	grant, err := deps.Evaluator.Check(ctx, GrantInput{

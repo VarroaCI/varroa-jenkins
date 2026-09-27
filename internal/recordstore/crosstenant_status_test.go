@@ -3,6 +3,7 @@ package recordstore
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -131,6 +132,28 @@ func TestCrossTenantStatus_UnknownIntentKeyAnswersPending(t *testing.T) {
 	}
 	if resp.RunID != "" {
 		t.Fatalf("run_id: got %q, want empty", resp.RunID)
+	}
+}
+
+// TestCrossTenantStatus_UnknownRunIDAnswersNotFound asserts a run_id with
+// no record answers NOT_FOUND with an error that names the identifier.
+func TestCrossTenantStatus_UnknownRunIDAnswersNotFound(t *testing.T) {
+	deps, _ := statusTestDeps(t)
+	runID := newTestUUIDv7String()
+
+	resp, err := handleCrossTenantStatus(context.Background(), deps, CrossTenantRequest{
+		Cluster:      testCluster,
+		CallerTenant: "alpha",
+		RunID:        runID,
+	})
+	if err != nil {
+		t.Fatalf("handleCrossTenantStatus: %v", err)
+	}
+	if resp.Code != CodeNotFound {
+		t.Fatalf("code: got %q, want %q", resp.Code, CodeNotFound)
+	}
+	if !strings.Contains(resp.Error, runID) {
+		t.Fatalf("error: got %q, want it to name %s", resp.Error, runID)
 	}
 }
 

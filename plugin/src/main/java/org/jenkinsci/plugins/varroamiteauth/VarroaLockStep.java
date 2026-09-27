@@ -208,13 +208,13 @@ public class VarroaLockStep extends Step {
                                 VarroaPollPolicy.LOCK_LEASE_SECONDS, isoInstant(acquireStartedAtMillis)));
                 if (reply.isFailure()) {
                     getContext().onFailure(
-                            new AbortException("varroaLock: the recorder did not answer (" + reply.code + ")"));
+                            new AbortException("varroaLock: " + reply.describe()));
                     return;
                 }
                 String reasonCode = reply.getString("reason_code", "");
                 if (isPermanentVeto(reasonCode)) {
                     releaseLock();
-                    getContext().onFailure(vetoFailure(reply, reasonCode));
+                    getContext().onFailure(vetoFailure(reply));
                     return;
                 }
                 ownerTenant = reply.getString("tenant", tenantArg);
@@ -276,7 +276,7 @@ public class VarroaLockStep extends Step {
                 if (isPermanentVeto(reasonCode)) {
                     // A revoked grant or a fenced cell never renews again,
                     // so the hold ends here, the same as a lost lease.
-                    endHold(vetoFailure(reply, reasonCode));
+                    endHold(vetoFailure(reply));
                     return;
                 }
                 String state = reply.getString("state", "");
@@ -439,9 +439,8 @@ public class VarroaLockStep extends Step {
             }
         }
 
-        private AbortException vetoFailure(VarroaCrossTenantReply reply, String reasonCode) {
-            return new AbortException("varroaLock: the recorder refused " + displayName() + " ("
-                    + reasonCode + "): " + reply.getString("message", ""));
+        private AbortException vetoFailure(VarroaCrossTenantReply reply) {
+            return new AbortException("varroaLock: " + reply.describeVeto() + " (lock " + displayName() + ")");
         }
 
         /** The lock as a log line names it: the owner tenant, when known, then the bare name. */

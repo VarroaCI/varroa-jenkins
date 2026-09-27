@@ -178,6 +178,7 @@ public class VarroaClaimQueue {
         }
         long deadline = clock.nowMillis() + LIFETIME_MILLIS;
         int attempt = 0;
+        LastAnswer last = new LastAnswer();
         while (true) {
             attempt++;
             IntentKey.Result derived = IntentKey.derive(item, job, action);
@@ -187,17 +188,17 @@ public class VarroaClaimQueue {
 
             OptionalInt home = homeCache.forwardSlotFor(job.getFullName());
             if (home.isPresent()) {
-                if (forwardOnce(item, job, action, derived, home.getAsInt())) {
+                if (forwardOnce(item, job, action, derived, home.getAsInt(), last)) {
                     return;
                 }
-            } else if (claimOnce(item, job, action, derived, attempt)) {
+            } else if (claimOnce(item, job, action, derived, attempt, last)) {
                 return;
             }
 
             if (clock.nowMillis() >= deadline) {
                 LOGGER.log(Level.WARNING,
-                        "VarroaClaimQueue: giving up on job {0} after one hour; home slot {1}, run {2}",
-                        new Object[] {job.getFullName(), homeSlotLabel(job), action.getRunId()});
+                        "VarroaClaimQueue: giving up on job {0} after one hour; home slot {1}, run {2}; last answer {3}",
+                        new Object[] {job.getFullName(), homeSlotLabel(job), action.getRunId(), last.text});
                 cancel(item);
                 return;
             }
@@ -220,10 +221,13 @@ public class VarroaClaimQueue {
      * the one-hour budget bounds a repeat.
      */
     private boolean claimOnce(Queue.Item item, Job<?, ?> job, VarroaIntentAction action,
-            IntentKey.Result derived, int attempt) {
+            IntentKey.Result derived, int attempt, LastAnswer last) {
         JSONObject body = buildRequestBody(item, job, action, derived, attempt);
         MiteLoopbackClient.Response resp = client.post(CLAIM_PATH, body.toString());
         Decision decision = parseDecision(resp);
+        if (decision.kind != Kind.GRANTED) {
+            last.text = decision.describe();
+        }
 
         switch (decision.kind) {
             case GRANTED:
@@ -245,14 +249,15 @@ public class VarroaClaimQueue {
             case VETOED_NOT_HOME:
                 homeCache.refresh();
                 OptionalInt refreshed = homeCache.forwardSlotFor(job.getFullName());
-                return refreshed.isPresent() && forwardOnce(item, job, action, derived, refreshed.getAsInt());
+                return refreshed.isPresent() && forwardOnce(item, job, action, derived, refreshed.getAsInt(), last);
             case VETOED_NOT_READY:
             case RETRY:
                 return false;
             case VETOED_OTHER:
             case UNKNOWN:
             default:
-                LOGGER.log(Level.WARNING, "VarroaClaimQueue: claim refused for run {0}", action.getRunId());
+                LOGGER.log(Level.WARNING, "VarroaClaimQueue: claim refused for job {0}, run {1}: {2}",
+                        new Object[] {job.getFullName(), action.getRunId(), decision.describe()});
                 cancel(item);
                 return true;
         }
@@ -272,14 +277,15 @@ public class VarroaClaimQueue {
      * one minute reach one ledger row.
      */
     private boolean forwardOnce(Queue.Item item, Job<?, ?> job, VarroaIntentAction action,
-            IntentKey.Result derived, int homeSlot) {
+            IntentKey.Result derived, int homeSlot, LastAnswer last) {
         String jobPath = job.getFullName();
         String tenant = VarroaHomeCache.tenantOf(jobPath);
         MiteLoopbackClient.Response resp = client.crossTenantBuild(jobPath, action.getRunId(),
                 FORWARD_SEQ, tenant, VarroaHomeCache.pathBelowTenant(jobPath),
                 parametersOf(item), derived.intentKey);
         VarroaCrossTenantReply reply = VarroaCrossTenantReply.parse(resp);
-        if (reply.isFailure() || !reply.getString("reason_code", "").isEmpty()) {
+        if (reply.isFailure() || !reply.reasonCode().isEmpty()) {
+            last.text = reply.isFailure() ? reply.describe() : reply.describeVeto();
             LOGGER.log(Level.FINE,
                     "VarroaClaimQueue: the forward of job {0} to slot {1} failed; retrying",
                     new Object[] {jobPath, homeSlot});
@@ -370,30 +376,72 @@ public class VarroaClaimQueue {
         GRANTED, DUPLICATE, VETOED_NOT_READY, VETOED_NOT_HOME, VETOED_OTHER, RETRY, UNKNOWN
     }
 
+    /**
+     * The newest answer that did not grant a claim, as the give-up line
+     * shows it. One claim runs on one thread, so the field needs no lock.
+     */
+    private static final class LastAnswer {
+        String text = "none";
+    }
+
     private static final class Decision {
         final Kind kind;
         final long buildNumber;
+        /** The failure code of a reply with no decision, or empty. */
+        final String code;
+        final String reasonCode;
+        final String message;
+        final String error;
 
         Decision(Kind kind, long buildNumber) {
+            this(kind, buildNumber, "", "", "", "");
+        }
+
+        Decision(Kind kind, long buildNumber, String code, String reasonCode, String message, String error) {
             this.kind = kind;
             this.buildNumber = buildNumber;
+            this.code = code;
+            this.reasonCode = reasonCode;
+            this.message = message;
+            this.error = error;
+        }
+
+        /** Builds a decision of {@code kind} that carries the reply's own reason and text fields. */
+        static Decision of(Kind kind, long buildNumber, Map<String, Object> body) {
+            return new Decision(kind, buildNumber, stringOf(body.get("code")), stringOf(body.get("reason_code")),
+                    stringOf(body.get("message")), stringOf(body.get("error")));
+        }
+
+        /**
+         * The answer as {@code <reason>: <text>}. The reason is the reason
+         * code, else the failure code, else {@code UNKNOWN}. The text is the
+         * message, else the error. An empty text leaves the reason alone.
+         */
+        String describe() {
+            String reason = !reasonCode.isEmpty() ? reasonCode : !code.isEmpty() ? code : "UNKNOWN";
+            String text = !message.isEmpty() ? message : error;
+            return text == null || text.isEmpty() ? reason : reason + ": " + text;
+        }
+
+        private static String stringOf(Object v) {
+            return v == null ? "" : String.valueOf(v);
         }
     }
 
     @SuppressWarnings("unchecked")
     private Decision parseDecision(MiteLoopbackClient.Response resp) {
         if (resp.isTransportFailure()) {
-            return new Decision(Kind.RETRY, 0);
+            return new Decision(Kind.RETRY, 0, VarroaCrossTenantReply.CODE_UNAVAILABLE, "", "", resp.error);
         }
         Map<String, Object> body;
         try {
             Object parsed = new JsonSlurper().parseText(resp.body);
             if (!(parsed instanceof Map)) {
-                return new Decision(Kind.UNKNOWN, 0);
+                return new Decision(Kind.UNKNOWN, 0, "", "", "", "the reply is not a JSON object");
             }
             body = (Map<String, Object>) parsed;
         } catch (Exception e) {
-            return new Decision(Kind.UNKNOWN, 0);
+            return new Decision(Kind.UNKNOWN, 0, "", "", "", "the reply did not decode");
         }
 
         // The mite encodes an empty decision with omitempty, so a failure
@@ -409,20 +457,20 @@ public class VarroaClaimQueue {
             case DECISION_VETOED:
                 String reason = String.valueOf(body.get("reason_code"));
                 if (REASON_NOT_READY.equals(reason)) {
-                    return new Decision(Kind.VETOED_NOT_READY, 0);
+                    return Decision.of(Kind.VETOED_NOT_READY, 0, body);
                 }
                 if (REASON_NOT_HOME.equals(reason)) {
-                    return new Decision(Kind.VETOED_NOT_HOME, 0);
+                    return Decision.of(Kind.VETOED_NOT_HOME, 0, body);
                 }
-                return new Decision(Kind.VETOED_OTHER, 0);
+                return Decision.of(Kind.VETOED_OTHER, 0, body);
             case "":
                 Object code = body.get("code");
                 if (code != null && !String.valueOf(code).isEmpty()) {
-                    return new Decision(Kind.RETRY, 0);
+                    return Decision.of(Kind.RETRY, 0, body);
                 }
-                return new Decision(Kind.UNKNOWN, 0);
+                return Decision.of(Kind.UNKNOWN, 0, body);
             default:
-                return new Decision(Kind.UNKNOWN, 0);
+                return new Decision(Kind.UNKNOWN, 0, "", "", "", "unknown decision " + decision);
         }
     }
 

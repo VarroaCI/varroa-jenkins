@@ -134,6 +134,10 @@ func run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("register fence metrics: %w", err)
 	}
 	ledger := recordstore.NewLedger(pool, recordstore.NewPlacementFence(pool, fenceMetrics))
+	claimMetrics, err := recordstore.NewClaimMetrics()
+	if err != nil {
+		return fmt.Errorf("register claim metrics: %w", err)
+	}
 
 	actionMetrics, err := recordstore.NewActionMetrics()
 	if err != nil {
@@ -216,7 +220,7 @@ func run(ctx context.Context, cfg Config) error {
 		return recordstore.RunActivityIngestConsumer(ctx, busConn, activityIngester, activityMetrics, cfg.RetentionActivity, logger)
 	}
 	responderFn := func(ctx context.Context) error {
-		sub, err := recordstore.RegisterClaimResponder(busConn, ledger, logger)
+		sub, err := recordstore.RegisterClaimResponder(busConn, ledger, claimMetrics, logger)
 		if err != nil {
 			return err
 		}

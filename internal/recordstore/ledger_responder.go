@@ -18,14 +18,14 @@ const claimQueueGroup = "recorder"
 const claimTimeout = 10 * time.Second
 
 // RegisterClaimResponder subscribes ledger to bus.LedgerClaimSubject with
-// queue group "recorder". The returned Sub stops the subscription when
-// unsubscribed.
-func RegisterClaimResponder(conn *bus.Conn, ledger *Ledger, logger *slog.Logger) (*bus.Sub, error) {
+// queue group "recorder". metrics may be nil. The returned Sub stops the
+// subscription when unsubscribed.
+func RegisterClaimResponder(conn *bus.Conn, ledger *Ledger, metrics *ClaimMetrics, logger *slog.Logger) (*bus.Sub, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	handler := func(data []byte) []byte {
-		return handleClaim(logger, ledger, data)
+		return handleClaim(logger, ledger, metrics, data)
 	}
 	return conn.SubscribeRequest(bus.LedgerClaimSubject, claimQueueGroup, handler)
 }
@@ -33,11 +33,12 @@ func RegisterClaimResponder(conn *bus.Conn, ledger *Ledger, logger *slog.Logger)
 // handleClaim decodes a ClaimRequest, runs it against ledger, and encodes
 // the ClaimResponse. A body the decoder rejects answers vetoed with
 // reason_code=INVALID_KEY, because a request the recorder cannot read
-// carries no valid key either.
-func handleClaim(logger *slog.Logger, ledger *Ledger, data []byte) []byte {
+// carries no valid key either. Every veto counts once in metrics.
+func handleClaim(logger *slog.Logger, ledger *Ledger, metrics *ClaimMetrics, data []byte) []byte {
 	var req ClaimRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		logger.Warn("claim request decode failed", "error", err)
+		metrics.addVeto(context.Background(), ReasonInvalidKey)
 		resp, _ := json.Marshal(ClaimResponse{
 			Decision:   DecisionVetoed,
 			ReasonCode: ReasonInvalidKey,
@@ -51,10 +52,17 @@ func handleClaim(logger *slog.Logger, ledger *Ledger, data []byte) []byte {
 
 	resp := ledger.Claim(ctx, req)
 	if resp.Decision == DecisionVetoed {
-		// Log the reason code and tenant for a refused claim, once per
-		// refusal. Log no other request or response field, so the log
-		// never carries the payload body.
-		logger.Info("claim refused", "reason_code", resp.ReasonCode, "tenant", req.Tenant)
+		metrics.addVeto(ctx, resp.ReasonCode)
+		// The line names the run, the job, and the cell, so an operator
+		// can find the refused build. It leaves out the params digest,
+		// the actor, and the cause, so the log never carries the payload.
+		logger.Info("claim refused",
+			"reason_code", resp.ReasonCode,
+			"tenant", req.Tenant,
+			"run_id", req.RunID,
+			"job_path", req.JobPath,
+			"cell", req.Cell,
+			"message", resp.Message)
 	}
 	out, err := json.Marshal(resp)
 	if err != nil {

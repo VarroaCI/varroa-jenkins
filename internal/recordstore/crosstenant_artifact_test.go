@@ -83,6 +83,61 @@ func TestCrossTenantArtifactURL_SignsStoredKeyForFixedLifetime(t *testing.T) {
 	}
 }
 
+// TestCrossTenantArtifactURL_MissingPathAnswersNotFound asserts a path the
+// run did not record answers NOT_FOUND with an error that names the path.
+func TestCrossTenantArtifactURL_MissingPathAnswersNotFound(t *testing.T) {
+	deps, db := statusTestDeps(t)
+	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
+	runID := seedCrossTenantRun(t, deps.Pool, "alpha", "alpha/release")
+	seedCrossTenantArtifact(t, db, runID, "artifacts/alpha/release/build.log")
+	deps.Blob = &fakeCrossTenantBlobSigner{url: "https://signed.example/build.log"}
+
+	resp, err := handleCrossTenantArtifactURL(context.Background(), deps, CrossTenantRequest{
+		Cluster:      testCluster,
+		Namespace:    "ns-alpha",
+		Cell:         "cell-alpha",
+		CallerTenant: "alpha",
+		RunID:        runID,
+		Path:         "does/not/exist",
+	})
+	if err != nil {
+		t.Fatalf("handleCrossTenantArtifactURL: %v", err)
+	}
+	if resp.Code != CodeNotFound {
+		t.Fatalf("code: got %q, want %q", resp.Code, CodeNotFound)
+	}
+	if resp.Error != `no artifact at path "does/not/exist"` {
+		t.Fatalf("error: got %q", resp.Error)
+	}
+}
+
+// TestCrossTenantArtifactList_UnknownRunIDAnswersNotFound asserts both
+// artifact kinds answer NOT_FOUND for a run_id with no record.
+func TestCrossTenantArtifactList_UnknownRunIDAnswersNotFound(t *testing.T) {
+	deps, _ := statusTestDeps(t)
+	req := CrossTenantRequest{
+		Cluster:      testCluster,
+		CallerTenant: "alpha",
+		RunID:        newTestUUIDv7String(),
+		Path:         crossTenantTestArtifactPath,
+	}
+	for name, handler := range map[string]func(context.Context, CrossTenantDeps, CrossTenantRequest) (CrossTenantResponse, error){
+		"artifact_list": handleCrossTenantArtifactList,
+		"artifact_url":  handleCrossTenantArtifactURL,
+	} {
+		resp, err := handler(context.Background(), deps, req)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if resp.Code != CodeNotFound {
+			t.Fatalf("%s code: got %q, want %q", name, resp.Code, CodeNotFound)
+		}
+		if !strings.Contains(resp.Error, req.RunID) {
+			t.Fatalf("%s error: got %q, want it to name the run_id", name, resp.Error)
+		}
+	}
+}
+
 // TestCrossTenantArtifactURL_PgblobAnswersBlobsModeError covers task
 // 3.7's third acceptance: pgblob answers an error naming
 // recordStore.blobs.mode.

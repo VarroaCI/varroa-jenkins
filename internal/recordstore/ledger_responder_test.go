@@ -43,7 +43,7 @@ func TestClaimResponderIntegration(t *testing.T) {
 	t.Cleanup(conn.Close)
 
 	ledger := NewLedger(pool, nil)
-	sub, err := RegisterClaimResponder(conn, ledger, nil)
+	sub, err := RegisterClaimResponder(conn, ledger, nil, nil)
 	if err != nil {
 		t.Fatalf("register claim responder: %v", err)
 	}

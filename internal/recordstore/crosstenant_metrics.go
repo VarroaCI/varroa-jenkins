@@ -37,11 +37,12 @@ func NewCrossTenantMetrics() (*CrossTenantMetrics, error) {
 	return &CrossTenantMetrics{requests: requests, grantDenied: grantDenied}, nil
 }
 
-// The three recorder_crosstenant_requests_total outcome values.
+// The four recorder_crosstenant_requests_total outcome values.
 const (
-	crossTenantOutcomeAllowed = "allowed"
-	crossTenantOutcomeDenied  = "denied"
-	crossTenantOutcomeError   = "error"
+	crossTenantOutcomeAllowed  = "allowed"
+	crossTenantOutcomeDenied   = "denied"
+	crossTenantOutcomeError    = "error"
+	crossTenantOutcomeNotFound = "not_found"
 )
 
 // addRequest counts one request, labelled by kind and outcome. A nil
@@ -104,10 +105,14 @@ func crossTenantGrantDenialReason(message string) string {
 }
 
 // crossTenantRequestOutcome classifies resp for the requests_total
-// outcome label: error when a server fault set Code, denied when a
-// placement or grant veto set ReasonCode, allowed otherwise.
+// outcome label: not_found when Code is NOT_FOUND, error when a server
+// fault set any other Code, denied when a placement or grant veto set
+// ReasonCode, allowed otherwise. A missing record is a caller mistake,
+// so it stays out of the error rate.
 func crossTenantRequestOutcome(resp CrossTenantResponse) string {
 	switch {
+	case resp.Code == CodeNotFound:
+		return crossTenantOutcomeNotFound
 	case resp.Code != "":
 		return crossTenantOutcomeError
 	case resp.ReasonCode != "":

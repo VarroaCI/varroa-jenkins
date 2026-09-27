@@ -155,13 +155,11 @@ public class VarroaBuildStep extends Step {
                     VarroaCrossTenantOps.client().crossTenantBuild(
                             callerJobPath, callerRunId, seq, targetTenant, jobPath, params, ""));
             if (reply.isFailure()) {
-                getContext().onFailure(new AbortException(
-                        "varroaBuild: the recorder did not answer (" + reply.code + ")"));
+                getContext().onFailure(new AbortException("varroaBuild: " + reply.describe()));
                 return true;
             }
-            String reasonCode = reply.getString("reason_code", "");
-            if (!reasonCode.isEmpty()) {
-                getContext().onFailure(new AbortException("varroaBuild: " + reply.getString("message", reasonCode)));
+            if (!reply.reasonCode().isEmpty()) {
+                getContext().onFailure(new AbortException("varroaBuild: " + reply.describeVeto()));
                 return true;
             }
             runId = reply.getString("run_id", "");
@@ -190,9 +188,26 @@ public class VarroaBuildStep extends Step {
                                 .crossTenantStatusByIntentKey(callerJobPath, intentKey))
                         : VarroaCrossTenantReply.parse(VarroaCrossTenantOps.client()
                                 .crossTenantStatus(callerJobPath, runId));
+                // The step polls by run_id only after a reply named one, and a
+                // reply names one only once its run_intents row exists. A later
+                // NOT_FOUND means the row is gone, and no poll brings it back.
+                if (reply.isFailure() && VarroaCrossTenantReply.CODE_NOT_FOUND.equals(reply.code)) {
+                    getContext().onFailure(new AbortException("varroaBuild: " + reply.describe()));
+                    return;
+                }
                 if (reply.isFailure()) {
-                    // A transient failure re-polls on the same cadence rather than
-                    // failing the step: the recorder may simply be restarting.
+                    // Any other failure re-polls on the same cadence rather than
+                    // failing the step: the recorder may be restarting.
+                    scheduleNext(elapsedMillis());
+                    return;
+                }
+                // A revoked grant or a fenced caller never clears by waiting, so
+                // a permanent veto fails the step. A retryable veto polls again.
+                if (reply.isPermanentVeto()) {
+                    getContext().onFailure(new AbortException("varroaBuild: " + reply.describeVeto()));
+                    return;
+                }
+                if (!reply.reasonCode().isEmpty()) {
                     scheduleNext(elapsedMillis());
                     return;
                 }

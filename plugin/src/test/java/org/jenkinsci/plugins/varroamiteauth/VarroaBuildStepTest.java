@@ -213,6 +213,89 @@ public class VarroaBuildStepTest {
     }
 
     @Test
+    public void aFailedBuildCallShowsTheRecorderCodeAndText() throws Exception {
+        installClient();
+        server.createContext("/v1/cross-tenant/build", ex -> respond(ex,
+                "{\"code\":\"INTERNAL\",\"error\":\"a cross-tenant build carries no intent key\"}"));
+
+        WorkflowRun run = scheduleAndWait("node { varroa.build(tenant: 'beta', job: 'beta/deploy') }", Result.FAILURE);
+        j.assertLogContains("varroaBuild: INTERNAL: a cross-tenant build carries no intent key", run);
+        j.assertLogNotContains("did not answer", run);
+    }
+
+    @Test
+    public void aVetoedBuildCallShowsTheReasonCodeAndMessage() throws Exception {
+        installClient();
+        server.createContext("/v1/cross-tenant/build", ex -> respond(ex,
+                "{\"reason_code\":\"CROSS_TENANT\",\"message\":\"Tenant beta exports no job matching deploy.\"}"));
+
+        WorkflowRun run = scheduleAndWait("node { varroa.build(tenant: 'beta', job: 'deploy') }", Result.FAILURE);
+        j.assertLogContains("varroaBuild: CROSS_TENANT: Tenant beta exports no job matching deploy.", run);
+    }
+
+    @Test
+    public void aPermanentVetoOnAPollFailsTheStep() throws Exception {
+        installClient();
+        server.createContext("/v1/cross-tenant/build", ex -> respond(ex, "{\"run_id\":\"run-1\",\"state\":\"queued\"}"));
+        server.createContext("/v1/cross-tenant/status", ex -> respond(ex,
+                "{\"reason_code\":\"CROSS_TENANT\",\"message\":\"Tenant beta does not grant job deploy to alpha.\"}"));
+
+        WorkflowRun run = scheduleAndWait("node { varroa.build(tenant: 'beta', job: 'deploy') }", Result.FAILURE);
+        j.assertLogContains("varroaBuild: CROSS_TENANT: Tenant beta does not grant job deploy to alpha.", run);
+    }
+
+    @Test
+    public void aRetryableVetoOnAPollKeepsPolling() throws Exception {
+        installClient();
+        AtomicInteger statusCalls = new AtomicInteger();
+        server.createContext("/v1/cross-tenant/build", ex -> respond(ex, "{\"run_id\":\"run-1\",\"state\":\"queued\"}"));
+        server.createContext("/v1/cross-tenant/status", ex -> {
+            if (statusCalls.incrementAndGet() == 1) {
+                respond(ex, "{\"reason_code\":\"NOT_READY\",\"message\":\"placement is behind\"}");
+            } else {
+                respond(ex, "{\"run_id\":\"run-1\",\"state\":\"completed\",\"result\":\"SUCCESS\",\"build_number\":3}");
+            }
+        });
+        server.createContext("/v1/cross-tenant/artifact", ex -> respond(ex, "{\"artifacts\":[]}"));
+
+        scheduleAndWait("node { varroa.build(tenant: 'beta', job: 'deploy') }", Result.SUCCESS);
+        assertTrue("a NOT_READY veto must poll again", statusCalls.get() >= 2);
+    }
+
+    @Test
+    public void aNotFoundPollForAKnownRunFailsTheStep() throws Exception {
+        installClient();
+        AtomicInteger statusCalls = new AtomicInteger();
+        server.createContext("/v1/cross-tenant/build", ex -> respond(ex, "{\"run_id\":\"run-1\",\"state\":\"queued\"}"));
+        server.createContext("/v1/cross-tenant/status", ex -> {
+            statusCalls.incrementAndGet();
+            respond(ex, "{\"code\":\"NOT_FOUND\",\"error\":\"unknown run_id \\\"run-1\\\"\"}");
+        });
+
+        WorkflowRun run = scheduleAndWait("node { varroa.build(tenant: 'beta', job: 'deploy') }", Result.FAILURE);
+        j.assertLogContains("varroaBuild: NOT_FOUND: unknown run_id \"run-1\"", run);
+        assertEquals("a NOT_FOUND poll must not poll again", 1, statusCalls.get());
+    }
+
+    @Test
+    public void anUnavailablePollKeepsPolling() throws Exception {
+        installClient();
+        AtomicInteger statusCalls = new AtomicInteger();
+        server.createContext("/v1/cross-tenant/build", ex -> respond(ex, "{\"run_id\":\"run-1\",\"state\":\"queued\"}"));
+        server.createContext("/v1/cross-tenant/status", ex -> {
+            if (statusCalls.incrementAndGet() == 1) {
+                respond(ex, "{\"code\":\"UNAVAILABLE\"}");
+            } else {
+                respond(ex, "{\"run_id\":\"run-1\",\"state\":\"completed\",\"result\":\"SUCCESS\",\"build_number\":3}");
+            }
+        });
+        server.createContext("/v1/cross-tenant/artifact", ex -> respond(ex, "{\"artifacts\":[]}"));
+
+        scheduleAndWait("node { varroa.build(tenant: 'beta', job: 'deploy') }", Result.SUCCESS);
+        assertTrue("an UNAVAILABLE poll must poll again", statusCalls.get() >= 2);
+    }
+
+    @Test
     public void everyPollIntervalCarriesJitter() {
         // Pure-logic coverage lives in VarroaPollPolicyTest; this asserts
         // the step's own cadence call site uses the jittering entry point.
