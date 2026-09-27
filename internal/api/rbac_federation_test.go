@@ -451,13 +451,13 @@ func testFederationReconciler(clusters []bus.ClusterInfo) (*RBACFederationReconc
 		"jenkins-admin": &v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{Name: "jenkins-admin"}, Spec: v1alpha1.JenkinsRoleSpec{RoleType: "Global", Permissions: []string{"Overall/Read"}, Description: "core copy"}},
 	}}
 	brood := newFakeConfigBrood()
-	reconciler := NewRBACFederationReconciler(roles, bindings, jenkinsRoles, brood, nil, "core", testLogger())
+	reconciler := NewRBACFederationReconciler(roles, bindings, jenkinsRoles, brood, nil, nil, "core", testLogger())
 	reconciler.clusterLister = func() ([]bus.ClusterInfo, error) { return clusters, nil }
 	return reconciler, brood
 }
 
 func (r *RBACFederationReconciler) desiredBindingsForTest() []*v1alpha1.JenkinsRoleBinding {
-	_, bindings, _ := r.desired()
+	_, bindings, _, _ := r.desired(r.sourceBindings())
 	return bindings
 }
 

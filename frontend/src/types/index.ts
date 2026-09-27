@@ -340,11 +340,29 @@ export interface VarroaRoleBindingSpec {
   scope?: VarroaRoleBindingScope;
 }
 
+export type BindingFederationState = "federated" | "skipped" | "failed";
+
+/** The federation outcome of a binding on one hive cluster. */
+export interface BindingFederationStatus {
+  cluster: string;
+  state: BindingFederationState;
+  reason?: string;
+  message?: string;
+  lastTransitionTime: string;
+}
+
+/** Written by the core BFF federation pass only. A request never sets it. */
+export interface VarroaRoleBindingStatus {
+  observedGeneration?: number;
+  federation?: BindingFederationStatus[];
+}
+
 export interface VarroaRoleBinding {
   apiVersion: "varroa.dev/v1alpha1";
   kind: "VarroaRoleBinding";
   metadata: ObjectMeta;
   spec: VarroaRoleBindingSpec;
+  status?: VarroaRoleBindingStatus;
 }
 
 export interface VarroaRoleBindingList {

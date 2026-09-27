@@ -76,6 +76,12 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   `UpdateCenterCatalogSourceName`; every Go site aliases that constant, but
   the CEL rule spells the literal out because a rule cannot reference a Go
   constant, so the two must be changed together.
+  `VarroaRoleBinding` has a status subresource that only the core BFF
+  federation pass writes: `status.observedGeneration` plus
+  `status.federation`, a list map keyed by `cluster` with `state`
+  (`federated`/`skipped`/`failed`), `reason`, `message`, and
+  `lastTransitionTime`. `federation` is `omitempty`, so
+  `internal/crdstore/registry.go` clears it explicitly.
   `CatalogItemStatus` carries three `omitempty` list fields — `closure`,
   `compat`, `conditions` — which means `internal/crdstore/registry.go` must
   clear each explicitly (`nil`, not `""`) or a merge patch leaves stale entries

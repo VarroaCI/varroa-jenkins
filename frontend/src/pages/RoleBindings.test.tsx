@@ -196,4 +196,27 @@ describe("RoleBindings — a tenant scope", () => {
       expect(screen.getByText("tenant:payments jobs:release/*,build/**")).toBeInTheDocument();
     });
   });
+
+  it("summarizes hive federation per binding", async () => {
+    const reported = createRoleBinding({
+      metadata: { name: "reported-binding" },
+      spec: { subjects: [{ kind: "User", name: "carol" }], roleRef: "varroa:viewer" },
+      status: {
+        federation: [
+          { cluster: "a", state: "federated", lastTransitionTime: "2026-09-27T12:00:00Z" },
+          { cluster: "b", state: "federated", lastTransitionTime: "2026-09-27T12:00:00Z" },
+          { cluster: "c", state: "failed", reason: "HiveUnavailable", lastTransitionTime: "2026-09-27T12:00:00Z" },
+        ],
+      },
+    });
+    mockListRoleBindings.mockResolvedValue({ items: [reported, clusterWideBinding] });
+    renderWithProviders(<RoleBindings />);
+    await waitFor(() => {
+      expect(screen.getByText("reported-binding")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Hive federation")).toBeInTheDocument();
+    expect(screen.getByText("1 failed")).toBeInTheDocument();
+    expect(screen.getByText("2 federated")).toBeInTheDocument();
+    expect(screen.getByText("Not reported")).toBeInTheDocument();
+  });
 });

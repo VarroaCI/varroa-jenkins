@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { getRoleBinding, createRoleBinding, updateRoleBinding, listRoles } from "../api/client";
-import type { VarroaRoleBinding, VarroaRole, SubjectRef, VarroaRoleBindingScope } from "../types";
+import type { VarroaRoleBinding, VarroaRole, SubjectRef, VarroaRoleBindingScope, VarroaRoleBindingStatus } from "../types";
 import type { TenantScope } from "../types/auth";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import TenantScopeEditor, { validateTenantScope } from "../components/TenantScopeEditor";
+import { FederationStatusTable } from "../components/FederationStatus";
 import styles from "./RoleBindingForm.module.css";
 
 interface LabelEntry {
@@ -34,6 +35,8 @@ export default function RoleBindingForm() {
   // not edit survives the edit.
   const [loadedScope, setLoadedScope] = useState<VarroaRoleBindingScope | undefined>(undefined);
   const [tenants, setTenants] = useState<TenantScope[] | undefined>(undefined);
+  // Read-only. The core BFF writes the status, and a submit never sends it.
+  const [federation, setFederation] = useState<VarroaRoleBindingStatus | undefined>(undefined);
   const [roleOptions, setRoleOptions] = useState<VarroaRole[]>([]);
   const [scopeOpen, setScopeOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -52,6 +55,7 @@ export default function RoleBindingForm() {
         setRoleRef(binding.spec.roleRef || "");
         setLoadedScope(binding.spec.scope);
         setTenants(binding.spec.scope?.tenants);
+        setFederation(binding.status);
         setScopeNamespaces((binding.spec.scope?.namespaces || []).join(", "));
         setSelectorLabels(
           Object.entries(binding.spec.scope?.controllerSelector?.matchLabels || {}).map(([k, v]) => ({
@@ -314,6 +318,12 @@ export default function RoleBindingForm() {
           </div>
         </Card>
       </form>
+
+      {isEdit && (
+        <Card>
+          <FederationStatusTable status={federation} />
+        </Card>
+      )}
     </div>
   );
 }

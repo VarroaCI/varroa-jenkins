@@ -2819,6 +2819,53 @@ VarroaRoleBinding:
       $ref: '#/ObjectMeta'
     spec:
       $ref: '#/VarroaRoleBindingSpec'
+    status:
+      $ref: '#/VarroaRoleBindingStatus'
+
+VarroaRoleBindingStatus:
+  type: object
+  readOnly: true
+  description: >-
+    Federation outcome of the binding on each hive. The core BFF federation
+    pass writes it. A create or update request cannot set it.
+  properties:
+    observedGeneration:
+      type: integer
+      format: int64
+      description: Spec generation the federation entries describe.
+    federation:
+      type: array
+      description: One entry for each hive cluster. The core cluster has no entry.
+      items:
+        $ref: '#/BindingFederationStatus'
+
+BindingFederationStatus:
+  type: object
+  description: Federation outcome of a binding on one hive.
+  required: [cluster, state, lastTransitionTime]
+  properties:
+    cluster:
+      type: string
+      description: Hive cluster name.
+    state:
+      type: string
+      enum: [federated, skipped, failed]
+    reason:
+      type: string
+      description: >-
+        CamelCase code for the state. Skipped codes are NoSubjects, TenantScope,
+        RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound,
+        NonGlobalJenkinsRole, and ReservedRole. Failed codes are
+        HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed,
+        JenkinsRoleBindingCollision, and JenkinsRoleBindingWriteFailed. The
+        federated code is Federated.
+    message:
+      type: string
+      description: Human-readable detail for the state.
+    lastTransitionTime:
+      type: string
+      format: date-time
+      description: Time the state, reason, or message last changed.
 
 JenkinsRole:
   type: object

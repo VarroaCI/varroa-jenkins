@@ -122,6 +122,9 @@ var clearStatusFields = map[schema.GroupVersionResource]map[string]any{
 	// tenants is omitempty. A pool whose last tenant leaves must report an
 	// empty list, or a merge patch leaves the stale names in etcd.
 	cellPoolGVR: {"tenants": nil},
+	// federation is omitempty. A binding whose last hive leaves membership
+	// must report an empty list, or a merge patch leaves the stale entries.
+	varroaRoleBindingGVR: {"federation": nil},
 }
 
 // NestedClear is a clearStatusFields value for a status object that holds

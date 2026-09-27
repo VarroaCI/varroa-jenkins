@@ -460,6 +460,42 @@
         ],
         "type": "object"
       },
+      "BindingFederationStatus": {
+        "description": "Federation outcome of a binding on one hive.",
+        "properties": {
+          "cluster": {
+            "description": "Hive cluster name.",
+            "type": "string"
+          },
+          "lastTransitionTime": {
+            "description": "Time the state, reason, or message last changed.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "message": {
+            "description": "Human-readable detail for the state.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "CamelCase code for the state. Skipped codes are NoSubjects, TenantScope, RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound, NonGlobalJenkinsRole, and ReservedRole. Failed codes are HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed, JenkinsRoleBindingCollision, and JenkinsRoleBindingWriteFailed. The federated code is Federated.",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "federated",
+              "skipped",
+              "failed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "cluster",
+          "state",
+          "lastTransitionTime"
+        ],
+        "type": "object"
+      },
       "BroodOperationDetail": {
         "additionalProperties": false,
         "description": "Full brood operation resource with spec and status.",
@@ -4512,6 +4548,25 @@
         ],
         "type": "object"
       },
+      "VarroaRoleBindingStatus": {
+        "description": "Federation outcome of the binding on each hive. The core BFF federation pass writes it. A create or update request cannot set it.",
+        "properties": {
+          "federation": {
+            "description": "One entry for each hive cluster. The core cluster has no entry.",
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_BindingFederationStatus"
+            },
+            "type": "array"
+          },
+          "observedGeneration": {
+            "description": "Spec generation the federation entries describe.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "readOnly": true,
+        "type": "object"
+      },
       "VarroaRoleSpec": {
         "additionalProperties": false,
         "description": "Spec for a VarroaRole (API-level RBAC).",
@@ -4915,6 +4970,42 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "components_schemas_BindingFederationStatus": {
+        "description": "Federation outcome of a binding on one hive.",
+        "properties": {
+          "cluster": {
+            "description": "Hive cluster name.",
+            "type": "string"
+          },
+          "lastTransitionTime": {
+            "description": "Time the state, reason, or message last changed.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "message": {
+            "description": "Human-readable detail for the state.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "CamelCase code for the state. Skipped codes are NoSubjects, TenantScope, RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound, NonGlobalJenkinsRole, and ReservedRole. Failed codes are HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed, JenkinsRoleBindingCollision, and JenkinsRoleBindingWriteFailed. The federated code is Federated.",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "federated",
+              "skipped",
+              "failed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "cluster",
+          "state",
+          "lastTransitionTime"
+        ],
         "type": "object"
       },
       "components_schemas_BreakGlassRequest": {
@@ -12778,6 +12869,9 @@
           },
           "spec": {
             "$ref": "#/components/schemas/components_schemas_VarroaRoleBindingSpec"
+          },
+          "status": {
+            "$ref": "#/components/schemas/components_schemas_VarroaRoleBindingStatus"
           }
         },
         "type": "object"
@@ -12828,6 +12922,25 @@
           "subjects",
           "roleRef"
         ],
+        "type": "object"
+      },
+      "components_schemas_VarroaRoleBindingStatus": {
+        "description": "Federation outcome of the binding on each hive. The core BFF federation pass writes it. A create or update request cannot set it.",
+        "properties": {
+          "federation": {
+            "description": "One entry for each hive cluster. The core cluster has no entry.",
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_BindingFederationStatus"
+            },
+            "type": "array"
+          },
+          "observedGeneration": {
+            "description": "Spec generation the federation entries describe.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "readOnly": true,
         "type": "object"
       },
       "components_schemas_VarroaRoleSpec": {

@@ -82,6 +82,47 @@ skips a binding with no subjects, a `tenants` scope, or a reserved `system-*`
 role, and deletes its earlier copy. The BFF logs a failed copy as
 `rbac federation warning`.
 
+### Read the federation status
+
+Each core `VarroaRoleBinding` reports its result on each hive in
+`status.federation`. The BFF writes one entry per hive cluster. The core
+cluster has no entry. A hive that leaves the fleet loses its entry on the next
+pass.
+
+```bash
+kubectl get varroarolebinding team-admins -o jsonpath='{.status.federation}'
+```
+
+| `state` | `reason` | Meaning |
+|---|---|---|
+| `federated` | `Federated` | The hive holds the `JenkinsRole` and the `JenkinsRoleBinding`. |
+| `skipped` | `NoSubjects` | The binding has no subjects. |
+| `skipped` | `TenantScope` | The scope names `tenants`. A tenant grant stays on the core cluster. |
+| `skipped` | `RoleNotFound` | The `roleRef` names no `VarroaRole`. |
+| `skipped` | `NoJenkinsProjection` | The role sets no `jenkinsRoleRef` and no `jenkinsPermissions`. |
+| `skipped` | `JenkinsRoleNotFound` | The role's `jenkinsRoleRef` names no core `JenkinsRole`. |
+| `skipped` | `NonGlobalJenkinsRole` | The referenced `JenkinsRole` is not Global. |
+| `skipped` | `ReservedRole` | The role projects onto a reserved `system-*` role. |
+| `failed` | `HiveUnavailable` | The BFF cannot list the RBAC objects on the hive. |
+| `failed` | `JenkinsRoleCollision` | A `JenkinsRole` that Varroa does not own has the same name. |
+| `failed` | `JenkinsRoleWriteFailed` | The hive refused the `JenkinsRole` write. |
+| `failed` | `JenkinsRoleBindingCollision` | A `JenkinsRoleBinding` that Varroa does not own has the same name. |
+| `failed` | `JenkinsRoleBindingWriteFailed` | The hive refused the `JenkinsRoleBinding` write. |
+
+A skip applies to every hive. `message` gives the detail, such as the hive
+error text. `lastTransitionTime` changes only when the state, reason, or message
+changes. `status.observedGeneration` names the spec generation the entries
+describe. The BFF retries a failed hive on each pass, and the entry returns to
+`federated` when the fault clears. To clear a collision, rename or delete the
+object on the hive that Varroa does not own. The status reports the current
+copy only. A failed delete of an earlier copy appears in the BFF log as
+`rbac federation warning`, and the BFF retries the delete on each pass.
+
+The dashboard Role Bindings page shows a count of hives per state. The edit
+page of a binding shows one row per hive. The MCP `get_varroa_role_binding`
+tool returns the status, and `list_varroa_role_bindings` returns the
+`hivesFederated`, `hivesSkipped`, and `hivesFailed` counts.
+
 ## Troubleshoot
 
 | Symptom | Check |

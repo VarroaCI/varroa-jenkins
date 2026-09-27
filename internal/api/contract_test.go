@@ -321,6 +321,14 @@ func newContractServer(t *testing.T) (*httptest.Server, *openapi3.T) {
 			Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "admins"}},
 			RoleRef:  "admin",
 		},
+		// The status exercises the federation schema on the read paths.
+		Status: v1alpha1.VarroaRoleBindingStatus{
+			ObservedGeneration: 1,
+			Federation: []v1alpha1.BindingFederationStatus{
+				{Cluster: "member-c", State: v1alpha1.BindingFederated, Reason: "Federated", Message: "JenkinsRoleBinding varroa-fed-admin-0123456789ab", LastTransitionTime: metav1.NewTime(time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC))},
+				{Cluster: "edge", State: v1alpha1.BindingFailed, Reason: "HiveUnavailable", Message: "offline", LastTransitionTime: metav1.NewTime(time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC))},
+			},
+		},
 	}
 	crdstore.MustSeed(client.crdStore, client.roleBindings["admin-binding"])
 	client.jenkinsRoles["global-admin"] = &v1alpha1.JenkinsRole{

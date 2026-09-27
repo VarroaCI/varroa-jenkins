@@ -569,6 +569,7 @@ func main() {
 		roleBindingInformer.GetStore(),
 		jenkinsRoleInformer.GetStore(),
 		configBrood,
+		clientsetClient,
 		clustersKV,
 		cluster,
 		logger,

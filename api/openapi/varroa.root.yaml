@@ -374,6 +374,8 @@ components:
       $ref: './components/schemas.yaml#/ApplyResult'
     ApplySectionResult:
       $ref: './components/schemas.yaml#/ApplySectionResult'
+    BindingFederationStatus:
+      $ref: './components/schemas.yaml#/BindingFederationStatus'
     BuiltinRoleRef:
       $ref: './components/schemas.yaml#/BuiltinRoleRef'
     CatalogItemSpec:
@@ -506,6 +508,8 @@ components:
       $ref: './components/schemas.yaml#/VarroaRoleBindingScope'
     VarroaRoleBindingSpec:
       $ref: './components/schemas.yaml#/VarroaRoleBindingSpec'
+    VarroaRoleBindingStatus:
+      $ref: './components/schemas.yaml#/VarroaRoleBindingStatus'
     VarroaRoleSpec:
       $ref: './components/schemas.yaml#/VarroaRoleSpec'
     VersionCatalogEntry:

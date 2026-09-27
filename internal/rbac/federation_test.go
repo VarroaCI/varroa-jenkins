@@ -12,7 +12,7 @@ import (
 
 func TestDesiredFederatedCRsRefPath(t *testing.T) {
 	scope := &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"team-a"}}
-	roles, bindings, warnings := DesiredFederatedCRs(
+	roles, bindings, warnings, _ := DesiredFederatedCRs(
 		[]*v1alpha1.VarroaRoleBinding{{
 			ObjectMeta: metav1.ObjectMeta{Name: "bind-admin"},
 			Spec: v1alpha1.VarroaRoleBindingSpec{
@@ -55,7 +55,7 @@ func TestDesiredFederatedCRsRefPath(t *testing.T) {
 }
 
 func TestDesiredFederatedCRsLegacyPath(t *testing.T) {
-	roles, bindings, warnings := DesiredFederatedCRs(
+	roles, bindings, warnings, _ := DesiredFederatedCRs(
 		[]*v1alpha1.VarroaRoleBinding{{Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "legacy-role", Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "devs"}}}}},
 		func(name string) (*v1alpha1.VarroaRole, bool) {
 			return &v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.VarroaRoleSpec{JenkinsPermissions: []string{"Job/Build"}}}, true
@@ -74,7 +74,7 @@ func TestDesiredFederatedCRsLegacyPath(t *testing.T) {
 }
 
 func TestDesiredFederatedCRsSkipsNonGlobalRef(t *testing.T) {
-	roles, bindings, warnings := DesiredFederatedCRs(
+	roles, bindings, warnings, _ := DesiredFederatedCRs(
 		[]*v1alpha1.VarroaRoleBinding{{Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "item-role", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}}}},
 		func(name string) (*v1alpha1.VarroaRole, bool) {
 			return &v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.VarroaRoleSpec{JenkinsRoleRef: "folder-role"}}, true
@@ -97,7 +97,7 @@ func TestDesiredFederatedCRsDedupsRolesAndSkipsMite(t *testing.T) {
 		// not the VarroaRole's own name).
 		{Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "mite-ref", Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "attackers"}}}},
 	}
-	roles, bindings, warnings := DesiredFederatedCRs(
+	roles, bindings, warnings, _ := DesiredFederatedCRs(
 		vrbs,
 		func(name string) (*v1alpha1.VarroaRole, bool) {
 			ref := "jenkins-admin"
@@ -136,7 +136,7 @@ func TestDesiredFederatedCRsSkipsSystemOperator(t *testing.T) {
 		{Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "team-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}}},
 		{Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "op-ref", Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "attackers"}}}},
 	}
-	roles, bindings, warnings := DesiredFederatedCRs(
+	roles, bindings, warnings, _ := DesiredFederatedCRs(
 		vrbs,
 		func(name string) (*v1alpha1.VarroaRole, bool) {
 			ref := "jenkins-admin"
@@ -171,7 +171,7 @@ func TestDesiredFederatedCRsLabelIsDeterministic(t *testing.T) {
 		for _, n := range order {
 			vrbs = append(vrbs, &v1alpha1.VarroaRoleBinding{Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: n, Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: n}}}})
 		}
-		roles, _, _ := DesiredFederatedCRs(
+		roles, _, _, _ := DesiredFederatedCRs(
 			vrbs,
 			func(name string) (*v1alpha1.VarroaRole, bool) {
 				return &v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.VarroaRoleSpec{JenkinsRoleRef: "shared-role"}}, true
@@ -196,7 +196,7 @@ func TestDesiredFederatedCRsLabelIsDeterministic(t *testing.T) {
 // jenkinsRoleRef nor jenkinsPermissions has no Jenkins projection: D12 states
 // spec.apiRules is never read by this function.
 func TestDesiredFederatedCRsPipelinesOnlyRoleFederatesNothing(t *testing.T) {
-	roles, bindings, _ := DesiredFederatedCRs(
+	roles, bindings, _, _ := DesiredFederatedCRs(
 		[]*v1alpha1.VarroaRoleBinding{{
 			ObjectMeta: metav1.ObjectMeta{Name: "bind-pipelines"},
 			Spec:       v1alpha1.VarroaRoleBindingSpec{RoleRef: "pipelines-only", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}},
@@ -235,7 +235,7 @@ func TestDesiredFederatedCRsSkipsTenantScopedBinding(t *testing.T) {
 			Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"team-a"}},
 		},
 	}
-	roles, bindings, warnings := DesiredFederatedCRs(
+	roles, bindings, warnings, _ := DesiredFederatedCRs(
 		[]*v1alpha1.VarroaRoleBinding{tenantScoped, controllerScoped},
 		func(name string) (*v1alpha1.VarroaRole, bool) {
 			return &v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.VarroaRoleSpec{JenkinsRoleRef: "jenkins-admin"}}, true
@@ -279,7 +279,7 @@ func TestDesiredFederatedCRsSkipsEmptySubjects(t *testing.T) {
 		{ObjectMeta: metav1.ObjectMeta{Name: "team-tenant"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "developer", Scope: &v1alpha1.VarroaRoleBindingScope{Tenants: []v1alpha1.TenantScope{{Name: "team-a"}}}}},
 		{ObjectMeta: metav1.ObjectMeta{Name: "bind-admin"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "team-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}}},
 	}
-	roles, bindings, warnings := DesiredFederatedCRs(
+	roles, bindings, warnings, _ := DesiredFederatedCRs(
 		vrbs,
 		func(name string) (*v1alpha1.VarroaRole, bool) {
 			return &v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.VarroaRoleSpec{JenkinsRoleRef: "jenkins-" + name}}, true
@@ -302,7 +302,7 @@ func TestDesiredFederatedCRsSkipsEmptySubjects(t *testing.T) {
 // The JenkinsRoleBinding subjects field has no omitempty. A nil slice encodes
 // as null, and the API server treats null as a missing required field.
 func TestDesiredFederatedCRsSubjectsNeverNull(t *testing.T) {
-	_, bindings, _ := DesiredFederatedCRs(
+	_, bindings, _, _ := DesiredFederatedCRs(
 		[]*v1alpha1.VarroaRoleBinding{{ObjectMeta: metav1.ObjectMeta{Name: "bind-admin"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "team-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}}}},
 		func(name string) (*v1alpha1.VarroaRole, bool) {
 			return &v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.VarroaRoleSpec{JenkinsPermissions: []string{"Overall/Read"}}}, true

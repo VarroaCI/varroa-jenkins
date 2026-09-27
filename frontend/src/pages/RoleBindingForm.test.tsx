@@ -344,4 +344,40 @@ describe("RoleBindingForm — the tenants dimension", () => {
     expect(sent.spec.scope.tenants).toEqual([{ name: "payments", jobs: ["release/*"] }]);
     expect(sent.spec.roleRef).toBe("varroa:viewer");
   });
+
+  it("shows the read-only hive federation table and never sends status", async () => {
+    mockGetRoleBinding.mockResolvedValue({
+      ...existingBinding,
+      status: {
+        observedGeneration: 1,
+        federation: [
+          { cluster: "member-c", state: "federated", reason: "Federated", message: "JenkinsRoleBinding varroa-fed-x", lastTransitionTime: "2026-09-27T12:00:00Z" },
+          { cluster: "edge", state: "failed", reason: "HiveUnavailable", message: "offline", lastTransitionTime: "2026-09-27T12:00:00Z" },
+        ],
+      },
+    });
+    mockUpdateRoleBinding.mockResolvedValueOnce({});
+    const user = userEvent.setup();
+    renderWithProviders(<RoleBindingForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Hive federation")).toBeInTheDocument();
+    });
+    expect(screen.getByText("edge")).toBeInTheDocument();
+    expect(screen.getByText("HiveUnavailable")).toBeInTheDocument();
+    expect(screen.getByText("offline")).toBeInTheDocument();
+    expect(screen.getByText("failed")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mockUpdateRoleBinding).toHaveBeenCalled());
+    expect(mockUpdateRoleBinding.mock.calls[0][1].status).toBeUndefined();
+  });
+
+  it("states that no hive reports a binding with no status", async () => {
+    mockGetRoleBinding.mockResolvedValue(existingBinding);
+    renderWithProviders(<RoleBindingForm />);
+    await waitFor(() => {
+      expect(screen.getByText(/No hive reports this binding/)).toBeInTheDocument();
+    });
+  });
 });

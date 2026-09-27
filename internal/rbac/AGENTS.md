@@ -101,7 +101,13 @@ with what this package generates.
   projected binding always carries a non-nil `subjects` list (`copySubjects`),
   because the CRD rejects a `null` list. Federation silently accepts an
   existing labeled builtin JenkinsRole only when its name and spec match the
-  canonical builtin.
+  canonical builtin. The fourth return value, `outcomes`, maps each named
+  source binding to a `BindingOutcome`: a `Skip*` reason code and message, or
+  the desired `JenkinsRole` and `JenkinsRoleBinding` names. Every skip branch
+  sets a reason, including the silent ones (`NoSubjects`, `RoleNotFound`,
+  `NoJenkinsProjection`). Bindings that hash to one child name share one
+  projected child. The BFF status write reads these outcomes, so a new skip
+  branch needs a new reason code.
 - **`Backend` interface** (`resolver.go:79`) — abstraction over YAML
   rendering; `RoleStrategyBackend` is the only implementation today. Swap
   points here if a second Jenkins authorization plugin is ever supported.

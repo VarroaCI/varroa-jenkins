@@ -1778,6 +1778,41 @@ func (in *VarroaRoleBinding) DeepCopyInto(out *VarroaRoleBinding) {
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
 	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+func (in *VarroaRoleBindingStatus) DeepCopyInto(out *VarroaRoleBindingStatus) {
+	*out = *in
+	if in.Federation != nil {
+		in, out := &in.Federation, &out.Federation
+		*out = make([]BindingFederationStatus, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+func (in *VarroaRoleBindingStatus) DeepCopy() *VarroaRoleBindingStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(VarroaRoleBindingStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *BindingFederationStatus) DeepCopyInto(out *BindingFederationStatus) {
+	*out = *in
+	in.LastTransitionTime.DeepCopyInto(&out.LastTransitionTime)
+}
+
+func (in *BindingFederationStatus) DeepCopy() *BindingFederationStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(BindingFederationStatus)
+	in.DeepCopyInto(out)
+	return out
 }
 
 func (in *VarroaRoleBinding) DeepCopy() *VarroaRoleBinding {

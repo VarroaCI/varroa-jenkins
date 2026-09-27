@@ -23,7 +23,8 @@ import (
 func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	listRB := mcp.NewTool("list_varroa_role_bindings",
 		mcp.WithDescription("List Varroa RBAC role bindings managed by Varroa. Returns a compact "+
-			"summary per binding (name, roleRef, subjectCount, scopeNamespaces) \u2014 enough to "+
+			"summary per binding (name, roleRef, subjectCount, scopeNamespaces, and per-state hive "+
+			"federation counts) \u2014 enough to "+
 			"survey a fleet and see who is bound to which role and how broadly. Use "+
 			"get_varroa_role_binding for the full resource."),
 		mcp.WithBoolean("verbose", mcp.Description("Return full VarroaRoleBinding resources instead "+
@@ -49,7 +50,8 @@ func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depen
 	})
 
 	getRB := mcp.NewTool("get_varroa_role_binding",
-		mcp.WithDescription("Get a specific Varroa RBAC role binding by name"),
+		mcp.WithDescription("Get a specific Varroa RBAC role binding by name. status.federation holds one "+
+			"entry per hive cluster: state (federated, skipped, or failed), reason, message, and lastTransitionTime."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Binding name")),
 	)
 	addTool(mcpServer, kindRead, getRB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -273,12 +275,17 @@ func buildTenantScopes(raw interface{}) ([]v1alpha1.TenantScope, error) {
 // the scope namespaces list. The counts carry the same operational signal
 // ("who is bound here, how many, how broadly") and the detail is one
 // get_varroa_role_binding away. VarroaRoleBinding is cluster-scoped
-// (kubebuilder scope=Cluster), so the summary carries no namespace.
+// (kubebuilder scope=Cluster), so the summary carries no namespace. The three
+// hive counts tally status.federation by state, so a caller finds a binding
+// that failed on a hive without a get per binding.
 type varroaRoleBindingSummary struct {
 	Name            string `json:"name"`
 	RoleRef         string `json:"roleRef,omitempty"`
 	SubjectCount    int    `json:"subjectCount"`
 	ScopeNamespaces int    `json:"scopeNamespaces"`
+	HivesFederated  int    `json:"hivesFederated"`
+	HivesSkipped    int    `json:"hivesSkipped"`
+	HivesFailed     int    `json:"hivesFailed"`
 }
 
 func summarizeVarroaRoleBinding(vrb *v1alpha1.VarroaRoleBinding) varroaRoleBindingSummary {
@@ -296,6 +303,16 @@ func summarizeVarroaRoleBinding(vrb *v1alpha1.VarroaRoleBinding) varroaRoleBindi
 	if vrb.Spec.Scope != nil {
 		s.ScopeNamespaces = len(vrb.Spec.Scope.Namespaces)
 	}
+	for _, entry := range vrb.Status.Federation {
+		switch entry.State {
+		case v1alpha1.BindingFederated:
+			s.HivesFederated++
+		case v1alpha1.BindingSkipped:
+			s.HivesSkipped++
+		case v1alpha1.BindingFailed:
+			s.HivesFailed++
+		}
+	}
 	return s
 }
 
@@ -304,4 +321,7 @@ var varroaRoleBindingListOutputSchema = listOutputSchema("Default summary projec
 	{Name: "roleRef", Type: "string", Desc: "VarroaRole name this binding grants."},
 	{Name: "subjectCount", Type: "integer", Desc: "Number of bound subjects."},
 	{Name: "scopeNamespaces", Type: "integer", Desc: "Number of namespaces the binding is scoped to; 0 means cluster-wide."},
+	{Name: "hivesFederated", Type: "integer", Desc: "Number of hive clusters that hold the binding's federated Jenkins grant."},
+	{Name: "hivesSkipped", Type: "integer", Desc: "Number of hive clusters where federation skips the binding on purpose."},
+	{Name: "hivesFailed", Type: "integer", Desc: "Number of hive clusters where federation of the binding failed. get_varroa_role_binding gives the reason in status.federation."},
 })

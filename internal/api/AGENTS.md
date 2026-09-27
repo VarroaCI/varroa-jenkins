@@ -168,7 +168,15 @@ federation, activity persistence, and SSE fanout.
   object is a warning, and the pass continues with the other objects and the
   garbage-collect loops. `reconcileAndLog` logs each warning once as
   `rbac federation warning` until it clears, so the warning text must stay
-  the same across passes. This is BFF-owned cross-cluster federation —
+  the same across passes. The pass also writes each core binding's
+  `status.federation` (`rbac_federation_status.go`): `reconcileCluster` and
+  `isConvergentCreate` record each fault in a per-hive `hiveResult` keyed by
+  child name, and `writeStatuses` builds one entry per visited hive and
+  patches the status subresource through `crdstore.PatchStatus`. It patches
+  only a status that differs from the stored one, and `lastTransitionTime`
+  moves only on a change of state, reason, or message: every status write is
+  an informer update that enqueues another pass, so an unconditional write
+  never settles. A failed cluster list writes no status. This is BFF-owned cross-cluster federation —
   distinct from `role_controller.go`'s single-cluster built-in-role
   reconciliation in `internal/controller`.
 - Activity (`internal/api/activity/`): there is no in-memory ring and no retention

@@ -13,6 +13,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/rbac"
 )
 
@@ -31,6 +32,8 @@ type RBACFederationReconciler struct {
 	bindings         rbacFederationStore
 	coreJenkinsRoles rbacFederationStore
 	brood            ConfigBrood
+	store            crdstore.Backend
+	now              func() time.Time
 	kv               *bus.KV
 	coreCluster      string
 	logger           *slog.Logger
@@ -44,13 +47,16 @@ type RBACFederationReconciler struct {
 
 // NewRBACFederationReconciler builds a reconciler over the core's VarroaRole,
 // VarroaRoleBinding, and JenkinsRole listers plus the config brood and cluster
-// membership KV.
-func NewRBACFederationReconciler(roles, bindings, coreJenkinsRoles rbacFederationStore, brood ConfigBrood, kv *bus.KV, coreCluster string, logger *slog.Logger) *RBACFederationReconciler {
+// membership KV. The store receives the VarroaRoleBinding status writes. A nil
+// store turns the status writes off.
+func NewRBACFederationReconciler(roles, bindings, coreJenkinsRoles rbacFederationStore, brood ConfigBrood, store crdstore.Backend, kv *bus.KV, coreCluster string, logger *slog.Logger) *RBACFederationReconciler {
 	r := &RBACFederationReconciler{
 		roles:            roles,
 		bindings:         bindings,
 		coreJenkinsRoles: coreJenkinsRoles,
 		brood:            brood,
+		store:            store,
+		now:              time.Now,
 		kv:               kv,
 		coreCluster:      coreCluster,
 		logger:           logger.With("component", "rbac_federation"),
@@ -122,33 +128,47 @@ func (r *RBACFederationReconciler) reconcileAndLog(ctx context.Context) {
 
 func (r *RBACFederationReconciler) reconcile(ctx context.Context) []string {
 	var warnings []string
-	desiredRoles, desiredBindings, projectorWarnings := r.desired()
+	// One snapshot feeds both the projection and the status write, so a
+	// status never pairs an outcome with a later spec generation.
+	sources := r.sourceBindings()
+	desiredRoles, desiredBindings, projectorWarnings, outcomes := r.desired(sources)
 	warnings = append(warnings, projectorWarnings...)
 
 	clusters, err := r.clusterLister()
 	if err != nil {
 		return append(warnings, fmt.Sprintf("list clusters: %v", err))
 	}
+	results := make(map[string]*hiveResult)
 	for _, cluster := range clusters {
 		if cluster.Name == "" || cluster.Name == r.coreCluster {
 			continue
 		}
-		if err := r.reconcileCluster(ctx, cluster.Name, desiredRoles, desiredBindings, &warnings); err != nil {
+		result := newHiveResult()
+		results[cluster.Name] = result
+		if err := r.reconcileCluster(ctx, cluster.Name, desiredRoles, desiredBindings, &warnings, result); err != nil {
 			warnings = append(warnings, fmt.Sprintf("cluster %s: %v", cluster.Name, err))
+			result.listFault = &federationFault{reason: reasonHiveUnavailable, message: err.Error()}
 			continue
 		}
 	}
+	r.writeStatuses(ctx, sources, outcomes, results, &warnings)
 	sort.Strings(warnings)
 	return warnings
 }
 
-func (r *RBACFederationReconciler) desired() ([]*v1alpha1.JenkinsRole, []*v1alpha1.JenkinsRoleBinding, []string) {
+// sourceBindings snapshots the core bindings the informer holds. An informer
+// update replaces the stored pointer, so the snapshot objects stay fixed.
+func (r *RBACFederationReconciler) sourceBindings() []*v1alpha1.VarroaRoleBinding {
 	var bindings []*v1alpha1.VarroaRoleBinding
 	for _, obj := range r.bindings.List() {
 		if binding, ok := obj.(*v1alpha1.VarroaRoleBinding); ok {
 			bindings = append(bindings, binding)
 		}
 	}
+	return bindings
+}
+
+func (r *RBACFederationReconciler) desired(bindings []*v1alpha1.VarroaRoleBinding) ([]*v1alpha1.JenkinsRole, []*v1alpha1.JenkinsRoleBinding, []string, map[string]rbac.BindingOutcome) {
 	return rbac.DesiredFederatedCRs(bindings, func(name string) (*v1alpha1.VarroaRole, bool) {
 		obj, ok, err := r.roles.GetByKey(name)
 		if err != nil || !ok {
@@ -170,8 +190,9 @@ func (r *RBACFederationReconciler) desired() ([]*v1alpha1.JenkinsRole, []*v1alph
 // the cluster. A failed write on one object becomes a warning, so the writes
 // for every other object and the garbage-collect loops still run. The
 // warning text must stay the same across passes: reconcileAndLog uses it to
-// log a repeated failure once.
-func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster string, desiredRoles []*v1alpha1.JenkinsRole, desiredBindings []*v1alpha1.JenkinsRoleBinding, warnings *[]string) error {
+// log a repeated failure once. Each fault on a desired child is also recorded
+// in result, keyed by the child name, for the binding status write.
+func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster string, desiredRoles []*v1alpha1.JenkinsRole, desiredBindings []*v1alpha1.JenkinsRoleBinding, warnings *[]string, result *hiveResult) error {
 	actualRoles, err := r.listRoles(ctx, cluster)
 	if err != nil {
 		return fmt.Errorf("list JenkinsRoles: %w", err)
@@ -187,6 +208,7 @@ func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster
 			if builtinRoleMatches(actual) {
 				continue
 			}
+			result.roleFault(desired.Name, reasonJenkinsRoleCollision, roleCollisionMessage(actual))
 			if actual.Labels != nil && actual.Labels[v1alpha1.LabelBuiltin] == "true" {
 				if _, ok := builtinRoleDefinition(actual.Name); ok {
 					*warnings = append(*warnings, fmt.Sprintf("cluster %s: builtin spec drift JenkinsRole collision %s", cluster, desired.Name))
@@ -199,8 +221,9 @@ func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster
 			continue
 		}
 		if !exists {
-			if err := r.createRole(ctx, cluster, desired); err != nil && !r.isConvergentCreate(ctx, cluster, desired.Name, true, err, warnings) {
+			if err := r.createRole(ctx, cluster, desired); err != nil && !r.isConvergentCreate(ctx, cluster, desired.Name, true, err, warnings, result) {
 				objectWarning(warnings, cluster, "create JenkinsRole", desired.Name, err)
+				result.roleFault(desired.Name, reasonJenkinsRoleWriteFailed, err.Error())
 			}
 			continue
 		}
@@ -209,6 +232,7 @@ func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster
 			updated.ResourceVersion = actual.ResourceVersion
 			if err := r.updateRole(ctx, cluster, updated); err != nil && !isConflict(err) {
 				objectWarning(warnings, cluster, "update JenkinsRole", desired.Name, err)
+				result.roleFault(desired.Name, reasonJenkinsRoleWriteFailed, err.Error())
 			}
 		}
 	}
@@ -225,11 +249,13 @@ func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster
 		actual, exists := actualBindings[desired.Name]
 		if exists && !isFederated(actual.Labels) {
 			*warnings = append(*warnings, fmt.Sprintf("cluster %s: skip unlabeled JenkinsRoleBinding collision %s", cluster, desired.Name))
+			result.bindingFault(desired.Name, reasonJenkinsRoleBindingCollision, bindingCollisionMessage(desired.Name))
 			continue
 		}
 		if !exists {
-			if err := r.createBinding(ctx, cluster, desired); err != nil && !r.isConvergentCreate(ctx, cluster, desired.Name, false, err, warnings) {
+			if err := r.createBinding(ctx, cluster, desired); err != nil && !r.isConvergentCreate(ctx, cluster, desired.Name, false, err, warnings, result) {
 				objectWarning(warnings, cluster, "create JenkinsRoleBinding", desired.Name, err)
+				result.bindingFault(desired.Name, reasonJenkinsRoleBindingWriteFailed, err.Error())
 			}
 			continue
 		}
@@ -238,6 +264,7 @@ func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster
 			updated.ResourceVersion = actual.ResourceVersion
 			if err := r.updateBinding(ctx, cluster, updated); err != nil && !isConflict(err) {
 				objectWarning(warnings, cluster, "update JenkinsRoleBinding", desired.Name, err)
+				result.bindingFault(desired.Name, reasonJenkinsRoleBindingWriteFailed, err.Error())
 			}
 		}
 	}
@@ -320,7 +347,7 @@ func (r *RBACFederationReconciler) updateBinding(ctx context.Context, cluster st
 	return err
 }
 
-func (r *RBACFederationReconciler) isConvergentCreate(ctx context.Context, cluster, name string, role bool, err error, warnings *[]string) bool {
+func (r *RBACFederationReconciler) isConvergentCreate(ctx context.Context, cluster, name string, role bool, err error, warnings *[]string, result *hiveResult) bool {
 	if !isConflict(err) {
 		return false
 	}
@@ -358,6 +385,7 @@ func (r *RBACFederationReconciler) isConvergentCreate(ctx context.Context, clust
 		if builtinRoleMatches(actualRole) {
 			return true
 		}
+		result.roleFault(name, reasonJenkinsRoleCollision, roleCollisionMessage(actualRole))
 		if labels[v1alpha1.LabelBuiltin] == "true" {
 			if _, ok := builtinRoleDefinition(actualRole.Name); ok {
 				*warnings = append(*warnings, fmt.Sprintf("cluster %s: builtin spec drift JenkinsRole collision %s", cluster, name))
@@ -370,6 +398,9 @@ func (r *RBACFederationReconciler) isConvergentCreate(ctx context.Context, clust
 	kind := "JenkinsRoleBinding"
 	if role {
 		kind = "JenkinsRole"
+		result.roleFault(name, reasonJenkinsRoleCollision, fmt.Sprintf("JenkinsRole %s exists and is not federated", name))
+	} else {
+		result.bindingFault(name, reasonJenkinsRoleBindingCollision, bindingCollisionMessage(name))
 	}
 	*warnings = append(*warnings, fmt.Sprintf("cluster %s: skip unlabeled %s collision %s", cluster, kind, name))
 	return true

@@ -98,6 +98,50 @@ func TestSummarizeVarroaRoleBinding_NilScopeDoesNotPanic(t *testing.T) {
 	}
 }
 
+// The summary tallies the per-hive federation entries by state.
+func TestSummarizeVarroaRoleBinding_CountsHivesByState(t *testing.T) {
+	now := metav1.Now()
+	got := summarizeVarroaRoleBinding(&v1alpha1.VarroaRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "vrb"},
+		Status: v1alpha1.VarroaRoleBindingStatus{Federation: []v1alpha1.BindingFederationStatus{
+			{Cluster: "a", State: v1alpha1.BindingFederated, LastTransitionTime: now},
+			{Cluster: "b", State: v1alpha1.BindingFederated, LastTransitionTime: now},
+			{Cluster: "c", State: v1alpha1.BindingFailed, Reason: "HiveUnavailable", LastTransitionTime: now},
+			{Cluster: "d", State: v1alpha1.BindingSkipped, Reason: "TenantScope", LastTransitionTime: now},
+		}},
+	})
+	if got.HivesFederated != 2 || got.HivesFailed != 1 || got.HivesSkipped != 1 {
+		t.Fatalf("counts = %d federated, %d skipped, %d failed; want 2, 1, 1", got.HivesFederated, got.HivesSkipped, got.HivesFailed)
+	}
+}
+
+// get_varroa_role_binding returns the stored status with the spec.
+func TestGetVarroaRoleBinding_ReturnsFederationStatus(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, &v1alpha1.VarroaRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "vrb"},
+		Spec:       v1alpha1.VarroaRoleBindingSpec{RoleRef: "ci-deploy", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "ci-bot"}}},
+		Status: v1alpha1.VarroaRoleBindingStatus{Federation: []v1alpha1.BindingFederationStatus{
+			{Cluster: "edge", State: v1alpha1.BindingFailed, Reason: "HiveUnavailable", Message: "offline", LastTransitionTime: metav1.Now()},
+		}},
+	})
+	handler := NewHandler(&api.Dependencies{Client: &stubClient{}, Store: store})
+	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+		"name":      "get_varroa_role_binding",
+		"arguments": map[string]interface{}{"name": "vrb"},
+	}, mcpAdminClaims)
+	tr := parseToolResult(t, resp.Result)
+	if tr.IsError {
+		t.Fatalf("get_varroa_role_binding returned error: %v", tr.Content)
+	}
+	b, _ := json.Marshal(resp.Result)
+	for _, want := range []string{`"federation"`, `"HiveUnavailable"`, `"failed"`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("result lacks %s: %s", want, b)
+		}
+	}
+}
+
 // The projection exists to drop spec.subjects[] and the scope namespaces /
 // controllerSelector internals. The counts must survive; the payload text
 // must not.
@@ -142,6 +186,7 @@ func TestListVarroaRoleBindings_DefaultsToSummary(t *testing.T) {
 	for _, item := range []map[string]any{scoped, clusterWide} {
 		allowed := map[string]bool{
 			"name": true, "roleRef": true, "subjectCount": true, "scopeNamespaces": true,
+			"hivesFederated": true, "hivesSkipped": true, "hivesFailed": true,
 		}
 		for k := range item {
 			if !allowed[k] {

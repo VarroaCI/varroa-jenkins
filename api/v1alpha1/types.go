@@ -2597,12 +2597,56 @@ type VarroaRoleList struct {
 // VarroaRoleBinding is the Schema for the varroarolebindings API.
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:resource:scope=Cluster
+// +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="ROLE",type="string",JSONPath=".spec.roleRef"
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 type VarroaRoleBinding struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	Spec              VarroaRoleBindingSpec `json:"spec,omitempty"`
+	// Status reports the federation outcome of the binding on each hive. Only
+	// the core BFF federation pass writes it.
+	// +optional
+	Status VarroaRoleBindingStatus `json:"status,omitempty"`
+}
+
+// VarroaRoleBindingStatus reports the federation outcome of a core binding.
+type VarroaRoleBindingStatus struct {
+	// ObservedGeneration is the spec generation the federation entries describe.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+	// Federation holds one entry for each hive cluster. The core cluster has no entry.
+	// +listType=map
+	// +listMapKey=cluster
+	// +optional
+	Federation []BindingFederationStatus `json:"federation,omitempty"`
+}
+
+// BindingFederationState is the federation outcome of a binding on one hive.
+// +kubebuilder:validation:Enum=federated;skipped;failed
+type BindingFederationState string
+
+// Federation states of a binding on one hive.
+const (
+	BindingFederated BindingFederationState = "federated"
+	BindingSkipped   BindingFederationState = "skipped"
+	BindingFailed    BindingFederationState = "failed"
+)
+
+// BindingFederationStatus is the federation outcome of a binding on one hive.
+type BindingFederationStatus struct {
+	// Cluster is the hive cluster name.
+	Cluster string `json:"cluster"`
+	// State is federated, skipped, or failed.
+	State BindingFederationState `json:"state"`
+	// Reason is a CamelCase code for the state.
+	// +optional
+	Reason string `json:"reason,omitempty"`
+	// Message is the human-readable detail for the state.
+	// +optional
+	Message string `json:"message,omitempty"`
+	// LastTransitionTime is the time the state, reason, or message last changed.
+	LastTransitionTime metav1.Time `json:"lastTransitionTime"`
 }
 
 // VarroaRoleBindingSpec defines the desired state of VarroaRoleBinding.

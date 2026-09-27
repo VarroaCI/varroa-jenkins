@@ -15,6 +15,10 @@ rules:
   - apiGroups: ["varroa.dev"]
     resources: ["varroaroles", "varroarolebindings", "jenkinsroles", "jenkinsrolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # The RBAC federation pass reports each binding's per-hive outcome.
+  - apiGroups: ["varroa.dev"]
+    resources: ["varroarolebindings/status"]
+    verbs: ["get", "patch", "update"]
   - apiGroups: ["varroa.dev"]
     resources: ["teams", "teams/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

@@ -41,6 +41,13 @@ const (
 	ComponentsSchemasActivityEventSourceUser     ComponentsSchemasActivityEventSource = "user"
 )
 
+// Defines values for ComponentsSchemasBindingFederationStatusState.
+const (
+	ComponentsSchemasBindingFederationStatusStateFailed    ComponentsSchemasBindingFederationStatusState = "failed"
+	ComponentsSchemasBindingFederationStatusStateFederated ComponentsSchemasBindingFederationStatusState = "federated"
+	ComponentsSchemasBindingFederationStatusStateSkipped   ComponentsSchemasBindingFederationStatusState = "skipped"
+)
+
 // Defines values for ComponentsSchemasBroodOperationDetailSpecActionVerb.
 const (
 	ComponentsSchemasBroodOperationDetailSpecActionVerbExecuteGroovy ComponentsSchemasBroodOperationDetailSpecActionVerb = "executeGroovy"
@@ -209,10 +216,10 @@ const (
 
 // Defines values for ComponentsSchemasComposedBundleStatusPhase.
 const (
-	Drifted ComponentsSchemasComposedBundleStatusPhase = "Drifted"
-	Invalid ComponentsSchemasComposedBundleStatusPhase = "Invalid"
-	Pending ComponentsSchemasComposedBundleStatusPhase = "Pending"
-	Ready   ComponentsSchemasComposedBundleStatusPhase = "Ready"
+	ComponentsSchemasComposedBundleStatusPhaseDrifted ComponentsSchemasComposedBundleStatusPhase = "Drifted"
+	ComponentsSchemasComposedBundleStatusPhaseInvalid ComponentsSchemasComposedBundleStatusPhase = "Invalid"
+	ComponentsSchemasComposedBundleStatusPhasePending ComponentsSchemasComposedBundleStatusPhase = "Pending"
+	ComponentsSchemasComposedBundleStatusPhaseReady   ComponentsSchemasComposedBundleStatusPhase = "Ready"
 )
 
 // Defines values for ComponentsSchemasControllerAttentionKind.
@@ -595,6 +602,25 @@ type ComponentsSchemasBackupSpec struct {
 	// Schedule Cron expression for the backup schedule.
 	Schedule *string `json:"schedule,omitempty"`
 }
+
+// ComponentsSchemasBindingFederationStatus Federation outcome of a binding on one hive.
+type ComponentsSchemasBindingFederationStatus struct {
+	// Cluster Hive cluster name.
+	Cluster string `json:"cluster"`
+
+	// LastTransitionTime Time the state, reason, or message last changed.
+	LastTransitionTime time.Time `json:"lastTransitionTime"`
+
+	// Message Human-readable detail for the state.
+	Message *string `json:"message,omitempty"`
+
+	// Reason CamelCase code for the state. Skipped codes are NoSubjects, TenantScope, RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound, NonGlobalJenkinsRole, and ReservedRole. Failed codes are HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed, JenkinsRoleBindingCollision, and JenkinsRoleBindingWriteFailed. The federated code is Federated.
+	Reason *string                                       `json:"reason,omitempty"`
+	State  ComponentsSchemasBindingFederationStatusState `json:"state"`
+}
+
+// ComponentsSchemasBindingFederationStatusState defines model for ComponentsSchemasBindingFederationStatus.State.
+type ComponentsSchemasBindingFederationStatusState string
 
 // ComponentsSchemasBreakGlassRequest Request body for a break-glass grant.
 type ComponentsSchemasBreakGlassRequest struct {
@@ -3882,6 +3908,9 @@ type ComponentsSchemasVarroaRoleBinding struct {
 
 	// Spec Spec for a VarroaRoleBinding.
 	Spec *ComponentsSchemasVarroaRoleBindingSpec `json:"spec,omitempty"`
+
+	// Status Federation outcome of the binding on each hive. The core BFF federation pass writes it. A create or update request cannot set it.
+	Status *ComponentsSchemasVarroaRoleBindingStatus `json:"status,omitempty"`
 }
 
 // ComponentsSchemasVarroaRoleBindingScope Scope for a VarroaRoleBinding.
@@ -3901,6 +3930,15 @@ type ComponentsSchemasVarroaRoleBindingSpec struct {
 	// Scope Scope for a VarroaRoleBinding.
 	Scope    *ComponentsSchemasVarroaRoleBindingScope `json:"scope,omitempty"`
 	Subjects []ComponentsSchemasSubjectRef            `json:"subjects"`
+}
+
+// ComponentsSchemasVarroaRoleBindingStatus Federation outcome of the binding on each hive. The core BFF federation pass writes it. A create or update request cannot set it.
+type ComponentsSchemasVarroaRoleBindingStatus struct {
+	// Federation One entry for each hive cluster. The core cluster has no entry.
+	Federation *[]ComponentsSchemasBindingFederationStatus `json:"federation,omitempty"`
+
+	// ObservedGeneration Spec generation the federation entries describe.
+	ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
 }
 
 // ComponentsSchemasVarroaRoleSpec Spec for a VarroaRole (API-level RBAC).
