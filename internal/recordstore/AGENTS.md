@@ -127,7 +127,15 @@ of the fleet's audit activity, once a controller becomes disposable.
   slot-0 member built from the row's scalar columns. `members.go` holds
   the only three readers of a member's identity, `memberForJob`,
   `memberForInstance`, and `memberForCell`, plus the Lamping and Veach
-  jump consistent hash the recorder homes a job with. `00006_fleet_locks.sql`
+  jump consistent hash the recorder homes a job with. `resolveJobHome`
+  (`job_homes.go`) joins `readTenantPlacementMembers` and `memberForJob`
+  into one read of a job's home member. `pgReader.JobHome`, the upstream
+  fan-out, and the backstop fire call it; the two rounds call it through
+  `jobHomeCache`, which reads each placement once for each round.
+  `job_schedules.cell` is the home at the last export the ingest accepted.
+  It is an input to the ingest delete rule and the cell purge only. An
+  action that must reach a job's home never reads it for a placed tenant.
+  `00006_fleet_locks.sql`
   adds `fleet_locks`, the fleet-lock authority (see the Fleet locks
   bullet), and the sequence `fleet_lock_fence_seq`. `00007_job_schedule_upstream.sql`
   adds `job_schedules`'s three upstream columns.
@@ -602,7 +610,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   when either declaration passes. The cap covers the de-duplicated list, never
   one set. The round then runs the `fanout`-path
   `GrantEvaluator.Check` per row and publishes one `LedgerActionTriggerRun`
-  per allowed row, actor `varroa-upstream/<producer-tenant>`; a set B candidate
+  per allowed row, actor `varroa-upstream/<producer-tenant>`. The action's
+  namespace and controller come from `resolveJobHome` for the subscriber
+  job, never from the row. A home slot with no cell publishes nothing and
+  counts `unplaced` with a warning; the round cannot retry it, because
+  `fanout_at` is already written. Only a tenant with no placement row keeps
+  the row's own coordinate. A set B candidate
   always passes, because its caller tenant equals its target tenant. The
   intent-key seq is `t<digest>`, the first twelve hex characters of the
   SHA-256 of the subscriber's own `<cluster>/<tenant>/<job_path>`
@@ -877,6 +890,11 @@ of the fleet's audit activity, once a controller becomes disposable.
   and the 100-fire-per-round bound. `readTenantSchedulePolicy` answers
   the backstop-scheduler capability's defaults (backstop on, catch-up
   `one`, grace `5m`) for a tenant with no `tenant_placements` row.
+  `runBackstopSchedule` addresses each fire's `wake_cell` and `retry_run`
+  through `resolveJobHome`, never through the row's cell. A home slot with
+  no cell skips the candidate for this round and writes no activity row,
+  so a later round fires it. A tenant with no placement row keeps the
+  row's own coordinate.
   `Ledger.SetConcurrencyCancel` wires the sibling concurrency-groups
   capability: on a granted claim for a `cancelInProgress` tenant, `Claim`
   starts `runConcurrencyCancel` in its own goroutine so it answers the

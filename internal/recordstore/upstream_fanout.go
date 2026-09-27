@@ -121,7 +121,10 @@ type FanoutDeps struct {
 }
 
 // upstreamFanoutCandidate is one job_schedules row the fan-out selects:
-// a subscriber's own declared upstream trigger, of either kind.
+// a subscriber's own declared upstream trigger, of either kind. namespace
+// and cell are the coordinate of the export the recorder last accepted.
+// The fan-out addresses them only for a tenant with no placement row.
+// A placed tenant's job home can move after that export.
 type upstreamFanoutCandidate struct {
 	cluster, namespace, cell, tenant, jobPath string
 	disabled                                  bool
@@ -267,8 +270,9 @@ func RunUpstreamFanout(ctx context.Context, deps FanoutDeps, producer FanoutProd
 		active = active[:upstreamFanoutCap]
 	}
 
+	homes := newJobHomeCache()
 	for _, c := range active {
-		fanOutOne(ctx, deps, producer, c, logger)
+		fanOutOne(ctx, deps, producer, c, homes, logger)
 	}
 	return nil
 }
@@ -365,7 +369,14 @@ func matchNativeUpstreamList(spec, tenant, producerJob string) (matched, foreign
 // trigger_run action. It never returns an error: a per-subscriber fault
 // counts and moves to the next row, because one bad subscriber must
 // never block the rest of the round.
-func fanOutOne(ctx context.Context, deps FanoutDeps, producer FanoutProducer, c upstreamFanoutCandidate, logger *slog.Logger) {
+//
+// For a placed tenant, the action names the member that holds the
+// subscriber job's home slot. The claim fence reads the same member, so a
+// trigger sent to another cell is refused. A tenant with no placement row
+// keeps the schedule row's own namespace and cell. The round cannot retry a skip, because the producer's
+// run already carries its fan-out marker.
+func fanOutOne(ctx context.Context, deps FanoutDeps, producer FanoutProducer, c upstreamFanoutCandidate,
+	homes *jobHomeCache, logger *slog.Logger) {
 	result, err := deps.Evaluator.Check(ctx, GrantInput{
 		PlacementInput: PlacementInput{
 			Path:    GrantPathFanout,
@@ -392,6 +403,23 @@ func fanOutOne(ctx context.Context, deps FanoutDeps, producer FanoutProducer, c 
 		return
 	}
 
+	namespace, cell := c.namespace, c.cell
+	home, err := homes.resolve(ctx, deps.Pool, c.cluster, c.tenant, c.jobPath)
+	if err != nil {
+		logger.Warn("upstream fan-out home read failed", "subscriber_tenant", c.tenant, "subscriber_job", c.jobPath, "error", err)
+		deps.Metrics.addSkipped(ctx, FanoutSkipUnplaced)
+		return
+	}
+	if home.Placed {
+		if home.Cell == "" {
+			logger.Warn("upstream fan-out skipped: the job's home slot holds no cell",
+				"subscriber_tenant", c.tenant, "subscriber_job", c.jobPath)
+			deps.Metrics.addSkipped(ctx, FanoutSkipUnplaced)
+			return
+		}
+		namespace, cell = home.Namespace, home.Cell
+	}
+
 	runID, err := uuid.NewV7()
 	if err != nil {
 		logger.Warn("mint fan-out run id failed", "subscriber_tenant", c.tenant, "subscriber_job", c.jobPath, "error", err)
@@ -403,8 +431,8 @@ func fanOutOne(ctx context.Context, deps FanoutDeps, producer FanoutProducer, c 
 	action := LedgerAction{
 		Kind:       LedgerActionTriggerRun,
 		Cluster:    c.cluster,
-		Namespace:  c.namespace,
-		Controller: c.cell,
+		Namespace:  namespace,
+		Controller: cell,
 		Actor:      upstreamFanoutActorPrefix + producer.Tenant,
 		RunID:      runID.String(),
 		IntentKey:  fmt.Sprintf("%s:%s:%s", IntentSchemeUpstream, producer.RunID, seq),
@@ -416,6 +444,8 @@ func fanOutOne(ctx context.Context, deps FanoutDeps, producer FanoutProducer, c 
 		return
 	}
 	deps.Metrics.addPublished(ctx)
+	logger.Info("upstream fan-out published", "subscriber_tenant", c.tenant, "subscriber_job", c.jobPath,
+		"controller", namespace+"/"+cell, "run_id", action.RunID, "intent_key", action.IntentKey)
 }
 
 // scanUpstreamFanoutCandidates reads upstreamFanoutCandidatesQuery's rows.

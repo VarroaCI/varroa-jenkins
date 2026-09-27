@@ -225,3 +225,66 @@ func readTenantPlacementMembers(ctx context.Context, db livenessQuerier, cluster
 	}
 	return decoded, true, nil
 }
+
+// resolveJobHome answers the member that holds jobPath's home slot for
+// cluster/tenant. A tenant with no placement row answers Placed false. A
+// home slot that holds no member answers Placed true and an empty Cell.
+// Every action that must reach a job's home reads its address here, never
+// from job_schedules.cell.
+func resolveJobHome(ctx context.Context, db livenessQuerier, cluster, tenant, jobPath string) (JobHome, error) {
+	row, exists, err := readTenantPlacementMembers(ctx, db, cluster, tenant)
+	if err != nil {
+		return JobHome{}, err
+	}
+	return jobHomeOf(row, exists, jobPath), nil
+}
+
+// jobHomeOf answers jobPath's home from a placement already read.
+func jobHomeOf(row placementMembers, exists bool, jobPath string) JobHome {
+	if !exists {
+		return JobHome{}
+	}
+	home := memberForJob(row, jobPath)
+	return JobHome{Placed: true, Namespace: home.Namespace, Cell: home.Cell}
+}
+
+// jobHomeCacheKey names one tenant placement row.
+type jobHomeCacheKey struct {
+	cluster, tenant string
+}
+
+// jobHomeCacheEntry holds one decoded placement and whether the row
+// exists.
+type jobHomeCacheEntry struct {
+	row    placementMembers
+	exists bool
+}
+
+// jobHomeCache reads each tenant placement at most once for one round.
+// It holds a placement for one round only: a later round must read the
+// row again, because a takeover or a scale changes it. A failed read is
+// not cached.
+type jobHomeCache struct {
+	entries map[jobHomeCacheKey]jobHomeCacheEntry
+}
+
+// newJobHomeCache answers an empty cache for one round.
+func newJobHomeCache() *jobHomeCache {
+	return &jobHomeCache{entries: map[jobHomeCacheKey]jobHomeCacheEntry{}}
+}
+
+// resolve answers resolveJobHome's result, and reads the placement row
+// only on the first call for cluster/tenant.
+func (c *jobHomeCache) resolve(ctx context.Context, db livenessQuerier, cluster, tenant, jobPath string) (JobHome, error) {
+	key := jobHomeCacheKey{cluster: cluster, tenant: tenant}
+	entry, cached := c.entries[key]
+	if !cached {
+		row, exists, err := readTenantPlacementMembers(ctx, db, cluster, tenant)
+		if err != nil {
+			return JobHome{}, err
+		}
+		entry = jobHomeCacheEntry{row: row, exists: exists}
+		c.entries[key] = entry
+	}
+	return jobHomeOf(entry.row, entry.exists, jobPath), nil
+}

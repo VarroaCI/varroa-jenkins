@@ -124,6 +124,8 @@ A `Jenkinsfile` `triggers {}` block also works, but only the items form
 this result or better. A job declares exactly one `varroaUpstream` trigger. A job that needs
 two producers calls `varroa.build` from each producer's pipeline instead.
 
+The trigger reaches the subscriber job's home slot.
+
 ## The export grant
 
 A tenant exports nothing by default. Grant another tenant access on the producing tenant's

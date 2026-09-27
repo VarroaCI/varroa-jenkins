@@ -97,7 +97,10 @@ func selectReadyFires(candidates []backstopFireCandidate, now time.Time) []backs
 // fireOne publishes D11's fire for one candidate: a wake_cell action,
 // then a retry_run action carrying the cron:<job-path>:<occurrence-
 // minute> intent key and a fresh UUIDv7 run id, then one
-// build.scheduled.backstop activity row. It counts
+// build.scheduled.backstop activity row. Both actions name c's namespace
+// and cell. For a placed tenant, they are the member of the job's home
+// slot. For a tenant with no placement row, they are the schedule row's
+// own coordinate. It counts
 // recorder_cron_fired_total and recorder_actions_published_total only
 // once the retry_run action, the fire itself, publishes without error.
 func fireOne(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, metrics *BackstopMetrics, actionMetrics *ActionMetrics,

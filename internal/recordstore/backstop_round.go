@@ -151,6 +151,7 @@ func runBackstopSchedule(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn
 	}
 
 	var fireCandidates []backstopFireCandidate
+	homes := newJobHomeCache()
 	for _, pair := range pairs {
 		policy, err := readTenantSchedulePolicy(ctx, pool, pair.cluster, pair.tenant)
 		if err != nil {
@@ -194,11 +195,30 @@ func runBackstopSchedule(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn
 				continue
 			}
 
+			// The fire goes to the job's home slot, the member the claim
+			// fence reads. The row's own cell can name a former home. A
+			// tenant with no placement row keeps the row's coordinate.
+			namespace, cell := row.Namespace, row.Cell
+			home, err := homes.resolve(ctx, pool, pair.cluster, pair.tenant, row.JobPath)
+			if err != nil {
+				logger.Warn("backstop round: read job home failed", "job_path", row.JobPath, "error", err)
+				continue
+			}
+			if home.Placed {
+				if home.Cell == "" {
+					// No activity row is written, so a later round fires
+					// this occurrence once the slot holds a cell.
+					logger.Warn("backstop round: the job's home slot holds no cell", "job_path", row.JobPath)
+					continue
+				}
+				namespace, cell = home.Namespace, home.Cell
+			}
+
 			fireCandidates = append(fireCandidates, backstopFireCandidate{
 				cluster:    pair.cluster,
 				tenant:     pair.tenant,
-				namespace:  row.Namespace,
-				cell:       row.Cell,
+				namespace:  namespace,
+				cell:       cell,
 				jobPath:    row.JobPath,
 				occurrence: *fire,
 				grace:      policy.cronGrace,

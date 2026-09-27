@@ -268,13 +268,5 @@ func (r *pgReader) JobHome(ctx context.Context, cluster, tenant, jobPath string)
 	if err := r.checkSchema(ctx); err != nil {
 		return JobHome{}, err
 	}
-	row, exists, err := readTenantPlacementMembers(ctx, r.pool, cluster, tenant)
-	if err != nil {
-		return JobHome{}, err
-	}
-	if !exists {
-		return JobHome{}, nil
-	}
-	home := memberForJob(row, jobPath)
-	return JobHome{Placed: true, Namespace: home.Namespace, Cell: home.Cell}, nil
+	return resolveJobHome(ctx, r.pool, cluster, tenant, jobPath)
 }

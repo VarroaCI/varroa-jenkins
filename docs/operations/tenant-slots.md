@@ -36,19 +36,19 @@ kubectl get team payments -o jsonpath='{.status.placement.members}'
 
 ## Every job has one home slot
 
-The recorder maps each job path to one slot, as its only writer. A job runs only on its home
+The recorder maps each job path to one slot. A job runs only on its home
 slot's holder; a claim from any other member answers `NOT_HOME`. One writer for each job keeps
 `disableConcurrentBuilds`, `previousBuild`, workspace reuse, and throttling true: all observe one
 Jenkins.
 
 The map uses a consistent hash. A growth from `N` to `N + 1` slots moves about one job in `N + 1`,
-onto the new slot. A job the recorder has never seen resolves to slot 0 until the next round.
+onto the new slot. A new job resolves to slot 0 until the next round.
 
 A change to `members` binds or releases cells, then the recorder recomputes the map. A job whose
 home changed takes its history to the new holder: the recorder refreshes its records and raises
 its build number. A scale moves no running build. A scale-down releases the highest indexes, so
-they stay dense. No cell refreshes a released slot's agent pods, so the operator deletes them within
-about 16 minutes of their last refresh.
+they stay dense. The operator deletes a released slot's agent pods within about 16 minutes of their
+last refresh.
 
 ## Jobs that trigger each other
 
@@ -56,7 +56,7 @@ Varroa forwards a cross-slot trigger through the ledger.
 
 - A `build job:` step with `wait: false` reaches a job on another slot.
 - A `build job:` step that waits fails at once, and names `varroa.build`, which waits across slots.
-- A native `upstream` trigger fires across slots.
+- A native `upstream` trigger, a `varroaUpstream` trigger, and a backstop cron fire reach the job's home slot.
 - A cross-slot `build job:` shows no downstream link. `varroa.build` returns a handle instead.
 - A forwarded build carries text parameters only; a file parameter does not cross a slot.
 
