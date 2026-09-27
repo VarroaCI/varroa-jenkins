@@ -69,7 +69,7 @@ func TestDecodePlacementMembersNullColumns(t *testing.T) {
 }
 
 // TestMemberForJobUsesTheHomeMap asserts a job resolves to its home slot's
-// holder, and an unseen job resolves to slot 0.
+// holder, and an unseen job resolves to its computed hash home.
 func TestMemberForJobUsesTheHomeMap(t *testing.T) {
 	row := twoSlotRow()
 	if got := memberForJob(row, "acme/api"); got.Cell != "cell-b" {
@@ -78,8 +78,65 @@ func TestMemberForJobUsesTheHomeMap(t *testing.T) {
 	if got := memberForJob(row, "acme/web"); got.Cell != "cell-a" {
 		t.Fatalf("acme/web home: want cell-a, got %q", got.Cell)
 	}
-	if got := memberForJob(row, "acme/unseen"); got.Cell != "cell-a" {
-		t.Fatalf("an unseen job: want slot 0's cell-a, got %q", got.Cell)
+	// The jump hash homes acme/unseen on slot 1 of two.
+	if got := memberForJob(row, "acme/unseen"); got.Cell != "cell-b" {
+		t.Fatalf("an unseen job: want its hash home cell-b, got %q", got.Cell)
+	}
+}
+
+// TestMemberForJob_MissingEntryUsesTheComputedHome asserts a job with no
+// stored entry resolves to the slot the next recompute stores, so every
+// reader reads one home from the moment the job exists.
+func TestMemberForJob_MissingEntryUsesTheComputedHome(t *testing.T) {
+	row := twoSlotRow()
+	row.jobHomes = map[string]int32{}
+	const jobPath = "smoke-b/xt-missing-artifact"
+
+	want := computeJobHomes([]string{jobPath}, row.members)[jobPath]
+	if want != 1 {
+		t.Fatalf("fixture: the jump hash homes %s on slot %d, want 1", jobPath, want)
+	}
+	if got := homeSlotForJob(row, jobPath); got != want {
+		t.Fatalf("homeSlotForJob = %d, want the recompute's %d", got, want)
+	}
+	if got := memberForJob(row, jobPath); got.Cell != "cell-b" {
+		t.Fatalf("memberForJob = %q, want cell-b", got.Cell)
+	}
+}
+
+// TestMemberForJob_StoredEntryWins asserts a stored entry wins over the
+// computed hash home.
+func TestMemberForJob_StoredEntryWins(t *testing.T) {
+	row := twoSlotRow()
+	// The jump hash homes acme/api on slot 0; the stored entry names 1.
+	if jobHomeSlot("acme/api", 2) != 0 {
+		t.Fatal("fixture: acme/api must hash to slot 0")
+	}
+	if got := memberForJob(row, "acme/api"); got.Cell != "cell-b" {
+		t.Fatalf("memberForJob = %q, want the stored slot's cell-b", got.Cell)
+	}
+}
+
+// TestMemberForJob_OneSlotAnswersSlotZero asserts a tenant with one
+// active slot homes every job, known or not, on slot 0.
+func TestMemberForJob_OneSlotAnswersSlotZero(t *testing.T) {
+	row := placementMembers{
+		members:  []member{{Cell: "solo", Namespace: "cells", Role: MemberRoleActive, Slot: slotPtr(0)}},
+		jobHomes: map[string]int32{},
+	}
+	for _, path := range []string{"acme/unseen", "smoke-b/xt-missing-artifact"} {
+		if got := homeSlotForJob(row, path); got != 0 {
+			t.Fatalf("%s: slot = %d, want 0", path, got)
+		}
+	}
+}
+
+// TestMemberForJob_EmptyPathAnswersSlotZero asserts a tenant-wide call,
+// which carries no job path, resolves to slot 0.
+func TestMemberForJob_EmptyPathAnswersSlotZero(t *testing.T) {
+	row := twoSlotRow()
+	if got := memberForJob(row, ""); got.Cell != "cell-a" {
+		t.Fatalf("empty path: want slot 0's cell-a, got %q", got.Cell)
 	}
 }
 

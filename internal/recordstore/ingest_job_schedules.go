@@ -96,8 +96,10 @@ func applyJobSchedulesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, pay
 			// Only a job's home slot holder owns that job's row. A
 			// standby polls SCM and fires cron, so its export would
 			// overwrite the row's cell and the backstop would then fire
-			// the job on a cell that must not run it. The envelope does
-			// not fail: its other rows can be valid.
+			// the job on a cell that must not run it. A new job with no
+			// stored home resolves to its computed home, so the gate
+			// admits the same cell the next recompute names. The
+			// envelope does not fail: its other rows can be valid.
 			continue
 		}
 		fireTimes, err := parseJobScheduleFireTimes(row.NextFireTimes)

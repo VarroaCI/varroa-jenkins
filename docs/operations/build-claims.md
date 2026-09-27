@@ -75,7 +75,7 @@ A missing `decision` key counts as empty. The mite omits the key from every fail
 | `FENCED` | the cell holds no member of the tenant | cancel |
 | `CROSS_TENANT` | the trigger names a job of another tenant | cancel |
 | `NOT_READY` | the placement is missing or behind | retry |
-| `NOT_HOME` | a standby or a slot that is not the home | forward to the home slot |
+| `NOT_HOME` | a standby or a slot that is not the home | forward to the veto's `home_slot` |
 
 A cancel logs the `WARNING` `claim refused for job <job>, run <run_id>: <reason>: <message>`. The recorder
 logs each veto at `INFO` as `claim refused`, with `reason_code`, `tenant`, `run_id`, `job_path`,

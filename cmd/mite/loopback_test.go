@@ -1574,3 +1574,57 @@ func TestLoopbackMetricsRegistered(t *testing.T) {
 		t.Error("varroa.mite.build_events.retained_bytes was not registered")
 	}
 }
+
+// TestClaimRelaysTheHomeSlotOfANotHomeVeto asserts the /v1/claim body
+// carries home_slot when the gateway sets it, slot 0 included, and omits
+// the key when the gateway sets none.
+func TestClaimRelaysTheHomeSlotOfANotHomeVeto(t *testing.T) {
+	zero := 0
+	cases := []struct {
+		name     string
+		homeSlot *int
+		want     string
+	}{
+		{"slot 0 is relayed", &zero, `"home_slot":0`},
+		{"no slot is omitted", nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := NewAgent(Config{})
+			agent.Logger = slog.Default()
+			agent.loopbackToken = "tok"
+			agent.claimTimeout = 2 * time.Second
+			captured := make(chan string, 1)
+			agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+				captured <- m.GetClaimRequest().RequestId
+				return nil
+			}}
+
+			done := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				req := httptest.NewRequest(http.MethodPost, "/v1/claim", strings.NewReader(claimRequestBody()))
+				req.Header.Set("Authorization", "Bearer tok")
+				rec := httptest.NewRecorder()
+				agent.handleClaim(rec, req)
+				done <- rec
+			}()
+			id := <-captured
+			agent.claimWaiters.resolve(&mitev1.ClaimResponse{RequestId: id, Decision: "vetoed",
+				ReasonCode: "NOT_HOME", HomeSlot: tc.homeSlot})
+
+			var rec *httptest.ResponseRecorder
+			select {
+			case rec = <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("timed out waiting for the claim reply")
+			}
+			body := rec.Body.String()
+			if tc.want != "" && !strings.Contains(body, tc.want) {
+				t.Fatalf("body %s lacks %s", body, tc.want)
+			}
+			if tc.want == "" && strings.Contains(body, "home_slot") {
+				t.Fatalf("body %s carries home_slot, want none", body)
+			}
+		})
+	}
+}

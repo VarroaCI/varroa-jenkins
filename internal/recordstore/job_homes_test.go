@@ -185,9 +185,9 @@ func TestJobHomeScaleUpMovesOnlyOntoTheNewSlot(t *testing.T) {
 	}
 }
 
-// TestJobHomesAnUnseenJobAnswersSlotZero asserts a path the recorder has
-// never stored resolves to slot 0 through memberForJob.
-func TestJobHomesAnUnseenJobAnswersSlotZero(t *testing.T) {
+// TestJobHomesAnUnseenJobAnswersItsComputedHome asserts a path the
+// recorder has never stored resolves to its hash slot through memberForJob.
+func TestJobHomesAnUnseenJobAnswersItsComputedHome(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	seedJobHomePaths(t, db, "acme/api")
@@ -201,8 +201,9 @@ func TestJobHomesAnUnseenJobAnswersSlotZero(t *testing.T) {
 	if err != nil || !exists {
 		t.Fatalf("read members: exists=%v err=%v", exists, err)
 	}
-	if got := memberForJob(row, "acme/never-seen"); got.Cell != "cell-a" {
-		t.Fatalf("an unseen job resolved to %q, want slot 0's cell-a", got.Cell)
+	want := []string{"cell-a", "cell-b"}[jobHomeSlot("acme/never-seen", 2)]
+	if got := memberForJob(row, "acme/never-seen"); got.Cell != want {
+		t.Fatalf("an unseen job resolved to %q, want its hash home %s", got.Cell, want)
 	}
 }
 

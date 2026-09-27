@@ -259,7 +259,7 @@ func TestFenceMessageNamesTheCellAndTheJob(t *testing.T) {
 	req.CellInstance = "pod-c"
 
 	got := decidePlacement(row, true, req)
-	want := "cell cell-c is not the home of job acme/app"
+	want := "cell cell-c is not the home of job acme/app; home slot is 0"
 	if got.Message != want {
 		t.Fatalf("Message = %q, want %q", got.Message, want)
 	}

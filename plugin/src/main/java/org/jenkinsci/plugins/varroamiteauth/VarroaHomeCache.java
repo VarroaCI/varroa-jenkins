@@ -22,7 +22,10 @@ import java.util.logging.Logger;
  * <p>Two fallbacks keep the plugin and the fence in step. An empty entry
  * list means the mite has applied no desired state carrying the map, and
  * the plugin then has no opinion. A job with no entry in a present map
- * resolves to slot 0, which is the recorder's own fallback.
+ * also has no opinion: the recorder homes a new job before the map
+ * reaches this cell. The cell then claims, and the claim fence decides.
+ * A {@code NOT_HOME} veto names the home slot, and the claimer forwards
+ * there.
  */
 public final class VarroaHomeCache {
 
@@ -99,16 +102,16 @@ public final class VarroaHomeCache {
     }
 
     /**
-     * The home slot of {@code jobPath}. A job with no entry in a present
-     * map answers slot 0, the recorder's own fallback.
+     * The home slot of {@code jobPath}, or empty when the held map has no
+     * entry for it. An empty answer is "no opinion", never slot 0.
      */
-    public int homeSlotOf(String jobPath) {
+    public OptionalInt homeSlotOf(String jobPath) {
         Entry entry = entryFor(tenantOf(jobPath));
         if (entry == null) {
-            return 0;
+            return OptionalInt.empty();
         }
         Integer slot = entry.jobHomes.get(jobPath);
-        return slot != null ? slot : 0;
+        return slot != null ? OptionalInt.of(slot) : OptionalInt.empty();
     }
 
     /**
@@ -136,19 +139,24 @@ public final class VarroaHomeCache {
     /**
      * The home slot {@code jobPath} must be forwarded to, or empty when
      * this cell claims for it. A standby holds no slot, so every
-     * submission of a hosted tenant answers that tenant's home slot.
+     * submission of a hosted tenant with a map entry answers that entry.
+     * A job with no entry answers empty: the cell claims, and a
+     * {@code NOT_HOME} veto then names the home slot.
      */
     public OptionalInt forwardSlotFor(String jobPath) {
         String tenant = tenantOf(jobPath);
         if (!hasOpinion() || !hostsTenant(tenant)) {
             return OptionalInt.empty();
         }
-        int home = homeSlotOf(jobPath);
-        OptionalInt held = heldSlotFor(tenant);
-        if (held.isPresent() && held.getAsInt() == home) {
+        OptionalInt home = homeSlotOf(jobPath);
+        if (home.isEmpty()) {
             return OptionalInt.empty();
         }
-        return OptionalInt.of(home);
+        OptionalInt held = heldSlotFor(tenant);
+        if (held.isPresent() && held.getAsInt() == home.getAsInt()) {
+            return OptionalInt.empty();
+        }
+        return home;
     }
 
     /** The tenant folder of a cell job path: its first path segment. */

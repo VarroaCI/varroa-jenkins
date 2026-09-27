@@ -125,7 +125,7 @@ func buildMessageIR(pm *proto.Message, enumNames map[string]bool) MessageIR {
 	for _, el := range pm.Elements {
 		switch v := el.(type) {
 		case *proto.NormalField:
-			fi := buildFieldIR(v.Field, v.Repeated, enumNames)
+			fi := buildFieldIR(v.Field, v.Repeated, v.Optional, enumNames)
 			m.Fields = append(m.Fields, fi)
 		case *proto.MapField:
 			fi := buildMapFieldIR(v)
@@ -157,7 +157,7 @@ func buildMessageIR(pm *proto.Message, enumNames map[string]bool) MessageIR {
 	return m
 }
 
-func buildFieldIR(f *proto.Field, repeated bool, enumNames map[string]bool) FieldIR {
+func buildFieldIR(f *proto.Field, repeated, optional bool, enumNames map[string]bool) FieldIR {
 	isRequired := false
 	if f.Comment != nil {
 		msg := f.Comment.Message()
@@ -171,6 +171,10 @@ func buildFieldIR(f *proto.Field, repeated bool, enumNames map[string]bool) Fiel
 		goType = "[]" + protoToGo(f.Type)
 	} else if isMessageType(f.Type, enumNames) {
 		goType = "*" + f.Type
+	} else if optional {
+		// An optional scalar needs a pointer: omitempty drops a zero
+		// value, and a zero can be a real answer.
+		goType = "*" + protoToGo(f.Type)
 	}
 
 	return FieldIR{

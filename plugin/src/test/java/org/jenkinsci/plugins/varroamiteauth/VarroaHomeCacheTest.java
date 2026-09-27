@@ -41,18 +41,20 @@ public class VarroaHomeCacheTest {
     }
 
     @Test
-    public void aJobWithNoEntryResolvesToSlotZero() {
-        harness.seedHomes("payments", 0, "active", Map.of("payments/build", 0));
+    public void aJobWithNoEntryHasNoOpinion() {
+        harness.seedHomes("payments", 1, "active", Map.of("payments/build", 0));
 
-        assertEquals("a job with no entry takes the recorder's own fallback",
-                0, harness.cache().homeSlotOf("payments/new-job"));
+        assertEquals("a job with no entry must not resolve to slot 0",
+                OptionalInt.empty(), harness.cache().homeSlotOf("payments/new-job"));
+        assertFalse("a job with no entry must claim, so the fence decides",
+                harness.cache().forwardSlotFor("payments/new-job").isPresent());
     }
 
     @Test
     public void aJobEntryNamesItsHomeSlot() {
         harness.seedHomes("payments", 0, "active", Map.of("payments/deploy", 1));
 
-        assertEquals(1, harness.cache().homeSlotOf("payments/deploy"));
+        assertEquals(OptionalInt.of(1), harness.cache().homeSlotOf("payments/deploy"));
         assertTrue("slot 0 must forward a job homed on slot 1",
                 harness.cache().forwardSlotFor("payments/deploy").isPresent());
         assertEquals(1, harness.cache().forwardSlotFor("payments/deploy").getAsInt());
@@ -61,13 +63,13 @@ public class VarroaHomeCacheTest {
     // ---- The standby ----
 
     @Test
-    public void aStandbyHoldsNoSlotAndForwardsEverySubmission() {
+    public void aStandbyHoldsNoSlotAndForwardsEveryMappedSubmission() {
         harness.seedHomes("payments", 0, "standby", Map.of("payments/build", 0));
 
         assertEquals(OptionalInt.empty(), harness.cache().heldSlotFor("payments"));
         assertTrue("a standby forwards a job homed on slot 0",
                 harness.cache().forwardSlotFor("payments/build").isPresent());
-        assertTrue("a standby forwards a job with no entry",
+        assertFalse("a standby claims a job with no entry, and the veto names the home",
                 harness.cache().forwardSlotFor("payments/other").isPresent());
     }
 
@@ -92,7 +94,7 @@ public class VarroaHomeCacheTest {
 
         assertTrue("a reply with no entry list must keep the previous answer",
                 harness.cache().hasOpinion());
-        assertEquals(1, harness.cache().homeSlotOf("payments/deploy"));
+        assertEquals(OptionalInt.of(1), harness.cache().homeSlotOf("payments/deploy"));
     }
 
     @Test
@@ -104,7 +106,7 @@ public class VarroaHomeCacheTest {
 
         assertTrue("an entries value that is not a list must keep the previous answer",
                 harness.cache().hasOpinion());
-        assertEquals(1, harness.cache().homeSlotOf("payments/deploy"));
+        assertEquals(OptionalInt.of(1), harness.cache().homeSlotOf("payments/deploy"));
     }
 
     @Test
@@ -128,7 +130,7 @@ public class VarroaHomeCacheTest {
         harness.cache().refresh();
 
         assertTrue("a failed refresh must keep the previous answer", harness.cache().hasOpinion());
-        assertEquals(1, harness.cache().homeSlotOf("payments/deploy"));
+        assertEquals(OptionalInt.of(1), harness.cache().homeSlotOf("payments/deploy"));
     }
 
     // ---- The interval ----

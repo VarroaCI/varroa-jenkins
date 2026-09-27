@@ -487,6 +487,9 @@ message ClaimResponse {
   string message = 6;
   string error = 7;
   string code = 8;
+  // home_slot names the job's home slot on a NOT_HOME veto alone. The
+  // claimer forwards the build to that slot.
+  optional int32 home_slot = 9;
 }
 
 message EventAck {

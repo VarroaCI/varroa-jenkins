@@ -77,6 +77,7 @@ type ledgerClaimResponse struct {
 	BuildNumber int64  `json:"build_number,omitempty"`
 	ReasonCode  string `json:"reason_code,omitempty"`
 	Message     string `json:"message,omitempty"`
+	HomeSlot    *int   `json:"home_slot,omitempty"`
 	Error       string `json:"error,omitempty"`
 	Code        string `json:"code,omitempty"`
 }
@@ -304,6 +305,7 @@ func (h *BusHandler) handleClaimRequest(name, ns string, req *mitev1.ClaimReques
 		Message:     reply.Message,
 		Error:       reply.Error,
 		Code:        reply.Code,
+		HomeSlot:    reply.HomeSlot,
 	}
 	out := &mitev1.OperatorMessage{
 		Message: &mitev1.OperatorMessage_ClaimResponse{ClaimResponse: resp},

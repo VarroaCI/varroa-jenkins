@@ -78,6 +78,7 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 			replay_of    = COALESCE(EXCLUDED.replay_of, runs.replay_of),
 			status       = `+runsStatusMergeSQL("TRUE")+`,
 			cell         = CASE WHEN `+supersedeSQL("TRUE")+` THEN EXCLUDED.cell ELSE runs.cell END,
+			namespace    = CASE WHEN `+supersedeSQL("TRUE")+` THEN EXCLUDED.namespace ELSE runs.namespace END,
 			result       = CASE WHEN `+supersedeSQL("TRUE")+` THEN NULL::text ELSE runs.result END,
 			ended_at     = CASE WHEN `+supersedeSQL("TRUE")+` THEN NULL::timestamptz ELSE runs.ended_at END,
 			interrupted_superseded_at = CASE WHEN `+supersedeSQL("TRUE")+` AND runs.result = 'INTERRUPTED' THEN now() ELSE runs.interrupted_superseded_at END,

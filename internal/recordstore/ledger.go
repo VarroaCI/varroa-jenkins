@@ -120,7 +120,8 @@ func (l *Ledger) Claim(ctx context.Context, req ClaimRequest) ClaimResponse {
 		return ClaimResponse{Code: CodeUnavailable, Error: err.Error()}
 	}
 	if !result.Allow {
-		return ClaimResponse{Decision: DecisionVetoed, ReasonCode: result.ReasonCode, Message: result.Message}
+		return ClaimResponse{Decision: DecisionVetoed, ReasonCode: result.ReasonCode, Message: result.Message,
+			HomeSlot: result.HomeSlot}
 	}
 
 	resp, err := claimTx(ctx, tx, req, runID, createdAt)

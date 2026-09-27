@@ -42,7 +42,7 @@ slot's holder; a claim from any other member answers `NOT_HOME`. One writer for 
 Jenkins.
 
 The map uses a consistent hash. A growth from `N` to `N + 1` slots moves about one job in `N + 1`,
-onto the new slot. A new job resolves to slot 0 until the next round.
+onto the new slot. A new job takes its slot at once.
 
 A change to `members` binds or releases cells, then the recorder recomputes the map. A job whose
 home changed takes its history to the new holder: the recorder refreshes its records and raises
@@ -58,7 +58,7 @@ Varroa forwards a cross-slot trigger through the ledger.
 - A `build job:` step that waits fails at once, and names `varroa.build`, which waits across slots.
 - A native `upstream` trigger, a `varroaUpstream` trigger, and a backstop cron fire reach the job's home slot.
 - A cross-slot `build job:` shows no downstream link. `varroa.build` returns a handle instead.
-- A forwarded build carries text parameters only; a file parameter does not cross a slot.
+- A forwarded build keeps its run id and text parameters; a file parameter does not cross a slot.
 
 Two members that fire one cron inside one minute build the job once. A fire that crosses a minute
 boundary builds it twice.

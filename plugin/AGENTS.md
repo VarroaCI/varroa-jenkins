@@ -213,8 +213,9 @@ the root AGENTS.md greenfield rule.
   slot map. **The plugin computes no home**; it reads the map the recorder wrote and
   the operator delivered, so the plugin and the claim fence read one home for every
   job. Two fallbacks keep the two in step: an empty entry list is "no opinion" and
-  forwards nothing, and a job with no entry in a present map resolves to slot 0. A
-  job of a tenant this cell does not host is never forwarded.
+  forwards nothing, and a job with no entry in a present map is "no opinion" too, so
+  the cell claims and the fence decides. A job of a tenant this cell does not host is
+  never forwarded.
   `VarroaHomeRefresher.java` (`AsyncPeriodicWork`) is the only caller of the refresh,
   every 30 s, overridden by `VARROA_HOMES_POLL_MS` and gated on `VARROA_CLAIM_GATE`;
   a failed refresh keeps the previous answer. **The forward runs in
@@ -223,10 +224,13 @@ the root AGENTS.md greenfield rule.
   before it posts the claim, forwards a non-home job over
   `POST /v1/cross-tenant/build` with `caller_job_path` the job's own full path,
   `target_tenant` the same tenant, `seq` `s1`, and `intent_key` the key it derived,
-  then cancels the local item. A standby holds no slot, so it forwards every
-  submission. A `vetoed`/`NOT_HOME` reply is the one veto the claimer does not
-  cancel: it refreshes the cache and forwards, and the one-hour budget bounds a
-  repeat. A failed forward joins the claim's own retry class.
+  and `caller_run_id` the item's run id, which the recorder keeps as the run id, then
+  cancels the local item. A standby holds no slot, so it forwards every submission
+  the map names. A `vetoed`/`NOT_HOME` reply is the one veto the claimer does not
+  cancel: it refreshes the cache and forwards to the reply's `home_slot`, else to the
+  refreshed cache's slot, else retries; the one-hour budget bounds a repeat. A failed
+  forward joins the claim's own retry class, and a forward answered with a reason code
+  makes the next attempt claim instead of forward.
   `VarroaQueueDecisionHandler` gains one refusal: a **waiting** `build` step for a
   non-home job, detected by an action whose class simple name is
   `BuildTriggerAction`, because `Queue.schedule2` refuses on the first `false` and

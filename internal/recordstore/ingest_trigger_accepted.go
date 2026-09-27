@@ -34,6 +34,13 @@ type RunTriggerAcceptedPayload struct {
 // real run's created_at holds that same moment, so one run identifier maps
 // to one primary key whichever path writes it. The conflict clause alone
 // then decides, and the store can hold no second row for that identifier.
+//
+// A forwarded build keeps its run identifier, so a second cell can accept
+// a run that a first cell accepted. The conflict clause then moves the row
+// to the new cell: it writes the cell, the namespace, and the accepted
+// keys. It moves only a QUEUED row that still holds the accepted keys,
+// because such a row records no build. It moves only for a newer accept
+// on another cell, so a redelivered older accept never moves the row back.
 func (g *Ingester) applyTriggerAccepted(ctx context.Context, env IngestEnvelope) (ApplyResult, error) {
 	// The route runs before Apply's own uuid.Parse, so no other code checks
 	// the identifier. An unchecked identifier lands in no partition, and the
@@ -73,7 +80,14 @@ func (g *Ingester) applyTriggerAccepted(ctx context.Context, env IngestEnvelope)
 			$9,
 			jsonb_build_object('accepted_at', $10::timestamptz, 'accepted_instance', $11::text)
 		)
-		ON CONFLICT (created_at, run_id) DO NOTHING
+		ON CONFLICT (created_at, run_id) DO UPDATE SET
+			cell      = EXCLUDED.cell,
+			namespace = EXCLUDED.namespace,
+			payload   = runs.payload || EXCLUDED.payload
+		WHERE runs.status = 'QUEUED'
+		  AND COALESCE(runs.payload ? 'accepted_at', false)
+		  AND (runs.namespace, runs.cell) IS DISTINCT FROM (EXCLUDED.namespace, EXCLUDED.cell)
+		  AND (runs.payload->>'accepted_at')::timestamptz < $10::timestamptz
 	`,
 		runID, createdAt, env.IntentKey, env.Cluster, env.Namespace, env.Cell, env.Tenant, env.JobPath,
 		nullableString(payload.Actor),

@@ -127,7 +127,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   slot-0 member built from the row's scalar columns. `members.go` holds
   the only three readers of a member's identity, `memberForJob`,
   `memberForInstance`, and `memberForCell`, plus the Lamping and Veach
-  jump consistent hash the recorder homes a job with. `resolveJobHome`
+  jump consistent hash the recorder homes a job with. `homeSlotForJob`
+  resolves a job's slot for `memberForJob`: a stored `job_homes` entry
+  wins, an empty path answers slot 0, and a path with no entry answers its
+  computed hash slot over the active slot count. That fallback equals the
+  value the next recompute stores, so the dispatcher, the fence, and the
+  schedule gate read one home from the moment a job exists. `resolveJobHome`
   (`job_homes.go`) joins `readTenantPlacementMembers` and `memberForJob`
   into one read of a job's home member. `pgReader.JobHome`, the upstream
   fan-out, and the backstop fire call it; the two rounds call it through
@@ -269,7 +274,11 @@ of the fleet's audit activity, once a controller becomes disposable.
   nothing else would ever resolve it. `applyTriggerAccepted` writes the
   same row `DUPLICATE` at once when `run_intents` already holds its
   intent key under another run identifier, because an accepted trigger
-  can land on either side of its claim. `NextBuildNumber` and
+  can land on either side of its claim. A forwarded build keeps its run
+  identifier, so a second cell can accept the same run: a newer accept
+  from another cell moves a `QUEUED` row that still holds `accepted_at`
+  onto its cell, namespace, and accepted keys. An older accept never moves
+  the row back. `NextBuildNumber` and
   `RaiseWatermarkForStartedBuild` are exported for `ingest_started.go`'s
   `run.started` write, which is their only caller in this package
   today.
@@ -293,7 +302,10 @@ of the fleet's audit activity, once a controller becomes disposable.
   the two generation orders, the cross-tenant test, and the home
   member's own seed state (`rehydrated_instance` and `pending_jobs`). A
   missing row answers `NOT_READY` with no exemption. A claim from a
-  standby or a non-home slot answers the permanent `NOT_HOME`. The
+  standby or a non-home slot answers the permanent `NOT_HOME`, and that
+  veto alone carries `FenceResult.HomeSlot`, which `Ledger.Claim` copies
+  onto `ClaimResponse.home_slot`. A `NOT_HOME` veto writes no
+  `run_intents` row. The
   generation orders answer the retryable `NOT_READY`, because orders 2
   and 3 already refuse a cell the tenant has left, so a request that
   reaches them comes from a live member with a stale resolver cache. `FenceMetrics`
@@ -400,7 +412,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   kind is the one kind that reads `CrossTenantRequest.IntentKey`, and only when
   `CallerTenant` equals `TargetTenant`: an intra-tenant forward preserves the
   claimer's own key, so two members that fire one cron in one minute reach one
-  ledger row. `crossTenantSuppliedKey` validates it with `ParseIntentKey`
+  ledger row. A request with a supplied key is a forward, and it keeps its
+  `caller_run_id` as the run identifier (`INVALID_KEY` when that value is
+  not a UUIDv7): the API answered that identifier, so a minted one leaves the
+  answered run `QUEUED`. A forward answers `NOT_READY` and publishes nothing
+  when the home slot holds no cell or the home is the calling cell, because
+  its claimer cancels its item on an answer with no reason code. `crossTenantSuppliedKey` validates it with `ParseIntentKey`
   (`reason_code=INVALID_KEY` for an unparsable key) and answers `code=INTERNAL`
   for a cross-tenant request that carries one, because grant order 8 tests the
   scheme of a key the recorder derived. `status` and

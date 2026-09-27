@@ -409,3 +409,44 @@ func TestOnClaimRequest_MoveIsServedStaleWithinTTLThenRefreshedAfterExpiry(t *te
 		t.Fatalf("claim after TTL expiry = %q/%d, want the refreshed payments/2", got.Tenant, got.PlacementGeneration)
 	}
 }
+
+// TestOnClaimRequest_NotHomeRelaysTheHomeSlot asserts a NOT_HOME reply's
+// home slot reaches the mite, slot 0 included, and that a reply with no
+// home slot relays none.
+func TestOnClaimRequest_NotHomeRelaysTheHomeSlot(t *testing.T) {
+	zero := 0
+	cases := []struct {
+		name  string
+		reply ledgerClaimResponse
+		want  *int
+	}{
+		{"not home names slot 0", ledgerClaimResponse{Decision: "vetoed", ReasonCode: "NOT_HOME", HomeSlot: &zero}, &zero},
+		{"granted names none", ledgerClaimResponse{Decision: "granted", RunID: "run-1", BuildNumber: 1}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reply := tc.reply
+			h := newClaimTestHandler(&fakeLedger{reply: &reply})
+			sender := &fakeSender{}
+			h.OnClaimRequest("ctrl1", "ns1", 1, &mitev1.ClaimRequest{
+				RequestId: "req-1", IntentKey: "manual:r", RunId: "run-1", JobPath: "team-a/build",
+			}, sender.send)
+
+			waitFor(t, func() bool { return sender.count() == 1 }, time.Second, "no claim response sent")
+			resp := sender.first().GetClaimResponse()
+			switch {
+			case tc.want == nil && resp.HomeSlot != nil:
+				t.Fatalf("home slot = %d, want none", *resp.HomeSlot)
+			case tc.want != nil && (resp.HomeSlot == nil || *resp.HomeSlot != *tc.want):
+				t.Fatalf("home slot = %v, want %d", resp.HomeSlot, *tc.want)
+			}
+			body, err := json.Marshal(resp)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if got := bytes.Contains(body, []byte(`"home_slot"`)); got != (tc.want != nil) {
+				t.Fatalf("wire body %s: home_slot present = %v, want %v", body, got, tc.want != nil)
+			}
+		})
+	}
+}

@@ -189,6 +189,7 @@ type ClaimResponse struct {
 	Message     string `json:"message,omitempty"`
 	Error       string `json:"error,omitempty"`
 	Code        string `json:"code,omitempty"`
+	HomeSlot    *int   `json:"home_slot,omitempty"`
 }
 
 type CommandResult struct {

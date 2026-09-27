@@ -162,5 +162,6 @@ func TestResumeTargetAnswersTheHomeSlotMember(t *testing.T) {
 		}
 	}
 	assertTarget(testJobPath, meshTargetCell)
-	assertTarget("acme/unseen", "cell-slot0")
+	// acme/api holds no entry, and the jump hash homes it on slot 0.
+	assertTarget("acme/api", "cell-slot0")
 }

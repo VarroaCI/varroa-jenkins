@@ -148,7 +148,7 @@ func TestDecidePlacementOrders(t *testing.T) {
 				req.CellInstance = "pod-c"
 			},
 			wantReason: ReasonNotHome,
-			wantMsg:    "cell cell-c is not the home of job acme/app",
+			wantMsg:    "cell cell-c is not the home of job acme/app; home slot is 0",
 		},
 		{
 			name:   "order 6: the claiming slot is not the job's home",
@@ -159,7 +159,7 @@ func TestDecidePlacementOrders(t *testing.T) {
 				req.CellInstance = "pod-b"
 			},
 			wantReason: ReasonNotHome,
-			wantMsg:    "cell cell-b is not the home of job acme/app",
+			wantMsg:    "cell cell-b is not the home of job acme/app; home slot is 0",
 		},
 		{
 			name:   "order 7: request generation below stored",

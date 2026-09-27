@@ -622,6 +622,78 @@ public class VarroaClaimQueueTest {
     }
 
     @Test
+    public void aNotHomeVetoWithAHomeSlotForwardsThere() throws Exception {
+        FreeStyleProject project = tenantJob("payments", "fresh");
+        // The map holds no entry for a new job, so the cell claims first.
+        homes.seedHomes("payments", 1, "active", java.util.Map.of("payments/other", 1));
+        homes.stub().setClaimResponder(n -> new StubLoopback.Reply(200,
+                "{\"decision\":\"vetoed\",\"reason_code\":\"NOT_HOME\",\"home_slot\":0}"));
+        Queue.Item item = scheduleItem(project);
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
+                millis -> { }, homes.cache());
+        queue.offer(item, project);
+
+        awaitTrue(() -> isCancelled(item), "the item to be cancelled after the forward");
+        assertEquals("the veto must cost exactly one claim", 1, homes.stub().claimCallCount());
+        assertEquals("the veto's home slot must drive one forward", 1, homes.stub().forwardCallCount());
+        String body = homes.stub().bodiesFor(StubLoopback.FORWARD_PATH).get(0);
+        assertEquals("the forward keeps the item's run id",
+                item.getAction(VarroaIntentAction.class).getRunId(), extractField(body, "caller_run_id"));
+    }
+
+    @Test
+    public void aNotHomeVetoWithNoSlotAndNoEntryRetries() throws Exception {
+        FreeStyleProject project = tenantJob("payments", "orphan");
+        homes.seedHomes("payments", 1, "active", java.util.Map.of("payments/other", 1));
+        homes.stub().setClaimResponder(
+                n -> new StubLoopback.Reply(200, "{\"decision\":\"vetoed\",\"reason_code\":\"NOT_HOME\"}"));
+        Queue.Item item = scheduleItem(project);
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
+                millis -> { }, homes.cache());
+        queue.offer(item, project);
+
+        awaitTrue(() -> homes.stub().claimCallCount() >= 3, "the claim to retry on the ladder");
+        assertEquals("no slot and no entry must forward nothing", 0, homes.stub().forwardCallCount());
+        assertFalse("no slot and no entry must keep the item", isCancelled(item));
+        queue.shutdown();
+    }
+
+    @Test
+    public void aNewJobWithNoEntryClaimsLocally() throws Exception {
+        FreeStyleProject project = tenantJob("payments", "brand-new");
+        homes.seedHomes("payments", 1, "active", java.util.Map.of("payments/other", 0));
+        Queue.Item item = scheduleItem(project);
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
+                millis -> { }, homes.cache());
+        queue.offer(item, project);
+
+        awaitTrue(() -> item.getAction(VarroaIntentAction.class).isGranted(), "the claim to be granted");
+        assertEquals("a job with no entry must post no forward", 0, homes.stub().forwardCallCount());
+        assertEquals(1, homes.stub().claimCallCount());
+    }
+
+    @Test
+    public void aRefusedForwardClaimsOnTheNextAttempt() throws Exception {
+        FreeStyleProject project = tenantJob("payments", "stale");
+        // The cached map is stale: the recorder already homes the job here.
+        homes.seedHomes("payments", 0, "active", java.util.Map.of("payments/stale", 1));
+        homes.stub().setForwardResponder(n -> new StubLoopback.Reply(200,
+                "{\"reason_code\":\"NOT_READY\",\"message\":\"the home of job payments/stale is the calling cell\"}"));
+        Queue.Item item = scheduleItem(project);
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
+                millis -> { }, homes.cache());
+        queue.offer(item, project);
+
+        awaitTrue(() -> item.getAction(VarroaIntentAction.class).isGranted(), "the claim to be granted");
+        assertEquals("the refused forward costs one call", 1, homes.stub().forwardCallCount());
+        assertEquals("the next attempt claims", 1, homes.stub().claimCallCount());
+    }
+
+    @Test
     public void aFailedForwardRetriesAndOnlyTheBudgetCancels() throws Exception {
         FreeStyleProject project = tenantJob("payments", "flaky");
         homes.seedHomes("payments", 0, "active", java.util.Map.of("payments/flaky", 1));

@@ -41,7 +41,8 @@ type placementScalars struct {
 // decodePlacementMembers decodes the members and job_homes columns of one
 // tenant_placements row. An empty members list answers one synthetic
 // slot-0 active member built from scalars. An empty or absent job_homes
-// map answers an empty map, which resolves every job path to slot 0.
+// map answers an empty map, which resolves every job path to its computed
+// home slot.
 func decodePlacementMembers(membersRaw, jobHomesRaw []byte, scalars placementScalars) (placementMembers, error) {
 	out := placementMembers{jobHomes: map[string]int32{}}
 	if len(membersRaw) > 0 {
@@ -91,11 +92,11 @@ func syntheticSlotZero(scalars placementScalars) member {
 }
 
 // memberForJob answers the active member that holds jobPath's home slot.
-// A job path with no job_homes entry resolves to slot 0. A slot that holds
-// no member answers the zero member, whose empty cell and empty instance
-// make every comparison fail closed. This helper never answers a standby.
+// A slot that holds no member answers the zero member, whose empty cell
+// and empty instance make every comparison fail closed. This helper never
+// answers a standby.
 func memberForJob(row placementMembers, jobPath string) member {
-	slot := row.jobHomes[jobPath]
+	slot := homeSlotForJob(row, jobPath)
 	for _, m := range row.members {
 		if m.Role != MemberRoleActive || m.Slot == nil {
 			continue
@@ -105,6 +106,23 @@ func memberForJob(row placementMembers, jobPath string) member {
 		}
 	}
 	return member{}
+}
+
+// homeSlotForJob answers jobPath's home slot. A stored job_homes entry
+// wins. A path with no entry resolves to its computed hash home over the
+// row's active slot count, the same value the next recompute stores. The
+// dispatcher, the claim fence, and the schedule gate must read one home
+// from the moment a job exists, before any recompute stores its entry.
+// An empty path is a tenant-wide call, such as a fleet lock, and resolves
+// to slot 0.
+func homeSlotForJob(row placementMembers, jobPath string) int32 {
+	if slot, ok := row.jobHomes[jobPath]; ok {
+		return slot
+	}
+	if jobPath == "" {
+		return 0
+	}
+	return jobHomeSlot(jobPath, activeSlotCount(row.members))
 }
 
 // memberForInstance answers the member whose cell instance equals

@@ -57,7 +57,7 @@ func countJobHomeChanges(ctx context.Context, metrics *ActionMetrics, before, af
 
 // tenantJobPaths answers the union of the tenant's job_numbers paths and
 // its job_schedules paths. A path in neither has no home entry, and every
-// reader resolves such a path to slot 0.
+// reader resolves such a path to its computed hash home.
 func tenantJobPaths(ctx context.Context, tx pgx.Tx, cluster, tenant string) ([]string, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT job_path FROM varroa.job_numbers WHERE cluster = $1 AND tenant = $2

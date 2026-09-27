@@ -33,9 +33,13 @@ import java.util.logging.Logger;
  *
  * <p>A claimer thread also owns the intra-tenant forward. It resolves the
  * job's home slot from {@link VarroaHomeCache} before it posts the claim,
- * and forwards a job this cell does not home. The forward is a network
- * call, so it cannot run in the queue decision handler or in the
- * dispatcher: both hold the Jenkins queue lock.
+ * and forwards a job this cell does not home. A {@code NOT_HOME} veto
+ * names the home slot, and the claimer forwards to that slot first. The
+ * forward is a network call, so it cannot run in the queue decision
+ * handler or in the dispatcher: both hold the Jenkins queue lock.
+ *
+ * <p>A forward keeps the item's run id. The recorder triggers the home
+ * with that run id, so the run the API answered is the run that builds.
  */
 public class VarroaClaimQueue {
 
@@ -186,7 +190,11 @@ public class VarroaClaimQueue {
             action.setIntentKey(derived.intentKey);
             action.setRevision(derived.revision);
 
-            OptionalInt home = homeCache.forwardSlotFor(job.getFullName());
+            // A refused forward proves the cached map disagrees with the
+            // recorder. The next attempt claims, so the fence names the home.
+            OptionalInt home = last.forwardRefused ? OptionalInt.empty()
+                    : homeCache.forwardSlotFor(job.getFullName());
+            last.forwardRefused = false;
             if (home.isPresent()) {
                 if (forwardOnce(item, job, action, derived, home.getAsInt(), last)) {
                     return;
@@ -218,7 +226,9 @@ public class VarroaClaimQueue {
      *
      * <p>A {@code NOT_HOME} veto proves the home cache was stale. It
      * refreshes the cache and forwards at once, and it cancels no item:
-     * the one-hour budget bounds a repeat.
+     * the one-hour budget bounds a repeat. It forwards to the slot the
+     * veto names, else to the refreshed cache's slot. With neither, the
+     * caller retries.
      */
     private boolean claimOnce(Queue.Item item, Job<?, ?> job, VarroaIntentAction action,
             IntentKey.Result derived, int attempt, LastAnswer last) {
@@ -248,8 +258,9 @@ public class VarroaClaimQueue {
                 return true;
             case VETOED_NOT_HOME:
                 homeCache.refresh();
-                OptionalInt refreshed = homeCache.forwardSlotFor(job.getFullName());
-                return refreshed.isPresent() && forwardOnce(item, job, action, derived, refreshed.getAsInt(), last);
+                OptionalInt target = decision.homeSlot.isPresent() ? decision.homeSlot
+                        : homeCache.forwardSlotFor(job.getFullName());
+                return target.isPresent() && forwardOnce(item, job, action, derived, target.getAsInt(), last);
             case VETOED_NOT_READY:
             case RETRY:
                 return false;
@@ -274,7 +285,12 @@ public class VarroaClaimQueue {
      * <p>The caller tenant and the target tenant are the same tenant, so
      * the grant allows the call with no export. The forward carries the
      * derived intent key unchanged, so two members that fire one cron in
-     * one minute reach one ledger row.
+     * one minute reach one ledger row. It carries the item's run id as
+     * {@code caller_run_id}, and the recorder triggers the home with it.
+     *
+     * <p>A reply with a reason code, such as {@code NOT_READY} while the
+     * home slot holds no cell, keeps the item. The next attempt then
+     * claims instead of forwarding.
      */
     private boolean forwardOnce(Queue.Item item, Job<?, ?> job, VarroaIntentAction action,
             IntentKey.Result derived, int homeSlot, LastAnswer last) {
@@ -286,6 +302,7 @@ public class VarroaClaimQueue {
         VarroaCrossTenantReply reply = VarroaCrossTenantReply.parse(resp);
         if (reply.isFailure() || !reply.reasonCode().isEmpty()) {
             last.text = reply.isFailure() ? reply.describe() : reply.describeVeto();
+            last.forwardRefused = !reply.isFailure();
             LOGGER.log(Level.FINE,
                     "VarroaClaimQueue: the forward of job {0} to slot {1} failed; retrying",
                     new Object[] {jobPath, homeSlot});
@@ -310,11 +327,8 @@ public class VarroaClaimQueue {
 
     /** The job's home slot as a log value, or {@code none} with no cached opinion. */
     private String homeSlotLabel(Job<?, ?> job) {
-        String jobPath = job.getFullName();
-        if (!homeCache.hasOpinion() || !homeCache.hostsTenant(VarroaHomeCache.tenantOf(jobPath))) {
-            return "none";
-        }
-        return Integer.toString(homeCache.homeSlotOf(jobPath));
+        OptionalInt slot = homeCache.homeSlotOf(job.getFullName());
+        return slot.isPresent() ? Integer.toString(slot.getAsInt()) : "none";
     }
 
     // --- Build number apply (contract G3) ---
@@ -382,6 +396,8 @@ public class VarroaClaimQueue {
      */
     private static final class LastAnswer {
         String text = "none";
+        /** True when the newest forward got a reason code back. */
+        boolean forwardRefused;
     }
 
     private static final class Decision {
@@ -392,24 +408,41 @@ public class VarroaClaimQueue {
         final String reasonCode;
         final String message;
         final String error;
+        /** The home slot a {@code NOT_HOME} veto names, or empty. */
+        final OptionalInt homeSlot;
 
         Decision(Kind kind, long buildNumber) {
-            this(kind, buildNumber, "", "", "", "");
+            this(kind, buildNumber, "", "", "", "", OptionalInt.empty());
         }
 
         Decision(Kind kind, long buildNumber, String code, String reasonCode, String message, String error) {
+            this(kind, buildNumber, code, reasonCode, message, error, OptionalInt.empty());
+        }
+
+        Decision(Kind kind, long buildNumber, String code, String reasonCode, String message, String error,
+                OptionalInt homeSlot) {
             this.kind = kind;
             this.buildNumber = buildNumber;
             this.code = code;
             this.reasonCode = reasonCode;
             this.message = message;
             this.error = error;
+            this.homeSlot = homeSlot;
         }
 
         /** Builds a decision of {@code kind} that carries the reply's own reason and text fields. */
         static Decision of(Kind kind, long buildNumber, Map<String, Object> body) {
             return new Decision(kind, buildNumber, stringOf(body.get("code")), stringOf(body.get("reason_code")),
-                    stringOf(body.get("message")), stringOf(body.get("error")));
+                    stringOf(body.get("message")), stringOf(body.get("error")), homeSlotOf(body.get("home_slot")));
+        }
+
+        /** Reads {@code home_slot}: a non-negative number, else empty. */
+        private static OptionalInt homeSlotOf(Object v) {
+            if (!(v instanceof Number)) {
+                return OptionalInt.empty();
+            }
+            int slot = ((Number) v).intValue();
+            return slot >= 0 ? OptionalInt.of(slot) : OptionalInt.empty();
         }
 
         /**

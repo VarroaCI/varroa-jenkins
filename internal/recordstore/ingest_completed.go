@@ -82,6 +82,7 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 		ON CONFLICT (created_at, run_id) DO UPDATE SET
 			status = `+runsStatusMergeSQL("$13")+`,
 			cell = CASE WHEN `+supersedeSQL("$13")+` THEN EXCLUDED.cell ELSE runs.cell END,
+			namespace = CASE WHEN `+supersedeSQL("$13")+` THEN EXCLUDED.namespace ELSE runs.namespace END,
 			-- The owner arm below already supplies the supersede value for
 			-- these three columns: a supersede needs $13, and $13 takes the
 			-- event's own value whatever the row holds.

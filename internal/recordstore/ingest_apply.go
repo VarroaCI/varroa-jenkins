@@ -58,9 +58,9 @@ type ApplyResult struct {
 	TriggerFailedStored bool
 
 	// TriggerAcceptedStored reports whether a run.trigger_accepted
-	// envelope's insert wrote a row. It is false when the conflict clause
-	// skipped the insert, because a redelivery or a real run already
-	// holds the run id. The caller acknowledges the message and counts
+	// envelope's insert wrote a row or moved an accepted-only row to a new
+	// cell. It is false when the conflict clause skipped the write, because
+	// a redelivery or a real run already holds the run id. The caller acknowledges the message and counts
 	// recorder_ingest_trigger_accepted_total with a stored attribute.
 	TriggerAcceptedStored bool
 

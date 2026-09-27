@@ -261,8 +261,9 @@ func (r *pgReader) CellTenantUsage(ctx context.Context, cluster, namespace, cell
 	return rows, nil
 }
 
-// JobHome answers the member that holds jobPath's home slot. A tenant
-// with no placement row answers Placed false. A tenant whose home slot
+// JobHome answers the member that holds jobPath's home slot. A job with
+// no stored home resolves to its computed hash home, the same home the
+// claim fence reads. A tenant with no placement row answers Placed false. A tenant whose home slot
 // holds no cell answers Placed true and an empty Cell.
 func (r *pgReader) JobHome(ctx context.Context, cluster, tenant, jobPath string) (JobHome, error) {
 	if err := r.checkSchema(ctx); err != nil {

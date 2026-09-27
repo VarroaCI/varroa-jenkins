@@ -335,7 +335,7 @@ func TestReadTenantCellInstanceNamesTheHomeSlot(t *testing.T) {
 		t.Fatalf("readTenantCellInstance: %v", err)
 	}
 	if got != "pod-a" {
-		t.Fatalf("instance = %q, want pod-a: an unseen job is homed on slot 0", got)
+		t.Fatalf("instance = %q, want pod-a: acme/web holds no entry, and its hash home is slot 0", got)
 	}
 }
 

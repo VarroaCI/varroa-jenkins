@@ -143,7 +143,7 @@ func (f *PlacementFence) checkCrossTenantGrant(ctx context.Context, req ClaimReq
 	if err != nil {
 		return FenceResult{}, err
 	}
-	return FenceResult(result), nil
+	return FenceResult{Allow: result.Allow, ReasonCode: result.ReasonCode, Message: result.Message}, nil
 }
 
 // scanTenantPlacementFenceRow scans one tenantPlacementFenceQuery row
@@ -200,6 +200,7 @@ func decidePlacement(row tenantPlacementFenceRow, exists bool, req ClaimRequest)
 
 	claimer, isMember := memberForCell(row.members, req.Namespace, req.Cell)
 	home := memberForJob(row.members, req.JobPath)
+	homeSlot := homeSlotForJob(row.members, req.JobPath)
 
 	switch {
 	case !hasMemberInNamespace(row.members, req.Namespace):
@@ -224,13 +225,11 @@ func decidePlacement(row tenantPlacementFenceRow, exists bool, req ClaimRequest)
 
 	case claimer.Role == MemberRoleStandby:
 		// Order 5: a standby holds the folder and runs no build.
-		return FenceResult{Allow: false, ReasonCode: ReasonNotHome,
-			Message: fmt.Sprintf("cell %s is not the home of job %s", req.Cell, req.JobPath)}
+		return notHomeResult(req, homeSlot)
 
 	case !sameSlot(claimer, home):
 		// Order 6: an active slot that is not this job's home slot.
-		return FenceResult{Allow: false, ReasonCode: ReasonNotHome,
-			Message: fmt.Sprintf("cell %s is not the home of job %s", req.Cell, req.JobPath)}
+		return notHomeResult(req, homeSlot)
 
 	case req.PlacementGeneration < row.generation, req.PlacementGeneration > row.generation:
 		// Orders 7 and 8: the request's generation does not match the
@@ -261,6 +260,15 @@ func decidePlacement(row tenantPlacementFenceRow, exists bool, req ClaimRequest)
 		// Order 12: every comparison passed.
 		return FenceResult{Allow: true}
 	}
+}
+
+// notHomeResult answers the NOT_HOME veto of orders 5 and 6. It names
+// the job's home slot, because the claimer's own home map can lack a new
+// job, and the claimer then forwards to the slot the veto names.
+func notHomeResult(req ClaimRequest, homeSlot int32) FenceResult {
+	return FenceResult{Allow: false, ReasonCode: ReasonNotHome,
+		Message:  fmt.Sprintf("cell %s is not the home of job %s; home slot is %d", req.Cell, req.JobPath, homeSlot),
+		HomeSlot: &homeSlot}
 }
 
 // instanceIsAnnounced reports whether any member of the row names

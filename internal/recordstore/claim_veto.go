@@ -36,7 +36,8 @@ const vetoedRunMessage = "the record store refused the build claim"
 //
 // One upsert covers both orders of the race with run.trigger_accepted.
 // With no row yet, the insert writes the failed row, and the later
-// accepted insert keeps it through its own ON CONFLICT DO NOTHING. With
+// accepted insert keeps it: its conflict clause moves a QUEUED row
+// alone, and the failed row is COMPLETED. With
 // the QUEUED row already stored, the update marks it. Both halves refuse
 // a run that holds a ledger intent, a build number, a mesh resume
 // record, or any status but QUEUED. A later run.started supersedes the

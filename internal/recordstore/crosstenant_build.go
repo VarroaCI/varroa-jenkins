@@ -27,8 +27,13 @@ var crossTenantBuildSeqPattern = regexp.MustCompile(`^s[1-9][0-9]*$`)
 // publishes a trigger_run action.
 //
 // The kind also serves an intra-tenant forward, whose caller tenant
-// equals its target tenant. Such a request may carry its own intent key,
-// and the responder then derives none.
+// equals its target tenant. Such a request carries its own intent key,
+// and the responder then derives none. A forward also keeps the caller's
+// run identifier: the API answered that identifier to its caller, and
+// the intent key names it. A new identifier leaves the answered run
+// QUEUED until the claim expiry. A forward answers NOT_READY, and publishes
+// nothing, while the home slot holds no cell or while the home is the
+// calling cell. The claimer then retries, and never drops the build.
 func handleCrossTenantBuild(ctx context.Context, deps CrossTenantDeps, req CrossTenantRequest) (CrossTenantResponse, error) {
 	if !crossTenantBuildSeqPattern.MatchString(req.Seq) {
 		return CrossTenantResponse{Code: CodeInternal,
@@ -38,6 +43,16 @@ func handleCrossTenantBuild(ctx context.Context, deps CrossTenantDeps, req Cross
 	suppliedKey, resp, ok := crossTenantSuppliedKey(req)
 	if !ok {
 		return resp, nil
+	}
+	forward := suppliedKey != ""
+	var forwardRunID uuid.UUID
+	if forward {
+		id, _, err := parseRunUUIDv7(req.CallerRunID)
+		if err != nil {
+			return CrossTenantResponse{ReasonCode: ReasonInvalidKey,
+				Message: fmt.Sprintf("caller_run_id of a forward: %v", err)}, nil
+		}
+		forwardRunID = id
 	}
 
 	qualifiedJobPath := qualifyCrossTenantJobPath(req.TargetTenant, req.JobPath)
@@ -87,14 +102,29 @@ func handleCrossTenantBuild(ctx context.Context, deps CrossTenantDeps, req Cross
 		return resp, nil
 	}
 
-	runID, err := uuid.NewV7()
-	if err != nil {
-		return CrossTenantResponse{}, fmt.Errorf("mint reserved run id: %w", err)
+	runID := forwardRunID
+	if !forward {
+		runID, err = uuid.NewV7()
+		if err != nil {
+			return CrossTenantResponse{}, fmt.Errorf("mint reserved run id: %w", err)
+		}
 	}
 
 	target, err := resolveCrossTenantTargetPlacement(ctx, deps.Pool, req.Cluster, req.TargetTenant, qualifiedJobPath)
 	if err != nil {
 		return CrossTenantResponse{}, err
+	}
+	if forward && target.cell == "" {
+		// A forward's caller cancels its own queue item on any answer
+		// with no reason code, so a PENDING answer would drop the build.
+		return CrossTenantResponse{ReasonCode: ReasonNotReady,
+			Message: fmt.Sprintf("the home slot of job %s holds no cell", qualifiedJobPath)}, nil
+	}
+	if forward && target.cluster == req.Cluster && target.namespace == req.Namespace && target.cell == req.Cell {
+		// The caller's home map is newer than the recorder's. A trigger
+		// back to the calling cell would run the same run id there again.
+		return CrossTenantResponse{ReasonCode: ReasonNotReady,
+			Message: fmt.Sprintf("the home of job %s is the calling cell %s", qualifiedJobPath, req.Cell)}, nil
 	}
 	if target.cell == "" {
 		// The target job's home slot holds no cell yet. The caller
@@ -117,6 +147,9 @@ func handleCrossTenantBuild(ctx context.Context, deps CrossTenantDeps, req Cross
 		return CrossTenantResponse{}, err
 	}
 
+	if forward {
+		return CrossTenantResponse{RunID: runID.String(), State: CrossTenantStatePending}, nil
+	}
 	return CrossTenantResponse{State: CrossTenantStatePending}, nil
 }
 

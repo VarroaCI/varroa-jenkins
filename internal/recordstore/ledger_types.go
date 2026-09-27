@@ -34,8 +34,10 @@ type ClaimResponse struct {
 	BuildNumber int64  `json:"build_number,omitempty"`
 	ReasonCode  string `json:"reason_code,omitempty"`
 	Message     string `json:"message,omitempty"`
-	Error       string `json:"error,omitempty"`
-	Code        string `json:"code,omitempty"`
+	// HomeSlot names the job's home slot on a NOT_HOME veto alone.
+	HomeSlot *int32 `json:"home_slot,omitempty"`
+	Error    string `json:"error,omitempty"`
+	Code     string `json:"code,omitempty"`
 }
 
 // Decision values a ClaimResponse carries.

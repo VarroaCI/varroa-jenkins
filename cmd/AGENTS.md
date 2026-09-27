@@ -115,7 +115,9 @@ stating what it is/is not responsible for:
 - **`protogen/`** — codegen helper that parses `.proto` files
   (`github.com/emicklei/proto`) and renders Go types via the templates in
   `protogen/templates/` for `internal/mite/proto/mitev1/`. Invoked by
-  `make generate-proto`, not run standalone.
+  `make generate-proto`, not run standalone. An `optional` scalar field
+  generates a pointer (`optional int32` gives `*int`), because `omitempty`
+  drops a zero value and a zero can be a real answer.
 - **`bootstrapdeps/`** — repo-maintenance tool (never in the runtime image,
   deliberately not a `varroactl` subcommand) that asserts and records
   `varroa-mite-auth`'s mandatory dependency closure against a resolved plugin

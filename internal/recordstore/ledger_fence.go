@@ -26,8 +26,11 @@ type TxFence interface {
 // FenceResult is the answer a Fence gives for one claim.
 type FenceResult struct {
 	Allow      bool
-	ReasonCode string // FENCED, NOT_READY, CROSS_TENANT, or THROTTLED
+	ReasonCode string // FENCED, NOT_READY, NOT_HOME, CROSS_TENANT, or THROTTLED
 	Message    string
+	// HomeSlot names the job's home slot on a NOT_HOME veto, and is nil
+	// on every other answer. The claimer forwards to that slot.
+	HomeSlot *int32
 }
 
 // allowAllFence is the default Fence. It allows every well-formed claim,
