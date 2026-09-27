@@ -156,36 +156,79 @@ func TestRunBackstopRoundSingleTenantUsesDefaults(t *testing.T) {
 	}
 }
 
-// TestRunBackstopRoundSkipsStaleGenerationRow asserts a job_schedules row
-// whose placement_generation is below the tenant's stored generation
-// produces no fire: that row came from a cell the tenant has left.
-func TestRunBackstopRoundSkipsStaleGenerationRow(t *testing.T) {
+// TestRunBackstopRoundSkipsRowOffItsHome asserts a job_schedules row
+// whose cell is not the job's home produces no fire: that row came from
+// a cell the job has left.
+func TestRunBackstopRoundSkipsRowOffItsHome(t *testing.T) {
 	pool, db := setupLedgerPool(t)
-	seedTenantPlacementPolicy(t, db, `{}`)
-	if _, err := db.Exec(`UPDATE varroa.tenant_placements SET generation = 5 WHERE cluster = $1 AND tenant = $2`,
-		testCluster, testTenant); err != nil {
-		t.Fatalf("raise tenant generation: %v", err)
-	}
+	seedGrantPlacement(t, db, testCluster, testTenant, jsTestNS, "cell-a", 1, "{}")
 
 	g := NewIngester(pool, nil, nil)
-	jobPath := "acme/stale-generation"
-	ingestCronSchedule(t, g, testTenant, jobPath, 3, time.Now().UTC().Add(-10*time.Minute))
+	jobPath := "acme/off-home"
+	ingestCronSchedule(t, g, testTenant, jobPath, 1, time.Now().UTC().Add(-10*time.Minute))
+	// The ingest refuses a non-home export, so the test moves the row.
+	if _, err := db.Exec(`
+		UPDATE varroa.job_schedules SET cell = 'cell-old'
+		WHERE cluster = $1 AND tenant = $2 AND job_path = $3
+	`, testCluster, testTenant, jobPath); err != nil {
+		t.Fatalf("move the row off its home: %v", err)
+	}
 
 	conn, cleanup := newSweepTestBus(t)
 	defer cleanup()
 	received := subscribeCancelActions(t, conn, 4)
 
-	if _, err := RunBackstopRound(context.Background(), pool, conn, BackstopConfig{}); err != nil {
-		t.Fatalf("RunBackstopRound: %v", err)
+	// The full round's home refresh would move the row back to its home
+	// first, so the test calls the schedule pass alone.
+	if err := runBackstopSchedule(context.Background(), pool, conn, BackstopConfig{}, time.Now()); err != nil {
+		t.Fatalf("runBackstopSchedule: %v", err)
 	}
 
 	select {
 	case a := <-received:
-		t.Fatalf("want no action for a stale-generation row, got %+v", a)
+		t.Fatalf("want no action for a row off its home, got %+v", a)
 	case <-time.After(500 * time.Millisecond):
 	}
 	if n := countBackstopActivity(t, db, jobPath); n != 0 {
 		t.Fatalf("backstop activity rows = %d, want 0", n)
+	}
+}
+
+// TestRunBackstopRoundFiresHomeRowBelowGeneration asserts a row on its
+// job's home cell fires although its placement_generation is below the
+// tenant's stored generation. A generation raise does not move a row
+// whose home keeps its cell.
+func TestRunBackstopRoundFiresHomeRowBelowGeneration(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	seedGrantPlacement(t, db, testCluster, testTenant, jsTestNS, "cell-a", 3, "{}")
+
+	g := NewIngester(pool, nil, nil)
+	jobPath := "acme/home-below-generation"
+	ingestCronSchedule(t, g, testTenant, jobPath, 3, time.Now().UTC().Add(-10*time.Minute))
+	if _, err := db.Exec(`UPDATE varroa.tenant_placements SET generation = 5 WHERE cluster = $1 AND tenant = $2`,
+		testCluster, testTenant); err != nil {
+		t.Fatalf("raise tenant generation: %v", err)
+	}
+
+	conn, cleanup := newSweepTestBus(t)
+	defer cleanup()
+	wait := collectBackstopActions(t, conn)
+
+	if _, err := RunBackstopRound(context.Background(), pool, conn, BackstopConfig{}); err != nil {
+		t.Fatalf("RunBackstopRound: %v", err)
+	}
+
+	actions := wait(2)
+	if actions[0].Kind != LedgerActionWakeCell || actions[1].Kind != LedgerActionRetryRun {
+		t.Fatalf("kinds = [%s %s], want [wake_cell retry_run]", actions[0].Kind, actions[1].Kind)
+	}
+	for _, a := range actions {
+		if a.Namespace != jsTestNS || a.Controller != "cell-a" {
+			t.Fatalf("%s address = %s/%s, want %s/cell-a", a.Kind, a.Namespace, a.Controller, jsTestNS)
+		}
+	}
+	if n := countBackstopActivity(t, db, jobPath); n != 1 {
+		t.Fatalf("backstop activity rows = %d, want 1", n)
 	}
 }
 

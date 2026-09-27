@@ -172,8 +172,35 @@ func runBackstopSchedule(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn
 			if row.TriggerType != scheduleTriggerTypeCron || row.Disabled || len(row.NextFireTimes) == 0 {
 				continue
 			}
-			if row.PlacementGeneration < policy.generation {
+
+			// The fire goes to the job's home slot, the member the claim
+			// fence reads. A tenant with no placement row keeps the row's
+			// coordinate. The home, not the placement generation, admits
+			// a row: a generation raise leaves an unmoved row below the
+			// new generation until its cell exports again.
+			namespace, cell := row.Namespace, row.Cell
+			home, err := homes.resolve(ctx, pool, pair.cluster, pair.tenant, row.JobPath)
+			if err != nil {
+				logger.Warn("backstop round: read job home failed", "job_path", row.JobPath, "error", err)
 				continue
+			}
+			if home.Placed {
+				if home.Cell == "" {
+					// No activity row is written, so a later round fires
+					// this occurrence once the slot holds a cell.
+					logger.Warn("backstop round: the job's home slot holds no cell", "job_path", row.JobPath)
+					continue
+				}
+				if home.Namespace != row.Namespace || home.Cell != row.Cell {
+					// Every home write moves the job's rows in its own
+					// transaction, so this row came from a cell the job
+					// has left.
+					logger.Debug("backstop round: the row is not on the job's home", "job_path", row.JobPath,
+						"row_namespace", row.Namespace, "row_cell", row.Cell,
+						"home_namespace", home.Namespace, "home_cell", home.Cell)
+					continue
+				}
+				namespace, cell = home.Namespace, home.Cell
 			}
 
 			candidates, err := selectCandidateOccurrences(ctx, reader, pool, pair.cluster, row.JobPath, row.NextFireTimes, now, policy.cronGrace)
@@ -193,25 +220,6 @@ func runBackstopSchedule(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn
 			}
 			if fire == nil {
 				continue
-			}
-
-			// The fire goes to the job's home slot, the member the claim
-			// fence reads. The row's own cell can name a former home. A
-			// tenant with no placement row keeps the row's coordinate.
-			namespace, cell := row.Namespace, row.Cell
-			home, err := homes.resolve(ctx, pool, pair.cluster, pair.tenant, row.JobPath)
-			if err != nil {
-				logger.Warn("backstop round: read job home failed", "job_path", row.JobPath, "error", err)
-				continue
-			}
-			if home.Placed {
-				if home.Cell == "" {
-					// No activity row is written, so a later round fires
-					// this occurrence once the slot holds a cell.
-					logger.Warn("backstop round: the job's home slot holds no cell", "job_path", row.JobPath)
-					continue
-				}
-				namespace, cell = home.Namespace, home.Cell
 			}
 
 			fireCandidates = append(fireCandidates, backstopFireCandidate{

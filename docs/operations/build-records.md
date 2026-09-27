@@ -218,9 +218,9 @@ The mite sends no set until its Jenkins holds an applied desired state, because 
 empty set would delete the cell's rows. The first apply opens this gate and starts a poll. A
 failed poll retries within a minute. The mite polls again 5 seconds after the next cron
 occurrence, at most once a minute and at least every ten minutes. It sends the set when the set
-changed, on a reconnect, when a sent occurrence has passed, or every thirty minutes. A dense cron
-therefore sends up to one envelope a minute. A row names its job's home cell, its only
-writer. A home move moves the row at once. An envelope deletes only rows that name its cell.
+changed, on a reconnect, when a sent occurrence has passed, or every thirty minutes. A row names
+its job's home cell, its only writer. A home move moves the row at once. The backstop fires only
+a row on its job's home. An envelope deletes only rows that name its cell.
 
 A row's `next_fire_times` also keeps its passed occurrences from the last `3 × cronGrace + 2m`,
 at most 16, so the backstop can judge a miss. A changed spec, time zone, or disabled state

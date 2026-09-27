@@ -286,9 +286,9 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 		// the tenant before this one. A cell exports a tenant's jobs only
 		// after the announce that placed it, and this is that announce,
 		// so the new tenant has exported none yet. A row left here would
-		// outlive its own tenant: the backstop skips a row below the
-		// stored generation alone, and the old tenant's cron would keep
-		// firing under the new tenant's name.
+		// outlive its own tenant: the backstop admits a row by its job's
+		// home, and the new tenant's home can name the same cell, so the
+		// old tenant's cron would keep firing under the new tenant's name.
 		if err := deleteTenantJobSchedules(ctx, tx, req.Cluster, req.Tenant); err != nil {
 			return TenantSyncResponse{}, err
 		}

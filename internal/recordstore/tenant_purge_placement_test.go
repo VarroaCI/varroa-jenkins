@@ -314,9 +314,10 @@ func TestTenantPurgeKeepsANewerIncarnationsSchedules(t *testing.T) {
 
 // TestTakeOverDropsTheOldIncarnationsSchedules asserts the announcement
 // that takes the row over deletes the schedule rows the torn-down tenant
-// left. The backstop scheduler skips a row below the stored generation
-// alone, so a row left behind would keep firing the old tenant's cron
-// under the new tenant's name. Another tenant's rows stay.
+// left. The backstop scheduler admits a row by its job's home, and the
+// new tenant's home can name the same cell, so a row left behind would
+// keep firing the old tenant's cron under the new tenant's name. Another
+// tenant's rows stay.
 func TestTakeOverDropsTheOldIncarnationsSchedules(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)

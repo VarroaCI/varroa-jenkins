@@ -157,14 +157,14 @@ type JobSchedule struct {
 	Disabled      bool
 	NextFireTimes []time.Time
 	ObservedAt    time.Time
-	// Namespace and Cell name the reporting cell: the backstop cron
-	// scheduler (design D11) fills a wake_cell/retry_run action's
-	// namespace and controller fields from them.
+	// Namespace and Cell name the job's home cell. The backstop cron
+	// scheduler skips a row whose Namespace and Cell are not the job's
+	// resolved home, and addresses a tenant with no placement row to them.
 	Namespace string
 	Cell      string
 	// PlacementGeneration is the row's own placement_generation. The
-	// backstop scheduler skips a row below the tenant's stored
-	// generation: that row came from a cell the tenant has left.
+	// tenant purge deletes a row at or below its own generation, so the
+	// value fences a delayed purge. The backstop does not read it.
 	PlacementGeneration int64
 	// UpstreamTenant, UpstreamJob, and UpstreamResult carry a
 	// varroa-upstream row's subscription, design.md D9. Every other

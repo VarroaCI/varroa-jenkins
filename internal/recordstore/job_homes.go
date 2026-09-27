@@ -191,7 +191,8 @@ func refreshOneTenantJobHomes(ctx context.Context, pool *pgxpool.Pool, metrics *
 // rehomeJobSchedules sets each job_schedules row of cluster/tenant to the
 // namespace and cell of its job's home member in view. A moved row also
 // gets generation, the placement's generation after the home write,
-// because the backstop skips a row below that generation. The statement
+// because a delayed tenant purge deletes each row at or below its own
+// generation, and a moved row belongs to the new placement. The statement
 // keeps observed_at and next_fire_times, so the backstop can still judge
 // a passed occurrence. A row whose home slot holds no cell does not move.
 //

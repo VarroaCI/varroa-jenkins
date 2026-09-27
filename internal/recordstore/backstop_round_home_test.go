@@ -48,16 +48,24 @@ func collectBackstopActions(t *testing.T, conn *bus.Conn) func(n int) []LedgerAc
 
 // TestRunBackstopSchedule_FiresOnTheHomeSlot asserts the wake_cell and
 // the retry_run of a backstop fire both name the member of the job's
-// home slot, not the cell the stored schedule row names.
+// home slot.
 func TestRunBackstopSchedule_FiresOnTheHomeSlot(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	jobPath := testTenant + "/home-fire"
-	// The row is stored from slot 0's cell before the home moves.
 	ingestCronSchedule(t, NewIngester(pool, nil, nil), testTenant, jobPath, 1, time.Now().UTC().Add(-10*time.Minute))
 	seedGrantPlacement(t, db, testCluster, testTenant, jsTestNS, "cell-a", 1, "{}")
 	setPlacementMembers(t, db, testTenant,
 		[]member{activeMember("cell-a", 0, "i0"), activeMember("cell-b1", 1, "i1")},
 		map[string]int32{jobPath: 1})
+	// A home write moves the row to the home member in its own
+	// transaction. The test writes the placement directly, so it moves
+	// the row itself.
+	if _, err := db.Exec(`
+		UPDATE varroa.job_schedules SET namespace = 'cells', cell = 'cell-b1'
+		WHERE cluster = $1 AND tenant = $2 AND job_path = $3
+	`, testCluster, testTenant, jobPath); err != nil {
+		t.Fatalf("move the row to its home: %v", err)
+	}
 
 	conn, cleanup := newSweepTestBus(t)
 	defer cleanup()

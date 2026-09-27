@@ -26,10 +26,8 @@ const defaultCronGrace = 5 * time.Minute
 const cronCatchUpNone = "none"
 
 // tenantSchedulePolicy is the backstop round's per-tenant policy: the
-// stored generation job_schedules rows are fenced against, and the
 // three backstop settings the announce's policy field carries.
 type tenantSchedulePolicy struct {
-	generation   int64
 	cronBackstop bool
 	cronCatchUp  string
 	cronGrace    time.Duration
@@ -54,11 +52,9 @@ type schedulePolicyWire struct {
 
 // decodeSchedulePolicy decodes raw against schedulePolicyWire, falling
 // back to the backstop-scheduler capability's defaults for a field the
-// JSON omits or a raw the decoder rejects. generation is read
-// separately, from the same row.
-func decodeSchedulePolicy(generation int64, raw json.RawMessage) tenantSchedulePolicy {
+// JSON omits or a raw the decoder rejects.
+func decodeSchedulePolicy(raw json.RawMessage) tenantSchedulePolicy {
 	out := defaultTenantSchedulePolicy()
-	out.generation = generation
 	if len(raw) == 0 {
 		return out
 	}
@@ -85,23 +81,20 @@ type schedulePolicyQuerier interface {
 }
 
 // readTenantSchedulePolicy reads cluster/tenant's tenant_placements
-// generation and policy. A missing row answers
-// defaultTenantSchedulePolicy: a single-tenant controller.
+// policy. A missing row answers defaultTenantSchedulePolicy: a
+// single-tenant controller.
 func readTenantSchedulePolicy(ctx context.Context, q schedulePolicyQuerier, cluster, tenant string) (tenantSchedulePolicy, error) {
-	var (
-		generation int64
-		policyRaw  json.RawMessage
-	)
+	var policyRaw json.RawMessage
 	err := q.QueryRow(ctx, `
-		SELECT generation, policy FROM varroa.tenant_placements WHERE cluster = $1 AND tenant = $2
-	`, cluster, tenant).Scan(&generation, &policyRaw)
+		SELECT policy FROM varroa.tenant_placements WHERE cluster = $1 AND tenant = $2
+	`, cluster, tenant).Scan(&policyRaw)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return defaultTenantSchedulePolicy(), nil
 	case err != nil:
 		return tenantSchedulePolicy{}, fmt.Errorf("read tenant schedule policy: %w", err)
 	}
-	return decodeSchedulePolicy(generation, policyRaw), nil
+	return decodeSchedulePolicy(policyRaw), nil
 }
 
 // schedulePair is one distinct (cluster, tenant) pair job_schedules

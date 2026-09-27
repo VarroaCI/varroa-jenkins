@@ -144,7 +144,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   after `writeTenantPlacement` in the announce and after the map update in
   `refreshOneTenantJobHomes`. It sets a moved row's `namespace` and `cell`
   to the home member's values and its `placement_generation` to the
-  placement's generation, so the backstop does not skip it. It keeps
+  placement's generation, so a delayed tenant purge at an older
+  generation does not delete it. It keeps
   `observed_at` and `next_fire_times`, and it moves no row whose home slot
   holds no cell. The column is an input to the ingest delete rule and the
   cell purge only. An action that must reach a job's home never reads it
@@ -959,11 +960,14 @@ of the fleet's audit activity, once a controller becomes disposable.
   and the 100-fire-per-round bound. `readTenantSchedulePolicy` answers
   the backstop-scheduler capability's defaults (backstop on, catch-up
   `one`, grace `5m`) for a tenant with no `tenant_placements` row.
-  `runBackstopSchedule` addresses each fire's `wake_cell` and `retry_run`
-  through `resolveJobHome`, never through the row's cell. A home slot with
-  no cell skips the candidate for this round and writes no activity row,
-  so a later round fires it. A tenant with no placement row keeps the
-  row's own coordinate.
+  `runBackstopSchedule` resolves each row's home through `resolveJobHome`
+  before it selects a candidate, and addresses each fire's `wake_cell` and
+  `retry_run` to that home. A home slot with no cell skips the row for this
+  round and writes no activity row, so a later round fires it. A row whose
+  namespace or cell is not the home's is skipped, because every home write
+  moves the job's rows. The round reads no placement generation: a
+  generation raise leaves an unmoved row below it until its cell exports
+  again. A tenant with no placement row keeps the row's own coordinate.
   `Ledger.SetConcurrencyCancel` wires the sibling concurrency-groups
   capability: on a granted claim for a `cancelInProgress` tenant, `Claim`
   starts `runConcurrencyCancel` in its own goroutine so it answers the
@@ -1042,8 +1046,10 @@ of the fleet's audit activity, once a controller becomes disposable.
   superset pushed into SQL, and the per-event predicate still runs on
   every returned row. `ListJobSchedules` returns one cell or tenant's
   `job_schedules` rows, carrying `NextFireTimes`, `Namespace`, `Cell`, and
-  `PlacementGeneration`, which the backstop cron scheduler reads directly
-  from this package, not only from the BFF. `SearchRecords`
+  `PlacementGeneration`. The backstop cron scheduler calls
+  `ListJobSchedules` directly from this package, not only from the BFF.
+  It compares `Namespace` and `Cell` with the job's home and never reads
+  `PlacementGeneration`, which fences the tenant purge. `SearchRecords`
   answers the `job`, `run`, and `activity` kinds of the `search` tool
   and `GET /search`. `ActivityRetentionDays` reports the parsed
   `recordStore.retention.activity` value the BFF passed to `NewReader`;
