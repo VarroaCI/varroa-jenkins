@@ -145,6 +145,50 @@ func TestApplyJobSchedules_MixedEnvelopeStoresItsHomeRows(t *testing.T) {
 	}
 }
 
+// TestApplyJobSchedules_HomeMoveKeepsTheRow asserts a job's row survives
+// the old home's next export after its home moves. The row names the new
+// home at once, so only the new home's export can delete it.
+func TestApplyJobSchedules_HomeMoveKeepsTheRow(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+	g := NewIngester(pool, nil, nil)
+	job := pathOnSlot(t, 1)
+	slot0 := member{Cell: "cell-a", Namespace: jsTestNS, Role: MemberRoleActive, Slot: slotPtr(0), Instance: "uid-a"}
+	slot1 := member{Cell: "cell-b", Namespace: jsTestNS, Role: MemberRoleActive, Slot: slotPtr(1), Instance: "uid-b"}
+	rows := []JobScheduleRowInput{{Tenant: testTenant, PlacementGeneration: 1, JobPath: job,
+		TriggerType: "cron", Spec: "H * * * *"}}
+
+	sendTenantSync(t, pool, conn, announceMembers(1, []member{slot0}))
+	now := time.Now().UTC()
+	if _, err := g.Apply(context.Background(), newJobScheduleEnvelope(t, "cell-a", now.Add(-2*time.Minute),
+		JobSchedulesPayload{Hash: "h1", Rows: rows})); err != nil {
+		t.Fatalf("apply the first cell-a envelope: %v", err)
+	}
+	if got := readScheduleCell(t, db, testTenant, job); got != "cell-a" {
+		t.Fatalf("stored cell = %q, want cell-a before the move", got)
+	}
+
+	sendTenantSync(t, pool, conn, announceMembers(2, []member{slot0, slot1}))
+
+	// The plugin exports every job on every member, so cell-a still
+	// carries the job. The home gate drops it.
+	if _, err := g.Apply(context.Background(), newJobScheduleEnvelope(t, "cell-a", now.Add(-time.Minute),
+		JobSchedulesPayload{Hash: "h1", Rows: rows})); err != nil {
+		t.Fatalf("apply the second cell-a envelope: %v", err)
+	}
+	if got := readScheduleCell(t, db, testTenant, job); got != "cell-b" {
+		t.Fatalf("stored cell = %q, want cell-b: the old home's export deleted the moved row", got)
+	}
+
+	if _, err := g.Apply(context.Background(), newJobScheduleEnvelope(t, "cell-b", now,
+		JobSchedulesPayload{Hash: "h2"})); err != nil {
+		t.Fatalf("apply the cell-b envelope: %v", err)
+	}
+	if got := readScheduleCell(t, db, testTenant, job); got != "" {
+		t.Fatalf("stored cell = %q, want no row: the new home's export omits the job", got)
+	}
+}
+
 // TestApplyJobSchedules_SingleMemberTenantStoresEveryRow asserts a tenant
 // with one active slot, and a tenant with no placement row at all, both
 // store every row they export.

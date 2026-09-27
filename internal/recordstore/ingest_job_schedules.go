@@ -237,12 +237,15 @@ func parseJobScheduleFireTimes(values []string) ([]time.Time, error) {
 // exports, which is the behaviour before slots existed.
 //
 // The cache holds one decoded placement for each tenant of the envelope,
-// so a cell hosting many tenants runs one read for each.
+// so a cell hosting many tenants runs one read for each. The read holds a
+// FOR SHARE lock until the envelope commits. A home write waits for it,
+// so the write moves the rows this envelope stores, and this envelope
+// never stores a row at a home the write already moved.
 func jobScheduleHomeCell(ctx context.Context, tx pgx.Tx, cluster, tenant, jobPath string,
 	cache map[string]placementMembers) (string, bool, error) {
 	row, cached := cache[tenant]
 	if !cached {
-		read, exists, err := readTenantPlacementMembers(ctx, tx, cluster, tenant)
+		read, exists, err := readTenantPlacementMembersForShare(ctx, tx, cluster, tenant)
 		if err != nil {
 			return "", false, err
 		}

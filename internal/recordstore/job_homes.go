@@ -178,16 +178,91 @@ func refreshOneTenantJobHomes(ctx context.Context, pool *pgxpool.Pool, metrics *
 	`, cluster, tenant, string(encoded)); err != nil {
 		return false, fmt.Errorf("update job homes: %w", err)
 	}
+	view := newPlacementMembers(old.members, after, placementScalars{})
+	if err := rehomeJobSchedules(ctx, tx, cluster, tenant, view, old.generation); err != nil {
+		return false, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, fmt.Errorf("commit job home transaction: %w", err)
 	}
 	return true, nil
 }
 
+// rehomeJobSchedules sets each job_schedules row of cluster/tenant to the
+// namespace and cell of its job's home member in view. A moved row also
+// gets generation, the placement's generation after the home write,
+// because the backstop skips a row below that generation. The statement
+// keeps observed_at and next_fire_times, so the backstop can still judge
+// a passed occurrence. A row whose home slot holds no cell does not move.
+//
+// Every home write calls this in the same transaction. The ingest stores
+// a row only from its job's home, and its stale delete matches the stored
+// cell. A row that kept the old home's cell after a home move would be
+// deleted by the old home's next export, and no row would exist until
+// the new home exports again.
+func rehomeJobSchedules(ctx context.Context, tx pgx.Tx, cluster, tenant string,
+	view placementMembers, generation int64) error {
+	rows, err := tx.Query(ctx, `
+		SELECT DISTINCT job_path, namespace, cell FROM varroa.job_schedules
+		WHERE cluster = $1 AND tenant = $2
+	`, cluster, tenant)
+	if err != nil {
+		return fmt.Errorf("list tenant job schedule addresses: %w", err)
+	}
+	var paths, namespaces, cells []string
+	queued := map[string]bool{}
+	for rows.Next() {
+		var path, namespace, cell string
+		if err := rows.Scan(&path, &namespace, &cell); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan tenant job schedule address: %w", err)
+		}
+		home := memberForJob(view, path)
+		if home.Cell == "" || queued[path] || (home.Cell == cell && home.Namespace == namespace) {
+			continue
+		}
+		queued[path] = true
+		paths = append(paths, path)
+		namespaces = append(namespaces, home.Namespace)
+		cells = append(cells, home.Cell)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("list tenant job schedule addresses: %w", err)
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE varroa.job_schedules AS js
+		SET namespace = m.namespace, cell = m.cell, placement_generation = $3
+		FROM unnest($4::text[], $5::text[], $6::text[]) AS m(job_path, namespace, cell)
+		WHERE js.cluster = $1 AND js.tenant = $2 AND js.job_path = m.job_path
+		  AND (js.namespace <> m.namespace OR js.cell <> m.cell)
+	`, cluster, tenant, generation, paths, namespaces, cells); err != nil {
+		return fmt.Errorf("move job schedule rows to their home: %w", err)
+	}
+	return nil
+}
+
 // readTenantPlacementMembers reads cluster/tenant's member view with no
 // lock. It answers exists=false, with no error, when no row is stored.
 // Every reader of a member's identity starts here.
 func readTenantPlacementMembers(ctx context.Context, db livenessQuerier, cluster, tenant string) (placementMembers, bool, error) {
+	return readPlacementMembersRow(ctx, db, cluster, tenant, "")
+}
+
+// readTenantPlacementMembersForShare is readTenantPlacementMembers with a
+// FOR SHARE lock on the row for the rest of tx. The schedule ingest reads
+// the home through it, so a home write, which locks the row FOR UPDATE,
+// cannot move a job's rows between the ingest's home read and its upsert.
+func readTenantPlacementMembersForShare(ctx context.Context, tx pgx.Tx, cluster, tenant string) (placementMembers, bool, error) {
+	return readPlacementMembersRow(ctx, tx, cluster, tenant, " FOR SHARE")
+}
+
+// readPlacementMembersRow reads one placement's member view. lock is
+// appended to the query and is empty or a row-lock clause.
+func readPlacementMembersRow(ctx context.Context, db livenessQuerier, cluster, tenant, lock string) (placementMembers, bool, error) {
 	var (
 		cell               string
 		namespace          string
@@ -200,8 +275,7 @@ func readTenantPlacementMembers(ctx context.Context, db livenessQuerier, cluster
 	err := db.QueryRow(ctx, `
 		SELECT cell, namespace, cell_instance, rehydrated_instance, pending_jobs, members, job_homes
 		FROM varroa.tenant_placements
-		WHERE cluster = $1 AND tenant = $2
-	`, cluster, tenant).Scan(&cell, &namespace, &cellInstance, &rehydratedInstance,
+		WHERE cluster = $1 AND tenant = $2`+lock, cluster, tenant).Scan(&cell, &namespace, &cellInstance, &rehydratedInstance,
 		&pendingRaw, &membersRaw, &jobHomesRaw)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):

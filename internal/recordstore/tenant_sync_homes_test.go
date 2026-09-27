@@ -91,3 +91,38 @@ func TestTenantSyncHomesNeedsAClusterAndATenant(t *testing.T) {
 		t.Fatal("want an error for a homes request with no tenant")
 	}
 }
+
+// TestAnnounceScaleMovesTheRehomedScheduleRows asserts an announce that
+// grows the tenant from one slot to two moves each rehomed job's schedule
+// row to the new slot's cell at the new generation, and leaves each other
+// row as it is.
+func TestAnnounceScaleMovesTheRehomedScheduleRows(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+	moved := pathOnSlot(t, 1)
+	stays := pathOnSlot(t, 0)
+
+	sendTenantSync(t, pool, conn, announceMembers(1, []member{activeMember("cell-a", 0, "uid-a")}))
+	seedScheduleRowAt(t, db, moved, 1)
+	seedScheduleRowAt(t, db, stays, 1)
+
+	resp := sendTenantSync(t, pool, conn, announceMembers(2, []member{
+		activeMember("cell-a", 0, "uid-a"),
+		activeMember("cell-b", 1, "uid-b"),
+	}))
+	if resp.Error != "" || !resp.Ok {
+		t.Fatalf("announce: %+v", resp)
+	}
+
+	got, ok := readScheduleRowAddress(t, db, moved)
+	if !ok {
+		t.Fatal("the announce deleted the rehomed job's row")
+	}
+	if want := (scheduleRowAddress{namespace: "cells", cell: "cell-b", generation: 2}); got != want {
+		t.Fatalf("rehomed row = %+v, want %+v", got, want)
+	}
+	got, _ = readScheduleRowAddress(t, db, stays)
+	if want := (scheduleRowAddress{namespace: "cells", cell: "cell-a", generation: 1}); got != want {
+		t.Fatalf("unmoved row = %+v, want %+v", got, want)
+	}
+}

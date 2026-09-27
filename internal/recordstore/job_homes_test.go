@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"testing"
+	"time"
 )
 
 // seedJobHomePaths writes one job_numbers watermark row for each path, so
@@ -274,5 +275,171 @@ func TestAnnounceClearsOnlyTheChangedMemberSeed(t *testing.T) {
 	}
 	if got := byCell["cell-b"].RehydratedInstance; got != "" {
 		t.Fatalf("slot 1 kept a seed across a pod replacement: %q", got)
+	}
+}
+
+// pathOnSlot answers a job path of testTenant whose hash home over two
+// active slots is slot.
+func pathOnSlot(t *testing.T, slot int32) string {
+	t.Helper()
+	for i := 0; i < 1000; i++ {
+		p := fmt.Sprintf("%s/job-%d", testTenant, i)
+		if jobHomeSlot(p, 2) == slot {
+			return p
+		}
+	}
+	t.Fatalf("no path of %s hashes to slot %d of 2", testTenant, slot)
+	return ""
+}
+
+// seedScheduleRowAt inserts one cron job_schedules row for testTenant
+// that names cells/cell-a at generation.
+func seedScheduleRowAt(t *testing.T, db *sql.DB, jobPath string, generation int64) {
+	t.Helper()
+	if _, err := db.Exec(`
+		INSERT INTO varroa.job_schedules
+			(cluster, namespace, cell, tenant, job_path, trigger_type, observed_at,
+			 placement_generation, payload)
+		VALUES ($1, 'cells', 'cell-a', $2, $3, 'cron', now(), $4, '{}')
+	`, testCluster, testTenant, jobPath, generation); err != nil {
+		t.Fatalf("seed schedule row %s: %v", jobPath, err)
+	}
+}
+
+// scheduleRowAddress is the stored address and generation of one row.
+type scheduleRowAddress struct {
+	namespace  string
+	cell       string
+	generation int64
+}
+
+// readScheduleRowAddress reads one testTenant job's cron row address. It
+// answers ok=false when no row exists.
+func readScheduleRowAddress(t *testing.T, db *sql.DB, jobPath string) (scheduleRowAddress, bool) {
+	t.Helper()
+	var out scheduleRowAddress
+	err := db.QueryRow(`
+		SELECT namespace, cell, placement_generation FROM varroa.job_schedules
+		WHERE cluster = $1 AND tenant = $2 AND job_path = $3 AND trigger_type = 'cron'
+	`, testCluster, testTenant, jobPath).Scan(&out.namespace, &out.cell, &out.generation)
+	if err == sql.ErrNoRows {
+		return scheduleRowAddress{}, false
+	}
+	if err != nil {
+		t.Fatalf("read schedule row %s: %v", jobPath, err)
+	}
+	return out, true
+}
+
+// TestRefreshJobHomesMovesTheScheduleRow asserts a refresh that moves a
+// job's home also moves its schedule row to the new home's namespace and
+// cell, at the placement's generation. A row whose home does not move
+// keeps its address and its generation.
+func TestRefreshJobHomesMovesTheScheduleRow(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+	moved := pathOnSlot(t, 1)
+	stays := pathOnSlot(t, 0)
+
+	sendTenantSync(t, pool, conn, announceMembers(5, []member{
+		activeMember("cell-a", 0, "uid-a"),
+		{Cell: "cell-b", Namespace: "cells-b", Role: MemberRoleActive, Slot: slotPtr(1), Instance: "uid-b"},
+	}))
+	// The stored map names slot 0 for the moved path. This is the state
+	// before its home moves.
+	setPlacementMembers(t, db, testTenant, readStoredMembers(t, db), map[string]int32{moved: 0, stays: 0})
+	seedScheduleRowAt(t, db, moved, 3)
+	seedScheduleRowAt(t, db, stays, 3)
+
+	if _, err := RefreshJobHomes(context.Background(), pool, nil, slog.Default()); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+
+	got, ok := readScheduleRowAddress(t, db, moved)
+	if !ok {
+		t.Fatal("the refresh deleted the moved job's row")
+	}
+	if want := (scheduleRowAddress{namespace: "cells-b", cell: "cell-b", generation: 5}); got != want {
+		t.Fatalf("moved row = %+v, want %+v", got, want)
+	}
+	got, _ = readScheduleRowAddress(t, db, stays)
+	if want := (scheduleRowAddress{namespace: "cells", cell: "cell-a", generation: 3}); got != want {
+		t.Fatalf("unmoved row = %+v, want %+v", got, want)
+	}
+}
+
+// TestRefreshJobHomesLeavesARowOnAnUnboundSlot asserts a home slot that
+// holds no cell leaves the row as it is.
+func TestRefreshJobHomesLeavesARowOnAnUnboundSlot(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+	moved := pathOnSlot(t, 1)
+
+	sendTenantSync(t, pool, conn, announceMembers(5, []member{
+		activeMember("cell-a", 0, "uid-a"),
+		{Namespace: "cells", Role: MemberRoleActive, Slot: slotPtr(1)},
+	}))
+	setPlacementMembers(t, db, testTenant, readStoredMembers(t, db), map[string]int32{moved: 0})
+	seedScheduleRowAt(t, db, moved, 3)
+
+	if _, err := RefreshJobHomes(context.Background(), pool, nil, slog.Default()); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if homes := readStoredJobHomes(t, db); homes[moved] != 1 {
+		t.Fatalf("the refresh stored %v, want %s on slot 1", homes, moved)
+	}
+	got, _ := readScheduleRowAddress(t, db, moved)
+	if want := (scheduleRowAddress{namespace: "cells", cell: "cell-a", generation: 3}); got != want {
+		t.Fatalf("row = %+v, want %+v: an unbound home slot moves no row", got, want)
+	}
+}
+
+// TestRefreshJobHomesWaitsForAnIngestHomeRead asserts a home write waits
+// while a schedule ingest holds its FOR SHARE home read, so the write
+// cannot move a row between that read and the ingest's upsert.
+func TestRefreshJobHomesWaitsForAnIngestHomeRead(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+	moved := pathOnSlot(t, 1)
+	sendTenantSync(t, pool, conn, announceMembers(5, []member{
+		activeMember("cell-a", 0, "uid-a"),
+		activeMember("cell-b", 1, "uid-b"),
+	}))
+	setPlacementMembers(t, db, testTenant, readStoredMembers(t, db), map[string]int32{moved: 0})
+	seedScheduleRowAt(t, db, moved, 3)
+
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, _, err := readTenantPlacementMembersForShare(ctx, tx, testCluster, testTenant); err != nil {
+		t.Fatalf("share read: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := RefreshJobHomes(ctx, pool, nil, slog.Default())
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("the refresh finished while the ingest held its home read: %v", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("refresh: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the refresh did not finish after the ingest committed")
+	}
+	if homes := readStoredJobHomes(t, db); homes[moved] != 1 {
+		t.Fatalf("the refresh stored %v, want %s on slot 1", homes, moved)
 	}
 }

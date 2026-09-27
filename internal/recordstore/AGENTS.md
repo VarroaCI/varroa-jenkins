@@ -139,9 +139,16 @@ of the fleet's audit activity, once a controller becomes disposable.
   `jobHomeCache`, which reads each placement once for each round. The
   interrupted-run automatic retry calls `jobHomeOf` over the placement its
   mark decision already read.
-  `job_schedules.cell` is the home at the last export the ingest accepted.
-  It is an input to the ingest delete rule and the cell purge only. An
-  action that must reach a job's home never reads it for a placed tenant.
+  `job_schedules.cell` names the job's home. Every home write moves the
+  rows in its own transaction: `rehomeJobSchedules` (`job_homes.go`) runs
+  after `writeTenantPlacement` in the announce and after the map update in
+  `refreshOneTenantJobHomes`. It sets a moved row's `namespace` and `cell`
+  to the home member's values and its `placement_generation` to the
+  placement's generation, so the backstop does not skip it. It keeps
+  `observed_at` and `next_fire_times`, and it moves no row whose home slot
+  holds no cell. The column is an input to the ingest delete rule and the
+  cell purge only. An action that must reach a job's home never reads it
+  for a placed tenant.
   `00006_fleet_locks.sql`
   adds `fleet_locks`, the fleet-lock authority (see the Fleet locks
   bullet), and the sequence `fleet_lock_fence_seq`. `00007_job_schedule_upstream.sql`
@@ -606,7 +613,11 @@ of the fleet's audit activity, once a controller becomes disposable.
   watermark inside the same transaction, rejects an envelope whose
   `observed_at` is not newer than the stored value, and deletes every row
   of the cell older than the accepted envelope, but only when the
-  envelope is not truncated. The upsert keeps passed occurrences in
+  envelope is not truncated. The delete matches the stored cell. A home
+  write moves a job's rows to the new home at once, so the old home's
+  next envelope skips the job and deletes none of its rows. The ingest
+  reads each tenant's home `FOR SHARE` (`jobScheduleHomeCell`), so a home
+  write waits for an envelope that already read the old home. The upsert keeps passed occurrences in
   `next_fire_times`: with an unchanged spec, time zone, and disabled
   state, it merges each
   stored occurrence at or before the envelope time and newer than

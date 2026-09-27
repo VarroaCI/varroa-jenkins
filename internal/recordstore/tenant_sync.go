@@ -298,6 +298,10 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 		deadInstances, members, jobHomes, keptIncarnation(old.incarnation, req.Incarnation)); err != nil {
 		return TenantSyncResponse{}, err
 	}
+	homeView := newPlacementMembers(members, jobHomes, placementScalars{cell: req.Cell, namespace: req.Namespace})
+	if err := rehomeJobSchedules(ctx, tx, req.Cluster, req.Tenant, homeView, newGeneration); err != nil {
+		return TenantSyncResponse{}, err
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return TenantSyncResponse{}, fmt.Errorf("commit tenant sync transaction: %w", err)

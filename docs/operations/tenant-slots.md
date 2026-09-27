@@ -45,8 +45,8 @@ The map uses a consistent hash. A growth from `N` to `N + 1` slots moves about o
 onto the new slot. A new job takes its slot at once.
 
 A change to `members` binds or releases cells, then the recorder recomputes the map. A job whose
-home changed takes its history to the new holder: the recorder refreshes its records and raises
-its build number. A scale moves no running build. A scale-down releases the highest indexes.
+home changed takes its history and its trigger rows to the new holder, and its build number rises.
+A scale moves no running build. A scale-down releases the highest indexes.
 The operator deletes a released slot's agent pods within about 16 minutes of their
 last refresh.
 

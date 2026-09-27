@@ -79,6 +79,48 @@ func TestRunUpstreamFanout_TakeoverAddressesThePromotedCell(t *testing.T) {
 	wantFanoutAddress(t, received, "cells", "cell-b2")
 }
 
+// TestRunUpstreamFanout_FiresAfterAHomeMove asserts the fan-out reaches a
+// subscriber job whose home moved, after the old home exported again and
+// before the new home exported at all.
+func TestRunUpstreamFanout_FiresAfterAHomeMove(t *testing.T) {
+	fx := newFanoutFixture(t)
+	fx.setExports([]string{"beta"})
+	seedGrantPlacement(t, fx.db, testCluster, "beta", "jenkins", "cell-a", 1, "{}")
+	jobPath := "beta/" + fanoutSubscriberJob
+	home := jobHomeSlot(jobPath, 2)
+	old := 1 - home
+	cells := []string{"cell-a", "cell-b1"}
+	setPlacementMembers(t, fx.db, "beta", []member{
+		{Cell: cells[0], Namespace: "jenkins", Role: MemberRoleActive, Slot: slotPtr(0), Instance: "i0"},
+		{Cell: cells[1], Namespace: "jenkins", Role: MemberRoleActive, Slot: slotPtr(1), Instance: "i1"},
+	}, map[string]int32{jobPath: old})
+	fx.seedSubscriber(testCluster, "beta", false)
+	if _, err := fx.db.Exec(`
+		UPDATE varroa.job_schedules SET cell = $1, observed_at = now() - interval '1 hour'
+		WHERE tenant = 'beta'
+	`, cells[old]); err != nil {
+		t.Fatalf("name the old home: %v", err)
+	}
+
+	if _, err := RefreshJobHomes(context.Background(), fx.pool, nil, nil); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+
+	// The old home still exports the job, and the home gate drops it.
+	g := NewIngester(fx.pool, nil, nil)
+	env := newJobScheduleEnvelope(t, cells[old], time.Now().UTC(), JobSchedulesPayload{
+		Hash: "h1",
+		Rows: []JobScheduleRowInput{{Tenant: "beta", JobPath: jobPath, TriggerType: "varroa-upstream",
+			UpstreamTenant: fx.producer.Tenant, UpstreamJob: "build", UpstreamResult: "SUCCESS"}},
+	})
+	if _, err := g.Apply(context.Background(), env); err != nil {
+		t.Fatalf("apply the old home's envelope: %v", err)
+	}
+
+	_, received := runFanoutForHome(t, fx)
+	wantFanoutAddress(t, received, "jenkins", cells[home])
+}
+
 // TestRunUpstreamFanout_UnboundHomeSlotCountsUnplaced asserts a home slot
 // that holds no member publishes nothing and counts reason "unplaced".
 func TestRunUpstreamFanout_UnboundHomeSlotCountsUnplaced(t *testing.T) {
