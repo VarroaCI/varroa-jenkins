@@ -689,15 +689,16 @@ func (c *ClientsetClient) CreateOrUpdateTenantService(ctx context.Context, name,
 	return nil
 }
 
-// CreateServiceAccount creates a ServiceAccount.
+// CreateServiceAccount creates a ServiceAccount. An existing ServiceAccount
+// is the steady state of every reconcile tick, so AlreadyExists returns nil
+// and logs nothing. The object carries no field the operator owns, so an
+// existing one always matches.
 func (c *ClientsetClient) CreateServiceAccount(ctx context.Context, name, namespace string) error {
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 	}
 	_, err := c.clientset.CoreV1().ServiceAccounts(namespace).Create(ctx, sa, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
-		slog.Warn("resource already exists during create, treating as idempotent retry",
-			"kind", "ServiceAccount", "name", name, "namespace", namespace)
 		return nil
 	}
 	return err
@@ -909,7 +910,22 @@ func (c *ClientsetClient) applyRoleBinding(ctx context.Context, rb *rbacv1.RoleB
 // kubernetes.io/service-account-token Secret bound to serviceAccount
 // through the kubernetes.io/service-account.name annotation. Kubernetes'
 // token controller populates the Secret's token key after creation.
+//
+// The method reads the Secret first, so the steady state costs one Get and
+// no write. An existing token Secret for serviceAccount returns nil and logs
+// nothing. A Secret under the name that is not a token for serviceAccount
+// logs a warning, because agents that mount it do not get the expected
+// identity. The method does not replace that Secret.
 func (c *ClientsetClient) CreateServiceAccountTokenSecret(ctx context.Context, name, namespace, serviceAccount string) error {
+	secrets := c.clientset.CoreV1().Secrets(namespace)
+	existing, err := secrets.Get(ctx, name, metav1.GetOptions{})
+	switch {
+	case err == nil:
+		warnForeignTokenSecret(existing, serviceAccount)
+		return nil
+	case !apierrors.IsNotFound(err):
+		return fmt.Errorf("get service account token secret %s/%s: %w", namespace, name, err)
+	}
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -920,13 +936,30 @@ func (c *ClientsetClient) CreateServiceAccountTokenSecret(ctx context.Context, n
 		},
 		Type: corev1.SecretTypeServiceAccountToken,
 	}
-	_, err := c.clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
-	if apierrors.IsAlreadyExists(err) {
-		slog.Warn("resource already exists during create, treating as idempotent retry",
-			"kind", "Secret", "name", name, "namespace", namespace)
-		return nil
+	_, err = secrets.Create(ctx, secret, metav1.CreateOptions{})
+	if !apierrors.IsAlreadyExists(err) {
+		return err
 	}
-	return err
+	// Another writer created the Secret after the Get. Read it and check the
+	// binding now, so a foreign Secret logs its warning in this call.
+	existing, err = secrets.Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("get service account token secret %s/%s after lost create: %w", namespace, name, err)
+	}
+	warnForeignTokenSecret(existing, serviceAccount)
+	return nil
+}
+
+// warnForeignTokenSecret logs a warning when secret is not a
+// service-account-token Secret bound to serviceAccount.
+func warnForeignTokenSecret(secret *corev1.Secret, serviceAccount string) {
+	bound := secret.Annotations[corev1.ServiceAccountNameKey]
+	if secret.Type == corev1.SecretTypeServiceAccountToken && bound == serviceAccount {
+		return
+	}
+	slog.Warn("secret exists but is not a token for the service account",
+		"name", secret.Name, "namespace", secret.Namespace, "serviceAccount", serviceAccount,
+		"type", secret.Type, "boundServiceAccount", bound)
 }
 
 // CreateJenkinsCR creates a Jenkins custom resource via the dynamic client.

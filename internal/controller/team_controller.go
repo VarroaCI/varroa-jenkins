@@ -1476,7 +1476,9 @@ func (r *TeamReconciler) upsertTenantAgentService(ctx context.Context, team, nam
 // CreateAgentRBAC builds. The placement pass is the one owner: the
 // controller reconciler only reads these objects and never creates them, so
 // a controller tick never restores what teardown removed. Every call is
-// idempotent (Create is a no-op on AlreadyExists).
+// idempotent: an existing object logs nothing. The one exception is a
+// Secret under the token name that is not a token for the ServiceAccount,
+// which logs a warning.
 func (r *TeamReconciler) ensureTenantAgentIdentity(ctx context.Context, team, agentNamespace string) {
 	saName := tenantAgentServiceAccountName(team)
 	if err := r.client.CreateServiceAccount(ctx, saName, agentNamespace); err != nil {
