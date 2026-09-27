@@ -27,7 +27,12 @@ func DesiredFederatedCRs(
 	roleByName := make(map[string]*v1alpha1.JenkinsRole)
 
 	for _, vrb := range varroaRoleBindings {
-		if vrb == nil {
+		// A binding with no subjects grants nothing, and the JenkinsRoleBinding
+		// CRD requires a subjects list. A Team with no members is a normal
+		// state, so the skip comes before every check that warns. The skip
+		// also comes before the role is recorded: a role that only empty
+		// bindings reference is not federated.
+		if vrb == nil || len(vrb.Spec.Subjects) == 0 {
 			continue
 		}
 		if vrb.Spec.Scope != nil && len(vrb.Spec.Scope.Tenants) > 0 {
@@ -101,7 +106,7 @@ func DesiredFederatedCRs(
 			},
 			Spec: v1alpha1.JenkinsRoleBindingSpec{
 				RoleRef:         roleName,
-				Subjects:        append([]v1alpha1.SubjectRef(nil), vrb.Spec.Subjects...),
+				Subjects:        copySubjects(vrb.Spec.Subjects),
 				ControllerScope: vrb.Spec.Scope,
 			},
 		})
@@ -118,6 +123,14 @@ func DesiredFederatedCRs(
 	sort.Slice(bindings, func(i, j int) bool { return bindings[i].Name < bindings[j].Name })
 	sort.Strings(warnings)
 	return roles, bindings, warnings
+}
+
+// copySubjects always returns a non-nil slice. JenkinsRoleBindingSpec.Subjects
+// has no omitempty, so a nil slice encodes as null, and the API server rejects
+// null as a missing required field.
+func copySubjects(in []v1alpha1.SubjectRef) []v1alpha1.SubjectRef {
+	out := make([]v1alpha1.SubjectRef, 0, len(in))
+	return append(out, in...)
 }
 
 func jenkinsRoleSpecCopy(in v1alpha1.JenkinsRoleSpec) v1alpha1.JenkinsRoleSpec {

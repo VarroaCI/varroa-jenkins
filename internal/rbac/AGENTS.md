@@ -86,13 +86,22 @@ with what this package generates.
   `View.Read`, `View.Configure`, `View.Create`. Deliberately excludes
   `Administer` — mite never calls admin-only endpoints (see project memory
   "Mite minimal permissions").
-- **Federation** (`federation.go`) — projects a core-cluster
-  `VarroaRoleBinding` for the `system-mite` `VarroaRole` onto a non-core
-  (hive) cluster as a generated `JenkinsRole`/`JenkinsRoleBinding` pair
-  (`fedBindingName`, content hash via `sha256`/hex for change detection) so
-  multi-cluster mites get consistent Jenkins RBAC without hand-authored
-  per-cluster CRs. Federation silently accepts an existing labeled builtin
-  JenkinsRole only when its name and spec match the canonical builtin.
+- **Federation** (`federation.go`) — `DesiredFederatedCRs` projects every
+  core-cluster `VarroaRoleBinding` whose `VarroaRole` has a Jenkins
+  projection (a Global `jenkinsRoleRef` or legacy `jenkinsPermissions`) onto
+  each non-core (hive) cluster as a generated `JenkinsRole` plus a
+  `varroa-fed-<role>-<hash>` `JenkinsRoleBinding` (`fedBindingName`, a
+  `sha256` of the scope and subjects). It skips these bindings: a binding
+  whose scope carries `tenants` (with a warning), a projection onto the
+  reserved `system-mite` or `system-operator` role (with a warning), and a
+  binding with no subjects (silent, because a Team with no members is a
+  normal state). The empty-subjects skip comes first, before every check that
+  warns and before the role is recorded, so a role that only empty bindings
+  reference is not federated. A
+  projected binding always carries a non-nil `subjects` list (`copySubjects`),
+  because the CRD rejects a `null` list. Federation silently accepts an
+  existing labeled builtin JenkinsRole only when its name and spec match the
+  canonical builtin.
 - **`Backend` interface** (`resolver.go:79`) — abstraction over YAML
   rendering; `RoleStrategyBackend` is the only implementation today. Swap
   points here if a second Jenkins authorization plugin is ever supported.

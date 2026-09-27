@@ -159,11 +159,18 @@ federation, activity persistence, and SSE fanout.
   `handlers_clusters.go` is the `/clusters/{cluster}/...` dispatcher: local
   `ResourceClient` calls when `cluster == local`, `Brood`/`ConfigBrood` otherwise.
 - `RBACFederationReconciler` (`rbac_federation.go`) is a **ticker-driven loop**
-  (`Run`/`Reconcile`, not controller-runtime) that propagates JenkinsRole/
-  JenkinsRoleBinding CRDs from the core cluster's source of truth out to every member
-  cluster via `ConfigBrood`. This is BFF-owned cross-cluster federation — distinct
-  from `role_controller.go`'s single-cluster built-in-role reconciliation in
-  `internal/controller`.
+  (`Run`/`Reconcile`, not controller-runtime) that writes the
+  `JenkinsRole`/`JenkinsRoleBinding` set `rbac.DesiredFederatedCRs` projects
+  from the core `VarroaRoleBinding` objects to every non-core member cluster
+  via `ConfigBrood`, and deletes each federation-labeled child that is no
+  longer desired. The core cluster itself is skipped. Only a list failure
+  stops the pass for a cluster; a failed create, update, or delete of one
+  object is a warning, and the pass continues with the other objects and the
+  garbage-collect loops. `reconcileAndLog` logs each warning once as
+  `rbac federation warning` until it clears, so the warning text must stay
+  the same across passes. This is BFF-owned cross-cluster federation —
+  distinct from `role_controller.go`'s single-cluster built-in-role
+  reconciliation in `internal/controller`.
 - Activity (`internal/api/activity/`): there is no in-memory ring and no retention
   dial. `deps.ActivityPublisher.Publish` (`notifyActivity` in `handlers.go`) is the
   single write path for user-action events, routed onto the NATS bus by

@@ -41,7 +41,11 @@ type fakeConfigBrood struct {
 	// visible to Get/Create, simulating a role created between the
 	// reconciler's list and its create (the isConvergentCreate race).
 	hiddenFromList map[string]bool
-	ops            []string
+	// failBindingCreate makes CreateJenkinsRoleBinding answer an invalid
+	// error for the named binding, as the API server does for a spec that
+	// fails CRD validation.
+	failBindingCreate map[string]bool
+	ops               []string
 }
 
 func newFakeConfigBrood() *fakeConfigBrood {
@@ -133,6 +137,9 @@ func (f *fakeConfigBrood) GetJenkinsRoleBinding(_ context.Context, cluster, name
 
 func (f *fakeConfigBrood) CreateJenkinsRoleBinding(_ context.Context, cluster, name string, obj json.RawMessage) (json.RawMessage, error) {
 	f.ensure(cluster)
+	if f.failBindingCreate[name] {
+		return nil, &BroodError{Code: bus.CodeInvalid, Msg: "spec.subjects: Required value"}
+	}
 	if f.bindings[cluster][name] != nil {
 		return nil, &BroodError{Code: bus.CodeConflict}
 	}
@@ -334,6 +341,73 @@ func TestRBACFederationReconcilerUnreachableHiveDoesNotAbortOthers(t *testing.T)
 	}
 	if brood.roles["dev-cluster"]["jenkins-admin"] == nil {
 		t.Fatalf("reachable cluster did not converge")
+	}
+}
+
+// A source binding that loses its last subject stops federating. The child
+// that an earlier pass created on the hive is garbage-collected, and so is a
+// role that only that binding referenced.
+func TestRBACFederationReconcilerDeletesChildWhenSubjectsEmpty(t *testing.T) {
+	reconciler, brood := testFederationReconciler([]bus.ClusterInfo{{Name: "dev-cluster"}})
+	if warnings := reconciler.Reconcile(context.Background()); len(warnings) != 0 {
+		t.Fatalf("first pass warnings = %v", warnings)
+	}
+	federated := reconciler.desiredBindingsForTest()
+	if len(federated) != 1 || brood.bindings["dev-cluster"][federated[0].Name] == nil {
+		t.Fatalf("first pass did not federate the binding")
+	}
+
+	source := reconciler.bindings.(*fakeFederationStore).items["bind-admin"].(*v1alpha1.VarroaRoleBinding)
+	source.Spec.Subjects = []v1alpha1.SubjectRef{}
+	if warnings := reconciler.Reconcile(context.Background()); len(warnings) != 0 {
+		t.Fatalf("second pass warnings = %v", warnings)
+	}
+	if len(brood.bindings["dev-cluster"]) != 0 {
+		t.Fatalf("hive bindings = %v, want none", brood.bindings["dev-cluster"])
+	}
+	if brood.roles["dev-cluster"]["jenkins-admin"] != nil {
+		t.Fatalf("role that only the empty binding referenced stayed on the hive")
+	}
+}
+
+// A create that the hive rejects on one binding is a warning. The pass
+// continues: a later binding is created and the garbage-collect loop runs.
+func TestRBACFederationReconcilerCreateFailureDoesNotAbortCluster(t *testing.T) {
+	reconciler, brood := testFederationReconciler([]bus.ClusterInfo{{Name: "dev-cluster"}})
+	store := reconciler.bindings.(*fakeFederationStore)
+	store.items["bind-zeta"] = &v1alpha1.VarroaRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "bind-zeta"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "team-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "zed"}}}}
+	desired := reconciler.desiredBindingsForTest()
+	if len(desired) != 2 {
+		t.Fatalf("desired bindings = %d, want 2", len(desired))
+	}
+	brood.failBindingCreate = map[string]bool{desired[0].Name: true}
+	brood.ensure("dev-cluster")
+	brood.bindings["dev-cluster"]["varroa-fed-team-admin-stale"] = &v1alpha1.JenkinsRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "varroa-fed-team-admin-stale", Labels: map[string]string{rbac.LabelFederatedFrom: "team-admin"}}}
+
+	warnings := reconciler.Reconcile(context.Background())
+	if len(warnings) != 1 || !strings.Contains(warnings[0], desired[0].Name) || !strings.Contains(warnings[0], "dev-cluster") {
+		t.Fatalf("warnings = %v, want one warning naming %s", warnings, desired[0].Name)
+	}
+	if brood.bindings["dev-cluster"][desired[1].Name] == nil {
+		t.Fatalf("binding after the failed one was not created")
+	}
+	if brood.bindings["dev-cluster"]["varroa-fed-team-admin-stale"] != nil {
+		t.Fatalf("garbage-collect loop did not run after a create failure")
+	}
+}
+
+// A create failure that repeats on every pass logs one warning line.
+func TestRBACFederationReconcilerRepeatedCreateFailureLogsOnce(t *testing.T) {
+	reconciler, brood := testFederationReconciler([]bus.ClusterInfo{{Name: "dev-cluster"}})
+	writer := &bytes.Buffer{}
+	reconciler.logger = slog.New(slog.NewTextHandler(writer, nil))
+	desired := reconciler.desiredBindingsForTest()
+	brood.failBindingCreate = map[string]bool{desired[0].Name: true}
+
+	reconciler.reconcileAndLog(context.Background())
+	reconciler.reconcileAndLog(context.Background())
+	if got := strings.Count(writer.String(), "rbac federation warning"); got != 1 {
+		t.Fatalf("warning count after two passes = %d, want 1; log = %s", got, writer.String())
 	}
 }
 

@@ -884,6 +884,44 @@ func TestHandleBindingsCreateConflict(t *testing.T) {
 	}
 }
 
+// An API server validation failure is the caller's fault, so a create answers
+// CodeInvalid and not CodeInternal.
+func TestHandleRBACCreateInvalidAnswersCodeInvalid(t *testing.T) {
+	invalid := func(kind string) error {
+		return apierrors.NewInvalid(schema.GroupKind{Group: "varroa.dev", Kind: kind}, "x", nil)
+	}
+
+	t.Run("binding", func(t *testing.T) {
+		cr, crStore := newTestConfigCRUD(newFakeClient(), "", nil)
+		gvr, err := crdstore.GVRFor[v1alpha1.JenkinsRoleBinding]()
+		if err != nil {
+			t.Fatal(err)
+		}
+		crStore.FailNext("create", gvr, invalid("JenkinsRoleBinding"))
+		obj, _ := json.Marshal(v1alpha1.JenkinsRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "jrb1"}})
+		var appResp bus.ConfigApplyResponse
+		jsonUnmarshal(t, cr.HandleBindingsCreate(jsonMarshal(t, bus.ConfigApplyRequest{Name: "jrb1", Object: obj})), &appResp)
+		if appResp.Code != bus.CodeInvalid {
+			t.Errorf("binding create code = %q, want %q", appResp.Code, bus.CodeInvalid)
+		}
+	})
+
+	t.Run("role", func(t *testing.T) {
+		cr, crStore := newTestConfigCRUD(newFakeClient(), "", nil)
+		gvr, err := crdstore.GVRFor[v1alpha1.JenkinsRole]()
+		if err != nil {
+			t.Fatal(err)
+		}
+		crStore.FailNext("create", gvr, invalid("JenkinsRole"))
+		obj, _ := json.Marshal(v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{Name: "jr1"}})
+		var appResp bus.ConfigApplyResponse
+		jsonUnmarshal(t, cr.HandleRolesCreate(jsonMarshal(t, bus.ConfigApplyRequest{Name: "jr1", Object: obj})), &appResp)
+		if appResp.Code != bus.CodeInvalid {
+			t.Errorf("role create code = %q, want %q", appResp.Code, bus.CodeInvalid)
+		}
+	})
+}
+
 // ---------------------------------------------------------------------------
 // Tests for Task 2.5: pause/resume/sync
 // ---------------------------------------------------------------------------

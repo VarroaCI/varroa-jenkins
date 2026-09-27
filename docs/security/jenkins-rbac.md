@@ -3,9 +3,8 @@
 `JenkinsRole` defines Jenkins permissions. `JenkinsRoleBinding` assigns a role
 to users or groups on selected controllers and Jenkins objects.
 
-Varroa owns the managed controllers' role-strategy configuration. Configure it
-with these resources. JCasC `authorizationStrategy` entries and manual Jenkins
-role edits are not retained.
+Varroa owns the role-strategy configuration of managed controllers. It drops
+JCasC `authorizationStrategy` entries and manual role edits.
 
 ## Grant folder build access
 
@@ -43,7 +42,7 @@ spec:
 kubectl apply -f jenkins-rbac.yaml
 ```
 
-Connected controllers receive role changes without reprovisioning.
+Connected controllers get role changes without reprovisioning.
 
 ## Select scopes
 
@@ -55,7 +54,7 @@ Connected controllers receive role changes without reprovisioning.
 | `jenkinsScope.type` | `Global`, `Folder`, `Pattern` | Limits Jenkins objects |
 | `jenkinsScope.propagate` | `None`, `Children`, `Subtree` | Controls folder inheritance |
 
-Pattern scope accepts a regular expression over full item names:
+Pattern scope matches item names with a regular expression:
 
 ```yaml
 jenkinsScope:
@@ -63,25 +62,28 @@ jenkinsScope:
   pattern: "payments/.*-production"
 ```
 
-Prefer folder scope when a folder is the security boundary.
-
 ## Link Varroa and Jenkins access
 
 A `VarroaRole` can set `jenkinsRoleRef` to a Global `JenkinsRole`. Its bindings
-then grant both control-plane permissions and that Jenkins role within the same
+grant control-plane permissions and that Jenkins role within the same
 controller scope. Use a separate `JenkinsRoleBinding` for Item or Agent roles.
 
-Varroa reconciles the built-in Jenkins role resources `varroa-admin`,
+Varroa reconciles the built-in Jenkins roles `varroa-admin`,
 `varroa-operator`, `varroa-developer`, `varroa-viewer`,
 `varroa-system-mite`, and `varroa-system-operator`. Create custom roles instead
-of editing built-ins. The privileged operator role is covered by
-[executeGroovy security](execute-groovy.md).
+of editing built-ins. See [executeGroovy security](execute-groovy.md) for the
+operator role.
+
+## Federate roles to hive clusters
+
+Varroa copies each core `VarroaRoleBinding` that grants a Global Jenkins role
+to every hive as a `varroa-fed-*` `JenkinsRoleBinding` and `JenkinsRole`. It
+skips a binding with no subjects, a `tenants` scope, or a reserved `system-*`
+role, and deletes its earlier copy. The BFF logs a failed copy as
+`rbac federation warning`.
 
 ## Troubleshoot
 
 | Symptom | Check |
 |---|---|
 | Jenkins returns `403` | Subject, scope, role, and permission |
-| JCasC authorization disappears | Use Jenkins RBAC resources |
-| Manual role edit reverts | Edit the Varroa resource |
-| Job action fails | Add the required Item grant |

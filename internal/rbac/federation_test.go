@@ -1,6 +1,7 @@
 package rbac
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -74,7 +75,7 @@ func TestDesiredFederatedCRsLegacyPath(t *testing.T) {
 
 func TestDesiredFederatedCRsSkipsNonGlobalRef(t *testing.T) {
 	roles, bindings, warnings := DesiredFederatedCRs(
-		[]*v1alpha1.VarroaRoleBinding{{Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "item-role"}}},
+		[]*v1alpha1.VarroaRoleBinding{{Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "item-role", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}}}},
 		func(name string) (*v1alpha1.VarroaRole, bool) {
 			return &v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.VarroaRoleSpec{JenkinsRoleRef: "folder-role"}}, true
 		},
@@ -264,5 +265,73 @@ func TestDesiredFederatedCRsSkipsTenantScopedBinding(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected a warning naming bind-tenant, got %v", warnings)
+	}
+}
+
+// A VarroaRoleBinding with no subjects grants nothing in the generator, and
+// the JenkinsRoleBinding CRD rejects a binding with no subjects field. The
+// projector skips it, and a role that only such a binding references stays
+// off the hive.
+func TestDesiredFederatedCRsSkipsEmptySubjects(t *testing.T) {
+	vrbs := []*v1alpha1.VarroaRoleBinding{
+		{ObjectMeta: metav1.ObjectMeta{Name: "team-empty"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "developer", Subjects: []v1alpha1.SubjectRef{}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "team-nil"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "developer"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "team-tenant"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "developer", Scope: &v1alpha1.VarroaRoleBindingScope{Tenants: []v1alpha1.TenantScope{{Name: "team-a"}}}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "bind-admin"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "team-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}}},
+	}
+	roles, bindings, warnings := DesiredFederatedCRs(
+		vrbs,
+		func(name string) (*v1alpha1.VarroaRole, bool) {
+			return &v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.VarroaRoleSpec{JenkinsRoleRef: "jenkins-" + name}}, true
+		},
+		func(name string) (*v1alpha1.JenkinsRole, bool) {
+			return &v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.JenkinsRoleSpec{RoleType: "Global"}}, true
+		},
+	)
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none for a binding with no subjects", warnings)
+	}
+	if len(roles) != 1 || roles[0].Name != "jenkins-team-admin" {
+		t.Fatalf("roles = %#v, want only jenkins-team-admin", roles)
+	}
+	if len(bindings) != 1 || bindings[0].Spec.RoleRef != "jenkins-team-admin" {
+		t.Fatalf("bindings = %#v, want only the team-admin binding", bindings)
+	}
+}
+
+// The JenkinsRoleBinding subjects field has no omitempty. A nil slice encodes
+// as null, and the API server treats null as a missing required field.
+func TestDesiredFederatedCRsSubjectsNeverNull(t *testing.T) {
+	_, bindings, _ := DesiredFederatedCRs(
+		[]*v1alpha1.VarroaRoleBinding{{ObjectMeta: metav1.ObjectMeta{Name: "bind-admin"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "team-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}}}},
+		func(name string) (*v1alpha1.VarroaRole, bool) {
+			return &v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.VarroaRoleSpec{JenkinsPermissions: []string{"Overall/Read"}}}, true
+		},
+		func(string) (*v1alpha1.JenkinsRole, bool) { return nil, false },
+	)
+	if len(bindings) != 1 {
+		t.Fatalf("bindings = %#v", bindings)
+	}
+	raw, err := json.Marshal(bindings[0])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded struct {
+		Spec map[string]json.RawMessage `json:"spec"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	subjects, ok := decoded.Spec["subjects"]
+	if !ok || !strings.HasPrefix(string(subjects), "[") {
+		t.Fatalf("spec.subjects is not a list: %s", raw)
+	}
+}
+
+// A projected binding never encodes a null subjects list, even when a caller
+// hands the projector a subject list that it then copies.
+func TestFederatedSubjectsCopyIsNonNil(t *testing.T) {
+	if got := copySubjects(nil); got == nil {
+		t.Fatalf("copySubjects(nil) = nil, want an empty non-nil slice")
 	}
 }

@@ -166,6 +166,11 @@ func (r *RBACFederationReconciler) desired() ([]*v1alpha1.JenkinsRole, []*v1alph
 	})
 }
 
+// reconcileCluster converges one hive. Only a list failure stops the pass for
+// the cluster. A failed write on one object becomes a warning, so the writes
+// for every other object and the garbage-collect loops still run. The
+// warning text must stay the same across passes: reconcileAndLog uses it to
+// log a repeated failure once.
 func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster string, desiredRoles []*v1alpha1.JenkinsRole, desiredBindings []*v1alpha1.JenkinsRoleBinding, warnings *[]string) error {
 	actualRoles, err := r.listRoles(ctx, cluster)
 	if err != nil {
@@ -195,7 +200,7 @@ func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster
 		}
 		if !exists {
 			if err := r.createRole(ctx, cluster, desired); err != nil && !r.isConvergentCreate(ctx, cluster, desired.Name, true, err, warnings) {
-				return err
+				objectWarning(warnings, cluster, "create JenkinsRole", desired.Name, err)
 			}
 			continue
 		}
@@ -203,7 +208,7 @@ func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster
 			updated := desired.DeepCopy()
 			updated.ResourceVersion = actual.ResourceVersion
 			if err := r.updateRole(ctx, cluster, updated); err != nil && !isConflict(err) {
-				return err
+				objectWarning(warnings, cluster, "update JenkinsRole", desired.Name, err)
 			}
 		}
 	}
@@ -212,7 +217,7 @@ func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster
 			continue
 		}
 		if err := r.brood.DeleteJenkinsRole(ctx, cluster, name); err != nil && !isNotFound(err) {
-			return err
+			objectWarning(warnings, cluster, "delete JenkinsRole", name, err)
 		}
 	}
 
@@ -224,7 +229,7 @@ func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster
 		}
 		if !exists {
 			if err := r.createBinding(ctx, cluster, desired); err != nil && !r.isConvergentCreate(ctx, cluster, desired.Name, false, err, warnings) {
-				return err
+				objectWarning(warnings, cluster, "create JenkinsRoleBinding", desired.Name, err)
 			}
 			continue
 		}
@@ -232,7 +237,7 @@ func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster
 			updated := desired.DeepCopy()
 			updated.ResourceVersion = actual.ResourceVersion
 			if err := r.updateBinding(ctx, cluster, updated); err != nil && !isConflict(err) {
-				return err
+				objectWarning(warnings, cluster, "update JenkinsRoleBinding", desired.Name, err)
 			}
 		}
 	}
@@ -241,7 +246,7 @@ func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster
 			continue
 		}
 		if err := r.brood.DeleteJenkinsRoleBinding(ctx, cluster, name); err != nil && !isNotFound(err) {
-			return err
+			objectWarning(warnings, cluster, "delete JenkinsRoleBinding", name, err)
 		}
 	}
 	return nil
@@ -368,6 +373,10 @@ func (r *RBACFederationReconciler) isConvergentCreate(ctx context.Context, clust
 	}
 	*warnings = append(*warnings, fmt.Sprintf("cluster %s: skip unlabeled %s collision %s", cluster, kind, name))
 	return true
+}
+
+func objectWarning(warnings *[]string, cluster, action, name string, err error) {
+	*warnings = append(*warnings, fmt.Sprintf("cluster %s: %s %s: %v", cluster, action, name, err))
 }
 
 func isFederated(labels map[string]string) bool {

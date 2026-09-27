@@ -174,7 +174,21 @@ func k8sConfigErrToCode(err error) string {
 	if apierrors.IsAlreadyExists(err) || apierrors.IsConflict(err) {
 		return bus.CodeConflict
 	}
+	if apierrors.IsInvalid(err) {
+		return bus.CodeInvalid
+	}
 	return bus.CodeInternal
+}
+
+// logCreateFailure logs a validation rejection at Warn. The caller sent the
+// invalid object and can retry it on every pass, so Error level would repeat
+// an alert for a fault that is not in the operator.
+func (c *ConfigCRUD) logCreateFailure(msg, name string, err error) {
+	if apierrors.IsInvalid(err) {
+		c.Logger.Warn(msg, "name", name, "error", err)
+		return
+	}
+	c.Logger.Error(msg, "name", name, "error", err)
 }
 
 // ---------------------------------------------------------------------------
@@ -931,8 +945,8 @@ func (c *ConfigCRUD) HandleRolesCreate(data []byte) []byte {
 		if apierrors.IsAlreadyExists(err) {
 			return c.configReply(bus.ConfigApplyResponse{Error: "jenkinsrole already exists", Code: bus.CodeConflict})
 		}
-		c.Logger.Error("create jenkinsrole failed", "name", req.Name, "error", err)
-		return c.configReply(bus.ConfigApplyResponse{Error: err.Error(), Code: bus.CodeInternal})
+		c.logCreateFailure("create jenkinsrole failed", req.Name, err)
+		return c.configReply(bus.ConfigApplyResponse{Error: err.Error(), Code: k8sConfigErrToCode(err)})
 	}
 
 	raw, err := marshalCR(&cr)
@@ -1004,8 +1018,8 @@ func (c *ConfigCRUD) HandleBindingsCreate(data []byte) []byte {
 		if apierrors.IsAlreadyExists(err) {
 			return c.configReply(bus.ConfigApplyResponse{Error: "jenkinsrolebinding already exists", Code: bus.CodeConflict})
 		}
-		c.Logger.Error("create jenkinsrolebinding failed", "name", req.Name, "error", err)
-		return c.configReply(bus.ConfigApplyResponse{Error: err.Error(), Code: bus.CodeInternal})
+		c.logCreateFailure("create jenkinsrolebinding failed", req.Name, err)
+		return c.configReply(bus.ConfigApplyResponse{Error: err.Error(), Code: k8sConfigErrToCode(err)})
 	}
 
 	raw, err := marshalCR(&cr)
