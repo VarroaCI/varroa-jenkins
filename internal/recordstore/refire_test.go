@@ -554,6 +554,37 @@ func TestRefireRejectedTriggerClearsTheMarker(t *testing.T) {
 	}
 }
 
+// TestRefireUnreachableTriggerClearsTheMarker asserts a re-fired trigger
+// that reached no Jenkins clears the marker, like a rejected one.
+func TestRefireUnreachableTriggerClearsTheMarker(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	reader := useManualMeter(t)
+	conn := newTestActionConn(t)
+	received := collectActions(t, conn)
+
+	intentKey := "manual:" + newTestUUIDv7String()
+	runID := seedRefireIntent(t, db, intentKey, refireDeadInstance, "")
+	seedRefirePlacement(t, db, "pod-new", "pod-new", true)
+
+	metrics, err := NewInterruptedMetrics()
+	if err != nil {
+		t.Fatalf("new interrupted metrics: %v", err)
+	}
+	if got := runRefire(t, pool, conn, metrics); got != 1 {
+		t.Fatalf("published = %d, want 1", got)
+	}
+	<-received
+
+	ingestRejectedTrigger(t, pool, metrics, runID, intentKey, reasonTriggerUnreachable, 0)
+
+	if at := refiredAt(t, db, intentKey); at != nil {
+		t.Fatalf("refired_at = %v, want null: an unreachable trigger must clear the marker", at)
+	}
+	if got := refiredCountBy(t, reader, refireOutcomeCleared, refireReasonRejectedTemp); got != 1 {
+		t.Fatalf("cleared/rejected-transient count = %d, want 1", got)
+	}
+}
+
 // TestRefirePermanentRejectionKeepsTheMarker asserts a permanent reason
 // keeps the marker. No retry fixes a job that is absent or disabled, so
 // the intent stays for a person.

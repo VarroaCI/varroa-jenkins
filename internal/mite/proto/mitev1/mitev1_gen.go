@@ -199,6 +199,9 @@ type CommandResult struct {
 	Deferred    bool                   `json:"deferred,omitempty"`
 	DeferReason string                 `json:"defer_reason,omitempty"`
 	HttpStatus  int                    `json:"http_status,omitempty"`
+	CommandType CommandType            `json:"command_type,omitempty"`
+	JobPath     string                 `json:"job_path,omitempty"`
+	RunId       string                 `json:"run_id,omitempty"`
 	Result      isCommandResult_result `json:"-"`
 }
 
@@ -220,6 +223,9 @@ func (m *CommandResult) MarshalJSON() ([]byte, error) {
 		Deferred     bool                `json:"deferred,omitempty"`
 		DeferReason  string              `json:"defer_reason,omitempty"`
 		HttpStatus   int                 `json:"http_status,omitempty"`
+		CommandType  CommandType         `json:"command_type,omitempty"`
+		JobPath      string              `json:"job_path,omitempty"`
+		RunId        string              `json:"run_id,omitempty"`
 		DesiredState *DesiredStateResult `json:"desired_state,omitempty"`
 	}
 	var a alias
@@ -229,6 +235,9 @@ func (m *CommandResult) MarshalJSON() ([]byte, error) {
 	a.Deferred = m.Deferred
 	a.DeferReason = m.DeferReason
 	a.HttpStatus = m.HttpStatus
+	a.CommandType = m.CommandType
+	a.JobPath = m.JobPath
+	a.RunId = m.RunId
 	switch v := m.Result.(type) {
 	case *CommandResult_DesiredState:
 		a.DesiredState = v.DesiredState
@@ -244,6 +253,9 @@ func (m *CommandResult) UnmarshalJSON(data []byte) error {
 		Deferred     bool                `json:"deferred,omitempty"`
 		DeferReason  string              `json:"defer_reason,omitempty"`
 		HttpStatus   int                 `json:"http_status,omitempty"`
+		CommandType  CommandType         `json:"command_type,omitempty"`
+		JobPath      string              `json:"job_path,omitempty"`
+		RunId        string              `json:"run_id,omitempty"`
 		DesiredState *DesiredStateResult `json:"desired_state,omitempty"`
 	}
 	if err := json.Unmarshal(data, &a); err != nil {
@@ -255,6 +267,9 @@ func (m *CommandResult) UnmarshalJSON(data []byte) error {
 	m.Deferred = a.Deferred
 	m.DeferReason = a.DeferReason
 	m.HttpStatus = a.HttpStatus
+	m.CommandType = a.CommandType
+	m.JobPath = a.JobPath
+	m.RunId = a.RunId
 	switch {
 	case a.DesiredState != nil:
 		m.Result = &CommandResult_DesiredState{DesiredState: a.DesiredState}

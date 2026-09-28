@@ -62,11 +62,14 @@ const (
 )
 
 // Reason codes a run.trigger_failed envelope carries. The set is complete:
-// every status maps onto exactly one of them.
+// every status maps onto exactly one of them. reasonTriggerUnreachable is
+// the one retryable code: the call reached no Jenkins, so a later fire can
+// still succeed. The other three are permanent.
 const (
-	reasonJobNotFound     = "JOB_NOT_FOUND"
-	reasonJobNotBuildable = "JOB_NOT_BUILDABLE"
-	reasonTriggerRejected = "TRIGGER_REJECTED"
+	reasonJobNotFound        = "JOB_NOT_FOUND"
+	reasonJobNotBuildable    = "JOB_NOT_BUILDABLE"
+	reasonTriggerRejected    = "TRIGGER_REJECTED"
+	reasonTriggerUnreachable = "TRIGGER_UNREACHABLE"
 )
 
 // Reason codes a run.resume_failed envelope carries. The mite names five
@@ -125,9 +128,13 @@ func reasonCodeForResumeError(text string) string {
 }
 
 // reasonCodeForStatus maps the Jenkins HTTP status of a failed trigger onto
-// one reason code. The status 0 names a call that reached no Jenkins.
+// one reason code. The status 0 names a call that reached no Jenkins: a
+// readiness wait that expired, a refused connection, or a crumb fetch that
+// failed before the trigger call.
 func reasonCodeForStatus(status int) string {
 	switch status {
+	case 0:
+		return reasonTriggerUnreachable
 	case 404:
 		return reasonJobNotFound
 	case 409:

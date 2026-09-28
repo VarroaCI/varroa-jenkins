@@ -268,6 +268,12 @@ type Agent struct {
 	// a nested-budget warning reaches the real logger.
 	crossTenantTimeout time.Duration
 
+	// triggerReadyWait bounds the Jenkins readiness wait a TRIGGER_BUILD
+	// command runs before its trigger call. A reconnecting cell receives
+	// its queued triggers within one second, before its Jenkins accepts a
+	// call. NewAgent sets triggerReadyWaitDefault.
+	triggerReadyWait time.Duration
+
 	// crossTenantSeq allocates each cross-tenant request its own numeric
 	// id. The waiter map only needs uniqueness among currently open
 	// requests, never across a restart, so a process-local counter is
@@ -322,6 +328,7 @@ func NewAgent(cfg Config) *Agent {
 		eventAcks:              newAckBuffer(),
 		logRetention:           newLogRetentionStore(logRetainBytesFromEnv()),
 		crossTenantTimeout:     defaultCrossTenantMiteTimeoutMS * time.Millisecond,
+		triggerReadyWait:       triggerReadyWaitDefault,
 		crossTenantWaiters:     newCrossTenantWaiterMap(),
 		runStateAcks:           newRunStateAckStore(),
 		runStateWaiters:        newRunStateWaiterMap(),
@@ -1069,6 +1076,11 @@ type commandWork struct {
 const imperativeQueueCap = 16
 const defaultCommandDeadline = 20 * time.Minute
 
+// triggerReadyWaitDefault is the readiness wait of one TRIGGER_BUILD
+// command. It stays below defaultCommandDeadline, so the trigger call
+// still has time after a full wait.
+const triggerReadyWaitDefault = 5 * time.Minute
+
 // commandMailbox is a mutex-guarded queue with a single-slot replace-on-arrival
 // desired-state entry (newest-wins) and a bounded FIFO imperative queue.
 // Desired-state commands coalesce instead of queueing; imperatives preserve
@@ -1078,11 +1090,18 @@ type commandMailbox struct {
 	desired    *commandWork  // replace-on-arrival slot (newest-wins)
 	imperative []commandWork // bounded FIFO
 	signal     chan struct{} // cap 1, non-blocking notify
+	// active holds the identifier of every imperative command that is
+	// queued or running. The gateway's consumer redelivers a command
+	// that holds no acknowledgement after 30 seconds, and a trigger can
+	// wait five minutes for Jenkins. A redelivery of an active command
+	// is therefore dropped, so it cannot fill the queue.
+	active map[string]bool
 }
 
 func newCommandMailbox() *commandMailbox {
 	return &commandMailbox{
 		signal: make(chan struct{}, 1),
+		active: map[string]bool{},
 	}
 }
 
@@ -1097,15 +1116,39 @@ func (mb *commandMailbox) putDesired(w commandWork) {
 	mb.notify()
 }
 
-func (mb *commandMailbox) putImperative(w commandWork) bool {
+// putImperative queues w. It answers duplicate true, and queues nothing,
+// for a command whose identifier is already queued or running. It answers
+// ok false when the queue is full.
+func (mb *commandMailbox) putImperative(w commandWork) (ok, duplicate bool) {
 	mb.mu.Lock()
 	defer mb.mu.Unlock()
+	var id string
+	if w.imperativeCmd != nil {
+		id = w.imperativeCmd.CommandId
+	}
+	if id != "" && mb.active[id] {
+		return true, true
+	}
 	if len(mb.imperative) >= imperativeQueueCap {
-		return false
+		return false, false
+	}
+	if id != "" {
+		mb.active[id] = true
 	}
 	mb.imperative = append(mb.imperative, w)
 	mb.notify()
-	return true
+	return true, false
+}
+
+// finish releases the identifier of an imperative command that ran, so a
+// later delivery of it runs again.
+func (mb *commandMailbox) finish(w commandWork) {
+	if w.imperativeCmd == nil {
+		return
+	}
+	mb.mu.Lock()
+	delete(mb.active, w.imperativeCmd.CommandId)
+	mb.mu.Unlock()
 }
 
 func (mb *commandMailbox) take() (commandWork, bool) {
@@ -1201,9 +1244,14 @@ func (a *Agent) processCommands(ctx context.Context) {
 			a.deferMu.Unlock()
 		case *mitev1.OperatorMessage_Imperative:
 			w := commandWork{imperativeCmd: m.Imperative, ctx: ctx}
-			if !mb.putImperative(w) {
+			ok, duplicate := mb.putImperative(w)
+			if !ok {
 				a.Logger.Error("imperative queue full, ending stream session")
 				return
+			}
+			if duplicate {
+				a.Logger.Debug("imperative command already queued or running, dropping the redelivery",
+					"command_id", m.Imperative.CommandId)
 			}
 		case *mitev1.OperatorMessage_TokenGrant:
 			grant := m.TokenGrant
@@ -1312,6 +1360,7 @@ func (a *Agent) commandWorker(ctx context.Context, mb *commandMailbox) {
 									}
 									mb.putDesired(w)
 									a.runCommand(ctx, newW)
+									mb.finish(newW)
 									continue workLoop
 								}
 								if newW.desiredStateCmd != nil {
@@ -1335,6 +1384,7 @@ func (a *Agent) commandWorker(ctx context.Context, mb *commandMailbox) {
 			}
 
 			a.runCommand(ctx, w)
+			mb.finish(w)
 		}
 	}
 }
@@ -1478,6 +1528,12 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 				errStr = "trigger_build payload is nil"
 				break
 			}
+			// A wait that expires reaches no Jenkins, so the result keeps
+			// the status 0 and the gateway reports a retryable failure.
+			if readyErr := a.awaitTriggerReady(cctx); readyErr != nil {
+				errStr = fmt.Sprintf("trigger build %s: %v", payload.JobPath, readyErr)
+				break
+			}
 			jenkinsClient := a.getJenkinsClient()
 			triggerStatus, triggerErr := jenkinsClient.TriggerBuild(cctx, jenkins.TriggerBuildRequest{
 				RunID:      payload.RunId,
@@ -1590,9 +1646,15 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 			errStr = fmt.Sprintf("command deadline exceeded (%s)", deadline)
 			success = false
 		}
+		jobPath, runID := imperativeCommandSubject(cmd)
+		a.logImperativeResult(cmd, jobPath, runID, success, errStr, httpStatus)
 		a.sendMu.Lock()
 		sendErr := a.stream.Send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_CommandResult{
-			CommandResult: &mitev1.CommandResult{CommandId: cmd.CommandId, Success: success, Error: errStr, Deferred: deferred, DeferReason: deferReason, HttpStatus: httpStatus},
+			CommandResult: &mitev1.CommandResult{
+				CommandId: cmd.CommandId, Success: success, Error: errStr,
+				Deferred: deferred, DeferReason: deferReason, HttpStatus: httpStatus,
+				CommandType: cmd.Type, JobPath: jobPath, RunId: runID,
+			},
 		}})
 		a.sendMu.Unlock()
 		if sendErr != nil {
@@ -1601,6 +1663,65 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 			return
 		}
 	}
+}
+
+// awaitTriggerReady runs the startup path's readiness check before a
+// TRIGGER_BUILD call, bounded by triggerReadyWait. It answers nil at once
+// for a ready Jenkins.
+func (a *Agent) awaitTriggerReady(ctx context.Context) error {
+	wait := a.triggerReadyWait
+	if wait <= 0 {
+		wait = triggerReadyWaitDefault
+	}
+	wctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	if err := a.waitForJenkinsWithFreshToken(wctx); err != nil {
+		return fmt.Errorf("jenkins not ready after %s: %w", wait, err)
+	}
+	return nil
+}
+
+// imperativeCommandSubject answers the job path and the run identifier an
+// imperative command names. A command type that names no run answers two
+// empty strings.
+func imperativeCommandSubject(cmd *mitev1.ImperativeCommand) (jobPath, runID string) {
+	switch {
+	case cmd.TriggerBuild != nil:
+		return cmd.TriggerBuild.JobPath, cmd.TriggerBuild.RunId
+	case cmd.CancelBuild != nil:
+		return cmd.CancelBuild.JobPath, cmd.CancelBuild.RunId
+	case cmd.ResumeBuild != nil:
+		return cmd.ResumeBuild.JobPath, cmd.ResumeBuild.RunId
+	case cmd.ProceedInput != nil:
+		return cmd.ProceedInput.JobPath, cmd.ProceedInput.RunId
+	case cmd.AbortInput != nil:
+		return cmd.AbortInput.JobPath, cmd.AbortInput.RunId
+	case cmd.ReplayBuild != nil:
+		return cmd.ReplayBuild.JobPath, cmd.ReplayBuild.RunId
+	case cmd.Target != "":
+		return cmd.Target, ""
+	}
+	return "", ""
+}
+
+// logImperativeResult logs the outcome of one imperative command: Info on
+// success and Warn on failure. A refused command leaves no other trace on
+// the mite, so this line is the cell-side record of it.
+func (a *Agent) logImperativeResult(cmd *mitev1.ImperativeCommand, jobPath, runID string,
+	success bool, reason string, httpStatus int) {
+	attrs := make([]any, 0, 12)
+	attrs = append(attrs,
+		"kind", cmd.Type.Label(),
+		"command_id", cmd.CommandId,
+		"job_path", jobPath,
+		"run_id", runID,
+	)
+	if success {
+		a.Logger.Info("imperative command succeeded", attrs...)
+		return
+	}
+	attrs = append(attrs, "reason", reason, "http_status", httpStatus)
+	a.Logger.Warn("imperative command failed", attrs...)
 }
 
 // actingUserOf maps an imperative command's acting user onto the Jenkins

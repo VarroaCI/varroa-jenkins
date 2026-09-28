@@ -203,8 +203,9 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   of an unnamed failure. Every publisher resolves the tenant through
   `CellTenantResolver.ResolveJobTenant`.
   `publishTriggerFailed` maps `CommandResult.http_status` onto a reason code
-  with `reasonCodeForStatus` (`404` to `JOB_NOT_FOUND`, `409` to
-  `JOB_NOT_BUILDABLE`, everything else and `0` to `TRIGGER_REJECTED`);
+  with `reasonCodeForStatus` (`0` to the retryable `TRIGGER_UNREACHABLE`,
+  `404` to `JOB_NOT_FOUND`, `409` to `JOB_NOT_BUILDABLE`, everything else
+  to `TRIGGER_REJECTED`);
   `publishTriggerAccepted` carries no reason code and no error, only
   `http_status` and `actor`, because Jenkins accepted the trigger. **Neither
   publisher may consult `job_schedules.go`'s stream-missing negative

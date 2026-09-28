@@ -16,6 +16,12 @@ error, so alert on any increase. The recorder also exports `recorder_fence_veto_
 `recorder_job_home_changed_total`, and logs each refused
 claim; see [Build claims](build-claims.md).
 
+The operator exports `varroa.imperative_command.results`, tagged with `kind` and `outcome`. It
+counts every result of an imperative command that a mite reports, for example `cancel_build` or
+`trigger_build`. `outcome` is `success`, `failure`, or `deferred`. A deferred result is a restart
+that waits for running builds. The mite also logs each result: at info level on success, and at
+warning level on failure. The log line names the kind, the job path, the run, and the reason.
+
 ## Use activity history
 
 Activity history needs the [build record store](build-records.md). Set `recordStore.enabled: true` and size `recordStore.retention.activity` (default `30d`) in chart values.
@@ -35,6 +41,11 @@ interrupted run. `build.scheduled.backstop` marks a missed cron build that the b
 `build.claim_vetoed` marks a refused claim. The recorder
 writes all four directly to the store. A live subscriber sees each event only on its next
 backfill, never on the live stream.
+
+The operator publishes one `command.failed` event for each imperative command that fails on a
+controller. A cancel of a build that Jenkins cannot find is an example. The event names the
+command kind in `reason`, the job path, the run, and the error text. A successful command and a
+deferred restart publish no event.
 
 ## Read brood health
 

@@ -823,11 +823,12 @@ func TestApplyJobSchedules_DropsOccurrencesPastTheWindow(t *testing.T) {
 	t0 := scheduleBase()
 	m := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Minute) }
 
-	// The default grace is five minutes, so the window is seventeen.
+	// The default grace is five minutes, so the window is twenty-two:
+	// two graces, the ten-minute answer wait, and the slack.
 	applyCronEnvelope(t, g, t0, "* * * * *", m(1), m(4))
-	applyCronEnvelope(t, g, m(20), "* * * * *", m(21))
+	applyCronEnvelope(t, g, m(25), "* * * * *", m(26))
 
-	assertOccurrences(t, readAppOccurrences(t, pool), []time.Time{m(4), m(21)})
+	assertOccurrences(t, readAppOccurrences(t, pool), []time.Time{m(4), m(26)})
 }
 
 func TestApplyJobSchedules_SpecChangeReplacesOccurrences(t *testing.T) {
@@ -863,19 +864,20 @@ func TestApplyJobSchedules_CapsPassedOccurrences(t *testing.T) {
 func TestApplyJobSchedules_WindowFollowsTenantGrace(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	seedTenantPlacementPolicy(t, db, `{"cronGrace":"1m"}`)
-	if _, err := db.Exec(`UPDATE varroa.tenant_placements SET cell = $1 WHERE cluster = $2 AND tenant = $3`,
-		jsTestCell, testCluster, testTenant); err != nil {
+	if _, err := db.Exec(`UPDATE varroa.tenant_placements SET namespace = $1, cell = $2 WHERE cluster = $3 AND tenant = $4`,
+		jsTestNS, jsTestCell, testCluster, testTenant); err != nil {
 		t.Fatalf("place tenant on the test cell: %v", err)
 	}
 	g := NewIngester(pool, nil, nil)
 	t0 := scheduleBase()
 	m := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Minute) }
 
-	// A one-minute grace makes the window five minutes.
+	// A one-minute grace makes the window fourteen minutes, because the
+	// ten-minute answer wait outlasts three graces.
 	applyCronEnvelope(t, g, t0, "* * * * *", m(1), m(3))
-	applyCronEnvelope(t, g, m(7), "* * * * *", m(8))
+	applyCronEnvelope(t, g, m(16), "* * * * *", m(17))
 
-	assertOccurrences(t, readAppOccurrences(t, pool), []time.Time{m(3), m(8)})
+	assertOccurrences(t, readAppOccurrences(t, pool), []time.Time{m(3), m(17)})
 }
 
 func TestApplyJobSchedules_DisabledChangeReplacesOccurrences(t *testing.T) {

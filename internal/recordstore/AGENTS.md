@@ -616,13 +616,18 @@ of the fleet's audit activity, once a controller becomes disposable.
   of the cell older than the accepted envelope, but only when the
   envelope is not truncated. The delete matches the stored cell. A home
   write moves a job's rows to the new home at once, so the old home's
-  next envelope skips the job and deletes none of its rows. The ingest
+  next envelope skips the job and deletes none of its rows. The gate
+  stores a row only when the envelope's namespace **and** cell equal the
+  job's home member, because two namespaces can hold a cell of one name.
+  The ingest
   reads each tenant's home `FOR SHARE` (`jobScheduleHomeCell`), so a home
   write waits for an envelope that already read the old home. The upsert keeps passed occurrences in
   `next_fire_times`: with an unchanged spec, time zone, and disabled
   state, it merges each
   stored occurrence at or before the envelope time and newer than
-  `passedOccurrenceWindow(cronGrace)` (`3 × cronGrace + 2m`), at most
+  `passedOccurrenceWindow(cronGrace)` (`max(3 × cronGrace, 2 × cronGrace +
+  backstopAnswerWait) + 2m`, so a lost fire still finds its occurrence
+  when its suppression ends), at most
   `maxPassedOccurrences` (16), with the carried list, deduplicated and
   sorted. The backstop needs that: the plugin exports future times only,
   so a plain replace removes a miss before the round can judge it.
@@ -886,8 +891,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   replicas publish one action. **A rejected trigger heals the marker
   too**: `applyTriggerFailed` calls `healRefiredIntent` inside its own
   transaction, so the marker and the failed run's record commit
-  together. `TRIGGER_REJECTED` is transient (the cell answered but
-  refused), so it clears the marker and counts
+  together. `TRIGGER_REJECTED` and `TRIGGER_UNREACHABLE` are transient
+  here (`isTransientTriggerReason`: the cell refused the call, or it
+  reached no Jenkins), so each clears the marker and counts
   `cleared`/`rejected-transient`; `JOB_NOT_FOUND` and
   `JOB_NOT_BUILDABLE` are permanent, so the marker stays and the round
   counts `skipped`/`rejected-permanent`. `run_intents.refire_attempts`
@@ -968,6 +974,29 @@ of the fleet's audit activity, once a controller becomes disposable.
   moves the job's rows. The round reads no placement generation: a
   generation raise leaves an unmoved row below it until its cell exports
   again. A tenant with no placement row keeps the row's own coordinate.
+  **A failed fire belongs to the re-fire pass** (`backstop_retry.go`).
+  `isBackstopCandidate` refuses an occurrence whose intent key holds any
+  `TRIGGER_FAILED` run, so a permanent code never fires again, and its
+  activity-row suppression lasts the longer of the grace window and
+  `backstopAnswerWait`, so a waiting first fire gets no second fire.
+  `selectBackstopRetries` reads the failed `cron:` runs of the last 24
+  hours, not `job_schedules`, so a re-fire outlives the passed-occurrence
+  window. It re-fires a key only when every failed run carries
+  `TRIGGER_UNREACHABLE` and at most `maxBackstopRefires` (3) failed runs
+  and fires exist (an unanswered fire spends its attempt too), no
+  intent holds the key, the failed runs number at least the
+  occurrence's `build.scheduled.backstop` rows (every fire answered: a
+  count, never a clock, because a run identifier holds millisecond time,
+  or `backstopAnswerWait` (10 minutes) since the newest fire),
+  the newest fire is past the grace window, and no newer occurrence of
+  the job fired. `mergeBackstopRetries` drops a re-fire that a newer first
+  fire of the same job in the round supersedes. A re-fire counts
+  `recorder_cron_refired_total` beside `recorder_cron_fired_total`.
+  `applyTriggerFailed` writes `payload.trigger_attempt` (one more than the
+  key's other failed runs of the same cluster and tenant, and at least
+  the occurrence's fire count for a `cron:` key) on every failed trigger, and appends
+  `backstopRefireSpentNote` to `trigger_error` for the `cron:` failure
+  that spends the last re-fire.
   `Ledger.SetConcurrencyCancel` wires the sibling concurrency-groups
   capability: on a granted claim for a `cancelInProgress` tenant, `Claim`
   starts `runConcurrencyCancel` in its own goroutine so it answers the

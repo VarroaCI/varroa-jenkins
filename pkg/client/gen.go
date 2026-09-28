@@ -3074,7 +3074,7 @@ type ComponentsSchemasRunDetail struct {
 	// TriggerError The error text a refused build trigger reported. Set only when result is TRIGGER_FAILED.
 	TriggerError *string `json:"triggerError,omitempty"`
 
-	// TriggerReasonCode Why no build exists for the trigger. One of JOB_NOT_FOUND, JOB_NOT_BUILDABLE, TRIGGER_REJECTED, CLAIM_EXPIRED, FENCED, CROSS_TENANT, INVALID_KEY, and THROTTLED. The first three name a refusal from the controller. CLAIM_EXPIRED names an accepted trigger that no build claim followed. The last four name a build claim that the record store refused. Set only when result is TRIGGER_FAILED.
+	// TriggerReasonCode Why no build exists for the trigger. One of JOB_NOT_FOUND, JOB_NOT_BUILDABLE, TRIGGER_REJECTED, TRIGGER_UNREACHABLE, CLAIM_EXPIRED, FENCED, CROSS_TENANT, INVALID_KEY, and THROTTLED. The first three name a refusal from the controller. TRIGGER_UNREACHABLE names a trigger that reached no Jenkins. CLAIM_EXPIRED names an accepted trigger that no build claim followed. The last four name a build claim that the record store refused. Set only when result is TRIGGER_FAILED.
 	TriggerReasonCode *string `json:"triggerReasonCode,omitempty"`
 }
 

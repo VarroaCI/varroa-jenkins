@@ -92,11 +92,13 @@ func applyJobSchedulesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, pay
 		if err != nil {
 			return ApplyResult{}, err
 		}
-		if known && home != env.Cell {
+		if known && (home.Namespace != env.Namespace || home.Cell != env.Cell) {
 			// Only a job's home slot holder owns that job's row. A
 			// standby polls SCM and fires cron, so its export would
 			// overwrite the row's cell and the backstop would then fire
-			// the job on a cell that must not run it. A new job with no
+			// the job on a cell that must not run it. The test compares
+			// the namespace and the cell together, because two
+			// namespaces can hold a cell of one name. A new job with no
 			// stored home resolves to its computed home, so the gate
 			// admits the same cell the next recompute names. The
 			// envelope does not fail: its other rows can be valid.
@@ -204,16 +206,19 @@ func applyJobSchedulesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, pay
 const maxPassedOccurrences = 16
 
 // passedOccurrenceSlack is the extra time a passed occurrence stays
-// beyond three grace windows. It covers one backstop round interval
+// beyond the backstop's own need. It covers one backstop round interval
 // and the envelope delay.
 const passedOccurrenceSlack = 2 * time.Minute
 
 // passedOccurrenceWindow answers how long a row keeps a passed
 // occurrence for a tenant with the given cron grace. The backstop
 // judges an occurrence one grace after it and can wait one more grace
-// for its spread delay, so three graces leave one grace of margin.
+// for its spread delay, so three graces leave one grace of margin. A
+// fire then suppresses a second first fire for backstopAnswerWait at
+// least, and a lost fire must still find its occurrence in the row
+// when that suppression ends.
 func passedOccurrenceWindow(grace time.Duration) time.Duration {
-	return 3*grace + passedOccurrenceSlack
+	return max(3*grace, 2*grace+backstopAnswerWait) + passedOccurrenceSlack
 }
 
 // parseJobScheduleFireTimes parses a job schedule row's RFC 3339
@@ -231,8 +236,8 @@ func parseJobScheduleFireTimes(values []string) ([]time.Time, error) {
 	return out, nil
 }
 
-// jobScheduleHomeCell answers the cell that holds jobPath's home slot
-// for tenant, and whether the tenant holds a placement row at all. A
+// jobScheduleHomeCell answers the member that holds jobPath's home slot
+// for tenant, with its namespace and cell, and whether the tenant holds a placement row at all. A
 // tenant with no row is unknown, and the caller then stores every row it
 // exports, which is the behaviour before slots existed.
 //
@@ -242,22 +247,22 @@ func parseJobScheduleFireTimes(values []string) ([]time.Time, error) {
 // so the write moves the rows this envelope stores, and this envelope
 // never stores a row at a home the write already moved.
 func jobScheduleHomeCell(ctx context.Context, tx pgx.Tx, cluster, tenant, jobPath string,
-	cache map[string]placementMembers) (string, bool, error) {
+	cache map[string]placementMembers) (member, bool, error) {
 	row, cached := cache[tenant]
 	if !cached {
 		read, exists, err := readTenantPlacementMembersForShare(ctx, tx, cluster, tenant)
 		if err != nil {
-			return "", false, err
+			return member{}, false, err
 		}
 		if !exists {
 			cache[tenant] = placementMembers{}
-			return "", false, nil
+			return member{}, false, nil
 		}
 		cache[tenant] = read
 		row = read
 	}
 	if len(row.members) == 0 {
-		return "", false, nil
+		return member{}, false, nil
 	}
-	return memberForJob(row, jobPath).Cell, true, nil
+	return memberForJob(row, jobPath), true, nil
 }

@@ -163,9 +163,9 @@ func TestIsBackstopCandidateFiresAgainAfterSuppressionWindowPasses(t *testing.T)
 		cluster: testCluster, tenant: testTenant, namespace: testNamespace, cell: "cell-a",
 		jobPath: "acme/resuppress", occurrence: occ, grace: backstopTestGrace,
 	}
-	// The prior fire's row is older than the grace window: the
-	// suppression no longer applies.
-	if err := writeBackstopActivity(context.Background(), pool, c, now.Add(-10*time.Minute)); err != nil {
+	// The prior fire's row is older than the grace window and the answer
+	// wait: the suppression no longer applies.
+	if err := writeBackstopActivity(context.Background(), pool, c, now.Add(-backstopAnswerWait-time.Minute)); err != nil {
 		t.Fatalf("write backstop activity: %v", err)
 	}
 

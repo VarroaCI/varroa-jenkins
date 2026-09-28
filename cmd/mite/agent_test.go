@@ -1047,7 +1047,7 @@ func TestCommandMailboxImperativeFIFO(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		w := commandWork{imperativeCmd: &mitev1.ImperativeCommand{CommandId: fmt.Sprintf("%d", i)}}
-		if !mb.putImperative(w) {
+		if ok, _ := mb.putImperative(w); !ok {
 			t.Fatalf("putImperative %d should succeed", i)
 		}
 	}
@@ -1074,14 +1074,39 @@ func TestCommandMailboxImperativeCap(t *testing.T) {
 
 	for i := 0; i < imperativeQueueCap; i++ {
 		w := commandWork{imperativeCmd: &mitev1.ImperativeCommand{CommandId: fmt.Sprintf("%d", i)}}
-		if !mb.putImperative(w) {
+		if ok, _ := mb.putImperative(w); !ok {
 			t.Fatalf("putImperative %d at cap should succeed", i)
 		}
 	}
 
 	w := commandWork{imperativeCmd: &mitev1.ImperativeCommand{CommandId: "overflow"}}
-	if mb.putImperative(w) {
+	if ok, _ := mb.putImperative(w); ok {
 		t.Error("putImperative should return false at capacity")
+	}
+}
+
+// TestCommandMailboxDropsActiveRedelivery verifies a redelivery of a queued
+// or running command queues nothing, and a finished command runs again.
+func TestCommandMailboxDropsActiveRedelivery(t *testing.T) {
+	mb := newCommandMailbox()
+	w := commandWork{imperativeCmd: &mitev1.ImperativeCommand{CommandId: "trigger-1"}}
+
+	if ok, dup := mb.putImperative(w); !ok || dup {
+		t.Fatalf("first put = %v %v, want queued", ok, dup)
+	}
+	if ok, dup := mb.putImperative(w); !ok || !dup {
+		t.Fatalf("queued redelivery = %v %v, want a dropped duplicate", ok, dup)
+	}
+	taken, _ := mb.take()
+	if ok, dup := mb.putImperative(w); !ok || !dup {
+		t.Fatalf("running redelivery = %v %v, want a dropped duplicate", ok, dup)
+	}
+	if _, more := mb.take(); more {
+		t.Fatal("the mailbox holds a second copy of the command")
+	}
+	mb.finish(taken)
+	if ok, dup := mb.putImperative(w); !ok || dup {
+		t.Fatalf("delivery after finish = %v %v, want queued", ok, dup)
 	}
 }
 

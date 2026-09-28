@@ -82,6 +82,44 @@ func TestApplyJobSchedules_StandbyExportIsDropped(t *testing.T) {
 	}
 }
 
+// TestApplyJobSchedules_SameNamedCellInAnotherNamespaceIsDropped asserts
+// the gate compares the namespace and the cell together. A cell of the
+// home's name in another namespace is not the home.
+func TestApplyJobSchedules_SameNamedCellInAnotherNamespaceIsDropped(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	g := NewIngester(pool, nil, nil)
+	seedScheduleMembers(t, db, "acme", map[string]int32{"acme/app": 0})
+
+	now := time.Now().UTC()
+	homeEnv := newJobScheduleEnvelope(t, "cell-a", now.Add(-time.Minute), JobSchedulesPayload{
+		Hash: "h1",
+		Rows: []JobScheduleRowInput{{Tenant: "acme", JobPath: "acme/app", TriggerType: "cron", Spec: "H * * * *"}},
+	})
+	if _, err := g.Apply(context.Background(), homeEnv); err != nil {
+		t.Fatalf("apply the home envelope: %v", err)
+	}
+
+	foreignEnv := newJobScheduleEnvelope(t, "cell-a", now, JobSchedulesPayload{
+		Hash: "h2",
+		Rows: []JobScheduleRowInput{{Tenant: "acme", JobPath: "acme/app", TriggerType: "cron", Spec: "H * * * *"}},
+	})
+	foreignEnv.Namespace = "other-ns"
+	if _, err := g.Apply(context.Background(), foreignEnv); err != nil {
+		t.Fatalf("apply the foreign envelope: %v", err)
+	}
+
+	var namespace string
+	if err := db.QueryRow(`
+		SELECT namespace FROM varroa.job_schedules
+		WHERE cluster = $1 AND tenant = 'acme' AND job_path = 'acme/app'
+	`, jsTestCluster).Scan(&namespace); err != nil {
+		t.Fatalf("read schedule namespace: %v", err)
+	}
+	if namespace != jsTestNS {
+		t.Fatalf("stored namespace = %q, want %q: a same-named cell in another namespace is not the home", namespace, jsTestNS)
+	}
+}
+
 // TestApplyJobSchedules_TheHomeStoresTheRow asserts slot 1's holder owns
 // the row of a job homed on slot 1.
 func TestApplyJobSchedules_TheHomeStoresTheRow(t *testing.T) {

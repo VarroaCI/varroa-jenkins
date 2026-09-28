@@ -42,9 +42,22 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   - **Command dispatch** — `commandMailbox` (`agent.go:834`): desired-state
     commands coalesce into a single replace-on-arrival slot (newest wins,
     never queued); imperative commands go through a bounded (cap 16) FIFO
-    that must not silently drop — a full queue ends the stream session.
+    that drops a delivery whose command identifier is already queued or
+    running (`commandMailbox.active`, released by `finish`), because the
+    gateway redelivers an unacknowledged command every 30 seconds. The FIFO
+    must not silently drop a new command — a full queue ends the stream session.
     `commandWorker` (`agent.go:994`) drains one command at a time so Jenkins
     writes never overlap desired-state and imperative work.
+  - **Imperative results** — `TRIGGER_BUILD` runs `awaitTriggerReady`
+    (the startup path's `waitForJenkinsWithFreshToken`, bounded by
+    `triggerReadyWait`, five minutes) before its trigger call, because a
+    reconnecting cell receives its queued triggers before its Jenkins
+    accepts a call. An expired wait makes no call and answers
+    `http_status` `0`, which the gateway maps onto the retryable
+    `TRIGGER_UNREACHABLE`. Every imperative `CommandResult` carries
+    `command_type`, `job_path`, and `run_id` (`imperativeCommandSubject`),
+    and `logImperativeResult` logs each one at info on success and at warn
+    on failure.
   - **`REPLAY_WEBHOOK` delivery identity** — `runCommand`'s replay case
     sets `X-Varroa-Delivery` from `ReplayWebhookPayload.delivery_id` after
     it copies every header the envelope carries, so a forged inbound

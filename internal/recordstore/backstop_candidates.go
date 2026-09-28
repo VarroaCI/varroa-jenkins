@@ -28,11 +28,12 @@ func cronIntentKey(jobPath string, occ time.Time) string {
 	return fmt.Sprintf("cron:%s:%s", jobPath, occurrenceMinuteKey(occ))
 }
 
-// isBackstopCandidate applies D11's four candidate rules to one exported
+// isBackstopCandidate applies D11's candidate rules to one exported
 // occurrence of cluster/jobPath: older than grace, not older than 24
-// hours, no cron:<job-path>:<occurrence-minute> intent, and no
-// build.scheduled.backstop activity row for the same cluster, job path,
-// and occurrence minute newer than the grace window.
+// hours, no cron:<job-path>:<occurrence-minute> intent, no failed run
+// under that key, and no build.scheduled.backstop activity row for the
+// same cluster, job path, and occurrence minute newer than the longer of
+// the grace window and backstopAnswerWait.
 func isBackstopCandidate(ctx context.Context, reader Reader, pool *pgxpool.Pool, cluster, jobPath string, occ, now time.Time, grace time.Duration) (bool, error) {
 	if !occ.Before(now.Add(-grace)) {
 		return false, nil
@@ -49,7 +50,21 @@ func isBackstopCandidate(ctx context.Context, reader Reader, pool *pgxpool.Pool,
 		return false, nil
 	}
 
-	logged, err := backstopFireRecentlyLogged(ctx, pool, cluster, jobPath, occurrenceMinuteKey(occ), now.Add(-grace))
+	// An occurrence with a failed fire belongs to the re-fire pass
+	// (selectBackstopRetries), which bounds its attempts and never
+	// re-fires a permanent failure.
+	failed, err := hasTriggerFailure(ctx, pool, cluster, cronIntentKey(jobPath, occ))
+	if err != nil {
+		return false, err
+	}
+	if failed {
+		return false, nil
+	}
+
+	// A fire with no answer yet can still wait on a booting cell, so the
+	// suppression lasts at least backstopAnswerWait, like a re-fire's.
+	logged, err := backstopFireRecentlyLogged(ctx, pool, cluster, jobPath, occurrenceMinuteKey(occ),
+		now.Add(-max(grace, backstopAnswerWait)))
 	if err != nil {
 		return false, err
 	}

@@ -219,6 +219,13 @@ message CommandResult {
   // applies its ack/nak/term decision table on it. The gateway maps a failed
   // TRIGGER_BUILD status onto a record-store reason code.
   int32 http_status = 6;
+  // command_type, job_path, and run_id name the imperative command this
+  // result answers. The mite copies them from the command, so the operator
+  // can count and record an outcome without a second lookup. A desired-state
+  // result leaves all three empty.
+  CommandType command_type = 7;
+  string job_path = 8;
+  string run_id = 9;
   oneof result {
     DesiredStateResult desired_state = 10;
   }

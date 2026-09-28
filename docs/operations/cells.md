@@ -338,15 +338,14 @@ The recorder checks them against its ledger every minute. After a cell restart, 
 [Jenkinsfile cron trigger](../config/items.md#schedule-a-job) is not exported until the job
 builds again.
 
-An occurrence becomes a candidate once older than `cronGrace` (default `5m`, range `1m` to
-`60m`) with no matching ledger entry. The recorder triggers the build, keyed by the job path and
+An occurrence becomes a candidate once older than `cronGrace` with no matching ledger entry. The recorder triggers the build, keyed by the job path and
 the occurrence's minute, so a late cell fire and a backstop fire never both run.
 
 `cronCatchUp` decides what several misses of one job fire: `one` (default) fires the newest and
 counts the rest; `none` fires nothing and counts every miss. A long hibernation can exhaust the
 three-occurrence horizon. A fire wakes a hibernated controller, which then exports a fresh
 horizon. A trigger for a controller that never wakes expires after 24 hours. A cell roll loses no
-occurrence.
+occurrence; see [Cell loss](cell-loss.md#a-backstop-fire-during-a-cell-roll).
 
 Each fire writes one `build.scheduled.backstop` row, visible only on the next backfill.
 

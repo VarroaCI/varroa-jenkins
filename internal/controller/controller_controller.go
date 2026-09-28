@@ -3439,6 +3439,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 			// Every CommandResult without a DesiredState payload is an imperative
 			// ack (SAFE_RESTART, DELETE_ITEM, etc.). Always record it last-one-wins
 			// on LastImperativeResult for brood operation completion predicates.
+			recv.recordImperativeOutcome(ctx, cr, res)
 			cr.Status.LastImperativeResult = &v1alpha1.ImperativeResult{
 				CommandID:  res.CommandId,
 				Success:    res.Success,

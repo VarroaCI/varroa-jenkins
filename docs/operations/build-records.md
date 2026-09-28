@@ -112,9 +112,12 @@ Jenkins or the recorder can refuse a build trigger. The store then holds one run
 | `JOB_NOT_FOUND` | The job does not exist on the controller. |
 | `JOB_NOT_BUILDABLE` | The job exists, but it cannot start a build. |
 | `TRIGGER_REJECTED` | The controller refused the trigger for another reason. |
+| `TRIGGER_UNREACHABLE` | The trigger reached no Jenkins, for example on a booting cell. |
 | `CLAIM_EXPIRED` | The recorder found no claim 75 minutes after acceptance. See [Build claims](build-claims.md). |
 | `FENCED`, `CROSS_TENANT`, `INVALID_KEY`, `THROTTLED` | The recorder refused the build claim. |
 
+The cron backstop retries only `TRIGGER_UNREACHABLE`; see
+[Cell loss](cell-loss.md#a-backstop-fire-during-a-cell-roll).
 The run page also shows the error text the controller or the recorder reported. Such a run holds no build number,
 no log, and no stage. `Re-run` starts a fresh run with each parameter's declared default.
 
@@ -223,8 +226,8 @@ changed, on a reconnect, when a sent occurrence has passed, or every thirty minu
 its job's home cell, its only writer. A home move moves the row at once. The backstop fires only
 a row on its job's home. An envelope deletes only rows that name its cell.
 
-A row's `next_fire_times` also keeps its passed occurrences from the last `3 × cronGrace + 2m`,
-at most 16, so the backstop can judge a miss. A changed spec, time zone, or disabled state
+A row's `next_fire_times` also keeps its passed occurrences from the last
+`max(3 × cronGrace, 2 × cronGrace + 10m) + 2m`, at most 16, so the backstop can judge a miss. A changed spec, time zone, or disabled state
 replaces the list.
 
 `job_schedule_cells` holds one watermark row per cell: the time of the newest accepted envelope.

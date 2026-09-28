@@ -228,7 +228,7 @@ func TestReasonCodeForStatus(t *testing.T) {
 		{400, reasonTriggerRejected},
 		{403, reasonTriggerRejected},
 		{500, reasonTriggerRejected},
-		{0, reasonTriggerRejected},
+		{0, reasonTriggerUnreachable},
 	}
 	for _, tc := range cases {
 		if got := reasonCodeForStatus(tc.status); got != tc.want {

@@ -5,8 +5,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
@@ -60,6 +62,12 @@ func TestTriggerAndCancelBuildCommands(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var calls int32
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/login" {
+					// The readiness check a trigger runs first. It is not
+					// a run call.
+					w.WriteHeader(http.StatusOK)
+					return
+				}
 				if r.URL.Path == "/crumbIssuer/api/json" {
 					// CSRF protection off — the client fetches this once
 					// before every state-changing request and does not
@@ -106,7 +114,115 @@ func TestTriggerAndCancelBuildCommands(t *testing.T) {
 			if !result.Success {
 				t.Errorf("expected success, got error: %s", result.Error)
 			}
+			cmd := tt.build()
+			if result.CommandType != cmd.Type || result.JobPath != "team-a/job-1" || result.RunId != "run-1" {
+				t.Errorf("result names %v %q %q, want the command's type, job path, and run id",
+					result.CommandType, result.JobPath, result.RunId)
+			}
 		})
+	}
+}
+
+// TestTriggerBuildWaitsForJenkins verifies a TRIGGER_BUILD command waits for
+// the readiness check and triggers once Jenkins answers it.
+func TestTriggerBuildWaitsForJenkins(t *testing.T) {
+	var loginCalls, runCalls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			// The first probe finds a booting Jenkins.
+			if atomic.AddInt32(&loginCalls, 1) == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		case "/crumbIssuer/api/json":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			atomic.AddInt32(&runCalls, 1)
+			w.WriteHeader(http.StatusAccepted)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	stream, captured := testReplayStream(t)
+	agent := NewAgent(Config{ControllerName: "test", Namespace: "ns", JenkinsURL: srv.URL})
+	agent.Logger = slog.Default()
+	agent.stream = stream
+	agent.jenkinsTokenMu.Lock()
+	agent.jenkinsToken = "test-token"
+	agent.jenkinsTokenMu.Unlock()
+
+	agent.runCommand(context.Background(), commandWork{
+		imperativeCmd: triggerCommand(),
+		ctx:           context.Background(),
+	})
+
+	if got := atomic.LoadInt32(&runCalls); got != 1 {
+		t.Fatalf("run calls = %d, want 1 after Jenkins became ready", got)
+	}
+	if got := atomic.LoadInt32(&loginCalls); got < 2 {
+		t.Fatalf("login probes = %d, want at least 2", got)
+	}
+	if result := captured.Load(); result == nil || !result.Success {
+		t.Fatalf("result = %+v, want success", result)
+	}
+}
+
+// TestTriggerBuildReadinessWaitExpires verifies a trigger whose readiness
+// wait expires makes no trigger call and reports the status 0, which the
+// gateway maps onto the retryable reason code.
+func TestTriggerBuildReadinessWaitExpires(t *testing.T) {
+	var runCalls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		atomic.AddInt32(&runCalls, 1)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(srv.Close)
+
+	stream, captured := testReplayStream(t)
+	agent := NewAgent(Config{ControllerName: "test", Namespace: "ns", JenkinsURL: srv.URL})
+	agent.Logger = slog.Default()
+	agent.stream = stream
+	agent.triggerReadyWait = 50 * time.Millisecond
+	agent.jenkinsTokenMu.Lock()
+	agent.jenkinsToken = "test-token"
+	agent.jenkinsTokenMu.Unlock()
+
+	agent.runCommand(context.Background(), commandWork{
+		imperativeCmd: triggerCommand(),
+		ctx:           context.Background(),
+	})
+
+	if got := atomic.LoadInt32(&runCalls); got != 0 {
+		t.Fatalf("run calls = %d, want 0 while Jenkins is not ready", got)
+	}
+	result := captured.Load()
+	if result == nil {
+		t.Fatal("expected a CommandResult to be sent")
+	}
+	if result.Success || result.HttpStatus != 0 {
+		t.Fatalf("result = %+v, want a failure with the status 0", result)
+	}
+	if !strings.Contains(result.Error, "jenkins not ready") {
+		t.Fatalf("error = %q, want it to name the readiness wait", result.Error)
+	}
+}
+
+// triggerCommand builds one TRIGGER_BUILD command for the readiness tests.
+func triggerCommand() *mitev1.ImperativeCommand {
+	return &mitev1.ImperativeCommand{
+		CommandId: "trigger-ready-001",
+		Type:      mitev1.CommandTypeTriggerBuild,
+		TriggerBuild: &mitev1.TriggerBuildPayload{
+			RunId:     "run-2",
+			IntentKey: "cron:team-a/job-1:2026-09-27T20:44:00Z",
+			JobPath:   "team-a/job-1",
+		},
 	}
 }
 

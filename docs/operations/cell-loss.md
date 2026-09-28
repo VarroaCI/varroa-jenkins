@@ -93,12 +93,24 @@ run the job with each declared default.
 
 A mark leaves the ledger entry alone, so the re-fired build claims the same run identifier.
 
+## A backstop fire during a cell roll
+
+A backstop fire can reach a cell pod that still boots. The mite then waits up to five minutes for
+its Jenkins before it sends the trigger. A trigger that still reaches no Jenkins fails with
+`TRIGGER_UNREACHABLE`, and the backstop fires the occurrence again on a later round.
+
+A re-fire waits until every earlier fire of the occurrence has failed, or until ten minutes have
+passed since the last fire. It also waits until `cronGrace` has passed since the last fire. It goes to the job's home slot. The backstop re-fires one occurrence
+at most three times, and the run of the last failure names that limit in its error text. Any
+other failure code is permanent, so no round fires that occurrence again.
+
 ## Metrics
 
 | Metric | Labels | Meaning |
 |---|---|---|
 | `recorder_cell_loss_confirmed_total` | `path` | runs marked from a confirmed loss |
 | `recorder_intent_refired_total` | `outcome`, `reason` | re-fire outcomes |
+| `recorder_cron_refired_total` | none | backstop re-fires of an unreachable trigger |
 | `recorder_interrupted_marked_total` | `path`, `status` | every interrupted mark |
 | `recorder_retry_skipped_total` | `reason` | automatic retries with no home cell |
 | `recorder_run_resume_total` | `outcome`, `reason` | mesh resume outcomes |

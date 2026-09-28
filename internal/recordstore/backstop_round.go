@@ -138,7 +138,8 @@ func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c
 // runBackstopSchedule runs D11's whole backstop cron round: it lists
 // every distinct (cluster, tenant) pair job_schedules holds, reads each
 // pair's policy, drops a pair whose cronBackstop is off, applies D11's
-// candidate and fire-decision rules to every surviving cron row, then
+// candidate and fire-decision rules to every surviving cron row, adds
+// the re-fires of each occurrence whose fire reached no Jenkins, then
 // fires the round's ready candidates, oldest occurrence first, bounded
 // at 100.
 func runBackstopSchedule(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, cfg BackstopConfig, now time.Time) error {
@@ -233,6 +234,12 @@ func runBackstopSchedule(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn
 			})
 		}
 	}
+
+	retries, err := selectBackstopRetries(ctx, pool, reader, homes, now, logger)
+	if err != nil {
+		logger.Warn("backstop round: select re-fires failed", "error", err)
+	}
+	fireCandidates = mergeBackstopRetries(fireCandidates, retries)
 
 	for _, c := range selectReadyFires(fireCandidates, now) {
 		fireOne(ctx, pool, conn, cfg.BackstopMetrics, cfg.ActionMetrics, c, now, logger)

@@ -66,6 +66,9 @@ type backstopFireCandidate struct {
 	jobPath    string
 	occurrence time.Time
 	grace      time.Duration
+	// attempt is the fire's number for its occurrence. A first fire
+	// leaves it zero; a re-fire names two or more.
+	attempt int
 }
 
 // spreadEligible reports whether c's spread delay has elapsed: now is at
@@ -143,10 +146,23 @@ func fireOne(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, metrics *B
 	}
 	actionMetrics.addPublished(ctx, retry.Kind)
 	metrics.addFired(ctx)
+	if c.attempt > 1 {
+		metrics.addRefired(ctx)
+	}
 
 	if err := writeBackstopActivity(ctx, pool, c, now); err != nil {
 		logger.Warn("backstop fire: write activity row failed", "job_path", c.jobPath, "error", err)
 	}
+}
+
+// backstopActivityMessage answers the text of a fire's activity row. A
+// re-fire names its attempt, so a reader can tell it from the first fire.
+func backstopActivityMessage(c backstopFireCandidate) string {
+	if c.attempt > 1 {
+		return fmt.Sprintf("%s missed its scheduled build; the backstop fired it again (attempt %d of %d)",
+			c.jobPath, c.attempt, maxBackstopRefires+1)
+	}
+	return fmt.Sprintf("%s missed its scheduled build; the backstop retried it", c.jobPath)
 }
 
 // writeBackstopActivity writes the fire's build.scheduled.backstop
@@ -162,7 +178,7 @@ func writeBackstopActivity(ctx context.Context, pool *pgxpool.Pool, c backstopFi
 		Namespace:  c.namespace,
 		Controller: c.cell,
 		Actor:      LedgerActionRecorder,
-		Message:    fmt.Sprintf("%s missed its scheduled build; the backstop retried it", c.jobPath),
+		Message:    backstopActivityMessage(c),
 		Reason:     occurrenceMinuteKey(c.occurrence),
 		ItemPath:   c.jobPath,
 	}
