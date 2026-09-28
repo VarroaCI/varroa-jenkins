@@ -182,6 +182,11 @@ export const RunLogViewer = forwardRef<RunLogViewerHandle, RunLogViewerProps>(
       if (pendingLine == null) return;
       const idx = rows.findIndex((r) => r.kind === "line" && r.n === pendingLine);
       if (idx !== -1) {
+        // This effect turns follow off for every resolved jump: a permalink,
+        // a search hit, or the first error. The scroll events of one frame
+        // coalesce, so the scroll handler never sees the jump as a scroll up,
+        // and the next row batch would otherwise pull the viewport to the end.
+        setFollow(false);
         virtualizer.scrollToIndex(idx, { align: "center" });
         if (urlLineRef.current === pendingLine) {
           scrollRef.current?.scrollIntoView?.({ block: "center" });

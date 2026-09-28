@@ -152,6 +152,35 @@ describe("RunLogViewer", () => {
     expect(el?.className).toMatch(/highlighted/);
   });
 
+  it("turns follow off when a permalink resolves, so later rows do not pull the viewport to the end", () => {
+    window.location.hash = "#L2";
+    const { rerender } = render(
+      <RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[]} version={0} />,
+    );
+    const followBtn = screen.getByRole("button", { name: "Follow" });
+    expect(followBtn).toHaveAttribute("aria-pressed", "true");
+    rerender(
+      <RunLogViewer
+        runId="r1"
+        runTerminal={false} logFinalized={false}
+        frames={[lineEvent(1, "first"), lineEvent(2, "second")]}
+        version={1}
+      />,
+    );
+    expect(followBtn).toHaveAttribute("aria-pressed", "false");
+
+    mockScrollToIndex.mockClear();
+    rerender(
+      <RunLogViewer
+        runId="r1"
+        runTerminal={false} logFinalized={false}
+        frames={[lineEvent(1, "first"), lineEvent(2, "second"), lineEvent(3, "third")]}
+        version={2}
+      />,
+    );
+    expect(mockScrollToIndex).not.toHaveBeenCalledWith(2, { align: "end" });
+  });
+
   it("shows the first-error control from the meta event and scrolls to it", () => {
     const meta: RunLogViewerEvent = {
       type: "meta",
