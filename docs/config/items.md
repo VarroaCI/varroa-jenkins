@@ -93,6 +93,23 @@ to select a template per branch through a marker file. See
 
 Varroa creates missing items, updates changed items, and skips unchanged items.
 
+## Set the quiet period and the resume block
+
+A `pipeline` item accepts two job fields:
+
+```yaml
+- kind: pipeline
+  name: release
+  quietPeriod: 30
+  resumeBlocked: true
+  definition:
+    script: echo release
+```
+
+`quietPeriod` sets the job's quiet period in seconds. Without it, the job uses the global quiet
+period. `resumeBlocked: true` stops a run from resuming after a controller restart. It has the
+same effect as the `disableResume` property.
+
 ## Set build parameters
 
 A job declares parameters as a flat list, or under `properties` (`kind: pipeline` and

@@ -155,6 +155,9 @@ control. The control is disabled, with an explanation, for an artifact Jenkins s
 on its local disk; see [Build logs and artifacts](../operations/build-logs-and-artifacts.md)
 for the storage modes that make an artifact downloadable.
 
+The tab omits the files Varroa archives for its own use under `.varroa/`. Download the test
+report from the **Tests** tab.
+
 ## Run a job with parameters
 
 On the pipeline page, select **Run**. This control is present only for a caller who holds the

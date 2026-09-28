@@ -121,6 +121,8 @@ public final class VarroaRunRecorder {
     private static final int MAX_FIELD_512 = 512;
     private static final int MAX_LIBRARIES = 50;
     private static final int MAX_POD_TEMPLATES = 50;
+    /** The agent node names one run state remembers, so a wide fan-out holds bounded memory. */
+    private static final int MAX_ALLOCATED_NODES = 1024;
     /** The number of test cases one event carries. The list is priority ordered, so the cap keeps the head. */
     static final int MAX_TEST_CASES = 500;
     private static final int MAX_STAGE_ERROR = 2048;
@@ -162,10 +164,15 @@ public final class VarroaRunRecorder {
         private final AtomicLong seq = new AtomicLong();
         /** Set once the first source probe answered a revision. */
         final AtomicBoolean sourceResolved = new AtomicBoolean();
-        /** Set once the allocation emission fired, or was refused for this run. */
-        final AtomicBoolean allocationResolved = new AtomicBoolean();
-        /** Set when the second emission carried a pod template. */
-        final AtomicBoolean sourceHadPodTemplate = new AtomicBoolean();
+        /**
+         * The pod templates the run allocated, keyed by template name, in
+         * allocation order. The graph listener adds an entry while the
+         * agent is still connected, because a gone agent answers no
+         * template and no image. Guarded by {@code this}.
+         */
+        private final Map<String, BuildPodTemplate> podTemplates = new LinkedHashMap<>();
+        /** The agent node names already read into {@link #podTemplates}. Guarded by {@code this}. */
+        private final Set<String> allocatedNodes = new HashSet<>();
         /**
          * Set while a {@code STARTED} event is held for this run (D8a), so
          * a {@link VarroaTemplateValuesAction} attachment or a terminal
@@ -196,6 +203,36 @@ public final class VarroaRunRecorder {
             this.intentKey = intentKey;
             this.jobPath = jobPath;
             this.buildNumber = buildNumber;
+        }
+
+        /**
+         * Answers true when the agent node name needs no read: the name is
+         * already read, or the template map is full.
+         */
+        synchronized boolean hasAllocatedNode(String nodeName) {
+            return podTemplates.size() >= MAX_POD_TEMPLATES || allocatedNodes.contains(nodeName);
+        }
+
+        /**
+         * Records one agent's pod template. Answers true only when the
+         * template name is new. The template map holds at most
+         * {@link #MAX_POD_TEMPLATES} entries, and the node name set holds
+         * at most {@link #MAX_ALLOCATED_NODES} names.
+         */
+        synchronized boolean recordPodTemplate(String nodeName, BuildPodTemplate template) {
+            if (allocatedNodes.size() < MAX_ALLOCATED_NODES) {
+                allocatedNodes.add(nodeName);
+            }
+            if (podTemplates.containsKey(template.getName()) || podTemplates.size() >= MAX_POD_TEMPLATES) {
+                return false;
+            }
+            podTemplates.put(template.getName(), template);
+            return true;
+        }
+
+        /** Answers a copy of the recorded pod templates, in allocation order. */
+        synchronized List<BuildPodTemplate> podTemplates() {
+            return new ArrayList<>(podTemplates.values());
         }
 
         long nextSeq() {
@@ -1133,9 +1170,11 @@ public final class VarroaRunRecorder {
 
     /**
      * Resolves every source fact of a run. Each field takes the first
-     * non-empty answer of its own chain.
+     * non-empty answer of its own chain. The pod templates are the run
+     * state's recorded set. With {@code walk} true, a flow graph walk
+     * first adds every allocation the listener did not see.
      */
-    static SourceFacts resolveSourceFacts(Run<?, ?> run) {
+    static SourceFacts resolveSourceFacts(Run<?, ?> run, RunState state, boolean walk) {
         SourceFacts scmApi = resolveScmApiFacts(run);
         SourceFacts git = resolveGitFacts(run);
         String revision = firstNonEmpty(scmApi.scmRevision, git.scmRevision);
@@ -1152,7 +1191,7 @@ public final class VarroaRunRecorder {
                 git.scmUrl,
                 resolveDefinitionPath(run),
                 resolveLibraries(run),
-                resolvePodTemplates(run));
+                resolvePodTemplates(run, state, walk));
     }
 
     /**
@@ -1332,11 +1371,12 @@ public final class VarroaRunRecorder {
     }
 
     /**
-     * Walks the run's flow graph and reads the pod templates it
-     * allocated: one entry per distinct node name, in the order the run
-     * allocated them. The event caps bound this list.
+     * Answers the run state's recorded pod templates, in allocation
+     * order. With {@code walk} true, it first walks the flow graph and
+     * records every allocation the graph listener did not see, for
+     * example the allocations of a run that resumed after a restart.
      */
-    private static List<BuildPodTemplate> resolvePodTemplates(Run<?, ?> run) {
+    private static List<BuildPodTemplate> resolvePodTemplates(Run<?, ?> run, RunState state, boolean walk) {
         if (!(run instanceof WorkflowRun)) {
             return List.of();
         }
@@ -1344,24 +1384,48 @@ public final class VarroaRunRecorder {
         if (execution == null) {
             return List.of();
         }
-        List<BuildPodTemplate> podTemplates = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
-        for (FlowNode node : new FlowGraphWalker(execution)) {
-            WorkspaceAction workspace = node.getAction(WorkspaceAction.class);
-            if (workspace == null) {
-                continue;
+        if (walk) {
+            for (FlowNode node : new FlowGraphWalker(execution)) {
+                WorkspaceAction workspace = node.getAction(WorkspaceAction.class);
+                if (workspace != null) {
+                    recordAllocation(state, workspace);
+                }
             }
-            String nodeName = orEmpty(workspace.getNode());
-            if (nodeName.isEmpty() || !seen.add(nodeName)) {
-                continue;
-            }
-            podTemplates.add(BuildPodTemplate.builder()
-                    .name(truncate(nodeName, MAX_FIELD_512))
-                    .label(agentLabelFrom(workspace))
-                    .image(resolvePodTemplateImage(Jenkins.get().getNode(nodeName)))
-                    .build());
         }
-        return podTemplates;
+        return state.podTemplates();
+    }
+
+    /**
+     * Records the pod template of the agent that a workspace action
+     * names. Answers true only when the run state holds no entry of that
+     * template yet. The read happens while the agent is connected, so a
+     * later disconnect loses no entry.
+     */
+    private static boolean recordAllocation(RunState state, WorkspaceAction workspace) {
+        String nodeName = orEmpty(workspace.getNode());
+        if (nodeName.isEmpty() || state.hasAllocatedNode(nodeName)) {
+            return false;
+        }
+        return state.recordPodTemplate(nodeName,
+                podTemplateFor(nodeName, agentLabelFrom(workspace), Jenkins.get().getNode(nodeName)));
+    }
+
+    /**
+     * Builds the pod template entry of one agent. A kubernetes agent
+     * answers its template's name and image. Another agent, or an agent
+     * that is gone, answers its node name and no image.
+     */
+    static BuildPodTemplate podTemplateFor(String nodeName, String label, Node node) {
+        Object template = kubernetesTemplateOf(node);
+        String name = template != null ? stringOf(invokeNoArg(template, "getName")) : "";
+        if (name.isEmpty()) {
+            name = nodeName;
+        }
+        return BuildPodTemplate.builder()
+                .name(truncate(name, MAX_FIELD_512))
+                .label(label)
+                .image(templateImage(template))
+                .build();
     }
 
     /**
@@ -1369,18 +1433,31 @@ public final class VarroaRunRecorder {
      * that is no kubernetes agent answers no image.
      */
     static String resolvePodTemplateImage(Node node) {
+        return templateImage(kubernetesTemplateOf(node));
+    }
+
+    /**
+     * Reads the pod template of a kubernetes agent. Any other node, and a
+     * kubernetes agent whose template is gone, answers null.
+     */
+    private static Object kubernetesTemplateOf(Node node) {
         // KubernetesSlave declares getTemplateOrNull() and getTemplate().
         // The second throws when the template is gone, so the null-first
         // read happens first, and the throwing call is the fallback.
-        // PodTemplate declares getImage() and getContainers(), and
-        // ContainerTemplate declares getImage().
         if (node == null || !hasSimpleNameInHierarchy(node.getClass(), "KubernetesSlave")) {
-            return "";
+            return null;
         }
         Object template = invokeNoArg(node, "getTemplateOrNull");
         if (template == null) {
             template = invokeNoArg(node, "getTemplate");
         }
+        return template;
+    }
+
+    /** Reads the first container image a pod template declares. */
+    private static String templateImage(Object template) {
+        // PodTemplate declares getImage() and getContainers(), and
+        // ContainerTemplate declares getImage().
         if (template == null) {
             return "";
         }
@@ -1599,39 +1676,41 @@ public final class VarroaRunRecorder {
                         emitStageEnded(run, state, start, (BlockEndNode) node);
                     }
                 }
+                // Each allocation: record the agent's pod template while the
+                // agent is still connected. The read covers the arriving node
+                // and its enclosing blocks, and it walks no graph.
+                boolean newTemplate = false;
+                try {
+                    WorkspaceAction workspace = workspaceOf(node);
+                    if (workspace != null) {
+                        newTemplate = recordAllocation(state, workspace);
+                    }
+                } catch (Exception e) {
+                    LOGGER.log(Level.WARNING,
+                            "VarroaRunRecorder.Graph: failed to record the run's allocation", e);
+                }
                 // E2: the first node at which the run answers a
                 // revision. The probe never stops the listener's other
                 // work: its own catch logs and falls through.
                 if (!state.sourceResolved.get()) {
                     try {
-                        SourceFacts source = resolveSourceFacts(run);
+                        SourceFacts source = resolveSourceFacts(run, state, true);
                         if (!source.scmRevision.isEmpty()) {
                             emitRunSource(run, state, source, true, true);
                             state.sourceResolved.set(true);
-                            if (!source.podTemplates.isEmpty()) {
-                                state.sourceHadPodTemplate.set(true);
-                            }
                         }
                     } catch (Exception e) {
                         LOGGER.log(Level.WARNING,
                                 "VarroaRunRecorder.Graph: failed to probe the run's source", e);
                     }
-                }
-                // E3: the first allocation, when the second emission carried no pod
-                // template. The workspace action sits on the node step's start node,
-                // so the gate reads the arriving node and the blocks that enclose it.
-                // The body's first node is the first node whose enclosing block holds
-                // that action. The flags come first, so a node after the emission, or a
-                // run whose second emission carried a pod template, reads no enclosing
-                // block. The gate walks no graph, it returns early from nothing, and it
-                // stops neither the stage events nor the run-state push below.
-                if (state.sourceResolved.get()
-                        && !state.allocationResolved.get()
-                        && !state.sourceHadPodTemplate.get()
-                        && carriesWorkspace(node)
-                        && state.allocationResolved.compareAndSet(false, true)) {
+                } else if (newTemplate) {
+                    // E3: each allocation of a new pod template after the
+                    // second emission. The event carries the whole recorded
+                    // set, so the highest seq holds every template. It walks
+                    // no graph, and it stops neither the stage events nor the
+                    // run-state push below.
                     try {
-                        emitRunSource(run, state, resolveSourceFacts(run), true, false);
+                        emitRunSource(run, state, resolveSourceFacts(run, state, false), true, false);
                     } catch (Exception e) {
                         LOGGER.log(Level.WARNING,
                                 "VarroaRunRecorder.Graph: failed to emit the allocation source event", e);
@@ -1670,25 +1749,27 @@ public final class VarroaRunRecorder {
     }
 
     /**
-     * Answers true when {@code node} carries the workspace action, or when
-     * a block that encloses {@code node} does. The node step's start node
-     * holds that action, and the body's first node is the first node whose
+     * Answers the workspace action of {@code node}, or of the nearest
+     * block that encloses {@code node}. The node step's start node holds
+     * that action, and the body's first node is the first node whose
      * enclosing block holds it. The read covers one node plus its nesting
      * chain, and it walks no graph.
      */
-    private static boolean carriesWorkspace(FlowNode node) {
+    private static WorkspaceAction workspaceOf(FlowNode node) {
         if (node == null) {
-            return false;
+            return null;
         }
-        if (node.getAction(WorkspaceAction.class) != null) {
-            return true;
+        WorkspaceAction own = node.getAction(WorkspaceAction.class);
+        if (own != null) {
+            return own;
         }
         for (BlockStartNode enclosing : node.getEnclosingBlocks()) {
-            if (enclosing.getAction(WorkspaceAction.class) != null) {
-                return true;
+            WorkspaceAction workspace = enclosing.getAction(WorkspaceAction.class);
+            if (workspace != null) {
+                return workspace;
             }
         }
-        return false;
+        return null;
     }
 
     private static void emitStageStarted(Run<?, ?> run, RunState state, BlockStartNode start) {

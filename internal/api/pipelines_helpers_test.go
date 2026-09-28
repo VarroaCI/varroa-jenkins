@@ -291,7 +291,26 @@ func (f *fakeRecordReader) ListArtifacts(_ context.Context, runID string) ([]rec
 	if f.schemaTooOld {
 		return nil, recordstore.ErrSchemaTooOld
 	}
-	return f.artifacts[runID], nil
+	// The fake applies the real reader's filter: no internal key.
+	var out []recordstore.Artifact
+	for _, a := range f.artifacts[runID] {
+		if !recordstore.IsInternalArtifactPath(a.Path) {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRecordReader) GetArtifact(_ context.Context, runID, path string) (recordstore.Artifact, bool, error) {
+	if f.schemaTooOld {
+		return recordstore.Artifact{}, false, recordstore.ErrSchemaTooOld
+	}
+	for _, a := range f.artifacts[runID] {
+		if a.Path == path {
+			return a, true, nil
+		}
+	}
+	return recordstore.Artifact{}, false, nil
 }
 
 func (f *fakeRecordReader) ListTests(_ context.Context, runID string) ([]recordstore.TestSuite, error) {

@@ -741,3 +741,36 @@ func TestTestCaseKey_RoundTripsSeparators(t *testing.T) {
 		}
 	}
 }
+
+// TestRunArtifactsHideTheInternalReportButServeItsDownload asserts the
+// artifacts list omits the internal test report, and the download route
+// still serves it by its path.
+func TestRunArtifactsHideTheInternalReportButServeItsDownload(t *testing.T) {
+	reader := newFakeRecordReader()
+	reader.runs["r1"] = recordstore.Run{RunID: "r1", Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: "COMPLETED"}
+	reader.artifacts["r1"] = []recordstore.Artifact{
+		{RunID: "r1", Path: "dist/app.jar", SizeBytes: 4, BlobKey: "artifacts/r1/dist/app.jar"},
+		{RunID: "r1", Path: recordstore.TestReportPath, SizeBytes: 2, BlobKey: "artifacts/r1/.varroa/tests.json"},
+	}
+	blobStore := newFakeBlobStore()
+	blobStore.objects["artifacts/r1/.varroa/tests.json"] = []byte("{}")
+	srv := newRunFixtureServer(reader, blobStore)
+
+	rec := doRunRequest(t, srv.handleListRunArtifacts, "/runs/r1/artifacts", map[string]string{"run": "r1"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var list runArtifactListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(list.Items) != 1 || list.Items[0].Path != "dist/app.jar" {
+		t.Fatalf("list items = %+v, want dist/app.jar alone", list.Items)
+	}
+
+	rec = doRunRequest(t, srv.handleDownloadRunArtifact, "/runs/r1/artifacts/.varroa/tests.json",
+		map[string]string{"run": "r1", "path": recordstore.TestReportPath}, nil)
+	if rec.Code != http.StatusOK || rec.Body.String() != "{}" {
+		t.Fatalf("report download status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+}

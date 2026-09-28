@@ -207,7 +207,7 @@ func deleteExpiredRunState(ctx context.Context, db maintDB, store ObjectDeleter,
 // TestReportPath is the archived path of a run's per-case test report.
 // The plugin archives the report under this path, and the BFF names it
 // on the run's test read.
-const TestReportPath = ".varroa/tests.json"
+const TestReportPath = InternalArtifactPrefix + "tests.json"
 
 // deleteExpiredArtifacts deletes the blob object of every run_artifacts
 // row older than cutoff, then the row itself, in bounded batches. An

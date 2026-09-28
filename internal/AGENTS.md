@@ -75,8 +75,10 @@ reading each package's entry point):
   pipelines API's `buildPipelineParameters` already performs;
   `Item.Validate` rejects a name repeated across the two sources and a
   `durabilityHint` value outside Jenkins core's three `FlowDurabilityHint`
-  names, for every controller. Two item
-  properties feed the cell's agent fence and shared-library support:
+  names, for every controller. A `pipeline` item's `quietPeriod` renders as
+  the job's `<quietPeriod>` element, and `resumeBlocked: true` renders the
+  same single `DisableResumeJobProperty` a `disableResume` property renders.
+  Two item properties feed the cell's agent fence and shared-library support:
   `KubernetesFolderProperty` (`kubernetes.permittedClouds`) restricts which
   kubernetes-plugin clouds a folder's items may use — the cell assembly
   pass sets it to the tenant's own cloud name. `FolderLibrariesProperty`

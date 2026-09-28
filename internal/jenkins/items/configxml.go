@@ -566,6 +566,7 @@ type pipelineXML struct {
 	Definition      *cpsFlowDefXML         `xml:"definition"`
 	Disabled        bool                   `xml:"disabled,omitempty"`
 	ConcurrentBuild bool                   `xml:"concurrentBuild,omitempty"`
+	QuietPeriod     int                    `xml:"quietPeriod,omitempty"`
 	Properties      *pipelinePropertiesXML `xml:"properties,omitempty"`
 }
 
@@ -625,6 +626,7 @@ func pipelineConfigXML(item Item) xmlConfig {
 		Description:     item.Description,
 		Disabled:        item.Disabled,
 		ConcurrentBuild: item.ConcurrentBuild,
+		QuietPeriod:     item.QuietPeriod,
 	}
 	if item.Definition != nil {
 		if item.Definition.CpsScmFlowDefinition != nil {
@@ -691,6 +693,14 @@ func pipelineConfigXML(item Item) xmlConfig {
 			}
 			p.Properties.DurabilityHint = &durabilityHintXML{Hint: prop.DurabilityHint.Hint}
 		}
+	}
+	// resumeBlocked and a disableResume property render the same single
+	// job property. The WorkflowJob field of that name is deprecated.
+	if item.ResumeBlocked {
+		if p.Properties == nil {
+			p.Properties = &pipelinePropertiesXML{}
+		}
+		p.Properties.DisableResume = &disableResumeXML{}
 	}
 	if params := collectParameters(item); len(params) > 0 {
 		if p.Properties == nil {

@@ -2,6 +2,7 @@ package recordstore
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -61,6 +62,16 @@ type Stage struct {
 	DurationMs *int64
 	Error      *string
 	Payload    json.RawMessage
+}
+
+// InternalArtifactPrefix is the path prefix of every file the plugin
+// archives for its own use. An artifact list never shows such a file.
+const InternalArtifactPrefix = ".varroa/"
+
+// IsInternalArtifactPath reports whether path is an internal key: a file
+// the plugin archives for its own use, not a user artifact.
+func IsInternalArtifactPath(path string) bool {
+	return strings.HasPrefix(path, InternalArtifactPrefix)
 }
 
 // Artifact is one row of varroa.run_artifacts.

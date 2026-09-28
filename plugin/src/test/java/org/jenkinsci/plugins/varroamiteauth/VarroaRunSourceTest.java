@@ -26,6 +26,7 @@ import org.jenkinsci.plugins.workflow.flow.FlowDefinition;
 import org.jenkinsci.plugins.workflow.flow.FlowExecution;
 import org.jenkinsci.plugins.workflow.flow.FlowExecutionOwner;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
+import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
@@ -189,6 +190,102 @@ public class VarroaRunSourceTest {
                 e3.getPodTemplates().get(0).getLabel());
         assertEquals("the third emission carries no change list", 0, e3.getChanges().size());
         assertEquals("E3 re-reads the revision", e2.getScmRevision(), e3.getScmRevision());
+    }
+
+    @Test
+    public void everyAllocatedTemplateReachesTheRecordEvenAfterItsAgentLeaves() throws Exception {
+        DumbSlave first = j.createSlave("agent-a", "pool-a", new EnvVars());
+        DumbSlave second = j.createSlave("agent-b", "pool-b", new EnvVars());
+        j.waitOnline(first);
+        j.waitOnline(second);
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "two-agent-run");
+        job.setDefinition(new SourceFactsFlowDefinition(
+                "sleep 1\nnode('pool-a') { echo 'a' }\n"
+                        + "sleep 5\n"
+                        + "node('pool-b') { echo 'b' }\n", true));
+
+        WorkflowRun run = job.scheduleBuild2(0, grantedAction()).waitForStart();
+        j.waitForMessage("Sleeping for 5 sec", run);
+        // The first agent leaves before the run completes.
+        j.jenkins.removeNode(first);
+        j.assertBuildStatusSuccess(j.waitForCompletion(run));
+
+        List<BuildEvent> sources = byPhase(drainEvents(), BuildEvent.PHASE_RUN_SOURCE);
+        assertEquals("E1, E2, and one emission for each new template", 4, sources.size());
+        BuildEvent last = sources.get(sources.size() - 1);
+        for (BuildEvent source : sources) {
+            assertTrue("the last emission holds the highest seq", source.getSeq() <= last.getSeq());
+        }
+        assertEquals(2, last.getPodTemplates().size());
+        assertEquals("agent-a", last.getPodTemplates().get(0).getName());
+        assertEquals("pool-a", last.getPodTemplates().get(0).getLabel());
+        assertEquals("agent-b", last.getPodTemplates().get(1).getName());
+        assertEquals("pool-b", last.getPodTemplates().get(1).getLabel());
+        assertEquals("an allocation emission carries no change list", 0, last.getChanges().size());
+    }
+
+    @Test
+    public void aSecondAllocationOfTheSameTemplateEmitsNothing() throws Exception {
+        DumbSlave agent = j.createSlave("agent-a", "pool-a", new EnvVars());
+        j.waitOnline(agent);
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "same-agent-run");
+        job.setDefinition(new SourceFactsFlowDefinition(
+                "sleep 1\nnode('pool-a') { echo 'a' }\nnode('pool-a') { echo 'again' }\n", true));
+
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
+
+        List<BuildEvent> sources = byPhase(drainEvents(), BuildEvent.PHASE_RUN_SOURCE);
+        assertEquals("the second allocation adds no template", 3, sources.size());
+        assertEquals(1, sources.get(2).getPodTemplates().size());
+    }
+
+    @Test
+    public void aKubernetesAgentReportsItsTemplateNameAndImage() throws Exception {
+        KubernetesSlave pod = new KubernetesSlave("golang-x1y2z", new FakePodTemplate());
+        BuildPodTemplate live = VarroaRunRecorder.podTemplateFor("golang-x1y2z", "golang", pod);
+        assertEquals("a kubernetes agent answers its template name", "golang", live.getName());
+        assertEquals("golang", live.getLabel());
+        assertEquals("the image comes from the template's first container", "golang:1.23", live.getImage());
+
+        BuildPodTemplate gone = VarroaRunRecorder.podTemplateFor("golang-x1y2z", "golang", null);
+        assertEquals("a gone agent answers its node name", "golang-x1y2z", gone.getName());
+        assertEquals("a gone agent answers no image", "", gone.getImage());
+    }
+
+    /** A stand-in whose simple name matches the kubernetes plugin's agent class. */
+    public static class KubernetesSlave extends hudson.model.Slave {
+        private final transient FakePodTemplate template;
+
+        KubernetesSlave(String name, FakePodTemplate template) throws Exception {
+            super(name, "/tmp", new hudson.slaves.JNLPLauncher());
+            this.template = template;
+        }
+
+        public FakePodTemplate getTemplateOrNull() {
+            return template;
+        }
+    }
+
+    /** A stand-in pod template with one container. */
+    public static class FakePodTemplate {
+        public String getName() {
+            return "golang";
+        }
+
+        public String getImage() {
+            return "";
+        }
+
+        public List<FakeContainer> getContainers() {
+            return List.of(new FakeContainer());
+        }
+    }
+
+    /** A stand-in container template. */
+    public static class FakeContainer {
+        public String getImage() {
+            return "golang:1.23";
+        }
     }
 
     // --- A run that answers no revision at all ---

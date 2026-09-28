@@ -676,18 +676,13 @@ func (s *Server) handleDownloadRunArtifact(w http.ResponseWriter, r *http.Reques
 	}
 	path := r.PathValue("path")
 
-	artifacts, err := s.deps.RecordStore.ListArtifacts(ctx, run.RunID)
-	if s.handleReaderError(w, err, "list artifacts") {
+	// GetArtifact reads an internal key too. The tests response gives the
+	// report's internal path, and this route serves that download.
+	artifact, found, err := s.deps.RecordStore.GetArtifact(ctx, run.RunID, path)
+	if s.handleReaderError(w, err, "get artifact") {
 		return
 	}
-	var artifact *recordstore.Artifact
-	for i := range artifacts {
-		if artifacts[i].Path == path {
-			artifact = &artifacts[i]
-			break
-		}
-	}
-	if artifact == nil {
+	if !found {
 		s.writeJSONError(w, http.StatusNotFound, "artifact not found")
 		return
 	}

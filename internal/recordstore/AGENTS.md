@@ -1026,7 +1026,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   DESC)`, never `OFFSET`; its `cause` filter joins `run_intents` instead
   of matching `runs.cause`, because `runs.cause` holds the free-form
   Jenkins `Cause` object and `run_intents.cause` holds the plain-text
-  classification a claim request carries. `GetRun` resolves `created_at`
+  classification a claim request carries. `ListArtifacts` omits every
+  internal key, a path under `InternalArtifactPrefix` (`.varroa/`, where the
+  plugin archives `.varroa/tests.json`), so the BFF list and both
+  cross-tenant artifact kinds never show one. `GetArtifact` reads one row
+  by its exact path, internal keys included; the BFF download route reads
+  through it, so the test report still downloads. `GetRun` resolves `created_at`
   from `run_intents` first, so its `runs` query prunes to one partition.
   A run that holds no intent row, which is what a failed trigger writes,
   falls back to a bounded `runs` query over `runWindow`

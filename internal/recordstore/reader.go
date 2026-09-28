@@ -46,7 +46,12 @@ type Reader interface {
 	// once.
 	CurrentStages(ctx context.Context, runIDs []string) (map[string]string, error)
 
+	// ListArtifacts reads the run's user artifacts, ordered by path. It
+	// omits every internal key (see IsInternalArtifactPath).
 	ListArtifacts(ctx context.Context, runID string) ([]Artifact, error)
+	// GetArtifact reads the one run_artifacts row at path, an internal
+	// key included. found is false when the run holds no row at path.
+	GetArtifact(ctx context.Context, runID, path string) (artifact Artifact, found bool, err error)
 	ListTests(ctx context.Context, runID string) ([]TestSuite, error)
 
 	// ListTestCases reads the run's run_test_cases rows: every row that
@@ -409,8 +414,8 @@ func (r *pgReader) CurrentStages(ctx context.Context, runIDs []string) (map[stri
 	return stages, nil
 }
 
-// ListArtifacts reads every run_artifacts row for runID, ordered by
-// path.
+// ListArtifacts reads every run_artifacts row for runID that is not an
+// internal key, ordered by path.
 func (r *pgReader) ListArtifacts(ctx context.Context, runID string) ([]Artifact, error) {
 	if err := r.checkSchema(ctx); err != nil {
 		return nil, err
@@ -418,9 +423,9 @@ func (r *pgReader) ListArtifacts(ctx context.Context, runID string) ([]Artifact,
 	rows, err := r.pool.Query(ctx, `
 		SELECT run_id, path, created_at, size_bytes, digest, content_type, blob_key
 		FROM varroa.run_artifacts
-		WHERE run_id = $1
+		WHERE run_id = $1 AND NOT starts_with(path, $2)
 		ORDER BY path
-	`, runID)
+	`, runID, InternalArtifactPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("list artifacts: %w", err)
 	}
@@ -428,18 +433,48 @@ func (r *pgReader) ListArtifacts(ctx context.Context, runID string) ([]Artifact,
 
 	var artifacts []Artifact
 	for rows.Next() {
-		var a Artifact
-		var artifactRunID uuid.UUID
-		if err := rows.Scan(&artifactRunID, &a.Path, &a.CreatedAt, &a.SizeBytes, &a.Digest, &a.ContentType, &a.BlobKey); err != nil {
+		a, err := scanArtifact(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan artifact: %w", err)
 		}
-		a.RunID = artifactRunID.String()
 		artifacts = append(artifacts, a)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list artifacts: %w", err)
 	}
 	return artifacts, nil
+}
+
+// GetArtifact reads the run_artifacts row at runID and path. It reads an
+// internal key too, so the test report download keeps its row.
+func (r *pgReader) GetArtifact(ctx context.Context, runID, path string) (Artifact, bool, error) {
+	if err := r.checkSchema(ctx); err != nil {
+		return Artifact{}, false, err
+	}
+	a, err := scanArtifact(r.pool.QueryRow(ctx, `
+		SELECT run_id, path, created_at, size_bytes, digest, content_type, blob_key
+		FROM varroa.run_artifacts
+		WHERE run_id = $1 AND path = $2
+	`, runID, path))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Artifact{}, false, nil
+	}
+	if err != nil {
+		return Artifact{}, false, fmt.Errorf("get artifact: %w", err)
+	}
+	return a, true, nil
+}
+
+// scanArtifact scans one run_artifacts row in the column order both
+// artifact reads select.
+func scanArtifact(row pgx.Row) (Artifact, error) {
+	var a Artifact
+	var artifactRunID uuid.UUID
+	if err := row.Scan(&artifactRunID, &a.Path, &a.CreatedAt, &a.SizeBytes, &a.Digest, &a.ContentType, &a.BlobKey); err != nil {
+		return Artifact{}, err
+	}
+	a.RunID = artifactRunID.String()
+	return a, nil
 }
 
 // ListTests reads every run_tests row for runID, ordered by suite.

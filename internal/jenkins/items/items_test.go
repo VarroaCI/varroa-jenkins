@@ -1100,3 +1100,45 @@ func TestParseGitHubPushTrigger(t *testing.T) {
 		t.Fatalf("githubPush trigger not parsed: %+v", m.Items[0].Triggers)
 	}
 }
+
+// TestGenerateConfigXMLPipelineQuietPeriodAndResumeBlocked asserts that a
+// pipeline item's quietPeriod and resumeBlocked fields reach config.xml.
+func TestGenerateConfigXMLPipelineQuietPeriodAndResumeBlocked(t *testing.T) {
+	item := Item{
+		Kind:          "pipeline",
+		Name:          "quiet",
+		QuietPeriod:   7,
+		ResumeBlocked: true,
+		Definition:    &PipelineDefinition{Script: "echo hi"},
+	}
+	out, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "<quietPeriod>7</quietPeriod>") {
+		t.Errorf("expected the quiet period in XML, got: %s", out)
+	}
+	const resume = "<org.jenkinsci.plugins.workflow.job.properties.DisableResumeJobProperty>"
+	if strings.Count(out, resume) != 1 {
+		t.Errorf("expected one DisableResumeJobProperty in XML, got: %s", out)
+	}
+
+	// resumeBlocked and a disableResume property render one property.
+	item.Properties = []Property{{DisableResume: &DisableResume{}}}
+	out, err = GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Count(out, resume) != 1 {
+		t.Errorf("expected one DisableResumeJobProperty with both spellings, got: %s", out)
+	}
+
+	// The zero values render neither element.
+	out, err = GenerateConfigXML(Item{Kind: "pipeline", Name: "plain", Definition: &PipelineDefinition{Script: "echo hi"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(out, "quietPeriod") || strings.Contains(out, "DisableResumeJobProperty") {
+		t.Errorf("expected no quiet period and no resume property, got: %s", out)
+	}
+}
