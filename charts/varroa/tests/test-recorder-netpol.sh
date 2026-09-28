@@ -212,7 +212,8 @@ check "external Postgres + pinned cidrs: no CNPG pod selector" "$rc"
 
 # ---------------------------------------------------------------------------
 # (g) Hive mode: exactly four NetworkPolicy objects, none named recorder,
-#     no record-store rule anywhere.
+#     no Postgres rule anywhere. A member on s3 blobs writes to the core
+#     object store and never reaches a database.
 # ---------------------------------------------------------------------------
 echo ""
 echo "--- (g) Hive mode ---"
@@ -224,7 +225,10 @@ HIVE_RENDER=$(helm template "$ROOT" \
   --set auth.oidc.clientSecret=test \
   --set auth.dashboardUrl=http://example.com \
   --set networkPolicy.enabled=true \
-  --set recordStore.enabled=true 2>/dev/null) || {
+  --set recordStore.enabled=true \
+  --set recordStore.postgres.mode=external \
+  --set recordStore.blobs.mode=s3 \
+  --set-string 'recordStore.blobs.s3.url=s3://b?endpoint=http://objects.example:9000' 2>/dev/null) || {
   echo "FAIL: helm template (hive) failed"; exit 1
 }
 
@@ -236,11 +240,11 @@ recorder_hive=$(grep_c "np-recorder" "$HIVE_RENDER")
 if [[ "$recorder_hive" -eq 0 ]]; then rc=0; else rc=1; fi
 check "hive mode: no np-recorder policy" "$rc"
 
-# A hive render has no Postgres Secret, so no workload may reference the
-# record store at all: a secretKeyRef to a missing Secret blocks the pod.
-recordstore_env_hive=$(grep_c "VARROA_RECORDSTORE_DSN\|VARROA_BLOBSTORE_URL" "$HIVE_RENDER")
+# In s3 blob mode no hive workload reads a DSN: a secretKeyRef to a
+# missing Secret blocks the pod.
+recordstore_env_hive=$(grep_c "VARROA_RECORDSTORE_DSN" "$HIVE_RENDER")
 if [[ "$recordstore_env_hive" -eq 0 ]]; then rc=0; else rc=1; fi
-check "hive mode: no record-store env on any workload" "$rc"
+check "hive mode: no DSN env on any workload" "$rc"
 
 NETPOLS_ONLY_HIVE=$(awk '/^kind: NetworkPolicy$/{c=1} c{print} /^---$/{c=0}' <<< "$HIVE_RENDER")
 recordstore_rule_hive=$(grep_c "varroa-recordstore\|cnpg.io/cluster" "$NETPOLS_ONLY_HIVE")

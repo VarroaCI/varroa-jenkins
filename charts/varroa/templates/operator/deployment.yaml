@@ -156,7 +156,7 @@ spec:
               value: {{ .Values.networkPolicy.apiServerEgress | toJson | quote }}
             - name: VARROA_CELL_ISOLATION
               value: {{ .Values.networkPolicy.cellIsolation | toJson | quote }}
-{{- if and .Values.recordStore.enabled (not (include "varroa.isHive" .)) }}
+{{- if .Values.recordStore.enabled }}
             {{- if eq .Values.recordStore.blobs.mode "postgres" }}
             - name: VARROA_BLOBSTORE_URL
               value: "pgblob:"

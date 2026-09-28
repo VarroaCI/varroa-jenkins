@@ -134,6 +134,12 @@ type Reader interface {
 	// ListAllFleetLocks answers every fleet_locks row of cluster, with
 	// no tenant filter.
 	ListAllFleetLocks(ctx context.Context, cluster string) ([]FleetLock, error)
+
+	// ListTenantPlacements answers the slot-0 coordinate of every
+	// placement row of tenant, one row for each cluster. A member
+	// cluster's operator writes its tenants' rows through the core
+	// recorder, so this is the core's only view of a Team placed there.
+	ListTenantPlacements(ctx context.Context, tenant string) ([]TenantPlacement, error)
 }
 
 // JobHome is one job's home member. Placed reports whether the tenant

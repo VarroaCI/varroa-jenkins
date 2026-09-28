@@ -264,7 +264,8 @@ spec:
 {{- end }}
 {{ include "varroa.np.apiServerEgress" . | nindent 4 }}
 {{ include "varroa.np.telemetryEgress" . | nindent 4 }}
-{{- if and $full .Values.recordStore.enabled }}
+{{- /* A member gateway writes blobs straight to the core record store. */}}
+{{- if .Values.recordStore.enabled }}
 {{ include "varroa.np.recordStoreBlobEgress" . | nindent 4 }}
 {{- if eq .Values.recordStore.blobs.mode "postgres" }}
 {{ include "varroa.np.recordStorePostgresEgress" . | nindent 4 }}
@@ -774,6 +775,19 @@ spec:
       ports:
         - protocol: TCP
           port: 5432
+{{- $me := .Values.recordStore.postgres.memberEndpoint | default dict }}
+{{- if $me.enabled }}
+    # Member gateways reach the primary through the member endpoint Service.
+    # recordstore-guard.yaml refuses an empty allowedCIDRs list here.
+    - from:
+{{- range $me.allowedCIDRs }}
+        - ipBlock:
+            cidr: {{ . }}
+{{- end }}
+      ports:
+        - protocol: TCP
+          port: 5432
+{{- end }}
     - from:
         - namespaceSelector:
             matchLabels: {{- toYaml .Values.networkPolicy.recordStoreCNPGOperatorNamespaceSelector | nindent 14 }}

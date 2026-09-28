@@ -32,6 +32,12 @@ func (t *BusReadModelTransport) SendImperative(ctx context.Context, ns, name str
 	return t.model.PublishSafeRestart(ctx, ns, name, cmd)
 }
 
+// SendImperativeToCluster publishes cmd for the mite of ns/name on
+// cluster, which can be a member cluster of the brood.
+func (t *BusReadModelTransport) SendImperativeToCluster(ctx context.Context, cluster, ns, name string, cmd *mitev1.ImperativeCommand) error {
+	return t.model.PublishImperativeToCluster(ctx, cluster, ns, name, cmd)
+}
+
 // DrainResults returns nil; BusReadModelTransport does not collect command results.
 func (t *BusReadModelTransport) DrainResults(_, _ string) []*mitev1.CommandResult {
 	return nil

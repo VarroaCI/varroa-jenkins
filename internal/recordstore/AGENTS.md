@@ -27,6 +27,10 @@ of the fleet's audit activity, once a controller becomes disposable.
   goes through this package. A sibling package that needs record data
   reads through the `Reader` this package exports; it never opens its own
   write path.
+- **`Reader.ListTenantPlacements`** (`reader_placements.go`) answers the
+  slot-0 coordinate of every `tenant_placements` row of one tenant, one per
+  cluster. It is the core BFF's only view of a Team that a member cluster
+  places, because that Team lives on the member's API server.
 - **The pipeline mesh** (`mesh_takeover.go`, `resume_target.go`,
   `ingest_state.go`, `ingest_resume_failed.go`) — C3's run-state
   replication and cross-cell resume.

@@ -1144,12 +1144,26 @@ func (s *Server) handleGetTeamCell(w http.ResponseWriter, r *http.Request) {
 
 	team, err := crdstore.Get[v1alpha1.Team](ctx, s.deps.Store, teamName, "")
 	if err != nil || team == nil || team.Spec.Pipelines == nil {
-		// Step 2: every surviving candidate is a single-controller
-		// tenant, so the answer is notCellHosted.
-		if _, serr := s.resolveTeamTenants(ctx, claims, teamName); serr != nil {
+		refs, serr := s.resolveTeamTenants(ctx, claims, teamName)
+		if serr != nil {
 			s.writeServiceError(w, serr)
 			return
 		}
+		// A Team that only a member cluster holds resolves to one placed
+		// tenant of its own name. The member's API server holds the Team
+		// status, so the body carries no Placed reason and one slot-0
+		// member.
+		if len(refs) == 1 && refs[0].Tenant == teamName && refs[0].Controller != "" {
+			body, serr := s.buildTeamCell(ctx, claims, refs[0], "", nil)
+			if serr != nil {
+				s.writeServiceError(w, serr)
+				return
+			}
+			s.writeJSON(w, http.StatusOK, body)
+			return
+		}
+		// Step 2: every surviving candidate is a single-controller
+		// tenant, so the answer is notCellHosted.
 		s.writeJSON(w, http.StatusOK, teamCellJSON{State: teamCellNotCellHosted})
 		return
 	}

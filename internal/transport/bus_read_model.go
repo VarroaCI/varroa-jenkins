@@ -131,15 +131,21 @@ func (m *BusReadModel) ObservabilityReport(ns, name string) *mitev1.Observabilit
 // outbound subject. It does not subscribe to the inbound subject, allocate
 // a result buffer, or drain command results.
 func (m *BusReadModel) PublishSafeRestart(ctx context.Context, ns, name string, cmd *mitev1.ImperativeCommand) error {
+	return m.PublishImperativeToCluster(ctx, m.cluster, ns, name, cmd)
+}
+
+// PublishImperativeToCluster publishes cmd on cluster's mite-out subject
+// for ns/name. The gateway of that cluster delivers it to the mite.
+func (m *BusReadModel) PublishImperativeToCluster(_ context.Context, cluster, ns, name string, cmd *mitev1.ImperativeCommand) error {
 	data, err := json.Marshal(&mitev1.OperatorMessage{
 		Message: &mitev1.OperatorMessage_Imperative{Imperative: cmd},
 	})
 	if err != nil {
-		return fmt.Errorf("marshal safe restart: %w", err)
+		return fmt.Errorf("marshal imperative command: %w", err)
 	}
-	_, err = m.conn.PublishJetStream(bus.MiteOutSubject(m.cluster, ns, name), data)
+	_, err = m.conn.PublishJetStream(bus.MiteOutSubject(cluster, ns, name), data)
 	if err != nil {
-		return fmt.Errorf("publish safe restart: %w", err)
+		return fmt.Errorf("publish imperative command: %w", err)
 	}
 	return nil
 }

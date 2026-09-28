@@ -905,6 +905,23 @@ recordStore:
       existingSecret: ""
       # -- Key in existingSecret holding the DSN.
       dsnKey: dsn
+    # -- Core only, cnpg mode: a Service that exposes the record-store
+    # primary to member clusters. A member gateway needs it only in
+    # postgres blob mode. A hive release ignores this block.
+    memberEndpoint:
+      enabled: false
+      # -- LoadBalancer or NodePort.
+      serviceType: LoadBalancer
+      # -- Fixed nodePort when serviceType is NodePort (0 = auto).
+      nodePort: 0
+      # -- REQUIRED when enabled: the address members dial. It replaces
+      # the host in the DSN a member receives.
+      host: ""
+      annotations: {}
+      # -- With networkPolicy.enabled, REQUIRED: the source CIDRs the
+      # database admits on 5432. A NodePort or load-balancer path can
+      # rewrite the source address; set 0.0.0.0/0 to admit every source.
+      allowedCIDRs: []
     # -- Used when postgres.mode is "cnpg". Requires the CloudNativePG
     # operator to be installed in the cluster; this chart does not install it.
     cnpg:

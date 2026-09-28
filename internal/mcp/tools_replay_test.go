@@ -57,6 +57,7 @@ func replayToolDeps(t *testing.T, reader *fakePipelineReader, mt *fakePipelineTr
 		"<script>echo 'source'</script><loadedScripts/><sandbox>true</sandbox></execution></flow-build>"
 	return &api.Dependencies{
 		Authorizer:     pipelinesTestAuthorizer(verb),
+		Brood:          coreBrood{},
 		RecordStore:    reader,
 		BlobStore:      &fakeScriptBlobStore{objects: map[string][]byte{key: []byte(doc)}},
 		MiteRegistry:   mt,

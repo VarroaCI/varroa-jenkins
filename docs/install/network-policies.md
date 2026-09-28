@@ -33,6 +33,12 @@ above, for the recorder, the BFF, and the gateway. It renders nothing when
 `recordStore.blobs.mode` is `postgres`, because that mode needs no external egress. See
 [Build records](../operations/build-records.md#network-policy) for its defaults.
 
+On a [member cluster](multi-cluster.md#record-store), the gateway policy carries the same blob rule.
+Point it at the core object store address. In `postgres` blob mode the member gateway also needs
+`networkPolicy.recordStorePostgresEgress.cidrs`, pinned to the core member endpoint. The core
+database policy admits that traffic from `recordStore.postgres.memberEndpoint.allowedCIDRs`, a
+required list when network policies are enabled.
+
 An agent uploads build artifacts straight to the object store, not through the controller pod.
 This chart does not isolate controller or agent namespaces. An agent namespace that egresses
 through a restrictive policy of its own needs the same destination as the blob storage row

@@ -1,22 +1,44 @@
 {{- /*
 recordstore-guard.yaml
 Fails the render when the retired "activity" values block is set, and
-validates recordStore.* values when the record store is enabled and the
-release is not hive mode. Renders no objects.
+validates recordStore.* values when the record store is enabled. A hive
+release renders no recorder and no database: it must name an external
+Postgres, and it needs the DSN Secret only in postgres blob mode, where
+the gateway writes log chunks to the core database. Renders no objects.
 */}}
 
 {{- if hasKey .Values "activity" -}}
 {{- fail "the \"activity\" values block no longer exists; set recordStore.retention.activity instead" -}}
 {{- end -}}
 
-{{- if and .Values.recordStore.enabled (not (include "varroa.isHive" .)) }}
+{{- if .Values.recordStore.enabled }}
+{{- $hive := include "varroa.isHive" . -}}
 
 {{- $validPostgresModes := list "cnpg" "external" -}}
 {{- if not (has .Values.recordStore.postgres.mode $validPostgresModes) -}}
 {{- fail (printf "recordStore.postgres.mode must be one of %v, got %q" $validPostgresModes .Values.recordStore.postgres.mode) -}}
 {{- end -}}
 
-{{- if eq .Values.recordStore.postgres.mode "external" -}}
+{{- if and $hive (ne .Values.recordStore.postgres.mode "external") -}}
+{{- fail "mode=hive with recordStore.enabled requires recordStore.postgres.mode=external: a member cluster renders no database and uses the core record store" -}}
+{{- end -}}
+
+{{- $me := .Values.recordStore.postgres.memberEndpoint | default dict -}}
+{{- $memberEndpoint := and (not $hive) $me.enabled -}}
+{{- if and $memberEndpoint (ne .Values.recordStore.postgres.mode "cnpg") -}}
+{{- fail "recordStore.postgres.memberEndpoint requires recordStore.postgres.mode=cnpg; expose an external Postgres through its own endpoint" -}}
+{{- end -}}
+
+{{- if and $memberEndpoint (empty $me.host) -}}
+{{- fail "recordStore.postgres.memberEndpoint.enabled requires recordStore.postgres.memberEndpoint.host" -}}
+{{- end -}}
+
+{{- /* The database ingress rule admits these sources. An empty list would admit every source, so the chart asks for an explicit list. */ -}}
+{{- if and $memberEndpoint .Values.networkPolicy.enabled (empty $me.allowedCIDRs) -}}
+{{- fail "recordStore.postgres.memberEndpoint.allowedCIDRs must list the source CIDRs when networkPolicy.enabled is true; set 0.0.0.0/0 explicitly to admit every source" -}}
+{{- end -}}
+
+{{- if and (eq .Values.recordStore.postgres.mode "external") (or (not $hive) (eq .Values.recordStore.blobs.mode "postgres")) -}}
 {{- if not .Values.recordStore.postgres.external.existingSecret -}}
 {{- fail "recordStore.postgres.external.existingSecret is required when recordStore.postgres.mode is \"external\"" -}}
 {{- end -}}

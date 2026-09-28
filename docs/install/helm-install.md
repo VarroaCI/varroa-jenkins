@@ -125,6 +125,10 @@ first; `recordStore.blobs.mode` defaults to `postgres`; and `recordStore.retenti
 `networkPolicy.recordStorePostgresEgress` and `networkPolicy.recordStoreBlobEgress` both default
 to `enabled: true`, on ports `5432` and `443`. See [Build records](../operations/build-records.md)
 for the CloudNativePG prerequisite and the full value tree.
+`recordStore.postgres.memberEndpoint` exposes the CloudNativePG primary to member clusters. It
+defaults to off. A member cluster sets `recordStore.enabled: true` with
+`recordStore.postgres.mode: external` and renders no database. See
+[Record store](multi-cluster.md#record-store) for the member values.
 
 Set `recordStore.blobs.mode: s3` to store console logs and archived artifacts in an
 S3-compatible bucket instead of Postgres. Artifact storage needs this mode. Postgres mode keeps

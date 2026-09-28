@@ -354,8 +354,7 @@ expect_fail "retention.runs=999999999999999999999d" "--set recordStore.enabled=t
 expect_fail "retention.activity=0d" "--set recordStore.enabled=true --set recordStore.retention.activity=0d" "recordStore.retention.activity must match"
 expect_fail "the retired activity values block" "--set activity.retention=7d" "the \"activity\" values block no longer exists"
 
-# Hive mode with recordStore.enabled=true and a stray full-mode value
-# renders successfully, because the guard is skipped in hive mode.
+# The guard also runs in hive mode: a stray blob mode still fails there.
 set +e
 OUT=$(helm template "$ROOT" \
   -f "$ROOT/values-hive.yaml" \
@@ -363,10 +362,12 @@ OUT=$(helm template "$ROOT" \
   --set bus.url=nats://h:4222 \
   $COMMON \
   --set recordStore.enabled=true \
+  --set recordStore.postgres.mode=external \
   --set recordStore.blobs.mode=file 2>&1)
 rc=$?
 set -e
-check "hive mode with recordStore.enabled=true and blobs.mode=file: render succeeds (guard skipped)" "$rc"
+if [[ "$rc" -ne 0 ]] && grep -q "recordStore.blobs.mode must be one of" <<< "$OUT"; then rc=0; else rc=1; fi
+check "hive mode with recordStore.enabled=true and blobs.mode=file: render fails (guard runs)" "$rc"
 
 # ---------------------------------------------------------------------------
 # (k) Task 10.2: hardened contexts, placement, whole-volume creds, no

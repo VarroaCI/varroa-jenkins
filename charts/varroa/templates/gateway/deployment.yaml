@@ -98,7 +98,7 @@ spec:
             - name: {{ .name }}
               value: {{ .value | quote }}
             {{- end }}
-{{- if and .Values.recordStore.enabled (not (include "varroa.isHive" .)) }}
+{{- if .Values.recordStore.enabled }}
             {{- if eq .Values.recordStore.blobs.mode "postgres" }}
             - name: VARROA_RECORDSTORE_DSN
               valueFrom:

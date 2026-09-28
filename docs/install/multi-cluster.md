@@ -30,7 +30,51 @@ helm upgrade --install varroa charts/varroa \
 
 ## Record store
 
-The core [recorder](../operations/build-records.md) sends each run action, such as a cell wake, to the target cluster's operator over NATS. A member needs no recorder credential.
+A member runs no recorder and no record-store database. The core [recorder](../operations/build-records.md) serves every cluster. It reads build events and claims from the bus, and it sends each run action, such as a cell wake, to the target cluster's operator over NATS.
+
+A member that hosts [cells](../operations/cells.md) must also write to the core record store. Its gateway writes console logs, and its cells write archived artifacts, straight to the core object store. Enable the record store in hive mode with these values:
+
+| Value | Member setting |
+|---|---|
+| `recordStore.enabled` | `true` |
+| `recordStore.postgres.mode` | `external`. A member renders no database. |
+| `recordStore.blobs.mode` | `s3`. A cell needs the s3 tier. |
+| `recordStore.blobs.s3.url` | The core bucket URL, with an `endpoint` that the member can reach |
+| `recordStore.blobs.s3.existingSecret` | The Secret that holds the object store credential |
+| `recordStore.blobs.s3.artifactSecret` | The base name of the artifact Secrets on the member |
+| `networkPolicy.recordStoreBlobEgress` | The object store address and port, when network policies are enabled |
+
+The hive render adds the blob settings to the gateway and the operator. It renders no recorder, no CloudNativePG cluster, and no retention settings. The core keeps the retention rules for every cluster.
+
+Copy these Secrets into the member release namespace before the install:
+
+| Secret | Keys | Source |
+|---|---|---|
+| `recordStore.blobs.s3.existingSecret` | `access-key-id`, `secret-access-key`, optional `session-token` | The core Secret of the same name |
+| `<artifactSecret>-<pool>` | `access-key-id`, `secret-access-key` | A credential scoped to that member pool's artifact prefix |
+
+A member in s3 blob mode needs no database credential. The gateway reads a DSN only in `postgres` blob mode, where it writes log chunks to the core database. That mode cannot host cells. For it, expose the core database and set the member DSN:
+
+```bash
+helm upgrade varroa charts/varroa -n varroa-system -f values.yaml \
+  --set recordStore.postgres.memberEndpoint.enabled=true \
+  --set recordStore.postgres.memberEndpoint.host=pg.example.com \
+  --set recordStore.postgres.memberEndpoint.serviceType=LoadBalancer \
+  --set 'recordStore.postgres.memberEndpoint.allowedCIDRs={203.0.113.0/24}'
+```
+
+The endpoint Service selects the CloudNativePG primary on port 5432. Put the core `varroa-recordstore-gateway` DSN into the member Secret named by `recordStore.postgres.external.existingSecret`, with the host replaced by the endpoint address. With network policies enabled, set `networkPolicy.recordStorePostgresEgress.cidrs` on the member. The core then requires `recordStore.postgres.memberEndpoint.allowedCIDRs`. A NodePort or load-balancer path can rewrite the source address, so list the addresses the traffic arrives from. Set `0.0.0.0/0` only when the endpoint is not reachable from outside your network.
+
+### Pipelines tenant on a member
+
+1. Enable the record store on the member as shown above, and confirm the gateway logs `gateway log writer enabled`.
+2. Make the object store reachable from the member network. The bucket URL `endpoint` must resolve and route from the member cells and gateway.
+3. With `networkPolicy.cellIsolation` enabled, add `cellIsolation.extraEgress` entries for the object store and for the update center that the member cells use.
+4. Create the pool's artifact Secret, then a `CellPool` on the member.
+5. Create the `Team` with `spec.pipelines` on the member. The member operator places it, and the core record store holds its placement.
+6. Grant access on the core with a `VarroaRoleBinding` scoped to the tenant. The core does not read the member Team's own subjects.
+
+The core dashboard, `varroactl`, and the MCP tools then read and trigger the tenant through the core, the same as a tenant on the core. Other tenants can call it with [cross-tenant steps](../config/cross-tenant-pipelines.md). The core does not read the member Team's composed bundle, so a job's kind shows as unknown.
 
 ## Prepare controller namespaces
 

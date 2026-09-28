@@ -266,11 +266,28 @@ the packaged CRDs. Does not own the Go source it packages
   Deployment carries `VARROA_ARTIFACT_SECRET` (that base name, only when
   non-empty) and `VARROA_BLOBSTORE_URL` set to the identical value the
   gateway gets, both gated the same way as the gateway's own recordStore env
-  block (`recordStore.enabled` and not hive mode).
+  block (`recordStore.enabled`, in both modes).
+  **Hive mode joins the core record store directly.** With
+  `recordStore.enabled` a hive render gives the gateway the blob URL and s3
+  credential env (the DSN only in postgres blob mode) and the operator the
+  blob URL, artifact Secret base, and claim gate, and renders no recorder,
+  CNPG `Cluster`, role Secret, recorder PDB, or retention env.
+  `recordstore-guard.yaml` runs in both modes: a hive must set
+  `postgres.mode: external` and needs `existingSecret`/`dsnKey` only in
+  postgres blob mode. The gateway NetworkPolicy carries the record-store
+  egress rules in hive mode too; the hive set stays at four policies.
+  `recordStore.postgres.memberEndpoint` (core, cnpg only, ignored in hive
+  mode like `nats.external`) renders `<release>-recordstore-member` for the
+  CNPG primary and a `np-recordstore-db` ingress rule from `allowedCIDRs`,
+  which the guard requires when `networkPolicy.enabled` (an empty list
+  would admit every source; a NodePort path masquerades the source, so the
+  list must hold the addresses the traffic arrives from). `tests/test-hive-recordstore.sh`
+  asserts all of it.
 - **`tests/*.sh`** — golden-render bash assertions over `helm template` output
   (`test-hive-mode.sh`, `test-secret-rbac-scoping.sh`, `test-nats-bus-security.sh`,
   `test-recorder-netpol.sh`, `test-recorder-chart.sh`, `test-activity-stream-acl.sh`,
-  `test-runner-door-nginx.sh`, `test-cells-guard.sh`); not the `helm unittest` plugin.
+  `test-runner-door-nginx.sh`, `test-cells-guard.sh`, `test-hive-recordstore.sh`); not the
+  `helm unittest` plugin.
 - **The agent WebSocket door needs one nginx block, no Ingress change.**
   `frontend/nginx.conf`'s `location /runners/` block proxies to the BFF
   (`VARROA_API_HOST:8080`) and forwards the WebSocket upgrade: `Upgrade`,
@@ -338,6 +355,7 @@ bash charts/varroa/tests/test-recorder-netpol.sh
 bash charts/varroa/tests/test-recorder-chart.sh
 bash charts/varroa/tests/test-runner-door-nginx.sh
 bash charts/varroa/tests/test-cellpool-rbac.sh
+bash charts/varroa/tests/test-hive-recordstore.sh
 ```
 
 - **Record-store Postgres NetworkPolicy** — in `recordStore.postgres.mode: cnpg` the chart renders

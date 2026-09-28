@@ -27,3 +27,17 @@ frontend: {enabled: false}
 #  enabled: true
 #  coreNatsEgress:
 #    cidrs: ["<core-nats-endpoint-ip>/32"]
+
+# Optional: host pipelines cells on this member. The member writes to the
+# core record store directly and renders no recorder or database. See
+# docs/install/multi-cluster.md ("Record store").
+#recordStore:
+#  enabled: true
+#  postgres:
+#    mode: external
+#  blobs:
+#    mode: s3
+#    s3:
+#      url: s3://<core-bucket>?region=<region>&endpoint=<member-reachable-endpoint>
+#      existingSecret: <s3-credential-secret>
+#      artifactSecret: <artifact-secret-base>

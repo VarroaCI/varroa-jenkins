@@ -652,10 +652,6 @@ func main() {
 	// Fleet plugin inventory reader: the classified accessor T2.1 publishes
 	// through the transport. Always wired when the transport exists.
 	apiDeps.FleetPluginInventory = api.NewFleetInventoryReader(miteTransport)
-	// The pipelines tenant resolver needs no record store: it maps a
-	// {team} URL segment onto tenants through Team CRDs and the brood
-	// router, both already wired above.
-	apiDeps.TenantResolver = api.NewTeamTenantResolver(apiDeps.Store, apiDeps.Brood, apiDeps.Authorizer)
 	if ucURL := os.Getenv("VARROA_UPDATE_CENTER_URL"); ucURL != "" {
 		apiDeps.UpdateCenterInventory = api.NewUpdateCenterInventoryClient(ucURL, &http.Client{Timeout: 10 * time.Second})
 		// The BFF is the only component that authenticates a real user, so it is
@@ -717,6 +713,16 @@ func main() {
 	} else {
 		logger.Warn("VARROA_RECORDSTORE_DSN not set; activity history reads are unavailable (deps.Backfill is nil)")
 	}
+	// The pipelines tenant resolver maps a {team} URL segment onto tenants
+	// through Team CRDs and the brood router. The record store adds the
+	// placement rows of Teams that a member cluster holds; a nil store
+	// leaves that step off.
+	var placements api.TenantPlacementReader
+	if apiDeps.RecordStore != nil {
+		placements = apiDeps.RecordStore
+	}
+	apiDeps.TenantResolver = api.NewTeamTenantResolver(apiDeps.Store, apiDeps.Brood, apiDeps.Authorizer,
+		api.WithMemberPlacements(placements))
 	apiDeps.JenkinsTokenSigner = tokenSigner
 
 	// Create a controller-runtime client for read-only CRD operations

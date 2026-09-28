@@ -131,7 +131,9 @@ federation, activity persistence, and SSE fanout.
 - **The team cell read** (`handleGetTeamCell`, `handlers_pipelines.go`) serves
   `GET /pipelines/{team}/cell`. It reads the `Team` object first and falls
   back to `TenantResolver`, so a pipelines Team awaiting its first cell
-  answers 200 with `unplaced` instead of 404. The state ladder is
+  answers 200 with `unplaced` instead of 404. A resolved tenant whose tenant
+  value equals the team name, with no local Team, is a member-placed Team: it
+  answers the placed body with no Placed reason and one slot-0 member. The state ladder is
   `notCellHosted` → `unplaced` → `moving` → `rehydrating` → `placed`, tested in
   that order; rule four reads `status.cell.appliedTenants` and never
   `status.cell.rehydration`, which stays internal to the operator.
@@ -251,9 +253,14 @@ federation, activity persistence, and SSE fanout.
   serves the `/pipelines/{team}/...` and `/runs/{run}/...` paths over
   `internal/recordstore`. `TenantResolver` (`tenantresolver.go`, `deps.TenantResolver`)
   is the one seam that maps a `{team}` URL segment onto record-store tenants: a placed
-  Team resolves to one tenant, an unplaced Team fans out over its namespaces, and a
-  name matching no Team falls back to a same-named controller as a synthetic
-  single-controller tenant, ambiguous across clusters. Every pipelines path narrows
+  Team resolves to one tenant, an unplaced Team fans out over its namespaces, a name
+  matching no local Team resolves from the record store's placement rows of another
+  cluster (`WithMemberPlacements`, `Reader.ListTenantPlacements`: a Team a member
+  cluster places lives only on that member's API server), and otherwise falls back to a
+  same-named controller as a synthetic single-controller tenant, ambiguous across
+  clusters. `publishImperative` sends a command for a tenant on another cluster through
+  the transport's optional `SendImperativeToCluster`, never the local send: the local
+  send addresses the BFF's own cluster subject, and a member cell never receives it. Every pipelines path narrows
   through it, then calls one of three checks in `handlers_pipelines_auth.go` —
   `canReadPipeline`, `canWritePipeline`, `canReadRun` — never a controller-scoped
   check. `canReadRun` builds its `RunTenantRow` from the run row's own `tenant` and

@@ -708,11 +708,18 @@ func runInputDeps(reader *fakePipelineReader, mt transport.Transport, verb strin
 	}
 	return &api.Dependencies{
 		Authorizer:     pipelinesTestAuthorizer(verb),
+		Brood:          coreBrood{},
 		RecordStore:    reader,
 		MiteRegistry:   mt,
 		TenantResolver: &fakePipelineTenantResolver{},
 	}
 }
+
+// coreBrood names "core" as the local cluster, the cluster of the run
+// runInputDeps seeds, so its commands take the local send.
+type coreBrood struct{ api.Brood }
+
+func (coreBrood) LocalCluster() string { return "core" }
 
 // postRunInputRoute posts to one of the two input routes through the real
 // router, the way a dashboard caller reaches them.

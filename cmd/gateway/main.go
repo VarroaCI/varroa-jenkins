@@ -251,7 +251,8 @@ func main() {
 	// in postgres blob mode, and VARROA_BLOBSTORE_URL in every mode. A
 	// discriminator read from the DSN is therefore false on an s3-mode
 	// install, which would acknowledge every failed trigger with no record.
-	// A hive-mode gateway gets neither variable, and records nothing.
+	// A gateway with no record store gets neither variable, and records
+	// nothing.
 	handler.SetRecordStoreEnabled(logStore != nil)
 	if logStore != nil {
 		handler.SetLogStore(logStore, logPendingBytesFromEnv(), logFinalizeWaitFromEnv(), runOwnerCacheSizeFromEnv())

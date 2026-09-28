@@ -45,13 +45,35 @@ type teamTenantResolver struct {
 	store      crdstore.Backend
 	brood      Brood
 	authorizer *Authorizer
+	placements TenantPlacementReader
+}
+
+// TenantPlacementReader answers a tenant's placement rows from the record
+// store. recordstore.Reader satisfies it.
+type TenantPlacementReader interface {
+	ListTenantPlacements(ctx context.Context, tenant string) ([]recordstore.TenantPlacement, error)
+}
+
+// ResolverOption configures NewTeamTenantResolver.
+type ResolverOption func(*teamTenantResolver)
+
+// WithMemberPlacements lets the resolver find a placed Team that another
+// cluster's API server holds. The member operator places the Team and the
+// core recorder stores the placement row, so the record store is the only
+// view the core has of it. A nil reader leaves the option off.
+func WithMemberPlacements(placements TenantPlacementReader) ResolverOption {
+	return func(t *teamTenantResolver) { t.placements = placements }
 }
 
 // NewTeamTenantResolver builds the resolver design D1 owns. store reads
 // Team CRDs, brood lists controllers across every cluster, and authorizer
 // decides which candidate tenant the caller may read.
-func NewTeamTenantResolver(store crdstore.Backend, brood Brood, authorizer *Authorizer) TenantResolver {
-	return &teamTenantResolver{store: store, brood: brood, authorizer: authorizer}
+func NewTeamTenantResolver(store crdstore.Backend, brood Brood, authorizer *Authorizer, opts ...ResolverOption) TenantResolver {
+	t := &teamTenantResolver{store: store, brood: brood, authorizer: authorizer}
+	for _, opt := range opts {
+		opt(t)
+	}
+	return t
 }
 
 // Resolve implements TenantResolver.
@@ -100,6 +122,13 @@ func (t *teamTenantResolver) candidates(ctx context.Context, team string) ([]Ten
 		// Step 2: an unplaced Team fans out over its namespaces.
 		return t.namespaceTenants(ctx, obj)
 	case k8serrors.IsNotFound(err):
+		// Step 1 for a Team a member cluster holds: the local API server
+		// holds no such Team, but a member operator placed one of that
+		// name, and the record store holds its placement row.
+		refs, err := t.memberPlacedTenant(ctx, team)
+		if err != nil || len(refs) > 0 {
+			return refs, err
+		}
 		// Steps 3 and 4: no such Team. A controller of that name is a
 		// synthetic single-controller tenant, unless the name is
 		// ambiguous across clusters.
@@ -132,6 +161,47 @@ func placedTenant(team string, obj *unstructured.Unstructured) (TenantRef, bool)
 		Team:       team,
 		Folder:     team,
 	}, true
+}
+
+// memberPlacedTenant resolves a Team placed on a member cluster from its
+// record-store placement row. It skips a row of the local cluster, whose
+// Team the local API server no longer holds, and a row that names no
+// cell. Rows on two or more member clusters are ambiguous.
+func (t *teamTenantResolver) memberPlacedTenant(ctx context.Context, team string) ([]TenantRef, error) {
+	if t.placements == nil {
+		return nil, nil
+	}
+	rows, err := t.placements.ListTenantPlacements(ctx, team)
+	if err != nil {
+		return nil, fmt.Errorf("read placement of team %q: %w", team, err)
+	}
+	local := ""
+	if t.brood != nil {
+		local = t.brood.LocalCluster()
+	}
+	var refs []TenantRef
+	var clusters []string
+	for _, row := range rows {
+		if row.Cluster == local || row.Cell == "" {
+			continue
+		}
+		refs = append(refs, TenantRef{
+			Cluster:    row.Cluster,
+			Namespace:  row.Namespace,
+			Controller: row.Cell,
+			Tenant:     team,
+			Team:       team,
+			Folder:     team,
+		})
+		clusters = append(clusters, row.Cluster)
+	}
+	if len(refs) > 1 {
+		return nil, &ServiceError{
+			Status:  http.StatusConflict,
+			Message: fmt.Sprintf("team %q is placed on clusters %s", team, strings.Join(clusters, ", ")),
+		}
+	}
+	return refs, nil
 }
 
 // namespaceTenants applies design D1 step 2: one TenantRef per controller

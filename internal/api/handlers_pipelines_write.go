@@ -189,14 +189,33 @@ func resolveManualRunID(clientToken string) (runID, intentKey string, err error)
 
 // --- Shared write-path helpers ---
 
+// clusterImperativeSender is a mite transport that can address the mite
+// of a controller on another cluster.
+type clusterImperativeSender interface {
+	SendImperativeToCluster(ctx context.Context, cluster, ns, name string, cmd *mitev1.ImperativeCommand) error
+}
+
 // publishImperative sends cmd to ref's controller through the mite
 // transport (design D3's Transport.SendImperative), never on the
-// ledger's claim subject: the BFF has no claim to make, per D3a.
+// ledger's claim subject: the BFF has no claim to make, per D3a. A ref on
+// a member cluster goes to that cluster's mite subject: the local send
+// always addresses the BFF's own cluster, so a member cell never receives
+// it.
 func (s *Server) publishImperative(ctx context.Context, ref TenantRef, cmd *mitev1.ImperativeCommand) error {
 	if s.deps.MiteRegistry == nil {
 		return errors.New("mite transport not configured")
 	}
-	return s.deps.MiteRegistry.SendImperative(ctx, ref.Namespace, ref.Controller, cmd)
+	if ref.Cluster == "" || (s.deps.Brood != nil && ref.Cluster == s.deps.Brood.LocalCluster()) {
+		return s.deps.MiteRegistry.SendImperative(ctx, ref.Namespace, ref.Controller, cmd)
+	}
+	// A named cluster that the brood router does not call local, or any
+	// named cluster when there is no router, takes the cluster-addressed
+	// send. The local send would reach no member cell.
+	sender, ok := s.deps.MiteRegistry.(clusterImperativeSender)
+	if !ok {
+		return fmt.Errorf("the mite transport cannot reach cluster %q", ref.Cluster)
+	}
+	return sender.SendImperativeToCluster(ctx, ref.Cluster, ref.Namespace, ref.Controller, cmd)
 }
 
 // homeRef answers the tenant reference of the member that holds jobPath's
