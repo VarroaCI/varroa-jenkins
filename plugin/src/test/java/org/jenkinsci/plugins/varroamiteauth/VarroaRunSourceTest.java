@@ -291,6 +291,27 @@ public class VarroaRunSourceTest {
     // --- A run that answers no revision at all ---
 
     @Test
+    public void aRunWithNoScmFactsStillReportsItsPodTemplate() throws Exception {
+        DumbSlave agent = j.createSlave("inline-agent", "inline-pool", new EnvVars());
+        j.waitOnline(agent);
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "no-scm-agent-run");
+        job.setDefinition(new CpsFlowDefinition("node('inline-pool') { echo 'hi' }", true));
+
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
+
+        List<BuildEvent> events = drainEvents();
+        List<BuildEvent> sources = byPhase(events, BuildEvent.PHASE_RUN_SOURCE);
+        assertEquals("E1, then the completion-time emission; no revision means no E2", 2, sources.size());
+        BuildEvent last = sources.get(1);
+        assertEquals(1, last.getPodTemplates().size());
+        assertEquals("inline-agent", last.getPodTemplates().get(0).getName());
+        assertEquals("inline-pool", last.getPodTemplates().get(0).getLabel());
+        assertTrue("no revision reaches the record", last.getScmRevision().isEmpty());
+        BuildEvent completed = byPhase(events, BuildEvent.PHASE_COMPLETED).get(0);
+        assertTrue("the emission orders before the completion", last.getSeq() < completed.getSeq());
+    }
+
+    @Test
     public void aRunWithNoScmFactsEmitsOneSourceEventAndThrowsNothing() throws Exception {
         WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "no-scm-run");
         job.setDefinition(new CpsFlowDefinition("node { echo 'hi' }", true));

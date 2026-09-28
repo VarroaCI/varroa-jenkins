@@ -172,17 +172,17 @@ message the 72-hour buffer still holds. It discards an event older than `retenti
 
 ## Source fields
 
-A build reports its definition in three kinds of event.
+A build reports its definition in four kinds of event.
 
 | Event | Fields |
 |---|---|
 | The flow starts. | The script path. The shared libraries. The branch, for a multibranch child. |
 | The first node that resolves a revision. | The branch, the revision, the repository URL, the changes, and the pod templates the run has allocated. |
-| Each allocation of a new pod template after that node. | Every source field again, and every pod template the run has allocated. It carries no change list. |
+| Each allocation of a new pod template after that node. | Every source field again, and every pod template the run has allocated. No change list. |
+| Completion of a run with no revision. | Its pod templates, and no revision fields. |
 
-A template-defined run reports no script path. A run that resolves no revision reports no pod
-template. The plugin reads each pod template when its agent attaches, so an agent that leaves
-early stays in the record. Each entry names a pod template, at most 50. A non-Kubernetes agent,
+A template-defined run reports no script path. The plugin reads each pod template when its agent attaches, so an early leaver stays
+in the record. Each entry names a pod template, at most 50. A non-Kubernetes agent,
 or an agent gone before the read, reports its node name and no image.
 
 `GET /runs/{run}` answers them in one `source` object: `definitionPath`, `libraries[]`,

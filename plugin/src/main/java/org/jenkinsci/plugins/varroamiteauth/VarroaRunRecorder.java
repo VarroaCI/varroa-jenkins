@@ -724,6 +724,9 @@ public final class VarroaRunRecorder {
                     releaseHeld(run, state, action, null);
                 }
                 String runId = resolveRunId(action);
+                if (state != null) {
+                    emitUnresolvedPodTemplates(run, state);
+                }
                 // A completion with no live state still orders after every
                 // earlier event of the run, so it stamps the wall clock and
                 // not a fresh counter.
@@ -1484,6 +1487,38 @@ public final class VarroaRunRecorder {
      */
     private static SourceFacts resolveDefinitionFacts(Run<?, ?> run) {
         return new SourceFacts("", "", "", "", resolveDefinitionPath(run), resolveLibraries(run), List.of());
+    }
+
+    /**
+     * Emits the pod templates of a run that never answered a revision.
+     * The graph listener records each template while its agent is
+     * connected, but the revision-gated emissions never fire for such a
+     * run, so this one carries the recorded set at completion. A run with
+     * a revision, or with no recorded template, emits nothing here.
+     */
+    private static void emitUnresolvedPodTemplates(Run<?, ?> run, RunState state) {
+        if (state.sourceResolved.get()) {
+            return;
+        }
+        try {
+            // The recorded set is complete when this process saw the run;
+            // a state rebuilt after a restart holds none, and only then
+            // does the walk recover the allocations. An agent gone by then
+            // answers its node name and no image.
+            List<BuildPodTemplate> templates = state.podTemplates();
+            if (templates.isEmpty()) {
+                templates = resolvePodTemplates(run, state, true);
+            }
+            if (templates.isEmpty()) {
+                return;
+            }
+            SourceFacts facts = new SourceFacts("", "", "", "",
+                    resolveDefinitionPath(run), resolveLibraries(run), templates);
+            emitRunSource(run, state, facts, true, false);
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING,
+                    "VarroaRunRecorder.Runs: failed to emit the run's pod templates", e);
+        }
     }
 
     /**
