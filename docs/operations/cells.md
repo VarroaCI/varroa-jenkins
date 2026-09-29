@@ -109,15 +109,15 @@ Expect `"status":"True","reason":"TenantPlaced"`.
   operator ignores `plugins.yaml`, `rbac.yaml`, and `jenkins.yaml` except its
   [pod templates](tenant-pod-templates.md): a tenant cannot change controller configuration. A
   job the bundle no longer declares leaves the folder, and its next trigger fails with
-  `JOB_NOT_FOUND`. After a roll, a trigger waits up to five minutes for the tenant's jobs. See
+  `JOB_NOT_FOUND`. After a roll or a new placement, a trigger waits up to five minutes for the
+  tenant's jobs. See
   [Build records](build-records.md).
 - **Item role.** The operator synthesizes a role scoped to the folder's subtree, granting build,
   read, and replay permissions, bound to the tenant's service identity.
 - **Service identity.** Every build in the folder runs as `svc-<team>`, an identity the plugin
   synthesizes with no Jenkins user record.
 - **Cloud and agent namespace.** The tenant gets one restricted Kubernetes cloud pointed at
-  `spec.pipelines.agentNamespace`. The folder's own permitted-clouds property names only that
-  cloud. A pipeline selects it with `agent { label '<team>-default' }` or `cloud: '<team>'`;
+  `spec.pipelines.agentNamespace`. The folder permits only that cloud. A pipeline selects it with `agent { label '<team>-default' }` or `cloud: '<team>'`;
   `agent any` lands on the cell's default cloud, which the agent fence refuses.
 - **Projected credentials.** A `Secret` labelled `varroa.dev/tenant-credential: "true"` in the
   agent namespace becomes a folder-scoped Jenkins credential:

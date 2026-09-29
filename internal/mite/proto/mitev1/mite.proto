@@ -132,6 +132,12 @@ message DesiredStateCommand {
   // when a slot changes or a job's home changes, so hashing it costs at
   // most one push for each such change.
   repeated TenantHomes tenant_homes = 18;
+  // cell is true when the controller runs as a cell. A cell with no
+  // tenant sends no tenant_homes entry, so the mite needs this flag to
+  // tell such a cell from a controller that is not a cell. It stays out
+  // of the composite desired-state hash: the role of a controller does
+  // not change the content the mite applies.
+  bool cell = 19;
 }
 
 // TenantHomes names one hosted tenant's slot on this cell and that

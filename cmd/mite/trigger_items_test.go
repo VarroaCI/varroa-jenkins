@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -27,6 +28,53 @@ type itemsGateJenkins struct {
 	itemsReady   atomic.Bool
 	// loginDelay delays every /login answer, in nanoseconds.
 	loginDelay atomic.Int64
+
+	// In tenant mode, a trigger call answers 404 unless the job's tenant
+	// is in readyTenants. A desired-state result replaces readyTenants
+	// with nextTenants, because that apply creates the tenant folders.
+	tenantMu     sync.Mutex
+	tenantMode   bool
+	nextTenants  []string
+	readyTenants map[string]bool
+}
+
+// useTenants turns on tenant mode with ready as the tenants that hold a
+// folder now and next as the tenants of the next applied desired state.
+func (f *itemsGateJenkins) useTenants(ready, next []string) {
+	f.tenantMu.Lock()
+	defer f.tenantMu.Unlock()
+	f.tenantMode = true
+	f.readyTenants = map[string]bool{}
+	for _, t := range ready {
+		f.readyTenants[t] = true
+	}
+	f.nextTenants = next
+}
+
+// applyTenants replaces readyTenants with nextTenants.
+func (f *itemsGateJenkins) applyTenants() {
+	f.tenantMu.Lock()
+	defer f.tenantMu.Unlock()
+	f.readyTenants = map[string]bool{}
+	for _, t := range f.nextTenants {
+		f.readyTenants[t] = true
+	}
+}
+
+// jobReady reports whether the fake holds the job of a trigger call.
+func (f *itemsGateJenkins) jobReady(r *http.Request) bool {
+	f.tenantMu.Lock()
+	defer f.tenantMu.Unlock()
+	if !f.tenantMode {
+		return f.itemsReady.Load()
+	}
+	var body struct {
+		JobPath string `json:"jobPath"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		return false
+	}
+	return f.readyTenants[jobTenant(body.JobPath)]
 }
 
 func newItemsGateJenkins(t *testing.T) *itemsGateJenkins {
@@ -40,7 +88,7 @@ func newItemsGateJenkins(t *testing.T) *itemsGateJenkins {
 			w.WriteHeader(http.StatusOK)
 		case "/varroa-run/trigger":
 			f.triggerCalls.Add(1)
-			if !f.itemsReady.Load() {
+			if !f.jobReady(r) {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
@@ -65,6 +113,7 @@ func itemsGateAgent(t *testing.T, f *itemsGateJenkins) (*Agent, func() []*mitev1
 			if cr := m.GetCommandResult(); cr != nil {
 				if cr.GetDesiredState() != nil {
 					f.itemsReady.Store(true)
+					f.applyTenants()
 				}
 				mu.Lock()
 				results = append(results, cr)
@@ -336,5 +385,232 @@ func TestTriggerBuildInlineApplyOutlastsBudget(t *testing.T) {
 	if len(got) != 2 || got[1].Success || got[1].HttpStatus != 0 ||
 		!strings.Contains(got[1].Error, "items not applied") {
 		t.Fatalf("results = %+v, want the apply result and then an items failure with the status 0", got)
+	}
+}
+
+// tenantTrigger answers a TRIGGER_BUILD command for jobPath.
+func tenantTrigger(jobPath string) *mitev1.ImperativeCommand {
+	return &mitev1.ImperativeCommand{
+		CommandId:    "trigger-tenant-" + jobPath,
+		Type:         mitev1.CommandTypeTriggerBuild,
+		TriggerBuild: &mitev1.TriggerBuildPayload{RunId: "run-t", JobPath: jobPath},
+	}
+}
+
+// cellDesired answers a cell's desired state that holds tenants.
+func cellDesired(id string, tenants ...string) *mitev1.DesiredStateCommand {
+	cmd := &mitev1.DesiredStateCommand{CommandId: id, Cell: true}
+	for _, t := range tenants {
+		cmd.TenantHomes = append(cmd.TenantHomes, &mitev1.TenantHomes{Tenant: t, Role: "active"})
+	}
+	return cmd
+}
+
+// runTriggerAsync runs a trigger for jobPath on the worker's behalf and
+// answers a channel that closes when the trigger finishes.
+func runTriggerAsync(agent *Agent, mb *commandMailbox, jobPath string) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		agent.runCommand(context.Background(), commandWork{
+			imperativeCmd: tenantTrigger(jobPath),
+			ctx:           context.Background(),
+			mailbox:       mb,
+		})
+	}()
+	return done
+}
+
+// TestTriggerWaitsForNewTenantOnRunningCell verifies a trigger for a
+// tenant that the cell does not hold yet makes no call, runs the queued
+// desired state that adds the tenant inline, and then makes one call.
+func TestTriggerWaitsForNewTenantOnRunningCell(t *testing.T) {
+	f := newItemsGateJenkins(t)
+	f.useTenants([]string{"a"}, []string{"a", "b"})
+	agent, results := itemsGateAgent(t, f)
+	agent.setAppliedTenants(true, []string{"a"})
+	agent.markItemsApplied()
+	mb := newCommandMailbox()
+
+	done := runTriggerAsync(agent, mb, "b/build")
+	time.Sleep(150 * time.Millisecond)
+	if got := f.triggerCalls.Load(); got != 0 {
+		t.Fatalf("trigger calls = %d before the tenant apply, want 0", got)
+	}
+	mb.putDesired(commandWork{desiredStateCmd: cellDesired("desired-ab", "a", "b"), ctx: context.Background()})
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the trigger did not finish after the desired state arrived")
+	}
+	if got := f.triggerCalls.Load(); got != 1 {
+		t.Fatalf("trigger calls = %d, want 1", got)
+	}
+	got := results()
+	if len(got) != 2 || got[0].GetDesiredState() == nil {
+		t.Fatalf("results = %+v, want the desired-state result and then the trigger result", got)
+	}
+	if !got[1].Success || got[1].HttpStatus != http.StatusAccepted {
+		t.Fatalf("trigger result = %+v, want success with the status 202", got[1])
+	}
+}
+
+// TestTriggerFirstTenantOnEmptyCell verifies a trigger on a cell with no
+// tenant waits for the desired state that places the first tenant.
+func TestTriggerFirstTenantOnEmptyCell(t *testing.T) {
+	f := newItemsGateJenkins(t)
+	f.useTenants(nil, []string{"a"})
+	agent, results := itemsGateAgent(t, f)
+	agent.setAppliedTenants(true, nil)
+	agent.markItemsApplied()
+	mb := newCommandMailbox()
+
+	done := runTriggerAsync(agent, mb, "a/build")
+	time.Sleep(150 * time.Millisecond)
+	if got := f.triggerCalls.Load(); got != 0 {
+		t.Fatalf("trigger calls = %d before the tenant apply, want 0", got)
+	}
+	mb.putDesired(commandWork{desiredStateCmd: cellDesired("desired-a", "a"), ctx: context.Background()})
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the trigger did not finish after the desired state arrived")
+	}
+	got := results()
+	if f.triggerCalls.Load() != 1 || len(got) != 2 || !got[1].Success {
+		t.Fatalf("calls = %d, results = %+v, want one call that succeeds", f.triggerCalls.Load(), got)
+	}
+}
+
+// TestTriggerNonCellSkipsTenantGate verifies a controller that is not a
+// cell makes the call at once for any job path.
+func TestTriggerNonCellSkipsTenantGate(t *testing.T) {
+	f := newItemsGateJenkins(t)
+	f.itemsReady.Store(true)
+	agent, results := itemsGateAgent(t, f)
+	agent.triggerReadyWait = 100 * time.Millisecond
+	agent.setAppliedTenants(false, nil)
+	agent.markItemsApplied()
+
+	agent.runCommand(context.Background(), commandWork{
+		imperativeCmd: tenantTrigger("unknown/build"),
+		ctx:           context.Background(),
+		mailbox:       newCommandMailbox(),
+	})
+
+	got := results()
+	if f.triggerCalls.Load() != 1 || len(got) != 1 || !got[0].Success {
+		t.Fatalf("calls = %d, results = %+v, want one call that succeeds", f.triggerCalls.Load(), got)
+	}
+}
+
+// TestTriggerTenantWaitExpires verifies a trigger whose tenant never
+// arrives makes no call and answers the status 0 with an error that
+// names the tenant and the items.
+func TestTriggerTenantWaitExpires(t *testing.T) {
+	f := newItemsGateJenkins(t)
+	f.useTenants([]string{"a"}, []string{"a"})
+	agent, results := itemsGateAgent(t, f)
+	agent.triggerReadyWait = 100 * time.Millisecond
+	agent.setAppliedTenants(true, []string{"a"})
+	agent.markItemsApplied()
+
+	agent.runCommand(context.Background(), commandWork{
+		imperativeCmd: tenantTrigger("b/build"),
+		ctx:           context.Background(),
+		mailbox:       newCommandMailbox(),
+	})
+
+	if got := f.triggerCalls.Load(); got != 0 {
+		t.Fatalf("trigger calls = %d, want 0", got)
+	}
+	got := results()
+	if len(got) != 1 || got[0].Success || got[0].HttpStatus != 0 {
+		t.Fatalf("results = %+v, want one failure with the status 0", got)
+	}
+	if !strings.Contains(got[0].Error, "tenant b items not applied") {
+		t.Fatalf("error = %q, want it to name the tenant and the items", got[0].Error)
+	}
+}
+
+// TestTriggerTenantGateHonorsIdleDeferral verifies that, with the items
+// gate open, a waiting trigger does not apply an apply_when idle desired
+// state inline while builds run. The desired state stays in the mailbox.
+func TestTriggerTenantGateHonorsIdleDeferral(t *testing.T) {
+	f := newItemsGateJenkins(t)
+	f.useTenants([]string{"a"}, []string{"a", "b"})
+	agent, results := itemsGateAgent(t, f)
+	agent.triggerReadyWait = 300 * time.Millisecond
+	agent.setAppliedTenants(true, []string{"a"})
+	agent.markItemsApplied()
+	mb := newCommandMailbox()
+	idle := cellDesired("desired-idle", "a", "b")
+	idle.ApplyWhen = "idle"
+	mb.putDesired(commandWork{desiredStateCmd: idle, ctx: context.Background()})
+
+	agent.runCommand(context.Background(), commandWork{
+		imperativeCmd: tenantTrigger("b/build"),
+		ctx:           context.Background(),
+		mailbox:       mb,
+	})
+
+	if got := f.triggerCalls.Load(); got != 0 {
+		t.Fatalf("trigger calls = %d, want 0", got)
+	}
+	got := results()
+	if len(got) != 1 || got[0].GetDesiredState() != nil || got[0].Success ||
+		!strings.Contains(got[0].Error, "items not applied") {
+		t.Fatalf("results = %+v, want one trigger failure and no apply result", got)
+	}
+	left, ok := mb.takeDesired()
+	if !ok || left.desiredStateCmd.CommandId != "desired-idle" {
+		t.Fatalf("mailbox desired = %+v, %v, want the deferred desired state", left, ok)
+	}
+}
+
+// TestTenantGateRestoredFromMarker verifies a marker from the live boot
+// restores the tenant set, so a trigger for a held tenant makes its call
+// without a push, and a tenant absent from the marker stays closed.
+func TestTenantGateRestoredFromMarker(t *testing.T) {
+	f := newItemsGateJenkins(t)
+	f.useTenants([]string{"a"}, []string{"a"})
+	agent, results := itemsGateAgent(t, f)
+	agent.triggerReadyWait = 200 * time.Millisecond
+	agent.writeMarker(appliedMarker{
+		composite: "hash-1", session: itemsGateSession, cell: true, tenants: []string{"a"},
+	})
+
+	agent.runCommand(context.Background(), commandWork{
+		imperativeCmd: tenantTrigger("a/x"),
+		ctx:           context.Background(),
+	})
+
+	got := results()
+	if f.triggerCalls.Load() != 1 || len(got) != 1 || !got[0].Success {
+		t.Fatalf("calls = %d, results = %+v, want one call that succeeds", f.triggerCalls.Load(), got)
+	}
+	if agent.tenantItemsReady("b/x") {
+		t.Fatal("tenant b is ready, want only the marker's tenants")
+	}
+}
+
+// TestTenantSetReplacedNotMerged verifies each apply replaces the tenant
+// set, so a tenant that left the cell leaves the set.
+func TestTenantSetReplacedNotMerged(t *testing.T) {
+	f := newItemsGateJenkins(t)
+	agent, _ := itemsGateAgent(t, f)
+
+	agent.handleDesiredState(context.Background(), cellDesired("desired-ab", "a", "b"))
+	if !agent.tenantItemsReady("a/x") || !agent.tenantItemsReady("b/x") {
+		t.Fatal("tenants a and b are not ready after the first apply")
+	}
+	agent.handleDesiredState(context.Background(), cellDesired("desired-b", "b"))
+	if agent.tenantItemsReady("a/x") {
+		t.Fatal("tenant a is ready after an apply without it")
+	}
+	if !agent.tenantItemsReady("b/x") {
+		t.Fatal("tenant b is not ready after an apply with it")
 	}
 }

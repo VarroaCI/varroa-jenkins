@@ -328,6 +328,7 @@ type DesiredStateCommand struct {
 	LiveFingerprintIntervalSec int64              `json:"live_fingerprint_interval_sec,omitempty"`
 	Rehydration                *RehydrationBundle `json:"rehydration,omitempty"`
 	TenantHomes                []*TenantHomes     `json:"tenant_homes,omitempty"`
+	Cell                       bool               `json:"cell,omitempty"`
 }
 
 type DesiredStateResult struct {

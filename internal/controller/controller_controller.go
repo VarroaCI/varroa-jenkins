@@ -1857,6 +1857,10 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 	if err != nil {
 		return fmt.Errorf("build desired state: %w", err)
 	}
+	// The mite replaces its tenant set from every cell push, so a push
+	// without tenant_homes holds back every tenant's triggers. The entries
+	// are also inside the hash below.
+	r.attachTenantHomes(ctx, cr, r.listPlacedTeams(ctx, cr), desired)
 
 	// Set the Reload flag on the DesiredStateCommand for "reload" action
 	// before sending so the mite receives it.
@@ -5185,6 +5189,7 @@ func (r *Reconciler) buildDesiredStateCommand(cr *v1alpha1.Controller, resolved 
 		// Jenkins.ADMINISTER. Reload is always true; the flag is retained on the
 		// proto for compatibility.
 		Reload: true,
+		Cell:   isCellController(cr),
 	}
 
 	// JCasC and items YAML from resolved bundle.
@@ -6000,7 +6005,8 @@ func computeDesiredStateHash(cmd *mitev1.DesiredStateCommand) string {
 	// tenant_homes is inside the hash. It changes only when a slot
 	// changes or a job's home changes, so it costs at most one push for
 	// each such change. The rehydration bundle stays outside for its own
-	// reason: it changes after every build.
+	// reason: it changes after every build. The cell flag stays outside
+	// too: the role of a controller does not change the applied content.
 	h.Write([]byte(tenantHomesHash(cmd.TenantHomes)))
 	return hex.EncodeToString(h.Sum(nil))
 }

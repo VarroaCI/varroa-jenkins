@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -282,6 +283,19 @@ type Agent struct {
 	itemsAppliedInit sync.Once
 	itemsAppliedOnce sync.Once
 	itemsAppliedC    chan struct{}
+
+	// The tenant gate holds the tenants of the newest desired state that
+	// reached the items step or returned converged. A new cell tenant has
+	// no folder until the operator pushes a desired state that holds it,
+	// but the recorder routes its triggers to the cell at once. A trigger
+	// on a cell therefore also waits until its tenant is in this set.
+	// Each apply replaces the set. tenantGateCell is the cell flag of
+	// that desired state; with it false, the tenant gate does not apply.
+	// tenantGateC closes, and is replaced, on each update.
+	tenantGateMu    sync.Mutex
+	tenantGateCell  bool
+	tenantGateNames map[string]bool
+	tenantGateC     chan struct{}
 
 	// crossTenantSeq allocates each cross-tenant request its own numeric
 	// id. The waiter map only needs uniqueness among currently open
@@ -1203,6 +1217,20 @@ func (mb *commandMailbox) takeDesired() (commandWork, bool) {
 	return w, true
 }
 
+// restoreDesired puts w back into an empty desired slot and sends no
+// notify. A newer command in the slot wins, and w is dropped.
+func (mb *commandMailbox) restoreDesired(w commandWork) {
+	mb.mu.Lock()
+	defer mb.mu.Unlock()
+	if mb.desired != nil {
+		if w.span != nil {
+			w.span.End()
+		}
+		return
+	}
+	mb.desired = &w
+}
+
 func (mb *commandMailbox) notify() {
 	select {
 	case mb.signal <- struct{}{}:
@@ -1703,15 +1731,18 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 }
 
 // awaitTriggerReady runs the startup path's readiness check before a
-// TRIGGER_BUILD call, then waits for the items gate. One triggerReadyWait
-// budget bounds both waits. It answers nil at once for a ready Jenkins
-// whose items are applied.
+// TRIGGER_BUILD call, then waits for the items gate and, on a cell, for
+// the tenant gate of the job's tenant. One triggerReadyWait budget bounds
+// every wait. It answers nil at once for a ready Jenkins whose items are
+// applied.
 //
 // The command worker is serial, so the worker cannot run the desired
-// state that opens the gate while this wait holds it. The wait therefore
-// takes a pending desired-state command from mb and runs it inline. The
-// inline apply skips the idle deferral: no build runs on a Jenkins that
-// holds no items yet. A nil mb waits for the gate alone.
+// state that opens a gate while this wait holds it. The wait therefore
+// takes a pending desired-state command from mb and runs it inline. While
+// the items gate is closed, the inline apply skips the idle deferral: no
+// build runs on a Jenkins that holds no items yet. Once the items gate is
+// open, builds can run, so the inline apply keeps the idle deferral. A nil
+// mb waits for the gates alone.
 func (a *Agent) awaitTriggerReady(ctx context.Context, mb *commandMailbox, jobPath string) error {
 	wait := a.triggerReadyWait
 	if wait <= 0 {
@@ -1722,55 +1753,171 @@ func (a *Agent) awaitTriggerReady(ctx context.Context, mb *commandMailbox, jobPa
 	if err := a.waitForJenkinsWithFreshToken(wctx); err != nil {
 		return fmt.Errorf("jenkins not ready after %s: %w", wait, err)
 	}
-	if a.itemsApplied() {
+	if !a.itemsApplied() {
+		a.openItemsGateFromMarker(wctx)
+	}
+	if a.tenantItemsReady(jobPath) {
 		return nil
 	}
-	a.openItemsGateFromMarker(wctx)
+	tenant := jobTenant(jobPath)
 	if a.itemsApplied() {
-		return nil
+		a.Logger.Info("trigger waits for the tenant items apply",
+			"tenant", tenant, "job_path", jobPath, "budget", wait)
+	} else {
+		a.Logger.Info("trigger waits for the items apply", "job_path", jobPath, "budget", wait)
 	}
-	a.Logger.Info("trigger waits for the items apply", "job_path", jobPath, "budget", wait)
+	waitErr := func() error {
+		if a.itemsApplied() {
+			return fmt.Errorf("tenant %s items not applied after %s", tenant, wait)
+		}
+		return fmt.Errorf("items not applied after %s", wait)
+	}
 	var signal <-chan struct{}
 	if mb != nil {
 		signal = mb.signal
 	}
-	gate := a.itemsAppliedSignal()
+	recheck := a.heartbeatInterval
+	if recheck <= 0 {
+		recheck = 15 * time.Second
+	}
+	recheckTimer := time.NewTimer(recheck)
+	recheckTimer.Stop()
+	defer recheckTimer.Stop()
 	for {
+		if a.tenantItemsReady(jobPath) {
+			return nil
+		}
+		var recheckC <-chan time.Time
 		if mb != nil {
 			if dw, ok := mb.takeDesired(); ok {
-				// The trigger budget also bounds the inline apply, so a
-				// stalled apply cannot hold the worker past the budget.
-				// A cut apply reports its deadline, and the operator
-				// pushes the desired state again.
-				if dw.ctx == nil {
-					dw.ctx = ctx
+				if a.deferInlineApply(dw) {
+					mb.restoreDesired(dw)
+					recheckTimer.Reset(recheck)
+					recheckC = recheckTimer.C
+				} else {
+					// The trigger budget also bounds the inline apply, so
+					// a stalled apply cannot hold the worker past the
+					// budget. A cut apply reports its deadline, and the
+					// operator pushes the desired state again.
+					if dw.ctx == nil {
+						dw.ctx = ctx
+					}
+					deadline, _ := wctx.Deadline()
+					var applyCancel context.CancelFunc
+					dw.ctx, applyCancel = context.WithDeadline(dw.ctx, deadline)
+					a.runCommand(ctx, dw)
+					applyCancel()
+					mb.finish(dw)
+					if wctx.Err() != nil {
+						return waitErr()
+					}
+					continue
 				}
-				deadline, _ := wctx.Deadline()
-				var applyCancel context.CancelFunc
-				dw.ctx, applyCancel = context.WithDeadline(dw.ctx, deadline)
-				a.runCommand(ctx, dw)
-				applyCancel()
-				mb.finish(dw)
-				if wctx.Err() != nil {
-					return fmt.Errorf("items not applied after %s", wait)
-				}
-				continue
 			}
 		}
-		if a.itemsApplied() {
-			return nil
+		var bootC <-chan struct{}
+		if !a.itemsApplied() {
+			bootC = a.itemsAppliedSignal()
 		}
 		select {
-		case <-gate:
-			return nil
+		case <-bootC:
+		case <-a.tenantGateSignal():
 		case <-signal:
+		case <-recheckC:
 		case <-wctx.Done():
-			if a.itemsApplied() {
+			if a.tenantItemsReady(jobPath) {
 				return nil
 			}
-			return fmt.Errorf("items not applied after %s", wait)
+			return waitErr()
 		}
 	}
+}
+
+// deferInlineApply reports whether a waiting trigger must leave the
+// desired state dw in the mailbox. It answers true for an apply_when
+// idle command while builds run, but only once the items gate is open.
+func (a *Agent) deferInlineApply(dw commandWork) bool {
+	if !a.itemsApplied() || dw.desiredStateCmd == nil || dw.desiredStateCmd.ApplyWhen != "idle" {
+		return false
+	}
+	if a.shouldApplyNow(dw.desiredStateCmd) {
+		a.setDeferState(false, "")
+		return false
+	}
+	_, reason := a.loadDeferState()
+	a.setDeferState(true, reason)
+	return true
+}
+
+// jobTenant answers the tenant a job path names: its first segment. On a
+// cell, each tenant is a top-level folder named after the tenant.
+func jobTenant(jobPath string) string {
+	tenant, _, _ := strings.Cut(strings.Trim(jobPath, "/"), "/")
+	return tenant
+}
+
+// tenantItemsReady reports whether a trigger for jobPath can make its
+// call. The items gate must be open. On a cell, the job's tenant must
+// also be in the tenant set of the newest applied desired state.
+func (a *Agent) tenantItemsReady(jobPath string) bool {
+	if !a.itemsApplied() {
+		return false
+	}
+	a.tenantGateMu.Lock()
+	defer a.tenantGateMu.Unlock()
+	if !a.tenantGateCell {
+		return true
+	}
+	return a.tenantGateNames[jobTenant(jobPath)]
+}
+
+// tenantGateSignal answers the tenant gate channel. It closes at the next
+// update of the tenant set.
+func (a *Agent) tenantGateSignal() <-chan struct{} {
+	a.tenantGateMu.Lock()
+	defer a.tenantGateMu.Unlock()
+	if a.tenantGateC == nil {
+		a.tenantGateC = make(chan struct{})
+	}
+	return a.tenantGateC
+}
+
+// setAppliedTenants replaces the tenant set and wakes every waiter. The
+// set is replaced, not merged, so a tenant that left the cell leaves the
+// set.
+func (a *Agent) setAppliedTenants(cell bool, tenants []string) {
+	names := make(map[string]bool, len(tenants))
+	for _, t := range tenants {
+		if t != "" {
+			names[t] = true
+		}
+	}
+	a.tenantGateMu.Lock()
+	a.tenantGateCell = cell
+	a.tenantGateNames = names
+	old := a.tenantGateC
+	a.tenantGateC = make(chan struct{})
+	a.tenantGateMu.Unlock()
+	if old != nil {
+		close(old)
+	}
+}
+
+// recordAppliedTenants replaces the tenant set with the tenants of cmd.
+func (a *Agent) recordAppliedTenants(cmd *mitev1.DesiredStateCommand) {
+	a.setAppliedTenants(cmd.Cell, tenantNames(cmd))
+}
+
+// tenantNames answers the sorted tenant names of cmd's tenant_homes.
+func tenantNames(cmd *mitev1.DesiredStateCommand) []string {
+	names := make([]string, 0, len(cmd.TenantHomes))
+	for _, h := range cmd.TenantHomes {
+		if h != nil && h.Tenant != "" {
+			names = append(names, h.Tenant)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 // itemsAppliedSignal answers the items gate channel. It closes when the
@@ -1799,7 +1946,8 @@ func (a *Agent) itemsApplied() bool {
 // openItemsGateFromMarker opens the items gate when the convergence
 // marker's session equals the live Jenkins boot session. The marker is
 // written only after every requested section succeeded, so such a
-// marker proves the items were applied in this boot.
+// marker proves the items were applied in this boot. Such a marker also
+// restores the tenant gate from its cell and tenants lines.
 func (a *Agent) openItemsGateFromMarker(ctx context.Context) {
 	marker := a.readMarker()
 	if marker.session == "" {
@@ -1807,6 +1955,7 @@ func (a *Agent) openItemsGateFromMarker(ctx context.Context) {
 	}
 	live, err := a.getJenkinsClient().SessionID(ctx)
 	if err == nil && live == marker.session {
+		a.setAppliedTenants(marker.cell, marker.tenants)
 		a.markItemsApplied()
 	}
 }
@@ -1910,6 +2059,7 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 				result.RbacSuccess = true
 				result.ItemsSuccess = true
 				result.RehydrationSuccess = true
+				a.recordAppliedTenants(cmd)
 				a.markItemsApplied()
 				return result
 			case err == nil:
@@ -2051,7 +2201,9 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 		result.ItemsSuccess = true
 	}
 	// A failed items apply opens the gate too: one broken item must not
-	// hold back the triggers of every other tenant on the cell.
+	// hold back the triggers of every other tenant on the cell. The same
+	// rule opens the tenant gate for every tenant of this desired state.
+	a.recordAppliedTenants(cmd)
 	a.markItemsApplied()
 
 	// 6. Reload every item the rehydration section named. Runs after the
@@ -2101,6 +2253,8 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 			composite: cmd.DesiredStateHash,
 			session:   appliedSession,
 			sections:  newSections,
+			cell:      cmd.Cell,
+			tenants:   tenantNames(cmd),
 		})
 
 		// Capture a live-drift baseline from a fresh export.
@@ -2565,6 +2719,11 @@ func (a *Agent) requestTokenRefresh(ctx context.Context) {
 type appliedMarker struct {
 	composite, session string
 	sections           map[string]string // "config"|"rbac"|"items" → hash
+	// cell and tenants restore the tenant gate after a mite restart in
+	// the same Jenkins boot. A marker without a cell line restores no
+	// tenant gate.
+	cell    bool
+	tenants []string
 }
 
 var markerSectionNames = []string{"config", "plugins", "rbac", "items", "rehydration"}
@@ -2603,6 +2762,10 @@ func (a *Agent) readMarker() appliedMarker {
 			m.composite = val
 		case "session":
 			m.session = val
+		case "cell":
+			m.cell = val == "true"
+		case "tenants":
+			m.tenants = strings.Split(val, ",")
 		default:
 			m.sections[key] = val
 		}
@@ -2678,6 +2841,12 @@ func (a *Agent) writeMarker(m appliedMarker) {
 	for _, name := range markerSectionNames {
 		if h, ok := m.sections[name]; ok {
 			buf.WriteString(name + " " + h + "\n")
+		}
+	}
+	if m.cell {
+		buf.WriteString("cell true\n")
+		if len(m.tenants) > 0 {
+			buf.WriteString("tenants " + strings.Join(m.tenants, ",") + "\n")
 		}
 	}
 	tmpFile := a.lastAppliedHashPath() + ".tmp"

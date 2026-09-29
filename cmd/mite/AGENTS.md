@@ -48,8 +48,9 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
     must not silently drop a new command — a full queue ends the stream session.
     While the items gate is closed, `take` answers the desired slot before
     the imperative queue (`commandMailbox.desiredFirst`), and `takeDesired`
-    empties the desired slot alone. Each `commandWork` carries the mailbox
-    that queued it.
+    empties the desired slot alone; `restoreDesired` puts a deferred
+    command back only into an empty slot, so a newer push wins. Each
+    `commandWork` carries the mailbox that queued it.
     `commandWorker` (`agent.go:994`) drains one command at a time so Jenkins
     writes never overlap desired-state and imperative work.
   - **Imperative results** — `TRIGGER_BUILD` runs `awaitTriggerReady`
@@ -61,13 +62,29 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
     `markItemsApplied`) opens when `handleDesiredState` reaches the items
     step (success, failure, or no items) or returns converged, and when a
     convergence marker's session equals the live `X-Jenkins-Session`
-    (`openItemsGateFromMarker`). It never closes in one process. The
-    worker is serial, so the waiting trigger takes a pending desired-state
-    command from its mailbox and runs it inline, without the `idle`
-    deferral; otherwise the trigger blocks the apply it waits for. An
-    expired wait makes no call and answers `http_status` `0` with
-    `jenkins not ready` or `items not applied`, which the gateway maps
-    onto the retryable `TRIGGER_UNREACHABLE`. A job still missing after
+    (`openItemsGateFromMarker`). It never closes in one process. On a
+    cell, the trigger also waits for the **tenant gate**
+    (`tenantItemsReady`): the job path's first segment must be in the
+    tenant set of the newest desired state that reached the items step or
+    returned converged, because the recorder routes a newly placed
+    tenant's triggers to the cell before the operator pushes its folder.
+    `recordAppliedTenants` replaces the set (never merges) from
+    `tenant_homes` at the same two points that open the items gate, and a
+    failed items apply still records every tenant. The set applies only
+    when the newest desired state carries `cell` (field 19), since a cell
+    with no tenant sends no `tenant_homes`. `tenantGateC` closes and is
+    replaced on each update. The marker's `cell` and `tenants` lines
+    restore the set with the items gate; a marker without them restores
+    no tenant gate. The worker is serial, so the waiting trigger takes a
+    pending desired-state command from its mailbox and runs it inline.
+    While the items gate is closed the inline apply skips the `idle`
+    deferral; once it is open, an `idle` apply that must defer goes back
+    to the mailbox (`restoreDesired`, no notify) and the wait re-checks
+    each `heartbeatInterval`. An expired wait makes no call and answers
+    `http_status` `0` with `jenkins not ready`, `items not applied`, or
+    `tenant <t> items not applied`, which the gateway maps onto the
+    retryable `TRIGGER_UNREACHABLE`. A moved-away tenant waits the full
+    budget and answers the same. A job still missing after
     the apply answers the plugin's `404` (`JOB_NOT_FOUND`). Every imperative `CommandResult` carries
     `command_type`, `job_path`, and `run_id` (`imperativeCommandSubject`),
     and `logImperativeResult` logs each one at info on success and at warn

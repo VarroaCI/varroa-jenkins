@@ -515,8 +515,10 @@ sections describe.
   unchanged, so a mite that lost its in-memory token on restart gets a fresh one on
   the next push; `Reload` is always `true` (#166 — config push always uses the
   MANAGE-gated `/configuration-as-code/reload` path, never the admin-gated apply
-  path). `cmd.DesiredStateHash = computeDesiredStateHash(cmd)` hashes `JcascYaml` +
-  `RbacYaml` + `ItemsYaml` only.
+  path); `Cell` (field 19) is `isCellController(cr)`, so the mite can tell a cell
+  with no tenant from a controller that is not a cell. `cmd.DesiredStateHash =
+  computeDesiredStateHash(cmd)` hashes `JcascYaml` + `RbacYaml` + `ItemsYaml` +
+  `tenant_homes`; `Cell` and `rehydration` stay outside the hash.
 - **Every imperative result leaves a trace** (`imperative_outcome.go`) —
   `handleConnected`'s result drain calls `recordImperativeOutcome` for each
   result without a desired-state payload, before it writes
