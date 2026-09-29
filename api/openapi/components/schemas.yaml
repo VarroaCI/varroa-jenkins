@@ -2806,6 +2806,27 @@ VarroaRole:
       $ref: '#/ObjectMeta'
     spec:
       $ref: '#/VarroaRoleSpec'
+    status:
+      $ref: '#/VarroaRoleStatus'
+
+VarroaRoleStatus:
+  type: object
+  readOnly: true
+  description: >-
+    Federation faults of the role on each hive. The core BFF federation pass
+    writes it. A create or update request cannot set it.
+  properties:
+    observedGeneration:
+      type: integer
+      format: int64
+      description: Spec generation the federation entries describe.
+    federation:
+      type: array
+      description: >-
+        One entry for each hive where the delete of a stale federated
+        JenkinsRole failed. A hive with no fault has no entry.
+      items:
+        $ref: '#/BindingFederationStatus'
 
 VarroaRoleBinding:
   type: object
@@ -2841,7 +2862,9 @@ VarroaRoleBindingStatus:
 
 BindingFederationStatus:
   type: object
-  description: Federation outcome of a binding on one hive.
+  description: >-
+    Federation outcome of a binding on one hive, or a federation fault of a
+    role on one hive.
   required: [cluster, state, lastTransitionTime]
   properties:
     cluster:
@@ -2857,8 +2880,10 @@ BindingFederationStatus:
         RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound,
         NonGlobalJenkinsRole, and ReservedRole. Failed codes are
         HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed,
-        JenkinsRoleBindingCollision, JenkinsRoleBindingWriteFailed, and
-        StaleJenkinsRoleBindingDeleteFailed. The federated code is Federated.
+        JenkinsRoleBindingCollision, JenkinsRoleBindingWriteFailed,
+        StaleJenkinsRoleBindingDeleteFailed, and StaleJenkinsRoleDeleteFailed.
+        StaleJenkinsRoleDeleteFailed occurs only on a VarroaRole. The
+        federated code is Federated.
     message:
       type: string
       description: Human-readable detail for the state.

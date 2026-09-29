@@ -328,6 +328,17 @@ export interface VarroaRole {
   kind: "VarroaRole";
   metadata: ObjectMeta;
   spec: VarroaRoleSpec;
+  status?: VarroaRoleStatus;
+}
+
+/**
+ * Written by the core BFF federation pass only. A request never sets it. It
+ * holds an entry only for a hive where the delete of a stale federated
+ * JenkinsRole failed.
+ */
+export interface VarroaRoleStatus {
+  observedGeneration?: number;
+  federation?: BindingFederationStatus[];
 }
 
 export interface VarroaRoleList {
@@ -342,7 +353,7 @@ export interface VarroaRoleBindingSpec {
 
 export type BindingFederationState = "federated" | "skipped" | "failed";
 
-/** The federation outcome of a binding on one hive cluster. */
+/** The federation outcome of a binding, or a fault of a role, on one hive cluster. */
 export interface BindingFederationStatus {
   cluster: string;
   state: BindingFederationState;

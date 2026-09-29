@@ -603,7 +603,7 @@ type ComponentsSchemasBackupSpec struct {
 	Schedule *string `json:"schedule,omitempty"`
 }
 
-// ComponentsSchemasBindingFederationStatus Federation outcome of a binding on one hive.
+// ComponentsSchemasBindingFederationStatus Federation outcome of a binding on one hive, or a federation fault of a role on one hive.
 type ComponentsSchemasBindingFederationStatus struct {
 	// Cluster Hive cluster name.
 	Cluster string `json:"cluster"`
@@ -614,7 +614,7 @@ type ComponentsSchemasBindingFederationStatus struct {
 	// Message Human-readable detail for the state.
 	Message *string `json:"message,omitempty"`
 
-	// Reason CamelCase code for the state. Skipped codes are NoSubjects, TenantScope, RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound, NonGlobalJenkinsRole, and ReservedRole. Failed codes are HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed, JenkinsRoleBindingCollision, JenkinsRoleBindingWriteFailed, and StaleJenkinsRoleBindingDeleteFailed. The federated code is Federated.
+	// Reason CamelCase code for the state. Skipped codes are NoSubjects, TenantScope, RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound, NonGlobalJenkinsRole, and ReservedRole. Failed codes are HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed, JenkinsRoleBindingCollision, JenkinsRoleBindingWriteFailed, StaleJenkinsRoleBindingDeleteFailed, and StaleJenkinsRoleDeleteFailed. StaleJenkinsRoleDeleteFailed occurs only on a VarroaRole. The federated code is Federated.
 	Reason *string                                       `json:"reason,omitempty"`
 	State  ComponentsSchemasBindingFederationStatusState `json:"state"`
 }
@@ -3896,6 +3896,9 @@ type ComponentsSchemasVarroaRole struct {
 
 	// Spec Spec for a VarroaRole (API-level RBAC).
 	Spec *ComponentsSchemasVarroaRoleSpec `json:"spec,omitempty"`
+
+	// Status Federation faults of the role on each hive. The core BFF federation pass writes it. A create or update request cannot set it.
+	Status *ComponentsSchemasVarroaRoleStatus `json:"status,omitempty"`
 }
 
 // ComponentsSchemasVarroaRoleBinding A VarroaRoleBinding CRD (cluster-scoped).
@@ -3950,6 +3953,15 @@ type ComponentsSchemasVarroaRoleSpec struct {
 
 	// JenkinsRoleRef Reference to a JenkinsRole.
 	JenkinsRoleRef *string `json:"jenkinsRoleRef,omitempty"`
+}
+
+// ComponentsSchemasVarroaRoleStatus Federation faults of the role on each hive. The core BFF federation pass writes it. A create or update request cannot set it.
+type ComponentsSchemasVarroaRoleStatus struct {
+	// Federation One entry for each hive where the delete of a stale federated JenkinsRole failed. A hive with no fault has no entry.
+	Federation *[]ComponentsSchemasBindingFederationStatus `json:"federation,omitempty"`
+
+	// ObservedGeneration Spec generation the federation entries describe.
+	ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
 }
 
 // ComponentsSchemasVersionCatalogEntry Entry in the version catalog.

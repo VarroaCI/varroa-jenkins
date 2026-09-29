@@ -2557,12 +2557,30 @@ type ProvisioningDefaultsList struct {
 // VarroaRole is the Schema for the varroaroles API.
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:resource:scope=Cluster
+// +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="BUILTIN",type="string",JSONPath=".metadata.labels.varroa\\.dev/builtin"
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 type VarroaRole struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	Spec              VarroaRoleSpec `json:"spec,omitempty"`
+	// Status reports each hive where the delete of a stale federated
+	// JenkinsRole failed. Only the core BFF federation pass writes it.
+	// +optional
+	Status VarroaRoleStatus `json:"status,omitempty"`
+}
+
+// VarroaRoleStatus reports the federation faults of a core VarroaRole.
+type VarroaRoleStatus struct {
+	// ObservedGeneration is the spec generation the federation entries describe.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+	// Federation holds one entry for each hive where the delete of a stale
+	// federated JenkinsRole failed. A hive with no fault has no entry.
+	// +listType=map
+	// +listMapKey=cluster
+	// +optional
+	Federation []BindingFederationStatus `json:"federation,omitempty"`
 }
 
 // VarroaRoleSpec defines the desired state of VarroaRole.

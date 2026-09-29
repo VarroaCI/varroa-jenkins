@@ -371,3 +371,43 @@ func TestDesiredFederatedCRsAnnotatesOwners(t *testing.T) {
 		}
 	}
 }
+
+// Each federated JenkinsRole names every VarroaRole that projects onto it
+// through at least one projected binding, sorted, so the annotation does not
+// depend on the informer order. A VarroaRole whose bindings are all skipped
+// is not named.
+func TestDesiredFederatedCRsAnnotatesRoleSources(t *testing.T) {
+	varroaRoles := map[string]*v1alpha1.VarroaRole{
+		"zeta":  {ObjectMeta: metav1.ObjectMeta{Name: "zeta"}, Spec: v1alpha1.VarroaRoleSpec{JenkinsRoleRef: "shared"}},
+		"alpha": {ObjectMeta: metav1.ObjectMeta{Name: "alpha"}, Spec: v1alpha1.VarroaRoleSpec{JenkinsRoleRef: "shared"}},
+		"quiet": {ObjectMeta: metav1.ObjectMeta{Name: "quiet"}, Spec: v1alpha1.VarroaRoleSpec{JenkinsRoleRef: "shared"}},
+	}
+	subjects := []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}
+	vrbs := []*v1alpha1.VarroaRoleBinding{
+		{ObjectMeta: metav1.ObjectMeta{Name: "b-zeta"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "zeta", Subjects: subjects}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "b-alpha"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "alpha", Subjects: subjects}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "b-quiet"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "quiet"}},
+	}
+	run := func(in []*v1alpha1.VarroaRoleBinding) []*v1alpha1.JenkinsRole {
+		roles, _, _, _ := DesiredFederatedCRs(in,
+			func(name string) (*v1alpha1.VarroaRole, bool) { vr, ok := varroaRoles[name]; return vr, ok },
+			func(name string) (*v1alpha1.JenkinsRole, bool) {
+				return &v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.JenkinsRoleSpec{RoleType: "Global", Permissions: []string{"Overall/Read"}}}, true
+			},
+		)
+		return roles
+	}
+	reversed := []*v1alpha1.VarroaRoleBinding{vrbs[2], vrbs[1], vrbs[0]}
+	for _, in := range [][]*v1alpha1.VarroaRoleBinding{vrbs, reversed} {
+		roles := run(in)
+		if len(roles) != 1 {
+			t.Fatalf("roles = %#v, want one shared role", roles)
+		}
+		if got := roles[0].Annotations[AnnotationFederatedRoles]; got != "alpha,zeta" {
+			t.Fatalf("role annotation = %q, want alpha,zeta", got)
+		}
+		if got := roles[0].Labels[LabelFederatedFrom]; got != "alpha" {
+			t.Fatalf("role label = %q, want alpha", got)
+		}
+	}
+}

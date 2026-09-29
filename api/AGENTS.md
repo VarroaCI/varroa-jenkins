@@ -82,6 +82,10 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   (`federated`/`skipped`/`failed`), `reason`, `message`, and
   `lastTransitionTime`. `federation` is `omitempty`, so
   `internal/crdstore/registry.go` clears it explicitly.
+  `VarroaRole` has the same status shape (`VarroaRoleStatus`, element type
+  `BindingFederationStatus`), also written only by the core BFF federation
+  pass and cleared the same way. Its `federation` list holds an entry only
+  for a hive with a failed stale-role delete.
   `CatalogItemStatus` carries three `omitempty` list fields — `closure`,
   `compat`, `conditions` — which means `internal/crdstore/registry.go` must
   clear each explicitly (`nil`, not `""`) or a merge patch leaves stale entries

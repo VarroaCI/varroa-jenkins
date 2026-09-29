@@ -461,7 +461,7 @@
         "type": "object"
       },
       "BindingFederationStatus": {
-        "description": "Federation outcome of a binding on one hive.",
+        "description": "Federation outcome of a binding on one hive, or a federation fault of a role on one hive.",
         "properties": {
           "cluster": {
             "description": "Hive cluster name.",
@@ -477,7 +477,7 @@
             "type": "string"
           },
           "reason": {
-            "description": "CamelCase code for the state. Skipped codes are NoSubjects, TenantScope, RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound, NonGlobalJenkinsRole, and ReservedRole. Failed codes are HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed, JenkinsRoleBindingCollision, JenkinsRoleBindingWriteFailed, and StaleJenkinsRoleBindingDeleteFailed. The federated code is Federated.",
+            "description": "CamelCase code for the state. Skipped codes are NoSubjects, TenantScope, RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound, NonGlobalJenkinsRole, and ReservedRole. Failed codes are HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed, JenkinsRoleBindingCollision, JenkinsRoleBindingWriteFailed, StaleJenkinsRoleBindingDeleteFailed, and StaleJenkinsRoleDeleteFailed. StaleJenkinsRoleDeleteFailed occurs only on a VarroaRole. The federated code is Federated.",
             "type": "string"
           },
           "state": {
@@ -4973,7 +4973,7 @@
         "type": "object"
       },
       "components_schemas_BindingFederationStatus": {
-        "description": "Federation outcome of a binding on one hive.",
+        "description": "Federation outcome of a binding on one hive, or a federation fault of a role on one hive.",
         "properties": {
           "cluster": {
             "description": "Hive cluster name.",
@@ -4989,7 +4989,7 @@
             "type": "string"
           },
           "reason": {
-            "description": "CamelCase code for the state. Skipped codes are NoSubjects, TenantScope, RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound, NonGlobalJenkinsRole, and ReservedRole. Failed codes are HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed, JenkinsRoleBindingCollision, JenkinsRoleBindingWriteFailed, and StaleJenkinsRoleBindingDeleteFailed. The federated code is Federated.",
+            "description": "CamelCase code for the state. Skipped codes are NoSubjects, TenantScope, RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound, NonGlobalJenkinsRole, and ReservedRole. Failed codes are HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed, JenkinsRoleBindingCollision, JenkinsRoleBindingWriteFailed, StaleJenkinsRoleBindingDeleteFailed, and StaleJenkinsRoleDeleteFailed. StaleJenkinsRoleDeleteFailed occurs only on a VarroaRole. The federated code is Federated.",
             "type": "string"
           },
           "state": {
@@ -12851,6 +12851,9 @@
           },
           "spec": {
             "$ref": "#/components/schemas/components_schemas_VarroaRoleSpec"
+          },
+          "status": {
+            "$ref": "#/components/schemas/components_schemas_VarroaRoleStatus"
           }
         },
         "type": "object"
@@ -12965,6 +12968,25 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "components_schemas_VarroaRoleStatus": {
+        "description": "Federation faults of the role on each hive. The core BFF federation pass writes it. A create or update request cannot set it.",
+        "properties": {
+          "federation": {
+            "description": "One entry for each hive where the delete of a stale federated JenkinsRole failed. A hive with no fault has no entry.",
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_BindingFederationStatus"
+            },
+            "type": "array"
+          },
+          "observedGeneration": {
+            "description": "Spec generation the federation entries describe.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "readOnly": true,
         "type": "object"
       },
       "components_schemas_VersionCatalogEntry": {

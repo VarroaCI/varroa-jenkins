@@ -132,7 +132,8 @@ func (r *RBACFederationReconciler) reconcile(ctx context.Context) []string {
 	// One snapshot feeds both the projection and the status write, so a
 	// status never pairs an outcome with a later spec generation.
 	sources := r.sourceBindings()
-	desiredRoles, desiredBindings, projectorWarnings, outcomes := r.desired(sources)
+	varroaRoles := r.sourceRoles()
+	desiredRoles, desiredBindings, projectorWarnings, outcomes := r.desired(sources, varroaRoles)
 	warnings = append(warnings, projectorWarnings...)
 
 	clusters, err := r.clusterLister()
@@ -140,6 +141,7 @@ func (r *RBACFederationReconciler) reconcile(ctx context.Context) []string {
 		return append(warnings, fmt.Sprintf("list clusters: %v", err))
 	}
 	owners := newStaleOwnerIndex(sources, outcomes)
+	roleOwners := newStaleRoleOwnerIndex(varroaRoles)
 	results := make(map[string]*hiveResult)
 	for _, cluster := range clusters {
 		if cluster.Name == "" || cluster.Name == r.coreCluster {
@@ -147,13 +149,14 @@ func (r *RBACFederationReconciler) reconcile(ctx context.Context) []string {
 		}
 		result := newHiveResult()
 		results[cluster.Name] = result
-		if err := r.reconcileCluster(ctx, cluster.Name, desiredRoles, desiredBindings, owners, &warnings, result); err != nil {
+		if err := r.reconcileCluster(ctx, cluster.Name, desiredRoles, desiredBindings, owners, roleOwners, &warnings, result); err != nil {
 			warnings = append(warnings, fmt.Sprintf("cluster %s: %v", cluster.Name, err))
 			result.listFault = &federationFault{reason: reasonHiveUnavailable, message: err.Error()}
 			continue
 		}
 	}
 	r.writeStatuses(ctx, sources, outcomes, results, &warnings)
+	r.writeRoleStatuses(ctx, varroaRoles, results, &warnings)
 	sort.Strings(warnings)
 	return warnings
 }
@@ -170,13 +173,23 @@ func (r *RBACFederationReconciler) sourceBindings() []*v1alpha1.VarroaRoleBindin
 	return bindings
 }
 
-func (r *RBACFederationReconciler) desired(bindings []*v1alpha1.VarroaRoleBinding) ([]*v1alpha1.JenkinsRole, []*v1alpha1.JenkinsRoleBinding, []string, map[string]rbac.BindingOutcome) {
-	return rbac.DesiredFederatedCRs(bindings, func(name string) (*v1alpha1.VarroaRole, bool) {
-		obj, ok, err := r.roles.GetByKey(name)
-		if err != nil || !ok {
-			return nil, false
+// sourceRoles snapshots the core VarroaRoles the informer holds, keyed by
+// name. The projection, the stale-role owner index, and the role status write
+// read this one snapshot, so a role that the informer adds or removes during
+// the pass does not give the three steps different answers.
+func (r *RBACFederationReconciler) sourceRoles() map[string]*v1alpha1.VarroaRole {
+	roles := make(map[string]*v1alpha1.VarroaRole)
+	for _, obj := range r.roles.List() {
+		if role, ok := obj.(*v1alpha1.VarroaRole); ok && role.Name != "" {
+			roles[role.Name] = role
 		}
-		role, ok := obj.(*v1alpha1.VarroaRole)
+	}
+	return roles
+}
+
+func (r *RBACFederationReconciler) desired(bindings []*v1alpha1.VarroaRoleBinding, varroaRoles map[string]*v1alpha1.VarroaRole) ([]*v1alpha1.JenkinsRole, []*v1alpha1.JenkinsRoleBinding, []string, map[string]rbac.BindingOutcome) {
+	return rbac.DesiredFederatedCRs(bindings, func(name string) (*v1alpha1.VarroaRole, bool) {
+		role, ok := varroaRoles[name]
 		return role, ok
 	}, func(name string) (*v1alpha1.JenkinsRole, bool) {
 		obj, ok, err := r.coreJenkinsRoles.GetByKey(name)
@@ -195,8 +208,9 @@ func (r *RBACFederationReconciler) desired(bindings []*v1alpha1.VarroaRoleBindin
 // log a repeated failure once. Each fault on a desired child is also recorded
 // in result, keyed by the child name, for the binding status write. A failed
 // delete of a stale binding child is recorded under each owner that owners
-// finds for it.
-func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster string, desiredRoles []*v1alpha1.JenkinsRole, desiredBindings []*v1alpha1.JenkinsRoleBinding, owners staleOwnerIndex, warnings *[]string, result *hiveResult) error {
+// finds for it. A failed delete of a stale role child is recorded under each
+// VarroaRole that roleOwners finds for it.
+func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster string, desiredRoles []*v1alpha1.JenkinsRole, desiredBindings []*v1alpha1.JenkinsRoleBinding, owners staleOwnerIndex, roleOwners staleRoleOwnerIndex, warnings *[]string, result *hiveResult) error {
 	actualRoles, err := r.listRoles(ctx, cluster)
 	if err != nil {
 		return fmt.Errorf("list JenkinsRoles: %w", err)
@@ -245,7 +259,15 @@ func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster
 			continue
 		}
 		if err := r.brood.DeleteJenkinsRole(ctx, cluster, name); err != nil && !isNotFound(err) {
+			staleOwners := roleOwners.ownersOf(actual)
+			if len(staleOwners) == 0 {
+				objectWarning(warnings, cluster, "delete orphaned JenkinsRole", name, err)
+				continue
+			}
 			objectWarning(warnings, cluster, "delete JenkinsRole", name, err)
+			for _, owner := range staleOwners {
+				result.staleRoleFault(owner, name, err.Error())
+			}
 		}
 	}
 
@@ -443,8 +465,12 @@ func builtinRoleMatches(actual *v1alpha1.JenkinsRole) bool {
 	return ok && reflect.DeepEqual(actual.Spec, want.Spec)
 }
 
+// roleDrifted compares only the source annotation key, so an annotation that
+// another writer adds does not cause an update on each pass.
 func roleDrifted(actual, desired *v1alpha1.JenkinsRole) bool {
-	return !reflect.DeepEqual(actual.Labels, desired.Labels) || !reflect.DeepEqual(actual.Spec, desired.Spec)
+	return !reflect.DeepEqual(actual.Labels, desired.Labels) ||
+		actual.Annotations[rbac.AnnotationFederatedRoles] != desired.Annotations[rbac.AnnotationFederatedRoles] ||
+		!reflect.DeepEqual(actual.Spec, desired.Spec)
 }
 
 // bindingDrifted compares only the owner annotation key, so an annotation that
@@ -487,6 +513,40 @@ func (idx staleOwnerIndex) ownersOf(child *v1alpha1.JenkinsRoleBinding) []string
 	listed, annotated := child.Annotations[rbac.AnnotationFederatedBindings]
 	if !annotated {
 		return idx.byRoleRef[child.Labels[rbac.LabelFederatedFrom]]
+	}
+	var owners []string
+	for _, name := range strings.Split(listed, ",") {
+		if idx.names[name] {
+			owners = append(owners, name)
+		}
+	}
+	return owners
+}
+
+// staleRoleOwnerIndex finds the core VarroaRoles that own a stale federated
+// JenkinsRole. It holds only the VarroaRoles of the pass snapshot, so a
+// deleted VarroaRole owns nothing and its stale copy gets only a warning.
+type staleRoleOwnerIndex struct {
+	names map[string]bool
+}
+
+func newStaleRoleOwnerIndex(varroaRoles map[string]*v1alpha1.VarroaRole) staleRoleOwnerIndex {
+	idx := staleRoleOwnerIndex{names: make(map[string]bool, len(varroaRoles))}
+	for name := range varroaRoles {
+		idx.names[name] = true
+	}
+	return idx
+}
+
+// ownersOf reads the source annotation. A child with no annotation falls back
+// to the VarroaRole of its label.
+func (idx staleRoleOwnerIndex) ownersOf(child *v1alpha1.JenkinsRole) []string {
+	listed, annotated := child.Annotations[rbac.AnnotationFederatedRoles]
+	if !annotated {
+		if label := child.Labels[rbac.LabelFederatedFrom]; idx.names[label] {
+			return []string{label}
+		}
+		return nil
 	}
 	var owners []string
 	for _, name := range strings.Split(listed, ",") {

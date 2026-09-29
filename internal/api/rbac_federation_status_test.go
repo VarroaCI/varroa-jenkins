@@ -26,6 +26,9 @@ func statusFederationReconciler(t *testing.T, clusters []bus.ClusterInfo) (*RBAC
 	for _, obj := range reconciler.bindings.(*fakeFederationStore).items {
 		crdstore.MustSeed(store, obj.(*v1alpha1.VarroaRoleBinding).DeepCopy())
 	}
+	for _, obj := range reconciler.roles.(*fakeFederationStore).items {
+		crdstore.MustSeed(store, obj.(*v1alpha1.VarroaRole).DeepCopy())
+	}
 	reconciler.store = store
 	reconciler.now = func() time.Time { return federationTestNow }
 	return reconciler, brood, store
@@ -329,13 +332,16 @@ func TestFederationStatusEqualIgnoresEntryOrder(t *testing.T) {
 	ts := metav1.NewTime(federationTestNow)
 	a := v1alpha1.BindingFederationStatus{Cluster: "a", State: v1alpha1.BindingFederated, LastTransitionTime: ts}
 	b := v1alpha1.BindingFederationStatus{Cluster: "b", State: v1alpha1.BindingFailed, Reason: "HiveUnavailable", LastTransitionTime: ts}
-	x := v1alpha1.VarroaRoleBindingStatus{ObservedGeneration: 1, Federation: []v1alpha1.BindingFederationStatus{a, b}}
-	y := v1alpha1.VarroaRoleBindingStatus{ObservedGeneration: 1, Federation: []v1alpha1.BindingFederationStatus{b, a}}
-	if !statusEqual(x, y) {
+	x := []v1alpha1.BindingFederationStatus{a, b}
+	y := []v1alpha1.BindingFederationStatus{b, a}
+	if !statusEqual(1, x, 1, y) {
 		t.Fatalf("statusEqual depends on entry order")
 	}
-	y.Federation[0].State = v1alpha1.BindingFederated
-	if statusEqual(x, y) {
+	if statusEqual(1, x, 2, y) {
+		t.Fatalf("statusEqual missed a generation change")
+	}
+	y[0].State = v1alpha1.BindingFederated
+	if statusEqual(1, x, 1, y) {
 		t.Fatalf("statusEqual missed a state change")
 	}
 }

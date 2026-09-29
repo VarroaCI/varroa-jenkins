@@ -79,7 +79,57 @@ spec:
                   The referenced JenkinsRole MUST be RoleType=Global.
                 type: string
             type: object
+          status:
+            description: |-
+              Status reports each hive where the delete of a stale federated
+              JenkinsRole failed. Only the core BFF federation pass writes it.
+            properties:
+              federation:
+                description: |-
+                  Federation holds one entry for each hive where the delete of a stale
+                  federated JenkinsRole failed. A hive with no fault has no entry.
+                items:
+                  description: BindingFederationStatus is the federation outcome of
+                    a binding on one hive.
+                  properties:
+                    cluster:
+                      description: Cluster is the hive cluster name.
+                      type: string
+                    lastTransitionTime:
+                      description: LastTransitionTime is the time the state, reason,
+                        or message last changed.
+                      format: date-time
+                      type: string
+                    message:
+                      description: Message is the human-readable detail for the state.
+                      type: string
+                    reason:
+                      description: Reason is a CamelCase code for the state.
+                      type: string
+                    state:
+                      description: State is federated, skipped, or failed.
+                      enum:
+                      - federated
+                      - skipped
+                      - failed
+                      type: string
+                  required:
+                  - cluster
+                  - lastTransitionTime
+                  - state
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - cluster
+                x-kubernetes-list-type: map
+              observedGeneration:
+                description: ObservedGeneration is the spec generation the federation
+                  entries describe.
+                format: int64
+                type: integer
+            type: object
         type: object
     served: true
     storage: true
-    subresources: {}
+    subresources:
+      status: {}

@@ -260,12 +260,14 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   the whole loaded `scope` object and rebuilds it on submit by spreading that
   value, so a dimension the form does not edit (such as
   `controllerSelector.matchExpressions`) survives an edit.
-- **`src/components/FederationStatus.tsx`** renders a `VarroaRoleBinding`'s
-  `status.federation`: `FederationSummary` (the Role Bindings list column,
-  the non-zero hive count per state, or `Not reported`) and
-  `FederationStatusTable` (the read-only per-hive table on the edit page).
-  Both render the reported entries only. `RoleBindingForm.tsx` never sends
-  `status` on a submit.
+- **`src/components/FederationStatus.tsx`** renders any status with a
+  `federation` list (`VarroaRoleBinding` or `VarroaRole`):
+  `FederationSummary` (the Role Bindings list column, the non-zero hive count
+  per state, or `Not reported`) and `FederationStatusTable` (the read-only
+  per-hive table on the binding edit page). Both render the reported entries
+  only. `RoleBindingForm.tsx` never sends `status` on a submit. `Roles.tsx`
+  renders `FederationSummary` next to a role name only when the role has at
+  least one entry, because a role status holds faults only.
 - **Pipeline templates** — `CatalogItemDetail.tsx` renders a
   `pipeline-template` item's `PipelineTemplateCard`: the template's
   parameters/uiSchema form (`VarroaForm`, `src/components/specform/

@@ -266,6 +266,21 @@ func TestApplyStatusClears_VarroaRoleBindingClearsFederation(t *testing.T) {
 	}
 }
 
+// TestApplyStatusClears_VarroaRoleClearsFederation asserts a role status
+// patch with no federation entries deletes the stored list.
+func TestApplyStatusClears_VarroaRoleClearsFederation(t *testing.T) {
+	gvr, err := GVRFor[v1alpha1.VarroaRole]()
+	if err != nil {
+		t.Fatalf("GVRFor[VarroaRole]: %v", err)
+	}
+	statusMap := map[string]any{"observedGeneration": float64(2)}
+	ApplyStatusClears(gvr, statusMap)
+	value, sent := statusMap["federation"]
+	if !sent || value != nil {
+		t.Fatalf("statusMap = %#v, want federation sent as null", statusMap)
+	}
+}
+
 // TestApplyStatusClears_TeamClearsThePendingPurgeKeys asserts a Team status
 // patch that still carries a pipelines object clears the three pendingPurge
 // keys inside it.

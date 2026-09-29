@@ -24,6 +24,7 @@ const (
 	reasonJenkinsRoleBindingCollision   = "JenkinsRoleBindingCollision"
 	reasonJenkinsRoleBindingWriteFailed = "JenkinsRoleBindingWriteFailed"
 	reasonStaleBindingDeleteFailed      = "StaleJenkinsRoleBindingDeleteFailed"
+	reasonStaleRoleDeleteFailed         = "StaleJenkinsRoleDeleteFailed"
 )
 
 type federationFault struct {
@@ -36,31 +37,49 @@ type federationFault struct {
 // faults key on the desired child name. The first fault for a name wins, so
 // the result does not depend on the order of later writes. staleFaults keys
 // on the source binding name, because a stale child is no longer desired.
+// staleRoleFaults keys on the source VarroaRole name for the same reason.
 type hiveResult struct {
-	listFault     *federationFault
-	roleFaults    map[string]federationFault
-	bindingFaults map[string]federationFault
-	staleFaults   map[string]staleFault
+	listFault       *federationFault
+	roleFaults      map[string]federationFault
+	bindingFaults   map[string]federationFault
+	staleFaults     map[string]staleFault
+	staleRoleFaults map[string]staleFault
 }
 
-// staleFault is a failed delete of a stale binding child.
+// staleFault is a failed delete of a stale binding child or role child.
 type staleFault struct {
 	child string
 	err   string
 }
 
 func newHiveResult() *hiveResult {
-	return &hiveResult{roleFaults: map[string]federationFault{}, bindingFaults: map[string]federationFault{}, staleFaults: map[string]staleFault{}}
+	return &hiveResult{
+		roleFaults:      map[string]federationFault{},
+		bindingFaults:   map[string]federationFault{},
+		staleFaults:     map[string]staleFault{},
+		staleRoleFaults: map[string]staleFault{},
+	}
 }
 
 // staleFault keeps the lexically first child for each owner. The pass visits
 // the stale children in map order, and the message must stay the same across
 // passes.
 func (h *hiveResult) staleFault(owner, child, err string) {
-	if old, ok := h.staleFaults[owner]; ok && old.child <= child {
+	keepFirstStaleChild(h.staleFaults, owner, child, err)
+}
+
+// staleRoleFault records a failed delete of a stale role child under its
+// source VarroaRole. It keeps the lexically first child for each owner, like
+// staleFault.
+func (h *hiveResult) staleRoleFault(owner, child, err string) {
+	keepFirstStaleChild(h.staleRoleFaults, owner, child, err)
+}
+
+func keepFirstStaleChild(faults map[string]staleFault, owner, child, err string) {
+	if old, ok := faults[owner]; ok && old.child <= child {
 		return
 	}
-	h.staleFaults[owner] = staleFault{child: child, err: err}
+	faults[owner] = staleFault{child: child, err: err}
 }
 
 func (h *hiveResult) roleFault(name, reason, message string) {
@@ -149,7 +168,7 @@ func (r *RBACFederationReconciler) writeStatuses(ctx context.Context, sources []
 			return buildBindingStatus(binding.Name, binding.Generation, clusters, outcome, results, stored, now)
 		}
 		next := build(binding.Status)
-		if statusEqual(binding.Status, next) {
+		if statusEqual(binding.Status.ObservedGeneration, binding.Status.Federation, next.ObservedGeneration, next.Federation) {
 			continue
 		}
 		// The informer copy can lag an earlier write of this pass loop. Read
@@ -163,7 +182,7 @@ func (r *RBACFederationReconciler) writeStatuses(ctx context.Context, sources []
 			continue
 		}
 		next = build(live.Status)
-		if statusEqual(live.Status, next) {
+		if statusEqual(live.Status.ObservedGeneration, live.Status.Federation, next.ObservedGeneration, next.Federation) {
 			continue
 		}
 		if err := crdstore.PatchStatus[v1alpha1.VarroaRoleBinding](ctx, r.store, binding.Name, "", next); err != nil && !apierrors.IsNotFound(err) {
@@ -183,25 +202,123 @@ func buildBindingStatus(name string, generation int64, clusters []string, outcom
 	next := v1alpha1.VarroaRoleBindingStatus{ObservedGeneration: generation}
 	for _, cluster := range clusters {
 		entry := federationEntry(cluster, name, outcome, results[cluster])
-		entry.LastTransitionTime = now
-		if old, ok := previous[cluster]; ok && old.State == entry.State && old.Reason == entry.Reason && old.Message == entry.Message {
-			entry.LastTransitionTime = old.LastTransitionTime
-		}
-		next.Federation = append(next.Federation, entry)
+		next.Federation = append(next.Federation, withTransitionTime(entry, previous, now))
 	}
 	return next
 }
 
+// withTransitionTime keeps the stored lastTransitionTime of the entry's
+// cluster while the state, reason, and message stay the same.
+func withTransitionTime(entry v1alpha1.BindingFederationStatus, previous map[string]v1alpha1.BindingFederationStatus, now metav1.Time) v1alpha1.BindingFederationStatus {
+	entry.LastTransitionTime = now
+	if old, ok := previous[entry.Cluster]; ok && old.State == entry.State && old.Reason == entry.Reason && old.Message == entry.Message {
+		entry.LastTransitionTime = old.LastTransitionTime
+	}
+	return entry
+}
+
+// writeRoleStatuses patches the status of every VarroaRole in the pass
+// snapshot. A role status holds an entry only for a hive where the delete of
+// a stale role child failed. A role with no stored entry and no fault gets no
+// write, so a healthy fleet never writes a VarroaRole status. Every write is
+// an informer update that enqueues another pass, so the rule of writeStatuses
+// applies: write only a status that differs from the stored one.
+func (r *RBACFederationReconciler) writeRoleStatuses(ctx context.Context, varroaRoles map[string]*v1alpha1.VarroaRole, results map[string]*hiveResult, warnings *[]string) {
+	if r.store == nil {
+		return
+	}
+	clusters := make([]string, 0, len(results))
+	for cluster := range results {
+		clusters = append(clusters, cluster)
+	}
+	sort.Strings(clusters)
+	names := make([]string, 0, len(varroaRoles))
+	for name := range varroaRoles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	now := metav1.NewTime(r.now().UTC().Truncate(time.Second))
+
+	for _, name := range names {
+		role := varroaRoles[name]
+		build := func(stored v1alpha1.VarroaRoleStatus) v1alpha1.VarroaRoleStatus {
+			return buildRoleStatus(name, role.Generation, clusters, results, stored, now)
+		}
+		next := build(role.Status)
+		if roleStatusSettled(role.Status, next) {
+			continue
+		}
+		// The informer copy can lag an earlier write. Read the stored status
+		// before a write, as writeStatuses does.
+		live, err := crdstore.Get[v1alpha1.VarroaRole](ctx, r.store, name, "")
+		if err != nil {
+			if !apierrors.IsNotFound(err) {
+				*warnings = append(*warnings, fmt.Sprintf("read status varroarole %s: %v", name, err))
+			}
+			continue
+		}
+		next = build(live.Status)
+		if roleStatusSettled(live.Status, next) {
+			continue
+		}
+		if err := crdstore.PatchStatus[v1alpha1.VarroaRole](ctx, r.store, name, "", next); err != nil && !apierrors.IsNotFound(err) {
+			*warnings = append(*warnings, fmt.Sprintf("status varroarole %s: %v", name, err))
+		}
+	}
+}
+
+// buildRoleStatus builds the status of one VarroaRole for the visited hives.
+// A hive whose list failed keeps its stored entry, because the pass did not
+// see its stale children. A hive that is not in clusters has left the fleet
+// and loses its entry.
+func buildRoleStatus(name string, generation int64, clusters []string, results map[string]*hiveResult, stored v1alpha1.VarroaRoleStatus, now metav1.Time) v1alpha1.VarroaRoleStatus {
+	previous := make(map[string]v1alpha1.BindingFederationStatus, len(stored.Federation))
+	for _, e := range stored.Federation {
+		previous[e.Cluster] = e
+	}
+	next := v1alpha1.VarroaRoleStatus{ObservedGeneration: generation}
+	for _, cluster := range clusters {
+		result := results[cluster]
+		if result.listFault != nil {
+			if old, ok := previous[cluster]; ok {
+				next.Federation = append(next.Federation, old)
+			}
+			continue
+		}
+		fault, ok := result.staleRoleFaults[name]
+		if !ok {
+			continue
+		}
+		entry := v1alpha1.BindingFederationStatus{
+			Cluster: cluster,
+			State:   v1alpha1.BindingFailed,
+			Reason:  reasonStaleRoleDeleteFailed,
+			Message: fmt.Sprintf("delete of earlier copy JenkinsRole %s failed: %s", fault.child, fault.err),
+		}
+		next.Federation = append(next.Federation, withTransitionTime(entry, previous, now))
+	}
+	return next
+}
+
+// roleStatusSettled reports that a role status needs no write: it equals the
+// stored status, or neither holds an entry.
+func roleStatusSettled(stored, next v1alpha1.VarroaRoleStatus) bool {
+	if len(stored.Federation) == 0 && len(next.Federation) == 0 {
+		return true
+	}
+	return statusEqual(stored.ObservedGeneration, stored.Federation, next.ObservedGeneration, next.Federation)
+}
+
 // statusEqual compares by cluster, so the stored entry order does not matter.
-func statusEqual(a, b v1alpha1.VarroaRoleBindingStatus) bool {
-	if a.ObservedGeneration != b.ObservedGeneration || len(a.Federation) != len(b.Federation) {
+func statusEqual(aGeneration int64, a []v1alpha1.BindingFederationStatus, bGeneration int64, b []v1alpha1.BindingFederationStatus) bool {
+	if aGeneration != bGeneration || len(a) != len(b) {
 		return false
 	}
-	byCluster := make(map[string]v1alpha1.BindingFederationStatus, len(b.Federation))
-	for _, e := range b.Federation {
+	byCluster := make(map[string]v1alpha1.BindingFederationStatus, len(b))
+	for _, e := range b {
 		byCluster[e.Cluster] = e
 	}
-	for _, x := range a.Federation {
+	for _, x := range a {
 		y, ok := byCluster[x.Cluster]
 		if !ok || x.State != y.State || x.Reason != y.Reason || x.Message != y.Message || !x.LastTransitionTime.Equal(&y.LastTransitionTime) {
 			return false

@@ -137,6 +137,48 @@ page of a binding shows one row per hive. The MCP `get_varroa_role_binding`
 tool returns the status, and `list_varroa_role_bindings` returns the
 `hivesFederated`, `hivesSkipped`, and `hivesFailed` counts.
 
+### Read a stale role copy status
+
+The BFF deletes a federated `JenkinsRole` copy on a hive when no binding needs
+it. A role copy becomes stale in three cases:
+
+- The `jenkinsRoleRef` of a `VarroaRole` changes.
+- The `VarroaRole` is deleted.
+- Every binding of the role goes away, loses its last subject, or gets a
+  `tenants` scope.
+
+Each role copy carries the annotation `varroa.dev/federated-roles`. It names
+each core `VarroaRole` that projects onto the copy through a projected
+binding. When the hive refuses the delete, each owner reports the fault in its
+own `status.federation`. `status.observedGeneration` is set only when the BFF
+writes the role status, so it is not a health signal:
+
+```bash
+kubectl get varroarole team-admin -o jsonpath='{.status.federation}'
+```
+
+| `state` | `reason` | Meaning |
+|---|---|---|
+| `failed` | `StaleJenkinsRoleDeleteFailed` | The hive refused the delete of an earlier `JenkinsRole` copy. |
+
+A role status holds an entry only for a hive with a fault. A healthy role has
+no entries. The message names the copy and the hive error. A copy with no
+annotation reports on the `VarroaRole` that its `varroa.dev/federated-from`
+label names. The BFF retries the delete on each pass. The BFF removes the entry
+when the delete succeeds. A hive that the BFF cannot list keeps its entry. A
+hive that leaves the fleet loses its entry.
+
+A stale role copy grants nothing while no `JenkinsRoleBinding` names it. But a
+later binding that names the same role gets the earlier permission set. When
+the fault remains, delete the copy on the hive.
+
+When the `VarroaRole` is deleted, no status changes. The BFF log shows
+`rbac federation warning` with the text
+`cluster <name>: delete orphaned JenkinsRole <copy>`.
+
+The dashboard Roles page shows a count of failed hives next to a role with
+entries.
+
 ## Troubleshoot
 
 | Symptom | Check |

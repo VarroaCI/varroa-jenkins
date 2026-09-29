@@ -1,8 +1,11 @@
-import type { BindingFederationState, VarroaRoleBindingStatus } from "../types";
+import type { BindingFederationState, BindingFederationStatus } from "../types";
 import { age } from "./activityTimeline.util";
 import styles from "./FederationStatus.module.css";
 
 const STATE_ORDER: BindingFederationState[] = ["failed", "skipped", "federated"];
+
+/** A status that holds per-hive federation entries: a binding or a role status. */
+type FederationHolder = { federation?: BindingFederationStatus[] };
 
 const STATE_CLASS: Record<BindingFederationState, string> = {
   federated: styles.federated,
@@ -10,8 +13,8 @@ const STATE_CLASS: Record<BindingFederationState, string> = {
   failed: styles.failed,
 };
 
-/** Counts the hive entries of a binding status by state. */
-export function federationCounts(status?: VarroaRoleBindingStatus): Record<BindingFederationState, number> {
+/** Counts the hive entries of a status by state. */
+export function federationCounts(status?: FederationHolder): Record<BindingFederationState, number> {
   const counts: Record<BindingFederationState, number> = { federated: 0, skipped: 0, failed: 0 };
   for (const entry of status?.federation ?? []) {
     if (entry.state in counts) counts[entry.state] += 1;
@@ -23,7 +26,7 @@ export function federationCounts(status?: VarroaRoleBindingStatus): Record<Bindi
  * The one-line federation summary of a binding: the non-zero hive count of
  * each state, failed first. A binding with no entries reads "Not reported".
  */
-export function FederationSummary({ status }: { status?: VarroaRoleBindingStatus }) {
+export function FederationSummary({ status }: { status?: FederationHolder }) {
   const counts = federationCounts(status);
   const parts = STATE_ORDER.filter((state) => counts[state] > 0);
   if (parts.length === 0) {
@@ -41,7 +44,7 @@ export function FederationSummary({ status }: { status?: VarroaRoleBindingStatus
 }
 
 /** The read-only per-hive federation table of one binding. */
-export function FederationStatusTable({ status }: { status?: VarroaRoleBindingStatus }) {
+export function FederationStatusTable({ status }: { status?: FederationHolder }) {
   const entries = status?.federation ?? [];
   return (
     <div className={styles.block}>

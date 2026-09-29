@@ -110,7 +110,12 @@ with what this package generates.
   `varroa.dev/federated-bindings` (`AnnotationFederatedBindings`): the sorted,
   comma-separated names of its source bindings. It is an annotation because
   one child has several owners and a label value holds 63 characters. The BFF
-  reads it to report a failed delete of a stale child. The BFF status write reads these outcomes, so a new skip
+  reads it to report a failed delete of a stale child. Each projected
+  `JenkinsRole` carries the annotation `varroa.dev/federated-roles`
+  (`AnnotationFederatedRoles`): the sorted, comma-separated names of every
+  `VarroaRole` with at least one projected binding onto it. The label names
+  only the first of them. The BFF reads it to report a failed delete of a
+  stale role copy on each owner `VarroaRole`. The BFF status write reads these outcomes, so a new skip
   branch needs a new reason code.
 - **`Backend` interface** (`resolver.go:79`) — abstraction over YAML
   rendering; `RoleStrategyBackend` is the only implementation today. Swap

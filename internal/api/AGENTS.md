@@ -189,7 +189,22 @@ federation, activity persistence, and SSE fanout.
   only a status that differs from the stored one, and `lastTransitionTime`
   moves only on a change of state, reason, or message: every status write is
   an informer update that enqueues another pass, so an unconditional write
-  never settles. A failed cluster list writes no status. This is BFF-owned cross-cluster federation —
+  never settles. A failed cluster list writes no status.
+  The pass reads one `VarroaRole` snapshot (`sourceRoles`) for the
+  projection, the role owner lookup, and the role status write. A failed
+  delete of a stale role child records a `StaleJenkinsRoleDeleteFailed` fault
+  in `hiveResult.staleRoleFaults`, keyed by `VarroaRole` name.
+  `staleRoleOwnerIndex` reads the child's `varroa.dev/federated-roles`
+  annotation, restricted to the snapshot, and falls back to the
+  `varroa.dev/federated-from` label when that role is in the snapshot. A
+  child with no owner gets only the warning
+  `cluster <c>: delete orphaned JenkinsRole <name>`. `roleDrifted` compares
+  that annotation key. `writeRoleStatuses` writes `VarroaRole.status.federation`
+  with entries only for faults: a hive with no fault has no entry, a hive
+  whose list failed keeps its stored entry, and a departed hive loses its
+  entry. A role with no stored entry and no fault gets no write. An empty
+  list clears through the `crdstore` `clearStatusFields` rule for
+  `varroaroles`. This is BFF-owned cross-cluster federation —
   distinct from `role_controller.go`'s single-cluster built-in-role
   reconciliation in `internal/controller`.
 - Activity (`internal/api/activity/`): there is no in-memory ring and no retention

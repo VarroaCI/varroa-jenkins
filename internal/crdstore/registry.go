@@ -125,6 +125,9 @@ var clearStatusFields = map[schema.GroupVersionResource]map[string]any{
 	// federation is omitempty. A binding whose last hive leaves membership
 	// must report an empty list, or a merge patch leaves the stale entries.
 	varroaRoleBindingGVR: {"federation": nil},
+	// federation is omitempty. A role whose last stale-delete fault clears
+	// must report an empty list, or a merge patch leaves the stale entries.
+	varroaRoleGVR: {"federation": nil},
 }
 
 // NestedClear is a clearStatusFields value for a status object that holds

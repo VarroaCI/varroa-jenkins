@@ -24,6 +24,12 @@ const LabelFederatedFrom = "varroa.dev/federated-from"
 // characters, so the names go in an annotation.
 const AnnotationFederatedBindings = "varroa.dev/federated-bindings"
 
+// AnnotationFederatedRoles names the source VarroaRoles of a federated
+// JenkinsRole: sorted and comma-separated. It names only the VarroaRoles that
+// have at least one projected binding. Several VarroaRoles can share one
+// jenkinsRoleRef, and the label names only one of them.
+const AnnotationFederatedRoles = "varroa.dev/federated-roles"
+
 // Skip reason codes a BindingOutcome carries. Each one applies to every hive,
 // because the projection is the same for every hive.
 const (
@@ -57,6 +63,7 @@ func DesiredFederatedCRs(
 	roleByName := make(map[string]*v1alpha1.JenkinsRole)
 	bindingByName := make(map[string]bool)
 	ownersByChild := make(map[string][]string)
+	sourcesByRole := make(map[string]map[string]bool)
 	outcomes = make(map[string]BindingOutcome)
 	skip := func(vrb *v1alpha1.VarroaRoleBinding, reason, message string) {
 		outcomes[vrb.Name] = BindingOutcome{SkipReason: reason, SkipMessage: message}
@@ -144,6 +151,11 @@ func DesiredFederatedCRs(
 			existing.Labels[LabelFederatedFrom] = vr.Name
 		}
 
+		if sourcesByRole[roleName] == nil {
+			sourcesByRole[roleName] = map[string]bool{}
+		}
+		sourcesByRole[roleName][vr.Name] = true
+
 		childName := fedBindingName(vr, vrb)
 		outcomes[vrb.Name] = BindingOutcome{RoleName: roleName, BindingName: childName}
 		ownersByChild[childName] = append(ownersByChild[childName], vrb.Name)
@@ -174,7 +186,14 @@ func DesiredFederatedCRs(
 	}
 	sort.Strings(roleNames)
 	for _, name := range roleNames {
-		roles = append(roles, roleByName[name])
+		sources := make([]string, 0, len(sourcesByRole[name]))
+		for source := range sourcesByRole[name] {
+			sources = append(sources, source)
+		}
+		sort.Strings(sources)
+		role := roleByName[name]
+		role.Annotations = map[string]string{AnnotationFederatedRoles: strings.Join(sources, ",")}
+		roles = append(roles, role)
 	}
 	for _, binding := range bindings {
 		owners := ownersByChild[binding.Name]

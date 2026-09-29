@@ -48,7 +48,13 @@ type fakeConfigBrood struct {
 	// failBindingDelete makes DeleteJenkinsRoleBinding answer an internal
 	// error for the named binding and keep the object.
 	failBindingDelete map[string]bool
-	ops               []string
+	// failRoleDelete makes DeleteJenkinsRole answer an internal error for
+	// the named role and keep the object.
+	failRoleDelete map[string]bool
+	// goneRoleDelete makes DeleteJenkinsRole answer not found for the named
+	// role, as the API server does after another writer deleted it.
+	goneRoleDelete map[string]bool
+	ops            []string
 }
 
 func newFakeConfigBrood() *fakeConfigBrood {
@@ -116,6 +122,13 @@ func (f *fakeConfigBrood) UpdateJenkinsRole(_ context.Context, cluster, name str
 
 func (f *fakeConfigBrood) DeleteJenkinsRole(_ context.Context, cluster, name string) error {
 	f.ensure(cluster)
+	if f.failRoleDelete[name] {
+		return &BroodError{Code: bus.CodeInternal, Msg: "etcd timeout"}
+	}
+	if f.goneRoleDelete[name] {
+		delete(f.roles[cluster], name)
+		return &BroodError{Code: bus.CodeNotFound, Msg: "not found"}
+	}
 	delete(f.roles[cluster], name)
 	f.ops = append(f.ops, "delete-role:"+cluster+":"+name)
 	return nil
@@ -463,7 +476,7 @@ func testFederationReconciler(clusters []bus.ClusterInfo) (*RBACFederationReconc
 }
 
 func (r *RBACFederationReconciler) desiredBindingsForTest() []*v1alpha1.JenkinsRoleBinding {
-	_, bindings, _, _ := r.desired(r.sourceBindings())
+	_, bindings, _, _ := r.desired(r.sourceBindings(), r.sourceRoles())
 	return bindings
 }
 
@@ -479,6 +492,47 @@ func TestRoleDriftedIgnoresResourceVersion(t *testing.T) {
 	actual.ResourceVersion = "123"
 	if !reflect.DeepEqual(actual.Spec, desired.Spec) || roleDrifted(actual, desired) {
 		t.Fatalf("resourceVersion should not cause drift")
+	}
+}
+
+// roleDrifted sees a change of the source annotation and ignores an
+// annotation that another writer adds.
+func TestRoleDriftedComparesSourceAnnotation(t *testing.T) {
+	desired := &v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{
+		Name:        "role",
+		Labels:      map[string]string{rbac.LabelFederatedFrom: "vr"},
+		Annotations: map[string]string{rbac.AnnotationFederatedRoles: "vr,vr-two"},
+	}, Spec: v1alpha1.JenkinsRoleSpec{RoleType: "Global"}}
+	actual := desired.DeepCopy()
+	actual.Annotations["example.com/other"] = "x"
+	if roleDrifted(actual, desired) {
+		t.Fatalf("an unrelated annotation caused drift")
+	}
+	actual.Annotations[rbac.AnnotationFederatedRoles] = "vr"
+	if !roleDrifted(actual, desired) {
+		t.Fatalf("a changed source annotation caused no drift")
+	}
+}
+
+// An existing role copy with no source annotation gets it on one update, and
+// the next pass writes nothing.
+func TestReconcileAnnotatesExistingRoleOnce(t *testing.T) {
+	r, brood := testFederationReconciler([]bus.ClusterInfo{{Name: "dev-cluster"}})
+	r.Reconcile(context.Background())
+	delete(brood.roles["dev-cluster"]["jenkins-admin"].Annotations, rbac.AnnotationFederatedRoles)
+	brood.ops = nil
+
+	r.Reconcile(context.Background())
+	if len(brood.ops) != 1 || brood.ops[0] != "update-role:dev-cluster:jenkins-admin" {
+		t.Fatalf("ops = %v, want one role update", brood.ops)
+	}
+	if got := brood.roles["dev-cluster"]["jenkins-admin"].Annotations[rbac.AnnotationFederatedRoles]; got != "team-admin" {
+		t.Fatalf("role annotation = %q, want team-admin", got)
+	}
+	brood.ops = nil
+	r.Reconcile(context.Background())
+	if len(brood.ops) != 0 {
+		t.Fatalf("ops = %v, want none after the annotation settles", brood.ops)
 	}
 }
 

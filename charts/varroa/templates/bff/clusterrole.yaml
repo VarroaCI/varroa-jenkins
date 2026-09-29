@@ -15,9 +15,10 @@ rules:
   - apiGroups: ["varroa.dev"]
     resources: ["varroaroles", "varroarolebindings", "jenkinsroles", "jenkinsrolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # The RBAC federation pass reports each binding's per-hive outcome.
+  # The RBAC federation pass reports each binding's per-hive outcome, and a
+  # failed delete of a stale federated JenkinsRole on each owner VarroaRole.
   - apiGroups: ["varroa.dev"]
-    resources: ["varroarolebindings/status"]
+    resources: ["varroarolebindings/status", "varroaroles/status"]
     verbs: ["get", "patch", "update"]
   - apiGroups: ["varroa.dev"]
     resources: ["teams", "teams/status"]
