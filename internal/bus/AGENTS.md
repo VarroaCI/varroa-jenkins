@@ -41,7 +41,10 @@ control plane's async transport — no other package talks to NATS directly.
   stream and `webhook.<cluster>.>` consumer filter, no new stream or
   consumer needed),
   `wake.<cluster>.<ns>.<ctrl>` (hibernation wake), `operator.<cluster>.*`
-  (BFF→operator remote-cluster RPCs, see `config.go`),
+  (BFF→operator remote-cluster RPCs, see `config.go`; this includes
+  `operator.<cluster>.cellpools.{list,get,scale}`, where `scale` carries
+  `CellPoolScaleRequest` — the pool name and the four dials only — and the
+  member operator runs the read-modify-write on its own apiserver),
   `builds.<cluster>.<ns>.<cell>` (build event ingest into the
   `varroa_builds` stream), `varroa.ledger.claim` (core NATS request-reply
   build-number claim, queue group `recorder`),

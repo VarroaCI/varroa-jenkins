@@ -12,7 +12,6 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
-	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
 // defaultCellMaxTenants is the last tier of the effective tenant cap. It
@@ -74,49 +73,59 @@ type cellPresentation struct {
 // request touches. The chain is first match, never a minimum: the cell's
 // own spec.cell.maxTenants when that value is not zero, else the owning
 // pool's maxTenantsPerCell, else the chart value the environment carries,
-// else the compiled default. The resolver lists the CellPools once, on the
-// first pool-labelled cell, so a listing of many cells costs one read. A
-// failed list drops the pool tier for the request and is logged once.
+// else the compiled default. The pool tier reads the pools of the cell's
+// own cluster, because a pool name is unique inside one cluster only. The
+// resolver keeps one pool map for each cluster and reads a cluster's pools
+// on the first cell of that cluster that needs the pool tier, so a listing
+// of many cells costs one read for each cluster. A failed read drops the
+// pool tier of that cluster for the request and is logged once.
 type cellCapResolver struct {
-	s      *Server
-	ctx    context.Context
-	loaded bool
-	pools  map[string]int32
+	s     *Server
+	ctx   context.Context
+	pools map[string]map[string]int32
 }
 
 // cellCaps starts a resolver bound to one request context.
 func (s *Server) cellCaps(ctx context.Context) *cellCapResolver {
-	return &cellCapResolver{s: s, ctx: ctx}
+	return &cellCapResolver{s: s, ctx: ctx, pools: map[string]map[string]int32{}}
 }
 
-// resolveCellCap resolves the cap of one cell. A path that touches many
-// cells holds one cellCaps resolver instead.
-func (s *Server) resolveCellCap(ctx context.Context, cr *v1alpha1.Controller) int32 {
-	return s.cellCaps(ctx).resolve(cr)
+// resolveCellCap resolves the cap of one cell of cluster. A path that
+// touches many cells holds one cellCaps resolver instead.
+func (s *Server) resolveCellCap(ctx context.Context, cluster string, cr *v1alpha1.Controller) int32 {
+	return s.cellCaps(ctx).resolve(cluster, cr)
 }
 
-// poolCap answers the pool's maxTenantsPerCell, or zero when the pool is
-// gone: a cell whose pool no longer exists has no pool tier.
-func (c *cellCapResolver) poolCap(name string) int32 {
-	if !c.loaded {
-		c.loaded = true
-		c.pools = map[string]int32{}
-		if c.s.deps.Store == nil {
-			return 0
+// poolCap answers the maxTenantsPerCell of the named pool on cluster, or
+// zero when the pool is gone: a cell whose pool no longer exists has no
+// pool tier.
+func (c *cellCapResolver) poolCap(cluster, name string) int32 {
+	key := cluster
+	if c.s.isLocalCluster(cluster) {
+		key = ""
+	}
+	byName, loaded := c.pools[key]
+	if !loaded {
+		byName = map[string]int32{}
+		c.pools[key] = byName
+		target := cluster
+		if key == "" {
+			target = c.s.localCluster()
 		}
-		pools, err := crdstore.List[v1alpha1.CellPool](c.ctx, c.s.deps.Store, "", "")
+		pools, err := c.s.cellPoolsOn(c.ctx, target)
 		if err != nil {
-			c.s.deps.Logger.Warn("cell cap: the pool list failed; the pool tier is skipped", "error", err)
+			c.s.deps.Logger.Warn("cell cap: the pool list failed; the pool tier is skipped",
+				"cluster", target, "error", err)
 			return 0
 		}
 		for i := range pools {
-			c.pools[pools[i].Name] = pools[i].Spec.MaxTenantsPerCell
+			byName[pools[i].Name] = pools[i].Spec.MaxTenantsPerCell
 		}
 	}
-	return c.pools[name]
+	return byName[name]
 }
 
-func (c *cellCapResolver) resolve(cr *v1alpha1.Controller) int32 {
+func (c *cellCapResolver) resolve(cluster string, cr *v1alpha1.Controller) int32 {
 	if cr == nil {
 		return c.chartCap()
 	}
@@ -124,7 +133,7 @@ func (c *cellCapResolver) resolve(cr *v1alpha1.Controller) int32 {
 		return cr.Spec.Cell.MaxTenants
 	}
 	if pool := cr.Labels[cells.LabelCellPool]; pool != "" {
-		if n := c.poolCap(pool); n > 0 {
+		if n := c.poolCap(cluster, pool); n > 0 {
 			return n
 		}
 	}

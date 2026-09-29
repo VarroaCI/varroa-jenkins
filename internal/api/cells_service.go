@@ -94,7 +94,7 @@ func (s *Server) fillCellUsagePresentation(row *cellUsageJSON, cr *v1alpha1.Cont
 	row.JenkinsHealth = presentation.JenkinsHealth
 	row.QueueLength = presentation.QueueLength
 	row.QueueLengthAt = presentation.QueueLengthAt
-	row.MaxTenants = caps.resolve(cr)
+	row.MaxTenants = caps.resolve(cluster, cr)
 	row.FreeSlots = cellFreeSlots(row.MaxTenants, cellPlacedTenants(cr))
 	if row.WindowStart.IsZero() {
 		row.WindowStart = time.Now().UTC().Add(-24 * time.Hour)

@@ -5586,8 +5586,11 @@ CellPoolCondition:
 CellPool:
   type: object
   description: Full cell-pool object returned from get and list operations.
-  required: [name, spec, status]
+  required: [cluster, name, spec, status]
   properties:
+    cluster:
+      type: string
+      description: The cluster that holds the pool. A pool name is unique inside one cluster only.
     name:
       type: string
     spec:

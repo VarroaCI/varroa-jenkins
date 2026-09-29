@@ -136,10 +136,13 @@ top-level verb `scale`:
 varroactl get cellpools
 varroactl describe cellpool jenkins-lts
 varroactl scale cellpool jenkins-lts --warm 3 --max-cells 8
+varroactl scale cellpool lts-2-570 --cluster east --warm 2
 ```
 
-`get cellpools` prints `NAME`, `PROFILE`, `WARM`, `PLACED`, `FREE`, and `READY`. `describe` adds
-the tenant list and the `PoolReady` condition. Every cell-pool command refuses `--namespace` and
+`get cellpools` prints `CLUSTER`, `NAME`, `PROFILE`, `WARM`, `PLACED`, `FREE`, and `READY` for
+every cluster. `--cluster` narrows the list. A warning names a cluster that does not answer.
+`describe` adds the cluster, the tenant list, and the `PoolReady` condition. A command on one pool
+uses the core cluster when you give no `--cluster`. Every cell-pool command refuses `--namespace` and
 `--all-namespaces`, because `CellPool` is cluster-scoped.
 
 `scale` sends only the flags you pass, so an unnamed dial keeps its stored value. A call with

@@ -44,7 +44,8 @@ The panel lists one block for each tenant, with the subjects, the pipelines verb
 
 Open `/cells`. The page and its navigation row need cluster-wide `cellpools:read`. A namespace-scoped grant admits neither.
 
-The page renders one block for each cell pool. Each block states:
+The page renders one block for each cell pool of each cluster. The block head names the cluster
+and the pool, for example `east / lts-2-570`. Each block states:
 
 | Value | Meaning |
 |---|---|
@@ -57,13 +58,13 @@ The page renders one block for each cell pool. Each block states:
 
 The warm-cell count and the free-slot count measure different things. Do not add them.
 
-A table under each block lists that pool's cells, and each row links to that cell's Cell tab. Cell, Phase, Age, and Unready since come from the controllers list. Tenants over cap, Queue, Runs 24 h, and Failures 24 h come from the batch cell usage read, one read for each cluster. A cell name is unique inside one cluster only, so the page joins on the cluster, the namespace, and the name. A cell whose cluster answered no read shows **not available**, which is not a count of zero. A pool that owns no cell states the reason.
+A table under each block lists that pool's cells: the cells of the block's cluster whose pool label names the block's pool. Each row links to that cell's Cell tab. Cell, Phase, Age, and Unready since come from the controllers list. Tenants over cap, Queue, Runs 24 h, and Failures 24 h come from the batch cell usage read, one read for each cluster. A cell name is unique inside one cluster only, so the page joins on the cluster, the namespace, and the name. A cell whose cluster answered no read shows **not available**, which is not a count of zero. A pool that owns no cell states the reason.
 
 ## The scale control
 
 Each pool block carries an inline scale control for a caller who holds `cellpools:update`. Every other caller sees no control at all.
 
-The control edits `warm` and `maxCells`. Press **Apply** to write them. The write carries only the dial you changed, so another operator's value is kept, and an Apply with no change sends nothing.
+The control edits `warm` and `maxCells`. Press **Apply** to write them. The write goes to the pool on the block's own cluster, and the operator of that cluster applies it. The write carries only the dial you changed, so another operator's value is kept, and an Apply with no change sends nothing.
 
 A new `warm` below the reported warm-cell count drains free cells, and the control asks for a confirm that names both numbers. A drain never touches a cell that holds a tenant.
 
@@ -86,6 +87,7 @@ The operator sets `status.cell.evacuate` when a cell stays unready past twice it
 | Cluster-wide `cellpools:read` | The `/cells` route and its navigation row do not render |
 | `controllers:read` on a cell | That cell has no row, and the table says it lists readable cells only |
 | The build record store | The batch read answers `503`, and the table drops its four usage columns |
+| An answer from a member cluster | The page names that cluster and the error, and shows no block for its pools |
 | Cluster-wide `rolebindings:read` | The Permissions panel names the missing verb and lists no grant |
 
 The page never states how many cells a caller cannot see.

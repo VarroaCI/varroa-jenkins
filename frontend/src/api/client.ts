@@ -1297,17 +1297,26 @@ export function abortRunInput(runId: string, inputId: string): Promise<CancelRun
   });
 }
 
-/**
- * Lists every cell pool. The surface needs the cellpools:read verb on a
- * cluster-wide binding, because CellPool is cluster scoped.
- */
-export function getCellPools(): Promise<CellPoolListResponse> {
-  return bffFetch<CellPoolListResponse>("/cellpools");
+/** clusterQuery builds the optional cluster query string. */
+function clusterQuery(cluster?: string): string {
+  return cluster ? `?cluster=${encodeURIComponent(cluster)}` : "";
 }
 
-/** Reads one cell pool's spec and status. */
-export function getCellPool(name: string): Promise<CellPool> {
-  return bffFetch<CellPool>(`/cellpools/${enc(name)}`);
+/**
+ * Lists the cell pools of every cluster, or of one cluster. The surface
+ * needs the cellpools:read verb on a cluster-wide binding, because
+ * CellPool is cluster scoped.
+ */
+export function getCellPools(cluster?: string): Promise<CellPoolListResponse> {
+  return bffFetch<CellPoolListResponse>(`/cellpools${clusterQuery(cluster)}`);
+}
+
+/**
+ * Reads one cell pool's spec and status. With no cluster, the BFF reads
+ * its own cluster.
+ */
+export function getCellPool(name: string, cluster?: string): Promise<CellPool> {
+  return bffFetch<CellPool>(`/cellpools/${enc(name)}${clusterQuery(cluster)}`);
 }
 
 /**
@@ -1315,8 +1324,8 @@ export function getCellPool(name: string): Promise<CellPool> {
  * structural edit goes to kubectl or GitOps. The handler retries an
  * internal conflict three times and then answers 409.
  */
-export function patchCellPool(name: string, body: CellPoolScaleRequest): Promise<CellPool> {
-  return bffFetch<CellPool>(`/cellpools/${enc(name)}`, {
+export function patchCellPool(name: string, cluster: string, body: CellPoolScaleRequest): Promise<CellPool> {
+  return bffFetch<CellPool>(`/cellpools/${enc(name)}${clusterQuery(cluster)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

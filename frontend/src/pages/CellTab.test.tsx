@@ -79,6 +79,7 @@ function makeUsage(overrides?: Partial<CellUsage>): CellUsage {
 
 function makePool(overrides?: Partial<CellPool>): CellPool {
   return {
+    cluster: "core",
     name: "lts-2-555",
     spec: { profileRef: "lts-2-555", warm: 2, maxCells: 8, maxTenantsPerCell: 10 },
     status: {

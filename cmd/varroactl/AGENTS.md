@@ -62,7 +62,10 @@ new capabilities are added to the BFF/OpenAPI spec first, then surfaced here.
     `get` and `describe` only, plus the top-level verb `scale`, registered
     from this same file through `registerRootCommand` so no framework file
     changes. Cluster-scoped: every command refuses `-n`/`-A` with a usage
-    error before any request. `scale cellpool <name> --warm N [--max-cells N]`
+    error before any request. `get`, `describe`, and `scale` take `--cluster`: a
+    list with no flag covers every cluster and prints a `CLUSTER` column (an
+    unanswered cluster is a warning on stderr); a single pool with no flag is
+    read from the BFF's own cluster. `scale cellpool <name> --warm N [--max-cells N]`
     sends only the flags the caller actually passed (`Flags().Changed`), so an
     unnamed dial keeps its stored value; no flag at all, and a negative value,
     are usage errors raised before the request. There is deliberately no

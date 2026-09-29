@@ -70,7 +70,7 @@ The endpoint Service selects the CloudNativePG primary on port 5432. Put the cor
 1. Enable the record store on the member as shown above, and confirm the gateway logs `gateway log writer enabled`.
 2. Make the object store reachable from the member network. The bucket URL `endpoint` must resolve and route from the member cells and gateway.
 3. With `networkPolicy.cellIsolation` enabled, add `cellIsolation.extraEgress` entries for the object store and for the update center that the member cells use.
-4. Create the pool's artifact Secret, then a `CellPool` on the member.
+4. Create the pool's artifact Secret, then a `CellPool` on the member. The core `/cells` page then shows a block for the member pool, and you can scale it from the core with `varroactl scale cellpool <name> --cluster <member-name>`.
 5. Create the `Team` with `spec.pipelines` on the member. The member operator places it, and the core record store holds its placement.
 6. Grant access on the core with a `VarroaRoleBinding` scoped to the tenant. The core does not read the member Team's own subjects.
 

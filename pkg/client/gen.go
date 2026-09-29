@@ -1127,7 +1127,9 @@ type ComponentsSchemasCellGrants struct {
 
 // ComponentsSchemasCellPool Full cell-pool object returned from get and list operations.
 type ComponentsSchemasCellPool struct {
-	Name string `json:"name"`
+	// Cluster The cluster that holds the pool. A pool name is unique inside one cluster only.
+	Cluster string `json:"cluster"`
+	Name    string `json:"name"`
 
 	// Spec A CellPool's configuration (spec.*). profileRef is immutable, because a pool's cells carry the profile label they were created with.
 	Spec ComponentsSchemasCellPoolSpec `json:"spec"`
@@ -4173,6 +4175,24 @@ type AuthCallbackParams struct {
 	Error *string `form:"error,omitempty" json:"error,omitempty"`
 }
 
+// ListCellPoolsParams defines parameters for ListCellPools.
+type ListCellPoolsParams struct {
+	// Cluster Cluster name filter for aggregated list.
+	Cluster *ComponentsParametersClusterQuery `form:"cluster,omitempty" json:"cluster,omitempty"`
+}
+
+// GetCellPoolParams defines parameters for GetCellPool.
+type GetCellPoolParams struct {
+	// Cluster Cluster name filter for aggregated list.
+	Cluster *ComponentsParametersClusterQuery `form:"cluster,omitempty" json:"cluster,omitempty"`
+}
+
+// PatchCellPoolParams defines parameters for PatchCellPool.
+type PatchCellPoolParams struct {
+	// Cluster Cluster name filter for aggregated list.
+	Cluster *ComponentsParametersClusterQuery `form:"cluster,omitempty" json:"cluster,omitempty"`
+}
+
 // ListCellUsageParams defines parameters for ListCellUsage.
 type ListCellUsageParams struct {
 	// Cluster Cluster name filter for aggregated list.
@@ -5110,15 +5130,15 @@ type ClientInterface interface {
 	AuthCallback(ctx context.Context, params *AuthCallbackParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListCellPools request
-	ListCellPools(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ListCellPools(ctx context.Context, params *ListCellPoolsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetCellPool request
-	GetCellPool(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error)
+	GetCellPool(ctx context.Context, name ComponentsParametersName, params *GetCellPoolParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PatchCellPoolWithBody request with any body
-	PatchCellPoolWithBody(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	PatchCellPoolWithBody(ctx context.Context, name ComponentsParametersName, params *PatchCellPoolParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	PatchCellPool(ctx context.Context, name ComponentsParametersName, body PatchCellPoolJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	PatchCellPool(ctx context.Context, name ComponentsParametersName, params *PatchCellPoolParams, body PatchCellPoolJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListCellUsage request
 	ListCellUsage(ctx context.Context, params *ListCellUsageParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -5890,8 +5910,8 @@ func (c *Client) AuthCallback(ctx context.Context, params *AuthCallbackParams, r
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListCellPools(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListCellPoolsRequest(c.Server)
+func (c *Client) ListCellPools(ctx context.Context, params *ListCellPoolsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListCellPoolsRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -5902,8 +5922,8 @@ func (c *Client) ListCellPools(ctx context.Context, reqEditors ...RequestEditorF
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetCellPool(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetCellPoolRequest(c.Server, name)
+func (c *Client) GetCellPool(ctx context.Context, name ComponentsParametersName, params *GetCellPoolParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetCellPoolRequest(c.Server, name, params)
 	if err != nil {
 		return nil, err
 	}
@@ -5914,8 +5934,8 @@ func (c *Client) GetCellPool(ctx context.Context, name ComponentsParametersName,
 	return c.Client.Do(req)
 }
 
-func (c *Client) PatchCellPoolWithBody(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPatchCellPoolRequestWithBody(c.Server, name, contentType, body)
+func (c *Client) PatchCellPoolWithBody(ctx context.Context, name ComponentsParametersName, params *PatchCellPoolParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchCellPoolRequestWithBody(c.Server, name, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5926,8 +5946,8 @@ func (c *Client) PatchCellPoolWithBody(ctx context.Context, name ComponentsParam
 	return c.Client.Do(req)
 }
 
-func (c *Client) PatchCellPool(ctx context.Context, name ComponentsParametersName, body PatchCellPoolJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPatchCellPoolRequest(c.Server, name, body)
+func (c *Client) PatchCellPool(ctx context.Context, name ComponentsParametersName, params *PatchCellPoolParams, body PatchCellPoolJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchCellPoolRequest(c.Server, name, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -9091,7 +9111,7 @@ func NewAuthCallbackRequest(server string, params *AuthCallbackParams) (*http.Re
 }
 
 // NewListCellPoolsRequest generates requests for ListCellPools
-func NewListCellPoolsRequest(server string) (*http.Request, error) {
+func NewListCellPoolsRequest(server string, params *ListCellPoolsParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -9109,6 +9129,28 @@ func NewListCellPoolsRequest(server string) (*http.Request, error) {
 		return nil, err
 	}
 
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cluster != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cluster", runtime.ParamLocationQuery, *params.Cluster); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
 	req, err := http.NewRequest("GET", queryURL.String(), nil)
 	if err != nil {
 		return nil, err
@@ -9118,7 +9160,7 @@ func NewListCellPoolsRequest(server string) (*http.Request, error) {
 }
 
 // NewGetCellPoolRequest generates requests for GetCellPool
-func NewGetCellPoolRequest(server string, name ComponentsParametersName) (*http.Request, error) {
+func NewGetCellPoolRequest(server string, name ComponentsParametersName, params *GetCellPoolParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -9141,6 +9183,28 @@ func NewGetCellPoolRequest(server string, name ComponentsParametersName) (*http.
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cluster != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cluster", runtime.ParamLocationQuery, *params.Cluster); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
 	}
 
 	req, err := http.NewRequest("GET", queryURL.String(), nil)
@@ -9152,18 +9216,18 @@ func NewGetCellPoolRequest(server string, name ComponentsParametersName) (*http.
 }
 
 // NewPatchCellPoolRequest calls the generic PatchCellPool builder with application/json body
-func NewPatchCellPoolRequest(server string, name ComponentsParametersName, body PatchCellPoolJSONRequestBody) (*http.Request, error) {
+func NewPatchCellPoolRequest(server string, name ComponentsParametersName, params *PatchCellPoolParams, body PatchCellPoolJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewPatchCellPoolRequestWithBody(server, name, "application/json", bodyReader)
+	return NewPatchCellPoolRequestWithBody(server, name, params, "application/json", bodyReader)
 }
 
 // NewPatchCellPoolRequestWithBody generates requests for PatchCellPool with any type of body
-func NewPatchCellPoolRequestWithBody(server string, name ComponentsParametersName, contentType string, body io.Reader) (*http.Request, error) {
+func NewPatchCellPoolRequestWithBody(server string, name ComponentsParametersName, params *PatchCellPoolParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -9186,6 +9250,28 @@ func NewPatchCellPoolRequestWithBody(server string, name ComponentsParametersNam
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cluster != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cluster", runtime.ParamLocationQuery, *params.Cluster); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
 	}
 
 	req, err := http.NewRequest("PATCH", queryURL.String(), body)
@@ -15655,15 +15741,15 @@ type ClientWithResponsesInterface interface {
 	AuthCallbackWithResponse(ctx context.Context, params *AuthCallbackParams, reqEditors ...RequestEditorFn) (*AuthCallbackResponse, error)
 
 	// ListCellPoolsWithResponse request
-	ListCellPoolsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListCellPoolsResponse, error)
+	ListCellPoolsWithResponse(ctx context.Context, params *ListCellPoolsParams, reqEditors ...RequestEditorFn) (*ListCellPoolsResponse, error)
 
 	// GetCellPoolWithResponse request
-	GetCellPoolWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*GetCellPoolResponse, error)
+	GetCellPoolWithResponse(ctx context.Context, name ComponentsParametersName, params *GetCellPoolParams, reqEditors ...RequestEditorFn) (*GetCellPoolResponse, error)
 
 	// PatchCellPoolWithBodyWithResponse request with any body
-	PatchCellPoolWithBodyWithResponse(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchCellPoolResponse, error)
+	PatchCellPoolWithBodyWithResponse(ctx context.Context, name ComponentsParametersName, params *PatchCellPoolParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchCellPoolResponse, error)
 
-	PatchCellPoolWithResponse(ctx context.Context, name ComponentsParametersName, body PatchCellPoolJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchCellPoolResponse, error)
+	PatchCellPoolWithResponse(ctx context.Context, name ComponentsParametersName, params *PatchCellPoolParams, body PatchCellPoolJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchCellPoolResponse, error)
 
 	// ListCellUsageWithResponse request
 	ListCellUsageWithResponse(ctx context.Context, params *ListCellUsageParams, reqEditors ...RequestEditorFn) (*ListCellUsageResponse, error)
@@ -16615,10 +16701,12 @@ type ListCellPoolsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *struct {
-		Items []ComponentsSchemasCellPool `json:"items"`
+		Clusters []ComponentsSchemasClusterFanoutStatus `json:"clusters"`
+		Items    []ComponentsSchemasCellPool            `json:"items"`
 	}
 	JSON401 *ComponentsResponsesUnauthorized
 	JSON403 *ComponentsResponsesForbidden
+	JSON404 *ComponentsResponsesNotFound
 }
 
 // Status returns HTTPResponse.Status
@@ -16644,6 +16732,7 @@ type GetCellPoolResponse struct {
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON403      *ComponentsResponsesForbidden
 	JSON404      *ComponentsResponsesNotFound
+	JSON502      *ComponentsResponsesClusterUnreachable
 }
 
 // Status returns HTTPResponse.Status
@@ -16671,6 +16760,7 @@ type PatchCellPoolResponse struct {
 	JSON403      *ComponentsResponsesForbidden
 	JSON404      *ComponentsResponsesNotFound
 	JSON409      *ComponentsResponsesConflict
+	JSON502      *ComponentsResponsesClusterUnreachable
 }
 
 // Status returns HTTPResponse.Status
@@ -20450,8 +20540,8 @@ func (c *ClientWithResponses) AuthCallbackWithResponse(ctx context.Context, para
 }
 
 // ListCellPoolsWithResponse request returning *ListCellPoolsResponse
-func (c *ClientWithResponses) ListCellPoolsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListCellPoolsResponse, error) {
-	rsp, err := c.ListCellPools(ctx, reqEditors...)
+func (c *ClientWithResponses) ListCellPoolsWithResponse(ctx context.Context, params *ListCellPoolsParams, reqEditors ...RequestEditorFn) (*ListCellPoolsResponse, error) {
+	rsp, err := c.ListCellPools(ctx, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -20459,8 +20549,8 @@ func (c *ClientWithResponses) ListCellPoolsWithResponse(ctx context.Context, req
 }
 
 // GetCellPoolWithResponse request returning *GetCellPoolResponse
-func (c *ClientWithResponses) GetCellPoolWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*GetCellPoolResponse, error) {
-	rsp, err := c.GetCellPool(ctx, name, reqEditors...)
+func (c *ClientWithResponses) GetCellPoolWithResponse(ctx context.Context, name ComponentsParametersName, params *GetCellPoolParams, reqEditors ...RequestEditorFn) (*GetCellPoolResponse, error) {
+	rsp, err := c.GetCellPool(ctx, name, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -20468,16 +20558,16 @@ func (c *ClientWithResponses) GetCellPoolWithResponse(ctx context.Context, name 
 }
 
 // PatchCellPoolWithBodyWithResponse request with arbitrary body returning *PatchCellPoolResponse
-func (c *ClientWithResponses) PatchCellPoolWithBodyWithResponse(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchCellPoolResponse, error) {
-	rsp, err := c.PatchCellPoolWithBody(ctx, name, contentType, body, reqEditors...)
+func (c *ClientWithResponses) PatchCellPoolWithBodyWithResponse(ctx context.Context, name ComponentsParametersName, params *PatchCellPoolParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchCellPoolResponse, error) {
+	rsp, err := c.PatchCellPoolWithBody(ctx, name, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
 	return ParsePatchCellPoolResponse(rsp)
 }
 
-func (c *ClientWithResponses) PatchCellPoolWithResponse(ctx context.Context, name ComponentsParametersName, body PatchCellPoolJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchCellPoolResponse, error) {
-	rsp, err := c.PatchCellPool(ctx, name, body, reqEditors...)
+func (c *ClientWithResponses) PatchCellPoolWithResponse(ctx context.Context, name ComponentsParametersName, params *PatchCellPoolParams, body PatchCellPoolJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchCellPoolResponse, error) {
+	rsp, err := c.PatchCellPool(ctx, name, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -22855,7 +22945,8 @@ func ParseListCellPoolsResponse(rsp *http.Response) (*ListCellPoolsResponse, err
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest struct {
-			Items []ComponentsSchemasCellPool `json:"items"`
+			Clusters []ComponentsSchemasClusterFanoutStatus `json:"clusters"`
+			Items    []ComponentsSchemasCellPool            `json:"items"`
 		}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
@@ -22875,6 +22966,13 @@ func ParseListCellPoolsResponse(rsp *http.Response) (*ListCellPoolsResponse, err
 			return nil, err
 		}
 		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
 
 	}
 
@@ -22922,6 +23020,13 @@ func ParseGetCellPoolResponse(rsp *http.Response) (*GetCellPoolResponse, error) 
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest ComponentsResponsesClusterUnreachable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
 
 	}
 
@@ -22983,6 +23088,13 @@ func ParsePatchCellPoolResponse(rsp *http.Response) (*PatchCellPoolResponse, err
 			return nil, err
 		}
 		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest ComponentsResponsesClusterUnreachable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
 
 	}
 

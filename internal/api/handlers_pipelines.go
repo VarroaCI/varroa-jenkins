@@ -1216,7 +1216,7 @@ func (s *Server) buildTeamCell(ctx context.Context, claims *auth.Claims, ref Ten
 
 	presentation := s.cellPresentationFor(cr, ref.Cluster)
 	placed := cellPlacedTenants(cr)
-	freeSlots := cellFreeSlots(s.resolveCellCap(ctx, cr), placed)
+	freeSlots := cellFreeSlots(s.resolveCellCap(ctx, ref.Cluster, cr), placed)
 	others := placed - 1
 	if others < 0 {
 		others = 0

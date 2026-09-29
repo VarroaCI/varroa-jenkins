@@ -353,33 +353,33 @@ func TestResolveCellCapChain(t *testing.T) {
 	ctx := context.Background()
 
 	withCap := newCellControllerFixture("ns-a", "cell-a", nil, 3, map[string]string{cells.LabelCellPool: "lts"})
-	if got := srv.resolveCellCap(ctx, withCap); got != 3 {
+	if got := srv.resolveCellCap(ctx, "", withCap); got != 3 {
 		t.Errorf("cell tier = %d, want 3", got)
 	}
 
 	pooled := newCellControllerFixture("ns-a", "cell-b", nil, 0, map[string]string{cells.LabelCellPool: "lts"})
-	if got := srv.resolveCellCap(ctx, pooled); got != 4 {
+	if got := srv.resolveCellCap(ctx, "", pooled); got != 4 {
 		t.Errorf("pool tier = %d, want 4", got)
 	}
 
 	orphan := newCellControllerFixture("ns-a", "cell-c", nil, 0, map[string]string{cells.LabelCellPool: "gone"})
-	if got := srv.resolveCellCap(ctx, orphan); got != defaultCellMaxTenants {
+	if got := srv.resolveCellCap(ctx, "", orphan); got != defaultCellMaxTenants {
 		t.Errorf("a gone pool must fall through to the compiled tier: got %d, want %d", got, defaultCellMaxTenants)
 	}
 
 	noCap := newCellControllerFixture("ns-a", "cell-d", nil, 0, nil)
-	if got := srv.resolveCellCap(ctx, noCap); got != defaultCellMaxTenants {
+	if got := srv.resolveCellCap(ctx, "", noCap); got != defaultCellMaxTenants {
 		t.Errorf("compiled tier = %d, want %d", got, defaultCellMaxTenants)
 	}
 
 	srv.deps.CellMaxTenants = 7
-	if got := srv.resolveCellCap(ctx, noCap); got != 7 {
+	if got := srv.resolveCellCap(ctx, "", noCap); got != 7 {
 		t.Errorf("chart tier = %d, want 7", got)
 	}
-	if got := srv.resolveCellCap(ctx, pooled); got != 4 {
+	if got := srv.resolveCellCap(ctx, "", pooled); got != 4 {
 		t.Errorf("pool tier must win over the chart tier: got %d, want 4", got)
 	}
-	if got := srv.resolveCellCap(ctx, withCap); got != 3 {
+	if got := srv.resolveCellCap(ctx, "", withCap); got != 3 {
 		t.Errorf("cell tier must win over the chart tier: got %d, want 3", got)
 	}
 

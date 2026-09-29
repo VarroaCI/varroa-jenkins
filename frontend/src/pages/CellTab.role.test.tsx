@@ -52,6 +52,7 @@ function roleUsage(): CellUsage {
 
 function rolePool(): CellPool {
   return {
+    cluster: "core",
     name: "lts",
     spec: { profileRef: "lts", warm: 2, maxCells: 8, maxTenantsPerCell: 10 },
     status: {

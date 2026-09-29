@@ -220,6 +220,11 @@ reading each package's entry point):
   here issues an HTTP request to the BFF or calls a controller-scoped check.
   `get_run_log` returns a bounded tail (`tailLines`, default 100, clamped 1
   to 500) as plain text, never a stream, and starts no live tail.
+  `tools_cellpools.go` registers `list_cell_pools`, `get_cell_pool`, and
+  `update_cell_pool` over `internal/api`'s `Server.ListCellPools`,
+  `GetCellPool`, and `ScaleCellPool`, the same service the `/cellpools`
+  routes call; each takes an optional `cluster`, and each result names the
+  pool's cluster.
   `tools_cells.go` registers one read tool, `get_cell_usage`, over
   `internal/api`'s `Server.CellUsage` — the same entry point the single-cell
   HTTP path uses. It is a cell read, so it **does** call `CanReadController`,

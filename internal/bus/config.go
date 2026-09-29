@@ -41,6 +41,26 @@ func OperatorVersionProfilesSubject(cluster, verb string) string {
 	return "operator." + cluster + ".versionprofiles." + verb
 }
 
+// OperatorCellPoolsSubject returns operator.<cluster>.cellpools.<verb>.
+// verb ∈ list|get|scale. list takes ConfigListRequest and answers
+// ConfigListResponse. get takes ConfigGetRequest and answers
+// ConfigGetResponse. scale takes CellPoolScaleRequest and answers
+// ConfigGetResponse with the stored pool after the write.
+func OperatorCellPoolsSubject(cluster, verb string) string {
+	return "operator." + cluster + ".cellpools." + verb
+}
+
+// CellPoolScaleRequest is the payload for cellpools.scale. It carries the
+// pool name and the scale dials only, so a structural edit cannot reach the
+// operator. A nil dial keeps its stored value.
+type CellPoolScaleRequest struct {
+	Name               string  `json:"name"`
+	Warm               *int32  `json:"warm,omitempty"`
+	MaxCells           *int32  `json:"maxCells,omitempty"`
+	MaxTenantsPerCell  *int32  `json:"maxTenantsPerCell,omitempty"`
+	UnreadyGracePeriod *string `json:"unreadyGracePeriod,omitempty"`
+}
+
 // ---------------------------------------------------------------------------
 // Generic request/response types (DP1). The same types serve every config kind;
 // the subject encodes the kind.

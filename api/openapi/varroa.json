@@ -6311,6 +6311,10 @@
         "additionalProperties": false,
         "description": "Full cell-pool object returned from get and list operations.",
         "properties": {
+          "cluster": {
+            "description": "The cluster that holds the pool. A pool name is unique inside one cluster only.",
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -6322,6 +6326,7 @@
           }
         },
         "required": [
+          "cluster",
           "name",
           "spec",
           "status"
@@ -14215,6 +14220,11 @@
     "/api/v1/cellpools": {
       "get": {
         "operationId": "listCellPools",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/components_parameters_clusterQuery"
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -14222,6 +14232,12 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
+                    "clusters": {
+                      "items": {
+                        "$ref": "#/components/schemas/components_schemas_ClusterFanoutStatus"
+                      },
+                      "type": "array"
+                    },
                     "items": {
                       "items": {
                         "$ref": "#/components/schemas/components_schemas_CellPool"
@@ -14230,22 +14246,26 @@
                     }
                   },
                   "required": [
-                    "items"
+                    "items",
+                    "clusters"
                   ],
                   "type": "object"
                 }
               }
             },
-            "description": "Cell-pool list (items envelope)."
+            "description": "Cell-pool list with one read status for each cluster the list covered."
           },
           "401": {
             "$ref": "#/components/responses/components_responses_Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/components_responses_NotFound"
           }
         },
-        "summary": "Lists every cell pool with its spec and status, sorted by name. Requires the cellpools:read verb on a cluster-wide binding.",
+        "summary": "Lists the cell pools of every known cluster, or of the named cluster, with their spec and status. The list sorts by cluster, with the BFF's own cluster first, and then by name. A cluster whose read fails is reported with ok false in clusters and adds no item. Requires the cellpools:read verb on a cluster-wide binding.",
         "tags": [
           "CellPools"
         ]
@@ -14257,6 +14277,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/components_parameters_name"
+          },
+          {
+            "$ref": "#/components/parameters/components_parameters_clusterQuery"
           }
         ],
         "responses": {
@@ -14278,9 +14301,12 @@
           },
           "404": {
             "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "502": {
+            "$ref": "#/components/responses/components_responses_ClusterUnreachable"
           }
         },
-        "summary": "Gets one cell pool's spec and status. Requires the cellpools:read verb on a cluster-wide binding.",
+        "summary": "Gets one cell pool's spec and status from the named cluster, or from the BFF's own cluster when no cluster is named. Requires the cellpools:read verb on a cluster-wide binding.",
         "tags": [
           "CellPools"
         ]
@@ -14290,6 +14316,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/components_parameters_name"
+          },
+          {
+            "$ref": "#/components/parameters/components_parameters_clusterQuery"
           }
         ],
         "requestBody": {
@@ -14327,9 +14356,12 @@
           },
           "409": {
             "$ref": "#/components/responses/components_responses_Conflict"
+          },
+          "502": {
+            "$ref": "#/components/responses/components_responses_ClusterUnreachable"
           }
         },
-        "summary": "Scales a cell pool. The body carries only the four scale dials; a body naming profileRef or cellTemplate is refused with 400. Requires the cellpools:update verb on a cluster-wide binding.",
+        "summary": "Scales a cell pool. The body carries only the four scale dials; a body naming profileRef or cellTemplate is refused with 400. The write goes to the pool of the named cluster, or of the BFF's own cluster when no cluster is named. Requires the cellpools:update verb on a cluster-wide binding.",
         "tags": [
           "CellPools"
         ]

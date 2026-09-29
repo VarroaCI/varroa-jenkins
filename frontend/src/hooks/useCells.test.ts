@@ -66,8 +66,26 @@ describe("useCells polling", () => {
     mockBffFetch.mockResolvedValue({ items: [] });
     renderHook(() => useCellPools(), { wrapper: createWrapper(qc) });
     renderHook(() => useCellUsageList(), { wrapper: createWrapper(qc) });
-    await waitFor(() => expect(qc.getQueryData(["cellpools", null])).toEqual([]));
+    await waitFor(() => expect(qc.getQueryData(["cellpools", null])).toEqual({ items: [] }));
     expect(qc.getQueryData(["cell-usage", null, null])).toEqual([]);
+  });
+});
+
+describe("the pool reads name the cluster", () => {
+  it("sends the cluster on the pool list", async () => {
+    mockBffFetch.mockResolvedValue({ items: [], clusters: [] });
+    const { result } = renderHook(() => useCellPools("member-c"), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockBffFetch).toHaveBeenCalledWith("/cellpools?cluster=member-c");
+  });
+
+  it("reads a hive cell's pool on that cell's cluster", async () => {
+    mockBffFetch.mockResolvedValue({});
+    const { result } = renderHook(() => useCellPool("member-2-570", true, "member-c"), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockBffFetch).toHaveBeenCalledWith("/cellpools/member-2-570?cluster=member-c");
   });
 });
 

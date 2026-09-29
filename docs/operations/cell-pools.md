@@ -114,11 +114,22 @@ template. Edit the pool to change it, as [Template edits](#template-edits) descr
 
 ## Scale a pool
 
+Each cluster of the brood holds its own pools. A pool name is unique inside one cluster only.
+
 ```bash
 varroactl get cellpools
 varroactl describe cellpool jenkins-lts
 varroactl scale cellpool jenkins-lts --warm 3 --max-cells 8
+varroactl scale cellpool lts-2-570 --cluster east --warm 2
 ```
+
+`get cellpools` lists every cluster, with a `CLUSTER` column. A command on one pool uses the core
+cluster when you give no `--cluster`.
+
+`GET /api/v1/cellpools` adds a `cluster` field to each pool and a `clusters` array with one read
+status for each cluster. A cluster that does not answer has `ok: false`. `GET` and `PATCH
+/api/v1/cellpools/{name}` take `?cluster=<name>`, and an unreachable member gives `502`. A member
+operator on an older image does not answer until you upgrade it.
 
 The same edit through `kubectl`:
 

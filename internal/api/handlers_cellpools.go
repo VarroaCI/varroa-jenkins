@@ -4,30 +4,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sort"
 	"strings"
-	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
-	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
 )
 
-// cellPoolPatchAttempts bounds the read-modify-write retry. A conflict past
-// this bound is reported as 409, so a caller retries with a fresh read
-// rather than the handler looping.
-const cellPoolPatchAttempts = 3
-
 // cellPoolEntry is the JSON shape of GET /cellpools entries and of
-// GET /cellpools/{name}. Field names match v1alpha1.CellPoolSpec and
-// CellPoolStatus's own JSON tags.
+// GET /cellpools/{name}. Cluster names the cluster that holds the pool.
+// Field names match v1alpha1.CellPoolSpec and CellPoolStatus's own JSON
+// tags.
 type cellPoolEntry struct {
-	Name   string              `json:"name"`
-	Spec   cellPoolSpecEntry   `json:"spec"`
-	Status cellPoolStatusEntry `json:"status"`
+	Cluster string              `json:"cluster"`
+	Name    string              `json:"name"`
+	Spec    cellPoolSpecEntry   `json:"spec"`
+	Status  cellPoolStatusEntry `json:"status"`
 }
 
 // cellPoolSpecEntry mirrors v1alpha1.CellPoolSpec.
@@ -135,6 +130,20 @@ func cellPoolEntryFrom(pool *v1alpha1.CellPool) cellPoolEntry {
 	return e
 }
 
+// cellPoolListResponse is the body of GET /cellpools: the pools of every
+// cluster the list covered, and one read status for each of those clusters.
+type cellPoolListResponse struct {
+	Items    []cellPoolEntry       `json:"items"`
+	Clusters []ClusterFanoutStatus `json:"clusters"`
+}
+
+// cellPoolEntryForCluster maps a pool of one cluster onto the wire shape.
+func cellPoolEntryForCluster(p ClusterCellPool) cellPoolEntry {
+	e := cellPoolEntryFrom(p.Pool)
+	e.Cluster = p.Cluster
+	return e
+}
+
 // HandleCellPools serves GET /cellpools. There is no POST: an operator
 // creates a pool with kubectl or through GitOps.
 func (s *Server) HandleCellPools(w http.ResponseWriter, r *http.Request) {
@@ -142,22 +151,19 @@ func (s *Server) HandleCellPools(w http.ResponseWriter, r *http.Request) {
 		s.writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if !s.canReadCellPools(r) {
-		s.writeJSONError(w, http.StatusForbidden, "forbidden")
+	list, serr := s.ListCellPools(r.Context(), auth.ClaimsFromContext(r.Context()), r.URL.Query().Get("cluster"))
+	if serr != nil {
+		s.writeJSONError(w, serr.Status, serr.Message)
 		return
 	}
-
-	pools, err := crdstore.List[v1alpha1.CellPool](r.Context(), s.deps.Store, "", "")
-	if err != nil {
-		s.writeJSONError(w, http.StatusInternalServerError, "failed to list cell pools")
-		return
+	body := cellPoolListResponse{
+		Items:    make([]cellPoolEntry, 0, len(list.Items)),
+		Clusters: list.Clusters,
 	}
-	result := make([]cellPoolEntry, 0, len(pools))
-	for _, pool := range pools {
-		result = append(result, cellPoolEntryFrom(pool))
+	for _, p := range list.Items {
+		body.Items = append(body.Items, cellPoolEntryForCluster(p))
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
-	s.writeJSON(w, http.StatusOK, itemsEnvelope(result))
+	s.writeJSON(w, http.StatusOK, body)
 }
 
 // HandleCellPoolDispatch serves /cellpools/{name}:
@@ -165,8 +171,9 @@ func (s *Server) HandleCellPools(w http.ResponseWriter, r *http.Request) {
 //	GET   /cellpools/{name} — one pool's spec and status
 //	PATCH /cellpools/{name} — the four scale dials
 //
-// There is no DELETE: an operator deletes a pool with kubectl or through
-// GitOps.
+// Both take an optional cluster query parameter and default to the BFF's
+// own cluster. There is no DELETE: an operator deletes a pool with kubectl
+// or through GitOps.
 func (s *Server) HandleCellPoolDispatch(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/cellpools/")
 	if name == "" || strings.Contains(name, "/") {
@@ -184,141 +191,89 @@ func (s *Server) HandleCellPoolDispatch(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleGetCellPool(w http.ResponseWriter, r *http.Request, name string) {
-	if !s.canReadCellPools(r) {
-		s.writeJSONError(w, http.StatusForbidden, "forbidden")
+	pool, serr := s.GetCellPool(r.Context(), auth.ClaimsFromContext(r.Context()), r.URL.Query().Get("cluster"), name)
+	if serr != nil {
+		s.writeJSONError(w, serr.Status, serr.Message)
 		return
 	}
-	pool, err := crdstore.Get[v1alpha1.CellPool](r.Context(), s.deps.Store, name, "")
-	if err != nil {
-		s.writeJSONError(w, http.StatusNotFound, "cell pool not found")
-		return
-	}
-	s.writeJSON(w, http.StatusOK, cellPoolEntryFrom(pool))
+	s.writeJSON(w, http.StatusOK, cellPoolEntryForCluster(pool))
 }
 
-// handlePatchCellPool applies the four scale dials with a read-modify-write.
-// crdstore exposes no spec-level merge patch, so the handler merges in Go
-// and calls Update. A conflict is retried, because the pool reconciler
-// writes the same object on its own tick.
+// handlePatchCellPool applies the scale dials to the pool of the named
+// cluster. A successful write publishes one cellpool.updated event that
+// names the pool's cluster.
 func (s *Server) handlePatchCellPool(w http.ResponseWriter, r *http.Request, name string) {
-	if s.deps.Authorizer == nil || !s.deps.Authorizer.CanUpdateCellPools(auth.ClaimsFromContext(r.Context())) {
+	claims := auth.ClaimsFromContext(r.Context())
+	if s.deps.Authorizer == nil || claims == nil || !s.deps.Authorizer.CanUpdateCellPools(claims) {
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}
 
-	req, errMsg := decodeCellPoolScaleRequest(r)
+	dials, errMsg := decodeCellPoolScaleRequest(r)
 	if errMsg != "" {
 		s.writeJSONError(w, http.StatusBadRequest, errMsg)
 		return
 	}
 
-	ctx := r.Context()
-	for attempt := 0; attempt < cellPoolPatchAttempts; attempt++ {
-		existing, err := crdstore.Get[v1alpha1.CellPool](ctx, s.deps.Store, name, "")
-		if err != nil {
-			s.writeJSONError(w, http.StatusNotFound, "cell pool not found")
-			return
-		}
-		updated := existing.DeepCopy()
-		if errMsg := applyCellPoolScale(&updated.Spec, req); errMsg != "" {
-			s.writeJSONError(w, http.StatusBadRequest, errMsg)
-			return
-		}
-		err = crdstore.Update(ctx, s.deps.Store, updated)
-		if err == nil {
-			s.writeJSON(w, http.StatusOK, cellPoolEntryFrom(updated))
-			return
-		}
-		if !apierrors.IsConflict(err) {
-			s.writeJSONError(w, http.StatusInternalServerError, "failed to update cell pool")
-			return
-		}
+	pool, serr := s.ScaleCellPool(r.Context(), claims, r.URL.Query().Get("cluster"), name, dials)
+	if serr != nil {
+		s.writeJSONError(w, serr.Status, serr.Message)
+		return
 	}
-	s.writeJSONError(w, http.StatusConflict, "the cell pool changed during the update; retry the request")
+	s.notifyActivity(activity.Event{
+		Type:    "cellpool.updated",
+		Actor:   ActorFrom(claims),
+		Cluster: pool.Cluster,
+		Message: "CellPool " + name + " scaled on cluster " + pool.Cluster,
+	})
+	s.writeJSON(w, http.StatusOK, cellPoolEntryForCluster(pool))
 }
 
 // decodeCellPoolScaleRequest reads the body and refuses every key outside
 // the four dials. A body naming profileRef or cellTemplate, an unknown key,
 // or no recognised key at all is a 400, so the contract and the handler
-// agree on what a scale edit is.
-func decodeCellPoolScaleRequest(r *http.Request) (cellPoolScaleRequest, string) {
+// agree on what a scale edit is. The numeric bounds are checked where the
+// write runs, by cells.ApplyCellPoolDials.
+func decodeCellPoolScaleRequest(r *http.Request) (cells.CellPoolDials, string) {
 	var top map[string]json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&top); err != nil {
-		return cellPoolScaleRequest{}, "invalid request body"
+		return cells.CellPoolDials{}, "invalid request body"
 	}
 	for k := range top {
 		if k != "spec" {
-			return cellPoolScaleRequest{}, fmt.Sprintf("the body may only contain spec; got %q", k)
+			return cells.CellPoolDials{}, fmt.Sprintf("the body may only contain spec; got %q", k)
 		}
 	}
 	raw, ok := top["spec"]
 	if !ok {
-		return cellPoolScaleRequest{}, "the body must contain spec"
+		return cells.CellPoolDials{}, "the body must contain spec"
 	}
 
 	var keys map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &keys); err != nil {
-		return cellPoolScaleRequest{}, "spec must be an object"
+		return cells.CellPoolDials{}, "spec must be an object"
 	}
 	if len(keys) == 0 {
-		return cellPoolScaleRequest{}, "spec must name at least one of warm, maxCells, maxTenantsPerCell, or unreadyGracePeriod"
+		return cells.CellPoolDials{}, "spec must name at least one of warm, maxCells, maxTenantsPerCell, or unreadyGracePeriod"
 	}
 	for k := range keys {
 		switch k {
 		case "warm", "maxCells", "maxTenantsPerCell", "unreadyGracePeriod":
 		case "profileRef", "cellTemplate":
-			return cellPoolScaleRequest{}, fmt.Sprintf("spec.%s is not an API operation; edit the CellPool with kubectl or through GitOps", k)
+			return cells.CellPoolDials{}, fmt.Sprintf("spec.%s is not an API operation; edit the CellPool with kubectl or through GitOps", k)
 		default:
-			return cellPoolScaleRequest{}, fmt.Sprintf("spec may only contain the scale dials; got %q", k)
+			return cells.CellPoolDials{}, fmt.Sprintf("spec may only contain the scale dials; got %q", k)
 		}
 	}
 
 	var req cellPoolScaleRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
-		return cellPoolScaleRequest{}, "invalid spec"
+		return cells.CellPoolDials{}, "invalid spec"
 	}
-	return req, ""
-}
-
-// applyCellPoolScale merges the named dials onto a spec and repeats the
-// CRD's numeric bounds. The CRD schema stays the authority; this check is a
-// message-quality measure, so a bad PATCH returns the uniform 400 envelope
-// instead of a raw apiserver 422.
-func applyCellPoolScale(spec *v1alpha1.CellPoolSpec, req cellPoolScaleRequest) string {
-	if req.Warm != nil {
-		if *req.Warm < 0 {
-			return "spec.warm must be 0 or above"
-		}
-		spec.Warm = *req.Warm
-	}
-	if req.MaxCells != nil {
-		if *req.MaxCells < 0 {
-			return "spec.maxCells must be 0 or above"
-		}
-		spec.MaxCells = *req.MaxCells
-	}
-	if req.MaxTenantsPerCell != nil {
-		if *req.MaxTenantsPerCell < 1 {
-			return "spec.maxTenantsPerCell must be 1 or above"
-		}
-		spec.MaxTenantsPerCell = *req.MaxTenantsPerCell
-	}
-	if req.UnreadyGracePeriod != nil {
-		d, err := time.ParseDuration(*req.UnreadyGracePeriod)
-		if err != nil || d < 0 {
-			return "spec.unreadyGracePeriod must be a duration such as 5m"
-		}
-		spec.UnreadyGracePeriod = &metav1.Duration{Duration: d}
-	}
-	if spec.MaxCells > 0 && spec.MaxCells < spec.Warm {
-		return "spec.maxCells must be 0 or at least spec.warm"
-	}
-	return ""
-}
-
-// canReadCellPools answers the read gate. An absent Authorizer denies, the
-// way every other cluster-scoped gate does.
-func (s *Server) canReadCellPools(r *http.Request) bool {
-	return s.deps.Authorizer != nil &&
-		s.deps.Authorizer.CanReadCellPools(auth.ClaimsFromContext(r.Context()))
+	return cells.CellPoolDials{
+		Warm:               req.Warm,
+		MaxCells:           req.MaxCells,
+		MaxTenantsPerCell:  req.MaxTenantsPerCell,
+		UnreadyGracePeriod: req.UnreadyGracePeriod,
+	}, ""
 }

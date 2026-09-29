@@ -27,6 +27,28 @@ func init() {
 			WantStatus: http.StatusOK,
 		},
 		contractCase{
+			Name:       "listCellPools-oneCluster",
+			Method:     "GET",
+			Path:       "/api/v1/cellpools?cluster=core",
+			Claims:     adminClaims,
+			WantStatus: http.StatusOK,
+		},
+		contractCase{
+			Name:       "getCellPool-namedCluster",
+			Method:     "GET",
+			Path:       "/api/v1/cellpools/test-pool?cluster=core",
+			Claims:     adminClaims,
+			WantStatus: http.StatusOK,
+		},
+		contractCase{
+			Name:       "patchCellPool-namedCluster",
+			Method:     "PATCH",
+			Path:       "/api/v1/cellpools/test-pool?cluster=core",
+			Body:       map[string]any{"spec": map[string]any{"maxCells": 4}},
+			Claims:     adminClaims,
+			WantStatus: http.StatusOK,
+		},
+		contractCase{
 			Name:       "patchCellPool",
 			Method:     "PATCH",
 			Path:       "/api/v1/cellpools/test-pool",

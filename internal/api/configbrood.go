@@ -83,6 +83,13 @@ type ConfigBrood interface {
 	UpdateVersionProfile(ctx context.Context, cluster, name string, obj json.RawMessage) (json.RawMessage, error)
 	DeleteVersionProfile(ctx context.Context, cluster, name string) error
 	ViewVersionProfiles(ctx context.Context, cluster string) ([]bus.VersionProfileView, error)
+
+	// --- CellPools (cluster-scoped; member clusters only) ---
+	// The caller reads and scales the local cluster's pools on its own
+	// store, so each method refuses the local cluster.
+	ListCellPools(ctx context.Context, cluster string) ([]v1alpha1.CellPool, error)
+	GetCellPool(ctx context.Context, cluster, name string) (*v1alpha1.CellPool, error)
+	ScaleCellPool(ctx context.Context, cluster string, req bus.CellPoolScaleRequest) (*v1alpha1.CellPool, error)
 }
 
 // busConfigBrood implements ConfigBrood over the NATS bus (with direct k8s
@@ -124,9 +131,19 @@ func (f *busConfigBrood) requestTo(subject string, req any, timeout time.Duratio
 	}
 	resp, err := f.request(subject, data, timeout)
 	if err != nil {
-		return nil, &ErrClusterUnreachable{Cluster: f.localCluster, Err: err}
+		return nil, &ErrClusterUnreachable{Cluster: clusterOfSubject(subject), Err: err}
 	}
 	return resp, nil
+}
+
+// clusterOfSubject returns the target cluster of an operator.<cluster>.*
+// subject: the second dot-separated token.
+func clusterOfSubject(subject string) string {
+	parts := strings.SplitN(subject, ".", 3)
+	if len(parts) < 3 {
+		return subject
+	}
+	return parts[1]
 }
 
 func (f *busConfigBrood) codeToErr(code, msg string) error {

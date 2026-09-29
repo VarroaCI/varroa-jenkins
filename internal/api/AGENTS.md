@@ -70,20 +70,33 @@ federation, activity persistence, and SSE fanout.
   by `POST /stream/ticket` → `handleStreamTicket`) instead of a bearer token, since
   `EventSource` cannot set headers; `vk_`-prefixed tokens route to the API-key
   `Verifier`, everything else to the OIDC/local/ldap `Provider`.
-- **Cell pools** (`handlers_cellpools.go`) serve `GET /cellpools`,
-  `GET /cellpools/{name}`, and `PATCH /cellpools/{name}` over the
-  cluster-scoped `CellPool` CRD. There is deliberately **no `POST` and no
-  `DELETE`**: the surface is a scale control, and a pool is created and
-  deleted with kubectl or GitOps. The `PATCH` body is `{"spec": {…}}` holding
-  only the four dials (`warm`, `maxCells`, `maxTenantsPerCell`,
-  `unreadyGracePeriod`); `profileRef`, `cellTemplate`, an unknown key, or no
-  recognised key at all is a `400`. The write is read-modify-write, not SSA:
-  `crdstore` exposes no spec-level merge patch, and an SSA field manager would
-  fight the operator that writes the spec of an auto-created pool. A conflict
-  is retried three times (the pool reconciler writes the same object on its
-  own tick) and then answers `409`. The handler repeats the CRD's numeric
-  bounds before the write so a bad dial returns the uniform `400` envelope
-  rather than a raw apiserver `422`; the CRD schema stays the authority.
+- **Cell pools** (`handlers_cellpools.go`, `cellpools_service.go`) serve
+  `GET /cellpools`, `GET /cellpools/{name}`, and `PATCH /cellpools/{name}`
+  over the cluster-scoped `CellPool` CRD of **every cluster of the brood**.
+  There is deliberately **no `POST` and no `DELETE`**: the surface is a scale
+  control, and a pool is created and deleted with kubectl or GitOps.
+  `Server.ListCellPools`/`GetCellPool`/`ScaleCellPool` is the one
+  implementation the HTTP routes and the three MCP tools call. Each route
+  takes `?cluster=`; an unknown cluster is `404`. The list reads every known
+  cluster in parallel (or the named one), answers `{items, clusters}` with a
+  `cluster` on each item, sorts the local cluster first, then cluster, then
+  name, and reports a failed cluster as `ok: false` without failing the call.
+  A single-pool read or a scale with no cluster acts on the local cluster
+  (`Server.localCluster()`). The local cluster reads and writes
+  `deps.Store`; a member goes through `ConfigBrood`'s member-only
+  `ListCellPools`/`GetCellPool`/`ScaleCellPool`, and an unreachable member is
+  `502`. The `PATCH` body is `{"spec": {…}}` holding only the four dials
+  (`warm`, `maxCells`, `maxTenantsPerCell`, `unreadyGracePeriod`);
+  `profileRef`, `cellTemplate`, an unknown key, or no recognised key at all is
+  a `400`. The write is `cells.ScaleCellPool`: a read-modify-write, not SSA,
+  on the cluster that holds the pool (the hive runs it in its
+  `cellpools.scale` handler). `crdstore` exposes no spec-level merge patch,
+  and an SSA field manager would fight the operator that writes the spec of
+  an auto-created pool. A conflict is retried three times and then answers
+  `409`. `cells.ApplyCellPoolDials` repeats the CRD's numeric bounds so a bad
+  dial returns the uniform `400` envelope rather than a raw apiserver `422`;
+  the CRD schema stays the authority. A successful `PATCH` publishes
+  `cellpool.updated` with the pool's cluster.
 - **Cell usage** (`handlers_cells.go`, `cells_service.go`) serves the flat
   `GET /cells/usage` and `GET /cells/{namespace}/{name}/usage` family: a cell
   usage row is a fleet view, never a controller sub-resource, so it does not
@@ -97,12 +110,16 @@ federation, activity persistence, and SSE fanout.
   the labels, the stored mite status, and `status.cell.tenants` come from the
   cell `Controller`; `queueLength`/`queueLengthAt` come from
   `MiteRegistry.IdleGauges` and are **absent, never zero**, for a remote
-  cluster. `cellCapResolver` (`resolveCellCap` for one cell) is the
+  cluster. `cellCapResolver` (`resolveCellCap(ctx, cluster, cr)` for one cell) is the
   first-match cap chain — the cell's `spec.cell.maxTenants` when non-zero,
   else the owning `CellPool`'s `maxTenantsPerCell`, else `deps.CellMaxTenants`
   (`VARROA_CELLS_MAX_TENANTS`, rendered from the same chart value as the
-  operator's), else ten. It is never a minimum. A listing holds one resolver
-  so the pools are listed once per request; a failed list skips the pool tier.
+  operator's), else ten. It is never a minimum. The pool tier reads the pools
+  of the cell's **own cluster** (`resolve(cluster, cr)`), because a pool name
+  is unique inside one cluster only. A listing holds one resolver, which
+  keeps one pool map per cluster and reads a cluster's pools on the first cell
+  of that cluster that needs the pool tier; a failed read skips the pool tier
+  of that cluster for the request.
 - **Cell grants** (`handleCellGrants`, `handlers_cells.go`;
   `Server.CellGrants`, `cells_service.go`) serves
   `GET /cells/{namespace}/{name}/grants`: which subjects may build on each

@@ -57,6 +57,7 @@ vi.mock("../context/AuthContext", () => ({
 
 function pool(overrides?: Partial<CellPool>): CellPool {
   return {
+    cluster: "core",
     name: "lts-2-555",
     spec: { profileRef: "lts-2-555", warm: 2, maxCells: 8, maxTenantsPerCell: 10 },
     status: {
@@ -68,6 +69,13 @@ function pool(overrides?: Partial<CellPool>): CellPool {
     },
     ...overrides,
   };
+}
+
+// poolList builds the GET /cellpools envelope. Every cluster a pool names
+// answered, and core comes first.
+function poolList(items: CellPool[], clusters?: Array<{ name: string; ok: boolean; error?: string }>) {
+  const names = Array.from(new Set(["core", ...items.map((p) => p.cluster)]));
+  return { items, clusters: clusters ?? names.map((name) => ({ name, ok: true })) };
 }
 
 function cellRow(name: string, overrides?: Partial<ControllerListItem>): ControllerListItem {
@@ -126,7 +134,7 @@ function renderPage() {
 beforeEach(() => {
   vi.clearAllMocks();
   mockCanDoGlobal.mockReturnValue(true);
-  mockUseCellPools.mockReturnValue({ data: [pool()], isLoading: false, error: null });
+  mockUseCellPools.mockReturnValue({ data: poolList([pool()]), isLoading: false, error: null });
   mockUseCellUsageIndex.mockReturnValue(usageIndex([usageRow("cell-a")], ["core"]));
   mockUseControllers.mockReturnValue({
     data: [cellRow("cell-a"), cellRow("plain", { kind: "stateful", cellPool: undefined })],
@@ -151,7 +159,7 @@ describe("The pool block", () => {
   it("states the reason for an empty pool", () => {
     mockUseControllers.mockReturnValue({ data: [], isLoading: false, error: null });
     mockUseCellPools.mockReturnValue({
-      data: [pool({ spec: { profileRef: "lts-2-555", warm: 0, maxCells: 0, maxTenantsPerCell: 10 } })],
+      data: poolList([pool({ spec: { profileRef: "lts-2-555", warm: 0, maxCells: 0, maxTenantsPerCell: 10 } })]),
       isLoading: false,
       error: null,
     });
@@ -161,7 +169,7 @@ describe("The pool block", () => {
 
   it("names both caps when the pool cap differs from a reported cap", () => {
     mockUseCellPools.mockReturnValue({
-      data: [pool({ spec: { profileRef: "lts-2-555", warm: 2, maxCells: 8, maxTenantsPerCell: 4 } })],
+      data: poolList([pool({ spec: { profileRef: "lts-2-555", warm: 2, maxCells: 8, maxTenantsPerCell: 4 } })]),
       isLoading: false,
       error: null,
     });
@@ -240,19 +248,19 @@ describe("The scale control", () => {
     const user = userEvent.setup();
     mockPatchCellPool.mockResolvedValue(pool());
     renderPage();
-    const warm = screen.getByLabelText("Warm cells of lts-2-555");
+    const warm = screen.getByLabelText("Warm cells of lts-2-555 on core");
     await user.clear(warm);
     await user.type(warm, "5");
     await user.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() =>
-      expect(mockPatchCellPool).toHaveBeenCalledWith("lts-2-555", { spec: { warm: 5 } }),
+      expect(mockPatchCellPool).toHaveBeenCalledWith("lts-2-555", "core", { spec: { warm: 5 } }),
     );
   });
 
   it("asks for a confirm on a drain and names the two reported numbers", async () => {
     const user = userEvent.setup();
     renderPage();
-    const warm = screen.getByLabelText("Warm cells of lts-2-555");
+    const warm = screen.getByLabelText("Warm cells of lts-2-555 on core");
     await user.clear(warm);
     await user.type(warm, "1");
     await user.click(screen.getByRole("button", { name: "Apply" }));
@@ -267,13 +275,13 @@ describe("The scale control", () => {
     const user = userEvent.setup();
     mockPatchCellPool.mockResolvedValue(pool());
     renderPage();
-    const warm = screen.getByLabelText("Warm cells of lts-2-555");
+    const warm = screen.getByLabelText("Warm cells of lts-2-555 on core");
     await user.clear(warm);
     await user.type(warm, "1");
     await user.click(screen.getByRole("button", { name: "Apply" }));
     await user.click(screen.getByRole("button", { name: "Yes, drain" }));
     await waitFor(() =>
-      expect(mockPatchCellPool).toHaveBeenCalledWith("lts-2-555", { spec: { warm: 1 } }),
+      expect(mockPatchCellPool).toHaveBeenCalledWith("lts-2-555", "core", { spec: { warm: 1 } }),
     );
   });
 
@@ -281,7 +289,7 @@ describe("The scale control", () => {
     const user = userEvent.setup();
     mockPatchCellPool.mockRejectedValue(new ApiError(409, "conflict"));
     renderPage();
-    const warm = screen.getByLabelText("Warm cells of lts-2-555");
+    const warm = screen.getByLabelText("Warm cells of lts-2-555 on core");
     await user.clear(warm);
     await user.type(warm, "6");
     await user.click(screen.getByRole("button", { name: "Apply" }));
@@ -292,6 +300,16 @@ describe("The scale control", () => {
 });
 
 describe("The usage join stays inside one cluster", () => {
+  beforeEach(() => {
+    // Each cluster holds its own pool of the same name, so each cell has a
+    // block on its own cluster.
+    mockUseCellPools.mockReturnValue({
+      data: poolList([pool(), pool({ cluster: "member" })]),
+      isLoading: false,
+      error: null,
+    });
+  });
+
   it("gives two clusters with the same namespace and cell name distinct counts", () => {
     mockUseCellUsageIndex.mockReturnValue(
       usageIndex(
@@ -365,12 +383,12 @@ describe("The scale control sends one dial", () => {
     const user = userEvent.setup();
     mockPatchCellPool.mockResolvedValue(pool());
     renderPage();
-    const maxCells = screen.getByLabelText("Max cells of lts-2-555");
+    const maxCells = screen.getByLabelText("Max cells of lts-2-555 on core");
     await user.clear(maxCells);
     await user.type(maxCells, "12");
     await user.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() =>
-      expect(mockPatchCellPool).toHaveBeenCalledWith("lts-2-555", { spec: { maxCells: 12 } }),
+      expect(mockPatchCellPool).toHaveBeenCalledWith("lts-2-555", "core", { spec: { maxCells: 12 } }),
     );
   });
 
@@ -378,15 +396,15 @@ describe("The scale control sends one dial", () => {
     const user = userEvent.setup();
     mockPatchCellPool.mockResolvedValue(pool());
     renderPage();
-    const warm = screen.getByLabelText("Warm cells of lts-2-555");
-    const maxCells = screen.getByLabelText("Max cells of lts-2-555");
+    const warm = screen.getByLabelText("Warm cells of lts-2-555 on core");
+    const maxCells = screen.getByLabelText("Max cells of lts-2-555 on core");
     await user.clear(warm);
     await user.type(warm, "4");
     await user.clear(maxCells);
     await user.type(maxCells, "12");
     await user.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() =>
-      expect(mockPatchCellPool).toHaveBeenCalledWith("lts-2-555", {
+      expect(mockPatchCellPool).toHaveBeenCalledWith("lts-2-555", "core", {
         spec: { warm: 4, maxCells: 12 },
       }),
     );
@@ -406,14 +424,14 @@ describe("The scale control tracks what the user edited", () => {
     mockPatchCellPool.mockResolvedValue(pool());
     const { rerender } = renderPage();
 
-    const warm = screen.getByLabelText("Warm cells of lts-2-555");
+    const warm = screen.getByLabelText("Warm cells of lts-2-555 on core");
     await user.clear(warm);
     await user.type(warm, "5");
 
     // A poll lands: another writer raised maxCells from 8 to 20. The user
     // never touched that input, so the write must not carry it.
     mockUseCellPools.mockReturnValue({
-      data: [pool({ spec: { profileRef: "lts-2-555", warm: 2, maxCells: 20, maxTenantsPerCell: 10 } })],
+      data: poolList([pool({ spec: { profileRef: "lts-2-555", warm: 2, maxCells: 20, maxTenantsPerCell: 10 } })]),
       isLoading: false,
       error: null,
     });
@@ -421,19 +439,19 @@ describe("The scale control tracks what the user edited", () => {
 
     await user.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() =>
-      expect(mockPatchCellPool).toHaveBeenCalledWith("lts-2-555", { spec: { warm: 5 } }),
+      expect(mockPatchCellPool).toHaveBeenCalledWith("lts-2-555", "core", { spec: { warm: 5 } }),
     );
   });
 
   it("re-seeds an untouched input from the live spec", async () => {
     const user = userEvent.setup();
     const { rerender } = renderPage();
-    const warm = screen.getByLabelText("Warm cells of lts-2-555");
+    const warm = screen.getByLabelText("Warm cells of lts-2-555 on core");
     await user.clear(warm);
     await user.type(warm, "5");
 
     mockUseCellPools.mockReturnValue({
-      data: [pool({ spec: { profileRef: "lts-2-555", warm: 2, maxCells: 20, maxTenantsPerCell: 10 } })],
+      data: poolList([pool({ spec: { profileRef: "lts-2-555", warm: 2, maxCells: 20, maxTenantsPerCell: 10 } })]),
       isLoading: false,
       error: null,
     });
@@ -441,15 +459,15 @@ describe("The scale control tracks what the user edited", () => {
 
     // The untouched input shows the new stored value; the edited one keeps
     // what the user typed.
-    expect(screen.getByLabelText("Max cells of lts-2-555")).toHaveValue(20);
-    expect(screen.getByLabelText("Warm cells of lts-2-555")).toHaveValue(5);
+    expect(screen.getByLabelText("Max cells of lts-2-555 on core")).toHaveValue(20);
+    expect(screen.getByLabelText("Warm cells of lts-2-555 on core")).toHaveValue(5);
   });
 
   it("sends nothing when only the live spec moved", async () => {
     const user = userEvent.setup();
     const { rerender } = renderPage();
     mockUseCellPools.mockReturnValue({
-      data: [pool({ spec: { profileRef: "lts-2-555", warm: 6, maxCells: 8, maxTenantsPerCell: 10 } })],
+      data: poolList([pool({ spec: { profileRef: "lts-2-555", warm: 6, maxCells: 8, maxTenantsPerCell: 10 } })]),
       isLoading: false,
       error: null,
     });
@@ -470,7 +488,7 @@ describe("The scale control reports every refusal", () => {
       }),
     );
     renderPage();
-    const maxCells = screen.getByLabelText("Max cells of lts-2-555");
+    const maxCells = screen.getByLabelText("Max cells of lts-2-555 on core");
     await user.clear(maxCells);
     await user.type(maxCells, "1");
     await user.click(screen.getByRole("button", { name: "Apply" }));
@@ -485,7 +503,7 @@ describe("The scale control reports every refusal", () => {
     const user = userEvent.setup();
     mockPatchCellPool.mockRejectedValue(new ApiError(409, "conflict"));
     renderPage();
-    const warm = screen.getByLabelText("Warm cells of lts-2-555");
+    const warm = screen.getByLabelText("Warm cells of lts-2-555 on core");
     await user.clear(warm);
     await user.type(warm, "6");
     await user.click(screen.getByRole("button", { name: "Apply" }));
@@ -498,7 +516,7 @@ describe("The scale control reports every refusal", () => {
       new ApiError(400, "The request could not be completed.", { error: "bad dial" }),
     );
     renderPage();
-    const warm = screen.getByLabelText("Warm cells of lts-2-555");
+    const warm = screen.getByLabelText("Warm cells of lts-2-555 on core");
     await user.clear(warm);
     await user.type(warm, "6");
     await user.click(screen.getByRole("button", { name: "Apply" }));
@@ -507,5 +525,76 @@ describe("The scale control reports every refusal", () => {
     mockPatchCellPool.mockResolvedValue(pool());
     await user.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() => expect(screen.queryByText("bad dial")).not.toBeInTheDocument());
+  });
+});
+
+describe("Pools on more than one cluster", () => {
+  beforeEach(() => {
+    mockUseCellPools.mockReturnValue({
+      data: poolList([pool({ name: "p" }), pool({ cluster: "member-c", name: "p" })]),
+      isLoading: false,
+      error: null,
+    });
+    mockUseControllers.mockReturnValue({
+      data: [
+        cellRow("core-cell", { cellPool: "p" }),
+        cellRow("member-c-cell", { cluster: "member-c", cellPool: "p" }),
+      ],
+      isLoading: false,
+      error: null,
+    });
+    mockUseCellUsageIndex.mockReturnValue(usageIndex([], ["core", "member-c"]));
+  });
+
+  it("renders one block for each cluster and pool, each with its own cells", () => {
+    renderPage();
+    const heads = screen.getAllByRole("heading", { level: 2 });
+    expect(heads.map((h) => h.textContent)).toEqual(["core / p", "member-c / p"]);
+    const coreBlock = heads[0].closest("div")?.parentElement?.parentElement as HTMLElement;
+    const member-cBlock = heads[1].closest("div")?.parentElement?.parentElement as HTMLElement;
+    expect(within(coreBlock).getByRole("link", { name: "core-cell" })).toBeInTheDocument();
+    expect(within(coreBlock).queryByRole("link", { name: "member-c-cell" })).toBeNull();
+    expect(within(member-cBlock).getByRole("link", { name: "member-c-cell" })).toBeInTheDocument();
+    expect(within(member-cBlock).queryByRole("link", { name: "core-cell" })).toBeNull();
+  });
+
+  it("scales the member-c block on its own cluster", async () => {
+    const user = userEvent.setup();
+    mockPatchCellPool.mockResolvedValue(pool({ cluster: "member-c", name: "p" }));
+    renderPage();
+    const warm = screen.getByLabelText("Warm cells of p on member-c");
+    await user.clear(warm);
+    await user.type(warm, "5");
+    const applies = screen.getAllByRole("button", { name: "Apply" });
+    await user.click(applies[1]);
+    await waitFor(() =>
+      expect(mockPatchCellPool).toHaveBeenCalledWith("p", "member-c", { spec: { warm: 5 } }),
+    );
+  });
+
+  it("states a cluster whose pool read failed", () => {
+    mockUseCellPools.mockReturnValue({
+      data: poolList([pool({ name: "p" })], [
+        { name: "core", ok: true },
+        { name: "member-c", ok: false, error: "cluster member-c unreachable" },
+      ]),
+      isLoading: false,
+      error: null,
+    });
+    renderPage();
+    expect(screen.getByText(/cluster member-c unreachable/)).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(1);
+  });
+
+  it("puts a cell with no cluster on the BFF's own cluster", () => {
+    mockUseControllers.mockReturnValue({
+      data: [cellRow("plain-cell", { cluster: "", cellPool: "p" })],
+      isLoading: false,
+      error: null,
+    });
+    renderPage();
+    const heads = screen.getAllByRole("heading", { level: 2 });
+    const coreBlock = heads[0].closest("div")?.parentElement?.parentElement as HTMLElement;
+    expect(within(coreBlock).getByRole("link", { name: "plain-cell" })).toBeInTheDocument();
   });
 });

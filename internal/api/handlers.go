@@ -313,7 +313,7 @@ type controllerResponse struct {
 // and CreatedAt are always present. The other five stay absent for a
 // controller with no cell role, which carries no pool, no tenant, and no
 // cell readiness clock.
-func (s *Server) fillCellSummary(cr *v1alpha1.Controller, row *controllerResponse, caps *cellCapResolver) {
+func (s *Server) fillCellSummary(cr *v1alpha1.Controller, cluster string, row *controllerResponse, caps *cellCapResolver) {
 	row.Kind = controllerKind(cr)
 	if cr == nil {
 		return
@@ -327,7 +327,7 @@ func (s *Server) fillCellSummary(cr *v1alpha1.Controller, row *controllerRespons
 	row.CellPool = cr.Labels[cells.LabelCellPool]
 	tenants := cellPlacedTenants(cr)
 	row.TenantCount = &tenants
-	cap32 := caps.resolve(cr)
+	cap32 := caps.resolve(cluster, cr)
 	row.MaxTenants = &cap32
 	warm := false
 	if cr.Status.Cell != nil {
@@ -901,7 +901,7 @@ func (s *Server) handleControllersFiltered(w http.ResponseWriter, r *http.Reques
 			AppliedBundleHash: cr.Status.AppliedBundleHash,
 			Attention:         buildAttentionJSON(cr),
 		}
-		s.fillCellSummary(cr, &crResp, caps)
+		s.fillCellSummary(cr, cluster, &crResp, caps)
 		if cr.Spec.ReconciliationPolicy != nil {
 			crResp.RolloutWave = cr.Spec.ReconciliationPolicy.RolloutWave
 		}

@@ -13,7 +13,7 @@ import { patchCellPool } from "../api/client";
 import { ApiError } from "../hooks/useApi";
 import { controllerRoute } from "../routing";
 import type { ControllerListItem } from "../hooks/useControllers";
-import type { CellPool, CellPoolScaleRequest, CellUsage } from "../types";
+import type { CellPool, CellPoolListResponse, CellPoolScaleRequest, CellUsage } from "../types";
 import type { CellUsageIndex } from "../hooks/useCells";
 import styles from "./Cells.module.css";
 
@@ -25,6 +25,11 @@ export default function Cells() {
   const canScale = canDoGlobal(permissions, "cellpools", "update");
 
   const pools = useCellPools();
+  const poolItems = pools.data?.items ?? [];
+  // The list sorts the BFF's own cluster first. A controllers row with no
+  // cluster belongs to that cluster.
+  const localCluster = pools.data?.clusters?.[0]?.name ?? "";
+  const unreachable = (pools.data?.clusters ?? []).filter((c) => !c.ok);
   const controllers = useControllers();
   const cells = (controllers.data ?? []).filter((c) => c.kind === "cell");
 
@@ -53,8 +58,8 @@ export default function Cells() {
         <div>
           <h1 className={styles.pageTitle}>Cells</h1>
           <p className={styles.pageDesc}>
-            One block for each cell pool, with the cells that pool owns. The table lists the cells
-            you may read.
+            One block for each cell pool of each cluster, with the cells that pool owns. The table
+            lists the cells you may read.
           </p>
         </div>
       </div>
@@ -69,16 +74,24 @@ export default function Cells() {
         <div className={styles.notice}>Failed to read the cell pools: {pools.error.message}</div>
       )}
 
+      {unreachable.map((c) => (
+        <div key={c.name} className={styles.notice}>
+          The pools of cluster <code>{c.name}</code> are absent: {c.error || "the cluster did not answer"}.
+        </div>
+      ))}
+
       {pools.isLoading && <div className={styles.notice}>Reading the cell pools…</div>}
-      {!pools.isLoading && (pools.data ?? []).length === 0 && (
+      {!pools.isLoading && poolItems.length === 0 && unreachable.length === 0 && (
         <div className={styles.notice}>No cell pool exists yet.</div>
       )}
 
-      {(pools.data ?? []).map((pool) => (
+      {poolItems.map((pool) => (
         <PoolBlock
-          key={pool.name}
+          key={`${pool.cluster}/${pool.name}`}
           pool={pool}
-          cells={cells.filter((c) => c.cellPool === pool.name)}
+          cells={cells.filter(
+            (c) => (c.cluster || localCluster) === pool.cluster && c.cellPool === pool.name,
+          )}
           usage={usage}
           usageDisabled={usageDisabled}
           controllersLoading={controllers.isLoading}
@@ -117,7 +130,10 @@ function PoolBlock({
     <Card>
       <div className={styles.poolHead}>
         <div>
-          <h2 className={styles.poolName}>{pool.name}</h2>
+          <h2 className={styles.poolName}>
+            <span className={styles.poolCluster}>{pool.cluster} / </span>
+            {pool.name}
+          </h2>
           <p className={styles.poolProfile}>Profile {pool.spec.profileRef}</p>
         </div>
         {canScale && <ScaleControl pool={pool} />}
@@ -305,7 +321,7 @@ function ScaleControl({ pool }: { pool: CellPool }) {
   const hasChange = Object.keys(changed).length > 0;
 
   const scale = useMutation({
-    mutationFn: () => patchCellPool(pool.name, { spec: changed }),
+    mutationFn: () => patchCellPool(pool.name, pool.cluster, { spec: changed }),
     onSuccess: (updated) => {
       setConfirming(false);
       setConflict(false);
@@ -314,8 +330,17 @@ function ScaleControl({ pool }: { pool: CellPool }) {
       setDirty(new Set());
       // The response carries the stored pool, so the block renders the
       // written values without waiting for the next poll.
-      queryClient.setQueriesData<CellPool[]>({ queryKey: ["cellpools"] }, (current) =>
-        current?.map((p) => (p.name === updated.name ? updated : p)),
+      // A pool name is unique inside one cluster only, so the merge
+      // matches both the cluster and the name.
+      queryClient.setQueriesData<CellPoolListResponse>({ queryKey: ["cellpools"] }, (current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((p) =>
+                p.cluster === updated.cluster && p.name === updated.name ? updated : p,
+              ),
+            }
+          : current,
       );
       void queryClient.invalidateQueries({ queryKey: ["cellpools"] });
     },
@@ -364,7 +389,7 @@ function ScaleControl({ pool }: { pool: CellPool }) {
           min={0}
           value={warm}
           onChange={(e) => edit("warm", e.target.value)}
-          aria-label={`Warm cells of ${pool.name}`}
+          aria-label={`Warm cells of ${pool.name} on ${pool.cluster}`}
         />
       </label>
       <label className={styles.field}>
@@ -374,7 +399,7 @@ function ScaleControl({ pool }: { pool: CellPool }) {
           min={0}
           value={maxCells}
           onChange={(e) => edit("maxCells", e.target.value)}
-          aria-label={`Max cells of ${pool.name}`}
+          aria-label={`Max cells of ${pool.name} on ${pool.cluster}`}
         />
       </label>
       <Button size="sm" onClick={apply} disabled={scale.isPending}>

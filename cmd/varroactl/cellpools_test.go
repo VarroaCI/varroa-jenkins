@@ -15,7 +15,8 @@ import (
 
 func cellPoolJSON(warm int) map[string]any {
 	return map[string]any{
-		"name": "lts-2-555",
+		"cluster": "core",
+		"name":    "lts-2-555",
 		"spec": map[string]any{
 			"profileRef": "lts-2-555", "warm": warm, "maxCells": 6, "maxTenantsPerCell": 10,
 		},
@@ -272,5 +273,92 @@ func TestCellPools_CreateIsNotACLIOperation(t *testing.T) {
 		if !present[verb] {
 			t.Errorf("%s cellpool must exist", verb)
 		}
+	}
+}
+
+// TestCellPools_ListPrintsTheClusterColumn proves each row names the
+// cluster that holds the pool, and that an unanswered cluster is reported.
+func TestCellPools_ListPrintsTheClusterColumn(t *testing.T) {
+	testSetup(t)
+	srv := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Has("cluster") {
+			t.Errorf("a list with no --cluster must send no cluster: %s", r.URL.RawQuery)
+		}
+		member := cellPoolJSON(1)
+		member["cluster"] = "member-c"
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{cellPoolJSON(2), member},
+			"clusters": []map[string]any{
+				{"name": "core", "ok": true},
+				{"name": "member-c", "ok": true},
+				{"name": "far", "ok": false, "error": "cluster far unreachable"},
+			},
+		})
+	})
+	defer srv.Close()
+
+	root := newRootCmd()
+	var out, errOut strings.Builder
+	root.SetOut(&out)
+	root.SetErr(&errOut)
+	root.SetArgs([]string{"get", "cellpools"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text := out.String()
+	if !strings.HasPrefix(strings.TrimSpace(text), "CLUSTER") {
+		t.Errorf("the table must start with the CLUSTER column:\n%s", text)
+	}
+	for _, want := range []string{"core", "member-c"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("table missing cluster %q:\n%s", want, text)
+		}
+	}
+	if !strings.Contains(errOut.String(), "far") {
+		t.Errorf("an unanswered cluster must be reported, stderr:\n%s", errOut.String())
+	}
+}
+
+// TestCellPools_ClusterFlagReachesEveryRoute proves --cluster travels as
+// the cluster query parameter on get, describe, and scale.
+func TestCellPools_ClusterFlagReachesEveryRoute(t *testing.T) {
+	for _, args := range [][]string{
+		{"get", "cellpools", "--cluster", "member-c"},
+		{"get", "cellpool", "lts-2-555", "--cluster", "member-c"},
+		{"describe", "cellpool", "lts-2-555", "--cluster", "member-c"},
+		{"scale", "cellpool", "lts-2-555", "--warm", "2", "--cluster", "member-c"},
+	} {
+		t.Run(strings.Join(args[:2], " "), func(t *testing.T) {
+			testSetup(t)
+			srv := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if got := r.URL.Query().Get("cluster"); got != "member-c" {
+					t.Errorf("cluster = %q, want member-c", got)
+				}
+				pool := cellPoolJSON(2)
+				pool["cluster"] = "member-c"
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/api/v1/cellpools" {
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"items":    []map[string]any{pool},
+						"clusters": []map[string]any{{"name": "member-c", "ok": true}},
+					})
+					return
+				}
+				_ = json.NewEncoder(w).Encode(pool)
+			})
+			defer srv.Close()
+
+			root := newRootCmd()
+			var out strings.Builder
+			root.SetOut(&out)
+			root.SetArgs(args)
+			if err := root.Execute(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !strings.Contains(out.String(), "member-c") {
+				t.Errorf("output must name the cluster:\n%s", out.String())
+			}
+		})
 	}
 }

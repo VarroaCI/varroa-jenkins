@@ -16,11 +16,14 @@ const CELL_POLL_MS = 15_000;
  */
 const GRANTS_STALE_MS = 60_000;
 
-/** Lists every cell pool. */
+/**
+ * Lists the cell pools of every cluster, or of one cluster. The data is the
+ * whole envelope: the page needs the clusters status beside the items.
+ */
 export function useCellPools(cluster?: string) {
   return useQuery({
     queryKey: ["cellpools", cluster ?? null],
-    queryFn: () => getCellPools().then((r) => r.items),
+    queryFn: () => getCellPools(cluster),
     refetchInterval: CELL_POLL_MS,
   });
 }
@@ -32,7 +35,7 @@ export function useCellPools(cluster?: string) {
 export function useCellPool(name: string | undefined, enabled: boolean, cluster?: string) {
   return useQuery({
     queryKey: ["cellpool", cluster ?? null, name ?? null],
-    queryFn: () => getCellPool(name as string),
+    queryFn: () => getCellPool(name as string, cluster),
     enabled: enabled && !!name,
     refetchInterval: CELL_POLL_MS,
   });

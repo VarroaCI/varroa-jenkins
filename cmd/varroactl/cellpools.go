@@ -18,20 +18,42 @@ func init() {
 // verb parents. There is no create and no delete: the API serves no such
 // route, and a pool is created and deleted with kubectl or through GitOps.
 func addCellPoolCommands(v *verbCommands) {
-	v.get.AddCommand(&cobra.Command{
+	get := &cobra.Command{
 		Use:     "cellpool [NAME]",
 		Aliases: []string{"cellpools"},
 		Short:   "Get cell pool(s)",
 		Args:    cobra.MaximumNArgs(1),
 		RunE:    runGetCellPools,
-	})
-	v.describe.AddCommand(&cobra.Command{
+	}
+	addCellPoolClusterFlag(get)
+	v.get.AddCommand(get)
+	describe := &cobra.Command{
 		Use:     "cellpool NAME",
 		Aliases: []string{"cellpools"},
 		Short:   "Describe a cell pool",
 		Args:    cobra.ExactArgs(1),
 		RunE:    runDescribeCellPool,
-	})
+	}
+	addCellPoolClusterFlag(describe)
+	v.describe.AddCommand(describe)
+}
+
+// addCellPoolClusterFlag registers --cluster on a cell-pool command. Each
+// cluster of the brood holds its own pools. A list with no flag covers
+// every cluster. A single pool with no flag is read from the BFF's own
+// cluster.
+func addCellPoolClusterFlag(cmd *cobra.Command) {
+	cmd.Flags().String("cluster", "", "cluster that holds the pool (list: default every cluster; single pool: default the core cluster)")
+}
+
+// cellPoolCluster returns the --cluster value as a query parameter, or nil
+// when the flag is not set.
+func cellPoolCluster(cmd *cobra.Command) *client.ComponentsParametersClusterQuery {
+	cluster, _ := cmd.Flags().GetString("cluster")
+	if cluster == "" {
+		return nil
+	}
+	return &cluster
 }
 
 // addScaleCommand registers the top-level verb scale. It is registered from
@@ -56,6 +78,7 @@ func newScaleCellPoolCmd() *cobra.Command {
 	}
 	cmd.Flags().Int32("warm", 0, "Target count of free cells the pool keeps ready")
 	cmd.Flags().Int32("max-cells", 0, "Cap on the pool's cells, placed cells included. 0 means unlimited")
+	addCellPoolClusterFlag(cmd)
 	return cmd
 }
 
@@ -88,7 +111,7 @@ func runGetCellPools(cmd *cobra.Command, args []string) error {
 		return renderCellPools(cmd, []client.ComponentsSchemasCellPool{*pool})
 	}
 
-	resp, err := c.ListCellPoolsWithResponse(cmd.Context())
+	resp, err := c.ListCellPoolsWithResponse(cmd.Context(), &client.ListCellPoolsParams{Cluster: cellPoolCluster(cmd)})
 	if err != nil {
 		return err
 	}
@@ -97,6 +120,15 @@ func runGetCellPools(cmd *cobra.Command, args []string) error {
 	}
 	if resp.JSON200 == nil {
 		return fmt.Errorf("unexpected response: no data")
+	}
+	for _, st := range resp.JSON200.Clusters {
+		if !st.Ok {
+			msg := "no answer"
+			if st.Error != nil && *st.Error != "" {
+				msg = *st.Error
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: cluster %s: %s; its pools are not listed\n", st.Name, msg)
+		}
 	}
 	return renderCellPools(cmd, resp.JSON200.Items)
 }
@@ -115,6 +147,7 @@ func runDescribeCellPool(cmd *cobra.Command, args []string) error {
 	}
 
 	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "Cluster:             %s\n", pool.Cluster)
 	fmt.Fprintf(out, "Name:                %s\n", pool.Name)
 	fmt.Fprintf(out, "Profile:             %s\n", pool.Spec.ProfileRef)
 	fmt.Fprintf(out, "Warm:                %s\n", int32PtrString(pool.Spec.Warm))
@@ -198,7 +231,7 @@ func runScaleCellPool(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	body := client.PatchCellPoolJSONRequestBody{Spec: spec}
-	resp, err := c.PatchCellPoolWithResponse(cmd.Context(), args[0], body)
+	resp, err := c.PatchCellPoolWithResponse(cmd.Context(), args[0], &client.PatchCellPoolParams{Cluster: cellPoolCluster(cmd)}, body)
 	if err != nil {
 		return err
 	}
@@ -212,7 +245,7 @@ func runScaleCellPool(cmd *cobra.Command, args []string) error {
 }
 
 func fetchCellPool(cmd *cobra.Command, c *client.ClientWithResponses, name string) (*client.ComponentsSchemasCellPool, error) {
-	resp, err := c.GetCellPoolWithResponse(cmd.Context(), name)
+	resp, err := c.GetCellPoolWithResponse(cmd.Context(), name, &client.GetCellPoolParams{Cluster: cellPoolCluster(cmd)})
 	if err != nil {
 		return nil, err
 	}
@@ -243,10 +276,11 @@ func renderCellPools(cmd *cobra.Command, items []client.ComponentsSchemasCellPoo
 		return nil
 	}
 
-	headers := []string{"NAME", "PROFILE", "WARM", "PLACED", "FREE", "READY"}
+	headers := []string{"CLUSTER", "NAME", "PROFILE", "WARM", "PLACED", "FREE", "READY"}
 	rows := make([][]string, len(items))
 	for i, item := range items {
 		rows[i] = []string{
+			item.Cluster,
 			item.Name,
 			item.Spec.ProfileRef,
 			strconv.Itoa(int(item.Status.WarmCells)),

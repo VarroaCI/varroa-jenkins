@@ -1503,6 +1503,9 @@ func (r *operatorCommandRunner) Start(ctx context.Context) error {
 		{"versionprofiles.update", bus.OperatorVersionProfilesSubject(r.cluster, "update"), r.configCrud.HandleVersionProfilesUpdate},
 		{"versionprofiles.delete", bus.OperatorVersionProfilesSubject(r.cluster, "delete"), r.configCrud.HandleVersionProfilesDelete},
 		{"versionprofiles.view", bus.OperatorVersionProfilesSubject(r.cluster, "view"), r.configCrud.HandleVersionProfilesView},
+		{"cellpools.list", bus.OperatorCellPoolsSubject(r.cluster, "list"), r.configCrud.HandleCellPoolsList},
+		{"cellpools.get", bus.OperatorCellPoolsSubject(r.cluster, "get"), r.configCrud.HandleCellPoolsGet},
+		{"cellpools.scale", bus.OperatorCellPoolsSubject(r.cluster, "scale"), r.configCrud.HandleCellPoolsScale},
 		// Namespace discovery (F4 add-cluster-namespace-discovery).
 		{"namespaces.list", bus.OperatorNamespacesSubject(r.cluster), r.crud.HandleNamespacesList},
 	}

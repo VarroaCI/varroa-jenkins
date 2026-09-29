@@ -81,14 +81,20 @@ profile.
 
 | Tool | Arguments | Verb |
 |---|---|---|
-| `list_cell_pools` | `verbose` (optional) | `cellpools:read` |
-| `get_cell_pool` | `name` | `cellpools:read` |
-| `update_cell_pool` | `name`, and at least one of `warm`, `maxCells`, `maxTenantsPerCell`, `unreadyGracePeriod` | `cellpools:update` |
+| `list_cell_pools` | `cluster`, `verbose` (both optional) | `cellpools:read` |
+| `get_cell_pool` | `name`, `cluster` (optional) | `cellpools:read` |
+| `update_cell_pool` | `name`, `cluster` (optional), and at least one of `warm`, `maxCells`, `maxTenantsPerCell`, `unreadyGracePeriod` | `cellpools:update` |
 
-`list_cell_pools` returns a compact summary of each pool, sorted by name. The
-summary carries every spec dial and every status count. Pass `verbose: true`
+Each cluster of the brood holds its own pools. `list_cell_pools` lists every
+cluster, or the one `cluster` names. It returns a compact summary of each pool,
+with the local cluster first, then by cluster and name. Each summary names its
+`cluster` and carries every spec dial and every status count. The result also
+carries `clusters`, one read status for each cluster. A cluster with
+`ok: false` did not answer, and its pools are absent. Pass `verbose: true`
 for the full resources, which add the cell template and the condition list.
-`get_cell_pool` returns one pool's full resource.
+`get_cell_pool` returns one pool's full resource with a `cluster` key. Without
+`cluster`, `get_cell_pool` and `update_cell_pool` act on the core cluster. An
+unknown cluster, or a member that does not answer, gives a tool error.
 
 `update_cell_pool` scales a pool. It writes only the dials the call names and
 removes nothing, so it is annotated `destructiveHint: false` and

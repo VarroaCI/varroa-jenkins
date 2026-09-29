@@ -337,3 +337,12 @@ func TestConfigPayloadRoundTrips(t *testing.T) {
 		t.Errorf("CatalogSyncResponse.Code: got %q", gotSyncResp.Code)
 	}
 }
+
+func TestOperatorCellPoolsSubject(t *testing.T) {
+	for _, verb := range []string{"list", "get", "scale"} {
+		want := "operator.member-c.cellpools." + verb
+		if got := OperatorCellPoolsSubject("member-c", verb); got != want {
+			t.Errorf("OperatorCellPoolsSubject(member-c, %q) = %q, want %q", verb, got, want)
+		}
+	}
+}

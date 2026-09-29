@@ -6,34 +6,52 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"sort"
+	"net/http"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
-	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
 )
-
-// cellPoolUpdateAttempts bounds the read-modify-write retry, matching the
-// HTTP sibling's own bound.
-const cellPoolUpdateAttempts = 3
 
 // =============================================================================
 // CellPool tools (3)
 // =============================================================================
 
+// Each tool calls the same internal/api service method as its HTTP sibling,
+// so a tool and a route authorize, route to a cluster, and refuse a call
+// identically.
+
+// cellPoolResource is the full CellPool resource with a top-level cluster
+// key. A pool name is unique inside one cluster only.
+type cellPoolResource struct {
+	Cluster string `json:"cluster"`
+	*v1alpha1.CellPool
+}
+
+// cellPoolToolError maps a service refusal onto a tool error. The two
+// gate refusals keep the verb in the text, so an agent knows which grant
+// is missing.
+func cellPoolToolError(serr *api.ServiceError, verb string) *mcp.CallToolResult {
+	if serr.Status == http.StatusForbidden {
+		return mcp.NewToolResultError("access denied: missing cellpools:" + verb + " permission")
+	}
+	return mcp.NewToolResultError(serr.Message)
+}
+
 func registerCellPoolTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	listPools := mcp.NewTool("list_cell_pools",
-		mcp.WithDescription("List every CellPool, sorted by name. A CellPool holds the size, "+
-			"the capacity, and the template of one pool of cells that serve the pipelines "+
-			"tenants of a single version profile. The summary carries every spec dial and "+
-			"every status count. Use get_cell_pool for the full resource."),
+		mcp.WithDescription("List the CellPools of every cluster of the brood, or of one cluster. "+
+			"A CellPool holds the size, the capacity, and the template of one pool of cells that "+
+			"serve the pipelines tenants of a single version profile. Each item names its cluster. "+
+			"The summary carries every spec dial and every status count. clusters reports each "+
+			"cluster the list read; a cluster with ok false added no item. Use get_cell_pool for "+
+			"the full resource."),
+		mcp.WithString("cluster", mcp.Description("List the pools of this cluster only. Default: every cluster.")),
 		mcp.WithBoolean("verbose", mcp.Description("Return full CellPool resources instead of "+
 			"summaries. A full resource carries the cell template and the condition list.")),
 		withListOutput(cellPoolListOutputSchema),
@@ -46,29 +64,38 @@ func registerCellPoolTools(mcpServer *server.MCPServer, deps *api.Dependencies) 
 		if err != nil {
 			return mcp.NewToolResultError("authentication required"), nil
 		}
-		if !deps.Authorizer.CanReadCellPools(claims) {
-			return mcp.NewToolResultError("access denied: missing cellpools:read permission"), nil
+		args := getArgs(req)
+		list, serr := api.NewServer(deps).ListCellPools(ctx, claims, strArg(args, "cluster"))
+		if serr != nil {
+			return cellPoolToolError(serr, "read"), nil
 		}
-		pools, err := crdstore.List[v1alpha1.CellPool](ctx, deps.Store, "", "")
-		if err != nil {
-			return mcp.NewToolResultError("failed to list cell pools: " + err.Error()), nil
+		var items any
+		if verbose, _ := args["verbose"].(bool); verbose {
+			full := make([]cellPoolResource, 0, len(list.Items))
+			for _, p := range list.Items {
+				full = append(full, cellPoolResource{Cluster: p.Cluster, CellPool: p.Pool})
+			}
+			items = full
+		} else {
+			summaries := make([]cellPoolSummary, 0, len(list.Items))
+			for _, p := range list.Items {
+				summaries = append(summaries, summarizeCellPool(p.Cluster, p.Pool))
+			}
+			items = summaries
 		}
-		sort.Slice(pools, func(i, j int) bool { return pools[i].Name < pools[j].Name })
-		if verbose, _ := getArgs(req)["verbose"].(bool); verbose {
-			return resultJSON(pools)
-		}
-		summaries := make([]cellPoolSummary, 0, len(pools))
-		for _, pool := range pools {
-			summaries = append(summaries, summarizeCellPool(pool))
-		}
-		return resultJSON(summaries)
+		return resultJSON(map[string]any{
+			"items":    items,
+			"count":    len(list.Items),
+			"clusters": list.Clusters,
+		})
 	})
 
 	getPool := mcp.NewTool("get_cell_pool",
 		mcp.WithDescription("Get one CellPool's spec and status. status reports warmCells, "+
 			"placedCells, unreadyCells, freeTenantSlots, the tenant list, and the PoolReady "+
-			"condition."),
+			"condition. The result names the pool's cluster."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("CellPool name")),
+		mcp.WithString("cluster", mcp.Description("Cluster that holds the pool. Default: the core cluster.")),
 	)
 	addTool(mcpServer, kindRead, getPool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -78,22 +105,20 @@ func registerCellPoolTools(mcpServer *server.MCPServer, deps *api.Dependencies) 
 		if err != nil {
 			return mcp.NewToolResultError("authentication required"), nil
 		}
-		if !deps.Authorizer.CanReadCellPools(claims) {
-			return mcp.NewToolResultError("access denied: missing cellpools:read permission"), nil
+		args := getArgs(req)
+		pool, serr := api.NewServer(deps).GetCellPool(ctx, claims, strArg(args, "cluster"), strArg(args, "name"))
+		if serr != nil {
+			return cellPoolToolError(serr, "read"), nil
 		}
-		name := strArg(getArgs(req), "name")
-		pool, err := crdstore.Get[v1alpha1.CellPool](ctx, deps.Store, name, "")
-		if err != nil {
-			return mcp.NewToolResultError("cell pool not found: " + err.Error()), nil
-		}
-		return resultJSON(pool)
+		return resultJSON(cellPoolResource{Cluster: pool.Cluster, CellPool: pool.Pool})
 	})
 
 	updatePool := mcp.NewTool("update_cell_pool",
-		mcp.WithDescription("Scale a CellPool. Writes only the dials the call names and removes "+
-			"nothing. profileRef and cellTemplate are not API operations: edit those with "+
-			"kubectl or through GitOps."),
+		mcp.WithDescription("Scale a CellPool on its own cluster. Writes only the dials the call "+
+			"names and removes nothing. profileRef and cellTemplate are not API operations: edit "+
+			"those with kubectl or through GitOps."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("CellPool name")),
+		mcp.WithString("cluster", mcp.Description("Cluster that holds the pool. Default: the core cluster.")),
 		mcp.WithNumber("warm", mcp.Description("Target count of free cells the pool keeps ready")),
 		mcp.WithNumber("maxCells", mcp.Description("Cap on the pool's cells, placed cells included. 0 means unlimited")),
 		mcp.WithNumber("maxTenantsPerCell", mcp.Description("Capacity a pool cell uses when its own spec.cell.maxTenants is zero")),
@@ -113,33 +138,20 @@ func registerCellPoolTools(mcpServer *server.MCPServer, deps *api.Dependencies) 
 
 		args := getArgs(req)
 		name := strArg(args, "name")
-		apply, errMsg := cellPoolDialsFromArgs(args)
+		dials, errMsg := cellPoolDialsFromArgs(args)
 		if errMsg != "" {
 			return mcp.NewToolResultError(errMsg), nil
 		}
 
-		for attempt := 0; attempt < cellPoolUpdateAttempts; attempt++ {
-			existing, getErr := crdstore.Get[v1alpha1.CellPool](ctx, deps.Store, name, "")
-			if getErr != nil {
-				return mcp.NewToolResultError("cell pool not found: " + getErr.Error()), nil
-			}
-			updated := existing.DeepCopy()
-			if msg := apply(&updated.Spec); msg != "" {
-				return mcp.NewToolResultError(msg), nil
-			}
-			updateErr := crdstore.Update(ctx, deps.Store, updated)
-			if updateErr == nil {
-				emitActivity(deps, claims, activity.Event{
-					Type:    "cellpool.updated",
-					Message: "CellPool " + name + " scaled",
-				})
-				return resultJSON(updated)
-			}
-			if !apierrors.IsConflict(updateErr) {
-				return mcp.NewToolResultError(fmt.Sprintf("failed to update cell pool: %v", updateErr)), nil
-			}
+		pool, serr := api.NewServer(deps).ScaleCellPool(ctx, claims, strArg(args, "cluster"), name, dials)
+		if serr != nil {
+			return cellPoolToolError(serr, "update"), nil
 		}
-		return mcp.NewToolResultError("the cell pool changed during the update; retry the call"), nil
+		emitActivityForCluster(deps, claims, pool.Cluster, activity.Event{
+			Type:    "cellpool.updated",
+			Message: "CellPool " + name + " scaled on cluster " + pool.Cluster,
+		})
+		return resultJSON(cellPoolResource{Cluster: pool.Cluster, CellPool: pool.Pool})
 	})
 }
 
@@ -147,6 +159,7 @@ func registerCellPoolTools(mcpServer *server.MCPServer, deps *api.Dependencies) 
 // every spec dial and every status count, so a caller surveys pool capacity
 // without pulling the cell template and the condition list of each pool.
 type cellPoolSummary struct {
+	Cluster            string   `json:"cluster"`
 	Name               string   `json:"name"`
 	ProfileRef         string   `json:"profileRef"`
 	Warm               int32    `json:"warm"`
@@ -162,11 +175,12 @@ type cellPoolSummary struct {
 	PoolReadyReason    string   `json:"poolReadyReason,omitempty"`
 }
 
-func summarizeCellPool(pool *v1alpha1.CellPool) cellPoolSummary {
+func summarizeCellPool(cluster string, pool *v1alpha1.CellPool) cellPoolSummary {
 	if pool == nil {
-		return cellPoolSummary{}
+		return cellPoolSummary{Cluster: cluster}
 	}
 	s := cellPoolSummary{
+		Cluster:           cluster,
 		Name:              pool.Name,
 		ProfileRef:        pool.Spec.ProfileRef,
 		Warm:              pool.Spec.Warm,
@@ -190,7 +204,8 @@ func summarizeCellPool(pool *v1alpha1.CellPool) cellPoolSummary {
 }
 
 // cellPoolListOutputSchema describes the result of list_cell_pools.
-var cellPoolListOutputSchema = listOutputSchema("Default summary projection.", []schemaField{
+var cellPoolListOutputSchema = withClustersProperty(listOutputSchema("Default summary projection.", []schemaField{
+	{Name: "cluster", Type: "string", Desc: "The cluster that holds the pool. A pool name is unique inside one cluster only."},
 	{Name: "name", Type: "string", Desc: "CellPool name."},
 	{Name: "profileRef", Type: "string", Desc: "The JenkinsVersionProfile the pool's cells run."},
 	{Name: "warm", Type: "integer", Desc: "Target count of free cells the pool keeps ready."},
@@ -204,67 +219,74 @@ var cellPoolListOutputSchema = listOutputSchema("Default summary projection.", [
 	{Name: "tenants", Type: "array", Desc: "Every tenant on the pool, sorted."},
 	{Name: "poolReady", Type: "string", Desc: "The PoolReady condition's status."},
 	{Name: "poolReadyReason", Type: "string", Desc: "Ready, CellCapReached, ProfileMissing, RecordStoreUnsupported, BlobTierUnsupported, ArtifactSecretMissing, ArtifactPluginMissing, or SecretsMissing."},
-})
+}))
 
-// cellPoolDialsFromArgs reads the four dials off the call arguments and
-// returns a function that merges them onto a spec. The numeric bounds repeat
-// the CRD's own, so a bad call is refused before the write and the caller
-// receives a readable message rather than a raw apiserver rejection.
-func cellPoolDialsFromArgs(args map[string]any) (func(*v1alpha1.CellPoolSpec) string, string) {
-	var warm, maxCells, maxTenants *int32
-	var grace *metav1.Duration
-	named := false
+// withClustersProperty adds the clusters property to a list output schema:
+// one read status for each cluster the list covered.
+func withClustersProperty(schema json.RawMessage) json.RawMessage {
+	var doc map[string]any
+	if err := json.Unmarshal(schema, &doc); err != nil {
+		panic("cell pool list schema: " + err.Error())
+	}
+	props, _ := doc["properties"].(map[string]any)
+	props["clusters"] = map[string]any{
+		"type":        "array",
+		"description": "One read status for each cluster the list covered. A cluster with ok false added no item.",
+		"items": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name":  map[string]any{"type": "string"},
+				"ok":    map[string]any{"type": "boolean"},
+				"error": map[string]any{"type": "string"},
+			},
+		},
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		panic("cell pool list schema: " + err.Error())
+	}
+	return out
+}
+
+// cellPoolDialsFromArgs reads the four dials off the call arguments. It
+// refuses a number that is not a whole int32 and a value below the CRD's
+// floor, so a bad call is refused before any request. The remaining rules,
+// such as maxCells against warm, run where the write runs.
+func cellPoolDialsFromArgs(args map[string]any) (cells.CellPoolDials, string) {
+	var d cells.CellPoolDials
 
 	if v, ok := numberArg(args, "warm"); ok {
 		n, msg := int32Dial("warm", v, 0)
 		if msg != "" {
-			return nil, msg
+			return d, msg
 		}
-		warm, named = &n, true
+		d.Warm = &n
 	}
 	if v, ok := numberArg(args, "maxCells"); ok {
 		n, msg := int32Dial("maxCells", v, 0)
 		if msg != "" {
-			return nil, msg
+			return d, msg
 		}
-		maxCells, named = &n, true
+		d.MaxCells = &n
 	}
 	if v, ok := numberArg(args, "maxTenantsPerCell"); ok {
 		n, msg := int32Dial("maxTenantsPerCell", v, 1)
 		if msg != "" {
-			return nil, msg
+			return d, msg
 		}
-		maxTenants, named = &n, true
+		d.MaxTenantsPerCell = &n
 	}
 	if s := strArg(args, "unreadyGracePeriod"); s != "" {
-		d, err := time.ParseDuration(s)
-		if err != nil || d < 0 {
-			return nil, "unreadyGracePeriod must be a duration such as 5m"
+		dur, err := time.ParseDuration(s)
+		if err != nil || dur < 0 {
+			return d, "unreadyGracePeriod must be a duration such as 5m"
 		}
-		grace, named = &metav1.Duration{Duration: d}, true
+		d.UnreadyGracePeriod = &s
 	}
-	if !named {
-		return nil, "name at least one of warm, maxCells, maxTenantsPerCell, or unreadyGracePeriod"
+	if !d.Named() {
+		return d, "name at least one of warm, maxCells, maxTenantsPerCell, or unreadyGracePeriod"
 	}
-
-	return func(spec *v1alpha1.CellPoolSpec) string {
-		if warm != nil {
-			spec.Warm = *warm
-		}
-		if maxCells != nil {
-			spec.MaxCells = *maxCells
-		}
-		if maxTenants != nil {
-			spec.MaxTenantsPerCell = *maxTenants
-		}
-		if grace != nil {
-			spec.UnreadyGracePeriod = grace
-		}
-		if spec.MaxCells > 0 && spec.MaxCells < spec.Warm {
-			return "maxCells must be 0 or at least warm"
-		}
-		return ""
-	}, ""
+	return d, ""
 }
 
 // int32Dial converts one JSON number to the int32 a spec dial holds, and

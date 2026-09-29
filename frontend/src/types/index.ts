@@ -2373,14 +2373,27 @@ export interface CellPoolStatus {
 
 /** One cell pool, as the read and scale surface returns it. */
 export interface CellPool {
+  /** The cluster that holds the pool. A pool name is unique inside one cluster only. */
+  cluster: string;
   name: string;
   spec: CellPoolSpec;
   status: CellPoolStatus;
 }
 
-/** The items envelope of GET /cellpools. */
+/** The read status of one cluster in GET /cellpools. */
+export interface CellPoolClusterStatus {
+  name: string;
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * The body of GET /cellpools. clusters holds one entry for each cluster the
+ * list read. A cluster with ok false added no item.
+ */
 export interface CellPoolListResponse {
   items: CellPool[];
+  clusters: CellPoolClusterStatus[];
 }
 
 /** The body of PATCH /cellpools/{name}. It carries the four scale dials only. */
