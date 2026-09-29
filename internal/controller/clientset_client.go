@@ -113,7 +113,15 @@ const artifactSecretHashAnnotation = "varroa.dev/artifact-secret-hash"
 // cp -L. DefaultConfidentialStore chmods the directory only when it creates
 // it, and never chmods a key file, so this container owns both modes. The
 // guard keeps the script correct for a pod that carries no such mount.
+//
+// The shell runs as PID 1 of the container, and the kernel drops a signal to
+// PID 1 that has no handler. Without the TERM trap, a pod delete waits the
+// full pod grace. Each long command runs in the background under wait, so
+// the trap runs at once. The trap ignores TERM for the shell itself and
+// sends TERM to the whole process group, which also reaches every stage of
+// a pipeline and the JVM that jenkins-plugin-cli starts.
 const pluginsInitScript = `set -e
+trap 'trap "" TERM; kill -TERM 0 2>/dev/null; exit 143' TERM
 if [ -d /run/secrets/varroa-cell-secrets ]; then
   mkdir -p /var/jenkins_home/secrets
   chmod 700 /var/jenkins_home/secrets
@@ -123,8 +131,9 @@ fi
 attempt=1
 max_attempts=5
 while true; do
-  if jenkins-plugin-cli --plugin-file /var/run/varroa/plugins/plugins.txt \
-      --plugin-download-directory /var/jenkins_home/plugins --latest false --verbose; then
+  jenkins-plugin-cli --plugin-file /var/run/varroa/plugins/plugins.txt \
+      --plugin-download-directory /var/jenkins_home/plugins --latest false --verbose &
+  if wait $!; then
     exit 0
   fi
   if [ "$attempt" -ge "$max_attempts" ]; then
@@ -134,7 +143,8 @@ while true; do
   delay=$((attempt * 10))
   echo "plugins-init: attempt $attempt failed, retrying in ${delay}s" >&2
   attempt=$((attempt + 1))
-  sleep "$delay"
+  sleep "$delay" &
+  wait $!
 done`
 
 type probeKind int
@@ -5007,6 +5017,23 @@ func (c *ClientsetClient) DeleteControllerPod(ctx context.Context, namespace, na
 			return nil
 		}
 		return derr
+	}
+	return nil
+}
+
+// DeleteControllerPodGrace deletes one pod with graceSeconds as the delete
+// grace and a UID precondition. NotFound and Conflict answer nil: in both
+// cases the observed pod is gone.
+func (c *ClientsetClient) DeleteControllerPodGrace(ctx context.Context, namespace, podName string, uid types.UID, graceSeconds int64) error {
+	if graceSeconds <= 0 {
+		return fmt.Errorf("delete pod %s/%s: grace must be above 0, got %d", namespace, podName, graceSeconds)
+	}
+	err := c.clientset.CoreV1().Pods(namespace).Delete(ctx, podName, metav1.DeleteOptions{
+		GracePeriodSeconds: &graceSeconds,
+		Preconditions:      &metav1.Preconditions{UID: &uid},
+	})
+	if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
+		return err
 	}
 	return nil
 }

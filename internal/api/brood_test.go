@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
@@ -58,6 +59,9 @@ func (f *fakeBroodClient) SetHibernated(_ context.Context, _, _ string, _ bool) 
 }
 func (f *fakeBroodClient) DeleteControllerCRD(_ context.Context, _, _ string) error { return nil }
 func (f *fakeBroodClient) DeleteControllerPod(_ context.Context, _, _ string) error { return nil }
+func (f *fakeBroodClient) DeleteControllerPodGrace(_ context.Context, _, _ string, _ types.UID, _ int64) error {
+	return nil
+}
 func (f *fakeBroodClient) GetControllerPod(_ context.Context, _, _ string) (*corev1.Pod, error) {
 	return nil, nil
 }

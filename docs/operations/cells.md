@@ -11,9 +11,8 @@ history, and the new instance [deletes the old agent pods](tenant-pod-templates.
 `spec.cell.enabled` cannot change after creation. `spec.cell.maxTenants` can, and only caps the
 tenant count.
 
-A cell accepts no ingress host.
-Tenant traffic reaches it through the [tenant webhook door](#the-tenant-webhook-door), or through
-builds the plugin authenticates internally.
+A cell accepts no ingress host. Tenant traffic arrives through the
+[tenant webhook door](#the-tenant-webhook-door).
 
 Six limitations apply:
 
@@ -104,8 +103,8 @@ Expect `"status":"True","reason":"TenantPlaced"`.
 
 ## What composes a tenant
 
-- **Folder.** The tenant's `items.yaml` is wrapped under one top-level folder named after the
-  `Team`, then merged with every other tenant's folder into the cell's single manifest. The
+- **Folder.** The tenant's `items.yaml` goes under one top-level folder named after the `Team`,
+  merged with the other tenants' folders. The
   operator ignores `plugins.yaml`, `rbac.yaml`, and `jenkins.yaml` except its
   [pod templates](tenant-pod-templates.md): a tenant cannot change controller configuration. A
   job the bundle no longer declares leaves the folder, and its next trigger fails with
@@ -176,8 +175,7 @@ Four controls confine a tenant to its own folder and its own agents:
 
 1. **Network policy.** `networkPolicy.cellIsolation.enabled` renders one `NetworkPolicy` per cell.
    See [Isolate cells](../install/network-policies.md#isolate-cells).
-2. **Cloud restriction.** Each tenant's Kubernetes cloud is restricted to its own folder, so one
-   tenant cannot provision another tenant's agents.
+2. **Cloud restriction.** Each tenant's Kubernetes cloud serves only its own folder.
 3. **Agent fence.** The plugin refuses a build on a node labelled for another tenant, or on a
    node with no tenant label.
 4. **Build identity.** The plugin authenticates every build, including a Pipeline `node` block, as
@@ -196,8 +194,8 @@ served from the BFF's public host, outside `/api/v1` and login. `<path>` must ma
 
 Two credentials guard the door. Varroa mints each once, and never regenerates them:
 
-- `status.pipelines.webhookToken` addresses the tenant and goes in the URL. Read it directly from
-  the `Team` object; it is not exposed through the API or the dashboard:
+- `status.pipelines.webhookToken` addresses the tenant and goes in the URL. Only the `Team`
+  object holds it:
 
   ```bash
   kubectl get team payments -o jsonpath='{.status.pipelines.webhookToken}'
@@ -210,8 +208,8 @@ The door verifies the delivery by forge: GitHub with an HMAC-SHA256 `X-Hub-Signa
 GitLab with `X-Gitlab-Token`, anything else with `X-Varroa-Token`. An unsigned or mismatched
 delivery answers `400`.
 
-A delivery buffers for at most one hour. A tenant that moves cells inside that hour still receives
-the replay. Past that bound, the forge's own retry is the recovery path.
+A delivery buffers for at most one hour, so a tenant that moves cells inside that hour still
+receives it. After that hour, only the forge's own retry recovers it.
 
 **Verify:**
 
@@ -225,8 +223,7 @@ curl -i -X POST \
 
 Expect `202 Accepted`, then a build in the `payments` folder.
 
-A push of a built revision only pokes the job. The GitHub plugin polls, finds no change, and
-starts no build.
+A push of an already built revision starts no build.
 
 ## Placement lifecycle
 
@@ -244,12 +241,15 @@ confirm the folder is idle, then performs the same two-step move.
 
 **Roll.** A cell that reports `CellReady=False` past `cells.unreadyGracePeriod`, for a reason
 other than the three configuration gates, gets its pod deleted once and the reason `CellRolled`.
+The roll waits up to 30 minutes from the pod start while an init container runs without a
+restart. The message then reads `plugins-init running for 12m`. The grace counts from the init
+finish. A pod that has not started Jenkins gets a 30-second delete grace.
 
 **Teardown.** Teardown releases the placement record, so the name is free at once.
 
 **Eviction.** Past twice that grace period, the operator sets `status.cell.evacuate`, and every
-tenant moves off on its next placement tick. Recovery clears `evacuate`, `unreadySince`, and
-`rolledAt` together.
+tenant moves off on its next placement tick. The init wait applies here too. Only recovery clears
+`evacuate`, `unreadySince`, and `rolledAt`.
 
 ## Troubleshoot placement
 

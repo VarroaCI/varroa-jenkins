@@ -6,7 +6,9 @@ import (
 	"sort"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
@@ -61,6 +63,111 @@ func cellConfigGateMessage(reason string) string {
 	}
 }
 
+// cellInitRollCap bounds the init hold. Past this age of the pod, the roll
+// rule counts from unreadySince again, so a stuck init cannot hold a cell
+// unready forever.
+const cellInitRollCap = 30 * time.Minute
+
+// cellInitPodDeleteGrace is the delete grace in seconds for a rolled pod
+// whose main containers have not started. That pod has no build and no
+// drain to wait for. It must stay above 0: a force delete can run two pods
+// for one StatefulSet ordinal.
+const cellInitPodDeleteGrace int64 = 30
+
+// initObservation is what the roll rule reads from the cell pod. The zero
+// value means no pod, and keeps the roll rule on unreadySince alone.
+type initObservation struct {
+	Present     bool
+	Name        string
+	UID         types.UID
+	Terminating bool
+	// MainStarted is true once a main container has run.
+	MainStarted bool
+	// InitFinishedAt is the latest init container finish time when every
+	// init container exited 0. It is zero otherwise.
+	InitFinishedAt time.Time
+	// Progressing is true while an init container runs, or waits for its
+	// start after an earlier one exited 0, with no init restart, failure,
+	// or back-off, inside cellInitRollCap of the pod start.
+	Progressing bool
+	// Container is the init container that runs or starts now.
+	Container string
+	// InitFor is the age of the pod start.
+	InitFor time.Duration
+}
+
+// observeInit reads the init state of pod at now. A nil pod answers the zero
+// value. The cap uses status.startTime, because a container startedAt
+// resets on each restart.
+func observeInit(pod *corev1.Pod, now time.Time) initObservation {
+	if pod == nil {
+		return initObservation{}
+	}
+	obs := initObservation{
+		Present:     true,
+		Name:        pod.Name,
+		UID:         pod.UID,
+		Terminating: pod.DeletionTimestamp != nil,
+	}
+	for _, s := range pod.Status.ContainerStatuses {
+		if s.State.Running != nil || s.State.Terminated != nil || s.LastTerminationState.Terminated != nil {
+			obs.MainStarted = true
+			break
+		}
+	}
+	if pod.Status.StartTime != nil {
+		obs.InitFor = now.Sub(pod.Status.StartTime.Time)
+	}
+
+	// An init container that waits in PodInitializing or ContainerCreating
+	// after an earlier one exited 0 is the hand-off between two init
+	// containers. It makes progress as much as a running one does.
+	allDone := len(pod.Status.InitContainerStatuses) > 0
+	var latest time.Time
+	anyDone := false
+	running := ""
+	handoff := ""
+	failed := false
+	for _, s := range pod.Status.InitContainerStatuses {
+		if t := s.State.Terminated; t != nil && t.ExitCode == 0 {
+			anyDone = true
+			if t.FinishedAt.After(latest) {
+				latest = t.FinishedAt.Time
+			}
+			continue
+		}
+		allDone = false
+		if s.RestartCount > 0 || s.State.Terminated != nil {
+			failed = true
+		}
+		switch {
+		case s.State.Running != nil:
+			if running == "" {
+				running = s.Name
+			}
+		case s.State.Waiting != nil:
+			switch s.State.Waiting.Reason {
+			case "PodInitializing", "ContainerCreating":
+				if handoff == "" {
+					handoff = s.Name
+				}
+			default:
+				failed = true
+			}
+		}
+	}
+	if allDone {
+		obs.InitFinishedAt = latest
+	}
+	obs.Container = running
+	if obs.Container == "" && anyDone {
+		obs.Container = handoff
+	}
+	obs.Progressing = !obs.Terminating && !obs.MainStarted && !failed && obs.Container != "" &&
+		pod.Status.StartTime != nil && obs.InitFor < cellInitRollCap
+	return obs
+}
+
 // cellRollResult is what evaluateCellRoll computes for a cell whose
 // CellReady gate is False for baseReason, a reason that is never one of the
 // three configuration gates (design D6).
@@ -70,7 +177,7 @@ type cellRollResult struct {
 	// period.
 	Reason string
 	// Message carries the original fault reason once Reason is
-	// ReasonCellRolled; otherwise empty.
+	// ReasonCellRolled, and the init hold note while the hold applies.
 	Message string
 	// DeletePod is true when the caller must delete the cell pod this
 	// tick to attempt recovery.
@@ -81,21 +188,35 @@ type cellRollResult struct {
 	// RolledAt is the roll marker to keep or set once DeletePod succeeds.
 	// A tick that neither rolls nor was already rolled leaves this nil.
 	RolledAt *metav1.Time
-	// Evacuate is true once the unready period has run twice the grace
-	// period.
+	// Evacuate is true once the roll clock has run twice the grace period.
+	// Once true, it stays true until recovery.
 	Evacuate bool
+}
+
+// cellRolledInPeriod reports whether rolledAt marks a roll inside the
+// unready period that started at unreadySince. unreadySince alone cannot
+// record that a roll already happened, so a later tick would delete the pod
+// again on every pass. rolledAt not earlier than unreadySince is the
+// durable marker that stops it.
+func cellRolledInPeriod(rolledAt *metav1.Time, unreadySince time.Time) bool {
+	return rolledAt != nil && !rolledAt.Time.Before(unreadySince)
 }
 
 // evaluateCellRoll implements design D6's roll and evacuate rule. cell is
 // read only, never mutated — the caller commits the result, after actually
 // deleting the pod when DeletePod is true. now and grace let a test inject
-// a fake clock instead of the wall clock.
-func evaluateCellRoll(cell *v1alpha1.CellStatus, baseReason string, now time.Time, grace time.Duration) cellRollResult {
+// a fake clock instead of the wall clock. obs is the cell pod's init state.
+// While init progresses, nothing rolls and evacuate does not newly set.
+// After init finishes, the roll clock starts at the later of unreadySince
+// and the init finish time.
+func evaluateCellRoll(cell *v1alpha1.CellStatus, baseReason string, now time.Time, grace time.Duration, obs initObservation) cellRollResult {
 	unreadySince := now
 	var rolledAt *metav1.Time
+	evacuated := false
 	if cell != nil {
 		if cell.UnreadySince != nil {
 			unreadySince = cell.UnreadySince.Time
+			evacuated = cell.Evacuate
 		}
 		rolledAt = cell.RolledAt
 	}
@@ -103,12 +224,25 @@ func evaluateCellRoll(cell *v1alpha1.CellStatus, baseReason string, now time.Tim
 		Reason:       baseReason,
 		UnreadySince: metav1.NewTime(unreadySince),
 		RolledAt:     rolledAt,
+		Evacuate:     evacuated,
 	}
-	age := now.Sub(unreadySince)
-	// unreadySince alone cannot record that a roll already happened, so a
-	// later tick would delete the pod again on every pass. rolledAt not
-	// earlier than unreadySince is the durable marker that stops it.
-	alreadyRolled := rolledAt != nil && !rolledAt.Time.Before(unreadySince)
+	alreadyRolled := cellRolledInPeriod(rolledAt, unreadySince)
+
+	if obs.Progressing {
+		hold := fmt.Sprintf("%s running for %dm", obs.Container, int(obs.InitFor/time.Minute))
+		result.Message = hold
+		if alreadyRolled {
+			result.Reason = v1alpha1.ReasonCellRolled
+			result.Message = baseReason + "; " + hold
+		}
+		return result
+	}
+
+	clockStart := unreadySince
+	if obs.InitFinishedAt.After(clockStart) {
+		clockStart = obs.InitFinishedAt
+	}
+	age := now.Sub(clockStart)
 	if !alreadyRolled && age >= grace {
 		result.DeletePod = true
 		t := metav1.NewTime(now)
@@ -200,14 +334,22 @@ func (r *Reconciler) evaluateCellReadiness(ctx context.Context, cr *v1alpha1.Con
 			baseReason = v1alpha1.ReasonMiteUnreachable
 		}
 		grace := r.cellUnreadyGrace(ctx, cr)
-		roll := evaluateCellRoll(cell, baseReason, now, grace)
+		obs := r.observeCellPod(ctx, cr, cell, now, grace)
+		roll := evaluateCellRoll(cell, baseReason, now, grace, obs)
+		if roll.DeletePod && obs.Terminating {
+			// The pod already goes away. Leave rolledAt as it was, so the
+			// next tick decides again against the pod that replaces it.
+			roll.DeletePod = false
+			roll.RolledAt = cell.RolledAt
+			roll.Reason, roll.Message = baseReason, ""
+		}
 		cell.UnreadySince = &roll.UnreadySince
 		cell.Evacuate = roll.Evacuate
 		previousRolledAt := cell.RolledAt
 		cell.RolledAt = roll.RolledAt
 		cond.Reason, cond.Message = roll.Reason, roll.Message
 		if roll.DeletePod {
-			if err := r.client.DeleteControllerPod(ctx, cr.Namespace, cr.Name); err != nil {
+			if err := r.rollCellPod(ctx, cr, obs); err != nil {
 				if r.Logger != nil {
 					r.Logger.Warn("roll cell pod failed", "controller", cr.Namespace+"/"+cr.Name, "error", err)
 				}
@@ -238,6 +380,38 @@ func (r *Reconciler) evaluateCellReadiness(ctx context.Context, cr *v1alpha1.Con
 		warmCond.Reason = "Free"
 	}
 	cr.Status.Conditions = setCondition(cr.Status.Conditions, warmCond)
+}
+
+// observeCellPod reads the cell pod's init state only when the roll rule on
+// unreadySince alone would act: the unready age passes the grace, and the
+// cell has not both rolled and evacuated in this unready period. The roll
+// clock never starts before unreadySince, so no other tick can act. A read
+// error answers the zero value, which keeps the rule on unreadySince.
+func (r *Reconciler) observeCellPod(ctx context.Context, cr *v1alpha1.Controller, cell *v1alpha1.CellStatus, now time.Time, grace time.Duration) initObservation {
+	if cell.UnreadySince == nil || now.Sub(cell.UnreadySince.Time) < grace {
+		return initObservation{}
+	}
+	if cell.Evacuate && cellRolledInPeriod(cell.RolledAt, cell.UnreadySince.Time) {
+		return initObservation{}
+	}
+	pod, err := r.client.GetControllerPod(ctx, cr.Namespace, cr.Name)
+	if err != nil {
+		if r.Logger != nil {
+			r.Logger.Warn("read cell pod failed", "controller", cr.Namespace+"/"+cr.Name, "error", err)
+		}
+		return initObservation{}
+	}
+	return observeInit(pod, now)
+}
+
+// rollCellPod deletes the cell pod. A pod whose main containers have not
+// started gets a short delete grace and a UID precondition, because the pod
+// grace covers a Jenkins drain that such a pod does not need.
+func (r *Reconciler) rollCellPod(ctx context.Context, cr *v1alpha1.Controller, obs initObservation) error {
+	if obs.Present && !obs.MainStarted && obs.UID != "" {
+		return r.client.DeleteControllerPodGrace(ctx, cr.Namespace, obs.Name, obs.UID, cellInitPodDeleteGrace)
+	}
+	return r.client.DeleteControllerPod(ctx, cr.Namespace, cr.Name)
 }
 
 // sortedTenantCopy returns a sorted copy of in, or nil for an empty in.

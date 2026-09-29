@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
@@ -115,6 +116,9 @@ func (s *stubClient) StreamPodLogs(ctx context.Context, namespace, podName, cont
 	return io.NopCloser(strings.NewReader("")), nil
 }
 func (s *stubClient) DeleteControllerPod(ctx context.Context, namespace, name string) error {
+	return nil
+}
+func (s *stubClient) DeleteControllerPodGrace(_ context.Context, _, _ string, _ types.UID, _ int64) error {
 	return nil
 }
 func (s *stubClient) ListResourceQuotas(ctx context.Context, namespace string) ([]corev1.ResourceQuota, error) {

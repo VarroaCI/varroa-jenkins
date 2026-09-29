@@ -1067,6 +1067,12 @@ type ResourceClient interface {
 	// The StatefulSet recreates it. Idempotent: a missing pod is not an error.
 	DeleteControllerPod(ctx context.Context, namespace, name string) error
 
+	// DeleteControllerPodGrace deletes the named pod with graceSeconds as
+	// the delete grace, only while its UID equals uid. A missing pod and a
+	// pod created again under the same name are not errors. graceSeconds
+	// must be above 0: a force delete can run two pods for one ordinal.
+	DeleteControllerPodGrace(ctx context.Context, namespace, podName string, uid types.UID, graceSeconds int64) error
+
 	// GetControllerPod returns the Jenkins pod for a controller. Returns nil
 	// without error when the pod does not exist.
 	GetControllerPod(ctx context.Context, namespace, name string) (*corev1.Pod, error)

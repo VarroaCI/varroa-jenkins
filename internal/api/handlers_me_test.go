@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -511,6 +512,9 @@ func (f *fakeResourceClient) StreamPodLogs(_ context.Context, _, _, _ string, _ 
 	return nil, nil
 }
 func (f *fakeResourceClient) DeleteControllerPod(_ context.Context, _, _ string) error { return nil }
+func (f *fakeResourceClient) DeleteControllerPodGrace(_ context.Context, _, _ string, _ types.UID, _ int64) error {
+	return nil
+}
 func (f *fakeResourceClient) ListResourceQuotas(_ context.Context, _ string) ([]corev1.ResourceQuota, error) {
 	return nil, nil
 }

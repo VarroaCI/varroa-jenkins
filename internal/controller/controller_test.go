@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/bundles"
@@ -103,8 +104,10 @@ type testClient struct {
 	controllers []*v1alpha1.Controller
 	// deleteControllerPodCalls records each call to DeleteControllerPod.
 	deleteControllerPodCalls int
-	controllerPod            *corev1.Pod
-	controllerPodErr         error // injected error for GetControllerPod
+	// podGraceDeletes records each call to DeleteControllerPodGrace.
+	podGraceDeletes  []podGraceDelete
+	controllerPod    *corev1.Pod
+	controllerPodErr error // injected error for GetControllerPod
 	// getControllerPodCalls counts GetControllerPod calls, so tests can assert
 	// a hot path does NOT fetch the pod.
 	getControllerPodCalls int
@@ -681,6 +684,18 @@ func (t *testClient) ClearUserPassword(_ context.Context, name, namespace string
 
 func (t *testClient) DeleteControllerPod(_ context.Context, _, _ string) error {
 	t.deleteControllerPodCalls++
+	return nil
+}
+
+// podGraceDelete is one recorded DeleteControllerPodGrace call.
+type podGraceDelete struct {
+	namespace, pod string
+	uid            types.UID
+	graceSeconds   int64
+}
+
+func (t *testClient) DeleteControllerPodGrace(_ context.Context, namespace, podName string, uid types.UID, graceSeconds int64) error {
+	t.podGraceDeletes = append(t.podGraceDeletes, podGraceDelete{namespace: namespace, pod: podName, uid: uid, graceSeconds: graceSeconds})
 	return nil
 }
 func (t *testClient) ScaleStatefulSet(_ context.Context, name, _ string, replicas int32) error {

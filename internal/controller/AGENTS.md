@@ -415,7 +415,8 @@ sections describe.
   provisioning-time `plugins.txt` and connected-phase drift detection — these two call
   sites must stay in sync or plugin drift will fire spuriously.
 - `ResourceClient` (`controller_controller.go`, ~40 methods) is the operator's deep-op
-  K8s surface (StatefulSet/Service/Ingress/Secret/ConfigMap/pod/wake operations plus the
+  K8s surface (StatefulSet/Service/Ingress/Secret/ConfigMap/pod/wake operations, including
+  `DeleteControllerPodGrace` for a short-grace, UID-fenced pod delete, plus the
   named special-semantics methods `PatchControllerStatus`/`ApplyControllerSpecSSA`/
   `SetHibernated`/`ClearUserPassword`); `ClientsetClient` (`clientset_client.go`)
   is the only real implementation (client-go clientset + dynamic client + REST config)
@@ -817,7 +818,25 @@ sections describe.
     implements design D6's roll-then-evacuate rule off
     `UnreadySince`/`cellsConfig.UnreadyGracePeriod` — `CellNotReady`
     applies when the pass keeps a placement on a cell reporting
-    `CellReady=False` with no `evacuate`), `cell_networkpolicy.go`
+    `CellReady=False` with no `evacuate`. `observeCellPod` reads the pod
+    only on a tick where the rule on `UnreadySince` alone would act, and
+    `observeInit` turns it into an `initObservation`. While an init
+    container runs, or the next one waits in `PodInitializing`/
+    `ContainerCreating` after an earlier one exited 0, with no init
+    restart, failure, or back-off, inside
+    `cellInitRollCap` (30m) of `status.startTime`, the roll and a new
+    `evacuate` hold, and the `CellReady` message names the container.
+    After init, the roll clock starts at the later of `UnreadySince` and
+    the last init finish. `evacuate` stays set until recovery. A
+    terminating pod is never deleted again. `rollCellPod` deletes a pod
+    whose main containers have not started through
+    `DeleteControllerPodGrace` (30s, UID precondition, never 0), and
+    every other pod through `DeleteControllerPod`. `pluginsInitScript`
+    (`clientset_client.go`) traps `TERM`, because the script is PID 1 and
+    the kernel drops an unhandled signal: each long command runs in the
+    background under `wait`, and the trap signals the process group and
+    exits 143. A new command in that script must run the same way),
+    `cell_networkpolicy.go`
     (`reconcileCellNetworkPolicy` rebuilds the `<prefix>-cell`
     NetworkPolicy on every `Running`/`Connected` tick — never provisioning
     — so a tenant add/remove converges without a re-provision; ingress
