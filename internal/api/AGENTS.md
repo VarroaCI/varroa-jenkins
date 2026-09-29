@@ -173,7 +173,18 @@ federation, activity persistence, and SSE fanout.
   the same across passes. The pass also writes each core binding's
   `status.federation` (`rbac_federation_status.go`): `reconcileCluster` and
   `isConvergentCreate` record each fault in a per-hive `hiveResult` keyed by
-  child name, and `writeStatuses` builds one entry per visited hive and
+  child name. A failed delete of a stale binding child records a
+  `StaleJenkinsRoleBindingDeleteFailed` fault in `hiveResult.staleFaults`,
+  keyed by source binding name. `staleOwnerIndex` finds the owners from the
+  child's `varroa.dev/federated-bindings` annotation, restricted to the pass
+  snapshot. A child with no annotation falls back to every projected snapshot
+  binding whose `roleRef` equals the child's `varroa.dev/federated-from` label. A
+  child with no owner gets only the warning
+  `cluster <c>: delete orphaned JenkinsRoleBinding <name>`. The stale fault
+  comes after the binding write faults and before `Federated`, and it also
+  replaces a projector skip on that hive. `bindingDrifted` compares the
+  owner annotation key, so an owner change updates the child.
+  `writeStatuses` builds one entry per visited hive and
   patches the status subresource through `crdstore.PatchStatus`. It patches
   only a status that differs from the stored one, and `lastTransitionTime`
   moves only on a change of state, reason, or message: every status write is

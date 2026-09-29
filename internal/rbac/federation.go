@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -16,6 +17,12 @@ import (
 // (value = the source VarroaRole name); it drives GC and collision detection so
 // hand-authored RBAC of the same name is never overwritten.
 const LabelFederatedFrom = "varroa.dev/federated-from"
+
+// AnnotationFederatedBindings names the source VarroaRoleBindings of a
+// federated JenkinsRoleBinding: sorted and comma-separated. One child can
+// serve several source bindings, and a label value holds at most 63
+// characters, so the names go in an annotation.
+const AnnotationFederatedBindings = "varroa.dev/federated-bindings"
 
 // Skip reason codes a BindingOutcome carries. Each one applies to every hive,
 // because the projection is the same for every hive.
@@ -49,6 +56,7 @@ func DesiredFederatedCRs(
 ) (roles []*v1alpha1.JenkinsRole, bindings []*v1alpha1.JenkinsRoleBinding, warnings []string, outcomes map[string]BindingOutcome) {
 	roleByName := make(map[string]*v1alpha1.JenkinsRole)
 	bindingByName := make(map[string]bool)
+	ownersByChild := make(map[string][]string)
 	outcomes = make(map[string]BindingOutcome)
 	skip := func(vrb *v1alpha1.VarroaRoleBinding, reason, message string) {
 		outcomes[vrb.Name] = BindingOutcome{SkipReason: reason, SkipMessage: message}
@@ -138,6 +146,7 @@ func DesiredFederatedCRs(
 
 		childName := fedBindingName(vr, vrb)
 		outcomes[vrb.Name] = BindingOutcome{RoleName: roleName, BindingName: childName}
+		ownersByChild[childName] = append(ownersByChild[childName], vrb.Name)
 		// Bindings with the same role, scope, and subjects hash to one child
 		// name. The child is projected once, so no two desired bindings share
 		// a name.
@@ -166,6 +175,11 @@ func DesiredFederatedCRs(
 	sort.Strings(roleNames)
 	for _, name := range roleNames {
 		roles = append(roles, roleByName[name])
+	}
+	for _, binding := range bindings {
+		owners := ownersByChild[binding.Name]
+		sort.Strings(owners)
+		binding.Annotations = map[string]string{AnnotationFederatedBindings: strings.Join(owners, ",")}
 	}
 	sort.Slice(bindings, func(i, j int) bool { return bindings[i].Name < bindings[j].Name })
 	sort.Strings(warnings)

@@ -2857,8 +2857,8 @@ BindingFederationStatus:
         RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound,
         NonGlobalJenkinsRole, and ReservedRole. Failed codes are
         HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed,
-        JenkinsRoleBindingCollision, and JenkinsRoleBindingWriteFailed. The
-        federated code is Federated.
+        JenkinsRoleBindingCollision, JenkinsRoleBindingWriteFailed, and
+        StaleJenkinsRoleBindingDeleteFailed. The federated code is Federated.
     message:
       type: string
       description: Human-readable detail for the state.

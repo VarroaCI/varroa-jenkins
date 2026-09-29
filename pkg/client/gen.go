@@ -614,7 +614,7 @@ type ComponentsSchemasBindingFederationStatus struct {
 	// Message Human-readable detail for the state.
 	Message *string `json:"message,omitempty"`
 
-	// Reason CamelCase code for the state. Skipped codes are NoSubjects, TenantScope, RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound, NonGlobalJenkinsRole, and ReservedRole. Failed codes are HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed, JenkinsRoleBindingCollision, and JenkinsRoleBindingWriteFailed. The federated code is Federated.
+	// Reason CamelCase code for the state. Skipped codes are NoSubjects, TenantScope, RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound, NonGlobalJenkinsRole, and ReservedRole. Failed codes are HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed, JenkinsRoleBindingCollision, JenkinsRoleBindingWriteFailed, and StaleJenkinsRoleBindingDeleteFailed. The federated code is Federated.
 	Reason *string                                       `json:"reason,omitempty"`
 	State  ComponentsSchemasBindingFederationStatusState `json:"state"`
 }

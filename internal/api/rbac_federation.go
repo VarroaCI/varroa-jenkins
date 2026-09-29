@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -138,6 +139,7 @@ func (r *RBACFederationReconciler) reconcile(ctx context.Context) []string {
 	if err != nil {
 		return append(warnings, fmt.Sprintf("list clusters: %v", err))
 	}
+	owners := newStaleOwnerIndex(sources, outcomes)
 	results := make(map[string]*hiveResult)
 	for _, cluster := range clusters {
 		if cluster.Name == "" || cluster.Name == r.coreCluster {
@@ -145,7 +147,7 @@ func (r *RBACFederationReconciler) reconcile(ctx context.Context) []string {
 		}
 		result := newHiveResult()
 		results[cluster.Name] = result
-		if err := r.reconcileCluster(ctx, cluster.Name, desiredRoles, desiredBindings, &warnings, result); err != nil {
+		if err := r.reconcileCluster(ctx, cluster.Name, desiredRoles, desiredBindings, owners, &warnings, result); err != nil {
 			warnings = append(warnings, fmt.Sprintf("cluster %s: %v", cluster.Name, err))
 			result.listFault = &federationFault{reason: reasonHiveUnavailable, message: err.Error()}
 			continue
@@ -191,8 +193,10 @@ func (r *RBACFederationReconciler) desired(bindings []*v1alpha1.VarroaRoleBindin
 // for every other object and the garbage-collect loops still run. The
 // warning text must stay the same across passes: reconcileAndLog uses it to
 // log a repeated failure once. Each fault on a desired child is also recorded
-// in result, keyed by the child name, for the binding status write.
-func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster string, desiredRoles []*v1alpha1.JenkinsRole, desiredBindings []*v1alpha1.JenkinsRoleBinding, warnings *[]string, result *hiveResult) error {
+// in result, keyed by the child name, for the binding status write. A failed
+// delete of a stale binding child is recorded under each owner that owners
+// finds for it.
+func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster string, desiredRoles []*v1alpha1.JenkinsRole, desiredBindings []*v1alpha1.JenkinsRoleBinding, owners staleOwnerIndex, warnings *[]string, result *hiveResult) error {
 	actualRoles, err := r.listRoles(ctx, cluster)
 	if err != nil {
 		return fmt.Errorf("list JenkinsRoles: %w", err)
@@ -273,7 +277,15 @@ func (r *RBACFederationReconciler) reconcileCluster(ctx context.Context, cluster
 			continue
 		}
 		if err := r.brood.DeleteJenkinsRoleBinding(ctx, cluster, name); err != nil && !isNotFound(err) {
+			staleOwners := owners.ownersOf(actual)
+			if len(staleOwners) == 0 {
+				objectWarning(warnings, cluster, "delete orphaned JenkinsRoleBinding", name, err)
+				continue
+			}
 			objectWarning(warnings, cluster, "delete JenkinsRoleBinding", name, err)
+			for _, owner := range staleOwners {
+				result.staleFault(owner, name, err.Error())
+			}
 		}
 	}
 	return nil
@@ -435,8 +447,54 @@ func roleDrifted(actual, desired *v1alpha1.JenkinsRole) bool {
 	return !reflect.DeepEqual(actual.Labels, desired.Labels) || !reflect.DeepEqual(actual.Spec, desired.Spec)
 }
 
+// bindingDrifted compares only the owner annotation key, so an annotation that
+// another writer adds does not cause an update on each pass.
 func bindingDrifted(actual, desired *v1alpha1.JenkinsRoleBinding) bool {
-	return !reflect.DeepEqual(actual.Labels, desired.Labels) || !reflect.DeepEqual(actual.Spec, desired.Spec)
+	return !reflect.DeepEqual(actual.Labels, desired.Labels) ||
+		actual.Annotations[rbac.AnnotationFederatedBindings] != desired.Annotations[rbac.AnnotationFederatedBindings] ||
+		!reflect.DeepEqual(actual.Spec, desired.Spec)
+}
+
+// staleOwnerIndex finds the core bindings that own a stale federated
+// JenkinsRoleBinding. It holds only the bindings of the pass snapshot, so a
+// deleted core binding owns nothing. The role-label fallback holds only
+// projected bindings: a skipped binding with no annotation link has no
+// evidence that it ever owned a child.
+type staleOwnerIndex struct {
+	names     map[string]bool
+	byRoleRef map[string][]string
+}
+
+func newStaleOwnerIndex(sources []*v1alpha1.VarroaRoleBinding, outcomes map[string]rbac.BindingOutcome) staleOwnerIndex {
+	idx := staleOwnerIndex{names: map[string]bool{}, byRoleRef: map[string][]string{}}
+	for _, binding := range sources {
+		if binding == nil || binding.Name == "" {
+			continue
+		}
+		idx.names[binding.Name] = true
+		if outcomes[binding.Name].SkipReason != "" {
+			continue
+		}
+		idx.byRoleRef[binding.Spec.RoleRef] = append(idx.byRoleRef[binding.Spec.RoleRef], binding.Name)
+	}
+	return idx
+}
+
+// ownersOf reads the owner annotation. A child with no annotation names no
+// owner, so every projected core binding on the role of its label owns it: a report on
+// a binding that never owned the child is better than a missed revocation.
+func (idx staleOwnerIndex) ownersOf(child *v1alpha1.JenkinsRoleBinding) []string {
+	listed, annotated := child.Annotations[rbac.AnnotationFederatedBindings]
+	if !annotated {
+		return idx.byRoleRef[child.Labels[rbac.LabelFederatedFrom]]
+	}
+	var owners []string
+	for _, name := range strings.Split(listed, ",") {
+		if idx.names[name] {
+			owners = append(owners, name)
+		}
+	}
+	return owners
 }
 
 func roleDesired(name string, desired []*v1alpha1.JenkinsRole) bool {

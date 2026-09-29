@@ -477,7 +477,7 @@
             "type": "string"
           },
           "reason": {
-            "description": "CamelCase code for the state. Skipped codes are NoSubjects, TenantScope, RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound, NonGlobalJenkinsRole, and ReservedRole. Failed codes are HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed, JenkinsRoleBindingCollision, and JenkinsRoleBindingWriteFailed. The federated code is Federated.",
+            "description": "CamelCase code for the state. Skipped codes are NoSubjects, TenantScope, RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound, NonGlobalJenkinsRole, and ReservedRole. Failed codes are HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed, JenkinsRoleBindingCollision, JenkinsRoleBindingWriteFailed, and StaleJenkinsRoleBindingDeleteFailed. The federated code is Federated.",
             "type": "string"
           },
           "state": {
@@ -4989,7 +4989,7 @@
             "type": "string"
           },
           "reason": {
-            "description": "CamelCase code for the state. Skipped codes are NoSubjects, TenantScope, RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound, NonGlobalJenkinsRole, and ReservedRole. Failed codes are HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed, JenkinsRoleBindingCollision, and JenkinsRoleBindingWriteFailed. The federated code is Federated.",
+            "description": "CamelCase code for the state. Skipped codes are NoSubjects, TenantScope, RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound, NonGlobalJenkinsRole, and ReservedRole. Failed codes are HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed, JenkinsRoleBindingCollision, JenkinsRoleBindingWriteFailed, and StaleJenkinsRoleBindingDeleteFailed. The federated code is Federated.",
             "type": "string"
           },
           "state": {

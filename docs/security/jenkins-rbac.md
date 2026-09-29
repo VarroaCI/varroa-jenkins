@@ -108,15 +108,29 @@ kubectl get varroarolebinding team-admins -o jsonpath='{.status.federation}'
 | `failed` | `JenkinsRoleWriteFailed` | The hive refused the `JenkinsRole` write. |
 | `failed` | `JenkinsRoleBindingCollision` | A `JenkinsRoleBinding` that Varroa does not own has the same name. |
 | `failed` | `JenkinsRoleBindingWriteFailed` | The hive refused the `JenkinsRoleBinding` write. |
+| `failed` | `StaleJenkinsRoleBindingDeleteFailed` | The hive refused the delete of an earlier `JenkinsRoleBinding` copy. The earlier copy still grants its subjects. |
 
 A skip applies to every hive. `message` gives the detail, such as the hive
 error text. `lastTransitionTime` changes only when the state, reason, or message
 changes. `status.observedGeneration` names the spec generation the entries
 describe. The BFF retries a failed hive on each pass, and the entry returns to
 `federated` when the fault clears. To clear a collision, rename or delete the
-object on the hive that Varroa does not own. The status reports the current
-copy only. A failed delete of an earlier copy appears in the BFF log as
-`rbac federation warning`, and the BFF retries the delete on each pass.
+object on the hive that Varroa does not own.
+
+A change to the subjects or the scope of a binding gives its copy a new name.
+The BFF creates the new copy and deletes the earlier copy. Each copy carries
+the annotation `varroa.dev/federated-bindings`, which names the core bindings
+that own it. When the hive refuses the delete, each owner reports `failed` with
+reason `StaleJenkinsRoleBindingDeleteFailed` on that hive. This state replaces
+a skip, because the earlier copy still grants access. A binding that loses its
+last subject is an example. A copy with no annotation reports on every projected
+core binding whose `roleRef` equals the copy's `varroa.dev/federated-from` label. The
+BFF retries the delete on each pass. The entry changes when the delete
+succeeds.
+
+When no owner of the earlier copy exists on the core, no status changes. The
+BFF log shows `rbac federation warning` with the text
+`cluster <name>: delete orphaned JenkinsRoleBinding <copy>`.
 
 The dashboard Role Bindings page shows a count of hives per state. The edit
 page of a binding shows one row per hive. The MCP `get_varroa_role_binding`

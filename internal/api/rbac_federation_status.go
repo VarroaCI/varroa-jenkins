@@ -23,6 +23,7 @@ const (
 	reasonJenkinsRoleWriteFailed        = "JenkinsRoleWriteFailed"
 	reasonJenkinsRoleBindingCollision   = "JenkinsRoleBindingCollision"
 	reasonJenkinsRoleBindingWriteFailed = "JenkinsRoleBindingWriteFailed"
+	reasonStaleBindingDeleteFailed      = "StaleJenkinsRoleBindingDeleteFailed"
 )
 
 type federationFault struct {
@@ -33,15 +34,33 @@ type federationFault struct {
 // hiveResult holds the faults of one pass on one hive. A list failure stops
 // the pass for the hive, so listFault applies to every binding. The other
 // faults key on the desired child name. The first fault for a name wins, so
-// the result does not depend on the order of later writes.
+// the result does not depend on the order of later writes. staleFaults keys
+// on the source binding name, because a stale child is no longer desired.
 type hiveResult struct {
 	listFault     *federationFault
 	roleFaults    map[string]federationFault
 	bindingFaults map[string]federationFault
+	staleFaults   map[string]staleFault
+}
+
+// staleFault is a failed delete of a stale binding child.
+type staleFault struct {
+	child string
+	err   string
 }
 
 func newHiveResult() *hiveResult {
-	return &hiveResult{roleFaults: map[string]federationFault{}, bindingFaults: map[string]federationFault{}}
+	return &hiveResult{roleFaults: map[string]federationFault{}, bindingFaults: map[string]federationFault{}, staleFaults: map[string]staleFault{}}
+}
+
+// staleFault keeps the lexically first child for each owner. The pass visits
+// the stale children in map order, and the message must stay the same across
+// passes.
+func (h *hiveResult) staleFault(owner, child, err string) {
+	if old, ok := h.staleFaults[owner]; ok && old.child <= child {
+		return
+	}
+	h.staleFaults[owner] = staleFault{child: child, err: err}
 }
 
 func (h *hiveResult) roleFault(name, reason, message string) {
@@ -68,15 +87,21 @@ func bindingCollisionMessage(name string) string {
 }
 
 // federationEntry gives the outcome of one binding on one hive. A projector skip
-// applies to every hive. A list fault comes before a role fault, and a role
-// fault comes before a binding fault.
-func federationEntry(cluster string, outcome rbac.BindingOutcome, result *hiveResult) v1alpha1.BindingFederationStatus {
+// applies to every hive, but a stale fault on the hive comes first: the stale
+// child still grants its subjects there. A list fault comes before a role
+// fault, a role fault before a binding fault, and a binding fault before a
+// stale fault.
+func federationEntry(cluster, binding string, outcome rbac.BindingOutcome, result *hiveResult) v1alpha1.BindingFederationStatus {
 	entry := v1alpha1.BindingFederationStatus{Cluster: cluster}
 	fault := func(f federationFault) v1alpha1.BindingFederationStatus {
 		entry.State, entry.Reason, entry.Message = v1alpha1.BindingFailed, f.reason, f.message
 		return entry
 	}
+	stale, hasStale := result.staleFaults[binding]
 	if outcome.SkipReason != "" {
+		if hasStale {
+			return fault(federationFault{reason: reasonStaleBindingDeleteFailed, message: fmt.Sprintf("delete of earlier copy %s failed: %s", stale.child, stale.err)})
+		}
 		entry.State, entry.Reason, entry.Message = v1alpha1.BindingSkipped, outcome.SkipReason, outcome.SkipMessage
 		return entry
 	}
@@ -88,6 +113,9 @@ func federationEntry(cluster string, outcome rbac.BindingOutcome, result *hiveRe
 	}
 	if f, ok := result.bindingFaults[outcome.BindingName]; ok {
 		return fault(f)
+	}
+	if hasStale {
+		return fault(federationFault{reason: reasonStaleBindingDeleteFailed, message: fmt.Sprintf("JenkinsRoleBinding %s applied; delete of earlier copy %s failed: %s", outcome.BindingName, stale.child, stale.err)})
 	}
 	entry.State, entry.Reason, entry.Message = v1alpha1.BindingFederated, reasonFederated, "JenkinsRoleBinding "+outcome.BindingName
 	return entry
@@ -118,7 +146,7 @@ func (r *RBACFederationReconciler) writeStatuses(ctx context.Context, sources []
 			continue
 		}
 		build := func(stored v1alpha1.VarroaRoleBindingStatus) v1alpha1.VarroaRoleBindingStatus {
-			return buildBindingStatus(binding.Generation, clusters, outcome, results, stored, now)
+			return buildBindingStatus(binding.Name, binding.Generation, clusters, outcome, results, stored, now)
 		}
 		next := build(binding.Status)
 		if statusEqual(binding.Status, next) {
@@ -147,14 +175,14 @@ func (r *RBACFederationReconciler) writeStatuses(ctx context.Context, sources []
 // buildBindingStatus builds the status of one binding for the visited hives.
 // An entry keeps the stored lastTransitionTime while its state, reason, and
 // message stay the same.
-func buildBindingStatus(generation int64, clusters []string, outcome rbac.BindingOutcome, results map[string]*hiveResult, stored v1alpha1.VarroaRoleBindingStatus, now metav1.Time) v1alpha1.VarroaRoleBindingStatus {
+func buildBindingStatus(name string, generation int64, clusters []string, outcome rbac.BindingOutcome, results map[string]*hiveResult, stored v1alpha1.VarroaRoleBindingStatus, now metav1.Time) v1alpha1.VarroaRoleBindingStatus {
 	previous := make(map[string]v1alpha1.BindingFederationStatus, len(stored.Federation))
 	for _, e := range stored.Federation {
 		previous[e.Cluster] = e
 	}
 	next := v1alpha1.VarroaRoleBindingStatus{ObservedGeneration: generation}
 	for _, cluster := range clusters {
-		entry := federationEntry(cluster, outcome, results[cluster])
+		entry := federationEntry(cluster, name, outcome, results[cluster])
 		entry.LastTransitionTime = now
 		if old, ok := previous[cluster]; ok && old.State == entry.State && old.Reason == entry.Reason && old.Message == entry.Message {
 			entry.LastTransitionTime = old.LastTransitionTime

@@ -335,3 +335,39 @@ func TestFederatedSubjectsCopyIsNonNil(t *testing.T) {
 		t.Fatalf("copySubjects(nil) = nil, want an empty non-nil slice")
 	}
 }
+
+// Each child names every source binding that projects onto it, sorted, so
+// the annotation does not depend on the informer order.
+func TestDesiredFederatedCRsAnnotatesOwners(t *testing.T) {
+	subjects := []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}
+	mk := func(names ...string) []*v1alpha1.JenkinsRoleBinding {
+		vrbs := make([]*v1alpha1.VarroaRoleBinding, 0, 1+len(names))
+		vrbs = append(vrbs, &v1alpha1.VarroaRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "b-solo"},
+			Spec:       v1alpha1.VarroaRoleBindingSpec{RoleRef: "team-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "bob"}}},
+		})
+		for _, n := range names {
+			vrbs = append(vrbs, &v1alpha1.VarroaRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: n}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "team-admin", Subjects: subjects}})
+		}
+		_, bindings, _, _ := DesiredFederatedCRs(vrbs,
+			func(name string) (*v1alpha1.VarroaRole, bool) {
+				return &v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.VarroaRoleSpec{JenkinsPermissions: []string{"Overall/Read"}}}, true
+			},
+			func(string) (*v1alpha1.JenkinsRole, bool) { return nil, false },
+		)
+		return bindings
+	}
+	for _, order := range [][]string{{"b-two", "b-one"}, {"b-one", "b-two"}} {
+		bindings := mk(order...)
+		if len(bindings) != 2 {
+			t.Fatalf("bindings = %#v, want one shared child and one solo child", bindings)
+		}
+		got := map[string]bool{}
+		for _, b := range bindings {
+			got[b.Annotations[AnnotationFederatedBindings]] = true
+		}
+		if !got["b-one,b-two"] || !got["b-solo"] {
+			t.Fatalf("order %v annotations = %v, want b-one,b-two and b-solo", order, got)
+		}
+	}
+}

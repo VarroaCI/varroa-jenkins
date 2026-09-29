@@ -45,6 +45,9 @@ type fakeConfigBrood struct {
 	// error for the named binding, as the API server does for a spec that
 	// fails CRD validation.
 	failBindingCreate map[string]bool
+	// failBindingDelete makes DeleteJenkinsRoleBinding answer an internal
+	// error for the named binding and keep the object.
+	failBindingDelete map[string]bool
 	ops               []string
 }
 
@@ -164,6 +167,9 @@ func (f *fakeConfigBrood) UpdateJenkinsRoleBinding(_ context.Context, cluster, n
 
 func (f *fakeConfigBrood) DeleteJenkinsRoleBinding(_ context.Context, cluster, name string) error {
 	f.ensure(cluster)
+	if f.failBindingDelete[name] {
+		return &BroodError{Code: bus.CodeInternal, Msg: "etcd timeout"}
+	}
 	delete(f.bindings[cluster], name)
 	f.ops = append(f.ops, "delete-binding:"+cluster+":"+name)
 	return nil

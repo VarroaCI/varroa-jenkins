@@ -367,3 +367,186 @@ func TestFederationStatusPairsOutcomeWithSnapshotGeneration(t *testing.T) {
 		t.Fatalf("status = %#v, want generation 2 skipped TenantScope", status)
 	}
 }
+
+func statusPatchCount(t *testing.T, store *crdstore.Fake) int {
+	t.Helper()
+	gvr, _ := crdstore.GVRFor[v1alpha1.VarroaRoleBinding]()
+	return len(store.StatusPatches(gvr))
+}
+
+func setSubjects(r *RBACFederationReconciler, name string, subjects ...string) {
+	b := r.bindings.(*fakeFederationStore).items[name].(*v1alpha1.VarroaRoleBinding)
+	b.Spec.Subjects = []v1alpha1.SubjectRef{}
+	for _, s := range subjects {
+		b.Spec.Subjects = append(b.Spec.Subjects, v1alpha1.SubjectRef{Kind: "User", Name: s})
+	}
+}
+
+// A subject change renames the child. A failed delete of the earlier child
+// reports failed until the delete succeeds, and a repeated fault writes
+// nothing.
+func TestFederationStatusReportsFailedStaleDelete(t *testing.T) {
+	r, brood, store := statusFederationReconciler(t, []bus.ClusterInfo{{Name: "dev-cluster"}})
+	r.Reconcile(context.Background())
+	syncInformer(t, r, store, "bind-admin")
+	old := r.desiredBindingsForTest()[0].Name
+
+	setSubjects(r, "bind-admin", "bob")
+	brood.failBindingDelete = map[string]bool{old: true}
+	before := statusPatchCount(t, store)
+	warnings := r.Reconcile(context.Background())
+	if len(warnings) != 1 || !strings.HasPrefix(warnings[0], "cluster dev-cluster: delete JenkinsRoleBinding "+old) {
+		t.Fatalf("warnings = %v, want one delete warning for %s", warnings, old)
+	}
+	current := r.desiredBindingsForTest()[0].Name
+	if current == old || brood.bindings["dev-cluster"][current] == nil || brood.bindings["dev-cluster"][old] == nil {
+		t.Fatalf("hive bindings = %v, want the new copy %s and the earlier copy %s", brood.bindings["dev-cluster"], current, old)
+	}
+	e := entryFor(t, storedStatus(t, store, "bind-admin"), "dev-cluster")
+	if e.State != v1alpha1.BindingFailed || e.Reason != "StaleJenkinsRoleBindingDeleteFailed" {
+		t.Fatalf("entry = %#v, want failed StaleJenkinsRoleBindingDeleteFailed", e)
+	}
+	want := "JenkinsRoleBinding " + current + " applied; delete of earlier copy " + old + " failed: etcd timeout"
+	if e.Message != want {
+		t.Fatalf("message = %q, want %q", e.Message, want)
+	}
+	if got := statusPatchCount(t, store); got != before+1 {
+		t.Fatalf("status patches = %d, want %d", got, before+1)
+	}
+	syncInformer(t, r, store, "bind-admin")
+
+	r.now = func() time.Time { return federationTestNow.Add(time.Minute) }
+	r.Reconcile(context.Background())
+	if got := statusPatchCount(t, store); got != before+1 {
+		t.Fatalf("status patches after a repeated fault = %d, want %d", got, before+1)
+	}
+
+	later := federationTestNow.Add(time.Hour)
+	r.now = func() time.Time { return later }
+	brood.failBindingDelete = nil
+	r.Reconcile(context.Background())
+	e = entryFor(t, storedStatus(t, store, "bind-admin"), "dev-cluster")
+	if e.State != v1alpha1.BindingFederated || !e.LastTransitionTime.Time.Equal(later) {
+		t.Fatalf("entry = %#v, want federated at %v", e, later)
+	}
+	if got := statusPatchCount(t, store); got != before+2 {
+		t.Fatalf("status patches after the fault clears = %d, want %d", got, before+2)
+	}
+	if brood.bindings["dev-cluster"][old] != nil {
+		t.Fatalf("earlier copy %s stayed on the hive", old)
+	}
+}
+
+// A child with no owner annotation reports through its role label, and the
+// desired child gets the annotation on the same pass.
+func TestFederationStatusStaleDeleteFallsBackToRoleLabel(t *testing.T) {
+	r, brood, store := statusFederationReconciler(t, []bus.ClusterInfo{{Name: "dev-cluster"}})
+	brood.ensure("dev-cluster")
+	desired := r.desiredBindingsForTest()[0].DeepCopy()
+	desired.Annotations = nil
+	brood.bindings["dev-cluster"][desired.Name] = desired
+	stale := "varroa-fed-team-admin-000000000000"
+	brood.bindings["dev-cluster"][stale] = &v1alpha1.JenkinsRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: stale, Labels: map[string]string{rbac.LabelFederatedFrom: "team-admin"}},
+		Spec:       v1alpha1.JenkinsRoleBindingSpec{RoleRef: "jenkins-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "mallory"}}},
+	}
+	brood.failBindingDelete = map[string]bool{stale: true}
+	addSourceBinding(t, r, store, &v1alpha1.VarroaRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "tenant"}, Spec: v1alpha1.VarroaRoleBindingSpec{
+		RoleRef: "team-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "bob"}},
+		Scope: &v1alpha1.VarroaRoleBindingScope{Tenants: []v1alpha1.TenantScope{{Name: "team-a"}}},
+	}})
+
+	r.Reconcile(context.Background())
+	if e := entryFor(t, storedStatus(t, store, "tenant"), "dev-cluster"); e.Reason != rbac.SkipTenantScope {
+		t.Fatalf("tenant entry = %#v, want skipped TenantScope: a skipped binding is no fallback owner", e)
+	}
+	if got := brood.bindings["dev-cluster"][desired.Name].Annotations[rbac.AnnotationFederatedBindings]; got != "bind-admin" {
+		t.Fatalf("owner annotation = %q, want bind-admin", got)
+	}
+	e := entryFor(t, storedStatus(t, store, "bind-admin"), "dev-cluster")
+	if e.Reason != "StaleJenkinsRoleBindingDeleteFailed" || !strings.Contains(e.Message, stale) {
+		t.Fatalf("entry = %#v, want the stale fault on %s", e, stale)
+	}
+}
+
+// A stale child whose owners are all gone from the core changes no status.
+// Its warning carries the orphan prefix.
+func TestFederationStatusOrphanStaleDeleteIsWarningOnly(t *testing.T) {
+	r, brood, store := statusFederationReconciler(t, []bus.ClusterInfo{{Name: "dev-cluster"}})
+	r.Reconcile(context.Background())
+	syncInformer(t, r, store, "bind-admin")
+	before := statusPatchCount(t, store)
+
+	orphan := "varroa-fed-team-admin-111111111111"
+	brood.bindings["dev-cluster"][orphan] = &v1alpha1.JenkinsRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        orphan,
+			Labels:      map[string]string{rbac.LabelFederatedFrom: "team-admin"},
+			Annotations: map[string]string{rbac.AnnotationFederatedBindings: "bind-gone"},
+		},
+		Spec: v1alpha1.JenkinsRoleBindingSpec{RoleRef: "jenkins-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "mallory"}}},
+	}
+	brood.failBindingDelete = map[string]bool{orphan: true}
+
+	warnings := r.Reconcile(context.Background())
+	if len(warnings) != 1 || !strings.HasPrefix(warnings[0], "cluster dev-cluster: delete orphaned JenkinsRoleBinding "+orphan) {
+		t.Fatalf("warnings = %v, want the orphan warning", warnings)
+	}
+	if got := statusPatchCount(t, store); got != before {
+		t.Fatalf("status patches = %d, want %d", got, before)
+	}
+}
+
+// A stale child reports only on the owners its annotation names, not on
+// every binding on the same role.
+func TestFederationStatusStaleDeleteReachesListedOwnersOnly(t *testing.T) {
+	r, brood, store := statusFederationReconciler(t, []bus.ClusterInfo{{Name: "dev-cluster"}})
+	for name, subject := range map[string]string{"b-one": "carol", "b-two": "carol", "b-three": "dave"} {
+		addSourceBinding(t, r, store, &v1alpha1.VarroaRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "team-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: subject}}}})
+	}
+	r.Reconcile(context.Background())
+	var shared string
+	for name, b := range brood.bindings["dev-cluster"] {
+		if b.Annotations[rbac.AnnotationFederatedBindings] == "b-one,b-two" {
+			shared = name
+		}
+	}
+	if shared == "" {
+		t.Fatalf("no hive binding names b-one,b-two: %v", brood.bindings["dev-cluster"])
+	}
+	for _, name := range []string{"bind-admin", "b-one", "b-two", "b-three"} {
+		syncInformer(t, r, store, name)
+	}
+
+	setSubjects(r, "b-one", "erin")
+	setSubjects(r, "b-two", "frank")
+	brood.failBindingDelete = map[string]bool{shared: true}
+	r.Reconcile(context.Background())
+	for name, want := range map[string]string{"b-one": "StaleJenkinsRoleBindingDeleteFailed", "b-two": "StaleJenkinsRoleBindingDeleteFailed", "b-three": "Federated", "bind-admin": "Federated"} {
+		if e := entryFor(t, storedStatus(t, store, name), "dev-cluster"); e.Reason != want {
+			t.Fatalf("%s entry = %#v, want reason %s", name, e, want)
+		}
+	}
+}
+
+// A binding that loses its last subject skips. On a hive that keeps its
+// earlier child, the stale fault replaces the skip.
+func TestFederationStatusStaleDeleteReplacesSkip(t *testing.T) {
+	r, brood, store := statusFederationReconciler(t, []bus.ClusterInfo{{Name: "dev-cluster"}, {Name: "edge"}})
+	brood.unreachable["edge"] = true
+	r.Reconcile(context.Background())
+	syncInformer(t, r, store, "bind-admin")
+	old := r.desiredBindingsForTest()[0].Name
+
+	setSubjects(r, "bind-admin")
+	brood.failBindingDelete = map[string]bool{old: true}
+	r.Reconcile(context.Background())
+	status := storedStatus(t, store, "bind-admin")
+	e := entryFor(t, status, "dev-cluster")
+	if e.State != v1alpha1.BindingFailed || e.Reason != "StaleJenkinsRoleBindingDeleteFailed" || e.Message != "delete of earlier copy "+old+" failed: etcd timeout" {
+		t.Fatalf("dev-cluster entry = %#v, want the stale fault on %s", e, old)
+	}
+	if e := entryFor(t, status, "edge"); e.State != v1alpha1.BindingSkipped || e.Reason != rbac.SkipNoSubjects {
+		t.Fatalf("edge entry = %#v, want skipped NoSubjects", e)
+	}
+}
