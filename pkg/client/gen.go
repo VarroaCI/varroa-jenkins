@@ -2590,6 +2590,32 @@ type ComponentsSchemasPipelineSummaryHealth string
 // ComponentsSchemasPipelineSummaryKind The item kind the tenant's bundle declares. A job the record store alone holds reports unknown. A declared item of any other kind also reports unknown.
 type ComponentsSchemasPipelineSummaryKind string
 
+// ComponentsSchemasPipelineTeam One row of GET /pipelines. cell and cellNamespace are set only on a placed row.
+type ComponentsSchemasPipelineTeam struct {
+	// Cell The slot-0 cell Controller that holds the tenant.
+	Cell *string `json:"cell,omitempty"`
+
+	// CellNamespace The namespace of that cell Controller.
+	CellNamespace *string `json:"cellNamespace,omitempty"`
+
+	// Cluster The cluster that holds the tenant's cell. An unplaced local Team names the local cluster.
+	Cluster string `json:"cluster"`
+
+	// Name The Team name, which is also its tenant name.
+	Name string `json:"name"`
+
+	// Placed True when a cell holds the tenant.
+	Placed bool `json:"placed"`
+}
+
+// ComponentsSchemasPipelineTeamList GET /pipelines. The rows are in (name, cluster) order.
+type ComponentsSchemasPipelineTeamList struct {
+	Items []ComponentsSchemasPipelineTeam `json:"items"`
+
+	// RecordStore False when the record store is off or its schema is too old. The list then carries no Team that another cluster holds.
+	RecordStore bool `json:"recordStore"`
+}
+
 // ComponentsSchemasPipelineTemplateInfo The resolved catalog template for a job, read from the record store (marker-defined) or the items engine and catalog (items-declared). Absent from PipelineJobDetail for a job with no catalog template.
 // For source "marker": name, version, and asOfBuild are absent before the job's first run — markerPath and source are always present. markerRevision is the trusted revision the cell read the marker from, not the branch tip. For source "items": only name, version, and source are set.
 type ComponentsSchemasPipelineTemplateInfo struct {
@@ -5442,6 +5468,9 @@ type ClientInterface interface {
 
 	UpdateMyPreferences(ctx context.Context, body UpdateMyPreferencesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListPipelineTeams request
+	ListPipelineTeams(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListPipelines request
 	ListPipelines(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -7259,6 +7288,18 @@ func (c *Client) UpdateMyPreferencesWithBody(ctx context.Context, contentType st
 
 func (c *Client) UpdateMyPreferences(ctx context.Context, body UpdateMyPreferencesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUpdateMyPreferencesRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListPipelineTeams(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListPipelineTeamsRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -13243,6 +13284,33 @@ func NewUpdateMyPreferencesRequestWithBody(server string, contentType string, bo
 	return req, nil
 }
 
+// NewListPipelineTeamsRequest generates requests for ListPipelineTeams
+func NewListPipelineTeamsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListPipelinesRequest generates requests for ListPipelines
 func NewListPipelinesRequest(server string, team ComponentsParametersTeam) (*http.Request, error) {
 	var err error
@@ -16053,6 +16121,9 @@ type ClientWithResponsesInterface interface {
 
 	UpdateMyPreferencesWithResponse(ctx context.Context, body UpdateMyPreferencesJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateMyPreferencesResponse, error)
 
+	// ListPipelineTeamsWithResponse request
+	ListPipelineTeamsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListPipelineTeamsResponse, error)
+
 	// ListPipelinesWithResponse request
 	ListPipelinesWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*ListPipelinesResponse, error)
 
@@ -18857,6 +18928,30 @@ func (r UpdateMyPreferencesResponse) StatusCode() int {
 	return 0
 }
 
+type ListPipelineTeamsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasPipelineTeamList
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON500      *ComponentsResponsesInternal
+}
+
+// Status returns HTTPResponse.Status
+func (r ListPipelineTeamsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListPipelineTeamsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListPipelinesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -21528,6 +21623,15 @@ func (c *ClientWithResponses) UpdateMyPreferencesWithResponse(ctx context.Contex
 		return nil, err
 	}
 	return ParseUpdateMyPreferencesResponse(rsp)
+}
+
+// ListPipelineTeamsWithResponse request returning *ListPipelineTeamsResponse
+func (c *ClientWithResponses) ListPipelineTeamsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListPipelineTeamsResponse, error) {
+	rsp, err := c.ListPipelineTeams(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListPipelineTeamsResponse(rsp)
 }
 
 // ListPipelinesWithResponse request returning *ListPipelinesResponse
@@ -26802,6 +26906,46 @@ func ParseUpdateMyPreferencesResponse(rsp *http.Response) (*UpdateMyPreferencesR
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListPipelineTeamsResponse parses an HTTP response from a ListPipelineTeamsWithResponse call
+func ParseListPipelineTeamsResponse(rsp *http.Response) (*ListPipelineTeamsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListPipelineTeamsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasPipelineTeamList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ComponentsResponsesInternal
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
 
 	}
 

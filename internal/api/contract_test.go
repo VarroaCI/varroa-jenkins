@@ -203,6 +203,7 @@ var routeManifest = []route{
 	{Method: "GET", Path: "/api/v1/version-candidates/{name}"},
 	{Method: "POST", Path: "/api/v1/version-candidates/{name}/promote"},
 	// Pipelines
+	{Method: "GET", Path: "/api/v1/pipelines"},
 	{Method: "GET", Path: "/api/v1/pipelines/{team}"},
 	{Method: "GET", Path: "/api/v1/pipelines/{team}/jobs/{job}"},
 	{Method: "GET", Path: "/api/v1/pipelines/{team}/jobs/{job}/runs"},
@@ -374,6 +375,15 @@ func newContractServer(t *testing.T) (*httptest.Server, *openapi3.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test-runner"},
 		Spec:       v1alpha1.RunnerSpec{Team: "test-team", Launcher: "inbound", RemoteFS: "/var/j"},
 		Status:     v1alpha1.RunnerStatus{Token: "deadbeefdeadbeefdeadbeefdeadbeef"},
+	})
+	// A placed pipelines Team, so the landing-page list answers one row
+	// for the response schema to check.
+	crdstore.MustSeed(client.crdStore, &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "contract-tenant"},
+		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"test-ns"}, Pipelines: &v1alpha1.TeamPipelinesSpec{}},
+		Status: v1alpha1.TeamStatus{Placement: &v1alpha1.TeamPlacementStatus{
+			Cluster: "core", Cell: "test-cell", CellNamespace: "test-ns", Generation: 1,
+		}},
 	})
 	crdstore.MustSeed(client.crdStore, &v1alpha1.CellPool{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-pool"},

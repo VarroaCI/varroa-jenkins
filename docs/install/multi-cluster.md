@@ -74,7 +74,7 @@ The endpoint Service selects the CloudNativePG primary on port 5432. Put the cor
 5. Create the `Team` with `spec.pipelines` on the member. The member operator places it, and the core record store holds its placement.
 6. Grant access on the core with a `VarroaRoleBinding` scoped to the tenant. The core does not read the member Team's own subjects.
 
-The core dashboard, `varroactl`, and the MCP tools then read and trigger the tenant through the core, the same as a tenant on the core. Other tenants can call it with [cross-tenant steps](../config/cross-tenant-pipelines.md). The core does not read the member Team's composed bundle, so a job's kind shows as unknown.
+The core dashboard, including the `/pipelines` list, `varroactl`, and the MCP tools then read and trigger the tenant through the core. Other tenants can call it with [cross-tenant steps](../config/cross-tenant-pipelines.md). The core does not read the member Team's composed bundle, so a job's kind shows as unknown.
 
 ## Prepare controller namespaces
 

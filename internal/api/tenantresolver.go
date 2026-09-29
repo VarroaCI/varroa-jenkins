@@ -165,8 +165,9 @@ func placedTenant(team string, obj *unstructured.Unstructured) (TenantRef, bool)
 
 // memberPlacedTenant resolves a Team placed on a member cluster from its
 // record-store placement row. It skips a row of the local cluster, whose
-// Team the local API server no longer holds, and a row that names no
-// cell. Rows on two or more member clusters are ambiguous.
+// Team the local API server no longer holds, a row that names no cell,
+// and a row at generation 0, whose tenant a teardown ended. Rows on two
+// or more member clusters are ambiguous.
 func (t *teamTenantResolver) memberPlacedTenant(ctx context.Context, team string) ([]TenantRef, error) {
 	if t.placements == nil {
 		return nil, nil
@@ -182,7 +183,7 @@ func (t *teamTenantResolver) memberPlacedTenant(ctx context.Context, team string
 	var refs []TenantRef
 	var clusters []string
 	for _, row := range rows {
-		if row.Cluster == local || row.Cell == "" {
+		if !livePlacementRow(row, local) {
 			continue
 		}
 		refs = append(refs, TenantRef{
@@ -284,4 +285,11 @@ func controllerTenant(row ClusterController) TenantRef {
 // the form "<namespace>/<cell>" is a controller tenant.
 func (t *teamTenantResolver) ResolveRun(_ context.Context, _ *auth.Claims, r recordstore.Run) (TenantRef, error) {
 	return TenantRefFromRow(r.Cluster, r.Namespace, r.Cell, r.Tenant)
+}
+
+// livePlacementRow reports whether a placement row names a live tenant on
+// a cluster other than local. A torn-down tenant keeps its row at
+// generation 0, and a row with no cell names no tenant home.
+func livePlacementRow(row recordstore.TenantPlacement, local string) bool {
+	return row.Cluster != local && row.Cell != "" && row.Generation > 0
 }

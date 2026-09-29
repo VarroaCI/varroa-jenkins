@@ -299,7 +299,8 @@ federation, activity persistence, and SSE fanout.
   Team resolves to one tenant, an unplaced Team fans out over its namespaces, a name
   matching no local Team resolves from the record store's placement rows of another
   cluster (`WithMemberPlacements`, `Reader.ListTenantPlacements`: a Team a member
-  cluster places lives only on that member's API server), and otherwise falls back to a
+  cluster places lives only on that member's API server; `livePlacementRow` skips a row
+  of the local cluster, a row with no cell, and a generation-0 row a teardown leaves), and otherwise falls back to a
   same-named controller as a synthetic single-controller tenant, ambiguous across
   clusters. `publishImperative` sends a command for a tenant on another cluster through
   the transport's optional `SendImperativeToCluster`, never the local send: the local
@@ -308,7 +309,12 @@ federation, activity persistence, and SSE fanout.
   `canReadPipeline`, `canWritePipeline`, `canReadRun` — never a controller-scoped
   check. `canReadRun` builds its `RunTenantRow` from the run row's own `tenant` and
   `job_path` columns, so a run whose cell was deleted still resolves for a permitted
-  caller. **`GET /pipelines/{team}` filters every row of its response by the
+  caller. **`GET /pipelines` (`handlers_pipelines_list.go`) is the landing-page team
+  list**: every local Team with `spec.pipelines` plus every live placement row of
+  another cluster (`Reader.ListAllTenantPlacements`), filtered per name by
+  `CanReadPipeline` with no gate of its own. It is the one pipelines path that does not
+  answer `503` without a record store: it answers the local rows with
+  `recordStore: false`. **`GET /pipelines/{team}` filters every row of its response by the
   caller's `jobs` globs**: `handleListPipelines` calls
   `(*Authorizer).tenantGrants` once per `TenantRef` and then `grantsAllow` per job
   summary, per declared job path, and per running run, dropping a refused row

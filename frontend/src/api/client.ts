@@ -68,6 +68,7 @@ import type {
   CellPoolScaleRequest,
   CellGrants,
   FleetLockListResponse,
+  PipelineTeamList,
 } from "../types";
 import type { ControllerDetail } from "../hooks/useControllers";
 import type { Permissions } from "../types/auth";
@@ -1086,6 +1087,14 @@ const pipelinesBase = (team: string) => `/pipelines/${enc(team)}`;
 // path payments/checkout-api/main becomes payments%2Fcheckout-api%2Fmain.
 const jobBase = (team: string, jobPath: string) => `${pipelinesBase(team)}/jobs/${enc(jobPath)}`;
 const runBase = (runId: string) => `/runs/${enc(runId)}`;
+
+/**
+ * Lists every pipelines Team the caller may read, on this cluster and on
+ * each member cluster. The pipelines landing page reads this route.
+ */
+export function listPipelineTeams(): Promise<PipelineTeamList> {
+  return bffFetch<PipelineTeamList>("/pipelines");
+}
 
 export function listPipelines(team: string): Promise<PipelineListResponse> {
   return bffFetch<PipelineListResponse>(pipelinesBase(team));

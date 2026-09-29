@@ -308,6 +308,8 @@ paths:
     $ref: './paths/version-candidates.yaml#/~1api~1v1~1version-candidates~1{name}'
   /api/v1/version-candidates/{name}/promote:
     $ref: './paths/version-candidates.yaml#/~1api~1v1~1version-candidates~1{name}~1promote'
+  /api/v1/pipelines:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines'
   /api/v1/pipelines/{team}:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}'
   /api/v1/pipelines/{team}/jobs/{job}:

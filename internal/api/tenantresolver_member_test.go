@@ -33,7 +33,7 @@ func (b localBrood) LocalCluster() string { return b.local }
 
 func TestTenantResolver_MemberPlacedTeamResolvesFromThePlacementRow(t *testing.T) {
 	placements := &fakePlacementReader{rows: map[string][]recordstore.TenantPlacement{
-		"shop": {{Cluster: "member", Namespace: "varroa-system", Cell: "cell-m-0"}},
+		"shop": {{Cluster: "member", Namespace: "varroa-system", Cell: "cell-m-0", Generation: 1}},
 	}}
 	resolver := NewTeamTenantResolver(crdstore.NewFake(), localBrood{local: "core"}, resolverAuthorizer("shop"),
 		WithMemberPlacements(placements))
@@ -54,9 +54,23 @@ func TestTenantResolver_MemberPlacementIgnoresLocalAndEmptyRows(t *testing.T) {
 	// resolves, so the name falls through to the synthetic step.
 	placements := &fakePlacementReader{rows: map[string][]recordstore.TenantPlacement{
 		"shop": {
-			{Cluster: "core", Namespace: "varroa-system", Cell: "cell-c-0"},
-			{Cluster: "member", Namespace: "varroa-system", Cell: ""},
+			{Cluster: "core", Namespace: "varroa-system", Cell: "cell-c-0", Generation: 1},
+			{Cluster: "member", Namespace: "varroa-system", Cell: "", Generation: 1},
 		},
+	}}
+	resolver := NewTeamTenantResolver(crdstore.NewFake(), localBrood{local: "core"}, resolverAuthorizer("shop"),
+		WithMemberPlacements(placements))
+
+	_, err := resolver.Resolve(context.Background(), resolverClaims, "shop")
+	assertNotFound(t, err)
+}
+
+func TestTenantResolver_MemberPlacementAtGenerationZeroDoesNotResolve(t *testing.T) {
+	// A teardown resets the row's generation to 0 and keeps the row. The
+	// row names no live tenant, so the name falls through to the
+	// synthetic step and answers 404.
+	placements := &fakePlacementReader{rows: map[string][]recordstore.TenantPlacement{
+		"shop": {{Cluster: "member", Namespace: "varroa-system", Cell: "cell-m-0", Generation: 0}},
 	}}
 	resolver := NewTeamTenantResolver(crdstore.NewFake(), localBrood{local: "core"}, resolverAuthorizer("shop"),
 		WithMemberPlacements(placements))
@@ -68,8 +82,8 @@ func TestTenantResolver_MemberPlacementIgnoresLocalAndEmptyRows(t *testing.T) {
 func TestTenantResolver_MemberPlacementOnTwoClustersIs409(t *testing.T) {
 	placements := &fakePlacementReader{rows: map[string][]recordstore.TenantPlacement{
 		"shop": {
-			{Cluster: "member-a", Namespace: "varroa-system", Cell: "cell-a-0"},
-			{Cluster: "member-b", Namespace: "varroa-system", Cell: "cell-b-0"},
+			{Cluster: "member-a", Namespace: "varroa-system", Cell: "cell-a-0", Generation: 1},
+			{Cluster: "member-b", Namespace: "varroa-system", Cell: "cell-b-0", Generation: 1},
 		},
 	}}
 	resolver := NewTeamTenantResolver(crdstore.NewFake(), localBrood{local: "core"}, resolverAuthorizer("shop"),

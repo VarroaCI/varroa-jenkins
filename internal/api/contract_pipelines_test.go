@@ -15,6 +15,15 @@ func init() {
 	// stays excluded from coverage-gate-1 until section 5 replaces the
 	// 501 stub and adds its own case here.
 	registerContractCases(
+		// The landing-page list answers the local pipelines Teams with
+		// recordStore false when no record store is wired, not 503.
+		contractCase{
+			Name:       "listPipelineTeams-recordStoreDisabled",
+			Method:     "GET",
+			Path:       "/api/v1/pipelines",
+			Claims:     adminClaims,
+			WantStatus: http.StatusOK,
+		},
 		contractCase{
 			Name:       "listPipelines-recordStoreDisabled",
 			Method:     "GET",

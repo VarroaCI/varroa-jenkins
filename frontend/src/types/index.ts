@@ -2274,6 +2274,27 @@ export interface CellUsageListResponse {
   items: CellUsage[];
 }
 
+/**
+ * One row of GET /pipelines, the landing-page list. cell and cellNamespace
+ * are set only on a placed row.
+ */
+export interface PipelineTeam {
+  name: string;
+  cluster: string;
+  cell?: string;
+  cellNamespace?: string;
+  placed: boolean;
+}
+
+/**
+ * The body of GET /pipelines. recordStore is false when the list carries
+ * no Team that another cluster holds, because the record store is off.
+ */
+export interface PipelineTeamList {
+  items: PipelineTeam[];
+  recordStore: boolean;
+}
+
 /** The placement state of a team's pipelines tenant. */
 export type TeamCellState = "placed" | "moving" | "rehydrating" | "unplaced" | "notCellHosted";
 

@@ -97,8 +97,9 @@ func NewRouter(deps *Dependencies) http.Handler {
 	mux.HandleFunc("GET /cells/{namespace}/{name}/usage", srv.handleCellUsage)
 	mux.HandleFunc("GET /cells/{namespace}/{name}/grants", srv.handleCellGrants)
 
-	// Pipelines: team-scoped job listing, job detail, run list/create,
-	// and one test case's history.
+	// Pipelines: the landing-page team list, team-scoped job listing,
+	// job detail, run list/create, and one test case's history.
+	mux.HandleFunc("GET /pipelines", srv.handleListPipelineTeams)
 	mux.HandleFunc("GET /pipelines/{team}", srv.handleListPipelines)
 	mux.HandleFunc("GET /pipelines/{team}/jobs/{job}", srv.handleGetPipelineJob)
 	mux.HandleFunc("GET /pipelines/{team}/jobs/{job}/runs", srv.handleListRuns)

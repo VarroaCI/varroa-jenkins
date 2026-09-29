@@ -31,6 +31,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   slot-0 coordinate of every `tenant_placements` row of one tenant, one per
   cluster. It is the core BFF's only view of a Team that a member cluster
   places, because that Team lives on the member's API server.
+  `Reader.ListAllTenantPlacements` answers the same coordinate plus the
+  generation for every row of every tenant; the BFF's `GET /pipelines`
+  landing list reads it. A generation-0 row names a torn-down tenant.
 - **The pipeline mesh** (`mesh_takeover.go`, `resume_target.go`,
   `ingest_state.go`, `ingest_resume_failed.go`) — C3's run-state
   replication and cross-cell resume.

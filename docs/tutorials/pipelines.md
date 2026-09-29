@@ -14,8 +14,8 @@ builds.
 
 Sign in and select **Pipelines** in the sidebar. Access follows the team: you see the pipelines
 of every [Team](../security/varroa-rbac.md#grant-pipelines-access) that grants you a `pipelines`
-verb. `/pipelines` lists those teams and opens your only team automatically. With more than one
-team, pick one from the list.
+verb. `/pipelines` lists every team you can read, including member-cluster teams, and opens your
+only team automatically. With more than one, pick one.
 
 ## Your cell card
 

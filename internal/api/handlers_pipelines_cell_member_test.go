@@ -17,7 +17,7 @@ func TestGetTeamCellReportsAMemberPlacedTeam(t *testing.T) {
 		{JobPath: teamCellTenant + "/release/eu", CellUsageCounts: recordstore.CellUsageCounts{RunningNow: 2, Jobs: 1}},
 	}
 	placements := &fakePlacementReader{rows: map[string][]recordstore.TenantPlacement{
-		teamCellTenant: {{Cluster: "remote", Namespace: "cells", Cell: "cell-a"}},
+		teamCellTenant: {{Cluster: "remote", Namespace: "cells", Cell: "cell-a", Generation: 1}},
 	}}
 	authorizer := teamCellAuthorizer([]string{teamCellTenant}, nil)
 	store := storeFromFake(client)

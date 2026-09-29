@@ -140,6 +140,12 @@ type Reader interface {
 	// cluster's operator writes its tenants' rows through the core
 	// recorder, so this is the core's only view of a Team placed there.
 	ListTenantPlacements(ctx context.Context, tenant string) ([]TenantPlacement, error)
+
+	// ListAllTenantPlacements answers the slot-0 coordinate of every
+	// placement row of every tenant, ordered by tenant, then by cluster.
+	// The core BFF lists member-placed tenants on the pipelines landing
+	// page from it.
+	ListAllTenantPlacements(ctx context.Context) ([]TenantPlacement, error)
 }
 
 // JobHome is one job's home member. Placed reports whether the tenant

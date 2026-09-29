@@ -4752,6 +4752,49 @@ FleetLock:
         releasing row.
   additionalProperties: false
 
+PipelineTeam:
+  type: object
+  description: >
+    One row of GET /pipelines. cell and cellNamespace are set only on a
+    placed row.
+  required: [name, cluster, placed]
+  properties:
+    name:
+      type: string
+      description: The Team name, which is also its tenant name.
+    cluster:
+      type: string
+      description: >
+        The cluster that holds the tenant's cell. An unplaced local Team
+        names the local cluster.
+    cell:
+      type: string
+      description: The slot-0 cell Controller that holds the tenant.
+    cellNamespace:
+      type: string
+      description: The namespace of that cell Controller.
+    placed:
+      type: boolean
+      description: True when a cell holds the tenant.
+  additionalProperties: false
+
+PipelineTeamList:
+  type: object
+  description: >
+    GET /pipelines. The rows are in (name, cluster) order.
+  required: [items, recordStore]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/PipelineTeam'
+    recordStore:
+      type: boolean
+      description: >
+        False when the record store is off or its schema is too old. The
+        list then carries no Team that another cluster holds.
+  additionalProperties: false
+
 FleetLockListResponse:
   type: object
   description: >

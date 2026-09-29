@@ -7256,6 +7256,49 @@ components:
       - health
       - kind
       type: object
+    components_schemas_PipelineTeam:
+      additionalProperties: false
+      description: |
+        One row of GET /pipelines. cell and cellNamespace are set only on a placed row.
+      properties:
+        cell:
+          description: The slot-0 cell Controller that holds the tenant.
+          type: string
+        cellNamespace:
+          description: The namespace of that cell Controller.
+          type: string
+        cluster:
+          description: |
+            The cluster that holds the tenant's cell. An unplaced local Team names the local cluster.
+          type: string
+        name:
+          description: The Team name, which is also its tenant name.
+          type: string
+        placed:
+          description: True when a cell holds the tenant.
+          type: boolean
+      required:
+      - name
+      - cluster
+      - placed
+      type: object
+    components_schemas_PipelineTeamList:
+      additionalProperties: false
+      description: |
+        GET /pipelines. The rows are in (name, cluster) order.
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelineTeam'
+          type: array
+        recordStore:
+          description: |
+            False when the record store is off or its schema is too old. The list then carries no Team that another cluster holds.
+          type: boolean
+      required:
+      - items
+      - recordStore
+      type: object
     components_schemas_PipelineTemplateInfo:
       additionalProperties: false
       description: |
@@ -13069,6 +13112,25 @@ paths:
       summary: Returns the bundled OpenAPI spec.
       tags:
       - ops
+  /api/v1/pipelines:
+    get:
+      description: |
+        Answers each local Team that carries spec.pipelines, and each live record-store placement row of another cluster. A row of the local cluster, a row with no cell, and a row at placement generation 0 are not listed. A name that a local Team holds lists only the local Team. One name placed on two other clusters lists one row for each cluster. The route has no gate of its own: the tenant read check drops each row the caller may not read, so a caller who can read no row gets an empty list. When the record store is off or its schema is too old, the list carries the local Teams alone and recordStore is false.
+      operationId: listPipelineTeams
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_PipelineTeamList'
+          description: The pipelines Teams the caller may read.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "500":
+          $ref: '#/components/responses/components_responses_Internal'
+      summary: Lists the pipelines Teams the caller may read.
+      tags:
+      - Pipelines
   /api/v1/pipelines/{team}:
     get:
       description: |
