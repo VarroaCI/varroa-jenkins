@@ -523,9 +523,9 @@ func TestEqualNumberFromForeignInstanceIsARealStart(t *testing.T) {
 }
 
 // TestLowerNumberFromOwnerTakesOrdinaryPath asserts a lower number from
-// the owning instance is not superseded: it takes the ordinary write,
-// here the UNIQUE-conflict retry, because another intent of the job
-// holds that number.
+// the owning instance is not superseded: it takes the ordinary write.
+// Another intent of the job holds that number as an unstarted grant, so
+// the owner takes it and the holder keeps no number.
 func TestLowerNumberFromOwnerTakesOrdinaryPath(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
@@ -559,18 +559,21 @@ func TestLowerNumberFromOwnerTakesOrdinaryPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply owner run.started: %v", err)
 	}
-	if res.SupersededStart || !res.Conflict {
-		t.Fatalf("want the conflict disposition and no superseded start, got %+v", res)
+	if res.SupersededStart || res.Conflict || res.NumberTakenFrom != b.RunID {
+		t.Fatalf("want the take from run %s and no conflict, got %+v", b.RunID, res)
 	}
 	var recorded *int64
 	if err := db.QueryRow(`SELECT build_number FROM varroa.runs WHERE run_id = $1`, runA).Scan(&recorded); err != nil {
 		t.Fatalf("read runs row: %v", err)
 	}
-	if recorded != nil {
-		t.Fatalf("runs.build_number = %d, want null", *recorded)
+	if recorded == nil || *recorded != lower {
+		t.Fatalf("runs.build_number = %v, want %d", recorded, lower)
 	}
-	if state, number := readIntentStateAndNumber(t, db, runA); state != stateConsumed || number != nil {
-		t.Fatalf("want CONSUMED with a null number, got %s/%v", state, number)
+	if state, number := readIntentStateAndNumber(t, db, runA); state != stateConsumed || number == nil || *number != lower {
+		t.Fatalf("want CONSUMED at %d, got %s/%v", lower, state, number)
+	}
+	if state, number := readIntentStateAndNumber(t, db, uuid.MustParse(b.RunID)); state != stateGranted || number != nil {
+		t.Fatalf("want B GRANTED with a null number, got %s/%v", state, number)
 	}
 	if next := readNextNumber(t, db); next != refreshed.BuildNumber+1 {
 		t.Fatalf("next_number = %d, want %d", next, refreshed.BuildNumber+1)

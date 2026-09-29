@@ -68,6 +68,7 @@ type ledgerClaimRequest struct {
 	PlacementGeneration    int64     `json:"placement_generation"`
 	JenkinsNextBuildNumber int64     `json:"jenkins_next_build_number"`
 	RequestedAt            time.Time `json:"requested_at"`
+	NumberConflict         int64     `json:"number_conflict,omitempty"`
 }
 
 // ledgerClaimResponse is the reply body of a varroa.ledger.claim call.
@@ -267,6 +268,7 @@ func (h *BusHandler) handleClaimRequest(name, ns string, req *mitev1.ClaimReques
 		PlacementGeneration:    placementGeneration,
 		JenkinsNextBuildNumber: req.JenkinsNextBuildNumber,
 		RequestedAt:            millisToTime(req.RequestedAtMillis),
+		NumberConflict:         req.NumberConflict,
 	}
 
 	data, err := json.Marshal(body)

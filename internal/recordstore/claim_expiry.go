@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
@@ -21,13 +22,21 @@ import (
 // covers the plugin's last backoff step and the round interval.
 const ClaimExpiryAge = 75 * time.Minute
 
-// claimExpiryBatch bounds the runs one round marks. Each mark commits its
+// claimExpiryBatch bounds the runs one round marks, over both classes. Each mark commits its
 // own transaction under the backstop lock, so a large backlog must drain
 // over several rounds and never hold the lock for the whole backlog.
 const claimExpiryBatch = 500
 
 // claimExpiredMessage is the trigger_error text an expired run holds.
 const claimExpiredMessage = "no build claim reached the record store within 75 minutes of acceptance"
+
+// claimAbandonedMessage is the trigger_error text an abandoned run holds.
+const claimAbandonedMessage = "a build claim was granted, but no build started within 75 minutes of acceptance"
+
+// ReasonClaimAbandoned is the trigger reason code of a queued run whose
+// claim the ledger granted and whose build never started. No envelope
+// carries it: the recorder itself marks the run.
+const ReasonClaimAbandoned = "CLAIM_ABANDONED"
 
 // ClaimExpiryMetrics holds the claim-expiry sweep's counter on the
 // "varroa-recorder" meter.
@@ -39,19 +48,20 @@ type ClaimExpiryMetrics struct {
 func NewClaimExpiryMetrics() (*ClaimExpiryMetrics, error) {
 	meter := otel.Meter("varroa-recorder")
 	expired, err := meter.Int64Counter("recorder_claim_expired_total",
-		metric.WithDescription("Accepted runs marked TRIGGER_FAILED because no claim reached the ledger"))
+		metric.WithDescription("Accepted runs marked TRIGGER_FAILED because no claim reached the ledger, or a granted claim built nothing"))
 	if err != nil {
 		return nil, fmt.Errorf("register recorder_claim_expired_total: %w", err)
 	}
 	return &ClaimExpiryMetrics{expired: expired}, nil
 }
 
-// addExpired counts one expired run. A nil receiver is a no-op.
-func (m *ClaimExpiryMetrics) addExpired(ctx context.Context) {
+// addExpired counts one marked run under its reason code. A nil receiver
+// is a no-op.
+func (m *ClaimExpiryMetrics) addExpired(ctx context.Context, reason string) {
 	if m == nil || m.expired == nil {
 		return
 	}
-	m.expired.Add(ctx, 1)
+	m.expired.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", reason)))
 }
 
 // claimExpiryCandidate is one accepted run the sweep can expire.
@@ -92,15 +102,49 @@ const unclaimedQueuedRunSQL = `
 	AND jsonb_typeof(r.payload->'mesh'->'resume') IS DISTINCT FROM 'object'
 	AND NOT EXISTS (SELECT 1 FROM varroa.run_intents ri WHERE ri.run_id = r.run_id)`
 
+// claimAbandonedGuardSQL admits a run row "r" whose claim the ledger
+// granted and whose build never started: it is QUEUED, holds no build
+// number, still holds the accepted keys, holds an accepted_at older than
+// the cutoff ($1), holds no mesh resume record, and a GRANTED intent holds
+// its run id. A granted item that the plugin lost leaves such a row on a
+// live cell, where neither the re-fire nor the interrupted sweep acts.
+const claimAbandonedGuardSQL = `
+	(r.payload->>'accepted_at')::timestamptz <= $1
+	AND r.status = 'QUEUED'
+	AND r.build_number IS NULL
+	AND COALESCE(r.payload ? 'accepted_at', false)
+	AND jsonb_typeof(r.payload->'mesh'->'resume') IS DISTINCT FROM 'object'
+	AND EXISTS (SELECT 1 FROM varroa.run_intents ri WHERE ri.run_id = r.run_id AND ri.state = 'GRANTED')`
+
+// claimExpiryClass is one kind of run the sweep ends: its guard, its
+// reason code, its trigger_error text, and its activity type.
+type claimExpiryClass struct {
+	guardSQL     string
+	reason       string
+	message      string
+	activityType string
+	summary      string
+}
+
+// claimExpiryClasses lists the two classes in the order one round marks
+// them. The abandoned class comes first: its rows are rare, and an outage
+// backlog of unclaimed rows must never starve it of the shared batch.
+var claimExpiryClasses = []claimExpiryClass{
+	{guardSQL: claimAbandonedGuardSQL, reason: ReasonClaimAbandoned, message: claimAbandonedMessage,
+		activityType: "build.claim_abandoned", summary: "was granted a build number but never started"},
+	{guardSQL: claimExpiryGuardSQL, reason: ReasonClaimExpired, message: claimExpiredMessage,
+		activityType: "build.claim_expired", summary: "never claimed a build number"},
+}
+
 // selectClaimExpiryCandidates reads the oldest claimExpiryBatch runs the
-// guard admits at cutoff.
-func selectClaimExpiryCandidates(ctx context.Context, pool *pgxpool.Pool, cutoff time.Time) ([]claimExpiryCandidate, error) {
+// class's guard admits at cutoff.
+func selectClaimExpiryCandidates(ctx context.Context, pool *pgxpool.Pool, class claimExpiryClass, cutoff time.Time, limit int) ([]claimExpiryCandidate, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT r.run_id, r.created_at, r.cluster, r.namespace, r.cell, r.tenant, r.job_path, r.actor
 		FROM varroa.runs r
-		WHERE `+claimExpiryGuardSQL+`
+		WHERE `+class.guardSQL+`
 		ORDER BY (r.payload->>'accepted_at')::timestamptz
-		LIMIT $2`, cutoff, claimExpiryBatch)
+		LIMIT $2`, cutoff, limit)
 	if err != nil {
 		return nil, fmt.Errorf("select claim-expiry candidates: %w", err)
 	}
@@ -133,7 +177,7 @@ func selectClaimExpiryCandidates(ctx context.Context, pool *pgxpool.Pool, cutoff
 // The write keeps the accepted keys, so every reader that asks for a
 // real build still excludes the row. A late run.started replaces the
 // row through the ordinary TRIGGER_FAILED supersede.
-func markClaimExpired(ctx context.Context, pool *pgxpool.Pool, c claimExpiryCandidate, cutoff, now time.Time) (bool, error) {
+func markClaimExpired(ctx context.Context, pool *pgxpool.Pool, class claimExpiryClass, c claimExpiryCandidate, cutoff, now time.Time) (bool, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return false, fmt.Errorf("begin claim-expiry marking: %w", err)
@@ -149,8 +193,8 @@ func markClaimExpired(ctx context.Context, pool *pgxpool.Pool, c claimExpiryCand
 		        'trigger_error', $5::text,
 		        'trigger_reason_code', $6::text,
 		        'trigger_failed_at', $4::timestamptz)
-		WHERE r.run_id = $2 AND r.created_at = $3 AND `+claimExpiryGuardSQL,
-		cutoff, c.runID, c.createdAt, now, claimExpiredMessage, ReasonClaimExpired)
+		WHERE r.run_id = $2 AND r.created_at = $3 AND `+class.guardSQL,
+		cutoff, c.runID, c.createdAt, now, class.message, class.reason)
 	if err != nil {
 		return false, fmt.Errorf("mark run claim-expired: %w", err)
 	}
@@ -160,7 +204,7 @@ func markClaimExpired(ctx context.Context, pool *pgxpool.Pool, c claimExpiryCand
 
 	event := activity.Event{
 		Timestamp:  now,
-		Type:       "build.claim_expired",
+		Type:       class.activityType,
 		Source:     "recorder",
 		Severity:   "warning",
 		Cluster:    c.cluster,
@@ -169,9 +213,9 @@ func markClaimExpired(ctx context.Context, pool *pgxpool.Pool, c claimExpiryCand
 		Actor:      c.actor,
 		// The run id keeps the event key unique. Two runs of one job share
 		// the round time, the cell, and an empty build number.
-		Message: fmt.Sprintf("%s run %s never claimed a build number and was marked failed (%s)",
-			c.jobPath, c.runID, ReasonClaimExpired),
-		Reason:   ReasonClaimExpired,
+		Message: fmt.Sprintf("%s run %s %s and was marked failed (%s)",
+			c.jobPath, c.runID, class.summary, class.reason),
+		Reason:   class.reason,
 		ItemPath: c.jobPath,
 		Result:   ResultTriggerFailed,
 	}
@@ -212,18 +256,20 @@ func insertRunActivityTx(ctx context.Context, db DBTX, event activity.Event) err
 }
 
 // ExpireUnclaimedRuns marks every accepted run that no claim reached
-// within ClaimExpiryAge as TRIGGER_FAILED with reason CLAIM_EXPIRED. It
-// answers how many runs it marked.
+// within ClaimExpiryAge as TRIGGER_FAILED with reason CLAIM_EXPIRED, and
+// every accepted run whose granted claim built nothing within that age
+// with reason CLAIM_ABANDONED. It answers how many runs it marked.
 //
-// Such a run holds no ledger intent, so neither the interrupted sweep
-// nor the re-fire can end it while its cell stays alive. The plugin
-// stops claiming after one hour, and after that no event ever moves
-// the row.
+// An unclaimed run holds no ledger intent, so neither the interrupted
+// sweep nor the re-fire can end it while its cell stays alive. The plugin
+// stops claiming after one hour, and after that no event ever moves the
+// row. An abandoned run holds a GRANTED intent on a live cell, which the
+// re-fire leaves alone for the same reason.
 //
-// The age limit does not prove that the plugin tried to claim. A queue
-// item that waits longer than the limit before its first claim, for
-// example behind a long previous build, is marked too. Its later claim
-// and run.started then replace the row with the real build.
+// The age limit does not prove that the plugin tried to claim, or that
+// the granted item is gone. A queue item that waits longer than the limit,
+// for example behind a long previous build or for an executor, is marked
+// too. Its later run.started then replaces the row with the real build.
 //
 // A nil notifier and nil metrics are no-ops.
 func ExpireUnclaimedRuns(ctx context.Context, pool *pgxpool.Pool, notifier *RunNotifier,
@@ -233,33 +279,42 @@ func ExpireUnclaimedRuns(ctx context.Context, pool *pgxpool.Pool, notifier *RunN
 	}
 	cutoff := now.Add(-ClaimExpiryAge)
 
-	candidates, err := selectClaimExpiryCandidates(ctx, pool, cutoff)
-	if err != nil {
-		return 0, err
-	}
-
-	marked := 0
-	for _, c := range candidates {
-		changed, err := markClaimExpired(ctx, pool, c, cutoff, now)
+	marked, attempted := 0, 0
+	for _, class := range claimExpiryClasses {
+		// Both classes share one batch of attempts, so one round holds the
+		// backstop lock for at most claimExpiryBatch transactions, even when
+		// every guarded update misses.
+		limit := claimExpiryBatch - attempted
+		if limit <= 0 {
+			break
+		}
+		candidates, err := selectClaimExpiryCandidates(ctx, pool, class, cutoff, limit)
 		if err != nil {
-			logger.Warn("claim-expiry sweep: mark failed", "run_id", c.runID, "error", err)
-			continue
+			return marked, err
 		}
-		if !changed {
-			continue
+		attempted += len(candidates)
+		for _, c := range candidates {
+			changed, err := markClaimExpired(ctx, pool, class, c, cutoff, now)
+			if err != nil {
+				logger.Warn("claim-expiry sweep: mark failed", "run_id", c.runID, "reason", class.reason, "error", err)
+				continue
+			}
+			if !changed {
+				continue
+			}
+			metrics.addExpired(ctx, class.reason)
+			notifier.Notify(RunNotification{
+				Kind:    "run",
+				Cluster: c.cluster,
+				Tenant:  c.tenant,
+				JobPath: c.jobPath,
+				RunID:   c.runID.String(),
+				Status:  StatusCompleted,
+				Result:  ResultTriggerFailed,
+			})
+			logger.Debug("accepted run marked", "run_id", c.runID, "job_path", c.jobPath, "reason", class.reason)
+			marked++
 		}
-		metrics.addExpired(ctx)
-		notifier.Notify(RunNotification{
-			Kind:    "run",
-			Cluster: c.cluster,
-			Tenant:  c.tenant,
-			JobPath: c.jobPath,
-			RunID:   c.runID.String(),
-			Status:  StatusCompleted,
-			Result:  ResultTriggerFailed,
-		})
-		logger.Debug("accepted run marked claim-expired", "run_id", c.runID, "job_path", c.jobPath)
-		marked++
 	}
 	if marked > 0 {
 		logger.Info("claim-expiry sweep marked accepted runs", "count", marked)

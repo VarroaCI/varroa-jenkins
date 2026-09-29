@@ -187,6 +187,13 @@ the root AGENTS.md greenfield rule.
   (helper: origin and intent-key derivation, the params digest, the revision wait),
   `VarroaClaimDispatcher.java` (`QueueTaskDispatcher`, blocks the item until granted),
   `VarroaClaimQueue.java` (bounded work queue, four daemon threads, a retry ladder),
+  `BuildNumberGate.java` (one grant of a job applies at a time: Jenkins numbers a
+  dispatched item from the job's counter, so the next grant waits until the last
+  grant's run fires `onStarted`, its item leaves the queue cancelled, or 60 s pass;
+  every apply runs on the gate's own thread and asks for a queue pass; the
+  dispatcher offers no claim while `VarroaIntentAction.applyPending`; a
+  `NUMBER_CONFLICT` keeps the item and the next claim carries `number_conflict`;
+  `grantedNumber` rides the `STARTED` event as `granted_build_number`),
   `VarroaHomeCache.java` + `VarroaHomeRefresher.java` (the tenant home map, below),
   `DuplicateRegistry.java`, `ClaimRegistry.java`, and `VarroaDeliveryFilter.java` +
   `DeliveryRegistry.java` (records `X-Varroa-Delivery` for the claimer). Every class in

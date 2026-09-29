@@ -425,6 +425,24 @@ func TestStartedPayload_ReplayOf(t *testing.T) {
 	}
 }
 
+// TestStartedPayload_GrantedBuildNumber proves run.started writes
+// granted_build_number for a non-zero grant, writes no key for zero, and
+// no other payload writes it.
+func TestStartedPayload_GrantedBuildNumber(t *testing.T) {
+	granted := startedPayload(&mitev1.BuildEvent{Phase: phaseStarted, RunId: "run-1", BuildNumber: 64, GrantedBuildNumber: 70})
+	if got, ok := granted["granted_build_number"]; !ok || got != int64(70) {
+		t.Fatalf("granted_build_number = %v (present %v), want 70", got, ok)
+	}
+	ordinary := startedPayload(&mitev1.BuildEvent{Phase: phaseStarted, RunId: "run-1", BuildNumber: 64})
+	if _, ok := ordinary["granted_build_number"]; ok {
+		t.Fatalf("run.started payload carries granted_build_number for a run with no grant: %+v", ordinary)
+	}
+	evt := &mitev1.BuildEvent{Phase: phaseCompleted, RunId: "run-1", GrantedBuildNumber: 70}
+	if _, ok := completedPayload(evt)["granted_build_number"]; ok {
+		t.Fatal("run.completed payload carries granted_build_number, want the key on run.started alone")
+	}
+}
+
 // TestReplayOf_OmittedFromEveryOtherPhase proves no payload function other
 // than startedPayload writes replay_of, even when the event sets it.
 func TestReplayOf_OmittedFromEveryOtherPhase(t *testing.T) {

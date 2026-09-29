@@ -148,10 +148,9 @@ func TestExpireUnclaimedRunsLeavesAYoungRun(t *testing.T) {
 	}
 }
 
-// TestExpireUnclaimedRunsLeavesARunWithAnIntent asserts a queued run the
-// ledger holds an intent for stays QUEUED at any age. The intent makes
-// the run a claimed build, which the interrupted sweep and the re-fire
-// own.
+// TestExpireUnclaimedRunsLeavesARunWithAnIntent asserts the claim-expiry
+// class never marks a run the ledger holds an intent for. A GRANTED
+// intent with no build ends through the claim-abandoned class instead.
 func TestExpireUnclaimedRunsLeavesARunWithAnIntent(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 
@@ -161,15 +160,14 @@ func TestExpireUnclaimedRunsLeavesARunWithAnIntent(t *testing.T) {
 	req.RunID = runID.String()
 	mustGrant(t, NewLedger(pool, nil), req)
 
-	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, claimExpiryNow, nil)
-	if err != nil {
+	if _, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, claimExpiryNow, nil); err != nil {
 		t.Fatalf("expire unclaimed runs: %v", err)
 	}
-	if n != 0 {
-		t.Fatalf("expired = %d, want 0", n)
-	}
-	if status, _ := readStatusResult(t, db, runID); status != StatusQueued {
-		t.Fatalf("status = %q, want QUEUED", status)
+	payload := readRunPayload(t, db, runID.String())
+	var code string
+	_ = json.Unmarshal(payload["trigger_reason_code"], &code)
+	if code != ReasonClaimAbandoned {
+		t.Fatalf("trigger_reason_code = %q, want %q and never %q", code, ReasonClaimAbandoned, ReasonClaimExpired)
 	}
 }
 

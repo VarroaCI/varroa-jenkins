@@ -3,6 +3,7 @@ package recordstore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -44,9 +45,30 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 		return res, nil
 	}
 
+	res := dispatchResult{}
+	if payload.BuildNumber != nil && payload.GrantedBuildNumber != nil && *payload.GrantedBuildNumber != *payload.BuildNumber {
+		res.numberMismatch = true
+		res.mismatchGranted = *payload.GrantedBuildNumber
+		res.mismatchReported = *payload.BuildNumber
+	}
+
 	buildNumber := payload.BuildNumber
 	if nullBuildNumber {
 		buildNumber = nil
+		if payload.BuildNumber != nil {
+			holder, err := numberHolder(ctx, tx, intent, *payload.BuildNumber)
+			if err != nil {
+				return dispatchResult{}, err
+			}
+			res.conflictRunID = holder
+			res.conflictNumber = *payload.BuildNumber
+		}
+	} else if payload.BuildNumber != nil && (intent.buildNumber == nil || *intent.buildNumber != *payload.BuildNumber) {
+		taken, err := takeUnstartedGrant(ctx, tx, intent, *payload.BuildNumber)
+		if err != nil {
+			return dispatchResult{}, err
+		}
+		res.numberTakenFrom = taken
 	}
 
 	envelopeJSON, err := json.Marshal(env)
@@ -118,7 +140,7 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 	if status != StatusQueued && status != StatusRunning {
 		// The arriving run is no longer live: an out-of-order run.completed
 		// already finished it. The duplicate backstop does not apply.
-		return dispatchResult{}, nil
+		return res, nil
 	}
 
 	revision := ""
@@ -126,7 +148,71 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 		revision = *payload.SCMRevision
 	}
 	action, err := runDuplicateBackstop(ctx, tx, intent, revision)
-	return dispatchResult{action: action}, err
+	res.action = action
+	return res, err
+}
+
+// takeUnstartedGrant frees number for the arriving run when another
+// intent of the same job holds it as an unstarted grant. Jenkins already
+// built the arriving run under number, so that number is the truth. The
+// holder's run has not started, so it holds no Jenkins number yet: its
+// own run.started writes one later, and its next claim reserves a fresh
+// grant. The function sets the holder's number to null and answers the
+// holder's run id. It answers "" and changes nothing when no intent holds
+// the number, or when the holder already started; the write then meets
+// the unique constraint.
+//
+// The caller already holds its own intent's lock. The holder's lock comes
+// second, and a claim never holds two intent locks, so only two crossing
+// ingest writes can deadlock; Postgres then fails one, and the message is
+// delivered again.
+func takeUnstartedGrant(ctx context.Context, tx pgx.Tx, intent *intentRow, number int64) (string, error) {
+	var (
+		holder uuid.UUID
+		state  string
+	)
+	err := tx.QueryRow(ctx, `
+		SELECT run_id, state FROM varroa.run_intents
+		WHERE cluster = $1 AND tenant = $2 AND job_path = $3 AND build_number = $4 AND run_id <> $5
+		FOR UPDATE
+	`, intent.cluster, intent.tenant, intent.jobPath, number, intent.runID).Scan(&holder, &state)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return "", nil
+	case err != nil:
+		return "", fmt.Errorf("read build number holder: %w", err)
+	}
+	if state != stateGranted {
+		return "", nil
+	}
+	started, err := runsRowExists(ctx, tx, holder)
+	if err != nil || started {
+		return "", err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE varroa.run_intents SET build_number = NULL WHERE run_id = $1
+	`, holder); err != nil {
+		return "", fmt.Errorf("release unstarted grant: %w", err)
+	}
+	return holder.String(), nil
+}
+
+// numberHolder answers the run id of the other intent of the job that
+// holds number, or "" when none does. The null-number retry reads it for
+// the conflict log line alone.
+func numberHolder(ctx context.Context, tx pgx.Tx, intent *intentRow, number int64) (string, error) {
+	var holder uuid.UUID
+	err := tx.QueryRow(ctx, `
+		SELECT run_id FROM varroa.run_intents
+		WHERE cluster = $1 AND tenant = $2 AND job_path = $3 AND build_number = $4 AND run_id <> $5
+	`, intent.cluster, intent.tenant, intent.jobPath, number, intent.runID).Scan(&holder)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return "", nil
+	case err != nil:
+		return "", fmt.Errorf("read build number holder: %w", err)
+	}
+	return holder.String(), nil
 }
 
 // replayOfArg binds run.started's replay_of value. An absent, empty, or

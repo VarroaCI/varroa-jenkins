@@ -152,8 +152,10 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   goroutine that outlives its stream cannot underflow a replacement
   connection's counter), and requests C1's `bus.LedgerClaimSubject` with the
   `VARROA_LEDGER_TIMEOUT_MS` budget (default 4s). The ledger body copies
-  the mite request's `origin` as it is; the recorder marks a vetoed run
-  only when the origin is `VARROA_INTENT`. Both methods read
+  the mite request's `origin` and `number_conflict` as they are; the recorder
+  marks a vetoed run only when the origin is `VARROA_INTENT`. The recorder's
+  own claim budget, `recordstore.ClaimBudget` (3.5s), stays below the 4s
+  default; `claim_budget_test.go` pins it. Both methods read
   `cell_instance` from the registered identity, never from the event or
   request payload. Both also resolve `tenant` (and, for a claim,
   `placement_generation`) through `CellTenantResolver.ResolveJobTenant`,
@@ -171,8 +173,9 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   (`template_name`, `template_version`, `marker_path`, `marker_revision`)
   onto the `run.started`/`run.completed` payload via `addTemplateFields`,
   omitting any field the event does not carry; a `HEARTBEAT` event never
-  carries them. `startedPayload` alone writes `replay_of`, and only for a
-  non-empty value, so no other phase and no ordinary build sends the key. A `COMPLETED` event publishes `run.tests` when it carries a
+  carries them. `startedPayload` alone writes `replay_of` and
+  `granted_build_number`, each only for a non-empty or non-zero value, so no
+  other phase and no ordinary build sends the key. A `COMPLETED` event publishes `run.tests` when it carries a
   test counter, a test case, or a test report, so a report whose case count
   is zero still reaches the store. `shrinkToBudget`'s `cases` rung runs after
   the `error` truncation and drops the **last** case, because the plugin

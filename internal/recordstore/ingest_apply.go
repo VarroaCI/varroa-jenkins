@@ -35,6 +35,22 @@ type ApplyResult struct {
 	// recorder_ingest_conflict_total.
 	Conflict bool
 
+	// ConflictRunID and ConflictNumber name the run that already holds
+	// the reported number, for the caller's log line.
+	ConflictRunID  string
+	ConflictNumber int64
+
+	// NumberTakenFrom names the unstarted run whose grant a run.started
+	// took, because Jenkins built the arriving run under that number.
+	NumberTakenFrom string
+
+	// NumberMismatch is true when a run.started reported a build number
+	// other than the grant it applied. The caller counts
+	// recorder_ingest_number_mismatch_total and logs both numbers.
+	NumberMismatch   bool
+	MismatchGranted  int64
+	MismatchReported int64
+
 	// Truncated is true when a job.schedules envelope reported
 	// truncation. The recorder upserted every carried row and deleted
 	// none. The caller acknowledges the message and counts
@@ -255,9 +271,22 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 		// null-number run was stored then, so Conflict stays false.
 		if !dispatched.supersededStart {
 			result.Conflict = true
+			result.ConflictRunID = dispatched.conflictRunID
+			result.ConflictNumber = dispatched.conflictNumber
 			g.logger.Warn("run.started build number conflict; stored run with a null build number",
-				"runID", env.RunID)
+				"runID", env.RunID, "buildNumber", dispatched.conflictNumber,
+				"holderRunID", dispatched.conflictRunID)
 		}
+	}
+	if dispatched.numberTakenFrom != "" {
+		result.NumberTakenFrom = dispatched.numberTakenFrom
+		g.logger.Warn("run.started took the build number of an unstarted grant",
+			"runID", env.RunID, "holderRunID", dispatched.numberTakenFrom)
+	}
+	if dispatched.numberMismatch {
+		result.NumberMismatch = true
+		result.MismatchGranted = dispatched.mismatchGranted
+		result.MismatchReported = dispatched.mismatchReported
 	}
 	if dispatched.supersededStart {
 		result.SupersededStart = true
@@ -355,6 +384,19 @@ type dispatchResult struct {
 	supersededReported int64
 	supersededStored   int64
 	supersededOwner    string
+
+	// numberTakenFrom names the unstarted run whose grant a run.started
+	// took. conflictRunID and conflictNumber name the started run that
+	// holds the reported number on the null-number retry.
+	numberTakenFrom string
+	conflictRunID   string
+	conflictNumber  int64
+
+	// numberMismatch is true when a run.started reported a build number
+	// other than its grant.
+	numberMismatch   bool
+	mismatchGranted  int64
+	mismatchReported int64
 
 	// refusedSource is true when a run.source write carried a seq below
 	// the stored source_seq, so the merge changed no stored value. The

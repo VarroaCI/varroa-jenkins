@@ -23,6 +23,9 @@ type ClaimRequest struct {
 	PlacementGeneration    int64     `json:"placement_generation"`
 	JenkinsNextBuildNumber int64     `json:"jenkins_next_build_number"`
 	RequestedAt            time.Time `json:"requested_at"`
+	// NumberConflict names a granted number the cell could not apply,
+	// because its own counter already passed it. Zero names none.
+	NumberConflict int64 `json:"number_conflict,omitempty"`
 }
 
 // ClaimResponse is the reply body of a varroa.ledger.claim call. Error and

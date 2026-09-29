@@ -32,6 +32,7 @@ type IngestMetrics struct {
 	triggerFailed     metric.Int64Counter
 	triggerAccepted   metric.Int64Counter
 	supersededStart   metric.Int64Counter
+	numberMismatch    metric.Int64Counter
 	backlogMsgs       metric.Int64ObservableGauge
 	backlogBytes      metric.Int64ObservableGauge
 }
@@ -61,6 +62,12 @@ func NewIngestMetrics(conn *bus.Conn, streamName, consumerName string) (*IngestM
 		metric.WithDescription("run.started events acknowledged because they reported a build number below the intent's stored number from an instance other than the intent's owner"))
 	if err != nil {
 		return nil, fmt.Errorf("register recorder_ingest_superseded_start_total: %w", err)
+	}
+
+	m.numberMismatch, err = meter.Int64Counter("recorder_ingest_number_mismatch_total",
+		metric.WithDescription("run.started events whose build number differs from the grant the run applied"))
+	if err != nil {
+		return nil, fmt.Errorf("register recorder_ingest_number_mismatch_total: %w", err)
 	}
 
 	m.orphan, err = meter.Int64Counter("recorder_ingest_orphan_total",
@@ -171,6 +178,15 @@ func (m *IngestMetrics) addScheduleStale(ctx context.Context) {
 		return
 	}
 	m.scheduleStale.Add(ctx, 1)
+}
+
+// addNumberMismatch counts one recorder_ingest_number_mismatch_total
+// event.
+func (m *IngestMetrics) addNumberMismatch(ctx context.Context) {
+	if m == nil || m.numberMismatch == nil {
+		return
+	}
+	m.numberMismatch.Add(ctx, 1)
 }
 
 // addSupersededStart counts one recorder_ingest_superseded_start_total

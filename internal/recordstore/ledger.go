@@ -301,14 +301,25 @@ func intentStarted(ctx context.Context, tx pgx.Tx, row storedIntent) (bool, erro
 // old number stays burned, and a zero counter never refreshes. A request
 // that names no cell instance never refreshes either: the ingest path
 // tells a superseded start from a real one by the intent's owner, so a
-// refreshed intent must always name one. A repeat from the same instance
-// changes nothing: a pod keeps its Jenkins home across a container
-// restart, so its counter passes the stored number only by running the
-// build, and a refresh there would start that build a second time.
+// refreshed intent must always name one. A plain repeat from the same
+// instance changes nothing: a pod keeps its Jenkins home across a
+// container restart, so its counter passes the stored number only by
+// running the build, and a refresh there would start that build a
+// second time.
+//
+// Two refreshes apply from any instance, the same one included. A null
+// stored number means a run.started took the grant, so the run holds no
+// usable number. A number_conflict that names the stored number means
+// the cell refused to apply it; the cell holds no build under it, and
+// the number is below the watermark, so the fresh number is above it.
 func reanswerSameRun(ctx context.Context, tx pgx.Tx, req ClaimRequest, row storedIntent) (ClaimResponse, error) {
 	buildNumber := derefInt64(row.buildNumber)
+	if row.state != stateGranted {
+		return ClaimResponse{Decision: DecisionGranted, RunID: row.runID.String(), BuildNumber: buildNumber}, nil
+	}
 	sameInstance := row.cellInstance != nil && *row.cellInstance == req.CellInstance
-	if !sameInstance && row.state == stateGranted {
+	refresh := false
+	if !sameInstance {
 		if _, err := tx.Exec(ctx, `
 			UPDATE varroa.run_intents
 			SET cell = $1, cell_instance = $2, placement_generation = $3
@@ -316,20 +327,45 @@ func reanswerSameRun(ctx context.Context, tx pgx.Tx, req ClaimRequest, row store
 		`, nullableString(req.Cell), nullableString(req.CellInstance), req.PlacementGeneration, row.runID); err != nil {
 			return ClaimResponse{}, fmt.Errorf("move ownership: %w", err)
 		}
-		if req.CellInstance != "" && req.JenkinsNextBuildNumber > 0 && buildNumber < req.JenkinsNextBuildNumber {
-			fresh, err := reserveBuildNumber(ctx, tx, req.Cluster, req.Tenant, req.JobPath, req.JenkinsNextBuildNumber)
-			if err != nil {
-				return ClaimResponse{}, err
-			}
-			if _, err := tx.Exec(ctx, `
-				UPDATE varroa.run_intents SET build_number = $1 WHERE run_id = $2
-			`, fresh, row.runID); err != nil {
-				return ClaimResponse{}, fmt.Errorf("refresh stale build number: %w", err)
-			}
-			buildNumber = fresh
+		refresh = req.CellInstance != "" && req.JenkinsNextBuildNumber > 0 && buildNumber < req.JenkinsNextBuildNumber
+	}
+	if !refresh {
+		var err error
+		if refresh, err = namedOrNullRefresh(ctx, tx, req, row); err != nil {
+			return ClaimResponse{}, err
 		}
 	}
+	if refresh {
+		fresh, err := reserveBuildNumber(ctx, tx, req.Cluster, req.Tenant, req.JobPath, req.JenkinsNextBuildNumber)
+		if err != nil {
+			return ClaimResponse{}, err
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE varroa.run_intents SET build_number = $1 WHERE run_id = $2
+		`, fresh, row.runID); err != nil {
+			return ClaimResponse{}, fmt.Errorf("refresh stale build number: %w", err)
+		}
+		buildNumber = fresh
+	}
 	return ClaimResponse{Decision: DecisionGranted, RunID: row.runID.String(), BuildNumber: buildNumber}, nil
+}
+
+// namedOrNullRefresh reports whether a GRANTED intent needs a fresh
+// number from any instance: its stored number is null, or the request's
+// number_conflict names the stored number and that number is below the
+// job's watermark.
+func namedOrNullRefresh(ctx context.Context, tx pgx.Tx, req ClaimRequest, row storedIntent) (bool, error) {
+	if row.buildNumber == nil {
+		return true, nil
+	}
+	if req.NumberConflict <= 0 || *row.buildNumber != req.NumberConflict {
+		return false, nil
+	}
+	next, err := NextBuildNumber(ctx, tx, req.Cluster, req.Tenant, req.JobPath)
+	if err != nil {
+		return false, err
+	}
+	return *row.buildNumber < next, nil
 }
 
 // transferIntent moves an intent to a new run_id, reserving a new build

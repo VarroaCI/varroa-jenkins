@@ -44,6 +44,10 @@ import java.util.Map;
  * <p>Field 50, {@code replay_of}, names the run whose script a replayed
  * build copied. Only the {@code STARTED} event carries it. {@link
  * #toJson()} writes no key for it when it is empty.
+ *
+ * <p>Field 51, {@code granted_build_number}, is the grant the run applied.
+ * Only the {@code STARTED} event carries it. {@link #toJson()} writes no
+ * key for zero.
  */
 public final class BuildEvent implements PostableEvent {
 
@@ -108,6 +112,7 @@ public final class BuildEvent implements PostableEvent {
     private final BuildTestReport testReport;
     private final List<BuildTestCase> testCases;
     private final String replayOf;
+    private final long grantedBuildNumber;
 
     private BuildEvent(Builder b) {
         this.phase = orEmpty(b.phase);
@@ -160,6 +165,7 @@ public final class BuildEvent implements PostableEvent {
         this.testReport = b.testReport;
         this.testCases = List.copyOf(b.testCases);
         this.replayOf = orEmpty(b.replayOf);
+        this.grantedBuildNumber = b.grantedBuildNumber;
     }
 
     private static String orEmpty(String s) {
@@ -391,6 +397,11 @@ public final class BuildEvent implements PostableEvent {
         return replayOf;
     }
 
+    /** Field 51: the grant the run applied. Zero for a run with no grant. */
+    public long getGrantedBuildNumber() {
+        return grantedBuildNumber;
+    }
+
     /**
      * Serializes the event to a {@link JSONObject} using proto JSON field
      * names, ready to post to {@code /v1/events}.
@@ -497,6 +508,9 @@ public final class BuildEvent implements PostableEvent {
         if (!replayOf.isEmpty()) {
             o.put("replay_of", replayOf);
         }
+        if (grantedBuildNumber != 0) {
+            o.put("granted_build_number", grantedBuildNumber);
+        }
         return o;
     }
 
@@ -564,7 +578,8 @@ public final class BuildEvent implements PostableEvent {
                 .inputs(inputs)
                 .testReport(testReport)
                 .testCases(testCases)
-                .replayOf(replayOf);
+                .replayOf(replayOf)
+                .grantedBuildNumber(grantedBuildNumber);
     }
 
     public static final class Builder {
@@ -618,6 +633,7 @@ public final class BuildEvent implements PostableEvent {
         private BuildTestReport testReport;
         private List<BuildTestCase> testCases = new ArrayList<>();
         private String replayOf;
+        private long grantedBuildNumber;
 
         private Builder() {
         }
@@ -887,6 +903,12 @@ public final class BuildEvent implements PostableEvent {
         /** Field 50: the run a replayed build copied its script from. */
         public Builder replayOf(String v) {
             this.replayOf = v;
+            return this;
+        }
+
+        /** Field 51: the grant the run applied. */
+        public Builder grantedBuildNumber(long v) {
+            this.grantedBuildNumber = v;
             return this;
         }
 

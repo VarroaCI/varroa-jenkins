@@ -840,7 +840,8 @@ public final class VarroaRunRecorder {
                 .buildNumber(state.buildNumber)
                 .deliveryId(action.getDeliveryId())
                 .scmRevision(truncate(action.getRevision(), MAX_FIELD_512))
-                .replayOf(replaySourceOf(run));
+                .replayOf(replaySourceOf(run))
+                .grantedBuildNumber(action.getGrantedNumber());
         applyCommonMetadata(b, run, false);
         return b;
     }

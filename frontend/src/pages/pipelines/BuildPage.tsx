@@ -82,6 +82,7 @@ const TRIGGER_REASON_SENTENCES: Record<string, string> = {
   TRIGGER_REJECTED: "The controller refused the trigger.",
   TRIGGER_UNREACHABLE: "The trigger did not reach the controller's Jenkins.",
   CLAIM_EXPIRED: "The build did not get a build number in time, so it did not start.",
+  CLAIM_ABANDONED: "The build got a build number, but it did not start in time.",
   FENCED: "The controller that received the trigger no longer hosts this team.",
   CROSS_TENANT: "Another team may not start this job.",
   INVALID_KEY: "The build request was not valid.",

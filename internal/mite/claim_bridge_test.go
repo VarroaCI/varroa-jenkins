@@ -92,6 +92,7 @@ func TestOnClaimRequest_GrantedPathCopiesReply(t *testing.T) {
 		JobPath:                "team-a/build",
 		CellInstance:           "pod-uid-1",
 		JenkinsNextBuildNumber: 41,
+		NumberConflict:         39,
 	}
 	h.OnClaimRequest("ctrl1", "ns1", 1, req, sender.send)
 
@@ -113,6 +114,9 @@ func TestOnClaimRequest_GrantedPathCopiesReply(t *testing.T) {
 	}
 	if lastReq.JenkinsNextBuildNumber != 41 {
 		t.Fatalf("ledger request jenkins_next_build_number = %d, want 41", lastReq.JenkinsNextBuildNumber)
+	}
+	if lastReq.NumberConflict != 39 {
+		t.Fatalf("ledger request number_conflict = %d, want 39", lastReq.NumberConflict)
 	}
 	if lastReq.Cluster != "cluster1" || lastReq.Namespace != "ns1" || lastReq.Cell != "ctrl1" {
 		t.Fatalf("ledger request identity = %+v, want stream identity, not the payload", lastReq)

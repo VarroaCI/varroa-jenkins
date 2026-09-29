@@ -127,6 +127,9 @@ type RunStartedPayload struct {
 	// ReplayOf names the run a replayed build copied its script from. The
 	// gateway writes the key only for a non-empty value, so nil binds NULL.
 	ReplayOf *string `json:"replay_of,omitempty"`
+	// GrantedBuildNumber is the grant the run applied in Jenkins. The
+	// recorder only compares it with BuildNumber; no column stores it.
+	GrantedBuildNumber *int64 `json:"granted_build_number,omitempty"`
 }
 
 // RunCompletedPayload is the payload of a run.completed envelope.

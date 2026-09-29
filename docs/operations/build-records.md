@@ -113,7 +113,7 @@ Jenkins or the recorder can refuse a build trigger. The store then holds one run
 | `JOB_NOT_BUILDABLE` | The job exists, but it cannot start a build. |
 | `TRIGGER_REJECTED` | The controller refused the trigger for another reason. |
 | `TRIGGER_UNREACHABLE` | After five minutes, the trigger found no ready Jenkins with its tenant's items. |
-| `CLAIM_EXPIRED` | The recorder found no claim 75 minutes after acceptance. See [Build claims](build-claims.md). |
+| `CLAIM_EXPIRED`, `CLAIM_ABANDONED` | No claim, or no build after a granted claim, in 75 minutes. See [Build claims](build-claims.md). |
 | `FENCED`, `CROSS_TENANT`, `INVALID_KEY`, `THROTTLED` | The recorder refused the build claim. |
 
 The cron backstop retries only `TRIGGER_UNREACHABLE`; see

@@ -403,6 +403,9 @@ func startedPayload(evt *mitev1.BuildEvent) map[string]interface{} {
 	if evt.ReplayOf != "" {
 		p["replay_of"] = evt.ReplayOf
 	}
+	if evt.GrantedBuildNumber != 0 {
+		p["granted_build_number"] = evt.GrantedBuildNumber
+	}
 	addTemplateFields(p, evt)
 	return p
 }

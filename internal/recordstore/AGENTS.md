@@ -251,7 +251,16 @@ of the fleet's audit activity, once a controller becomes disposable.
   replacement pod. That answer skips `markDuplicateClaim`, because the
   row it would mark is the started run's own row. `reanswerSameRun`
   serves only a run that has not started, which keeps the re-fire and
-  the ownership-move refresh working. A resumed build never claims. The
+  the ownership-move refresh working. It also reserves a fresh number, from any cell
+  instance, for a `GRANTED` intent whose number is null (a `run.started` took it) or
+  whose number equals the request's `number_conflict` and sits below the watermark.
+  **The number Jenkins used is the truth at `run.started`**: `takeUnstartedGrant`
+  (`ingest_started.go`) nulls another unstarted `GRANTED` intent that holds the
+  reported number before the write; only a holder that already started leaves the
+  unique-constraint retry, which stores a null number and logs both run ids.
+  `granted_build_number` on the payload is compared alone and counted in
+  `recorder_ingest_number_mismatch_total`. `ClaimBudget` (3.5s) bounds one claim so
+  the recorder answers inside the gateway's 4s. A resumed build never claims. The
   ledger learns of a start only from `run.started`, so a redelivery to
   another cell before that event lands still reads `granted`. `Fence` gates a claim before the
   transaction opens; `allowAllFence` is the C1 default.
@@ -946,7 +955,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   the backstop lock. The age does not prove a claim attempt: an item that
   waits in the Jenkins queue past the limit before its first claim (behind
   a long previous build) is marked too, and its later `run.started`
-  supersedes the row; the activity row and the count stay.
+  supersedes the row; the activity row and the count stay. A second class,
+  `claimAbandonedGuardSQL`, ends a `QUEUED` run that still holds its accepted keys
+  and a `GRANTED` intent, at the same age, with `CLAIM_ABANDONED` and a
+  `build.claim_abandoned` activity row. `recorder_claim_expired_total` carries the
+  attribute `reason` for both classes. The two classes share one 500-attempt batch
+  per round, the abandoned class first, so an unclaimed backlog never starves it.
 - **Backstop cron scheduler and the interrupted sweep's round**
   (`backstop_round.go`, `backstop_policy.go`, `backstop_candidates.go`,
   `backstop_fire.go`, `backstop_metrics.go`, `action_metrics.go`,

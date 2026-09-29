@@ -466,6 +466,8 @@ message BuildEvent {
   BuildTestReport test_report = 48;
   repeated BuildTestCase test_cases = 49;
   string replay_of = 50;
+  // The grant the run applied, on STARTED alone. Zero names no grant.
+  int64 granted_build_number = 51;
 }
 
 message ClaimRequest {
@@ -488,6 +490,9 @@ message ClaimRequest {
   int64 requested_at_millis = 12;
   string cell_instance = 13;
   int64 jenkins_next_build_number = 14;
+  // A granted number the cell could not apply, because its counter already
+  // passed it. Zero names no conflict.
+  int64 number_conflict = 15;
 }
 
 message ClaimResponse {

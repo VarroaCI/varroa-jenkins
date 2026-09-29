@@ -27,9 +27,13 @@ import java.util.logging.Logger;
  * (D1, D4).
  *
  * <p>A claimer thread derives the origin and the intent key (D5), posts a
- * {@code ClaimRequest}, and applies the decision table. A grant applies
- * the build number first (D4's five steps, contract G3), then sets the
- * action's granted flag, which releases the dispatcher.
+ * {@code ClaimRequest}, and applies the decision table. A grant goes to
+ * {@link BuildNumberGate}, which applies one grant of a job at a time:
+ * Jenkins numbers a dispatched item from the job's counter, so a second
+ * applied grant would give the first item the second number. The apply
+ * sets the build number (D4's five steps, contract G3), then the action's
+ * granted flag, which releases the dispatcher. A grant below the job's
+ * counter keeps the item and claims again with {@code number_conflict}.
  *
  * <p>A claimer thread also owns the intra-tenant forward. It resolves the
  * job's home slot from {@link VarroaHomeCache} before it posts the claim,
@@ -87,6 +91,7 @@ public class VarroaClaimQueue {
     private final VarroaHomeCache homeCache;
     private final ThreadPoolExecutor executor;
     private final Set<String> pendingKeys = ConcurrentHashMap.newKeySet();
+    private final BuildNumberGate gate;
 
     public VarroaClaimQueue() {
         this(new MiteLoopbackClient(), System::currentTimeMillis, Thread::sleep, VarroaHomeCache.get());
@@ -99,6 +104,13 @@ public class VarroaClaimQueue {
 
     /** Package-private constructor for testing: injects the home cache as well. */
     VarroaClaimQueue(MiteLoopbackClient client, Clock clock, Sleeper sleeper, VarroaHomeCache homeCache) {
+        this(client, clock, sleeper, homeCache, BuildNumberGate.get());
+    }
+
+    /** Package-private constructor for testing: injects the apply gate as well. */
+    VarroaClaimQueue(MiteLoopbackClient client, Clock clock, Sleeper sleeper, VarroaHomeCache homeCache,
+            BuildNumberGate gate) {
+        this.gate = gate;
         this.client = client;
         this.clock = clock;
         this.sleeper = sleeper;
@@ -241,12 +253,11 @@ public class VarroaClaimQueue {
 
         switch (decision.kind) {
             case GRANTED:
-                if (!applyBuildNumber(job, decision.buildNumber)) {
-                    cancel(item);
-                    return true;
-                }
-                ClaimRegistry.get().record(derived.intentKey, action.getRunId());
-                action.setGranted(true);
+                long granted = decision.buildNumber;
+                String intentKey = derived.intentKey;
+                action.setApplyPending(true);
+                gate.submit(job.getFullName(), action.getRunId(),
+                        () -> applyGrant(item, job, action, intentKey, granted));
                 return true;
             case DUPLICATE:
                 DuplicateRegistry.get().record(action.getRunId());
@@ -334,33 +345,99 @@ public class VarroaClaimQueue {
     // --- Build number apply (contract G3) ---
 
     /**
+     * Applies one grant on the gate's thread. Answers true when the run
+     * keeps the gate until it starts, and false when the gate opens at
+     * once: the item left the queue, or the number did not apply. A number
+     * below the counter keeps the item blocked; the dispatcher then offers a
+     * new claim that names the number as {@code number_conflict}. A failed
+     * save cancels the item, because a new claim cannot fix the disk.
+     */
+    boolean applyGrant(Queue.Item item, Job<?, ?> job, VarroaIntentAction action, String intentKey, long granted) {
+        try {
+            if (!stillQueued(item)) {
+                return false;
+            }
+            ApplyResult applied = applyNumber(job, granted, action.getRunId());
+            if (applied == ApplyResult.PERSIST_FAILED) {
+                cancel(item);
+                return false;
+            }
+            if (applied == ApplyResult.NUMBER_CONFLICT) {
+                action.setNumberConflict(granted);
+                return false;
+            }
+            action.setGrantedNumber(granted);
+            action.setNumberConflict(0);
+            ClaimRegistry.get().record(intentKey, action.getRunId());
+            action.setGranted(true);
+            return true;
+        } finally {
+            action.setApplyPending(false);
+            scheduleMaintenance();
+        }
+    }
+
+    /** True unless the item already left the queue. With no Jenkins, the answer is true. */
+    private static boolean stillQueued(Queue.Item item) {
+        try {
+            Queue.Item live = Queue.getInstance().getItem(item.getId());
+            return live != null && !(live instanceof Queue.LeftItem);
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    private static void scheduleMaintenance() {
+        try {
+            Queue.getInstance().scheduleMaintenance();
+        } catch (Exception e) {
+            LOGGER.log(Level.FINE, "VarroaClaimQueue: failed to schedule a queue pass", e);
+        }
+    }
+
+    /**
      * Applies the granted build number under the job's monitor (D4's five
      * steps). Never called from {@code canRun}: it takes the job monitor
      * and writes a file.
      */
     boolean applyBuildNumber(Job<?, ?> job, long grantedNumber) {
+        return applyNumber(job, grantedNumber, "") == ApplyResult.APPLIED;
+    }
+
+    /** The outcome of one apply. */
+    enum ApplyResult {
+        APPLIED,
+        /** The job's counter passed the grant; a new claim with {@code number_conflict} fixes it. */
+        NUMBER_CONFLICT,
+        /** The {@code nextBuildNumber} file did not save; a new claim cannot fix it. */
+        PERSIST_FAILED
+    }
+
+    /** As {@link #applyBuildNumber(Job, long)}, names {@code runId} in the log line, and tells the two failures apart. */
+    ApplyResult applyNumber(Job<?, ?> job, long grantedNumber, String runId) {
         synchronized (job) {
             int before = job.getNextBuildNumber();
             if (before > grantedNumber) {
                 LOGGER.log(Level.WARNING,
-                        "VarroaClaimQueue: NUMBER_CONFLICT, job {0} next build number {1} already exceeds the granted {2}",
-                        new Object[] {job.getFullName(), before, grantedNumber});
-                return false;
+                        "VarroaClaimQueue: NUMBER_CONFLICT, job {0} run {1} next build number {2} already exceeds the granted {3}; claiming again",
+                        new Object[] {job.getFullName(), runId, before, grantedNumber});
+                return ApplyResult.NUMBER_CONFLICT;
             }
             try {
                 job.updateNextBuildNumber((int) grantedNumber);
             } catch (IOException e) {
-                LOGGER.log(Level.WARNING, "VarroaClaimQueue: failed to persist the granted build number", e);
-                return false;
+                LOGGER.log(Level.WARNING, "VarroaClaimQueue: failed to persist the granted build number for run "
+                        + runId + "; cancelled the queue item", e);
+                return ApplyResult.PERSIST_FAILED;
             }
             int after = job.getNextBuildNumber();
             if (after != grantedNumber) {
                 LOGGER.log(Level.WARNING,
-                        "VarroaClaimQueue: NUMBER_CONFLICT, updateNextBuildNumber was a no-op for job {0}: stayed {1}, wanted {2}",
-                        new Object[] {job.getFullName(), after, grantedNumber});
-                return false;
+                        "VarroaClaimQueue: NUMBER_CONFLICT, updateNextBuildNumber was a no-op for job {0} run {1}: stayed {2}, wanted {3}; claiming again",
+                        new Object[] {job.getFullName(), runId, after, grantedNumber});
+                return ApplyResult.NUMBER_CONFLICT;
             }
-            return true;
+            return ApplyResult.APPLIED;
         }
     }
 
@@ -381,6 +458,9 @@ public class VarroaClaimQueue {
         body.put("attempt", attempt);
         body.put("requested_at_millis", clock.nowMillis());
         body.put("jenkins_next_build_number", job.getNextBuildNumber());
+        if (action.getNumberConflict() > 0) {
+            body.put("number_conflict", action.getNumberConflict());
+        }
         return body;
     }
 

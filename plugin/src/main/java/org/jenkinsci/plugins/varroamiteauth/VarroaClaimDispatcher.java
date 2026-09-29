@@ -81,6 +81,11 @@ public class VarroaClaimDispatcher extends QueueTaskDispatcher {
             action = VarroaIntentAction.stampMissing(job, item.getCauses());
             item.addAction(action);
         }
+        if (action.isApplyPending()) {
+            // The grant waits for the job's apply gate. A second claim
+            // now would hand the gate a second apply for the same run.
+            return blockedCause();
+        }
 
         sweepExpiredStarted();
         String key = job.getFullName() + "#" + action.getRunId();

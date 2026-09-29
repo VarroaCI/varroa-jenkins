@@ -46,6 +46,9 @@ public class VarroaIntentAction extends InvisibleAction implements Queue.QueueAc
     private volatile String revision = "";
     private volatile boolean granted;
     private volatile String actor = "";
+    private volatile long grantedNumber;
+    private volatile long numberConflict;
+    private transient volatile boolean applyPending;
 
     /**
      * Constructs the action the handler stamps at admission (D4 step 6).
@@ -131,6 +134,43 @@ public class VarroaIntentAction extends InvisibleAction implements Queue.QueueAc
     /** Set by the claimer thread after a {@code granted} decision. Package-private. */
     void setGranted(boolean granted) {
         this.granted = granted;
+    }
+
+    /** Returns the build number the grant applied, or zero before a grant applied. */
+    public long getGrantedNumber() {
+        return grantedNumber;
+    }
+
+    /** Set by the apply after the job's next build number matches the grant. Package-private. */
+    void setGrantedNumber(long grantedNumber) {
+        this.grantedNumber = grantedNumber;
+    }
+
+    /**
+     * Returns a granted number the job could not apply because its counter
+     * already passed it, or zero. The next claim names it as {@code
+     * number_conflict}, so the ledger answers a fresh number.
+     */
+    public long getNumberConflict() {
+        return numberConflict;
+    }
+
+    /** Set by the apply on {@code NUMBER_CONFLICT}, cleared by a matching apply. Package-private. */
+    void setNumberConflict(long numberConflict) {
+        this.numberConflict = numberConflict;
+    }
+
+    /**
+     * Returns true while a grant waits for the job's apply gate. The
+     * dispatcher then blocks the item and offers no claim.
+     */
+    public boolean isApplyPending() {
+        return applyPending;
+    }
+
+    /** Set by the claimer when it hands a grant to the gate. Package-private. */
+    void setApplyPending(boolean applyPending) {
+        this.applyPending = applyPending;
     }
 
     /**

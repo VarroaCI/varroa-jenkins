@@ -120,7 +120,13 @@ func handleIngestMessage(ctx context.Context, ingester *Ingester, metrics *Inges
 		if result.Conflict {
 			metrics.addConflict(ctx)
 			logger.Warn("run.started build number conflict acknowledged",
-				"runID", env.RunID, "kind", env.Kind)
+				"runID", env.RunID, "kind", env.Kind, "buildNumber", result.ConflictNumber,
+				"holderRunID", result.ConflictRunID)
+		}
+		if result.NumberMismatch {
+			metrics.addNumberMismatch(ctx)
+			logger.Warn("run.started build number differs from its grant",
+				"runID", env.RunID, "granted", result.MismatchGranted, "reported", result.MismatchReported)
 		}
 		if result.SupersededStart {
 			metrics.addSupersededStart(ctx)

@@ -13,9 +13,10 @@ import (
 // joins, so more than one recorder replica shares the subscription.
 const claimQueueGroup = "recorder"
 
-// claimTimeout bounds one claim's database work, so a stalled Postgres
-// connection does not hold the responder goroutine open indefinitely.
-const claimTimeout = 10 * time.Second
+// ClaimBudget bounds one claim's database work. It must stay below the
+// gateway's ledger timeout, so the recorder answers before the gateway
+// gives up and the plugin reads a structured reply.
+const ClaimBudget = 3500 * time.Millisecond
 
 // RegisterClaimResponder subscribes ledger to bus.LedgerClaimSubject with
 // queue group "recorder". metrics may be nil. The returned Sub stops the
@@ -50,7 +51,7 @@ func handleClaim(logger *slog.Logger, ledger *Ledger, metrics *ClaimMetrics, dat
 		return resp
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), claimTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), ClaimBudget)
 	defer cancel()
 
 	resp := ledger.Claim(ctx, req)

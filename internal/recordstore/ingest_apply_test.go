@@ -47,16 +47,20 @@ func TestApplyIntentMissingIsRejected(t *testing.T) {
 }
 
 // TestApplyBuildNumberConflictStoresNullAndFlagsConflict asserts a
-// run.started write that collides with another intent's already-claimed
+// run.started write that collides with another run's already-started
 // build number commits with a null build_number, moves the intent to
 // CONSUMED with a null build number, and reports ApplyResult.Conflict.
 func TestApplyBuildNumberConflictStoresNullAndFlagsConflict(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	runA := seedGrantedIntent(t, pool, "manual:conflict-a") // reserves build_number 1
-	_ = seedGrantedIntent(t, pool, "manual:conflict-b")     // reserves build_number 2
+	runB := seedGrantedIntent(t, pool, "manual:conflict-b") // reserves build_number 2
 	g := NewIngester(pool, nil, nil)
 
 	colliding := int64(2)
+	startB := newTestEnvelope(t, runB, "manual:conflict-b", KindRunStarted, RunStartedPayload{BuildNumber: &colliding})
+	if _, err := g.Apply(context.Background(), startB); err != nil {
+		t.Fatalf("apply run.started for B: %v", err)
+	}
 	env := newTestEnvelope(t, runA, "manual:conflict-a", KindRunStarted, RunStartedPayload{
 		BuildNumber: &colliding,
 	})
@@ -67,6 +71,9 @@ func TestApplyBuildNumberConflictStoresNullAndFlagsConflict(t *testing.T) {
 	}
 	if !result.Conflict {
 		t.Fatal("ApplyResult.Conflict = false, want true")
+	}
+	if result.ConflictRunID != runB.String() || result.ConflictNumber != colliding {
+		t.Fatalf("conflict names %s at %d, want %s at %d", result.ConflictRunID, result.ConflictNumber, runB, colliding)
 	}
 
 	var buildNumber *int64
@@ -237,13 +244,17 @@ func TestApplyRefusedRunSourcePublishesNothing(t *testing.T) {
 func TestApplyBuildNumberConflictPublishesOnce(t *testing.T) {
 	pool, _ := setupLedgerPool(t)
 	runA := seedGrantedIntent(t, pool, "manual:notify-conflict-a") // reserves build_number 1
-	_ = seedGrantedIntent(t, pool, "manual:notify-conflict-b")     // reserves build_number 2
+	runB := seedGrantedIntent(t, pool, "manual:notify-conflict-b") // reserves build_number 2
 	g := NewIngester(pool, nil, nil)
+	colliding := int64(2)
+	startB := newTestEnvelope(t, runB, "manual:notify-conflict-b", KindRunStarted, RunStartedPayload{BuildNumber: &colliding})
+	if _, err := g.Apply(context.Background(), startB); err != nil {
+		t.Fatalf("apply run.started for B: %v", err)
+	}
 	notifier, sent, _ := newCaptureNotifier(t)
 	defer notifier.Close()
 	g.SetRunNotifier(notifier)
 
-	colliding := int64(2)
 	env := newTestEnvelope(t, runA, "manual:notify-conflict-a", KindRunStarted, RunStartedPayload{
 		BuildNumber: &colliding,
 	})

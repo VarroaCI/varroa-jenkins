@@ -93,6 +93,7 @@ type BuildEvent struct {
 	TestReport              *BuildTestReport    `json:"test_report,omitempty"`
 	TestCases               []*BuildTestCase    `json:"test_cases,omitempty"`
 	ReplayOf                string              `json:"replay_of,omitempty"`
+	GrantedBuildNumber      int64               `json:"granted_build_number,omitempty"`
 }
 
 type BuildInput struct {
@@ -178,6 +179,7 @@ type ClaimRequest struct {
 	RequestedAtMillis      int64  `json:"requested_at_millis,omitempty"`
 	CellInstance           string `json:"cell_instance,omitempty"`
 	JenkinsNextBuildNumber int64  `json:"jenkins_next_build_number,omitempty"`
+	NumberConflict         int64  `json:"number_conflict,omitempty"`
 }
 
 type ClaimResponse struct {

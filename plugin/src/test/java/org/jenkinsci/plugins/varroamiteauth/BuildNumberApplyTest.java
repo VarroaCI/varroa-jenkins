@@ -76,6 +76,24 @@ public class BuildNumberApplyTest {
     }
 
     @Test
+    public void aFailedSaveCancelsTheItemAndNamesNoConflict() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject();
+        VarroaIntentAction action = new VarroaIntentAction("run-io", "", null, 0L);
+        Queue.Item item = Queue.getInstance().schedule2(project, 300, action).getItem();
+        VarroaClaimQueue queue = new VarroaClaimQueue(new MiteLoopbackClient(), System::currentTimeMillis, m -> { }) {
+            @Override
+            ApplyResult applyNumber(hudson.model.Job<?, ?> job, long grantedNumber, String runId) {
+                return ApplyResult.PERSIST_FAILED;
+            }
+        };
+
+        assertFalse(queue.applyGrant(item, project, action, "manual:run-io", 5));
+        assertTrue("a failed save cancels the item", item.getFuture().isCancelled());
+        assertEquals("a failed save names no conflict", 0, action.getNumberConflict());
+        assertFalse(action.isGranted());
+    }
+
+    @Test
     public void grantedFlagIsSetOnlyAfterTheNumberMatches() throws Exception {
         FreeStyleProject project = j.createFreeStyleProject();
         j.buildAndAssertSuccess(project); // next build number is now 2
@@ -109,11 +127,13 @@ public class BuildNumberApplyTest {
             queue.offer(item, project);
 
             long deadline = System.currentTimeMillis() + 10_000L;
-            while (System.currentTimeMillis() < deadline && !item.getFuture().isCancelled()) {
+            while (System.currentTimeMillis() < deadline && action.getNumberConflict() == 0) {
                 Thread.sleep(20L);
             }
             assertFalse("NUMBER_CONFLICT must leave the action ungranted", action.isGranted());
-            assertTrue("the item is cancelled on NUMBER_CONFLICT", item.getFuture().isCancelled());
+            assertEquals("the item records the number it could not apply", 1, action.getNumberConflict());
+            assertFalse("the apply is no longer pending", action.isApplyPending());
+            assertFalse("NUMBER_CONFLICT keeps the item for a new claim", item.getFuture().isCancelled());
         } finally {
             server.stop(0);
         }

@@ -25,7 +25,7 @@ changes, because it is stamped on the pod template.
 
 ## Timeout budget
 
-Four hops carry a budget each. Every budget shrinks going inward, so the hop closest to the
+Five hops carry a budget each. Every budget shrinks going inward, so the hop closest to the
 ledger answers first and every caller above it reads a structured decision instead of a bare
 timeout.
 
@@ -35,6 +35,7 @@ timeout.
 | Plugin to mite, read | 5 s | `VARROA_CLAIM_TIMEOUT_MS` on the Jenkins container | empty decision, code `UNAVAILABLE` |
 | Mite wait for the claim reply | 4.5 s | `MITE_CLAIM_TIMEOUT_MS` on the mite container | HTTP `504`, empty decision, code `UNAVAILABLE` |
 | Gateway request to the recorder | 4 s | `VARROA_LEDGER_TIMEOUT_MS` on the gateway | claim reply with empty decision, code `UNAVAILABLE` |
+| Recorder database work for one claim | 3.5 s | none | claim reply with empty decision, code `UNAVAILABLE` |
 
 The operator stamps the first two overrides together from its own `VARROA_CLAIM_TIMEOUT_MS`
 value. Leave it unset and both containers use their built-in defaults, 5000 ms and 4500 ms. Set
@@ -105,21 +106,20 @@ revision Jenkins has recorded for the job at the moment the claim runs. A second
 same revision reuses the same key and reads `granted` again on its own run, or `duplicate` if a
 different run already claimed it.
 
+## Build numbers in a burst
+
+The plugin applies one grant of a job at a time. The next grant waits until the last grant's run
+starts, or for 60 seconds. A run that starts under another number than its grant logs a
+`BuildNumberGate` `WARNING`, and `recorder_ingest_number_mismatch_total` counts it.
+
+The number Jenkins used is the truth. The recorder moves it from an unstarted grant to the started
+run, and the other run gets a fresh number on its next claim.
+
 ## `NUMBER_CONFLICT`
 
-The ledger grants a build number that is not yet used locally. The claimer reads the number back
-from Jenkins right after applying it. `NUMBER_CONFLICT` means that read-back found Jenkins
-already past the granted number. The counter advanced between the claim request and the number
-apply, for example through a manual `Job.scheduleBuild2` call or a backup restore. An advance
-before a first claim causes no conflict: the claim reports the counter as
-`jenkins_next_build_number`, and the ledger never grants a new number below it. Two repeat
-claims are the exceptions. One from the same cell instance answers the stored number while the
-ledger has not yet recorded the build's start. A second queue item for a run that instance
-already built then reads `NUMBER_CONFLICT` and is cancelled, which keeps that run from building
-twice. Once the ledger records the start, the repeat answers `duplicate` instead. One that names
-no cell instance answers the stored number too, because the ledger cannot tell which instance
-owns the run; a real cell always names its instance. Treat any other `NUMBER_CONFLICT` as a sign the Jenkins instance
-and the ledger have diverged for that job. The retry schedule will not clear it.
+`NUMBER_CONFLICT` means the job's counter already passed the grant. The plugin keeps the item and
+claims again with `number_conflict=<grant>`. The ledger then grants a fresh number, and the old
+number stays burned.
 
 ## Symptoms of a recorder outage
 
@@ -141,3 +141,6 @@ the claimer cancels the item and logs a `WARNING` that names the last answer. A 
 The backstop round marks its run `TRIGGER_FAILED`, reason `CLAIM_EXPIRED`, 75 minutes after
 acceptance. One round marks 500 runs at most and counts each in `recorder_claim_expired_total`. An item that waits that long before its first claim is
 marked too, and its real build later replaces the row.
+
+A granted run whose build never started ends the same way with reason `CLAIM_ABANDONED`. The
+counter carries the attribute `reason`.

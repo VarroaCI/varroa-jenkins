@@ -331,6 +331,36 @@ public class VarroaRunRecorderTest {
         assertFalse(started.toJson().containsKey("replay_of"));
     }
 
+    // --- The granted number on STARTED ---
+
+    @Test
+    public void startedCarriesTheGrantTheRunApplied() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject();
+        VarroaIntentAction action = grantedAction("");
+        action.setGrantedNumber(1);
+
+        j.assertBuildStatusSuccess(project.scheduleBuild2(0, action));
+
+        BuildEventSink.DrainResult result = BuildEventSink.get().drain(100);
+        BuildEvent started = byPhase(result.events, BuildEvent.PHASE_STARTED).get(0);
+        assertEquals(1L, started.getGrantedBuildNumber());
+        assertEquals(1L, started.toJson().getLong("granted_build_number"));
+        for (BuildEvent e : byPhase(result.events, BuildEvent.PHASE_COMPLETED)) {
+            assertFalse(e.toJson().containsKey("granted_build_number"));
+        }
+    }
+
+    @Test
+    public void aRunWithNoGrantWritesNoGrantedNumber() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject();
+
+        j.assertBuildStatusSuccess(project.scheduleBuild2(0, grantedAction("")));
+
+        BuildEventSink.DrainResult result = BuildEventSink.get().drain(100);
+        BuildEvent started = byPhase(result.events, BuildEvent.PHASE_STARTED).get(0);
+        assertFalse(started.toJson().containsKey("granted_build_number"));
+    }
+
     // --- 5.10b: the completion rebuild carries every stage and branch ---
 
     @Test
