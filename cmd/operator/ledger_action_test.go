@@ -65,6 +65,7 @@ func TestHandleLedgerAction_CancelRun(t *testing.T) {
 		Kind: recordstore.LedgerActionCancelRun, Cluster: "core",
 		Namespace: "cells-ns", Controller: "cell-a",
 		RunID: "run-1", JobPath: "team/job-a", BuildNumber: &bn,
+		Actor: recordstore.LedgerActionRecorder,
 	}
 	data, _ := json.Marshal(action)
 	handleLedgerAction(context.Background(), testLogger(), "varroa.ledger.actions.core", "core", rec, data)
@@ -78,6 +79,9 @@ func TestHandleLedgerAction_CancelRun(t *testing.T) {
 	}
 	if cmd.CancelBuild == nil || cmd.CancelBuild.RunId != "run-1" || cmd.CancelBuild.JobPath != "team/job-a" || cmd.CancelBuild.BuildNumber != 7 {
 		t.Fatalf("unexpected CancelBuild payload: %+v", cmd.CancelBuild)
+	}
+	if cmd.CancelBuild.Actor != recordstore.LedgerActionRecorder {
+		t.Fatalf("cancel actor = %q, want %q", cmd.CancelBuild.Actor, recordstore.LedgerActionRecorder)
 	}
 	if rec.sentNS != "cells-ns" || rec.sentName != "cell-a" {
 		t.Fatalf("expected the command addressed to cells-ns/cell-a, got %s/%s", rec.sentNS, rec.sentName)

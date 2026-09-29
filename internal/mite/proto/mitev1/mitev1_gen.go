@@ -162,6 +162,7 @@ type CancelBuildPayload struct {
 	RunId       string `json:"run_id"`
 	JobPath     string `json:"job_path"`
 	BuildNumber int64  `json:"build_number,omitempty"`
+	Actor       string `json:"actor,omitempty"`
 }
 
 type ClaimRequest struct {
@@ -204,6 +205,7 @@ type CommandResult struct {
 	CommandType CommandType            `json:"command_type,omitempty"`
 	JobPath     string                 `json:"job_path,omitempty"`
 	RunId       string                 `json:"run_id,omitempty"`
+	Actor       string                 `json:"actor,omitempty"`
 	Result      isCommandResult_result `json:"-"`
 }
 
@@ -228,6 +230,7 @@ func (m *CommandResult) MarshalJSON() ([]byte, error) {
 		CommandType  CommandType         `json:"command_type,omitempty"`
 		JobPath      string              `json:"job_path,omitempty"`
 		RunId        string              `json:"run_id,omitempty"`
+		Actor        string              `json:"actor,omitempty"`
 		DesiredState *DesiredStateResult `json:"desired_state,omitempty"`
 	}
 	var a alias
@@ -240,6 +243,7 @@ func (m *CommandResult) MarshalJSON() ([]byte, error) {
 	a.CommandType = m.CommandType
 	a.JobPath = m.JobPath
 	a.RunId = m.RunId
+	a.Actor = m.Actor
 	switch v := m.Result.(type) {
 	case *CommandResult_DesiredState:
 		a.DesiredState = v.DesiredState
@@ -258,6 +262,7 @@ func (m *CommandResult) UnmarshalJSON(data []byte) error {
 		CommandType  CommandType         `json:"command_type,omitempty"`
 		JobPath      string              `json:"job_path,omitempty"`
 		RunId        string              `json:"run_id,omitempty"`
+		Actor        string              `json:"actor,omitempty"`
 		DesiredState *DesiredStateResult `json:"desired_state,omitempty"`
 	}
 	if err := json.Unmarshal(data, &a); err != nil {
@@ -272,6 +277,7 @@ func (m *CommandResult) UnmarshalJSON(data []byte) error {
 	m.CommandType = a.CommandType
 	m.JobPath = a.JobPath
 	m.RunId = a.RunId
+	m.Actor = a.Actor
 	switch {
 	case a.DesiredState != nil:
 		m.Result = &CommandResult_DesiredState{DesiredState: a.DesiredState}

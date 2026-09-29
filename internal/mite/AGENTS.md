@@ -189,8 +189,12 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   or `run.trigger_accepted` when `success` is true. `RESUME_BUILD`
   publishes `run.resume_failed` for a failed result and nothing for a
   successful one, because a resumed build proves itself by its own
-  heartbeat. `REPLAY_BUILD` publishes nothing and logs a refused result,
-  because a refused replay leaves no run to record. **A resume result always acks, whatever the publish
+  heartbeat. `CANCEL_BUILD`, `PROCEED_INPUT`, `ABORT_INPUT`, and
+  `REPLAY_BUILD` publish nothing. `logRefusedRunCommand` logs one Warn line
+  for a refused result (controller, command id, run, actor, HTTP status,
+  error). These three branches run **before** the `recordStoreEnabled`
+  gate, so an install with no record store still logs a refusal. The
+  operator, not the gateway, writes the activity row. **A resume result always acks, whatever the publish
   answers**, which is the opposite of the trigger rule below: a
   redelivered resume can succeed while the recorder holds no dispatched
   resume, and only the named target's heartbeat clears a resume record,

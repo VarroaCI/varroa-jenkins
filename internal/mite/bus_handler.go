@@ -576,8 +576,10 @@ func (h *BusHandler) SetRecordStoreEnabled(enabled bool) {
 // recordCommandOutcome publishes the record of one command result, and
 // reports whether the pending imperative message may be acknowledged.
 //
-// With no record store the gateway publishes nothing, counts nothing, and
-// acknowledges: such an install has nothing to record.
+// A refused CANCEL_BUILD, input answer, or REPLAY_BUILD logs one Warn line
+// first, with or without a record store, and acknowledges: the caller
+// already holds a 202, and none of the three writes a record here. With no
+// record store the gateway then publishes nothing and acknowledges.
 //
 // A TRIGGER_BUILD result publishes, and ANY publish error blocks the
 // acknowledgement. The stream then redelivers the command, the mite triggers
@@ -595,11 +597,27 @@ func (h *BusHandler) SetRecordStoreEnabled(enabled bool) {
 //
 // Every other command type acknowledges, because it writes no record.
 func (h *BusHandler) recordCommandOutcome(ns, name string, pendingMsg *nats.Msg, result *mitev1.CommandResult) bool {
-	if !h.recordStoreEnabled {
-		return true
-	}
 	imp := pendingCommand(pendingMsg)
 	if imp == nil {
+		return true
+	}
+	switch imp.Type {
+	case mitev1.CommandTypeCancelBuild:
+		// A cancel publishes no record: the operator records the outcome
+		// on the activity stream. The log names the refusal on the gateway.
+		h.logRefusedRunCommand("cancel build command refused", ns, name, result)
+		return true
+	case mitev1.CommandTypeProceedInput, mitev1.CommandTypeAbortInput:
+		// An input answer publishes no record: the plugin re-reads the
+		// run's pending set and reports the outcome itself.
+		h.logRefusedRunCommand("run input command refused", ns, name, result)
+		return true
+	case mitev1.CommandTypeReplayBuild:
+		// A replay publishes no record: a refused replay leaves no run.
+		h.logRefusedRunCommand("replay build command refused", ns, name, result)
+		return true
+	}
+	if !h.recordStoreEnabled {
 		return true
 	}
 	switch imp.Type {
@@ -618,33 +636,24 @@ func (h *BusHandler) recordCommandOutcome(ns, name string, pendingMsg *nats.Msg,
 			h.publishResumeFailed(ns, name, imp.ResumeBuild, result)
 		}
 		return true
-	case mitev1.CommandTypeProceedInput, mitev1.CommandTypeAbortInput:
-		// An input answer publishes no record: the plugin re-reads the
-		// run's pending set and reports the outcome itself. The caller
-		// already holds a 202, so a refusal is visible here alone.
-		if !result.Success {
-			h.log().Warn("run input command refused",
-				"controller", ns+"/"+name,
-				"command_id", result.CommandId,
-				"http_status", result.HttpStatus,
-				"error", result.Error)
-		}
-		return true
-	case mitev1.CommandTypeReplayBuild:
-		// A replay publishes no record: a refused replay leaves no run, and
-		// the caller already holds a 202. The log is the only place that
-		// names the refusal.
-		if !result.Success {
-			h.log().Warn("replay build command refused",
-				"controller", ns+"/"+name,
-				"command_id", result.CommandId,
-				"http_status", result.HttpStatus,
-				"error", result.Error)
-		}
-		return true
 	default:
 		return true
 	}
+}
+
+// logRefusedRunCommand logs one Warn line for a refused run command that
+// writes no record. A success logs nothing.
+func (h *BusHandler) logRefusedRunCommand(msg, ns, name string, result *mitev1.CommandResult) {
+	if result.Success {
+		return
+	}
+	h.log().Warn(msg,
+		"controller", ns+"/"+name,
+		"command_id", result.CommandId,
+		"run_id", result.RunId,
+		"actor", result.Actor,
+		"http_status", result.HttpStatus,
+		"error", result.Error)
 }
 
 // publishTriggerFailed publishes one run.trigger_failed envelope for a

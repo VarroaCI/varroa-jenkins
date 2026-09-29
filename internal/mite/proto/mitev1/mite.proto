@@ -232,6 +232,10 @@ message CommandResult {
   CommandType command_type = 7;
   string job_path = 8;
   string run_id = 9;
+  // actor names the sender of a run command: a trigger's actor, a cancel's
+  // actor, or the acting user of an input answer or a replay. Tag 10 is the
+  // desired_state oneof member, so actor takes tag 11.
+  string actor = 11;
   oneof result {
     DesiredStateResult desired_state = 10;
   }
@@ -807,6 +811,10 @@ message CancelBuildPayload {
   // @required
   string job_path = 2;
   int64 build_number = 3;
+  // actor names the person or service that sent the cancel: the caller's
+  // name for a BFF cancel, "varroa-recorder" for a ledger cancel. The mite copies
+  // it onto the CommandResult.
+  string actor = 4;
 }
 
 message PluginInventory {

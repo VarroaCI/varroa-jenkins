@@ -569,6 +569,9 @@ func TestHandleCancelRun_PublishesTheRunsIdentity(t *testing.T) {
 	if cmd.CancelBuild.RunId != "r1" || cmd.CancelBuild.JobPath != "svc/main" || cmd.CancelBuild.BuildNumber != 7 {
 		t.Fatalf("cancel payload = %+v, want run_id=r1 job_path=svc/main build_number=7", cmd.CancelBuild)
 	}
+	if want := ActorFrom(testClaims()); want == "" || cmd.CancelBuild.Actor != want {
+		t.Fatalf("cancel actor = %q, want the caller %q", cmd.CancelBuild.Actor, want)
+	}
 }
 
 func TestHandleCancelRun_CrossTenantIs403(t *testing.T) {

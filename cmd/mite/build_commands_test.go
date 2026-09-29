@@ -52,6 +52,7 @@ func TestTriggerAndCancelBuildCommands(t *testing.T) {
 						RunId:       "run-1",
 						JobPath:     "team-a/job-1",
 						BuildNumber: 0,
+						Actor:       "alice",
 					},
 				}
 			},
@@ -120,7 +121,77 @@ func TestTriggerAndCancelBuildCommands(t *testing.T) {
 				t.Errorf("result names %v %q %q, want the command's type, job path, and run id",
 					result.CommandType, result.JobPath, result.RunId)
 			}
+			if result.Actor != "alice" {
+				t.Errorf("result actor = %q, want alice", result.Actor)
+			}
+			if result.HttpStatus != http.StatusAccepted {
+				t.Errorf("result http_status = %d, want %d", result.HttpStatus, http.StatusAccepted)
+			}
 		})
+	}
+}
+
+// TestImperativeCommandActor verifies the mite copies the sender of each
+// run command onto its result, and leaves every other command empty.
+func TestImperativeCommandActor(t *testing.T) {
+	user := &mitev1.ActingUser{Name: "bob", Email: "bob@example.com"}
+	cases := []struct {
+		cmd  *mitev1.ImperativeCommand
+		want string
+	}{
+		{&mitev1.ImperativeCommand{TriggerBuild: &mitev1.TriggerBuildPayload{Actor: "alice"}}, "alice"},
+		{&mitev1.ImperativeCommand{CancelBuild: &mitev1.CancelBuildPayload{Actor: "varroa-recorder"}}, "varroa-recorder"},
+		{&mitev1.ImperativeCommand{ProceedInput: &mitev1.ProceedInputPayload{ActingUser: user}}, "bob"},
+		{&mitev1.ImperativeCommand{AbortInput: &mitev1.AbortInputPayload{ActingUser: user}}, "bob"},
+		{&mitev1.ImperativeCommand{ReplayBuild: &mitev1.ReplayBuildPayload{ActingUser: user}}, "bob"},
+		{&mitev1.ImperativeCommand{ReplayBuild: &mitev1.ReplayBuildPayload{}}, ""},
+		{&mitev1.ImperativeCommand{Type: mitev1.CommandTypeSafeRestart}, ""},
+	}
+	for i, tc := range cases {
+		if got := imperativeCommandActor(tc.cmd); got != tc.want {
+			t.Errorf("case %d: actor = %q, want %q", i, got, tc.want)
+		}
+	}
+}
+
+// TestCancelBuildRefusedCarriesStatus verifies a refused cancel answers the
+// plugin's HTTP status on its result.
+func TestCancelBuildRefusedCarriesStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/crumbIssuer/api/json" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		http.Error(w, "no build carries run id run-1", http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	stream, captured := testReplayStream(t)
+	agent := NewAgent(Config{ControllerName: "test", Namespace: "ns", JenkinsURL: srv.URL})
+	agent.Logger = slog.Default()
+	agent.stream = stream
+	agent.jenkinsTokenMu.Lock()
+	agent.jenkinsToken = "test-token"
+	agent.jenkinsTokenMu.Unlock()
+
+	agent.runCommand(context.Background(), commandWork{
+		imperativeCmd: &mitev1.ImperativeCommand{
+			CommandId: "cancel-build-run-1",
+			Type:      mitev1.CommandTypeCancelBuild,
+			CancelBuild: &mitev1.CancelBuildPayload{
+				RunId: "run-1", JobPath: "team-a/job-1", Actor: "alice",
+			},
+		},
+		ctx: context.Background(),
+	})
+
+	result := captured.Load()
+	if result == nil {
+		t.Fatal("expected a CommandResult to be sent")
+	}
+	if result.Success || result.HttpStatus != http.StatusNotFound || result.Actor != "alice" {
+		t.Fatalf("result = success %v status %d actor %q, want a refusal with 404 by alice",
+			result.Success, result.HttpStatus, result.Actor)
 	}
 }
 

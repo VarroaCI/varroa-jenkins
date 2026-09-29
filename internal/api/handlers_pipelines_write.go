@@ -404,6 +404,7 @@ func (s *Server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 			RunId:       run.RunID,
 			JobPath:     run.JobPath,
 			BuildNumber: buildNumber,
+			Actor:       ActorFrom(claims),
 		},
 	}
 	if err := s.publishImperative(r.Context(), ref, cmd); err != nil {

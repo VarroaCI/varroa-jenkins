@@ -1620,11 +1620,12 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 				break
 			}
 			jenkinsClient := a.getJenkinsClient()
-			cancelErr := jenkinsClient.CancelBuild(cctx, jenkins.CancelBuildRequest{
+			cancelStatus, cancelErr := jenkinsClient.CancelBuild(cctx, jenkins.CancelBuildRequest{
 				RunID:       payload.RunId,
 				JobPath:     payload.JobPath,
 				BuildNumber: payload.BuildNumber,
 			})
+			httpStatus = cancelStatus
 			if cancelErr != nil {
 				errStr = cancelErr.Error()
 			} else {
@@ -1719,6 +1720,7 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 				CommandId: cmd.CommandId, Success: success, Error: errStr,
 				Deferred: deferred, DeferReason: deferReason, HttpStatus: httpStatus,
 				CommandType: cmd.Type, JobPath: jobPath, RunId: runID,
+				Actor: imperativeCommandActor(cmd),
 			},
 		}})
 		a.sendMu.Unlock()
@@ -1981,6 +1983,32 @@ func imperativeCommandSubject(cmd *mitev1.ImperativeCommand) (jobPath, runID str
 		return cmd.Target, ""
 	}
 	return "", ""
+}
+
+// imperativeCommandActor answers the sender of a run command: the trigger's
+// or the cancel's actor, or the acting user's name of an input answer or a
+// replay. Every other command answers an empty actor.
+func imperativeCommandActor(cmd *mitev1.ImperativeCommand) string {
+	switch {
+	case cmd.TriggerBuild != nil:
+		return cmd.TriggerBuild.Actor
+	case cmd.CancelBuild != nil:
+		return cmd.CancelBuild.Actor
+	case cmd.ProceedInput != nil:
+		return actingUserName(cmd.ProceedInput.ActingUser)
+	case cmd.AbortInput != nil:
+		return actingUserName(cmd.AbortInput.ActingUser)
+	case cmd.ReplayBuild != nil:
+		return actingUserName(cmd.ReplayBuild.ActingUser)
+	}
+	return ""
+}
+
+func actingUserName(user *mitev1.ActingUser) string {
+	if user == nil {
+		return ""
+	}
+	return user.Name
 }
 
 // logImperativeResult logs the outcome of one imperative command: Info on

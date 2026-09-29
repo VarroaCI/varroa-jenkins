@@ -32,7 +32,8 @@ stating what it is/is not responsible for:
   group and NATS gives a share of one cluster's actions to the others.
   `handleLedgerAction` maps `cancel_run`/`retry_run`/`trigger_run`/`resume_run`
   to the matching mite imperative command and `wake_cell` to a direct
-  hibernation wake. The one core recorder publishes the actions of every
+  hibernation wake. `cancel_run` and `retry_run` copy the action's `actor`
+  onto the command, so the operator's outcome row names the recorder. The one core recorder publishes the actions of every
   cluster, so a member operator receives its actions over the shared bus. It logs at Warn and counts an action that names another cluster
   (`reason="foreign_cluster"`) or an unknown kind (`reason="unknown_kind"`)
   rather than acting on it. `trigger_run` wakes a hibernated target through the same hibernation

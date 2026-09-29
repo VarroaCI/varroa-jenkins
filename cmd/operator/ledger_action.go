@@ -147,6 +147,7 @@ func handleLedgerAction(ctx context.Context, logger *slog.Logger, subject, ownCl
 				RunId:       action.RunID,
 				JobPath:     action.JobPath,
 				BuildNumber: ledgerActionBuildNumber(action.BuildNumber),
+				Actor:       action.Actor,
 			},
 		}
 		if err := rec.SendImperativeCommand(ctx, action.Namespace, action.Controller, cmd); err != nil {

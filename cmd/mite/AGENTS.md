@@ -87,8 +87,11 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
     budget and answers the same. A job still missing after
     the apply answers the plugin's `404` (`JOB_NOT_FOUND`). Every imperative `CommandResult` carries
     `command_type`, `job_path`, and `run_id` (`imperativeCommandSubject`),
-    and `logImperativeResult` logs each one at info on success and at warn
-    on failure.
+    and `actor` (`imperativeCommandActor`: the trigger's or cancel's
+    `actor`, or the `acting_user.name` of an input answer or a replay).
+    A cancel carries the plugin's HTTP status like every other run
+    command. `logImperativeResult` logs each result at info on success and
+    at warn on failure.
   - **`REPLAY_WEBHOOK` delivery identity** — `runCommand`'s replay case
     sets `X-Varroa-Delivery` from `ReplayWebhookPayload.delivery_id` after
     it copies every header the envelope carries, so a forged inbound

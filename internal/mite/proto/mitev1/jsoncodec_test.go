@@ -164,3 +164,34 @@ func TestBuildEventTemplateFieldsOmittedWhenEmpty(t *testing.T) {
 		}
 	}
 }
+
+// TestRunCommandActorRoundTrip proves the cancel payload's actor and the
+// command result's actor survive a marshal/unmarshal round trip.
+func TestRunCommandActorRoundTrip(t *testing.T) {
+	cancel := &CancelBuildPayload{RunId: "run-1", JobPath: "team/app", BuildNumber: 3, Actor: "alice"}
+	data, err := json.Marshal(cancel)
+	if err != nil {
+		t.Fatalf("marshal CancelBuildPayload: %v", err)
+	}
+	var cancel2 CancelBuildPayload
+	if err := json.Unmarshal(data, &cancel2); err != nil {
+		t.Fatalf("unmarshal CancelBuildPayload: %v", err)
+	}
+	if cancel2.Actor != "alice" {
+		t.Errorf("CancelBuildPayload.Actor = %q, want alice (json %s)", cancel2.Actor, data)
+	}
+
+	res := &CommandResult{CommandId: "cancel-build-run-1", HttpStatus: 404, CommandType: CommandTypeCancelBuild, RunId: "run-1", Actor: "alice"}
+	data, err = json.Marshal(&MiteMessage{Message: &MiteMessage_CommandResult{CommandResult: res}})
+	if err != nil {
+		t.Fatalf("marshal MiteMessage: %v", err)
+	}
+	var mm MiteMessage
+	if err := json.Unmarshal(data, &mm); err != nil {
+		t.Fatalf("unmarshal MiteMessage: %v", err)
+	}
+	got := mm.GetCommandResult()
+	if got == nil || got.Actor != "alice" || got.HttpStatus != 404 {
+		t.Errorf("CommandResult = %+v, want actor alice and status 404 (json %s)", got, data)
+	}
+}

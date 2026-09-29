@@ -1082,22 +1082,23 @@ type CancelBuildRequest struct {
 // Jenkins through the Varroa plugin's /varroa-run/cancel route. The plugin
 // resolves the target by run identifier, never by job path alone. Cancel is
 // best-effort: a run that already ended answers 404, which is not a
-// condition the caller needs to retry.
-func (c *Client) CancelBuild(ctx context.Context, req CancelBuildRequest) error {
+// condition the caller needs to retry. It returns the Jenkins HTTP status
+// beside the error, and 0 for a call that reached no server.
+func (c *Client) CancelBuild(ctx context.Context, req CancelBuildRequest) (int, error) {
 	payload, err := json.Marshal(req)
 	if err != nil {
-		return fmt.Errorf("cancel build %s: marshal request: %w", req.JobPath, err)
+		return 0, fmt.Errorf("cancel build %s: marshal request: %w", req.JobPath, err)
 	}
 	resp, err := c.do(ctx, http.MethodPost, "/varroa-run/cancel", bytes.NewReader(payload), "application/json")
 	if err != nil {
-		return fmt.Errorf("cancel build %s: %w", req.JobPath, err)
+		return 0, fmt.Errorf("cancel build %s: %w", req.JobPath, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("cancel build %s: HTTP %d: %s", req.JobPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return resp.StatusCode, fmt.Errorf("cancel build %s: HTTP %d: %s", req.JobPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
 	}
-	return nil
+	return resp.StatusCode, nil
 }
 
 // ActingUser is the person a mite-delivered command acts as. The plugin

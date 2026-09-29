@@ -551,9 +551,14 @@ sections describe.
   result without a desired-state payload, before it writes
   `LastImperativeResult`. It counts `varroa.imperative_command.results`
   (`kind` from `CommandResult.command_type`, `outcome` `success`, `failure`,
-  or `deferred`) and publishes one `command.failed` activity event for a
-  `failure` alone. A success and a deferred `SAFE_RESTART` drain publish no
-  event: the activity stream holds audit-worthy events only.
+  or `deferred`). `imperativeOutcomeEvent` builds at most one activity
+  event per result, with `CommandResult.actor` in `Actor` and the HTTP
+  status in the message. Every `failure` publishes `command.failed`. A
+  success publishes `command.succeeded` only for a person-sent run command
+  (`personSentRunCommand`: a cancel, input answer, or replay whose actor is
+  not empty and not `recordstore.LedgerActionRecorder`). Every other
+  success, a trigger success included, and a deferred `SAFE_RESTART` drain
+  publish no event: the activity stream holds audit-worthy events only.
 - **Hash re-stamp quirk**: `handleConnected` calls `buildDesiredStateCommand` (which
   sets its own internal hash), then immediately recomputes
   `computeDesiredStateHash(d)` again and reassigns `d.DesiredStateHash`
