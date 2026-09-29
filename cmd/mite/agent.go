@@ -274,6 +274,15 @@ type Agent struct {
 	// call. NewAgent sets triggerReadyWaitDefault.
 	triggerReadyWait time.Duration
 
+	// itemsAppliedC is the items gate. It closes once, which opens the
+	// gate, when an items apply completed in this Jenkins boot. A trigger
+	// waits for it, because a cell's emptyDir home holds no jobs until
+	// the items apply. The gate never closes again in one process: a
+	// Jenkins container restart keeps the pod's home and its jobs.
+	itemsAppliedInit sync.Once
+	itemsAppliedOnce sync.Once
+	itemsAppliedC    chan struct{}
+
 	// crossTenantSeq allocates each cross-tenant request its own numeric
 	// id. The waiter map only needs uniqueness among currently open
 	// requests, never across a restart, so a process-local counter is
@@ -1071,6 +1080,10 @@ type commandWork struct {
 	imperativeCmd   *mitev1.ImperativeCommand
 	ctx             context.Context
 	span            trace.Span
+	// mailbox is the mailbox that queued the command. A waiting trigger
+	// takes a pending desired-state command from it. Nil for a command
+	// that no mailbox queued.
+	mailbox *commandMailbox
 }
 
 const imperativeQueueCap = 16
@@ -1096,6 +1109,11 @@ type commandMailbox struct {
 	// wait five minutes for Jenkins. A redelivery of an active command
 	// is therefore dropped, so it cannot fill the queue.
 	active map[string]bool
+	// desiredFirst, when set and true, makes take answer the desired slot
+	// before the imperative queue. A trigger that runs before the items
+	// apply finds no job, so the apply goes first while the items gate
+	// is closed.
+	desiredFirst func() bool
 }
 
 func newCommandMailbox() *commandMailbox {
@@ -1152,6 +1170,11 @@ func (mb *commandMailbox) finish(w commandWork) {
 }
 
 func (mb *commandMailbox) take() (commandWork, bool) {
+	if mb.desiredFirst != nil && mb.desiredFirst() {
+		if w, ok := mb.takeDesired(); ok {
+			return w, true
+		}
+	}
 	mb.mu.Lock()
 	defer mb.mu.Unlock()
 	if len(mb.imperative) > 0 {
@@ -1167,6 +1190,19 @@ func (mb *commandMailbox) take() (commandWork, bool) {
 	return commandWork{}, false
 }
 
+// takeDesired empties the desired slot and answers its command. It
+// answers false when the slot is empty.
+func (mb *commandMailbox) takeDesired() (commandWork, bool) {
+	mb.mu.Lock()
+	defer mb.mu.Unlock()
+	if mb.desired == nil {
+		return commandWork{}, false
+	}
+	w := *mb.desired
+	mb.desired = nil
+	return w, true
+}
+
 func (mb *commandMailbox) notify() {
 	select {
 	case mb.signal <- struct{}{}:
@@ -1180,6 +1216,7 @@ func (mb *commandMailbox) notify() {
 // are dispatched through a commandMailbox for a single serialized worker goroutine.
 func (a *Agent) processCommands(ctx context.Context) {
 	mb := newCommandMailbox()
+	mb.desiredFirst = func() bool { return !a.itemsApplied() }
 
 	// Stream teardown (context cancellation or a Recv error, both handled by
 	// every return below) releases every open claim waiter, so an HTTP
@@ -1225,7 +1262,7 @@ func (a *Agent) processCommands(ctx context.Context) {
 					attribute.String("command_id", m.DesiredState.CommandId),
 				),
 			)
-			w := commandWork{desiredStateCmd: m.DesiredState, ctx: cmdCtx, span: span}
+			w := commandWork{desiredStateCmd: m.DesiredState, ctx: cmdCtx, span: span, mailbox: mb}
 			mb.putDesired(w) // never ends session; coalescing is the back-pressure
 
 			// Cache drain timeout so the SAFE_RESTART path reads the latest.
@@ -1243,7 +1280,7 @@ func (a *Agent) processCommands(ctx context.Context) {
 			}
 			a.deferMu.Unlock()
 		case *mitev1.OperatorMessage_Imperative:
-			w := commandWork{imperativeCmd: m.Imperative, ctx: ctx}
+			w := commandWork{imperativeCmd: m.Imperative, ctx: ctx, mailbox: mb}
 			ok, duplicate := mb.putImperative(w)
 			if !ok {
 				a.Logger.Error("imperative queue full, ending stream session")
@@ -1530,7 +1567,7 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 			}
 			// A wait that expires reaches no Jenkins, so the result keeps
 			// the status 0 and the gateway reports a retryable failure.
-			if readyErr := a.awaitTriggerReady(cctx); readyErr != nil {
+			if readyErr := a.awaitTriggerReady(cctx, w.mailbox, payload.JobPath); readyErr != nil {
 				errStr = fmt.Sprintf("trigger build %s: %v", payload.JobPath, readyErr)
 				break
 			}
@@ -1666,9 +1703,16 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 }
 
 // awaitTriggerReady runs the startup path's readiness check before a
-// TRIGGER_BUILD call, bounded by triggerReadyWait. It answers nil at once
-// for a ready Jenkins.
-func (a *Agent) awaitTriggerReady(ctx context.Context) error {
+// TRIGGER_BUILD call, then waits for the items gate. One triggerReadyWait
+// budget bounds both waits. It answers nil at once for a ready Jenkins
+// whose items are applied.
+//
+// The command worker is serial, so the worker cannot run the desired
+// state that opens the gate while this wait holds it. The wait therefore
+// takes a pending desired-state command from mb and runs it inline. The
+// inline apply skips the idle deferral: no build runs on a Jenkins that
+// holds no items yet. A nil mb waits for the gate alone.
+func (a *Agent) awaitTriggerReady(ctx context.Context, mb *commandMailbox, jobPath string) error {
 	wait := a.triggerReadyWait
 	if wait <= 0 {
 		wait = triggerReadyWaitDefault
@@ -1678,7 +1722,93 @@ func (a *Agent) awaitTriggerReady(ctx context.Context) error {
 	if err := a.waitForJenkinsWithFreshToken(wctx); err != nil {
 		return fmt.Errorf("jenkins not ready after %s: %w", wait, err)
 	}
-	return nil
+	if a.itemsApplied() {
+		return nil
+	}
+	a.openItemsGateFromMarker(wctx)
+	if a.itemsApplied() {
+		return nil
+	}
+	a.Logger.Info("trigger waits for the items apply", "job_path", jobPath, "budget", wait)
+	var signal <-chan struct{}
+	if mb != nil {
+		signal = mb.signal
+	}
+	gate := a.itemsAppliedSignal()
+	for {
+		if mb != nil {
+			if dw, ok := mb.takeDesired(); ok {
+				// The trigger budget also bounds the inline apply, so a
+				// stalled apply cannot hold the worker past the budget.
+				// A cut apply reports its deadline, and the operator
+				// pushes the desired state again.
+				if dw.ctx == nil {
+					dw.ctx = ctx
+				}
+				deadline, _ := wctx.Deadline()
+				var applyCancel context.CancelFunc
+				dw.ctx, applyCancel = context.WithDeadline(dw.ctx, deadline)
+				a.runCommand(ctx, dw)
+				applyCancel()
+				mb.finish(dw)
+				if wctx.Err() != nil {
+					return fmt.Errorf("items not applied after %s", wait)
+				}
+				continue
+			}
+		}
+		if a.itemsApplied() {
+			return nil
+		}
+		select {
+		case <-gate:
+			return nil
+		case <-signal:
+		case <-wctx.Done():
+			if a.itemsApplied() {
+				return nil
+			}
+			return fmt.Errorf("items not applied after %s", wait)
+		}
+	}
+}
+
+// itemsAppliedSignal answers the items gate channel. It closes when the
+// gate opens.
+func (a *Agent) itemsAppliedSignal() chan struct{} {
+	a.itemsAppliedInit.Do(func() { a.itemsAppliedC = make(chan struct{}) })
+	return a.itemsAppliedC
+}
+
+// markItemsApplied opens the items gate. Later calls do nothing.
+func (a *Agent) markItemsApplied() {
+	ch := a.itemsAppliedSignal()
+	a.itemsAppliedOnce.Do(func() { close(ch) })
+}
+
+// itemsApplied reports whether the items gate is open.
+func (a *Agent) itemsApplied() bool {
+	select {
+	case <-a.itemsAppliedSignal():
+		return true
+	default:
+		return false
+	}
+}
+
+// openItemsGateFromMarker opens the items gate when the convergence
+// marker's session equals the live Jenkins boot session. The marker is
+// written only after every requested section succeeded, so such a
+// marker proves the items were applied in this boot.
+func (a *Agent) openItemsGateFromMarker(ctx context.Context) {
+	marker := a.readMarker()
+	if marker.session == "" {
+		return
+	}
+	live, err := a.getJenkinsClient().SessionID(ctx)
+	if err == nil && live == marker.session {
+		a.markItemsApplied()
+	}
 }
 
 // imperativeCommandSubject answers the job path and the run identifier an
@@ -1780,6 +1910,7 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 				result.RbacSuccess = true
 				result.ItemsSuccess = true
 				result.RehydrationSuccess = true
+				a.markItemsApplied()
 				return result
 			case err == nil:
 				a.Logger.Info("jenkins boot session changed since last apply — re-applying desired state",
@@ -1919,6 +2050,9 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 		// error message — surfacing as "items: rejected, no message returned".
 		result.ItemsSuccess = true
 	}
+	// A failed items apply opens the gate too: one broken item must not
+	// hold back the triggers of every other tenant on the cell.
+	a.markItemsApplied()
 
 	// 6. Reload every item the rehydration section named. Runs after the
 	// items apply, so a job the items section just created adopts its

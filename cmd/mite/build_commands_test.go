@@ -97,6 +97,7 @@ func TestTriggerAndCancelBuildCommands(t *testing.T) {
 			agent.jenkinsTokenMu.Lock()
 			agent.jenkinsToken = "test-token"
 			agent.jenkinsTokenMu.Unlock()
+			agent.markItemsApplied()
 
 			agent.runCommand(context.Background(), commandWork{
 				imperativeCmd: tt.build(),
@@ -152,6 +153,7 @@ func TestTriggerBuildWaitsForJenkins(t *testing.T) {
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "test-token"
 	agent.jenkinsTokenMu.Unlock()
+	agent.markItemsApplied()
 
 	agent.runCommand(context.Background(), commandWork{
 		imperativeCmd: triggerCommand(),

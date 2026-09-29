@@ -46,15 +46,29 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
     running (`commandMailbox.active`, released by `finish`), because the
     gateway redelivers an unacknowledged command every 30 seconds. The FIFO
     must not silently drop a new command — a full queue ends the stream session.
+    While the items gate is closed, `take` answers the desired slot before
+    the imperative queue (`commandMailbox.desiredFirst`), and `takeDesired`
+    empties the desired slot alone. Each `commandWork` carries the mailbox
+    that queued it.
     `commandWorker` (`agent.go:994`) drains one command at a time so Jenkins
     writes never overlap desired-state and imperative work.
   - **Imperative results** — `TRIGGER_BUILD` runs `awaitTriggerReady`
-    (the startup path's `waitForJenkinsWithFreshToken`, bounded by
-    `triggerReadyWait`, five minutes) before its trigger call, because a
-    reconnecting cell receives its queued triggers before its Jenkins
-    accepts a call. An expired wait makes no call and answers
-    `http_status` `0`, which the gateway maps onto the retryable
-    `TRIGGER_UNREACHABLE`. Every imperative `CommandResult` carries
+    before its trigger call, because a reconnecting cell receives its
+    queued triggers before its Jenkins accepts a call and before the items
+    apply creates its jobs. One `triggerReadyWait` budget (five minutes)
+    bounds two waits: the startup path's `waitForJenkinsWithFreshToken`,
+    then the **items gate**. The gate (`itemsAppliedC`, closed once by
+    `markItemsApplied`) opens when `handleDesiredState` reaches the items
+    step (success, failure, or no items) or returns converged, and when a
+    convergence marker's session equals the live `X-Jenkins-Session`
+    (`openItemsGateFromMarker`). It never closes in one process. The
+    worker is serial, so the waiting trigger takes a pending desired-state
+    command from its mailbox and runs it inline, without the `idle`
+    deferral; otherwise the trigger blocks the apply it waits for. An
+    expired wait makes no call and answers `http_status` `0` with
+    `jenkins not ready` or `items not applied`, which the gateway maps
+    onto the retryable `TRIGGER_UNREACHABLE`. A job still missing after
+    the apply answers the plugin's `404` (`JOB_NOT_FOUND`). Every imperative `CommandResult` carries
     `command_type`, `job_path`, and `run_id` (`imperativeCommandSubject`),
     and `logImperativeResult` logs each one at info on success and at warn
     on failure.

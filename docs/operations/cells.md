@@ -1,7 +1,6 @@
 # Cells and Pipelines Tenants
 
-A cell is a shared Jenkins controller that runs many teams' pipelines as tenants, instead of one
-controller per team. Each tenant gets its own folder, its own build identity, and its own
+A cell is a shared Jenkins controller that runs many teams' pipelines as tenants. Each tenant gets its own folder, its own build identity, and its own
 Kubernetes agents.
 
 ## What a cell is
@@ -22,8 +21,7 @@ Six limitations apply:
 - `powerState: Stopped` on a cell destroys every in-flight build.
 - Every branch source on a cell sees each delivered webhook. Only the job whose SCM matches
   the payload reacts.
-- A rehydrated run shows no stage view, culprit list, or test detail. The thin record holds core
-  fields, parameters, and changesets only.
+- A rehydrated run shows no stage view, culprit list, or test detail.
 - The role-strategy admin screen reports a tenant's service identity as unknown until its
   first build.
 - An ad-hoc job made in the Jenkins UI or script console does not survive a pod roll. Only a
@@ -111,7 +109,8 @@ Expect `"status":"True","reason":"TenantPlaced"`.
   operator ignores `plugins.yaml`, `rbac.yaml`, and `jenkins.yaml` except its
   [pod templates](tenant-pod-templates.md): a tenant cannot change controller configuration. A
   job the bundle no longer declares leaves the folder, and its next trigger fails with
-  `JOB_NOT_FOUND`. See [Build records](build-records.md).
+  `JOB_NOT_FOUND`. After a roll, a trigger waits up to five minutes for the tenant's jobs. See
+  [Build records](build-records.md).
 - **Item role.** The operator synthesizes a role scoped to the folder's subtree, granting build,
   read, and replay permissions, bound to the tenant's service identity.
 - **Service identity.** Every build in the folder runs as `svc-<team>`, an identity the plugin

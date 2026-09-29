@@ -63,8 +63,8 @@ const (
 
 // Reason codes a run.trigger_failed envelope carries. The set is complete:
 // every status maps onto exactly one of them. reasonTriggerUnreachable is
-// the one retryable code: the call reached no Jenkins, so a later fire can
-// still succeed. The other three are permanent.
+// the one retryable code: the call reached no Jenkins ready to build it,
+// so a later fire can still succeed. The other three are permanent.
 const (
 	reasonJobNotFound        = "JOB_NOT_FOUND"
 	reasonJobNotBuildable    = "JOB_NOT_BUILDABLE"

@@ -168,7 +168,7 @@ type RunStatePayload struct {
 // envelope. The gateway maps the Jenkins HTTP status onto ReasonCode,
 // which holds exactly one of JOB_NOT_FOUND, JOB_NOT_BUILDABLE,
 // TRIGGER_REJECTED, and TRIGGER_UNREACHABLE. The status 0 answers
-// TRIGGER_UNREACHABLE.
+// TRIGGER_UNREACHABLE: the trigger reached no Jenkins ready to build it.
 type RunTriggerFailedPayload struct {
 	Error      string `json:"error"`
 	ReasonCode string `json:"reason_code"`
