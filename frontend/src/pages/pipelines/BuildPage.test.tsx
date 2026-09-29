@@ -329,6 +329,15 @@ describe("BuildPage — record and recovery states", () => {
     expect(await screen.findByText("Pipeline history is off")).toBeInTheDocument();
   });
 
+  it("renders the header duration in the format the team table uses", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ durationMs: 600_000 }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.getByText("10m 0s")).toBeInTheDocument();
+    expect(screen.queryByText("600s")).not.toBeInTheDocument();
+  });
+
   it("renders the four tabs, the disabled download, and the tests notice", async () => {
     mockGetRun.mockResolvedValue(baseRun());
     mockListRunArtifacts.mockResolvedValue({

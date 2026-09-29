@@ -4708,11 +4708,12 @@ FleetLock:
   description: >
     One fleet lock row, from a varroa.lock step. tenant and jobPath are
     always present, whichever tenant the row belongs to. runLink is
-    present only when the reading caller can read that row's own run. The
-    row reports its own state and its own waitingSince or acquiredAt. It
-    carries no queue position and no derived holder: a consumer groups the
-    rows it already has by name.
-  required: [name, tenant, jobPath, state, runId, waitingSince]
+    present only when the reading caller can read that row's own run. A
+    waiting row reports its own waitingSince. A held or a releasing row
+    reports its own acquiredAt and no waitingSince. The row carries no
+    queue position and no derived holder: a consumer groups the rows it
+    already has by name.
+  required: [name, tenant, jobPath, state, runId]
   properties:
     name:
       type: string
@@ -4741,17 +4742,22 @@ FleetLock:
     waitingSince:
       type: string
       format: date-time
+      description: >
+        The time the run began to wait. Present only on a waiting row.
     acquiredAt:
       type: string
       format: date-time
+      description: >
+        The time the run acquired the lock. Present on a held or a
+        releasing row.
   additionalProperties: false
 
 FleetLockListResponse:
   type: object
   description: >
     GET /pipelines/{team}/locks and GET /locks. Both routes answer the
-    rows in (name, waitingSince, runId) order, so the holder of a lock
-    name comes before its waiters.
+    rows in lock name order. In one name, the holder comes first, and
+    the waiters follow in the order they began to wait.
   required: [items]
   properties:
     items:

@@ -113,6 +113,7 @@ function RunnerRow({ item }: { item: RunnerEntry }) {
 function LockRow({ items, row }: { items: FleetLock[]; row: FleetLock }) {
   const waiting = row.state === "waiting";
   const holder = waiting ? holderOf(items, row) : holdsLock(row) ? row : undefined;
+  const since = waiting ? row.waitingSince : row.acquiredAt;
   return (
     <tr>
       <td className={styles.nameCell}>{row.name}</td>
@@ -127,7 +128,7 @@ function LockRow({ items, row }: { items: FleetLock[]; row: FleetLock }) {
         )}
       </td>
       <td className={styles.lockSince}>
-        {age(waiting ? row.waitingSince : row.acquiredAt ?? row.waitingSince)}
+        {since ? age(since) : <span className={styles.dim}>—</span>}
       </td>
     </tr>
   );

@@ -44,6 +44,55 @@ describe("StageGraph", () => {
     expect(screen.getByLabelText("Integration tests nested stages")).toBeInTheDocument();
   });
 
+  it("orders the branches of a parallel bundle by start time, then by stage id, not by name", () => {
+    const branch = (stageId: string, name: string, startedAt: string) =>
+      stage({ stageId, name, status: "SUCCESS", parentId: "1", nodeType: "parallel", startedAt });
+    const stages: RunStage[] = [
+      stage({ stageId: "1", name: "Checks", status: "SUCCESS", startedAt: "2026-01-01T00:00:00Z" }),
+      branch("14", "Vulncheck", "2026-01-01T00:00:03Z"),
+      branch("11", "Lint", "2026-01-01T00:00:01Z"),
+      branch("13", "Frontend", "2026-01-01T00:00:03Z"),
+      branch("12", "Test", "2026-01-01T00:00:02Z"),
+    ];
+
+    render(<StageGraph stages={stages} terminal={false} />);
+
+    const branchIds = new Set(["11", "12", "13", "14"]);
+    const order = Array.from(document.querySelectorAll<HTMLElement>('[id^="node-stage-"]'))
+      .map((el) => el.id.replace("node-stage-", ""))
+      .filter((id) => branchIds.has(id));
+    expect(order).toEqual(["11", "12", "13", "14"]);
+
+    const rowY = (id: string) => {
+      const g = document.getElementById(`node-stage-${id}`)?.closest("g");
+      const match = /translate\([^,]+,([^)]+)\)/.exec(g?.getAttribute("transform") ?? "");
+      return Number(match?.[1]);
+    };
+    const ys = ["11", "12", "13", "14"].map(rowY);
+    expect(ys).toEqual([...ys].sort((a, b) => a - b));
+    expect(new Set(ys).size).toBe(4);
+  });
+
+  it("compares start times as times and stage ids as numbers, and puts unstarted branches last", () => {
+    const branch = (stageId: string, name: string, startedAt?: string) =>
+      stage({ stageId, name, status: "SUCCESS", parentId: "1", nodeType: "parallel", startedAt });
+    const stages: RunStage[] = [
+      stage({ stageId: "1", name: "Checks", status: "SUCCESS", startedAt: "2026-01-01T00:00:00Z" }),
+      branch("10", "Later id, unstarted"),
+      branch("9", "Earlier id, unstarted"),
+      branch("3", "Whole second", "2026-01-01T00:00:01Z"),
+      branch("4", "Fraction", "2026-01-01T00:00:00.5Z"),
+    ];
+
+    render(<StageGraph stages={stages} terminal={false} />);
+
+    const branchIds = new Set(["3", "4", "9", "10"]);
+    const order = Array.from(document.querySelectorAll<HTMLElement>('[id^="node-stage-"]'))
+      .map((el) => el.id.replace("node-stage-", ""))
+      .filter((id) => branchIds.has(id));
+    expect(order).toEqual(["4", "3", "9", "10"]);
+  });
+
   it("renders an unknown status with the raw value in the accessible name", () => {
     const stages: RunStage[] = [stage({ stageId: "1", name: "Deploy", status: "SOMETHING_NEW" })];
     render(<StageGraph stages={stages} terminal={false} />);

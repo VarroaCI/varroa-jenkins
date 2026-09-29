@@ -55,6 +55,23 @@ describe("Locks", () => {
     await waitFor(() => expect(screen.getByText("held elsewhere")).toBeInTheDocument());
   });
 
+  it("reads a held row's elapsed time from acquiredAt and a waiting row's from waitingSince", async () => {
+    const ago = (mins: number) => new Date(Date.now() - mins * 60_000).toISOString();
+    mockListAllFleetLocks.mockResolvedValue({
+      items: [
+        createFleetLock({ name: "payments/a-lock", state: "held", acquiredAt: ago(5) }),
+        createFleetLock({ name: "payments/a-lock", state: "waiting", waitingSince: ago(3) }),
+        createFleetLock({ name: "payments/b-lock", state: "held", acquiredAt: undefined }),
+      ],
+    });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("5m ago")).toBeInTheDocument());
+    expect(screen.getByText("3m ago")).toBeInTheDocument();
+    const bRow = screen.getByText("payments/b-lock").closest("tr");
+    expect(bRow?.lastElementChild?.textContent).toBe("—");
+  });
+
   it("renders the forbidden state for a refused read", async () => {
     mockListAllFleetLocks.mockRejectedValue(new ApiError(403, "no"));
     renderPage();

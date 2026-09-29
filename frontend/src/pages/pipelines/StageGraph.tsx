@@ -117,6 +117,31 @@ function flattenNested(byParent: Map<string, RunStage[]>, parentId: string, dept
 }
 
 /**
+ * byStart orders stages by start time, then by stage id. The trunk and the
+ * branches of a parallel bundle both use it, so the branches render in the
+ * order the pipeline starts them, not in name order. It compares parsed
+ * times, because an RFC3339 value can carry a fraction of any length. A
+ * stage with no start time sorts after every started stage. Jenkins stage
+ * ids are flow node numbers, so a numeric id compares as a number.
+ */
+function byStart(a: RunStage, b: RunStage): number {
+  const at = startTime(a);
+  const bt = startTime(b);
+  if (at !== bt) {
+    if (at === null) return 1;
+    if (bt === null) return -1;
+    return at - bt;
+  }
+  return a.stageId.localeCompare(b.stageId, undefined, { numeric: true });
+}
+
+function startTime(s: RunStage): number | null {
+  if (!s.startedAt) return null;
+  const t = Date.parse(s.startedAt);
+  return Number.isNaN(t) ? null : t;
+}
+
+/**
  * Lays out the stage set left to right: a trunk stage forms its own column;
  * a parallel branch bundle stacks vertically at the next column; a stage
  * that is not part of a bundle renders nested under its parent instead of
@@ -128,14 +153,7 @@ function buildColumns(
   largeMode: boolean,
   expandedTrunkId: string | null,
 ): TopNode[][] {
-  const trunk = stages
-    .filter((s) => !s.parentId)
-    .slice()
-    .sort(
-      (a, b) =>
-        (a.startedAt ?? "").localeCompare(b.startedAt ?? "") ||
-        a.stageId.localeCompare(b.stageId),
-    );
+  const trunk = stages.filter((s) => !s.parentId).sort(byStart);
 
   const columns: TopNode[][] = [];
   let col = 0;
@@ -152,9 +170,7 @@ function buildColumns(
     columns.push([trunkNode]);
     col++;
     if (bundle) {
-      const kids = (byParent.get(t.stageId) ?? [])
-        .slice()
-        .sort((a, b) => a.name.localeCompare(b.name));
+      const kids = (byParent.get(t.stageId) ?? []).slice().sort(byStart);
       const bundleNodes: TopNode[] = kids.map((k, i) => ({
         stage: k,
         column: col,

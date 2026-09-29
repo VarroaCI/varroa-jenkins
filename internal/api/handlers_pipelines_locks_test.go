@@ -381,9 +381,25 @@ func TestLockRoutes_CarryNoQueuePositionOrHolderField(t *testing.T) {
 						t.Errorf("row %d carries the field %q, which the frozen row shape does not name", i, key)
 					}
 				}
-				for _, key := range []string{"name", "tenant", "jobPath", "state", "runId", "waitingSince"} {
+				for _, key := range []string{"name", "tenant", "jobPath", "state", "runId"} {
 					if _, present := item[key]; !present {
 						t.Errorf("row %d carries no %s", i, key)
+					}
+				}
+				var state string
+				if err := json.Unmarshal(item["state"], &state); err != nil {
+					t.Fatalf("row %d state: %v", i, err)
+				}
+				_, hasWaiting := item["waitingSince"]
+				_, hasAcquired := item["acquiredAt"]
+				switch state {
+				case "waiting":
+					if !hasWaiting || hasAcquired {
+						t.Errorf("waiting row %d: waitingSince present = %t, acquiredAt present = %t, want true, false", i, hasWaiting, hasAcquired)
+					}
+				default:
+					if hasWaiting || !hasAcquired {
+						t.Errorf("%s row %d: waitingSince present = %t, acquiredAt present = %t, want false, true", state, i, hasWaiting, hasAcquired)
 					}
 				}
 			}

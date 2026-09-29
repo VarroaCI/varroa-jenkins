@@ -6070,9 +6070,11 @@ components:
     components_schemas_FleetLock:
       additionalProperties: false
       description: |
-        One fleet lock row, from a varroa.lock step. tenant and jobPath are always present, whichever tenant the row belongs to. runLink is present only when the reading caller can read that row's own run. The row reports its own state and its own waitingSince or acquiredAt. It carries no queue position and no derived holder: a consumer groups the rows it already has by name.
+        One fleet lock row, from a varroa.lock step. tenant and jobPath are always present, whichever tenant the row belongs to. runLink is present only when the reading caller can read that row's own run. A waiting row reports its own waitingSince. A held or a releasing row reports its own acquiredAt and no waitingSince. The row carries no queue position and no derived holder: a consumer groups the rows it already has by name.
       properties:
         acquiredAt:
+          description: |
+            The time the run acquired the lock. Present on a held or a releasing row.
           format: date-time
           type: string
         jobPath:
@@ -6098,6 +6100,8 @@ components:
           description: The tenant of the run that holds or waits on the lock.
           type: string
         waitingSince:
+          description: |
+            The time the run began to wait. Present only on a waiting row.
           format: date-time
           type: string
       required:
@@ -6106,12 +6110,11 @@ components:
       - jobPath
       - state
       - runId
-      - waitingSince
       type: object
     components_schemas_FleetLockListResponse:
       additionalProperties: false
       description: |
-        GET /pipelines/{team}/locks and GET /locks. Both routes answer the rows in (name, waitingSince, runId) order, so the holder of a lock name comes before its waiters.
+        GET /pipelines/{team}/locks and GET /locks. Both routes answer the rows in lock name order. In one name, the holder comes first, and the waiters follow in the order they began to wait.
       properties:
         items:
           items:
@@ -12733,7 +12736,7 @@ paths:
   /api/v1/locks:
     get:
       description: |
-        Reads the cluster the optional cluster query parameter names, and the BFF's own local cluster when the parameter is absent. Each row carries its own tenant and jobPath, whichever tenant it belongs to. A row carries runLink only when the caller's own grant can read that row's own run. A row reports its own state and its own waitingSince or acquiredAt. It carries no queue position and no derived holder.
+        Reads the cluster the optional cluster query parameter names, and the BFF's own local cluster when the parameter is absent. Each row carries its own tenant and jobPath, whichever tenant it belongs to. A row carries runLink only when the caller's own grant can read that row's own run. A waiting row reports its own waitingSince. A held or a releasing row reports its own acquiredAt. It carries no queue position and no derived holder.
       operationId: listAllFleetLocks
       parameters:
       - $ref: '#/components/parameters/components_parameters_clusterQuery'
@@ -13285,7 +13288,7 @@ paths:
   /api/v1/pipelines/{team}/locks:
     get:
       description: |
-        Resolves {team} onto one or more record-store tenants, applies the tenant read check to each, reads each tenant's locks, and merges the answers by (name, waitingSince, runId). Each row carries its own tenant and jobPath, whichever tenant it belongs to. A row carries runLink only when the caller's own grant can read that row's own run. A row reports its own state and its own waitingSince or acquiredAt. It carries no queue position.
+        Resolves {team} onto one or more record-store tenants, applies the tenant read check to each, reads each tenant's locks, and merges the answers in lock name order, the holder before its waiters. Each row carries its own tenant and jobPath, whichever tenant it belongs to. A row carries runLink only when the caller's own grant can read that row's own run. A waiting row reports its own waitingSince. A held or a releasing row reports its own acquiredAt. It carries no queue position.
       operationId: listTeamFleetLocks
       parameters:
       - $ref: '#/components/parameters/components_parameters_team'
@@ -13295,7 +13298,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/components_schemas_FleetLockListResponse'
-          description: The team's fleet locks, in (name, waitingSince, runId) order.
+          description: The team's fleet locks, the holder of each name before its
+            waiters.
         "401":
           $ref: '#/components/responses/components_responses_Unauthorized'
         "404":

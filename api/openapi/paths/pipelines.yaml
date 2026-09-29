@@ -181,16 +181,18 @@
     description: >
       Resolves {team} onto one or more record-store tenants, applies the
       tenant read check to each, reads each tenant's locks, and merges the
-      answers by (name, waitingSince, runId). Each row carries its own
-      tenant and jobPath, whichever tenant it belongs to. A row carries
+      answers in lock name order, the holder before its waiters. Each row
+      carries its own tenant and jobPath, whichever tenant it belongs to.
+      A row carries
       runLink only when the caller's own grant can read that row's own
-      run. A row reports its own state and its own waitingSince or
-      acquiredAt. It carries no queue position.
+      run. A waiting row reports its own waitingSince. A held or a
+      releasing row reports its own acquiredAt. It carries no queue
+      position.
     parameters:
       - $ref: '../components/parameters.yaml#/team'
     responses:
       "200":
-        description: The team's fleet locks, in (name, waitingSince, runId) order.
+        description: The team's fleet locks, the holder of each name before its waiters.
         content:
           application/json:
             schema:

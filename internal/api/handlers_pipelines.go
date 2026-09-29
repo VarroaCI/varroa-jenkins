@@ -1377,9 +1377,10 @@ func (s *Server) teamCellState(cr *v1alpha1.Controller, ref TenantRef, reason st
 // fleetLockJSON is one row of either lock response. tenant and jobPath
 // are always present, so a caller learns which tenant holds a lock even
 // when it may not read that tenant's runs. runLink is present only when
-// the caller's own grant reads the row's own run. No other field
-// exists: a consumer that wants a lock's holder groups the rows of one
-// name itself.
+// the caller's own grant reads the row's own run. waitingSince is
+// present only on a waiting row: a held or a releasing row reports
+// acquiredAt instead. No other field exists: a consumer that wants a
+// lock's holder groups the rows of one name itself.
 type fleetLockJSON struct {
 	Name         string     `json:"name"`
 	Tenant       string     `json:"tenant"`
@@ -1387,7 +1388,7 @@ type fleetLockJSON struct {
 	State        string     `json:"state"`
 	RunID        string     `json:"runId"`
 	RunLink      *string    `json:"runLink,omitempty"`
-	WaitingSince time.Time  `json:"waitingSince"`
+	WaitingSince *time.Time `json:"waitingSince,omitempty"`
 	AcquiredAt   *time.Time `json:"acquiredAt,omitempty"`
 }
 
@@ -1487,13 +1488,16 @@ func (s *Server) fleetLockRows(claims *auth.Claims, refs []TenantRef, locks []re
 	rows := make([]fleetLockJSON, 0, len(locks))
 	for _, lock := range locks {
 		row := fleetLockJSON{
-			Name:         lock.Name,
-			Tenant:       lock.Tenant,
-			JobPath:      lock.JobPath,
-			State:        lock.State,
-			RunID:        lock.RunID,
-			WaitingSince: lock.WaitingSince,
-			AcquiredAt:   lock.AcquiredAt,
+			Name:       lock.Name,
+			Tenant:     lock.Tenant,
+			JobPath:    lock.JobPath,
+			State:      lock.State,
+			RunID:      lock.RunID,
+			AcquiredAt: lock.AcquiredAt,
+		}
+		if lock.State == recordstore.FleetLockStateWaiting {
+			since := lock.WaitingSince
+			row.WaitingSince = &since
 		}
 		grant := s.fleetLockGrantFor(claims, refs, cache, lock.Tenant)
 		if lock.JobPath != "" && grant.granted && grantsAllow(grant.grants, grant.folder, lock.JobPath, "read") {

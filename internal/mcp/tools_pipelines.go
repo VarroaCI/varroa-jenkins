@@ -383,6 +383,6 @@ var fleetLockListOutputSchema = listOutputSchema("Fleet lock.", []schemaField{
 	{Name: "state", Type: "string", Desc: "waiting, held, or releasing."},
 	{Name: "runId", Type: "string", Desc: "Run that holds or waits on the lock."},
 	{Name: "runLink", Type: "string", Desc: "Run link, present only when the caller may read that run."},
-	{Name: "waitingSince", Type: "string", Desc: "Time the row began to wait, RFC3339."},
+	{Name: "waitingSince", Type: "string", Desc: "Time the row began to wait, RFC3339. Present only on a waiting row."},
 	{Name: "acquiredAt", Type: "string", Desc: "Time the lock was acquired, once held."},
 })

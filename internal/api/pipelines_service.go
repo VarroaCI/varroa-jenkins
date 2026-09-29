@@ -329,7 +329,7 @@ type FleetLockRow struct {
 	State        string     `json:"state"`
 	RunID        string     `json:"runId"`
 	RunLink      *string    `json:"runLink,omitempty"`
-	WaitingSince time.Time  `json:"waitingSince"`
+	WaitingSince *time.Time `json:"waitingSince,omitempty"`
 	AcquiredAt   *time.Time `json:"acquiredAt,omitempty"`
 }
 

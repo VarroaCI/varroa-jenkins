@@ -1939,8 +1939,9 @@ type ComponentsSchemasExecuteGroovyPolicy struct {
 	Enabled *bool `json:"enabled,omitempty"`
 }
 
-// ComponentsSchemasFleetLock One fleet lock row, from a varroa.lock step. tenant and jobPath are always present, whichever tenant the row belongs to. runLink is present only when the reading caller can read that row's own run. The row reports its own state and its own waitingSince or acquiredAt. It carries no queue position and no derived holder: a consumer groups the rows it already has by name.
+// ComponentsSchemasFleetLock One fleet lock row, from a varroa.lock step. tenant and jobPath are always present, whichever tenant the row belongs to. runLink is present only when the reading caller can read that row's own run. A waiting row reports its own waitingSince. A held or a releasing row reports its own acquiredAt and no waitingSince. The row carries no queue position and no derived holder: a consumer groups the rows it already has by name.
 type ComponentsSchemasFleetLock struct {
+	// AcquiredAt The time the run acquired the lock. Present on a held or a releasing row.
 	AcquiredAt *time.Time `json:"acquiredAt,omitempty"`
 
 	// JobPath The job path of the run that holds or waits on the lock.
@@ -1955,14 +1956,16 @@ type ComponentsSchemasFleetLock struct {
 	State   ComponentsSchemasFleetLockState `json:"state"`
 
 	// Tenant The tenant of the run that holds or waits on the lock.
-	Tenant       string    `json:"tenant"`
-	WaitingSince time.Time `json:"waitingSince"`
+	Tenant string `json:"tenant"`
+
+	// WaitingSince The time the run began to wait. Present only on a waiting row.
+	WaitingSince *time.Time `json:"waitingSince,omitempty"`
 }
 
 // ComponentsSchemasFleetLockState defines model for ComponentsSchemasFleetLock.State.
 type ComponentsSchemasFleetLockState string
 
-// ComponentsSchemasFleetLockListResponse GET /pipelines/{team}/locks and GET /locks. Both routes answer the rows in (name, waitingSince, runId) order, so the holder of a lock name comes before its waiters.
+// ComponentsSchemasFleetLockListResponse GET /pipelines/{team}/locks and GET /locks. Both routes answer the rows in lock name order. In one name, the holder comes first, and the waiters follow in the order they began to wait.
 type ComponentsSchemasFleetLockListResponse struct {
 	Items []ComponentsSchemasFleetLock `json:"items"`
 }

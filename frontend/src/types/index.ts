@@ -2089,7 +2089,9 @@ export interface FleetLock {
   runId: string;
   /** The holder run's page. Absent when the caller cannot read that run. */
   runLink?: string;
-  waitingSince: string;
+  /** The time the run began to wait. Present only on a waiting row. */
+  waitingSince?: string;
+  /** The time the run acquired the lock. Present on a held or a releasing row. */
   acquiredAt?: string;
 }
 

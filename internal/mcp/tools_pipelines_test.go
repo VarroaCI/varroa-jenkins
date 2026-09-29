@@ -547,12 +547,13 @@ func TestListFleetLocksAnswersTheTeamRows(t *testing.T) {
 
 	var payload struct {
 		Items []struct {
-			Name    string `json:"name"`
-			Tenant  string `json:"tenant"`
-			JobPath string `json:"jobPath"`
-			State   string `json:"state"`
-			RunID   string `json:"runId"`
-			RunLink string `json:"runLink"`
+			Name         string  `json:"name"`
+			Tenant       string  `json:"tenant"`
+			JobPath      string  `json:"jobPath"`
+			State        string  `json:"state"`
+			RunID        string  `json:"runId"`
+			RunLink      string  `json:"runLink"`
+			WaitingSince *string `json:"waitingSince"`
 		} `json:"items"`
 		Count int `json:"count"`
 	}
@@ -564,6 +565,9 @@ func TestListFleetLocksAnswersTheTeamRows(t *testing.T) {
 	}
 	if payload.Items[0].State != "held" || payload.Items[1].State != "waiting" {
 		t.Errorf("items = %+v, want the holder before its waiter", payload.Items)
+	}
+	if payload.Items[0].WaitingSince != nil || payload.Items[1].WaitingSince == nil {
+		t.Errorf("items = %+v, want waitingSince on the waiter only", payload.Items)
 	}
 	for _, item := range payload.Items {
 		if item.Name != "team-a/deploy" || item.Tenant != "team-a" || item.JobPath != "team-a/build" {

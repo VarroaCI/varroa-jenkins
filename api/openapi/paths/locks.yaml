@@ -13,8 +13,9 @@
       BFF's own local cluster when the parameter is absent. Each row
       carries its own tenant and jobPath, whichever tenant it belongs to. A
       row carries runLink only when the caller's own grant can read that
-      row's own run. A row reports its own state and its own waitingSince
-      or acquiredAt. It carries no queue position and no derived holder.
+      row's own run. A waiting row reports its own waitingSince. A held or
+      a releasing row reports its own acquiredAt. It carries no queue
+      position and no derived holder.
     parameters:
       - $ref: '../components/parameters.yaml#/clusterQuery'
     responses:

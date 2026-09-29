@@ -471,15 +471,20 @@ export function createRunningRun(overrides?: Partial<RunningRun>): RunningRun {
 
 /** createFleetLock sets every required field of FleetLock. runLink is
  * absent by default, because the BFF sends it only to a caller whose
- * grant covers the run. */
+ * grant covers the run. A waiting row carries waitingSince, and a held or
+ * a releasing row carries acquiredAt, as the BFF answers them. */
 export function createFleetLock(overrides?: Partial<FleetLock>): FleetLock {
+  const state = overrides?.state ?? "held";
+  const since = state === "waiting"
+    ? { waitingSince: "2026-01-01T00:00:00Z" }
+    : { acquiredAt: "2026-01-01T00:00:00Z" };
   return {
     name: "payments/smoke-lock",
     tenant: "payments",
     jobPath: "payments/app-a",
-    state: "held",
+    state,
     runId: nextId("run"),
-    waitingSince: "2026-01-01T00:00:00Z",
+    ...since,
     ...overrides,
   };
 }

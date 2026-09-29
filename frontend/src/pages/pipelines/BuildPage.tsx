@@ -591,7 +591,7 @@ export default function BuildPage() {
           {run.actor && <span>{run.actor}</span>}
           {run.cause && <span>{run.cause}</span>}
           {run.startedAt && <span>{new Date(run.startedAt).toLocaleString()}</span>}
-          {typeof run.durationMs === "number" && <span>{Math.round(run.durationMs / 1000)}s</span>}
+          {typeof run.durationMs === "number" && <span>{formatDuration(run.durationMs)}</span>}
         </div>
         {/* The summary row renders the run's own summary line. It hides
             itself when the record carries no summary. */}
