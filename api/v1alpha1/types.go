@@ -911,6 +911,18 @@ const (
 	ReasonPluginRollFailed = "PluginRollFailed"
 	// ReasonJenkinsBootFailed is set when the Jenkins container fails to reach Running.
 	ReasonJenkinsBootFailed = "JenkinsBootFailed"
+	// ReasonDownloadURLNotFound is set on UpdateCenterFallback=True when the plugin download
+	// URL answers 404 or 410 for a pinned plugin. The base must be <mirror>/download/plugins.
+	ReasonDownloadURLNotFound = "DownloadURLNotFound"
+	// ReasonPluginArchiveFallback is set on UpdateCenterFallback=True when jenkins-plugin-cli
+	// fetched one or more plugins from https://archives.jenkins.io/ instead of the download URL.
+	ReasonPluginArchiveFallback = "PluginArchiveFallback"
+	// ReasonDownloadURLReachable is set on UpdateCenterFallback=False when the operator check of
+	// an explicit download URL passes after a DownloadURLNotFound verdict.
+	ReasonDownloadURLReachable = "DownloadURLReachable"
+	// ReasonPluginDownloadsVerified is set on UpdateCenterFallback=False when plugins-init exits
+	// clean after a DownloadURLNotFound or PluginArchiveFallback verdict.
+	ReasonPluginDownloadsVerified = "PluginDownloadsVerified"
 	// ReasonPluginConflict is set when a requested plugin version conflicts with the profile lock set.
 	ReasonPluginConflict = "PluginConflict"
 	// ReasonPluginPinConflict is set when a bundle-pinned plugin version conflicts with the
@@ -1153,9 +1165,10 @@ const (
 	// ConditionOverlayActive is True when spec.resourceOverlay sets any of
 	// statefulSet/service/ingress — the controller is using the Tier-3 escape hatch.
 	ConditionOverlayActive ControllerConditionType = "OverlayActive"
-	// ConditionUpdateCenterFallback indicates the update center is configured but
-	// unreachable in online mode; the init container falls back to tool defaults.
-	// Non-blocking: provisioning proceeds.
+	// ConditionUpdateCenterFallback indicates that plugins do not come from the configured
+	// source: the update center is configured but unreachable in online mode, the download
+	// URL answers 404 or 410 (ReasonDownloadURLNotFound), or plugins-init fetched plugins from the
+	// public archive (ReasonPluginArchiveFallback). Non-blocking: provisioning proceeds.
 	ConditionUpdateCenterFallback ControllerConditionType = "UpdateCenterFallback"
 	// ConditionWaitingForUpdateCenter indicates the update center is configured but
 	// not Ready in air-gap mode; provisioning is blocked until the UC is available.
@@ -2400,6 +2413,8 @@ type ProvisioningDefaultsSpec struct {
 	PluginUpdateCenterURL string `json:"pluginUpdateCenterURL,omitempty"`
 	// PluginUpdateCenterDownloadURL is the Jenkins update-center binary download URL
 	// (maps to JENKINS_UC_DOWNLOAD_URL). When non-empty, plugins-init uses this mirror.
+	// jenkins-plugin-cli appends <name>/<version>/<name>.hpi to it, so the value must be
+	// <mirror>/download/plugins, for example https://updates.jenkins.io/download/plugins.
 	// +optional
 	PluginUpdateCenterDownloadURL string `json:"pluginUpdateCenterDownloadURL,omitempty"`
 	// BroodPolicy constrains which brood operation verbs may run in this cluster.

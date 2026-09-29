@@ -359,6 +359,9 @@ func newTestReconciler(client *testClient) *Reconciler {
 		nil, // composer not used in tests
 	)
 	rec.Logger = slog.Default()
+	rec.downloadProbe = func(context.Context, string, string, string) downloadProbeResult {
+		return downloadProbeResult{}
+	}
 	return rec
 }
 

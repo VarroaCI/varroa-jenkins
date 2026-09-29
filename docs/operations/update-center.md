@@ -33,7 +33,16 @@ varroactl import --from <source> --to <destination>
 
 Enable pull-through only when the update center may reach its configured upstream and archive hosts. In an air-gapped environment, seed or import every required plugin before deploying controllers. See [Air-gapped installation](../install/air-gapped.md) and [Plugin packs](../config/plugin-packs.md).
 
-`seed.secretRef` names a `.dockerconfigjson` or `username`/`password` Secret in the operator namespace (`UpdateCenter` is cluster-scoped, so there is no "same namespace") holding pull credentials for every ref in `seed.refs`. The secret must contain exactly one registry entry; a `.dockerconfigjson` with more than one `auths` entry is rejected, since `seed.refs` entries must all resolve against the same registry.
+`seed.secretRef` names a `.dockerconfigjson` or `username`/`password` Secret in the operator namespace. It holds pull credentials for every ref in `seed.refs`, so it must contain exactly one registry entry.
+
+## Set an explicit download URL
+
+The value of `ProvisioningDefaults.spec.pluginUpdateCenterDownloadURL` must be `<mirror>/download/plugins`, for example `https://updates.jenkins.io/download/plugins`. The plugin installer appends `<name>/<version>/<name>.hpi` to it. When the first pin answers `404` or `410`, `plugins-init` stops at once. When a later download fails, the installer fetches it from `https://archives.jenkins.io/`. The controller reports both cases as `UpdateCenterFallback=True`:
+
+| Reason | Meaning |
+|---|---|
+| `DownloadURLNotFound` | The download URL answers `404` or `410` for the first pin. |
+| `PluginArchiveFallback` | Some plugins came from the public archive. The message names the first one. |
 
 ## Check readiness
 

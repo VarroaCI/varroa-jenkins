@@ -407,6 +407,32 @@ sections describe.
   already reported any parse error on the bundle itself. Called from
   `config_crud.go`'s preview/validate NATS replies onto
   `bus.BundleComposePreview.PipelineTemplates`.
+- **plugins-init reports on its termination log.** `pluginsInitScript`
+  (`clientset_client.go`) writes one marker line that `plugininit_report.go`
+  parses, so the format is a contract:
+  `varroa:download-url-not-found url= plugin=name:version status=` with exit 42
+  (a pre-flight one-byte fetch of the first pin answered 404 or 410; no retry),
+  and `varroa:archive-fallback count= plugin= url=` on any other exit (the tool
+  fell back to `https://archives.jenkins.io/`, which no flag disables). A clean
+  run leaves the log empty. The pre-flight `curl` and the tool's `tee` pipeline
+  (one subshell that exits with the tool's status) run in the background under
+  `wait`, like every long command of the script. A failed tool run keeps no plugin, so each retry
+  downloads the full set again. `pluginInitUCReport` reads `State.Terminated`,
+  or `LastTerminationState` while the container runs again after a restart;
+  `reconcileProvisioningPluginInitFailure` and `checkPluginRollFailed` both call
+  it. `pluginInitFailureMessage` reads `LastTerminationState` the same way.
+- **`UpdateCenterFallback` has several writers, and each clears only its own
+  reasons.** The update-center gate writes `UpdateCenterAvailable`, except for an
+  explicit `ProvisioningDefaults` download URL (`ucGateResult.DownloadURLExplicit`),
+  which never touches the in-cluster update center: there it only clears its own
+  stale `True` verdict (`UpdateCenterUnavailable`). For that URL,
+  `handleProvisioning` runs `Reconciler.downloadProbe` (`ucprobe.go`): a ranged GET
+  of the first pin (never HEAD, the update center answers 405), five-second
+  timeout, ten-minute cache per URL. Only 404/410 give a verdict
+  (`DownloadURLNotFound`); a network error gives none, and the check never blocks.
+  The plugins-init report writes `DownloadURLNotFound`/`PluginArchiveFallback` and
+  clears them with `PluginDownloadsVerified`. Tests stub `downloadProbe` in
+  `newTestReconciler`; a new constructor path must stub it too.
 - Version profiles: `resolveProfileForCr` → `ResolveProfile` (`versionresolve.go`)
   matches **exact version → LTS line (`lineKey`, `major.minor`) →
   `pluginlock.Baseline()`** (embedded fallback, no profile). `resolveCoreSet` /

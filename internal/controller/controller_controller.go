@@ -241,6 +241,10 @@ type Reconciler struct {
 	// numberCacheMu. Losing it (an operator restart) restarts the
 	// deadline clock, which is an accepted, harmless degradation.
 	rehydrationPendingSince map[string]rehydrationPendingMark
+
+	// downloadProbe checks an explicit plugin download URL during
+	// provisioning. Tests replace it so that no test makes a real request.
+	downloadProbe func(ctx context.Context, base, name, version string) downloadProbeResult
 }
 
 // rehydrationPendingMark is one cell key + tenant's deadline-anchor
@@ -1126,6 +1130,7 @@ func NewReconciler(r *bundle.Resolver, client ResourceClient, store crdstore.Bac
 	// compat + upgradePolicy gate. Assigned post-construction because it is a
 	// method value bound to rec.
 	rec.versionRollGate = rec.upgradePolicyVersionRollGate
+	rec.downloadProbe = newDownloadURLProber().Probe
 
 	return rec
 }
@@ -3081,12 +3086,20 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 		r.persistStatusDiagnostics(ctx, cr)
 		return fmt.Errorf("update center not ready in air-gap mode")
 	case ucGateClear:
-		// UC ready or not configured: clear any stale fallback/waiting conditions.
-		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
-			Type:   v1alpha1.ConditionUpdateCenterFallback,
-			Status: metav1.ConditionFalse,
-			Reason: "UpdateCenterAvailable",
-		})
+		// UC ready or not configured: clear any stale fallback/waiting
+		// conditions. An explicit download URL never touches the UC, so the
+		// gate makes no claim for it and only clears its own stale True
+		// verdict. The download-URL check and the plugins-init report own
+		// their reasons.
+		fb := findCondition(cr.Status.Conditions, v1alpha1.ConditionUpdateCenterFallback)
+		gateStale := fb != nil && fb.Status == metav1.ConditionTrue && !ucFallbackOwnReason(fb.Reason)
+		if !ucGate.DownloadURLExplicit || gateStale {
+			cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+				Type:   v1alpha1.ConditionUpdateCenterFallback,
+				Status: metav1.ConditionFalse,
+				Reason: "UpdateCenterAvailable",
+			})
+		}
 		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
 			Type:   v1alpha1.ConditionWaitingForUpdateCenter,
 			Status: metav1.ConditionFalse,
@@ -3094,6 +3107,20 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 		})
 	case ucGateNoop:
 		// Explicit defaults override both URL tiers: leave conditions untouched.
+	}
+	// A wrong explicit download URL makes jenkins-plugin-cli fall back to the
+	// public archive for every plugin. The check only warns: it never blocks
+	// provisioning, because the operator can reach a different network than
+	// the pod.
+	if ucGate.DownloadURLExplicit && r.downloadProbe != nil {
+		if name, version, ok := firstVersionedPin(lines); ok {
+			res := r.downloadProbe(ctx, ucGate.DownloadURL, name, version)
+			if res.Verdict == downloadProbeNotFound {
+				r.Logger.Warn("explicit plugin download URL answers not found",
+					"controller", cr.Namespace+"/"+cr.Name, "url", res.URL, "status", res.Status)
+			}
+			cr.Status.Conditions = applyDownloadURLProbe(cr.Status.Conditions, res)
+		}
 	}
 	{
 		_, span := tracer.Start(ctx, "provision.createStatefulSet")
@@ -4061,6 +4088,11 @@ func (r *Reconciler) checkPluginRollFailed(ctx context.Context, cr *v1alpha1.Con
 		logger.Warn("failed to get controller pod for roll-failed check", "error", err)
 		return
 	}
+	// The termination record of plugins-init outlives the roll, so the
+	// download report runs before the early return for a completed roll.
+	if pod != nil {
+		cr.Status.Conditions = applyPluginInitUCReport(cr.Status.Conditions, pluginInitUCReport(pod))
+	}
 
 	// If no pod OR the pod is Ready and checksums match, the roll completed.
 	if pod == nil || (appliedChecksum == desiredChecksum && isPodReady(pod)) {
@@ -4091,6 +4123,7 @@ func (r *Reconciler) reconcileProvisioningPluginInitFailure(ctx context.Context,
 	if err != nil || pod == nil {
 		return
 	}
+	cr.Status.Conditions = applyPluginInitUCReport(cr.Status.Conditions, pluginInitUCReport(pod))
 	if reason, failed := pluginInitFailureMessage(pod); failed {
 		msg := "plugins-init failed during provisioning"
 		if reason != "" {
@@ -4117,11 +4150,28 @@ func pluginInitFailureMessage(pod *corev1.Pod) (string, bool) {
 			continue
 		}
 		if t := s.State.Terminated; t != nil && t.ExitCode != 0 {
+			if text, ok := describePluginInitMarker(t.Message); ok {
+				return text, true
+			}
 			reason := t.Message
 			if reason == "" {
 				reason = t.Reason
 			}
 			return reason, true
+		}
+		// An init container restarts in place after a failure, so its current
+		// state is Running or Waiting and the failure sits only in
+		// LastTerminationState.
+		// A terminated container never reads this history, so a recovered
+		// plugins-init clears the condition.
+		if t := s.LastTerminationState.Terminated; s.State.Terminated == nil && s.RestartCount > 0 && t != nil && t.ExitCode != 0 {
+			reason := t.Message
+			if text, ok := describePluginInitMarker(t.Message); ok {
+				reason = text
+			} else if reason == "" {
+				reason = t.Reason
+			}
+			return fmt.Sprintf("plugins-init exited with code %d (%d restarts): %s", t.ExitCode, s.RestartCount, reason), true
 		}
 		if w := s.State.Waiting; w != nil {
 			switch w.Reason {

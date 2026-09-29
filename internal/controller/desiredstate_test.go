@@ -122,6 +122,28 @@ func TestResolveUpdateCenterGate(t *testing.T) {
 	}
 }
 
+func TestResolveUpdateCenterGate_ExplicitDownloadURL(t *testing.T) {
+	readyUC := &v1alpha1.UpdateCenter{Status: v1alpha1.UpdateCenterStatus{Conditions: []v1alpha1.UpdateCenterCondition{
+		{Type: "Ready", Status: metav1.ConditionTrue},
+	}}}
+	explicitDL := &v1alpha1.ProvisioningDefaults{Spec: v1alpha1.ProvisioningDefaultsSpec{
+		PluginUpdateCenterDownloadURL: "https://mirror.example.org/download",
+	}}
+	got := resolveUpdateCenterGate(explicitDL, readyUC, "http://uc:8080")
+	if got.Outcome != ucGateClear {
+		t.Fatalf("outcome = %d, want ucGateClear", got.Outcome)
+	}
+	if !got.DownloadURLExplicit {
+		t.Fatal("DownloadURLExplicit = false, want true for a tier-1 download URL")
+	}
+	if got.DownloadURL != "https://mirror.example.org/download" {
+		t.Fatalf("DownloadURL = %q", got.DownloadURL)
+	}
+	if res := resolveUpdateCenterGate(nil, readyUC, "http://uc:8080"); res.DownloadURLExplicit {
+		t.Fatal("DownloadURLExplicit = true for a tier-2 download URL")
+	}
+}
+
 func TestUcBlockAirgapMessage(t *testing.T) {
 	tests := []struct {
 		name       string

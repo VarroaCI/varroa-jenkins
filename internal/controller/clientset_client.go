@@ -97,17 +97,28 @@ const artifactSecretHashAnnotation = "varroa.dev/artifact-secret-hash"
 
 // pluginsInitScript runs jenkins-plugin-cli with a bounded retry.
 //
-// jenkins-plugin-cli aborts the entire run on the first plugin it cannot download, and
-// exits non-zero, which fails the init container and restarts the pod. Any plugin the
-// in-cluster update center cannot serve is fetched from the public internet instead, so
-// a single transient upstream failure — a truncated response, a mirror hiccup — discards
-// every plugin already downloaded in that run and costs a full pod restart.
+// jenkins-plugin-cli downloads every plugin in parallel into a temporary directory and
+// moves the files into the plugin directory only when every download succeeds. One failed
+// plugin aborts the run and keeps nothing, so each retry downloads the full set again. Only
+// plugins that an earlier successful run installed are skipped. The retry absorbs a single
+// transient upstream failure, and the backoff keeps an unreachable upstream from spinning.
+// A real failure still exits non-zero after the last attempt.
 //
-// Retrying in place absorbs that. The tool is idempotent (plugins already present in the
-// download directory are not refetched), so each attempt resumes rather than restarting
-// the work, and the backoff keeps a genuinely unreachable upstream from spinning. A real
-// failure still exits non-zero after the last attempt, so a broken plugin set surfaces
-// as a failed init container exactly as before, just later.
+// jenkins-plugin-cli falls back to https://archives.jenkins.io/ after each failed download,
+// and no flag disables that. The script therefore reports on the termination log, which
+// Kubernetes keeps for a successful container too:
+//   - When JENKINS_UC_DOWNLOAD_URL is set, a pre-flight fetch of one byte of the first
+//     pinned plugin runs first. A 404 or 410 writes a varroa:download-url-not-found line
+//     and exits 42 with no retry, because a retry cannot fix a wrong base URL.
+//   - Each attempt counts the archive fallback lines. A non-zero count writes a
+//     varroa:archive-fallback line that names the first failed request.
+//
+// pluginInitUCReport parses these lines, so their format is a contract. When the
+// termination log cannot be written, the line goes to stderr. VARROA_PLUGINS_FILE,
+// VARROA_PLUGIN_DIR, and VARROA_TERMINATION_LOG exist for tests; the pod sets none of them.
+// The script empties the termination log with printf, not with ':'. A failed redirection
+// on a special builtin such as ':' exits a POSIX shell.
+//
 // The script also seeds a pool cell's confidential store. A Secret volume
 // presents each key as a symlink into a ..data directory, so the copy needs
 // cp -L. DefaultConfidentialStore chmods the directory only when it creates
@@ -119,7 +130,9 @@ const artifactSecretHashAnnotation = "varroa.dev/artifact-secret-hash"
 // full pod grace. Each long command runs in the background under wait, so
 // the trap runs at once. The trap ignores TERM for the shell itself and
 // sends TERM to the whole process group, which also reaches every stage of
-// a pipeline and the JVM that jenkins-plugin-cli starts.
+// a pipeline and the JVM that jenkins-plugin-cli starts. The tool run and
+// its tee pipeline therefore run in one background subshell, which exits
+// with the status of jenkins-plugin-cli.
 const pluginsInitScript = `set -e
 trap 'trap "" TERM; kill -TERM 0 2>/dev/null; exit 143' TERM
 if [ -d /run/secrets/varroa-cell-secrets ]; then
@@ -128,12 +141,61 @@ if [ -d /run/secrets/varroa-cell-secrets ]; then
   cp -L /run/secrets/varroa-cell-secrets/* /var/jenkins_home/secrets/
   chmod 600 /var/jenkins_home/secrets/*
 fi
+set +e
+plugins_file="${VARROA_PLUGINS_FILE:-/var/run/varroa/plugins/plugins.txt}"
+plugin_dir="${VARROA_PLUGIN_DIR:-/var/jenkins_home/plugins}"
+term_log="${VARROA_TERMINATION_LOG:-/dev/termination-log}"
+cli_log="${TMPDIR:-/tmp}/plugins-init.log"
+status_file="${TMPDIR:-/tmp}/plugins-init.status"
+archive="https://archives.jenkins.io/"
+report() {
+  { printf '%s\n' "$1" > "$term_log"; } 2>/dev/null || printf '%s\n' "$1" >&2
+}
+{ printf "" > "$term_log"; } 2>/dev/null
+if [ -n "$JENKINS_UC_DOWNLOAD_URL" ] && command -v curl >/dev/null 2>&1; then
+  pin=$(grep -oE '^[A-Za-z0-9._-]+:[^[:space:]]+' "$plugins_file" 2>/dev/null | head -n 1)
+  if [ -n "$pin" ]; then
+    name="${pin%%:*}"
+    version="${pin#*:}"
+    url="${JENKINS_UC_DOWNLOAD_URL%/}/$name/$version/$name.hpi"
+    curl -s -o /dev/null -w '%{http_code}' -r 0-0 -L --max-time 10 "$url" > "$status_file" 2>/dev/null &
+    wait $!
+    status=$(cat "$status_file" 2>/dev/null)
+    case "$status" in
+      404|410)
+        echo "plugins-init: $url answered $status; the download URL must be <mirror>/download/plugins" >&2
+        report "varroa:download-url-not-found url=$url plugin=$name:$version status=$status"
+        exit 42
+        ;;
+      2??) ;;
+      *) echo "plugins-init: pre-flight fetch of $url answered ${status:-nothing}; continuing" >&2 ;;
+    esac
+  fi
+fi
 attempt=1
 max_attempts=5
 while true; do
-  jenkins-plugin-cli --plugin-file /var/run/varroa/plugins/plugins.txt \
-      --plugin-download-directory /var/jenkins_home/plugins --latest false --verbose &
-  if wait $!; then
+  (
+    exec 3>&1
+    rc=$( { { jenkins-plugin-cli --plugin-file "$plugins_file" \
+        --plugin-download-directory "$plugin_dir" --latest false --verbose 2>&1; echo "$?" >&4; } \
+        | tee "$cli_log" >&3; } 4>&1 )
+    exit "${rc:-1}"
+  ) &
+  wait $!
+  rc=$?
+  fallbacks=$(grep -c "falling back to $archive" "$cli_log" 2>/dev/null)
+  if [ "${fallbacks:-0}" -gt 0 ]; then
+    first=$(sed -n 's/.*Unable to resolve plugin URL \([^,]*\), or download plugin \([^ ]*\) to file.*/\2 \1/p' "$cli_log" \
+      | grep -vF " $archive" | head -n 1)
+    fb_name="${first%% *}"
+    fb_url="${first#* }"
+    echo "plugins-init: $fallbacks plugin downloads fell back to $archive" >&2
+    report "varroa:archive-fallback count=$fallbacks plugin=${fb_name:-unknown} url=${fb_url:-unknown}"
+  else
+    { printf "" > "$term_log"; } 2>/dev/null
+  fi
+  if [ "$rc" = 0 ]; then
     exit 0
   fi
   if [ "$attempt" -ge "$max_attempts" ]; then

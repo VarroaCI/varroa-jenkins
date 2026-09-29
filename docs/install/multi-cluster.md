@@ -80,7 +80,7 @@ The core dashboard, `varroactl`, and the MCP tools then read and trigger the ten
 
 Each member provisions controllers using its own cluster resources. Before creating controllers, provide the required storage class, ingress setup, image pull Secrets, deployable namespaces, and `ProvisioningDefaults`. For private bundle sources, also provide the required credentials in the member cluster.
 
-Use [Network policies](network-policies.md) to permit the gateway and core NATS traffic. For air-gapped plugin delivery, follow [Air-gapped installation](air-gapped.md) and [Update Center](../operations/update-center.md).
+Use [Network policies](network-policies.md) to permit the gateway and core NATS traffic. For air-gapped plugin delivery, follow [Air-gapped installation](air-gapped.md) and [Update Center](../operations/update-center.md). A member that downloads plugins from the core update center sets `pluginUpdateCenterDownloadURL` to `https://<core-update-center-host>/download/plugins`.
 
 ## Verify and operate
 

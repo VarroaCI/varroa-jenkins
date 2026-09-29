@@ -61,6 +61,12 @@ const (
 type ucGateResult struct {
 	URL, DownloadURL string
 	Outcome          ucGateOutcome
+	// DownloadURLExplicit is true when DownloadURL comes from
+	// ProvisioningDefaults. Plugin downloads then never touch the in-cluster
+	// update center, so the clear outcome must not claim
+	// UpdateCenterFallback=False for it: the download-URL check and the
+	// plugins-init report own that condition.
+	DownloadURLExplicit bool
 }
 
 // resolveUpdateCenterGate resolves the plugin update-center URLs and decides
@@ -69,6 +75,7 @@ type ucGateResult struct {
 func resolveUpdateCenterGate(defaults *v1alpha1.ProvisioningDefaults, uc *v1alpha1.UpdateCenter, ucBaseURL string) ucGateResult {
 	url, downloadURL := resolvePluginUpdateCenterURLs(defaults, uc, ucBaseURL)
 	res := ucGateResult{URL: url, DownloadURL: downloadURL, Outcome: ucGateClear}
+	res.DownloadURLExplicit = defaults != nil && defaults.Spec.PluginUpdateCenterDownloadURL != ""
 
 	ucReady := uc != nil && ucConditionTrue(uc.Status.Conditions, "Ready") && ucBaseURL != ""
 	if ucBaseURL == "" || ucReady {
