@@ -49,13 +49,13 @@ turns a slow recorder into a retry storm.
 
 ## The retry schedule and the queue delay
 
-A trigger admits its queue item at once. The item shows up in the Jenkins queue immediately,
-blocked with the cause "awaiting Varroa claim", while a background claimer asks for the claim.
+A trigger admits its queue item at once, blocked with the cause "awaiting Varroa claim", while a
+background claimer asks for the claim.
 The item runs only after the claimer receives a `granted` decision.
 
 The claimer retries a failed or timed-out claim on this schedule: 1 s, 2 s, 5 s, 10 s, 30 s,
-then every 60 s. It keeps retrying for one hour on one pending claim, then cancels the queue item
-and logs a `WARNING`. Every attempt carries the same `run_id`, so a lost reply costs one retry
+then every 60 s. After one hour it cancels the queue item and logs a `WARNING`. A claim waits for
+its next attempt off the claimer threads, so a refused claim does not delay other jobs. Every attempt carries the same `run_id`, so a lost reply costs one retry
 and never starts a second build.
 
 ## Reading a claim decision
@@ -87,7 +87,7 @@ once. The recorder marks it `TRIGGER_FAILED` with the veto code before it replie
 Jenkins-native trigger gets no run record, and `NOT_READY` and `NOT_HOME` mark nothing.
 
 A retried request reads `granted` again when it carries the same `intent_key` and the same `run_id` as an earlier
-granted claim, and that run has not started. A `duplicate` means the intent key belongs to a different run entirely, for example two triggers
+granted claim, and that run has not started. A `duplicate` means the intent key belongs to a different run, for example two triggers
 racing on the same commit. It also answers a repeat for a run whose start the ledger recorded.
 That repeat comes from a redelivered command. A redelivery that reaches another cell before the
 ledger records the start still reads `granted`.
@@ -136,7 +136,7 @@ Symptoms to check for:
 - Build events queue in the JetStream stream while NATS is healthy, so `recorder_ingest_backlog_msgs` and `recorder_ingest_backlog_bytes` (see
   [Build records](build-records.md)) rise during the outage and drain once it recovers.
 
-A recorder back within the hour needs no action: the next retry reads `granted`. After one hour
+A recorder back within the hour needs no action. After one hour
 the claimer cancels the item and logs a `WARNING` that names the last answer. A cancelled trigger needs a new build request.
 The backstop round marks its run `TRIGGER_FAILED`, reason `CLAIM_EXPIRED`, 75 minutes after
 acceptance. One round marks 500 runs at most and counts each in `recorder_claim_expired_total`. An item that waits that long before its first claim is

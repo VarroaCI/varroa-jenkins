@@ -80,7 +80,7 @@ public class VarroaClaimDispatcherTest {
         Files.writeString(tokenFile, "test-token");
         LoopbackTokenFile tf = new LoopbackTokenFile(tokenFile, System::currentTimeMillis);
         MiteLoopbackClient client = new MiteLoopbackClient(base, tf, Duration.ofSeconds(5));
-        return new VarroaClaimQueue(client, System::currentTimeMillis, millis -> { });
+        return new VarroaClaimQueue(client, System::currentTimeMillis, (task, d) -> task.run());
     }
 
     private static void awaitTrue(java.util.function.BooleanSupplier condition, String message) throws Exception {

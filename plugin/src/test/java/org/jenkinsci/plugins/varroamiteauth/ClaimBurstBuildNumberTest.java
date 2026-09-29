@@ -124,7 +124,15 @@ public class ClaimBurstBuildNumberTest {
         Files.writeString(tokenFile, "test-token");
         LoopbackTokenFile tf = new LoopbackTokenFile(tokenFile, System::currentTimeMillis);
         MiteLoopbackClient client = new MiteLoopbackClient(base, tf, Duration.ofSeconds(5));
-        VarroaClaimQueue queue = new VarroaClaimQueue(client, System::currentTimeMillis, millis -> Thread.sleep(50L));
+        VarroaClaimQueue queue = new VarroaClaimQueue(client, System::currentTimeMillis, (task, d) -> {
+            try {
+                Thread.sleep(50L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            task.run();
+        });
         GateOn.delegate = new VarroaClaimDispatcher(queue);
     }
 
@@ -289,7 +297,7 @@ public class ClaimBurstBuildNumberTest {
     public void aReloadAfterTheApplyKeepsTheGrant() throws Exception {
         FreeStyleProject project = j.createFreeStyleProject("burst-reload");
         j.buildAndAssertSuccess(project);
-        VarroaClaimQueue queue = new VarroaClaimQueue(new MiteLoopbackClient(), System::currentTimeMillis, m -> { });
+        VarroaClaimQueue queue = new VarroaClaimQueue(new MiteLoopbackClient(), System::currentTimeMillis, (task, d) -> task.run());
 
         assertTrue(queue.applyBuildNumber(project, 7));
         project.doReload();

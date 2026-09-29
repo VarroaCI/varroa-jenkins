@@ -238,7 +238,7 @@ public class VarroaQueueDecisionHandlerTest {
                 claimerThreadName.set(Thread.currentThread().getName());
                 return System.currentTimeMillis();
             };
-            VarroaClaimQueue claimQueue = new VarroaClaimQueue(client, clock, millis -> { });
+            VarroaClaimQueue claimQueue = new VarroaClaimQueue(client, clock, (task, d) -> task.run());
 
             claimQueue.offer(item, project);
 

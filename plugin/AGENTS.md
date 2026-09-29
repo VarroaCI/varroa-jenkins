@@ -186,7 +186,10 @@ the root AGENTS.md greenfield rule.
   (`Queue.QueueDecisionHandler`, stamps `VarroaIntentAction.java`), `IntentKey.java`
   (helper: origin and intent-key derivation, the params digest, the revision wait),
   `VarroaClaimDispatcher.java` (`QueueTaskDispatcher`, blocks the item until granted),
-  `VarroaClaimQueue.java` (bounded work queue, four daemon threads, a retry ladder),
+  `VarroaClaimQueue.java` (a pending cap of 256, four daemon claimer threads, a retry
+  ladder; a claimer runs one attempt, and a retry waits on the one `varroa-claim-retry`
+  scheduler thread, never on a claimer thread; each attempt first checks that the item
+  is still queued),
   `BuildNumberGate.java` (one grant of a job applies at a time: Jenkins numbers a
   dispatched item from the job's counter, so the next grant waits until the last
   grant's run fires `onStarted`, its item leaves the queue cancelled, or 60 s pass;

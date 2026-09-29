@@ -35,7 +35,7 @@ public class BuildNumberApplyTest {
     public TemporaryFolder tmp = new TemporaryFolder();
 
     private VarroaClaimQueue newQueue() throws Exception {
-        return new VarroaClaimQueue(new MiteLoopbackClient(), System::currentTimeMillis, millis -> { });
+        return new VarroaClaimQueue(new MiteLoopbackClient(), System::currentTimeMillis, (task, d) -> task.run());
     }
 
     @Test
@@ -80,7 +80,7 @@ public class BuildNumberApplyTest {
         FreeStyleProject project = j.createFreeStyleProject();
         VarroaIntentAction action = new VarroaIntentAction("run-io", "", null, 0L);
         Queue.Item item = Queue.getInstance().schedule2(project, 300, action).getItem();
-        VarroaClaimQueue queue = new VarroaClaimQueue(new MiteLoopbackClient(), System::currentTimeMillis, m -> { }) {
+        VarroaClaimQueue queue = new VarroaClaimQueue(new MiteLoopbackClient(), System::currentTimeMillis, (task, d) -> task.run()) {
             @Override
             ApplyResult applyNumber(hudson.model.Job<?, ?> job, long grantedNumber, String runId) {
                 return ApplyResult.PERSIST_FAILED;
@@ -119,7 +119,7 @@ public class BuildNumberApplyTest {
             LoopbackTokenFile tf = new LoopbackTokenFile(tokenFile, System::currentTimeMillis);
             MiteLoopbackClient client = new MiteLoopbackClient(
                     "http://127.0.0.1:" + server.getAddress().getPort(), tf, Duration.ofSeconds(5));
-            VarroaClaimQueue queue = new VarroaClaimQueue(client, System::currentTimeMillis, millis -> { });
+            VarroaClaimQueue queue = new VarroaClaimQueue(client, System::currentTimeMillis, (task, d) -> task.run());
 
             VarroaIntentAction action = new VarroaIntentAction("run-1", "", null, 0L);
             ScheduleResult result = Queue.getInstance().schedule2(project, 300, action);

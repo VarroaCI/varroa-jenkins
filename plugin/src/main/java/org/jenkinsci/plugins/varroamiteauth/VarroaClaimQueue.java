@@ -14,6 +14,7 @@ import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -35,6 +36,14 @@ import java.util.logging.Logger;
  * granted flag, which releases the dispatcher. A grant below the job's
  * counter keeps the item and claims again with {@code number_conflict}.
  *
+ * <p>A claimer thread runs one attempt of a claim and then releases the
+ * thread. An answer that retries parks the claim on the
+ * {@code varroa-claim-retry} scheduler thread for the next ladder step.
+ * When the step ends, the scheduler hands the claim back to the claimer
+ * pool. A waiting claim thus holds no claimer thread, and a refused claim
+ * does not delay the claims of other jobs. A hand-back that the full work
+ * queue refuses waits one more second, bounded by the claim's deadline.
+ *
  * <p>A claimer thread also owns the intra-tenant forward. It resolves the
  * job's home slot from {@link VarroaHomeCache} before it posts the claim,
  * and forwards a job this cell does not home. A {@code NOT_HOME} veto
@@ -51,7 +60,7 @@ public class VarroaClaimQueue {
 
     static final String CLAIM_PATH = "/v1/claim";
 
-    /** Bounded work queue capacity. */
+    /** The cap on pending claims, parked and queued together. */
     static final int CAPACITY = 256;
 
     /** Daemon claimer threads. */
@@ -62,6 +71,9 @@ public class VarroaClaimQueue {
 
     /** A pending claim gives up after one hour. */
     static final long LIFETIME_MILLIS = 60L * 60 * 1000;
+
+    /** The wait before a hand-back that the full work queue refused tries again. */
+    static final long HANDBACK_RETRY_MILLIS = 1000L;
 
     private static final String DECISION_GRANTED = "granted";
     private static final String DECISION_DUPLICATE = "duplicate";
@@ -75,9 +87,20 @@ public class VarroaClaimQueue {
      */
     private static final int FORWARD_SEQ = 1;
 
-    /** Seam for a test to skip real wall-clock waits. */
-    interface Sleeper {
-        void sleep(long millis) throws InterruptedException;
+    /**
+     * Runs a task after a delay. A claim waits here between two attempts,
+     * so the wait holds no claimer thread. A test runs the task at once.
+     */
+    interface Scheduler {
+        /**
+         * Runs {@code task} after {@code delayMillis}. Throws
+         * {@link RejectedExecutionException} after {@link #shutdownNow()}.
+         */
+        void schedule(Runnable task, long delayMillis);
+
+        /** Drops every waiting task. */
+        default void shutdownNow() {
+        }
     }
 
     /** Millisecond clock seam so a test can pin the retry timing. */
@@ -87,43 +110,51 @@ public class VarroaClaimQueue {
 
     private final MiteLoopbackClient client;
     private final Clock clock;
-    private final Sleeper sleeper;
+    private final Scheduler scheduler;
     private final VarroaHomeCache homeCache;
     private final ThreadPoolExecutor executor;
+    private final int capacity;
     private final Set<String> pendingKeys = ConcurrentHashMap.newKeySet();
     private final BuildNumberGate gate;
 
     public VarroaClaimQueue() {
-        this(new MiteLoopbackClient(), System::currentTimeMillis, Thread::sleep, VarroaHomeCache.get());
+        this(new MiteLoopbackClient(), System::currentTimeMillis, retryScheduler(), VarroaHomeCache.get());
     }
 
     /** Package-private constructor for testing: injects every collaborator. */
-    VarroaClaimQueue(MiteLoopbackClient client, Clock clock, Sleeper sleeper) {
-        this(client, clock, sleeper, VarroaHomeCache.get());
+    VarroaClaimQueue(MiteLoopbackClient client, Clock clock, Scheduler scheduler) {
+        this(client, clock, scheduler, VarroaHomeCache.get());
     }
 
     /** Package-private constructor for testing: injects the home cache as well. */
-    VarroaClaimQueue(MiteLoopbackClient client, Clock clock, Sleeper sleeper, VarroaHomeCache homeCache) {
-        this(client, clock, sleeper, homeCache, BuildNumberGate.get());
+    VarroaClaimQueue(MiteLoopbackClient client, Clock clock, Scheduler scheduler, VarroaHomeCache homeCache) {
+        this(client, clock, scheduler, homeCache, BuildNumberGate.get());
     }
 
     /** Package-private constructor for testing: injects the apply gate as well. */
-    VarroaClaimQueue(MiteLoopbackClient client, Clock clock, Sleeper sleeper, VarroaHomeCache homeCache,
+    VarroaClaimQueue(MiteLoopbackClient client, Clock clock, Scheduler scheduler, VarroaHomeCache homeCache,
             BuildNumberGate gate) {
+        this(client, clock, scheduler, homeCache, gate, CAPACITY);
+    }
+
+    /** Package-private constructor for testing: sets the pending cap as well. */
+    VarroaClaimQueue(MiteLoopbackClient client, Clock clock, Scheduler scheduler, VarroaHomeCache homeCache,
+            BuildNumberGate gate, int capacity) {
         this.gate = gate;
         this.client = client;
         this.clock = clock;
-        this.sleeper = sleeper;
+        this.scheduler = scheduler;
         this.homeCache = homeCache;
+        this.capacity = capacity;
         this.executor = new ThreadPoolExecutor(THREADS, THREADS, 0L, TimeUnit.MILLISECONDS,
-                new ArrayBlockingQueue<>(CAPACITY), daemonThreadFactory(),
+                new ArrayBlockingQueue<>(capacity), daemonThreadFactory(),
                 new ThreadPoolExecutor.AbortPolicy());
     }
 
     /**
      * Offers a pending claim for {@code item}. Returns {@code true} when
      * the queue accepted the offer or a claim for the same job and run id
-     * is already pending; {@code false} when the bounded queue is full.
+     * is already pending; {@code false} when the pending cap is reached.
      */
     public boolean offer(Queue.Item item, Job<?, ?> job) {
         return offer(item, job, null);
@@ -132,32 +163,30 @@ public class VarroaClaimQueue {
     /**
      * Offers a pending claim for {@code item}, as {@link #offer(Queue.Item, Job)},
      * and runs {@code onResolved} once the claim resolves: granted,
-     * cancelled, given up after one hour, or after an unexpected claimer
-     * error (ruling q). {@code onResolved} never runs when the queue
-     * refuses the offer, because no claim started. The caller may pass
-     * {@code null} for no callback.
+     * cancelled, given up after one hour, left the queue, or after an
+     * unexpected claimer error (ruling q). {@code onResolved} never runs
+     * when the queue refuses the offer, because no claim started. The
+     * caller may pass {@code null} for no callback.
+     *
+     * <p>The cap counts every pending claim, parked on the scheduler or
+     * queued for a claimer thread.
      */
     public boolean offer(Queue.Item item, Job<?, ?> job, Runnable onResolved) {
         VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
         String runId = action != null ? action.getRunId() : "";
         String key = job.getFullName() + "#" + runId;
-        if (!pendingKeys.add(key)) {
-            return true;
+        synchronized (pendingKeys) {
+            if (pendingKeys.contains(key)) {
+                return true;
+            }
+            if (pendingKeys.size() >= capacity) {
+                return false;
+            }
+            pendingKeys.add(key);
         }
+        PendingClaim pc = new PendingClaim(item, job, action, key, onResolved);
         try {
-            executor.execute(() -> {
-                try {
-                    runClaim(item, job, action);
-                } catch (Exception e) {
-                    LOGGER.log(Level.WARNING, "VarroaClaimQueue: claimer thread failed", e);
-                    cancel(item);
-                } finally {
-                    pendingKeys.remove(key);
-                    if (onResolved != null) {
-                        onResolved.run();
-                    }
-                }
-            });
+            executor.execute(() -> runAttempt(pc));
             return true;
         } catch (RejectedExecutionException e) {
             pendingKeys.remove(key);
@@ -166,11 +195,18 @@ public class VarroaClaimQueue {
     }
 
     /**
-     * Stops the four claimer threads. {@link VarroaBuildEventLifecycle}
-     * calls this from its {@code @Terminator} (ruling r). Idempotent.
+     * Stops the four claimer threads and the retry scheduler, and drops
+     * every pending claim. {@link VarroaBuildEventLifecycle} calls this
+     * from its {@code @Terminator} (ruling r). Idempotent.
+     *
+     * <p>A dropped claim cancels no queue item. Jenkins saves the blocked
+     * item with its {@link VarroaIntentAction}, and after a restart the
+     * dispatcher offers the claim again with the same run id.
      */
     public void shutdown() {
         executor.shutdownNow();
+        scheduler.shutdownNow();
+        pendingKeys.clear();
     }
 
     /** {@code true} once {@link #shutdown()} has run. Package-private for testing. */
@@ -183,53 +219,152 @@ public class VarroaClaimQueue {
         return pendingKeys.contains(key);
     }
 
-    private void runClaim(Queue.Item item, Job<?, ?> job, VarroaIntentAction action) {
+    /** The number of claimer threads that run an attempt now. Package-private for testing. */
+    int activeClaimersForTesting() {
+        return executor.getActiveCount();
+    }
+
+    /**
+     * The state of one claim between two attempts. One attempt runs at a
+     * time, and each hand-back goes through an executor, which orders the
+     * writes of one attempt before the reads of the next. The fields thus
+     * need no lock.
+     */
+    private static final class PendingClaim {
+        final Queue.Item item;
+        final Job<?, ?> job;
+        final VarroaIntentAction action;
+        final String key;
+        final Runnable onResolved;
+        final LastAnswer last = new LastAnswer();
+        long deadline;
+        int attempt;
+
+        PendingClaim(Queue.Item item, Job<?, ?> job, VarroaIntentAction action, String key, Runnable onResolved) {
+            this.item = item;
+            this.job = job;
+            this.action = action;
+            this.key = key;
+            this.onResolved = onResolved;
+        }
+    }
+
+    /** Runs one attempt on a claimer thread, and resolves the claim unless the attempt parked it. */
+    private void runAttempt(PendingClaim pc) {
+        boolean resolved = true;
+        try {
+            resolved = attemptOnce(pc);
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "VarroaClaimQueue: claimer thread failed", e);
+            cancel(pc.item);
+        } finally {
+            if (resolved) {
+                resolve(pc);
+            }
+        }
+    }
+
+    /** Removes the pending key and runs the callback. Runs once per claim, at the final outcome. */
+    private void resolve(PendingClaim pc) {
+        pendingKeys.remove(pc.key);
+        if (pc.onResolved != null) {
+            pc.onResolved.run();
+        }
+    }
+
+    /**
+     * Hands a parked claim back to the claimer pool. Runs on the
+     * scheduler thread. A full work queue parks the claim for one more
+     * second, and the claim's deadline bounds the repeat. The pending cap
+     * equals the work queue's size, so a full queue is a guard only: it
+     * occurs only if the two sizes differ.
+     */
+    private void dispatch(PendingClaim pc) {
+        try {
+            executor.execute(() -> runAttempt(pc));
+        } catch (RejectedExecutionException e) {
+            if (executor.isShutdown()) {
+                resolve(pc);
+                return;
+            }
+            if (clock.nowMillis() >= pc.deadline) {
+                giveUp(pc);
+                resolve(pc);
+                return;
+            }
+            if (!park(pc, HANDBACK_RETRY_MILLIS)) {
+                resolve(pc);
+            }
+        }
+    }
+
+    /** Parks the claim for {@code delayMillis}. Answers false when the scheduler is shut down. */
+    private boolean park(PendingClaim pc, long delayMillis) {
+        try {
+            scheduler.schedule(() -> dispatch(pc), delayMillis);
+            return true;
+        } catch (RejectedExecutionException e) {
+            return false;
+        }
+    }
+
+    private void giveUp(PendingClaim pc) {
+        LOGGER.log(Level.WARNING,
+                "VarroaClaimQueue: giving up on job {0} after one hour; home slot {1}, run {2}; last answer {3}",
+                new Object[] {pc.job.getFullName(), homeSlotLabel(pc.job), pc.action.getRunId(), pc.last.text});
+        cancel(pc.item);
+    }
+
+    /**
+     * Runs one attempt of the claim. Answers true when the claim is
+     * resolved, and false when the claim is parked for its next attempt.
+     * An item that left the queue resolves the claim with no request.
+     */
+    private boolean attemptOnce(PendingClaim pc) {
+        Queue.Item item = pc.item;
+        Job<?, ?> job = pc.job;
+        VarroaIntentAction action = pc.action;
         if (action == null) {
             // The dispatcher stamps an action on every item before it
             // offers a claim (ruling p), so this never runs in
             // production. It leaves the item blocked rather than
             // cancelling it for a condition the claimer did not cause.
             LOGGER.log(Level.WARNING, "VarroaClaimQueue: item carries no VarroaIntentAction; leaving it blocked");
-            return;
+            return true;
         }
-        long deadline = clock.nowMillis() + LIFETIME_MILLIS;
-        int attempt = 0;
-        LastAnswer last = new LastAnswer();
-        while (true) {
-            attempt++;
-            IntentKey.Result derived = IntentKey.derive(item, job, action);
-            action.setOrigin(derived.origin);
-            action.setIntentKey(derived.intentKey);
-            action.setRevision(derived.revision);
-
-            // A refused forward proves the cached map disagrees with the
-            // recorder. The next attempt claims, so the fence names the home.
-            OptionalInt home = last.forwardRefused ? OptionalInt.empty()
-                    : homeCache.forwardSlotFor(job.getFullName());
-            last.forwardRefused = false;
-            if (home.isPresent()) {
-                if (forwardOnce(item, job, action, derived, home.getAsInt(), last)) {
-                    return;
-                }
-            } else if (claimOnce(item, job, action, derived, attempt, last)) {
-                return;
-            }
-
-            if (clock.nowMillis() >= deadline) {
-                LOGGER.log(Level.WARNING,
-                        "VarroaClaimQueue: giving up on job {0} after one hour; home slot {1}, run {2}; last answer {3}",
-                        new Object[] {job.getFullName(), homeSlotLabel(job), action.getRunId(), last.text});
-                cancel(item);
-                return;
-            }
-            try {
-                sleeper.sleep(backoffFor(attempt));
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                cancel(item);
-                return;
-            }
+        if (!stillQueued(item)) {
+            LOGGER.log(Level.FINE, "VarroaClaimQueue: the item of job {0}, run {1} left the queue; claiming stops",
+                    new Object[] {job.getFullName(), action.getRunId()});
+            return true;
         }
+        if (pc.attempt == 0) {
+            pc.deadline = clock.nowMillis() + LIFETIME_MILLIS;
+        }
+        pc.attempt++;
+        LastAnswer last = pc.last;
+        IntentKey.Result derived = IntentKey.derive(item, job, action);
+        action.setOrigin(derived.origin);
+        action.setIntentKey(derived.intentKey);
+        action.setRevision(derived.revision);
+
+        // A refused forward proves the cached map disagrees with the
+        // recorder. The next attempt claims, so the fence names the home.
+        OptionalInt home = last.forwardRefused ? OptionalInt.empty()
+                : homeCache.forwardSlotFor(job.getFullName());
+        last.forwardRefused = false;
+        if (home.isPresent()) {
+            if (forwardOnce(item, job, action, derived, home.getAsInt(), last)) {
+                return true;
+            }
+        } else if (claimOnce(item, job, action, derived, pc.attempt, last)) {
+            return true;
+        }
+
+        if (clock.nowMillis() >= pc.deadline) {
+            giveUp(pc);
+            return true;
+        }
+        return !park(pc, backoffFor(pc.attempt));
     }
 
     /**
@@ -472,7 +607,8 @@ public class VarroaClaimQueue {
 
     /**
      * The newest answer that did not grant a claim, as the give-up line
-     * shows it. One claim runs on one thread, so the field needs no lock.
+     * shows it. One attempt of a claim runs at a time, and each hand-back
+     * goes through an executor, so the field needs no lock.
      */
     private static final class LastAnswer {
         String text = "none";
@@ -617,6 +753,27 @@ public class VarroaClaimQueue {
     static long backoffFor(int attempt) {
         int index = Math.min(attempt - 1, BACKOFF_MILLIS.length - 1);
         return BACKOFF_MILLIS[Math.max(0, index)];
+    }
+
+    /** The production scheduler: one daemon thread that only hands a parked claim back to the pool. */
+    private static Scheduler retryScheduler() {
+        ScheduledThreadPoolExecutor timer = new ScheduledThreadPoolExecutor(1, runnable -> {
+            Thread thread = new Thread(runnable, "varroa-claim-retry");
+            thread.setDaemon(true);
+            return thread;
+        });
+        timer.setRemoveOnCancelPolicy(true);
+        return new Scheduler() {
+            @Override
+            public void schedule(Runnable task, long delayMillis) {
+                timer.schedule(task, delayMillis, TimeUnit.MILLISECONDS);
+            }
+
+            @Override
+            public void shutdownNow() {
+                timer.shutdownNow();
+            }
+        };
     }
 
     private static ThreadFactory daemonThreadFactory() {

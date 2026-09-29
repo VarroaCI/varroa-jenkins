@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.function.IntFunction;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -64,6 +65,8 @@ public class VarroaClaimQueueTest {
     private final List<String> requestBodies = new CopyOnWriteArrayList<>();
     private final AtomicInteger calls = new AtomicInteger();
     private volatile IntFunction<Reply> responder;
+    /** When set, answers each claim from its request body instead of {@link #responder}. */
+    private volatile Function<String, Reply> bodyResponder;
 
     private static final class Reply {
         final int status;
@@ -81,6 +84,7 @@ public class VarroaClaimQueueTest {
         ClaimRegistry.get().resetForTesting();
         requestBodies.clear();
         calls.set(0);
+        bodyResponder = null;
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/v1/claim", this::handle);
         server.start();
@@ -95,9 +99,11 @@ public class VarroaClaimQueueTest {
 
     private void handle(HttpExchange exchange) throws java.io.IOException {
         byte[] reqBytes = exchange.getRequestBody().readAllBytes();
-        requestBodies.add(new String(reqBytes, StandardCharsets.UTF_8));
+        String reqBody = new String(reqBytes, StandardCharsets.UTF_8);
+        requestBodies.add(reqBody);
         int n = calls.incrementAndGet();
-        Reply reply = responder.apply(n);
+        Function<String, Reply> byBody = bodyResponder;
+        Reply reply = byBody != null ? byBody.apply(reqBody) : responder.apply(n);
         byte[] resp = reply.body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json");
         exchange.sendResponseHeaders(reply.status, resp.length == 0 ? -1 : resp.length);
@@ -150,7 +156,7 @@ public class VarroaClaimQueueTest {
         responder = n -> new Reply(200, "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":1}");
 
         VarroaClaimQueue.Clock clock = () -> 42_000L;
-        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), clock, millis -> { });
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), clock, (task, d) -> task.run());
         assertTrue(queue.offer(item, project));
 
         awaitTrue(() -> !requestBodies.isEmpty(), "a claim request");
@@ -174,7 +180,7 @@ public class VarroaClaimQueueTest {
         Queue.Item item = scheduleItem(project);
         responder = n -> new Reply(200, "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":5}");
 
-        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, millis -> { });
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> task.run());
         queue.offer(item, project);
 
         VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
@@ -189,7 +195,7 @@ public class VarroaClaimQueueTest {
         Queue.Item item = scheduleItem(project);
         responder = n -> new Reply(200, "{\"decision\":\"duplicate\",\"run_id\":\"run-1\"}");
 
-        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, millis -> { });
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> task.run());
         queue.offer(item, project);
 
         awaitTrue(() -> isCancelled(item), "the item to be cancelled");
@@ -202,7 +208,7 @@ public class VarroaClaimQueueTest {
         Queue.Item item = scheduleItem(project);
         responder = n -> new Reply(200, "{\"decision\":\"vetoed\",\"reason_code\":\"FENCED\"}");
 
-        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, millis -> { });
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> task.run());
         queue.offer(item, project);
 
         awaitTrue(() -> isCancelled(item), "the item to be cancelled");
@@ -257,7 +263,7 @@ public class VarroaClaimQueueTest {
         responder = n -> new Reply(200, "{\"decision\":\"vetoed\",\"reason_code\":\"FENCED\","
                 + "\"message\":\"cell cell-old holds no member of tenant alpha\"}");
 
-        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, millis -> { });
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> task.run());
         queue.offer(item, project);
 
         awaitTrue(() -> isCancelled(item), "the item to be cancelled");
@@ -273,7 +279,7 @@ public class VarroaClaimQueueTest {
         List<String> lines = captureClaimQueueLog(Level.WARNING);
         responder = n -> new Reply(200, "{\"request_id\":\"req-1\"}");
 
-        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, millis -> { });
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> task.run());
         queue.offer(item, project);
 
         awaitTrue(() -> isCancelled(item), "the item to be cancelled");
@@ -291,8 +297,11 @@ public class VarroaClaimQueueTest {
                 + "\"message\":\"tenant alpha has no placement row\"}");
 
         long[] clockMillis = {0L};
-        VarroaClaimQueue.Sleeper sleeper = millis -> clockMillis[0] += millis;
-        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), () -> clockMillis[0], sleeper);
+        VarroaClaimQueue.Scheduler scheduler = (task, d) -> {
+            clockMillis[0] += d;
+            task.run();
+        };
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), () -> clockMillis[0], scheduler);
         queue.offer(item, project);
 
         awaitTrue(() -> isCancelled(item), "the item to be cancelled at the one-hour budget");
@@ -308,7 +317,7 @@ public class VarroaClaimQueueTest {
         Queue.Item item = scheduleItem(project);
         responder = n -> new Reply(200, "{\"decision\":\"vetoed\",\"reason_code\":\"CROSS_TENANT\"}");
 
-        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, millis -> { });
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> task.run());
         queue.offer(item, project);
 
         awaitTrue(() -> isCancelled(item), "the item to be cancelled");
@@ -325,7 +334,10 @@ public class VarroaClaimQueueTest {
                 : new Reply(200, "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":1}");
 
         List<Long> slept = new CopyOnWriteArrayList<>();
-        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, slept::add);
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> {
+            slept.add(d);
+            task.run();
+        });
         queue.offer(item, project);
 
         VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
@@ -342,7 +354,7 @@ public class VarroaClaimQueueTest {
                 ? new Reply(429, "{\"decision\":\"\",\"code\":\"RESOURCE_EXHAUSTED\"}")
                 : new Reply(200, "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":1}");
 
-        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, millis -> { });
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> task.run());
         queue.offer(item, project);
 
         VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
@@ -356,7 +368,7 @@ public class VarroaClaimQueueTest {
         Queue.Item item = scheduleItem(project);
         responder = n -> new Reply(200, "{\"request_id\":\"req-1\"}");
 
-        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, millis -> { });
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> task.run());
         queue.offer(item, project);
 
         awaitTrue(() -> isCancelled(item), "the item to be cancelled");
@@ -372,11 +384,12 @@ public class VarroaClaimQueueTest {
         long[] clockMillis = {0L};
         List<Long> slept = new CopyOnWriteArrayList<>();
         long[] cancelledAtMillis = {-1L};
-        VarroaClaimQueue.Sleeper sleeper = millis -> {
-            slept.add(millis);
-            clockMillis[0] += millis;
+        VarroaClaimQueue.Scheduler scheduler = (task, d) -> {
+            slept.add(d);
+            clockMillis[0] += d;
+            task.run();
         };
-        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), () -> clockMillis[0], sleeper);
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), () -> clockMillis[0], scheduler);
         queue.offer(item, project);
 
         awaitTrue(() -> isCancelled(item), "the item to be cancelled at the one-hour budget");
@@ -396,7 +409,7 @@ public class VarroaClaimQueueTest {
                 ? new Reply(503, UNAVAILABLE_BODY)
                 : new Reply(200, "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":7}");
 
-        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, millis -> { });
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> task.run());
         queue.offer(item, project);
 
         VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
@@ -415,7 +428,7 @@ public class VarroaClaimQueueTest {
         Queue.Item item = scheduleItem(project);
         responder = n -> new Reply(200, "{\"decision\":\"bogus\"}");
 
-        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, millis -> { });
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> task.run());
         queue.offer(item, project);
 
         awaitTrue(() -> isCancelled(item), "the item to be cancelled");
@@ -432,7 +445,7 @@ public class VarroaClaimQueueTest {
                 ? new Reply(200, "{\"decision\":\"vetoed\",\"reason_code\":\"NOT_READY\"}")
                 : new Reply(200, "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":1}");
 
-        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, millis -> { });
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> task.run());
         queue.offer(item, project);
 
         VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
@@ -458,11 +471,12 @@ public class VarroaClaimQueueTest {
 
         long[] clockMillis = {0L};
         List<Long> slept = new CopyOnWriteArrayList<>();
-        VarroaClaimQueue.Sleeper sleeper = millis -> {
-            slept.add(millis);
-            clockMillis[0] += millis;
+        VarroaClaimQueue.Scheduler scheduler = (task, d) -> {
+            slept.add(d);
+            clockMillis[0] += d;
+            task.run();
         };
-        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), () -> clockMillis[0], sleeper);
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), () -> clockMillis[0], scheduler);
         queue.offer(item, project);
 
         VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
@@ -478,7 +492,7 @@ public class VarroaClaimQueueTest {
     public void shutdownStopsTheExecutorAndRefusesFurtherOffers() throws Exception {
         FreeStyleProject project = j.createFreeStyleProject("shutdown-job");
         Queue.Item item = scheduleItem(project);
-        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, millis -> { });
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> task.run());
 
         queue.shutdown();
 
@@ -496,7 +510,7 @@ public class VarroaClaimQueueTest {
         when(client.post(any(), any())).thenThrow(new RuntimeException("boom"));
         java.util.concurrent.atomic.AtomicBoolean resolved = new java.util.concurrent.atomic.AtomicBoolean(false);
 
-        VarroaClaimQueue queue = new VarroaClaimQueue(client, System::currentTimeMillis, millis -> { });
+        VarroaClaimQueue queue = new VarroaClaimQueue(client, System::currentTimeMillis, (task, d) -> task.run());
         queue.offer(item, project, () -> resolved.set(true));
 
         awaitTrue(() -> isCancelled(item), "the item to be cancelled after an unexpected error");
@@ -515,7 +529,7 @@ public class VarroaClaimQueueTest {
         Queue.Item item = scheduled.getItem();
         assertNull("fixture must start with no action", item.getAction(VarroaIntentAction.class));
 
-        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, millis -> { });
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> task.run());
         java.util.concurrent.atomic.AtomicBoolean resolved = new java.util.concurrent.atomic.AtomicBoolean(false);
         queue.offer(item, project, () -> resolved.set(true));
 
@@ -540,7 +554,7 @@ public class VarroaClaimQueueTest {
         Queue.Item item = scheduleItem(project);
 
         VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
-                millis -> { }, homes.cache());
+                (task, d) -> task.run(), homes.cache());
         queue.offer(item, project);
 
         awaitTrue(() -> isCancelled(item), "the item to be cancelled after the forward");
@@ -555,7 +569,7 @@ public class VarroaClaimQueueTest {
         Queue.Item item = scheduleItem(project);
 
         VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
-                millis -> { }, homes.cache());
+                (task, d) -> task.run(), homes.cache());
         queue.offer(item, project);
 
         awaitTrue(() -> homes.stub().forwardCallCount() == 1, "one forward");
@@ -578,7 +592,7 @@ public class VarroaClaimQueueTest {
         Queue.Item item = scheduleItem(project);
 
         VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
-                millis -> { }, homes.cache());
+                (task, d) -> task.run(), homes.cache());
         queue.offer(item, project);
 
         awaitTrue(() -> item.getAction(VarroaIntentAction.class).isGranted(), "the claim to be granted");
@@ -592,7 +606,7 @@ public class VarroaClaimQueueTest {
         Queue.Item item = scheduleItem(project);
 
         VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
-                millis -> { }, homes.cache());
+                (task, d) -> task.run(), homes.cache());
         queue.offer(item, project);
 
         awaitTrue(() -> isCancelled(item), "the item to be cancelled after the forward");
@@ -614,7 +628,7 @@ public class VarroaClaimQueueTest {
                 + "\"job_homes\":{\"payments/moved\":1}}]}");
 
         VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
-                millis -> { }, homes.cache());
+                (task, d) -> task.run(), homes.cache());
         queue.offer(item, project);
 
         awaitTrue(() -> homes.stub().forwardCallCount() == 1, "a forward after the not-home veto");
@@ -631,7 +645,7 @@ public class VarroaClaimQueueTest {
         Queue.Item item = scheduleItem(project);
 
         VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
-                millis -> { }, homes.cache());
+                (task, d) -> task.run(), homes.cache());
         queue.offer(item, project);
 
         awaitTrue(() -> isCancelled(item), "the item to be cancelled after the forward");
@@ -651,7 +665,7 @@ public class VarroaClaimQueueTest {
         Queue.Item item = scheduleItem(project);
 
         VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
-                millis -> { }, homes.cache());
+                (task, d) -> task.run(), homes.cache());
         queue.offer(item, project);
 
         awaitTrue(() -> homes.stub().claimCallCount() >= 3, "the claim to retry on the ladder");
@@ -667,7 +681,7 @@ public class VarroaClaimQueueTest {
         Queue.Item item = scheduleItem(project);
 
         VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
-                millis -> { }, homes.cache());
+                (task, d) -> task.run(), homes.cache());
         queue.offer(item, project);
 
         awaitTrue(() -> item.getAction(VarroaIntentAction.class).isGranted(), "the claim to be granted");
@@ -685,7 +699,7 @@ public class VarroaClaimQueueTest {
         Queue.Item item = scheduleItem(project);
 
         VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
-                millis -> { }, homes.cache());
+                (task, d) -> task.run(), homes.cache());
         queue.offer(item, project);
 
         awaitTrue(() -> item.getAction(VarroaIntentAction.class).isGranted(), "the claim to be granted");
@@ -703,11 +717,12 @@ public class VarroaClaimQueueTest {
 
         long[] clockMillis = {0L};
         List<Long> slept = new CopyOnWriteArrayList<>();
-        VarroaClaimQueue.Sleeper sleeper = millis -> {
-            slept.add(millis);
-            clockMillis[0] += millis;
+        VarroaClaimQueue.Scheduler scheduler = (task, d) -> {
+            slept.add(d);
+            clockMillis[0] += d;
+            task.run();
         };
-        VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), () -> clockMillis[0], sleeper,
+        VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), () -> clockMillis[0], scheduler,
                 homes.cache());
         queue.offer(item, project);
 
@@ -716,6 +731,145 @@ public class VarroaClaimQueueTest {
         assertEquals("the ladder starts at one second", Long.valueOf(1000L), slept.get(0));
         long totalSlept = slept.stream().mapToLong(Long::longValue).sum();
         assertTrue("the budget is one hour, got " + totalSlept, totalSlept >= 60L * 60 * 1000);
+    }
+
+    // ---- A waiting claim holds no claimer thread ----
+
+    private static final String NOT_READY_BODY =
+            "{\"decision\":\"vetoed\",\"reason_code\":\"NOT_READY\"}";
+
+    private static final String GRANT_BODY =
+            "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":1}";
+
+    @Test
+    public void aNotReadyClaimReleasesItsThread() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("parked-job");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> new Reply(200, NOT_READY_BODY);
+
+        List<Runnable> parked = new CopyOnWriteArrayList<>();
+        List<Long> delays = new CopyOnWriteArrayList<>();
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> {
+            delays.add(d);
+            parked.add(task);
+        });
+        queue.offer(item, project);
+
+        awaitTrue(() -> parked.size() == 1, "the claim to park on the scheduler");
+        awaitTrue(() -> queue.activeClaimersForTesting() == 0, "every claimer thread to be free");
+        assertTrue("a parked claim stays pending", queue.isPendingForTesting("parked-job#run-1"));
+        assertEquals("the first ladder step is one second", List.of(1000L), delays);
+        assertEquals(1, calls.get());
+
+        responder = n -> new Reply(200, GRANT_BODY);
+        parked.remove(0).run();
+
+        VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
+        awaitTrue(action::isGranted, "the grant after the hand-back");
+        assertEquals(2, calls.get());
+        queue.shutdown();
+    }
+
+    @Test
+    public void aReadyJobClaimsWhileFourClaimsWaitOnNotReady() throws Exception {
+        bodyResponder = body -> body.contains("\"job_path\":\"ready-job\"")
+                ? new Reply(200, GRANT_BODY)
+                : new Reply(200, NOT_READY_BODY);
+        // The scheduler never fires, so a refused claim waits forever.
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> { });
+
+        for (int i = 0; i < VarroaClaimQueue.THREADS; i++) {
+            FreeStyleProject waiting = j.createFreeStyleProject("waiting-job-" + i);
+            queue.offer(scheduleItem(waiting), waiting);
+        }
+        awaitTrue(() -> calls.get() == VarroaClaimQueue.THREADS, "one refused claim per waiting job");
+
+        FreeStyleProject ready = j.createFreeStyleProject("ready-job");
+        Queue.Item item = scheduleItem(ready);
+        long offeredAt = System.currentTimeMillis();
+        queue.offer(item, ready);
+
+        VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
+        awaitTrue(action::isGranted, "the ready job's grant");
+        long waited = System.currentTimeMillis() - offeredAt;
+        assertTrue("the ready job must not wait behind refused claims, waited " + waited, waited < 5_000L);
+        for (int i = 0; i < VarroaClaimQueue.THREADS; i++) {
+            assertTrue(queue.isPendingForTesting("waiting-job-" + i + "#run-1"));
+        }
+        queue.shutdown();
+    }
+
+    @Test
+    public void theBudgetStillExpiresOffThread() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("budget-job");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> new Reply(200, NOT_READY_BODY);
+
+        long[] clockMillis = {0L};
+        List<String> schedulingThreads = new CopyOnWriteArrayList<>();
+        VarroaClaimQueue.Scheduler scheduler = (task, d) -> {
+            schedulingThreads.add(Thread.currentThread().getName());
+            clockMillis[0] += d;
+            task.run();
+        };
+        AtomicInteger resolved = new AtomicInteger();
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), () -> clockMillis[0], scheduler);
+        queue.offer(item, project, resolved::incrementAndGet);
+
+        awaitTrue(() -> isCancelled(item), "the item to be cancelled at the one-hour budget");
+        awaitTrue(() -> resolved.get() == 1, "one resolution");
+        assertTrue("the cancel must come at the one-hour budget or later, got " + clockMillis[0],
+                clockMillis[0] >= VarroaClaimQueue.LIFETIME_MILLIS);
+        assertFalse(queue.isPendingForTesting("budget-job#run-1"));
+        assertEquals("the claim resolves exactly once", 1, resolved.get());
+        assertTrue("only a claimer thread parks a claim",
+                schedulingThreads.stream().allMatch(name -> name.startsWith("varroa-claim-queue-")));
+    }
+
+    @Test
+    public void aCancelledItemStopsClaiming() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("cancelled-job");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> new Reply(200, NOT_READY_BODY);
+
+        List<Runnable> parked = new CopyOnWriteArrayList<>();
+        java.util.concurrent.atomic.AtomicBoolean resolved = new java.util.concurrent.atomic.AtomicBoolean(false);
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis,
+                (task, d) -> parked.add(task));
+        queue.offer(item, project, () -> resolved.set(true));
+
+        awaitTrue(() -> parked.size() == 1, "the claim to park on the scheduler");
+        assertTrue(Queue.getInstance().cancel(item));
+        parked.remove(0).run();
+
+        awaitTrue(resolved::get, "the claim to resolve");
+        assertEquals("an item that left the queue sends no claim", 1, calls.get());
+        assertFalse(queue.isPendingForTesting("cancelled-job#run-1"));
+        assertTrue("the claim parks no new attempt", parked.isEmpty());
+    }
+
+    @Test
+    public void thePendingCapCountsParkedClaims() throws Exception {
+        responder = n -> new Reply(200, NOT_READY_BODY);
+        List<Runnable> parked = new CopyOnWriteArrayList<>();
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis,
+                (task, d) -> parked.add(task), VarroaHomeCache.get(), BuildNumberGate.get(), 2);
+
+        FreeStyleProject first = j.createFreeStyleProject("cap-job-0");
+        FreeStyleProject second = j.createFreeStyleProject("cap-job-1");
+        Queue.Item firstItem = scheduleItem(first);
+        assertTrue(queue.offer(firstItem, first));
+        assertTrue(queue.offer(scheduleItem(second), second));
+        awaitTrue(() -> parked.size() == 2, "both claims to park");
+        awaitTrue(() -> queue.activeClaimersForTesting() == 0, "every claimer thread to be free");
+
+        FreeStyleProject third = j.createFreeStyleProject("cap-job-2");
+        assertFalse("parked claims count toward the cap", queue.offer(scheduleItem(third), third));
+        assertTrue("a claim that is already pending is accepted", queue.offer(firstItem, first));
+        assertEquals(2, calls.get());
+        queue.shutdown();
+        assertFalse("a shutdown drops the parked claims", queue.isPendingForTesting("cap-job-0#run-1"));
+        assertFalse("a shutdown cancels no queue item", isCancelled(firstItem));
     }
 
     private static String extractField(String json, String field) {
