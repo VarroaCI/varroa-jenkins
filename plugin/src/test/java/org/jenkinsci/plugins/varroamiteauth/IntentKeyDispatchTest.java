@@ -11,10 +11,11 @@ import java.util.List;
 import org.junit.Test;
 
 /**
- * Tests for {@link IntentKey}'s revision wait: blocks until the factory
- * revision differs from the admission revision, resolves at once when it
- * already differs, falls back after 30 s, and is skipped for a non-branch
- * cause (D5).
+ * Tests for {@link IntentKey}'s revision read: each call reads the factory
+ * once and never waits. It answers "not yet" while the factory revision
+ * equals the admission revision before the deadline, resolves at once
+ * when it differs, falls back at the deadline, and is skipped for a
+ * non-branch cause (D5).
  */
 public class IntentKeyDispatchTest {
 
@@ -47,15 +48,17 @@ public class IntentKeyDispatchTest {
         }
     }
 
-    /** A factory whose revision can change between polls. */
+    /** A factory whose revision can change between polls. It counts each revision read. */
     static class MutableFactory {
         volatile String revision;
+        final java.util.concurrent.atomic.AtomicInteger reads = new java.util.concurrent.atomic.AtomicInteger();
 
         MutableFactory(String revision) {
             this.revision = revision;
         }
 
         public String getRevision(Object project) {
+            reads.incrementAndGet();
             return revision;
         }
 
@@ -72,27 +75,6 @@ public class IntentKeyDispatchTest {
 
         public String getLastSeenRevision(Object project) {
             throw new AssertionError("factory must not be consulted with no branch cause");
-        }
-    }
-
-    /** Shared fake clock and sleeper: a sleep advances the clock by the same amount. */
-    static final class FakeTime implements IntentKey.Clock, IntentKey.Sleeper {
-        long now;
-        int sleepCount;
-
-        FakeTime(long start) {
-            this.now = start;
-        }
-
-        @Override
-        public long nowMillis() {
-            return now;
-        }
-
-        @Override
-        public void sleep(long millis) {
-            now += millis;
-            sleepCount++;
         }
     }
 
@@ -125,28 +107,26 @@ public class IntentKeyDispatchTest {
         return item;
     }
 
+    private static final long NOW = 1_000_000L;
+    private static final long DEADLINE = NOW + IntentKey.WAIT_DEADLINE_MILLIS;
+
     @Test
-    public void aRevisionEqualToAdmissionBlocksUntilItChanges() {
+    public void aRevisionEqualToAdmissionAnswersNotYet() {
         MutableFactory factory = new MutableFactory("rev-old");
         MultiBranchProject parent = new MultiBranchProject(factory);
         Job<?, ?> job = job("folder/job", null);
         Queue.Item item = itemWithCauses(List.of(new BranchEventCause()));
         VarroaIntentAction action = new VarroaIntentAction("run-1", "", "rev-old", 0L);
-        FakeTime time = new FakeTime(1_000_000L);
 
-        // The factory reports the same (admission) revision until the
-        // fake sleeper has been called twice, then a new one.
-        IntentKey.Sleeper sleeper = millis -> {
-            time.sleep(millis);
-            if (time.sleepCount == 2) {
-                factory.revision = "rev-new";
-            }
-        };
+        assertNull("an unaccepted revision before the deadline answers not yet",
+                IntentKey.derive(item, job, action, NOW, DEADLINE, () -> parent));
+        assertEquals("one call reads the factory once", 1, factory.reads.get());
 
-        IntentKey.Result result = IntentKey.derive(item, job, action, time, sleeper, () -> parent);
+        factory.revision = "rev-new";
+        IntentKey.Result result = IntentKey.derive(item, job, action, NOW + 2000L, DEADLINE, () -> parent);
         assertEquals(IntentKey.ORIGIN_SCM, result.origin);
         assertEquals("scm:folder/job:rev-new", result.intentKey);
-        assertTrue("expected at least 2 sleeps before the revision changed", time.sleepCount >= 2);
+        assertEquals(2, factory.reads.get());
     }
 
     @Test
@@ -156,26 +136,25 @@ public class IntentKeyDispatchTest {
         Job<?, ?> job = job("folder/job", null);
         Queue.Item item = itemWithCauses(List.of(new BranchIndexingCause()));
         VarroaIntentAction action = new VarroaIntentAction("run-1", "", "rev-old", 0L);
-        FakeTime time = new FakeTime(1_000_000L);
 
-        IntentKey.Result result = IntentKey.derive(item, job, action, time, time, () -> parent);
+        IntentKey.Result result = IntentKey.derive(item, job, action, NOW, DEADLINE, () -> parent);
         assertEquals("scm:folder/job:rev-new", result.intentKey);
-        assertEquals("no wait needed when the first read already differs", 0, time.sleepCount);
+        assertEquals(1, factory.reads.get());
     }
 
     @Test
-    public void a30SecondDeadlineFallsBackToApiUuid() {
+    public void anUnchangedRevisionAtTheDeadlineFallsBackToApiUuid() {
         MutableFactory factory = new MutableFactory("rev-stuck");
         MultiBranchProject parent = new MultiBranchProject(factory);
         Job<?, ?> job = job("folder/job", null);
         Queue.Item item = itemWithCauses(List.of(new BranchEventCause()));
         VarroaIntentAction action = new VarroaIntentAction("run-1", "", "rev-stuck", 0L);
-        FakeTime time = new FakeTime(1_000_000L);
 
-        IntentKey.Result result = IntentKey.derive(item, job, action, time, time, () -> parent);
+        assertNull(IntentKey.derive(item, job, action, DEADLINE - 1, DEADLINE, () -> parent));
+        IntentKey.Result result = IntentKey.derive(item, job, action, DEADLINE, DEADLINE, () -> parent);
         assertEquals(IntentKey.ORIGIN_CELL_LOCAL, result.origin);
         assertTrue(result.intentKey.startsWith("api:"));
-        assertEquals(15, time.sleepCount);
+        assertEquals(2, factory.reads.get());
     }
 
     @Test
@@ -183,12 +162,22 @@ public class IntentKeyDispatchTest {
         MultiBranchProject parent = new MultiBranchProject(new PoisonFactory());
         Job<?, ?> job = job("folder/job", null);
         Queue.Item item = itemWithCauses(List.of(new Cause.UserIdCause()));
-        FakeTime time = new FakeTime(1_000_000L);
 
-        IntentKey.Result result = IntentKey.derive(item, job, null, time, time, () -> parent);
+        IntentKey.Result result = IntentKey.derive(item, job, null, NOW, DEADLINE, () -> parent);
         // Falls straight to the api:<uuid> fallback; the poison factory,
         // if touched, would have thrown.
         assertEquals(IntentKey.ORIGIN_CELL_LOCAL, result.origin);
-        assertEquals(0, time.sleepCount);
+    }
+
+    @Test
+    public void aNonMultibranchParentFallsBackAtOnce() {
+        Job<?, ?> job = job("folder/job", null);
+        Queue.Item item = itemWithCauses(List.of(new BranchEventCause()));
+        VarroaIntentAction action = new VarroaIntentAction("run-1", "", "rev-old", 0L);
+
+        IntentKey.Result result = IntentKey.derive(item, job, action, NOW, DEADLINE, Object::new);
+        assertNotNull("a parent with no factory has no revision to wait for", result);
+        assertEquals(IntentKey.ORIGIN_CELL_LOCAL, result.origin);
+        assertTrue(result.intentKey.startsWith("api:"));
     }
 }

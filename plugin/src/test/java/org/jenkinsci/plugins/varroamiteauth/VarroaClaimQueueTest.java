@@ -872,6 +872,181 @@ public class VarroaClaimQueueTest {
         assertFalse("a shutdown cancels no queue item", isCancelled(firstItem));
     }
 
+    // ---- A revision wait holds no claimer thread ----
+
+    /** Schedules an item with a branch event cause and the given admission revision. */
+    private Queue.Item scheduleBranchItem(FreeStyleProject project, String admissionRevision) {
+        VarroaIntentAction action = new VarroaIntentAction("run-1", "", admissionRevision, 1_000_000L);
+        ScheduleResult result = Queue.getInstance().schedule2(project, QUIET_PERIOD, action,
+                new hudson.model.CauseAction(new IntentKeyDispatchTest.BranchEventCause()));
+        assertTrue(result.isAccepted());
+        return result.getItem();
+    }
+
+    @Test
+    public void aRevisionWaitReleasesItsThread() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("revision-job");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> new Reply(200, GRANT_BODY);
+
+        java.util.concurrent.atomic.AtomicBoolean accepted = new java.util.concurrent.atomic.AtomicBoolean(false);
+        AtomicInteger derives = new AtomicInteger();
+        VarroaClaimQueue.Deriver deriver = (i, jb, a, now, deadline) -> {
+            derives.incrementAndGet();
+            return accepted.get() ? IntentKey.derive(i, jb, a, now, deadline) : null;
+        };
+        List<Runnable> parked = new CopyOnWriteArrayList<>();
+        List<Long> delays = new CopyOnWriteArrayList<>();
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> {
+            delays.add(d);
+            parked.add(task);
+        }, VarroaHomeCache.get(), BuildNumberGate.get(), VarroaClaimQueue.CAPACITY, deriver);
+        queue.offer(item, project);
+
+        awaitTrue(() -> parked.size() == 1, "the revision wait to park on the scheduler");
+        awaitTrue(() -> queue.activeClaimersForTesting() == 0, "every claimer thread to be free");
+        assertTrue("a waiting claim stays pending", queue.isPendingForTesting("revision-job#run-1"));
+        assertEquals("a revision poll parks for two seconds", List.of(2000L), delays);
+        assertEquals("a revision wait sends no request", 0, calls.get());
+
+        accepted.set(true);
+        parked.remove(0).run();
+
+        VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
+        awaitTrue(action::isGranted, "the grant after the revision wait");
+        assertEquals(1, calls.get());
+        assertTrue("a revision poll is not a claim attempt: " + requestBodies.get(0),
+                requestBodies.get(0).contains("\"attempt\":1"));
+        assertEquals(2, derives.get());
+        queue.shutdown();
+    }
+
+    @Test
+    public void aReadyJobClaimsWhileFourClaimsWaitOnARevision() throws Exception {
+        responder = n -> new Reply(200, GRANT_BODY);
+        AtomicInteger waits = new AtomicInteger();
+        VarroaClaimQueue.Deriver deriver = (i, jb, a, now, deadline) -> {
+            if (jb.getFullName().startsWith("revision-wait-")) {
+                waits.incrementAndGet();
+                return null;
+            }
+            return IntentKey.derive(i, jb, a, now, deadline);
+        };
+        // The scheduler never fires, so a revision wait lasts forever.
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> { },
+                VarroaHomeCache.get(), BuildNumberGate.get(), VarroaClaimQueue.CAPACITY, deriver);
+
+        for (int i = 0; i < VarroaClaimQueue.THREADS; i++) {
+            FreeStyleProject waiting = j.createFreeStyleProject("revision-wait-" + i);
+            queue.offer(scheduleItem(waiting), waiting);
+        }
+        awaitTrue(() -> waits.get() == VarroaClaimQueue.THREADS, "one revision read per waiting job");
+
+        FreeStyleProject ready = j.createFreeStyleProject("revision-ready");
+        Queue.Item item = scheduleItem(ready);
+        long offeredAt = System.currentTimeMillis();
+        queue.offer(item, ready);
+
+        VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
+        awaitTrue(action::isGranted, "the ready job's grant");
+        long waited = System.currentTimeMillis() - offeredAt;
+        assertTrue("the ready job must not wait behind revision waits, waited " + waited, waited < 5_000L);
+        assertEquals("only the ready job posts a claim", 1, calls.get());
+        for (int i = 0; i < VarroaClaimQueue.THREADS; i++) {
+            assertTrue(queue.isPendingForTesting("revision-wait-" + i + "#run-1"));
+        }
+        queue.shutdown();
+    }
+
+    @Test
+    public void aRevisionWaitFallsBackAtThe30SecondBudget() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("revision-stuck");
+        Queue.Item item = scheduleBranchItem(project, "rev-stuck");
+        responder = n -> new Reply(200, GRANT_BODY);
+
+        IntentKeyDispatchTest.MutableFactory factory = new IntentKeyDispatchTest.MutableFactory("rev-stuck");
+        IntentKeyDispatchTest.MultiBranchProject parent = new IntentKeyDispatchTest.MultiBranchProject(factory);
+        VarroaClaimQueue.Deriver deriver = (i, jb, a, now, deadline) ->
+                IntentKey.derive(i, jb, a, now, deadline, () -> parent);
+        long[] clockMillis = {0L};
+        List<Long> delays = new CopyOnWriteArrayList<>();
+        VarroaClaimQueue.Scheduler scheduler = (task, d) -> {
+            delays.add(d);
+            clockMillis[0] += d;
+            task.run();
+        };
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), () -> clockMillis[0], scheduler,
+                VarroaHomeCache.get(), BuildNumberGate.get(), VarroaClaimQueue.CAPACITY, deriver);
+        queue.offer(item, project);
+
+        VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
+        awaitTrue(action::isGranted, "the grant after the fallback");
+        assertEquals("fifteen revision polls park for two seconds each", java.util.Collections.nCopies(15, 2000L),
+                delays);
+        assertEquals("the factory is read at 0, 2, ..., 30 s", 16, factory.reads.get());
+        assertEquals(1, calls.get());
+        String body = requestBodies.get(0);
+        assertEquals(IntentKey.ORIGIN_CELL_LOCAL, extractField(body, "origin"));
+        assertTrue(body, extractField(body, "intent_key").startsWith("api:"));
+        assertTrue(body, body.contains("\"attempt\":1"));
+        queue.shutdown();
+    }
+
+    @Test
+    public void aRevisionWaitStillEndsAtTheOneHourBudget() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("revision-forever");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> new Reply(200, GRANT_BODY);
+
+        VarroaClaimQueue.Deriver deriver = (i, jb, a, now, deadline) -> null;
+        long[] clockMillis = {0L};
+        VarroaClaimQueue.Scheduler scheduler = (task, d) -> {
+            clockMillis[0] += d;
+            task.run();
+        };
+        AtomicInteger resolved = new AtomicInteger();
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), () -> clockMillis[0], scheduler,
+                VarroaHomeCache.get(), BuildNumberGate.get(), VarroaClaimQueue.CAPACITY, deriver);
+        queue.offer(item, project, resolved::incrementAndGet);
+
+        awaitTrue(() -> isCancelled(item), "the item to be cancelled at the one-hour budget");
+        awaitTrue(() -> resolved.get() == 1, "one resolution");
+        assertTrue("the cancel must come at the one-hour budget or later, got " + clockMillis[0],
+                clockMillis[0] >= VarroaClaimQueue.LIFETIME_MILLIS);
+        assertEquals("a revision wait sends no claim", 0, calls.get());
+        assertFalse(queue.isPendingForTesting("revision-forever#run-1"));
+    }
+
+    @Test
+    public void aCancelledItemStopsTheRevisionWait() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("revision-cancelled");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> new Reply(200, GRANT_BODY);
+
+        AtomicInteger derives = new AtomicInteger();
+        VarroaClaimQueue.Deriver deriver = (i, jb, a, now, deadline) -> {
+            derives.incrementAndGet();
+            return null;
+        };
+        List<Runnable> parked = new CopyOnWriteArrayList<>();
+        java.util.concurrent.atomic.AtomicBoolean resolved = new java.util.concurrent.atomic.AtomicBoolean(false);
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis,
+                (task, d) -> parked.add(task), VarroaHomeCache.get(), BuildNumberGate.get(),
+                VarroaClaimQueue.CAPACITY, deriver);
+        queue.offer(item, project, () -> resolved.set(true));
+
+        awaitTrue(() -> parked.size() == 1, "the revision wait to park on the scheduler");
+        assertTrue(Queue.getInstance().cancel(item));
+        parked.remove(0).run();
+
+        awaitTrue(resolved::get, "the claim to resolve");
+        assertEquals("an item that left the queue reads no revision", 1, derives.get());
+        assertEquals("an item that left the queue sends no claim", 0, calls.get());
+        assertFalse(queue.isPendingForTesting("revision-cancelled#run-1"));
+        assertTrue("the claim parks no new poll", parked.isEmpty());
+        queue.shutdown();
+    }
+
     private static String extractField(String json, String field) {
         String marker = "\"" + field + "\":\"";
         int start = json.indexOf(marker);

@@ -44,6 +44,13 @@ import java.util.logging.Logger;
  * does not delay the claims of other jobs. A hand-back that the full work
  * queue refuses waits one more second, bounded by the claim's deadline.
  *
+ * <p>A branch-caused item can wait up to 30 s for its accepted revision.
+ * Each attempt reads the branch project factory once. While the revision
+ * is not accepted, the attempt sends no request and parks the claim on
+ * the same scheduler for two seconds. The revision wait thus holds no
+ * claimer thread either. A revision poll is not a claim post, so it does
+ * not advance the ladder or the request's {@code attempt} field.
+ *
  * <p>A claimer thread also owns the intra-tenant forward. It resolves the
  * job's home slot from {@link VarroaHomeCache} before it posts the claim,
  * and forwards a job this cell does not home. A {@code NOT_HOME} veto
@@ -108,6 +115,17 @@ public class VarroaClaimQueue {
         long nowMillis();
     }
 
+    /**
+     * Derives the origin and the intent key of a claim. Answers
+     * {@code null} while a branch-caused item waits for its revision.
+     * The production deriver is {@link IntentKey#derive(Queue.Item, Job,
+     * VarroaIntentAction, long, long)}.
+     */
+    interface Deriver {
+        IntentKey.Result derive(Queue.Item item, Job<?, ?> job, VarroaIntentAction action, long nowMillis,
+                long revisionDeadlineMillis);
+    }
+
     private final MiteLoopbackClient client;
     private final Clock clock;
     private final Scheduler scheduler;
@@ -116,6 +134,7 @@ public class VarroaClaimQueue {
     private final int capacity;
     private final Set<String> pendingKeys = ConcurrentHashMap.newKeySet();
     private final BuildNumberGate gate;
+    private final Deriver deriver;
 
     public VarroaClaimQueue() {
         this(new MiteLoopbackClient(), System::currentTimeMillis, retryScheduler(), VarroaHomeCache.get());
@@ -140,7 +159,14 @@ public class VarroaClaimQueue {
     /** Package-private constructor for testing: sets the pending cap as well. */
     VarroaClaimQueue(MiteLoopbackClient client, Clock clock, Scheduler scheduler, VarroaHomeCache homeCache,
             BuildNumberGate gate, int capacity) {
+        this(client, clock, scheduler, homeCache, gate, capacity, IntentKey::derive);
+    }
+
+    /** Package-private constructor for testing: injects the deriver as well. */
+    VarroaClaimQueue(MiteLoopbackClient client, Clock clock, Scheduler scheduler, VarroaHomeCache homeCache,
+            BuildNumberGate gate, int capacity, Deriver deriver) {
         this.gate = gate;
+        this.deriver = deriver;
         this.client = client;
         this.clock = clock;
         this.scheduler = scheduler;
@@ -237,7 +263,9 @@ public class VarroaClaimQueue {
         final String key;
         final Runnable onResolved;
         final LastAnswer last = new LastAnswer();
+        boolean started;
         long deadline;
+        long revisionDeadline;
         int attempt;
 
         PendingClaim(Queue.Item item, Job<?, ?> job, VarroaIntentAction action, String key, Runnable onResolved) {
@@ -337,12 +365,22 @@ public class VarroaClaimQueue {
                     new Object[] {job.getFullName(), action.getRunId()});
             return true;
         }
-        if (pc.attempt == 0) {
-            pc.deadline = clock.nowMillis() + LIFETIME_MILLIS;
+        long now = clock.nowMillis();
+        if (!pc.started) {
+            pc.started = true;
+            pc.deadline = now + LIFETIME_MILLIS;
+            pc.revisionDeadline = now + IntentKey.WAIT_DEADLINE_MILLIS;
+        }
+        IntentKey.Result derived = deriver.derive(item, job, action, now, pc.revisionDeadline);
+        if (derived == null) {
+            if (now >= pc.deadline) {
+                giveUp(pc);
+                return true;
+            }
+            return !park(pc, IntentKey.WAIT_INTERVAL_MILLIS);
         }
         pc.attempt++;
         LastAnswer last = pc.last;
-        IntentKey.Result derived = IntentKey.derive(item, job, action);
         action.setOrigin(derived.origin);
         action.setIntentKey(derived.intentKey);
         action.setRevision(derived.revision);

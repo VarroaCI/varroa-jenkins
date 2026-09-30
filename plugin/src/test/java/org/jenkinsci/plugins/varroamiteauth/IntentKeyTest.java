@@ -100,7 +100,7 @@ public class IntentKeyTest {
         action.setOrigin(IntentKey.ORIGIN_VARROA_INTENT);
         action.setIntentKey("manual:11111111-1111-7111-8111-111111111111");
 
-        IntentKey.Result result = IntentKey.derive(item, job, action);
+        IntentKey.Result result = IntentKey.derive(item, job, action, 0L, 0L);
         assertEquals(IntentKey.ORIGIN_VARROA_INTENT, result.origin);
         assertEquals("manual:11111111-1111-7111-8111-111111111111", result.intentKey);
     }
@@ -110,7 +110,7 @@ public class IntentKeyTest {
         Job<?, ?> job = job("folder/job", null);
         Queue.Item item = item(List.of(new SCMRevisionAction("abc123")), List.of());
 
-        IntentKey.Result result = IntentKey.derive(item, job, null);
+        IntentKey.Result result = IntentKey.derive(item, job, null, 0L, 0L);
         assertEquals(IntentKey.ORIGIN_SCM, result.origin);
         assertEquals("scm:folder/job:abc123", result.intentKey);
         assertEquals("abc123", result.revision);
@@ -126,7 +126,7 @@ public class IntentKeyTest {
 
         // The parent travels through the test seam, not the mocked
         // Job.getParent(): see the job() helper's javadoc.
-        IntentKey.Result result = IntentKey.derive(item, job, null, () -> 0L, millis -> { }, () -> parent);
+        IntentKey.Result result = IntentKey.derive(item, job, null, 0L, 0L, () -> parent);
         assertEquals(IntentKey.ORIGIN_SCM, result.origin);
         assertEquals("scm:folder/job:rev-from-getRevision", result.intentKey);
     }
@@ -139,7 +139,7 @@ public class IntentKeyTest {
         Cause branchCause = new IntentKeyDispatchTest.BranchIndexingCause();
         Queue.Item item = item(List.of(), List.of(branchCause));
 
-        IntentKey.Result result = IntentKey.derive(item, job, null, () -> 0L, millis -> { }, () -> parent);
+        IntentKey.Result result = IntentKey.derive(item, job, null, 0L, 0L, () -> parent);
         assertEquals(IntentKey.ORIGIN_SCM, result.origin);
         assertEquals("scm:folder/job:rev-from-lastSeen", result.intentKey);
     }
@@ -152,7 +152,7 @@ public class IntentKeyTest {
         long millis = java.time.Instant.parse("2026-09-10T00:12:34Z").toEpochMilli();
         VarroaIntentAction action = new VarroaIntentAction("run-1", "", null, millis);
 
-        IntentKey.Result result = IntentKey.derive(item, job, action);
+        IntentKey.Result result = IntentKey.derive(item, job, action, 0L, 0L);
         assertEquals(IntentKey.ORIGIN_CRON, result.origin);
         assertEquals("cron:folder/job:2026-09-10T00:12:00Z", result.intentKey);
     }
@@ -162,7 +162,7 @@ public class IntentKeyTest {
         Job<?, ?> job = job("folder/job", null);
         Queue.Item item = item(List.of(), List.of());
 
-        IntentKey.Result result = IntentKey.derive(item, job, null);
+        IntentKey.Result result = IntentKey.derive(item, job, null, 0L, 0L);
         assertEquals(IntentKey.ORIGIN_CELL_LOCAL, result.origin);
         assertTrue(result.intentKey.startsWith("api:"));
         assertEquals(36 + 4, result.intentKey.length());

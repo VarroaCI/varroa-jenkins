@@ -52,24 +52,15 @@ public final class IntentKey {
 
     private static final int MAX_REVISION_LENGTH = 128;
     private static final int MAX_CAUSE_LENGTH = 512;
-    private static final long WAIT_INTERVAL_MILLIS = 2000L;
-    private static final long WAIT_DEADLINE_MILLIS = 30_000L;
+
+    /** The wait between two reads of the branch project factory. */
+    static final long WAIT_INTERVAL_MILLIS = 2000L;
+
+    /** The budget of the revision wait; at its end the key falls back to {@code api:<uuid>}. */
+    static final long WAIT_DEADLINE_MILLIS = 30_000L;
 
     private IntentKey() {
     }
-
-    /** Millisecond clock seam so a test can pin the wait's timing. */
-    public interface Clock {
-        long nowMillis();
-    }
-
-    /** Sleep seam so a test can skip the wait's real delay. */
-    public interface Sleeper {
-        void sleep(long millis) throws InterruptedException;
-    }
-
-    private static final Clock SYSTEM_CLOCK = System::currentTimeMillis;
-    private static final Sleeper THREAD_SLEEPER = Thread::sleep;
 
     /** The derived origin, intent key, and accepted revision (empty when none applies). */
     public static final class Result {
@@ -84,19 +75,22 @@ public final class IntentKey {
         }
     }
 
-    /** Derives the claim-time origin and intent key using the system clock and a real sleep. */
-    public static Result derive(Queue.Item item, Job<?, ?> job, VarroaIntentAction action) {
-        return derive(item, job, action, SYSTEM_CLOCK, THREAD_SLEEPER);
-    }
-
     /**
      * Derives the claim-time origin and intent key (D5 table), in order:
      * an existing key on the action, a revision-bearing action, the
-     * branch project factory (waiting when the cause warrants it), a
-     * timer cause, and finally the {@code api:<uuid>} fallback.
+     * branch project factory, a timer cause, and finally the
+     * {@code api:<uuid>} fallback.
+     *
+     * <p>For a branch cause, each call reads the factory once and never
+     * waits. It answers {@code null} while the factory revision equals
+     * the admission revision and {@code nowMillis} is before
+     * {@code revisionDeadlineMillis}. The caller then reads again after
+     * {@link #WAIT_INTERVAL_MILLIS}. At the deadline, the key falls back
+     * to {@code api:<uuid>}.
      */
-    public static Result derive(Queue.Item item, Job<?, ?> job, VarroaIntentAction action, Clock clock, Sleeper sleeper) {
-        return derive(item, job, action, clock, sleeper, job::getParent);
+    public static Result derive(Queue.Item item, Job<?, ?> job, VarroaIntentAction action, long nowMillis,
+            long revisionDeadlineMillis) {
+        return derive(item, job, action, nowMillis, revisionDeadlineMillis, job::getParent);
     }
 
     /**
@@ -110,8 +104,8 @@ public final class IntentKey {
      * above passes the real {@code job::getParent} method reference, so
      * behavior is identical.
      */
-    static Result derive(Queue.Item item, Job<?, ?> job, VarroaIntentAction action, Clock clock, Sleeper sleeper,
-            java.util.function.Supplier<Object> parentSupplier) {
+    static Result derive(Queue.Item item, Job<?, ?> job, VarroaIntentAction action, long nowMillis,
+            long revisionDeadlineMillis, java.util.function.Supplier<Object> parentSupplier) {
         if (action != null && !action.getIntentKey().isEmpty()) {
             return new Result(action.getOrigin(), action.getIntentKey(), action.getRevision());
         }
@@ -126,9 +120,15 @@ public final class IntentKey {
 
         String admissionRevision = action != null ? action.getAdmissionRevision() : null;
         if (hasBranchCause(causes)) {
-            String factoryRevision = waitForFactoryRevision(job, parentSupplier, admissionRevision, clock, sleeper);
-            if (factoryRevision != null) {
-                return new Result(ORIGIN_SCM, SCHEME_SCM + jobPath + ":" + factoryRevision, factoryRevision);
+            Object factory = branchProjectFactory(parentSupplier);
+            if (factory != null) {
+                String candidate = readFactoryRevision(factory, job);
+                if (candidate != null && !candidate.equals(admissionRevision)) {
+                    return new Result(ORIGIN_SCM, SCHEME_SCM + jobPath + ":" + candidate, candidate);
+                }
+                if (nowMillis < revisionDeadlineMillis) {
+                    return null;
+                }
             }
             LOGGER.log(Level.WARNING,
                     "IntentKey: no accepted revision for {0} after the 30 s wait; falling back to api:<uuid>",
@@ -138,7 +138,7 @@ public final class IntentKey {
         }
 
         if (hasTimerCause(causes)) {
-            long fireMillis = action != null ? action.getAdmittedAtMillis() : clock.nowMillis();
+            long fireMillis = action != null ? action.getAdmittedAtMillis() : nowMillis;
             return new Result(ORIGIN_CRON, SCHEME_CRON + jobPath + ":" + fireMinute(fireMillis), "");
         }
 
@@ -173,30 +173,6 @@ public final class IntentKey {
             }
         }
         return null;
-    }
-
-    private static String waitForFactoryRevision(Job<?, ?> job, java.util.function.Supplier<Object> parentSupplier,
-            String admissionRevision, Clock clock, Sleeper sleeper) {
-        Object factory = branchProjectFactory(parentSupplier);
-        if (factory == null) {
-            return null;
-        }
-        long deadline = clock.nowMillis() + WAIT_DEADLINE_MILLIS;
-        while (true) {
-            String candidate = readFactoryRevision(factory, job);
-            if (candidate != null && !candidate.equals(admissionRevision)) {
-                return candidate;
-            }
-            if (clock.nowMillis() >= deadline) {
-                return null;
-            }
-            try {
-                sleeper.sleep(WAIT_INTERVAL_MILLIS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return null;
-            }
-        }
     }
 
     private static Object branchProjectFactory(java.util.function.Supplier<Object> parentSupplier) {
