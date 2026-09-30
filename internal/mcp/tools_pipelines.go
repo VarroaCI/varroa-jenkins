@@ -378,6 +378,7 @@ func registerListFleetLocksTool(mcpServer *server.MCPServer, deps *api.Dependenc
 // api.FleetLockRow serializes directly.
 var fleetLockListOutputSchema = listOutputSchema("Fleet lock.", []schemaField{
 	{Name: "name", Type: "string", Desc: "Qualified lock name, <owner tenant>/<bare name>. The owner can hold a slash."},
+	{Name: "cluster", Type: "string", Desc: "Cluster of the run that holds or waits on the lock."},
 	{Name: "tenant", Type: "string", Desc: "Tenant whose run holds or waits on the lock."},
 	{Name: "jobPath", Type: "string", Desc: "Full job path of the holder's or waiter's run."},
 	{Name: "state", Type: "string", Desc: "waiting, held, or releasing."},

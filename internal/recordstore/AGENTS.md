@@ -202,6 +202,10 @@ of the fleet's audit activity, once a controller becomes disposable.
   `runs_trigger_failed_intent_key_idx` on `runs (intent_key)` for
   `TRIGGER_FAILED` rows only. A query must name the same literal
   predicate to use it.
+  `00022_tenant_placements_agent_namespace.sql` adds
+  `tenant_placements.agent_namespace`, the tenant's agent namespace as its
+  own cluster announces it. It defaults to the empty string, and every
+  announce overwrites it with the announced value.
   A later migration never edits an applied one. `migrationsFS` (`migrations.go`) embeds
   every file under `migrations/` into the binary through `embed.FS`, so
   the recorder needs no separate deploy artifact. Monthly partition
@@ -487,7 +491,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   `Reader.ListFleetLocks` answers every row whose `owner_tenant` equals
   the tenant plus every row its own runs hold or wait on, by equality and
   never by a name prefix, and
-  `Reader.ListAllFleetLocks` answers one cluster. Both order by
+  `Reader.ListAllFleetLocks` answers every cluster, because the one-holder
+  index covers `name` alone and a holder can sit on another cluster than
+  its waiters. Both order by
   `(name, waiting_since, run_id)`, so a holder sorts before its
   waiters, and neither answers a queue position. `resolveLockTarget`
   (`fleet_lock_acquire.go`) resolves one lock call: `name` is the bare
@@ -1132,7 +1138,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   therefore contributes no count to it. `jobs` counts
   `DISTINCT job_path`, because `job_schedules` holds one row for each
   trigger type. The window is a fixed 24 hours and no caller chooses
-  another. These methods add no migration and no index.
+  another. Each tenant row also carries the placement row's `generation`
+  and `agent_namespace`, which the Cell tab shows for a member cell.
   `ListTestCases` and `ListTestCaseHistory` (`reader_testcases.go`) read
   `run_test_cases`. The run read answers every row that is not `SKIPPED`
   first, then each group by suite, class name, and test name. The history

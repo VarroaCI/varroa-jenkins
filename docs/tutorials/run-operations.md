@@ -21,7 +21,7 @@ on. A row names the lock, the state, the holder, and the time since the wait or 
 started. The card reads the locks again on a `lock` event from the run stream, at most once every
 two seconds. It shows no queue position.
 
-An operator opens `/locks` to list every lock of the cluster, across every tenant. That page needs
+An operator opens `/locks` to list every lock of every cluster, across every tenant. That page needs
 the `fleetlocks:read` verb, which `varroa:operator` and `varroa:admin` hold. The page polls and
 opens no stream.
 

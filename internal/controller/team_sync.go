@@ -133,6 +133,7 @@ func NewNATSSyncAnnouncer(conn *bus.Conn) cells.Announcer {
 			CellLastSeenAt:     req.CellLastSeenAt,
 			DeadInstances:      deadInstancesToWire(req.DeadInstances),
 			Members:            membersToWire(req.Members),
+			AgentNamespace:     req.AgentNamespace,
 		})
 		if err != nil {
 			return cells.AnnounceResult{}, fmt.Errorf("marshal tenant sync announce request: %w", err)

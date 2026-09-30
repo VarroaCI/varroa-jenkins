@@ -1383,6 +1383,7 @@ func (s *Server) teamCellState(cr *v1alpha1.Controller, ref TenantRef, reason st
 // lock's holder groups the rows of one name itself.
 type fleetLockJSON struct {
 	Name         string     `json:"name"`
+	Cluster      string     `json:"cluster"`
 	Tenant       string     `json:"tenant"`
 	JobPath      string     `json:"jobPath"`
 	State        string     `json:"state"`
@@ -1429,7 +1430,7 @@ func (s *Server) handleListTeamFleetLocks(w http.ResponseWriter, r *http.Request
 
 // handleListAllFleetLocks serves GET /locks, the fleet-wide read. The
 // gate admits only a cluster-wide fleetlocks:read binding, and the
-// answer carries every tenant's rows.
+// answer carries every tenant's rows of every cluster.
 func (s *Server) handleListAllFleetLocks(w http.ResponseWriter, r *http.Request) {
 	if s.deps.RecordStore == nil {
 		s.pipelinesUnavailable(w)
@@ -1440,7 +1441,7 @@ func (s *Server) handleListAllFleetLocks(w http.ResponseWriter, r *http.Request)
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}
-	locks, err := s.deps.RecordStore.ListAllFleetLocks(r.Context(), s.cellUsageCluster(r))
+	locks, err := s.deps.RecordStore.ListAllFleetLocks(r.Context())
 	if s.handleReaderError(w, err, "list fleet locks") {
 		return
 	}
@@ -1489,6 +1490,7 @@ func (s *Server) fleetLockRows(claims *auth.Claims, refs []TenantRef, locks []re
 	for _, lock := range locks {
 		row := fleetLockJSON{
 			Name:       lock.Name,
+			Cluster:    lock.Cluster,
 			Tenant:     lock.Tenant,
 			JobPath:    lock.JobPath,
 			State:      lock.State,

@@ -131,9 +131,9 @@ type Reader interface {
 	// its run.
 	ListFleetLocks(ctx context.Context, cluster, tenant string) ([]FleetLock, error)
 
-	// ListAllFleetLocks answers every fleet_locks row of cluster, with
-	// no tenant filter.
-	ListAllFleetLocks(ctx context.Context, cluster string) ([]FleetLock, error)
+	// ListAllFleetLocks answers every fleet_locks row of every cluster,
+	// with no tenant filter.
+	ListAllFleetLocks(ctx context.Context) ([]FleetLock, error)
 
 	// ListTenantPlacements answers the slot-0 coordinate of every
 	// placement row of tenant, one row for each cluster. A member

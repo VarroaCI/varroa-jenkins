@@ -1,7 +1,7 @@
 // Package recordstore: the fleet lock reads of the fleet-locks
 // capability. The tenant read answers the locks a tenant owns and the
-// locks its own runs hold or wait for. The cluster-wide read answers
-// every lock of one cluster. Neither read writes, and neither read
+// locks its own runs hold or wait for. The fleet-wide read answers
+// every lock of every cluster. Neither read writes, and neither read
 // answers a queue position.
 package recordstore
 
@@ -53,18 +53,19 @@ func (r *pgReader) ListFleetLocks(ctx context.Context, cluster, tenant string) (
 	return locks, nil
 }
 
-// ListAllFleetLocks answers every fleet_locks row of cluster, in the
-// same order ListFleetLocks uses.
-func (r *pgReader) ListAllFleetLocks(ctx context.Context, cluster string) ([]FleetLock, error) {
+// ListAllFleetLocks answers every fleet_locks row of every cluster, in
+// the same order ListFleetLocks uses. The one-holder index covers name
+// alone, so a holder and its waiters can sit on different clusters; a
+// read of one cluster would show a waiter with no holder.
+func (r *pgReader) ListAllFleetLocks(ctx context.Context) ([]FleetLock, error) {
 	if err := r.checkSchema(ctx); err != nil {
 		return nil, err
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+fleetLockColumns+`
 		FROM varroa.fleet_locks
-		WHERE cluster = $1
 		ORDER BY name, waiting_since, run_id
-	`, cluster)
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("list all fleet locks: %w", err)
 	}

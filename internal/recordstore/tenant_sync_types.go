@@ -95,6 +95,11 @@ type TenantSyncRequest struct {
 	// value means the caller names no incarnation.
 	Incarnation string `json:"incarnation,omitempty"`
 
+	// AgentNamespace applies to kind "announce". It is the namespace of
+	// the tenant's build agents. The recorder stores the announced value
+	// as it is, so an empty value clears the stored one.
+	AgentNamespace string `json:"agent_namespace,omitempty"`
+
 	// JobPaths and PerJob apply to kind "records". An empty JobPaths
 	// means enumerate.
 	JobPaths []string `json:"job_paths,omitempty"`

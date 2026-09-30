@@ -28,7 +28,7 @@ A tenant table lists one row for each tenant, naming the tenant, its folder, and
 
 Each row also names that tenant's **Role** here: `slot <n>` for an active member, and `standby` for a standby. A standby holds the tenant folder and runs no build. The value comes from the cell usage read. Read [Tenant slots](tenant-slots.md).
 
-Two more columns, the agent namespace and the placement generation, come from the Teams read, which needs the administrator grant. For every other caller both columns are absent and the table states the reason. A refused read drops them and reports no error.
+Two more columns, the agent namespace and the placement generation, also come from the cell usage read, so a member cell shows them too.
 
 A tenant links to its pipelines page only for a caller who may read that tenant. Every other caller sees the name as text.
 

@@ -4713,7 +4713,7 @@ FleetLock:
     reports its own acquiredAt and no waitingSince. The row carries no
     queue position and no derived holder: a consumer groups the rows it
     already has by name.
-  required: [name, tenant, jobPath, state, runId]
+  required: [name, cluster, tenant, jobPath, state, runId]
   properties:
     name:
       type: string
@@ -4721,6 +4721,9 @@ FleetLock:
         The qualified lock name: the owner tenant, a slash, and the bare
         lock name. A controller tenant holds a slash of its own, so do not
         split this value to find the owner.
+    cluster:
+      type: string
+      description: The cluster of the run that holds or waits on the lock.
     tenant:
       type: string
       description: The tenant of the run that holds or waits on the lock.
@@ -5844,7 +5847,7 @@ CellUsageCounts:
 CellTenantUsage:
   type: object
   description: One tenant on a cell, with that tenant's role and four counts.
-  required: [tenant, runningNow, runsLast24h, failedLast24h, jobs]
+  required: [tenant, placementGeneration, runningNow, runsLast24h, failedLast24h, jobs]
   properties:
     tenant:
       type: string
@@ -5854,6 +5857,16 @@ CellTenantUsage:
         That tenant's role on this cell: "slot <n>" for an active member
         and "standby" for a standby. A standby holds the tenant folder and
         runs no build, so its running count is zero.
+    agentNamespace:
+      type: string
+      description: >-
+        The namespace that holds the tenant's build agents, as the
+        tenant's own cluster last announced it. Absent when no
+        announcement named one.
+    placementGeneration:
+      type: integer
+      format: int64
+      description: The generation of the tenant's placement row.
     runningNow:
       type: integer
       format: int64

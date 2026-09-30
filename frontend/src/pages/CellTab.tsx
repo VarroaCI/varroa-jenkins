@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Card } from "../components/Card";
 import { KVGrid } from "../components/KVGrid";
@@ -6,7 +5,6 @@ import { age } from "../components/activityTimeline.util";
 import { useCellGrants, useCellPool, useCellUsage } from "../hooks/useCells";
 import { useAuth } from "../context/AuthContext";
 import { canAccessTenantPipeline, canDoGlobal } from "../hooks/usePermissions";
-import { listTeams } from "../api/client";
 import { ApiError } from "../hooks/useApi";
 import type { ControllerDetail } from "../hooks/useControllers";
 import type { CellPool, CellTenantGrants, CellUsage } from "../types";
@@ -27,25 +25,11 @@ interface CellTabProps {
 export function CellTab({ ctrl, cluster, namespace, name, active }: CellTabProps) {
   const { permissions } = useAuth();
   const canReadPools = canDoGlobal(permissions, "cellpools", "read");
-  // GET /teams answers the admin gate alone, and no role declares a teams
-  // resource. A resource check would admit a caller the server refuses, so
-  // this is the same wildcard rule the Access page uses.
-  const isAdmin = canDoGlobal(permissions, "*", "*");
 
   const usage = useCellUsage(namespace, name, active, cluster);
   const poolName = usage.data?.cellPool;
   const pool = useCellPool(poolName, active && canReadPools, cluster);
   const grants = useCellGrants(namespace, name, active, cluster);
-  const teams = useQuery({
-    queryKey: ["teams"],
-    queryFn: listTeams,
-    enabled: active && isAdmin,
-    retry: false,
-  });
-  // A refused Teams read drops the two columns, exactly as a missing grant
-  // does. The tab reports no error for it: the columns are an addition for
-  // an admin, never a part the tenant table needs.
-  const canReadTeams = isAdmin && !teams.isError;
 
   const cell = ctrl.cell;
   const tenants = cell?.tenants ?? [];
@@ -58,8 +42,6 @@ export function CellTab({ ctrl, cluster, namespace, name, active }: CellTabProps
         usage={usage.data}
         pool={pool.data}
         canReadPools={canReadPools}
-        canReadTeams={canReadTeams}
-        teams={teams.data}
         tenants={tenants}
         applied={applied}
         permissions={permissions}
@@ -83,8 +65,6 @@ function TopologyPanel({
   usage,
   pool,
   canReadPools,
-  canReadTeams,
-  teams,
   tenants,
   applied,
   permissions,
@@ -93,8 +73,6 @@ function TopologyPanel({
   usage?: CellUsage;
   pool?: CellPool;
   canReadPools: boolean;
-  canReadTeams: boolean;
-  teams?: { name: string; pipelines?: { agentNamespace?: string }; placement?: { generation?: number } }[];
   tenants: string[];
   applied: Set<string>;
   permissions: Permissions;
@@ -119,10 +97,12 @@ function TopologyPanel({
     items.push({ key: "Pool ready", value: poolReadyLine(pool) });
   }
 
-  const teamByName = new Map((teams ?? []).map((t) => [t.name, t]));
-  // The role comes from the cell usage read. The tab computes nothing: a
-  // standby holds the tenant folder and runs no build.
-  const roleByTenant = new Map((usage?.tenants ?? []).map((row) => [row.tenant, row.role]));
+  // The role, the agent namespace, and the placement generation come from
+  // the cell usage read, which reads the record store. The record store
+  // holds a member cluster's tenants too, so a member cell shows them the
+  // same way. The tab computes nothing: a standby holds the tenant folder
+  // and runs no build.
+  const usageByTenant = new Map((usage?.tenants ?? []).map((row) => [row.tenant, row]));
 
   return (
     <Card>
@@ -154,13 +134,13 @@ function TopologyPanel({
               <th>Folder</th>
               <th>Role</th>
               <th>Placement</th>
-              {canReadTeams && <th>Agent namespace</th>}
-              {canReadTeams && <th>Placement generation</th>}
+              <th>Agent namespace</th>
+              <th>Placement generation</th>
             </tr>
           </thead>
           <tbody>
             {tenants.map((tenant) => {
-              const team = teamByName.get(tenant);
+              const row = usageByTenant.get(tenant);
               const canOpen = canAccessTenantPipeline(permissions, tenant, "read");
               return (
                 <tr key={tenant}>
@@ -172,21 +152,15 @@ function TopologyPanel({
                     )}
                   </td>
                   <td className={styles.mono}>{tenant}</td>
-                  <td>{roleByTenant.get(tenant) || DASH}</td>
+                  <td>{row?.role || DASH}</td>
                   <td>{applied.has(tenant) ? "placed" : "rehydrating"}</td>
-                  {canReadTeams && <td className={styles.mono}>{team?.pipelines?.agentNamespace || DASH}</td>}
-                  {canReadTeams && <td>{team?.placement?.generation ?? DASH}</td>}
+                  <td className={styles.mono}>{row?.agentNamespace || DASH}</td>
+                  <td>{row?.placementGeneration ?? DASH}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-      )}
-      {!canReadTeams && (
-        <p className={styles.note}>
-          The agent namespace and the placement generation come from the Teams read, which needs
-          the admin grant.
-        </p>
       )}
     </Card>
   );

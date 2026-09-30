@@ -688,3 +688,48 @@ func TestCellGrantsNeedsNoRecordStore(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestCellUsageCarriesAgentNamespaceAndPlacementGeneration asserts a
+// member cell's usage read carries each tenant's agent namespace and
+// placement generation from the record store, and omits an agent
+// namespace no announcement named.
+func TestCellUsageCarriesAgentNamespaceAndPlacementGeneration(t *testing.T) {
+	reader := newFakeCellReader()
+	reader.usage["member/ns-a/cell-a"] = recordstore.CellUsage{
+		Cluster: "member", Namespace: "ns-a", Cell: "cell-a",
+		Tenants: []recordstore.CellTenantUsage{
+			{Tenant: "acme", Role: "slot 0", AgentNamespace: "acme-agents", PlacementGeneration: 4},
+			{Tenant: "beta", Role: "slot 0", PlacementGeneration: 2},
+		},
+	}
+	srv := cellsTestServer(twoCellClient(), cellReadAuthorizer("ns-a"), reader)
+	rec := doCellRequest(t, srv.handleCellUsage, "/cells/ns-a/cell-a/usage?cluster=member",
+		map[string]string{"namespace": "ns-a", "name": "cell-a"}, cellUserClaims)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	usage := decodeCellUsage(t, rec)
+	if len(usage.Tenants) != 2 {
+		t.Fatalf("tenants = %+v, want two rows", usage.Tenants)
+	}
+	acme, beta := usage.Tenants[0], usage.Tenants[1]
+	if acme.AgentNamespace != "acme-agents" || acme.PlacementGeneration != 4 {
+		t.Errorf("acme = %+v, want acme-agents at generation 4", acme)
+	}
+	if beta.AgentNamespace != "" || beta.PlacementGeneration != 2 {
+		t.Errorf("beta = %+v, want no agent namespace at generation 2", beta)
+	}
+
+	var raw struct {
+		Tenants []map[string]json.RawMessage `json:"tenants"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw: %v", err)
+	}
+	if _, present := raw.Tenants[1]["agentNamespace"]; present {
+		t.Errorf("beta carries agentNamespace, want the field absent: %s", rec.Body.String())
+	}
+	if _, present := raw.Tenants[1]["placementGeneration"]; !present {
+		t.Errorf("beta carries no placementGeneration: %s", rec.Body.String())
+	}
+}

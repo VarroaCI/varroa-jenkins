@@ -1123,7 +1123,7 @@ export function listFleetLocks(team: string): Promise<FleetLockListResponse> {
 
 /**
  * Lists every tenant's fleet locks. The operator page reads this route,
- * and the read covers the local cluster.
+ * and the read covers every cluster.
  */
 export function listAllFleetLocks(): Promise<FleetLockListResponse> {
   return bffFetch<FleetLockListResponse>("/locks");

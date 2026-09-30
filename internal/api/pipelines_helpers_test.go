@@ -60,8 +60,9 @@ type fakeRecordReader struct {
 	// ListFleetLocks. It is seeded whole, so a test decides exactly
 	// which rows one tenant's read answers.
 	locksByTenant map[string][]recordstore.FleetLock
-	// locksByCluster is keyed by cluster, for ListAllFleetLocks.
-	locksByCluster map[string][]recordstore.FleetLock
+	// allLocks answers ListAllFleetLocks: every seeded row of every
+	// cluster, in the seeded order.
+	allLocks []recordstore.FleetLock
 	// locksErr makes both lock reads fail.
 	locksErr error
 
@@ -135,12 +136,12 @@ func (f *fakeRecordReader) ListFleetLocks(_ context.Context, cluster, tenant str
 	return f.locksByTenant[f.tenantKey(cluster, tenant)], nil
 }
 
-// ListAllFleetLocks answers the seeded rows of one cluster.
-func (f *fakeRecordReader) ListAllFleetLocks(_ context.Context, cluster string) ([]recordstore.FleetLock, error) {
+// ListAllFleetLocks answers every seeded row of every cluster.
+func (f *fakeRecordReader) ListAllFleetLocks(_ context.Context) ([]recordstore.FleetLock, error) {
 	if f.locksErr != nil {
 		return nil, f.locksErr
 	}
-	return f.locksByCluster[cluster], nil
+	return f.allLocks, nil
 }
 
 func newFakeRecordReader() *fakeRecordReader {
@@ -156,7 +157,6 @@ func newFakeRecordReader() *fakeRecordReader {
 		windowStats:     map[string]recordstore.JobWindowStats{},
 		jobDependencies: map[string]recordstore.JobDependencies{},
 		locksByTenant:   map[string][]recordstore.FleetLock{},
-		locksByCluster:  map[string][]recordstore.FleetLock{},
 		testCases:       map[string][]recordstore.TestCase{},
 		caseHistory:     map[string][]recordstore.TestCaseOutcome{},
 	}

@@ -35,6 +35,10 @@ type cellTenantUsageJSON struct {
 	// Role is that tenant's role on this cell: "slot <n>" for an active
 	// member and "standby" for a standby.
 	Role string `json:"role,omitempty"`
+	// AgentNamespace is absent until the tenant's own cluster announces
+	// one.
+	AgentNamespace      string `json:"agentNamespace,omitempty"`
+	PlacementGeneration int64  `json:"placementGeneration"`
 	cellUsageCountsJSON
 }
 

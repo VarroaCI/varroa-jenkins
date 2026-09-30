@@ -145,13 +145,14 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   page at `/locks`, behind the cluster-wide `fleetlocks:read` gate, and it
   carries **no** sidebar row and no `navPermissions.ts` door: a caller
   reaches it by its own URL. It polls `GET /locks` on the cells cadence and
-  opens no stream. `CellTab.tsx` is the Cell tab of
+  opens no stream. That read covers every cluster, so a waiting row finds a
+  holder on another cluster, and each row names its own cluster.
+  `CellTab.tsx` is the Cell tab of
   `ControllerDetail.tsx`, rendered only when the detail response reports
-  `kind` `cell`. Its two Team-derived columns take the **wildcard admin
-  gate** (`canDoGlobal(perms, "*", "*")`, the rule the Access page uses):
-  `GET /teams` answers `IsAdmin` alone and no role declares a `teams`
-  resource, so a resource check would admit a caller the server refuses. A
-  `403` from that read drops the same two columns and raises no error. `ControllerDetail.tsx` keeps the active tab in the `tab`
+  `kind` `cell`. Its role, agent namespace, and placement generation
+  columns all come from the cell usage read, never from `GET /teams`: a
+  member cell's Team lives on the member cluster only, and the record store
+  holds its placement row. `ControllerDetail.tsx` keeps the active tab in the `tab`
   query parameter, not in state: a user's click pushes a history entry and a
   correction replaces one, so the Back button walks the tabs. Neither cell
   surface computes a capacity value; both render the numbers the cell usage

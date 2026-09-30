@@ -32,7 +32,8 @@ func registerCellTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 func registerGetCellUsageTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	getCellUsageTool := mcp.NewTool("get_cell_usage",
 		mcp.WithDescription("Get one cell's load, tenant by tenant: the runs that run now, the "+
-			"runs and failures inside a fixed 24-hour window, and the job count. The response "+
+			"runs and failures inside a fixed 24-hour window, and the job count. Each tenant row "+
+			"also carries its role, its agent namespace, and its placement generation. The response "+
 			"also carries the tenant cap, the free slots, and the Jenkins queue length."),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("The cell's namespace")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("The cell's name")),

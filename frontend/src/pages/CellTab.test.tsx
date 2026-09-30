@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { CellTab } from "./CellTab";
@@ -17,18 +17,6 @@ vi.mock("../hooks/useCells", () => ({
   useCellPools: vi.fn(),
   useCellUsageList: vi.fn(),
 }));
-
-const mockListTeams = vi.fn();
-vi.mock("../api/client", () => ({
-  listTeams: () => mockListTeams(),
-}));
-
-// The admin gate the Access page uses. mockCanDoGlobal answers it through
-// the wildcard resource and verb, exactly as the real helper does.
-const asAdmin = (isAdmin: boolean) =>
-  mockCanDoGlobal.mockImplementation((_p: unknown, resource: string) =>
-    resource === "*" ? isAdmin : true,
-  );
 
 const mockPermissions = vi.fn();
 vi.mock("../context/AuthContext", () => ({
@@ -65,8 +53,16 @@ function makeUsage(overrides?: Partial<CellUsage>): CellUsage {
     cellPool: "lts-2-555",
     profile: "lts-2-555",
     tenants: [
-      { tenant: "acme", runningNow: 1, runsLast24h: 4, failedLast24h: 1, jobs: 3 },
-      { tenant: "beta", runningNow: 0, runsLast24h: 0, failedLast24h: 0, jobs: 1 },
+      {
+        tenant: "acme",
+        agentNamespace: "acme-agents",
+        placementGeneration: 7,
+        runningNow: 1,
+        runsLast24h: 4,
+        failedLast24h: 1,
+        jobs: 3,
+      },
+      { tenant: "beta", placementGeneration: 2, runningNow: 0, runsLast24h: 0, failedLast24h: 0, jobs: 1 },
     ],
     totals: { runningNow: 1, runsLast24h: 4, failedLast24h: 1, jobs: 4 },
     maxTenants: 10,
@@ -146,7 +142,6 @@ beforeEach(() => {
   mockUseCellUsage.mockReturnValue({ data: makeUsage(), isLoading: false, error: null });
   mockUseCellPool.mockReturnValue({ data: makePool(), isLoading: false, error: null });
   mockUseCellGrants.mockReturnValue({ data: makeGrants(), isLoading: false, error: null });
-  mockListTeams.mockResolvedValue([]);
 });
 
 describe("Topology panel", () => {
@@ -193,14 +188,6 @@ describe("Topology panel", () => {
     renderTab(makeCtrl({ cell: { tenants: ["acme"], appliedTenants: ["acme"], evacuate: true } }));
     expect(screen.getByText("Set by the operator")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /evacuate/i })).not.toBeInTheDocument();
-  });
-
-  it("hides the two Team columns and states the reason for a non-admin", () => {
-    asAdmin(false);
-    renderTab();
-    expect(screen.queryByText("Agent namespace")).not.toBeInTheDocument();
-    expect(screen.queryByText("Placement generation")).not.toBeInTheDocument();
-    expect(screen.getByText(/needs the admin grant/)).toBeInTheDocument();
   });
 
   it("renders the tenant name as text when the caller may not open its pipelines", () => {
@@ -305,39 +292,27 @@ describe("Permissions panel", () => {
   });
 });
 
-describe("The Team columns take the admin gate", () => {
-  it("hides the two columns for a caller who is not an admin", () => {
-    // GET /teams is admin-only on the server. A teams:read grant does not
-    // exist in any role, so a resource check would admit a caller the
-    // server refuses.
-    asAdmin(false);
-    renderTab();
-    expect(screen.queryByText("Agent namespace")).not.toBeInTheDocument();
-    expect(screen.queryByText("Placement generation")).not.toBeInTheDocument();
-    expect(screen.getByText(/needs the admin grant/)).toBeInTheDocument();
-  });
-
-  it("issues no Teams read for a caller who is not an admin", () => {
-    asAdmin(false);
-    renderTab();
-    expect(mockListTeams).not.toHaveBeenCalled();
-  });
-
-  it("shows the two columns for an admin", () => {
-    asAdmin(true);
+describe("The agent namespace and placement generation columns", () => {
+  it("reads both columns from the usage read", () => {
     renderTab();
     expect(screen.getByText("Agent namespace")).toBeInTheDocument();
     expect(screen.getByText("Placement generation")).toBeInTheDocument();
+    const acme = screen.getByRole("link", { name: "acme" }).closest("tr") as HTMLElement;
+    expect(within(acme).getByText("acme-agents")).toBeInTheDocument();
+    expect(within(acme).getByText("7")).toBeInTheDocument();
   });
 
-  it("treats a 403 from the Teams read as columns absent, never an error", async () => {
-    asAdmin(true);
-    mockListTeams.mockRejectedValue(new ApiError(403, "forbidden"));
+  it("renders a dash when the usage row carries no agent namespace", () => {
     renderTab();
-    await waitFor(() => expect(screen.queryByText("Agent namespace")).not.toBeInTheDocument());
-    expect(screen.queryByText("Placement generation")).not.toBeInTheDocument();
-    expect(screen.getByText(/needs the admin grant/)).toBeInTheDocument();
-    // The tenant table itself still renders.
-    expect(screen.getAllByText("acme").length).toBeGreaterThan(0);
+    const beta = screen.getByRole("link", { name: "beta" }).closest("tr") as HTMLElement;
+    expect(within(beta).getByText("2")).toBeInTheDocument();
+    expect(within(beta).getAllByText("—").length).toBeGreaterThan(0);
+  });
+
+  it("renders both columns for a caller without the admin grant", () => {
+    mockCanDoGlobal.mockImplementation((_p: unknown, resource: string) => resource !== "*");
+    renderTab();
+    expect(screen.getByText("Agent namespace")).toBeInTheDocument();
+    expect(screen.getByText("acme-agents")).toBeInTheDocument();
   });
 });

@@ -374,6 +374,65 @@ func TestPlace_Reannounce_ExportsEdit(t *testing.T) {
 	}
 }
 
+// TestMaybeReannounceOnAgentNamespaceChange asserts the first
+// announcement carries the tenant's agent namespace, and an edited
+// agent namespace alone triggers a same-generation reannounce that
+// carries the new value.
+func TestMaybeReannounceOnAgentNamespaceChange(t *testing.T) {
+	in := testInputs()
+	cell := readyCell("cell-a")
+	cell.Instance = "uid-1"
+	in.Cells = []CellCandidate{cell}
+	team := testTeam()
+	team.Spec.Namespaces = append(team.Spec.Namespaces, "payments-agents")
+	status := &v1alpha1.TeamStatus{}
+
+	var first AnnounceRequest
+	in.Announce = func(_ context.Context, req AnnounceRequest) (AnnounceResult, error) {
+		first = req
+		return AnnounceResult{OK: true}, nil
+	}
+	out1, err := Place(context.Background(), in, team, status)
+	if err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	if first.AgentNamespace != "payments-ns" {
+		t.Fatalf("first AgentNamespace = %q, want payments-ns", first.AgentNamespace)
+	}
+	if out1.SyncCacheUpdate == nil || out1.SyncCacheUpdate.AgentNamespace != "payments-ns" {
+		t.Fatalf("SyncCacheUpdate = %+v, want the announced agent namespace", out1.SyncCacheUpdate)
+	}
+	generationBefore := status.Placement.Generation
+
+	team.Spec.Pipelines.AgentNamespace = "payments-agents"
+	in.LastSync = out1.SyncCacheUpdate
+	in.Now = fixedClock(fixedNow.Add(time.Minute))
+
+	var calls int
+	var got AnnounceRequest
+	in.Announce = func(_ context.Context, req AnnounceRequest) (AnnounceResult, error) {
+		calls++
+		got = req
+		return AnnounceResult{OK: true}, nil
+	}
+	out2, err := Place(context.Background(), in, team, status)
+	if err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected one reannounce for the agent namespace edit, got %d", calls)
+	}
+	if got.AgentNamespace != "payments-agents" {
+		t.Errorf("AgentNamespace = %q, want payments-agents", got.AgentNamespace)
+	}
+	if got.Generation != generationBefore {
+		t.Errorf("expected the reannounce to stay at generation %d, got %d", generationBefore, got.Generation)
+	}
+	if out2.SyncCacheUpdate == nil || out2.SyncCacheUpdate.AgentNamespace != "payments-agents" {
+		t.Errorf("SyncCacheUpdate = %+v, want the new agent namespace", out2.SyncCacheUpdate)
+	}
+}
+
 // TestSyncPolicyFromPipelines_NilSpec_NoExports covers task 7.3: a Team
 // with no spec.pipelines contributes no export policy.
 func TestSyncPolicyFromPipelines_NilSpec_NoExports(t *testing.T) {

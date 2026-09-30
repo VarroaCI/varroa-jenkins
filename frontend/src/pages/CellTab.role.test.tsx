@@ -17,11 +17,6 @@ vi.mock("../hooks/useCells", () => ({
   useCellUsageList: vi.fn(),
 }));
 
-const mockListTeams = vi.fn();
-vi.mock("../api/client", () => ({
-  listTeams: () => mockListTeams(),
-}));
-
 const mockPermissions = vi.fn();
 vi.mock("../context/AuthContext", () => ({
   useAuth: () => ({ permissions: mockPermissions() }),
@@ -41,8 +36,8 @@ function roleUsage(): CellUsage {
     name: "cell-a",
     windowStart: "2026-09-11T00:00:00Z",
     tenants: [
-      { tenant: "acme", role: "slot 1", runningNow: 1, runsLast24h: 4, failedLast24h: 1, jobs: 3 },
-      { tenant: "beta", role: "standby", runningNow: 0, runsLast24h: 0, failedLast24h: 0, jobs: 1 },
+      { tenant: "acme", role: "slot 1", placementGeneration: 1, runningNow: 1, runsLast24h: 4, failedLast24h: 1, jobs: 3 },
+      { tenant: "beta", role: "standby", placementGeneration: 1, runningNow: 0, runsLast24h: 0, failedLast24h: 0, jobs: 1 },
     ],
     totals: { runningNow: 1, runsLast24h: 4, failedLast24h: 1, jobs: 4 },
     maxTenants: 10,
@@ -94,7 +89,6 @@ describe("CellTab role column", () => {
     mockUseCellUsage.mockReturnValue({ data: roleUsage(), isLoading: false, error: null });
     mockUseCellPool.mockReturnValue({ data: rolePool(), isLoading: false, error: null });
     mockUseCellGrants.mockReturnValue({ data: undefined, isLoading: false, error: null });
-    mockListTeams.mockResolvedValue([]);
     mockPermissions.mockReturnValue({ global: {}, scopes: [] });
     mockCanDoGlobal.mockReturnValue(false);
     mockCanAccessTenantPipeline.mockReturnValue(false);
@@ -128,7 +122,7 @@ describe("CellTab role column", () => {
     mockUseCellUsage.mockReturnValue({
       data: {
         ...roleUsage(),
-        tenants: [{ tenant: "acme", runningNow: 0, runsLast24h: 0, failedLast24h: 0, jobs: 0 }],
+        tenants: [{ tenant: "acme", placementGeneration: 1, runningNow: 0, runsLast24h: 0, failedLast24h: 0, jobs: 0 }],
       },
       isLoading: false,
       error: null,

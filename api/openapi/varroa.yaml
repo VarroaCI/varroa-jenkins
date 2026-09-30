@@ -4888,10 +4888,19 @@ components:
       additionalProperties: false
       description: One tenant on a cell, with that tenant's role and four counts.
       properties:
+        agentNamespace:
+          description: The namespace that holds the tenant's build agents, as the
+            tenant's own cluster last announced it. Absent when no announcement named
+            one.
+          type: string
         failedLast24h:
           format: int64
           type: integer
         jobs:
+          format: int64
+          type: integer
+        placementGeneration:
+          description: The generation of the tenant's placement row.
           format: int64
           type: integer
         role:
@@ -4909,6 +4918,7 @@ components:
           type: string
       required:
       - tenant
+      - placementGeneration
       - runningNow
       - runsLast24h
       - failedLast24h
@@ -6077,6 +6087,9 @@ components:
             The time the run acquired the lock. Present on a held or a releasing row.
           format: date-time
           type: string
+        cluster:
+          description: The cluster of the run that holds or waits on the lock.
+          type: string
         jobPath:
           description: The job path of the run that holds or waits on the lock.
           type: string
@@ -6106,6 +6119,7 @@ components:
           type: string
       required:
       - name
+      - cluster
       - tenant
       - jobPath
       - state
@@ -12779,24 +12793,22 @@ paths:
   /api/v1/locks:
     get:
       description: |
-        Reads the cluster the optional cluster query parameter names, and the BFF's own local cluster when the parameter is absent. Each row carries its own tenant and jobPath, whichever tenant it belongs to. A row carries runLink only when the caller's own grant can read that row's own run. A waiting row reports its own waitingSince. A held or a releasing row reports its own acquiredAt. It carries no queue position and no derived holder.
+        Reads every cluster in one list, ordered by name, then waitingSince, then runId. A holder and its waiters can run on different clusters. Each row carries its own cluster, tenant, and jobPath. A row carries runLink only when the caller's own grant can read that row's own run. A waiting row reports its own waitingSince. A held or a releasing row reports its own acquiredAt. It carries no queue position and no derived holder.
       operationId: listAllFleetLocks
-      parameters:
-      - $ref: '#/components/parameters/components_parameters_clusterQuery'
       responses:
         "200":
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/components_schemas_FleetLockListResponse'
-          description: Every fleet lock of the cluster (items envelope).
+          description: Every fleet lock of every cluster (items envelope).
         "401":
           $ref: '#/components/responses/components_responses_Unauthorized'
         "403":
           $ref: '#/components/responses/components_responses_Forbidden'
         "503":
           $ref: '#/components/responses/components_responses_ServiceUnavailable'
-      summary: Lists every fleet lock of one cluster, across every tenant. Requires
+      summary: Lists every fleet lock of every cluster, across every tenant. Requires
         the fleetlocks:read verb on a cluster-wide binding.
       tags:
       - Pipelines

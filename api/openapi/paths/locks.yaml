@@ -6,21 +6,19 @@
     operationId: listAllFleetLocks
     tags: [Pipelines]
     summary: >-
-      Lists every fleet lock of one cluster, across every tenant. Requires
-      the fleetlocks:read verb on a cluster-wide binding.
+      Lists every fleet lock of every cluster, across every tenant.
+      Requires the fleetlocks:read verb on a cluster-wide binding.
     description: >
-      Reads the cluster the optional cluster query parameter names, and the
-      BFF's own local cluster when the parameter is absent. Each row
-      carries its own tenant and jobPath, whichever tenant it belongs to. A
+      Reads every cluster in one list, ordered by name, then waitingSince,
+      then runId. A holder and its waiters can run on different clusters.
+      Each row carries its own cluster, tenant, and jobPath. A
       row carries runLink only when the caller's own grant can read that
       row's own run. A waiting row reports its own waitingSince. A held or
       a releasing row reports its own acquiredAt. It carries no queue
       position and no derived holder.
-    parameters:
-      - $ref: '../components/parameters.yaml#/clusterQuery'
     responses:
       "200":
-        description: Every fleet lock of the cluster (items envelope).
+        description: Every fleet lock of every cluster (items envelope).
         content:
           application/json:
             schema:

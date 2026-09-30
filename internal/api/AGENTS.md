@@ -108,7 +108,10 @@ federation, activity persistence, and SSE fanout.
   implementation the HTTP path and the `get_cell_usage` MCP tool both call.
   The counts come from `recordstore.Reader`'s `CellUsage`/`CellUsageMany`;
   the labels, the stored mite status, and `status.cell.tenants` come from the
-  cell `Controller`; `queueLength`/`queueLengthAt` come from
+  cell `Controller`; each tenant row's `role`, `agentNamespace`, and
+  `placementGeneration` come from that tenant's `tenant_placements` row,
+  which a member cluster's operator announces to the core, so a member
+  cell reports them too; `queueLength`/`queueLengthAt` come from
   `MiteRegistry.IdleGauges` and are **absent, never zero**, for a remote
   cluster. `cellCapResolver` (`resolveCellCap(ctx, cluster, cr)` for one cell) is the
   first-match cap chain — the cell's `spec.cell.maxTenants` when non-zero,
@@ -136,8 +139,10 @@ federation, activity persistence, and SSE fanout.
   `handlers_pipelines.go`; `Server.ListFleetLocks`, `pipelines_service.go`)
   serves `GET /pipelines/{team}/locks` and `GET /locks` over
   `Reader.ListFleetLocks`/`ListAllFleetLocks`. `GET /locks` is the fleet-wide
-  read: it requires a cluster-wide `CanReadFleetLocks`, and it resolves its
-  cluster exactly as the cell-usage paths resolve theirs.
+  read: it requires a cluster-wide `CanReadFleetLocks`, takes no `cluster`
+  parameter, and reads every cluster in one list. A holder and its waiters
+  can run on different clusters, so a read of one cluster would show a
+  waiter with no holder. Every row of both routes carries its `cluster`.
   `Server.ListFleetLocks` is the one implementation the team route and the
   `list_fleet_locks` MCP tool share, so both authorize a caller and shape a
   row identically. Every row always carries `tenant` and `jobPath`, and

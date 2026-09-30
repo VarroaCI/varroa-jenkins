@@ -279,6 +279,13 @@ type CellTenantUsage struct {
 	// member and "standby" for a standby. A standby runs no build, so
 	// its running count is zero.
 	Role string
+	// AgentNamespace is the namespace of the tenant's build agents, as
+	// the tenant's own cluster last announced it. It is empty until an
+	// announcement names one.
+	AgentNamespace string
+	// PlacementGeneration is the generation of the tenant's placement
+	// row.
+	PlacementGeneration int64
 	CellUsageCounts
 }
 

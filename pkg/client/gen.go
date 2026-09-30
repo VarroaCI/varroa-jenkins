@@ -1237,8 +1237,13 @@ type ComponentsSchemasCellTenantGrants struct {
 
 // ComponentsSchemasCellTenantUsage One tenant on a cell, with that tenant's role and four counts.
 type ComponentsSchemasCellTenantUsage struct {
-	FailedLast24h int64 `json:"failedLast24h"`
-	Jobs          int64 `json:"jobs"`
+	// AgentNamespace The namespace that holds the tenant's build agents, as the tenant's own cluster last announced it. Absent when no announcement named one.
+	AgentNamespace *string `json:"agentNamespace,omitempty"`
+	FailedLast24h  int64   `json:"failedLast24h"`
+	Jobs           int64   `json:"jobs"`
+
+	// PlacementGeneration The generation of the tenant's placement row.
+	PlacementGeneration int64 `json:"placementGeneration"`
 
 	// Role That tenant's role on this cell: "slot <n>" for an active member and "standby" for a standby. A standby holds the tenant folder and runs no build, so its running count is zero.
 	Role        *string `json:"role,omitempty"`
@@ -1943,6 +1948,9 @@ type ComponentsSchemasExecuteGroovyPolicy struct {
 type ComponentsSchemasFleetLock struct {
 	// AcquiredAt The time the run acquired the lock. Present on a held or a releasing row.
 	AcquiredAt *time.Time `json:"acquiredAt,omitempty"`
+
+	// Cluster The cluster of the run that holds or waits on the lock.
+	Cluster string `json:"cluster"`
 
 	// JobPath The job path of the run that holds or waits on the lock.
 	JobPath string `json:"jobPath"`
@@ -4338,12 +4346,6 @@ type GetFleetPluginParams struct {
 	Affected *string `form:"affected,omitempty" json:"affected,omitempty"`
 }
 
-// ListAllFleetLocksParams defines parameters for ListAllFleetLocks.
-type ListAllFleetLocksParams struct {
-	// Cluster Cluster name filter for aggregated list.
-	Cluster *ComponentsParametersClusterQuery `form:"cluster,omitempty" json:"cluster,omitempty"`
-}
-
 // ChangeMyPasswordJSONBody defines parameters for ChangeMyPassword.
 type ChangeMyPasswordJSONBody struct {
 	NewPassword string `json:"newPassword"`
@@ -5426,7 +5428,7 @@ type ClientInterface interface {
 	GetIdentitySettings(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListAllFleetLocks request
-	ListAllFleetLocks(ctx context.Context, params *ListAllFleetLocksParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ListAllFleetLocks(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// LoginWithBody request with any body
 	LoginWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -7106,8 +7108,8 @@ func (c *Client) GetIdentitySettings(ctx context.Context, reqEditors ...RequestE
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListAllFleetLocks(ctx context.Context, params *ListAllFleetLocksParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListAllFleetLocksRequest(c.Server, params)
+func (c *Client) ListAllFleetLocks(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListAllFleetLocksRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -12887,7 +12889,7 @@ func NewGetIdentitySettingsRequest(server string) (*http.Request, error) {
 }
 
 // NewListAllFleetLocksRequest generates requests for ListAllFleetLocks
-func NewListAllFleetLocksRequest(server string, params *ListAllFleetLocksParams) (*http.Request, error) {
+func NewListAllFleetLocksRequest(server string) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -12903,28 +12905,6 @@ func NewListAllFleetLocksRequest(server string, params *ListAllFleetLocksParams)
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
-	}
-
-	if params != nil {
-		queryValues := queryURL.Query()
-
-		if params.Cluster != nil {
-
-			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cluster", runtime.ParamLocationQuery, *params.Cluster); err != nil {
-				return nil, err
-			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
-				return nil, err
-			} else {
-				for k, v := range parsed {
-					for _, v2 := range v {
-						queryValues.Add(k, v2)
-					}
-				}
-			}
-
-		}
-
-		queryURL.RawQuery = queryValues.Encode()
 	}
 
 	req, err := http.NewRequest("GET", queryURL.String(), nil)
@@ -16079,7 +16059,7 @@ type ClientWithResponsesInterface interface {
 	GetIdentitySettingsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetIdentitySettingsResponse, error)
 
 	// ListAllFleetLocksWithResponse request
-	ListAllFleetLocksWithResponse(ctx context.Context, params *ListAllFleetLocksParams, reqEditors ...RequestEditorFn) (*ListAllFleetLocksResponse, error)
+	ListAllFleetLocksWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListAllFleetLocksResponse, error)
 
 	// LoginWithBodyWithResponse request with any body
 	LoginWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*LoginResponse, error)
@@ -21487,8 +21467,8 @@ func (c *ClientWithResponses) GetIdentitySettingsWithResponse(ctx context.Contex
 }
 
 // ListAllFleetLocksWithResponse request returning *ListAllFleetLocksResponse
-func (c *ClientWithResponses) ListAllFleetLocksWithResponse(ctx context.Context, params *ListAllFleetLocksParams, reqEditors ...RequestEditorFn) (*ListAllFleetLocksResponse, error) {
-	rsp, err := c.ListAllFleetLocks(ctx, params, reqEditors...)
+func (c *ClientWithResponses) ListAllFleetLocksWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListAllFleetLocksResponse, error) {
+	rsp, err := c.ListAllFleetLocks(ctx, reqEditors...)
 	if err != nil {
 		return nil, err
 	}

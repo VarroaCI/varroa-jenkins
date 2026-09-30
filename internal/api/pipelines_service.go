@@ -324,6 +324,7 @@ func (s *Server) GetRunLog(ctx context.Context, claims *auth.Claims, runID strin
 // wants either groups the rows it already has by name.
 type FleetLockRow struct {
 	Name         string     `json:"name"`
+	Cluster      string     `json:"cluster"`
 	Tenant       string     `json:"tenant"`
 	JobPath      string     `json:"jobPath"`
 	State        string     `json:"state"`

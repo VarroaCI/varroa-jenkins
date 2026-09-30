@@ -480,6 +480,7 @@ export function createFleetLock(overrides?: Partial<FleetLock>): FleetLock {
     : { acquiredAt: "2026-01-01T00:00:00Z" };
   return {
     name: "payments/smoke-lock",
+    cluster: "core",
     tenant: "payments",
     jobPath: "payments/app-a",
     state,

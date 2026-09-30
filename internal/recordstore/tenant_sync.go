@@ -664,10 +664,10 @@ func writeTenantPlacement(ctx context.Context, tx pgx.Tx, req TenantSyncRequest,
 		INSERT INTO varroa.tenant_placements (
 			cluster, tenant, namespace, cell, generation, cell_instance, policy,
 			rehydrated_instance, pending_jobs, cell_alive, cell_alive_at, cell_last_seen_at,
-			dead_instances, announced_at, members, job_homes, incarnation
+			dead_instances, announced_at, members, job_homes, incarnation, agent_namespace
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::jsonb, $10, $11, $12, $13::jsonb, now(),
-			$14::jsonb, $15::jsonb, $16
+			$14::jsonb, $15::jsonb, $16, $17
 		)
 		ON CONFLICT (cluster, tenant) DO UPDATE SET
 			namespace           = EXCLUDED.namespace,
@@ -684,11 +684,13 @@ func writeTenantPlacement(ctx context.Context, tx pgx.Tx, req TenantSyncRequest,
 			announced_at        = now(),
 			members             = EXCLUDED.members,
 			job_homes           = EXCLUDED.job_homes,
-			incarnation         = EXCLUDED.incarnation
+			incarnation         = EXCLUDED.incarnation,
+			agent_namespace     = EXCLUDED.agent_namespace
 	`,
 		req.Cluster, req.Tenant, req.Namespace, req.Cell, generation, req.CellInstance, string(policy),
 		rehydratedInstance, string(pendingJobsJSON), req.CellAlive, req.CellAliveAt, req.CellLastSeenAt,
 		string(deadInstancesJSON), string(membersJSON), string(jobHomesJSON), incarnation,
+		req.AgentNamespace,
 	); err != nil {
 		return fmt.Errorf("upsert tenant placement: %w", err)
 	}

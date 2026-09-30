@@ -95,38 +95,36 @@ func TestReaderListFleetLocks_TenantScope(t *testing.T) {
 	}
 }
 
-// TestReaderListFleetLocks_ClusterWide asserts the cluster-wide read
-// answers every tenant's rows of that cluster, and no other cluster's
-// row.
-func TestReaderListFleetLocks_ClusterWide(t *testing.T) {
+// TestReaderListAllFleetLocks_EveryCluster asserts the fleet-wide read
+// answers every tenant's rows of every cluster as one ordered list, and
+// each row carries its own cluster.
+func TestReaderListAllFleetLocks_EveryCluster(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	seedLockReadFixture(t, db)
 
-	locks, err := NewReader(pool).ListAllFleetLocks(context.Background(), testCluster)
+	locks, err := NewReader(pool).ListAllFleetLocks(context.Background())
 	if err != nil {
 		t.Fatalf("ListAllFleetLocks: %v", err)
 	}
-	if len(locks) != 5 {
-		t.Fatalf("ListAllFleetLocks answered %d rows, want 5: %+v", len(locks), locks)
+	want := []struct {
+		name, runID, cluster string
+	}{
+		{"alpha/deploy-prod", "run-alpha-held", testCluster},
+		{"alpha/deploy-prod", "run-alpha-wait-1", testCluster},
+		{"alpha/deploy-prod", "run-alpha-wait-2", testCluster},
+		{"alpha/deploy-prod", "run-other-cluster", "other"},
+		{"beta/deploy-prod", "run-alpha-under-beta", testCluster},
+		{"beta/deploy-prod", "run-beta-held", testCluster},
 	}
-	tenants := map[string]int{}
-	for _, lock := range locks {
-		tenants[lock.Tenant]++
-		if lock.Cluster != testCluster {
-			t.Errorf("row %s/%s carries cluster %q, want %q", lock.Name, lock.RunID, lock.Cluster, testCluster)
+	if len(locks) != len(want) {
+		t.Fatalf("ListAllFleetLocks answered %d rows, want %d: %+v", len(locks), len(want), locks)
+	}
+	for i, tc := range want {
+		got := locks[i]
+		if got.Name != tc.name || got.RunID != tc.runID || got.Cluster != tc.cluster {
+			t.Errorf("row %d = %s/%s@%s, want %s/%s@%s", i,
+				got.Name, got.RunID, got.Cluster, tc.name, tc.runID, tc.cluster)
 		}
-	}
-	if tenants["alpha"] != 4 || tenants["beta"] != 1 {
-		t.Errorf("tenant row counts = %v, want alpha 4 and beta 1", tenants)
-	}
-
-	// The same read of another cluster answers that cluster's row alone.
-	other, err := NewReader(pool).ListAllFleetLocks(context.Background(), "other")
-	if err != nil {
-		t.Fatalf("ListAllFleetLocks for other: %v", err)
-	}
-	if len(other) != 1 || other[0].RunID != "run-other-cluster" {
-		t.Fatalf("ListAllFleetLocks for other = %+v, want the one row of that cluster", other)
 	}
 }
 
@@ -160,7 +158,7 @@ func TestReaderListFleetLocks_RowCarriesNoQueuePosition(t *testing.T) {
 			return NewReader(pool).ListFleetLocks(context.Background(), testCluster, "alpha")
 		}},
 		{"ListAllFleetLocks", func() ([]FleetLock, error) {
-			return NewReader(pool).ListAllFleetLocks(context.Background(), testCluster)
+			return NewReader(pool).ListAllFleetLocks(context.Background())
 		}},
 	} {
 		t.Run(read.name, func(t *testing.T) {

@@ -432,3 +432,36 @@ func TestCellUsageMethodsRefuseAnOldSchema(t *testing.T) {
 		t.Errorf("CellTenantUsage error = %v, want ErrSchemaTooOld", err)
 	}
 }
+
+// TestCellUsageCarriesPlacementGenerationAndAgentNamespace asserts each
+// tenant row carries its placement row's generation and announced agent
+// namespace, and an empty namespace for a row that names none.
+func TestCellUsageCarriesPlacementGenerationAndAgentNamespace(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	ctx := context.Background()
+
+	const cell = "cell-a"
+	seedCellPlacement(t, db, cell, "acme")
+	seedCellPlacement(t, db, cell, "quiet")
+	if _, err := db.Exec(`
+		UPDATE varroa.tenant_placements SET generation = 7, agent_namespace = 'acme-agents'
+		WHERE cluster = $1 AND tenant = 'acme'
+	`, testCluster); err != nil {
+		t.Fatalf("stamp acme's placement: %v", err)
+	}
+
+	usage, err := NewReader(pool).CellUsage(ctx, testCluster, cellUsageNamespace, cell)
+	if err != nil {
+		t.Fatalf("CellUsage: %v", err)
+	}
+	if len(usage.Tenants) != 2 {
+		t.Fatalf("Tenants = %+v, want two rows", usage.Tenants)
+	}
+	acme, quiet := usage.Tenants[0], usage.Tenants[1]
+	if acme.Tenant != "acme" || acme.PlacementGeneration != 7 || acme.AgentNamespace != "acme-agents" {
+		t.Errorf("acme row = %+v, want generation 7 and namespace acme-agents", acme)
+	}
+	if quiet.Tenant != "quiet" || quiet.PlacementGeneration != 0 || quiet.AgentNamespace != "" {
+		t.Errorf("quiet row = %+v, want generation 0 and no namespace", quiet)
+	}
+}

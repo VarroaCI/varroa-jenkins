@@ -33,6 +33,13 @@ type CellTenantUsage struct {
 	// member and "standby" for a standby. A standby holds the tenant
 	// folder and runs no build.
 	Role string `json:"role,omitempty"`
+	// AgentNamespace is the namespace of the tenant's build agents, as
+	// the tenant's own cluster last announced it. It is absent until an
+	// announcement names one.
+	AgentNamespace string `json:"agentNamespace,omitempty"`
+	// PlacementGeneration is the generation of the tenant's placement
+	// row in the record store.
+	PlacementGeneration int64 `json:"placementGeneration"`
 	CellUsageCounts
 }
 
@@ -70,8 +77,10 @@ func cellUsageRowJSON(usage recordstore.CellUsage) cellUsageJSON {
 	}
 	for _, tenant := range usage.Tenants {
 		row.Tenants = append(row.Tenants, cellTenantUsageJSON{
-			Tenant: tenant.Tenant,
-			Role:   tenant.Role,
+			Tenant:              tenant.Tenant,
+			Role:                tenant.Role,
+			AgentNamespace:      tenant.AgentNamespace,
+			PlacementGeneration: tenant.PlacementGeneration,
 			cellUsageCountsJSON: cellUsageCountsJSON{
 				RunningNow:    tenant.RunningNow,
 				RunsLast24h:   tenant.RunsLast24h,

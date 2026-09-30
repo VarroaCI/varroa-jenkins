@@ -99,7 +99,7 @@ function usageRow(name: string, overrides?: Partial<CellUsage>): CellUsage {
     namespace: "ns-a",
     name,
     windowStart: "2026-09-11T00:00:00Z",
-    tenants: [{ tenant: "acme", runningNow: 0, runsLast24h: 2, failedLast24h: 1, jobs: 3 }],
+    tenants: [{ tenant: "acme", placementGeneration: 1, runningNow: 0, runsLast24h: 2, failedLast24h: 1, jobs: 3 }],
     totals: { runningNow: 0, runsLast24h: 2, failedLast24h: 1, jobs: 3 },
     maxTenants: 10,
     freeSlots: 9,

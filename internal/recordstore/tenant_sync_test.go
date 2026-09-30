@@ -509,3 +509,36 @@ func sendTenantSyncWithMetrics(t *testing.T, pool *pgxpool.Pool, conn *bus.Conn,
 	}
 	return resp
 }
+
+// TestTenantSyncAnnounceStoresAgentNamespace asserts an announce stores
+// its agent namespace, and a later announce replaces the stored value
+// with the announced one.
+func TestTenantSyncAnnounceStoresAgentNamespace(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+
+	readAgentNamespace := func() string {
+		t.Helper()
+		var ns string
+		if err := db.QueryRow(`
+			SELECT agent_namespace FROM varroa.tenant_placements WHERE cluster = 'core' AND tenant = 'payments'
+		`).Scan(&ns); err != nil {
+			t.Fatalf("read agent_namespace: %v", err)
+		}
+		return ns
+	}
+
+	for _, want := range []string{"payments-agents", "payments-agents-2"} {
+		resp := sendTenantSync(t, pool, conn, TenantSyncRequest{
+			Kind: TenantSyncKindAnnounce, Cluster: "core", Tenant: "payments",
+			Namespace: "cells-a", Cell: "cell-b", Generation: 5, CellInstance: "pod-1",
+			AgentNamespace: want,
+		})
+		if resp.Error != "" || !resp.Ok {
+			t.Fatalf("want ok, got %+v", resp)
+		}
+		if got := readAgentNamespace(); got != want {
+			t.Fatalf("agent_namespace = %q, want %q", got, want)
+		}
+	}
+}

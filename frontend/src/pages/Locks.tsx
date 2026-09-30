@@ -11,7 +11,7 @@ import type { FleetLock } from "../types";
 import styles from "./Locks.module.css";
 
 /** CELLS_POLL_MS is the cadence the cells page reads at. This page holds
- * the same kind of cluster-wide list, so it polls at that cadence and
+ * the same kind of fleet-wide list, so it polls at that cadence and
  * opens no stream. */
 const CELLS_POLL_MS = 15_000;
 
@@ -29,6 +29,7 @@ function LockRow({ items, row }: { items: FleetLock[]; row: FleetLock }) {
   return (
     <tr>
       <td className={styles.nameCell}>{row.name}</td>
+      <td>{row.cluster}</td>
       <td>{row.tenant}</td>
       <td className={styles.jobCell}>{row.jobPath}</td>
       <td>{row.state}</td>
@@ -90,8 +91,8 @@ export default function Locks() {
         <div>
           <h1 className={styles.pageTitle}>Fleet locks</h1>
           <p className={styles.pageDesc}>
-            Every tenant's fleet locks in this cluster. This view reads only; a lock leaves when
-            the run that holds it releases the lock.
+            Every tenant's fleet locks across every cluster. This view reads only; a lock leaves
+            when the run that holds it releases the lock.
           </p>
         </div>
       </div>
@@ -104,6 +105,7 @@ export default function Locks() {
             <thead>
               <tr>
                 <th>Lock</th>
+                <th>Cluster</th>
                 <th>Tenant</th>
                 <th>Job</th>
                 <th>State</th>

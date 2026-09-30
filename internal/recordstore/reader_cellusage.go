@@ -35,7 +35,7 @@ const cellUsageWindow = 24 * time.Hour
 // holds one row for each trigger type.
 const cellUsageQuery = `
 	WITH placed AS (
-		SELECT m.cell, p.tenant, m.role, m.slot
+		SELECT m.cell, p.tenant, m.role, m.slot, p.generation, p.agent_namespace
 		FROM varroa.tenant_placements p
 		CROSS JOIN LATERAL jsonb_to_recordset(
 			CASE WHEN jsonb_array_length(p.members) > 0 THEN p.members
@@ -69,7 +69,7 @@ const cellUsageQuery = `
 		WHERE s.cluster = $1 AND s.namespace = $2 AND s.cell = ANY($3)
 		GROUP BY s.cell, s.tenant
 	)
-	SELECT p.cell, p.tenant, p.role, p.slot,
+	SELECT p.cell, p.tenant, p.role, p.slot, p.generation, p.agent_namespace,
 	       COALESCE(n.running_now, 0),
 	       COALESCE(w.runs, 0),
 	       COALESCE(w.failed, 0),
@@ -152,11 +152,13 @@ const cellTenantJobQuery = `
 
 // cellUsageRow is one row of cellUsageQuery: one tenant on one cell.
 type cellUsageRow struct {
-	cell   string
-	tenant string
-	role   string
-	slot   *int32
-	counts CellUsageCounts
+	cell                string
+	tenant              string
+	role                string
+	slot                *int32
+	placementGeneration int64
+	agentNamespace      string
+	counts              CellUsageCounts
 }
 
 // queryCellUsage runs one cell-usage statement and returns its rows.
@@ -170,7 +172,8 @@ func (r *pgReader) queryCellUsage(ctx context.Context, cluster, namespace string
 	var rows []cellUsageRow
 	for pgRows.Next() {
 		var row cellUsageRow
-		if err := pgRows.Scan(&row.cell, &row.tenant, &row.role, &row.slot, &row.counts.RunningNow,
+		if err := pgRows.Scan(&row.cell, &row.tenant, &row.role, &row.slot,
+			&row.placementGeneration, &row.agentNamespace, &row.counts.RunningNow,
 			&row.counts.RunsLast24h, &row.counts.FailedLast24h, &row.counts.Jobs); err != nil {
 			return nil, fmt.Errorf("scan cell usage: %w", err)
 		}
@@ -210,7 +213,12 @@ func (r *pgReader) CellUsageMany(ctx context.Context, cluster, namespace string,
 			continue
 		}
 		cell.Tenants = append(cell.Tenants, CellTenantUsage{
-			Tenant: row.tenant, Role: renderMemberRole(row.role, row.slot), CellUsageCounts: row.counts})
+			Tenant:              row.tenant,
+			Role:                renderMemberRole(row.role, row.slot),
+			AgentNamespace:      row.agentNamespace,
+			PlacementGeneration: row.placementGeneration,
+			CellUsageCounts:     row.counts,
+		})
 		cell.Totals.RunningNow += row.counts.RunningNow
 		cell.Totals.RunsLast24h += row.counts.RunsLast24h
 		cell.Totals.FailedLast24h += row.counts.FailedLast24h

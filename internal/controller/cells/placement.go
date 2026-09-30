@@ -642,6 +642,7 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 	// rolled pod of a cell that stays a candidate is reported through
 	// cellPreviousInstances, on this path and on the moveNone path.
 	policy := SyncPolicyFromPipelines(team.Spec.Pipelines)
+	agentNamespace := teamAgentNamespace(team)
 	var dead []DeadInstance
 	if wasPlaced && oldCell == nil {
 		// The old cell left the candidate set, so this call site reads
@@ -671,6 +672,7 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 		CellLastSeenAt: newCell.MiteLastSeen,
 		DeadInstances:  dead,
 		Members:        announced,
+		AgentNamespace: agentNamespace,
 	})
 	if announceErr != nil || !result.OK {
 		// A failed announcement stops the move for this tick (design
@@ -683,7 +685,7 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 		Cell: newCell.Name, CellNamespace: newCell.Namespace,
 		Generation: newGeneration, CellInstance: newCell.Instance,
 		Policy: policy, CellLastSeenAt: newCell.MiteLastSeen, At: nowT,
-		Members: announced,
+		Members: announced, AgentNamespace: agentNamespace,
 	}
 
 	// The claim: the caller writes it onto the new cell before the fence
@@ -800,6 +802,15 @@ func requestPurge(ctx context.Context, in Inputs, team *v1alpha1.Team, oldGenera
 	return ok && err == nil
 }
 
+// teamAgentNamespace answers the tenant's spec.pipelines.agentNamespace,
+// or the empty string for a Team with no pipelines spec.
+func teamAgentNamespace(team *v1alpha1.Team) string {
+	if team.Spec.Pipelines == nil {
+		return ""
+	}
+	return team.Spec.Pipelines.AgentNamespace
+}
+
 // sendAnnounce calls Inputs.Announce and reports its reply. A nil Announce
 // answers a failure, the same way requestPurge treats a nil RequestPurge:
 // a missing wire-up is visible as a retry, not a panic.
@@ -812,11 +823,12 @@ func sendAnnounce(ctx context.Context, in Inputs, req AnnounceRequest) (Announce
 
 // maybeReannounce sends the same-generation announcement (tenant-placement
 // spec, task 4.4a) when the owning cell's instance changed, the seven
-// pipelines settings changed, the tenant's rehydration state changed, or
-// the resync window elapsed. cell is the tenant's current, unchanged
+// pipelines settings changed, the tenant's rehydration state changed, the
+// agent namespace changed, or the resync window elapsed. cell is the tenant's current, unchanged
 // binding (moveNone): status.Placement already names it.
 func maybeReannounce(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus, cell CellCandidate, nowT time.Time, out *Outcome) {
 	policy := SyncPolicyFromPipelines(team.Spec.Pipelines)
+	agentNamespace := teamAgentNamespace(team)
 	rehydratedInstance, pendingJobs := currentRehydrationState(in, cell)
 
 	members, _ := desiredMembers(in, team, status, &cell, nowT)
@@ -833,6 +845,7 @@ func maybeReannounce(ctx context.Context, in Inputs, team *v1alpha1.Team, status
 		!last.Policy.Equal(policy) ||
 		last.RehydratedInstance != rehydratedInstance ||
 		!stringSlicesEqual(last.PendingJobs, pendingJobs) ||
+		last.AgentNamespace != agentNamespace ||
 		membersChanged ||
 		nowT.Sub(last.At) >= syncResyncInterval
 	if !due {
@@ -866,6 +879,7 @@ func maybeReannounce(ctx context.Context, in Inputs, team *v1alpha1.Team, status
 		CellLastSeenAt:     cell.MiteLastSeen,
 		DeadInstances:      dead,
 		Members:            announced,
+		AgentNamespace:     agentNamespace,
 	})
 	if err != nil || !result.OK {
 		// A failed announcement stops the member change for this tick.
@@ -877,6 +891,7 @@ func maybeReannounce(ctx context.Context, in Inputs, team *v1alpha1.Team, status
 		Generation: generation, CellInstance: cell.Instance,
 		Policy: policy, RehydratedInstance: rehydratedInstance, PendingJobs: pendingJobs,
 		CellLastSeenAt: cell.MiteLastSeen, At: nowT, Members: announced,
+		AgentNamespace: agentNamespace,
 	}
 
 	// The announce is the pre-step, so the status write follows it. The

@@ -2081,6 +2081,8 @@ export interface RunNotification {
 export interface FleetLock {
   /** The qualified name, as <tenant>/<bare-name>. */
   name: string;
+  /** The cluster of the run that holds or waits on the lock. */
+  cluster: string;
   /** The tenant of the run that holds or waits on the lock. */
   tenant: string;
   jobPath: string;
@@ -2240,6 +2242,13 @@ export interface CellTenantUsage extends CellUsageCounts {
    * build, so its running count is zero.
    */
   role?: string;
+  /**
+   * The namespace of the tenant's build agents, as the tenant's own cluster
+   * last announced it. Absent until an announcement names one.
+   */
+  agentNamespace?: string;
+  /** The generation of the tenant's placement row in the record store. */
+  placementGeneration: number;
 }
 
 /**

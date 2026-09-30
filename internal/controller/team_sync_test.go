@@ -72,7 +72,8 @@ func TestNewNATSSyncAnnouncer_RequestShape(t *testing.T) {
 		},
 		RehydratedInstance: "uid-2", PendingJobs: []string{"payments/api/main"},
 		CellAlive: true, CellAliveAt: &aliveAt, CellLastSeenAt: &lastSeen,
-		DeadInstances: []cells.DeadInstance{{Instance: "uid-1", LastSeenAt: lastSeen}},
+		DeadInstances:  []cells.DeadInstance{{Instance: "uid-1", LastSeenAt: lastSeen}},
+		AgentNamespace: "payments-agents",
 	})
 	if err != nil {
 		t.Fatalf("announce: %v", err)
@@ -98,6 +99,9 @@ func TestNewNATSSyncAnnouncer_RequestShape(t *testing.T) {
 	}
 	if len(got.DeadInstances) != 1 || got.DeadInstances[0].Instance != "uid-1" {
 		t.Errorf("DeadInstances = %v", got.DeadInstances)
+	}
+	if got.AgentNamespace != "payments-agents" {
+		t.Errorf("AgentNamespace = %q, want payments-agents", got.AgentNamespace)
 	}
 
 	var policy syncPolicyWire

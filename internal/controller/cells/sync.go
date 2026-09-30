@@ -175,6 +175,10 @@ type AnnounceRequest struct {
 	// Members carries the whole member list of the tenant. Slot 0's entry
 	// repeats the scalar fields above.
 	Members []AnnounceMember
+	// AgentNamespace is the tenant's spec.pipelines.agentNamespace. The
+	// core reads it from the placement row, because a member cluster
+	// holds the Team object.
+	AgentNamespace string
 }
 
 // AnnounceResult is the "announce" reply (design D6).
@@ -261,6 +265,9 @@ type SyncCache struct {
 	// member triggers compare against it, and the promotion choice reads
 	// each member's applied time from it.
 	Members []AnnounceMember
+	// AgentNamespace is the agent namespace the last announcement
+	// carried. A change is a trigger.
+	AgentNamespace string
 }
 
 // HomesRequest asks for one tenant's member list and its job home map

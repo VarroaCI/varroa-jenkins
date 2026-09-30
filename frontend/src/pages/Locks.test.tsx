@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createTestQueryClient } from "../test/render-utils";
@@ -84,6 +84,43 @@ describe("Locks", () => {
     renderPage();
 
     await waitFor(() => expect(screen.getByText("Not found")).toBeInTheDocument());
+  });
+
+  it("renders the cluster column", async () => {
+    mockListAllFleetLocks.mockResolvedValue({
+      items: [createFleetLock({ name: "payments/smoke-lock", cluster: "member-a", state: "held" })],
+    });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Cluster")).toBeInTheDocument());
+    const row = screen.getByText("payments/smoke-lock").closest("tr") as HTMLElement;
+    expect(within(row).getByText("member-a")).toBeInTheDocument();
+  });
+
+  it("groups a waiter with a holder on another cluster", async () => {
+    mockListAllFleetLocks.mockResolvedValue({
+      items: [
+        createFleetLock({
+          name: "payments/smoke-lock",
+          cluster: "member-a",
+          state: "held",
+          jobPath: "payments/holder-job",
+        }),
+        createFleetLock({
+          name: "payments/smoke-lock",
+          cluster: "core",
+          state: "waiting",
+          jobPath: "payments/waiter-job",
+        }),
+      ],
+    });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("payments/waiter-job")).toBeInTheDocument());
+    expect(screen.queryByText("held elsewhere")).not.toBeInTheDocument();
+    const waiter = screen.getByText("payments/waiter-job").closest("tr") as HTMLElement;
+    expect(within(waiter).getByText("core")).toBeInTheDocument();
+    expect(within(waiter).getByText("payments/holder-job")).toBeInTheDocument();
   });
 
   it("polls the read and opens no stream", async () => {
