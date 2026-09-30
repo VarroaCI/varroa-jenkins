@@ -218,6 +218,9 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   `BuildPage.tsx` also renders one terminal card, in its own early return
   after the `!run` guard, for a run whose `result` is `TRIGGER_FAILED`: the
   record exists, so the `requested` and `notStarted` blocks never run for it.
+  A record's `commandRefusal` renders one `role="status"` notice under the
+  interrupted banner, with the command, the HTTP status, the actor, the time,
+  and the error. A later successful command does not remove it.
   `RunLogViewer.tsx` renders the log stream: search, virtualized scroll, and
   ANSI colour via `ansi.ts`'s `parseAnsiLine`. `RunLogViewer` applies the
   frames the page hands it, in order, and it never calls `useEventStream`

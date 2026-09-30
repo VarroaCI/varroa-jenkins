@@ -405,6 +405,13 @@ const (
 	ComponentsSchemasRunActionResponseStateRequested ComponentsSchemasRunActionResponseState = "requested"
 )
 
+// Defines values for ComponentsSchemasRunCommandRefusalCommand.
+const (
+	AbortInput   ComponentsSchemasRunCommandRefusalCommand = "abort_input"
+	Cancel       ComponentsSchemasRunCommandRefusalCommand = "cancel"
+	ProceedInput ComponentsSchemasRunCommandRefusalCommand = "proceed_input"
+)
+
 // Defines values for ComponentsSchemasRunScriptDefinitionKind.
 const (
 	ComponentsSchemasRunScriptDefinitionKindScript   ComponentsSchemasRunScriptDefinitionKind = "script"
@@ -3013,6 +3020,27 @@ type ComponentsSchemasRunChangeListResponse struct {
 	Items []ComponentsSchemasRunChange `json:"items"`
 }
 
+// ComponentsSchemasRunCommandRefusal The newest cancel or input answer the Jenkins plugin refused for this run, on GET /runs/{run}. The field is absent when no such refusal exists. A later successful command does not remove it. The notice carries its own time, so a reader compares it with the run state.
+type ComponentsSchemasRunCommandRefusal struct {
+	// Actor The person or service that sent the command.
+	Actor *string `json:"actor,omitempty"`
+
+	// Command The refused command.
+	Command ComponentsSchemasRunCommandRefusalCommand `json:"command"`
+
+	// Error The refusal text. The mite keeps the title of a Jenkins error page, and the gateway cuts the text at 512 characters.
+	Error *string `json:"error,omitempty"`
+
+	// HttpStatus The HTTP status the plugin answered.
+	HttpStatus *int `json:"httpStatus,omitempty"`
+
+	// RefusedAt The time the gateway received the refusal.
+	RefusedAt time.Time `json:"refusedAt"`
+}
+
+// ComponentsSchemasRunCommandRefusalCommand The refused command.
+type ComponentsSchemasRunCommandRefusalCommand string
+
 // ComponentsSchemasRunDetail GET /runs/{run}.
 type ComponentsSchemasRunDetail struct {
 	Actor       *string `json:"actor,omitempty"`
@@ -3022,6 +3050,9 @@ type ComponentsSchemasRunDetail struct {
 	// Cases The run's stored failed and skipped test cases, the same entries GET /runs/{run}/tests serves. The field is absent when the run holds no stored case.
 	Cases *[]ComponentsSchemasRunTestCase `json:"cases,omitempty"`
 	Cause *string                         `json:"cause,omitempty"`
+
+	// CommandRefusal The newest cancel or input answer the Jenkins plugin refused for this run, on GET /runs/{run}. The field is absent when no such refusal exists. A later successful command does not remove it. The notice carries its own time, so a reader compares it with the run state.
+	CommandRefusal *ComponentsSchemasRunCommandRefusal `json:"commandRefusal,omitempty"`
 
 	// Digest Why a run that did not succeed failed. The server computes this object on every read, from the stored rows and the stored log. The field is absent for a run with no result, for a SUCCESS or TRIGGER_FAILED result, or for a run with no start time.
 	Digest *struct {

@@ -31,6 +31,7 @@ type IngestMetrics struct {
 	scheduleStale     metric.Int64Counter
 	triggerFailed     metric.Int64Counter
 	triggerAccepted   metric.Int64Counter
+	commandRefused    metric.Int64Counter
 	supersededStart   metric.Int64Counter
 	numberMismatch    metric.Int64Counter
 	backlogMsgs       metric.Int64ObservableGauge
@@ -98,6 +99,12 @@ func NewIngestMetrics(conn *bus.Conn, streamName, consumerName string) (*IngestM
 		metric.WithDescription("run.trigger_accepted envelopes the recorder stored, or skipped because a row already exists"))
 	if err != nil {
 		return nil, fmt.Errorf("register recorder_ingest_trigger_accepted_total: %w", err)
+	}
+
+	m.commandRefused, err = meter.Int64Counter("recorder_ingest_command_refused_total",
+		metric.WithDescription("run.command_refused envelopes the recorder stored, or skipped because no run row matched or the run holds a notice that is not older"))
+	if err != nil {
+		return nil, fmt.Errorf("register recorder_ingest_command_refused_total: %w", err)
 	}
 
 	m.backlogMsgs, err = meter.Int64ObservableGauge("recorder_ingest_backlog_msgs",
@@ -205,4 +212,15 @@ func (m *IngestMetrics) addTriggerAccepted(ctx context.Context, stored bool) {
 		return
 	}
 	m.triggerAccepted.Add(ctx, 1, metric.WithAttributes(attribute.Bool("stored", stored)))
+}
+
+// addCommandRefused counts one recorder_ingest_command_refused_total
+// event, labelled by the refused command and by whether the write stored
+// the notice.
+func (m *IngestMetrics) addCommandRefused(ctx context.Context, command string, stored bool) {
+	if m == nil || m.commandRefused == nil {
+		return
+	}
+	m.commandRefused.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("command", command), attribute.Bool("stored", stored)))
 }

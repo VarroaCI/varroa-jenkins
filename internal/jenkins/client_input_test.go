@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -196,5 +197,45 @@ func TestReplayBuildPostsTheRequestedBody(t *testing.T) {
 	refusedStatus, refusedErr := refused.ReplayBuild(context.Background(), ReplayBuildRequest{JobPath: "team/job"})
 	if refusedErr == nil || refusedStatus != http.StatusConflict {
 		t.Fatalf("status = %d, err = %v; want 409 and an error", refusedStatus, refusedErr)
+	}
+}
+
+// TestRunCommandRoutesReportTheTitleOfAnHTMLRefusal asserts every run
+// command route reports the title of a Jenkins HTML error page, not the
+// page itself.
+func TestRunCommandRoutesReportTheTitleOfAnHTMLRefusal(t *testing.T) {
+	const message = "Not Found: no build or queue item carries run id r1"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/crumbIssuer/api/json" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(jenkinsErrorPage(message + " - Jenkins")))
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient(srv.URL, "user", "token")
+	ctx := context.Background()
+
+	calls := map[string]func() (int, error){
+		"trigger": func() (int, error) { return c.TriggerBuild(ctx, TriggerBuildRequest{JobPath: "team/job"}) },
+		"cancel":  func() (int, error) { return c.CancelBuild(ctx, CancelBuildRequest{JobPath: "team/job"}) },
+		"proceed": func() (int, error) { return c.ProceedInput(ctx, ProceedInputRequest{JobPath: "team/job"}) },
+		"abort":   func() (int, error) { return c.AbortInput(ctx, AbortInputRequest{JobPath: "team/job"}) },
+		"replay":  func() (int, error) { return c.ReplayBuild(ctx, ReplayBuildRequest{JobPath: "team/job"}) },
+	}
+	for name, call := range calls {
+		status, err := call()
+		if err == nil || status != http.StatusNotFound {
+			t.Fatalf("%s: status = %d, err = %v; want 404 and an error", name, status, err)
+		}
+		msg := err.Error()
+		if !strings.HasSuffix(msg, ": HTTP 404: "+message) {
+			t.Fatalf("%s: error = %q, want the page title only", name, msg)
+		}
+		if strings.Contains(msg, "<") {
+			t.Fatalf("%s: error carries HTML: %q", name, msg)
+		}
 	}
 }

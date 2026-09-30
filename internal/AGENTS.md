@@ -58,6 +58,11 @@ reading each package's entry point):
   (`lastused.go`).
 - **`jenkins/`** — HTTP client for the Jenkins REST API, used by mite
   sidecars to manage their local Jenkins instance (crumb handling, retries).
+  Every error that quotes a 4 KiB error-body read goes through `refusalText`:
+  it keeps only the `<title>` of a Jenkins HTML error page, without the
+  ` - Jenkins` suffix, and cuts the text at 300 runes. `CheckConfig` and
+  `ExportConfig` keep their 8 KiB raw read, because a JCasC error body can be
+  longer than 300 runes and stays useful.
   Its `items` subpackage models `items.yaml` (the manifest, `config.xml`
   rendering, and the engine's incremental apply) and adds a tenant
   composition seam for a cell: `ReRoot` wraps one tenant's items under a

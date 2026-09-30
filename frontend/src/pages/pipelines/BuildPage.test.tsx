@@ -1352,3 +1352,32 @@ describe("BuildPage — replay", () => {
     expect(mockReplayRun).not.toHaveBeenCalled();
   });
 });
+
+describe("BuildPage — refused command notice", () => {
+  it("shows the newest refused cancel with its status, actor, and error", async () => {
+    mockGetRun.mockResolvedValue(
+      baseRun({
+        commandRefusal: {
+          command: "cancel",
+          actor: "alice",
+          httpStatus: 404,
+          error: "Not Found: no build carries run id run-1",
+          refusedAt: "2026-09-29T12:03:00Z",
+        },
+      }),
+    );
+    renderPage();
+    await screen.findByText(/Build #42/);
+    const notice = screen.getByText(
+      /^Cancel refused \(HTTP 404\) by alice at .*: Not Found: no build carries run id run-1$/,
+    );
+    expect(notice).toHaveAttribute("role", "status");
+  });
+
+  it("shows no notice when the run holds no refusal", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    renderPage();
+    await screen.findByText(/Build #42/);
+    expect(screen.queryByText(/refused/)).not.toBeInTheDocument();
+  });
+});

@@ -578,8 +578,13 @@ func (h *BusHandler) SetRecordStoreEnabled(enabled bool) {
 //
 // A refused CANCEL_BUILD, input answer, or REPLAY_BUILD logs one Warn line
 // first, with or without a record store, and acknowledges: the caller
-// already holds a 202, and none of the three writes a record here. With no
-// record store the gateway then publishes nothing and acknowledges.
+// already holds a 202. With a record store, a refused cancel or input answer
+// then publishes one run.command_refused envelope for its run, and a refused
+// replay publishes one run.trigger_failed envelope for the new run the
+// replay named. These three acknowledge whatever the publish answers: a
+// redelivered command runs the refused call again, and the record is only a
+// notice for the run's reader. With no record store the gateway publishes
+// nothing and acknowledges.
 //
 // A TRIGGER_BUILD result publishes, and ANY publish error blocks the
 // acknowledgement. The stream then redelivers the command, the mite triggers
@@ -603,18 +608,35 @@ func (h *BusHandler) recordCommandOutcome(ns, name string, pendingMsg *nats.Msg,
 	}
 	switch imp.Type {
 	case mitev1.CommandTypeCancelBuild:
-		// A cancel publishes no record: the operator records the outcome
-		// on the activity stream. The log names the refusal on the gateway.
 		h.logRefusedRunCommand("cancel build command refused", ns, name, result)
+		if p := imp.CancelBuild; p != nil && h.shouldRecordRefusal(result) {
+			h.publishCommandRefused(ns, name, refusedCommandCancel, p.RunId, p.JobPath, p.Actor, result)
+		}
 		return true
-	case mitev1.CommandTypeProceedInput, mitev1.CommandTypeAbortInput:
-		// An input answer publishes no record: the plugin re-reads the
-		// run's pending set and reports the outcome itself.
+	case mitev1.CommandTypeProceedInput:
 		h.logRefusedRunCommand("run input command refused", ns, name, result)
+		if p := imp.ProceedInput; p != nil && h.shouldRecordRefusal(result) {
+			h.publishCommandRefused(ns, name, refusedCommandProceed, p.RunId, p.JobPath, actingUserName(p.ActingUser), result)
+		}
+		return true
+	case mitev1.CommandTypeAbortInput:
+		h.logRefusedRunCommand("run input command refused", ns, name, result)
+		if p := imp.AbortInput; p != nil && h.shouldRecordRefusal(result) {
+			h.publishCommandRefused(ns, name, refusedCommandAbort, p.RunId, p.JobPath, actingUserName(p.ActingUser), result)
+		}
 		return true
 	case mitev1.CommandTypeReplayBuild:
-		// A replay publishes no record: a refused replay leaves no run.
+		// A refused replay leaves no build. The failure record of the new
+		// run is the only record the run's reader can find.
 		h.logRefusedRunCommand("replay build command refused", ns, name, result)
+		if p := imp.ReplayBuild; p != nil && h.shouldRecordRefusal(result) {
+			h.publishTriggerFailed(ns, name, &mitev1.TriggerBuildPayload{
+				RunId:     p.RunId,
+				IntentKey: p.IntentKey,
+				JobPath:   p.JobPath,
+				Actor:     actingUserName(p.ActingUser),
+			}, result)
+		}
 		return true
 	}
 	if !h.recordStoreEnabled {
@@ -656,6 +678,82 @@ func (h *BusHandler) logRefusedRunCommand(msg, ns, name string, result *mitev1.C
 		"error", result.Error)
 }
 
+// shouldRecordRefusal reports whether a run command result is a refusal the
+// record store must hold.
+func (h *BusHandler) shouldRecordRefusal(result *mitev1.CommandResult) bool {
+	return h.recordStoreEnabled && !result.Success
+}
+
+// actingUserName answers the name of an input answer's or a replay's acting
+// user, or an empty name when the command names none.
+func actingUserName(user *mitev1.ActingUser) string {
+	if user == nil {
+		return ""
+	}
+	return user.Name
+}
+
+// publishCommandRefused publishes one run.command_refused envelope for a
+// cancel or an input answer the plugin refused. It answers nothing: the
+// caller acknowledges the command whatever this publish does. A command that
+// names no run publishes nothing. An unresolved tenant publishes nothing and
+// counts a rejection: a cell must not write a record under a tenant it does
+// not host.
+func (h *BusHandler) publishCommandRefused(ns, name, command, runID, jobPath, actor string, result *mitev1.CommandResult) {
+	key := ns + "/" + name
+	if runID == "" {
+		buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("refused run command names no run, publishing no envelope",
+			"controller", key, "command", command)
+		return
+	}
+
+	tenant, _ := h.resolver().ResolveJobTenant(h.cluster, ns, name, jobPath)
+	if tenant == "" {
+		buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("refused run command unresolved, publishing no envelope",
+			"controller", key, "command", command, "job_path", jobPath)
+		return
+	}
+
+	env := ingestEnvelope{
+		SchemaVersion: 1,
+		Kind:          kindRunCommandRefused,
+		RunID:         runID,
+		Cluster:       h.cluster,
+		Namespace:     ns,
+		Cell:          name,
+		CellInstance:  h.lookupCellInstance(ns, name),
+		Tenant:        tenant,
+		JobPath:       jobPath,
+		// A run command payload carries no timestamp, so the gateway clock
+		// is the only source.
+		OccurredAt: time.Now().UTC(),
+		Payload: map[string]interface{}{
+			"command":     command,
+			"actor":       actor,
+			"http_status": result.HttpStatus,
+			"error":       truncateError(result.Error),
+		},
+	}
+
+	data, err := json.Marshal(env)
+	if err != nil {
+		h.log().Error("marshal command refusal envelope failed", "controller", key, "error", err)
+		return
+	}
+
+	if _, err := h.publisher.PublishJetStream(bus.BuildSubject(h.cluster, ns, name), data); err != nil {
+		buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("command refusal publish failed, the run shows no refusal",
+			"controller", key, "run_id", runID, "error", err)
+		return
+	}
+
+	commandRefusedTotal.Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("command", command)))
+}
+
 // publishTriggerFailed publishes one run.trigger_failed envelope for a
 // TRIGGER_BUILD command Jenkins refused. It reports whether the pending
 // imperative message may be acknowledged. An unresolved tenant publishes
@@ -688,7 +786,7 @@ func (h *BusHandler) publishTriggerFailed(ns, name string, payload *mitev1.Trigg
 		// is the only source.
 		OccurredAt: time.Now().UTC(),
 		Payload: map[string]interface{}{
-			"error":       truncateRunes(result.Error, errorTruncateChars),
+			"error":       truncateError(result.Error),
 			"reason_code": reasonCode,
 			"http_status": result.HttpStatus,
 			"actor":       payload.Actor,
@@ -811,7 +909,7 @@ func (h *BusHandler) publishResumeFailed(ns, name string, payload *mitev1.Resume
 		OccurredAt: time.Now().UTC(),
 		Payload: map[string]interface{}{
 			"instance":    payload.Instance,
-			"error":       truncateRunes(result.Error, errorTruncateChars),
+			"error":       truncateError(result.Error),
 			"reason_code": reasonCode,
 		},
 	}

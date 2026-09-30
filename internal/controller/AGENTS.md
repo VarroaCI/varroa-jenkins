@@ -559,6 +559,9 @@ sections describe.
   not empty and not `recordstore.LedgerActionRecorder`). Every other
   success, a trigger success included, and a deferred `SAFE_RESTART` drain
   publish no event: the activity stream holds audit-worthy events only.
+  These cell-keyed rows are the operator audit record. A tenant reader
+  sees a refused run command on the run detail instead, through the
+  gateway's `run.command_refused` or `run.trigger_failed` record.
 - **Hash re-stamp quirk**: `handleConnected` calls `buildDesiredStateCommand` (which
   sets its own internal hash), then immediately recomputes
   `computeDesiredStateHash(d)` again and reassigns `d.DesiredStateHash`

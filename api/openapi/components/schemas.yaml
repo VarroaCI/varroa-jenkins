@@ -5117,6 +5117,8 @@ RunDetail:
       description: >
         The identifier of the run whose script this build replayed. The
         field is absent for a build that is not a replay.
+    commandRefusal:
+      $ref: '#/RunCommandRefusal'
     summary:
       type: string
       description: >
@@ -5212,6 +5214,36 @@ RunDetail:
       type: array
       items:
         $ref: '#/RunStage'
+  additionalProperties: false
+
+RunCommandRefusal:
+  type: object
+  description: >
+    The newest cancel or input answer the Jenkins plugin refused for this
+    run, on GET /runs/{run}. The field is absent when no such refusal
+    exists. A later successful command does not remove it. The notice
+    carries its own time, so a reader compares it with the run state.
+  required: [command, refusedAt]
+  properties:
+    command:
+      type: string
+      enum: [cancel, proceed_input, abort_input]
+      description: The refused command.
+    actor:
+      type: string
+      description: The person or service that sent the command.
+    httpStatus:
+      type: integer
+      description: The HTTP status the plugin answered.
+    error:
+      type: string
+      description: >
+        The refusal text. The mite keeps the title of a Jenkins error
+        page, and the gateway cuts the text at 512 characters.
+    refusedAt:
+      type: string
+      format: date-time
+      description: The time the gateway received the refusal.
   additionalProperties: false
 
 RunDetailTestReport:

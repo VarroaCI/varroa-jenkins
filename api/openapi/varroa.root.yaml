@@ -596,6 +596,8 @@ components:
       $ref: './components/schemas.yaml#/RunTestReport'
     RunDetailTestReport:
       $ref: './components/schemas.yaml#/RunDetailTestReport'
+    RunCommandRefusal:
+      $ref: './components/schemas.yaml#/RunCommandRefusal'
     RunScript:
       $ref: './components/schemas.yaml#/RunScript'
     TestCaseOutcome:

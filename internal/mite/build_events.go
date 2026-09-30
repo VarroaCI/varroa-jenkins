@@ -59,6 +59,19 @@ const (
 	// result. A successful result publishes nothing, because a resumed
 	// build proves itself by its own heartbeat.
 	kindRunResumeFailed = "run.resume_failed"
+	// kindRunCommandRefused records a cancel or an input answer the plugin
+	// refused. The gateway publishes it from a failed CANCEL_BUILD,
+	// PROCEED_INPUT, or ABORT_INPUT result, so the run's own reader sees
+	// the refusal.
+	kindRunCommandRefused = "run.command_refused"
+)
+
+// Command names a run.command_refused envelope carries. The literal values
+// must match internal/recordstore's own command refusal names.
+const (
+	refusedCommandCancel  = "cancel"
+	refusedCommandProceed = "proceed_input"
+	refusedCommandAbort   = "abort_input"
 )
 
 // Reason codes a run.trigger_failed envelope carries. The set is complete:
@@ -159,8 +172,8 @@ const MaskedParamValue = "<masked>"
 // 1 MiB message limit.
 const gatewayEnvelopeBudget = 900 * 1024
 
-// errorTruncateChars is the character cap the size ladder applies to a
-// run.stage envelope's error field.
+// errorTruncateChars is the character cap on every error field the gateway
+// publishes: a run.stage envelope's error and each command outcome record.
 const errorTruncateChars = 512
 
 var (
@@ -168,6 +181,7 @@ var (
 	triggerFailedTotal   metric.Int64Counter
 	triggerAcceptedTotal metric.Int64Counter
 	resumeFailedTotal    metric.Int64Counter
+	commandRefusedTotal  metric.Int64Counter
 )
 
 func init() {
@@ -183,6 +197,9 @@ func init() {
 	)
 	resumeFailedTotal, _ = meter.Int64Counter("varroa.gateway.resume_failed",
 		metric.WithDescription("Failed build resumes the gateway published as a record"),
+	)
+	commandRefusedTotal, _ = meter.Int64Counter("varroa.gateway.command_refused",
+		metric.WithDescription("Refused cancels and input answers the gateway published as a record"),
 	)
 }
 
@@ -281,14 +298,14 @@ func millisToTime(ms int64) time.Time {
 	return time.UnixMilli(ms).UTC()
 }
 
-// truncateRunes cuts s to at most n runes, so a truncation never splits a
-// multi-byte UTF-8 character.
-func truncateRunes(s string, n int) string {
+// truncateError cuts an error text to at most errorTruncateChars runes, so
+// a truncation never splits a multi-byte UTF-8 character.
+func truncateError(s string) string {
 	r := []rune(s)
-	if len(r) <= n {
+	if len(r) <= errorTruncateChars {
 		return s
 	}
-	return string(r[:n])
+	return string(r[:errorTruncateChars])
 }
 
 // maskParameters copies params, replacing the value of every name in
@@ -799,7 +816,7 @@ func shrinkToBudget(env *ingestEnvelope) bool {
 	}
 
 	if errVal, ok := env.Payload["error"].(string); ok && errVal != "" {
-		env.Payload["error"] = truncateRunes(errVal, errorTruncateChars)
+		env.Payload["error"] = truncateError(errVal)
 		if fits() {
 			return true
 		}

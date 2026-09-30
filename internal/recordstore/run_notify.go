@@ -119,6 +119,14 @@ func notificationFor(env IngestEnvelope, res ApplyResult) (RunNotification, bool
 			return RunNotification{}, false
 		}
 		n.Kind = "input"
+	case KindRunCommandRefused:
+		// A skipped write changed no stored value, so it reports
+		// nothing. A stored notice changes the run detail, so an open
+		// build page refetches it.
+		if !res.CommandRefusedStored {
+			return RunNotification{}, false
+		}
+		n.Kind = "run"
 	case KindRunTriggerAccepted:
 		n.Kind = "run"
 		n.Status = "QUEUED"

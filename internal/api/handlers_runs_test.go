@@ -774,3 +774,59 @@ func TestRunArtifactsHideTheInternalReportButServeItsDownload(t *testing.T) {
 		t.Fatalf("report download status = %d, body = %q", rec.Code, rec.Body.String())
 	}
 }
+
+// TestGetRunReturnsCommandRefusal asserts the run detail carries the
+// refusal notice the recorder stored in the run's payload.
+func TestGetRunReturnsCommandRefusal(t *testing.T) {
+	reader := newFakeRecordReader()
+	reader.runs["r1"] = recordstore.Run{
+		RunID: "r1", Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: "RUNNING",
+		Payload: json.RawMessage(`{"command_refusal":{"command":"cancel","actor":"alice",` +
+			`"http_status":404,"error":"Not Found","refused_at":"2026-09-29T12:03:00.5+00:00"}}`),
+	}
+	srv := newRunFixtureServer(reader, nil)
+
+	rec := doRunRequest(t, srv.handleGetRun, "/runs/r1", map[string]string{"run": "r1"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var detail runDetailJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got := detail.CommandRefusal
+	if got == nil {
+		t.Fatalf("commandRefusal is absent: %s", rec.Body.String())
+	}
+	want := time.Date(2026, 9, 29, 12, 3, 0, 500_000_000, time.UTC)
+	if got.Command != "cancel" || got.Actor != "alice" || got.HTTPStatus != 404 ||
+		got.Error != "Not Found" || !got.RefusedAt.Equal(want) {
+		t.Fatalf("commandRefusal = %+v", got)
+	}
+	if !strings.Contains(rec.Body.String(), `"httpStatus":404`) {
+		t.Fatalf("body %s names no httpStatus", rec.Body.String())
+	}
+}
+
+// TestGetRunOmitsCommandRefusalWhenAbsent asserts a run with no notice
+// carries no commandRefusal field.
+func TestGetRunOmitsCommandRefusalWhenAbsent(t *testing.T) {
+	reader := newFakeRecordReader()
+	reader.runs["r1"] = recordstore.Run{
+		RunID: "r1", Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: "RUNNING",
+		Payload: json.RawMessage(`{"log_summary":{"finalized":false}}`),
+	}
+	srv := newRunFixtureServer(reader, nil)
+
+	rec := doRunRequest(t, srv.handleGetRun, "/runs/r1", map[string]string{"run": "r1"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, ok := raw["commandRefusal"]; ok {
+		t.Fatal("the response carries commandRefusal for a run that holds none")
+	}
+}

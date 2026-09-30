@@ -108,6 +108,7 @@ type RunDetail struct {
 	TestReport        *runTestReportDetailJSON `json:"testReport,omitempty"`
 	Cases             []runTestCaseJSON        `json:"cases,omitempty"`
 	ReplayOf          string                   `json:"replayOf,omitempty"`
+	CommandRefusal    *runCommandRefusalJSON   `json:"commandRefusal,omitempty"`
 }
 
 // convertJSON re-shapes in into a T by round-tripping through JSON. Every

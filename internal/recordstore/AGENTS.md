@@ -568,8 +568,19 @@ of the fleet's audit activity, once a controller becomes disposable.
   its protobuf `BuildEvent` onto its field names. `Ingester.Apply`
   (`ingest_apply.go`) writes one envelope inside one transaction, dispatching
   by `Kind` to one `ingest_<kind>.go` file per D4's write table. Each write
-  is a natural-key upsert. The kind set holds fifteen values; `run.state` is
+  is a natural-key upsert. The kind set holds sixteen values; `run.state` is
   the mesh's own kind and writes no typed column, only `payload.mesh`.
+  `run.command_refused` (`ingest_command_refused.go`) takes the early
+  route beside `run.resume_failed`. `applyCommandRefused` merges one
+  `payload.command_refusal` object (`command`, `actor`, `http_status`,
+  `error`, `refused_at` from the envelope's `occurred_at`) in one
+  `UPDATE`. The guard names the run's primary key **and** the envelope's
+  `cluster`, `tenant`, and `job_path`, so a cell cannot write a notice onto
+  another tenant's run. A newer stored `refused_at` wins. A run with no
+  row is a no-op, never an error, and a later successful command never
+  clears the notice. The command name must be one of `refusedCommands`,
+  else the envelope is malformed. Only a stored notice publishes a `run`
+  notification. The API's run detail reads the key as `commandRefusal`.
   `runsStatusMergeSQL` (`ingest_common.go`) is the
   one CASE expression every `runs` writer reuses to keep `status` monotonic
   and `DUPLICATE` terminal.
@@ -613,7 +624,7 @@ of the fleet's audit activity, once a controller becomes disposable.
   that applies D4's disposition table; `EnsureBuildsStream`
   (`ingest_stream.go`) creates the `varroa_builds` stream, and
   `cmd/recorder` is the only caller. `IngestMetrics`
-  (`ingest_metrics.go`) holds the six `recorder_ingest_*` instruments on
+  (`ingest_metrics.go`) holds the `recorder_ingest_*` instruments on
   `otel.Meter("varroa-recorder")`. The `job.schedules` kind rides the same
   `varroa_builds` stream and the same `recorder` consumer as every
   `run.*` kind; it carries an empty `run_id`, so `Ingester.Apply` skips

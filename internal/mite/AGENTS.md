@@ -189,12 +189,21 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   or `run.trigger_accepted` when `success` is true. `RESUME_BUILD`
   publishes `run.resume_failed` for a failed result and nothing for a
   successful one, because a resumed build proves itself by its own
-  heartbeat. `CANCEL_BUILD`, `PROCEED_INPUT`, `ABORT_INPUT`, and
-  `REPLAY_BUILD` publish nothing. `logRefusedRunCommand` logs one Warn line
-  for a refused result (controller, command id, run, actor, HTTP status,
-  error). These three branches run **before** the `recordStoreEnabled`
-  gate, so an install with no record store still logs a refusal. The
-  operator, not the gateway, writes the activity row. **A resume result always acks, whatever the publish
+  heartbeat. `logRefusedRunCommand` logs one Warn line for a refused
+  `CANCEL_BUILD`, `PROCEED_INPUT`, `ABORT_INPUT`, or `REPLAY_BUILD` result
+  (controller, command id, run, actor, HTTP status, error). These branches
+  run **before** the `recordStoreEnabled` gate, so an install with no record
+  store still logs a refusal. With a record store, a refused cancel or input
+  answer then publishes `run.command_refused` (`publishCommandRefused`:
+  command `cancel`/`proceed_input`/`abort_input`, actor, HTTP status, error
+  cut at 512 characters) for its own run, so the tenant's build page shows
+  the refusal. A refused replay publishes `run.trigger_failed` for the
+  **new** run id the replay named, through `publishTriggerFailed`, so the
+  new run's page shows **Build not started**. A success publishes nothing.
+  All four **always ack**, whatever the publish answers: a redelivery runs
+  the refused call again, and the record is a notice only. The operator
+  still writes the cell-keyed `command.failed`/`command.succeeded` activity
+  row as the operator audit record. **A resume result always acks, whatever the publish
   answers**, which is the opposite of the trigger rule below: a
   redelivered resume can succeed while the recorder holds no dispatched
   resume, and only the named target's heartbeat clears a resume record,

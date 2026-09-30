@@ -255,6 +255,9 @@ func TestNotificationForMapsEveryKind(t *testing.T) {
 		{KindRunTests, map[string]any{"build_number": 7}, "run", "", "", 0, true},
 		{KindRunState, map[string]any{"build_number": 7}, "", "", "", 0, false},
 		{KindRunResumeFailed, map[string]any{"build_number": 7}, "run", "", "", 0, true},
+		// A zero ApplyResult is a skipped refusal notice, which publishes
+		// nothing. The stored case follows the table.
+		{KindRunCommandRefused, RunCommandRefusedPayload{Command: RefusedCommandCancel}, "", "", "", 0, false},
 		{KindRunSource, RunSourcePayload{Seq: 0}, "run", "", "", 0, true},
 		{KindRunInput, RunInputPayload{Seq: inputSeqPtr(3), Inputs: runInputSet("input-1")}, "input", "", "", 0, true},
 		{KindRunTriggerAccepted, map[string]any{}, "run", "QUEUED", "", 0, true},
@@ -309,6 +312,16 @@ func TestNotificationForMapsEveryKind(t *testing.T) {
 		RunInputPayload{Seq: inputSeqPtr(1), Inputs: runInputSet("input-1")})
 	if _, ok := notificationFor(refused, ApplyResult{RefusedInput: true}); ok {
 		t.Fatal("notificationFor reported a refused run.input, want no notification")
+	}
+
+	// A stored refusal notice changes the run detail, so an open build
+	// page refetches it.
+	notice := newTestEnvelope(t, uuid.MustParse(newTestUUIDv7String()),
+		"manual:notify-command-refused", KindRunCommandRefused,
+		RunCommandRefusedPayload{Command: RefusedCommandCancel})
+	got, ok := notificationFor(notice, ApplyResult{CommandRefusedStored: true})
+	if !ok || got.Kind != "run" || got.Status != "" || got.RunID != notice.RunID {
+		t.Fatalf("stored run.command_refused = %+v, %v; want one run notification", got, ok)
 	}
 }
 

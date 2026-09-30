@@ -275,7 +275,7 @@ func registerListRunsTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 
 func registerGetRunTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	getRunTool := mcp.NewTool("get_run",
-		mcp.WithDescription("Get one run's detail: status, timing, params, test counts, and stages."),
+		mcp.WithDescription("Get one run's detail: status, timing, params, test counts, stages, and the newest refused cancel or input answer."),
 		mcp.WithString("run", mcp.Required(), mcp.Description("Run id (UUIDv7)")),
 	)
 	addTool(mcpServer, kindRead, getRunTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

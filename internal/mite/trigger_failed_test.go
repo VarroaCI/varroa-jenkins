@@ -237,9 +237,10 @@ func TestReasonCodeForStatus(t *testing.T) {
 	}
 }
 
-// TestFailedCancelPublishesNothing asserts the gateway keys on the command
-// type, so a failed CANCEL_BUILD writes no record.
-func TestFailedCancelPublishesNothing(t *testing.T) {
+// TestFailedCancelPublishesNoTriggerFailure asserts the gateway keys on the
+// command type, so a failed CANCEL_BUILD writes a command refusal, not a
+// trigger failure.
+func TestFailedCancelPublishesNoTriggerFailure(t *testing.T) {
 	pub := &fakePublisher{}
 	h, conn := newTriggerFailedHandler(t, pub, triggerFailedResolver())
 	cmd := &mitev1.ImperativeCommand{
@@ -256,8 +257,11 @@ func TestFailedCancelPublishesNothing(t *testing.T) {
 		HttpStatus: 404,
 	})
 
-	if got := pub.publishedCount(); got != 0 {
-		t.Fatalf("published %d envelopes, want 0", got)
+	if got := pub.publishedCount(); got != 1 {
+		t.Fatalf("published %d envelopes, want 1", got)
+	}
+	if env := pub.envelopeAt(0); env.Kind != kindRunCommandRefused {
+		t.Fatalf("kind = %q, want %q", env.Kind, kindRunCommandRefused)
 	}
 	waitAckAll(t, conn, stream, consumer)
 }

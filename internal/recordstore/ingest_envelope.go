@@ -12,8 +12,9 @@ import (
 // the run.* kinds that carry build state. The gateway publishes
 // run.trigger_failed from a failed TRIGGER_BUILD result,
 // run.trigger_accepted from a successful one, run.state from each
-// run-state push outcome, and run.resume_failed from a failed
-// RESUME_BUILD result, instead.
+// run-state push outcome, run.resume_failed from a failed RESUME_BUILD
+// result, and run.command_refused from a refused cancel or input answer,
+// instead.
 const (
 	KindRunStarted   = "run.started"
 	KindRunStage     = "run.stage"
@@ -47,6 +48,11 @@ const (
 	// touches that record alone, so the recorder routes it before the
 	// intent read beside the two trigger kinds.
 	KindRunResumeFailed = "run.resume_failed"
+	// KindRunCommandRefused records a cancel or an input answer the plugin
+	// refused. The write merges one notice into the run's own payload and
+	// needs no intent, so the recorder routes it before the intent read
+	// beside run.resume_failed.
+	KindRunCommandRefused = "run.command_refused"
 	// KindRunState records one run-state push outcome. The gateway
 	// publishes it after it stores a file, and after it refuses a push
 	// because the run passed its byte cap.
@@ -70,6 +76,7 @@ var ingestKinds = map[string]bool{
 	KindRunTriggerFailed:   true,
 	KindRunTriggerAccepted: true,
 	KindRunResumeFailed:    true,
+	KindRunCommandRefused:  true,
 	KindRunState:           true,
 	KindJobSchedules:       true,
 }
@@ -189,6 +196,16 @@ type RunResumeFailedPayload struct {
 	Instance   string `json:"instance"`
 	Error      string `json:"error"`
 	ReasonCode string `json:"reason_code"`
+}
+
+// RunCommandRefusedPayload is the payload of a run.command_refused
+// envelope. Command is one of the names refusedCommands lists. The
+// gateway caps Error.
+type RunCommandRefusedPayload struct {
+	Command    string `json:"command"`
+	Actor      string `json:"actor"`
+	HTTPStatus int32  `json:"http_status"`
+	Error      string `json:"error"`
 }
 
 // RunStagePayload is the payload of a run.stage envelope, mapped onto

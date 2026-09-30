@@ -133,6 +133,18 @@
   font-size: 13.5px;
 }
 
+.refusalNotice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  background: var(--warn-soft);
+  color: var(--warn-text);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+
 .interruptedBanner a {
   color: var(--bad-text);
   text-decoration: underline;

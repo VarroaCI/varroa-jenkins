@@ -103,14 +103,13 @@ Answer the step from the card, or from an MCP client.
 | `proceed_run_input` | `run`, `input`, and an optional `parameters` map |
 | `abort_run_input` | `run` and `input` |
 
-Both tools apply the tenant write check on the run's own tenant and job path.
+Both tools apply the tenant write check on the run's job path.
 
 Fill the form and select **Deploy**. The page reports that the request was sent. The card leaves
-when the run record no longer carries the input. A run reports no success from the request
-itself, because the plugin answers the step on the controller.
+when the run record no longer carries the input. A refused answer or cancel shows a notice on the
+build page with the sender, the HTTP status, and the error.
 
-Jenkins writes the approving user to the run's own build log. The **Log** tab therefore names
-who answered the step. Varroa keeps no separate record of the approval.
+Jenkins writes the approving user to the build log, which the **Log** tab shows. Varroa keeps no separate record of the approval.
 
 A step's `submitter` accepts a user name or a Varroa group name. A `submitter` that names a
 Varroa group admits any caller who holds that group. A Jenkins administrator on the controller can answer
@@ -135,8 +134,8 @@ A build shows the control only when it meets all five conditions:
 | It declared no template | No pipeline template or marker file defined the job |
 | It used no masked parameter | The build took no password or other masked parameter value |
 
-The new build takes its own build number from the ledger, so each replay is a separate build. The
-run record names the source run in `replayOf`.
+The new build takes its own build number from the ledger. The run record names the source run in
+`replayOf`. A refused replay shows **Build not started** on the new build's page.
 
 A headless tenant sees the same control, because the dashboard is the only surface of that tenant.
 

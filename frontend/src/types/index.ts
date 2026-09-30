@@ -1842,6 +1842,10 @@ export interface RunDetail {
   source?: RunSource;
   /** The source run this run replays. Absent for a run that is not a replay. */
   replayOf?: string;
+  /** The newest cancel or input answer Jenkins refused for this run.
+   * Absent when no refusal exists. A later successful command does not
+   * remove it. */
+  commandRefusal?: RunCommandRefusal;
   /** The one-line run summary. Absent until the run sets one. */
   summary?: string;
   /** The run's failure digest. Each part is absent when the record omits it. */
@@ -1853,6 +1857,16 @@ export interface RunDetail {
   /** The run's failed and skipped test cases, in the reader's order.
    * Absent when the run holds no case row. */
   cases?: RunTestCase[];
+}
+
+/** A refused cancel or input answer, as GET /runs/{run} reports it. */
+export interface RunCommandRefusal {
+  command: 'cancel' | 'proceed_input' | 'abort_input';
+  actor?: string;
+  httpStatus?: number;
+  /** The refusal text, at most 512 characters. */
+  error?: string;
+  refusedAt: string;
 }
 
 /** The test report as GET /runs/{run} reports it. */

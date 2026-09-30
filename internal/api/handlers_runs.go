@@ -124,6 +124,19 @@ type runDetailJSON struct {
 	// ReplayOf names the run a replayed build copied its script from. It
 	// is absent for a build that is not a replay.
 	ReplayOf string `json:"replayOf,omitempty"`
+	// CommandRefusal is the newest cancel or input answer the plugin
+	// refused for this run. It is absent when no such refusal exists. A
+	// later successful command does not clear it.
+	CommandRefusal *runCommandRefusalJSON `json:"commandRefusal,omitempty"`
+}
+
+// runCommandRefusalJSON is the response shape of a stored refusal notice.
+type runCommandRefusalJSON struct {
+	Command    string    `json:"command"`
+	Actor      string    `json:"actor,omitempty"`
+	HTTPStatus int       `json:"httpStatus,omitempty"`
+	Error      string    `json:"error,omitempty"`
+	RefusedAt  time.Time `json:"refusedAt"`
 }
 
 type runArtifactJSON struct {
@@ -336,6 +349,19 @@ type runInterruptedPayload struct {
 	InterruptedReason string `json:"interrupted_reason"`
 }
 
+// runCommandRefusalPayload reads the refusal notice the recorder writes
+// into Run.Payload for a refused cancel or input answer
+// (internal/recordstore's applyCommandRefused).
+type runCommandRefusalPayload struct {
+	CommandRefusal *struct {
+		Command    string    `json:"command"`
+		Actor      string    `json:"actor"`
+		HTTPStatus int       `json:"http_status"`
+		Error      string    `json:"error"`
+		RefusedAt  time.Time `json:"refused_at"`
+	} `json:"command_refusal"`
+}
+
 // buildRunSource maps the stored column shape into the response shape, field
 // by field. It answers nil when the column carries none of the three facts.
 func buildRunSource(stored recordstore.StoredRunSource) *runSourceJSON {
@@ -473,6 +499,14 @@ func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID,
 		var interrupted runInterruptedPayload
 		if d.Result == "INTERRUPTED" && json.Unmarshal(run.Payload, &interrupted) == nil {
 			d.InterruptedReason = interrupted.InterruptedReason
+		}
+		var refusal runCommandRefusalPayload
+		if json.Unmarshal(run.Payload, &refusal) == nil && refusal.CommandRefusal != nil && refusal.CommandRefusal.Command != "" {
+			c := refusal.CommandRefusal
+			d.CommandRefusal = &runCommandRefusalJSON{
+				Command: c.Command, Actor: c.Actor, HTTPStatus: c.HTTPStatus,
+				Error: c.Error, RefusedAt: c.RefusedAt,
+			}
 		}
 	}
 	if size, count, key, found := storedTestReport(run); found {

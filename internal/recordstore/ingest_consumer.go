@@ -163,6 +163,16 @@ func handleIngestMessage(ctx context.Context, ingester *Ingester, metrics *Inges
 					"reasonCode", result.ResumeFailedReason)
 			}
 		}
+		if env.Kind == KindRunCommandRefused {
+			metrics.addCommandRefused(ctx, result.CommandRefused, result.CommandRefusedStored)
+			if result.CommandRefusedStored {
+				logger.Info("refused run command recorded",
+					"runID", env.RunID, "command", result.CommandRefused)
+			} else {
+				logger.Info("refused run command skipped; no run row or a newer notice",
+					"runID", env.RunID, "command", result.CommandRefused)
+			}
+		}
 		if result.ScheduleStale {
 			metrics.addScheduleStale(ctx)
 			logger.Info("stale job schedule envelope acknowledged with no change",

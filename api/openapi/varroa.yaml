@@ -2448,6 +2448,36 @@ components:
       required:
       - items
       type: object
+    RunCommandRefusal:
+      additionalProperties: false
+      description: |
+        The newest cancel or input answer the Jenkins plugin refused for this run, on GET /runs/{run}. The field is absent when no such refusal exists. A later successful command does not remove it. The notice carries its own time, so a reader compares it with the run state.
+      properties:
+        actor:
+          description: The person or service that sent the command.
+          type: string
+        command:
+          description: The refused command.
+          enum:
+          - cancel
+          - proceed_input
+          - abort_input
+          type: string
+        error:
+          description: |
+            The refusal text. The mite keeps the title of a Jenkins error page, and the gateway cuts the text at 512 characters.
+          type: string
+        httpStatus:
+          description: The HTTP status the plugin answered.
+          type: integer
+        refusedAt:
+          description: The time the gateway received the refusal.
+          format: date-time
+          type: string
+      required:
+      - command
+      - refusedAt
+      type: object
     RunDetail:
       additionalProperties: false
       description: GET /runs/{run}.
@@ -2467,6 +2497,8 @@ components:
           type: array
         cause:
           type: string
+        commandRefusal:
+          $ref: '#/components/schemas/components_schemas_RunCommandRefusal'
         digest:
           additionalProperties: false
           description: |
@@ -8005,6 +8037,36 @@ components:
       required:
       - items
       type: object
+    components_schemas_RunCommandRefusal:
+      additionalProperties: false
+      description: |
+        The newest cancel or input answer the Jenkins plugin refused for this run, on GET /runs/{run}. The field is absent when no such refusal exists. A later successful command does not remove it. The notice carries its own time, so a reader compares it with the run state.
+      properties:
+        actor:
+          description: The person or service that sent the command.
+          type: string
+        command:
+          description: The refused command.
+          enum:
+          - cancel
+          - proceed_input
+          - abort_input
+          type: string
+        error:
+          description: |
+            The refusal text. The mite keeps the title of a Jenkins error page, and the gateway cuts the text at 512 characters.
+          type: string
+        httpStatus:
+          description: The HTTP status the plugin answered.
+          type: integer
+        refusedAt:
+          description: The time the gateway received the refusal.
+          format: date-time
+          type: string
+      required:
+      - command
+      - refusedAt
+      type: object
     components_schemas_RunDetail:
       additionalProperties: false
       description: GET /runs/{run}.
@@ -8024,6 +8086,8 @@ components:
           type: array
         cause:
           type: string
+        commandRefusal:
+          $ref: '#/components/schemas/components_schemas_RunCommandRefusal'
         digest:
           additionalProperties: false
           description: |

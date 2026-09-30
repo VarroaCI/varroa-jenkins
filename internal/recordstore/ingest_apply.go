@@ -97,6 +97,17 @@ type ApplyResult struct {
 	// pod, so a log line that read it would name the wrong target.
 	ResumeFailedInstance string
 
+	// CommandRefusedStored reports whether a run.command_refused envelope
+	// wrote its notice onto the run. It is false when no run row matched
+	// the guard, or when the run already holds a newer notice. The caller
+	// acknowledges the message either way and counts
+	// recorder_ingest_command_refused_total.
+	CommandRefusedStored bool
+
+	// CommandRefused holds that envelope's command name, for the caller's
+	// counter and log line.
+	CommandRefused string
+
 	// SupersededStart is true when a run.started reported a build number
 	// below the intent's stored number from an instance other than the
 	// intent's current owner: the ledger moved and refreshed the intent
@@ -246,6 +257,14 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 	// kind takes the same early route the two trigger kinds take.
 	if env.Kind == KindRunResumeFailed {
 		res, err := g.applyResumeFailed(ctx, env)
+		g.notify(env, res, err)
+		return res, err
+	}
+
+	// run.command_refused touches one runs row and nothing else, like
+	// run.resume_failed.
+	if env.Kind == KindRunCommandRefused {
+		res, err := g.applyCommandRefused(ctx, env)
 		g.notify(env, res, err)
 		return res, err
 	}

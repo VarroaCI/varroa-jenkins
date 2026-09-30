@@ -21,6 +21,7 @@ counts every result of an imperative command that a mite reports, for example `c
 `trigger_build`. `outcome` is `success`, `failure`, or `deferred`. A deferred result is a restart
 that waits for running builds. The mite also logs each result: at info level on success, and at
 warning level on failure. The log line names the kind, the job path, the run, and the reason.
+A Jenkins HTML refusal gives its page title, cut at 300 characters.
 The gateway also logs a warning for a refused cancel, input answer, or replay.
 
 ## Use activity history
@@ -32,7 +33,7 @@ varroactl activity --controller <name>
 varroactl activity --controller <name> --follow
 ```
 
-`varroactl activity` prints a backfill table, then, with `--follow`, streams new events live. Without the record store, the backfill table is always empty: `--follow` still shows events published after you start watching, but no history from before that moment.
+`varroactl activity` prints a backfill table, then, with `--follow`, streams new events live. Without the record store, the backfill table is always empty, and `--follow` shows only new events.
 
 The activity feed records lifecycle and audit events. Use `varroactl logs <namespace>/<name> --follow` for controller logs.
 

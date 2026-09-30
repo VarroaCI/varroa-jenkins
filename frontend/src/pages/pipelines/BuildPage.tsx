@@ -26,6 +26,7 @@ import { Card } from "../../components/Card";
 import { Tabs } from "../../components/Tabs";
 import { ForbiddenPage, GenericErrorPage, RecoveryState } from "../../components/RecoveryState";
 import type {
+  RunCommandRefusal,
   RunDetail,
   RunLogEndEvent,
   RunLogGapEvent,
@@ -89,6 +90,21 @@ const TRIGGER_REASON_SENTENCES: Record<string, string> = {
   THROTTLED: "The record store refused the build because of a limit.",
 };
 const TRIGGER_REASON_FALLBACK = "The controller refused the trigger.";
+
+const REFUSED_COMMAND_LABELS: Record<RunCommandRefusal["command"], string> = {
+  cancel: "Cancel",
+  proceed_input: "Input proceed",
+  abort_input: "Input abort",
+};
+
+/** The one-line text of a refused cancel or input answer. */
+function describeCommandRefusal(r: RunCommandRefusal): string {
+  let text = `${REFUSED_COMMAND_LABELS[r.command] ?? r.command} refused`;
+  if (r.httpStatus) text += ` (HTTP ${r.httpStatus})`;
+  if (r.actor) text += ` by ${r.actor}`;
+  text += ` at ${new Date(r.refusedAt).toLocaleString()}`;
+  return r.error ? `${text}: ${r.error}` : `${text}.`;
+}
 
 /**
  * Reads the run record, and polls it while the record can still change. A
@@ -658,6 +674,15 @@ export default function BuildPage() {
             </a>
           )}
           {!run.startedAt && <p>Re-run starts with each parameter&apos;s declared default.</p>}
+        </div>
+      )}
+
+      {/* The notice names the newest cancel or input answer Jenkins
+          refused. A later successful command does not remove it, so the
+          notice states its own time. */}
+      {run.commandRefusal && (
+        <div className={styles.refusalNotice} role="status">
+          {describeCommandRefusal(run.commandRefusal)}
         </div>
       )}
 

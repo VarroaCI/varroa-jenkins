@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"math/rand/v2"
@@ -18,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/time/rate"
 )
@@ -138,7 +140,7 @@ func (c *Client) ApplyConfig(ctx context.Context, jcascYAML string) error {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("apply config: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return fmt.Errorf("apply config: HTTP %d: %s", resp.StatusCode, refusalText(errBody))
 	}
 	return nil
 }
@@ -159,7 +161,7 @@ func (c *Client) Reload(ctx context.Context) error {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("reload config: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return fmt.Errorf("reload config: HTTP %d: %s", resp.StatusCode, refusalText(errBody))
 	}
 	// JCasC answers a failed reload with HTTP 200 and its error page at the
 	// reload path itself, and a successful one with a redirect to the
@@ -189,6 +191,31 @@ func cascErrorSummary(page []byte) string {
 }
 
 var htmlTagPattern = regexp.MustCompile(`<[^>]+>`)
+
+// refusalTextMaxRunes caps the body text one error carries. Every log line
+// and activity row that quotes a refused request carries this text.
+const refusalTextMaxRunes = 300
+
+var htmlTitlePattern = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+
+// refusalText answers the short text of an error response body. Jenkins
+// renders a refusal as a full HTML page that holds the message only in its
+// <title>, as "<message> - Jenkins". The function takes that title,
+// unescapes it, and strips the suffix. A body with no title answers its own
+// trimmed text. The result holds at most refusalTextMaxRunes runes.
+func refusalText(body []byte) string {
+	text := string(body)
+	if m := htmlTitlePattern.FindStringSubmatch(text); m != nil {
+		text = html.UnescapeString(m[1])
+		text = strings.Join(strings.Fields(text), " ")
+		text = strings.TrimSuffix(text, " - Jenkins")
+	}
+	text = strings.TrimSpace(text)
+	if utf8.RuneCountInString(text) > refusalTextMaxRunes {
+		text = string([]rune(text)[:refusalTextMaxRunes])
+	}
+	return text
+}
 
 // CheckConfig validates a JCasC document against the live Jenkins instance
 // without applying it (dry-run, POST /configuration-as-code/check). Returns a
@@ -486,7 +513,7 @@ func (c *Client) ScriptConsoleOnce(ctx context.Context, script string) (string, 
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", fmt.Errorf("script console once: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return "", fmt.Errorf("script console once: HTTP %d: %s", resp.StatusCode, refusalText(errBody))
 	}
 
 	b, err := io.ReadAll(resp.Body)
@@ -585,7 +612,7 @@ func (c *Client) SetRBAC(ctx context.Context, yaml string) error {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("set rbac: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return fmt.Errorf("set rbac: HTTP %d: %s", resp.StatusCode, refusalText(errBody))
 	}
 	return nil
 }
@@ -956,7 +983,7 @@ func (c *Client) CreateItem(ctx context.Context, itemPath, class, configXML stri
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("create item %s: HTTP %d: %s", itemPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return fmt.Errorf("create item %s: HTTP %d: %s", itemPath, resp.StatusCode, refusalText(errBody))
 	}
 	return nil
 }
@@ -975,7 +1002,7 @@ func (c *Client) GetItemConfig(ctx context.Context, itemPath string) (string, bo
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", false, fmt.Errorf("get item config %s: HTTP %d: %s", itemPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return "", false, fmt.Errorf("get item config %s: HTTP %d: %s", itemPath, resp.StatusCode, refusalText(errBody))
 	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -994,7 +1021,7 @@ func (c *Client) UpdateItemConfig(ctx context.Context, itemPath, configXML strin
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("update item %s: HTTP %d: %s", itemPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return fmt.Errorf("update item %s: HTTP %d: %s", itemPath, resp.StatusCode, refusalText(errBody))
 	}
 	return nil
 }
@@ -1013,7 +1040,7 @@ func (c *Client) ReloadItem(ctx context.Context, itemPath string) error {
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("reload item %s: HTTP %d: %s", itemPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return fmt.Errorf("reload item %s: HTTP %d: %s", itemPath, resp.StatusCode, refusalText(errBody))
 	}
 	return nil
 }
@@ -1030,7 +1057,7 @@ func (c *Client) DeleteItem(ctx context.Context, itemPath string) error {
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("delete item %s: HTTP %d: %s", itemPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return fmt.Errorf("delete item %s: HTTP %d: %s", itemPath, resp.StatusCode, refusalText(errBody))
 	}
 	return nil
 }
@@ -1065,7 +1092,7 @@ func (c *Client) TriggerBuild(ctx context.Context, req TriggerBuildRequest) (int
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return resp.StatusCode, fmt.Errorf("trigger build %s: HTTP %d: %s", req.JobPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return resp.StatusCode, fmt.Errorf("trigger build %s: HTTP %d: %s", req.JobPath, resp.StatusCode, refusalText(errBody))
 	}
 	return resp.StatusCode, nil
 }
@@ -1096,7 +1123,7 @@ func (c *Client) CancelBuild(ctx context.Context, req CancelBuildRequest) (int, 
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return resp.StatusCode, fmt.Errorf("cancel build %s: HTTP %d: %s", req.JobPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return resp.StatusCode, fmt.Errorf("cancel build %s: HTTP %d: %s", req.JobPath, resp.StatusCode, refusalText(errBody))
 	}
 	return resp.StatusCode, nil
 }
@@ -1150,7 +1177,7 @@ func (c *Client) ProceedInput(ctx context.Context, req ProceedInputRequest) (int
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return resp.StatusCode, fmt.Errorf("proceed input %s: HTTP %d: %s", req.JobPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return resp.StatusCode, fmt.Errorf("proceed input %s: HTTP %d: %s", req.JobPath, resp.StatusCode, refusalText(errBody))
 	}
 	return resp.StatusCode, nil
 }
@@ -1175,7 +1202,7 @@ func (c *Client) AbortInput(ctx context.Context, req AbortInputRequest) (int, er
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return resp.StatusCode, fmt.Errorf("abort input %s: HTTP %d: %s", req.JobPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return resp.StatusCode, fmt.Errorf("abort input %s: HTTP %d: %s", req.JobPath, resp.StatusCode, refusalText(errBody))
 	}
 	return resp.StatusCode, nil
 }
@@ -1211,7 +1238,7 @@ func (c *Client) ReplayBuild(ctx context.Context, req ReplayBuildRequest) (int, 
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return resp.StatusCode, fmt.Errorf("replay build %s: HTTP %d: %s", req.JobPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return resp.StatusCode, fmt.Errorf("replay build %s: HTTP %d: %s", req.JobPath, resp.StatusCode, refusalText(errBody))
 	}
 	return resp.StatusCode, nil
 }
@@ -1243,7 +1270,7 @@ func (c *Client) IsItemBuilding(ctx context.Context, itemPath string) (bool, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return true, fmt.Errorf("is item building %s: HTTP %d: %s", itemPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return true, fmt.Errorf("is item building %s: HTTP %d: %s", itemPath, resp.StatusCode, refusalText(errBody))
 	}
 
 	type jobNode struct {

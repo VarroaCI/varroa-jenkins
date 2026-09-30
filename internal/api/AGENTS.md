@@ -364,9 +364,12 @@ federation, activity persistence, and SSE fanout.
   (`internal/mcp`'s non-HTTP entry point) wraps the same unexported handler logic —
   `listRunsMerged`, `resolveTeamTenants`, `createRun`, `runByID`, `answerRunInput` — so the
   MCP tools and the REST paths share one implementation of every rule.
-  The run detail carries `triggerError`, `triggerReasonCode`, and
-  `interruptedReason`, read out of `runs.payload` in `buildRunDetail`
-  alongside the log summary. The stored `trigger_http_status` reaches no
+  The run detail carries `triggerError`, `triggerReasonCode`,
+  `interruptedReason`, and `commandRefusal` (the recorder's
+  `payload.command_refusal`: the newest refused cancel or input answer),
+  read out of `runs.payload` in `buildRunDetail` alongside the log summary.
+  The run read check alone gates `commandRefusal`, so a tenant reader sees
+  a refusal without `controllers:read` on the cell. The stored `trigger_http_status` reaches no
   response field. `runDetailJSON` (`handlers_runs.go`) and `RunDetail`
   (`pipelines_service.go`) must carry the same JSON tags, because
   `convertJSON` matches them by tag.
