@@ -722,16 +722,26 @@ sections describe.
     `status.pipelines`, the only copy of the agent namespace once
     `spec.pipelines` is gone.
   - **Tenant agent pod reaper** (`team_agent_pods.go`). The operator deletes
-    a tenant agent pod that no live JVM refreshes. The kubernetes plugin's
-    own garbage collection (`tenantAgentGCTimeoutSeconds = 300` on each
-    tenant cloud) covers a cell roll, a slot move, and a promotion; the
-    operator covers every case where no live JVM holds the slot's cloud.
+    a tenant agent pod that no live JVM refreshes. A Running pod can hold a
+    node that a resume adopts late, so every age that can delete one
+    outlives `TenantAgentAdoptBound` (`cell_jcasc.go`:
+    `recordstore.SilentCellWindow + recordstore.ResumeAdoptBound`, 36
+    minutes). The kubernetes plugin's own garbage collection
+    (`tenantAgentGCTimeoutSeconds = 2400`, the bound plus 4 minutes, on each
+    tenant cloud) covers a Running pod after a cell roll, a slot move, and a
+    promotion. The operator acts first on a pod that is not Running
+    (`tenantAgentPendingReapAfter`, 3 minutes): no node body ran on it, and
+    this covers the case where the new cell pod is itself Pending. The
+    operator also covers a Running pod no live JVM holds
+    (`tenantAgentRunningReapAfter`, the plugin timeout plus 5 minutes).
+    `TestTenantAgentTimeoutsCoverTheResumeWindow` pins this order.
     `orphanTenantAgentPods` is pure: a candidate runs as
     `varroa-agent-<team>`, carries the `kubernetes.jenkins.io/controller`
     label, and carries a `kubernetes.jenkins.io/last-refresh` annotation that
     parses as epoch milliseconds. It goes when older than
-    `tenantAgentReapAfter` (15 minutes, three times the plugin timeout) or at
-    once in teardown. `syncPipelinesChildren` runs the steady-state pass,
+    `agentPodReapAfter` (by pod phase; `Unknown` counts as Running) or at
+    once in teardown. An API cancel deletes no agent pod: a pod belongs to a
+    label, not to a run. `syncPipelinesChildren` runs the steady-state pass,
     rate-limited by `reapTenantAgentPodsDue` to one list per Team per
     `tenantAgentReapInterval` (1 minute), and never fails the tick on it.
     `Reconcile` runs the teardown pass before `cells.Place`, on the same

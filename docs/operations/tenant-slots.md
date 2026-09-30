@@ -47,8 +47,7 @@ onto the new slot. A new job takes its slot at once.
 A change to `members` binds or releases cells, then the recorder recomputes the map. A job whose
 home changed takes its history and its trigger rows to the new holder, and its build number rises.
 A scale moves no running build. A scale-down releases the highest indexes.
-The operator deletes a released slot's agent pods within about 16 minutes of their
-last refresh.
+A released slot's agent pods go as [Agent pod lifetime](tenant-pod-templates.md#agent-pod-lifetime) states.
 
 ## Jobs that trigger each other
 
@@ -71,7 +70,7 @@ with the newest applied time, ties broken by name.
 The promoted cell already holds the tenant folder and its history, so the slot stays warm. It
 keeps its slot index and job set, so no job's home changes. The agent Service
 `varroa-agents-<team>-<slot>` keeps its name, and its selector moves to the promoted cell. The
-promoted cell deletes the old holder's agent pods within about six minutes of their last refresh.
+old holder's agent pods go as [Agent pod lifetime](tenant-pod-templates.md#agent-pod-lifetime) states.
 
 Every other slot keeps building. A claim carrying the generation from before the promotion
 answers `NOT_READY`, a retry and never a cancel.

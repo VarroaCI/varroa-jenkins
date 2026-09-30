@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -12,6 +13,32 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
+
+// TestTenantAgentTimeoutsCoverTheResumeWindow pins the order of the agent
+// pod ages. A change to the recorder's liveness window, arm window, or
+// resume deadline that outgrows the plugin timeout fails here.
+func TestTenantAgentTimeoutsCoverTheResumeWindow(t *testing.T) {
+	// pluginRefreshInterval is the kubernetes plugin's refresh period
+	// (GarbageCollection.recurrencePeriod), which Go cannot read.
+	const pluginRefreshInterval = time.Minute
+	gcTimeout := time.Duration(tenantAgentGCTimeoutSeconds) * time.Second
+
+	if gcTimeout < TenantAgentAdoptBound+4*time.Minute {
+		t.Errorf("plugin timeout %v is under the adopt bound %v plus the 4m margin", gcTimeout, TenantAgentAdoptBound)
+	}
+	if gcTimeout%time.Minute != 0 {
+		t.Errorf("plugin timeout %v is not a whole minute", gcTimeout)
+	}
+	if tenantAgentRunningReapAfter != gcTimeout+5*time.Minute {
+		t.Errorf("running reap age %v, want the plugin timeout %v plus 5m", tenantAgentRunningReapAfter, gcTimeout)
+	}
+	if tenantAgentPendingReapAfter >= gcTimeout {
+		t.Errorf("pending reap age %v is not under the plugin timeout %v", tenantAgentPendingReapAfter, gcTimeout)
+	}
+	if tenantAgentPendingReapAfter < 2*pluginRefreshInterval {
+		t.Errorf("pending reap age %v is under two plugin refreshes", tenantAgentPendingReapAfter)
+	}
+}
 
 // cellControllerFixture returns a cell Controller with no tenants placed.
 func cellControllerFixture() *v1alpha1.Controller {

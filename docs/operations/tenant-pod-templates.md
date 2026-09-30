@@ -66,20 +66,22 @@ entry that names each ignored key path. A `jenkins.yaml` that does not parse giv
 ## Agent pod lifetime
 
 An agent pod can outlive the cell instance that launched it. The new instance holds no node for
-it, so two mechanisms delete such a pod:
+it until a resume adopts it. These mechanisms delete such a pod:
 
 | Mechanism | Covers | Deletes a stale pod within |
 | --- | --- | --- |
-| Kubernetes plugin garbage collection on the tenant cloud | A cell roll, a slot move, a standby promotion | About 6 minutes |
-| The operator | An unschedulable slot holder, a removed slot, a plugin fault | About 16 minutes |
+| The operator, for a pod that is not Running | Every case | About 4 minutes |
+| Kubernetes plugin garbage collection on the tenant cloud | A cell roll, a slot move, a standby promotion | About 41 minutes |
+| The operator, for a Running pod | An unschedulable slot holder, a removed slot, a plugin fault | About 46 minutes |
 | The operator, during teardown | A dropped `spec.pipelines` or a deleted `Team` | At once |
 
+A pod that is not Running never ran a build step, so no resume adopts it. A Running pod can hold
+a node that a late resume adopts, so it outlives the longest resume window.
 Every live cell instance refreshes the `kubernetes.jenkins.io/last-refresh` annotation on its own
 agent pods once a minute. The operator deletes only a pod that runs as `varroa-agent-<team>`,
 carries the `kubernetes.jenkins.io/controller` label, and carries a valid refresh annotation.
-Other pods in a shared agent namespace stay. Teardown keeps the `Team` finalizer until the
-tenant's agent pods are gone, or for ten minutes at most. The plugin timeout is 300 seconds and the
-operator timeout is 15 minutes. Each check runs once a minute, and neither timeout is configurable.
+Teardown keeps the `Team` finalizer until the tenant's agent pods are gone, or for ten minutes at
+most. Each check runs once a minute, and no timeout is configurable.
 
 ## Security
 

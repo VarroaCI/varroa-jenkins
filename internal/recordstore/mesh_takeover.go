@@ -34,6 +34,12 @@ const resumeArmWindow = 15 * time.Minute
 // could only be set wrong.
 const resumeDeadline = 6 * time.Minute
 
+// ResumeAdoptBound is the longest time from a run's arm to the moment its
+// resume adopts the run's agent nodes: the arm window, then the deadline
+// of the dispatched resume. An agent pod that a resume can still adopt
+// must live at least this long after the arm.
+const ResumeAdoptBound = resumeArmWindow + resumeDeadline
+
 // buildRecordRelPath is the file Jenkins reads to rebuild a run. The
 // action lists it last, so a reload never sees a run whose flow program
 // is still missing.

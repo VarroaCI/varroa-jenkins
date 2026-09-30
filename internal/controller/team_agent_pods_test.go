@@ -43,15 +43,18 @@ func agentPod(name, sa string, controllerLabel bool, refreshed time.Time) corev1
 	return pod
 }
 
+// phased sets the pod phase on an agent pod.
+func phased(pod corev1.Pod, phase corev1.PodPhase) corev1.Pod {
+	pod.Status.Phase = phase
+	return pod
+}
+
 func TestOrphanTenantAgentPods(t *testing.T) {
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	const sa = "varroa-agent-payments"
 	unparseable := agentPod("unparseable", sa, true, time.Time{})
 	unparseable.Annotations[agentPodLastRefreshAnnot] = "yesterday"
-	pending := agentPod("stale-pending", sa, true, now.Add(-20*time.Minute))
-	pending.Status.Phase = corev1.PodPending
-	running := agentPod("stale-running", sa, true, now.Add(-901*time.Second))
-	running.Status.Phase = corev1.PodRunning
+	ago := func(d time.Duration) time.Time { return now.Add(-d) }
 
 	cases := []struct {
 		name        string
@@ -59,23 +62,58 @@ func TestOrphanTenantAgentPods(t *testing.T) {
 		tearingDown bool
 		want        bool
 	}{
-		{"refreshed 60s ago is kept", agentPod("fresh", sa, true, now.Add(-60*time.Second)), false, false},
-		{"stale pod of another ServiceAccount is kept", agentPod("other-sa", "varroa-agent-search", true, now.Add(-time.Hour)), false, false},
-		{"stale pod with no controller label is kept", agentPod("no-label", sa, false, now.Add(-time.Hour)), false, false},
+		{"refreshed 60s ago is kept", agentPod("fresh", sa, true, ago(60*time.Second)), false, false},
+		{"stale pod of another ServiceAccount is kept", agentPod("other-sa", "varroa-agent-search", true, ago(time.Hour)), false, false},
+		{"stale pod with no controller label is kept", agentPod("no-label", sa, false, ago(time.Hour)), false, false},
 		{"pod with no annotation is kept", agentPod("no-annotation", sa, true, time.Time{}), false, false},
 		{"pod with an unparseable annotation is kept", unparseable, false, false},
-		{"stale running pod past 900s is deleted", running, false, true},
-		{"stale pending pod is deleted", pending, false, true},
-		{"teardown deletes a fresh tenant pod", agentPod("fresh-teardown", sa, true, now.Add(-10*time.Second)), true, true},
+		{"pending pod refreshed 120s ago is kept", phased(agentPod("pending-120", sa, true, ago(120*time.Second)), corev1.PodPending), false, false},
+		{"pending pod past 180s is deleted", phased(agentPod("pending-181", sa, true, ago(181*time.Second)), corev1.PodPending), false, true},
+		{"failed pod past 180s is deleted", phased(agentPod("failed-181", sa, true, ago(181*time.Second)), corev1.PodFailed), false, true},
+		{"succeeded pod past 180s is deleted", phased(agentPod("succeeded-181", sa, true, ago(181*time.Second)), corev1.PodSucceeded), false, true},
+		{"running pod inside the resume window is kept", phased(agentPod("running-20m", sa, true, ago(20*time.Minute)), corev1.PodRunning), false, false},
+		{"running pod at the plugin timeout is kept", phased(agentPod("running-gc", sa, true, ago(tenantAgentGCTimeoutSeconds*time.Second)), corev1.PodRunning), false, false},
+		{"running pod past the running age is deleted", phased(agentPod("running-old", sa, true, ago(tenantAgentRunningReapAfter+time.Second)), corev1.PodRunning), false, true},
+		{"unknown-phase pod gets the running age", phased(agentPod("unknown-20m", sa, true, ago(20*time.Minute)), corev1.PodUnknown), false, false},
+		{"teardown deletes a fresh tenant pod", agentPod("fresh-teardown", sa, true, ago(10*time.Second)), true, true},
+		{"teardown deletes a fresh running tenant pod", phased(agentPod("running-teardown", sa, true, ago(10*time.Second)), corev1.PodRunning), true, true},
 		{"teardown keeps another ServiceAccount's pod", agentPod("other-teardown", "varroa-agent-search", true, now), true, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := orphanTenantAgentPods([]corev1.Pod{tc.pod}, "payments", now, tenantAgentReapAfter, tc.tearingDown)
+			got := orphanTenantAgentPods([]corev1.Pod{tc.pod}, "payments", now, tc.tearingDown)
 			if (len(got) == 1) != tc.want {
 				t.Errorf("orphanTenantAgentPods = %d pods, want deleted=%v", len(got), tc.want)
 			}
 		})
+	}
+}
+
+// TestReapTenantAgentPods_DeletesAStalePendingPodAndKeepsAnAdoptableRunningPod
+// models a cell roll: the old instance left one Pending pod for a node
+// block that waited for an agent, and one Running pod whose node body a
+// resume adopts later. Both stopped their refresh ten minutes ago.
+func TestReapTenantAgentPods_DeletesAStalePendingPodAndKeepsAnAdoptableRunningPod(t *testing.T) {
+	now := time.Now()
+	pending := phased(agentPod("old-pending", "varroa-agent-payments", true, now.Add(-10*time.Minute)), corev1.PodPending)
+	running := phased(agentPod("old-running", "varroa-agent-payments", true, now.Add(-10*time.Minute)), corev1.PodRunning)
+	fc := fake.NewSimpleClientset(&pending, &running)
+
+	rec := NewTeamReconciler(&ClientsetClient{clientset: fc}, crdstore.NewFake(), teamTestNS, slog.Default())
+	if _, err := rec.reapTenantAgentPods(context.Background(), "payments", "payments-ns", false); err != nil {
+		t.Fatalf("reapTenantAgentPods: %v", err)
+	}
+
+	left, err := fc.CoreV1().Pods("payments-ns").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list pods: %v", err)
+	}
+	names := map[string]bool{}
+	for _, p := range left.Items {
+		names[p.Name] = true
+	}
+	if names["old-pending"] || !names["old-running"] {
+		t.Errorf("pods left = %v, want old-running only", names)
 	}
 }
 

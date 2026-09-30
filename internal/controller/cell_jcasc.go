@@ -9,6 +9,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
 // cellJCascDocument is the fixed JCasC fragment every cell merges onto its
@@ -48,13 +49,24 @@ const (
 	tenantAgentJnlpWorkingDir            = "/home/jenkins/agent"
 )
 
+// TenantAgentAdoptBound is the longest time from a cell JVM's last pod
+// refresh to the moment a resume on another JVM adopts one of its agent
+// nodes. The recorder can take the silent-cell window to see the cell as
+// gone, and the resume then takes at most the arm window and its deadline.
+// An agent pod that ran a node body must live this long, because a resume
+// adopts that node and the pod connects to the new JVM again.
+const TenantAgentAdoptBound = recordstore.SilentCellWindow + recordstore.ResumeAdoptBound
+
 // tenantAgentGCTimeoutSeconds is the orphan-pod timeout each tenant cloud
 // gives the kubernetes plugin. A cell home is an emptyDir, so a new cell JVM
-// holds no node for an agent pod the old JVM launched. Every live JVM
-// refreshes its own agent pods once a minute, and the plugin deletes a pod
-// of its cloud that no JVM refreshed for this long. The operator reaper
-// (tenantAgentReapAfter) waits three times longer, so the two never race.
-const tenantAgentGCTimeoutSeconds = 300
+// holds no node for an agent pod the old JVM launched until a resume adopts
+// it. Every live JVM refreshes its own agent pods once a minute, and the
+// plugin deletes a pod of its cloud that no JVM refreshed for this long.
+// The value is TenantAgentAdoptBound plus a four-minute margin, so the
+// plugin never deletes a pod that a resume can still adopt. The plugin
+// cannot read the pod phase, so the operator deletes a stale pod that is
+// not Running much sooner (tenantAgentPendingReapAfter).
+const tenantAgentGCTimeoutSeconds = 2400
 
 // tenantAgentEndpoint returns the in-cluster URL of one slot's agent
 // Service. An agent pod outlives the Jenkins JVM that launched it, so its

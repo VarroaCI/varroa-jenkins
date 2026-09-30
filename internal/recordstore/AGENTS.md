@@ -88,7 +88,10 @@ of the fleet's audit activity, once a controller becomes disposable.
   `run_intents`, `fleet_locks`, and `runs` in one transaction, and only the
   `runs` statement's row count gates the publish: the other two may move
   zero rows for a legitimate run. `resumeArmWindow` (15 minutes) and
-  `resumeDeadline` (6 minutes) are constants, never settings. The
+  `resumeDeadline` (6 minutes) are constants, never settings. Their sum is
+  exported as `ResumeAdoptBound`, and `silentHeartbeatWindow` as
+  `SilentCellWindow`. The controller sizes its tenant agent pod ages
+  from both, and its test fails when a window outgrows those ages. The
   heartbeat ingest clears `mesh.resume` once the named target's own
   heartbeat arrives **after** the dispatch, which is the only proof a
   resumed build gives: a

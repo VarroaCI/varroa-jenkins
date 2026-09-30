@@ -23,11 +23,22 @@ const (
 	agentPodDefaultLabelValue = "slave"
 )
 
-// tenantAgentReapAfter is the refresh age past which the operator deletes a
-// tenant agent pod. It is three times tenantAgentGCTimeoutSeconds, so the
-// plugin's own garbage collection always acts first while a live JVM holds
-// the slot's cloud. The operator acts only where no live JVM does.
-const tenantAgentReapAfter = 15 * time.Minute
+// tenantAgentRunningReapAfter is the refresh age past which the operator
+// deletes a Running tenant agent pod. It is five minutes more than
+// tenantAgentGCTimeoutSeconds, so the plugin's own garbage collection
+// acts first while a live JVM holds the slot's cloud. A Running pod may
+// hold a node that a resume adopts later, so it must outlive
+// TenantAgentAdoptBound.
+const tenantAgentRunningReapAfter = tenantAgentGCTimeoutSeconds*time.Second + 5*time.Minute
+
+// tenantAgentPendingReapAfter is the refresh age past which the operator
+// deletes a tenant agent pod that is not Running. The plugin accepts a
+// task on an agent only after every container of its pod is ready, so no
+// node body ran on such a pod and no resume adopts it. A live JVM
+// refreshes its pods once a minute, so three minutes is three missed
+// refreshes. The rule also acts while the slot's new cell pod is still
+// Pending, when no JVM holds the cloud.
+const tenantAgentPendingReapAfter = 3 * time.Minute
 
 // tenantAgentReapInterval is the least time between two steady-state pod
 // lists for one tenant. A teardown tick ignores it, because the finalizer
@@ -47,10 +58,11 @@ type tenantAgentPodReaper interface {
 // must delete. A pod is a candidate only when it runs as the tenant agent
 // ServiceAccount, carries the plugin's controller label, and carries a
 // last-refresh annotation that parses. A candidate goes when its last
-// refresh is older than staleAfter, or at once while the tenant tears down.
-// A pod with no annotation or an unparseable one is never deleted: the
-// operator cannot tell how old it is, and another controller may own it.
-func orphanTenantAgentPods(pods []corev1.Pod, team string, now time.Time, staleAfter time.Duration, tearingDown bool) []corev1.Pod {
+// refresh is older than its reap age (agentPodReapAfter), or at once while
+// the tenant tears down. A pod with no annotation or an unparseable one is
+// never deleted: the operator cannot tell how old it is, and another
+// controller may own it.
+func orphanTenantAgentPods(pods []corev1.Pod, team string, now time.Time, tearingDown bool) []corev1.Pod {
 	sa := tenantAgentServiceAccountName(team)
 	var out []corev1.Pod
 	for _, pod := range pods {
@@ -64,11 +76,24 @@ func orphanTenantAgentPods(pods []corev1.Pod, team string, now time.Time, staleA
 		if !ok {
 			continue
 		}
-		if tearingDown || now.Sub(refreshed) > staleAfter {
+		if tearingDown || now.Sub(refreshed) > agentPodReapAfter(pod) {
 			out = append(out, pod)
 		}
 	}
 	return out
+}
+
+// agentPodReapAfter answers the refresh age past which a tenant agent pod
+// goes. A Running pod, or one whose phase the kubelet cannot report, may
+// hold a node that a resume adopts later, so it gets the long age. Every
+// other phase gets the short age.
+func agentPodReapAfter(pod corev1.Pod) time.Duration {
+	switch pod.Status.Phase {
+	case corev1.PodRunning, corev1.PodUnknown:
+		return tenantAgentRunningReapAfter
+	default:
+		return tenantAgentPendingReapAfter
+	}
 }
 
 // agentPodLastRefresh parses the plugin's last-refresh annotation.
@@ -108,7 +133,7 @@ func (r *TeamReconciler) reapTenantAgentPods(ctx context.Context, team, agentNam
 	if tearingDown {
 		reason = "teardown"
 	}
-	orphans := orphanTenantAgentPods(pods, team, now, tenantAgentReapAfter, tearingDown)
+	orphans := orphanTenantAgentPods(pods, team, now, tearingDown)
 	gone := 0
 	var first error
 	for _, pod := range orphans {
@@ -134,7 +159,7 @@ func (r *TeamReconciler) reapTenantAgentPods(ctx context.Context, team, agentNam
 		r.logger.Info("deleted a tenant agent pod", "pod", pod.Name, "namespace", agentNamespace,
 			"team", team, "reason", reason)
 	}
-	remaining := len(orphanTenantAgentPods(pods, team, now, 0, true)) - gone
+	remaining := len(orphanTenantAgentPods(pods, team, now, true)) - gone
 	return remaining, first
 }
 

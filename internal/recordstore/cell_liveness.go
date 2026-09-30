@@ -18,6 +18,11 @@ const (
 	silentHeartbeatWindow = 15 * time.Minute
 )
 
+// SilentCellWindow is silentHeartbeatWindow for a reader outside this
+// package. A cell that stops its heartbeat counts as gone only after this
+// window, so a lost run can wait this long before its resume arms.
+const SilentCellWindow = silentHeartbeatWindow
+
 // cellAliveStaleAfter is twice the ten-minute announce resync interval
 // (internal/controller/cells.syncResyncInterval), design D9's "twice the
 // announce interval" rule. A cell-liveness reading older than this
