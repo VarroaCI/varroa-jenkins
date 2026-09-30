@@ -59,8 +59,9 @@ reading each package's entry point):
 - **`jenkins/`** — HTTP client for the Jenkins REST API, used by mite
   sidecars to manage their local Jenkins instance (crumb handling, retries).
   Every error that quotes a 4 KiB error-body read goes through `refusalText`:
-  it keeps only the `<title>` of a Jenkins HTML error page, without the
-  ` - Jenkins` suffix, and cuts the text at 300 runes. `CheckConfig` and
+  a plugin refusal is plain text and passes whole; a Jenkins core HTML error
+  page keeps only its `<title>`, without the ` - Jenkins` suffix. The text is
+  cut at 300 runes. `CheckConfig` and
   `ExportConfig` keep their 8 KiB raw read, because a JCasC error body can be
   longer than 300 runes and stays useful.
   Its `items` subpackage models `items.yaml` (the manifest, `config.xml`

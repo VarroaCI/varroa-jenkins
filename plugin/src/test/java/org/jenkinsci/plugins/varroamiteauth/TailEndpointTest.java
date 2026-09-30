@@ -11,7 +11,6 @@ import hudson.security.ACL;
 import hudson.security.ACLContext;
 
 import java.io.BufferedReader;
-import java.io.PrintWriter;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.util.List;
@@ -66,9 +65,7 @@ public class TailEndpointTest {
     }
 
     private static StaplerResponse2 responseCapturing(StringWriter writer) throws Exception {
-        StaplerResponse2 rsp = mock(StaplerResponse2.class);
-        when(rsp.getWriter()).thenReturn(new PrintWriter(writer));
-        return rsp;
+        return RefusalAssert.capturing(writer);
     }
 
     @Test
@@ -110,11 +107,11 @@ public class TailEndpointTest {
                 "bob", "", List.of(new SimpleGrantedAuthority("ROLE:varroa:developer"))))) {
             TailEndpoint endpoint = new TailEndpoint();
             StaplerRequest2 req = requestWithBody("POST", "{\"runId\":\"run-3\",\"action\":\"start\",\"leaseSeconds\":90}");
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
 
             endpoint.doTail(req, rsp);
 
-            verify(rsp).sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+            RefusalAssert.assertRefused(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
             assertFalse(endpoint.hasLeaseForTesting("run-3"));
         }
     }
@@ -126,11 +123,11 @@ public class TailEndpointTest {
             TailEndpoint endpoint = new TailEndpoint();
             StaplerRequest2 req = mock(StaplerRequest2.class);
             when(req.getMethod()).thenReturn("GET");
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
 
             endpoint.doTail(req, rsp);
 
-            verify(rsp).sendError(405, "Method Not Allowed: only POST is served");
+            RefusalAssert.assertRefused(rsp, 405, "Method Not Allowed: only POST is served");
         }
     }
 
@@ -140,11 +137,11 @@ public class TailEndpointTest {
                 "mite", "", List.of(new SimpleGrantedAuthority(MITE_AUTHORITY))))) {
             TailEndpoint endpoint = new TailEndpoint();
             StaplerRequest2 req = requestWithBody("POST", "{\"action\":\"start\"}");
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
 
             endpoint.doTail(req, rsp);
 
-            verify(rsp).sendError(400, "Bad Request: runId and a start/stop action are required");
+            RefusalAssert.assertRefused(rsp, 400, "Bad Request: runId and a start/stop action are required");
         }
     }
 
@@ -194,11 +191,11 @@ public class TailEndpointTest {
         try (ACLContext ctx = ACL.as2(new UsernamePasswordAuthenticationToken(
                 "bob", "", List.of(new SimpleGrantedAuthority("ROLE:varroa:developer"))))) {
             TailEndpoint endpoint = new TailEndpoint();
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
 
             endpoint.doCounters(requestWithMethod("GET"), rsp);
 
-            verify(rsp).sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+            RefusalAssert.assertRefused(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
         }
     }
 

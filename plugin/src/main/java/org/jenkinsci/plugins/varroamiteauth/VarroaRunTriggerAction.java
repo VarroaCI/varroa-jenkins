@@ -62,6 +62,9 @@ import org.springframework.security.core.GrantedAuthority;
  * ActivityEndpoint} performs. Only the mite calls these routes, over the Jenkins
  * bearer token the operator signs.
  *
+ * <p>Every refusal goes through {@link PlainTextRefusal#refuse}, so its body is the plain
+ * message and never the Jenkins HTML error page.
+ *
  * <p>{@code POST /varroa-run/load-build} loads one numbered build, because Jenkins
  * loads builds on demand and a build restored onto disk is otherwise invisible.
  *
@@ -120,11 +123,11 @@ public class VarroaRunTriggerAction implements RootAction {
     public void doTrigger(StaplerRequest2 req, StaplerResponse2 rsp) {
         try {
             if (!"POST".equalsIgnoreCase(req.getMethod())) {
-                rsp.sendError(405, "Method Not Allowed: only POST is served");
+                PlainTextRefusal.refuse(rsp, 405, "Method Not Allowed: only POST is served");
                 return;
             }
             if (!isMitePrincipal()) {
-                rsp.sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                PlainTextRefusal.refuse(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
                 return;
             }
 
@@ -132,7 +135,7 @@ public class VarroaRunTriggerAction implements RootAction {
             try {
                 body = readBody(req);
             } catch (Exception e) {
-                rsp.sendError(400, "Bad Request: body does not decode");
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: body does not decode");
                 return;
             }
 
@@ -149,11 +152,11 @@ public class VarroaRunTriggerAction implements RootAction {
             // a Job (e.g. a folder), and those two cases carry different response codes.
             Item rawItem = Jenkins.get().getItemByFullName(jobPath);
             if (rawItem == null) {
-                rsp.sendError(404, "Not Found: no item named " + jobPath);
+                PlainTextRefusal.refuse(rsp, 404, "Not Found: no item named " + jobPath);
                 return;
             }
             if (!(rawItem instanceof Job) || !(rawItem instanceof ParameterizedJobMixIn.ParameterizedJob)) {
-                rsp.sendError(409, "Conflict: " + jobPath + " is a " + rawItem.getClass().getName()
+                PlainTextRefusal.refuse(rsp, 409, "Conflict: " + jobPath + " is a " + rawItem.getClass().getName()
                         + ", not a parameterized job");
                 return;
             }
@@ -182,7 +185,7 @@ public class VarroaRunTriggerAction implements RootAction {
 
             Queue.Item item = ParameterizedJobMixIn.scheduleBuild2(job, 0, actions.toArray(new Action[0]));
             if (item == null) {
-                rsp.sendError(409, "Conflict: the queue refused to schedule " + jobPath);
+                PlainTextRefusal.refuse(rsp, 409, "Conflict: the queue refused to schedule " + jobPath);
                 return;
             }
 
@@ -190,7 +193,7 @@ public class VarroaRunTriggerAction implements RootAction {
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "VarroaRunTriggerAction.doTrigger caught exception", e);
             try {
-                rsp.sendError(500, "Internal server error");
+                PlainTextRefusal.refuse(rsp, 500, "Internal server error");
             } catch (Exception ignored) {
                 // Best-effort error response.
             }
@@ -218,11 +221,11 @@ public class VarroaRunTriggerAction implements RootAction {
     public void doReplay(StaplerRequest2 req, StaplerResponse2 rsp) {
         try {
             if (!"POST".equalsIgnoreCase(req.getMethod())) {
-                rsp.sendError(405, "Method Not Allowed: only POST is served");
+                PlainTextRefusal.refuse(rsp, 405, "Method Not Allowed: only POST is served");
                 return;
             }
             if (!isMitePrincipal()) {
-                rsp.sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                PlainTextRefusal.refuse(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
                 return;
             }
 
@@ -230,7 +233,7 @@ public class VarroaRunTriggerAction implements RootAction {
             try {
                 body = readBody(req);
             } catch (Exception e) {
-                rsp.sendError(400, "Bad Request: body does not decode");
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: body does not decode");
                 return;
             }
 
@@ -247,7 +250,7 @@ public class VarroaRunTriggerAction implements RootAction {
             // replay that names no source run is refused.
             if (runId.isEmpty() || sourceRunId.isEmpty() || jobPath.isEmpty() || script.isEmpty()
                     || actingUser == null) {
-                rsp.sendError(400, "Bad Request: the body names no run, no source run, no job, no script,"
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: the body names no run, no source run, no job, no script,"
                         + " or no acting user");
                 return;
             }
@@ -256,18 +259,18 @@ public class VarroaRunTriggerAction implements RootAction {
             // wrong kind carry different response codes.
             Item rawItem = Jenkins.get().getItemByFullName(jobPath);
             if (rawItem == null) {
-                rsp.sendError(404, "Not Found: no item named " + jobPath);
+                PlainTextRefusal.refuse(rsp, 404, "Not Found: no item named " + jobPath);
                 return;
             }
             if (!(rawItem instanceof Job) || !(rawItem instanceof ParameterizedJobMixIn.ParameterizedJob)) {
-                rsp.sendError(409, "Conflict: " + jobPath + " is a " + rawItem.getClass().getName()
+                PlainTextRefusal.refuse(rsp, 409, "Conflict: " + jobPath + " is a " + rawItem.getClass().getName()
                         + ", not a parameterized job");
                 return;
             }
             if (!(rawItem instanceof WorkflowJob)) {
                 // A replay replaces a Groovy script, and a job of another
                 // kind holds none.
-                rsp.sendError(409, "Conflict: " + jobPath + " is not a pipeline job");
+                PlainTextRefusal.refuse(rsp, 409, "Conflict: " + jobPath + " is not a pipeline job");
                 return;
             }
             Job<?, ?> job = (Job<?, ?>) rawItem;
@@ -275,7 +278,7 @@ public class VarroaRunTriggerAction implements RootAction {
                 // A template definition builds through a core definition that
                 // honours the replay factory action. A replay would therefore
                 // replace the governed template with the caller's script.
-                rsp.sendError(409, "Conflict: " + jobPath + " is template defined");
+                PlainTextRefusal.refuse(rsp, 409, "Conflict: " + jobPath + " is template defined");
                 return;
             }
 
@@ -299,7 +302,7 @@ public class VarroaRunTriggerAction implements RootAction {
                 // The check reads the job, not the source build: a cell is
                 // disposable, and the source build can be gone from it.
                 if (!job.hasPermission(ReplayAction.REPLAY)) {
-                    rsp.sendError(403, "Forbidden: the acting user may not replay this job");
+                    PlainTextRefusal.refuse(rsp, 403, "Forbidden: the acting user may not replay this job");
                     return;
                 }
 
@@ -316,7 +319,7 @@ public class VarroaRunTriggerAction implements RootAction {
 
                 Queue.Item item = ParameterizedJobMixIn.scheduleBuild2(job, 0, actions.toArray(new Action[0]));
                 if (item == null) {
-                    rsp.sendError(409, "Conflict: the queue refused to schedule " + jobPath);
+                    PlainTextRefusal.refuse(rsp, 409, "Conflict: the queue refused to schedule " + jobPath);
                     return;
                 }
             }
@@ -325,7 +328,7 @@ public class VarroaRunTriggerAction implements RootAction {
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "VarroaRunTriggerAction.doReplay caught exception", e);
             try {
-                rsp.sendError(500, "Internal server error");
+                PlainTextRefusal.refuse(rsp, 500, "Internal server error");
             } catch (Exception ignored) {
                 // Best-effort error response.
             }
@@ -342,11 +345,11 @@ public class VarroaRunTriggerAction implements RootAction {
     public void doCancel(StaplerRequest2 req, StaplerResponse2 rsp) {
         try {
             if (!"POST".equalsIgnoreCase(req.getMethod())) {
-                rsp.sendError(405, "Method Not Allowed: only POST is served");
+                PlainTextRefusal.refuse(rsp, 405, "Method Not Allowed: only POST is served");
                 return;
             }
             if (!isMitePrincipal()) {
-                rsp.sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                PlainTextRefusal.refuse(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
                 return;
             }
 
@@ -354,7 +357,7 @@ public class VarroaRunTriggerAction implements RootAction {
             try {
                 body = readBody(req);
             } catch (Exception e) {
-                rsp.sendError(400, "Bad Request: body does not decode");
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: body does not decode");
                 return;
             }
 
@@ -371,14 +374,14 @@ public class VarroaRunTriggerAction implements RootAction {
             }
 
             if (!cancelled) {
-                rsp.sendError(404, "Not Found: no build or queue item carries run id " + runId);
+                PlainTextRefusal.refuse(rsp, 404, "Not Found: no build or queue item carries run id " + runId);
                 return;
             }
             rsp.setStatus(202);
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "VarroaRunTriggerAction.doCancel caught exception", e);
             try {
-                rsp.sendError(500, "Internal server error");
+                PlainTextRefusal.refuse(rsp, 500, "Internal server error");
             } catch (Exception ignored) {
                 // Best-effort error response.
             }
@@ -586,11 +589,11 @@ public class VarroaRunTriggerAction implements RootAction {
     public void doProceedInput(StaplerRequest2 req, StaplerResponse2 rsp) {
         try {
             if (!"POST".equalsIgnoreCase(req.getMethod())) {
-                rsp.sendError(405, "Method Not Allowed: only POST is served");
+                PlainTextRefusal.refuse(rsp, 405, "Method Not Allowed: only POST is served");
                 return;
             }
             if (!isMitePrincipal()) {
-                rsp.sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                PlainTextRefusal.refuse(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
                 return;
             }
 
@@ -598,7 +601,7 @@ public class VarroaRunTriggerAction implements RootAction {
             try {
                 body = readBody(req);
             } catch (Exception e) {
-                rsp.sendError(400, "Bad Request: body does not decode");
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: body does not decode");
                 return;
             }
 
@@ -608,18 +611,18 @@ public class VarroaRunTriggerAction implements RootAction {
             String inputId = body.optString("inputId", "");
             VarroaActingUser actingUser = VarroaActingUser.fromJson(body);
             if (runId.isEmpty() || inputId.isEmpty() || actingUser == null) {
-                rsp.sendError(400, "Bad Request: the body names no run, no input, or no acting user");
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: the body names no run, no input, or no acting user");
                 return;
             }
 
             Run<?, ?> run = resolveRunByRunId(jobPath, buildNumber, runId);
             if (run == null) {
-                rsp.sendError(404, "Not Found: no build carries run id " + runId);
+                PlainTextRefusal.refuse(rsp, 404, "Not Found: no build carries run id " + runId);
                 return;
             }
             Object execution = VarroaRunInputs.executionFor(VarroaRunInputs.inputActionOf(run), inputId);
             if (execution == null) {
-                rsp.sendError(404, "Not Found: no input carries id " + inputId);
+                PlainTextRefusal.refuse(rsp, 404, "Not Found: no input carries id " + inputId);
                 return;
             }
 
@@ -629,13 +632,13 @@ public class VarroaRunTriggerAction implements RootAction {
                 // The explicit settled read separates a 409 from the 403 the
                 // submission check answers for the same input, so it runs first.
                 if (VarroaRunInputs.isSettled(execution)) {
-                    rsp.sendError(409, "Conflict: the input is already settled");
+                    PlainTextRefusal.refuse(rsp, 409, "Conflict: the input is already settled");
                     return;
                 }
                 try {
                     VarroaRunInputs.preSubmissionCheck(execution);
                 } catch (Failure refused) {
-                    rsp.sendError(403, "Forbidden: the acting user may not answer the input");
+                    PlainTextRefusal.refuse(rsp, 403, "Forbidden: the acting user may not answer the input");
                     return;
                 }
                 VarroaRunInputs.proceed(execution, inputParameterValues(req, execution, supplied, dropped));
@@ -655,7 +658,7 @@ public class VarroaRunTriggerAction implements RootAction {
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "VarroaRunTriggerAction.doProceedInput caught exception", e);
             try {
-                rsp.sendError(500, "Internal server error");
+                PlainTextRefusal.refuse(rsp, 500, "Internal server error");
             } catch (Exception ignored) {
                 // Best-effort error response.
             }
@@ -679,11 +682,11 @@ public class VarroaRunTriggerAction implements RootAction {
     public void doAbortInput(StaplerRequest2 req, StaplerResponse2 rsp) {
         try {
             if (!"POST".equalsIgnoreCase(req.getMethod())) {
-                rsp.sendError(405, "Method Not Allowed: only POST is served");
+                PlainTextRefusal.refuse(rsp, 405, "Method Not Allowed: only POST is served");
                 return;
             }
             if (!isMitePrincipal()) {
-                rsp.sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                PlainTextRefusal.refuse(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
                 return;
             }
 
@@ -691,7 +694,7 @@ public class VarroaRunTriggerAction implements RootAction {
             try {
                 body = readBody(req);
             } catch (Exception e) {
-                rsp.sendError(400, "Bad Request: body does not decode");
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: body does not decode");
                 return;
             }
 
@@ -701,30 +704,30 @@ public class VarroaRunTriggerAction implements RootAction {
             String inputId = body.optString("inputId", "");
             VarroaActingUser actingUser = VarroaActingUser.fromJson(body);
             if (runId.isEmpty() || inputId.isEmpty() || actingUser == null) {
-                rsp.sendError(400, "Bad Request: the body names no run, no input, or no acting user");
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: the body names no run, no input, or no acting user");
                 return;
             }
 
             Run<?, ?> run = resolveRunByRunId(jobPath, buildNumber, runId);
             if (run == null) {
-                rsp.sendError(404, "Not Found: no build carries run id " + runId);
+                PlainTextRefusal.refuse(rsp, 404, "Not Found: no build carries run id " + runId);
                 return;
             }
             Object execution = VarroaRunInputs.executionFor(VarroaRunInputs.inputActionOf(run), inputId);
             if (execution == null) {
-                rsp.sendError(404, "Not Found: no input carries id " + inputId);
+                PlainTextRefusal.refuse(rsp, 404, "Not Found: no input carries id " + inputId);
                 return;
             }
 
             try (ACLContext ignored = ACL.as2(actingUser.authentication())) {
                 if (VarroaRunInputs.isSettled(execution)) {
-                    rsp.sendError(409, "Conflict: the input is already settled");
+                    PlainTextRefusal.refuse(rsp, 409, "Conflict: the input is already settled");
                     return;
                 }
                 try {
                     VarroaRunInputs.abort(execution);
                 } catch (Failure refused) {
-                    rsp.sendError(403, "Forbidden: the acting user may not reject the input");
+                    PlainTextRefusal.refuse(rsp, 403, "Forbidden: the acting user may not reject the input");
                     return;
                 }
             }
@@ -734,7 +737,7 @@ public class VarroaRunTriggerAction implements RootAction {
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "VarroaRunTriggerAction.doAbortInput caught exception", e);
             try {
-                rsp.sendError(500, "Internal server error");
+                PlainTextRefusal.refuse(rsp, 500, "Internal server error");
             } catch (Exception ignored) {
                 // Best-effort error response.
             }
@@ -846,11 +849,11 @@ public class VarroaRunTriggerAction implements RootAction {
     public void doAdoptNode(StaplerRequest2 req, StaplerResponse2 rsp) {
         try {
             if (!"POST".equalsIgnoreCase(req.getMethod())) {
-                rsp.sendError(405, "Method Not Allowed: only POST is served");
+                PlainTextRefusal.refuse(rsp, 405, "Method Not Allowed: only POST is served");
                 return;
             }
             if (!isMitePrincipal()) {
-                rsp.sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                PlainTextRefusal.refuse(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
                 return;
             }
 
@@ -858,25 +861,25 @@ public class VarroaRunTriggerAction implements RootAction {
             try {
                 body = readBody(req);
             } catch (Exception e) {
-                rsp.sendError(400, "Bad Request: body does not decode");
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: body does not decode");
                 return;
             }
 
             String name = body.optString("name", "");
             if (!isAdoptableNodeName(name)) {
-                rsp.sendError(400, "Bad Request: the body names no usable node");
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: the body names no usable node");
                 return;
             }
 
             Jenkins jenkins = Jenkins.get();
             if (jenkins.getNode(name) != null) {
-                rsp.sendError(409, "Conflict: this process already holds the node " + name);
+                PlainTextRefusal.refuse(rsp, 409, "Conflict: this process already holds the node " + name);
                 return;
             }
 
             File config = new File(new File(jenkins.getRootDir(), "nodes"), name + "/config.xml");
             if (!config.isFile()) {
-                rsp.sendError(404, "Not Found: no configuration file for the node " + name);
+                PlainTextRefusal.refuse(rsp, 404, "Not Found: no configuration file for the node " + name);
                 return;
             }
 
@@ -884,11 +887,11 @@ public class VarroaRunTriggerAction implements RootAction {
             try (InputStream in = Files.newInputStream(config.toPath())) {
                 loaded = Jenkins.XSTREAM.fromXML(in);
             } catch (IOException | RuntimeException e) {
-                rsp.sendError(400, "Bad Request: the configuration file does not load");
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: the configuration file does not load");
                 return;
             }
             if (!(loaded instanceof Node)) {
-                rsp.sendError(400, "Bad Request: the configuration file is not a node");
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: the configuration file is not a node");
                 return;
             }
 
@@ -897,7 +900,7 @@ public class VarroaRunTriggerAction implements RootAction {
         } catch (IOException | RuntimeException e) {
             LOGGER.log(Level.WARNING, "VarroaRunTriggerAction.doAdoptNode caught exception", e);
             try {
-                rsp.sendError(500, "Internal server error");
+                PlainTextRefusal.refuse(rsp, 500, "Internal server error");
             } catch (IOException ignored) {
                 // Best-effort error response.
             }
@@ -937,11 +940,11 @@ public class VarroaRunTriggerAction implements RootAction {
     public void doLoadBuild(StaplerRequest2 req, StaplerResponse2 rsp) {
         try {
             if (!"POST".equalsIgnoreCase(req.getMethod())) {
-                rsp.sendError(405, "Method Not Allowed: only POST is served");
+                PlainTextRefusal.refuse(rsp, 405, "Method Not Allowed: only POST is served");
                 return;
             }
             if (!isMitePrincipal()) {
-                rsp.sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                PlainTextRefusal.refuse(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
                 return;
             }
 
@@ -949,20 +952,20 @@ public class VarroaRunTriggerAction implements RootAction {
             try {
                 body = readBody(req);
             } catch (Exception e) {
-                rsp.sendError(400, "Bad Request: body does not decode");
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: body does not decode");
                 return;
             }
 
             String jobPath = body.optString("jobPath", "");
             long buildNumber = body.optLong("buildNumber", 0L);
             if (jobPath.isEmpty() || buildNumber <= 0) {
-                rsp.sendError(400, "Bad Request: the body names no job and build");
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: the body names no job and build");
                 return;
             }
 
             Job<?, ?> job = Jenkins.get().getItemByFullName(jobPath, Job.class);
             if (job == null) {
-                rsp.sendError(404, "Not Found: no job " + jobPath);
+                PlainTextRefusal.refuse(rsp, 404, "Not Found: no job " + jobPath);
                 return;
             }
 
@@ -976,7 +979,7 @@ public class VarroaRunTriggerAction implements RootAction {
             // was written.
             Run<?, ?> run = job.getBuildByNumber((int) buildNumber);
             if (run == null) {
-                rsp.sendError(404, "Not Found: no build " + buildNumber + " of " + jobPath);
+                PlainTextRefusal.refuse(rsp, 404, "Not Found: no build " + buildNumber + " of " + jobPath);
                 return;
             }
 
@@ -985,7 +988,7 @@ public class VarroaRunTriggerAction implements RootAction {
         } catch (IOException | RuntimeException e) {
             LOGGER.log(Level.WARNING, "VarroaRunTriggerAction.doLoadBuild caught exception", e);
             try {
-                rsp.sendError(500, "Internal server error");
+                PlainTextRefusal.refuse(rsp, 500, "Internal server error");
             } catch (IOException ignored) {
                 // Best-effort error response.
             }

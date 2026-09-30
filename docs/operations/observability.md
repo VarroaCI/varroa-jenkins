@@ -21,7 +21,8 @@ counts every result of an imperative command that a mite reports, for example `c
 `trigger_build`. `outcome` is `success`, `failure`, or `deferred`. A deferred result is a restart
 that waits for running builds. The mite also logs each result: at info level on success, and at
 warning level on failure. The log line names the kind, the job path, the run, and the reason.
-A Jenkins HTML refusal gives its page title, cut at 300 characters.
+A plugin refusal gives its plain text, and a Jenkins HTML refusal gives its page title.
+Both are cut at 300 characters.
 The gateway also logs a warning for a refused cancel, input answer, or replay.
 
 ## Use activity history

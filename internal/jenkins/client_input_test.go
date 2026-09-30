@@ -239,3 +239,38 @@ func TestRunCommandRoutesReportTheTitleOfAnHTMLRefusal(t *testing.T) {
 		}
 	}
 }
+
+// TestRunCommandRoutesReportAPlainTextRefusal asserts every run command
+// route reports the whole plain-text body the plugin refuses with.
+func TestRunCommandRoutesReportAPlainTextRefusal(t *testing.T) {
+	const message = "Conflict: the input is already settled"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/crumbIssuer/api/json" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(message))
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient(srv.URL, "user", "token")
+	ctx := context.Background()
+
+	calls := map[string]func() (int, error){
+		"trigger": func() (int, error) { return c.TriggerBuild(ctx, TriggerBuildRequest{JobPath: "team/job"}) },
+		"cancel":  func() (int, error) { return c.CancelBuild(ctx, CancelBuildRequest{JobPath: "team/job"}) },
+		"proceed": func() (int, error) { return c.ProceedInput(ctx, ProceedInputRequest{JobPath: "team/job"}) },
+		"abort":   func() (int, error) { return c.AbortInput(ctx, AbortInputRequest{JobPath: "team/job"}) },
+		"replay":  func() (int, error) { return c.ReplayBuild(ctx, ReplayBuildRequest{JobPath: "team/job"}) },
+	}
+	for name, call := range calls {
+		status, err := call()
+		if err == nil || status != http.StatusConflict {
+			t.Fatalf("%s: status = %d, err = %v; want 409 and an error", name, status, err)
+		}
+		if msg := err.Error(); !strings.HasSuffix(msg, ": HTTP 409: "+message) {
+			t.Fatalf("%s: error = %q, want the plain-text body", name, msg)
+		}
+	}
+}

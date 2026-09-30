@@ -395,6 +395,13 @@ the root AGENTS.md greenfield rule.
   `getAffectedPaths()` always answers empty — the record store carries only
   an affected-path count, never the paths themselves, so the operator never
   has real paths to write into the document.
+- **Route refusals**: every refusal on `/varroa-run/*` (`VarroaRunTriggerAction`),
+  `/varroa-activity/*` (`ActivityEndpoint`), and `/varroa-log/*` (`TailEndpoint`) goes
+  through `PlainTextRefusal.refuse(rsp, code, msg)`. It resets an uncommitted response,
+  then answers the status, `text/plain; charset=UTF-8`, and the message as the whole
+  body. Never call `sendError` on these routes: Jenkins then renders its full HTML
+  error page and keeps the message only in the page title. Tests assert a refusal
+  through `RefusalAssert`, which also asserts that no `sendError` call occurred.
 - **Run trigger endpoint** (the mite's local call for a manual build trigger, a cancel,
   the two input-approval commands, and a replay; D3, D4, D8, D10, D11, run-trigger-endpoint):
   `VarroaRunTriggerAction.java`, a protected

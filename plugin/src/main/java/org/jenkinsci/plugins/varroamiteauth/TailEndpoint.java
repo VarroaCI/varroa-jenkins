@@ -72,11 +72,11 @@ public class TailEndpoint implements RootAction {
     public void doTail(StaplerRequest2 req, StaplerResponse2 rsp) {
         try {
             if (!"POST".equalsIgnoreCase(req.getMethod())) {
-                rsp.sendError(405, "Method Not Allowed: only POST is served");
+                PlainTextRefusal.refuse(rsp, 405, "Method Not Allowed: only POST is served");
                 return;
             }
             if (!isMitePrincipal()) {
-                rsp.sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                PlainTextRefusal.refuse(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
                 return;
             }
             JSONObject body = readBody(req);
@@ -84,7 +84,7 @@ public class TailEndpoint implements RootAction {
             String action = body.optString("action", "");
             long leaseSeconds = body.optLong("leaseSeconds", 0L);
             if (runId.isEmpty() || (!ACTION_START.equals(action) && !ACTION_STOP.equals(action))) {
-                rsp.sendError(400, "Bad Request: runId and a start/stop action are required");
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: runId and a start/stop action are required");
                 return;
             }
             ensureTicker();
@@ -104,7 +104,7 @@ public class TailEndpoint implements RootAction {
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "TailEndpoint.doTail caught exception", e);
             try {
-                rsp.sendError(500, "Internal server error");
+                PlainTextRefusal.refuse(rsp, 500, "Internal server error");
             } catch (Exception ignored) {
                 // Best-effort error response.
             }
@@ -120,11 +120,11 @@ public class TailEndpoint implements RootAction {
     public void doCounters(StaplerRequest2 req, StaplerResponse2 rsp) {
         try {
             if (!"GET".equalsIgnoreCase(req.getMethod())) {
-                rsp.sendError(405, "Method Not Allowed: only GET is served");
+                PlainTextRefusal.refuse(rsp, 405, "Method Not Allowed: only GET is served");
                 return;
             }
             if (!isMitePrincipal()) {
-                rsp.sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                PlainTextRefusal.refuse(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
                 return;
             }
             JSONObject out = new JSONObject();
@@ -137,7 +137,7 @@ public class TailEndpoint implements RootAction {
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "TailEndpoint.doCounters caught exception", e);
             try {
-                rsp.sendError(500, "Internal server error");
+                PlainTextRefusal.refuse(rsp, 500, "Internal server error");
             } catch (Exception ignored) {
                 // Best-effort error response.
             }

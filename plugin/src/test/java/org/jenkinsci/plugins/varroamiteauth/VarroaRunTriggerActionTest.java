@@ -31,7 +31,6 @@ import hudson.security.ACL;
 import hudson.security.ACLContext;
 
 import java.io.BufferedReader;
-import java.io.PrintWriter;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.net.URL;
@@ -83,9 +82,7 @@ public class VarroaRunTriggerActionTest {
     }
 
     private static StaplerResponse2 responseCapturing(StringWriter writer) throws Exception {
-        StaplerResponse2 rsp = mock(StaplerResponse2.class);
-        when(rsp.getWriter()).thenReturn(new PrintWriter(writer));
-        return rsp;
+        return RefusalAssert.capturing(writer);
     }
 
     private static ACLContext asMite() {
@@ -371,11 +368,11 @@ public class VarroaRunTriggerActionTest {
             VarroaRunTriggerAction action = new VarroaRunTriggerAction();
             StaplerRequest2 req = requestWithBody("{\"runId\":\"run-folder\",\"intentKey\":\"manual:run-folder\""
                     + ",\"jobPath\":\"" + folder.getFullName() + "\"}");
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
 
             action.doTrigger(req, rsp);
 
-            verify(rsp).sendError(eq(409), contains("not a parameterized job"));
+            RefusalAssert.assertRefusedContaining(rsp, 409, "not a parameterized job");
         }
         assertEquals(0, Queue.getInstance().getItems().length);
     }
@@ -386,11 +383,11 @@ public class VarroaRunTriggerActionTest {
             VarroaRunTriggerAction action = new VarroaRunTriggerAction();
             StaplerRequest2 req = requestWithBody("{\"runId\":\"run-missing\",\"intentKey\":\"manual:run-missing\""
                     + ",\"jobPath\":\"does-not-exist\"}");
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
 
             action.doTrigger(req, rsp);
 
-            verify(rsp).sendError(eq(404), contains("does-not-exist"));
+            RefusalAssert.assertRefusedContaining(rsp, 404, "does-not-exist");
         }
     }
 
@@ -402,11 +399,11 @@ public class VarroaRunTriggerActionTest {
             VarroaRunTriggerAction action = new VarroaRunTriggerAction();
             StaplerRequest2 req = requestWithBody("{\"runId\":\"run-x\",\"intentKey\":\"manual:run-x\""
                     + ",\"jobPath\":\"trigger-unauth\"}");
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
 
             action.doTrigger(req, rsp);
 
-            verify(rsp).sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+            RefusalAssert.assertRefused(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
         }
         assertEquals(0, Queue.getInstance().getItems().length);
     }
@@ -435,11 +432,11 @@ public class VarroaRunTriggerActionTest {
                 "bob", "", List.of(new SimpleGrantedAuthority("ROLE:varroa:developer"))))) {
             VarroaRunTriggerAction action = new VarroaRunTriggerAction();
             StaplerRequest2 req = requestWithBody("{\"name\":\"agent-1\"}");
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
 
             action.doAdoptNode(req, rsp);
 
-            verify(rsp).sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+            RefusalAssert.assertRefused(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
         }
     }
 
@@ -448,11 +445,11 @@ public class VarroaRunTriggerActionTest {
         try (ACLContext ctx = asMite()) {
             VarroaRunTriggerAction action = new VarroaRunTriggerAction();
             StaplerRequest2 req = requestWithBody("{\"name\":\"missing-agent\"}");
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
 
             action.doAdoptNode(req, rsp);
 
-            verify(rsp).sendError(eq(404), contains("missing-agent"));
+            RefusalAssert.assertRefusedContaining(rsp, 404, "missing-agent");
         }
     }
 
@@ -463,11 +460,11 @@ public class VarroaRunTriggerActionTest {
         try (ACLContext ctx = asMite()) {
             VarroaRunTriggerAction action = new VarroaRunTriggerAction();
             StaplerRequest2 req = requestWithBody("{\"name\":\"held-agent\"}");
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
 
             action.doAdoptNode(req, rsp);
 
-            verify(rsp).sendError(eq(409), contains("held-agent"));
+            RefusalAssert.assertRefusedContaining(rsp, 409, "held-agent");
         }
     }
 
@@ -476,11 +473,11 @@ public class VarroaRunTriggerActionTest {
         try (ACLContext ctx = asMite()) {
             VarroaRunTriggerAction action = new VarroaRunTriggerAction();
             StaplerRequest2 req = requestWithBody("{\"name\":\"../secrets\"}");
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
 
             action.doAdoptNode(req, rsp);
 
-            verify(rsp).sendError(eq(400), contains("no usable node"));
+            RefusalAssert.assertRefusedContaining(rsp, 400, "no usable node");
         }
     }
 
@@ -492,11 +489,11 @@ public class VarroaRunTriggerActionTest {
                 "bob", "", List.of(new SimpleGrantedAuthority("ROLE:varroa:developer"))))) {
             VarroaRunTriggerAction action = new VarroaRunTriggerAction();
             StaplerRequest2 req = requestWithBody("{\"jobPath\":\"pipe\",\"buildNumber\":1}");
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
 
             action.doLoadBuild(req, rsp);
 
-            verify(rsp).sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+            RefusalAssert.assertRefused(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
         }
     }
 
@@ -505,11 +502,11 @@ public class VarroaRunTriggerActionTest {
         try (ACLContext ctx = asMite()) {
             VarroaRunTriggerAction action = new VarroaRunTriggerAction();
             StaplerRequest2 req = requestWithBody("{\"jobPath\":\"\",\"buildNumber\":0}");
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
 
             action.doLoadBuild(req, rsp);
 
-            verify(rsp).sendError(eq(400), contains("no job and build"));
+            RefusalAssert.assertRefusedContaining(rsp, 400, "no job and build");
         }
     }
 
@@ -518,11 +515,11 @@ public class VarroaRunTriggerActionTest {
         try (ACLContext ctx = asMite()) {
             VarroaRunTriggerAction action = new VarroaRunTriggerAction();
             StaplerRequest2 req = requestWithBody("{\"jobPath\":\"no-such-job\",\"buildNumber\":1}");
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
 
             action.doLoadBuild(req, rsp);
 
-            verify(rsp).sendError(eq(404), contains("no-such-job"));
+            RefusalAssert.assertRefusedContaining(rsp, 404, "no-such-job");
         }
     }
 
@@ -534,11 +531,11 @@ public class VarroaRunTriggerActionTest {
             VarroaRunTriggerAction action = new VarroaRunTriggerAction();
             StaplerRequest2 req = requestWithBody(
                     "{\"jobPath\":\"" + p.getFullName() + "\",\"buildNumber\":42}");
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
 
             action.doLoadBuild(req, rsp);
 
-            verify(rsp).sendError(eq(404), contains("42"));
+            RefusalAssert.assertRefusedContaining(rsp, 404, "42");
         }
     }
 
@@ -748,11 +745,11 @@ public class VarroaRunTriggerActionTest {
             assertNotNull(build);
             assertTrue(build.isBuilding());
 
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
             action.doCancel(requestWithBody("{\"runId\":\"run-wrong\",\"jobPath\":\"" + p.getFullName()
                     + "\",\"buildNumber\":" + build.getNumber() + "}"), rsp);
 
-            verify(rsp).sendError(eq(404), contains("run-wrong"));
+            RefusalAssert.assertRefusedContaining(rsp, 404, "run-wrong");
             assertTrue("a mismatched cancel must not stop the build", build.isBuilding());
         } finally {
             release.countDown();
@@ -766,11 +763,11 @@ public class VarroaRunTriggerActionTest {
                 "bob", "", List.of(new SimpleGrantedAuthority("ROLE:varroa:developer"))))) {
             VarroaRunTriggerAction action = new VarroaRunTriggerAction();
             StaplerRequest2 req = requestWithBody("{\"runId\":\"run-y\",\"jobPath\":\"any\",\"buildNumber\":0}");
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
 
             action.doCancel(req, rsp);
 
-            verify(rsp).sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+            RefusalAssert.assertRefused(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
         }
     }
 
@@ -779,11 +776,11 @@ public class VarroaRunTriggerActionTest {
         try (ACLContext ctx = asMite()) {
             VarroaRunTriggerAction action = new VarroaRunTriggerAction();
             StaplerRequest2 req = requestWithBody("{\"runId\":\"run-nowhere\",\"jobPath\":\"any\",\"buildNumber\":0}");
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
 
             action.doCancel(req, rsp);
 
-            verify(rsp).sendError(eq(404), contains("run-nowhere"));
+            RefusalAssert.assertRefusedContaining(rsp, 404, "run-nowhere");
         }
     }
 

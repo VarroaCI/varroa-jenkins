@@ -110,14 +110,14 @@ public class ActivityEndpoint implements RootAction {
         try {
             // Method gate: only GET.
             if (!"GET".equalsIgnoreCase(req.getMethod())) {
-                rsp.sendError(405, "Method Not Allowed: only GET is served");
-                return; // Coordinator §9.1: return after sendError
+                PlainTextRefusal.refuse(rsp, 405, "Method Not Allowed: only GET is served");
+                return;
             }
 
             // AuthZ: require ROLE:varroa:system-mite authority.
             if (!isMitePrincipal()) {
-                rsp.sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
-                return; // Coordinator §9.1: return after sendError
+                PlainTextRefusal.refuse(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                return;
             }
 
             // Parse max query param.
@@ -141,7 +141,7 @@ public class ActivityEndpoint implements RootAction {
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "ActivityEndpoint.doEvents caught exception", e);
             try {
-                rsp.sendError(500, "Internal server error");
+                PlainTextRefusal.refuse(rsp, 500, "Internal server error");
             } catch (Exception ignored) {
                 // Best-effort error response.
             }
@@ -157,14 +157,14 @@ public class ActivityEndpoint implements RootAction {
         try {
             // Method gate: only GET.
             if (!"GET".equalsIgnoreCase(req.getMethod())) {
-                rsp.sendError(405, "Method Not Allowed: only GET is served");
-                return; // Coordinator §9.1: return after sendError
+                PlainTextRefusal.refuse(rsp, 405, "Method Not Allowed: only GET is served");
+                return;
             }
 
             // AuthZ: require ROLE:varroa:system-mite authority.
             if (!isMitePrincipal()) {
-                rsp.sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
-                return; // Coordinator §9.1: return after sendError
+                PlainTextRefusal.refuse(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                return;
             }
 
             Jenkins jenkins = Jenkins.getInstanceOrNull();
@@ -180,7 +180,7 @@ public class ActivityEndpoint implements RootAction {
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "ActivityEndpoint.doSchedules caught exception", e);
             try {
-                rsp.sendError(500, "Internal server error");
+                PlainTextRefusal.refuse(rsp, 500, "Internal server error");
             } catch (Exception ignored) {
                 // Best-effort error response.
             }

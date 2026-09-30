@@ -25,7 +25,6 @@ import hudson.security.ACLContext;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.PrintWriter;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
@@ -130,7 +129,7 @@ public class VarroaRunTriggerActionReplayTest {
         StaplerResponse2 rsp = replay(body("run-replay-2", job.getFullName(), "src-run-1",
                 "echo 'FROM-REPLAY'\n", actingUser("bob"), null), new StringWriter());
 
-        verify(rsp).sendError(403, "Forbidden: the acting user may not replay this job");
+        RefusalAssert.assertRefused(rsp, 403, "Forbidden: the acting user may not replay this job");
         assertEquals(0, Queue.getInstance().getItems().length);
         assertNull(job.getLastBuild());
     }
@@ -147,7 +146,7 @@ public class VarroaRunTriggerActionReplayTest {
             new VarroaRunTriggerAction().doReplay(requestWithBody(json), rsp);
         }
 
-        verify(rsp).sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+        RefusalAssert.assertRefused(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
         assertEquals(0, Queue.getInstance().getItems().length);
     }
 
@@ -158,7 +157,7 @@ public class VarroaRunTriggerActionReplayTest {
         StaplerResponse2 rsp = replay(body("run-replay-4", "no-such-job", "src-run-1", "echo 'x'\n",
                 actingUser("ada"), null), new StringWriter());
 
-        verify(rsp).sendError(404, "Not Found: no item named no-such-job");
+        RefusalAssert.assertRefused(rsp, 404, "Not Found: no item named no-such-job");
     }
 
     @Test
@@ -168,7 +167,7 @@ public class VarroaRunTriggerActionReplayTest {
         StaplerResponse2 rsp = replay(body("run-replay-5", folder.getFullName(), "src-run-1", "echo 'x'\n",
                 actingUser("ada"), null), new StringWriter());
 
-        verify(rsp).sendError(eq(409), contains("not a parameterized job"));
+        RefusalAssert.assertRefusedContaining(rsp, 409, "not a parameterized job");
         assertEquals(0, Queue.getInstance().getItems().length);
     }
 
@@ -180,7 +179,7 @@ public class VarroaRunTriggerActionReplayTest {
         StaplerResponse2 rsp = replay(body("run-replay-6", project.getFullName(), "src-run-1", "echo 'x'\n",
                 actingUser("ada"), null), new StringWriter());
 
-        verify(rsp).sendError(409, "Conflict: replay-freestyle is not a pipeline job");
+        RefusalAssert.assertRefused(rsp, 409, "Conflict: replay-freestyle is not a pipeline job");
         assertEquals(0, Queue.getInstance().getItems().length);
     }
 
@@ -192,7 +191,7 @@ public class VarroaRunTriggerActionReplayTest {
         StaplerResponse2 rsp = replay(body("run-replay-7", job.getFullName(), "src-run-1", "",
                 actingUser("ada"), null), new StringWriter());
 
-        verify(rsp).sendError(400, NO_FIELD_MESSAGE);
+        RefusalAssert.assertRefused(rsp, 400, NO_FIELD_MESSAGE);
         assertEquals(0, Queue.getInstance().getItems().length);
     }
 
@@ -204,7 +203,7 @@ public class VarroaRunTriggerActionReplayTest {
         StaplerResponse2 rsp = replay(body("run-replay-12", job.getFullName(), "", "echo 'x'\n",
                 actingUser("ada"), null), new StringWriter());
 
-        verify(rsp).sendError(400, NO_FIELD_MESSAGE);
+        RefusalAssert.assertRefused(rsp, 400, NO_FIELD_MESSAGE);
         assertEquals(0, Queue.getInstance().getItems().length);
     }
 
@@ -216,7 +215,7 @@ public class VarroaRunTriggerActionReplayTest {
         StaplerResponse2 rsp = replay(body("run-replay-8", job.getFullName(), "src-run-1", "echo 'x'\n",
                 null, null), new StringWriter());
 
-        verify(rsp).sendError(400, NO_FIELD_MESSAGE);
+        RefusalAssert.assertRefused(rsp, 400, NO_FIELD_MESSAGE);
         assertEquals(0, Queue.getInstance().getItems().length);
     }
 
@@ -229,7 +228,7 @@ public class VarroaRunTriggerActionReplayTest {
             new VarroaRunTriggerAction().doReplay(req, rsp);
         }
 
-        verify(rsp).sendError(405, "Method Not Allowed: only POST is served");
+        RefusalAssert.assertRefused(rsp, 405, "Method Not Allowed: only POST is served");
     }
 
     @Test
@@ -252,7 +251,7 @@ public class VarroaRunTriggerActionReplayTest {
         StaplerResponse2 rsp = replay(body("run-replay-9", job.getFullName(), "src-run-1", "echo 'x'\n",
                 actingUser("ada"), null), new StringWriter());
 
-        verify(rsp).sendError(409, "Conflict: replay-template is template defined");
+        RefusalAssert.assertRefused(rsp, 409, "Conflict: replay-template is template defined");
         assertEquals(0, Queue.getInstance().getItems().length);
     }
 
@@ -427,9 +426,7 @@ public class VarroaRunTriggerActionReplayTest {
     }
 
     private static StaplerResponse2 responseCapturing(StringWriter writer) throws Exception {
-        StaplerResponse2 rsp = mock(StaplerResponse2.class);
-        when(rsp.getWriter()).thenReturn(new PrintWriter(writer));
-        return rsp;
+        return RefusalAssert.capturing(writer);
     }
 
     private static ACLContext asMite() {

@@ -14,7 +14,6 @@ import hudson.security.ACL;
 import hudson.security.ACLContext;
 
 import java.io.BufferedReader;
-import java.io.PrintWriter;
 import java.io.StringReader;
 import java.io.StringWriter;
 
@@ -119,7 +118,7 @@ public class VarroaRunInputRouteTest {
         StaplerResponse2 rsp = proceed(body(run, inputId, actingUser("ada", "varroa-other"), null),
                 new StringWriter());
 
-        verify(rsp).sendError(403, "Forbidden: the acting user may not answer the input");
+        RefusalAssert.assertRefused(rsp, 403, "Forbidden: the acting user may not answer the input");
         assertEquals(1, pendingCount(run));
     }
 
@@ -144,7 +143,7 @@ public class VarroaRunInputRouteTest {
         StaplerResponse2 second = proceed(body(run, inputId, actingUser("ada", PAYMENTS_GROUP), null),
                 new StringWriter());
 
-        verify(second).sendError(409, "Conflict: the input is already settled");
+        RefusalAssert.assertRefused(second, 409, "Conflict: the input is already settled");
     }
 
     @Test
@@ -155,7 +154,7 @@ public class VarroaRunInputRouteTest {
         StaplerResponse2 rsp = proceed(
                 body(run, "no-such-input", actingUser("ada", PAYMENTS_GROUP), null), new StringWriter());
 
-        verify(rsp).sendError(404, "Not Found: no input carries id no-such-input");
+        RefusalAssert.assertRefused(rsp, 404, "Not Found: no input carries id no-such-input");
     }
 
     @Test
@@ -166,11 +165,11 @@ public class VarroaRunInputRouteTest {
         try (ACLContext ctx = ACL.as2(new UsernamePasswordAuthenticationToken(
                 "bob", "", java.util.List.of(new SimpleGrantedAuthority("ROLE:varroa:developer"))))) {
             StaplerRequest2 req = requestWithBody(body(run, inputId, actingUser("ada", PAYMENTS_GROUP), null));
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
 
             new VarroaRunTriggerAction().doProceedInput(req, rsp);
 
-            verify(rsp).sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+            RefusalAssert.assertRefused(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
         }
         assertEquals(1, pendingCount(run));
     }
@@ -274,7 +273,7 @@ public class VarroaRunInputRouteTest {
         StaplerResponse2 rsp = abort(body(run, inputId, actingUser("ada", "varroa-other"), null),
                 new StringWriter());
 
-        verify(rsp).sendError(403, "Forbidden: the acting user may not reject the input");
+        RefusalAssert.assertRefused(rsp, 403, "Forbidden: the acting user may not reject the input");
         assertEquals(1, pendingCount(run));
     }
 
@@ -386,9 +385,7 @@ public class VarroaRunInputRouteTest {
     }
 
     private static StaplerResponse2 responseCapturing(StringWriter writer) throws Exception {
-        StaplerResponse2 rsp = mock(StaplerResponse2.class);
-        when(rsp.getWriter()).thenReturn(new PrintWriter(writer));
-        return rsp;
+        return RefusalAssert.capturing(writer);
     }
 
     private static ACLContext asMite() {
