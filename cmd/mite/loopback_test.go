@@ -1417,6 +1417,37 @@ func TestClaimCellInstanceOverwritesBody(t *testing.T) {
 	}
 }
 
+// TestClaimPassesStartMark proves the claim route forwards a posted
+// start_mark unchanged, so the plugin's start mark reaches the gateway on
+// the claim's own stream message.
+func TestClaimPassesStartMark(t *testing.T) {
+	agent := NewAgent(Config{CellInstance: "pod-uid-789"})
+	agent.Logger = slog.Default()
+	agent.loopbackToken = "tok"
+	agent.claimTimeout = 50 * time.Millisecond
+
+	var captured *mitev1.ClaimRequest
+	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+		captured = m.GetClaimRequest()
+		return nil
+	}}
+
+	body := `{"origin":"scm","intent_key":"k","run_id":"r","job_path":"j","start_mark":true}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/claim", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer tok")
+	agent.handleClaim(httptest.NewRecorder(), req)
+
+	if captured == nil {
+		t.Fatal("claim_request was not sent")
+	}
+	if !captured.StartMark {
+		t.Error("expected start_mark forwarded as true")
+	}
+	if captured.CellInstance != "pod-uid-789" {
+		t.Errorf("expected cell_instance %q on the start mark, got %q", "pod-uid-789", captured.CellInstance)
+	}
+}
+
 // --- 4.5: processCommands cases + teardown release ---
 
 func TestProcessCommandsResolvesClaimAndReleasesEventAck(t *testing.T) {

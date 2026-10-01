@@ -26,6 +26,10 @@ type ClaimRequest struct {
 	// NumberConflict names a granted number the cell could not apply,
 	// because its own counter already passed it. Zero names none.
 	NumberConflict int64 `json:"number_conflict,omitempty"`
+	// StartMark asks the ledger to record that the owner of the grant can
+	// now start the build. The request names a granted intent and asks
+	// for no grant. Ledger.MarkStart states the answers.
+	StartMark bool `json:"start_mark,omitempty"`
 }
 
 // ClaimResponse is the reply body of a varroa.ledger.claim call. Error and

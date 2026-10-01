@@ -730,3 +730,26 @@ func TestRefireAndMarkAreIndependent(t *testing.T) {
 		t.Fatalf("run id = %q, want the stored %s", resp.RunID, runID)
 	}
 }
+
+// TestRefireSkipsMarkedIntent asserts that the re-fire never selects an
+// intent whose owner marked the start. The owner can have started the
+// build, and a re-fire would then run it a second time.
+func TestRefireSkipsMarkedIntent(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+
+	intentKey := "manual:" + newTestUUIDv7String()
+	seedRefireIntent(t, db, intentKey, refireDeadInstance, "")
+	seedRefirePlacement(t, db, "pod-new", "pod-new", true)
+	if _, err := db.Exec(`UPDATE varroa.run_intents SET start_marked_at = now() WHERE intent_key = $1`,
+		intentKey); err != nil {
+		t.Fatalf("mark the start: %v", err)
+	}
+
+	candidates, err := selectRefireCandidates(context.Background(), pool, testCluster, testTenant)
+	if err != nil {
+		t.Fatalf("selectRefireCandidates: %v", err)
+	}
+	if len(candidates) != 0 {
+		t.Fatalf("candidates = %+v, want none for a marked intent", candidates)
+	}
+}

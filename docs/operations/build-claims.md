@@ -84,12 +84,14 @@ A cancel on `INVALID_KEY`, `FENCED`, `CROSS_TENANT`, or `THROTTLED` ends a Varro
 once. The recorder marks it `TRIGGER_FAILED` with the veto code before it replies. A
 Jenkins-native trigger gets no run record, and `NOT_READY` and `NOT_HOME` mark nothing.
 
-A retried request reads `granted` again when it carries the same `intent_key` and the same `run_id` as an earlier
-granted claim, and that run has not started. A `duplicate` means the intent key belongs to a different run, for example two triggers
-racing on the same commit. It also answers a repeat for a run whose start the ledger recorded.
-That repeat comes from a redelivered command. A repeat from a new cell pod reads `NOT_READY` while
-the old pod can still be building the run. The wait ends when the operator confirms the old pod
-gone or the grant is five minutes old. The recorder ingest must also have no backlog.
+A retried request with the same `intent_key` and `run_id` reads `granted` again while the run has
+not started. A `duplicate` means the intent key belongs to a different run, for example two
+triggers racing on the same commit. It also answers a redelivered repeat for a run that started or
+that another pod marked.
+
+Before a granted item leaves the queue, the plugin sends a start mark on the claim route. This costs one
+round trip per build. The mark fails closed: with no `granted` answer, the build stays
+queued and claims again. A repeat from a new pod reads `NOT_READY` while the old pod can still mark.
 
 The ledger refreshes
 the number when the run never started, the repeat comes from a different cell instance, and the

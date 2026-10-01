@@ -202,9 +202,13 @@ func parameterlessIntent(digest string) bool {
 	return digest == "" || digest == emptyParamsDigest
 }
 
-// selectRefireCandidates reads every GRANTED, un-refired intent of
-// cluster/tenant whose owning instance is named and whose run_id holds
+// selectRefireCandidates reads every GRANTED, un-refired, unmarked intent
+// of cluster/tenant whose owning instance is named and whose run_id holds
 // no runs row that records a build.
+//
+// A start mark excludes the intent: its owner can have started the build,
+// and the start event can be lost with the owner's pod. A re-fire would
+// then run the build a second time.
 //
 // The state alone is not enough: an intent moves to CONSUMED only when
 // the run.started ingest lands, so a started build's intent stays
@@ -221,6 +225,7 @@ func selectRefireCandidates(ctx context.Context, pool *pgxpool.Pool, cluster, te
 		WHERE ri.cluster = $1 AND ri.tenant = $2
 		  AND ri.state = 'GRANTED'
 		  AND ri.refired_at IS NULL
+		  AND ri.start_marked_at IS NULL
 		  AND ri.refire_attempts < $3
 		  AND ri.cell_instance IS NOT NULL AND ri.cell_instance <> ''
 		  AND NOT EXISTS (

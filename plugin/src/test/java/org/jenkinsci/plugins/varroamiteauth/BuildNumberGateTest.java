@@ -75,6 +75,35 @@ public class BuildNumberGateTest {
     }
 
     @Test
+    public void runWhileHoldingRunsOnlyForTheHolder() throws Exception {
+        BuildNumberGate gate = new BuildNumberGate(System::currentTimeMillis, false);
+        List<String> ran = new CopyOnWriteArrayList<>();
+
+        gate.submit("job", "run-a", () -> true);
+        await(() -> "run-a".equals(gate.holderForTesting("job")), "run-a to hold the gate");
+
+        assertTrue(gate.runWhileHolding("job", "run-a", () -> ran.add("holder")));
+        assertFalse(gate.runWhileHolding("job", "run-b", () -> ran.add("other")));
+        gate.release("job", "run-a");
+        assertFalse(gate.runWhileHolding("job", "run-a", () -> ran.add("expired")));
+        assertEquals(List.of("holder"), ran);
+    }
+
+    @Test
+    public void reopenKeepsANewApplyOfTheSameRun() throws Exception {
+        BuildNumberGate gate = new BuildNumberGate(System::currentTimeMillis, false);
+        List<String> applied = new CopyOnWriteArrayList<>();
+
+        gate.submit("job", "run-a", () -> applied.add("first"));
+        await(() -> applied.size() == 1, "the first apply");
+        // A retry of the same run waits behind its own holder.
+        gate.submit("job", "run-a", () -> applied.add("second"));
+        gate.reopen("job", "run-a");
+        await(() -> applied.size() == 2, "the retry after the reopen");
+        assertEquals(List.of("first", "second"), applied);
+    }
+
+    @Test
     public void twoJobsDoNotWaitForEachOther() throws Exception {
         BuildNumberGate gate = new BuildNumberGate(System::currentTimeMillis, false);
         List<String> applied = new CopyOnWriteArrayList<>();

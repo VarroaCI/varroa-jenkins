@@ -82,8 +82,15 @@ public class VarroaClaimDispatcher extends QueueTaskDispatcher {
             item.addAction(action);
         }
         if (action.isApplyPending()) {
-            // The grant waits for the job's apply gate. A second claim
-            // now would hand the gate a second apply for the same run.
+            // The grant waits for the job's apply gate or for its start
+            // mark. A second claim now would hand the gate a second apply
+            // for the same run.
+            return blockedCause();
+        }
+        if (clock.getAsLong() < action.getClaimNotBeforeMillis()) {
+            // A start mark failed. The next claim waits for its backoff
+            // step, so a mark that keeps failing does not claim on every
+            // queue pass.
             return blockedCause();
         }
 

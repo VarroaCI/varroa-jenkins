@@ -67,6 +67,13 @@ public class VarroaClaimQueueTest {
     private volatile IntFunction<Reply> responder;
     /** When set, answers each claim from its request body instead of {@link #responder}. */
     private volatile Function<String, Reply> bodyResponder;
+    /** Every start-mark body, oldest first. A start mark never reaches {@link #requestBodies}. */
+    private final List<String> markBodies = new CopyOnWriteArrayList<>();
+    private final AtomicInteger markCalls = new AtomicInteger();
+    /** Answers the n-th start mark. The default grants it. */
+    private volatile IntFunction<Reply> markResponder;
+
+    private static final String MARK_GRANTED = "{\"decision\":\"granted\",\"run_id\":\"run-1\"}";
 
     private static final class Reply {
         final int status;
@@ -85,6 +92,9 @@ public class VarroaClaimQueueTest {
         requestBodies.clear();
         calls.set(0);
         bodyResponder = null;
+        markBodies.clear();
+        markCalls.set(0);
+        markResponder = n -> new Reply(200, MARK_GRANTED);
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/v1/claim", this::handle);
         server.start();
@@ -100,10 +110,16 @@ public class VarroaClaimQueueTest {
     private void handle(HttpExchange exchange) throws java.io.IOException {
         byte[] reqBytes = exchange.getRequestBody().readAllBytes();
         String reqBody = new String(reqBytes, StandardCharsets.UTF_8);
-        requestBodies.add(reqBody);
-        int n = calls.incrementAndGet();
-        Function<String, Reply> byBody = bodyResponder;
-        Reply reply = byBody != null ? byBody.apply(reqBody) : responder.apply(n);
+        Reply reply;
+        if (reqBody.contains("\"start_mark\":true")) {
+            markBodies.add(reqBody);
+            reply = markResponder.apply(markCalls.incrementAndGet());
+        } else {
+            requestBodies.add(reqBody);
+            int n = calls.incrementAndGet();
+            Function<String, Reply> byBody = bodyResponder;
+            reply = byBody != null ? byBody.apply(reqBody) : responder.apply(n);
+        }
         byte[] resp = reply.body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json");
         exchange.sendResponseHeaders(reply.status, resp.length == 0 ? -1 : resp.length);
@@ -187,6 +203,128 @@ public class VarroaClaimQueueTest {
         awaitTrue(action::isGranted, "the action to be granted");
         assertEquals(5, project.getNextBuildNumber());
         assertEquals("run-1", ClaimRegistry.get().runIdFor(action.getIntentKey()));
+    }
+
+    // ---- Start mark ----
+
+    @Test
+    public void aGrantReleasesTheItemOnlyAfterTheStartMark() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("mark-wait-job");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> new Reply(200, "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":5}");
+        java.util.concurrent.CountDownLatch answer = new java.util.concurrent.CountDownLatch(1);
+        markResponder = n -> {
+            try {
+                answer.await(10, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return new Reply(200, MARK_GRANTED);
+        };
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> task.run());
+        queue.offer(item, project);
+        VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
+
+        awaitTrue(() -> markBodies.size() == 1, "a start mark");
+        assertEquals("the number applies before the mark", 5, project.getNextBuildNumber());
+        assertFalse("the item stays blocked until the mark answers", action.isGranted());
+        assertTrue("the dispatcher offers no claim while the mark is out", action.isApplyPending());
+
+        answer.countDown();
+        awaitTrue(action::isGranted, "the grant after the start mark");
+        assertFalse(action.isApplyPending());
+        assertEquals(0, action.getMarkFailures());
+        assertEquals("run-1", ClaimRegistry.get().runIdFor(action.getIntentKey()));
+        String mark = markBodies.get(0);
+        for (String field : new String[] {
+                "\"start_mark\":true", "\"run_id\":\"run-1\"", "\"job_path\":\"mark-wait-job\"",
+                "\"intent_key\":\"" + action.getIntentKey() + "\""
+        }) {
+            assertTrue("start mark should contain " + field + ": " + mark, mark.contains(field));
+        }
+        assertEquals("one claim and one mark", 1, calls.get());
+    }
+
+    @Test
+    public void aDuplicateStartMarkCancelsTheItem() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("mark-duplicate-job");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> new Reply(200, "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":5}");
+        markResponder = n -> new Reply(200, "{\"decision\":\"duplicate\",\"run_id\":\"run-other\"}");
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> task.run());
+        queue.offer(item, project);
+        VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
+
+        awaitTrue(() -> isCancelled(item), "the item to be cancelled");
+        assertFalse(action.isGranted());
+        assertTrue(DuplicateRegistry.get().contains("run-1"));
+        assertNull("a mark that did not grant records no claim", ClaimRegistry.get().runIdFor(action.getIntentKey()));
+    }
+
+    @Test
+    public void aFailedStartMarkOpensTheGateAndDefersTheNextClaim() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("mark-fail-job");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> new Reply(200, "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":5}");
+        markResponder = n -> new Reply(200, UNAVAILABLE_BODY);
+
+        VarroaClaimQueue.Clock clock = () -> 42_000L;
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), clock, (task, d) -> task.run());
+        queue.offer(item, project);
+        VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
+
+        awaitTrue(() -> action.getMarkFailures() == 1 && !action.isApplyPending(), "the failed mark");
+        assertFalse("a failed mark never releases the item", action.isGranted());
+        assertFalse("a failed mark keeps the item", isCancelled(item));
+        assertEquals(42_000L + VarroaClaimQueue.backoffFor(1), action.getClaimNotBeforeMillis());
+        assertNull("a failed mark opens the gate", BuildNumberGate.get().holderForTesting("mark-fail-job"));
+    }
+
+    @Test
+    public void aStartMarkAfterTheGateExpiredClaimsAgain() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("mark-expired-job");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> new Reply(200, "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":5}");
+        java.util.concurrent.CountDownLatch answer = new java.util.concurrent.CountDownLatch(1);
+        markResponder = n -> {
+            try {
+                answer.await(10, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return new Reply(200, MARK_GRANTED);
+        };
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> task.run());
+        queue.offer(item, project);
+        VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
+
+        awaitTrue(() -> markBodies.size() == 1, "a start mark");
+        // The release stands in for the gate's 60-second expiry.
+        BuildNumberGate.get().release("mark-expired-job", "run-1");
+        answer.countDown();
+
+        awaitTrue(() -> action.getMarkFailures() == 1 && !action.isApplyPending(), "the refused late mark");
+        assertFalse("a mark after the gate expired never releases the item", action.isGranted());
+        assertFalse(isCancelled(item));
+    }
+
+    @Test
+    public void aNumberConflictPostsNoStartMark() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("mark-conflict-job");
+        project.updateNextBuildNumber(10);
+        Queue.Item item = scheduleItem(project);
+        responder = n -> new Reply(200, "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":5}");
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> task.run());
+        queue.offer(item, project);
+        VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
+
+        awaitTrue(() -> action.getNumberConflict() == 5 && !action.isApplyPending(), "the number conflict");
+        assertEquals("a number that did not apply posts no mark", 0, markCalls.get());
+        assertFalse(action.isGranted());
     }
 
     @Test

@@ -279,9 +279,16 @@ of the fleet's audit activity, once a controller becomes disposable.
   unique-constraint retry, which stores a null number and logs both run ids.
   `granted_build_number` on the payload is compared alone and counted in
   `recorder_ingest_number_mismatch_total`. `ClaimBudget` (3.5s) bounds one claim so
-  the recorder answers inside the gateway's 4s. A resumed build never claims. The
-  ledger learns of a start only from `run.started`. **A repeat from another
-  instance waits on the grant hold** (`ledger_grant_hold.go`): a same-`run_id`
+  the recorder answers inside the gateway's 4s. A resumed build never claims.
+  **The start mark** (`ledger_start_mark.go`, `run_intents.start_marked_at`,
+  migration `00025`): a `ClaimRequest` with `StartMark` set goes from `Claim` to
+  `MarkStart`, which checks the fence, locks the intent row, and stores the mark only
+  for the stored owner of the stored run; any other caller reads `duplicate`. The
+  plugin releases a queue item only after a granted mark, so a null mark proves no
+  start. A marked intent never moves: a repeat from another instance answers
+  `duplicate` before the hold, Row 3 skips it, and the re-fire skips it.
+  `recorder_start_marks_total` counts the answers by `decision`. **A repeat from another
+  instance for an unmarked intent waits on the grant hold** (`ledger_grant_hold.go`): a same-`run_id`
   repeat of a `GRANTED`, unstarted intent from any instance other than the
   named owner, an unnamed one included, answers `NOT_READY` and writes nothing. Release test (a)
   is a pod-read `confirmed_gone_at` for the owner older than the
@@ -296,8 +303,7 @@ of the fleet's audit activity, once a controller becomes disposable.
   the database clock that `existingKeyDecision` reads; test (a) and the
   consumer test use the recorder clock, as the re-fire does. `Ledger.SetGrantHold`
   wires it, `cmd/recorder`'s `wireGrantHold` is the only caller, and a
-  `Ledger` it never touches holds nothing. A start event lost with the old
-  pod stays open: the release then grants a second start. `Fence` gates a claim before the
+  `Ledger` it never touches holds nothing. `Fence` gates a claim before the
   transaction opens; `allowAllFence` is the C1 default.
   `RegisterClaimResponder` subscribes `bus.LedgerClaimSubject` with
   queue group `recorder`. `handleClaim` (`ledger_responder.go`) logs a

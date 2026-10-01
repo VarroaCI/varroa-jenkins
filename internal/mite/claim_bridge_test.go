@@ -454,3 +454,59 @@ func TestOnClaimRequest_NotHomeRelaysTheHomeSlot(t *testing.T) {
 		})
 	}
 }
+
+// TestOnClaimRequest_ForwardsStartMark proves the bridge copies start_mark
+// to the ledger request and relays the answer, and that a granted start
+// mark leaves the owner cache alone.
+func TestOnClaimRequest_ForwardsStartMark(t *testing.T) {
+	ledger := &fakeLedger{reply: &ledgerClaimResponse{Decision: "granted", RunID: "run-1", BuildNumber: 42}}
+	h := newClaimTestHandler(ledger)
+	h.ownerCache = newOwnerCache(0)
+	sender := &fakeSender{}
+
+	h.OnClaimRequest("ctrl1", "ns1", 1, &mitev1.ClaimRequest{
+		RequestId:    "req-mark",
+		Origin:       "VARROA_INTENT",
+		IntentKey:    "manual:team-a/build:1",
+		RunId:        "run-1",
+		JobPath:      "team-a/build",
+		CellInstance: "pod-uid-1",
+		StartMark:    true,
+	}, sender.send)
+
+	waitFor(t, func() bool { return sender.count() == 1 }, time.Second, "no claim response sent")
+	resp := sender.first().GetClaimResponse()
+	if resp == nil || resp.RequestId != "req-mark" || resp.Decision != "granted" || resp.BuildNumber != 42 {
+		t.Fatalf("resp = %+v, want the granted mark relayed", resp)
+	}
+	if !ledger.lastRequest().StartMark {
+		t.Fatal("ledger request start_mark = false, want true")
+	}
+	if _, ok := h.ownerCache.get("run-1"); ok {
+		t.Fatal("a granted start mark filled the owner cache")
+	}
+}
+
+// TestOnClaimRequest_ClaimOmitsStartMark proves a plain claim sends no
+// start_mark key, so the recorder reads it as a claim.
+func TestOnClaimRequest_ClaimOmitsStartMark(t *testing.T) {
+	ledger := &fakeLedger{reply: &ledgerClaimResponse{Decision: "granted", RunID: "run-1", BuildNumber: 42}}
+	h := newClaimTestHandler(ledger)
+	sender := &fakeSender{}
+
+	body, err := json.Marshal(ledgerClaimRequest{IntentKey: "k", RunID: "run-1"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(body), "start_mark") {
+		t.Fatalf("claim body %s carries start_mark", body)
+	}
+
+	h.OnClaimRequest("ctrl1", "ns1", 1, &mitev1.ClaimRequest{
+		RequestId: "req-claim", IntentKey: "k", RunId: "run-1", JobPath: "team-a/build",
+	}, sender.send)
+	waitFor(t, func() bool { return sender.count() == 1 }, time.Second, "no claim response sent")
+	if ledger.lastRequest().StartMark {
+		t.Fatal("ledger request start_mark = true for a plain claim")
+	}
+}

@@ -497,6 +497,9 @@ message ClaimRequest {
   // A granted number the cell could not apply, because its counter already
   // passed it. Zero names no conflict.
   int64 number_conflict = 15;
+  // True marks the start of a granted build. The ledger stores the mark,
+  // and the plugin keeps the queue item queued until the mark answers.
+  bool start_mark = 16;
 }
 
 message ClaimResponse {

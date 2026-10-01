@@ -30,9 +30,9 @@ import java.util.List;
  * <p>That fold reads queued items only. A build that already left the queue
  * is not a queued item, so a second schedule of its run id passes the fold.
  * {@link VarroaRunTriggerAction#findBuildForRunId} covers that case on the
- * JVM that holds the build. The ledger covers it on every other JVM once it
- * records the start, because it then answers {@code duplicate} to a repeat
- * claim. A redelivery to another JVM before that record can still build.
+ * JVM that holds the build. The ledger covers it on every other JVM: the
+ * item leaves the queue only after the ledger stored its start mark, and a
+ * repeat claim from another JVM for a marked run answers {@code duplicate}.
  */
 public class VarroaIntentAction extends InvisibleAction implements Queue.QueueAction {
 
@@ -49,6 +49,8 @@ public class VarroaIntentAction extends InvisibleAction implements Queue.QueueAc
     private volatile long grantedNumber;
     private volatile long numberConflict;
     private transient volatile boolean applyPending;
+    private transient volatile int markFailures;
+    private transient volatile long claimNotBeforeMillis;
 
     /**
      * Constructs the action the handler stamps at admission (D4 step 6).
@@ -171,6 +173,38 @@ public class VarroaIntentAction extends InvisibleAction implements Queue.QueueAc
     /** Set by the claimer when it hands a grant to the gate. Package-private. */
     void setApplyPending(boolean applyPending) {
         this.applyPending = applyPending;
+    }
+
+    /**
+     * Counts one failed start mark and answers the new count. Only the
+     * claimer writes the count, one attempt at a time. Package-private.
+     */
+    int addMarkFailure() {
+        markFailures = markFailures + 1;
+        return markFailures;
+    }
+
+    /** Clears the failed start-mark count after a granted mark. Package-private. */
+    void clearMarkFailures() {
+        markFailures = 0;
+    }
+
+    /** Returns the count of failed start marks since the last granted one. */
+    public int getMarkFailures() {
+        return markFailures;
+    }
+
+    /**
+     * Returns the wall-clock time before which the dispatcher offers no
+     * claim for this item, or zero. A failed start mark sets it.
+     */
+    public long getClaimNotBeforeMillis() {
+        return claimNotBeforeMillis;
+    }
+
+    /** Set by the claimer after a failed start mark. Package-private. */
+    void setClaimNotBeforeMillis(long claimNotBeforeMillis) {
+        this.claimNotBeforeMillis = claimNotBeforeMillis;
     }
 
     /**

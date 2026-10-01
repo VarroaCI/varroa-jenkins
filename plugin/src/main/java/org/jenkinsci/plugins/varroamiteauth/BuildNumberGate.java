@@ -118,6 +118,30 @@ public final class BuildNumberGate {
         }
     }
 
+    /**
+     * Runs {@code task} under the gate's lock when {@code runId} still holds
+     * the gate of {@code jobName}, and answers true. Answers false, and runs
+     * nothing, when the gate expired or another run holds it. The lock keeps
+     * {@link #expire()} from opening the gate while {@code task} runs.
+     */
+    synchronized boolean runWhileHolding(String jobName, String runId, Runnable task) {
+        Holder holder = holders.get(jobName);
+        if (holder == null || !holder.runId.equals(runId)) {
+            return false;
+        }
+        task.run();
+        return true;
+    }
+
+    /**
+     * Opens the gate when {@code runId} holds it, as an apply that kept
+     * nothing does. It keeps a waiting apply of the same run: a new claim
+     * can submit one before this call.
+     */
+    void reopen(String jobName, String runId) {
+        open(jobName, runId);
+    }
+
     /** The run id that holds the gate of {@code jobName}, or null. Package-private for testing. */
     synchronized String holderForTesting(String jobName) {
         Holder holder = holders.get(jobName);

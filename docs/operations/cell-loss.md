@@ -77,11 +77,11 @@ Running pod stays for about 41 minutes, or about 46 when no running cell holds t
 
 ## The re-fire
 
-A build can be granted and never start: the trigger reaches the ledger, the ledger assigns a build
-number, and the cell dies first. Such a build writes no run record, so no sweep can see it.
+A build can be granted and never start, because its cell dies first. Such a build writes no run
+record, so no sweep can see it.
 
 The recorder re-fires it on the tenant's current cell, with the same run identifier and intent key,
-so the rebuilt run keeps its identity and its build number. Four rules gate it.
+so the rebuilt run keeps its identity and its build number. Five rules gate it.
 
 | Rule | Behavior when it fails |
 |---|---|
@@ -89,6 +89,7 @@ so the rebuilt run keeps its identity and its build number. Four rules gate it.
 | The build carries no parameters | no re-fire; a person runs the build again |
 | The tenant holds a live cell and cell instance | the re-fire retries every 60 seconds |
 | The recorder has not re-fired this build | no second re-fire, ever |
+| The build holds no start mark | no re-fire; it can have started |
 
 The third rule holds a re-fire until a replacement pod reports, which takes minutes. The second
 rule is permanent: Varroa stores no parameters for a build that never started, so a re-fire would

@@ -61,6 +61,7 @@ var expectedColumns = map[string][]columnSpec{
 		{"refired_at", "timestamp with time zone", true},
 		{"refire_attempts", "integer", false},
 		{"granted_at", "timestamp with time zone", true},
+		{"start_marked_at", "timestamp with time zone", true},
 	},
 	"runs": {
 		{"run_id", "uuid", false},

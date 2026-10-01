@@ -110,6 +110,9 @@ func (l *Ledger) Claim(ctx context.Context, req ClaimRequest) ClaimResponse {
 	if err != nil {
 		return ClaimResponse{Decision: DecisionVetoed, ReasonCode: ReasonInvalidKey, Message: err.Error()}
 	}
+	if req.StartMark {
+		return l.MarkStart(ctx, req, runID)
+	}
 
 	resp, needRead := l.claimAttempt(ctx, req, runID, createdAt, nil)
 	if needRead {
@@ -228,6 +231,9 @@ type storedIntent struct {
 	// grantedAt is the time of the last grant to cellInstance. A row
 	// written before the column existed holds nil.
 	grantedAt *time.Time
+	// startMarkedAt is the time cellInstance marked the start of the
+	// build. A nil value proves that the build did not start.
+	startMarkedAt *time.Time
 	// dbNow is the database clock at the read. The grant hold compares
 	// grantedAt against it, so both values come from one clock.
 	dbNow time.Time
@@ -239,12 +245,13 @@ func existingKeyDecision(ctx context.Context, tx pgx.Tx, hold *grantHold, readin
 	reqRunID uuid.UUID, reqCreatedAt time.Time) (ClaimResponse, error) {
 	var row storedIntent
 	err := tx.QueryRow(ctx, `
-		SELECT run_id, created_at, cell_instance, placement_generation, state, build_number, granted_at, now()
+		SELECT run_id, created_at, cell_instance, placement_generation, state, build_number, granted_at,
+		       start_marked_at, now()
 		FROM varroa.run_intents
 		WHERE intent_key = $1
 		FOR UPDATE
 	`, req.IntentKey).Scan(&row.runID, &row.createdAt, &row.cellInstance, &row.placementGeneration, &row.state,
-		&row.buildNumber, &row.grantedAt, &row.dbNow)
+		&row.buildNumber, &row.grantedAt, &row.startMarkedAt, &row.dbNow)
 	if err != nil {
 		return ClaimResponse{}, fmt.Errorf("read existing intent: %w", err)
 	}
@@ -259,15 +266,17 @@ func existingKeyDecision(ctx context.Context, tx pgx.Tx, hold *grantHold, readin
 	// answers duplicate and writes nothing: only a queue item claims, and a
 	// queue item for a run that already started is a redelivered command.
 	// A repeat from another instance waits while the stored grant can
-	// still be building. Any other repeat answers granted; an unstarted
-	// intent moves to a new instance, and that move can refresh a stale
-	// build number.
+	// still be building. A repeat from another instance for a marked
+	// intent answers duplicate at once: the owner can have started the
+	// build, and its start event can be lost with its pod. Any other
+	// repeat answers granted; an unstarted intent moves to a new
+	// instance, and that move can refresh a stale build number.
 	if row.runID == reqRunID {
 		started, err := intentStarted(ctx, tx, row)
 		if err != nil {
 			return ClaimResponse{}, err
 		}
-		if started {
+		if started || (row.startMarkedAt != nil && storedOwner(row) != req.CellInstance) {
 			return ClaimResponse{Decision: DecisionDuplicate, RunID: row.runID.String()}, nil
 		}
 		held, message, err := hold.holds(ctx, tx, req, row, reading)
@@ -282,8 +291,9 @@ func existingKeyDecision(ctx context.Context, tx pgx.Tx, hold *grantHold, readin
 	}
 
 	// Row 3: a higher generation on an unstarted GRANTED intent transfers
-	// ownership.
-	if req.PlacementGeneration > row.placementGeneration && row.state == stateGranted {
+	// ownership. A marked intent never transfers, because its owner can
+	// have started the build.
+	if req.PlacementGeneration > row.placementGeneration && row.state == stateGranted && row.startMarkedAt == nil {
 		exists, err := runsRowExists(ctx, tx, row.runID)
 		if err != nil {
 			return ClaimResponse{}, err
@@ -421,13 +431,24 @@ func transferIntent(ctx context.Context, tx pgx.Tx, req ClaimRequest, newRunID u
 	if _, err := tx.Exec(ctx, `
 		UPDATE varroa.run_intents
 		SET run_id = $1, created_at = $2, cell = $3, cell_instance = $4,
-		    placement_generation = $5, build_number = $6, granted_at = now()
+		    placement_generation = $5, build_number = $6, granted_at = now(), start_marked_at = NULL
 		WHERE intent_key = $7
 	`, newRunID, newCreatedAt, nullableString(req.Cell), nullableString(req.CellInstance),
 		req.PlacementGeneration, buildNumber, req.IntentKey); err != nil {
 		return ClaimResponse{}, fmt.Errorf("transfer intent: %w", err)
 	}
 	return ClaimResponse{Decision: DecisionGranted, RunID: newRunID.String(), BuildNumber: buildNumber}, nil
+}
+
+// storedOwner answers the cell instance the stored intent names, or an
+// empty string for a null one. The start mark compares it with the
+// request's instance, so an owner that named no instance at its grant
+// still matches its own mark and its own repeat.
+func storedOwner(row storedIntent) string {
+	if row.cellInstance == nil {
+		return ""
+	}
+	return *row.cellInstance
 }
 
 // runsRowExists reports whether a runs row already records a build for

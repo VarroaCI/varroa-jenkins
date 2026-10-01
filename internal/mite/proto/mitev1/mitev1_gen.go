@@ -181,6 +181,7 @@ type ClaimRequest struct {
 	CellInstance           string `json:"cell_instance,omitempty"`
 	JenkinsNextBuildNumber int64  `json:"jenkins_next_build_number,omitempty"`
 	NumberConflict         int64  `json:"number_conflict,omitempty"`
+	StartMark              bool   `json:"start_mark,omitempty"`
 }
 
 type ClaimResponse struct {

@@ -137,6 +137,24 @@ public class VarroaClaimDispatcherTest {
     }
 
     @Test
+    public void aDeferredClaimBlocksAndOffersNothingUntilItsTime() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject();
+        Queue.Item item = scheduleItem(project, "run-1");
+        item.getAction(VarroaIntentAction.class).setClaimNotBeforeMillis(5_000L);
+        VarroaClaimQueue claimQueue = mock(VarroaClaimQueue.class);
+        when(claimQueue.offer(any(), any(), any())).thenReturn(true);
+        long[] now = {4_000L};
+        VarroaClaimDispatcher dispatcher = new VarroaClaimDispatcher(claimQueue, () -> now[0]);
+
+        assertNotNull(dispatcher.canRun(item, GATE_ON));
+        verify(claimQueue, never()).offer(any(), any(), any());
+
+        now[0] = 5_000L;
+        assertNotNull(dispatcher.canRun(item, GATE_ON));
+        verify(claimQueue, times(1)).offer(eq(item), eq(project), any());
+    }
+
+    @Test
     public void aRefusedOfferIsRetriedOnTheNextPass() throws Exception {
         FreeStyleProject project = j.createFreeStyleProject();
         Queue.Item item = scheduleItem(project, "run-1");

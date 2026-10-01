@@ -201,6 +201,10 @@ the root AGENTS.md greenfield rule.
   every apply runs on the gate's own thread and asks for a queue pass; the
   dispatcher offers no claim while `VarroaIntentAction.applyPending`; a
   `NUMBER_CONFLICT` keeps the item and the next claim carries `number_conflict`;
+  after the number applies, a claimer thread, never the gate thread, posts the start
+  mark (`start_mark: true` on `/v1/claim`); only `granted` sets the granted flag,
+  `duplicate` cancels the item, and every other outcome opens the gate and defers the
+  next claim through `VarroaIntentAction.claimNotBeforeMillis`;
   `grantedNumber` rides the `STARTED` event as `granted_build_number`),
   `VarroaHomeCache.java` + `VarroaHomeRefresher.java` (the tenant home map, below),
   `DuplicateRegistry.java`, `ClaimRegistry.java`, and `VarroaDeliveryFilter.java` +

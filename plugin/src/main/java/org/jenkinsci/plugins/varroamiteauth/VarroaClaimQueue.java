@@ -32,9 +32,19 @@ import java.util.logging.Logger;
  * {@link BuildNumberGate}, which applies one grant of a job at a time:
  * Jenkins numbers a dispatched item from the job's counter, so a second
  * applied grant would give the first item the second number. The apply
- * sets the build number (D4's five steps, contract G3), then the action's
- * granted flag, which releases the dispatcher. A grant below the job's
- * counter keeps the item and claims again with {@code number_conflict}.
+ * sets the build number (D4's five steps, contract G3). A grant below the
+ * job's counter keeps the item and claims again with {@code
+ * number_conflict}.
+ *
+ * <p>After the number applies, a claimer thread posts the start mark: the
+ * same claim route, with {@code start_mark} set. Only a {@code granted}
+ * answer sets the action's granted flag, which releases the dispatcher.
+ * The ledger therefore holds a mark for every build that can start, and
+ * an intent with no mark proves that its build did not start. The gate
+ * thread never posts the mark, because one slow round trip there would
+ * hold the grants of every job. A {@code duplicate} answer cancels the
+ * item. Any other answer opens the gate, leaves the item blocked, and
+ * defers the next claim by the backoff step of its failure count.
  *
  * <p>A claimer thread runs one attempt of a claim and then releases the
  * thread. An answer that retries parks the claim on the
@@ -526,6 +536,7 @@ public class VarroaClaimQueue {
      * save cancels the item, because a new claim cannot fix the disk.
      */
     boolean applyGrant(Queue.Item item, Job<?, ?> job, VarroaIntentAction action, String intentKey, long granted) {
+        boolean marking = false;
         try {
             if (!stillQueued(item)) {
                 return false;
@@ -541,13 +552,113 @@ public class VarroaClaimQueue {
             }
             action.setGrantedNumber(granted);
             action.setNumberConflict(0);
-            ClaimRegistry.get().record(intentKey, action.getRunId());
-            action.setGranted(true);
-            return true;
+            marking = submitStartMark(item, job, action, intentKey);
+            if (!marking) {
+                deferNextClaim(action);
+            }
+            return marking;
         } finally {
+            if (!marking) {
+                action.setApplyPending(false);
+                scheduleMaintenance();
+            }
+        }
+    }
+
+    // --- Start mark ---
+
+    /**
+     * Hands the start mark to the claimer pool. Answers false when the
+     * pool refuses the task; the caller then opens the gate.
+     */
+    private boolean submitStartMark(Queue.Item item, Job<?, ?> job, VarroaIntentAction action, String intentKey) {
+        try {
+            executor.execute(() -> markStart(item, job, action, intentKey));
+            return true;
+        } catch (RejectedExecutionException e) {
+            LOGGER.log(Level.FINE, "VarroaClaimQueue: the claimer pool refused the start mark of run {0}",
+                    action.getRunId());
+            return false;
+        }
+    }
+
+    /**
+     * Posts the start mark of a run whose number applied, on a claimer
+     * thread. Only a {@code granted} answer that arrives while this run
+     * still holds the apply gate sets the granted flag; the gate then stays
+     * held until the run starts. A {@code duplicate} answer
+     * cancels the item. Every other outcome opens the gate, leaves the item
+     * blocked, and defers the next claim.
+     */
+    void markStart(Queue.Item item, Job<?, ?> job, VarroaIntentAction action, String intentKey) {
+        boolean marked = false;
+        try {
+            if (!stillQueued(item)) {
+                return;
+            }
+            MiteLoopbackClient.Response resp = client.post(CLAIM_PATH, startMarkBody(job, action, intentKey).toString());
+            Decision decision = parseDecision(resp);
+            switch (decision.kind) {
+                case GRANTED:
+                    // The flag is set under the gate's lock, and only while
+                    // this run still holds the gate. An expired gate can
+                    // already have applied the next grant of the job, so
+                    // the item must claim again for a number it can use.
+                    marked = gate.runWhileHolding(job.getFullName(), action.getRunId(), () -> {
+                        action.clearMarkFailures();
+                        ClaimRegistry.get().record(intentKey, action.getRunId());
+                        action.setGranted(true);
+                    });
+                    if (!marked) {
+                        LOGGER.log(Level.WARNING,
+                                "VarroaClaimQueue: the apply gate of job {0} expired before the start mark of run {1} answered; claiming again",
+                                new Object[] {job.getFullName(), action.getRunId()});
+                        deferNextClaim(action);
+                    }
+                    return;
+                case DUPLICATE:
+                    DuplicateRegistry.get().record(action.getRunId());
+                    LOGGER.log(Level.INFO,
+                            "VarroaClaimQueue: the start mark of run {0} answered duplicate; cancelled the queue item",
+                            action.getRunId());
+                    cancel(item);
+                    return;
+                default:
+                    LOGGER.log(Level.WARNING,
+                            "VarroaClaimQueue: the start mark of job {0}, run {1} failed: {2}; claiming again",
+                            new Object[] {job.getFullName(), action.getRunId(), decision.describe()});
+                    deferNextClaim(action);
+                    return;
+            }
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "VarroaClaimQueue: the start mark of run " + action.getRunId()
+                    + " failed; claiming again", e);
+            deferNextClaim(action);
+        } finally {
+            // The gate opens before the item can claim again, and the open
+            // keeps a waiting apply of this run, so no retry is lost.
+            if (!marked) {
+                gate.reopen(job.getFullName(), action.getRunId());
+            }
             action.setApplyPending(false);
             scheduleMaintenance();
         }
+    }
+
+    /** Defers the item's next claim by the backoff step of its new start-mark failure count. */
+    private void deferNextClaim(VarroaIntentAction action) {
+        int failures = action.addMarkFailure();
+        action.setClaimNotBeforeMillis(clock.nowMillis() + backoffFor(failures));
+    }
+
+    private static JSONObject startMarkBody(Job<?, ?> job, VarroaIntentAction action, String intentKey) {
+        JSONObject body = new JSONObject();
+        body.put("origin", action.getOrigin());
+        body.put("intent_key", intentKey);
+        body.put("run_id", action.getRunId());
+        body.put("job_path", job.getFullName());
+        body.put("start_mark", true);
+        return body;
     }
 
     /** True unless the item already left the queue. With no Jenkins, the answer is true. */

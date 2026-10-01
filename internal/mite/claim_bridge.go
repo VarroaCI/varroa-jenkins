@@ -69,6 +69,7 @@ type ledgerClaimRequest struct {
 	JenkinsNextBuildNumber int64     `json:"jenkins_next_build_number"`
 	RequestedAt            time.Time `json:"requested_at"`
 	NumberConflict         int64     `json:"number_conflict,omitempty"`
+	StartMark              bool      `json:"start_mark,omitempty"`
 }
 
 // ledgerClaimResponse is the reply body of a varroa.ledger.claim call.
@@ -269,6 +270,7 @@ func (h *BusHandler) handleClaimRequest(name, ns string, req *mitev1.ClaimReques
 		JenkinsNextBuildNumber: req.JenkinsNextBuildNumber,
 		RequestedAt:            millisToTime(req.RequestedAtMillis),
 		NumberConflict:         req.NumberConflict,
+		StartMark:              req.StartMark,
 	}
 
 	data, err := json.Marshal(body)
@@ -290,7 +292,9 @@ func (h *BusHandler) handleClaimRequest(name, ns string, req *mitev1.ClaimReques
 		return
 	}
 
-	if reply.Decision == claimDecisionGranted && reply.RunID != "" && h.ownerCache != nil {
+	// A granted start mark moves no owner: the claim that granted the run
+	// already filled the cache.
+	if reply.Decision == claimDecisionGranted && reply.RunID != "" && h.ownerCache != nil && !req.StartMark {
 		// Fills the run-owner cache at no lookup cost, and invalidates a
 		// stale match unconditionally on an ownership transfer (design.md
 		// D4): the gateway already brokers this claim, so relaying it is

@@ -54,6 +54,7 @@ final class StubLoopback {
     final List<Recorded> requests = new CopyOnWriteArrayList<>();
 
     private final AtomicInteger claimCalls = new AtomicInteger();
+    private final AtomicInteger markCalls = new AtomicInteger();
     private final AtomicInteger forwardCalls = new AtomicInteger();
 
     private volatile String homesBody = "{\"entries\":[]}";
@@ -66,7 +67,7 @@ final class StubLoopback {
     void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext(HOMES_PATH, exchange -> answer(exchange, new Reply(200, homesBody)));
-        server.createContext(CLAIM_PATH, exchange -> answer(exchange, claimResponder.apply(claimCalls.incrementAndGet())));
+        server.createContext(CLAIM_PATH, this::answerClaim);
         server.createContext(FORWARD_PATH, exchange -> answer(exchange, forwardResponder.apply(forwardCalls.incrementAndGet())));
         server.start();
     }
@@ -93,8 +94,14 @@ final class StubLoopback {
         forwardResponder = responder;
     }
 
+    /** The count of claims. A start mark on the same route counts in {@link #markCallCount()}. */
     int claimCallCount() {
         return claimCalls.get();
+    }
+
+    /** The count of start marks, which the stub always grants. */
+    int markCallCount() {
+        return markCalls.get();
     }
 
     int forwardCallCount() {
@@ -113,10 +120,28 @@ final class StubLoopback {
         return new MiteLoopbackClient(baseUrl(), tf, Duration.ofSeconds(5));
     }
 
+    /** Answers a claim from the claim responder, and grants a start mark. */
+    private void answerClaim(HttpExchange exchange) throws IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Reply reply;
+        if (body.contains("\"start_mark\":true")) {
+            markCalls.incrementAndGet();
+            reply = new Reply(200, "{\"decision\":\"granted\",\"run_id\":\"run-1\"}");
+        } else {
+            requests.add(new Recorded(CLAIM_PATH, body));
+            reply = claimResponder.apply(claimCalls.incrementAndGet());
+        }
+        send(exchange, reply);
+    }
+
     private void answer(HttpExchange exchange, Reply reply) throws IOException {
         byte[] requestBody = exchange.getRequestBody().readAllBytes();
         requests.add(new Recorded(exchange.getHttpContext().getPath(),
                 new String(requestBody, StandardCharsets.UTF_8)));
+        send(exchange, reply);
+    }
+
+    private static void send(HttpExchange exchange, Reply reply) throws IOException {
         byte[] resp = reply.body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json");
         exchange.sendResponseHeaders(reply.status, resp.length == 0 ? -1 : resp.length);

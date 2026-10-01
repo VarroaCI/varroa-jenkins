@@ -55,6 +55,9 @@ func handleClaim(logger *slog.Logger, ledger *Ledger, metrics *ClaimMetrics, dat
 	defer cancel()
 
 	resp := ledger.Claim(ctx, req)
+	if req.StartMark {
+		metrics.addStartMark(ctx, resp.Decision)
+	}
 	if resp.Decision == DecisionVetoed {
 		metrics.addVeto(ctx, resp.ReasonCode)
 		// The line names the run, the job, and the cell, so an operator

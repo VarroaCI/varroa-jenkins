@@ -199,7 +199,11 @@ public class VarroaQueueDecisionHandlerTest {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         AtomicInteger hits = new AtomicInteger();
         server.createContext("/v1/claim", exchange -> {
-            hits.incrementAndGet();
+            // A start mark follows the grant on the same route; only claims count.
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            if (!body.contains("\"start_mark\":true")) {
+                hits.incrementAndGet();
+            }
             byte[] resp = "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":1}"
                     .getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json");
