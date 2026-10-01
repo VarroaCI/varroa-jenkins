@@ -142,6 +142,10 @@ type TenantSyncResponse struct {
 	// Ok and InterruptedMarked apply to kind "announce".
 	Ok                bool `json:"ok,omitempty"`
 	InterruptedMarked int  `json:"interrupted_marked,omitempty"`
+	// Stale applies to kind "announce". It is true when the recorder
+	// refused the request because it describes an older state than the
+	// stored row. Ok is then false.
+	Stale bool `json:"stale,omitempty"`
 
 	// Jobs applies to kind "records".
 	Jobs []TenantSyncJobRecords `json:"jobs,omitempty"`

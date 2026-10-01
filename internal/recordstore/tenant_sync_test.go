@@ -627,7 +627,7 @@ func TestTenantSyncAnnounceStaleAnnounceDerivesNothing(t *testing.T) {
 	older := announceMembers(1, []member{activeMember("cell-a", 0, "pod-a1")})
 	sendTenantSync(t, pool, conn, older)
 	sendTenantSync(t, pool, conn, announceMembers(1, []member{activeMember("cell-a", 0, "pod-a2")}))
-	sendTenantSync(t, pool, conn, older)
+	assertStaleReply(t, sendTenantSync(t, pool, conn, older))
 
 	if got, ok := derivedEntry(t, db, "pod-a2"); ok {
 		t.Fatalf("the stale announce listed the live pod dead: %+v", got)
@@ -642,9 +642,179 @@ func TestTenantSyncAnnounceLowerGenerationDerivesNothing(t *testing.T) {
 	conn := newTestSyncConn(t)
 
 	sendTenantSync(t, pool, conn, announceMembers(3, []member{activeMember("cell-b", 0, "pod-b1")}))
-	sendTenantSync(t, pool, conn, announceMembers(2, []member{activeMember("cell-a", 0, "pod-a1")}))
+	assertStaleReply(t, sendTenantSync(t, pool, conn, announceMembers(2, []member{activeMember("cell-a", 0, "pod-a1")})))
 
 	if got, ok := derivedEntry(t, db, "pod-b1"); ok {
 		t.Fatalf("a lower generation listed the stored pod dead: %+v", got)
+	}
+}
+
+// placementSnapshot reads every column an announce writes, except
+// announced_at, as one comparable string.
+func placementSnapshot(t *testing.T, db *sql.DB) string {
+	t.Helper()
+	var snapshot string
+	if err := db.QueryRow(`
+		SELECT concat_ws('|', namespace, cell, generation, cell_instance, policy::text,
+		       rehydrated_instance, pending_jobs::text, cell_alive, cell_alive_at, cell_last_seen_at,
+		       dead_instances::text, members::text, job_homes::text, incarnation, agent_namespace)
+		FROM varroa.tenant_placements WHERE cluster = $1 AND tenant = $2
+	`, testCluster, testTenant).Scan(&snapshot); err != nil {
+		t.Fatalf("read the placement snapshot: %v", err)
+	}
+	return snapshot
+}
+
+// assertStaleReply asserts resp is the refusal of a stale announce.
+func assertStaleReply(t *testing.T, resp TenantSyncResponse) {
+	t.Helper()
+	if !resp.Stale || resp.Ok || resp.Error != "" {
+		t.Fatalf("want a stale refusal, got %+v", resp)
+	}
+}
+
+// TestTenantSyncAnnounceStaleAnnounceKeepsTheStoredRow asserts an old
+// shard owner's announce, which names a replaced pod, changes no column.
+func TestTenantSyncAnnounceStaleAnnounceKeepsTheStoredRow(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+	seedJobHomePaths(t, db, "acme/api", "acme/web")
+
+	older := announceMembers(1, []member{activeMember("cell-a", 0, "pod-a1"), activeMember("cell-b", 1, "pod-b1")})
+	sendTenantSync(t, pool, conn, older)
+	sendTenantSync(t, pool, conn, announceMembers(1, []member{
+		activeMember("cell-a", 0, "pod-a2"), activeMember("cell-b", 1, "pod-b1"),
+	}))
+	before := placementSnapshot(t, db)
+
+	older.AgentNamespace = "stale-agents"
+	assertStaleReply(t, sendTenantSync(t, pool, conn, older))
+	if after := placementSnapshot(t, db); after != before {
+		t.Fatalf("the stale announce changed the row:\nbefore %s\nafter  %s", before, after)
+	}
+}
+
+// TestTenantSyncAnnounceStaleAnnounceKeepsTheSeed asserts the seed of the
+// live pod survives a stale announce and the fresh announce after it.
+func TestTenantSyncAnnounceStaleAnnounceKeepsTheSeed(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+
+	sendTenantSync(t, pool, conn, announceMembers(1, []member{activeMember("cell-a", 0, "pod-a1")}))
+	fresh := announceMembers(1, []member{activeMember("cell-a", 0, "pod-a2")})
+	fresh.RehydratedInstance = "pod-a2"
+	confirmed := time.Now()
+	fresh.DeadInstances = []TenantSyncDeadInstance{{Instance: "pod-a1", LastSeenAt: confirmed, ConfirmedGoneAt: &confirmed}}
+	sendTenantSync(t, pool, conn, fresh)
+	sendTenantSync(t, pool, conn, fresh)
+	if got := readTenantPlacement(t, db, testTenant).rehydratedInstance; got != "pod-a2" {
+		t.Fatalf("seed setup: rehydrated_instance = %q, want pod-a2", got)
+	}
+
+	stale := announceMembers(1, []member{activeMember("cell-a", 0, "pod-a1")})
+	stale.RehydratedInstance = "pod-a1"
+	assertStaleReply(t, sendTenantSync(t, pool, conn, stale))
+	if resp := sendTenantSync(t, pool, conn, fresh); !resp.Ok {
+		t.Fatalf("the fresh announce after a stale one: %+v", resp)
+	}
+
+	stored := readTenantPlacement(t, db, testTenant)
+	if stored.cellInstance != "pod-a2" || stored.rehydratedInstance != "pod-a2" {
+		t.Fatalf("want pod-a2 with its seed, got cell_instance %q, rehydrated_instance %q",
+			stored.cellInstance, stored.rehydratedInstance)
+	}
+	if members := readStoredMembers(t, db); len(members) != 1 || members[0].RehydratedInstance != "pod-a2" {
+		t.Fatalf("the member seed did not survive: %+v", members)
+	}
+}
+
+// TestTenantSyncAnnounceLowerGenerationKeepsTheCell asserts an announce
+// below the stored generation keeps the stored cell and members.
+func TestTenantSyncAnnounceLowerGenerationKeepsTheCell(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+
+	sendTenantSync(t, pool, conn, announceMembers(3, []member{activeMember("cell-b", 0, "pod-b1")}))
+	before := placementSnapshot(t, db)
+
+	assertStaleReply(t, sendTenantSync(t, pool, conn, announceMembers(2, []member{activeMember("cell-a", 0, "pod-a1")})))
+	if after := placementSnapshot(t, db); after != before {
+		t.Fatalf("the lower generation changed the row:\nbefore %s\nafter  %s", before, after)
+	}
+}
+
+// TestTenantSyncAnnounceTakeOverBelowTheStoredGenerationIsAccepted asserts
+// a new incarnation takes the row over at a lower generation, even when it
+// names an instance the old tenant listed as confirmed gone.
+func TestTenantSyncAnnounceTakeOverBelowTheStoredGenerationIsAccepted(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+
+	old := announceMembers(3, []member{activeMember("cell-a", 0, "pod-a2")})
+	old.Incarnation = "uid-old"
+	confirmed := time.Now()
+	old.DeadInstances = []TenantSyncDeadInstance{{Instance: "pod-a1", LastSeenAt: confirmed, ConfirmedGoneAt: &confirmed}}
+	sendTenantSync(t, pool, conn, old)
+
+	next := announceMembers(1, []member{activeMember("cell-a", 0, "pod-a1")})
+	next.Incarnation = "uid-new"
+	if resp := sendTenantSync(t, pool, conn, next); !resp.Ok || resp.Stale {
+		t.Fatalf("the take-over was refused: %+v", resp)
+	}
+	stored := readTenantPlacement(t, db, testTenant)
+	if stored.generation != 1 || stored.cellInstance != "pod-a1" || stored.incarnation != "uid-new" {
+		t.Fatalf("the take-over did not land: %+v", stored)
+	}
+}
+
+// TestTenantSyncAnnounceReturnToALeftPodIsAccepted asserts a tenant that
+// returns to a live pod it left is not refused. The recorder lists that
+// pod as dropped, and a dropped entry proves no replacement.
+func TestTenantSyncAnnounceReturnToALeftPodIsAccepted(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+
+	sendTenantSync(t, pool, conn, announceMembers(1, []member{
+		activeMember("cell-a", 0, "pod-a1"), activeMember("cell-b", 1, "pod-b1"),
+	}))
+	sendTenantSync(t, pool, conn, announceMembers(2, []member{activeMember("cell-a", 0, "pod-a1")}))
+	if _, ok := derivedEntry(t, db, "pod-b1"); !ok {
+		t.Fatal("setup: pod-b1 is not listed dropped")
+	}
+
+	back := announceMembers(3, []member{activeMember("cell-a", 0, "pod-a1"), activeMember("cell-b", 1, "pod-b1")})
+	if resp := sendTenantSync(t, pool, conn, back); !resp.Ok || resp.Stale {
+		t.Fatalf("the return was refused: %+v", resp)
+	}
+	if members := readStoredMembers(t, db); len(members) != 2 {
+		t.Fatalf("want two stored members after the return, got %+v", members)
+	}
+}
+
+// TestTenantSyncAnnounceStaleAnnounceMarksNoRun asserts a stale announce
+// runs no interrupted-run marking against the live pod's run.
+func TestTenantSyncAnnounceStaleAnnounceMarksNoRun(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+	runID := seedStaleRunOn(t, db, "cell-a", "pod-a2")
+
+	sendTenantSync(t, pool, conn, announceMembers(1, []member{activeMember("cell-a", 0, "pod-a1")}))
+	fresh := announceMembers(1, []member{activeMember("cell-a", 0, "pod-a2")})
+	confirmed := time.Now().Add(-time.Hour)
+	fresh.DeadInstances = []TenantSyncDeadInstance{{Instance: "pod-a1", LastSeenAt: confirmed, ConfirmedGoneAt: &confirmed}}
+	sendTenantSync(t, pool, conn, fresh)
+
+	stale := announceMembers(1, []member{activeMember("cell-a", 0, "pod-a1")})
+	resp := sendTenantSync(t, pool, conn, stale)
+	assertStaleReply(t, resp)
+	if resp.InterruptedMarked != 0 {
+		t.Fatalf("the stale announce marked %d runs", resp.InterruptedMarked)
+	}
+	var status string
+	if err := db.QueryRow(`SELECT status FROM varroa.runs WHERE run_id = $1`, runID).Scan(&status); err != nil {
+		t.Fatalf("read the run: %v", err)
+	}
+	if status != StatusRunning {
+		t.Fatalf("run status = %s, want RUNNING", status)
 	}
 }

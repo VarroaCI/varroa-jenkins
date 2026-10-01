@@ -184,7 +184,11 @@ type tenantPlacementRow struct {
 }
 
 // handleTenantSyncAnnounce upserts cluster/tenant's tenant_placements
-// row. It never lowers generation. The seed fields, rehydrated_instance
+// row. It never lowers generation.
+//
+// A request staleAnnounce judges stale writes nothing and runs no
+// sweep. It answers Stale and no Ok, so the sender stores no cache entry
+// and writes no placement status from its older reads. The seed fields, rehydrated_instance
 // and pending_jobs, follow D6/D7: a generation-zero row seeds itself
 // from the announced cell instance at once; a generation raise or a
 // cell-instance change clears the seed, because the new cell holds
@@ -245,6 +249,17 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 	// back.
 	stampsIncarnation := old.incarnation == "" && req.Incarnation != ""
 
+	if staleAnnounce(staleAnnounceInput{
+		takeOver: takeOver, storedGeneration: old.generation,
+		prior: old.members, stored: old.deadInstances, req: req,
+	}) {
+		logger.Info("tenant sync announce refused as stale",
+			"cluster", req.Cluster, "tenant", req.Tenant,
+			"generation", req.Generation, "storedGeneration", old.generation,
+			"cellInstance", req.CellInstance, "storedCellInstance", old.cellInstance)
+		return TenantSyncResponse{Stale: true}, nil
+	}
+
 	newGeneration := old.generation
 	if takeOver || req.Generation > newGeneration {
 		newGeneration = req.Generation
@@ -286,9 +301,7 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 			cell: req.Cell, namespace: req.Namespace, cellInstance: req.CellInstance,
 		}).members,
 		requestInstance: req.CellInstance,
-		stored:          old.deadInstances,
 		listed:          listed,
-		staleGeneration: !takeOver && req.Generation < old.generation,
 		now:             time.Now(),
 	})
 	deadInstances := trimDeadInstances(append(listed, derived...), live, maxDeadInstances)

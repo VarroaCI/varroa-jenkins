@@ -1,9 +1,12 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -118,6 +121,31 @@ func TestNewNATSSyncAnnouncer_RequestShape(t *testing.T) {
 	}
 }
 
+// TestNATSSyncAnnouncerMapsAStaleReply asserts a stale refusal reaches the
+// placement pass as a failed announce, so the pass caches nothing.
+func TestNATSSyncAnnouncerMapsAStaleReply(t *testing.T) {
+	conn := startTestSyncBus(t)
+
+	sub, err := conn.SubscribeRequest(bus.TenantSyncSubject, "recorder", func([]byte) []byte {
+		resp, _ := json.Marshal(recordstore.TenantSyncResponse{Stale: true})
+		return resp
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	result, err := NewNATSSyncAnnouncer(conn)(context.Background(), cells.AnnounceRequest{
+		Cluster: "core", Tenant: "payments", Cell: "cell-a", Generation: 3, CellInstance: "uid-1",
+	})
+	if err != nil {
+		t.Fatalf("announce: %v", err)
+	}
+	if result.OK || !result.Stale {
+		t.Fatalf("want a stale, failed result, got %+v", result)
+	}
+}
+
 // TestNewNATSSyncRecordsRequester_RequestShape asserts task 4.1's other
 // kind: a "records" request and its reply.
 func TestNewNATSSyncRecordsRequester_RequestShape(t *testing.T) {
@@ -163,5 +191,37 @@ func TestNewNATSSyncRecordsRequester_RequestShape(t *testing.T) {
 	}
 	if len(result.Jobs[0].Records) != 1 || result.Jobs[0].Records[0].BuildNumber != 3 || result.Jobs[0].Records[0].Result != "SUCCESS" {
 		t.Errorf("unexpected records: %+v", result.Jobs[0].Records)
+	}
+}
+
+// TestLoggedAnnounceLogsAStaleRefusal asserts the Team reconciler's
+// announcer logs a stale refusal and passes the result through unchanged.
+func TestLoggedAnnounceLogsAStaleRefusal(t *testing.T) {
+	var buf bytes.Buffer
+	r := &TeamReconciler{logger: slog.New(slog.NewTextHandler(&buf, nil))}
+	if r.loggedAnnounce() != nil {
+		t.Fatal("a nil announcer must stay nil")
+	}
+
+	r.SetSyncAnnouncer(func(context.Context, cells.AnnounceRequest) (cells.AnnounceResult, error) {
+		return cells.AnnounceResult{Stale: true}, nil
+	})
+	result, err := r.loggedAnnounce()(context.Background(), cells.AnnounceRequest{Tenant: "payments", Generation: 3})
+	if err != nil || result.OK || !result.Stale {
+		t.Fatalf("want the stale result passed through, got %+v, %v", result, err)
+	}
+	if !strings.Contains(buf.String(), "recorder refused a stale announce") || !strings.Contains(buf.String(), "team=payments") {
+		t.Fatalf("no stale refusal log line: %q", buf.String())
+	}
+
+	buf.Reset()
+	r.SetSyncAnnouncer(func(context.Context, cells.AnnounceRequest) (cells.AnnounceResult, error) {
+		return cells.AnnounceResult{OK: true}, nil
+	})
+	if _, err := r.loggedAnnounce()(context.Background(), cells.AnnounceRequest{Tenant: "payments"}); err != nil {
+		t.Fatalf("announce: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("an accepted announce logged: %q", buf.String())
 	}
 }

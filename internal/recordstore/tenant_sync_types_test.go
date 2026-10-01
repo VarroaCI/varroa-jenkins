@@ -146,3 +146,15 @@ func TestTenantSyncResponseRoundTrip(t *testing.T) {
 		t.Fatalf("masked_parameter_names round trip: got %v", rec.MaskedParameterNames)
 	}
 }
+
+// TestTenantSyncStaleResponseWireShape asserts a stale refusal carries the
+// key "stale" and no "ok" key.
+func TestTenantSyncStaleResponseWireShape(t *testing.T) {
+	data, err := json.Marshal(TenantSyncResponse{Stale: true})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(data) != `{"stale":true}` {
+		t.Fatalf("wire shape = %s, want {\"stale\":true}", data)
+	}
+}

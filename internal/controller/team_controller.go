@@ -145,6 +145,25 @@ func (r *TeamReconciler) SetSyncAnnouncer(fn cells.Announcer) {
 	r.announce = fn
 }
 
+// loggedAnnounce wraps the injected announcer so a stale refusal leaves a
+// log line. The placement pass treats the refusal as a failed announce,
+// and without the line it reads the same as a transport failure. A nil
+// announcer stays nil, because the pass reports a nil one as a failure.
+func (r *TeamReconciler) loggedAnnounce() cells.Announcer {
+	if r.announce == nil {
+		return nil
+	}
+	announce := r.announce
+	return func(ctx context.Context, req cells.AnnounceRequest) (cells.AnnounceResult, error) {
+		result, err := announce(ctx, req)
+		if err == nil && result.Stale {
+			r.logger.Info("recorder refused a stale announce", "team", req.Tenant,
+				"generation", req.Generation, "cellInstance", req.CellInstance)
+		}
+		return result, err
+	}
+}
+
 // lastSync reads team's cached last-sent announcement, or nil when none is
 // cached.
 func (r *TeamReconciler) lastSync(team string) *cells.SyncCache {
@@ -470,7 +489,7 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 			MaxTenantsDefault:  int32(r.cellsConfig.MaxTenantsPerCell),
 			ClusterIdentity:    r.clusterIdentity,
 			RequestPurge:       r.requestPurge,
-			Announce:           r.announce,
+			Announce:           r.loggedAnnounce(),
 			LastSync:           r.lastSync(team.Name),
 			// PendingJobs (task 5.7a, design D13): the union of this
 			// tenant's own cell entry's Deferred job paths and the job

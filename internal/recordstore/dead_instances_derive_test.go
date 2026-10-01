@@ -75,18 +75,7 @@ func TestDeriveDeadInstancesSkipsAnInstanceTheRequestNames(t *testing.T) {
 	}
 }
 
-func TestDeriveDeadInstancesLowerGenerationDerivesNothing(t *testing.T) {
-	in := deriveCase(
-		[]member{activeMember("cell-a", 0, "pod-a2")},
-		[]member{activeMember("cell-a", 0, "pod-a1")},
-	)
-	in.staleGeneration = true
-	if got := deriveDeadInstances(in); len(got) != 0 {
-		t.Fatalf("a stale generation derives nothing, got %+v", got)
-	}
-}
-
-func TestDeriveDeadInstancesRequestNamingAListedInstanceDerivesNothing(t *testing.T) {
+func TestDeriveDeadInstancesStaleRequestDerivesNothing(t *testing.T) {
 	// The stored row holds pod-a2, which replaced pod-a1. A stale request
 	// names pod-a1 again. Without the guard, pod-a2, the live pod, would
 	// be listed dead.
@@ -94,10 +83,133 @@ func TestDeriveDeadInstancesRequestNamingAListedInstanceDerivesNothing(t *testin
 		[]member{activeMember("cell-a", 0, "pod-a2"), activeMember("cell-b", 1, "pod-b1")},
 		[]member{activeMember("cell-a", 0, "pod-a1")},
 	)
-	in.stored = []TenantSyncDeadInstance{{Instance: "pod-a1", LastSeenAt: in.now, Derived: DeadInstanceDerivedRolled}}
-	in.listed = in.stored
+	in.stale = true
 	if got := deriveDeadInstances(in); len(got) != 0 {
 		t.Fatalf("a stale request derives nothing, got %+v", got)
+	}
+}
+
+// staleCase builds a staleAnnounce input whose stored row is at
+// generation 3 and holds prior, and whose request names announced at
+// generation 3.
+func staleCase(prior, announced []member) staleAnnounceInput {
+	req := TenantSyncRequest{Generation: 3, Members: announced}
+	if len(announced) > 0 {
+		req.CellInstance = announced[0].Instance
+	}
+	return staleAnnounceInput{storedGeneration: 3, prior: prior, req: req}
+}
+
+func TestStaleAnnounceLowerGeneration(t *testing.T) {
+	in := staleCase([]member{activeMember("cell-b", 0, "pod-b1")}, []member{activeMember("cell-a", 0, "pod-a1")})
+	in.req.Generation = 2
+	if !staleAnnounce(in) {
+		t.Fatal("a lower generation is stale")
+	}
+}
+
+func TestStaleAnnounceNamesAConfirmedGoneInstance(t *testing.T) {
+	now := time.Now()
+	in := staleCase([]member{activeMember("cell-a", 0, "pod-a2")}, []member{activeMember("cell-a", 0, "pod-a1")})
+	in.stored = []TenantSyncDeadInstance{{Instance: "pod-a1", LastSeenAt: now, ConfirmedGoneAt: &now}}
+	if !staleAnnounce(in) {
+		t.Fatal("a request that names a confirmed gone instance is stale")
+	}
+}
+
+func TestStaleAnnounceNamesARolledInstance(t *testing.T) {
+	in := staleCase([]member{activeMember("cell-a", 0, "pod-a2")}, []member{activeMember("cell-a", 0, "pod-a1")})
+	in.stored = []TenantSyncDeadInstance{{Instance: "pod-a1", LastSeenAt: time.Now(), Derived: DeadInstanceDerivedRolled}}
+	if !staleAnnounce(in) {
+		t.Fatal("a request that names a rolled instance is stale")
+	}
+}
+
+func TestStaleAnnounceNamesARolledInstanceOnlyAsTheScalar(t *testing.T) {
+	in := staleCase([]member{activeMember("cell-a", 0, "pod-a2")}, nil)
+	in.req.CellInstance = "pod-a1"
+	in.stored = []TenantSyncDeadInstance{{Instance: "pod-a1", LastSeenAt: time.Now(), Derived: DeadInstanceDerivedRolled}}
+	if !staleAnnounce(in) {
+		t.Fatal("a request whose cell_instance names a rolled instance is stale")
+	}
+}
+
+func TestStaleAnnounceIgnoresADroppedEntry(t *testing.T) {
+	// The tenant left cell-a and comes back to pod-a1, which stayed live.
+	in := staleCase([]member{activeMember("cell-b", 0, "pod-b1")},
+		[]member{activeMember("cell-b", 0, "pod-b1"), activeMember("cell-a", 1, "pod-a1")})
+	in.stored = []TenantSyncDeadInstance{{Instance: "pod-a1", LastSeenAt: time.Now(), Derived: DeadInstanceDerivedDropped}}
+	if staleAnnounce(in) {
+		t.Fatal("a dropped entry proves no replacement")
+	}
+}
+
+func TestStaleAnnounceIgnoresAnUnconfirmedOperatorEntry(t *testing.T) {
+	in := staleCase([]member{activeMember("cell-b", 0, "pod-b1")}, []member{activeMember("cell-a", 0, "pod-a1")})
+	in.stored = []TenantSyncDeadInstance{{Instance: "pod-a1", LastSeenAt: time.Now()}}
+	if staleAnnounce(in) {
+		t.Fatal("an unconfirmed operator entry proves no replacement")
+	}
+}
+
+func TestStaleAnnounceIgnoresAnInstanceAStoredMemberHolds(t *testing.T) {
+	now := time.Now()
+	in := staleCase([]member{activeMember("cell-a", 0, "pod-a1")}, []member{activeMember("cell-a", 0, "pod-a1")})
+	in.stored = []TenantSyncDeadInstance{{Instance: "pod-a1", LastSeenAt: now, ConfirmedGoneAt: &now}}
+	if staleAnnounce(in) {
+		t.Fatal("a request that agrees with the stored members is not stale")
+	}
+}
+
+func TestStaleAnnounceTakeOverIsNeverStale(t *testing.T) {
+	now := time.Now()
+	in := staleCase([]member{activeMember("cell-b", 0, "pod-b1")}, []member{activeMember("cell-a", 0, "pod-a1")})
+	in.req.Generation = 1
+	in.stored = []TenantSyncDeadInstance{{Instance: "pod-a1", LastSeenAt: now, ConfirmedGoneAt: &now}}
+	in.takeOver = true
+	if staleAnnounce(in) {
+		t.Fatal("a take-over is never stale")
+	}
+}
+
+func TestStaleAnnounceAcceptsARequestThatConfirmsAStoredInstanceGone(t *testing.T) {
+	// The stored row holds pod-a1 and lists the live pod-a2 as rolled. The
+	// request confirms pod-a1 gone, so the stored row is the older one.
+	now := time.Now()
+	in := staleCase([]member{activeMember("cell-a", 0, "pod-a1")}, []member{activeMember("cell-a", 0, "pod-a2")})
+	in.stored = []TenantSyncDeadInstance{{Instance: "pod-a2", LastSeenAt: now, Derived: DeadInstanceDerivedRolled}}
+	in.req.DeadInstances = []TenantSyncDeadInstance{{Instance: "pod-a1", LastSeenAt: now, ConfirmedGoneAt: &now}}
+	if staleAnnounce(in) {
+		t.Fatal("a request that confirms a stored instance gone is not stale")
+	}
+}
+
+func TestStaleAnnounceConfirmationOfAnUnheldInstanceProvesNothing(t *testing.T) {
+	// The request confirms pod-a0 gone, but no stored member holds pod-a0,
+	// so the confirmation proves nothing about the stored row.
+	now := time.Now()
+	in := staleCase([]member{activeMember("cell-a", 0, "pod-a2")}, []member{activeMember("cell-a", 0, "pod-a1")})
+	in.stored = []TenantSyncDeadInstance{{Instance: "pod-a1", LastSeenAt: now, ConfirmedGoneAt: &now}}
+	in.req.DeadInstances = []TenantSyncDeadInstance{{Instance: "pod-a0", LastSeenAt: now, ConfirmedGoneAt: &now}}
+	if !staleAnnounce(in) {
+		t.Fatal("a confirmation of an instance no stored member holds keeps the request stale")
+	}
+}
+
+func TestStaleAnnounceUnconfirmedEntryOfAStoredInstanceProvesNothing(t *testing.T) {
+	now := time.Now()
+	in := staleCase([]member{activeMember("cell-a", 0, "pod-a2")}, []member{activeMember("cell-a", 0, "pod-a1")})
+	in.stored = []TenantSyncDeadInstance{{Instance: "pod-a1", LastSeenAt: now, ConfirmedGoneAt: &now}}
+	in.req.DeadInstances = []TenantSyncDeadInstance{{Instance: "pod-a2", LastSeenAt: now}}
+	if !staleAnnounce(in) {
+		t.Fatal("an unconfirmed entry of a stored instance keeps the request stale")
+	}
+}
+
+func TestStaleAnnounceSameStateIsNotStale(t *testing.T) {
+	in := staleCase([]member{activeMember("cell-a", 0, "pod-a1")}, []member{activeMember("cell-a", 0, "pod-a1")})
+	if staleAnnounce(in) {
+		t.Fatal("a repeated announcement is not stale")
 	}
 }
 
@@ -165,8 +277,7 @@ func TestDeriveDeadInstancesDerivesAgainAfterAReturnToALivePod(t *testing.T) {
 		[]member{activeMember("cell-a", 0, "pod-a1"), activeMember("cell-b", 1, "pod-b1")},
 		[]member{activeMember("cell-a", 0, "pod-a1")},
 	)
-	in.stored = []TenantSyncDeadInstance{{Instance: "pod-a1", LastSeenAt: in.now.Add(-time.Hour)}}
-	in.listed = in.stored
+	in.listed = []TenantSyncDeadInstance{{Instance: "pod-a1", LastSeenAt: in.now.Add(-time.Hour)}}
 	got := deriveDeadInstances(in)
 	if len(got) != 1 || got[0].Instance != "pod-b1" || got[0].Derived != DeadInstanceDerivedDropped {
 		t.Fatalf("want one dropped entry for pod-b1, got %+v", got)

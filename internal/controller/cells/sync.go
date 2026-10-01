@@ -185,6 +185,10 @@ type AnnounceRequest struct {
 type AnnounceResult struct {
 	OK                bool
 	InterruptedMarked int
+	// Stale is true when the recorder refused the request because the
+	// stored row is newer. OK is then false, so the pass stores no cache
+	// entry and writes no placement status from its older reads.
+	Stale bool
 }
 
 // Announcer sends one AnnounceRequest and reports the reply. The caller

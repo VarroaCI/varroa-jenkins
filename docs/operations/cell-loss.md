@@ -4,15 +4,14 @@ A cell that dies takes its running builds with it. Varroa detects the loss, mark
 and re-fires a build that was granted but never started.
 
 Cell loss detection needs the [build record store](build-records.md). An install with the store
-disabled records no run and marks nothing. A tenant that runs the
+disabled marks nothing. A tenant that runs the
 [pipeline mesh](pipeline-mesh.md) resumes a running Pipeline build instead, after that page's own
 windows.
 
 ## Two signals make one fact
 
 A stream loss alone is never proof: a network partition leaves a live Jenkins process that still
-runs builds, and marking those builds lost would strand them on two owners. A dead stream only
-makes the operator reconcile sooner.
+runs builds. A dead stream only makes the operator reconcile sooner.
 
 A pod read is proof. The operator writes the pod's unique identifier into
 `Controller.status.cell.instance`. A pod that is absent, `Failed`, or `Succeeded` counts as no
@@ -33,6 +32,9 @@ The recorder also compares each announcement with the members it stored. A repla
 member pod becomes an unconfirmed dead instance with the five-minute window. This covers two
 rolls during one recorder outage, and a cell deleted while the operator restarts. A lock of a
 cell the tenant only left waits for the operator's proof.
+
+The recorder refuses a late announcement from an old operator replica: a lower generation, or a
+pod it knows replaced.
 
 The recorder measures each window on its own clock, and stamps the time each heartbeat arrives.
 A heartbeat from an instance that no longer owns the run moves no window. A drifting cell clock
@@ -90,8 +92,6 @@ so the rebuilt run keeps its identity and its build number. Four rules gate it.
 The third rule holds a re-fire until a replacement pod reports, which takes minutes. The second
 rule is permanent: Varroa stores no parameters for a build that never started, so a re-fire would
 run the job with each declared default.
-
-A mark leaves the ledger entry alone, so the re-fired build claims the same run identifier.
 
 ## A backstop fire during a cell roll
 

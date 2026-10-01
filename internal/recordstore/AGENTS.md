@@ -441,12 +441,16 @@ of the fleet's audit activity, once a controller becomes disposable.
   Each entry carries the recorder's `now` as `last_seen_at` and no
   `confirmed_gone_at`, so the moved window and the anchor test still apply.
   The function never adds an instance that the merged list holds or that
-  the request names, so a repeat adds nothing. It derives nothing for a
-  stale request: a generation below the stored one (a take-over excepted),
-  or a request that names an instance the stored list holds and no stored
-  member holds. A pod
-  identifier never comes back, so that second test catches a stale
-  announce from an old shard owner. An operator entry for the same
+  the request names, so a repeat adds nothing. **`staleAnnounce` refuses a
+  stale announce before any write**: a take-over is never stale; otherwise a
+  generation below the stored one, or a request that names an instance the
+  stored list proves replaced (`confirmed_gone_at` set, or `derived:
+  rolled`) and no stored member holds. A `dropped` entry proves nothing,
+  because a tenant can return to the live pod of a cell it left. A request
+  that confirms a stored member's instance gone is never stale on that
+  test. A stale announce writes no column, runs no sweep, and answers
+  `stale: true` with no `ok`, so the operator caches nothing and writes no
+  placement status. An operator entry for the same
   instance clears the tag in `mergeDeadInstances`. `trimDeadInstances`
   sorts its input before it trims, because the derived entries join the
   end of the merged list.

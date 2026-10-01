@@ -1001,7 +1001,11 @@ sections describe.
   "announce" request for it on every tick — the fence needs a row for every
   claim, with no exemption. A cell's own tenant announcements instead ride
   `cells.Announcer` through `TeamReconciler`'s placement pass
-  (`cells.Place`, `cells/placement.go`). `NewNATSSyncAnnouncer` and
+  (`cells.Place`, `cells/placement.go`). The recorder refuses a stale
+  announce with `AnnounceResult.Stale` true, `OK` false, and no error. The
+  placement pass treats the refusal as a failed announce, and
+  `TeamReconciler.loggedAnnounce` and `announceSingleTenantPlacement` log
+  it. `NewNATSSyncAnnouncer` and
   `NewNATSSyncRecordsRequester` (`team_sync.go`) wire that seam and the
   rehydration `records` request over `bus.TenantSyncSubject`, encoding
   `cells.SyncPolicy` (`cells/sync.go`, `Team.spec.pipelines`'s seven

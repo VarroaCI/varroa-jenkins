@@ -1,8 +1,11 @@
 package controller
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -251,5 +254,26 @@ func TestAnnounceSingleTenantPlacement_ReportsPreviousInstanceDead(t *testing.T)
 	rec.announceSingleTenantPlacement(context.Background(), cr)
 	if len(got.DeadInstances) != 0 {
 		t.Fatalf("DeadInstances = %+v, want none without a previous instance", got.DeadInstances)
+	}
+}
+
+// TestAnnounceSingleTenantPlacement_LogsAStaleRefusal asserts a stale
+// refusal of a single-tenant announce leaves a log line.
+func TestAnnounceSingleTenantPlacement_LogsAStaleRefusal(t *testing.T) {
+	rec := newTestReconciler(newTestClient())
+	var buf bytes.Buffer
+	rec.Logger = slog.New(slog.NewTextHandler(&buf, nil))
+	rec.SetSyncAnnouncer(func(context.Context, cells.AnnounceRequest) (cells.AnnounceResult, error) {
+		return cells.AnnounceResult{Stale: true}, nil
+	})
+
+	rec.announceSingleTenantPlacement(context.Background(), &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "solo", Namespace: "team-ns"},
+		Status:     v1alpha1.ControllerStatus{Cell: &v1alpha1.CellStatus{Instance: "pod-uid-1"}},
+	})
+
+	if !strings.Contains(buf.String(), "recorder refused a stale announce") ||
+		!strings.Contains(buf.String(), "controller=team-ns/solo") {
+		t.Fatalf("no stale refusal log line: %q", buf.String())
 	}
 }

@@ -149,7 +149,7 @@ func NewNATSSyncAnnouncer(conn *bus.Conn) cells.Announcer {
 		if resp.Error != "" {
 			return cells.AnnounceResult{}, fmt.Errorf("%s", resp.Error)
 		}
-		return cells.AnnounceResult{OK: resp.Ok, InterruptedMarked: resp.InterruptedMarked}, nil
+		return cells.AnnounceResult{OK: resp.Ok, InterruptedMarked: resp.InterruptedMarked, Stale: resp.Stale}, nil
 	}
 }
 

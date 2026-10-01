@@ -54,7 +54,7 @@ func (r *Reconciler) announceSingleTenantPlacement(ctx context.Context, cr *v1al
 		lastSeen = timeFromMetaV1(cr.Status.MiteStatus.LastSeen)
 	}
 
-	_, err := r.announce(ctx, cells.AnnounceRequest{
+	result, err := r.announce(ctx, cells.AnnounceRequest{
 		Cluster:            r.clusterName,
 		Tenant:             cr.Namespace + "/" + cr.Name,
 		Incarnation:        string(cr.UID),
@@ -68,7 +68,11 @@ func (r *Reconciler) announceSingleTenantPlacement(ctx context.Context, cr *v1al
 		CellLastSeenAt:     lastSeen,
 		DeadInstances:      dead,
 	})
-	if err != nil {
+	switch {
+	case err != nil:
 		r.Logger.Warn("tenant sync announce failed", "controller", cr.Namespace+"/"+cr.Name, "error", err)
+	case result.Stale:
+		r.Logger.Info("recorder refused a stale announce", "controller", cr.Namespace+"/"+cr.Name,
+			"cellInstance", instance)
 	}
 }

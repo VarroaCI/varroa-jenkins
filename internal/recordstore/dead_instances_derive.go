@@ -24,14 +24,69 @@ type deadInstanceDerivation struct {
 	announced []member
 	// requestInstance is the request's scalar cell_instance.
 	requestInstance string
-	// stored is the dead_instances list stored before this announce.
-	stored []TenantSyncDeadInstance
-	// listed is the merge of stored and the request's own entries.
+	// listed is the merge of the stored dead_instances list and the
+	// request's own entries.
 	listed []TenantSyncDeadInstance
-	// staleGeneration is true when the request names a lower generation
-	// than the stored row and does not take the row over.
-	staleGeneration bool
-	now             time.Time
+	// stale is staleAnnounce's answer for the request.
+	stale bool
+	now   time.Time
+}
+
+// staleAnnounceInput holds the inputs staleAnnounce reads. prior is the
+// stored member view, resolved through the scalar columns.
+type staleAnnounceInput struct {
+	takeOver         bool
+	storedGeneration int64
+	prior            []member
+	stored           []TenantSyncDeadInstance
+	req              TenantSyncRequest
+}
+
+// staleAnnounce reports whether an announcement describes an older state
+// than the stored row. The recorder writes nothing for such a request.
+//
+// A take-over is never stale. Otherwise a request is stale when it names
+// a lower generation, or when it names an instance that stored proves
+// replaced and that no stored member holds. Only a confirmed entry or a
+// rolled entry proves a replacement: the pod of a dropped cell can still
+// be live, and a tenant can return to it.
+//
+// A request that confirms a stored member's instance gone is never stale
+// on the instance test, because it proves the stored row the older one.
+func staleAnnounce(in staleAnnounceInput) bool {
+	if in.takeOver {
+		return false
+	}
+	if in.req.Generation < in.storedGeneration {
+		return true
+	}
+	held := map[string]bool{}
+	for _, m := range in.prior {
+		if m.Instance != "" {
+			held[m.Instance] = true
+		}
+	}
+	for _, d := range in.req.DeadInstances {
+		if d.ConfirmedGoneAt != nil && held[d.Instance] {
+			return false
+		}
+	}
+	replaced := map[string]bool{}
+	for _, d := range in.stored {
+		if d.ConfirmedGoneAt != nil || d.Derived == DeadInstanceDerivedRolled {
+			replaced[d.Instance] = true
+		}
+	}
+	named := []string{in.req.CellInstance}
+	for _, m := range in.req.Members {
+		named = append(named, m.Instance)
+	}
+	for _, instance := range named {
+		if instance != "" && replaced[instance] && !held[instance] {
+			return true
+		}
+	}
+	return false
 }
 
 // deriveDeadInstances answers the dead instances the recorder adds from a
@@ -46,17 +101,10 @@ type deadInstanceDerivation struct {
 // It adds no entry for an instance that listed already holds, or that the
 // request names. A repeated announce therefore adds nothing.
 //
-// It adds nothing for a stale request. A request is stale when it names a
-// lower generation, or when it names an instance that stored lists dead
-// and that no stored member holds. A pod identifier never comes back, so
-// such a request describes an older state than the stored row. Without the
-// second test a stale request would list the live instance as dead.
-//
-// The second test also holds once for a tenant that returns to a live pod
-// it left. The stored members hold that pod after the return, so the next
-// announce derives again.
+// It adds nothing for a request staleAnnounce judges stale. Without that
+// test a stale request would list the live instance as dead.
 func deriveDeadInstances(in deadInstanceDerivation) []TenantSyncDeadInstance {
-	if in.staleGeneration {
+	if in.stale {
 		return nil
 	}
 	named := map[string]bool{}
@@ -69,17 +117,6 @@ func deriveDeadInstances(in deadInstanceDerivation) []TenantSyncDeadInstance {
 			named[m.Instance] = true
 		}
 		announcedByCell[memberKey(m.Namespace, m.Cell)] = m.Instance
-	}
-	held := map[string]bool{}
-	for _, m := range in.prior {
-		if m.Instance != "" {
-			held[m.Instance] = true
-		}
-	}
-	for _, d := range in.stored {
-		if named[d.Instance] && !held[d.Instance] {
-			return nil
-		}
 	}
 	listed := map[string]bool{}
 	for _, d := range in.listed {
