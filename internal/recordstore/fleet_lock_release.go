@@ -25,6 +25,10 @@ import (
 //
 // grace is the confirmed-gone grace, so a pod-read confirmation releases
 // a lock on the same schedule it interrupts a run.
+//
+// An entry the recorder derived from a dropped member never counts. A
+// changed placement alone releases no lock, because the cell the tenant
+// left can still be alive and still deploying.
 func fleetLockOwnerConfirmedGone(row tenantPlacementLivenessRow, cellInstance string, now time.Time,
 	grace time.Duration) bool {
 	if cellInstance == "" {
@@ -33,7 +37,19 @@ func fleetLockOwnerConfirmedGone(row tenantPlacementLivenessRow, cellInstance st
 	if cellInstance == row.cellInstance {
 		return currentInstanceGone(row, now, silentHeartbeatWindow)
 	}
-	return deadInstanceGone(row.deadInstances, cellInstance, now, movedHeartbeatWindow, grace)
+	return deadInstanceGone(withoutDroppedEntries(row.deadInstances), cellInstance, now, movedHeartbeatWindow, grace)
+}
+
+// withoutDroppedEntries answers dead without the entries tagged
+// DeadInstanceDerivedDropped.
+func withoutDroppedEntries(dead []TenantSyncDeadInstance) []TenantSyncDeadInstance {
+	out := make([]TenantSyncDeadInstance, 0, len(dead))
+	for _, d := range dead {
+		if d.Derived != DeadInstanceDerivedDropped {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // releasingFleetLock is one releasing fleet_locks row

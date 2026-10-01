@@ -972,7 +972,11 @@ sections describe.
   operator restart, a shard move, a recorder outage) still reports a
   rolled pod. It also stamps a confirmation on an unconfirmed cache entry
   that names the same instance. `deadInstanceDelta` and
-  `memberDeadInstances` read only the cache. A cell that **left** the candidate set is read
+  `memberDeadInstances` read only the cache. The operator is not the only
+  source: the recorder derives an unconfirmed entry from its own stored
+  member list (`internal/recordstore`, `deriveDeadInstances`), which covers
+  a second roll during a recorder outage and a cell deleted while the cache
+  is empty. A cell that **left** the candidate set is read
   by `TeamReconciler.departedMemberPods`, which applies the same pod rule to
   every member cell the tenant still names and hands the answers to
   `Inputs.DepartedPods` — the placement pass performs no Kubernetes read of

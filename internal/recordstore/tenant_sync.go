@@ -191,10 +191,14 @@ type tenantPlacementRow struct {
 // none yet; otherwise the announcement's own seed report is stored
 // as-is.
 //
+// The handler adds the dead instances deriveDeadInstances derives from a
+// changed or dropped member, inside the same transaction.
+//
 // An announcement whose cell or cell_instance differs from the row
-// stored before this call runs the interrupted-run moved test for every
-// RUNNING run of the tenant, once the write commits, and reports the
-// count in the response's InterruptedMarked field (design D9). conn and
+// stored before this call, or that derived a dead instance, runs the
+// interrupted-run moved test for every RUNNING run of the tenant, once
+// the write commits, and reports the count in the response's
+// InterruptedMarked field (design D9). conn and
 // metrics feed that marking; a nil metrics counts nothing. notifier
 // carries the fleet-lock release's own lock notifications, and a nil
 // notifier publishes nothing.
@@ -273,9 +277,22 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 	if err != nil {
 		return TenantSyncResponse{}, err
 	}
-	deadInstances := trimDeadInstances(mergeDeadInstances(old.deadInstances, req.DeadInstances), live, maxDeadInstances)
-
 	members := resolveAnnouncedMembers(old.members, req.Members, generationRaised)
+
+	listed := mergeDeadInstances(old.deadInstances, req.DeadInstances)
+	derived := deriveDeadInstances(deadInstanceDerivation{
+		prior: old.members,
+		announced: newPlacementMembers(members, nil, placementScalars{
+			cell: req.Cell, namespace: req.Namespace, cellInstance: req.CellInstance,
+		}).members,
+		requestInstance: req.CellInstance,
+		stored:          old.deadInstances,
+		listed:          listed,
+		staleGeneration: !takeOver && req.Generation < old.generation,
+		now:             time.Now(),
+	})
+	deadInstances := trimDeadInstances(append(listed, derived...), live, maxDeadInstances)
+
 	jobHomes, err := recomputeJobHomes(ctx, tx, req.Cluster, req.Tenant, members, old.jobHomes, actionMetrics)
 	if err != nil {
 		return TenantSyncResponse{}, err
@@ -339,7 +356,7 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 	}
 
 	var interruptedMarked int
-	if old.cell != req.Cell || old.cellInstance != req.CellInstance {
+	if old.cell != req.Cell || old.cellInstance != req.CellInstance || len(derived) > 0 {
 		n, markErr := MarkMovedRunsForTenant(ctx, pool, conn, metrics, actionMetrics, stateDeleter,
 			req.Cluster, req.Tenant, row, time.Now(), grace, logger)
 		if markErr != nil {
@@ -494,6 +511,9 @@ func liveCellInstances(ctx context.Context, tx pgx.Tx, cluster, tenant string) (
 // would hold the timestamp young forever and the confirmed-gone grace
 // would never elapse. A stored nil takes the incoming value, and an
 // incoming nil never clears a stored one.
+//
+// On a collision the incoming Derived value wins. An operator entry
+// carries none, so the operator's own report clears the recorder's tag.
 func mergeDeadInstances(stored, incoming []TenantSyncDeadInstance) []TenantSyncDeadInstance {
 	byInstance := make(map[string]TenantSyncDeadInstance, len(stored)+len(incoming))
 	for _, d := range stored {
@@ -510,6 +530,7 @@ func mergeDeadInstances(stored, incoming []TenantSyncDeadInstance) []TenantSyncD
 			merged = d
 		}
 		merged.ConfirmedGoneAt = earlierConfirmation(existing.ConfirmedGoneAt, d.ConfirmedGoneAt)
+		merged.Derived = d.Derived
 		byInstance[d.Instance] = merged
 	}
 	merged := make([]TenantSyncDeadInstance, 0, len(byInstance))
@@ -615,7 +636,13 @@ func earlierConfirmation(a, b *time.Time) *time.Time {
 // trims every other entry to at most limit, newest first. keep holds the
 // cell instances a RUNNING run still names, so the interrupted-run sweep
 // never loses the evidence a live build depends on.
+//
+// The input can arrive in any order, so the function sorts it newest first
+// before it trims. A derived entry joins the end of the merged list, and a
+// trim by position would drop it first although it is the newest.
 func trimDeadInstances(merged []TenantSyncDeadInstance, keep map[string]bool, limit int) []TenantSyncDeadInstance {
+	merged = append([]TenantSyncDeadInstance(nil), merged...)
+	sort.SliceStable(merged, func(i, j int) bool { return merged[i].LastSeenAt.After(merged[j].LastSeenAt) })
 	var kept, rest []TenantSyncDeadInstance
 	for _, d := range merged {
 		if keep[d.Instance] {

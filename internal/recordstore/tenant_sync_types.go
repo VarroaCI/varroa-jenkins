@@ -43,11 +43,11 @@ type TenantSyncMember struct {
 	AppliedAt *time.Time `json:"applied_at,omitempty"`
 }
 
-// TenantSyncDeadInstance is one confirmed-gone cell instance a
-// TenantSyncRequest of kind "announce" carries. The operator lists an
-// instance here only when it confirms that instance is gone; the
-// recorder merges the list into the stored one, because an operator
-// restart loses every deleted pod identity.
+// TenantSyncDeadInstance is one gone cell instance. A TenantSyncRequest
+// of kind "announce" carries the operator's entries, and the recorder
+// merges them into the stored list, because an operator restart loses
+// every deleted pod identity. The recorder also stores entries it derives
+// from a change of its own member list.
 type TenantSyncDeadInstance struct {
 	Instance   string    `json:"instance"`
 	LastSeenAt time.Time `json:"last_seen_at"`
@@ -56,6 +56,11 @@ type TenantSyncDeadInstance struct {
 	// this field existed decodes with a nil value, and such an entry
 	// keeps the five-minute moved window.
 	ConfirmedGoneAt *time.Time `json:"confirmed_gone_at,omitempty"`
+	// Derived is DeadInstanceDerivedRolled or DeadInstanceDerivedDropped
+	// on an entry the recorder derived, and empty on an operator entry.
+	// The fleet-lock release ignores a dropped entry, because the cell of
+	// such an instance can still be alive.
+	Derived string `json:"derived,omitempty"`
 }
 
 // TenantSyncRequest is the request body of a

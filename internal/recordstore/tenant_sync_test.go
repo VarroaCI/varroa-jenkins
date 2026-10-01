@@ -542,3 +542,109 @@ func TestTenantSyncAnnounceStoresAgentNamespace(t *testing.T) {
 		}
 	}
 }
+
+// derivedEntry answers the stored dead_instances entry for instance.
+func derivedEntry(t *testing.T, db *sql.DB, instance string) (TenantSyncDeadInstance, bool) {
+	t.Helper()
+	for _, d := range readTenantPlacement(t, db, testTenant).deadInstances {
+		if d.Instance == instance {
+			return d, true
+		}
+	}
+	return TenantSyncDeadInstance{}, false
+}
+
+// TestTenantSyncAnnounceDerivesARolledMemberInstance asserts a member whose
+// cell reports a new instance leaves its old instance in dead_instances,
+// tagged rolled and with no confirmation, while the operator reports none.
+func TestTenantSyncAnnounceDerivesARolledMemberInstance(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+
+	sendTenantSync(t, pool, conn, announceMembers(1, []member{
+		activeMember("cell-a", 0, "pod-a1"), activeMember("cell-b", 1, "pod-b1"),
+	}))
+	sendTenantSync(t, pool, conn, announceMembers(1, []member{
+		activeMember("cell-a", 0, "pod-a1"), activeMember("cell-b", 1, "pod-b2"),
+	}))
+
+	got, ok := derivedEntry(t, db, "pod-b1")
+	if !ok || got.Derived != DeadInstanceDerivedRolled || got.ConfirmedGoneAt != nil {
+		t.Fatalf("want an unconfirmed rolled entry for pod-b1, got %+v (found %v)", got, ok)
+	}
+	if _, ok := derivedEntry(t, db, "pod-a1"); ok {
+		t.Fatal("the unchanged member pod-a1 was listed dead")
+	}
+}
+
+// TestTenantSyncAnnounceDerivesADroppedMemberInstance asserts a member
+// whose cell the request drops leaves its instance in dead_instances,
+// tagged dropped.
+func TestTenantSyncAnnounceDerivesADroppedMemberInstance(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+
+	sendTenantSync(t, pool, conn, announceMembers(1, []member{
+		activeMember("cell-a", 0, "pod-a1"), activeMember("cell-b", 1, "pod-b1"),
+	}))
+	sendTenantSync(t, pool, conn, announceMembers(2, []member{activeMember("cell-a", 0, "pod-a1")}))
+
+	got, ok := derivedEntry(t, db, "pod-b1")
+	if !ok || got.Derived != DeadInstanceDerivedDropped || got.ConfirmedGoneAt != nil {
+		t.Fatalf("want an unconfirmed dropped entry for pod-b1, got %+v (found %v)", got, ok)
+	}
+}
+
+// TestTenantSyncAnnounceDerivationIsIdempotent asserts a repeated announce
+// keeps the derived entry as it is and adds no second one.
+func TestTenantSyncAnnounceDerivationIsIdempotent(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+
+	sendTenantSync(t, pool, conn, announceMembers(1, []member{activeMember("cell-a", 0, "pod-a1")}))
+	rolled := announceMembers(1, []member{activeMember("cell-a", 0, "pod-a2")})
+	sendTenantSync(t, pool, conn, rolled)
+	first := readTenantPlacement(t, db, testTenant).deadInstances
+
+	sendTenantSync(t, pool, conn, rolled)
+	second := readTenantPlacement(t, db, testTenant).deadInstances
+	if len(first) != 1 || len(second) != 1 {
+		t.Fatalf("want one entry after each announce, got %+v and %+v", first, second)
+	}
+	if !first[0].LastSeenAt.Equal(second[0].LastSeenAt) || second[0].Derived != DeadInstanceDerivedRolled {
+		t.Fatalf("the repeat changed the entry: %+v then %+v", first[0], second[0])
+	}
+}
+
+// TestTenantSyncAnnounceStaleAnnounceDerivesNothing asserts an announce
+// that names an instance the row already lists dead derives nothing. A
+// stale announce from an old shard owner therefore never lists the live
+// pod dead.
+func TestTenantSyncAnnounceStaleAnnounceDerivesNothing(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+
+	older := announceMembers(1, []member{activeMember("cell-a", 0, "pod-a1")})
+	sendTenantSync(t, pool, conn, older)
+	sendTenantSync(t, pool, conn, announceMembers(1, []member{activeMember("cell-a", 0, "pod-a2")}))
+	sendTenantSync(t, pool, conn, older)
+
+	if got, ok := derivedEntry(t, db, "pod-a2"); ok {
+		t.Fatalf("the stale announce listed the live pod dead: %+v", got)
+	}
+}
+
+// TestTenantSyncAnnounceLowerGenerationDerivesNothing asserts an announce
+// below the stored generation derives nothing from the member list it
+// names.
+func TestTenantSyncAnnounceLowerGenerationDerivesNothing(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+
+	sendTenantSync(t, pool, conn, announceMembers(3, []member{activeMember("cell-b", 0, "pod-b1")}))
+	sendTenantSync(t, pool, conn, announceMembers(2, []member{activeMember("cell-a", 0, "pod-a1")}))
+
+	if got, ok := derivedEntry(t, db, "pod-b1"); ok {
+		t.Fatalf("a lower generation listed the stored pod dead: %+v", got)
+	}
+}

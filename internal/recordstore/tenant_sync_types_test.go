@@ -29,7 +29,7 @@ func TestTenantSyncRequestRoundTrip(t *testing.T) {
 		CellAliveAt:        &aliveAt,
 		CellLastSeenAt:     &lastSeenAt,
 		DeadInstances: []TenantSyncDeadInstance{
-			{Instance: "pod-b", LastSeenAt: deadAt},
+			{Instance: "pod-b", LastSeenAt: deadAt, Derived: DeadInstanceDerivedRolled},
 		},
 	}
 
@@ -62,7 +62,7 @@ func TestTenantSyncRequestRoundTrip(t *testing.T) {
 		t.Fatalf("cell_last_seen_at round trip: got %v", got.CellLastSeenAt)
 	}
 	if len(got.DeadInstances) != 1 || got.DeadInstances[0].Instance != "pod-b" ||
-		!got.DeadInstances[0].LastSeenAt.Equal(deadAt) {
+		!got.DeadInstances[0].LastSeenAt.Equal(deadAt) || got.DeadInstances[0].Derived != DeadInstanceDerivedRolled {
 		t.Fatalf("dead_instances round trip: got %v", got.DeadInstances)
 	}
 }

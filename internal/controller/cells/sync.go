@@ -247,7 +247,8 @@ type RecordsFunc func(ctx context.Context, req RecordsRequest) (RecordsResult, e
 // forces one announcement, and the cache producers then report no dead
 // instance. cellPreviousInstances reads each cell's durable
 // status.cell.previousInstance instead, so a pod replaced in that window
-// is still reported. A cell deleted in that window leaves no record.
+// is still reported. The recorder adds the rest from its own stored
+// member list: an older replaced pod, and the last pod of a deleted cell.
 type SyncCache struct {
 	Cell               string
 	CellNamespace      string

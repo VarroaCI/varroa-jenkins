@@ -433,8 +433,27 @@ of the fleet's audit activity, once a controller becomes disposable.
   nothing. The wire types (`TenantSyncRequest`, `TenantSyncResponse`,
   and the nested job/record shapes) live in `tenant_sync_types.go`,
   beside `ledger_types.go`, because this responder dispatches on them.
+  **The announce also derives dead instances** (`dead_instances_derive.go`).
+  `deriveDeadInstances` compares the stored member list with the announced
+  one inside the same transaction. A member whose cell reports a new
+  instance leaves its old instance, tagged `derived: rolled`. A member whose
+  cell the request drops leaves its instance, tagged `derived: dropped`.
+  Each entry carries the recorder's `now` as `last_seen_at` and no
+  `confirmed_gone_at`, so the moved window and the anchor test still apply.
+  The function never adds an instance that the merged list holds or that
+  the request names, so a repeat adds nothing. It derives nothing for a
+  stale request: a generation below the stored one (a take-over excepted),
+  or a request that names an instance the stored list holds and no stored
+  member holds. A pod
+  identifier never comes back, so that second test catches a stale
+  announce from an old shard owner. An operator entry for the same
+  instance clears the tag in `mergeDeadInstances`. `trimDeadInstances`
+  sorts its input before it trims, because the derived entries join the
+  end of the merged list.
+  `fleetLockOwnerConfirmedGone` ignores a `dropped` entry, because the cell
+  the tenant left can still be alive.
   `handleTenantSyncAnnounce` runs `MarkMovedRunsForTenant` when `cell` or
-  `cell_instance` changes, and runs `ReleaseConfirmedFleetLocks`
+  `cell_instance` changes or the derivation added an entry, and runs `ReleaseConfirmedFleetLocks`
   (`fleet_lock_release.go`) on every announce, against the same
   `tenantPlacementLivenessRow` the announce just wrote: a lock's second
   release confirmation can become newly true on any announce, not only a

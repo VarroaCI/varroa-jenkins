@@ -29,9 +29,10 @@ reports it in every announcement. A pod that rolls while the operator restarts, 
 recorder is down, is therefore still confirmed. The 70 to 130 seconds start when the recorder
 accepts the next announcement, not when the pod rolled.
 
-The operator keeps one replaced instance per cell. Two rolls of one cell during one recorder
-outage can leave the older instance unconfirmed. A cell deleted while the operator restarts
-leaves no record. A run on such an instance stays `RUNNING` until an operator marks it.
+The recorder also compares each announcement with the members it stored. A replaced or removed
+member pod becomes an unconfirmed dead instance with the five-minute window. This covers two
+rolls during one recorder outage, and a cell deleted while the operator restarts. A lock of a
+cell the tenant only left waits for the operator's proof.
 
 The recorder measures each window on its own clock, and stamps the time each heartbeat arrives.
 A heartbeat from an instance that no longer owns the run moves no window. A drifting cell clock
