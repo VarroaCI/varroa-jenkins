@@ -214,6 +214,7 @@ var expectedColumns = map[string][]columnSpec{
 		{"job_homes", "jsonb", false},
 		{"incarnation", "text", false},
 		{"agent_namespace", "text", false},
+		{"retired_incarnations", "jsonb", false},
 	},
 	"fleet_locks": {
 		{"name", "text", false},

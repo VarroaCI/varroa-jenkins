@@ -35,7 +35,9 @@ type deadInstanceDerivation struct {
 // staleAnnounceInput holds the inputs staleAnnounce reads. prior is the
 // stored member view, resolved through the scalar columns.
 type staleAnnounceInput struct {
-	takeOver         bool
+	takeOver bool
+	// retired is the stored retired_incarnations list.
+	retired          []string
 	storedGeneration int64
 	prior            []member
 	stored           []TenantSyncDeadInstance
@@ -45,15 +47,22 @@ type staleAnnounceInput struct {
 // staleAnnounce reports whether an announcement describes an older state
 // than the stored row. The recorder writes nothing for such a request.
 //
-// A take-over is never stale. Otherwise a request is stale when it names
-// a lower generation, or when it names an instance that stored proves
-// replaced and that no stored member holds. Only a confirmed entry or a
-// rolled entry proves a replacement: the pod of a dropped cell can still
-// be live, and a tenant can return to it.
+// A request that names a retired incarnation is always stale, take-over or
+// not. A take-over replaced that tenant object, and Kubernetes never gives
+// its uid to another object.
+//
+// Any other take-over is never stale. Any other request is stale when it
+// names a lower generation. It is also stale when it names an instance
+// that stored proves replaced and that no stored member holds. Only a
+// confirmed entry or a rolled entry proves a replacement: the pod of a
+// dropped cell can still be live, and a tenant can return to it.
 //
 // A request that confirms a stored member's instance gone is never stale
 // on the instance test, because it proves the stored row the older one.
 func staleAnnounce(in staleAnnounceInput) bool {
+	if retiredIncarnation(in.retired, in.req.Incarnation) {
+		return true
+	}
 	if in.takeOver {
 		return false
 	}
@@ -107,15 +116,9 @@ func deriveDeadInstances(in deadInstanceDerivation) []TenantSyncDeadInstance {
 	if in.stale {
 		return nil
 	}
-	named := map[string]bool{}
-	if in.requestInstance != "" {
-		named[in.requestInstance] = true
-	}
+	named := announcedInstances(in.requestInstance, in.announced)
 	announcedByCell := map[string]string{}
 	for _, m := range in.announced {
-		if m.Instance != "" {
-			named[m.Instance] = true
-		}
 		announcedByCell[memberKey(m.Namespace, m.Cell)] = m.Instance
 	}
 	listed := map[string]bool{}
@@ -146,4 +149,71 @@ func deriveDeadInstances(in deadInstanceDerivation) []TenantSyncDeadInstance {
 // member of a tenant, so the namespace and cell pair is unique.
 func memberKey(namespace, cell string) string {
 	return namespace + "/" + cell
+}
+
+// announcedInstances answers the set of instances an announcement names:
+// its scalar cell_instance and the instance of each announced member. An
+// empty instance is never in the set.
+func announcedInstances(requestInstance string, announced []member) map[string]bool {
+	named := map[string]bool{}
+	if requestInstance != "" {
+		named[requestInstance] = true
+	}
+	for _, m := range announced {
+		if m.Instance != "" {
+			named[m.Instance] = true
+		}
+	}
+	return named
+}
+
+// pruneNamedUnconfirmed removes every entry with no confirmed_gone_at for
+// an instance that named holds. The caller passes the instances of an
+// accepted announcement, which proves each of them live. A dropped entry
+// goes, because it names a pod the tenant returned to. A rolled entry
+// goes too, because a later announcement corrected the order it came from.
+//
+// An entry with a confirmation stays, because it comes from a pod read
+// and a pod identifier never comes back.
+func pruneNamedUnconfirmed(listed []TenantSyncDeadInstance, named map[string]bool) []TenantSyncDeadInstance {
+	out := make([]TenantSyncDeadInstance, 0, len(listed))
+	for _, d := range listed {
+		if d.ConfirmedGoneAt == nil && named[d.Instance] {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// maxRetiredIncarnations bounds the retired_incarnations list. The list
+// needs no time limit, because a retired uid never comes back.
+const maxRetiredIncarnations = 8
+
+// retiredIncarnation reports whether incarnation is on the retired list.
+// An empty incarnation is never retired: it means unknown.
+func retiredIncarnation(retired []string, incarnation string) bool {
+	if incarnation == "" {
+		return false
+	}
+	for _, r := range retired {
+		if r == incarnation {
+			return true
+		}
+	}
+	return false
+}
+
+// retireIncarnation answers the retired list with incarnation added first.
+// An empty incarnation adds nothing, and a repeat moves no entry. The
+// answer holds at most maxRetiredIncarnations entries, newest first.
+func retireIncarnation(retired []string, incarnation string) []string {
+	out := append([]string(nil), retired...)
+	if incarnation != "" && !retiredIncarnation(out, incarnation) {
+		out = append([]string{incarnation}, out...)
+	}
+	if len(out) > maxRetiredIncarnations {
+		out = out[:maxRetiredIncarnations]
+	}
+	return out
 }

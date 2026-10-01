@@ -31,10 +31,11 @@ accepts the next announcement, not when the pod rolled.
 The recorder also compares each announcement with the members it stored. A replaced or removed
 member pod becomes an unconfirmed dead instance with the five-minute window. This covers two
 rolls during one recorder outage, and a cell deleted while the operator restarts. A lock of a
-cell the tenant only left waits for the operator's proof.
+cell the tenant only left waits for the operator's proof. A pod that a later announcement names
+again leaves the list.
 
-The recorder refuses a late announcement from an old operator replica: a lower generation, or a
-pod it knows replaced.
+The recorder refuses a late announcement from an old operator replica: a lower generation, a
+pod it knows replaced, or an object that a new one of the same name replaced.
 
 The recorder measures each window on its own clock, and stamps the time each heartbeat arrives.
 A heartbeat from an instance that no longer owns the run moves no window. A drifting cell clock

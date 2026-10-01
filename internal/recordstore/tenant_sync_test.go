@@ -39,7 +39,8 @@ func newTestSyncConn(t *testing.T) *bus.Conn {
 }
 
 // readTenantPlacement reads one tenant_placements row's generation, cell
-// instance, seed fields, dead_instances, and incarnation for assertions.
+// instance, seed fields, dead_instances, incarnation, and retired
+// incarnations for assertions.
 type storedTenantPlacement struct {
 	generation         int64
 	cellInstance       string
@@ -47,6 +48,7 @@ type storedTenantPlacement struct {
 	pendingJobs        []string
 	deadInstances      []TenantSyncDeadInstance
 	incarnation        string
+	retired            []string
 }
 
 func readTenantPlacement(t *testing.T, db *sql.DB, tenant string) storedTenantPlacement {
@@ -58,11 +60,14 @@ func readTenantPlacement(t *testing.T, db *sql.DB, tenant string) storedTenantPl
 		pendingRaw   []byte
 		deadRaw      []byte
 		incarnation  string
+		retiredRaw   []byte
 	)
 	if err := db.QueryRow(`
-		SELECT generation, cell_instance, rehydrated_instance, pending_jobs, dead_instances, incarnation
+		SELECT generation, cell_instance, rehydrated_instance, pending_jobs, dead_instances, incarnation,
+		       retired_incarnations
 		FROM varroa.tenant_placements WHERE cluster = 'core' AND tenant = $1
-	`, tenant).Scan(&generation, &cellInstance, &rehydrated, &pendingRaw, &deadRaw, &incarnation); err != nil {
+	`, tenant).Scan(&generation, &cellInstance, &rehydrated, &pendingRaw, &deadRaw, &incarnation,
+		&retiredRaw); err != nil {
 		t.Fatalf("read tenant_placements row: %v", err)
 	}
 	var pending []string
@@ -73,9 +78,13 @@ func readTenantPlacement(t *testing.T, db *sql.DB, tenant string) storedTenantPl
 	if err := json.Unmarshal(deadRaw, &dead); err != nil {
 		t.Fatalf("decode dead_instances: %v", err)
 	}
+	var retired []string
+	if err := json.Unmarshal(retiredRaw, &retired); err != nil {
+		t.Fatalf("decode retired_incarnations: %v", err)
+	}
 	return storedTenantPlacement{
 		generation: generation, cellInstance: cellInstance, rehydratedInstance: rehydrated,
-		pendingJobs: pending, deadInstances: dead, incarnation: incarnation,
+		pendingJobs: pending, deadInstances: dead, incarnation: incarnation, retired: retired,
 	}
 }
 
@@ -826,6 +835,79 @@ func TestTenantSyncAnnounceReturnToALeftPodIsAccepted(t *testing.T) {
 	}
 	if members := readStoredMembers(t, db); len(members) != 2 {
 		t.Fatalf("want two stored members after the return, got %+v", members)
+	}
+	if d, ok := derivedEntry(t, db, "pod-b1"); ok {
+		t.Fatalf("the returned live pod stays in dead_instances: %+v", d)
+	}
+}
+
+// TestTenantSyncAnnounceReturnThenRollDerivesRolled asserts a returned pod
+// that later rolls is derived again, tagged rolled and with a fresh
+// last_seen_at, because the return removed its old dropped entry.
+func TestTenantSyncAnnounceReturnThenRollDerivesRolled(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+
+	both := []member{activeMember("cell-a", 0, "pod-a1"), activeMember("cell-b", 1, "pod-b1")}
+	sendTenantSync(t, pool, conn, announceMembers(1, both))
+	sendTenantSync(t, pool, conn, announceMembers(2, []member{activeMember("cell-a", 0, "pod-a1")}))
+	dropped, ok := derivedEntry(t, db, "pod-b1")
+	if !ok {
+		t.Fatal("setup: pod-b1 is not listed dropped")
+	}
+	sendTenantSync(t, pool, conn, announceMembers(3, both))
+
+	rolled := announceMembers(3, []member{activeMember("cell-a", 0, "pod-a1"), activeMember("cell-b", 1, "pod-b2")})
+	if resp := sendTenantSync(t, pool, conn, rolled); !resp.Ok {
+		t.Fatalf("the roll was refused: %+v", resp)
+	}
+	got, ok := derivedEntry(t, db, "pod-b1")
+	if !ok || got.Derived != DeadInstanceDerivedRolled {
+		t.Fatalf("want pod-b1 listed rolled after the roll, got %+v (listed=%v)", got, ok)
+	}
+	if !got.LastSeenAt.After(dropped.LastSeenAt) {
+		t.Fatalf("want a fresh last_seen_at, got %v (dropped at %v)", got.LastSeenAt, dropped.LastSeenAt)
+	}
+}
+
+// TestTenantSyncAnnounceNamedPodKeepsItsLock asserts an accepted
+// announcement that names a pod removes that pod's unconfirmed rolled
+// entry before the fleet-lock release reads the row. A slot-1 owner is
+// not the scalar cell_instance, so without the removal the rolled entry
+// would release the lock of a live pod.
+func TestTenantSyncAnnounceNamedPodKeepsItsLock(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+
+	live := []member{activeMember("cell-a", 0, "pod-a1"), activeMember("cell-b", 1, "pod-b2")}
+	sendTenantSync(t, pool, conn, announceMembers(1, live))
+	if _, err := db.Exec(`
+		UPDATE varroa.tenant_placements
+		SET dead_instances = jsonb_build_array(jsonb_build_object(
+			'instance', 'pod-b2', 'last_seen_at', to_jsonb(now() - interval '10 minutes'), 'derived', 'rolled'))
+		WHERE cluster = $1 AND tenant = $2
+	`, testCluster, testTenant); err != nil {
+		t.Fatalf("seed the rolled entry: %v", err)
+	}
+	now := time.Now()
+	insertLockRowForTenant(t, db, testTenant+"/deploy", "run-b2", testTenant, testTenant+"/release",
+		FleetLockStateReleasing, now.Add(-10*time.Minute), now.Add(5*time.Minute))
+	if _, err := db.Exec(`UPDATE varroa.fleet_locks SET cell_instance = 'pod-b2' WHERE run_id = 'run-b2'`); err != nil {
+		t.Fatalf("set cell_instance: %v", err)
+	}
+
+	if resp := sendTenantSync(t, pool, conn, announceMembers(1, live)); !resp.Ok {
+		t.Fatalf("the announcement was refused: %+v", resp)
+	}
+	if d, ok := derivedEntry(t, db, "pod-b2"); ok {
+		t.Fatalf("the named live pod stays in dead_instances: %+v", d)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM varroa.fleet_locks WHERE run_id = 'run-b2'`).Scan(&n); err != nil {
+		t.Fatalf("count locks: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("the live pod's lock was released: %d rows left", n)
 	}
 }
 

@@ -212,6 +212,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   `00023_run_intents_granted_at.sql` adds the nullable
   `run_intents.granted_at`, the time of the last grant to the instance
   `cell_instance` names. A null value counts as an old grant.
+  `00024_tenant_placements_retired_incarnations.sql` adds
+  `tenant_placements.retired_incarnations`, a jsonb list of the
+  incarnations a take-over replaced, newest first. It defaults to `[]`.
   A later migration never edits an applied one. `migrationsFS` (`migrations.go`) embeds
   every file under `migrations/` into the binary through `embed.FS`, so
   the recorder needs no separate deploy artifact. Monthly partition
@@ -421,7 +424,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   own generation. That second test is what keeps a row written before the
   column existed from fencing the tenant that follows it.
   `keptIncarnation` never lets an announcement naming none erase the
-  stored value. **A take-over deletes every `job_schedules` row of the
+  stored value. **A take-over retires the stored incarnation**
+  (`retireIncarnation`): it adds that value to `retired_incarnations`.
+  The list keeps eight entries and has no time limit, because a
+  `metadata.uid` never comes back. A teardown purge retires nothing,
+  because a `Team` that drops `spec.pipelines` keeps its uid and can add
+  the field again. **A take-over deletes every `job_schedules` row of the
   name** (`deleteTenantJobSchedules`), inside the same transaction: a cell
   exports a tenant's jobs only after the announce that placed it, so at
   that moment every row belongs to the tenant before this one, and a row
@@ -467,15 +475,23 @@ of the fleet's audit activity, once a controller becomes disposable.
   stale announce before any write**: a take-over is never stale; otherwise a
   generation below the stored one, or a request that names an instance the
   stored list proves replaced (`confirmed_gone_at` set, or `derived:
-  rolled`) and no stored member holds. A `dropped` entry proves nothing,
+  rolled`) and no stored member holds. A request that names a retired
+  incarnation is stale before the take-over test, so a late announcement
+  of a replaced object can never take the row back; the log line carries
+  `reason=retired incarnation`. A `dropped` entry proves nothing,
   because a tenant can return to the live pod of a cell it left. A request
   that confirms a stored member's instance gone is never stale on that
   test. A stale announce writes no column, runs no sweep, and answers
   `stale: true` with no `ok`, so the operator caches nothing and writes no
   placement status. An operator entry for the same
-  instance clears the tag in `mergeDeadInstances`. `trimDeadInstances`
-  sorts its input before it trims, because the derived entries join the
-  end of the merged list.
+  instance clears the tag in `mergeDeadInstances`.
+  **An accepted announce removes every unconfirmed entry for an instance
+  it names** (`pruneNamedUnconfirmed`, between the merge and the
+  derivation): the request proves that pod live. A confirmed entry stays.
+  Without the removal, a `rolled` entry for a live slot-1 pod releases its
+  fleet lock. A returned pod that rolls later is then never derived again.
+  `trimDeadInstances` sorts its input before it trims, because the derived
+  entries join the end of the merged list.
   `fleetLockOwnerConfirmedGone` counts an entry only with a confirmation
   older than the grace, or with the `rolled` tag past the moved window. Any
   other entry with no confirmation releases no lock, because the cell the

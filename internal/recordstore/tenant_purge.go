@@ -168,6 +168,10 @@ func purgeTenant(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, r
 // tenant with no row answers the purge too, because the schedule rows can
 // outlive the placement row.
 //
+// The purge never adds the incarnation to retired_incarnations. A Team
+// that drops spec.pipelines tears down with its uid unchanged, and it can
+// add the field again under that same uid.
+//
 // A purge the test refuses writes nothing at all. The rows the torn-down
 // tenant left are already gone: the announcement that took the row over
 // deleted every job_schedules row of the name, because at that moment

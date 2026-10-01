@@ -175,6 +175,9 @@ type tenantPlacementRow struct {
 	// empty value means unknown: the row was written before the column
 	// existed, or by a caller that names no incarnation.
 	incarnation string
+	// retiredIncarnations holds the incarnations a take-over replaced,
+	// newest first. An announcement that names one is stale.
+	retiredIncarnations []string
 	// members holds the stored member list, resolved through the row's
 	// own scalar columns. A row with an empty stored list therefore
 	// answers one synthetic slot-0 member, so an upgraded tenant keeps
@@ -196,7 +199,8 @@ type tenantPlacementRow struct {
 // as-is.
 //
 // The handler adds the dead instances deriveDeadInstances derives from a
-// changed or dropped member, inside the same transaction.
+// changed or dropped member, inside the same transaction. Before that it
+// removes every unconfirmed entry for an instance the request names.
 //
 // An announcement whose cell or cell_instance differs from the row
 // stored before this call, or that derived a dead instance, runs the
@@ -250,11 +254,16 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 	stampsIncarnation := old.incarnation == "" && req.Incarnation != ""
 
 	if staleAnnounce(staleAnnounceInput{
-		takeOver: takeOver, storedGeneration: old.generation,
+		takeOver: takeOver, retired: old.retiredIncarnations, storedGeneration: old.generation,
 		prior: old.members, stored: old.deadInstances, req: req,
 	}) {
+		reason := "older state"
+		if retiredIncarnation(old.retiredIncarnations, req.Incarnation) {
+			reason = "retired incarnation"
+		}
 		logger.Info("tenant sync announce refused as stale",
-			"cluster", req.Cluster, "tenant", req.Tenant,
+			"cluster", req.Cluster, "tenant", req.Tenant, "reason", reason,
+			"incarnation", req.Incarnation, "storedIncarnation", old.incarnation,
 			"generation", req.Generation, "storedGeneration", old.generation,
 			"cellInstance", req.CellInstance, "storedCellInstance", old.cellInstance)
 		return TenantSyncResponse{Stale: true}, nil
@@ -294,12 +303,17 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 	}
 	members := resolveAnnouncedMembers(old.members, req.Members, generationRaised)
 
-	listed := mergeDeadInstances(old.deadInstances, req.DeadInstances)
+	announced := newPlacementMembers(members, nil, placementScalars{
+		cell: req.Cell, namespace: req.Namespace, cellInstance: req.CellInstance,
+	}).members
+	// An accepted announcement proves every instance it names live. An
+	// unconfirmed entry for such an instance leaves the list before the
+	// derivation reads it.
+	listed := pruneNamedUnconfirmed(mergeDeadInstances(old.deadInstances, req.DeadInstances),
+		announcedInstances(req.CellInstance, announced))
 	derived := deriveDeadInstances(deadInstanceDerivation{
-		prior: old.members,
-		announced: newPlacementMembers(members, nil, placementScalars{
-			cell: req.Cell, namespace: req.Namespace, cellInstance: req.CellInstance,
-		}).members,
+		prior:           old.members,
+		announced:       announced,
 		requestInstance: req.CellInstance,
 		listed:          listed,
 		now:             time.Now(),
@@ -324,8 +338,19 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 		}
 	}
 
+	// A take-over retires the stored incarnation, so a late announcement
+	// of the replaced tenant object can never take the row back. The
+	// second take-over arm names no stored incarnation and retires none.
+	retired := old.retiredIncarnations
+	if takeOver {
+		retired = retireIncarnation(retired, old.incarnation)
+	}
+
 	if err := writeTenantPlacement(ctx, tx, req, newGeneration, rehydratedInstance, pendingJobs,
-		deadInstances, members, jobHomes, keptIncarnation(old.incarnation, req.Incarnation)); err != nil {
+		deadInstances, members, jobHomes, placementIdentity{
+			incarnation: keptIncarnation(old.incarnation, req.Incarnation),
+			retired:     retired,
+		}); err != nil {
 		return TenantSyncResponse{}, err
 	}
 	homeView := newPlacementMembers(members, jobHomes, placementScalars{cell: req.Cell, namespace: req.Namespace})
@@ -418,15 +443,17 @@ func readTenantPlacementForUpdate(ctx context.Context, tx pgx.Tx, cluster, tenan
 		membersRaw         json.RawMessage
 		jobHomesRaw        json.RawMessage
 		incarnation        string
+		retiredRaw         json.RawMessage
 	)
 	err := tx.QueryRow(ctx, `
 		SELECT generation, cell, namespace, cell_instance, rehydrated_instance,
-		       dead_instances, pending_jobs, members, job_homes, incarnation
+		       dead_instances, pending_jobs, members, job_homes, incarnation,
+		       retired_incarnations
 		FROM varroa.tenant_placements
 		WHERE cluster = $1 AND tenant = $2
 		FOR UPDATE
 	`, cluster, tenant).Scan(&generation, &cell, &namespace, &cellInstance, &rehydratedInstance,
-		&deadRaw, &pendingRaw, &membersRaw, &jobHomesRaw, &incarnation)
+		&deadRaw, &pendingRaw, &membersRaw, &jobHomesRaw, &incarnation, &retiredRaw)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return tenantPlacementRow{jobHomes: map[string]int32{}}, nil
@@ -438,6 +465,12 @@ func readTenantPlacementForUpdate(ctx context.Context, tx pgx.Tx, cluster, tenan
 	if len(deadRaw) > 0 {
 		if err := json.Unmarshal(deadRaw, &dead); err != nil {
 			return tenantPlacementRow{}, fmt.Errorf("decode dead instances: %w", err)
+		}
+	}
+	var retired []string
+	if len(retiredRaw) > 0 {
+		if err := json.Unmarshal(retiredRaw, &retired); err != nil {
+			return tenantPlacementRow{}, fmt.Errorf("decode retired incarnations: %w", err)
 		}
 	}
 	var pending []string
@@ -456,7 +489,8 @@ func readTenantPlacementForUpdate(ctx context.Context, tx pgx.Tx, cluster, tenan
 	return tenantPlacementRow{
 		generation: generation, cell: cell, cellInstance: cellInstance,
 		rehydratedInstance: rehydratedInstance, pendingJobs: pending, deadInstances: dead,
-		incarnation: incarnation, members: decoded.members, jobHomes: decoded.jobHomes,
+		incarnation: incarnation, retiredIncarnations: retired,
+		members: decoded.members, jobHomes: decoded.jobHomes,
 	}, nil
 }
 
@@ -672,13 +706,21 @@ func trimDeadInstances(merged []TenantSyncDeadInstance, keep map[string]bool, li
 	return out
 }
 
+// placementIdentity holds the identity columns writeTenantPlacement
+// stores: the tenant object's incarnation and the incarnations a take-over
+// retired.
+type placementIdentity struct {
+	incarnation string
+	retired     []string
+}
+
 // writeTenantPlacement upserts cluster/tenant's row with the computed
-// generation, seed fields, and incarnation, inside tx. A NOT NULL jsonb
+// generation, seed fields, and identity, inside tx. A NOT NULL jsonb
 // column never receives a Go nil: an empty policy becomes "{}", and empty
 // pending_jobs and dead_instances lists become "[]".
 func writeTenantPlacement(ctx context.Context, tx pgx.Tx, req TenantSyncRequest, generation int64,
 	rehydratedInstance string, pendingJobs []string, deadInstances []TenantSyncDeadInstance,
-	members []member, jobHomes map[string]int32, incarnation string) error {
+	members []member, jobHomes map[string]int32, identity placementIdentity) error {
 	policy := req.Policy
 	if len(policy) == 0 {
 		policy = json.RawMessage(`{}`)
@@ -699,15 +741,20 @@ func writeTenantPlacement(ctx context.Context, tx pgx.Tx, req TenantSyncRequest,
 	if err != nil {
 		return fmt.Errorf("encode job homes: %w", err)
 	}
+	retiredJSON, err := json.Marshal(nonNilStrings(identity.retired))
+	if err != nil {
+		return fmt.Errorf("encode retired incarnations: %w", err)
+	}
 
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO varroa.tenant_placements (
 			cluster, tenant, namespace, cell, generation, cell_instance, policy,
 			rehydrated_instance, pending_jobs, cell_alive, cell_alive_at, cell_last_seen_at,
-			dead_instances, announced_at, members, job_homes, incarnation, agent_namespace
+			dead_instances, announced_at, members, job_homes, incarnation, agent_namespace,
+			retired_incarnations
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::jsonb, $10, $11, $12, $13::jsonb, now(),
-			$14::jsonb, $15::jsonb, $16, $17
+			$14::jsonb, $15::jsonb, $16, $17, $18::jsonb
 		)
 		ON CONFLICT (cluster, tenant) DO UPDATE SET
 			namespace           = EXCLUDED.namespace,
@@ -725,12 +772,13 @@ func writeTenantPlacement(ctx context.Context, tx pgx.Tx, req TenantSyncRequest,
 			members             = EXCLUDED.members,
 			job_homes           = EXCLUDED.job_homes,
 			incarnation         = EXCLUDED.incarnation,
-			agent_namespace     = EXCLUDED.agent_namespace
+			agent_namespace     = EXCLUDED.agent_namespace,
+			retired_incarnations = EXCLUDED.retired_incarnations
 	`,
 		req.Cluster, req.Tenant, req.Namespace, req.Cell, generation, req.CellInstance, string(policy),
 		rehydratedInstance, string(pendingJobsJSON), req.CellAlive, req.CellAliveAt, req.CellLastSeenAt,
-		string(deadInstancesJSON), string(membersJSON), string(jobHomesJSON), incarnation,
-		req.AgentNamespace,
+		string(deadInstancesJSON), string(membersJSON), string(jobHomesJSON), identity.incarnation,
+		req.AgentNamespace, string(retiredJSON),
 	); err != nil {
 		return fmt.Errorf("upsert tenant placement: %w", err)
 	}

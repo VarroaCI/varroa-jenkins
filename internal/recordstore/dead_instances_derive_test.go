@@ -293,9 +293,9 @@ func TestFleetLockOwnerConfirmedGoneNeedsAConfirmationForAnOperatorEntry(t *test
 }
 
 func TestDeriveDeadInstancesDerivesAgainAfterAReturnToALivePod(t *testing.T) {
-	// The tenant left cell-a, and pod-a1 stayed listed. The tenant came
-	// back to pod-a1, so the stored members hold it again. A later drop
-	// of cell-b derives as usual.
+	// An entry for pod-a1 is listed, and the stored members hold pod-a1.
+	// The entry changes nothing for the other members: a drop of cell-b
+	// derives as usual.
 	in := deriveCase(
 		[]member{activeMember("cell-a", 0, "pod-a1"), activeMember("cell-b", 1, "pod-b1")},
 		[]member{activeMember("cell-a", 0, "pod-a1")},
@@ -319,5 +319,83 @@ func TestTrimDeadInstancesKeepsANewestEntryAppendedLast(t *testing.T) {
 	got := trimDeadInstances(merged, nil, maxDeadInstances)
 	if len(got) != maxDeadInstances || got[0].Instance != "pod-derived" {
 		t.Fatalf("want the newest entry kept first, got %+v", got)
+	}
+}
+
+func TestStaleAnnounceRetiredIncarnationIsStale(t *testing.T) {
+	// A take-over back to an incarnation the row already replaced is stale.
+	in := staleCase([]member{activeMember("cell-a", 0, "pod-a2")}, []member{activeMember("cell-a", 0, "pod-a1")})
+	in.takeOver = true
+	in.req.Incarnation = "uid-old"
+	in.retired = []string{"uid-old"}
+	if !staleAnnounce(in) {
+		t.Fatal("a request that names a retired incarnation is stale")
+	}
+}
+
+func TestStaleAnnounceEmptyIncarnationIsNeverRetired(t *testing.T) {
+	in := staleCase([]member{activeMember("cell-a", 0, "pod-a1")}, []member{activeMember("cell-a", 0, "pod-a1")})
+	in.retired = []string{"uid-old"}
+	if staleAnnounce(in) {
+		t.Fatal("a request that names no incarnation is not retired")
+	}
+}
+
+func TestRetireIncarnationKeepsNewestFirstAndBounds(t *testing.T) {
+	var retired []string
+	for i := 0; i < maxRetiredIncarnations+2; i++ {
+		retired = retireIncarnation(retired, "uid-"+string(rune('a'+i)))
+	}
+	if len(retired) != maxRetiredIncarnations {
+		t.Fatalf("want %d entries, got %v", maxRetiredIncarnations, retired)
+	}
+	if retired[0] != "uid-"+string(rune('a'+maxRetiredIncarnations+1)) {
+		t.Fatalf("want the newest entry first, got %v", retired)
+	}
+}
+
+func TestRetireIncarnationIgnoresEmptyAndRepeat(t *testing.T) {
+	retired := retireIncarnation(nil, "uid-a")
+	retired = retireIncarnation(retired, "")
+	retired = retireIncarnation(retired, "uid-a")
+	if len(retired) != 1 || retired[0] != "uid-a" {
+		t.Fatalf("want [uid-a], got %v", retired)
+	}
+}
+
+func TestPruneNamedUnconfirmedDropsDroppedAndRolled(t *testing.T) {
+	now := time.Now()
+	listed := []TenantSyncDeadInstance{
+		{Instance: "pod-b1", LastSeenAt: now, Derived: DeadInstanceDerivedDropped},
+		{Instance: "pod-a2", LastSeenAt: now, Derived: DeadInstanceDerivedRolled},
+		{Instance: "pod-c1", LastSeenAt: now},
+	}
+	got := pruneNamedUnconfirmed(listed, map[string]bool{"pod-b1": true, "pod-a2": true, "pod-c1": true})
+	if len(got) != 0 {
+		t.Fatalf("want every unconfirmed named entry removed, got %+v", got)
+	}
+}
+
+func TestPruneNamedUnconfirmedKeepsAConfirmedEntry(t *testing.T) {
+	now := time.Now()
+	listed := []TenantSyncDeadInstance{{Instance: "pod-a1", LastSeenAt: now, ConfirmedGoneAt: &now}}
+	got := pruneNamedUnconfirmed(listed, map[string]bool{"pod-a1": true})
+	if len(got) != 1 {
+		t.Fatalf("want the confirmed entry kept, got %+v", got)
+	}
+}
+
+func TestPruneNamedUnconfirmedKeepsAnUnnamedEntry(t *testing.T) {
+	listed := []TenantSyncDeadInstance{{Instance: "pod-b1", LastSeenAt: time.Now(), Derived: DeadInstanceDerivedDropped}}
+	got := pruneNamedUnconfirmed(listed, map[string]bool{"pod-a1": true})
+	if len(got) != 1 {
+		t.Fatalf("want the unnamed entry kept, got %+v", got)
+	}
+}
+
+func TestAnnouncedInstancesHoldsTheScalarAndEveryMember(t *testing.T) {
+	named := announcedInstances("pod-x", []member{activeMember("cell-a", 0, "pod-a1"), activeMember("cell-b", 1, "")})
+	if !named["pod-x"] || !named["pod-a1"] || named[""] || len(named) != 2 {
+		t.Fatalf("want pod-x and pod-a1, got %v", named)
 	}
 }
