@@ -815,6 +815,7 @@ type StatefulSetSpec struct {
 	ImagePullSecrets              []string
 	ServiceAccountName            string
 	OIDCIssuer                    string
+	LocalIssuer                   string
 	VarroaLoginURL                string
 	OIDCUserClaim                 string
 	OIDCGroupClaim                string
@@ -949,7 +950,7 @@ type ResourceClient interface {
 	// (design D11).
 	CreateServiceAccountTokenSecret(ctx context.Context, name, namespace, serviceAccount string) error
 	CreateStatefulSet(ctx context.Context, spec StatefulSetSpec) error
-	UpdateStatefulSetOIDCEnv(ctx context.Context, name, namespace, oidcIssuer, loginURL, oidcUserClaim, oidcGroupClaim, pubKeyPEM, pubKeyKID, aud, apikeyVerifyURL, caPEM string) error
+	UpdateStatefulSetOIDCEnv(ctx context.Context, name, namespace string, authEnv JenkinsAuthEnv) error
 	EnsureStatefulSetPodLabel(ctx context.Context, namespace, stsName, key, value string) (bool, error)
 	IsStatefulSetReady(ctx context.Context, name, namespace string) (bool, error)
 	// GetStatefulSetPluginsChecksum returns the plugins-checksum annotation from the
@@ -3294,7 +3295,18 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 	// if values differ, so calling it every tick is safe and idempotent.
 	currentIssuer := r.Resolver.OIDCIssuer()
 	currentLoginURL := r.Resolver.LoginURL(r.varroaRedirectURL)
-	if err := r.client.UpdateStatefulSetOIDCEnv(ctx, controllerPrefix(cr), cr.Namespace, currentIssuer, currentLoginURL, r.Resolver.OIDCUserClaim(), r.Resolver.OIDCGroupClaim(), r.mitePubKeyPEM(), r.mitePubKeyKID(), cr.Namespace+"/"+cr.Name, r.apikeyVerifyURL(), r.caPEM); err != nil {
+	if err := r.client.UpdateStatefulSetOIDCEnv(ctx, controllerPrefix(cr), cr.Namespace, JenkinsAuthEnv{
+		OIDCIssuer:      currentIssuer,
+		LocalIssuer:     r.Resolver.LocalIssuer(),
+		LoginURL:        currentLoginURL,
+		OIDCUserClaim:   r.Resolver.OIDCUserClaim(),
+		OIDCGroupClaim:  r.Resolver.OIDCGroupClaim(),
+		PubKeyPEM:       r.mitePubKeyPEM(),
+		PubKeyKID:       r.mitePubKeyKID(),
+		Aud:             cr.Namespace + "/" + cr.Name,
+		ApikeyVerifyURL: r.apikeyVerifyURL(),
+		CAPEM:           r.caPEM,
+	}); err != nil {
 		logger.Error("failed to sync StatefulSet OIDC env", "error", err)
 	}
 	r.reconcileFleetPodLabel(ctx, cr)
@@ -6378,6 +6390,7 @@ func generateRealmDocument() string {
   securityRealm:
     varroaMiteAuth:
       oidcIssuer: "${VARROA_OIDC_ISSUER}"
+      localIssuer: "${VARROA_LOCAL_ISSUER:-}"
       userClaimNames: "${VARROA_OIDC_USER_CLAIM}"
       groupClaimName: "${VARROA_OIDC_GROUP_CLAIM}"
 `

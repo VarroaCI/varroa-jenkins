@@ -52,6 +52,13 @@ reading each package's entry point):
   `oidc|local|ldap`) plus HTTP middleware (`middleware.go`) that resolves
   request claims; subpackages `auth/local`, `auth/ldap`, `auth/identity`,
   `auth/userdirectory`, `auth/schedule` hold provider-specific logic.
+  `multi.go`'s `MultiProvider` serves local accounts beside OIDC
+  (`--local-accounts`). It selects the verifier by the unverified `iss`. It
+  refuses an IdP token whose `sub` or `preferred_username` starts with
+  `LocalSubjectPrefix` (`local:`). Only a local session beside OIDC carries that
+  prefix. `auth.IsLocalSession` is the one test for it. Every claim-to-`User`
+  mapping (`identity.UserResourceName`, the API-key group ladder) strips it. The
+  API-key owner label is `local.<name>`, because a label value cannot hold `:`.
 - **`apikey/`** — `vk_`-prefixed API key generation/parsing (`token.go`:
   `Generate`/`Parse`, prefix+secret split), verification HTTP handler
   (`httphandler.go`), and in-memory last-used tracking with a periodic flush

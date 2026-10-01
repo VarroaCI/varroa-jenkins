@@ -1642,6 +1642,7 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 											// mite's drift-baseline /configuration-as-code/export 403s.
 											{"name": "JAVA_OPTS", "value": javaOptsValue},
 											{"name": "VARROA_OIDC_ISSUER", "value": spec.OIDCIssuer},
+											{"name": "VARROA_LOCAL_ISSUER", "value": spec.LocalIssuer},
 											{"name": "VARROA_LOGIN_URL", "value": spec.VarroaLoginURL},
 											{"name": "VARROA_OIDC_USER_CLAIM", "value": spec.OIDCUserClaim},
 											{"name": "VARROA_OIDC_GROUP_CLAIM", "value": spec.OIDCGroupClaim},
@@ -2359,11 +2360,52 @@ func (c *ClientsetClient) CreateStatefulSet(ctx context.Context, spec StatefulSe
 	return err
 }
 
-// UpdateStatefulSetOIDCEnv patches the VARROA_OIDC_ISSUER and VARROA_LOGIN_URL
-// env vars on an existing StatefulSet's Jenkins container without rebuilding
-// the full StatefulSet spec. Note: changing env vars updates the pod template,
-// so the StatefulSet controller will perform a rolling update to apply them.
-func (c *ClientsetClient) UpdateStatefulSetOIDCEnv(ctx context.Context, name, namespace, oidcIssuer, loginURL, oidcUserClaim, oidcGroupClaim, pubKeyPEM, pubKeyKID, aud, apikeyVerifyURL, caPEM string) error {
+// JenkinsAuthEnv holds the auth env vars the operator keeps in sync on the
+// Jenkins container of a running StatefulSet.
+type JenkinsAuthEnv struct {
+	OIDCIssuer string
+	// LocalIssuer is the issuer of local account sessions beside OIDC, or
+	// "" when local accounts are off. The env var is always present so the
+	// realm's JCasC reference resolves.
+	LocalIssuer     string
+	LoginURL        string
+	OIDCUserClaim   string
+	OIDCGroupClaim  string
+	PubKeyPEM       string
+	PubKeyKID       string
+	Aud             string
+	ApikeyVerifyURL string
+	CAPEM           string
+}
+
+// entries returns the env vars in a fixed order. always marks a variable
+// that is added even when its value is empty.
+func (e JenkinsAuthEnv) entries() []struct {
+	name, value string
+	always      bool
+} {
+	return []struct {
+		name, value string
+		always      bool
+	}{
+		{"VARROA_OIDC_ISSUER", e.OIDCIssuer, true},
+		{"VARROA_LOCAL_ISSUER", e.LocalIssuer, true},
+		{"VARROA_LOGIN_URL", e.LoginURL, true},
+		{"VARROA_OIDC_USER_CLAIM", e.OIDCUserClaim, false},
+		{"VARROA_OIDC_GROUP_CLAIM", e.OIDCGroupClaim, false},
+		{"VARROA_MITE_PUBKEY_PEM", e.PubKeyPEM, false},
+		{"VARROA_MITE_PUBKEY_KID", e.PubKeyKID, false},
+		{"VARROA_MITE_AUD", e.Aud, false},
+		{"VARROA_APIKEY_VERIFY_URL", e.ApikeyVerifyURL, false},
+		{"VARROA_CA_PEM", e.CAPEM, false},
+	}
+}
+
+// UpdateStatefulSetOIDCEnv patches the auth env vars on an existing
+// StatefulSet's Jenkins container without rebuilding the full StatefulSet
+// spec. Note: changing env vars updates the pod template, so the StatefulSet
+// controller will perform a rolling update to apply them.
+func (c *ClientsetClient) UpdateStatefulSetOIDCEnv(ctx context.Context, name, namespace string, authEnv JenkinsAuthEnv) error {
 	gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
 	sts, err := c.dynamic.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
@@ -2388,112 +2430,8 @@ func (c *ClientsetClient) UpdateStatefulSetOIDCEnv(ctx context.Context, name, na
 		return fmt.Errorf("jenkins container not found in statefulset")
 	}
 
-	needUpdate := false
-	envs, found, _ := unstructured.NestedSlice(jenkins, "env")
-	if !found {
-		envs = make([]interface{}, 0)
-	}
-
-	// Upsert OIDC env vars.
-	issuerFound, loginFound, userClaimFound, groupClaimFound, pubKeyFound, kidFound, audFound := false, false, false, false, false, false, false
-	apikeyURLFound, caPEMFound := false, false
-	for i, e := range envs {
-		env, _ := e.(map[string]interface{})
-		name, _, _ := unstructured.NestedString(env, "name")
-		switch name {
-		case "VARROA_OIDC_ISSUER":
-			issuerFound = true
-			if old, _, _ := unstructured.NestedString(env, "value"); old != oidcIssuer {
-				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), oidcIssuer, "value")
-				needUpdate = true
-			}
-		case "VARROA_LOGIN_URL":
-			loginFound = true
-			if old, _, _ := unstructured.NestedString(env, "value"); old != loginURL {
-				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), loginURL, "value")
-				needUpdate = true
-			}
-		case "VARROA_OIDC_USER_CLAIM":
-			userClaimFound = true
-			if old, _, _ := unstructured.NestedString(env, "value"); old != oidcUserClaim {
-				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), oidcUserClaim, "value")
-				needUpdate = true
-			}
-		case "VARROA_OIDC_GROUP_CLAIM":
-			groupClaimFound = true
-			if old, _, _ := unstructured.NestedString(env, "value"); old != oidcGroupClaim {
-				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), oidcGroupClaim, "value")
-				needUpdate = true
-			}
-		case "VARROA_MITE_PUBKEY_PEM":
-			pubKeyFound = true
-			if old, _, _ := unstructured.NestedString(env, "value"); old != pubKeyPEM {
-				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), pubKeyPEM, "value")
-				needUpdate = true
-			}
-		case "VARROA_MITE_PUBKEY_KID":
-			kidFound = true
-			if old, _, _ := unstructured.NestedString(env, "value"); old != pubKeyKID {
-				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), pubKeyKID, "value")
-				needUpdate = true
-			}
-		case "VARROA_MITE_AUD":
-			audFound = true
-			if old, _, _ := unstructured.NestedString(env, "value"); old != aud {
-				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), aud, "value")
-				needUpdate = true
-			}
-		case "VARROA_APIKEY_VERIFY_URL":
-			apikeyURLFound = true
-			if old, _, _ := unstructured.NestedString(env, "value"); old != apikeyVerifyURL {
-				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), apikeyVerifyURL, "value")
-				needUpdate = true
-			}
-		case "VARROA_CA_PEM":
-			caPEMFound = true
-			if old, _, _ := unstructured.NestedString(env, "value"); old != caPEM {
-				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), caPEM, "value")
-				needUpdate = true
-			}
-		}
-	}
-	if !issuerFound {
-		envs = append(envs, map[string]interface{}{"name": "VARROA_OIDC_ISSUER", "value": oidcIssuer})
-		needUpdate = true
-	}
-	if !loginFound {
-		envs = append(envs, map[string]interface{}{"name": "VARROA_LOGIN_URL", "value": loginURL})
-		needUpdate = true
-	}
-	if !userClaimFound && oidcUserClaim != "" {
-		envs = append(envs, map[string]interface{}{"name": "VARROA_OIDC_USER_CLAIM", "value": oidcUserClaim})
-		needUpdate = true
-	}
-	if !groupClaimFound && oidcGroupClaim != "" {
-		envs = append(envs, map[string]interface{}{"name": "VARROA_OIDC_GROUP_CLAIM", "value": oidcGroupClaim})
-		needUpdate = true
-	}
-	if !pubKeyFound && pubKeyPEM != "" {
-		envs = append(envs, map[string]interface{}{"name": "VARROA_MITE_PUBKEY_PEM", "value": pubKeyPEM})
-		needUpdate = true
-	}
-	if !kidFound && pubKeyKID != "" {
-		envs = append(envs, map[string]interface{}{"name": "VARROA_MITE_PUBKEY_KID", "value": pubKeyKID})
-		needUpdate = true
-	}
-	if !audFound && aud != "" {
-		envs = append(envs, map[string]interface{}{"name": "VARROA_MITE_AUD", "value": aud})
-		needUpdate = true
-	}
-	if !apikeyURLFound && apikeyVerifyURL != "" {
-		envs = append(envs, map[string]interface{}{"name": "VARROA_APIKEY_VERIFY_URL", "value": apikeyVerifyURL})
-		needUpdate = true
-	}
-	if !caPEMFound && caPEM != "" {
-		envs = append(envs, map[string]interface{}{"name": "VARROA_CA_PEM", "value": caPEM})
-		needUpdate = true
-	}
-
+	envs, _, _ := unstructured.NestedSlice(jenkins, "env")
+	envs, needUpdate := upsertAuthEnv(envs, authEnv)
 	if !needUpdate {
 		return nil
 	}
@@ -2503,6 +2441,32 @@ func (c *ClientsetClient) UpdateStatefulSetOIDCEnv(ctx context.Context, name, na
 
 	_, err = c.dynamic.Resource(gvr).Namespace(namespace).Update(ctx, sts, metav1.UpdateOptions{})
 	return err
+}
+
+// upsertAuthEnv sets each auth env var in envs. It reports whether envs
+// changed.
+func upsertAuthEnv(envs []interface{}, authEnv JenkinsAuthEnv) ([]interface{}, bool) {
+	changed := false
+	for _, want := range authEnv.entries() {
+		found := false
+		for i, e := range envs {
+			env, _ := e.(map[string]interface{})
+			if n, _, _ := unstructured.NestedString(env, "name"); n != want.name {
+				continue
+			}
+			found = true
+			if old, _, _ := unstructured.NestedString(env, "value"); old != want.value {
+				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), want.value, "value")
+				changed = true
+			}
+			break
+		}
+		if !found && (want.always || want.value != "") {
+			envs = append(envs, map[string]interface{}{"name": want.name, "value": want.value})
+			changed = true
+		}
+	}
+	return envs, changed
 }
 
 // EnsureStatefulSetPodLabel adds a pod-template label to an existing StatefulSet.

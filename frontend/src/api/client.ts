@@ -673,7 +673,12 @@ export interface UserEntry {
   groups: string[];
   lastLogin?: string;
   managedBy: string;
+  /** Purpose of a local account beside OIDC. */
+  purpose?: AccountPurpose;
 }
+
+/** The purpose a local account beside OIDC carries. */
+export type AccountPurpose = "service" | "break-glass";
 
 export function listUsers(): Promise<UserEntry[]> {
   return bffFetch<{items: UserEntry[]}>("/users").then(r => r.items);
@@ -685,6 +690,8 @@ export interface CreateUserBody {
   displayName?: string;
   password: string;
   groups?: string[];
+  /** Required when local accounts run beside OIDC. */
+  purpose?: AccountPurpose;
 }
 
 export function createUser(body: CreateUserBody): Promise<{ name: string }> {
@@ -701,6 +708,8 @@ export function deleteUser(name: string): Promise<void> {
 export interface UpdateUserBody {
   email?: string;
   displayName?: string;
+  /** Required when local accounts run beside OIDC. */
+  purpose?: AccountPurpose;
 }
 
 export function updateUser(name: string, body: UpdateUserBody): Promise<{ name: string }> {

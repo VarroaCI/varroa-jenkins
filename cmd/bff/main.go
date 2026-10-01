@@ -97,7 +97,8 @@ func main() {
 	ldapCACertFile := flag.String("ldap-ca-cert-file", envDefault("VARROA_LDAP_CA_CERT_FILE", ""), "Path to a PEM CA bundle used to verify the LDAP server certificate")
 	kubeconfigPath := flag.String("kubeconfig", "", "Explicit kubeconfig path")
 	authMode := flag.String("auth-mode", envDefault("VARROA_AUTH_MODE", "oidc"), "Auth mode: oidc, local, or ldap")
-	bffURL := flag.String("bff-url", envDefault("VARROA_BFF_URL", ""), "BFF URL (required when auth-mode=local or ldap)")
+	bffURL := flag.String("bff-url", envDefault("VARROA_BFF_URL", ""), "BFF URL (required when auth-mode=local or ldap, or with --local-accounts)")
+	localAccounts := flag.Bool("local-accounts", envDefault("VARROA_LOCAL_ACCOUNTS", "") == "true", "Accept declared local accounts beside OIDC (auth-mode=oidc only)")
 	dashboardURL := flag.String("dashboard-url", envDefault("VARROA_DASHBOARD_URL", ""), "External dashboard URL (required in OIDC mode; absolute HTTPS origin)")
 	logLevel := flag.String("log-level", "info", "Log level: debug, info, warn, error")
 	logFormat := flag.String("log-format", "text", "Log format: text, json")
@@ -147,6 +148,10 @@ func main() {
 		}
 	} else if *authMode == "oidc" {
 		logger.Error("--dashboard-url is required in OIDC auth mode")
+		os.Exit(1)
+	}
+	if *localAccounts && *authMode != "oidc" {
+		logger.Error("--local-accounts is only valid with auth-mode=oidc", "authMode", *authMode)
 		os.Exit(1)
 	}
 
@@ -924,6 +929,37 @@ func main() {
 			provider = validator
 
 			logger.Info("OIDC auth enabled", "issuer", *oidcIssuer, "endSessionSupported", validator.EndSessionEndpoint() != "")
+
+			if *localAccounts {
+				if *bffURL == "" {
+					logger.Error("--bff-url is required with --local-accounts")
+					os.Exit(1)
+				}
+				if signer == nil {
+					logger.Error("signing key not available for local accounts; ensure the operator Secret exists")
+					os.Exit(1)
+				}
+				lp := localpkg.New(signer, bffUserStore{clientsetClient, client}, operatorNamespace, *bffURL, *oidcClientID, 8*time.Hour, *oidcCookieDomain)
+				lp.SetBesideOIDC(true)
+				apiDeps.Local = lp
+				provider = auth.NewMultiProvider(validator, lp, *bffURL)
+				logger.Info("local accounts enabled beside OIDC", "localIssuer", *bffURL, "kid", signer.KID())
+
+				// Controllers fetch the local issuer keys from these endpoints.
+				if cfg, jwks, ok2 := lp.Discovery(); ok2 {
+					mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+						w.Header().Set("Content-Type", "application/json")
+						w.Write(cfg)
+					})
+					mux.HandleFunc("/.well-known/jwks.json", func(w http.ResponseWriter, _ *http.Request) {
+						w.Header().Set("Content-Type", "application/json")
+						w.Write(jwks)
+					})
+				}
+			}
+		} else if *localAccounts {
+			logger.Error("--local-accounts needs an OIDC issuer")
+			os.Exit(1)
 		}
 	}
 
@@ -931,12 +967,13 @@ func main() {
 
 	// Populate identity configuration for the identity-settings endpoint.
 	apiDeps.IdentityConfig = api.IdentityConfig{
-		Mode:         *authMode,
-		Issuer:       *oidcIssuer,
-		ClientID:     *oidcClientID,
-		Scopes:       parseScopes(*oidcScopes),
-		CookieDomain: *oidcCookieDomain,
-		DefaultRead:  *defaultRead,
+		Mode:          *authMode,
+		Issuer:        *oidcIssuer,
+		ClientID:      *oidcClientID,
+		Scopes:        parseScopes(*oidcScopes),
+		CookieDomain:  *oidcCookieDomain,
+		DefaultRead:   *defaultRead,
+		LocalAccounts: *localAccounts,
 	}
 
 	// Stream-ticket issuer/verifier for header-less SSE auth. Requires the local RS256

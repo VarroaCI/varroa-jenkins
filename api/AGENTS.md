@@ -90,6 +90,9 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   `compat`, `conditions` — which means `internal/crdstore/registry.go` must
   clear each explicitly (`nil`, not `""`) or a merge patch leaves stale entries
   in etcd forever.
+- `UserSpec.Purpose` (`service`/`break-glass`) is optional in the schema: the
+  CRD cannot see the release mode, so the BFF enforces "a local account beside
+  OIDC needs a purpose" at sign-in and on user writes.
 - `validation.go` — hand-written Go validation (`ValidateJenkinsRole`, …)
   supplementing CEL. `routing.go` — ingress routing-mode helpers shared by
   operator+BFF. `bundleref.go` — `EffectiveBundleRef`/`StarterBundleName`, the

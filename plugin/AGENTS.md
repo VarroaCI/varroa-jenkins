@@ -20,7 +20,10 @@ the root AGENTS.md greenfield rule.
 
 - **Auth — two credential types**, both handled in `VarroaSecurityRealm.java`:
   1. `varroa_token` cookie (OIDC ID token from the BFF login) — `JWTValidator.java`
-     validates it **online** against the issuer's JWKS.
+     validates it **online** against the issuer's JWKS. Beside OIDC, a second
+     validator serves the `localIssuer` field. Its fallback is `VARROA_LOCAL_ISSUER`.
+     An empty value turns it off. `validateSession` picks the validator by the
+     unverified `iss`. It refuses an OIDC token whose subject starts with `local:`.
   2. `Authorization: Bearer` header: `vk_*` API keys go to `ApiKeyValidator.java`, which
      calls the gateway verify endpoint (`VARROA_APIKEY_VERIFY_URL`/`VARROA_CA_PEM`,
      60s/10s pos/neg cache TTL, errors never cached). Non-`vk_` Bearer is the mite

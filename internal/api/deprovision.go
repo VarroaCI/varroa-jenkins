@@ -12,9 +12,11 @@ import (
 )
 
 // deprovisionUser strips a user from all VarroaRoleBindings and
-// JenkinsRoleBindings, deletes bindings left empty, and removes the
-// user from Group.Members[] in local mode.
+// JenkinsRoleBindings, deletes bindings left empty, and removes a local
+// account from Group.Members[].
 func deprovisionUser(ctx context.Context, store crdstore.Backend, user *v1alpha1.User, mode string) error {
+	localAccount := mode == string(auth.AuthModeLocal) ||
+		user.Labels[v1alpha1.LabelManagedBy] == v1alpha1.ManagedByLocal
 	// Compute the set of identifiers that may appear in a binding's
 	// SubjectRef.Name for this user: subject, username, preferred_username, and
 	// email (a binding may reference any of these per --oidc-user-claim, default
@@ -22,6 +24,10 @@ func deprovisionUser(ctx context.Context, store crdstore.Backend, user *v1alpha1
 	// human label, never a binding subject, and would risk over-matching.
 	identifiers := map[string]bool{}
 	identifiers[user.Name] = true // local username; harmless oidc-hash for OIDC
+	if localAccount && mode != string(auth.AuthModeLocal) {
+		// A local account beside OIDC is bound as "local:<name>".
+		identifiers[auth.LocalSubjectPrefix+user.Name] = true
+	}
 	if sub := user.Annotations[v1alpha1.AnnotationOIDCSubject]; sub != "" {
 		identifiers[sub] = true
 	}
@@ -76,8 +82,8 @@ func deprovisionUser(ctx context.Context, store crdstore.Backend, user *v1alpha1
 		}
 	}
 
-	// --- Group membership (local mode only) ---
-	if mode == string(auth.AuthModeLocal) {
+	// --- Group membership (local accounts only) ---
+	if localAccount {
 		groupList, err := crdstore.List[v1alpha1.Group](ctx, store, "", "")
 		if err != nil {
 			return fmt.Errorf("list groups: %w", err)

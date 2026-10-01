@@ -24,12 +24,13 @@ type userListEntry struct {
 	Groups      []string   `json:"groups"`
 	LastLogin   *time.Time `json:"lastLogin,omitempty"`
 	ManagedBy   string     `json:"managedBy"`
+	Purpose     string     `json:"purpose,omitempty"`
 }
 
 // HandleUsers dispatches /users requests:
 //
 //	GET  /users       — list users (admin)
-//	POST /users       — create user (admin, local only)
+//	POST /users       — create user (admin, local accounts only)
 func (s *Server) HandleUsers(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -55,11 +56,10 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Pre-fetch groups for local-mode membership resolution.
+	// Pre-fetch groups for local account membership resolution.
 	mode := s.deps.IdentityConfig.Mode
 	var groups []*v1alpha1.Group
-	isLocal := mode == string(auth.AuthModeLocal)
-	if isLocal {
+	if s.localAccountsOn() {
 		groups, _ = crdstore.List[v1alpha1.Group](ctx, s.deps.Store, "", "")
 	}
 
@@ -70,13 +70,14 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 			Email:       u.Spec.Email,
 			DisplayName: u.Spec.DisplayName,
 			ManagedBy:   managedByLabel(u, mode),
+			Purpose:     string(u.Spec.Purpose),
 		}
 		if u.Status.LastLogin != nil {
 			t := u.Status.LastLogin.Time
 			entry.LastLogin = &t
 		}
 
-		if isLocal {
+		if entry.ManagedBy == v1alpha1.ManagedByLocal {
 			entry.Groups = groupsForUser(groups, u.Name)
 		} else {
 			entry.Groups = u.Status.ObservedGroups
@@ -98,11 +99,28 @@ type createUserRequest struct {
 	DisplayName string   `json:"displayName,omitempty"`
 	Password    string   `json:"password"`
 	Groups      []string `json:"groups,omitempty"`
+	Purpose     string   `json:"purpose,omitempty"`
+}
+
+// validatePurpose checks a local account purpose. Beside OIDC a purpose is
+// required; in local mode it is optional.
+func (s *Server) validatePurpose(purpose string) error {
+	switch v1alpha1.UserPurpose(purpose) {
+	case v1alpha1.UserPurposeService, v1alpha1.UserPurposeBreakGlass:
+		return nil
+	case "":
+		if s.deps.IdentityConfig.LocalAccounts {
+			return fmt.Errorf("purpose is required for a local account beside OIDC: service or break-glass")
+		}
+		return nil
+	default:
+		return fmt.Errorf("purpose must be service or break-glass")
+	}
 }
 
 func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
-	if s.deps.IdentityConfig.Mode != string(auth.AuthModeLocal) {
-		s.writeJSONError(w, http.StatusMethodNotAllowed, "user creation is only available in local auth mode")
+	if !s.localAccountsOn() {
+		s.writeJSONError(w, http.StatusMethodNotAllowed, "user creation is only available with local accounts")
 		return
 	}
 
@@ -126,6 +144,10 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		s.writeJSONError(w, http.StatusBadRequest, "password is required")
 		return
 	}
+	if err := s.validatePurpose(req.Purpose); err != nil {
+		s.writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	// Validate username as DNS-1123 before creating the CRD.
 	if err := identity.ValidateLocalUsername(req.Username); err != nil {
@@ -145,6 +167,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 			Email:       req.Email,
 			DisplayName: req.DisplayName,
 			Password:    req.Password,
+			Purpose:     v1alpha1.UserPurpose(req.Purpose),
 		},
 	}
 
@@ -162,13 +185,14 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 type updateUserRequest struct {
 	Email       string `json:"email"`
 	DisplayName string `json:"displayName"`
+	Purpose     string `json:"purpose,omitempty"`
 }
 
-// HandleUpdateUser handles PUT /users/{name}, updating a local user's email and
-// display name. Group membership is managed separately via the Groups endpoints.
+// HandleUpdateUser handles PUT /users/{name}, updating a local user's email,
+// display name, and purpose. Group membership is managed separately via the Groups endpoints.
 func (s *Server) HandleUpdateUser(w http.ResponseWriter, r *http.Request, name string) {
-	if s.deps.IdentityConfig.Mode != string(auth.AuthModeLocal) {
-		s.writeJSONError(w, http.StatusMethodNotAllowed, "user editing is only available in local auth mode")
+	if !s.localAccountsOn() {
+		s.writeJSONError(w, http.StatusMethodNotAllowed, "user editing is only available with local accounts")
 		return
 	}
 
@@ -183,7 +207,6 @@ func (s *Server) HandleUpdateUser(w http.ResponseWriter, r *http.Request, name s
 		s.writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
 	ctx := context.Background()
 	user, err := crdstore.Get[v1alpha1.User](ctx, s.deps.Store, name, s.deps.OperatorNamespace)
 	if err != nil || user == nil {
@@ -191,9 +214,26 @@ func (s *Server) HandleUpdateUser(w http.ResponseWriter, r *http.Request, name s
 		return
 	}
 
+	if managedByLabel(user, s.deps.IdentityConfig.Mode) != v1alpha1.ManagedByLocal {
+		s.writeJSONError(w, http.StatusBadRequest, "only a local account can be edited")
+		return
+	}
+
+	// An omitted purpose keeps the stored one, so an edit of other fields
+	// never clears the purpose that the sign-in gate reads.
+	purpose := req.Purpose
+	if purpose == "" {
+		purpose = string(user.Spec.Purpose)
+	}
+	if err := s.validatePurpose(purpose); err != nil {
+		s.writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	// Update identity fields only; never touch spec.password or status here.
 	user.Spec.Email = req.Email
 	user.Spec.DisplayName = req.DisplayName
+	user.Spec.Purpose = v1alpha1.UserPurpose(purpose)
 	if err := crdstore.Apply[v1alpha1.User](ctx, s.deps.Store, user); err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to update user")
 		return

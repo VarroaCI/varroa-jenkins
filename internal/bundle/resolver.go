@@ -116,6 +116,7 @@ type Resolver struct {
 	oidcClientSecret string
 	oidcUserClaim    string
 	oidcGroupClaim   string
+	localIssuer      string
 	Logger           *slog.Logger
 }
 
@@ -149,6 +150,13 @@ func (r *Resolver) OIDCUserClaim() string { return r.oidcUserClaim }
 
 // OIDCGroupClaim returns the configured OIDC group claim (may be empty if unset).
 func (r *Resolver) OIDCGroupClaim() string { return r.oidcGroupClaim }
+
+// LocalIssuer returns the issuer of local account sessions beside OIDC, or
+// "" when local accounts are off.
+func (r *Resolver) LocalIssuer() string { return r.localIssuer }
+
+// SetLocalIssuer sets the issuer of local account sessions beside OIDC.
+func (r *Resolver) SetLocalIssuer(issuer string) { r.localIssuer = issuer }
 
 // SetOIDCClaims configures the OIDC claim names.
 func (r *Resolver) SetOIDCClaims(userClaim, groupClaim string) {

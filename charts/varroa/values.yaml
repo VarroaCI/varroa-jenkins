@@ -408,8 +408,13 @@ dex:
 auth:
   # -- Auth mode: "oidc", "ldap", or "local".
   mode: oidc
-  # -- BFF URL, required when mode=local (the issuer URL for local JWT validation).
+  # -- BFF URL, required when mode=local or localAccounts.enabled (the issuer
+  # URL for local JWT validation).
   bffUrl: ""
+  # -- Declared local accounts beside OIDC. Needs mode=oidc and bffUrl.
+  # Each local account is a User with spec.purpose "service" or "break-glass".
+  localAccounts:
+    enabled: false
   # -- Cookie domain for the varroa_token cookie (e.g. .example.com).
   # Required for shared auth across subdomains (dashboard → Jenkins controllers).
   # Replaces the deprecated bff.oidcCookieDomain field.

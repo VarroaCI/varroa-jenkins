@@ -30,7 +30,9 @@ spec:
       name: release-user
 ```
 
-Subject names match authenticated claims exactly and case-sensitively.
+Subject names match authenticated claims exactly and case-sensitively. A local account beside OIDC is
+`local:<name>`. A group binding also matches the Varroa `Group` of that name.
+That is the break-glass path.
 
 ## Restrict the binding
 

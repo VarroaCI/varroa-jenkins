@@ -1491,7 +1491,7 @@ components:
       type: object
     CreateUserRequest:
       additionalProperties: false
-      description: Request body for creating a user (admin, local auth only).
+      description: Request body for creating a local account (admin only).
       properties:
         displayName:
           type: string
@@ -1502,6 +1502,12 @@ components:
             type: string
           type: array
         password:
+          type: string
+        purpose:
+          description: Required when local accounts run beside OIDC.
+          enum:
+          - service
+          - break-glass
           type: string
         username:
           type: string
@@ -1611,6 +1617,9 @@ components:
         issuer:
           description: OIDC issuer URL (present in OIDC mode only).
           type: string
+        localAccounts:
+          description: True when declared local accounts sign in beside OIDC.
+          type: boolean
         mode:
           enum:
           - local
@@ -1626,6 +1635,7 @@ components:
       - mode
       - cookieDomain
       - defaultRead
+      - localAccounts
       type: object
     JenkinsRoleBindingSpec:
       additionalProperties: false
@@ -1778,6 +1788,8 @@ components:
       description: Current user information, enriched from JWT claims and User CRD.
       properties:
         authMode:
+          description: Source of this session. A local account beside OIDC reports
+            local.
           enum:
           - local
           - ldap
@@ -3338,11 +3350,17 @@ components:
       type: object
     UpdateUserRequest:
       additionalProperties: false
-      description: Request body for updating a user's identity fields.
+      description: Request body for updating a local account's identity fields.
       properties:
         displayName:
           type: string
         email:
+          type: string
+        purpose:
+          description: Required when local accounts run beside OIDC.
+          enum:
+          - service
+          - break-glass
           type: string
       type: object
     UserListEntry:
@@ -3364,6 +3382,12 @@ components:
           description: Source of user management, e.g. "local" or "idp".
           type: string
         name:
+          type: string
+        purpose:
+          description: Purpose of a local account beside OIDC. Absent when not set.
+          enum:
+          - service
+          - break-glass
           type: string
       required:
       - name
@@ -6042,7 +6066,7 @@ components:
       type: object
     components_schemas_CreateUserRequest:
       additionalProperties: false
-      description: Request body for creating a user (admin, local auth only).
+      description: Request body for creating a local account (admin only).
       properties:
         displayName:
           type: string
@@ -6053,6 +6077,12 @@ components:
             type: string
           type: array
         password:
+          type: string
+        purpose:
+          description: Required when local accounts run beside OIDC.
+          enum:
+          - service
+          - break-glass
           type: string
         username:
           type: string
@@ -6471,6 +6501,9 @@ components:
         issuer:
           description: OIDC issuer URL (present in OIDC mode only).
           type: string
+        localAccounts:
+          description: True when declared local accounts sign in beside OIDC.
+          type: boolean
         mode:
           enum:
           - local
@@ -6486,6 +6519,7 @@ components:
       - mode
       - cookieDomain
       - defaultRead
+      - localAccounts
       type: object
     components_schemas_IngressSpec:
       additionalProperties: false
@@ -6764,6 +6798,8 @@ components:
       description: Current user information, enriched from JWT claims and User CRD.
       properties:
         authMode:
+          description: Source of this session. A local account beside OIDC reports
+            local.
           enum:
           - local
           - ldap
@@ -9708,11 +9744,17 @@ components:
       type: object
     components_schemas_UpdateUserRequest:
       additionalProperties: false
-      description: Request body for updating a user's identity fields.
+      description: Request body for updating a local account's identity fields.
       properties:
         displayName:
           type: string
         email:
+          type: string
+        purpose:
+          description: Required when local accounts run beside OIDC.
+          enum:
+          - service
+          - break-glass
           type: string
       type: object
     components_schemas_UserListEntry:
@@ -9734,6 +9776,12 @@ components:
           description: Source of user management, e.g. "local" or "idp".
           type: string
         name:
+          type: string
+        purpose:
+          description: Purpose of a local account beside OIDC. Absent when not set.
+          enum:
+          - service
+          - break-glass
           type: string
       required:
       - name
@@ -10165,6 +10213,8 @@ paths:
               schema:
                 additionalProperties: false
                 properties:
+                  localAccounts:
+                    type: boolean
                   mode:
                     enum:
                     - local
@@ -10173,8 +10223,10 @@ paths:
                     type: string
                 required:
                 - mode
+                - localAccounts
                 type: object
-          description: Auth mode.
+          description: Auth mode, and whether declared local accounts sign in beside
+            OIDC.
       security: []
       summary: Returns the configured authentication mode.
       tags:

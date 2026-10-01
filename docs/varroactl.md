@@ -57,7 +57,7 @@ printf '%s\n' "$VARROA_API_KEY" | varroactl login \
   --server https://varroa.example.com --api-key -
 ```
 
-For local or LDAP authentication, use `--username` and `--password-stdin`. OIDC installations require the browser flow. See [API keys](security/api-keys.md) for key lifecycle and handling.
+Password accounts use `--username` and `--password-stdin`. OIDC users use the browser flow. See [API keys](security/api-keys.md) for key lifecycle and handling.
 
 ## Use contexts
 

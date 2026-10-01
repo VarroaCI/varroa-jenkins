@@ -6,13 +6,17 @@ import { LoginPage } from "./LoginPage";
 // login() is provided by AuthContext; mock it so the page can be tested
 // in isolation without the react-query / router providers.
 const login = vi.fn();
+const authState: { authMode?: "oidc" | "local" | "ldap"; localAccounts?: boolean } = {};
 vi.mock("../context/AuthContext", () => ({
-  useAuth: () => ({ login }),
+  useAuth: () => ({ login, ...authState }),
+  PROGRESS_COPY: { redirecting: "Redirecting to sign in" },
 }));
 
 describe("LoginPage", () => {
   beforeEach(() => {
     login.mockReset();
+    delete authState.authMode;
+    delete authState.localAccounts;
   });
 
   it("renders the sign-in form", () => {
@@ -116,5 +120,37 @@ describe("LoginPage", () => {
     await screen.findByText(/invalid credentials/i);
     expect(screen.getByLabelText(/username/i)).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByLabelText(/password/i)).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("shows no local account control on an OIDC-only release", () => {
+    authState.authMode = "oidc";
+    authState.localAccounts = false;
+    render(<LoginPage />);
+    expect(screen.getByRole("button", { name: /sign in with sso/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /local account/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/username/i)).not.toBeInTheDocument();
+  });
+
+  it("puts SSO first and hides the local form behind a secondary control", async () => {
+    authState.authMode = "oidc";
+    authState.localAccounts = true;
+    login.mockResolvedValueOnce(undefined);
+    const user = userEvent.setup();
+    render(<LoginPage />);
+
+    const buttons = screen.getAllByRole("button");
+    expect(buttons[0]).toHaveTextContent(/sign in with sso/i);
+    expect(screen.queryByLabelText(/username/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /sign in with a local account/i }));
+    expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /back to single sign-on/i }));
+    expect(screen.queryByLabelText(/username/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /sign in with a local account/i }));
+    await user.type(screen.getByLabelText(/username/i), "rescue");
+    await user.type(screen.getByLabelText(/password/i), "s3cret");
+    await user.click(screen.getByRole("button", { name: /^sign in$/i }));
+    await waitFor(() => expect(login).toHaveBeenCalledWith("rescue", "s3cret"));
   });
 });

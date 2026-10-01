@@ -302,4 +302,13 @@ public class JWTValidatorTest {
             assertFalse("system token must not gain varroa_typ", validated.containsKey("varroa_typ"));
         }
     }
+
+    @Test
+    public void unverifiedIssuerReadsAndNormalizes() throws Exception {
+        Map<String, Object> claims = validClaims();
+        claims.put("iss", "https://varroa.example/");
+        assertEquals("https://varroa.example", JWTValidator.unverifiedIssuer(sign(claims)));
+        assertNull(JWTValidator.unverifiedIssuer("not-a-token"));
+        assertNull(JWTValidator.unverifiedIssuer(null));
+    }
 }

@@ -2024,7 +2024,7 @@
       },
       "CreateUserRequest": {
         "additionalProperties": false,
-        "description": "Request body for creating a user (admin, local auth only).",
+        "description": "Request body for creating a local account (admin only).",
         "properties": {
           "displayName": {
             "type": "string"
@@ -2039,6 +2039,14 @@
             "type": "array"
           },
           "password": {
+            "type": "string"
+          },
+          "purpose": {
+            "description": "Required when local accounts run beside OIDC.",
+            "enum": [
+              "service",
+              "break-glass"
+            ],
             "type": "string"
           },
           "username": {
@@ -2191,6 +2199,10 @@
             "description": "OIDC issuer URL (present in OIDC mode only).",
             "type": "string"
           },
+          "localAccounts": {
+            "description": "True when declared local accounts sign in beside OIDC.",
+            "type": "boolean"
+          },
           "mode": {
             "enum": [
               "local",
@@ -2210,7 +2222,8 @@
         "required": [
           "mode",
           "cookieDomain",
-          "defaultRead"
+          "defaultRead",
+          "localAccounts"
         ],
         "type": "object"
       },
@@ -2421,6 +2434,7 @@
         "description": "Current user information, enriched from JWT claims and User CRD.",
         "properties": {
           "authMode": {
+            "description": "Source of this session. A local account beside OIDC reports local.",
             "enum": [
               "local",
               "ldap",
@@ -4493,12 +4507,20 @@
       },
       "UpdateUserRequest": {
         "additionalProperties": false,
-        "description": "Request body for updating a user's identity fields.",
+        "description": "Request body for updating a local account's identity fields.",
         "properties": {
           "displayName": {
             "type": "string"
           },
           "email": {
+            "type": "string"
+          },
+          "purpose": {
+            "description": "Required when local accounts run beside OIDC.",
+            "enum": [
+              "service",
+              "break-glass"
+            ],
             "type": "string"
           }
         },
@@ -4529,6 +4551,14 @@
             "type": "string"
           },
           "name": {
+            "type": "string"
+          },
+          "purpose": {
+            "description": "Purpose of a local account beside OIDC. Absent when not set.",
+            "enum": [
+              "service",
+              "break-glass"
+            ],
             "type": "string"
           }
         },
@@ -8119,7 +8149,7 @@
       },
       "components_schemas_CreateUserRequest": {
         "additionalProperties": false,
-        "description": "Request body for creating a user (admin, local auth only).",
+        "description": "Request body for creating a local account (admin only).",
         "properties": {
           "displayName": {
             "type": "string"
@@ -8134,6 +8164,14 @@
             "type": "array"
           },
           "password": {
+            "type": "string"
+          },
+          "purpose": {
+            "description": "Required when local accounts run beside OIDC.",
+            "enum": [
+              "service",
+              "break-glass"
+            ],
             "type": "string"
           },
           "username": {
@@ -8687,6 +8725,10 @@
             "description": "OIDC issuer URL (present in OIDC mode only).",
             "type": "string"
           },
+          "localAccounts": {
+            "description": "True when declared local accounts sign in beside OIDC.",
+            "type": "boolean"
+          },
           "mode": {
             "enum": [
               "local",
@@ -8706,7 +8748,8 @@
         "required": [
           "mode",
           "cookieDomain",
-          "defaultRead"
+          "defaultRead",
+          "localAccounts"
         ],
         "type": "object"
       },
@@ -9084,6 +9127,7 @@
         "description": "Current user information, enriched from JWT claims and User CRD.",
         "properties": {
           "authMode": {
+            "description": "Source of this session. A local account beside OIDC reports local.",
             "enum": [
               "local",
               "ldap",
@@ -12944,12 +12988,20 @@
       },
       "components_schemas_UpdateUserRequest": {
         "additionalProperties": false,
-        "description": "Request body for updating a user's identity fields.",
+        "description": "Request body for updating a local account's identity fields.",
         "properties": {
           "displayName": {
             "type": "string"
           },
           "email": {
+            "type": "string"
+          },
+          "purpose": {
+            "description": "Required when local accounts run beside OIDC.",
+            "enum": [
+              "service",
+              "break-glass"
+            ],
             "type": "string"
           }
         },
@@ -12980,6 +13032,14 @@
             "type": "string"
           },
           "name": {
+            "type": "string"
+          },
+          "purpose": {
+            "description": "Purpose of a local account beside OIDC. Absent when not set.",
+            "enum": [
+              "service",
+              "break-glass"
+            ],
             "type": "string"
           }
         },
@@ -13599,6 +13659,9 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
+                    "localAccounts": {
+                      "type": "boolean"
+                    },
                     "mode": {
                       "enum": [
                         "local",
@@ -13609,13 +13672,14 @@
                     }
                   },
                   "required": [
-                    "mode"
+                    "mode",
+                    "localAccounts"
                   ],
                   "type": "object"
                 }
               }
             },
-            "description": "Auth mode."
+            "description": "Auth mode, and whether declared local accounts sign in beside OIDC."
           }
         },
         "security": [],

@@ -7,16 +7,18 @@
     security: []
     responses:
       "200":
-        description: Auth mode.
+        description: Auth mode, and whether declared local accounts sign in beside OIDC.
         content:
           application/json:
             schema:
               type: object
-              required: [mode]
+              required: [mode, localAccounts]
               properties:
                 mode:
                   type: string
                   enum: [local, ldap, oidc]
+                localAccounts:
+                  type: boolean
               additionalProperties: false
 
 /api/v1/login:

@@ -128,8 +128,8 @@ type createGroupRequest struct {
 }
 
 func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
-	if s.deps.IdentityConfig.Mode != string(auth.AuthModeLocal) {
-		s.writeJSONError(w, http.StatusMethodNotAllowed, "group management is only available in local auth mode")
+	if !s.localAccountsOn() {
+		s.writeJSONError(w, http.StatusMethodNotAllowed, "group management is only available with local accounts")
 		return
 	}
 
@@ -188,8 +188,8 @@ func (s *Server) HandleGroupDispatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request, name string) {
-	if s.deps.IdentityConfig.Mode != string(auth.AuthModeLocal) {
-		s.writeJSONError(w, http.StatusMethodNotAllowed, "group management is only available in local auth mode")
+	if !s.localAccountsOn() {
+		s.writeJSONError(w, http.StatusMethodNotAllowed, "group management is only available with local accounts")
 		return
 	}
 

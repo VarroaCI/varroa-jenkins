@@ -135,6 +135,31 @@ public class JWTValidator {
     }
 
     /**
+     * Reads the iss claim of a token without a signature check, with trailing
+     * slashes removed. The value only selects a validator; it never grants
+     * trust.
+     *
+     * @return the issuer, or {@code null} when the token has no readable iss.
+     */
+    public static String unverifiedIssuer(String token) {
+        if (token == null) return null;
+        try {
+            String[] parts = token.split("\\.");
+            if (parts.length != 3) return null;
+            String payloadJson = new String(Base64.getUrlDecoder().decode(parts[1]));
+            Object iss = ((Map<String, Object>) new JsonSlurper().parseText(payloadJson)).get("iss");
+            if (!(iss instanceof String)) return null;
+            String norm = (String) iss;
+            while (norm.endsWith("/")) {
+                norm = norm.substring(0, norm.length() - 1);
+            }
+            return norm;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
      * Validates a JWT ID token and returns the claims map, or null if invalid.
      */
     public Map<String, Object> validate(String token) {

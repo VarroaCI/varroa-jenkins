@@ -23,6 +23,13 @@ func TestUserResourceName_Local(t *testing.T) {
 	}
 }
 
+func TestUserResourceName_LocalPrefix(t *testing.T) {
+	claims := &auth.Claims{Subject: "local:rescue", PreferredUsername: "local:rescue"}
+	if name := UserResourceName(claims, auth.AuthModeOIDC); name != "rescue" {
+		t.Errorf("expected local account beside OIDC to map to 'rescue', got %q", name)
+	}
+}
+
 func TestUserResourceName_OIDCDeterministic(t *testing.T) {
 	claims := &auth.Claims{Subject: "Cg0g50hZvQK6w5Px3mR8dF2eT7uG9jL4"}
 	name1 := UserResourceName(claims, auth.AuthModeOIDC)

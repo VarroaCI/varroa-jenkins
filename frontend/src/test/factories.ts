@@ -421,6 +421,7 @@ export function createMeResponse(
 export function createAuthConfig(overrides?: Partial<AuthConfig>): AuthConfig {
   return {
     mode: "local",
+    localAccounts: false,
     ...overrides,
   };
 }

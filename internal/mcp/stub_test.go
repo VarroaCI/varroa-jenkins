@@ -35,7 +35,7 @@ func (s *stubClient) CreateServiceAccountTokenSecret(ctx context.Context, name, 
 func (s *stubClient) CreateStatefulSet(ctx context.Context, spec controller.StatefulSetSpec) error {
 	return nil
 }
-func (s *stubClient) UpdateStatefulSetOIDCEnv(ctx context.Context, name, namespace, oidcIssuer, loginURL, oidcUserClaim, oidcGroupClaim, pubKeyPEM, pubKeyKID, aud, apikeyVerifyURL, caPEM string) error {
+func (s *stubClient) UpdateStatefulSetOIDCEnv(ctx context.Context, name, namespace string, authEnv controller.JenkinsAuthEnv) error {
 	return nil
 }
 func (s *stubClient) EnsureStatefulSetPodLabel(ctx context.Context, namespace, stsName, key, value string) (bool, error) {

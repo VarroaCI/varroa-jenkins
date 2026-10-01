@@ -207,6 +207,11 @@ func (p *Provider) Login(_ context.Context, username, password string) (idToken 
 		// when the password is empty.
 		return "", 0, ErrInvalidCredentials
 	}
+	if strings.HasPrefix(username, auth.LocalSubjectPrefix) {
+		// The prefix marks a local account beside OIDC; no LDAP subject may
+		// carry it.
+		return "", 0, ErrInvalidCredentials
+	}
 
 	conn, err := p.dial(p.cfg)
 	if err != nil {

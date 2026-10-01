@@ -12,14 +12,18 @@ import (
 
 // UserResourceName derives the deterministic Kubernetes object name for a User
 // CRD from the authenticated claims. In local mode the name is the username
-// (which equals the subject). In OIDC mode the name is "oidc-" followed by
-// the first 32 hex characters of sha256(subject).
+// (which equals the subject). A local account beside OIDC has the subject
+// "local:<username>", and the name is the username. In OIDC mode the name is
+// "oidc-" followed by the first 32 hex characters of sha256(subject).
 //
 // Email is never used as the object name — the result is always stable across
 // email changes. Returns empty string when claims is nil.
 func UserResourceName(claims *auth.Claims, mode auth.AuthMode) string {
 	if claims == nil {
 		return ""
+	}
+	if auth.IsLocalSession(claims) {
+		return strings.TrimPrefix(claims.Subject, auth.LocalSubjectPrefix)
 	}
 	if mode == auth.AuthModeLocal {
 		return claims.Subject

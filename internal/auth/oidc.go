@@ -219,9 +219,18 @@ func (v *Validator) SetCookieDomain(d string) { v.cookieDomain = d }
 // Mode returns AuthModeOIDC.
 func (v *Validator) Mode() AuthMode { return AuthModeOIDC }
 
-// Verify validates a raw token and returns claims (quiet variant).
+// Verify validates a raw token and returns claims (quiet variant). It
+// refuses a subject with the local account prefix in every mode, so an IdP
+// token never passes as a local session.
 func (v *Validator) Verify(ctx context.Context, rawToken string) (*Claims, error) {
-	return v.VerifyTokenQuiet(ctx, rawToken)
+	claims, err := v.VerifyTokenQuiet(ctx, rawToken)
+	if err != nil {
+		return nil, err
+	}
+	if err := RefuseLocalPrefix(claims); err != nil {
+		return nil, err
+	}
+	return claims, nil
 }
 
 // CookieDomain returns the configured cookie domain.

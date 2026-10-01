@@ -106,6 +106,7 @@ Me:
     authMode:
       type: string
       enum: [local, ldap, oidc]
+      description: Source of this session. A local account beside OIDC reports local.
     lastLogin:
       type: string
       description: ISO 8601 last login time, absent if never logged in.
@@ -170,11 +171,15 @@ UserListEntry:
     managedBy:
       type: string
       description: Source of user management, e.g. "local" or "idp".
+    purpose:
+      type: string
+      enum: [service, break-glass]
+      description: Purpose of a local account beside OIDC. Absent when not set.
   additionalProperties: false
 
 CreateUserRequest:
   type: object
-  description: Request body for creating a user (admin, local auth only).
+  description: Request body for creating a local account (admin only).
   required: [username, password]
   properties:
     username:
@@ -189,16 +194,24 @@ CreateUserRequest:
       type: array
       items:
         type: string
+    purpose:
+      type: string
+      enum: [service, break-glass]
+      description: Required when local accounts run beside OIDC.
   additionalProperties: false
 
 UpdateUserRequest:
   type: object
-  description: Request body for updating a user's identity fields.
+  description: Request body for updating a local account's identity fields.
   properties:
     email:
       type: string
     displayName:
       type: string
+    purpose:
+      type: string
+      enum: [service, break-glass]
+      description: Required when local accounts run beside OIDC.
   additionalProperties: false
 
 GroupEntry:
@@ -718,7 +731,7 @@ RunnerCreateRequest:
 IdentitySettings:
   type: object
   description: Identity and OIDC configuration (admin view, client secret never included).
-  required: [mode, cookieDomain, defaultRead]
+  required: [mode, cookieDomain, defaultRead, localAccounts]
   properties:
     mode:
       type: string
@@ -727,6 +740,9 @@ IdentitySettings:
       type: string
     defaultRead:
       type: boolean
+    localAccounts:
+      type: boolean
+      description: True when declared local accounts sign in beside OIDC.
     issuer:
       type: string
       description: OIDC issuer URL (present in OIDC mode only).

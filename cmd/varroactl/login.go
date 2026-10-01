@@ -357,7 +357,7 @@ func loginWithUsername(cmd *cobra.Command, username string) error {
 	if authCfg.HTTPResponse.StatusCode >= 400 {
 		return fmt.Errorf("unable to determine auth mode")
 	}
-	if authCfg.JSON200 != nil && authCfg.JSON200.Mode == "oidc" {
+	if authCfg.JSON200 != nil && authCfg.JSON200.Mode == "oidc" && !authCfg.JSON200.LocalAccounts {
 		return fmt.Errorf("server uses OIDC; run \"varroactl login\" for the browser flow")
 	}
 

@@ -138,11 +138,15 @@ func (s *Server) HandleMe(w http.ResponseWriter, r *http.Request) {
 		Groups:            claims.Groups,
 	}
 
-	// Populate auth mode from the provider. Default to oidc when no
-	// provider is configured (e.g. dev/noop mode).
+	// Report the session source: the provider mode, or "local" for a local
+	// account beside OIDC. Default to oidc when no provider is configured
+	// (e.g. dev/noop mode).
 	resp.AuthMode = "oidc"
 	if s.deps.Auth != nil {
 		resp.AuthMode = string(s.deps.Auth.Mode())
+	}
+	if auth.IsLocalSession(claims) {
+		resp.AuthMode = string(auth.AuthModeLocal)
 	}
 
 	// Enrich with User CRD if it exists. Look up by subject-derived name
@@ -182,10 +186,15 @@ func (s *Server) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read the current ID token before clearing the cookie (for provider logout).
+	// Read the current ID token before clearing the cookie (for provider
+	// logout). A local session token never goes to the identity provider.
 	idToken := ""
 	if cookie, err := r.Cookie("varroa_token"); err == nil {
 		idToken = cookie.Value
+	}
+	localSession := auth.IsLocalSession(auth.ClaimsFromContext(r.Context()))
+	if localSession {
+		idToken = ""
 	}
 
 	// Emit logout event when an authenticated user logs out.

@@ -100,7 +100,8 @@ new capabilities are added to the BFF/OpenAPI spec first, then surfaced here.
   three mutually-exclusive flows, all converging on `validateAndStore`:
   - `--api-key` (or `-` for stdin) → `loginWithAPIKey`.
   - `--username` → `loginWithUsername` (local/ldap password prompt via
-    `golang.org/x/term`, `--password-stdin` supported).
+    `golang.org/x/term`, `--password-stdin` supported). It refuses an OIDC
+    server unless `/auth-config` reports `localAccounts: true`.
   - default → `loginBrowser`: opens a loopback listener on `127.0.0.1:0`,
     generates a random state nonce (`crypto/rand` + `base64.RawURLEncoding`),
     opens `<server>/cli-auth?port=<port>&state=<state>&name=<hostname>` in

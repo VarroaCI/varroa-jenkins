@@ -1,0 +1,14 @@
+{{- /*
+local-accounts-guard.yaml
+Validates auth.localAccounts. Local accounts beside OIDC need OIDC as the
+primary mode and auth.bffUrl, because the BFF issues the local sessions and
+each Jenkins controller fetches their keys from that URL. Renders no objects.
+*/}}
+{{- if .Values.auth.localAccounts.enabled }}
+{{- if ne .Values.auth.mode "oidc" }}
+{{- fail (printf "auth.localAccounts.enabled needs auth.mode \"oidc\", got %q" .Values.auth.mode) }}
+{{- end }}
+{{- if not .Values.auth.bffUrl }}
+{{- fail "auth.localAccounts.enabled needs auth.bffUrl: the BFF issues local sessions and controllers fetch their keys from it" }}
+{{- end }}
+{{- end }}

@@ -1287,7 +1287,22 @@ type UserSpec struct {
 	// Password is a write-only field set by admins. The UserReconciler
 	// hashes this value into status.credentials.passwordHash and clears it.
 	Password string `json:"password,omitempty"`
+	// Purpose states why a local account exists on a cluster whose primary
+	// sign-in is OIDC: "service" or "break-glass". When local accounts run
+	// beside OIDC, a local sign-in for a User without a purpose fails.
+	// +kubebuilder:validation:Enum=service;break-glass
+	// +optional
+	Purpose UserPurpose `json:"purpose,omitempty"`
 }
+
+// UserPurpose is the stated reason for a local account beside OIDC.
+type UserPurpose string
+
+// The two purposes a local account beside OIDC can carry.
+const (
+	UserPurposeService    UserPurpose = "service"
+	UserPurposeBreakGlass UserPurpose = "break-glass"
+)
 
 // UserPreferences holds user-customizable UI settings.
 type UserPreferences struct {
@@ -1311,7 +1326,7 @@ type UserStatus struct {
 	// Preferences stores user-customizable UI settings.
 	Preferences *UserPreferences `json:"preferences,omitempty"`
 	// Credentials holds the hashed password for local auth users.
-	// Only set when auth mode is "local".
+	// Only set for a local account.
 	Credentials *UserCredentials `json:"credentials,omitempty"`
 	// ObservedGroups captures the groups from OIDC claims at login time,
 	// enabling read-only group-by views in OIDC mode.

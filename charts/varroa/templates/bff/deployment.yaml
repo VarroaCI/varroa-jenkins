@@ -100,6 +100,8 @@ spec:
               value: "deployment.environment={{ .Values.telemetry.resourceAttributes.deploymentName }},cluster.name={{ .Values.telemetry.resourceAttributes.clusterName }}"
             - name: METRICS_TOKEN
               value: {{ .Values.telemetry.metricsToken | quote }}
+            - name: VARROA_LOCAL_ACCOUNTS
+              value: {{ .Values.auth.localAccounts.enabled | quote }}
             - name: VARROA_OIDC_USER_CLAIM
               value: {{ .Values.auth.oidc.userClaim | default "preferred_username,sub" | quote }}
             - name: VARROA_OIDC_GROUP_CLAIM

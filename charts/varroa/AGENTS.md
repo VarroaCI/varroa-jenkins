@@ -22,6 +22,10 @@ the packaged CRDs. Does not own the Go source it packages
   `gateway/`, `ingress/`, `operator/`, each with `deployment.yaml`/`service.yaml`/`serviceaccount.yaml` +
   RBAC where the component talks to the API server. `bff/` also owns
   `role-rbac-federation.yaml`/`rolebinding-rbac-federation.yaml` (JenkinsRole federation).
+  `auth.localAccounts.enabled` renders `VARROA_LOCAL_ACCOUNTS` into the operator
+  and the BFF; `templates/local-accounts-guard.yaml` fails the render unless
+  `auth.mode` is `oidc` and `auth.bffUrl` is set
+  (`tests/test-local-accounts.sh`).
   The internet-facing BFF holds no cluster-wide Secret write and no cluster-wide
   ConfigMap read: its `configmaps` `get` (version-profile plugin sets, issue #416)
   lives on the release-namespace `Role` in `bff/role.yaml`, because

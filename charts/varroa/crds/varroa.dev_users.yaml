@@ -54,6 +54,15 @@ spec:
                   Password is a write-only field set by admins. The UserReconciler
                   hashes this value into status.credentials.passwordHash and clears it.
                 type: string
+              purpose:
+                description: |-
+                  Purpose states why a local account exists on a cluster whose primary
+                  sign-in is OIDC: "service" or "break-glass". When local accounts run
+                  beside OIDC, a local sign-in for a User without a purpose fails.
+                enum:
+                - service
+                - break-glass
+                type: string
             type: object
           status:
             description: UserStatus defines the observed state of User.
@@ -67,7 +76,7 @@ spec:
               credentials:
                 description: |-
                   Credentials holds the hashed password for local auth users.
-                  Only set when auth mode is "local".
+                  Only set for a local account.
                 properties:
                   lastChanged:
                     format: date-time

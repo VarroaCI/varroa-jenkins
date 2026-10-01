@@ -30,6 +30,7 @@ function renderProtectedRoute(
     permissionsError: null,
     retryPermissions: vi.fn(),
     authMode: "local",
+    localAccounts: false,
     login: vi.fn(),
     logout: vi.fn(),
     authError: undefined,

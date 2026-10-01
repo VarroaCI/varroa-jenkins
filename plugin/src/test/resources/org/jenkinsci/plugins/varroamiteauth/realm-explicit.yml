@@ -4,3 +4,4 @@ jenkins:
       oidcIssuer: "https://dex.example/dex"
       userClaimNames: "login,sub"
       groupClaimName: "memberOf"
+      localIssuer: "https://varroa.example"

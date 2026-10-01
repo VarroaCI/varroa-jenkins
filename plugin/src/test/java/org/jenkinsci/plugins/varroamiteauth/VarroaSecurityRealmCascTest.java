@@ -121,6 +121,7 @@ public class VarroaSecurityRealmCascTest {
                 realm instanceof VarroaSecurityRealm);
         VarroaSecurityRealm vsr = (VarroaSecurityRealm) realm;
         assertEquals("https://dex.example/dex", vsr.getOidcIssuer());
+        assertEquals("https://varroa.example", vsr.getLocalIssuer());
         assertEquals("login,sub", vsr.getUserClaimNames());
         assertEquals("memberOf", vsr.getGroupClaimName());
     }
@@ -174,13 +175,16 @@ public class VarroaSecurityRealmCascTest {
         assertThat(exportedYaml, containsString("https://dex.example/dex"));
         assertThat(exportedYaml, containsString("login,sub"));
         assertThat(exportedYaml, containsString("memberOf"));
+        assertThat(exportedYaml, containsString("https://varroa.example"));
 
         // Re-import the exported document and assert value equality with the
         // original import (true round-trip, not just a string match).
         VarroaSecurityRealm reimported = new VarroaSecurityRealm(
                 imported.getOidcIssuer(), imported.getUserClaimNames(), imported.getGroupClaimName());
+        reimported.setLocalIssuer(imported.getLocalIssuer());
         assertThat(reimported.getOidcIssuer(), is(equalTo(imported.getOidcIssuer())));
         assertThat(reimported.getUserClaimNames(), is(equalTo(imported.getUserClaimNames())));
         assertThat(reimported.getGroupClaimName(), is(equalTo(imported.getGroupClaimName())));
+        assertThat(reimported.getLocalIssuer(), is(equalTo(imported.getLocalIssuer())));
     }
 }

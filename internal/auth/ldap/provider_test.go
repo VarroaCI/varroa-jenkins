@@ -425,3 +425,15 @@ func TestLogin_NoBindMode_Error(t *testing.T) {
 		t.Fatalf("expected 'no bind mode configured' error, got %v", err)
 	}
 }
+
+func TestLogin_RefusesLocalPrefix(t *testing.T) {
+	conn := newMockConn()
+	conn.binds["uid=local:rescue,ou=people,dc=test:secret"] = nil
+
+	cfg := Config{BindDNTemplate: "uid=%s,ou=people,dc=test"}
+	p := newTestProvider(t, cfg, conn)
+
+	if _, _, err := p.Login(context.Background(), "local:rescue", "secret"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
+	}
+}

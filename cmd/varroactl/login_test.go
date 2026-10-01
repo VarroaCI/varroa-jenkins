@@ -319,6 +319,46 @@ func TestLogin_Username_OIDCRefusal(t *testing.T) {
 	}
 }
 
+// TestUsernameLogin_OIDCWithLocalAccounts: an OIDC server with local accounts
+// accepts the username flow and reaches POST /login.
+func TestUsernameLogin_OIDCWithLocalAccounts(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("VARROACTL_CONFIG", tmpDir+"/config.yaml")
+
+	loginCalled := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/auth-config") {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"mode": "oidc", "localAccounts": true})
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/login") {
+			loginCalled = true
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("VARROACTL_SERVER", srv.URL)
+
+	root := newRootCmd()
+	root.SetArgs([]string{"login", "--username", "rescue", "--password-stdin"})
+	oldStdin := os.Stdin
+	pr, pw, _ := os.Pipe()
+	pw.WriteString("wrongpass\n")
+	pw.Close()
+	os.Stdin = pr
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	err := root.Execute()
+	if !loginCalled {
+		t.Fatalf("expected POST /login, got err %v", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "invalid credentials") {
+		t.Errorf("expected 'invalid credentials', got %v", err)
+	}
+}
+
 // TestLogin_Username_401 tests username flow with invalid credentials
 func TestLogin_Username_401(t *testing.T) {
 	tmpDir := t.TempDir()

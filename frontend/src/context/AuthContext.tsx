@@ -27,6 +27,8 @@ interface AuthState {
   permissionsError: Error | null;
   retryPermissions: () => void;
   authMode?: "oidc" | "local" | "ldap";
+  /** True when declared local accounts sign in beside OIDC. */
+  localAccounts: boolean;
   /** OIDC error description from provider callback. */
   authError?: string;
   login: (username?: string, password?: string) => Promise<void>;
@@ -84,6 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
 
   const mode = authConfig?.mode;
+  const localAccounts = authConfig?.localAccounts === true;
   const prevMode = prevModeRef.current;
   prevModeRef.current = mode;
 
@@ -147,8 +150,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const permissionsLoading = isAuthenticated && permissionsPending;
 
   const login = useCallback(async (username?: string, password?: string) => {
-    // Local/LDAP auth: POST to /api/v1/login with credentials.
-    if ((mode === "local" || mode === "ldap") && username && password) {
+    // Local/LDAP auth, or a local account beside OIDC: POST to /api/v1/login
+    // with credentials.
+    if ((mode === "local" || mode === "ldap" || localAccounts) && username && password) {
       setPhase("checkingSession");
       const res = await bffFetch<{ id_token: string; expires_in: number }>("/login", {
         method: "POST",
@@ -165,7 +169,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const returnPath = window.location.pathname !== "/login" ? window.location.pathname : "/";
     setPhase("redirecting");
     window.location.href = `/api/v1/auth/login?return=${encodeURIComponent(returnPath)}`;
-  }, [mode, queryClient]);
+  }, [mode, localAccounts, queryClient]);
 
   const logout = useCallback(async () => {
     try {
@@ -192,6 +196,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       permissionsError,
       retryPermissions,
       authMode: mode,
+      localAccounts,
       authError,
       login,
       logout,

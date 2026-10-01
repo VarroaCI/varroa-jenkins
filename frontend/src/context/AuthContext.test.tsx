@@ -23,6 +23,7 @@ function AuthTestComponent() {
       <span data-testid="authenticated">{String(auth.isAuthenticated)}</span>
       <span data-testid="user-name">{auth.user?.name ?? "null"}</span>
       <span data-testid="auth-mode">{auth.authMode ?? "null"}</span>
+      <span data-testid="local-accounts">{String(auth.localAccounts)}</span>
       <span data-testid="permissions-loading">{String(auth.permissionsLoading)}</span>
       <span data-testid="permissions-error">{auth.permissionsError?.message ?? "null"}</span>
       <button data-testid="login-btn" onClick={() => auth.login("testuser", "testpass")}>
@@ -190,6 +191,31 @@ describe("AuthContext", () => {
 
     expect(localStorage.getItem("varroa_id_token")).toBe("token123");
     expect(localStorage.getItem("varroa_user")).toBe("testuser");
+  });
+
+  it("login() with credentials posts to /login when local accounts run beside OIDC", async () => {
+    const user = userEvent.setup();
+    mockBffFetch.mockImplementation((path: string) => {
+      if (path === "/auth-config") return Promise.resolve({ mode: "oidc", localAccounts: true });
+      if (path === "/me") return Promise.resolve(createMeResponse());
+      if (path === "/login") return Promise.resolve({ id_token: "token456", expires_in: 3600 });
+      return Promise.resolve({});
+    });
+
+    renderWithProviders(<AuthTestComponent />);
+    await waitFor(() => {
+      expect(screen.getByTestId("local-accounts")).toHaveTextContent("true");
+    });
+    expect(screen.getByTestId("auth-mode")).toHaveTextContent("oidc");
+
+    await user.click(screen.getByTestId("login-btn"));
+    await waitFor(() => {
+      expect(mockBffFetch).toHaveBeenCalledWith(
+        "/login",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    expect(localStorage.getItem("varroa_id_token")).toBe("token456");
   });
 
   it("logout() clears localStorage and sets me query data to null", async () => {

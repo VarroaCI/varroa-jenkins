@@ -30,14 +30,11 @@ dex:
 ```
 
 Register the exact redirect URL with the provider. `dashboardUrl` must be an
-absolute HTTPS origin except on supported local development hosts. After sign
-in, inspect `/api/v1/me` and verify the username and groups used by role
-bindings.
+absolute HTTPS origin. Check the username and groups in `/api/v1/me`.
 
 ## Use Dex as an OIDC broker
 
-Enable Dex when an upstream provider needs a Dex connector. Configure Varroa as
-a Dex static client and set the upstream callback to the Dex callback URL.
+Use Dex when an upstream provider needs a Dex connector.
 
 ```yaml
 auth:
@@ -59,7 +56,7 @@ dex:
           - https://app.varroa.example.com/api/v1/callback
 ```
 
-Add the required OIDC, LDAP, SAML, or OAuth connector under `dex.config`.
+Add the connector under `dex.config`.
 
 ## Use LDAP
 
@@ -92,8 +89,7 @@ Configure the BFF with these environment variables:
 | Group name attribute | `VARROA_LDAP_GROUP_NAME_ATTR`, default `cn` |
 | CA bundle path | `VARROA_LDAP_CA_CERT_FILE` |
 
-Store bind credentials in a Secret. Prefer LDAPS or verified StartTLS-capable
-infrastructure, and confirm group resolution through `/api/v1/me`.
+Store bind credentials in a Secret and prefer LDAPS.
 
 ## Use local authentication
 
@@ -107,8 +103,35 @@ dex:
   enabled: false
 ```
 
-Create users through the dashboard or users API. Use an external identity
-provider for normal multi-user deployments.
+Create users through the dashboard or users API.
+
+## Add local accounts beside OIDC
+
+Keep `auth.mode: oidc` and declare the accounts:
+
+```yaml
+auth:
+  mode: oidc
+  bffUrl: "http://<release>-varroa-bff.<namespace>.svc.cluster.local:8080"
+  localAccounts:
+    enabled: true
+---
+apiVersion: varroa.dev/v1alpha1
+kind: User
+metadata:
+  name: rescue
+  namespace: varroa-system
+  labels:
+    varroa.dev/managed-by: local
+spec:
+  purpose: break-glass   # or service
+  password: <initial-password>
+```
+
+An account needs `purpose` and signs in as `local:<name>` from the login
+page. Each sign-in
+writes an `auth.local.login` activity event. A failed attempt on a declared
+account writes `auth.local.login_failed`. An unknown name writes no event.
 
 ## Configure controller SSO safely
 
@@ -117,11 +140,11 @@ The `varroa_token` browser cookie is shared with controller hosts through
 and managed Jenkins hosts. Use TLS on every host and do not host untrusted
 applications under that domain.
 
-All BFF replicas must share the OIDC state signing secret. Helm creates and
-preserves it unless `auth.oidc.stateSecret` is supplied.
+Helm creates and keeps the shared OIDC state secret unless
+`auth.oidc.stateSecret` is set.
 
-Controllers need network access to the configured issuer discovery and JWKS
-endpoints for initial and signing-key validation.
+Controllers need network access to the discovery and JWKS endpoints of each
+issuer.
 
 ## Troubleshoot
 

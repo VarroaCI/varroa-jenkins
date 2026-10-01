@@ -137,6 +137,8 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		mcp.WithString("displayName", mcp.Description("Display name")),
 		mcp.WithString("password", mcp.Description("Initial password")),
 		mcp.WithArray("groups", mcp.Description("Group memberships")),
+		mcp.WithString("purpose", mcp.Enum(string(v1alpha1.UserPurposeService), string(v1alpha1.UserPurposeBreakGlass)),
+			mcp.Description("Purpose of a local account beside OIDC: service or break-glass. Required when local accounts run beside OIDC.")),
 	)
 	addTool(mcpServer, kindCreate, createU, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -150,11 +152,16 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 			return mcp.NewToolResultError("access denied: admin only"), nil
 		}
 		args := getArgs(req)
+		purpose, perr := userPurposeArg(deps, args, true)
+		if perr != "" {
+			return mcp.NewToolResultError(perr), nil
+		}
 		user := &v1alpha1.User{
 			ObjectMeta: objMeta(args),
 			Spec: v1alpha1.UserSpec{
 				Email:       strArg(args, "email"),
 				DisplayName: strArg(args, "displayName"),
+				Purpose:     purpose,
 			},
 		}
 		if err := crdstore.Apply[v1alpha1.User](ctx, deps.Store, user); err != nil {
@@ -175,6 +182,8 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		mcp.WithString("email", mcp.Description("Email address")),
 		mcp.WithString("displayName", mcp.Description("Display name")),
 		mcp.WithArray("groups", mcp.Description("Group memberships")),
+		mcp.WithString("purpose", mcp.Enum(string(v1alpha1.UserPurposeService), string(v1alpha1.UserPurposeBreakGlass)),
+			mcp.Description("Purpose of a local account beside OIDC: service or break-glass.")),
 	)
 	addTool(mcpServer, kindUpdate, updateU, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
@@ -198,6 +207,13 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		}
 		if v := strArg(args, "displayName"); v != "" {
 			existing.Spec.DisplayName = v
+		}
+		if strArg(args, "purpose") != "" {
+			purpose, perr := userPurposeArg(deps, args, false)
+			if perr != "" {
+				return mcp.NewToolResultError(perr), nil
+			}
+			existing.Spec.Purpose = purpose
 		}
 		if err := crdstore.Apply[v1alpha1.User](ctx, deps.Store, existing); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to update user: %v", err)), nil
@@ -238,4 +254,22 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		})
 		return mcp.NewToolResultText("user " + ns + "/" + name + " deleted"), nil
 	})
+}
+
+// userPurposeArg reads and checks the purpose argument. On create, a local
+// account beside OIDC must carry a purpose. It returns an error message, or
+// "" when the value is valid.
+func userPurposeArg(deps *api.Dependencies, args map[string]any, create bool) (v1alpha1.UserPurpose, string) {
+	p := v1alpha1.UserPurpose(strArg(args, "purpose"))
+	switch p {
+	case v1alpha1.UserPurposeService, v1alpha1.UserPurposeBreakGlass:
+		return p, ""
+	case "":
+		if create && deps.IdentityConfig.LocalAccounts {
+			return "", "purpose is required for a local account beside OIDC: service or break-glass"
+		}
+		return "", ""
+	default:
+		return "", "purpose must be service or break-glass"
+	}
 }

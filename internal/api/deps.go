@@ -33,7 +33,8 @@ type Dependencies struct {
 	// JenkinsTokenSigner is used by the MCP proxy to mint per-caller Jenkins tokens; nil when the mite signing key is unavailable.
 	JenkinsTokenSigner *mitesrv.MiteTokenSigner
 
-	// Local is set in local auth mode; nil otherwise.
+	// Local is set in local auth mode and when local accounts run beside
+	// OIDC; nil otherwise.
 	Local *local.Provider
 	// LDAP is set in ldap auth mode; nil otherwise.
 	LDAP         *ldap.Provider
@@ -144,4 +145,7 @@ type IdentityConfig struct {
 	Scopes       []string // OIDC scopes
 	CookieDomain string   // cookie domain for varroa_token
 	DefaultRead  bool     // global default-read flag
+	// LocalAccounts is true when declared local accounts sign in beside a
+	// primary OIDC provider.
+	LocalAccounts bool
 }

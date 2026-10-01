@@ -312,6 +312,11 @@ func (s *Server) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "token validation failed", http.StatusInternalServerError)
 		return
 	}
+	if err := auth.RefuseLocalPrefix(claims); err != nil {
+		s.deps.Logger.Warn("identity provider token refused", "error", err, "subject", claims.Subject)
+		http.Error(w, "token validation failed", http.StatusForbidden)
+		return
+	}
 
 	if len(claims.Groups) == 0 {
 		s.deps.Logger.Warn("user has zero groups in ID token, RBAC group-based permissions will not apply",
@@ -372,10 +377,15 @@ func (s *Server) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// validator returns the OIDCProvider from the auth provider.
+// validator returns the OIDCProvider from the auth provider. Beside local
+// accounts, the provider is a MultiProvider and the OIDC provider is its
+// primary.
 func (s *Server) validator() (auth.OIDCProvider, bool) {
 	if s.deps.Auth == nil || s.deps.Auth.Mode() != auth.AuthModeOIDC {
 		return nil, false
+	}
+	if m, ok := s.deps.Auth.(*auth.MultiProvider); ok {
+		return m.OIDC(), m.OIDC() != nil
 	}
 	v, ok := s.deps.Auth.(auth.OIDCProvider)
 	return v, ok

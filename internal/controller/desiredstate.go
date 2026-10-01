@@ -307,6 +307,7 @@ func (r *Reconciler) buildStatefulSetSpec(cr *v1alpha1.Controller, class *v1alph
 		ImagePullSecrets:          imagePullSecrets,
 		ServiceAccountName:        in.Name + "-agent",
 		OIDCIssuer:                r.Resolver.OIDCIssuer(),
+		LocalIssuer:               r.Resolver.LocalIssuer(),
 		VarroaLoginURL:            r.Resolver.LoginURL(r.varroaRedirectURL),
 		OIDCUserClaim:             r.Resolver.OIDCUserClaim(),
 		OIDCGroupClaim:            r.Resolver.OIDCGroupClaim(),

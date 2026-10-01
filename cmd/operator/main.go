@@ -72,7 +72,8 @@ func main() {
 	oidcIssuer := flag.String("oidc-issuer", envDefault("VARROA_OIDC_ISSUER", ""), "OIDC issuer URL (for bundle variable injection)")
 	oidcClientID := flag.String("oidc-client-id", envDefault("VARROA_OIDC_CLIENT_ID", "varroa"), "OIDC client ID")
 	authMode := flag.String("auth-mode", envDefault("VARROA_AUTH_MODE", "oidc"), "Auth mode: oidc or local")
-	bffURL := flag.String("bff-url", envDefault("VARROA_BFF_URL", ""), "BFF URL (required when auth-mode=local)")
+	bffURL := flag.String("bff-url", envDefault("VARROA_BFF_URL", ""), "BFF URL (required when auth-mode=local or with --local-accounts)")
+	localAccounts := flag.Bool("local-accounts", envBool("VARROA_LOCAL_ACCOUNTS", false), "Accept declared local accounts beside OIDC (auth-mode=oidc only)")
 	oidcClientSecret := flag.String("oidc-client-secret", envDefault("VARROA_OIDC_CLIENT_SECRET", ""), "OIDC client secret")
 	oidcRedirectURL := flag.String("oidc-redirect-url", envDefault("VARROA_OIDC_REDIRECT_URL", ""), "OIDC redirect URL (for Varroa login link)")
 	oidcUserClaim := flag.String("oidc-user-claim", envDefault("VARROA_OIDC_USER_CLAIM", "preferred_username,sub"), "comma-separated JWT claims for kind:User bindings")
@@ -106,6 +107,11 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("cluster identity", "cluster", cluster)
+
+	if *localAccounts && (*authMode != "oidc" || *bffURL == "") {
+		logger.Error("--local-accounts needs auth-mode=oidc and --bff-url", "authMode", *authMode)
+		os.Exit(1)
+	}
 
 	if *authMode == "oidc" && strings.TrimSpace(*oidcClientSecret) == "" {
 		logger.Error("VARROA_OIDC_CLIENT_SECRET must be set when auth mode is oidc (no default is provided)")
@@ -280,6 +286,12 @@ func main() {
 		resolver.SetOIDCConfig(*oidcIssuer, *oidcClientID, *oidcClientSecret)
 		logger.Info("OIDC bundle variables configured", "issuer", *oidcIssuer)
 		resolver.SetOIDCClaims(*oidcUserClaim, *oidcGroupClaim)
+	}
+	// Beside OIDC, Jenkins pods also accept local account sessions that the
+	// BFF issues, and discover their keys from the BFF.
+	if *localAccounts {
+		resolver.SetLocalIssuer(*bffURL)
+		logger.Info("local accounts beside OIDC configured", "localIssuer", *bffURL)
 	}
 
 	// Create Composer for composed bundles (catalog-driven).
@@ -1052,16 +1064,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 5–6. Local-only auth reconcilers and bootstrap.
-	if *authMode == "local" {
+	// 5–6. Local account reconcilers and the local-mode admin bootstrap.
+	runLocalReconcilers, bootstrapAdmin := localAuthPlan(*authMode, *localAccounts)
+	if runLocalReconcilers {
 		userRec := controller.NewUserReconciler(clientsetClient, clientsetClient, operatorNamespace)
 		userRec.Logger = logger
+		var userSetup func(ctx context.Context) error
+		if bootstrapAdmin {
+			userSetup = func(ctx context.Context) error {
+				return controller.BootstrapLocalAdmin(ctx, clientsetClient, clientsetClient, operatorNamespace, logger)
+			}
+		}
 		if err := mgr.Add(&tickerRunnable{
 			name:     "user",
 			interval: 15 * time.Second,
-			setup: func(ctx context.Context) error {
-				return controller.BootstrapLocalAdmin(ctx, clientsetClient, clientsetClient, operatorNamespace, logger)
-			},
+			setup:    userSetup,
 			tick: func(ctx context.Context) {
 				if err := userRec.Reconcile(ctx); err != nil {
 					logger.Warn("user reconciler tick", "error", err)
@@ -1595,6 +1612,17 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+// localAuthPlan decides which local account runnables the operator starts.
+// The user and group reconcilers run for local mode and for local accounts
+// beside OIDC. The admin bootstrap runs only in local mode: beside OIDC, a
+// break-glass account exists only when an operator declares it.
+func localAuthPlan(authMode string, localAccounts bool) (reconcilers, bootstrapAdmin bool) {
+	if authMode == "local" {
+		return true, true
+	}
+	return localAccounts && authMode == "oidc", false
 }
 
 func envBool(key string, fallback bool) bool {

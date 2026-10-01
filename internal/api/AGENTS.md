@@ -70,6 +70,15 @@ federation, activity persistence, and SSE fanout.
   by `POST /stream/ticket` → `handleStreamTicket`) instead of a bearer token, since
   `EventSource` cannot set headers; `vk_`-prefixed tokens route to the API-key
   `Verifier`, everything else to the OIDC/local/ldap `Provider`.
+- **Local accounts beside OIDC** (`IdentityConfig.LocalAccounts`): `deps.Auth` is an
+  `auth.MultiProvider` and `deps.Local` the local provider; `Server.validator()`
+  unwraps the OIDC primary. `localAccountsOn()` gates user and group writes (local
+  mode or local accounts). A create or update beside OIDC needs `purpose`
+  (`validatePurpose`). `POST /login` beside OIDC publishes `auth.local.login`
+  (warning for break-glass, info for service) and `auth.local.login_failed` only
+  for an existing `User` with a purpose, never for an unknown name. `GET /me`
+  reports `authMode: local` for a local session, and logout of a local session
+  never sends the token to the IdP end-session endpoint.
 - **Cell pools** (`handlers_cellpools.go`, `cellpools_service.go`) serve
   `GET /cellpools`, `GET /cellpools/{name}`, and `PATCH /cellpools/{name}`
   over the cluster-scoped `CellPool` CRD of **every cluster of the brood**.

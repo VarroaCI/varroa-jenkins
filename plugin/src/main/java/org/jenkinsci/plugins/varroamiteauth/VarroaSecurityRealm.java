@@ -72,8 +72,17 @@ public class VarroaSecurityRealm extends SecurityRealm {
     static final String COOKIE_NAME = "varroa_token";
     static final String SYSTEM_AUTH = "varroa-mite-system";
 
+    /**
+     * Subject prefix of a local account that signs in beside OIDC. Only a
+     * session from the local issuer may carry it.
+     */
+    static final String LOCAL_SUBJECT_PREFIX = "local:";
+
     // Non-final only to allow test injection via setJwtValidatorForTest.
     private JWTValidator jwtValidator;
+    // Validator for local account sessions beside OIDC; null when off.
+    // Non-final only to allow test injection via setLocalJwtValidatorForTest.
+    private JWTValidator localJwtValidator;
     // Non-final only to allow test injection via setApiKeyValidatorForTest.
     private ApiKeyValidator apiKeyValidator;
     // Test seam for VARROA_LOGIN_URL, which is otherwise read from the environment.
@@ -126,6 +135,61 @@ public class VarroaSecurityRealm extends SecurityRealm {
         }
         this.groupClaimName = (groupClaimName != null && !groupClaimName.isEmpty())
                 ? groupClaimName : "groups";
+
+        setLocalIssuer(null);
+    }
+
+    /**
+     * Sets the issuer of local account sessions beside OIDC. An empty value
+     * falls back to {@code VARROA_LOCAL_ISSUER}; an empty result turns local
+     * account sessions off.
+     *
+     * @param localIssuer the BFF URL that issues local account sessions
+     */
+    @DataBoundSetter
+    public void setLocalIssuer(String localIssuer) {
+        if (localIssuer == null || localIssuer.isEmpty()) {
+            localIssuer = System.getenv("VARROA_LOCAL_ISSUER");
+        }
+        this.localJwtValidator = (localIssuer != null && !localIssuer.isEmpty())
+                ? new JWTValidator(localIssuer) : null;
+    }
+
+    /**
+     * The configured local account issuer, or {@code null} when local
+     * account sessions are off. Exposed so JCasC can export the realm.
+     *
+     * @return the resolved local issuer, or {@code null}.
+     */
+    public String getLocalIssuer() {
+        return localJwtValidator != null ? localJwtValidator.getOidcIssuer() : null;
+    }
+
+    /**
+     * Validates a session token from the OIDC issuer or, beside OIDC, from
+     * the local account issuer. The unverified iss claim selects the
+     * validator; the selected validator checks the signature, the issuer,
+     * the audience, and the expiry. A token from the OIDC issuer whose
+     * subject uses the local prefix is refused.
+     *
+     * @return the claims, or {@code null} when the token is invalid.
+     */
+    Map<String, Object> validateSession(String token) {
+        JWTValidator local = localJwtValidator;
+        if (local != null && local.getOidcIssuer() != null
+                && local.getOidcIssuer().equals(JWTValidator.unverifiedIssuer(token))) {
+            return local.validate(token);
+        }
+        Map<String, Object> claims = jwtValidator.validate(token);
+        if (claims != null && (hasLocalPrefix(claims.get("sub")) || hasLocalPrefix(claims.get("preferred_username")))) {
+            LOGGER.warning("varroa-mite-auth: OIDC token uses the reserved local: subject prefix");
+            return null;
+        }
+        return claims;
+    }
+
+    private static boolean hasLocalPrefix(Object v) {
+        return v instanceof String && ((String) v).startsWith(LOCAL_SUBJECT_PREFIX);
     }
 
     // ---- Data-bound property accessors (JCasC export) ----
@@ -472,7 +536,7 @@ public class VarroaSecurityRealm extends SecurityRealm {
         String token = getCookieValue(req, COOKIE_NAME);
         if (token == null || token.isEmpty()) return null;
 
-        Map<String, Object> claims = jwtValidator.validate(token);
+        Map<String, Object> claims = validateSession(token);
         if (claims == null) {
             LOGGER.warning("varroa-mite-auth: JWT validation failed for cookie");
             return null;
@@ -645,6 +709,10 @@ public class VarroaSecurityRealm extends SecurityRealm {
         this.jwtValidator = v;
     }
 
+    void setLocalJwtValidatorForTest(JWTValidator v) {
+        this.localJwtValidator = v;
+    }
+
     /**
      * Returns true if the request carries a valid HTTP session. When a
      * session already exists Jenkins' SecurityFilter will handle
@@ -694,7 +762,7 @@ public class VarroaSecurityRealm extends SecurityRealm {
                 // 1. Check varroa_token cookie (user auth).
                 String token = getCookie(req, COOKIE_NAME);
                 if (token != null && !token.isEmpty()) {
-                    Map<String, Object> claims = jwtValidator.validate(token);
+                    Map<String, Object> claims = validateSession(token);
                     if (claims != null) {
                         String userId = JWTValidator.getUserId(claims, userClaimNames);
                         if (userId == null) userId = (String) claims.get("sub");

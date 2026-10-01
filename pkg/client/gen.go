@@ -251,6 +251,12 @@ const (
 	ComponentsSchemasControllerSummaryKindStateful ComponentsSchemasControllerSummaryKind = "stateful"
 )
 
+// Defines values for ComponentsSchemasCreateUserRequestPurpose.
+const (
+	ComponentsSchemasCreateUserRequestPurposeBreakGlass ComponentsSchemasCreateUserRequestPurpose = "break-glass"
+	ComponentsSchemasCreateUserRequestPurposeService    ComponentsSchemasCreateUserRequestPurpose = "service"
+)
+
 // Defines values for ComponentsSchemasFleetLockState.
 const (
 	Held      ComponentsSchemasFleetLockState = "held"
@@ -514,6 +520,18 @@ const (
 const (
 	DeclaredNotYetStored ComponentsSchemasUpdateCenterUploadWarningCode = "declared-not-yet-stored"
 	LockTooOld           ComponentsSchemasUpdateCenterUploadWarningCode = "lock-too-old"
+)
+
+// Defines values for ComponentsSchemasUpdateUserRequestPurpose.
+const (
+	ComponentsSchemasUpdateUserRequestPurposeBreakGlass ComponentsSchemasUpdateUserRequestPurpose = "break-glass"
+	ComponentsSchemasUpdateUserRequestPurposeService    ComponentsSchemasUpdateUserRequestPurpose = "service"
+)
+
+// Defines values for ComponentsSchemasUserListEntryPurpose.
+const (
+	BreakGlass ComponentsSchemasUserListEntryPurpose = "break-glass"
+	Service    ComponentsSchemasUserListEntryPurpose = "service"
 )
 
 // Defines values for ListActivityParamsSource.
@@ -1909,14 +1927,20 @@ type ComponentsSchemasCreateRunRequest struct {
 	Parameters *map[string]string `json:"parameters,omitempty"`
 }
 
-// ComponentsSchemasCreateUserRequest Request body for creating a user (admin, local auth only).
+// ComponentsSchemasCreateUserRequest Request body for creating a local account (admin only).
 type ComponentsSchemasCreateUserRequest struct {
 	DisplayName *string   `json:"displayName,omitempty"`
 	Email       *string   `json:"email,omitempty"`
 	Groups      *[]string `json:"groups,omitempty"`
 	Password    string    `json:"password"`
-	Username    string    `json:"username"`
+
+	// Purpose Required when local accounts run beside OIDC.
+	Purpose  *ComponentsSchemasCreateUserRequestPurpose `json:"purpose,omitempty"`
+	Username string                                     `json:"username"`
 }
+
+// ComponentsSchemasCreateUserRequestPurpose Required when local accounts run beside OIDC.
+type ComponentsSchemasCreateUserRequestPurpose string
 
 // ComponentsSchemasDeployableNamespaces The caller's create-authorized namespaces.
 type ComponentsSchemasDeployableNamespaces struct {
@@ -2111,8 +2135,11 @@ type ComponentsSchemasIdentitySettings struct {
 	DefaultRead  bool    `json:"defaultRead"`
 
 	// Issuer OIDC issuer URL (present in OIDC mode only).
-	Issuer *string                               `json:"issuer,omitempty"`
-	Mode   ComponentsSchemasIdentitySettingsMode `json:"mode"`
+	Issuer *string `json:"issuer,omitempty"`
+
+	// LocalAccounts True when declared local accounts sign in beside OIDC.
+	LocalAccounts bool                                  `json:"localAccounts"`
+	Mode          ComponentsSchemasIdentitySettingsMode `json:"mode"`
 
 	// Scopes OIDC scopes (present in OIDC mode only).
 	Scopes *[]string `json:"scopes,omitempty"`
@@ -2296,6 +2323,7 @@ type ComponentsSchemasLoginResponse struct {
 
 // ComponentsSchemasMe Current user information, enriched from JWT claims and User CRD.
 type ComponentsSchemasMe struct {
+	// AuthMode Source of this session. A local account beside OIDC reports local.
 	AuthMode    ComponentsSchemasMeAuthMode `json:"authMode"`
 	DisplayName *string                     `json:"displayName,omitempty"`
 	Email       string                      `json:"email"`
@@ -2311,7 +2339,7 @@ type ComponentsSchemasMe struct {
 	Subject           string                        `json:"subject"`
 }
 
-// ComponentsSchemasMeAuthMode defines model for ComponentsSchemasMe.AuthMode.
+// ComponentsSchemasMeAuthMode Source of this session. A local account beside OIDC reports local.
 type ComponentsSchemasMeAuthMode string
 
 // ComponentsSchemasMissingPlugin A composed bundle's plugin pin absent from the resolved plugin set.
@@ -3936,11 +3964,17 @@ type ComponentsSchemasUpdateCenterUploadedPlugin struct {
 	Version string `json:"version"`
 }
 
-// ComponentsSchemasUpdateUserRequest Request body for updating a user's identity fields.
+// ComponentsSchemasUpdateUserRequest Request body for updating a local account's identity fields.
 type ComponentsSchemasUpdateUserRequest struct {
 	DisplayName *string `json:"displayName,omitempty"`
 	Email       *string `json:"email,omitempty"`
+
+	// Purpose Required when local accounts run beside OIDC.
+	Purpose *ComponentsSchemasUpdateUserRequestPurpose `json:"purpose,omitempty"`
 }
+
+// ComponentsSchemasUpdateUserRequestPurpose Required when local accounts run beside OIDC.
+type ComponentsSchemasUpdateUserRequestPurpose string
 
 // ComponentsSchemasUserListEntry Entry for each user in the user list.
 type ComponentsSchemasUserListEntry struct {
@@ -3954,7 +3988,13 @@ type ComponentsSchemasUserListEntry struct {
 	// ManagedBy Source of user management, e.g. "local" or "idp".
 	ManagedBy string `json:"managedBy"`
 	Name      string `json:"name"`
+
+	// Purpose Purpose of a local account beside OIDC. Absent when not set.
+	Purpose *ComponentsSchemasUserListEntryPurpose `json:"purpose,omitempty"`
 }
+
+// ComponentsSchemasUserListEntryPurpose Purpose of a local account beside OIDC. Absent when not set.
+type ComponentsSchemasUserListEntryPurpose string
 
 // ComponentsSchemasVarroaRole A VarroaRole CRD (cluster-scoped, API-level RBAC).
 type ComponentsSchemasVarroaRole struct {
@@ -16376,7 +16416,8 @@ type GetAuthConfigResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *struct {
-		Mode GetAuthConfig200Mode `json:"mode"`
+		LocalAccounts bool                 `json:"localAccounts"`
+		Mode          GetAuthConfig200Mode `json:"mode"`
 	}
 }
 type GetAuthConfig200Mode string
@@ -22350,7 +22391,8 @@ func ParseGetAuthConfigResponse(rsp *http.Response) (*GetAuthConfigResponse, err
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest struct {
-			Mode GetAuthConfig200Mode `json:"mode"`
+			LocalAccounts bool                 `json:"localAccounts"`
+			Mode          GetAuthConfig200Mode `json:"mode"`
 		}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err

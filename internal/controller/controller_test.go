@@ -65,7 +65,7 @@ type testClient struct {
 	deletedCellNetworkPolicies []string
 	createdCellNetworkPolicies []CellPolicySpec
 	statuses                   map[string]string
-	oidcUpdateCalls            []struct{ name, namespace, oidcIssuer, loginURL, apikeyVerifyURL, caPEM string }
+	oidcUpdateCalls            []struct{ name, namespace, oidcIssuer, localIssuer, loginURL, apikeyVerifyURL, caPEM string }
 	fleetPodLabel              string
 	fleetPodLabelPatches       int
 	secretWrites               int
@@ -439,8 +439,8 @@ func (t *testClient) CreateStatefulSet(_ context.Context, spec StatefulSetSpec) 
 	t.stsSpecs = append(t.stsSpecs, spec)
 	return nil
 }
-func (t *testClient) UpdateStatefulSetOIDCEnv(_ context.Context, name, namespace, oidcIssuer, loginURL, oidcUserClaim, oidcGroupClaim, pubKeyPEM, pubKeyKID, aud, apikeyVerifyURL, caPEM string) error {
-	t.oidcUpdateCalls = append(t.oidcUpdateCalls, struct{ name, namespace, oidcIssuer, loginURL, apikeyVerifyURL, caPEM string }{name, namespace, oidcIssuer, loginURL, apikeyVerifyURL, caPEM})
+func (t *testClient) UpdateStatefulSetOIDCEnv(_ context.Context, name, namespace string, authEnv JenkinsAuthEnv) error {
+	t.oidcUpdateCalls = append(t.oidcUpdateCalls, struct{ name, namespace, oidcIssuer, localIssuer, loginURL, apikeyVerifyURL, caPEM string }{name, namespace, authEnv.OIDCIssuer, authEnv.LocalIssuer, authEnv.LoginURL, authEnv.ApikeyVerifyURL, authEnv.CAPEM})
 	return nil
 }
 func (t *testClient) EnsureStatefulSetPodLabel(_ context.Context, _, _, key, value string) (bool, error) {
@@ -2282,6 +2282,65 @@ func TestHandleConnectedOIDCEnvSync(t *testing.T) {
 	}
 	if call.caPEM != "" {
 		t.Errorf("caPEM: got %q, want empty (no CA PEM set)", call.caPEM)
+	}
+	if call.localIssuer != "" {
+		t.Errorf("localIssuer: got %q, want empty (local accounts off)", call.localIssuer)
+	}
+}
+
+// TestHandleConnected_SyncsLocalIssuer checks that the local account issuer
+// beside OIDC reaches the StatefulSet env sync.
+func TestHandleConnected_SyncsLocalIssuer(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+	rec.Resolver.SetOIDCConfig("https://dex.example.com", "varroa", "secret")
+	rec.Resolver.SetLocalIssuer("https://varroa.example.com")
+
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "testctl", Namespace: "testns", UID: testUID, CreationTimestamp: metav1Now()},
+		Spec:       v1alpha1.ControllerSpec{Version: "latest"},
+		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected},
+	}
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(client.oidcUpdateCalls) == 0 {
+		t.Fatal("expected UpdateStatefulSetOIDCEnv to be called")
+	}
+	if got := client.oidcUpdateCalls[0].localIssuer; got != "https://varroa.example.com" {
+		t.Errorf("localIssuer: got %q, want https://varroa.example.com", got)
+	}
+}
+
+func TestGenerateRealmDocument_LocalIssuer(t *testing.T) {
+	doc := generateRealmDocument()
+	if !strings.Contains(doc, `localIssuer: "${VARROA_LOCAL_ISSUER:-}"`) {
+		t.Errorf("realm document has no localIssuer reference:\n%s", doc)
+	}
+}
+
+func TestUpsertAuthEnv_LocalIssuerAlwaysPresent(t *testing.T) {
+	envs, changed := upsertAuthEnv(nil, JenkinsAuthEnv{OIDCIssuer: "https://dex"})
+	if !changed {
+		t.Fatal("expected a change on an empty env list")
+	}
+	names := map[string]string{}
+	for _, e := range envs {
+		m := e.(map[string]interface{})
+		names[m["name"].(string)] = m["value"].(string)
+	}
+	if v, ok := names["VARROA_LOCAL_ISSUER"]; !ok || v != "" {
+		t.Errorf("VARROA_LOCAL_ISSUER = %q (present %v), want present and empty", v, ok)
+	}
+	if _, ok := names["VARROA_CA_PEM"]; ok {
+		t.Error("VARROA_CA_PEM must not be added when empty")
+	}
+	envs, changed = upsertAuthEnv(envs, JenkinsAuthEnv{OIDCIssuer: "https://dex", LocalIssuer: "https://bff"})
+	if !changed {
+		t.Fatal("expected a change when the local issuer is set")
+	}
+	if _, changed = upsertAuthEnv(envs, JenkinsAuthEnv{OIDCIssuer: "https://dex", LocalIssuer: "https://bff"}); changed {
+		t.Error("expected no change on a second identical upsert")
 	}
 }
 

@@ -49,6 +49,7 @@ export interface MeResponse {
     accent?: string;
     defaultLanding?: string;
   };
+  /** Source of this session. A local account beside OIDC reports "local". */
   authMode?: "oidc" | "local" | "ldap";
   lastLogin?: string;
 }
@@ -56,4 +57,6 @@ export interface MeResponse {
 /** Shape of GET /api/v1/auth-config (unauthenticated). */
 export interface AuthConfig {
   mode: "oidc" | "local" | "ldap";
+  /** True when declared local accounts sign in beside OIDC. */
+  localAccounts: boolean;
 }

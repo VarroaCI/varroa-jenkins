@@ -28,6 +28,7 @@ function renderWithAuth(overrideAuth: Partial<ReturnType<typeof useAuth>> = {}) 
     permissionsError: null,
     retryPermissions: vi.fn(),
     authMode: "local",
+    localAccounts: false,
     login: vi.fn(),
     logout: vi.fn(),
     authError: undefined,
