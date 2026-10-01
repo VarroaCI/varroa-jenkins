@@ -141,7 +141,10 @@ reading each package's entry point):
   stream while receiving no desired state at all. `BusTransport.Send` is a
   core NATS request answered by the gateway holding the stream; it stores
   nothing and returns `ErrMiteUnreachable` when no gateway answers. There is
-  no `ClearDesired`: no desired state is stored. Not related to git — bundle
+  no `ClearDesired`: no desired state is stored. `BusTransport.ensureSub`
+  reads the inbound subscription's denial watcher under `b.mu` on every
+  call. After a server denial, it subscribes again and keeps the result
+  channel. Not related to git — bundle
   git materialization lives in `bundle/resolver.go`.
 - **`mcp/`** — MCP (Model Context Protocol) Streamable-HTTP server exposing
   Varroa's CRUD surface as MCP tools; built on `internal/api.Dependencies` so it

@@ -135,6 +135,9 @@ control plane's async transport — no other package talks to NATS directly.
   flushes, waits up to 100 ms for the callback goroutine, and returns
   `ErrSubscribeDenied`. Register the watcher before the subscribe, and keep
   reading it afterwards: a denial can also arrive later.
+  The gateway confirms each subscription and rebuilds through its pacer.
+  The operator's `BusTransport.ensureSub` reads the watcher lazily on its
+  next call instead, because the reconcile tick calls it again.
 - **Logging** — a `Conn`'s logger is supplied only through `Config.Logger` and
   is installed by `Connect` before any handler closure exists. There is no
   exported logger field: the NATS callbacks read it from library goroutines and

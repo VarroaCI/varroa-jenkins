@@ -25,7 +25,7 @@ type BusTransport struct {
 
 	mu      sync.Mutex
 	results map[string]chan *mitev1.CommandResult  // keyed by "ns/name"
-	subs    map[string]*bus.Sub                    // subscriptions per mite
+	subs    map[string]*inboundSub                 // subscriptions per mite
 	reports map[string]*mitev1.ObservabilityReport // latest report per mite
 
 	// TokenGrantFunc mints a fresh Jenkins token for a mite. When set, a
@@ -55,26 +55,83 @@ func NewBusTransport(cluster string, conn *bus.Conn, snapshotKV, presenceKV *bus
 		snapshotKV: snapshotKV,
 		presenceKV: presenceKV,
 		results:    make(map[string]chan *mitev1.CommandResult),
-		subs:       make(map[string]*bus.Sub),
+		subs:       make(map[string]*inboundSub),
 		reports:    make(map[string]*mitev1.ObservabilityReport),
 	}
 }
 
-// ensureSub creates a NATS subscription for the given mite if one does not
-// already exist. Incoming CommandResult messages are buffered in a channel.
+// inboundSub is the operator's subscription to one mite's inbound subject.
+// The server can reject a subscription after the subscribe call returned,
+// so denied holds the watcher signal for that subject. Only ensureSub reads
+// it, under BusTransport.mu.
+type inboundSub struct {
+	sub     *bus.Sub
+	denied  <-chan struct{}
+	release func()
+	// wasDenied records that this entry replaces a denied subscription.
+	// ensureSub logs the first denial at Error and later rebuilds at Debug.
+	// It logs Info once when the entry is older than inboundAcceptGrace
+	// and has no denial signal.
+	wasDenied bool
+	// subscribedAt is when ensureSub sent this subscription. A denial
+	// arrives asynchronously, so a call soon after the subscribe cannot
+	// tell an accepted subscription from one that the server will deny.
+	subscribedAt time.Time
+}
+
+// inboundAcceptGrace is how long a rebuilt subscription must stay without
+// a denial signal before ensureSub reports it as accepted. The server
+// answers a subscription in one round trip, so one second is ample.
+const inboundAcceptGrace = time.Second
+
+func (s *inboundSub) close() {
+	_ = s.sub.Unsubscribe()
+	s.release()
+}
+
+// ensureSub creates a NATS subscription for the given mite if none exists.
+// It subscribes again when the server denied the current subscription.
+// Incoming CommandResult messages go to a buffered channel that a rebuild
+// keeps.
+//
+// Every read and write of b.subs and b.results happens under b.mu. A denial
+// only queues a signal on the entry's buffered watcher channel, and only
+// this function reads that signal and replaces the entry.
 func (b *BusTransport) ensureSub(ns, name string) {
 	key := ns + "/" + name
+	subject := bus.MiteInSubject(b.cluster, ns, name)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if _, ok := b.subs[key]; ok {
-		return
+	wasDenied := false
+	if cur, ok := b.subs[key]; ok {
+		select {
+		case <-cur.denied:
+		default:
+			if cur.wasDenied && time.Since(cur.subscribedAt) >= inboundAcceptGrace {
+				cur.wasDenied = false
+				b.log().Info("mite inbound subscription accepted again", "controller", key, "subject", subject)
+			}
+			return
+		}
+		cur.close()
+		delete(b.subs, key)
+		if cur.wasDenied {
+			b.log().Debug("mite inbound subscription still denied; subscribing again", "controller", key, "subject", subject)
+		} else {
+			b.log().Error("mite inbound subscription denied; subscribing again", "controller", key, "subject", subject)
+		}
+		wasDenied = true
 	}
 
-	ch := make(chan *mitev1.CommandResult, 64)
-	b.results[key] = ch
+	ch, kept := b.results[key]
+	if !kept {
+		ch = make(chan *mitev1.CommandResult, 64)
+		b.results[key] = ch
+	}
 
-	sub, err := b.conn.SubscribeData(bus.MiteInSubject(b.cluster, ns, name), func(data []byte) {
+	denied, release := b.conn.WatchSubscribeDenied(subject)
+	sub, err := b.conn.SubscribeData(subject, func(data []byte) {
 		var mm mitev1.MiteMessage
 		if err := json.Unmarshal(data, &mm); err != nil {
 			b.log().Error("unmarshal mite message failed", "controller", key, "error", err)
@@ -99,11 +156,14 @@ func (b *BusTransport) ensureSub(ns, name string) {
 		}
 	})
 	if err != nil {
-		b.log().Error("subscribe failed", "subject", bus.MiteInSubject(b.cluster, ns, name), "error", err)
-		delete(b.results, key)
+		release()
+		b.log().Error("subscribe failed", "subject", subject, "error", err)
+		if !kept {
+			delete(b.results, key)
+		}
 		return
 	}
-	b.subs[key] = sub
+	b.subs[key] = &inboundSub{sub: sub, denied: denied, release: release, wasDenied: wasDenied, subscribedAt: time.Now()}
 }
 
 // handleTokenRefresh mints a fresh Jenkins token and publishes a TokenGrant to
@@ -336,7 +396,7 @@ func (b *BusTransport) Close() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for key, sub := range b.subs {
-		_ = sub.Unsubscribe()
+		sub.close()
 		delete(b.subs, key)
 		delete(b.results, key)
 	}
