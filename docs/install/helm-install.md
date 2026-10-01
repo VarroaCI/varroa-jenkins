@@ -159,25 +159,35 @@ helm upgrade varroa oci://ghcr.io/varroaci/charts/varroa \
 
 Verify the Helm revision, control-plane pods, and existing controllers. Upgrading the control plane does not change `Controller.spec.version`.
 
+To keep earlier values, use `--reset-then-reuse-values`. The chart refuses `--reuse-values`, which drops the encryption defaults.
+
 ### Bus credentials and GitOps renders
 
-The chart mints the NATS passwords and TLS material once. On `helm upgrade` it
-re-reads them from the existing `<release>-nats-creds` Secret. Renderers that
-cannot read the cluster mint fresh values on every render. This applies to
-`helm template`, ArgoCD, and Flux.
+The chart mints the NATS passwords, the TLS material, and the JetStream
+encryption key once. On `helm upgrade` it re-reads them from the existing
+Secrets. Renderers that cannot read the cluster mint fresh values on every
+render. This applies to `helm template`, ArgoCD, and Flux.
 
-Fresh values are safe. The control-plane components read their password from the
-mounted Secret on every reconnect. After a rotation they reconnect with no
-restart, once kubelet has synced the new Secret onto the pod. That sync takes
-about a minute.
+Fresh passwords are safe. The components read the mounted Secret on each
+reconnect, so they recover in about a minute with no restart.
 
-During that window the operator reports NotReady, because `/readyz` fails while
-the bus is down, and the `varroa.bus.connected` gauge drops to 0. Both recover on
-their own.
+A fresh key is not safe. NATS encrypts JetStream with the key in the
+`varroa-nats-js-key` Secret. A changed or lost key loses all JetStream state.
+Back up the key after the first install:
 
-Restarting a pod during that window is also safe. A component that starts before
-its Secret has synced waits for the credential rather than exiting, so it sits
-NotReady until the bus accepts it.
+```bash
+kubectl get secret varroa-nats-js-key -n varroa-system -o jsonpath='{.data.key}' | base64 -d
+```
+
+For a GitOps render, set `nats.encryption.createSecret: false` and create the
+Secret yourself:
+
+```bash
+kubectl create secret generic varroa-nats-js-key -n varroa-system --from-literal=key=<key>
+```
+
+Uninstall keeps the Secret. If the Secret is lost, `helm upgrade` fails. Restore
+the Secret from the backup.
 
 ## Uninstall
 

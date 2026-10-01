@@ -52,3 +52,19 @@ non-clustered mode") into an install-time error.
 {{- end -}}
 {{- end -}}
 {{- end -}}
+
+{{- /*
+JetStream encryption is always on. The merge keys and the JS_KEY env are
+chart defaults, and `helm upgrade --reuse-values` drops new chart defaults.
+Without this guard such an upgrade would run NATS with a plain-text store.
+*/ -}}
+{{- if and .Values.nats.enabled (ne $mode "hive") -}}
+{{- $natsConfig := .Values.nats.config | default dict -}}
+{{- $jetstream := $natsConfig.jetstream | default dict -}}
+{{- $merge := $jetstream.merge | default dict -}}
+{{- $natsContainer := .Values.nats.container | default dict -}}
+{{- $natsEnv := $natsContainer.env | default dict -}}
+{{- if or (ne (toString $merge.key) "<< $JS_KEY >>") (empty $merge.cipher) (not (hasKey $natsEnv "JS_KEY")) -}}
+{{- fail "JetStream encryption is not configured: set nats.config.jetstream.merge.cipher, nats.config.jetstream.merge.key (<< $JS_KEY >>), and nats.container.env.JS_KEY. An upgrade with --reuse-values drops these chart defaults; use --reset-then-reuse-values." -}}
+{{- end -}}
+{{- end -}}

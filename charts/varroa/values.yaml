@@ -677,6 +677,15 @@ nats:
       fileStore:
         enabled: true
         dir: /data
+      # Encryption at rest. The server encrypts each stream, consumer, and
+      # raft log with this key. On the first start with a key, the server
+      # converts a plain-text store in place. The key comes from the
+      # JS_KEY env var below. The << >> form renders $JS_KEY unquoted, so
+      # NATS reads it as a variable. Do not add prev_encryption_key: a
+      # restart with it loses every durable consumer.
+      merge:
+        cipher: chachapoly
+        key: << $JS_KEY >>
     nats:
       port: 4222
       tls:
@@ -707,6 +716,14 @@ nats:
         secret:
           secretName: varroa-nats-auth-config
   container:
+    # The JetStream encryption key. Only the NATS container reads it. The
+    # varroa chart mints the Secret (see encryption.createSecret).
+    env:
+      JS_KEY:
+        valueFrom:
+          secretKeyRef:
+            name: varroa-nats-js-key
+            key: key
     merge:
       resources:
         requests:
@@ -725,6 +742,15 @@ nats:
     enabled: true
     size: 10Gi
     storageClass: ""
+  # The JetStream encryption key Secret (varroa-nats-js-key). The key
+  # must stay the same for the life of the NATS volumes: a lost or changed
+  # key loses all JetStream state.
+  encryption:
+    # -- Mint the key Secret once and keep it across upgrades. A renderer
+    # that cannot read the cluster (helm template, ArgoCD, Flux) mints a new
+    # key on each sync. Set false for such a renderer and create the Secret
+    # yourself, with the key in data key "key".
+    createSecret: true
   # External NATS exposure — opt-in, full-mode only.
   external:
     enabled: false

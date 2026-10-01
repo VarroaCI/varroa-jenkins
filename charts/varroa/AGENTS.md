@@ -151,6 +151,28 @@ the packaged CRDs. Does not own the Go source it packages
   disconnects the component until someone restarts it. The operator's readiness
   probe hits `/readyz` (bus-aware) while liveness stays on `/healthz`. Asserted
   by `tests/test-nats-bus-security.sh`.
+- **JetStream is encrypted at rest, always.** `nats.config.jetstream.merge`
+  sets `cipher: chachapoly` and `key: << $JS_KEY >>` (the subchart renders
+  `<< >>` unquoted, so NATS reads a variable), and `nats.container.env.JS_KEY`
+  reads `varroa-nats-js-key`/`key`. `templates/secret-nats-js-key.yaml` mints
+  that Secret once under the same fixed name, never the release name (`lookup` reuse, `randAlphaNum 64`,
+  `helm.sh/resource-policy: keep`), gated on `nats.enabled`, full mode, and
+  `nats.encryption.createSecret` (read nil-safe; only a bool counts, so a
+  null or empty value keeps the default `true`). With no stored key, the
+  template finds the live NATS StatefulSet by its selector labels
+  (`component: nats`, `instance: <release>`) and fails the render
+  when it already sets `JS_KEY`, instead of minting over a lost key.
+  `mode-guard.yaml` fails a full-mode render that lacks the merge keys or the
+  `JS_KEY` env, because `--reuse-values` drops new chart defaults.
+  `createSecret: false` is the GitOps escape, because a renderer without
+  `lookup` mints a new key each sync. A changed key makes NATS skip every
+  stream. So the key never enters `varroa-nats-creds`, which three client
+  components mount. No pod carries a checksum of the key Secret. The chart
+  never renders `prev_encryption_key`: a restart with it loses every durable
+  consumer on 2.10.16 and 2.11.17. NATS converts a plain store in place on the first
+  start with a key. `nats.image`, `nats.persistence`, and `nats.service` are
+  not read by the subchart: the server image is the subchart default
+  `container.image` (2.10.16). Asserted by `tests/test-nats-encryption.sh`.
 - **`nats.config.cluster.enabled`/`nats.config.cluster.replicas` are the ONLY real
   clustering knobs** for the vendored nats-1.2.0 subchart (its `stateful-set.yaml`
   hardcodes `replicas: 1` whenever `cluster.enabled` is false, ignoring `replicas`
@@ -304,7 +326,8 @@ the packaged CRDs. Does not own the Go source it packages
 - **`tests/*.sh`** — golden-render bash assertions over `helm template` output
   (`test-hive-mode.sh`, `test-secret-rbac-scoping.sh`, `test-nats-bus-security.sh`,
   `test-recorder-netpol.sh`, `test-recorder-chart.sh`, `test-activity-stream-acl.sh`,
-  `test-runner-door-nginx.sh`, `test-cells-guard.sh`, `test-hive-recordstore.sh`, `test-artifact-sts.sh`); not the
+  `test-runner-door-nginx.sh`, `test-cells-guard.sh`, `test-hive-recordstore.sh`, `test-artifact-sts.sh`,
+  `test-nats-encryption.sh`); not the
   `helm unittest` plugin.
 - **The agent WebSocket door needs one nginx block, no Ingress change.**
   `frontend/nginx.conf`'s `location /runners/` block proxies to the BFF
@@ -360,6 +383,7 @@ helm template charts/varroa
 bash charts/varroa/tests/test-hive-mode.sh
 bash charts/varroa/tests/test-secret-rbac-scoping.sh
 bash charts/varroa/tests/test-nats-bus-security.sh
+bash charts/varroa/tests/test-nats-encryption.sh
 bash charts/varroa/tests/test-mcp-netpol.sh
 bash charts/varroa/tests/test-dex-grpc-disabled.sh
 bash charts/varroa/tests/test-updatecenter-seed-default.sh
