@@ -103,14 +103,21 @@ Expect `"status":"True","reason":"TenantPlaced"`.
 
 ## What composes a tenant
 
-- **Folder.** The tenant's `items.yaml` goes under one top-level folder named after the `Team`,
-  merged with the other tenants' folders. The
-  operator ignores `plugins.yaml`, `rbac.yaml`, and `jenkins.yaml` except its
-  [pod templates](tenant-pod-templates.md): a tenant cannot change controller configuration. A
-  job the bundle no longer declares leaves the folder, and its next trigger fails with
-  `JOB_NOT_FOUND`. After a roll or a new placement, a trigger waits up to five minutes for the
-  tenant's jobs. See
+- **Folder.** The tenant's `items.yaml` goes under one top-level folder named after the `Team`.
+  The operator ignores `plugins.yaml`, `rbac.yaml`, and `jenkins.yaml` except its
+  [pod templates](tenant-pod-templates.md). A job the bundle no longer declares leaves the
+  folder, and its next trigger fails with `JOB_NOT_FOUND`. See
   [Build records](build-records.md).
+- **Held folder.** Tenant items resolve only their own bundle's variables. The operator
+  keeps the folder and its jobs as they are on one of these faults:
+  - an item still holds `${`, a `${varroa_*}` name too;
+  - the items do not parse, set `root`, or fail a lint rule;
+  - an item needs a plugin the cell does not pin;
+  - a pipeline template does not load;
+  - the bundle is missing or has no content yet.
+
+  The `Team` reports `TenantWarnings=True`, reason `ItemsHeld`. A first-time held tenant has no
+  folder until you fix the fault.
 - **Item role.** The operator synthesizes a role scoped to the folder's subtree, granting build,
   read, and replay permissions, bound to the tenant's service identity.
 - **Service identity.** Every build in the folder runs as `svc-<team>`, an identity the plugin
@@ -243,10 +250,10 @@ confirms the folder is idle, then does the same two-step move.
 **Roll.** A cell that reports `CellReady=False` past `cells.unreadyGracePeriod`, for a reason
 other than the three configuration gates, gets its pod deleted once and the reason `CellRolled`.
 The roll waits up to 30 minutes from the pod start while an init container runs without a
-restart. The message then reads `plugins-init running for 12m`. The grace counts from the init
-finish. A pod that has not started Jenkins gets a 30-second delete grace.
+restart. The grace counts from the init finish. A pod that has not started Jenkins gets a
+30-second delete grace.
 
-**Teardown.** Teardown frees the placement record and the name at once.
+**Teardown** frees the placement record and the name at once.
 
 **Eviction.** Past twice that grace period, the operator sets `status.cell.evacuate`, and every
 tenant moves off on its next placement tick. The init wait applies here too. Only recovery clears
@@ -320,13 +327,9 @@ claimer retries.
 
 ## Interrupted runs
 
-The recorder marks a `RUNNING` run interrupted only when its cell process is gone, not because
-its last event is old. [Cell loss](cell-loss.md) describes the signals, the windows, and the
-reasons. The same marks apply to a single-tenant controller whose pod is replaced.
-
-Marking sets the run's result to `INTERRUPTED` and releases no fleet lock; only a terminal event
-or a confirmed dead instance does. The recorder cancels the build only when its cell instance is
-alive.
+The recorder marks a `RUNNING` run interrupted only when its cell process is gone.
+[Cell loss](cell-loss.md) describes the signals, the windows, and the reasons. The same marks
+apply to a single-tenant controller whose pod is replaced.
 
 Set `interruptedRetry: automatic` to retry an interrupted run once on the job's home slot; the
 default, `manual`, leaves the retry to a user.
@@ -346,7 +349,3 @@ counts the rest; `none` fires nothing and counts every miss. A long hibernation 
 three-occurrence horizon. A fire wakes a hibernated controller, which then exports a fresh
 horizon. A trigger for a controller that never wakes expires after 24 hours. A cell roll loses no
 occurrence; see [Cell loss](cell-loss.md#a-backstop-fire-during-a-cell-roll).
-
-Each fire writes one `build.scheduled.backstop` row, visible only on the next backfill.
-
-Set `cronBackstop: false` to turn the backstop off.

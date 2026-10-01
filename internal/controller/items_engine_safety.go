@@ -32,6 +32,16 @@ func checkBranchBuildStrategiesPlugin(itemsYAML string, coreSet []pluginlock.Plu
 	if err != nil {
 		return nil //nolint:nilerr // a parse failure is reported through the caller's own error path, not this check
 	}
+	return checkBranchBuildStrategiesManifest(manifest, coreSet)
+}
+
+// checkBranchBuildStrategiesManifest is checkBranchBuildStrategiesPlugin
+// for a manifest that is already parsed. A cell runs it on each tenant's
+// re-rooted manifest, so one tenant's item holds only that tenant.
+func checkBranchBuildStrategiesManifest(manifest *items.Manifest, coreSet []pluginlock.PluginEntry) error {
+	if pluginPinned(coreSet, branchBuildStrategiesPlugin) {
+		return nil
+	}
 	for _, ip := range manifest.Flatten() {
 		if ip.Item.Kind == "multibranch" || ip.Item.Kind == "organizationFolder" {
 			return fmt.Errorf("item %q (kind=%s) needs plugin %q, which the resolved plugin set omits",

@@ -159,3 +159,17 @@ func TestMerge_DroppingATenantDeletesItsFolder(t *testing.T) {
 		t.Fatalf("expected team-b's folder to be deleted once dropped from the merged manifest, deleted=%v", deleted)
 	}
 }
+
+func TestReRoot_DropsRetain(t *testing.T) {
+	in, err := Parse("retain: [other]\nitems:\n  - kind: folder\n    name: f\n")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	out, err := ReRoot(in, "payments")
+	if err != nil {
+		t.Fatalf("reroot: %v", err)
+	}
+	if len(out.Retain) != 0 {
+		t.Errorf("a tenant manifest must not carry a retain list, got %v", out.Retain)
+	}
+}

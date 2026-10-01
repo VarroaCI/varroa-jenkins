@@ -55,9 +55,8 @@ template, and applies the others, when:
 5. `label` is present and is not a string;
 6. an earlier template of the tenant has the same `name`.
 
-Each skip adds a `PodTemplateSkipped` entry to the `Team`'s `TenantWarnings` condition. Rule 2
-keeps a template from reading a cell value or failing the cell for every tenant. In a pod `yaml`,
-write a shell variable as `$VAR`, not `${VAR}`.
+Each skip adds a `PodTemplateSkipped` entry to the `Team`'s `TenantWarnings` condition. In a pod
+`yaml`, write a shell variable as `$VAR`, not `${VAR}`.
 
 The operator ignores all other content of `jenkins.yaml`. It records one `BundleKeysIgnored`
 entry that names each ignored key path. A `jenkins.yaml` that does not parse gives one

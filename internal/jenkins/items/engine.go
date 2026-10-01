@@ -132,6 +132,14 @@ func (e *Engine) applyIncremental(ctx context.Context, manifest *Manifest, strat
 	// the same removal set (the managed cache only contains mite-authored
 	// items, all of which are supported types). The distinction is preserved
 	// so adding unmanaged-item listing later differentiates them.
+	// A retained path is outside this apply: its managed items stay in the
+	// cache with their previous hash, so the remove step below keeps them.
+	for path, h := range prev {
+		if _, declared := next[path]; !declared && manifest.retains(path) {
+			next[path] = h
+		}
+	}
+
 	if strategy != string(RemoveNone) {
 		if err := e.removeUndeclared(ctx, next, prev, res); err != nil {
 			return nil, fmt.Errorf("remove undeclared: %w", err)

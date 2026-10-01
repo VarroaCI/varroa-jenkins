@@ -74,6 +74,10 @@ const (
 
 // TenantWarnings reasons.
 const (
+	// TeamReasonItemsHeld reports a tenant whose items fail a cell check.
+	// The cell keeps the tenant's folder as it is and pushes the other
+	// tenants. The message names the fault.
+	TeamReasonItemsHeld         = "ItemsHeld"
 	TeamReasonBundleKeysIgnored = "BundleKeysIgnored"
 	// TeamReasonPodTemplateSkipped reports a tenant bundle pod template
 	// that the operator does not lift onto the tenant cloud.

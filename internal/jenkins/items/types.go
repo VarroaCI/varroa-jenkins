@@ -11,7 +11,12 @@ import (
 type Manifest struct {
 	RemoveStrategy *RemoveStrategy `yaml:"removeStrategy,omitempty"`
 	Root           string          `yaml:"root,omitempty"`
-	Items          []Item          `yaml:"items"`
+	// Retain names top-level item paths whose managed items the engine
+	// keeps as they are: it does not delete them and does not write them.
+	// A cell writes it for a tenant folder that it holds, because a folder
+	// absent from a sync manifest is otherwise deleted.
+	Retain []string `yaml:"retain,omitempty"`
+	Items  []Item   `yaml:"items"`
 }
 
 // RemoveStrategy defines how existing items and RBAC are handled.

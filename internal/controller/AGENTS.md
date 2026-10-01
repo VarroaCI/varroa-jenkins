@@ -338,7 +338,8 @@ sections describe.
   (subdomain vs path); merges the resolved `JenkinsVersionProfile`'s
   `spec.jcasc.content` via `bundle.MergeJenkinsYAML` **before** calling
   `bundle.ResolveVars`, so `${varroa_controller_*}` placeholders inside the overlay
-  also resolve; after a cell's own tenant merge (`applyCellContent`) and still
+  also resolve; computes `coreSetForCr` once and passes it to the cell's own
+  tenant merge (`applyCellContent`); after that merge and still
   before `ResolveVars`, calls `checkBranchBuildStrategiesPlugin`
   (`items_engine_safety.go`, design D12) and fails the resolve when the items
   content holds a `multibranch` or `organizationFolder` item and the resolved
@@ -346,7 +347,11 @@ sections describe.
   make XStream drop the rendered `buildStrategies` element or fail the item
   create, so a silent omission would produce an initial-index build storm
   with no warning; then resolves all vars and runs `findUnresolvedVars` as the
-  completeness check — any leftover `${...}` fails resolution. After that
+  completeness check — any leftover `${...}` fails resolution. For a cell
+  both steps skip `items.yaml`: it is tenant content only, which
+  `assembleCellContent` already resolved and checked per tenant, so a cell
+  variable never reaches a tenant item and a tenant fault never fails the
+  cell. After that
   check, `bundle.InjectPipelineTemplates` merges the controller's own
   delivered pipeline-template set (`mat.PipelineTemplatesYAML`, folder `""`),
   then once per entry in `mat.CellTemplateFragments` (a cell only, one entry
@@ -915,14 +920,35 @@ sections describe.
     `ResolveVars` and unresolved-variable check run over the lifted text. Any
     other `jenkins.yaml` content is residue: one `BundleKeysIgnored` warning
     naming each sorted path, never a cell failure), `cell_items_assembly.go`
-    (`assembleCellContent` runs the tenant items pipeline — `items.ReRoot`
-    then `items.Merge` per tenant, `lint.Run` against `cellLintRules`
-    (`NoPollSCMRule`, `NoGlobalCredentialsRule`,
-    `NoControllerConfigDependencyRule`) before a push — plus tenant cloud,
+    (`assembleCellContent` runs the tenant items pipeline plus tenant cloud,
     credential, and pipeline-template fragment assembly. Per tenant it calls
     `readTenantBundleContent`, then `tenantBundleCloudContent` (the lift plus
     the `plugins.yaml`/`rbac.yaml` warnings), then, for a non-draining
-    tenant only, `materializeTenantManifest` and the folder. A draining
+    tenant only, `materializeTenantManifest` and the folder.
+    `materializeTenantManifest` resolves the tenant's own `variables.yaml`
+    in one pass (no cell variable, so `${varroa_*}` stays unresolved), then
+    runs `findUnresolvedVars`, `items.Parse`, `items.ReRoot`, `lint.Run`
+    against `cellLintRules` (`NoPollSCMRule`, `NoGlobalCredentialsRule`,
+    `NoControllerConfigDependencyRule`), and
+    `checkBranchBuildStrategiesManifest`; the tenant's template fragment
+    must also load (`bundle.InjectPipelineTemplates`) against the base
+    `applyCellContent` builds: the cell's `jenkins.yaml` with the cell
+    bundle's own templates in it. A failed
+    check **holds** the tenant: its folder is left out of
+    `items.Merge`, its name goes on the merged `Manifest.Retain` so the
+    mite keeps the folder, it carries no folder credential, and an
+    `ItemsHeld` tenant warning names the fault. A held tenant keeps its
+    cloud and a fragment that loads; a fragment that does not load is
+    dropped. A set `composedBundleRef` whose bundle is not found or has no
+    `contentRef` yet (`errTenantBundleNotReady`) also holds the tenant; only
+    an unset ref gives an empty folder. A draining tenant is never held. Any
+    other read error, of the `ComposedBundle` or of its content ConfigMap,
+    for a non-draining tenant still fails the assembly: it is an API
+    fault, and a hold would push the cloud with no pod template.
+    `appliedTenantsAfterItemsApply` keeps a held tenant's previous
+    `status.cell.appliedTenants` membership, so a held applied folder never
+    reads as drained; `updateCellInstance` calls `dropHeldTenants` on a pod
+    change, because the new pod's empty home holds no held folder. A draining
     tenant keeps its lifted templates, and a read fault for it logs and
     lifts nothing instead of failing the cell. A non-draining
     tenant's own materialized `PipelineTemplatesYAML`, when non-blank, becomes

@@ -2,6 +2,7 @@ package items
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -1140,5 +1141,95 @@ func TestGenerateConfigXMLPipelineQuietPeriodAndResumeBlocked(t *testing.T) {
 	}
 	if strings.Contains(out, "quietPeriod") || strings.Contains(out, "DisableResumeJobProperty") {
 		t.Errorf("expected no quiet period and no resume property, got: %s", out)
+	}
+}
+
+// applyWithManagedCache applies yamlContent to an engine whose managed cache
+// holds managed, and returns the deleted paths and the cache it saved.
+func applyWithManagedCache(t *testing.T, managed map[string]string, yamlContent string) ([]string, map[string]string) {
+	t.Helper()
+	var deleted []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/doDelete"):
+			deleted = append(deleted, r.URL.Path)
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	mf := filepath.Join(t.TempDir(), "managed.json")
+	raw, err := json.Marshal(managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mf, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	engine := &Engine{client: jenkins.NewClient(srv.URL, "test", "token"), managedFile: mf}
+	if _, err := engine.Apply(context.Background(), yamlContent); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	return deleted, engine.loadManaged()
+}
+
+func TestApplyIncremental_RetainKeepsUndeclaredManagedItems(t *testing.T) {
+	managed := map[string]string{
+		"held":           "h1",
+		"held/build":     "h2",
+		"gone":           "h3",
+		"active":         "h4",
+		"active/old-job": "h5",
+	}
+	deleted, saved := applyWithManagedCache(t, managed, `removeStrategy:
+  items: sync
+retain: [held]
+items:
+  - kind: folder
+    name: active
+`)
+	for _, d := range deleted {
+		if strings.Contains(d, "/job/held") {
+			t.Errorf("a retained path was deleted: %s", d)
+		}
+	}
+	if len(deleted) != 2 {
+		t.Errorf("expected the two undeclared paths outside the retain list deleted, got %v", deleted)
+	}
+	if saved["held"] != "h1" || saved["held/build"] != "h2" {
+		t.Errorf("expected the retained paths kept in the cache with their hashes, got %v", saved)
+	}
+	if _, ok := saved["gone"]; ok {
+		t.Errorf("expected a deleted path out of the cache, got %v", saved)
+	}
+}
+
+func TestApplyIncremental_RetainMatchesWholeSegmentOnly(t *testing.T) {
+	managed := map[string]string{"payments": "h1", "payments/build": "h2"}
+	deleted, _ := applyWithManagedCache(t, managed, `removeStrategy:
+  items: sync
+retain: [pay]
+items: []
+`)
+	if len(deleted) != 2 {
+		t.Errorf("expected retain [pay] to keep nothing under payments, got deleted %v", deleted)
+	}
+}
+
+func TestApplyIncremental_RetainDroppedDeletesFolder(t *testing.T) {
+	managed := map[string]string{"held": "h1", "held/build": "h2"}
+	deleted, saved := applyWithManagedCache(t, managed, `removeStrategy:
+  items: sync
+items: []
+`)
+	if len(deleted) != 2 {
+		t.Errorf("expected the folder deleted once the retain list drops it, got %v", deleted)
+	}
+	if len(saved) != 0 {
+		t.Errorf("expected an empty cache, got %v", saved)
 	}
 }

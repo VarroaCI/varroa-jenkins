@@ -2289,3 +2289,13 @@ func TestSetTenantWarningsCondition_PodTemplateSkippedOutranksCredentialSkipped(
 		t.Errorf("expected reason PodTemplateSkipped, got %q", cond.Reason)
 	}
 }
+
+func TestSetTenantWarningsCondition_ItemsHeldOutranksBundleKeysIgnored(t *testing.T) {
+	cond := foldTenantWarnings(t, []v1alpha1.TenantWarning{
+		{Tenant: "payments", Reason: v1alpha1.TeamReasonBundleKeysIgnored, Message: `tenant bundle key "plugins.yaml" is ignored on a cell`},
+		{Tenant: "payments", Reason: v1alpha1.TeamReasonItemsHeld, Message: "tenant folder held: items.yaml holds unresolved variables: x"},
+	})
+	if cond.Reason != v1alpha1.TeamReasonItemsHeld {
+		t.Errorf("expected reason ItemsHeld, got %q", cond.Reason)
+	}
+}

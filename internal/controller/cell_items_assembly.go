@@ -2,19 +2,25 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
+	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items/lint"
 )
 
-// cellLintRules is the fixed rule set a cell's merged tenant manifest must
-// pass before the operator pushes it (design D9).
+// cellLintRules is the fixed rule set each tenant's re-rooted manifest must
+// pass before the operator pushes it (design D9). A finding holds only that
+// tenant.
 var cellLintRules = []lint.Rule{
 	lint.NoPollSCMRule{},
 	lint.NoGlobalCredentialsRule{},
@@ -25,7 +31,8 @@ var cellLintRules = []lint.Rule{
 // the merged items.yaml with no tenant credential, the tenant clouds to
 // append to jenkins.clouds, the SYSTEM-scope credentials those clouds need,
 // each tenant's pipeline-template fragment, each tenant folder's projected
-// credentials, and the tenantWarnings to record.
+// credentials, and the tenantWarnings to record. The merged items name
+// each held tenant in their retain list.
 type assembleCellState struct {
 	ItemsYAML         string
 	Clouds            []bundle.TenantCloud
@@ -35,22 +42,45 @@ type assembleCellState struct {
 	Warnings          []v1alpha1.TenantWarning
 }
 
-// assembleCellContent runs the four-step tenant items pipeline (design D7)
-// plus tenant credential, folder, and cloud assembly (D8, D10, D11) for a
-// cell. teams is task 8.11a's placed-tenant listing, read once per tick.
-// controllerEndpoint is the cell's own resolved varroa_controller_endpoint.
-// A tenant cloud's jenkinsUrl no longer reads it: each cloud names the
-// tenant's own agent Service instead.
-func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Controller, teams []*v1alpha1.Team, controllerEndpoint string) (assembleCellState, error) {
-	_ = controllerEndpoint
+// assembleCellContent runs the tenant items pipeline (design D7) plus
+// tenant credential, folder, and cloud assembly (D8, D10, D11) for a cell.
+// teams is task 8.11a's placed-tenant listing, read once per tick. coreSet
+// is the cell's resolved plugin set. templateBase is the cell's
+// jenkins.yaml with the cell bundle's own pipeline templates in it; a
+// tenant fragment must load against it.
+//
+// Each non-draining tenant's items pass every check on their own. A tenant
+// that fails one is held: its folder is absent from the merged items and
+// named in the manifest's retain list, so the mite keeps the folder as it
+// is. The other tenants still get their push. A hold never deletes a job,
+// because an absent folder in a sync manifest is otherwise deleted.
+//
+// A read error for a non-draining tenant's bundle fails the assembly. It
+// is a fault of the API read, not of the tenant content, and a hold would
+// push the tenant's cloud with no pod template and drop its templates.
+func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Controller, teams []*v1alpha1.Team, coreSet []pluginlock.PluginEntry, templateBase string) (assembleCellState, error) {
 	var (
 		manifests []*items.Manifest
 		clouds    []bundle.TenantCloud
 		creds     []tenantCloudCredential
 		fragments []bundle.CellTemplateFragment
 		folderCrd []bundle.CellFolderCredentials
+		held      []string
 		warnings  []v1alpha1.TenantWarning
 	)
+
+	hold := func(team string, fault error) {
+		held = append(held, team)
+		warnings = append(warnings, v1alpha1.TenantWarning{
+			Tenant:  team,
+			Reason:  v1alpha1.TeamReasonItemsHeld,
+			Message: fmt.Sprintf("tenant folder held: %v", fault),
+		})
+		if r.Logger != nil {
+			r.Logger.Warn("cell content: tenant items fail a check; holding the tenant folder",
+				"team", team, "error", fault)
+		}
+	}
 
 	for _, team := range teams {
 		if team.Spec.Pipelines == nil {
@@ -66,6 +96,10 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 		// the lifted pod templates. A read fault for a draining tenant
 		// lifts nothing and does not fail the cell.
 		data, err := r.readTenantBundleContent(ctx, team)
+		var notReady error
+		if errors.Is(err, errTenantBundleNotReady) {
+			notReady, err = err, nil
+		}
 		if err != nil {
 			if !draining {
 				return assembleCellState{}, fmt.Errorf("tenant %q: %w", team.Name, err)
@@ -84,38 +118,49 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 		// build can start, because the job is gone. Its cloud and cloud
 		// credential stay until the tenant leaves status.cell.tenants, so
 		// a build already running when the folder disappeared can still
-		// provision an agent.
+		// provision an agent. A draining tenant is never held, because a
+		// held folder would never drain.
 		if !draining {
-			tenantManifest, tenantTemplatesYAML, err := materializeTenantManifest(data)
+			fragment := data["pipeline-templates.yaml"]
+			// Two tenant folders never overlap, so two tenant fragments never
+			// conflict: each fragment loads against the cell's own base only.
+			_, fragErr := bundle.InjectPipelineTemplates(templateBase, fragment, team.Name)
+			rerooted, err := materializeTenantManifest(team.Name, data, coreSet)
+			if notReady != nil {
+				err = notReady
+			}
+			if err == nil && fragErr != nil {
+				err = fmt.Errorf("pipeline-templates.yaml: %w", fragErr)
+			}
 			if err != nil {
-				return assembleCellState{}, fmt.Errorf("tenant %q: %w", team.Name, err)
+				hold(team.Name, err)
+			} else {
+				folder := &rerooted.Items[0]
+
+				// Projected onto a separate folder item and carried: a value
+				// from a tenant Secret must not reach ResolveVars or the
+				// unresolved-variable check, which run on ItemsYAML after this.
+				projected := &items.Item{Kind: folder.Kind, Name: folder.Name}
+				warnings = append(warnings, r.projectTenantCredentials(ctx, team.Name, agentNamespace, projected)...)
+				if prop := folderCredentialsPropertyOf(projected); len(prop.FolderCredentials) > 0 {
+					folderCrd = append(folderCrd, bundle.CellFolderCredentials{Folder: folder.Name, Entries: prop.FolderCredentials})
+				}
+
+				folder.Properties = append(folder.Properties, items.Property{
+					Kubernetes: &items.KubernetesFolderProperty{PermittedClouds: []string{team.Name}},
+				})
+
+				manifests = append(manifests, rerooted)
 			}
 
-			rerooted, err := items.ReRoot(tenantManifest, team.Name)
-			if err != nil {
-				return assembleCellState{}, err
-			}
-			folder := &rerooted.Items[0]
-
-			// Projected onto a separate folder item and carried: a value
-			// from a tenant Secret must not reach ResolveVars or the
-			// unresolved-variable check, which run on ItemsYAML after this.
-			projected := &items.Item{Kind: folder.Kind, Name: folder.Name}
-			warnings = append(warnings, r.projectTenantCredentials(ctx, team.Name, agentNamespace, projected)...)
-			if prop := folderCredentialsPropertyOf(projected); len(prop.FolderCredentials) > 0 {
-				folderCrd = append(folderCrd, bundle.CellFolderCredentials{Folder: folder.Name, Entries: prop.FolderCredentials})
-			}
-
-			folder.Properties = append(folder.Properties, items.Property{
-				Kubernetes: &items.KubernetesFolderProperty{PermittedClouds: []string{team.Name}},
-			})
-
-			manifests = append(manifests, rerooted)
-
-			if strings.TrimSpace(tenantTemplatesYAML) != "" {
+			// A tenant held for its items keeps its template fragment, so
+			// the held jobs can still name a template of the tenant. A
+			// fragment that does not load is dropped, because it would
+			// fail the cell for every tenant.
+			if fragErr == nil && strings.TrimSpace(fragment) != "" {
 				fragments = append(fragments, bundle.CellTemplateFragment{
 					Folder:        team.Name,
-					TemplatesYAML: tenantTemplatesYAML,
+					TemplatesYAML: fragment,
 				})
 			}
 		}
@@ -137,10 +182,8 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 	if err != nil {
 		return assembleCellState{}, err
 	}
-
-	if findings := lint.Run(merged, cellLintRules); len(findings) > 0 {
-		return assembleCellState{}, fmt.Errorf("cell items lint failed: %s", findingsSummary(findings))
-	}
+	sort.Strings(held)
+	merged.Retain = held
 
 	out, err := yaml.Marshal(merged)
 	if err != nil {
@@ -157,27 +200,35 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 	}, nil
 }
 
+// errTenantBundleNotReady reports a tenant whose composedBundleRef names a
+// bundle that is missing or has not materialized yet. A non-draining
+// tenant is held for it: an empty folder in a sync manifest would delete
+// every job the tenant already has on the cell.
+var errTenantBundleNotReady = errors.New("tenant bundle is missing or not materialized")
+
 // readTenantBundleContent reads a tenant's materialized content ConfigMap
-// (design D7 step 1, tenant-isolation). An unset composedBundleRef, a
-// missing bundle, or a bundle that has not materialized yet returns nil
-// data and no error, so the tenant gets an empty folder and no template
-// rather than failing the whole cell.
+// (design D7 step 1, tenant-isolation). An unset composedBundleRef returns
+// nil data and no error, so the tenant gets an empty folder and no
+// template. A missing bundle, or a bundle that has not materialized yet,
+// returns nil data and an error that wraps errTenantBundleNotReady. Any
+// other read error, of the bundle or of its ConfigMap, returns an error
+// that does not wrap it.
 func (r *Reconciler) readTenantBundleContent(ctx context.Context, team *v1alpha1.Team) (map[string]string, error) {
 	ref := team.Spec.Pipelines.ComposedBundleRef
 	if ref == nil {
 		return nil, nil
 	}
+	name := ref.Namespace + "/" + ref.Name
 
 	cb, err := r.getComposedBundle(ctx, ref.Name, ref.Namespace)
+	if apierrors.IsNotFound(err) {
+		return nil, fmt.Errorf("%w: %s is not found", errTenantBundleNotReady, name)
+	}
 	if err != nil {
-		if r.Logger != nil {
-			r.Logger.Warn("cell content: tenant bundle not found; using an empty folder",
-				"team", team.Name, "bundle", ref.Namespace+"/"+ref.Name, "error", err)
-		}
-		return nil, nil
+		return nil, err
 	}
 	if cb.Status.ContentRef == "" {
-		return nil, nil
+		return nil, fmt.Errorf("%w: %s has no content yet", errTenantBundleNotReady, name)
 	}
 
 	data, err := r.client.GetConfigMap(ctx, cb.Status.ContentRef, cb.Namespace)
@@ -207,15 +258,33 @@ func tenantBundleCloudContent(team, agentNamespace string, data map[string]strin
 	return lift.Templates, warnings
 }
 
-// materializeTenantManifest parses a tenant's items.yaml and returns it
-// with the tenant's pipeline-templates.yaml. Nil data gives an empty
-// manifest and no template.
-func materializeTenantManifest(data map[string]string) (*items.Manifest, string, error) {
-	manifest, err := items.Parse(data["items.yaml"])
-	if err != nil {
-		return nil, "", fmt.Errorf("parse tenant items.yaml: %w", err)
+// materializeTenantManifest returns a tenant's items.yaml re-rooted under
+// its folder, or the first check it fails. It resolves the tenant's own
+// variables.yaml in one pass and no cell variable, so a tenant item never
+// reads a cell value. Any "${" reference left after that pass fails, a
+// ${varroa_*} name included. Then the manifest must parse, must set no
+// root, must pass cellLintRules, and must not need a plugin that coreSet
+// omits. Nil data gives an empty folder.
+func materializeTenantManifest(team string, data map[string]string, coreSet []pluginlock.PluginEntry) (*items.Manifest, error) {
+	resolved := tenantVarsReplacer(parseBundleVariables(data["variables.yaml"])).Replace(data["items.yaml"])
+	if unresolved := findUnresolvedVars(false, resolved); len(unresolved) > 0 {
+		return nil, fmt.Errorf("items.yaml holds unresolved variables: %s", strings.Join(unresolved, ", "))
 	}
-	return manifest, data["pipeline-templates.yaml"], nil
+	manifest, err := items.Parse(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("parse tenant items.yaml: %w", err)
+	}
+	rerooted, err := items.ReRoot(manifest, team)
+	if err != nil {
+		return nil, err
+	}
+	if findings := lint.Run(rerooted, cellLintRules); len(findings) > 0 {
+		return nil, fmt.Errorf("items lint failed: %s", findingsSummary(findings))
+	}
+	if err := checkBranchBuildStrategiesManifest(rerooted, coreSet); err != nil {
+		return nil, err
+	}
+	return rerooted, nil
 }
 
 // tenantCloudCredentialFor reads the tenant agent's ServiceAccount token
@@ -241,7 +310,8 @@ func findingsSummary(findings []lint.Finding) string {
 }
 
 // recordCellTenantWarnings rebuilds cr.Status.Cell.TenantWarnings' entries
-// for reasons BundleKeysIgnored, PodTemplateSkipped, and CredentialSkipped
+// for reasons BundleKeysIgnored, PodTemplateSkipped, CredentialSkipped, and
+// ItemsHeld
 // from fresh, leaving every other reason's entries (e.g.
 // HibernationIgnored) untouched (design D4: "Both reconcilers rebuild their
 // whole list each tick").
@@ -255,6 +325,56 @@ func recordCellTenantWarnings(cr *v1alpha1.Controller, fresh []v1alpha1.TenantWa
 		v1alpha1.TeamReasonPodTemplateSkipped, filterTenantWarnings(fresh, v1alpha1.TeamReasonPodTemplateSkipped))
 	cr.Status.Cell.TenantWarnings = replaceTenantWarnings(cr.Status.Cell.TenantWarnings,
 		v1alpha1.TeamReasonCredentialSkipped, filterTenantWarnings(fresh, v1alpha1.TeamReasonCredentialSkipped))
+	cr.Status.Cell.TenantWarnings = replaceTenantWarnings(cr.Status.Cell.TenantWarnings,
+		v1alpha1.TeamReasonItemsHeld, filterTenantWarnings(fresh, v1alpha1.TeamReasonItemsHeld))
+}
+
+// dropHeldTenants removes every tenant the cell holds from
+// status.cell.appliedTenants. updateCellInstance calls it when the cell's
+// pod changes: the new pod starts with an empty home, so a held folder is
+// gone, and appliedTenantsAfterItemsApply would otherwise keep reporting
+// it applied.
+func dropHeldTenants(cell *v1alpha1.CellStatus) {
+	held := heldTenants(cell)
+	if len(held) == 0 {
+		return
+	}
+	kept := cell.AppliedTenants[:0:0]
+	for _, tenant := range cell.AppliedTenants {
+		if !held[tenant] {
+			kept = append(kept, tenant)
+		}
+	}
+	cell.AppliedTenants = sortedTenantCopy(kept)
+}
+
+// heldTenants answers the tenants that have an ItemsHeld entry.
+func heldTenants(cell *v1alpha1.CellStatus) map[string]bool {
+	held := make(map[string]bool)
+	for _, w := range cell.TenantWarnings {
+		if w.Reason == v1alpha1.TeamReasonItemsHeld {
+			held[w.Tenant] = true
+		}
+	}
+	return held
+}
+
+// appliedTenantsAfterItemsApply answers status.cell.appliedTenants after a
+// successful items apply of the current desired state. A tenant the cell
+// holds keeps its previous state. A held tenant that was applied still
+// has its folder on the cell, so it must not read as drained. A held
+// tenant that was never applied has no folder, so it must not read as
+// applied. The held set is the ItemsHeld entries, which the same resolve
+// that produced the desired state wrote.
+func appliedTenantsAfterItemsApply(cell *v1alpha1.CellStatus) []string {
+	held := heldTenants(cell)
+	applied := make([]string, 0, len(cell.Tenants))
+	for _, tenant := range cell.Tenants {
+		if !held[tenant] || slices.Contains(cell.AppliedTenants, tenant) {
+			applied = append(applied, tenant)
+		}
+	}
+	return sortedTenantCopy(applied)
 }
 
 // filterTenantWarnings returns the subset of in with the given reason.

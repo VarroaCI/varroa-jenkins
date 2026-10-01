@@ -52,7 +52,7 @@ func TestApplyCellContent_ProjectsTenantAgentTokenAsSystemCredential(t *testing.
 	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"payments"}}
 	mat := &bundle.MaterializedBundle{JenkinsYAML: ""}
 
-	if err := rec.applyCellContent(context.Background(), cr, mat, "http://cell1-svc.ns1.svc.cluster.local:8080"); err != nil {
+	if err := rec.applyCellContent(context.Background(), cr, mat, nil); err != nil {
 		t.Fatalf("applyCellContent: %v", err)
 	}
 
@@ -102,7 +102,7 @@ func TestApplyCellContent_MissingTokenSkipsCredentialInjection(t *testing.T) {
 	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"payments"}}
 	mat := &bundle.MaterializedBundle{JenkinsYAML: ""}
 
-	if err := rec.applyCellContent(context.Background(), cr, mat, "http://cell1-svc.ns1.svc.cluster.local:8080"); err != nil {
+	if err := rec.applyCellContent(context.Background(), cr, mat, nil); err != nil {
 		t.Fatalf("applyCellContent: %v", err)
 	}
 	// The cloud still names credentialsId varroa-cloud-payments (it always

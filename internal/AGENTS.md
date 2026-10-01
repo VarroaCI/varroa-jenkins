@@ -69,10 +69,14 @@ reading each package's entry point):
   composition seam for a cell: `ReRoot` wraps one tenant's items under a
   single top-level folder, and `Merge` joins several tenants' manifests into
   one, rejecting a duplicate top-level name and fixing the remove strategy to
-  `sync` — the only way a removed tenant's folder gets deleted. The sibling
+  `sync` — the only way a removed tenant's folder gets deleted.
+  `Manifest.Retain` lists top-level paths the engine neither writes nor
+  deletes: their managed items keep their previous hash in the managed
+  cache, matched on whole path segments. Only the cell merge writes it, for
+  a held tenant folder; `ReRoot` drops it. The sibling
   `items/lint` package runs cell-only policy rules (`no-poll-scm`,
-  `no-global-credentials`, `no-controller-config-dependency`) over the
-  merged, flattened manifest before a push; `items.Parse` itself is
+  `no-global-credentials`, `no-controller-config-dependency`) over each
+  tenant's re-rooted manifest before a push; `items.Parse` itself is
   unchanged and still accepts every shape a non-cell controller accepts
   today. An item declares its build parameters two ways — a flat list at
   the item level (`Item.Parameters`) or a parameters property nested under

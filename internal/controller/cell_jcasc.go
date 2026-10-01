@@ -9,6 +9,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
+	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
@@ -210,8 +211,10 @@ func injectTenantCloudCredentials(yamlDoc string, creds []tenantCloudCredential)
 
 // applyCellContent assembles a cell's tenant items and clouds onto mat, and
 // merges them in (design D7, D10, D11). It records the BundleKeysIgnored,
-// PodTemplateSkipped, and CredentialSkipped tenantWarnings on
-// cr.Status.Cell. A no-op for a controller that is not a cell.
+// PodTemplateSkipped, CredentialSkipped, and ItemsHeld tenantWarnings on
+// cr.Status.Cell. A no-op for a controller that is not a cell. The tenant
+// items it writes to mat.ItemsYAML are already resolved and checked per
+// tenant.
 //
 // It does NOT merge each tenant's pipeline-template fragment into
 // mat.JenkinsYAML. It only carries them on mat.CellTemplateFragments, for
@@ -223,7 +226,7 @@ func injectTenantCloudCredentials(yamlDoc string, creds []tenantCloudCredential)
 // ConfigMap. The credentials are carried on mat.CellCloudCredentials
 // instead, unread by the ConfigMap write path, for
 // buildDesiredStateCommand to inject into the mite-bound JcascYaml alone.
-func (r *Reconciler) applyCellContent(ctx context.Context, cr *v1alpha1.Controller, mat *bundle.MaterializedBundle, controllerEndpoint string) error {
+func (r *Reconciler) applyCellContent(ctx context.Context, cr *v1alpha1.Controller, mat *bundle.MaterializedBundle, coreSet []pluginlock.PluginEntry) error {
 	if !isCellController(cr) {
 		return nil
 	}
@@ -240,8 +243,18 @@ func (r *Reconciler) applyCellContent(ctx context.Context, cr *v1alpha1.Controll
 	}
 	mat.JenkinsYAML = merged
 
+	// A tenant fragment loads against the cell's jenkins.yaml with the
+	// cell's own templates in it, the base resolveBundleForController
+	// injects each fragment into later. When that base does not load, the
+	// fault is the cell's own, resolveBundleForController reports it, and
+	// the fragments load against an empty base here.
+	templateBase, baseErr := bundle.InjectPipelineTemplates(mat.JenkinsYAML, mat.PipelineTemplatesYAML, "")
+	if baseErr != nil {
+		templateBase = ""
+	}
+
 	teams := r.listPlacedTeams(ctx, cr)
-	state, err := r.assembleCellContent(ctx, cr, teams, controllerEndpoint)
+	state, err := r.assembleCellContent(ctx, cr, teams, coreSet, templateBase)
 	if err != nil {
 		return err
 	}

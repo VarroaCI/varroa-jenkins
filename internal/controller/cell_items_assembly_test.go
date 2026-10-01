@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/bundle/pipelinetemplate"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
 )
 
 // seedTenantBundle seeds a Ready ComposedBundle plus its materialized
@@ -94,7 +96,7 @@ func TestAssembleCellContent_DrainingTenantOmitted(t *testing.T) {
 		},
 	}
 
-	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{clean, draining}, "http://cell1-svc.ns1.svc.cluster.local:8080")
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{clean, draining}, nil, "")
 	if err != nil {
 		t.Fatalf("assembleCellContent: %v", err)
 	}
@@ -124,72 +126,49 @@ func TestAssembleCellContent_DrainingTenantOmitted(t *testing.T) {
 	}
 }
 
-// TestAssembleCellContent_LintRejectionBlocksTheWholePush is the other half
-// of task 8.12's end-to-end acceptance: over three tenants — one draining,
-// one with a rejected item (a pollSCM trigger), and one clean — the
-// rejected tenant's finding fails the whole assembly. The operator pushes
-// no items, and the error names the offending item's path.
-func TestAssembleCellContent_LintRejectionBlocksTheWholePush(t *testing.T) {
+// TestAssembleCellContent_LintFindingHoldsOnlyThatTenant proves that a lint
+// finding in one tenant's items holds that tenant's folder and pushes the
+// other tenants.
+func TestAssembleCellContent_LintFindingHoldsOnlyThatTenant(t *testing.T) {
 	client := newTestClient()
 	rec := newTestReconciler(client)
 	cr := cellControllerFixture()
 
-	clean := &v1alpha1.Team{
-		ObjectMeta: metav1.ObjectMeta{Name: "clean"},
-		Spec: v1alpha1.TeamSpec{
-			Namespaces: []string{"clean-ns"},
-			Pipelines:  &v1alpha1.TeamPipelinesSpec{Profile: "lts", AgentNamespace: "clean-ns"},
-		},
-	}
+	clean := pipelinesTeam("clean")
 	seedTenantBundle(client, clean, "clean-bundle", cleanPipelineItemsYAML)
 
-	draining := &v1alpha1.Team{
-		ObjectMeta: metav1.ObjectMeta{Name: "draining"},
-		Spec: v1alpha1.TeamSpec{
-			Namespaces: []string{"draining-ns"},
-			Pipelines:  &v1alpha1.TeamPipelinesSpec{Profile: "lts", AgentNamespace: "draining-ns"},
-		},
-		Status: v1alpha1.TeamStatus{
-			Placement: &v1alpha1.TeamPlacementStatus{Cell: cr.Name, CellNamespace: cr.Namespace},
-			Conditions: []v1alpha1.TeamCondition{
-				{Type: v1alpha1.TeamConditionPlaced, Status: metav1.ConditionFalse, Reason: v1alpha1.TeamReasonTenantMoving},
-			},
-		},
-	}
+	draining := pipelinesTeam("draining")
+	markDraining(draining, cr)
 
-	rejected := &v1alpha1.Team{
-		ObjectMeta: metav1.ObjectMeta{Name: "rejected"},
-		Spec: v1alpha1.TeamSpec{
-			Namespaces: []string{"rejected-ns"},
-			Pipelines:  &v1alpha1.TeamPipelinesSpec{Profile: "lts", AgentNamespace: "rejected-ns"},
-		},
-	}
+	rejected := pipelinesTeam("rejected")
 	seedTenantBundle(client, rejected, "rejected-bundle", offendingPipelineItemsYAML)
 
-	_, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{clean, draining, rejected},
-		"http://cell1-svc.ns1.svc.cluster.local:8080")
-	if err == nil {
-		t.Fatal("expected the rejected tenant's finding to fail the whole assembly")
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{clean, draining, rejected}, nil, "")
+	if err != nil {
+		t.Fatalf("expected one tenant's finding to hold only that tenant, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "no-poll-scm") {
-		t.Errorf("expected the error to name the rule no-poll-scm, got: %v", err)
+	manifest := parseCellItems(t, state.ItemsYAML)
+	if got := topLevelNames(manifest); len(got) != 1 || got[0] != "clean" {
+		t.Errorf("expected only the clean folder pushed, got %v", got)
 	}
-	if !strings.Contains(err.Error(), "rejected/offender") {
-		t.Errorf("expected the error to name the offending item path rejected/offender, got: %v", err)
+	if len(manifest.Retain) != 1 || manifest.Retain[0] != "rejected" {
+		t.Errorf("expected retain [rejected], got %v", manifest.Retain)
+	}
+	msg := heldMessage(state.Warnings, "rejected")
+	if !strings.Contains(msg, "no-poll-scm") || !strings.Contains(msg, "rejected/offender") {
+		t.Errorf("expected the ItemsHeld message to name no-poll-scm and rejected/offender, got %q", msg)
 	}
 
-	// applyCellContent must push nothing when assembly fails. It reads
-	// teams through the crdstore by status.cell.tenants, same as production.
 	crdstore.MustSeed(client.store, clean)
 	crdstore.MustSeed(client.store, draining)
 	crdstore.MustSeed(client.store, rejected)
 	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"clean", "draining", "rejected"}}
 	mat := &bundle.MaterializedBundle{JenkinsYAML: "jenkins:\n  systemMessage: untouched\n"}
-	if err := rec.applyCellContent(context.Background(), cr, mat, "http://cell1-svc.ns1.svc.cluster.local:8080"); err == nil {
-		t.Fatal("expected applyCellContent to fail too")
+	if err := rec.applyCellContent(context.Background(), cr, mat, nil); err != nil {
+		t.Fatalf("applyCellContent: %v", err)
 	}
-	if mat.ItemsYAML != "" {
-		t.Errorf("expected no items pushed on a lint failure, got %q", mat.ItemsYAML)
+	if heldMessage(cr.Status.Cell.TenantWarnings, "rejected") == "" {
+		t.Errorf("expected an ItemsHeld entry for rejected on the cell status, got %+v", cr.Status.Cell.TenantWarnings)
 	}
 }
 
@@ -221,8 +200,7 @@ func TestAssembleCellContent_TemplateFragmentsGetOwnFolders(t *testing.T) {
 	seedTenantBundle(client, teamB, "team-b-bundle", cleanPipelineItemsYAML)
 	client.configMapData["team-b-bundle-content"]["pipeline-templates.yaml"] = tenantTemplateFixtureYAML("node-service")
 
-	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{teamA, teamB},
-		"http://cell1-svc.ns1.svc.cluster.local:8080")
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{teamA, teamB}, nil, "")
 	if err != nil {
 		t.Fatalf("assembleCellContent: %v", err)
 	}
@@ -405,8 +383,7 @@ func TestAssembleCellContent_TenantCloudNamesTheAgentService(t *testing.T) {
 		},
 	}
 
-	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{teamA, teamB},
-		"http://cell1-svc.ns1.svc.cluster.local:8080")
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{teamA, teamB}, nil, "")
 	if err != nil {
 		t.Fatalf("assembleCellContent: %v", err)
 	}
@@ -514,7 +491,7 @@ func TestAssembleCellContent_LiftsTenantPodTemplates(t *testing.T) {
 		"jenkins.yaml": minimalCloud("- name: default\n- name: node\n"),
 	})
 
-	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{golang, residue, plugins, skipped}, "")
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{golang, residue, plugins, skipped}, nil, "")
 	if err != nil {
 		t.Fatalf("assembleCellContent: %v", err)
 	}
@@ -568,7 +545,7 @@ func TestAssembleCellContent_DrainingTenantKeepsLiftedTemplates(t *testing.T) {
 	})
 	markDraining(draining, cr)
 
-	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{draining}, "")
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{draining}, nil, "")
 	if err != nil {
 		t.Fatalf("assembleCellContent: %v", err)
 	}
@@ -594,7 +571,7 @@ func TestAssembleCellContent_DrainingTenantUnreadableBundle(t *testing.T) {
 	delete(client.configMapData, "draining-bundle-content")
 	markDraining(draining, cr)
 
-	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{draining}, "")
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{draining}, nil, "")
 	if err != nil {
 		t.Fatalf("expected the assembly to succeed, got %v", err)
 	}
@@ -603,6 +580,10 @@ func TestAssembleCellContent_DrainingTenantUnreadableBundle(t *testing.T) {
 	}
 }
 
+// TestAssembleCellContent_ActiveTenantUnreadableBundleFails proves that a
+// read error is not a tenant fault: a hold would push the tenant's cloud
+// with no pod template and drop its templates, so the cell keeps its last
+// applied state instead.
 func TestAssembleCellContent_ActiveTenantUnreadableBundleFails(t *testing.T) {
 	client := newTestClient()
 	rec := newTestReconciler(client)
@@ -612,7 +593,7 @@ func TestAssembleCellContent_ActiveTenantUnreadableBundleFails(t *testing.T) {
 	seedTenantBundleContent(client, active, "active-bundle", nil)
 	delete(client.configMapData, "active-bundle-content")
 
-	if _, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{active}, ""); err == nil {
+	if _, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{active}, nil, ""); err == nil {
 		t.Fatal("expected the unreadable bundle of a non-draining tenant to fail the assembly")
 	}
 }
@@ -625,7 +606,7 @@ func TestAssembleCellContent_UnparseableJenkinsYAML(t *testing.T) {
 	broken := pipelinesTeam("broken")
 	seedTenantBundleContent(client, broken, "broken-bundle", map[string]string{"jenkins.yaml": "jenkins: [unclosed\n"})
 
-	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{broken}, "")
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{broken}, nil, "")
 	if err != nil {
 		t.Fatalf("expected the assembly to succeed, got %v", err)
 	}
@@ -657,7 +638,7 @@ func TestAssembleCellContent_EveryMemberCellRendersTheSameTemplates(t *testing.T
 	for _, cell := range []string{"cell-0", "cell-1", "cell-2"} {
 		cr := cellControllerFixture()
 		cr.Name = cell
-		state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{team}, "")
+		state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{team}, nil, "")
 		if err != nil {
 			t.Fatalf("%s: assembleCellContent: %v", cell, err)
 		}
@@ -723,5 +704,425 @@ func TestResolveBundleForController_CellResolvesTenantVariable(t *testing.T) {
 	}
 	if !strings.Contains(mat.JenkinsYAML, "image: golang:1.26-bookworm") {
 		t.Errorf("expected the resolved image in the cell jenkins.yaml, got: %s", mat.JenkinsYAML)
+	}
+}
+
+// parseCellItems parses a cell's merged items.yaml.
+func parseCellItems(t *testing.T, itemsYAML string) *items.Manifest {
+	t.Helper()
+	m, err := items.Parse(itemsYAML)
+	if err != nil {
+		t.Fatalf("parse cell items: %v\n%s", err, itemsYAML)
+	}
+	return m
+}
+
+// topLevelNames lists the top-level item names of m.
+func topLevelNames(m *items.Manifest) []string {
+	names := make([]string, 0, len(m.Items))
+	for _, it := range m.Items {
+		names = append(names, it.Name)
+	}
+	return names
+}
+
+// heldMessage answers the message of the ItemsHeld warning for tenant, or
+// "" when no such warning exists.
+func heldMessage(warnings []v1alpha1.TenantWarning, tenant string) string {
+	for _, w := range warnings {
+		if w.Tenant == tenant && w.Reason == v1alpha1.TeamReasonItemsHeld {
+			return w.Message
+		}
+	}
+	return ""
+}
+
+// assertHeldAlone assembles good and a tenant named bad whose items.yaml is
+// badItems, with no plugin pinned, and checks that only bad is held. It
+// answers the ItemsHeld message for bad.
+func assertHeldAlone(t *testing.T, badItems string) string {
+	t.Helper()
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	good := pipelinesTeam("good")
+	seedTenantBundle(client, good, "good-bundle", cleanPipelineItemsYAML)
+	bad := pipelinesTeam("bad")
+	seedTenantBundle(client, bad, "bad-bundle", badItems)
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{good, bad}, nil, "")
+	if err != nil {
+		t.Fatalf("expected the fault to hold only the tenant bad, got: %v", err)
+	}
+	manifest := parseCellItems(t, state.ItemsYAML)
+	if got := topLevelNames(manifest); len(got) != 1 || got[0] != "good" {
+		t.Errorf("expected only the good folder pushed, got %v", got)
+	}
+	if len(manifest.Retain) != 1 || manifest.Retain[0] != "bad" {
+		t.Errorf("expected retain [bad], got %v", manifest.Retain)
+	}
+	msg := heldMessage(state.Warnings, "bad")
+	if msg == "" {
+		t.Fatalf("expected an ItemsHeld warning for bad, got %+v", state.Warnings)
+	}
+	if heldMessage(state.Warnings, "good") != "" {
+		t.Errorf("expected no ItemsHeld warning for good, got %+v", state.Warnings)
+	}
+	return msg
+}
+
+func TestAssembleCellContent_UnresolvedVariableHoldsOnlyThatTenant(t *testing.T) {
+	msg := assertHeldAlone(t, `items:
+  - kind: pipeline
+    name: build
+    description: "uses ${x}"
+    definition:
+      script: "echo hi"
+`)
+	if !strings.Contains(msg, "unresolved variables: x") {
+		t.Errorf("expected the message to name x, got %q", msg)
+	}
+}
+
+func TestAssembleCellContent_UnparseableItemsHoldsOnlyThatTenant(t *testing.T) {
+	msg := assertHeldAlone(t, "items: [unclosed\n")
+	if !strings.Contains(msg, "parse tenant items.yaml") {
+		t.Errorf("expected a parse fault in the message, got %q", msg)
+	}
+}
+
+func TestAssembleCellContent_TenantRootHoldsOnlyThatTenant(t *testing.T) {
+	msg := assertHeldAlone(t, "root: escape\nitems: []\n")
+	if !strings.Contains(msg, "root") {
+		t.Errorf("expected the message to name root, got %q", msg)
+	}
+}
+
+func TestAssembleCellContent_ControllerVariableInTenantItemHolds(t *testing.T) {
+	msg := assertHeldAlone(t, `items:
+  - kind: pipeline
+    name: build
+    description: "runs on ${varroa_controller_name}"
+    definition:
+      script: "echo hi"
+`)
+	if !strings.Contains(msg, "varroa_controller_name") {
+		t.Errorf("expected the message to name varroa_controller_name, got %q", msg)
+	}
+}
+
+func TestAssembleCellContent_MultibranchWithoutStrategyPluginHoldsTenant(t *testing.T) {
+	msg := assertHeldAlone(t, multibranchItemsYAML)
+	if !strings.Contains(msg, branchBuildStrategiesPlugin) {
+		t.Errorf("expected the message to name %s, got %q", branchBuildStrategiesPlugin, msg)
+	}
+}
+
+func TestAssembleCellContent_TenantVariableResolvesItsItems(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	team := pipelinesTeam("payments")
+	seedTenantBundle(client, team, "payments-bundle", `items:
+  - kind: pipeline
+    name: build
+    description: "uses ${x}"
+    definition:
+      script: "echo hi"
+`)
+	client.configMapData["payments-bundle-content"]["variables.yaml"] = "x: hello\n"
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{team}, nil, "")
+	if err != nil {
+		t.Fatalf("assembleCellContent: %v", err)
+	}
+	if held := parseCellItems(t, state.ItemsYAML).Retain; len(held) != 0 {
+		t.Fatalf("expected no hold, got %v: %+v", held, state.Warnings)
+	}
+	if !strings.Contains(state.ItemsYAML, "uses hello") {
+		t.Errorf("expected the tenant variable resolved, got:\n%s", state.ItemsYAML)
+	}
+}
+
+func TestAssembleCellContent_HeldTenantKeepsCloudAndTemplatesAndCarriesNoCredentials(t *testing.T) {
+	client := newTestClient()
+	seedTenantCredentialSecret(t, client, "cred-text",
+		map[string]string{"varroa.dev/credential-id": "token", "varroa.dev/credential-kind": "secretText"},
+		map[string][]byte{"secret": []byte("value")})
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	payments := pipelinesTeam("payments")
+	seedTenantBundle(client, payments, "payments-bundle", offendingPipelineItemsYAML)
+	client.configMapData["payments-bundle-content"]["pipeline-templates.yaml"] = tenantTemplateFixtureYAML("go-build")
+	client.configMapData["payments-bundle-content"]["jenkins.yaml"] = minimalCloud(golangPodTemplate)
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{payments}, nil, "")
+	if err != nil {
+		t.Fatalf("assembleCellContent: %v", err)
+	}
+	if held := parseCellItems(t, state.ItemsYAML).Retain; len(held) != 1 || held[0] != "payments" {
+		t.Fatalf("expected held [payments], got %v", held)
+	}
+	if got := cloudTemplateNames(state, "payments"); !slices.Contains(got, "payments-golang") {
+		t.Errorf("expected the held tenant to keep its lifted pod template, got %v", got)
+	}
+	if len(state.TemplateFragments) != 1 || state.TemplateFragments[0].Folder != "payments" {
+		t.Errorf("expected the held tenant to keep its template fragment, got %+v", state.TemplateFragments)
+	}
+	if len(state.FolderCredentials) != 0 {
+		t.Errorf("expected no folder credentials for a held folder, got %+v", state.FolderCredentials)
+	}
+}
+
+func TestAssembleCellContent_DrainingTenantIsNeverHeld(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	draining := pipelinesTeam("draining")
+	seedTenantBundle(client, draining, "draining-bundle", offendingPipelineItemsYAML)
+	markDraining(draining, cr)
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{draining}, nil, "")
+	if err != nil {
+		t.Fatalf("assembleCellContent: %v", err)
+	}
+	manifest := parseCellItems(t, state.ItemsYAML)
+	if len(manifest.Items) != 0 || len(manifest.Retain) != 0 {
+		t.Errorf("expected a draining tenant omitted and not retained, got items %v retain %v",
+			topLevelNames(manifest), manifest.Retain)
+	}
+	if heldMessage(state.Warnings, "draining") != "" {
+		t.Errorf("expected no ItemsHeld warning for a draining tenant, got %+v", state.Warnings)
+	}
+}
+
+func TestAssembleCellContent_RetainListsEveryHeldTenant(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	zeta := pipelinesTeam("zeta")
+	seedTenantBundle(client, zeta, "zeta-bundle", offendingPipelineItemsYAML)
+	alpha := pipelinesTeam("alpha")
+	seedTenantBundle(client, alpha, "alpha-bundle", "items: [unclosed\n")
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{zeta, alpha}, nil, "")
+	if err != nil {
+		t.Fatalf("assembleCellContent: %v", err)
+	}
+	manifest := parseCellItems(t, state.ItemsYAML)
+	if len(manifest.Retain) != 2 || manifest.Retain[0] != "alpha" || manifest.Retain[1] != "zeta" {
+		t.Errorf("expected retain [alpha zeta], got %v", manifest.Retain)
+	}
+}
+
+// resolveCellWithTenants seeds every team on a cell and runs
+// resolveBundleForController.
+func resolveCellWithTenants(t *testing.T, client *testClient, teams ...*v1alpha1.Team) (*bundle.MaterializedBundle, *v1alpha1.Controller) {
+	t.Helper()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+	names := make([]string, 0, len(teams))
+	for _, team := range teams {
+		crdstore.MustSeed(client.store, team)
+		names = append(names, team.Name)
+	}
+	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: names}
+	mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	if err != nil {
+		t.Fatalf("resolveBundleForController: %v", err)
+	}
+	return mat, cr
+}
+
+func TestResolveBundleForController_CellResolvesTenantItemVariable(t *testing.T) {
+	client := newTestClientWithBundle()
+	team := pipelinesTeam("payments")
+	seedTenantBundleContent(client, team, "payments-bundle", map[string]string{
+		"items.yaml": `items:
+  - kind: pipeline
+    name: build
+    description: "uses ${x}"
+    definition:
+      script: "echo hi"
+`,
+		"variables.yaml": "x: hello\n",
+	})
+	mat, _ := resolveCellWithTenants(t, client, team)
+	if !strings.Contains(mat.ItemsYAML, "uses hello") {
+		t.Errorf("expected the tenant variable resolved in the cell items, got:\n%s", mat.ItemsYAML)
+	}
+}
+
+func TestResolveBundleForController_CellTenantFaultLeavesOtherTenantsPushed(t *testing.T) {
+	client := newTestClientWithBundle()
+	good := pipelinesTeam("good")
+	seedTenantBundle(client, good, "good-bundle", cleanPipelineItemsYAML)
+	bad := pipelinesTeam("bad")
+	seedTenantBundle(client, bad, "bad-bundle", `items:
+  - kind: pipeline
+    name: build
+    description: "uses ${x}"
+    definition:
+      script: "echo hi"
+`)
+	mat, cr := resolveCellWithTenants(t, client, good, bad)
+	manifest := parseCellItems(t, mat.ItemsYAML)
+	if got := topLevelNames(manifest); len(got) != 1 || got[0] != "good" {
+		t.Errorf("expected the good folder pushed, got %v", got)
+	}
+	if len(manifest.Retain) != 1 || manifest.Retain[0] != "bad" {
+		t.Errorf("expected retain [bad], got %v", manifest.Retain)
+	}
+	if heldMessage(cr.Status.Cell.TenantWarnings, "bad") == "" {
+		t.Errorf("expected an ItemsHeld entry for bad, got %+v", cr.Status.Cell.TenantWarnings)
+	}
+}
+
+func TestResolveBundleForController_CellEscapedItemReferenceSurvives(t *testing.T) {
+	client := newTestClientWithBundle()
+	team := pipelinesTeam("payments")
+	seedTenantBundle(client, team, "payments-bundle", `items:
+  - kind: pipeline
+    name: build
+    description: "literal ^${varroa_controller_name}"
+    definition:
+      script: "echo hi"
+`)
+	mat, _ := resolveCellWithTenants(t, client, team)
+	if !strings.Contains(mat.ItemsYAML, "^${varroa_controller_name}") {
+		t.Errorf("expected the escaped reference unchanged, got:\n%s", mat.ItemsYAML)
+	}
+}
+
+func TestAppliedTenantsAfterItemsApply_HeldTenantKeepsPriorState(t *testing.T) {
+	cell := &v1alpha1.CellStatus{
+		Tenants:        []string{"fresh", "held-new", "held-old", "plain"},
+		AppliedTenants: []string{"held-old"},
+		TenantWarnings: []v1alpha1.TenantWarning{
+			{Tenant: "held-new", Reason: v1alpha1.TeamReasonItemsHeld, Message: "m"},
+			{Tenant: "held-old", Reason: v1alpha1.TeamReasonItemsHeld, Message: "m"},
+			{Tenant: "plain", Reason: v1alpha1.TeamReasonBundleKeysIgnored, Message: "m"},
+		},
+	}
+	got := appliedTenantsAfterItemsApply(cell)
+	want := []string{"fresh", "held-old", "plain"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("appliedTenantsAfterItemsApply = %v, want %v", got, want)
+	}
+}
+
+func TestAssembleCellContent_UnloadableTemplateFragmentHoldsTenant(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	good := pipelinesTeam("good")
+	seedTenantBundle(client, good, "good-bundle", cleanPipelineItemsYAML)
+	bad := pipelinesTeam("bad")
+	seedTenantBundle(client, bad, "bad-bundle", cleanPipelineItemsYAML)
+	client.configMapData["bad-bundle-content"]["pipeline-templates.yaml"] = "templates: [unclosed\n"
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{good, bad}, nil, "")
+	if err != nil {
+		t.Fatalf("expected a bad fragment to hold only its tenant, got: %v", err)
+	}
+	if held := parseCellItems(t, state.ItemsYAML).Retain; len(held) != 1 || held[0] != "bad" {
+		t.Errorf("expected held [bad], got %v", held)
+	}
+	if !strings.Contains(heldMessage(state.Warnings, "bad"), "pipeline-templates.yaml") {
+		t.Errorf("expected the message to name pipeline-templates.yaml, got %+v", state.Warnings)
+	}
+	for _, f := range state.TemplateFragments {
+		if f.Folder == "bad" {
+			t.Errorf("expected the bad fragment dropped, got %+v", state.TemplateFragments)
+		}
+	}
+}
+
+func TestAssembleCellContent_FragmentConflictingWithCellTemplateHoldsTenant(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	team := pipelinesTeam("payments")
+	seedTenantBundle(client, team, "payments-bundle", cleanPipelineItemsYAML)
+	client.configMapData["payments-bundle-content"]["pipeline-templates.yaml"] = tenantTemplateFixtureYAML("go-build")
+	base, err := bundle.InjectPipelineTemplates("jenkins:\n  numExecutors: 0\n",
+		strings.Replace(tenantTemplateFixtureYAML("go-build"), "echo", "sh", 1), "")
+	if err != nil {
+		t.Fatalf("build the template base: %v", err)
+	}
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{team}, nil, base)
+	if err != nil {
+		t.Fatalf("assembleCellContent: %v", err)
+	}
+	if held := parseCellItems(t, state.ItemsYAML).Retain; len(held) != 1 || held[0] != "payments" {
+		t.Errorf("expected held [payments], got %v: %+v", held, state.Warnings)
+	}
+}
+
+func TestResolveBundleForController_CellTenantFragmentFaultLeavesCellResolving(t *testing.T) {
+	client := newTestClientWithBundle()
+	good := pipelinesTeam("good")
+	seedTenantBundle(client, good, "good-bundle", cleanPipelineItemsYAML)
+	bad := pipelinesTeam("bad")
+	seedTenantBundle(client, bad, "bad-bundle", cleanPipelineItemsYAML)
+	client.configMapData["bad-bundle-content"]["pipeline-templates.yaml"] = "templates: [unclosed\n"
+
+	mat, cr := resolveCellWithTenants(t, client, good, bad)
+	if got := topLevelNames(parseCellItems(t, mat.ItemsYAML)); len(got) != 1 || got[0] != "good" {
+		t.Errorf("expected the good folder pushed, got %v", got)
+	}
+	if heldMessage(cr.Status.Cell.TenantWarnings, "bad") == "" {
+		t.Errorf("expected an ItemsHeld entry for bad, got %+v", cr.Status.Cell.TenantWarnings)
+	}
+}
+
+func TestDropHeldTenants_RemovesOnlyHeldTenants(t *testing.T) {
+	cell := &v1alpha1.CellStatus{
+		AppliedTenants: []string{"held", "plain"},
+		TenantWarnings: []v1alpha1.TenantWarning{{Tenant: "held", Reason: v1alpha1.TeamReasonItemsHeld, Message: "m"}},
+	}
+	dropHeldTenants(cell)
+	if strings.Join(cell.AppliedTenants, ",") != "plain" {
+		t.Errorf("AppliedTenants = %v, want [plain]", cell.AppliedTenants)
+	}
+}
+
+func TestAssembleCellContent_UnmaterializedBundleHoldsTenant(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	good := pipelinesTeam("good")
+	seedTenantBundle(client, good, "good-bundle", cleanPipelineItemsYAML)
+	missing := pipelinesTeam("missing")
+	missing.Spec.Pipelines.ComposedBundleRef = &v1alpha1.ComposedBundleRef{Name: "absent", Namespace: "catalog-ns"}
+	pending := pipelinesTeam("pending")
+	crdstore.MustSeed(client.store, &v1alpha1.ComposedBundle{
+		ObjectMeta: metav1.ObjectMeta{Name: "pending-bundle", Namespace: "catalog-ns"},
+		Status:     v1alpha1.ComposedBundleStatus{Phase: v1alpha1.ComposedBundlePending},
+	})
+	pending.Spec.Pipelines.ComposedBundleRef = &v1alpha1.ComposedBundleRef{Name: "pending-bundle", Namespace: "catalog-ns"}
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{good, missing, pending}, nil, "")
+	if err != nil {
+		t.Fatalf("assembleCellContent: %v", err)
+	}
+	manifest := parseCellItems(t, state.ItemsYAML)
+	if got := topLevelNames(manifest); len(got) != 1 || got[0] != "good" {
+		t.Errorf("expected only the good folder pushed, got %v", got)
+	}
+	if strings.Join(manifest.Retain, ",") != "missing,pending" {
+		t.Errorf("expected retain [missing pending], got %v", manifest.Retain)
+	}
+	if !strings.Contains(heldMessage(state.Warnings, "pending"), "not materialized") {
+		t.Errorf("expected an ItemsHeld warning for pending, got %+v", state.Warnings)
 	}
 }

@@ -616,20 +616,19 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 
 	// Assemble a cell's tenant items, clouds, and cloud credentials onto
 	// mat (design D7, D8, D10, D11) — still before ResolveVars. A no-op for
-	// a controller that is not a cell. Unlike the artifact-storage step
-	// above, a failure here fails the whole resolve: a malformed composed
-	// configuration must fail loudly rather than push an incomplete result.
-	if cellErr := r.applyCellContent(ctx, cr, mat, vars["varroa_controller_endpoint"]); cellErr != nil {
+	// a controller that is not a cell. A fault in one tenant's items holds
+	// only that tenant. A failure returned here is a fault of the cell
+	// itself, and it fails the whole resolve.
+	coreSet := r.coreSetForCr(ctx, cr, r.Logger)
+	if cellErr := r.applyCellContent(ctx, cr, mat, coreSet); cellErr != nil {
 		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("assemble cell content: %w", cellErr)
 	}
 
 	// Refuse to assemble items when the manifest holds a multibranch item or
 	// an organization folder item and the resolved plugin set omits
-	// basic-branch-build-strategies (design D12). This runs after
-	// applyCellContent so it sees a cell's merged manifest too, and before
-	// ResolveVars so an item's kind is never templated. It applies to every
-	// controller, not only a cell.
-	coreSet := r.coreSetForCr(ctx, cr, r.Logger)
+	// basic-branch-build-strategies (design D12). This runs before
+	// ResolveVars so an item's kind is never templated. A cell already ran
+	// it on each tenant's items, so it cannot fail here for a cell.
 	if err := checkBranchBuildStrategiesPlugin(mat.ItemsYAML, coreSet); err != nil {
 		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("assemble items: %w", err)
 	}
@@ -638,17 +637,28 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 	// mat.CellTemplateFragments are absent from this pass, and from the
 	// unresolved-variable check below. A template body holds its own
 	// ${...} Groovy text. That text is not a catalog variable (design D7).
+	// A cell's items are absent too: they are tenant content only, which
+	// applyCellContent resolved and checked per tenant. A cell variable
+	// must not reach a tenant item, and a tenant fault must not fail the
+	// cell.
 	mat.Variables = vars
 	{
 		resolveStart := time.Now()
+		cell := isCellController(cr)
 		mat.JenkinsYAML = bundle.ResolveVars(mat.JenkinsYAML, vars)
 		mat.PluginsYAML = bundle.ResolveVars(mat.PluginsYAML, vars)
-		mat.ItemsYAML = bundle.ResolveVars(mat.ItemsYAML, vars)
+		if !cell {
+			mat.ItemsYAML = bundle.ResolveVars(mat.ItemsYAML, vars)
+		}
 		mat.RbacYAML = bundle.ResolveVars(mat.RbacYAML, vars)
 		duration := time.Since(resolveStart).Seconds()
 		result := "success"
 		unresolved := findUnresolvedVars(true, mat.JenkinsYAML, mat.RbacYAML)
-		for _, v := range findUnresolvedVars(false, mat.PluginsYAML, mat.ItemsYAML) {
+		checked := []string{mat.PluginsYAML}
+		if !cell {
+			checked = append(checked, mat.ItemsYAML)
+		}
+		for _, v := range findUnresolvedVars(false, checked...) {
 			if !slices.Contains(unresolved, v) {
 				unresolved = append(unresolved, v)
 			}
@@ -3390,14 +3400,14 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 				// since ControllerStatus carries no applied-hash field of
 				// its own. A hash match implies a tenant-set match too,
 				// because the tenant items pipeline folds every tenant's
-				// folder into the hashed items_yaml, so the current tenant
-				// list IS the set this push included.
+				// folder, or its retain entry, into the hashed items_yaml.
+				// A tenant the cell holds keeps its previous state.
 				if isCellController(cr) && r.DesiredState.ItemsSuccess &&
 					r.DesiredState.AppliedHash != "" && r.DesiredState.AppliedHash == cr.Status.DesiredStateHash {
 					if cr.Status.Cell == nil {
 						cr.Status.Cell = &v1alpha1.CellStatus{}
 					}
-					cr.Status.Cell.AppliedTenants = sortedTenantCopy(cr.Status.Cell.Tenants)
+					cr.Status.Cell.AppliedTenants = appliedTenantsAfterItemsApply(cr.Status.Cell)
 				}
 				// Rehydration result (design D13, task 6.2): update only
 				// the entries whose CommandID matches this result's own

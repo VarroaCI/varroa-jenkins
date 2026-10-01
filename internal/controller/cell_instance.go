@@ -27,6 +27,9 @@ import (
 // moves to status.cell.previousInstance with the mite's last heartbeat
 // time, so the single-tenant announcement can report the replaced pod as
 // a dead instance. A change from empty keeps the earlier record.
+//
+// Any change also drops each held tenant from status.cell.appliedTenants.
+// The new pod has an empty home, so a held folder is gone.
 func (r *Reconciler) updateCellInstance(ctx context.Context, cr *v1alpha1.Controller) {
 	pod, err := r.client.GetControllerPod(ctx, cr.Namespace, cr.Name)
 	if err != nil {
@@ -53,6 +56,9 @@ func (r *Reconciler) updateCellInstance(ctx context.Context, cr *v1alpha1.Contro
 			lastSeen = *cr.Status.MiteStatus.LastSeen
 		}
 		cr.Status.Cell.PreviousInstanceLastSeen = &lastSeen
+	}
+	if cr.Status.Cell.Instance != instance {
+		dropHeldTenants(cr.Status.Cell)
 	}
 	cr.Status.Cell.Instance = instance
 }

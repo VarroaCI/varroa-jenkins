@@ -383,7 +383,7 @@ func TestApplyCellContent_TenantCredentialsNeverReachAConfigMap(t *testing.T) {
 	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"payments"}}
 	mat := &bundle.MaterializedBundle{}
 
-	if err := rec.applyCellContent(context.Background(), cr, mat, "http://cell1-svc.ns1.svc.cluster.local:8080"); err != nil {
+	if err := rec.applyCellContent(context.Background(), cr, mat, nil); err != nil {
 		t.Fatalf("applyCellContent: %v", err)
 	}
 	carried, err := yaml.Marshal(mat.CellFolderCredentials)

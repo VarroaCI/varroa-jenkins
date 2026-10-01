@@ -57,7 +57,7 @@ func TestApplyCellContent_MergesCellDocumentAndKeepsBundleCloud(t *testing.T) {
 	cr := cellControllerFixture()
 	mat := &bundle.MaterializedBundle{JenkinsYAML: "jenkins:\n  clouds:\n    - kubernetes:\n        name: bundle-cloud\n"}
 
-	if err := rec.applyCellContent(context.Background(), cr, mat, "http://cell1-svc.ns1.svc.cluster.local:8080"); err != nil {
+	if err := rec.applyCellContent(context.Background(), cr, mat, nil); err != nil {
 		t.Fatalf("applyCellContent: %v", err)
 	}
 
@@ -107,7 +107,7 @@ func TestApplyCellContent_NotACellIsNoop(t *testing.T) {
 	mat := &bundle.MaterializedBundle{JenkinsYAML: "jenkins:\n  systemMessage: hi\n"}
 	original := mat.JenkinsYAML
 
-	if err := rec.applyCellContent(context.Background(), cr, mat, ""); err != nil {
+	if err := rec.applyCellContent(context.Background(), cr, mat, nil); err != nil {
 		t.Fatalf("applyCellContent: %v", err)
 	}
 	if mat.JenkinsYAML != original {
@@ -142,7 +142,7 @@ func TestApplyCellContent_DefaultGitHostKeyStrategy(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			rec := newTestReconciler(newTestClient())
 			mat := &bundle.MaterializedBundle{JenkinsYAML: jenkinsYAML}
-			if err := rec.applyCellContent(context.Background(), cellControllerFixture(), mat, "http://cell1-svc.ns1.svc.cluster.local:8080"); err != nil {
+			if err := rec.applyCellContent(context.Background(), cellControllerFixture(), mat, nil); err != nil {
 				t.Fatalf("applyCellContent: %v", err)
 			}
 			strategy, ok := gitHostKeyStrategyOf(t, mat.JenkinsYAML)
@@ -160,7 +160,7 @@ func TestApplyCellContent_BundleGitHostKeyStrategyWins(t *testing.T) {
 	t.Run("string", func(t *testing.T) {
 		rec := newTestReconciler(newTestClient())
 		mat := &bundle.MaterializedBundle{JenkinsYAML: "security:\n  gitHostKeyVerificationConfiguration:\n    sshHostKeyVerificationStrategy: noHostKeyVerificationStrategy\n"}
-		if err := rec.applyCellContent(context.Background(), cellControllerFixture(), mat, "http://cell1-svc.ns1.svc.cluster.local:8080"); err != nil {
+		if err := rec.applyCellContent(context.Background(), cellControllerFixture(), mat, nil); err != nil {
 			t.Fatalf("applyCellContent: %v", err)
 		}
 		strategy, _ := gitHostKeyStrategyOf(t, mat.JenkinsYAML)
@@ -171,7 +171,7 @@ func TestApplyCellContent_BundleGitHostKeyStrategyWins(t *testing.T) {
 	t.Run("map", func(t *testing.T) {
 		rec := newTestReconciler(newTestClient())
 		mat := &bundle.MaterializedBundle{JenkinsYAML: "security:\n  gitHostKeyVerificationConfiguration:\n    sshHostKeyVerificationStrategy:\n      manuallyProvidedKeyVerificationStrategy:\n        approvedHostKeys: \"github.com ssh-ed25519 AAAA\"\n"}
-		if err := rec.applyCellContent(context.Background(), cellControllerFixture(), mat, "http://cell1-svc.ns1.svc.cluster.local:8080"); err != nil {
+		if err := rec.applyCellContent(context.Background(), cellControllerFixture(), mat, nil); err != nil {
 			t.Fatalf("applyCellContent: %v", err)
 		}
 		strategy, _ := gitHostKeyStrategyOf(t, mat.JenkinsYAML)
@@ -193,7 +193,7 @@ func TestApplyCellContent_NonCellGetsNoGitHostKeyDefault(t *testing.T) {
 	rec := newTestReconciler(newTestClient())
 	cr := testController("normal", "ns1", v1alpha1.ControllerPhaseConnected)
 	mat := &bundle.MaterializedBundle{JenkinsYAML: "jenkins:\n  systemMessage: hi\n"}
-	if err := rec.applyCellContent(context.Background(), cr, mat, ""); err != nil {
+	if err := rec.applyCellContent(context.Background(), cr, mat, nil); err != nil {
 		t.Fatalf("applyCellContent: %v", err)
 	}
 	if strings.Contains(mat.JenkinsYAML, "gitHostKeyVerificationConfiguration") {
@@ -224,8 +224,7 @@ func TestApplyCellContent_TenantCloudRendering(t *testing.T) {
 	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"payments"}}
 	mat := &bundle.MaterializedBundle{JenkinsYAML: ""}
 
-	const endpoint = "http://cell1-svc.ns1.svc.cluster.local:8080"
-	if err := rec.applyCellContent(context.Background(), cr, mat, endpoint); err != nil {
+	if err := rec.applyCellContent(context.Background(), cr, mat, nil); err != nil {
 		t.Fatalf("applyCellContent: %v", err)
 	}
 
@@ -305,7 +304,7 @@ func TestApplyCellContent_LiftedTemplateRendering(t *testing.T) {
 	cr := cellControllerFixture()
 	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"payments"}}
 	mat := &bundle.MaterializedBundle{}
-	if err := rec.applyCellContent(context.Background(), cr, mat, ""); err != nil {
+	if err := rec.applyCellContent(context.Background(), cr, mat, nil); err != nil {
 		t.Fatalf("applyCellContent: %v", err)
 	}
 

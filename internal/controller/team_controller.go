@@ -1095,10 +1095,11 @@ func buildCellCandidate(cr *v1alpha1.Controller, profiles []*v1alpha1.JenkinsVer
 // tenantWarningPriority orders the TenantWarnings condition's Reason
 // (tenant-placement spec): the lowest rank wins.
 var tenantWarningPriority = map[string]int{
-	v1alpha1.TeamReasonBundleKeysIgnored:  0,
-	v1alpha1.TeamReasonPodTemplateSkipped: 1,
-	v1alpha1.TeamReasonCredentialSkipped:  2,
-	v1alpha1.TeamReasonHibernationIgnored: 3,
+	v1alpha1.TeamReasonItemsHeld:          0,
+	v1alpha1.TeamReasonBundleKeysIgnored:  1,
+	v1alpha1.TeamReasonPodTemplateSkipped: 2,
+	v1alpha1.TeamReasonCredentialSkipped:  3,
+	v1alpha1.TeamReasonHibernationIgnored: 4,
 }
 
 // setTenantWarningsCondition folds the owning cell's
