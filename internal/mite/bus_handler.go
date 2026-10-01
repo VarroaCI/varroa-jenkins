@@ -1687,34 +1687,49 @@ func (h *BusHandler) watchContent(ctx context.Context, ns, name string, send Sen
 	// Retried for the same reason as the desired-state subscription: giving up
 	// after one setup error leaves the mite unable to serve content fetches for
 	// the rest of the connection, with no operator-visible signal.
+	subject := bus.MiteContentSubject(h.cluster, ns, name)
 	pacer := h.newRebuildPacer()
 	for {
-		var sub *nats.Subscription
+		var (
+			sub     *nats.Subscription
+			denied  <-chan struct{}
+			release func()
+		)
 		established := h.retryEstablish(ctx, ns, name, "content", func() error {
 			nc := h.conn.NATSConn()
 			if nc == nil {
 				return errors.New("nats connection unavailable")
 			}
-			s, err := nc.SubscribeSync(bus.MiteContentSubject(h.cluster, ns, name))
+			// The watcher goes first: the server reports a denial only
+			// after Subscribe returns, and only to the error handler.
+			d, rel := h.conn.WatchSubscribeDenied(subject)
+			s, err := nc.SubscribeSync(subject)
 			if err != nil {
+				rel()
 				return fmt.Errorf("content subscribe: %w", err)
 			}
-			sub = s
+			if err := h.conn.ConfirmSubscription(d); err != nil {
+				_ = s.Unsubscribe()
+				rel()
+				return fmt.Errorf("content subscribe %s: %w", subject, err)
+			}
+			sub, denied, release = s, d, rel
 			return nil
 		})
 		if !established {
 			return // context cancelled: the mite disconnected
 		}
 		start := time.Now()
-		if reconnect := h.pumpContent(ctx, sub, ns, name, send); !reconnect {
-			_ = sub.Unsubscribe()
+		cause := h.pumpContent(ctx, sub, denied, ns, name, send)
+		_ = sub.Unsubscribe()
+		release()
+		if cause == nil {
 			return
 		}
 		// The subscription died while the mite is still connected. Returning
 		// here would leave it unable to serve any content fetch for the rest
 		// of the connection, with no signal.
-		_ = sub.Unsubscribe()
-		h.markWatchDegraded(ctx, ns, name, "content", "content subscription lost; rebuilding")
+		h.markWatchDegraded(ctx, ns, name, "content", "content subscription lost; rebuilding: "+cause.Error())
 		if !pacer.wait(ctx, time.Since(start)) {
 			return
 		}
@@ -1722,14 +1737,18 @@ func (h *BusHandler) watchContent(ctx context.Context, ns, name string, send Sen
 }
 
 // pumpContent bridges ContentRequests from the bus to the gRPC stream. It
-// returns true when the subscription died and should be rebuilt, false when
-// ctx was cancelled.
-func (h *BusHandler) pumpContent(ctx context.Context, sub *nats.Subscription, ns, name string, send Sender) bool {
+// returns the cause when the subscription died and must be rebuilt, and nil
+// when ctx was cancelled. A signal on denied, a server denial of the
+// subscription, is such a death.
+func (h *BusHandler) pumpContent(ctx context.Context, sub *nats.Subscription, denied <-chan struct{}, ns, name string, send Sender) error {
 	key := ns + "/" + name
 	for {
 		select {
 		case <-ctx.Done():
-			return false
+			return nil
+		case <-denied:
+			h.log().Error("content subscription denied", "controller", key)
+			return bus.ErrSubscribeDenied
 		default:
 		}
 		msg, err := sub.NextMsg(500 * time.Millisecond)
@@ -1737,11 +1756,10 @@ func (h *BusHandler) pumpContent(ctx context.Context, sub *nats.Subscription, ns
 			if errors.Is(err, nats.ErrTimeout) {
 				continue
 			}
-			if errors.Is(err, nats.ErrConnectionClosed) || errors.Is(err, nats.ErrBadSubscription) {
-				h.log().Error("content subscription lost", "controller", key, "error", err)
-				return true
-			}
-			continue
+			// Any other error rebuilds the subscription through the pacer.
+			// A retry in place spins on an error that does not clear.
+			h.log().Error("content subscription lost", "controller", key, "error", err)
+			return err
 		}
 		var req mitev1.ContentRequest
 		if err := json.Unmarshal(msg.Data, &req); err != nil {

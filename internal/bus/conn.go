@@ -94,6 +94,11 @@ type Conn struct {
 	// reports on this connection. The error handler can fire before
 	// RegisterMetrics runs, so the count lives here and the counter reads it.
 	permissionViolations atomic.Int64
+
+	// denied holds the watchers of a subscription denial. The server
+	// reports a denial only to the error handler, so the handler fans it
+	// out to the holder of the subscription.
+	denied deniedWatchers
 }
 
 // clampReplicas clamps a JetStream replica count to a sane floor of 1.
@@ -174,6 +179,9 @@ func Connect(url string, cfg ...Config) (*Conn, error) {
 				c.permissionViolations.Add(1)
 				if c.logger != nil {
 					c.logger.Error("nats permission violation", "error", err)
+				}
+				if isSubscribeDenial(err) {
+					c.denied.notify(err)
 				}
 				return
 			}

@@ -46,18 +46,34 @@ func (s natsDesiredSource) SubscribeDesired(subject string) (desiredInbox, error
 	if nc == nil {
 		return nil, errors.New("nats connection unavailable")
 	}
+	// The watcher goes first: the server rejects a subscription only
+	// after Subscribe returns, and only to the connection's error handler.
+	denied, release := s.conn.WatchSubscribeDenied(subject)
 	sub, err := nc.SubscribeSync(subject)
 	if err != nil {
+		release()
 		return nil, fmt.Errorf("desired subscribe: %w", err)
 	}
-	return natsDesiredInbox{sub: sub}, nil
+	if err := s.conn.ConfirmSubscription(denied); err != nil {
+		_ = sub.Unsubscribe()
+		release()
+		return nil, fmt.Errorf("desired subscribe %s: %w", subject, err)
+	}
+	return natsDesiredInbox{sub: sub, denied: denied, release: release}, nil
 }
 
 type natsDesiredInbox struct {
-	sub *nats.Subscription
+	sub     *nats.Subscription
+	denied  <-chan struct{}
+	release func()
 }
 
 func (i natsDesiredInbox) Next(timeout time.Duration) (desiredRequest, error) {
+	select {
+	case <-i.denied:
+		return desiredRequest{}, bus.ErrSubscribeDenied
+	default:
+	}
 	msg, err := i.sub.NextMsg(timeout)
 	if err != nil {
 		return desiredRequest{}, err
@@ -68,7 +84,10 @@ func (i natsDesiredInbox) Next(timeout time.Duration) (desiredRequest, error) {
 	}, nil
 }
 
-func (i natsDesiredInbox) Unsubscribe() error { return i.sub.Unsubscribe() }
+func (i natsDesiredInbox) Unsubscribe() error {
+	i.release()
+	return i.sub.Unsubscribe()
+}
 
 // subscribeDesired makes one subscription attempt for the mite. OnConnect
 // calls it before it announces the connection, so the operator's push on the
@@ -109,29 +128,30 @@ func (h *BusHandler) serveDesiredState(ctx context.Context, ns, name string, sen
 			}
 		}
 		start := time.Now()
-		reconnect := h.pumpDesired(ctx, inbox, ns, name, send)
+		cause := h.pumpDesired(ctx, inbox, ns, name, send)
 		_ = inbox.Unsubscribe()
 		inbox = nil
-		if !reconnect {
+		if cause == nil {
 			return
 		}
-		h.markWatchDegraded(ctx, ns, name, "desired", "desired-state subscription lost; rebuilding")
+		h.markWatchDegraded(ctx, ns, name, "desired", "desired-state subscription lost; rebuilding: "+cause.Error())
 		if !pacer.wait(ctx, time.Since(start)) {
 			return
 		}
 	}
 }
 
-// pumpDesired forwards requests until ctx is cancelled (returns false) or
-// the subscription dies (returns true). A failed send gets no answer. During
+// pumpDesired forwards requests until ctx is cancelled (returns nil) or the
+// subscription dies (returns the cause). A server denial of the
+// subscription is such a death. A failed send gets no answer. During
 // a reconnect two gateway replicas can hold a subscription for one mite, and
 // only the replica with the live stream may answer.
-func (h *BusHandler) pumpDesired(ctx context.Context, inbox desiredInbox, ns, name string, send Sender) bool {
+func (h *BusHandler) pumpDesired(ctx context.Context, inbox desiredInbox, ns, name string, send Sender) error {
 	key := ns + "/" + name
 	for {
 		select {
 		case <-ctx.Done():
-			return false
+			return nil
 		default:
 		}
 		req, err := inbox.Next(500 * time.Millisecond)
@@ -142,15 +162,17 @@ func (h *BusHandler) pumpDesired(ctx context.Context, inbox desiredInbox, ns, na
 			// Any other error rebuilds the subscription through the pacer.
 			// A retry in place spins on an error that does not clear.
 			h.log().Error("desired-state subscription lost", "controller", key, "error", err)
-			return true
+			return err
 		}
 		var op mitev1.OperatorMessage
 		if err := json.Unmarshal(req.Data, &op); err != nil {
 			h.log().Error("unmarshal desired failed", "controller", key, "error", err)
 			continue
 		}
-		if ctx.Err() != nil {
-			return false
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
 		}
 		if err := send(&op); err != nil {
 			h.log().Error("send desired to mite failed", "controller", key, "error", err)

@@ -123,27 +123,57 @@ func marshalTailReply(r tailReply) []byte {
 // watchTail subscribes the connected mite's TailSubject with the gateway
 // queue group and answers every start/stop request until ctx is
 // cancelled, following the retry-until-connected pattern serveDesiredState
-// and watchContent use for their own subscriptions.
+// and watchContent use for their own subscriptions. A server denial of the
+// subscription rebuilds it through the pacer, because nats.go reports the
+// denial only to the connection's error handler.
 func (h *BusHandler) watchTail(ctx context.Context, ns, name string, send Sender) {
 	if h.conn == nil {
 		return
 	}
-	var sub *bus.Sub
-	established := h.retryEstablish(ctx, ns, name, "tail", func() error {
-		s, err := h.conn.SubscribeRequest(bus.TailSubject(h.cluster, ns, name), tailQueueGroup, func(data []byte) []byte {
-			return h.handleTailRequest(ns, name, send, data)
+	subject := bus.TailSubject(h.cluster, ns, name)
+	pacer := h.newRebuildPacer()
+	for {
+		var (
+			sub     *bus.Sub
+			denied  <-chan struct{}
+			release func()
+		)
+		established := h.retryEstablish(ctx, ns, name, "tail", func() error {
+			d, rel := h.conn.WatchSubscribeDenied(subject)
+			s, err := h.conn.SubscribeRequest(subject, tailQueueGroup, func(data []byte) []byte {
+				return h.handleTailRequest(ns, name, send, data)
+			})
+			if err != nil {
+				rel()
+				return fmt.Errorf("tail subscribe: %w", err)
+			}
+			if err := h.conn.ConfirmSubscription(d); err != nil {
+				_ = s.Unsubscribe()
+				rel()
+				return fmt.Errorf("tail subscribe %s: %w", subject, err)
+			}
+			sub, denied, release = s, d, rel
+			return nil
 		})
-		if err != nil {
-			return fmt.Errorf("tail subscribe: %w", err)
+		if !established {
+			return // context cancelled: the mite disconnected
 		}
-		sub = s
-		return nil
-	})
-	if !established {
-		return // context cancelled: the mite disconnected
+		start := time.Now()
+		select {
+		case <-ctx.Done():
+			_ = sub.Unsubscribe()
+			release()
+			return
+		case <-denied:
+		}
+		_ = sub.Unsubscribe()
+		release()
+		h.log().Error("tail subscription denied", "controller", ns+"/"+name)
+		h.markWatchDegraded(ctx, ns, name, "tail", "tail subscription lost; rebuilding: "+bus.ErrSubscribeDenied.Error())
+		if !pacer.wait(ctx, time.Since(start)) {
+			return
+		}
 	}
-	<-ctx.Done()
-	_ = sub.Unsubscribe()
 }
 
 // handleTailRequest decodes one TailSubject request and dispatches it.

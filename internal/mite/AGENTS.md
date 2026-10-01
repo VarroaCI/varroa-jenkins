@@ -80,6 +80,16 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   re-establishes on *post-setup* death — `Updates()` closing, a lost durable
   consumer, a dead content subscription — rather than returning; the degraded
   mark is per watch kind, so a healthy watcher cannot clear another's failure.
+  A core NATS subscription (desired, content, tail) can be rejected by the
+  server after `Subscribe` returned nil, for example when a chart upgrade
+  rolls the gateway before the NATS auth reload lands. nats.go reports that
+  only to the connection's error handler and never re-sends the
+  subscription without a reconnect. So each of these watchers registers
+  `bus.Conn.WatchSubscribeDenied` before it subscribes, calls
+  `ConfirmSubscription` as part of its `retryEstablish` setup, and rebuilds
+  through the pacer when the watcher fires later. A new core subscription
+  must follow the same pattern. The imperative pull consumer reports its
+  denials synchronously and does not use it.
   `OnConnect` returns a connection token that `OnDisconnect` must pass back: a
   superseded stream can tear down *after* the mite reconnected, and an
   unqualified teardown cancels the live connection's watch goroutines — the

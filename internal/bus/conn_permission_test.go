@@ -2,12 +2,15 @@ package bus
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/nats-io/nats-server/v2/server"
+	"github.com/nats-io/nats.go"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
@@ -116,5 +119,83 @@ func TestPermissionViolationCountedAndLogged(t *testing.T) {
 	}
 	if !strings.Contains(logged, "denied.one") {
 		t.Fatalf("want the denied subject in the log, got %q", logged)
+	}
+}
+
+// TestConfirmSubscription_ReportsDenial pins that ConfirmSubscription turns
+// the server's asynchronous rejection of a subscription into an error.
+// nats.go returns no error from Subscribe for that case.
+func TestConfirmSubscription_ReportsDenial(t *testing.T) {
+	s := startPermissionTestServer(t)
+	conn, err := Connect(s.ClientURL(), Config{Username: "limited", Password: "limited_pass"})
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer conn.Close()
+
+	denied, release := conn.WatchSubscribeDenied("denied.sub")
+	defer release()
+	sub, err := conn.SubscribeData("denied.sub", func([]byte) {})
+	if err != nil {
+		t.Fatalf("a denied subscribe must not return an error at once: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+	if err := conn.ConfirmSubscription(denied); !errors.Is(err, ErrSubscribeDenied) {
+		t.Fatalf("ConfirmSubscription = %v, want ErrSubscribeDenied", err)
+	}
+
+	allowed, releaseAllowed := conn.WatchSubscribeDenied("_INBOX.ok")
+	defer releaseAllowed()
+	okSub, err := conn.SubscribeData("_INBOX.ok", func([]byte) {})
+	if err != nil {
+		t.Fatalf("allowed subscribe: %v", err)
+	}
+	defer func() { _ = okSub.Unsubscribe() }()
+	if err := conn.ConfirmSubscription(allowed); err != nil {
+		t.Fatalf("ConfirmSubscription for an allowed subject = %v, want nil", err)
+	}
+}
+
+// TestWatchSubscribeDenied_SignalsOnlyTheDeniedSubject pins that a denial
+// reaches the watchers of its own subject and no other watcher, and that a
+// released watcher gets nothing.
+func TestWatchSubscribeDenied_SignalsOnlyTheDeniedSubject(t *testing.T) {
+	var w deniedWatchers
+	a, releaseA := w.add("mite.core.ns.a.desired")
+	b, releaseB := w.add("mite.core.ns.b.desired")
+	defer releaseB()
+	gone, releaseGone := w.add("mite.core.ns.a.desired")
+	releaseGone()
+
+	w.notify(errors.New(`nats: permissions violation: Permissions Violation for Subscription to "mite.core.ns.a.desired"`))
+	w.notify(errors.New(`nats: permissions violation: Permissions Violation for Subscription to "mite.core.ns.a.desired"`))
+
+	select {
+	case <-a:
+	default:
+		t.Fatal("the watcher of the denied subject got no signal")
+	}
+	select {
+	case <-a:
+		t.Fatal("a second denial queued a second signal; one pending signal is enough")
+	default:
+	}
+	select {
+	case <-b:
+		t.Fatal("the watcher of another subject got a signal")
+	default:
+	}
+	select {
+	case <-gone:
+		t.Fatal("a released watcher got a signal")
+	default:
+	}
+	releaseA()
+
+	if isSubscribeDenial(fmt.Errorf("%w: Permissions Violation for Publish to \"x\"", nats.ErrPermissionViolation)) {
+		t.Fatal("a publish violation counted as a subscription denial")
+	}
+	if !isSubscribeDenial(fmt.Errorf("%w: Permissions Violation for Subscription to \"x\"", nats.ErrPermissionViolation)) {
+		t.Fatal("a subscription violation did not count as a subscription denial")
 	}
 }

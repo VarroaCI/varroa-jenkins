@@ -10,7 +10,8 @@ control plane's async transport — no other package talks to NATS directly.
 
 ## Ownership
 
-- Owns: connection/TLS setup (`conn.go`), subject naming (`subjects.go`),
+- Owns: connection/TLS setup (`conn.go`), subscription-denial watchers
+  (`denied.go`), subject naming (`subjects.go`),
   JetStream stream configs (`jetstream.go`), KV helpers (`kv.go`), the
   cluster directory (`clusters.go`, `cluster.go`), gateway↔operator
   request/reply schemas (`operator.go`, `config.go`), the mite presence
@@ -127,6 +128,13 @@ control plane's async transport — no other package talks to NATS directly.
   exclusive (nats.go rejects a static user/password alongside a handler).
   `Connect` fails fast when `PasswordFile` is unreadable at startup; a read
   failure during a later reconnect only logs.
+- **Subscription denial** (`denied.go`) — the server rejects a subscription
+  asynchronously, so `Subscribe` returns nil for it. The connection's error
+  handler parses the subject out of the violation and signals every
+  `WatchSubscribeDenied(subject)` watcher. `ConfirmSubscription(denied)`
+  flushes, waits up to 100 ms for the callback goroutine, and returns
+  `ErrSubscribeDenied`. Register the watcher before the subscribe, and keep
+  reading it afterwards: a denial can also arrive later.
 - **Logging** — a `Conn`'s logger is supplied only through `Config.Logger` and
   is installed by `Connect` before any handler closure exists. There is no
   exported logger field: the NATS callbacks read it from library goroutines and
