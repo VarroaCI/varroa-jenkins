@@ -165,11 +165,11 @@ To keep earlier values, use `--reset-then-reuse-values`. The chart refuses `--re
 
 The chart mints the NATS passwords, the TLS material, and the JetStream
 encryption key once. On `helm upgrade` it re-reads them from the existing
-Secrets. Renderers that cannot read the cluster mint fresh values on every
-render. This applies to `helm template`, ArgoCD, and Flux.
+Secrets. Renderers that cannot read the cluster, such as `helm template`,
+ArgoCD, and Flux, mint fresh values on each render.
 
-Fresh passwords are safe. The components read the mounted Secret on each
-reconnect, so they recover in about a minute with no restart.
+Fresh passwords are safe. The components reread the Secret and recover in
+about a minute.
 
 A fresh key is not safe. NATS encrypts JetStream with the key in the
 `varroa-nats-js-key` Secret. A changed or lost key loses all JetStream state.
@@ -180,14 +180,14 @@ kubectl get secret varroa-nats-js-key -n varroa-system -o jsonpath='{.data.key}'
 ```
 
 For a GitOps render, set `nats.encryption.createSecret: false` and create the
-Secret yourself:
+Secret yourself. The key starts with a letter and holds only letters and digits:
 
 ```bash
 kubectl create secret generic varroa-nats-js-key -n varroa-system --from-literal=key=<key>
 ```
 
-Uninstall keeps the Secret. If the Secret is lost, `helm upgrade` fails. Restore
-the Secret from the backup.
+Uninstall keeps the Secret. Without it, `helm upgrade` fails. Restore it from
+the backup.
 
 ## Uninstall
 

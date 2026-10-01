@@ -157,7 +157,8 @@ the packaged CRDs. Does not own the Go source it packages
   sets `cipher: chachapoly` and `key: << $JS_KEY >>` (the subchart renders
   `<< >>` unquoted, so NATS reads a variable), and `nats.container.env.JS_KEY`
   reads `varroa-nats-js-key`/`key`. `templates/secret-nats-js-key.yaml` mints
-  that Secret once under the same fixed name, never the release name (`lookup` reuse, `randAlphaNum 64`,
+  that Secret once under the same fixed name, never the release name (`lookup` reuse, a letter then `randAlphaNum 63`,
+  because NATS parses a digit-first `$JS_KEY` value as config and fails;
   `helm.sh/resource-policy: keep`), gated on `nats.enabled`, full mode, and
   `nats.encryption.createSecret` (read nil-safe; only a bool counts, so a
   null or empty value keeps the default `true`). With no stored key, the

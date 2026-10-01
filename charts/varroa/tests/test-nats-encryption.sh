@@ -5,7 +5,8 @@
 # Verifies that `helm template` produces:
 #   - nats.conf with cipher chachapoly and an unquoted $JS_KEY variable
 #   - JS_KEY on the NATS container from the varroa-nats-js-key Secret
-#   - the key Secret with the keep policy and a 64-character key
+#   - the key Secret with the keep policy and a 64-character key that
+#     starts with a letter and holds only letters and digits
 #   - no key in varroa-nats-creds, and no other workload that reads the key
 #   - NATS pod annotations that do not change with the key
 #   - nats.encryption.createSecret=false: no Secret, JS_KEY still set
@@ -64,6 +65,15 @@ check "key Secret carries helm.sh/resource-policy: keep" $?
 KEY=$(echo "$RENDER" | yq eval-all 'select(.kind == "Secret" and .metadata.name == "varroa-nats-js-key") | .data.key' | base64 -d)
 [[ ${#KEY} -eq 64 ]]
 check "key is 64 characters (got ${#KEY})" $?
+# One render draws one key, and a digit-first key occurs about once in six
+# draws. Thirty renders find a digit-first mint with more than 99% odds.
+BAD_KEYS=0
+for _ in $(seq 1 30); do
+  K=$(helm template varroa "$ROOT" "${BASE[@]}" -s templates/secret-nats-js-key.yaml 2>/dev/null | yq '.data.key' | base64 -d)
+  [[ "$K" =~ ^[A-Za-z][A-Za-z0-9]{63}$ ]] || BAD_KEYS=$((BAD_KEYS + 1))
+done
+[[ "$KEY" =~ ^[A-Za-z][A-Za-z0-9]*$ && "$BAD_KEYS" -eq 0 ]]
+check "each of 31 keys starts with a letter and holds only letters and digits (bad: $BAD_KEYS)" $?
 
 echo ""
 echo "=== 4. Key isolation ==="
