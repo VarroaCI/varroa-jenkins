@@ -43,6 +43,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/plugininv"
+	"github.com/varroaci/varroa-jenkins/internal/secretredact"
 	"github.com/varroaci/varroa-jenkins/internal/telemetry"
 )
 
@@ -1351,12 +1352,7 @@ func (a *Agent) processCommands(ctx context.Context) {
 		case *mitev1.OperatorMessage_ContentRequest:
 			req := m.ContentRequest
 			if req != nil && req.RequestId != "" {
-				resp := &mitev1.ContentResponse{
-					RequestId:  req.RequestId,
-					JcascYaml:  readFileEmpty(filepath.Join(a.miteDir, "last-jcasc.yaml")),
-					ItemsYaml:  readFileEmpty(filepath.Join(a.miteDir, "last-items.yaml")),
-					PluginsTxt: readFileEmpty(filepath.Join(a.miteDir, "last-plugins.txt")),
-				}
+				resp := buildContentResponse(a.miteDir, req.RequestId)
 				a.sendMu.Lock()
 				sendErr := a.stream.Send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_ContentResponse{ContentResponse: resp}})
 				a.sendMu.Unlock()
@@ -3323,6 +3319,19 @@ func computeStateHash(configHash, pluginsHash, rbacHash, itemsHash string) strin
 	h.Write([]byte(rbacHash))
 	h.Write([]byte(itemsHash))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// buildContentResponse answers a ContentRequest from the last-applied files
+// in miteDir. Every credential value is redacted before it leaves the pod,
+// because the answer reaches any caller with controller read access. The
+// files on disk stay unredacted: the convergence hashes read them.
+func buildContentResponse(miteDir, requestID string) *mitev1.ContentResponse {
+	return &mitev1.ContentResponse{
+		RequestId:  requestID,
+		JcascYaml:  secretredact.JCasC(readFileEmpty(filepath.Join(miteDir, "last-jcasc.yaml"))),
+		ItemsYaml:  secretredact.Items(readFileEmpty(filepath.Join(miteDir, "last-items.yaml"))),
+		PluginsTxt: readFileEmpty(filepath.Join(miteDir, "last-plugins.txt")),
+	}
 }
 
 // readFileEmpty reads a file's content, returning "" if the file does not exist,

@@ -43,6 +43,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/preflight"
 	"github.com/varroaci/varroa-jenkins/internal/rbac"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
+	"github.com/varroaci/varroa-jenkins/internal/secretredact"
 )
 
 // Server holds handler methods for the BFF API.
@@ -3634,6 +3635,18 @@ func (s *Server) handleControllerDiff(w http.ResponseWriter, r *http.Request, cl
 				Plugins: resp.PluginsTxt,
 			}
 		}
+	}
+
+	// No caller gets a credential value through this read. The mite
+	// already redacts its answer; this pass covers a mite that does not
+	// yet redact, and the incoming side, which can carry a literal value
+	// from the bundle or its variables. Both sides use the same rules, so
+	// a redacted value never shows as a difference.
+	incoming.Jcasc = secretredact.JCasC(incoming.Jcasc)
+	incoming.Items = secretredact.Items(incoming.Items)
+	if applied != nil {
+		applied.Jcasc = secretredact.JCasC(applied.Jcasc)
+		applied.Items = secretredact.Items(applied.Items)
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{

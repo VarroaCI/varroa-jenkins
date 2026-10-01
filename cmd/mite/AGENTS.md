@@ -35,6 +35,10 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   - **Send serialization** — `sendMu` (`agent.go:57`) guards every
     `stream.Send()` call; the heartbeat goroutine and `processCommands`
     (command results, content responses, token-refresh requests) all take it.
+  - **Content answer** — `buildContentResponse` answers a `ContentRequest` from
+    `last-jcasc.yaml`, `last-items.yaml`, and `last-plugins.txt`, and passes the
+    first two through `internal/secretredact`. The files on disk stay
+    unredacted, because the convergence hashes read them.
   - **Recv/ctx unblocking** — `processCommands` (`agent.go:896`) wraps
     `stream.Recv()` in a goroutine + channel so `ctx.Done()` can break the
     loop without waiting on a blocking Recv; on a Send error `sendHeartbeats`

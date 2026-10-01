@@ -367,6 +367,20 @@ reading each package's entry point):
 - **`hibernation/`** — shared controller-hibernation contracts: webhook replay
   constants, the BFF/operator wake interstitial renderer, and the operator's
   informer-backed `wakeserver` HTTP handler.
+- **`secretredact/`** — replaces secret values in JCasC (`JCasC`) and items
+  (`Items`) YAML with `<redacted>`. A key that contains `password`, `secret`,
+  `passphrase`, `privatekey`, or `token`, and does not end in `id`, marks a
+  secret, at every depth below it. Inside a `domainCredentials` or `folderCredentials` store, every
+  scalar is a secret except the fields in `storeVisibleKeys`, because a
+  credential type can hold its secret under any key name (`secretId` too).
+  Only scalars change. `JCasC` keeps a value that is one whole `${...}`
+  reference to a named entry, a file, or a system property; an inline-data
+  lookup (`base64:`, `decodeBase64:`, `json:`, `trim:`) or a `:-` default is
+  redacted. `Items` keeps no reference, because items never pass through
+  JCasC. It removes every comment, because a comment can hold a secret. Every
+  document is encoded again, so both sides of a diff share one style. Text
+  that does not parse becomes `<redacted: unparseable content>`. The mite's
+  content answer and the BFF diff read both use it.
 
 ## Verification
 

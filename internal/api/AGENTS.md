@@ -441,6 +441,10 @@ federation, activity persistence, and SSE fanout.
   `handlers_teams.go` maps `spec.pipelines` and `status.placement` by hand, in both
   directions; it never maps `status.pipelines.webhookToken` or `.webhookSecret` on any
   read path, because both are the tenant webhook door's credentials.
+- **Controller diff read** — `handleControllerDiff` passes the `jcasc` and `items`
+  text of both sides through `internal/secretredact`. No caller gets an unredacted
+  credential value, whatever its grants. The mite redacts its own answer too; the
+  BFF pass covers a mite that does not yet redact, and the incoming side.
 - **Cell fields on the controller DTOs** — `controllerResponse` carries seven
   (`kind`, `cellPool`, `tenantCount`, `maxTenants`, `warm`, `createdAt`,
   `unreadySince`), stamped by `fillCellSummary` (`handlers.go`). `kind` and

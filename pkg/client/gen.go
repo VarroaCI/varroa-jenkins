@@ -1693,7 +1693,7 @@ type ComponentsSchemasControllerDetail struct {
 // ComponentsSchemasControllerDetailKind Mirrors v1alpha1.IsCell. Present for every controller.
 type ComponentsSchemasControllerDetailKind string
 
-// ComponentsSchemasControllerDiff Diff between incoming bundle content and last-applied content.
+// ComponentsSchemasControllerDiff Diff between incoming bundle content and last-applied content. The jcasc and items text of both sides is redacted: each secret value shows as the marker "<redacted>". A key that contains password, secret, passphrase, privatekey, or token, and does not end in id, marks every value below it as a secret. Inside a domainCredentials or folderCredentials store, every value is a secret except id, scope, description, username, name, includes, excludes, and schemes. A jcasc value that is one whole ${...} reference to a named entry, a file, or a system property stays visible. Text that does not parse shows as "<redacted: unparseable content>". Every YAML comment is removed. No caller gets an unredacted value, and a rotated secret shows no difference.
 type ComponentsSchemasControllerDiff struct {
 	Applied *struct {
 		Items   *string `json:"items,omitempty"`

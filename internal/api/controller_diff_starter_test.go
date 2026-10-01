@@ -13,6 +13,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
 // A Controller with no composedBundleRef runs the built-in starter bundle, so
@@ -204,5 +205,63 @@ func TestControllerDiff_HeadlessInjectsInClusterLocationURL(t *testing.T) {
 	}
 	if strings.Contains(resp.Incoming.Jcasc, v1alpha1.PathPrefix("team-a", "cell")) {
 		t.Errorf("incoming jcasc should carry no path prefix for a headless controller, got %q", resp.Incoming.Jcasc)
+	}
+}
+
+// No caller gets a credential value through the diff read: the BFF redacts
+// the applied side for a mite that does not yet redact, and the incoming side
+// for a literal value in the bundle.
+func TestControllerDiff_RedactsAppliedAndIncoming(t *testing.T) {
+	client := newBundleTestClient()
+	client.configMaps = map[string]map[string]string{
+		"varroa-starter-content": {
+			"jenkins.yaml": "unclassified:\n  someSetting:\n    clientSecret: bundle-literal-secret\n",
+			"items.yaml":   "items:\n  - kind: folder\n    name: f\n",
+			"plugins.yaml": "",
+		},
+	}
+	store := storeFromBundleClient(client)
+	crdstore.MustSeed(store, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "cell", Namespace: "team-a"},
+	})
+	crdstore.MustSeed(store, &v1alpha1.ComposedBundle{
+		ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.StarterBundleName, Namespace: "varroa-system"},
+		Status: v1alpha1.ComposedBundleStatus{
+			Phase:      v1alpha1.ComposedBundleReady,
+			ContentRef: "varroa-starter-content",
+		},
+	})
+	raw := &mitev1.ContentResponse{
+		JcascYaml:  "credentials:\n  system:\n    domainCredentials:\n      - credentials:\n          - string:\n              id: varroa-cloud-t\n              secret: applied-cloud-token\n",
+		ItemsYaml:  "items:\n  - kind: folder\n    name: t\n    properties:\n      - folderCredentialsProperty:\n          folderCredentials:\n            - credentials:\n                - usernamePassword:\n                    id: up\n                    username: u\n                    password: applied-tenant-password\n",
+		PluginsTxt: "git:5.2.0\n",
+	}
+
+	srv := NewServer(&Dependencies{
+		Client:            client,
+		Store:             store,
+		Authorizer:        adminTestAuthorizer(),
+		OperatorNamespace: "varroa-system",
+		MiteRegistry:      &stubTransport{content: raw},
+		Logger:            slog.Default(),
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/core/controllers/team-a/cell/diff", nil)
+	srv.handleControllerDiff(w, req.WithContext(contextWithClaims(req.Context(), adminClaims)),
+		"core", "team-a", "cell")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	for _, secret := range []string{"bundle-literal-secret", "applied-cloud-token", "applied-tenant-password"} {
+		if strings.Contains(body, secret) {
+			t.Errorf("secret %q reached the diff response: %s", secret, body)
+		}
+	}
+	for _, visible := range []string{"varroa-cloud-t", "git:5.2.0", "\\u003credacted\\u003e"} {
+		if !strings.Contains(body, visible) {
+			t.Errorf("expected %q in the diff response: %s", visible, body)
+		}
 	}
 }

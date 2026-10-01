@@ -1,6 +1,6 @@
 # Cells and Pipelines Tenants
 
-A cell is a shared Jenkins controller that runs many teams' pipelines as tenants. Each tenant gets its own folder, its own build identity, and its own
+A cell is a shared Jenkins controller that runs many teams' pipelines as tenants, each with its own folder, build identity, and
 Kubernetes agents.
 
 ## What a cell is
@@ -8,7 +8,7 @@ Kubernetes agents.
 A cell is a `Controller` with `spec.cell.enabled: true`. Its Jenkins home is an `emptyDir`, so a
 pod roll loses the Jenkins local state and the mite's identity. [Rehydration](#rehydration) restores build
 history, and the new instance [deletes the old agent pods](tenant-pod-templates.md#agent-pod-lifetime).
-`spec.cell.enabled` cannot change after creation. `spec.cell.maxTenants` can, and only caps the
+`spec.cell.enabled` cannot change after creation. `spec.cell.maxTenants` can; it caps the
 tenant count.
 
 A cell accepts no ingress host. Tenant traffic arrives through the
@@ -90,7 +90,7 @@ spec:
 `pipelines.agentNamespace` must be one of `spec.namespaces`, and Varroa must manage it.
 `pipelines.profile` must name an existing `JenkinsVersionProfile`. An unset
 `pipelines.composedBundleRef` places the tenant with an empty folder. An unset
-`pipelines.cellPool` resolves to the profile's own pool. To give a team a cell of its own, name a
+`pipelines.cellPool` resolves to the profile's own pool. For a dedicated cell, name a
 pool whose `maxTenantsPerCell` is 1.
 
 **Verify:**
@@ -139,8 +139,10 @@ Expect `"status":"True","reason":"TenantPlaced"`.
 
   `varroa.dev/credential-kind` is `usernamePassword` (data keys `username` and `password`),
   `secretText` (data key `secret`), or `sshPrivateKey` (data keys `privateKey` and `username`,
-  optional `passphrase`). A `Secret` with a missing key, an unknown kind, or a duplicate id is
-  skipped, and the `Team`'s `TenantWarnings` condition records it. A GitHub deploy key:
+  optional `passphrase`). Varroa skips a `Secret` with a missing key, an unknown kind, or a
+  duplicate id, and the `Team`'s `TenantWarnings` condition records it. The controller diff drops
+  comments and shows each credential as `<redacted>`, so a rotation shows no change. A GitHub
+  deploy key:
 
   ```yaml
   apiVersion: v1
@@ -161,8 +163,7 @@ Expect `"status":"True","reason":"TenantPlaced"`.
       -----END FIXTURE KEY-----
   ```
 
-  A [runner](runners.md) credential `Secret` uses the same data keys, but it needs its own
-  `Secret` and label. A cell trusts a git host key on the first connection, because an agent
+  A [runner](runners.md) credential uses the same data keys in its own labelled `Secret`. A cell trusts a git host key on the first connection, because an agent
   pod has no `known_hosts` file. To pin host keys, set
   `security.gitHostKeyVerificationConfiguration.sshHostKeyVerificationStrategy` in the cell's own
   bundle.
@@ -171,7 +172,7 @@ Expect `"status":"True","reason":"TenantPlaced"`.
 
 ## Isolation controls
 
-Four controls confine a tenant to its own folder and its own agents:
+Four controls confine a tenant to its own folder and agents:
 
 1. **Network policy.** `networkPolicy.cellIsolation.enabled` renders one `NetworkPolicy` per cell.
    See [Isolate cells](../install/network-policies.md#isolate-cells).
