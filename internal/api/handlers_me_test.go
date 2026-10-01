@@ -536,6 +536,10 @@ func (f *fakeResourceClient) GetStatefulSetContainerEnv(_ context.Context, _, _,
 func (f *fakeResourceClient) GetStatefulSetContainerSpecs(_ context.Context, _, _ string) (string, string, *corev1.ResourceRequirements, *corev1.ResourceRequirements, string, map[string]string, bool, error) {
 	return "", "", nil, nil, "", nil, false, nil
 }
+func (f *fakeResourceClient) ListPodPhases(_ context.Context, _ string) (map[types.UID]corev1.PodPhase, error) {
+	return nil, nil
+}
+
 func (f *fakeResourceClient) GetControllerPod(_ context.Context, _, _ string) (*corev1.Pod, error) {
 	return nil, nil
 }

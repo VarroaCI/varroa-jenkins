@@ -68,6 +68,28 @@ func deadInstancesToWire(in []cells.DeadInstance) []recordstore.TenantSyncDeadIn
 			Instance:        d.Instance,
 			LastSeenAt:      d.LastSeenAt,
 			ConfirmedGoneAt: d.ConfirmedGoneAt,
+			Cell:            d.Cell,
+			Namespace:       d.Namespace,
+		})
+	}
+	return out
+}
+
+// deadInstancesFromWire converts the recorder's unconfirmed entries to
+// cells.DeadInstance. An entry with no cell or no namespace is dropped,
+// because the operator cannot read its pod.
+func deadInstancesFromWire(in []recordstore.TenantSyncDeadInstance) []cells.DeadInstance {
+	var out []cells.DeadInstance
+	for _, d := range in {
+		if d.Instance == "" || d.Cell == "" || d.Namespace == "" {
+			continue
+		}
+		out = append(out, cells.DeadInstance{
+			Instance:        d.Instance,
+			LastSeenAt:      d.LastSeenAt,
+			ConfirmedGoneAt: d.ConfirmedGoneAt,
+			Cell:            d.Cell,
+			Namespace:       d.Namespace,
 		})
 	}
 	return out
@@ -149,7 +171,8 @@ func NewNATSSyncAnnouncer(conn *bus.Conn) cells.Announcer {
 		if resp.Error != "" {
 			return cells.AnnounceResult{}, fmt.Errorf("%s", resp.Error)
 		}
-		return cells.AnnounceResult{OK: resp.Ok, InterruptedMarked: resp.InterruptedMarked, Stale: resp.Stale}, nil
+		return cells.AnnounceResult{OK: resp.Ok, InterruptedMarked: resp.InterruptedMarked, Stale: resp.Stale,
+			Unconfirmed: deadInstancesFromWire(resp.Unconfirmed)}, nil
 	}
 }
 

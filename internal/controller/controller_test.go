@@ -112,7 +112,12 @@ type testClient struct {
 	// getControllerPodCalls counts GetControllerPod calls, so tests can assert
 	// a hot path does NOT fetch the pod.
 	getControllerPodCalls int
-	statefulSetReady      *bool
+	// podPhases answers ListPodPhases per namespace, and
+	// podPhasesErr fails it. listPodPhasesCalls counts the calls.
+	podPhases          map[string]map[types.UID]corev1.PodPhase
+	podPhasesErr       error
+	listPodPhasesCalls int
+	statefulSetReady   *bool
 	// statefulSetRollout and statefulSetRolloutErr are returned by
 	// GetStatefulSetRollout.
 	statefulSetRollout    StatefulSetRollout
@@ -756,6 +761,14 @@ func (t *testClient) GetControllerPod(_ context.Context, _, _ string) (*corev1.P
 		return nil, t.controllerPodErr
 	}
 	return t.controllerPod, nil
+}
+
+func (t *testClient) ListPodPhases(_ context.Context, namespace string) (map[types.UID]corev1.PodPhase, error) {
+	t.listPodPhasesCalls++
+	if t.podPhasesErr != nil {
+		return nil, t.podPhasesErr
+	}
+	return t.podPhases[namespace], nil
 }
 
 func (t *testClient) GetLiveResource(_ context.Context, _ schema.GroupVersionResource, _, _ string) (*unstructured.Unstructured, error) {

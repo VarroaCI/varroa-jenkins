@@ -40,7 +40,8 @@ type BackstopConfig struct {
 	// ClaimExpiryMetrics counts the runs the claim-expiry sweep marks.
 	ClaimExpiryMetrics *ClaimExpiryMetrics
 	// RunNotifier publishes the live notification of each run the
-	// claim-expiry sweep marks. A nil RunNotifier publishes nothing.
+	// claim-expiry sweep marks, and of each fleet lock the release check
+	// deletes. A nil RunNotifier publishes nothing.
 	RunNotifier *RunNotifier
 	// StateDeleter removes a marked run's replicated state. A nil
 	// StateDeleter skips the delete, the same rule MaintenanceConfig's
@@ -77,9 +78,10 @@ func (cfg BackstopConfig) grace() time.Duration {
 
 // RunBackstopRound tries the backstop advisory lock on one acquired
 // connection, and on success runs D9's interrupted sweep, then the
-// claim-expiry sweep, then the unstarted-intent re-fire, then D11's
-// backstop cron round, before releasing it. It reports whether this call took the lock; a replica
-// that does not returns false, nil.
+// claim-expiry sweep, then the unstarted-intent re-fire, then the fleet
+// lock release check, then D11's backstop cron round, before releasing
+// it. It reports whether this call took the lock; a replica that does not
+// returns false, nil.
 func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, cfg BackstopConfig) (bool, error) {
 	pgConn, err := pool.Acquire(ctx)
 	if err != nil {
@@ -119,6 +121,13 @@ func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c
 
 	if err := runRefireRound(ctx, pool, conn, cfg.SweepMetrics, cfg.ActionMetrics, now, grace, logger); err != nil {
 		logger.Warn("unstarted-intent re-fire round failed", "error", err)
+	}
+
+	// The release check reads the stored placement row. A confirmation
+	// therefore releases its lock once the grace elapses, with no new
+	// announce.
+	if _, err := ReleaseConfirmedFleetLocksRound(ctx, pool, now, grace, cfg.RunNotifier, logger); err != nil {
+		logger.Warn("fleet lock release round failed", "error", err)
 	}
 
 	// The home recompute runs after the sweep. A job that first appears

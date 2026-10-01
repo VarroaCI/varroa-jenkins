@@ -49,7 +49,9 @@ func TestDepartedMemberPods(t *testing.T) {
 		want bool
 	}{
 		{name: "no pod answers gone", want: true},
-		{name: "a deleted controller answers gone", err: notFound, want: true},
+		// The Controller can go while its pod still drains, so only the
+		// pod UID read confirms such an instance.
+		{name: "a deleted controller answers present", err: notFound},
 		{
 			name: "a running pod answers present",
 			pod:  &corev1.Pod{Status: corev1.PodStatus{Phase: corev1.PodRunning}},

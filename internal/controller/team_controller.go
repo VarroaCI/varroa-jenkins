@@ -15,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -478,6 +479,7 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 			r.logger.Error("failed to list cell pools", "team", team.Name, "error", err)
 			return reconcile.Result{}, err
 		}
+		lastSync := r.lastSync(team.Name)
 		placeInputs := cells.Inputs{
 			Now:                time.Now,
 			Cells:              cellCandidates,
@@ -490,7 +492,7 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 			ClusterIdentity:    r.clusterIdentity,
 			RequestPurge:       r.requestPurge,
 			Announce:           r.loggedAnnounce(),
-			LastSync:           r.lastSync(team.Name),
+			LastSync:           lastSync,
 			// PendingJobs (task 5.7a, design D13): the union of this
 			// tenant's own cell entry's Deferred job paths and the job
 			// paths its selection has not covered yet this round.
@@ -512,6 +514,11 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 			// takeover of the member's runs.
 			DepartedPods:     r.departedMemberPods(ctx, status, cellsByKey),
 			AgentPodsPending: agentPodsPending,
+			// ConfirmedDeparted carries every unconfirmed dead instance of
+			// the last announce reply whose pod is now gone. The read
+			// repeats on every tick, so a cell the tenant left is read
+			// until its old pod is gone.
+			ConfirmedDeparted: r.confirmDepartedInstances(ctx, lastSync, time.Now()),
 		}
 		outcome, placeErr := cells.Place(ctx, placeInputs, team, status)
 		if placeErr != nil {
@@ -729,9 +736,8 @@ func memberSeedReader(cellsByKey map[string]*v1alpha1.Controller, teamName strin
 //
 // The placement pass performs no Kubernetes read, so the reading is taken
 // here. It is the evidence the pass needs to report such a member confirmed
-// gone: a cell delete removes the Controller, its StatefulSet, and its pod
-// within seconds, and the pass alone can only see that the cell left the
-// candidate list, which a scoped-RBAC change or a list error also produces.
+// gone. The pass alone can only see that the cell left the candidate list,
+// which a scoped-RBAC change or a list error also produces.
 //
 // The read count is bounded by the tenant's member count, and only a
 // departed member costs a read.
@@ -776,24 +782,70 @@ func memberCellRefs(placement *v1alpha1.TeamPlacementStatus) []struct{ namespace
 // It applies updateCellInstance's own rule: no pod, or a pod in phase
 // Failed or Succeeded, is an absence, and a running pod is not.
 //
-// A deleted Controller answers NotFound, which is the strongest absence:
-// no Controller, no StatefulSet, and therefore no pod. Every other read
-// error answers false, so a transient API failure never confirms a member
-// gone.
+// Every read error answers false, so a transient API failure never
+// confirms a member gone. A deleted Controller answers false too: the
+// Controller can go while its pod still drains, and that pod can still
+// serve builds. confirmDepartedInstances confirms such an instance once
+// no pod with its UID runs.
 func (r *TeamReconciler) cellPodGone(ctx context.Context, namespace, name string) bool {
 	pod, err := r.client.GetControllerPod(ctx, namespace, name)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return true
+		if !apierrors.IsNotFound(err) {
+			r.logger.Warn("read a departed member cell's pod",
+				"cell", teamCellKey(namespace, name), "error", err)
 		}
-		r.logger.Warn("read a departed member cell's pod",
-			"cell", teamCellKey(namespace, name), "error", err)
 		return false
 	}
 	if pod == nil {
 		return true
 	}
 	return pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded
+}
+
+// confirmDepartedInstances reads the pods of every namespace that holds an
+// unconfirmed dead instance of last, and answers the instances whose pod
+// is gone, each confirmed at now. A pod is gone when no pod in the
+// namespace carries the instance's UID, or when that pod is in phase
+// Failed or Succeeded. A pod UID never comes back, so a pod of the same
+// name with a new UID also proves the instance gone.
+//
+// A failed list confirms nothing for its namespace. The read costs one
+// list for each namespace, and only while an unconfirmed entry exists.
+func (r *TeamReconciler) confirmDepartedInstances(ctx context.Context, last *cells.SyncCache, now time.Time) []cells.DeadInstance {
+	if last == nil || len(last.Unconfirmed) == 0 {
+		return nil
+	}
+	phases := map[string]map[types.UID]corev1.PodPhase{}
+	failed := map[string]bool{}
+	var out []cells.DeadInstance
+	for _, d := range last.Unconfirmed {
+		if d.Instance == "" || d.Namespace == "" || d.ConfirmedGoneAt != nil || failed[d.Namespace] {
+			continue
+		}
+		pods, read := phases[d.Namespace]
+		if !read {
+			var err error
+			pods, err = r.client.ListPodPhases(ctx, d.Namespace)
+			if err != nil {
+				r.logger.Warn("read the pods of a departed instance's namespace",
+					"namespace", d.Namespace, "instance", d.Instance, "error", err)
+				failed[d.Namespace] = true
+				continue
+			}
+			phases[d.Namespace] = pods
+		}
+		phase, present := pods[types.UID(d.Instance)]
+		if present && phase != corev1.PodFailed && phase != corev1.PodSucceeded {
+			continue
+		}
+		confirmed := now
+		entry := d
+		entry.ConfirmedGoneAt = &confirmed
+		r.logger.Info("confirmed a departed cell instance gone",
+			"cell", teamCellKey(d.Namespace, d.Cell), "instance", d.Instance)
+		out = append(out, entry)
+	}
+	return out
 }
 
 // cellRehydrationEntryDeferred answers teamName's own cell entry's

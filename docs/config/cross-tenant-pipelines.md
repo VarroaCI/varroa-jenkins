@@ -217,9 +217,9 @@ A lock moves through three states.
 | `releasing` | the holder's run was marked interrupted; the lock is not yet free |
 
 A lock leaves `releasing` when the holder's run reaches a terminal state, or when the operator
-confirms the holder's cell instance gone. A move off a live cell confirms nothing. A `releasing`
-lock blocks every other caller. A Jenkins restart inside its pod fires neither event. Delete the
-cell pod then, and the lock releases.
+confirms the holder's cell instance gone. After a move, the old pod is confirmed once gone. A
+`releasing` lock blocks every other caller. A Jenkins restart inside its pod fires neither event.
+Delete the cell pod then, and the lock releases.
 
 ### Fencing tokens
 

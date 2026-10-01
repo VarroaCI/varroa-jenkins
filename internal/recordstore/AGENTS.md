@@ -457,8 +457,15 @@ of the fleet's audit activity, once a controller becomes disposable.
   `dead_instances` into the stored list,
   keeping every entry a `QUEUED` or `RUNNING` run names through
   `candidatesQuery`'s own owning-instance expression
-  (`run_intents.cell_instance`, else `payload->>'accepted_instance'`) and
-  trimming the rest to ten; `records` calls
+  (`run_intents.cell_instance`, else `payload->>'accepted_instance'`),
+  every entry a pending re-fire names, and every entry a `held` or
+  `releasing` fleet lock's `cell_instance` names (the run of a releasing
+  lock is `INTERRUPTED`, so the run arm misses it), and trimming the rest
+  to ten. **Each entry names its `cell` and `namespace`**; the merge keeps
+  a stored cell when the incoming entry names none, and the announce reply
+  answers `unconfirmed_dead_instances` (`unconfirmedDeadInstances`): every
+  stored entry with a cell and no `confirmed_gone_at`. The stored row is
+  the operator's durable list of pods to read again; `records` calls
   `ListRehydrationRecords`. An unknown kind answers an error and writes
   nothing. The wire types (`TenantSyncRequest`, `TenantSyncResponse`,
   and the nested job/record shapes) live in `tenant_sync_types.go`,
@@ -502,6 +509,10 @@ of the fleet's audit activity, once a controller becomes disposable.
   `tenantPlacementLivenessRow` the announce just wrote: a lock's second
   release confirmation can become newly true on any announce, not only a
   cell or an instance change, because `cell_alive` can flip on its own.
+  A confirmation counts only once the grace elapses, so the announce that
+  brings it never releases the lock: `ReleaseConfirmedFleetLocksRound`
+  repeats the check once a minute in the backstop round, against the
+  stored row of every tenant with a releasing lock.
 - **Cross-tenant responder** (`crosstenant_*.go`) — `RegisterCrossTenantResponder`
   subscribes `bus.LedgerCrossTenantSubject` with queue group `recorder`. It answers
   eight kinds behind one `CrossTenantRequest`/`CrossTenantResponse` pair:
@@ -597,8 +608,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   (`ingest_completed.go`'s own `applyRunCompleted`, gated on the owner
   test, in the same transaction as the `runs` write, so a crash after
   commit never strands the lock), or `ReleaseConfirmedFleetLocks`
-  (`fleet_lock_release.go`), the tenant-sync responder's own hook, which
-  reuses `cell_liveness.go`'s `deadInstanceGone`/`currentInstanceGone`
+  (`fleet_lock_release.go`), which the tenant-sync responder and the
+  backstop round both run, and which reuses `cell_liveness.go`'s `deadInstanceGone`/`currentInstanceGone`
   readings with no anchor test.
   **Every lock write publishes one `lock` notification per changed row,
   after its own transaction commits, through the `RunNotifier` the
@@ -1053,8 +1064,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   `concurrency_metrics.go`, `ledger_concurrency.go`) — design D10 and
   D11. `RunBackstopRound` holds one round on `backstopLockKey`, the third
   fixed advisory-lock key after `migrateLockKey` and `maintenanceLockKey`,
-  and runs `SweepInterruptedRuns`, `ExpireUnclaimedRuns`, and
-  `runBackstopSchedule` inside the same hold, so one ticker and one lock cover both. The round computes no
+  and runs `SweepInterruptedRuns`, `ExpireUnclaimedRuns`,
+  `ReleaseConfirmedFleetLocksRound`, and `runBackstopSchedule` inside the
+  same hold, so one ticker and one lock cover them all. The round computes no
   fire minute of its own: `isBackstopCandidate` admits only an occurrence
   Jenkins itself exported (`JobSchedule.NextFireTimes`) that is past the
   tenant's grace window, not older than 24 hours, holds no

@@ -75,7 +75,7 @@ func TestNewNATSSyncAnnouncer_RequestShape(t *testing.T) {
 		},
 		RehydratedInstance: "uid-2", PendingJobs: []string{"payments/api/main"},
 		CellAlive: true, CellAliveAt: &aliveAt, CellLastSeenAt: &lastSeen,
-		DeadInstances:  []cells.DeadInstance{{Instance: "uid-1", LastSeenAt: lastSeen}},
+		DeadInstances:  []cells.DeadInstance{{Instance: "uid-1", LastSeenAt: lastSeen, Cell: "cell-a", Namespace: "cells-ns"}},
 		AgentNamespace: "payments-agents",
 	})
 	if err != nil {
@@ -100,7 +100,8 @@ func TestNewNATSSyncAnnouncer_RequestShape(t *testing.T) {
 	if !got.CellAlive || got.CellAliveAt == nil || got.CellLastSeenAt == nil {
 		t.Errorf("presence fields wrong: %+v", got)
 	}
-	if len(got.DeadInstances) != 1 || got.DeadInstances[0].Instance != "uid-1" {
+	if len(got.DeadInstances) != 1 || got.DeadInstances[0].Instance != "uid-1" ||
+		got.DeadInstances[0].Cell != "cell-a" || got.DeadInstances[0].Namespace != "cells-ns" {
 		t.Errorf("DeadInstances = %v", got.DeadInstances)
 	}
 	if got.AgentNamespace != "payments-agents" {
@@ -143,6 +144,40 @@ func TestNATSSyncAnnouncerMapsAStaleReply(t *testing.T) {
 	}
 	if result.OK || !result.Stale {
 		t.Fatalf("want a stale, failed result, got %+v", result)
+	}
+}
+
+// TestNATSSyncAnnouncerMapsTheUnconfirmedList asserts the reply's
+// unconfirmed entries reach the placement pass, and that an entry with no
+// cell is dropped, because the operator cannot read its pod.
+func TestNATSSyncAnnouncerMapsTheUnconfirmedList(t *testing.T) {
+	conn := startTestSyncBus(t)
+	seen := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+
+	sub, err := conn.SubscribeRequest(bus.TenantSyncSubject, "recorder", func([]byte) []byte {
+		resp, _ := json.Marshal(recordstore.TenantSyncResponse{Ok: true, Unconfirmed: []recordstore.TenantSyncDeadInstance{
+			{Instance: "uid-1", LastSeenAt: seen, Cell: "cell-a", Namespace: "cells-ns", Derived: "dropped"},
+			{Instance: "uid-0", LastSeenAt: seen},
+		}})
+		return resp
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	result, err := NewNATSSyncAnnouncer(conn)(context.Background(), cells.AnnounceRequest{
+		Cluster: "core", Tenant: "payments", Cell: "cell-b", Generation: 3, CellInstance: "uid-2",
+	})
+	if err != nil {
+		t.Fatalf("announce: %v", err)
+	}
+	if len(result.Unconfirmed) != 1 {
+		t.Fatalf("Unconfirmed = %+v, want uid-1 alone", result.Unconfirmed)
+	}
+	u := result.Unconfirmed[0]
+	if u.Instance != "uid-1" || u.Cell != "cell-a" || u.Namespace != "cells-ns" || !u.LastSeenAt.Equal(seen) || u.ConfirmedGoneAt != nil {
+		t.Fatalf("Unconfirmed[0] = %+v", u)
 	}
 }
 

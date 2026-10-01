@@ -105,7 +105,8 @@ func staleAnnounce(in staleAnnounceInput) bool {
 //
 // Each entry carries now as its last_seen_at and no confirmed_gone_at. The
 // recorder reads no pod, so the entry keeps the moved window and the
-// anchor test.
+// anchor test. Each entry names the member's cell, so the operator can
+// read that cell's pods and confirm the entry later.
 //
 // It adds no entry for an instance that listed already holds, or that the
 // request names. A repeated announce therefore adds nothing.
@@ -140,6 +141,8 @@ func deriveDeadInstances(in deadInstanceDerivation) []TenantSyncDeadInstance {
 			Instance:   before.Instance,
 			LastSeenAt: in.now,
 			Derived:    derived,
+			Cell:       before.Cell,
+			Namespace:  before.Namespace,
 		})
 	}
 	return out

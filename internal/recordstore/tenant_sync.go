@@ -425,7 +425,21 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 			"cluster", req.Cluster, "tenant", req.Tenant, "error", releaseErr)
 	}
 
-	return TenantSyncResponse{Ok: true, InterruptedMarked: interruptedMarked}, nil
+	return TenantSyncResponse{Ok: true, InterruptedMarked: interruptedMarked,
+		Unconfirmed: unconfirmedDeadInstances(deadInstances)}, nil
+}
+
+// unconfirmedDeadInstances answers the entries of dead that name a cell and
+// carry no confirmed_gone_at. The announce reply hands them back to the
+// operator, which reads each pod again until the pod is gone.
+func unconfirmedDeadInstances(dead []TenantSyncDeadInstance) []TenantSyncDeadInstance {
+	var out []TenantSyncDeadInstance
+	for _, d := range dead {
+		if d.ConfirmedGoneAt == nil && d.Cell != "" && d.Namespace != "" {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // readTenantPlacementForUpdate reads cluster/tenant's tenant_placements
@@ -514,6 +528,11 @@ func readTenantPlacementForUpdate(ctx context.Context, tx pgx.Tx, cluster, tenan
 // intent the recorder already re-fired holds a non-null refired_at, so
 // it stops protecting its dead instance at once, and so does one past
 // maxRefireAttempts, whose retry loop has ended.
+//
+// The third arm keeps the owning instance of every held or releasing
+// fleet lock. The run of a releasing lock is INTERRUPTED, so the first arm
+// does not hold it. A trimmed entry is the lock's only release evidence,
+// and the lock would then stay releasing for good.
 func liveCellInstances(ctx context.Context, tx pgx.Tx, cluster, tenant string) (map[string]bool, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT DISTINCT COALESCE(NULLIF(ri.cell_instance, ''), r.payload->>'accepted_instance')
@@ -528,6 +547,11 @@ func liveCellInstances(ctx context.Context, tx pgx.Tx, cluster, tenant string) (
 		  AND ri.refired_at IS NULL
 		  AND ri.refire_attempts < $3
 		  AND ri.cell_instance IS NOT NULL AND ri.cell_instance <> ''
+		UNION
+		SELECT DISTINCT fl.cell_instance
+		FROM varroa.fleet_locks fl
+		WHERE fl.cluster = $1 AND fl.tenant = $2 AND fl.state IN ('held', 'releasing')
+		  AND fl.cell_instance <> ''
 	`, cluster, tenant, maxRefireAttempts)
 	if err != nil {
 		return nil, fmt.Errorf("list live cell instances: %w", err)
@@ -561,6 +585,8 @@ func liveCellInstances(ctx context.Context, tx pgx.Tx, cluster, tenant string) (
 //
 // On a collision the incoming Derived value wins. An operator entry
 // carries none, so the operator's own report clears the recorder's tag.
+// The incoming cell wins too, but an incoming entry with no cell keeps
+// the stored one, so the operator can still read that cell again.
 func mergeDeadInstances(stored, incoming []TenantSyncDeadInstance) []TenantSyncDeadInstance {
 	byInstance := make(map[string]TenantSyncDeadInstance, len(stored)+len(incoming))
 	for _, d := range stored {
@@ -578,6 +604,10 @@ func mergeDeadInstances(stored, incoming []TenantSyncDeadInstance) []TenantSyncD
 		}
 		merged.ConfirmedGoneAt = earlierConfirmation(existing.ConfirmedGoneAt, d.ConfirmedGoneAt)
 		merged.Derived = d.Derived
+		merged.Cell, merged.Namespace = d.Cell, d.Namespace
+		if d.Cell == "" {
+			merged.Cell, merged.Namespace = existing.Cell, existing.Namespace
+		}
 		byInstance[d.Instance] = merged
 	}
 	merged := make([]TenantSyncDeadInstance, 0, len(byInstance))
@@ -681,8 +711,9 @@ func earlierConfirmation(a, b *time.Time) *time.Time {
 
 // trimDeadInstances keeps every entry named in keep without limit, and
 // trims every other entry to at most limit, newest first. keep holds the
-// cell instances a RUNNING run still names, so the interrupted-run sweep
-// never loses the evidence a live build depends on.
+// cell instances a RUNNING run or a held or releasing fleet lock still
+// names, so neither the interrupted-run sweep nor the lock release loses
+// the evidence it depends on.
 //
 // The input can arrive in any order, so the function sorts it newest first
 // before it trims. A derived entry joins the end of the merged list, and a

@@ -142,6 +142,10 @@ func (s *stubClient) GetStatefulSetContainerEnv(_ context.Context, _, _, _ strin
 func (s *stubClient) GetStatefulSetContainerSpecs(_ context.Context, _, _ string) (string, string, *corev1.ResourceRequirements, *corev1.ResourceRequirements, string, map[string]string, bool, error) {
 	return "", "", nil, nil, "", nil, false, nil
 }
+func (s *stubClient) ListPodPhases(_ context.Context, _ string) (map[types.UID]corev1.PodPhase, error) {
+	return nil, nil
+}
+
 func (s *stubClient) GetControllerPod(_ context.Context, _, _ string) (*corev1.Pod, error) {
 	return nil, nil
 }

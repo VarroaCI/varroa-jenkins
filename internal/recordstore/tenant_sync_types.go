@@ -62,6 +62,12 @@ type TenantSyncDeadInstance struct {
 	// only. Every other entry needs a confirmation, because the cell of
 	// such an instance can still be alive.
 	Derived string `json:"derived,omitempty"`
+	// Cell and Namespace name the cell that ran the instance. The
+	// operator reads that cell's namespace again for an entry with no
+	// confirmation, until no pod with the instance's identifier runs
+	// there. An entry with no cell is never read again.
+	Cell      string `json:"cell,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // TenantSyncRequest is the request body of a
@@ -147,6 +153,12 @@ type TenantSyncResponse struct {
 	// refused the request because it describes an older state than the
 	// stored row. Ok is then false.
 	Stale bool `json:"stale,omitempty"`
+	// Unconfirmed applies to kind "announce". It lists every stored
+	// dead_instances entry that names a cell and carries no
+	// confirmed_gone_at. The operator reads the pod of each one and
+	// sends the confirmation once the pod is gone. The stored row is the
+	// durable list, so an operator restart loses nothing.
+	Unconfirmed []TenantSyncDeadInstance `json:"unconfirmed_dead_instances,omitempty"`
 
 	// Jobs applies to kind "records".
 	Jobs []TenantSyncJobRecords `json:"jobs,omitempty"`

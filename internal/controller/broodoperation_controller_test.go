@@ -71,6 +71,10 @@ func (f *fakeBroodClient) DeleteControllerPod(_ context.Context, namespace, name
 	return nil
 }
 
+func (f *fakeBroodClient) ListPodPhases(_ context.Context, _ string) (map[types.UID]corev1.PodPhase, error) {
+	return nil, nil
+}
+
 func (f *fakeBroodClient) GetControllerPod(_ context.Context, namespace, name string) (*corev1.Pod, error) {
 	return f.pods[namespace+"/"+name], nil
 }

@@ -1113,6 +1113,12 @@ type ResourceClient interface {
 	// without error when the pod does not exist.
 	GetControllerPod(ctx context.Context, namespace, name string) (*corev1.Pod, error)
 
+	// ListPodPhases answers the phase of every pod in namespace, keyed by
+	// the pod's UID. It reads pods, not Controllers, so it still sees a
+	// pod whose Controller is gone. It applies no label selector: a pod
+	// that lacks a label must never read as absent.
+	ListPodPhases(ctx context.Context, namespace string) (map[types.UID]corev1.PodPhase, error)
+
 	// ListResourceQuotas lists ResourceQuota objects in the given namespace.
 	ListResourceQuotas(ctx context.Context, namespace string) ([]corev1.ResourceQuota, error)
 

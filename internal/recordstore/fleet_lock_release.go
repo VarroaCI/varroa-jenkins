@@ -66,14 +66,14 @@ type releasingFleetLock struct {
 }
 
 // ReleaseConfirmedFleetLocks deletes every releasing fleet_locks row of
-// cluster/tenant whose owning cell instance row, the tenant's own
-// tenant_placements liveness row this same announce just wrote,
-// confirms gone. It is the tenant-sync responder's own hook: the
-// confirmation's evidence (dead_instances, cell_alive) can only become
-// newly true at the moment of a fresh announce, so running this check
-// once per announce, against the row that announce just wrote, is
-// enough; the maintenance round adds nothing this test could not already
-// see at the last announce. It answers how many rows it released.
+// cluster/tenant whose owning cell instance row, the tenant's
+// tenant_placements liveness row, confirms gone. Two callers run it: the
+// tenant-sync responder, against the row the announce just wrote, and
+// the backstop round, against the stored row. The backstop round is
+// necessary because a confirmation counts only once the grace elapses.
+// The announce that brings a confirmation therefore never releases the
+// lock, and the next announce can come ten minutes later. It answers how
+// many rows it released.
 //
 // It publishes one lock notification per row it deletes, through
 // notifier. A row whose delete affects nothing publishes nothing, which
@@ -134,4 +134,58 @@ func scanReleasingFleetLocks(rows pgx.Rows) ([]releasingFleetLock, error) {
 		return nil, fmt.Errorf("select releasing fleet locks: %w", err)
 	}
 	return out, nil
+}
+
+// releasingFleetLockTenant is one cluster and tenant that holds at least
+// one releasing fleet_locks row.
+type releasingFleetLockTenant struct {
+	cluster, tenant string
+}
+
+// ReleaseConfirmedFleetLocksRound runs ReleaseConfirmedFleetLocks for
+// every tenant that holds a releasing fleet lock, against that tenant's
+// stored tenant_placements row. The backstop round calls it once a
+// minute, so a confirmation releases its lock soon after the grace
+// elapses. A tenant with no stored row gives no reading and releases
+// nothing. The stored cell_alive_at keeps the staleness test, so a
+// stopped operator releases no lock. It answers how many rows it released.
+func ReleaseConfirmedFleetLocksRound(ctx context.Context, pool *pgxpool.Pool, now time.Time, grace time.Duration,
+	notifier *RunNotifier, logger *slog.Logger) (int, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT DISTINCT cluster, tenant FROM varroa.fleet_locks WHERE state = 'releasing'
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("select tenants with releasing fleet locks: %w", err)
+	}
+	tenants, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (releasingFleetLockTenant, error) {
+		var t releasingFleetLockTenant
+		err := r.Scan(&t.cluster, &t.tenant)
+		return t, err
+	})
+	if err != nil {
+		return 0, fmt.Errorf("select tenants with releasing fleet locks: %w", err)
+	}
+
+	released := 0
+	for _, t := range tenants {
+		row, exists, err := readTenantPlacementLivenessRow(ctx, pool, t.cluster, t.tenant)
+		if err != nil {
+			logger.Warn("fleet lock release round: read tenant placement failed",
+				"cluster", t.cluster, "tenant", t.tenant, "error", err)
+			continue
+		}
+		if !exists {
+			continue
+		}
+		n, err := ReleaseConfirmedFleetLocks(ctx, pool, t.cluster, t.tenant, row, now, grace, notifier, logger)
+		if err != nil {
+			logger.Warn("fleet lock release round failed", "cluster", t.cluster, "tenant", t.tenant, "error", err)
+			continue
+		}
+		released += n
+	}
+	return released, nil
 }

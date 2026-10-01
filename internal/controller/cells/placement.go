@@ -203,12 +203,21 @@ type Inputs struct {
 	// A true value is a confirmed absence: the caller's read succeeded
 	// and answered no pod, or a pod in phase Failed or Succeeded. Every
 	// other outcome answers false — a pod that still exists, a read that
-	// failed, and a cell the caller did not read.
+	// failed, a Controller that is gone, and a cell the caller did not
+	// read. A gone Controller can leave a pod that still drains, so
+	// ConfirmedDeparted confirms such an instance later, by its pod UID.
 	//
 	// The pass reports a member confirmed gone only on that value, and a
 	// confirmed reading is what arms a takeover of the member's runs. The
 	// caller builds the map because Place performs no Kubernetes read.
 	DepartedPods map[string]bool
+
+	// ConfirmedDeparted lists the unconfirmed dead instances of
+	// LastSync.Unconfirmed whose pod the caller's own read proved gone,
+	// each with ConfirmedGoneAt set. A non-empty list makes an
+	// announcement due, and both announce paths carry it. The caller
+	// builds it because Place performs no Kubernetes read.
+	ConfirmedDeparted []DeadInstance
 
 	// AgentPodsPending is true while a tearing-down tenant still has agent
 	// pods in its agent namespace, or while the caller could not count
@@ -658,6 +667,7 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 	announced := announceMembers(members)
 	dead = append(dead, memberDeadInstances(in.LastSync, announced, dead, in.DepartedPods, nowT)...)
 	dead = cellPreviousInstances(in, priorMembers, announced, dead, nowT)
+	dead = appendConfirmedDeparted(dead, in.ConfirmedDeparted, announced)
 	result, announceErr := sendAnnounce(ctx, in, AnnounceRequest{
 		Cluster:        in.ClusterIdentity,
 		Tenant:         team.Name,
@@ -686,6 +696,7 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 		Generation: newGeneration, CellInstance: newCell.Instance,
 		Policy: policy, CellLastSeenAt: newCell.MiteLastSeen, At: nowT,
 		Members: announced, AgentNamespace: agentNamespace,
+		Unconfirmed: result.Unconfirmed,
 	}
 
 	// The claim: the caller writes it onto the new cell before the fence
@@ -824,7 +835,8 @@ func sendAnnounce(ctx context.Context, in Inputs, req AnnounceRequest) (Announce
 // maybeReannounce sends the same-generation announcement (tenant-placement
 // spec, task 4.4a) when the owning cell's instance changed, the seven
 // pipelines settings changed, the tenant's rehydration state changed, the
-// agent namespace changed, or the resync window elapsed. cell is the tenant's current, unchanged
+// agent namespace changed, the caller confirmed a departed instance gone,
+// or the resync window elapsed. cell is the tenant's current, unchanged
 // binding (moveNone): status.Placement already names it.
 func maybeReannounce(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus, cell CellCandidate, nowT time.Time, out *Outcome) {
 	policy := SyncPolicyFromPipelines(team.Spec.Pipelines)
@@ -847,6 +859,7 @@ func maybeReannounce(ctx context.Context, in Inputs, team *v1alpha1.Team, status
 		!stringSlicesEqual(last.PendingJobs, pendingJobs) ||
 		last.AgentNamespace != agentNamespace ||
 		membersChanged ||
+		len(in.ConfirmedDeparted) > 0 ||
 		nowT.Sub(last.At) >= syncResyncInterval
 	if !due {
 		return
@@ -862,6 +875,7 @@ func maybeReannounce(ctx context.Context, in Inputs, team *v1alpha1.Team, status
 	dead := deadInstanceDelta(last, status.Placement.Cell, status.Placement.CellNamespace, cell.Instance, &nowT)
 	dead = append(dead, memberDeadInstances(last, announced, dead, in.DepartedPods, nowT)...)
 	dead = cellPreviousInstances(in, status.Placement, announced, dead, nowT)
+	dead = appendConfirmedDeparted(dead, in.ConfirmedDeparted, announced)
 
 	result, err := sendAnnounce(ctx, in, AnnounceRequest{
 		Cluster:            in.ClusterIdentity,
@@ -891,7 +905,7 @@ func maybeReannounce(ctx context.Context, in Inputs, team *v1alpha1.Team, status
 		Generation: generation, CellInstance: cell.Instance,
 		Policy: policy, RehydratedInstance: rehydratedInstance, PendingJobs: pendingJobs,
 		CellLastSeenAt: cell.MiteLastSeen, At: nowT, Members: announced,
-		AgentNamespace: agentNamespace,
+		AgentNamespace: agentNamespace, Unconfirmed: result.Unconfirmed,
 	}
 
 	// The announce is the pre-step, so the status write follows it. The
@@ -981,6 +995,8 @@ func memberDeadInstances(last *SyncCache, announced []AnnounceMember, reported [
 		entry := DeadInstance{
 			Instance:   before.Instance,
 			LastSeenAt: memberLastSeen(before, last),
+			Cell:       before.Cell,
+			Namespace:  before.Namespace,
 		}
 		if stillBound || departed[memberKey(before.Namespace, before.Cell)] {
 			stamped := nowT
@@ -1065,7 +1081,48 @@ func cellPreviousInstances(in Inputs, placement *v1alpha1.TeamPlacementStatus,
 			seenAt = *cell.PreviousInstanceLastSeen
 		}
 		index[prev] = len(dead)
-		dead = append(dead, DeadInstance{Instance: prev, LastSeenAt: seenAt, ConfirmedGoneAt: &confirmed})
+		dead = append(dead, DeadInstance{Instance: prev, LastSeenAt: seenAt, ConfirmedGoneAt: &confirmed,
+			Cell: ref.name, Namespace: ref.namespace})
+	}
+	return dead
+}
+
+// appendConfirmedDeparted adds the caller's confirmed departed instances
+// to dead. An entry of dead that names the same instance with no
+// confirmation takes the confirmation, and no second entry is added. Each
+// confirmation reaches the recorder once: the reply that follows no
+// longer lists the instance as unconfirmed.
+//
+// An instance that an announced member runs is never added. A confirmation
+// of a named instance would make the recorder refuse every later
+// announcement as stale.
+func appendConfirmedDeparted(dead, confirmed []DeadInstance, announced []AnnounceMember) []DeadInstance {
+	index := map[string]int{}
+	for i, d := range dead {
+		index[d.Instance] = i
+	}
+	live := map[string]bool{}
+	for _, m := range announced {
+		if m.Instance != "" {
+			live[m.Instance] = true
+		}
+	}
+	for _, c := range confirmed {
+		if c.Instance == "" || c.ConfirmedGoneAt == nil || live[c.Instance] {
+			continue
+		}
+		if i, ok := index[c.Instance]; ok {
+			if dead[i].ConfirmedGoneAt == nil {
+				stamped := *c.ConfirmedGoneAt
+				dead[i].ConfirmedGoneAt = &stamped
+			}
+			if dead[i].Cell == "" {
+				dead[i].Cell, dead[i].Namespace = c.Cell, c.Namespace
+			}
+			continue
+		}
+		index[c.Instance] = len(dead)
+		dead = append(dead, c)
 	}
 	return dead
 }
@@ -1211,7 +1268,8 @@ func deadInstanceDelta(last *SyncCache, cellName, cellNamespace, currentInstance
 	if last.CellLastSeenAt != nil {
 		seenAt = *last.CellLastSeenAt
 	}
-	return []DeadInstance{{Instance: last.CellInstance, LastSeenAt: seenAt, ConfirmedGoneAt: confirmedGoneAt}}
+	return []DeadInstance{{Instance: last.CellInstance, LastSeenAt: seenAt, ConfirmedGoneAt: confirmedGoneAt,
+		Cell: cellName, Namespace: cellNamespace}}
 }
 
 // stringSlicesEqual reports whether a and b hold the same strings in the

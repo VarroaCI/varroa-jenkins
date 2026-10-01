@@ -30,9 +30,9 @@ accepts the next announcement, not when the pod rolled.
 
 The recorder also compares each announcement with the members it stored. A replaced or removed
 member pod becomes an unconfirmed dead instance with the five-minute window. This covers two
-rolls during one recorder outage, and a cell deleted while the operator restarts. A lock of a
-cell the tenant only left waits for the operator's proof. A pod that a later announcement names
-again leaves the list.
+rolls during one recorder outage, and a cell deleted while the operator restarts. The operator
+reads a left cell until its old pod is gone. A pod that a later announcement names again leaves
+the list.
 
 The recorder refuses a late announcement from an old operator replica: a lower generation, a
 pod it knows replaced, or an object that a new one of the same name replaced.

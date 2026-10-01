@@ -82,6 +82,11 @@ type DeadInstance struct {
 	// 0001-01-01T00:00:00Z, which reads as older than any grace and
 	// confirms the loss at once.
 	ConfirmedGoneAt *time.Time
+	// Cell and Namespace name the cell that ran the instance. The
+	// recorder hands an unconfirmed entry back with them, and the
+	// operator reads that namespace's pods until the instance is gone.
+	Cell      string
+	Namespace string
 }
 
 // AnnounceMember is one member of a pipelines tenant an AnnounceRequest
@@ -189,6 +194,10 @@ type AnnounceResult struct {
 	// stored row is newer. OK is then false, so the pass stores no cache
 	// entry and writes no placement status from its older reads.
 	Stale bool
+	// Unconfirmed lists every stored dead instance that names a cell and
+	// carries no confirmation. The pass keeps it in SyncCache, and the
+	// caller reads each pod again on every tick.
+	Unconfirmed []DeadInstance
 }
 
 // Announcer sends one AnnounceRequest and reports the reply. The caller
@@ -273,6 +282,11 @@ type SyncCache struct {
 	// AgentNamespace is the agent namespace the last announcement
 	// carried. A change is a trigger.
 	AgentNamespace string
+	// Unconfirmed is the recorder's list of unconfirmed dead instances
+	// from the last announce reply. The stored placement row is the
+	// durable copy: an empty cache announces at once, and the reply fills
+	// the list again.
+	Unconfirmed []DeadInstance
 }
 
 // HomesRequest asks for one tenant's member list and its job home map

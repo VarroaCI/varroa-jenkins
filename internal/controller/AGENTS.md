@@ -1046,10 +1046,22 @@ sections describe.
   `Inputs.DepartedPods` — the placement pass performs no Kubernetes read of
   its own. `performMove`'s deleted-cell branch and `memberDeadInstances`
   stamp such an entry only when that reading confirms the pod gone. A
-  `NotFound` on the `Controller` is the strongest absence (no `Controller`,
-  no StatefulSet, no pod); every other read error, and a pod that still
-  terminates, confirm nothing, and the entry then keeps the five-minute
-  moved window. Without the reading a lost cell's member was never confirmed
+  `NotFound` on the `Controller` confirms nothing: the `Controller` can go
+  while its pod still drains and serves builds. Every other read error,
+  and a pod that still terminates, confirm nothing either. **Every entry
+  names its `cell` and `namespace`, and the announce reply hands the
+  recorder's unconfirmed entries back** (`AnnounceResult.Unconfirmed`,
+  kept in `SyncCache.Unconfirmed`; the stored `dead_instances` row is the
+  durable list, and an empty cache announces at once to fill it again).
+  On every tick `TeamReconciler.confirmDepartedInstances` lists the
+  pods of each such namespace (`ResourceClient.ListPodPhases`, no label
+  selector, so a pod with no label never reads as absent) and confirms an
+  instance when no pod carries its UID, or that pod is `Failed` or
+  `Succeeded`; a failed list confirms nothing. The confirmed list is
+  `Inputs.ConfirmedDeparted`: it makes `maybeReannounce` due, `performMove`
+  carries it too, and `appendConfirmedDeparted` drops an instance an
+  announced member runs, because the recorder refuses a request that names
+  a confirmed instance as stale. Without the reading a lost cell's member was never confirmed
   gone, so the promoted standby never received that member's armed runs. The
   field is a
   `*time.Time`: a zero `time.Time` marshals as year one and would confirm

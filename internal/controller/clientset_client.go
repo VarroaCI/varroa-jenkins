@@ -5109,6 +5109,21 @@ func (c *ClientsetClient) GetControllerPod(ctx context.Context, namespace, name 
 	return pod, nil
 }
 
+// ListPodPhases answers the phase of every pod in namespace, keyed by the
+// pod's UID. The caller reads an absent UID as a gone pod, so the list
+// applies no label selector.
+func (c *ClientsetClient) ListPodPhases(ctx context.Context, namespace string) (map[types.UID]corev1.PodPhase, error) {
+	pods, err := c.clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[types.UID]corev1.PodPhase, len(pods.Items))
+	for i := range pods.Items {
+		out[pods.Items[i].UID] = pods.Items[i].Status.Phase
+	}
+	return out, nil
+}
+
 // StreamPodLogs streams stdout+stderr from a container in the named pod.
 func (c *ClientsetClient) StreamPodLogs(ctx context.Context, namespace, podName, container string, tailLines int64, follow bool) (io.ReadCloser, error) {
 	opts := &corev1.PodLogOptions{
