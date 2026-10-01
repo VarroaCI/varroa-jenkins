@@ -1633,6 +1633,12 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 											// tenant's folder credentials, not only its own.
 											javaOptsValue += " -Dcom.cloudbees.plugins.credentials.UseItemPermission=true"
 										}
+										if spec.ArtifactSharedCredentials {
+											// STS mode: the AWS SDK default chain reads the
+											// projected credentials file, which the operator
+											// renews in place.
+											javaOptsValue += " " + artifactSharedCredentialsProperty
+										}
 										if spec.PodOverrides != nil && spec.PodOverrides.JvmOpts != "" {
 											javaOptsValue += " " + spec.PodOverrides.JvmOpts
 										}

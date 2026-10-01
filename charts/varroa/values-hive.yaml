@@ -41,3 +41,8 @@ frontend: {enabled: false}
 #      url: s3://<core-bucket>?region=<region>&endpoint=<member-reachable-endpoint>
 #      existingSecret: <s3-credential-secret>
 #      artifactSecret: <artifact-secret-base>
+#      # Or, in place of artifactSecret, operator-issued STS credentials:
+#      # artifactSTS:
+#      #   enabled: true
+#      #   issuerSecret: <issuer-secret>
+#      #   roleArn: <role-arn>

@@ -41,7 +41,7 @@ A member that hosts [cells](../operations/cells.md) must also write to the core 
 | `recordStore.blobs.mode` | `s3`. A cell needs the s3 tier. |
 | `recordStore.blobs.s3.url` | The core bucket URL, with an `endpoint` that the member can reach |
 | `recordStore.blobs.s3.existingSecret` | The Secret that holds the object store credential |
-| `recordStore.blobs.s3.artifactSecret` | The base name of the artifact Secrets on the member |
+| `recordStore.blobs.s3.artifactSecret` or `artifactSTS` | The member's [artifact credentials](../operations/artifact-credentials.md) |
 | `networkPolicy.recordStoreBlobEgress` | The object store address and port, when network policies are enabled |
 
 The hive render adds the blob settings to the gateway and the operator. It renders no recorder, no CloudNativePG cluster, and no retention settings. The core keeps the retention rules for every cluster.
@@ -51,7 +51,7 @@ Copy these Secrets into the member release namespace before the install:
 | Secret | Keys | Source |
 |---|---|---|
 | `recordStore.blobs.s3.existingSecret` | `access-key-id`, `secret-access-key`, optional `session-token` | The core Secret of the same name |
-| `<artifactSecret>-<pool>` | `access-key-id`, `secret-access-key` | A credential scoped to that member pool's artifact prefix |
+| `<artifactSecret>-<pool>`, or the STS issuer Secret | `access-key-id`, `secret-access-key` | A credential scoped to that member pool's artifact prefix, or the issuing identity |
 
 A member in s3 blob mode needs no database credential. The gateway reads a DSN only in `postgres` blob mode, where it writes log chunks to the core database. That mode cannot host cells. For it, expose the core database and set the member DSN:
 
@@ -70,7 +70,7 @@ The endpoint Service selects the CloudNativePG primary on port 5432. Put the cor
 1. Enable the record store on the member as shown above, and confirm the gateway logs `gateway log writer enabled`.
 2. Make the object store reachable from the member network. The bucket URL `endpoint` must resolve and route from the member cells and gateway.
 3. With `networkPolicy.cellIsolation` enabled, add `cellIsolation.extraEgress` entries for the object store and for the update center that the member cells use.
-4. Create the pool's artifact Secret, then a `CellPool` on the member. The core `/cells` page then shows a block for the member pool, and you can scale it from the core with `varroactl scale cellpool <name> --cluster <member-name>`.
+4. Create the pool's artifact Secret (STS mode: no Secret per pool), then a `CellPool` on the member. The core `/cells` page then shows a block for the member pool, and you can scale it from the core with `varroactl scale cellpool <name> --cluster <member-name>`.
 5. Create the `Team` with `spec.pipelines` on the member. The member operator places it, and the core record store holds its placement.
 6. Grant access on the core with a `VarroaRoleBinding` scoped to the tenant. The core does not read the member Team's own subjects.
 

@@ -270,7 +270,17 @@ the packaged CRDs. Does not own the Go source it packages
   `<artifactSecret>-<controller>` first, then `<artifactSecret>-<pool>` for a
   cell that carries a `varroa.dev/cell-pool` label, and projects the winning
   Secret into each controller's own namespace; this chart mounts nothing
-  itself). The operator
+  itself). `recordStore.blobs.s3.artifactSTS` (`enabled`, `issuerSecret`,
+  `roleArn`, `endpoint`, `duration`) is the exclusive alternative: the
+  operator issues a prefix-scoped STS credential per cell
+  (`internal/controller/artifactsts.go`). `recordstore-guard.yaml` fails a
+  render with both, or with STS mode and a postgres blob tier, an empty
+  `issuerSecret` or `roleArn`, `issuerSecret` equal to `existingSecret`, an `endpoint` that is not an
+  `http`/`https` URL, or a
+  `duration` that is not `<n>m`/`<n>h` from 15m to 12h
+  (asserted by `tests/test-artifact-sts.sh`). STS mode adds the four
+  `VARROA_ARTIFACT_STS_*` variables to the operator and the
+  `recordStoreBlobEgress` rule to the operator NetworkPolicy. The operator
   Deployment carries `VARROA_ARTIFACT_SECRET` (that base name, only when
   non-empty) and `VARROA_BLOBSTORE_URL` set to the identical value the
   gateway gets, both gated the same way as the gateway's own recordStore env
@@ -294,7 +304,7 @@ the packaged CRDs. Does not own the Go source it packages
 - **`tests/*.sh`** — golden-render bash assertions over `helm template` output
   (`test-hive-mode.sh`, `test-secret-rbac-scoping.sh`, `test-nats-bus-security.sh`,
   `test-recorder-netpol.sh`, `test-recorder-chart.sh`, `test-activity-stream-acl.sh`,
-  `test-runner-door-nginx.sh`, `test-cells-guard.sh`, `test-hive-recordstore.sh`); not the
+  `test-runner-door-nginx.sh`, `test-cells-guard.sh`, `test-hive-recordstore.sh`, `test-artifact-sts.sh`); not the
   `helm unittest` plugin.
 - **The agent WebSocket door needs one nginx block, no Ingress change.**
   `frontend/nginx.conf`'s `location /runners/` block proxies to the BFF

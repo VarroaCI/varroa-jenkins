@@ -381,6 +381,15 @@ the root AGENTS.md greenfield rule.
   only**, pinned to the versions task 0.5's compatibility spike verified
   (`review-log.md` "Task 0.5"), so `ArtifactStorageFragmentCascTest` can
   round-trip the fragment through the real configurators.
+  `ArtifactSessionCredentialsReloadTest` pins the operator's STS mode: a
+  fragment with an empty `credentialsId` reads the AWS SDK default chain, and
+  session credentials follow a rewritten shared credentials file. The
+  surefire JVM sets `aws.sharedCredentialsFile`, `aws.configFile`, and
+  `aws.disableEc2Metadata` for the whole run, because the SDK reads them once.
+  The SDK checks the file at most once a second, so the test waits past that
+  window. This plugin adds no AWS credential type: a file-backed type would
+  need aws-credentials as an optional dependency, and an older installed
+  aws-credentials would then stop this plugin from loading.
 - **Rehydrated changeset parsing** (feeds a rehydrated build's
   `currentBuild.previousBuild.changeSets`; design D1a): package
   `org.jenkinsci.plugins.varroamiteauth.rehydrate`, three classes, no new

@@ -541,12 +541,18 @@ func main() {
 	claimGate := envDefault("VARROA_CLAIM_GATE", "0")
 	blobstoreURL := os.Getenv("VARROA_BLOBSTORE_URL")
 	artifactSecretBase := os.Getenv("VARROA_ARTIFACT_SECRET")
+	artifactSTS, err := artifactSTSConfigFromEnv(artifactSecretBase)
+	if err != nil {
+		logger.Error("artifact STS configuration", "error", err)
+		os.Exit(1)
+	}
 	reconciler.SetClaimGate(claimGate)
 	reconciler.SetSyncAnnouncer(controller.NewNATSSyncAnnouncer(busConn))
 	reconciler.SetRecordsFunc(controller.NewNATSSyncRecordsRequester(busConn))
 	reconciler.SetHomesFunc(controller.NewNATSSyncHomesRequester(busConn))
 	reconciler.SetBlobstoreURL(blobstoreURL)
 	reconciler.SetArtifactSecretBase(artifactSecretBase)
+	reconciler.SetArtifactSTS(artifactSTS)
 	if raw := os.Getenv("VARROA_CLAIM_TIMEOUT_MS"); raw != "" {
 		if ms, err := strconv.Atoi(raw); err != nil {
 			logger.Warn("VARROA_CLAIM_TIMEOUT_MS: parse error, leaving claim timeouts unset", "value", raw, "error", err)
@@ -987,14 +993,15 @@ func main() {
 		Store:             clientsetClient,
 		OperatorNamespace: operatorNamespace,
 		Config: cells.WarmPoolConfig{
-			Enabled:            cellsConfig.WarmPoolEnabled,
-			PerProfile:         cellsConfig.WarmPoolPerProfile,
-			MaxTenantsPerCell:  cellsConfig.MaxTenantsPerCell,
-			UnreadyGracePeriod: cellsConfig.UnreadyGracePeriod,
-			CellTemplate:       cellsConfig.CellTemplate,
-			ClaimGate:          claimGate,
-			BlobTierS3:         controller.BlobstoreIsS3(blobstoreURL),
-			ArtifactSecretBase: artifactSecretBase,
+			Enabled:              cellsConfig.WarmPoolEnabled,
+			PerProfile:           cellsConfig.WarmPoolPerProfile,
+			MaxTenantsPerCell:    cellsConfig.MaxTenantsPerCell,
+			UnreadyGracePeriod:   cellsConfig.UnreadyGracePeriod,
+			CellTemplate:         cellsConfig.CellTemplate,
+			ClaimGate:            claimGate,
+			BlobTierS3:           controller.BlobstoreIsS3(blobstoreURL),
+			ArtifactSecretBase:   artifactSecretBase,
+			ArtifactIssuerSecret: artifactSTS.IssuerSecret,
 		},
 		Logger:       logger,
 		Secrets:      clientsetClient,

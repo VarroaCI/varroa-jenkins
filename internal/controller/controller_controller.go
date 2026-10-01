@@ -158,6 +158,13 @@ type Reconciler struct {
 	claimTimeoutMS     int    // VARROA_CLAIM_TIMEOUT_MS, read once at boot; 0 means unset
 	blobstoreURL       string // VARROA_BLOBSTORE_URL, read once at boot; drives the artifact-storage fragment
 	artifactSecretBase string // VARROA_ARTIFACT_SECRET, read once at boot; a base Secret name, "" disables artifact storage
+	// artifactSTS is the STS issuing configuration; a zero value keeps the
+	// static Secret path. artifactIssuer, artifactNow, and artifactFailures
+	// serve STS mode only (artifactsts.go).
+	artifactSTS      ArtifactSTSConfig
+	artifactIssuer   artifactIssuer
+	artifactNow      func() time.Time
+	artifactFailures artifactIssueFailures
 
 	reconcileEvents   chan event.GenericEvent // controller-runtime source.Channel: on-demand reconcile enqueue (wired in SetupWithManager)
 	activityPublisher *activity.Publisher
@@ -849,6 +856,10 @@ type StatefulSetSpec struct {
 	// annotation so a rotation rolls the pod even though the JCasC
 	// fragment's ${readFile:...} reference never changes.
 	ArtifactSecretHash string
+	// ArtifactSharedCredentials adds the AWS shared credentials file
+	// property to JAVA_OPTS. It is true in STS mode when ArtifactSecretName
+	// is set, so the JVM reads the projected credentials file.
+	ArtifactSharedCredentials bool
 
 	// CellSecretsName is the pool confidential store
 	// ("varroa-cell-secrets-<pool>") a pool cell mounts as the
@@ -2325,6 +2336,10 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 		if err := r.reconcileIngress(ctx, cr); err != nil {
 			r.Logger.Warn("reconcile ingress", "controller", cr.Namespace+"/"+cr.Name, "error", err)
 		}
+		// Renew a cell's STS artifact credential before the phase
+		// dispatch, so the ArtifactStorage condition the dispatch writes
+		// sees this tick's issue result.
+		r.renewArtifactCredential(ctx, cr)
 		// One runner contribution read for the whole tick (design D2, D11):
 		// the NetworkPolicy egress peers and the desired-state node list
 		// below must describe the same runner set, so contrib is computed
@@ -3063,17 +3078,18 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 	}
 
 	stsSpec := r.buildStatefulSetSpec(cr, class, defaults, profile, stsBuildInputs{
-		Name:               pre,
-		BootstrapSecret:    secretName,
-		InitConfigMap:      initCMName,
-		CascConfigMap:      cascCMName,
-		CascContentHash:    cascHash,
-		PluginsConfigMap:   pluginsCMName,
-		PluginsChecksum:    stsPluginsChecksum,
-		Policy:             pol,
-		ArtifactSecretName: artifactSecretName,
-		ArtifactSecretHash: artifactSecretHash,
-		CellSecretsName:    cellSecretsName,
+		Name:                      pre,
+		BootstrapSecret:           secretName,
+		InitConfigMap:             initCMName,
+		CascConfigMap:             cascCMName,
+		CascContentHash:           cascHash,
+		PluginsConfigMap:          pluginsCMName,
+		PluginsChecksum:           stsPluginsChecksum,
+		Policy:                    pol,
+		ArtifactSecretName:        artifactSecretName,
+		ArtifactSecretHash:        artifactSecretHash,
+		ArtifactSharedCredentials: artifactSecretName != "" && r.artifactSTS.Enabled(),
+		CellSecretsName:           cellSecretsName,
 	})
 	// Resolve plugin update center URLs with 3-tier precedence.
 	// Fetch the UpdateCenter CR best-effort for UC readiness gating.

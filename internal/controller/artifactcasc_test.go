@@ -91,7 +91,7 @@ func TestArtifactManagerPrefix(t *testing.T) {
 // than string matching.
 func TestRenderArtifactStorageFragment(t *testing.T) {
 	p := blobstoreParams{IsS3: true, Container: "spike-bucket", Region: "us-east-1", CustomEndpoint: "minio.example:9000", UseHTTP: true, UsePathStyleURL: true}
-	out, err := renderArtifactStorageFragment(p, "core", "varroa", "cell-a")
+	out, err := renderArtifactStorageFragment(p, "core", "varroa", "cell-a", false)
 	if err != nil {
 		t.Fatalf("renderArtifactStorageFragment: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestRenderArtifactStorageFragment(t *testing.T) {
 // URL omits customEndpoint rather than writing an empty string.
 func TestRenderArtifactStorageFragment_NoCustomEndpoint(t *testing.T) {
 	p := blobstoreParams{IsS3: true, Container: "b", Region: "eu-west-1"}
-	out, err := renderArtifactStorageFragment(p, "core", "ns", "cell")
+	out, err := renderArtifactStorageFragment(p, "core", "ns", "cell", false)
 	if err != nil {
 		t.Fatalf("renderArtifactStorageFragment: %v", err)
 	}
@@ -896,7 +896,7 @@ func TestCreateStatefulSet_CellInstanceEnv(t *testing.T) {
 // findUnresolvedVars unchanged (task 5.7).
 func TestFindUnresolvedVars_ArtifactFragmentPassesThrough(t *testing.T) {
 	p := blobstoreParams{IsS3: true, Container: "b", Region: "us-east-1"}
-	fragment, err := renderArtifactStorageFragment(p, "core", "ns", "cell")
+	fragment, err := renderArtifactStorageFragment(p, "core", "ns", "cell", false)
 	if err != nil {
 		t.Fatalf("renderArtifactStorageFragment: %v", err)
 	}

@@ -134,12 +134,9 @@ Set `recordStore.blobs.mode: s3` to store console logs and archived artifacts in
 S3-compatible bucket instead of Postgres. Artifact storage needs this mode. Postgres mode keeps
 logs but leaves artifacts on the controller's local disk.
 
-The value `recordStore.blobs.s3.artifactSecret` names a base Secret name. The operator resolves
-each controller's artifact Secret from an ordered candidate list, `<artifactSecret>-<controller>`
-first and `<artifactSecret>-<pool>` next for a cell of a pool, and projects the winning candidate
-into that controller's namespace. See
-[The artifact Secret](../operations/build-logs-and-artifacts.md#the-artifact-secret) for the
-full candidate order, the required bucket policy, and the Secret shape.
+Set `recordStore.blobs.s3.artifactSecret` for static artifact credentials, or
+`recordStore.blobs.s3.artifactSTS` for credentials the operator issues per cell. See
+[Artifact credentials](../operations/artifact-credentials.md).
 
 ## Use an Image Mirror
 

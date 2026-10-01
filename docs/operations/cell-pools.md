@@ -38,7 +38,7 @@ change would orphan every one of them. To serve another profile, create another 
 | `ProfileMissing` | `False` | `profileRef` names no `JenkinsVersionProfile` | Create the `JenkinsVersionProfile`, or fix `profileRef`. |
 | `RecordStoreUnsupported` | `False` | `recordStore.enabled` is false | Enable the record store. |
 | `BlobTierUnsupported` | `False` | `recordStore.blobs.mode` is not `s3` | Set the blob tier to `s3`. |
-| `ArtifactSecretMissing` | `False` | `recordStore.blobs.s3.artifactSecret` is unset, or `<artifactSecret>-<pool>` does not exist with non-empty data | Set `recordStore.blobs.s3.artifactSecret`, and create `<artifactSecret>-<pool>`. |
+| `ArtifactSecretMissing` | `False` | no artifact credential is configured, or `<artifactSecret>-<pool>` (STS mode: the issuer Secret) does not exist with data | Create the Secret the message names. |
 | `ArtifactPluginMissing` | `False` | the plugin set a cell of the pool's version resolves does not pin `artifact-manager-s3` | Pin `artifact-manager-s3` in the version profile. |
 | `SecretsMissing` | `False` | the pool holds no usable confidential store | Read [Pool secrets](#pool-secrets) below. |
 | `CellCapReached` | `False` | `maxCells` is above zero and the pool owns that many cells | Raise `maxCells`. |
@@ -147,10 +147,9 @@ cell, resolving its capacity from its own `spec.cell.maxTenants` or from `cells.
 
 ### Scale up a pool
 
-A fill needs the install-wide gates of the `PoolReady` table and one Secret per pool,
-`<artifactSecret>-<pool name>` in the release namespace. See
-[The artifact Secret](build-logs-and-artifacts.md#the-artifact-secret) for its keys. A running
-cell keeps its per-cell Secret. Only a new cell needs the pool Secret.
+A fill needs the install-wide gates of the `PoolReady` table. In static mode it also needs
+`<artifactSecret>-<pool name>`. In STS mode it needs no Secret per pool. See
+[Artifact credentials](artifact-credentials.md).
 
 ## Cold start
 

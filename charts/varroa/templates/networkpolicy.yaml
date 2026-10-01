@@ -172,6 +172,10 @@ spec:
 {{- end }}
 {{- end }}
 {{ include "varroa.np.telemetryEgress" . | nindent 4 }}
+{{- if and .Values.recordStore.enabled .Values.recordStore.blobs.s3.artifactSTS.enabled }}
+    # artifactSTS: operator calls STS AssumeRole on the blob store's endpoint
+{{ include "varroa.np.recordStoreBlobEgress" . | nindent 4 }}
+{{- end }}
 {{- if not $full }}
     - to:
 {{- if .Values.networkPolicy.coreNatsEgress.cidrs }}

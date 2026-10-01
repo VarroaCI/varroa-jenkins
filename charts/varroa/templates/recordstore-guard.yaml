@@ -56,6 +56,39 @@ the gateway writes log chunks to the core database. Renders no objects.
 {{- fail "recordStore.blobs.s3.url is required when recordStore.blobs.mode is \"s3\"" -}}
 {{- end -}}
 
+{{- $sts := .Values.recordStore.blobs.s3.artifactSTS | default dict -}}
+{{- if $sts.enabled -}}
+{{- if ne .Values.recordStore.blobs.mode "s3" -}}
+{{- fail "recordStore.blobs.s3.artifactSTS.enabled requires recordStore.blobs.mode=s3" -}}
+{{- end -}}
+{{- if .Values.recordStore.blobs.s3.artifactSecret -}}
+{{- fail "recordStore.blobs.s3.artifactSTS.enabled and recordStore.blobs.s3.artifactSecret are exclusive; set one" -}}
+{{- end -}}
+{{- if not $sts.issuerSecret -}}
+{{- fail "recordStore.blobs.s3.artifactSTS.issuerSecret is required when artifactSTS.enabled is true" -}}
+{{- end -}}
+{{- if eq $sts.issuerSecret .Values.recordStore.blobs.s3.existingSecret -}}
+{{- fail "recordStore.blobs.s3.artifactSTS.issuerSecret must not be recordStore.blobs.s3.existingSecret" -}}
+{{- end -}}
+{{- if not $sts.roleArn -}}
+{{- fail "recordStore.blobs.s3.artifactSTS.roleArn is required when artifactSTS.enabled is true" -}}
+{{- end -}}
+{{- if and $sts.endpoint (not (regexMatch "^https?://[^/]+" $sts.endpoint)) -}}
+{{- fail (printf "recordStore.blobs.s3.artifactSTS.endpoint must be an http or https URL, got %q" $sts.endpoint) -}}
+{{- end -}}
+{{- $duration := toString ($sts.duration | default "1h") -}}
+{{- if not (regexMatch "^[1-9][0-9]*[mh]$" $duration) -}}
+{{- fail (printf "recordStore.blobs.s3.artifactSTS.duration must be a whole number of minutes or hours, such as 90m or 2h, got %q" $duration) -}}
+{{- end -}}
+{{- $minutes := int (trimSuffix "m" (trimSuffix "h" $duration)) -}}
+{{- if hasSuffix "h" $duration -}}
+{{- $minutes = mul $minutes 60 -}}
+{{- end -}}
+{{- if or (lt $minutes 15) (gt $minutes 720) -}}
+{{- fail (printf "recordStore.blobs.s3.artifactSTS.duration must be from 15m to 12h, got %q" $duration) -}}
+{{- end -}}
+{{- end -}}
+
 {{- $retentionKeys := list "runs" "logs" "artifacts" "activity" -}}
 {{- range $key := $retentionKeys -}}
 {{- $val := index $.Values.recordStore.retention $key -}}

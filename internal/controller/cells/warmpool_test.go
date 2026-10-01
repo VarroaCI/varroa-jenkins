@@ -1177,6 +1177,15 @@ func TestCellPool_FillGateRefusals(t *testing.T) {
 			wantMsg:    fmt.Sprintf("artifact secret %q not found", testArtifactSecretBase+"-"+testProfileName),
 		},
 		{
+			name: "STS issuer secret absent",
+			mutate: func(r *WarmPoolReconciler) {
+				r.Config.ArtifactSecretBase = ""
+				r.Config.ArtifactIssuerSecret = "varroa-artifact-issuer"
+			},
+			wantReason: v1alpha1.CellPoolReasonArtifactSecretMissing,
+			wantMsg:    `artifact issuer secret "varroa-artifact-issuer" not found`,
+		},
+		{
 			name:       "plugin not pinned",
 			mutate:     func(r *WarmPoolReconciler) { r.Plugins = &fakePluginPinReader{pinned: false} },
 			wantReason: v1alpha1.CellPoolReasonArtifactPluginMissing,
@@ -1210,6 +1219,30 @@ func TestCellPool_FillGateRefusals(t *testing.T) {
 				t.Errorf("message = %q, want %q", cond.Message, tc.wantMsg)
 			}
 		})
+	}
+}
+
+// TestCellPool_STSModeFillsWithoutPoolSecret covers STS mode: the gate
+// reads the issuer Secret and never the pool's own artifact Secret.
+func TestCellPool_STSModeFillsWithoutPoolSecret(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, newProfile(), pipelinesTeam(), newPool(1))
+
+	r := newReconciler(store, WarmPoolConfig{Enabled: true, MaxTenantsPerCell: 10})
+	r.Config.ArtifactSecretBase = ""
+	r.Config.ArtifactIssuerSecret = "varroa-artifact-issuer"
+	secrets := &fakeSecretReader{data: map[string]map[string][]byte{
+		"varroa-artifact-issuer": {"access-key-id": []byte("a"), "secret-access-key": []byte("b")},
+	}}
+	r.Secrets = secrets
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if got := listCells(t, store); len(got) != 1 {
+		t.Fatalf("cells = %v, want one cell", cellNames(got))
+	}
+	if cond := poolReady(t, getPool(t, store, testProfileName)); cond == nil || cond.Reason == v1alpha1.CellPoolReasonArtifactSecretMissing {
+		t.Fatalf("PoolReady = %+v, want no ArtifactSecretMissing", cond)
 	}
 }
 

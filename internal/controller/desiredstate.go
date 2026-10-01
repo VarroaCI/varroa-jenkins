@@ -192,6 +192,9 @@ type stsBuildInputs struct {
 	// desired-state hash even though the fragment's ${readFile:...}
 	// reference never changes.
 	ArtifactSecretHash string
+	// ArtifactSharedCredentials is true in STS mode when ArtifactSecretName
+	// is set. The builder then adds the shared credentials file property.
+	ArtifactSharedCredentials bool
 	// CellSecretsName is the pool confidential store
 	// ("varroa-cell-secrets-<pool>"), or "" when the controller is not a
 	// pool cell. CreateStatefulSet mounts it only when non-empty.
@@ -330,6 +333,7 @@ func (r *Reconciler) buildStatefulSetSpec(cr *v1alpha1.Controller, class *v1alph
 		ClaimTimeoutMS:            r.claimTimeoutMS,
 		ArtifactSecretName:        in.ArtifactSecretName,
 		ArtifactSecretHash:        in.ArtifactSecretHash,
+		ArtifactSharedCredentials: in.ArtifactSharedCredentials,
 		CellSecretsName:           in.CellSecretsName,
 		Cell:                      v1alpha1.IsCell(cr),
 		CellPool:                  cellPoolLabel(cr),

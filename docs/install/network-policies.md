@@ -29,7 +29,8 @@ External egress depends on enabled features:
 | Recorder, BFF, gateway | Build record blob storage | 443/TCP | Logs and artifacts |
 
 The `networkPolicy.recordStoreBlobEgress` toggle governs the "Build record blob storage" row
-above, for the recorder, the BFF, and the gateway. It renders nothing when
+above, for the recorder, the BFF, and the gateway, and for the operator in
+[STS artifact mode](../operations/artifact-credentials.md#sts-mode). It renders nothing when
 `recordStore.blobs.mode` is `postgres`, because that mode needs no external egress. See
 [Build records](../operations/build-records.md#network-policy) for its defaults.
 

@@ -170,6 +170,18 @@ spec:
             - name: VARROA_ARTIFACT_SECRET
               value: {{ .Values.recordStore.blobs.s3.artifactSecret | quote }}
             {{- end }}
+            {{- with .Values.recordStore.blobs.s3.artifactSTS }}
+            {{- if .enabled }}
+            - name: VARROA_ARTIFACT_STS_ISSUER_SECRET
+              value: {{ .issuerSecret | quote }}
+            - name: VARROA_ARTIFACT_STS_ROLE_ARN
+              value: {{ .roleArn | quote }}
+            - name: VARROA_ARTIFACT_STS_ENDPOINT
+              value: {{ .endpoint | quote }}
+            - name: VARROA_ARTIFACT_STS_DURATION
+              value: {{ .duration | quote }}
+            {{- end }}
+            {{- end }}
 {{- end }}
 {{- if and .Values.updateCenter.enabled (not (include "varroa.isHive" .)) }}
             - name: VARROA_UPDATE_CENTER_URL

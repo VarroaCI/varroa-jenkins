@@ -33,8 +33,7 @@ A cell needs:
 - The [build record store](build-records.md) enabled (`recordStore.enabled: true`).
 - The `s3` blob tier (`recordStore.blobs.mode: s3`). A cell refuses the `postgres` tier.
 - External artifact storage. Pin `artifact-manager-s3` in the cell's `JenkinsVersionProfile` and
-  add a pool or per-cell artifact `Secret`. See
-  [The artifact Secret](build-logs-and-artifacts.md#the-artifact-secret).
+  configure [Artifact credentials](artifact-credentials.md).
 
 The operator reports `CellReady=False` until all three hold.
 
@@ -286,7 +285,7 @@ Every `CellReady` reason on a cell `Controller`:
 | `Connected` | True | The cell is provisioned and accepts tenants. | None. |
 | `RecordStoreUnsupported` | False | `recordStore.enabled` is false. | Enable the record store. |
 | `BlobTierUnsupported` | False | `recordStore.blobs.mode` is not `s3`. | Set the blob tier to `s3`. |
-| `ArtifactStorageLocal` | False | The `ArtifactStorage` condition is not `External`. | Pin `artifact-manager-s3` and add a pool or per-cell artifact `Secret`. |
+| `ArtifactStorageLocal` | False | The `ArtifactStorage` condition is not `External`. | Pin `artifact-manager-s3` and fix the credential that the condition names. |
 | `NotProvisioned` | False | The cell's phase has not reached `Connected` yet. | Wait, or check pod status. |
 | `MiteUnreachable` | False | The mite stream is lost. The roll applies. | Check the gateway. |
 | `CellRolled` | False | The operator already deleted the pod once to recover. The condition message names the original fault. | Diagnose the reason in the message. If it recurs, that condition is not self-healing. |

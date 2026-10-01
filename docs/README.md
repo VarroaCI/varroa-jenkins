@@ -89,6 +89,7 @@ Commands use `kubectl` and `helm`. Replace values in `<angle-brackets>` before r
 - [Build records](operations/build-records.md)
 - [Build claims](operations/build-claims.md)
 - [Build logs and artifacts](operations/build-logs-and-artifacts.md)
+- [Artifact credentials](operations/artifact-credentials.md)
 - [Observability](operations/observability.md)
 - [Troubleshooting](operations/troubleshooting.md)
 

@@ -950,14 +950,38 @@ recordStore:
       # and an optional session-token. Empty means ambient credentials
       # (IRSA, Workload Identity).
       existingSecret: ""
-      # -- Base name of the artifact credential Secret. The operator reads
-      # "<artifactSecret>-<controller>" in the release namespace first,
-      # then "<artifactSecret>-<pool>" for a cell of a pool. Each Secret
-      # holds access-key-id/secret-access-key and an optional
-      # session-token, scoped to that cell's or that pool's artifact
-      # prefix. Empty means Varroa keeps build artifacts on the cell's
-      # local disk.
+      # -- Base name of the static artifact credential Secret. The
+      # operator reads "<artifactSecret>-<controller>" in the release
+      # namespace first, then "<artifactSecret>-<pool>" for a cell of a
+      # pool. Each Secret holds access-key-id and secret-access-key, scoped
+      # to that cell's or that pool's artifact prefix. Jenkins ignores a
+      # session-token key in this Secret. Empty means Varroa keeps build
+      # artifacts on the cell's local disk, unless artifactSTS is enabled.
+      # Exclusive with artifactSTS.enabled.
       artifactSecret: ""
+      # -- Operator-issued artifact credentials. The operator calls STS
+      # AssumeRole for each cell with a session policy that limits the
+      # credential to the cell's own prefix, and renews it in place.
+      # Exclusive with artifactSecret.
+      artifactSTS:
+        # -- Enable STS mode.
+        enabled: false
+        # -- Name of a Secret in the release namespace with
+        # access-key-id and secret-access-key of the issuing identity.
+        # Never the recorder's existingSecret.
+        issuerSecret: ""
+        # -- The role the issuing identity assumes. Required. MinIO
+        # accepts any ARN-shaped value, for example
+        # arn:minio:iam:::role/varroa-artifacts. Ceph RGW needs a real role.
+        roleArn: ""
+        # -- STS endpoint URL. Empty uses the endpoint of blobs.s3.url, or
+        # the AWS regional endpoint when the URL names no endpoint.
+        endpoint: ""
+        # -- Lifetime of each credential, in whole minutes or hours (for
+        # example 90m or 2h), from 15m to 12h. The operator
+        # renews it when half of the lifetime has passed. On AWS, raise
+        # the role's MaxSessionDuration to match a value above 1h.
+        duration: 1h
   # -- Retention windows, each a whole day count with a "d" suffix
   # (e.g. "365d"), from 1d to 3650d.
   retention:

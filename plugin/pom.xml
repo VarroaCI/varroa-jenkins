@@ -292,6 +292,11 @@
                 <configuration>
                     <systemPropertyVariables>
                         <hudson.plugins.git.GitSCM.ALLOW_LOCAL_CHECKOUT>true</hudson.plugins.git.GitSCM.ALLOW_LOCAL_CHECKOUT>
+                        <!-- ArtifactSessionCredentialsReloadTest: the AWS SDK reads these once,
+                             when it first builds its default chain, so they apply to the whole JVM. -->
+                        <aws.sharedCredentialsFile>${project.build.directory}/varroa-aws/credentials</aws.sharedCredentialsFile>
+                        <aws.configFile>${project.build.directory}/varroa-aws/config</aws.configFile>
+                        <aws.disableEc2Metadata>true</aws.disableEc2Metadata>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>

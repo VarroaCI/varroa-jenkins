@@ -104,24 +104,31 @@ func artifactManagerPrefix(cluster, namespace, cell string) string {
 // renderArtifactStorageFragment builds the operator-owned artifact-storage
 // JCasC fragment: the jclouds/s3 factory selection and the aws root's
 // awsCredentials and s3 settings (task 0.5's export; the keys live under
-// "aws", not "unclassified"). It carries no secret value —
+// "aws", not "unclassified"). It carries no secret value. In static mode
 // injectArtifactCredential supplies the credential reference separately.
-func renderArtifactStorageFragment(p blobstoreParams, cluster, namespace, cell string) (string, error) {
+// In STS mode (sts true) the fragment names no credential and keeps session
+// tokens enabled: the plugin then reads the AWS SDK default chain, which
+// reads the shared credentials file the operator renews in place.
+func renderArtifactStorageFragment(p blobstoreParams, cluster, namespace, cell string, sts bool) (string, error) {
 	s3Section := map[string]any{
 		"container":           p.Container,
 		"prefix":              artifactManagerPrefix(cluster, namespace, cell),
 		"usePathStyleUrl":     p.UsePathStyleURL,
 		"useHttp":             p.UseHTTP,
-		"disableSessionToken": true,
+		"disableSessionToken": !sts,
 	}
 	if p.CustomEndpoint != "" {
 		s3Section["customEndpoint"] = p.CustomEndpoint
 	}
 
+	credentialsID := artifactCredentialID
+	if sts {
+		credentialsID = ""
+	}
 	doc := map[string]any{
 		"aws": map[string]any{
 			"awsCredentials": map[string]any{
-				"credentialsId": artifactCredentialID,
+				"credentialsId": credentialsID,
 				"region":        p.Region,
 			},
 			"s3": s3Section,
@@ -422,6 +429,10 @@ func (r *Reconciler) artifactStorageFragment(ctx context.Context, cr *v1alpha1.C
 			"record-store blob mode is not S3 (artifacts stay in the cell's local storage)"), nil
 	}
 
+	if r.artifactSTS.Enabled() {
+		return r.artifactSTSFragment(ctx, cr, params)
+	}
+
 	if r.artifactSecretBase == "" {
 		return "", artifactStorageCondition(metav1.ConditionFalse, "LocalOnly",
 			"recordStore.blobs.s3.artifactSecret is not configured"), nil
@@ -444,7 +455,7 @@ func (r *Reconciler) artifactStorageFragment(ctx context.Context, cr *v1alpha1.C
 			"resolved plugin set does not pin artifact-manager-s3"), nil
 	}
 
-	fragment, err := renderArtifactStorageFragment(params, r.clusterName, cr.Namespace, cr.Name)
+	fragment, err := renderArtifactStorageFragment(params, r.clusterName, cr.Namespace, cr.Name, false)
 	if err != nil {
 		if r.Logger != nil {
 			r.Logger.Warn("artifact storage: failed to render fragment", "controller", cr.Namespace+"/"+cr.Name, "error", err)
@@ -491,6 +502,9 @@ func (r *Reconciler) applyArtifactStorage(ctx context.Context, cr *v1alpha1.Cont
 	merged, err := bundle.MergeJenkinsYAML(stripped, fragment)
 	if err != nil {
 		return yamlDoc, cond, fmt.Errorf("merge artifact-storage fragment: %w", err)
+	}
+	if r.artifactSTS.Enabled() {
+		return merged, cond, nil
 	}
 	withCred, err := injectArtifactCredential(merged)
 	if err != nil {
@@ -544,8 +558,14 @@ type secretWithOwnerCreator interface {
 // projects no fleet-wide fallback: an exhausted candidate list is exactly
 // the caller's cue to report ArtifactStorage/LocalOnly. A non-nil error
 // means the lookup or the projection write failed; the caller must not
-// build a pod while the projection may be stale or missing.
+// build a pod while the projection may be stale or missing. In STS mode
+// resolveArtifactSTSSecret issues the credential instead, and the data hash
+// stays empty.
 func (r *Reconciler) resolveArtifactSecret(ctx context.Context, cr *v1alpha1.Controller) (projectedName, dataHash string, err error) {
+	if r.artifactSTS.Enabled() {
+		name, stsErr := r.resolveArtifactSTSSecret(ctx, cr)
+		return name, "", stsErr
+	}
 	if r.artifactSecretBase == "" {
 		return "", "", nil
 	}
@@ -594,8 +614,12 @@ type artifactSecretHashReader interface {
 // dispatch this tick. An exhausted candidate list, a missing StatefulSet,
 // or a backend without the reader seam is a no-op: an absent Secret is the
 // LocalOnly case, not a rotation. A read error logs a warning and skips the
-// tick, never rolling on a fault.
+// tick, never rolling on a fault. In STS mode a renewal never rolls the
+// pod; reconcileArtifactSTSRoll rolls only a pod that predates STS mode.
 func (r *Reconciler) reconcileArtifactSecretRoll(ctx context.Context, cr *v1alpha1.Controller) bool {
+	if r.artifactSTS.Enabled() {
+		return r.reconcileArtifactSTSRoll(ctx, cr)
+	}
 	if r.artifactSecretBase == "" {
 		return false
 	}

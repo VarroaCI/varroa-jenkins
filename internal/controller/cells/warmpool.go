@@ -62,8 +62,13 @@ type WarmPoolConfig struct {
 	// bool once at boot and passes it in.
 	BlobTierS3 bool
 	// ArtifactSecretBase is VARROA_ARTIFACT_SECRET, the base artifact
-	// Secret name. An empty value refuses every fill that needs a Secret.
+	// Secret name. An empty value refuses every fill that needs a Secret,
+	// unless ArtifactIssuerSecret is set.
 	ArtifactSecretBase string
+	// ArtifactIssuerSecret is VARROA_ARTIFACT_STS_ISSUER_SECRET. A
+	// non-empty value selects STS mode: the fill gate then checks this
+	// Secret in place of the pool's own artifact Secret.
+	ArtifactIssuerSecret string
 }
 
 // SecretReader reads a Secret's data. The fill gate uses it to check for
@@ -356,13 +361,13 @@ func (r *WarmPoolReconciler) fillGateReason(ctx context.Context, pool *v1alpha1.
 	if !r.Config.BlobTierS3 {
 		return v1alpha1.CellPoolReasonBlobTierUnsupported
 	}
-	if r.Config.ArtifactSecretBase == "" {
+	name := r.artifactGateSecret(pool)
+	if name == "" {
 		return v1alpha1.CellPoolReasonArtifactSecretMissing
 	}
 	if r.Secrets == nil {
 		return v1alpha1.CellPoolReasonArtifactSecretMissing
 	}
-	name := r.Config.ArtifactSecretBase + "-" + pool.Name
 	data, err := r.Secrets.GetSecret(ctx, name, r.OperatorNamespace)
 	if err != nil || len(data) == 0 {
 		if err != nil && !apierrors.IsNotFound(err) {
@@ -380,6 +385,19 @@ func (r *WarmPoolReconciler) fillGateReason(ctx context.Context, pool *v1alpha1.
 		return v1alpha1.CellPoolReasonSecretsMissing
 	}
 	return ""
+}
+
+// artifactGateSecret names the Secret the fill gate requires: the issuer
+// Secret in STS mode, else "<base>-<pool>". Empty means artifact storage is
+// not configured.
+func (r *WarmPoolReconciler) artifactGateSecret(pool *v1alpha1.CellPool) string {
+	if r.Config.ArtifactIssuerSecret != "" {
+		return r.Config.ArtifactIssuerSecret
+	}
+	if r.Config.ArtifactSecretBase == "" {
+		return ""
+	}
+	return r.Config.ArtifactSecretBase + "-" + pool.Name
 }
 
 // ensurePoolSecrets runs step 1a of the pool pass: it reads the pool's own
@@ -1003,10 +1021,13 @@ func (r *WarmPoolReconciler) writeStatus(ctx context.Context, pool *v1alpha1.Cel
 		message = "the pool needs the s3 blob tier (recordStore.blobs.mode)"
 	case v1alpha1.CellPoolReasonArtifactSecretMissing:
 		condStatus = metav1.ConditionFalse
-		if r.Config.ArtifactSecretBase == "" {
+		switch name := r.artifactGateSecret(pool); {
+		case name == "":
 			message = "recordStore.blobs.s3.artifactSecret is not configured"
-		} else {
-			message = fmt.Sprintf("artifact secret %q not found", r.Config.ArtifactSecretBase+"-"+pool.Name)
+		case r.Config.ArtifactIssuerSecret != "":
+			message = fmt.Sprintf("artifact issuer secret %q not found", name)
+		default:
+			message = fmt.Sprintf("artifact secret %q not found", name)
 		}
 	case v1alpha1.CellPoolReasonArtifactPluginMissing:
 		condStatus = metav1.ConditionFalse

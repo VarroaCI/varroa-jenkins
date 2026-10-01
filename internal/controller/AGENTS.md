@@ -196,7 +196,8 @@ sections describe.
     recovery path), then `reconcileHeadlessRoll` and
     `reconcileArtifactSecretRoll` (Connected only; the latter compares the per-cell
     artifact Secret's content hash with the `varroa.dev/artifact-secret-hash`
-    pod-template annotation, `artifactcasc.go`) — the jenkins-image check compares an effective
+    pod-template annotation, `artifactcasc.go`; in STS mode it rolls only a cell
+    whose live `JAVA_OPTS` lacks the shared credentials property) — the jenkins-image check compares an effective
     desired image (`effectiveDesiredJenkinsImage`) against the
     `varroa.dev/computed-images`-stamped container image on the live StatefulSet
     (`GetStatefulSetImages`, keyed by container name); `reconcileContainerSpecRoll`
@@ -411,7 +412,30 @@ sections describe.
   first removes any bundle- or profile-overlay-authored key from the same three subtrees
   (`artifactManagerStripPaths`), `bundle.MergeJenkinsYAML` merges the fragment, then
   `injectArtifactCredential` appends a system-scoped `${readFile:...}` credential reference (never
-  a secret value) to the global credentials domain. `ConditionArtifactStorage` is defined here
+  a secret value) to the global credentials domain.
+  **STS mode** (`artifactsts.go`, on when `SetArtifactSTS` receives a config with an issuer Secret;
+  exclusive with `VARROA_ARTIFACT_SECRET`, enforced at boot by `cmd/operator/artifact_sts.go`)
+  replaces the lookup for cells only: `artifactStorageFragment` calls `artifactSTSFragment`
+  (fragment with `credentialsId: ""` and `disableSessionToken: false`, no injected credential),
+  `resolveArtifactSecret` calls `resolveArtifactSTSSecret` (returns an empty data hash, so the
+  desired-state hash never carries a credential), and `reconcileArtifactSecretRoll` calls
+  `reconcileArtifactSTSRoll`. `ensureArtifactSTSCredential` calls STS `AssumeRole` through the
+  `artifactIssuer` seam (`stsArtifactIssuer`, aws-sdk-go-v2) with a three-statement session
+  policy for the cell's own prefix, and writes `credentials` (an AWS shared credentials file),
+  `issued-at`, and `expiration` into `<cell>-artifacts`. A copy is fresh until half of its own
+  lifetime. `renewArtifactCredential` runs at the top of the Running/Connected block of
+  `reconcileController`, before the dispatch, so the condition written on the same tick sees the
+  result. The Jenkins container gets `-Daws.sharedCredentialsFile=...` in `JAVA_OPTS`
+  (`StatefulSetSpec.ArtifactSharedCredentials`), never an `AWS_*` env var; the kubelet updates the
+  file and the SDK rereads it, so a renewal never rolls the pod. An issue error is held in the
+  in-memory `artifactIssueFailures` (message and time; no STS retry inside
+  `artifactIssueRetryInterval`, one minute); while it is held the fragment stays and `ArtifactStorage`
+  reads `False/IssueFailed`, which turns `CellReady` false without a roll. `reconcileArtifactSTSRoll`
+  rolls only a cell whose copy is already fresh (the renewal earlier on the tick wrote it), or a
+  credential-less cell would roll every tick. An issue that returns a credential stale at once
+  counts as a failure. A first-issue error
+  on a provisioning tick blocks with `ArtifactSecretFailed`. No failure ever falls back to a
+  static Secret. `ConditionArtifactStorage` is defined here
   rather than alongside the other `ControllerConditionType` constants in `api/v1alpha1/types.go`,
   because this batch's file scope excludes that package; flagged for the coordinator to relocate
   it.
@@ -802,8 +826,10 @@ sections describe.
     creates, and only a create writes it. A wanted fill first runs
     `fillGateReason`, in this order: `ClaimGate != "1"` is
     `RecordStoreUnsupported`; a blob URL that is not S3 is
-    `BlobTierUnsupported`; an empty `ArtifactSecretBase`, a nil `Secrets`, or
-    an absent, empty, or failed `Secrets.GetSecret(<base>-<pool>, ...)` read is
+    `BlobTierUnsupported`; an empty `ArtifactSecretBase` (with no
+    `ArtifactIssuerSecret`), a nil `Secrets`, or an absent, empty, or failed
+    `Secrets.GetSecret` read of `artifactGateSecret(pool)` (the issuer Secret in
+    STS mode, else `<base>-<pool>`) is
     `ArtifactSecretMissing` (a non-`NotFound` error is logged and counted the
     same); a nil `Plugins` or a false
     `Plugins.VersionPinsPlugin(ctx, version, "artifact-manager-s3")` is

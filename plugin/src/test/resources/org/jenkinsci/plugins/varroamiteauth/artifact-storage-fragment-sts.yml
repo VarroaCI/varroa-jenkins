@@ -1,0 +1,19 @@
+# The artifact-storage JCasC fragment the operator renders for one cell in
+# STS mode. It names no credential, so artifact-manager-s3 reads the AWS SDK
+# default chain, and it keeps session tokens enabled.
+aws:
+  awsCredentials:
+    credentialsId: ""
+    region: "us-east-1"
+  s3:
+    container: "spike-bucket"
+    customEndpoint: "minio.example:9000"
+    disableSessionToken: false
+    prefix: "artifacts/core/varroa/cell-a/"
+    useHttp: true
+    usePathStyleUrl: true
+unclassified:
+  artifactManager:
+    artifactManagerFactories:
+    - jclouds:
+        provider: "s3"
