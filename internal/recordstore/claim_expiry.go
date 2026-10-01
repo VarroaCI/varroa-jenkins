@@ -105,16 +105,19 @@ const unclaimedQueuedRunSQL = `
 // claimAbandonedGuardSQL admits a run row "r" whose claim the ledger
 // granted and whose build never started: it is QUEUED, holds no build
 // number, still holds the accepted keys, holds an accepted_at older than
-// the cutoff ($1), holds no mesh resume record, and a GRANTED intent holds
-// its run id. A granted item that the plugin lost leaves such a row on a
-// live cell, where neither the re-fire nor the interrupted sweep acts.
+// the cutoff ($1), holds no mesh resume record, and a GRANTED intent with
+// no start mark holds its run id. A granted item that the plugin lost
+// leaves such a row on a live cell, where neither the re-fire nor the
+// interrupted sweep acts. A start mark proves that the build started, so
+// the message of this class does not apply to a marked intent.
 const claimAbandonedGuardSQL = `
 	(r.payload->>'accepted_at')::timestamptz <= $1
 	AND r.status = 'QUEUED'
 	AND r.build_number IS NULL
 	AND COALESCE(r.payload ? 'accepted_at', false)
 	AND jsonb_typeof(r.payload->'mesh'->'resume') IS DISTINCT FROM 'object'
-	AND EXISTS (SELECT 1 FROM varroa.run_intents ri WHERE ri.run_id = r.run_id AND ri.state = 'GRANTED')`
+	AND EXISTS (SELECT 1 FROM varroa.run_intents ri
+	            WHERE ri.run_id = r.run_id AND ri.state = 'GRANTED' AND ri.start_marked_at IS NULL)`
 
 // claimExpiryClass is one kind of run the sweep ends: its guard, its
 // reason code, its trigger_error text, and its activity type.

@@ -77,10 +77,10 @@ func (cfg BackstopConfig) grace() time.Duration {
 }
 
 // RunBackstopRound tries the backstop advisory lock on one acquired
-// connection, and on success runs D9's interrupted sweep, then the
-// claim-expiry sweep, then the unstarted-intent re-fire, then the fleet
-// lock release check, then D11's backstop cron round, before releasing
-// it. It reports whether this call took the lock; a replica that does not
+// connection, and on success runs the mesh takeover, the end of marked
+// lost runs, D9's interrupted sweep, the claim-expiry sweep, the
+// unstarted-intent re-fire, the fleet lock release check, and D11's
+// backstop cron round, in that order, before releasing it. It reports whether this call took the lock; a replica that does not
 // returns false, nil.
 func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, cfg BackstopConfig) (bool, error) {
 	pgConn, err := pool.Acquire(ctx)
@@ -108,6 +108,14 @@ func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c
 	// shielded before the sweep reads it as a candidate.
 	if err := runTakeoverRound(ctx, pool, conn, cfg.SweepMetrics, cfg.ActionMetrics, now, grace, logger); err != nil {
 		logger.Warn("resume takeover round failed", "error", err)
+	}
+
+	// A marked run whose start event was lost can hold a QUEUED row that
+	// records no build. This end runs before the sweep, so the sweep never
+	// marks that row as a queued run.
+	if _, err := EndMarkedLostIntents(ctx, pool, conn, cfg.RunNotifier, cfg.SweepMetrics, cfg.ActionMetrics,
+		cfg.StateDeleter, cfg.MaxSweepPending, now, grace, logger); err != nil {
+		logger.Warn("marked lost intent round failed", "error", err)
 	}
 
 	if _, err := SweepInterruptedRuns(ctx, pool, conn, cfg.SweepMetrics, cfg.ActionMetrics,

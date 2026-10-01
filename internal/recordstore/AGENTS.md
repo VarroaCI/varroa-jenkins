@@ -286,7 +286,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   for the stored owner of the stored run; any other caller reads `duplicate`. The
   plugin releases a queue item only after a granted mark, so a null mark proves no
   start. A marked intent never moves: a repeat from another instance answers
-  `duplicate` before the hold, Row 3 skips it, and the re-fire skips it.
+  `duplicate` before the hold, Row 3 skips it, and the re-fire skips it. `EndMarkedLostIntents`
+  ends its run once the owner is confirmed gone.
   `recorder_start_marks_total` counts the answers by `decision`. **A repeat from another
   instance for an unmarked intent waits on the grant hold** (`ledger_grant_hold.go`): a same-`run_id`
   repeat of a `GRANTED`, unstarted intent from any instance other than the
@@ -1074,17 +1075,32 @@ of the fleet's audit activity, once a controller becomes disposable.
   a long previous build) is marked too, and its later `run.started`
   supersedes the row; the activity row and the count stay. A second class,
   `claimAbandonedGuardSQL`, ends a `QUEUED` run that still holds its accepted keys
-  and a `GRANTED` intent, at the same age, with `CLAIM_ABANDONED` and a
+  and a `GRANTED` intent with no start mark, at the same age, with `CLAIM_ABANDONED` and a
   `build.claim_abandoned` activity row. `recorder_claim_expired_total` carries the
   attribute `reason` for both classes. The two classes share one 500-attempt batch
   per round, the abandoned class first, so an unclaimed backlog never starves it.
+- **The end of a marked lost run** (`interrupted_marked.go`) —
+  `EndMarkedLostIntents` ends a `GRANTED` intent that holds a start mark,
+  whose run holds no `runs` row that records a build and no non-`QUEUED`
+  row (`markedLostIntentGuardSQL`), and whose `cell_instance` is
+  confirmed gone past the grace (`confirmedGoneInstance`). An unconfirmed
+  dead entry waits. In one transaction it locks the intent, re-reads the
+  guard, writes the run `RUNNING` from the intent's columns (an insert, or
+  an update of a `QUEUED` accepted row that strips the accepted keys),
+  and calls `markInterruptedTx` with `cell-rolled`. The intent stays
+  `GRANTED`. After the commit it sends one run notification and calls
+  `afterMark`; an automatic retry of a parameterized intent is counted in
+  `recorder_retry_skipped_total` with reason `parameterized` and not
+  published. It applies `sweepConsumerSkip` itself, and `RunBackstopRound`
+  runs it before `SweepInterruptedRuns`, so the sweep never marks the
+  accepted row as a queued run.
 - **Backstop cron scheduler and the interrupted sweep's round**
   (`backstop_round.go`, `backstop_policy.go`, `backstop_candidates.go`,
   `backstop_fire.go`, `backstop_metrics.go`, `action_metrics.go`,
   `concurrency_metrics.go`, `ledger_concurrency.go`) — design D10 and
   D11. `RunBackstopRound` holds one round on `backstopLockKey`, the third
   fixed advisory-lock key after `migrateLockKey` and `maintenanceLockKey`,
-  and runs `SweepInterruptedRuns`, `ExpireUnclaimedRuns`,
+  and runs `EndMarkedLostIntents`, `SweepInterruptedRuns`, `ExpireUnclaimedRuns`,
   `ReleaseConfirmedFleetLocksRound`, and `runBackstopSchedule` inside the
   same hold, so one ticker and one lock cover them all. The round computes no
   fire minute of its own: `isBackstopCandidate` admits only an occurrence

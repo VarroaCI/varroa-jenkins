@@ -270,6 +270,20 @@ func markInterrupted(ctx context.Context, pool *pgxpool.Pool, run runInterruptCa
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	changed, err := markInterruptedTx(ctx, tx, run, reason, now)
+	if err != nil || !changed {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit interrupted-run marking: %w", err)
+	}
+	return true, nil
+}
+
+// markInterruptedTx is markInterrupted's body inside the caller's
+// transaction: the conditional terminal write and the build.interrupted
+// activity row. The caller commits.
+func markInterruptedTx(ctx context.Context, tx pgx.Tx, run runInterruptCandidate, reason string, now time.Time) (bool, error) {
 	tag, err := tx.Exec(ctx, `
 		UPDATE varroa.runs
 		SET status = 'COMPLETED',
@@ -333,10 +347,6 @@ func markInterrupted(ctx context.Context, pool *pgxpool.Pool, run runInterruptCa
 		nullableBuildNumber(event.BuildNumber), event.Result, event.URL, string(payloadJSON),
 	); err != nil {
 		return false, fmt.Errorf("insert interrupted activity row: %w", err)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("commit interrupted-run marking: %w", err)
 	}
 	return true, nil
 }

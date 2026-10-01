@@ -89,7 +89,7 @@ so the rebuilt run keeps its identity and its build number. Five rules gate it.
 | The build carries no parameters | no re-fire; a person runs the build again |
 | The tenant holds a live cell and cell instance | the re-fire retries every 60 seconds |
 | The recorder has not re-fired this build | no second re-fire, ever |
-| The build holds no start mark | no re-fire; it can have started |
+| The build holds no start mark | no re-fire; the run ends `cell-rolled` |
 
 The third rule holds a re-fire until a replacement pod reports, which takes minutes. The second
 rule is permanent: Varroa stores no parameters for a build that never started, so a re-fire would
@@ -114,6 +114,6 @@ other failure code is permanent, so no round fires that occurrence again.
 | `recorder_intent_refired_total` | `outcome`, `reason` | re-fire outcomes |
 | `recorder_cron_refired_total` | none | backstop re-fires of an unreachable trigger |
 | `recorder_interrupted_marked_total` | `path`, `status` | every interrupted mark |
-| `recorder_retry_skipped_total` | `reason` | automatic retries with no home cell |
+| `recorder_retry_skipped_total` | `reason` | automatic retries not published |
 | `recorder_run_resume_total` | `outcome`, `reason` | mesh resume outcomes |
 | `recorder_run_resume_timeout_total` | none | runs marked on a resume window |
