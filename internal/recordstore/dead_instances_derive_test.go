@@ -264,8 +264,31 @@ func TestFleetLockOwnerConfirmedGoneIgnoresADroppedEntry(t *testing.T) {
 	}
 
 	row.deadInstances = []TenantSyncDeadInstance{{Instance: "pod-left", LastSeenAt: old}}
+	if fleetLockOwnerConfirmedGone(row, "pod-left", now, testGrace) {
+		t.Fatal("an unconfirmed operator entry released a lock")
+	}
+}
+
+func TestFleetLockOwnerConfirmedGoneNeedsAConfirmationForAnOperatorEntry(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-10 * time.Minute)
+	row := tenantPlacementLivenessRow{cellInstance: "pod-live"}
+
+	past := now.Add(-time.Minute)
+	row.deadInstances = []TenantSyncDeadInstance{{Instance: "pod-left", LastSeenAt: now, ConfirmedGoneAt: &past}}
 	if !fleetLockOwnerConfirmedGone(row, "pod-left", now, testGrace) {
-		t.Fatal("an operator entry past the moved window released no lock")
+		t.Fatal("a confirmation past the grace released no lock")
+	}
+
+	fresh := now.Add(-time.Second)
+	row.deadInstances = []TenantSyncDeadInstance{{Instance: "pod-left", LastSeenAt: old, ConfirmedGoneAt: &fresh}}
+	if fleetLockOwnerConfirmedGone(row, "pod-left", now, testGrace) {
+		t.Fatal("a confirmation inside the grace released a lock")
+	}
+
+	row.deadInstances = []TenantSyncDeadInstance{{Instance: "pod-left", LastSeenAt: old, Derived: DeadInstanceDerivedDropped, ConfirmedGoneAt: &past}}
+	if !fleetLockOwnerConfirmedGone(row, "pod-left", now, testGrace) {
+		t.Fatal("a confirmed dropped entry released no lock")
 	}
 }
 

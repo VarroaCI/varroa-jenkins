@@ -595,6 +595,44 @@ func TestTenantSyncAnnounceDerivesADroppedMemberInstance(t *testing.T) {
 	}
 }
 
+// TestTenantSyncAnnounceUnconfirmedLeftMemberKeepsAReleasingLock asserts
+// an operator entry with no confirmation keeps a releasing lock, even past
+// the moved window. The operator sends such an entry for a member that
+// leaves a live cell. A later entry with a confirmation releases the lock.
+func TestTenantSyncAnnounceUnconfirmedLeftMemberKeepsAReleasingLock(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+	now := time.Now().UTC()
+
+	sendTenantSync(t, pool, conn, announceMembers(1, []member{
+		activeMember("cell-a", 0, "pod-a1"), activeMember("cell-b", 1, "pod-b1"),
+	}))
+	insertLockRowForTenant(t, db, "acme/deploy-prod", "run-1", testTenant, "acme/release",
+		FleetLockStateReleasing, now.Add(-10*time.Minute), now.Add(5*time.Minute))
+	if _, err := db.Exec(`UPDATE varroa.fleet_locks SET cell_instance = 'pod-b1' WHERE name = $1 AND run_id = $2`,
+		"acme/deploy-prod", "run-1"); err != nil {
+		t.Fatalf("set cell_instance: %v", err)
+	}
+
+	left := announceMembers(2, []member{activeMember("cell-a", 0, "pod-a1")})
+	left.DeadInstances = []TenantSyncDeadInstance{{Instance: "pod-b1", LastSeenAt: now.Add(-6 * time.Minute)}}
+	if resp := sendTenantSync(t, pool, conn, left); !resp.Ok {
+		t.Fatalf("announce: %+v", resp)
+	}
+	if _, _, found := fleetLockRowState(t, db, "run-1"); !found {
+		t.Fatal("an unconfirmed entry for a member that left its cell released the lock")
+	}
+
+	confirmed := now.Add(-time.Minute)
+	left.DeadInstances[0].ConfirmedGoneAt = &confirmed
+	if resp := sendTenantSync(t, pool, conn, left); !resp.Ok {
+		t.Fatalf("announce: %+v", resp)
+	}
+	if _, _, found := fleetLockRowState(t, db, "run-1"); found {
+		t.Fatal("a confirmed entry past the grace kept the lock")
+	}
+}
+
 // TestTenantSyncAnnounceDerivationIsIdempotent asserts a repeated announce
 // keeps the derived entry as it is and adds no second one.
 func TestTenantSyncAnnounceDerivationIsIdempotent(t *testing.T) {

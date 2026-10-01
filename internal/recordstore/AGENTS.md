@@ -454,8 +454,10 @@ of the fleet's audit activity, once a controller becomes disposable.
   instance clears the tag in `mergeDeadInstances`. `trimDeadInstances`
   sorts its input before it trims, because the derived entries join the
   end of the merged list.
-  `fleetLockOwnerConfirmedGone` ignores a `dropped` entry, because the cell
-  the tenant left can still be alive.
+  `fleetLockOwnerConfirmedGone` counts an entry only with a confirmation
+  older than the grace, or with the `rolled` tag past the moved window. Any
+  other entry with no confirmation releases no lock, because the cell the
+  tenant left can still be alive.
   `handleTenantSyncAnnounce` runs `MarkMovedRunsForTenant` when `cell` or
   `cell_instance` changes or the derivation added an entry, and runs `ReleaseConfirmedFleetLocks`
   (`fleet_lock_release.go`) on every announce, against the same

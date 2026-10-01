@@ -143,9 +143,9 @@ func TestFleetLockStateMachine_TerminalEventDeletesHeldRow(t *testing.T) {
 	}
 }
 
-// TestFleetLockStateMachine_DeadInstanceEntryReleasesRow asserts task
-// 4.3's acceptance: a dead_instances entry older than the window
-// releases a releasing row.
+// TestFleetLockStateMachine_DeadInstanceEntryReleasesRow asserts a
+// rolled dead_instances entry older than the window releases a releasing
+// row with no confirmation.
 func TestFleetLockStateMachine_DeadInstanceEntryReleasesRow(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 
@@ -161,9 +161,11 @@ func TestFleetLockStateMachine_DeadInstanceEntryReleasesRow(t *testing.T) {
 
 	staleSeen := now.Add(-6 * time.Minute) // older than the 5-minute moved window
 	row := tenantPlacementLivenessRow{
-		cellInstance:  "pod-b",
-		cellAlive:     true,
-		deadInstances: []TenantSyncDeadInstance{{Instance: "pod-a", LastSeenAt: staleSeen}},
+		cellInstance: "pod-b",
+		cellAlive:    true,
+		deadInstances: []TenantSyncDeadInstance{{
+			Instance: "pod-a", LastSeenAt: staleSeen, Derived: DeadInstanceDerivedRolled,
+		}},
 	}
 	released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha", row, now, testGrace, nil, nil)
 	if err != nil {
@@ -204,6 +206,55 @@ func TestFleetLockStateMachine_TenantMoveWithNoDeadInstanceKeepsRow(t *testing.T
 	}
 	if _, _, found := fleetLockRowState(t, db, runID); !found {
 		t.Fatal("a tenant move with no dead_instances entry must keep the row")
+	}
+}
+
+// TestFleetLockStateMachine_MemberLeavingALiveCellKeepsRow asserts an
+// unconfirmed operator entry keeps a releasing row past the moved window.
+// The operator sends such an entry for a member that leaves a live cell,
+// and that cell can still be deploying.
+func TestFleetLockStateMachine_MemberLeavingALiveCellKeepsRow(t *testing.T) {
+	now := time.Now()
+	staleSeen := now.Add(-6 * time.Minute)
+	cases := []struct {
+		name    string
+		derived string
+	}{
+		{name: "operator entry", derived: ""},
+		{name: "dropped entry", derived: DeadInstanceDerivedDropped},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pool, db := setupLedgerPool(t)
+
+			runID := newTestUUIDv7String()
+			insertInterruptedRun(t, db, runID)
+			insertFleetLockRow(t, db, fleetLockStateMachineTestName, runID, FleetLockStateReleasing,
+				now.Add(-10*time.Minute), now.Add(5*time.Minute))
+			if _, err := db.Exec(`UPDATE varroa.fleet_locks SET cell_instance = 'pod-a' WHERE name = $1 AND run_id = $2`,
+				fleetLockStateMachineTestName, runID); err != nil {
+				t.Fatalf("set cell_instance: %v", err)
+			}
+
+			row := tenantPlacementLivenessRow{
+				cellInstance: "pod-b",
+				cellAlive:    true,
+				deadInstances: []TenantSyncDeadInstance{{
+					Instance: "pod-a", LastSeenAt: staleSeen, Derived: tc.derived,
+				}},
+			}
+			released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha",
+				row, now, testGrace, nil, nil)
+			if err != nil {
+				t.Fatalf("ReleaseConfirmedFleetLocks: %v", err)
+			}
+			if released != 0 {
+				t.Fatalf("released = %d, want 0: an unconfirmed entry proves no pod gone", released)
+			}
+			if _, _, found := fleetLockRowState(t, db, runID); !found {
+				t.Fatal("an unconfirmed entry must keep the releasing row")
+			}
+		})
 	}
 }
 
@@ -259,10 +310,13 @@ func TestFleetLockStateMachine_OwnerDiedWithPodReleasedWithoutCancel(t *testing.
 	}
 
 	staleSeen := now.Add(-8 * time.Minute)
+	confirmed := now.Add(-time.Minute)
 	row := tenantPlacementLivenessRow{
-		cellInstance:  "pod-new",
-		cellAlive:     true,
-		deadInstances: []TenantSyncDeadInstance{{Instance: "pod-dead", LastSeenAt: staleSeen}},
+		cellInstance: "pod-new",
+		cellAlive:    true,
+		deadInstances: []TenantSyncDeadInstance{{
+			Instance: "pod-dead", LastSeenAt: staleSeen, ConfirmedGoneAt: &confirmed,
+		}},
 	}
 	released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha", row, now, testGrace, nil, nil)
 	if err != nil {

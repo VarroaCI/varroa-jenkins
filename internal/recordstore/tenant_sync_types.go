@@ -58,7 +58,8 @@ type TenantSyncDeadInstance struct {
 	ConfirmedGoneAt *time.Time `json:"confirmed_gone_at,omitempty"`
 	// Derived is DeadInstanceDerivedRolled or DeadInstanceDerivedDropped
 	// on an entry the recorder derived, and empty on an operator entry.
-	// The fleet-lock release ignores a dropped entry, because the cell of
+	// The fleet-lock release applies the moved window to a rolled entry
+	// only. Every other entry needs a confirmation, because the cell of
 	// such an instance can still be alive.
 	Derived string `json:"derived,omitempty"`
 }

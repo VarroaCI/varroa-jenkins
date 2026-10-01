@@ -29,11 +29,15 @@ func TestReleaseConfirmedFleetLocks_PublishesOnePerRow(t *testing.T) {
 	}
 
 	// pod-a is gone: the tenant now runs on pod-b, and pod-a carries a
-	// dead_instances entry older than the moved window.
+	// dead_instances entry with a pod-read confirmation older than the
+	// grace.
+	confirmed := now.Add(-time.Minute)
 	live := tenantPlacementLivenessRow{
-		cellInstance:  "pod-b",
-		cellAlive:     true,
-		deadInstances: []TenantSyncDeadInstance{{Instance: "pod-a", LastSeenAt: now.Add(-6 * time.Minute)}},
+		cellInstance: "pod-b",
+		cellAlive:    true,
+		deadInstances: []TenantSyncDeadInstance{{
+			Instance: "pod-a", LastSeenAt: now.Add(-6 * time.Minute), ConfirmedGoneAt: &confirmed,
+		}},
 	}
 
 	notifier, sent, _ := newCaptureNotifier(t)
@@ -95,10 +99,13 @@ func TestReleaseConfirmedFleetLocks_NilNotifierReleasesWithoutPublishing(t *test
 		t.Fatalf("set cell_instance: %v", err)
 	}
 
+	confirmed := now.Add(-time.Minute)
 	live := tenantPlacementLivenessRow{
-		cellInstance:  "pod-b",
-		cellAlive:     true,
-		deadInstances: []TenantSyncDeadInstance{{Instance: "pod-a", LastSeenAt: now.Add(-6 * time.Minute)}},
+		cellInstance: "pod-b",
+		cellAlive:    true,
+		deadInstances: []TenantSyncDeadInstance{{
+			Instance: "pod-a", LastSeenAt: now.Add(-6 * time.Minute), ConfirmedGoneAt: &confirmed,
+		}},
 	}
 	released, err := ReleaseConfirmedFleetLocks(context.Background(), pool, testCluster, "alpha",
 		live, now, testGrace, nil, nil)

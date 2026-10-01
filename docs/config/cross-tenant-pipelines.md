@@ -216,11 +216,10 @@ A lock moves through three states.
 | `waiting` | one or more runs wait for the current holder |
 | `releasing` | the holder's run was marked interrupted; the lock is not yet free |
 
-A lock leaves `releasing` on one of two events: the holder's run reaches a terminal state, or an
-operator confirms the holder's cell instance is gone. A `releasing` lock still blocks every
-other caller. Neither event fires when a Jenkins process restarts inside its pod without a clean
-shutdown. Delete the cell pod then: the operator confirms
-that instance gone, and the lock releases.
+A lock leaves `releasing` when the holder's run reaches a terminal state, or when the operator
+confirms the holder's cell instance gone. A move off a live cell confirms nothing. A `releasing`
+lock blocks every other caller. A Jenkins restart inside its pod fires neither event. Delete the
+cell pod then, and the lock releases.
 
 ### Fencing tokens
 

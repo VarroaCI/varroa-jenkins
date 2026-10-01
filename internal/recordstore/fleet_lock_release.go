@@ -26,9 +26,13 @@ import (
 // grace is the confirmed-gone grace, so a pod-read confirmation releases
 // a lock on the same schedule it interrupts a run.
 //
-// An entry the recorder derived from a dropped member never counts. A
-// changed placement alone releases no lock, because the cell the tenant
-// left can still be alive and still deploying.
+// A dead_instances entry counts on two arms only. An entry with a
+// pod-read confirmation counts once the grace elapses. An entry the
+// recorder derived from a rolled member counts once its last_seen_at
+// passes the moved window, because a cell never runs two pods of one
+// name. Every other entry never counts: a changed placement alone
+// releases no lock, because the cell the tenant left can still be alive
+// and still deploying.
 func fleetLockOwnerConfirmedGone(row tenantPlacementLivenessRow, cellInstance string, now time.Time,
 	grace time.Duration) bool {
 	if cellInstance == "" {
@@ -37,15 +41,17 @@ func fleetLockOwnerConfirmedGone(row tenantPlacementLivenessRow, cellInstance st
 	if cellInstance == row.cellInstance {
 		return currentInstanceGone(row, now, silentHeartbeatWindow)
 	}
-	return deadInstanceGone(withoutDroppedEntries(row.deadInstances), cellInstance, now, movedHeartbeatWindow, grace)
+	return deadInstanceGone(lockReleaseEntries(row.deadInstances, now, grace), cellInstance, now, movedHeartbeatWindow, grace)
 }
 
-// withoutDroppedEntries answers dead without the entries tagged
-// DeadInstanceDerivedDropped.
-func withoutDroppedEntries(dead []TenantSyncDeadInstance) []TenantSyncDeadInstance {
+// lockReleaseEntries answers the entries of dead that can release a
+// fleet lock: an entry whose confirmation is older than grace, and an
+// entry tagged DeadInstanceDerivedRolled. Every other entry with no
+// confirmation is left out, because it does not prove the pod gone.
+func lockReleaseEntries(dead []TenantSyncDeadInstance, now time.Time, grace time.Duration) []TenantSyncDeadInstance {
 	out := make([]TenantSyncDeadInstance, 0, len(dead))
 	for _, d := range dead {
-		if d.Derived != DeadInstanceDerivedDropped {
+		if confirmedGone(d, now, grace) || d.Derived == DeadInstanceDerivedRolled {
 			out = append(out, d)
 		}
 	}
