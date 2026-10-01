@@ -52,6 +52,10 @@ type Ledger struct {
 	// marks no vetoed run.
 	vetoMarking  bool
 	vetoNotifier *RunNotifier
+
+	// hold wires the grant hold. A nil hold (NewLedger's default, until
+	// SetGrantHold is called) holds no repeat claim.
+	hold *grantHold
 }
 
 // NewLedger returns a Ledger over pool. It uses fence to gate a claim, or
@@ -107,9 +111,27 @@ func (l *Ledger) Claim(ctx context.Context, req ClaimRequest) ClaimResponse {
 		return ClaimResponse{Decision: DecisionVetoed, ReasonCode: ReasonInvalidKey, Message: err.Error()}
 	}
 
+	resp, needRead := l.claimAttempt(ctx, req, runID, createdAt, nil)
+	if needRead {
+		// The grant hold reads the ingest consumer only here, between two
+		// transactions, so a slow NATS read holds no row lock.
+		reading := l.hold.readConsumer(ctx)
+		resp, _ = l.claimAttempt(ctx, req, runID, createdAt, &reading)
+	}
+	if resp.Decision == DecisionGranted {
+		l.startConcurrencyCancel(req, createdAt)
+	}
+	return resp
+}
+
+// claimAttempt runs one claim transaction. reading is the grant hold's
+// consumer reading, or nil before Claim read it. It answers true, and
+// commits nothing, when the hold needs that reading to decide.
+func (l *Ledger) claimAttempt(ctx context.Context, req ClaimRequest, runID uuid.UUID, createdAt time.Time,
+	reading *consumerReading) (ClaimResponse, bool) {
 	tx, err := l.pool.Begin(ctx)
 	if err != nil {
-		return ClaimResponse{Code: classifyDBError(err), Error: err.Error()}
+		return ClaimResponse{Code: classifyDBError(err), Error: err.Error()}, false
 	}
 	defer func() {
 		_ = tx.Rollback(ctx)
@@ -117,25 +139,25 @@ func (l *Ledger) Claim(ctx context.Context, req ClaimRequest) ClaimResponse {
 
 	result, err := l.checkFence(ctx, tx, req)
 	if err != nil {
-		return ClaimResponse{Code: CodeUnavailable, Error: err.Error()}
+		return ClaimResponse{Code: CodeUnavailable, Error: err.Error()}, false
 	}
 	if !result.Allow {
 		return ClaimResponse{Decision: DecisionVetoed, ReasonCode: result.ReasonCode, Message: result.Message,
-			HomeSlot: result.HomeSlot}
+			HomeSlot: result.HomeSlot}, false
 	}
 
-	resp, err := claimTx(ctx, tx, req, runID, createdAt)
+	resp, err := claimTx(ctx, tx, l.hold, reading, req, runID, createdAt)
+	if errors.Is(err, errConsumerReadNeeded) {
+		return ClaimResponse{}, true
+	}
 	if err != nil {
-		return ClaimResponse{Code: classifyDBError(err), Error: err.Error()}
+		return ClaimResponse{Code: classifyDBError(err), Error: err.Error()}, false
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return ClaimResponse{Code: classifyDBError(err), Error: err.Error()}
+		return ClaimResponse{Code: classifyDBError(err), Error: err.Error()}, false
 	}
-	if resp.Decision == DecisionGranted {
-		l.startConcurrencyCancel(req, createdAt)
-	}
-	return resp
+	return resp, false
 }
 
 // checkFence runs the fence check for one claim. A Fence that also
@@ -151,14 +173,17 @@ func (l *Ledger) checkFence(ctx context.Context, tx pgx.Tx, req ClaimRequest) (F
 }
 
 // claimTx runs the fast-path insert, then falls back to the existing-key
-// decision table when the key already exists.
-func claimTx(ctx context.Context, tx pgx.Tx, req ClaimRequest, runID uuid.UUID, createdAt time.Time) (ClaimResponse, error) {
+// decision table when the key already exists. A nil hold holds no repeat
+// claim. reading is the hold's consumer reading, or nil when Claim has not
+// read it yet.
+func claimTx(ctx context.Context, tx pgx.Tx, hold *grantHold, reading *consumerReading, req ClaimRequest,
+	runID uuid.UUID, createdAt time.Time) (ClaimResponse, error) {
 	var insertedRunID uuid.UUID
 	err := tx.QueryRow(ctx, `
 		INSERT INTO varroa.run_intents
 			(intent_key, run_id, created_at, cluster, namespace, tenant, job_path,
-			 cell, cell_instance, placement_generation, state, actor, cause, params_digest)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'GRANTED', $11, $12, $13)
+			 cell, cell_instance, placement_generation, state, actor, cause, params_digest, granted_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'GRANTED', $11, $12, $13, now())
 		ON CONFLICT (intent_key) DO NOTHING
 		RETURNING run_id
 	`,
@@ -171,7 +196,7 @@ func claimTx(ctx context.Context, tx pgx.Tx, req ClaimRequest, runID uuid.UUID, 
 	case err == nil:
 		return grantNewIntent(ctx, tx, req, runID)
 	case errors.Is(err, pgx.ErrNoRows):
-		return existingKeyDecision(ctx, tx, req, runID, createdAt)
+		return existingKeyDecision(ctx, tx, hold, reading, req, runID, createdAt)
 	default:
 		return ClaimResponse{}, fmt.Errorf("insert intent: %w", err)
 	}
@@ -200,18 +225,26 @@ type storedIntent struct {
 	placementGeneration int64
 	state               string
 	buildNumber         *int64
+	// grantedAt is the time of the last grant to cellInstance. A row
+	// written before the column existed holds nil.
+	grantedAt *time.Time
+	// dbNow is the database clock at the read. The grant hold compares
+	// grantedAt against it, so both values come from one clock.
+	dbNow time.Time
 }
 
 // existingKeyDecision applies D2's decision table, in order, to the row
 // a repeated intent_key already holds.
-func existingKeyDecision(ctx context.Context, tx pgx.Tx, req ClaimRequest, reqRunID uuid.UUID, reqCreatedAt time.Time) (ClaimResponse, error) {
+func existingKeyDecision(ctx context.Context, tx pgx.Tx, hold *grantHold, reading *consumerReading, req ClaimRequest,
+	reqRunID uuid.UUID, reqCreatedAt time.Time) (ClaimResponse, error) {
 	var row storedIntent
 	err := tx.QueryRow(ctx, `
-		SELECT run_id, created_at, cell_instance, placement_generation, state, build_number
+		SELECT run_id, created_at, cell_instance, placement_generation, state, build_number, granted_at, now()
 		FROM varroa.run_intents
 		WHERE intent_key = $1
 		FOR UPDATE
-	`, req.IntentKey).Scan(&row.runID, &row.createdAt, &row.cellInstance, &row.placementGeneration, &row.state, &row.buildNumber)
+	`, req.IntentKey).Scan(&row.runID, &row.createdAt, &row.cellInstance, &row.placementGeneration, &row.state,
+		&row.buildNumber, &row.grantedAt, &row.dbNow)
 	if err != nil {
 		return ClaimResponse{}, fmt.Errorf("read existing intent: %w", err)
 	}
@@ -225,8 +258,10 @@ func existingKeyDecision(ctx context.Context, tx pgx.Tx, req ClaimRequest, reqRu
 	// Row 2: the stored run_id equals the request's run_id. A started run
 	// answers duplicate and writes nothing: only a queue item claims, and a
 	// queue item for a run that already started is a redelivered command.
-	// Any other repeat answers granted; an unstarted intent moves to a new
-	// instance, and that move can refresh a stale build number.
+	// A repeat from another instance waits while the stored grant can
+	// still be building. Any other repeat answers granted; an unstarted
+	// intent moves to a new instance, and that move can refresh a stale
+	// build number.
 	if row.runID == reqRunID {
 		started, err := intentStarted(ctx, tx, row)
 		if err != nil {
@@ -234,6 +269,14 @@ func existingKeyDecision(ctx context.Context, tx pgx.Tx, req ClaimRequest, reqRu
 		}
 		if started {
 			return ClaimResponse{Decision: DecisionDuplicate, RunID: row.runID.String()}, nil
+		}
+		held, message, err := hold.holds(ctx, tx, req, row, reading)
+		if err != nil {
+			return ClaimResponse{}, err
+		}
+		if held {
+			return ClaimResponse{Decision: DecisionVetoed, ReasonCode: ReasonNotReady, Message: message,
+				RunID: row.runID.String()}, nil
 		}
 		return reanswerSameRun(ctx, tx, req, row)
 	}
@@ -322,7 +365,7 @@ func reanswerSameRun(ctx context.Context, tx pgx.Tx, req ClaimRequest, row store
 	if !sameInstance {
 		if _, err := tx.Exec(ctx, `
 			UPDATE varroa.run_intents
-			SET cell = $1, cell_instance = $2, placement_generation = $3
+			SET cell = $1, cell_instance = $2, placement_generation = $3, granted_at = now()
 			WHERE run_id = $4
 		`, nullableString(req.Cell), nullableString(req.CellInstance), req.PlacementGeneration, row.runID); err != nil {
 			return ClaimResponse{}, fmt.Errorf("move ownership: %w", err)
@@ -378,7 +421,7 @@ func transferIntent(ctx context.Context, tx pgx.Tx, req ClaimRequest, newRunID u
 	if _, err := tx.Exec(ctx, `
 		UPDATE varroa.run_intents
 		SET run_id = $1, created_at = $2, cell = $3, cell_instance = $4,
-		    placement_generation = $5, build_number = $6
+		    placement_generation = $5, build_number = $6, granted_at = now()
 		WHERE intent_key = $7
 	`, newRunID, newCreatedAt, nullableString(req.Cell), nullableString(req.CellInstance),
 		req.PlacementGeneration, buildNumber, req.IntentKey); err != nil {

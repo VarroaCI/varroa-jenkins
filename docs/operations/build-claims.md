@@ -6,7 +6,7 @@ ledger. The ledger assigns the build number and makes the trigger idempotent, so
 webhook or a lost reply never starts a second build for the same event.
 
 Build claims need the [build record store](build-records.md). A controller with the store
-disabled runs builds the same way it always has, with no claim step.
+disabled runs builds with no claim step.
 
 ## Turn on the gate
 
@@ -40,8 +40,7 @@ timeout.
 The operator stamps the first two overrides together from its own `VARROA_CLAIM_TIMEOUT_MS`
 value. Leave it unset and both containers use their built-in defaults, 5000 ms and 4500 ms. Set
 it and the operator stamps that value on the Jenkins container and the value minus 500 ms on the
-mite container. A value below 5000 ms is rejected. The operator stamps neither variable and logs
-a warning instead, because a smaller value breaks the shrink-inward rule.
+mite container. A value below 5000 ms is rejected. The operator then stamps neither variable and logs a warning.
 
 Raise `VARROA_LEDGER_TIMEOUT_MS` only after raising `VARROA_CLAIM_TIMEOUT_MS` to match. Raising
 the gateway budget alone makes the mite answer `504` while the gateway is still waiting, which
@@ -55,8 +54,7 @@ The item runs only after the claimer receives a `granted` decision.
 
 The claimer retries a failed or timed-out claim on this schedule: 1 s, 2 s, 5 s, 10 s, 30 s,
 then every 60 s. After one hour it cancels the queue item and logs a `WARNING`. A claim waits for
-its next attempt off the claimer threads, so a refused claim does not delay other jobs. Every attempt carries the same `run_id`, so a lost reply costs one retry
-and never starts a second build.
+its next attempt off the claimer threads, so a refused claim does not delay other jobs.
 
 ## Reading a claim decision
 
@@ -75,7 +73,7 @@ A missing `decision` key counts as empty. The mite omits the key from every fail
 | `INVALID_KEY` | the key or the request does not parse | cancel |
 | `FENCED` | the cell holds no member of the tenant | cancel |
 | `CROSS_TENANT` | the trigger names a job of another tenant | cancel |
-| `NOT_READY` | the placement is missing or behind | retry |
+| `NOT_READY` | the placement is missing or behind, or another pod holds the grant | retry |
 | `NOT_HOME` | a standby or a slot that is not the home | forward to the veto's `home_slot` |
 
 A cancel logs the `WARNING` `claim refused for job <job>, run <run_id>: <reason>: <message>`. The recorder
@@ -89,14 +87,14 @@ Jenkins-native trigger gets no run record, and `NOT_READY` and `NOT_HOME` mark n
 A retried request reads `granted` again when it carries the same `intent_key` and the same `run_id` as an earlier
 granted claim, and that run has not started. A `duplicate` means the intent key belongs to a different run, for example two triggers
 racing on the same commit. It also answers a repeat for a run whose start the ledger recorded.
-That repeat comes from a redelivered command. A redelivery that reaches a new cell pod before the
-ledger records the start still reads `granted`.
+That repeat comes from a redelivered command. A repeat from a new cell pod reads `NOT_READY` while
+the old pod can still be building the run. The wait ends when the operator confirms the old pod
+gone or the grant is five minutes old. The recorder ingest must also have no backlog.
 
-A retried request from a new cell instance can carry a fresh build number. The ledger refreshes
+The ledger refreshes
 the number when the run never started, the repeat comes from a different cell instance, and the
 stored number is below that instance's next build number. A trigger lost to a cell roll
-therefore restarts under the same run identifier and a number the new cell can apply. The old
-number stays burned. A repeat from the same cell instance
+therefore restarts under the same run identifier and a number the new cell can apply. A repeat from the same cell instance
 keeps its number: that instance's counter passes the stored number only by running the build.
 The recorder drops a late `run.started` from the old cell for the old number and counts it in
 `recorder_ingest_superseded_start_total`.
@@ -127,7 +125,7 @@ During a recorder outage, every claim reads empty, `code` `UNAVAILABLE`. With no
 subscribed, the gateway answers at once ("no responders"). Otherwise it answers after its
 `VARROA_LEDGER_TIMEOUT_MS` budget. The claimer keeps the item and retries for one hour.
 
-Symptoms to check for:
+Symptoms:
 
 - Jenkins queues fill with items blocked on "awaiting Varroa claim" that never start.
 - The gateway logs `claim answered unavailable` at `WARN` for each failed claim, with the

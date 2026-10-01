@@ -33,6 +33,7 @@ func TestMigrationsFSListsEveryFile(t *testing.T) {
 		"00020_run_stages_drop_log_columns.sql":       false,
 		"00021_runs_trigger_failed_intent_key.sql":    false,
 		"00022_tenant_placements_agent_namespace.sql": false,
+		"00023_run_intents_granted_at.sql":            false,
 	}
 	for _, entry := range entries {
 		if _, ok := want[entry.Name()]; !ok {

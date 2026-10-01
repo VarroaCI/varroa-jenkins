@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -174,6 +175,17 @@ func (c *Conn) StreamInfo(name string) (*nats.StreamInfo, error) {
 // JetStream consumer.
 func (c *Conn) ConsumerInfo(stream, name string) (*nats.ConsumerInfo, error) {
 	info, err := c.js.ConsumerInfo(stream, name)
+	if err != nil {
+		return nil, fmt.Errorf("consumer info %s/%s: %w", stream, name, err)
+	}
+	return info, nil
+}
+
+// ConsumerInfoContext is ConsumerInfo bounded by ctx. A caller with a
+// deadline uses it, because the plain read waits for the default
+// JetStream API timeout.
+func (c *Conn) ConsumerInfoContext(ctx context.Context, stream, name string) (*nats.ConsumerInfo, error) {
+	info, err := c.js.ConsumerInfo(stream, name, nats.Context(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("consumer info %s/%s: %w", stream, name, err)
 	}

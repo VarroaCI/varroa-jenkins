@@ -190,3 +190,17 @@ func TestConfigConfirmedGoneGraceFallback(t *testing.T) {
 		})
 	}
 }
+
+// TestWireGrantHoldWiresTheLedger asserts run's wiring helper turns the
+// ledger's grant hold on. A ledger without the hold grants a repeat claim
+// from another instance while the stored grant can still be building.
+func TestWireGrantHoldWiresTheLedger(t *testing.T) {
+	ledger := recordstore.NewLedger(nil, nil)
+	if ledger.GrantHoldWired() {
+		t.Fatal("a new ledger holds the grant hold before the wiring")
+	}
+	wireGrantHold(ledger, nil, Config{})
+	if !ledger.GrantHoldWired() {
+		t.Fatal("wireGrantHold did not wire the grant hold")
+	}
+}

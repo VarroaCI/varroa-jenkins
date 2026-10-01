@@ -209,6 +209,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   `tenant_placements.agent_namespace`, the tenant's agent namespace as its
   own cluster announces it. It defaults to the empty string, and every
   announce overwrites it with the announced value.
+  `00023_run_intents_granted_at.sql` adds the nullable
+  `run_intents.granted_at`, the time of the last grant to the instance
+  `cell_instance` names. A null value counts as an old grant.
   A later migration never edits an applied one. `migrationsFS` (`migrations.go`) embeds
   every file under `migrations/` into the binary through `embed.FS`, so
   the recorder needs no separate deploy artifact. Monthly partition
@@ -271,8 +274,24 @@ of the fleet's audit activity, once a controller becomes disposable.
   `granted_build_number` on the payload is compared alone and counted in
   `recorder_ingest_number_mismatch_total`. `ClaimBudget` (3.5s) bounds one claim so
   the recorder answers inside the gateway's 4s. A resumed build never claims. The
-  ledger learns of a start only from `run.started`, so a redelivery to
-  another cell before that event lands still reads `granted`. `Fence` gates a claim before the
+  ledger learns of a start only from `run.started`. **A repeat from another
+  instance waits on the grant hold** (`ledger_grant_hold.go`): a same-`run_id`
+  repeat of a `GRANTED`, unstarted intent from any instance other than the
+  named owner, an unnamed one included, answers `NOT_READY` and writes nothing. Release test (a)
+  is a pod-read `confirmed_gone_at` for the owner older than the
+  confirmed-gone grace, which the hold raises to the ingest `ackWait` when
+  it is shorter. Release test (b) is a `granted_at` at least
+  `movedHeartbeatWindow` old. A release also needs a fresh `varroa_builds`
+  consumer: `sweepConsumerSkip` passes and `NumRedelivered` is zero. An
+  unreadable consumer keeps the hold. **The consumer read never runs inside
+  a claim transaction**: `holds` answers `errConsumerReadNeeded`, `Claim`
+  rolls back, reads the consumer under the claim's context, and runs
+  `claimAttempt` again with the reading. Test (b) compares `granted_at` with
+  the database clock that `existingKeyDecision` reads; test (a) and the
+  consumer test use the recorder clock, as the re-fire does. `Ledger.SetGrantHold`
+  wires it, `cmd/recorder`'s `wireGrantHold` is the only caller, and a
+  `Ledger` it never touches holds nothing. A start event lost with the old
+  pod stays open: the release then grants a second start. `Fence` gates a claim before the
   transaction opens; `allowAllFence` is the C1 default.
   `RegisterClaimResponder` subscribes `bus.LedgerClaimSubject` with
   queue group `recorder`. `handleClaim` (`ledger_responder.go`) logs a

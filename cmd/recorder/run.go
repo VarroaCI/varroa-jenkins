@@ -63,6 +63,13 @@ func (cfg Config) confirmedGoneGrace() time.Duration {
 	return recordstore.DefaultConfirmedGoneGrace
 }
 
+// wireGrantHold wires the ledger's grant hold with the confirmed-gone
+// grace and the backlog bound the interrupted sweep also reads. run is
+// its only caller, and a Ledger without it holds no repeat claim.
+func wireGrantHold(ledger *recordstore.Ledger, busConn *bus.Conn, cfg Config) {
+	ledger.SetGrantHold(busConn, cfg.confirmedGoneGrace(), cfg.SweepMaxPending)
+}
+
 // run wires the recorder's dependencies in the order design D6 states:
 // open the pool, run migrations, ensure the builds stream, ensure the
 // ingest consumer, ensure the activity stream, start the ten
@@ -148,6 +155,7 @@ func run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("register concurrency metrics: %w", err)
 	}
 	ledger.SetConcurrencyCancel(busConn, concurrencyMetrics, actionMetrics, logger)
+	wireGrantHold(ledger, busConn, cfg)
 
 	sweepMetrics, err := recordstore.NewInterruptedMetrics()
 	if err != nil {
