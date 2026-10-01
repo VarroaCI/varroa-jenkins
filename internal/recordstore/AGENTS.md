@@ -615,8 +615,22 @@ of the fleet's audit activity, once a controller becomes disposable.
   test, in the same transaction as the `runs` write, so a crash after
   commit never strands the lock), or `ReleaseConfirmedFleetLocks`
   (`fleet_lock_release.go`), which the tenant-sync responder and the
-  backstop round both run, and which reuses `cell_liveness.go`'s `deadInstanceGone`/`currentInstanceGone`
-  readings with no anchor test.
+  backstop round both run, and which reuses `cell_liveness.go`'s
+  `deadInstanceGone`/`currentInstanceGone` readings with no anchor test.
+  Beside the two confirmations, the holder's own `lock_release` and the
+  operator force release delete a `releasing` row.
+  **The force release** (`fleet_lock_force_release.go`,
+  `RegisterFleetLockReleaseResponder` on `bus.FleetLockReleaseSubject`,
+  queue group `recorder`) is the BFF's only path to a lock write. One
+  transaction reads the row `FOR UPDATE` and answers `not_found`,
+  `not_releasing` (a held or waiting row), `holder_live` (the stored
+  placement names the row's `cell_instance` as a member, through
+  `memberForInstance`), or deletes the row and answers `released`. The
+  placement row is read without a lock, so it cannot deadlock with the
+  announce. A request with no name, run id, actor, or reason answers an
+  error and writes nothing. A failed commit answers an error reply marked
+  `unknown`, because Postgres can have committed the delete. A release publishes one `lock` notification
+  after the commit; the BFF writes the audit row.
   **Every lock write publishes one `lock` notification per changed row,
   after its own transaction commits, through the `RunNotifier` the
   recorder wires (`CrossTenantDeps.LockNotifier`,

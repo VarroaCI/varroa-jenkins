@@ -99,20 +99,20 @@ list Teams. `CellPool` is cluster-scoped, so a namespace-scoped binding satisfie
 
 ## Read the fleet locks
 
-`fleetlocks` carries one verb, `read`. That verb lists every fleet lock of every cluster on the
-`/locks` page and through `GET /locks`. See [Fleet locks](../tutorials/run-operations.md#fleet-locks) for
-both lock views. There is no write verb, because the view is read-only.
+`fleetlocks` carries two verbs. `read` lists every fleet lock on the `/locks` page and through
+`GET /locks`. `release` force-releases a `releasing` lock through `POST /locks/release`. See
+[Fleet locks](../tutorials/run-operations.md#fleet-locks).
 
 | Role | `fleetlocks` verbs |
 |---|---|
-| `admin` | The verb, through the wildcard rule |
-| `operator` | `read` |
+| `admin` | Both, through the wildcard rule |
+| `operator` | `read`, `release` |
 | `developer` | None |
 | `viewer` | None |
 
-A fleet-wide lock list names every tenant's lock names and job paths at once. The verb therefore
-stays with the operator role. That is the same rule `cellpools` follows. A tenant sees its own
-locks on the team home, and it needs no verb for that.
+A fleet-wide lock list names every tenant's lock names and job paths at once. Both verbs
+therefore stay with the operator role, as `cellpools` does. A tenant sees its own locks on the
+team home with no verb.
 
 ## Grant break-glass access
 

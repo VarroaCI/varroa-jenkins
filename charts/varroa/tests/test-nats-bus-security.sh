@@ -475,6 +475,21 @@ else
   check "recordStore disabled: no other identity holds runs.>" 0
 fi
 
+# Fleet lock force release: the BFF requests varroa.recordstore.fleetlock.release
+# only when the record store is enabled, and the recorder answers it through
+# the BFF's own reply inbox. No other identity holds the subject.
+grep -q 'varroa.recordstore.fleetlock.release' <<<"$bff_rs_block"
+check "bff (recordStore enabled) publishes varroa.recordstore.fleetlock.release" $?
+grep -q 'varroa.recordstore.fleetlock.release' <<<"$recorder_block"
+check "recorder subscribes varroa.recordstore.fleetlock.release" $?
+grep -q '_INBOX_bff.>' <<<"$recorder_block"
+check "recorder publishes the BFF reply inbox _INBOX_bff.>" $?
+if grep -q 'varroa.recordstore.fleetlock.release' <<<"$bff_block$operator_rs_block$gateway_rs_block"; then
+  check "no identity outside the BFF and the recorder holds varroa.recordstore.fleetlock.release" 1
+else
+  check "no identity outside the BFF and the recorder holds varroa.recordstore.fleetlock.release" 0
+fi
+
 echo ""
 if [[ "$failures" -eq 0 ]]; then
   echo "=== ALL ASSERTIONS PASSED ==="

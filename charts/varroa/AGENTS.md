@@ -121,7 +121,9 @@ the packaged CRDs. Does not own the Go source it packages
   subscribe grant; the recorder adds a second subscribe grant on
   `varroa.recordstore.tenant.sync` and answers through the
   `_INBOX_operator.>` publish grant it already holds for the tenant purge
-  reply. Cross-tenant pipeline calls need one more request-reply pair,
+  reply. The fleet lock force release needs one more pair, gated the same
+  way: the BFF publishes `varroa.recordstore.fleetlock.release`, and the
+  recorder subscribes it and answers on `_INBOX_bff.>`. Cross-tenant pipeline calls need one more request-reply pair,
   gated the same way: the gateway publishes `varroa.ledger.crosstenant`
   and the recorder subscribes it, queue group `recorder`, both only when
   `recordStore.enabled` — no other identity (operator, BFF, or a mite

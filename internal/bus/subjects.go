@@ -20,6 +20,7 @@
 // Tail subjects:               varroa.tail.<cluster>.<ns>.<cell> (core NATS, request-reply)
 // Tenant purge subject:        varroa.recordstore.tenant.purge (core NATS, request-reply)
 // Tenant sync subject:          varroa.recordstore.tenant.sync (core NATS, request-reply)
+// Fleet lock release subject:  varroa.recordstore.fleetlock.release (core NATS, request-reply)
 // KV keys:                    <cluster>/<ns>/<name>
 package bus
 
@@ -107,6 +108,13 @@ const (
 	// the recorder is the responder. The request body carries the
 	// cluster and the tenant, so the subject needs no cluster token.
 	TenantSyncSubject = "varroa.recordstore.tenant.sync"
+
+	// FleetLockReleaseSubject is the core-NATS request-reply subject the
+	// BFF asks the recorder to force-release a releasing fleet lock on.
+	// The BFF is the requester and the recorder is the responder. The
+	// request body names the lock and its run, so the subject needs no
+	// cluster token.
+	FleetLockReleaseSubject = "varroa.recordstore.fleetlock.release"
 
 	// BuildsStreamName is the JetStream stream name for the build-event
 	// work queue.

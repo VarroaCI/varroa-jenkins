@@ -142,6 +142,11 @@ new capabilities are added to the BFF/OpenAPI spec first, then surfaced here.
   `activity.go` does for a path the generated client does not cover). Exits
   zero on an empty findings list, non-zero otherwise, printing each finding's
   severity/path/message. Contacts no cell and reads no record-store data.
+- **`locks release` (`locks.go`)** — `varroactl locks release NAME --run
+  RUN_ID --reason TEXT` force-releases one releasing fleet lock through the
+  generated client's `ReleaseFleetLockWithResponse` (`POST /locks/release`).
+  A missing name, run, or reason is a usage error raised before any
+  request. The `locks` group holds no other verb.
 - **`break-glass` (`breakglass.go`)** — `varroactl break-glass NAME [-n NS]
   [--cluster C] --reason TEXT [--ttl 15m] [--target URL] [--listen ADDR]`
   requests a short-lived admin grant for a headless controller through the

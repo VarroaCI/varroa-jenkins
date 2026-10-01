@@ -1,6 +1,6 @@
 # locks: the fleet-wide read over the record store's varroa.fleet_locks
-# table. The route is cluster-wide, like /cellpools: it names no team and no
-# namespace segment. It is read-only, so it carries no POST and no DELETE.
+# table, and the operator force release of a releasing lock. Both routes are
+# cluster-wide, like /cellpools: they name no team and no namespace segment.
 /api/v1/locks:
   get:
     operationId: listAllFleetLocks
@@ -27,5 +27,45 @@
         $ref: '../components/responses.yaml#/Unauthorized'
       "403":
         $ref: '../components/responses.yaml#/Forbidden'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/locks/release:
+  post:
+    operationId: releaseFleetLock
+    tags: [Pipelines]
+    summary: >-
+      Force-releases one releasing fleet lock that no live pod holds.
+      Requires the fleetlocks:release verb on a cluster-wide binding.
+    description: >
+      Deletes the releasing row that name and runId identify. The recorder
+      refuses a row in another state, and a row whose cell instance the
+      stored placement still names as a member, because that pod can still
+      run the holder's build. A release publishes one lock notification and
+      writes one fleetlock.force_released activity row that names the actor
+      and the reason. Confirm first that the holder's build runs on no cell.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/FleetLockReleaseRequest'
+    responses:
+      "200":
+        description: The lock was released.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/FleetLockReleaseResponse'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'

@@ -216,8 +216,9 @@ A lock moves through three states.
 | `waiting` | one or more runs wait for the current holder |
 | `releasing` | the holder's run was marked interrupted; the lock is not yet free |
 
-A lock leaves `releasing` when the holder's run reaches a terminal state, or when the operator
-confirms the holder's cell instance gone. After a move, the old pod is confirmed once gone. A
+A lock leaves `releasing` when the holder's run reaches a terminal state, when the operator
+confirms the holder's cell instance gone, or on a
+[force release](../tutorials/run-operations.md#fleet-locks). After a move, the old pod is confirmed once gone. A
 `releasing` lock blocks every other caller. A Jenkins restart inside its pod fires neither event.
 Delete the cell pod then, and the lock releases.
 

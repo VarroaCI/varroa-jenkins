@@ -407,6 +407,13 @@ func IsNoReply(err error) bool {
 	return errors.Is(err, nats.ErrNoResponders) || errors.Is(err, nats.ErrTimeout)
 }
 
+// IsNoResponder reports whether a request error means that no subscriber
+// received the request at all. A timeout is not such an error: the
+// responder can have received the request and acted on it.
+func IsNoResponder(err error) bool {
+	return errors.Is(err, nats.ErrNoResponders)
+}
+
 // DataHandler is a simplified subscription callback that receives only
 // the message data (not the full nats.Msg). This lets callers use bus
 // subscriptions without importing the nats package.

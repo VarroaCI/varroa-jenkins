@@ -109,6 +109,11 @@ type Dependencies struct {
 	// promotion.
 	VersionProfileReconciler *controller.JenkinsVersionProfileReconciler
 
+	// FleetLockReleaser asks the recorder to force-release a releasing
+	// fleet lock. Nil when the record store is off, so the release route
+	// answers 503.
+	FleetLockReleaser FleetLockReleaser
+
 	// RecordStore reads build records the recorder wrote. Nil when
 	// VARROA_RECORDSTORE_DSN is unset, so a handler on this surface must
 	// check for nil before use.

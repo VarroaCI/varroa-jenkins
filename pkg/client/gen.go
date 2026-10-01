@@ -264,6 +264,11 @@ const (
 	Waiting   ComponentsSchemasFleetLockState = "waiting"
 )
 
+// Defines values for ComponentsSchemasFleetLockReleaseResponseState.
+const (
+	Released ComponentsSchemasFleetLockReleaseResponseState = "released"
+)
+
 // Defines values for ComponentsSchemasGroupEntrySource.
 const (
 	ComponentsSchemasGroupEntrySourceBoth  ComponentsSchemasGroupEntrySource = "both"
@@ -2008,6 +2013,33 @@ type ComponentsSchemasFleetLockState string
 type ComponentsSchemasFleetLockListResponse struct {
 	Items []ComponentsSchemasFleetLock `json:"items"`
 }
+
+// ComponentsSchemasFleetLockReleaseRequest POST /locks/release. name and runId identify the lock row. reason is stored in the audit record, so it is required.
+type ComponentsSchemasFleetLockReleaseRequest struct {
+	// Name The qualified lock name, as the lock reads answer it.
+	Name string `json:"name"`
+
+	// Reason Why the operator releases the lock. The activity row carries it.
+	Reason string `json:"reason"`
+
+	// RunId The run that holds the releasing lock.
+	RunId string `json:"runId"`
+}
+
+// ComponentsSchemasFleetLockReleaseResponse The released row. It names the owner of the run that held the lock.
+type ComponentsSchemasFleetLockReleaseResponse struct {
+	// CellInstance The cell instance that held the lock.
+	CellInstance *string                                        `json:"cellInstance,omitempty"`
+	Cluster      string                                         `json:"cluster"`
+	JobPath      string                                         `json:"jobPath"`
+	Name         string                                         `json:"name"`
+	RunId        string                                         `json:"runId"`
+	State        ComponentsSchemasFleetLockReleaseResponseState `json:"state"`
+	Tenant       string                                         `json:"tenant"`
+}
+
+// ComponentsSchemasFleetLockReleaseResponseState defines model for ComponentsSchemasFleetLockReleaseResponse.State.
+type ComponentsSchemasFleetLockReleaseResponseState string
 
 // ComponentsSchemasFleetPluginClassCount defines model for components_schemas_FleetPluginClassCount.
 type ComponentsSchemasFleetPluginClassCount struct {
@@ -4601,6 +4633,9 @@ type UpdateVersionProfileJSONRequestBody = ComponentsSchemasJenkinsVersionProfil
 // CreateGroupJSONRequestBody defines body for CreateGroup for application/json ContentType.
 type CreateGroupJSONRequestBody = ComponentsSchemasCreateGroupRequest
 
+// ReleaseFleetLockJSONRequestBody defines body for ReleaseFleetLock for application/json ContentType.
+type ReleaseFleetLockJSONRequestBody = ComponentsSchemasFleetLockReleaseRequest
+
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = ComponentsSchemasLoginRequest
 
@@ -5500,6 +5535,11 @@ type ClientInterface interface {
 
 	// ListAllFleetLocks request
 	ListAllFleetLocks(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReleaseFleetLockWithBody request with any body
+	ReleaseFleetLockWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ReleaseFleetLock(ctx context.Context, body ReleaseFleetLockJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// LoginWithBody request with any body
 	LoginWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -7181,6 +7221,30 @@ func (c *Client) GetIdentitySettings(ctx context.Context, reqEditors ...RequestE
 
 func (c *Client) ListAllFleetLocks(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListAllFleetLocksRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ReleaseFleetLockWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReleaseFleetLockRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ReleaseFleetLock(ctx context.Context, body ReleaseFleetLockJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReleaseFleetLockRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -12986,6 +13050,46 @@ func NewListAllFleetLocksRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewReleaseFleetLockRequest calls the generic ReleaseFleetLock builder with application/json body
+func NewReleaseFleetLockRequest(server string, body ReleaseFleetLockJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewReleaseFleetLockRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewReleaseFleetLockRequestWithBody generates requests for ReleaseFleetLock with any type of body
+func NewReleaseFleetLockRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/locks/release")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewLoginRequest calls the generic Login builder with application/json body
 func NewLoginRequest(server string, body LoginJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -16132,6 +16236,11 @@ type ClientWithResponsesInterface interface {
 	// ListAllFleetLocksWithResponse request
 	ListAllFleetLocksWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListAllFleetLocksResponse, error)
 
+	// ReleaseFleetLockWithBodyWithResponse request with any body
+	ReleaseFleetLockWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReleaseFleetLockResponse, error)
+
+	ReleaseFleetLockWithResponse(ctx context.Context, body ReleaseFleetLockJSONRequestBody, reqEditors ...RequestEditorFn) (*ReleaseFleetLockResponse, error)
+
 	// LoginWithBodyWithResponse request with any body
 	LoginWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*LoginResponse, error)
 
@@ -18729,6 +18838,34 @@ func (r ListAllFleetLocksResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r ListAllFleetLocksResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ReleaseFleetLockResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasFleetLockReleaseResponse
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsResponsesConflict
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ReleaseFleetLockResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReleaseFleetLockResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -21545,6 +21682,23 @@ func (c *ClientWithResponses) ListAllFleetLocksWithResponse(ctx context.Context,
 		return nil, err
 	}
 	return ParseListAllFleetLocksResponse(rsp)
+}
+
+// ReleaseFleetLockWithBodyWithResponse request with arbitrary body returning *ReleaseFleetLockResponse
+func (c *ClientWithResponses) ReleaseFleetLockWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReleaseFleetLockResponse, error) {
+	rsp, err := c.ReleaseFleetLockWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReleaseFleetLockResponse(rsp)
+}
+
+func (c *ClientWithResponses) ReleaseFleetLockWithResponse(ctx context.Context, body ReleaseFleetLockJSONRequestBody, reqEditors ...RequestEditorFn) (*ReleaseFleetLockResponse, error) {
+	rsp, err := c.ReleaseFleetLock(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReleaseFleetLockResponse(rsp)
 }
 
 // LoginWithBodyWithResponse request with arbitrary body returning *LoginResponse
@@ -26553,6 +26707,74 @@ func ParseListAllFleetLocksResponse(rsp *http.Response) (*ListAllFleetLocksRespo
 			return nil, err
 		}
 		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseReleaseFleetLockResponse parses an HTTP response from a ReleaseFleetLockWithResponse call
+func ParseReleaseFleetLockResponse(rsp *http.Response) (*ReleaseFleetLockResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReleaseFleetLockResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasFleetLockReleaseResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest ComponentsResponsesServiceUnavailable

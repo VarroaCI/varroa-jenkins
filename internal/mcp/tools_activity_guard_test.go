@@ -61,6 +61,24 @@ func (guardRecordReader) GetRun(_ context.Context, runID string) (recordstore.Ru
 	}, nil, nil
 }
 
+// ListAllFleetLocks answers the one lock release_fleet_lock names, so its
+// pre-read finds the lock's cluster.
+func (guardRecordReader) ListAllFleetLocks(_ context.Context) ([]recordstore.FleetLock, error) {
+	return []recordstore.FleetLock{{Name: "team-a/obj/deploy", RunID: "obj", Cluster: "core",
+		Tenant: "team-a/obj", JobPath: "build", State: recordstore.FleetLockStateReleasing}}, nil
+}
+
+// guardFleetLockReleaser answers every force release as released, so
+// release_fleet_lock reaches its emit.
+type guardFleetLockReleaser struct{}
+
+func (guardFleetLockReleaser) ForceRelease(_ context.Context,
+	req recordstore.FleetLockForceReleaseRequest) (recordstore.FleetLockForceReleaseResponse, error) {
+	return recordstore.FleetLockForceReleaseResponse{
+		Outcome: recordstore.FleetLockForceReleased, Cluster: "core", Tenant: "team-a/obj", JobPath: "build",
+	}, nil
+}
+
 // guardBlobStore answers one sandboxed build.xml for every range read,
 // the read a run-state object takes, so replay_run's eligibility rules
 // pass.
@@ -181,6 +199,8 @@ func guardEmitDeps(t *testing.T, sink activity.EventSink) *api.Dependencies {
 		MiteRegistry: &guardTransport{},
 		// replay_run reads the source run's script replica.
 		BlobStore: guardBlobStore{},
+		// release_fleet_lock asks the recorder through this seam.
+		FleetLockReleaser: guardFleetLockReleaser{},
 	}
 }
 
@@ -300,10 +320,11 @@ func guardArgsFor(name string) map[string]interface{} {
 		// ProfileCandidates (cluster-scoped, direct store)
 		"promote_version_candidate": {"name": obj},
 		// Pipelines (record store + tenant resolver + mite transport)
-		"run_pipeline":      {"team": "team-a", "job": "build"},
-		"proceed_run_input": {"run": obj, "input": "in-1"},
-		"abort_run_input":   {"run": obj, "input": "in-1"},
-		"replay_run":        {"run": guardReplayRunID, "script": "echo 'edited'"},
+		"run_pipeline":       {"team": "team-a", "job": "build"},
+		"proceed_run_input":  {"run": obj, "input": "in-1"},
+		"abort_run_input":    {"run": obj, "input": "in-1"},
+		"replay_run":         {"run": guardReplayRunID, "script": "echo 'edited'"},
+		"release_fleet_lock": {"name": "team-a/obj/deploy", "runId": obj, "reason": "the old pod is gone"},
 		// CellPools (cluster-scoped, direct store)
 		"update_cell_pool": {"name": obj, "warm": 2},
 	}

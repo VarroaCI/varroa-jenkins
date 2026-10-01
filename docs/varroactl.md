@@ -97,6 +97,9 @@ varroactl builds team-a/checkout-api
 
 # Check a pipeline template marker before it is committed.
 varroactl lint marker --team team-a --marker .varroa/pipeline.yaml
+
+# Force-release a releasing fleet lock that no live pod holds.
+varroactl locks release team-a/deploy-prod --run <run id> --reason "<why>"
 ```
 
 Use [Controller lifecycle operations](operations/lifecycle.md) for state changes, [Brood operations](operations/brood-operations.md) for fleet actions, [Brood schedules](operations/brood-schedules.md) for recurring work, and the [pipelines tutorial](tutorials/pipelines.md) to trigger a run, read a log, and download an artifact.

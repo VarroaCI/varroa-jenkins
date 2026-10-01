@@ -4839,6 +4839,51 @@ FleetLockListResponse:
         $ref: '#/FleetLock'
   additionalProperties: false
 
+FleetLockReleaseRequest:
+  type: object
+  description: >
+    POST /locks/release. name and runId identify the lock row. reason is
+    stored in the audit record, so it is required.
+  required: [name, runId, reason]
+  properties:
+    name:
+      type: string
+      minLength: 1
+      description: The qualified lock name, as the lock reads answer it.
+    runId:
+      type: string
+      minLength: 1
+      description: The run that holds the releasing lock.
+    reason:
+      type: string
+      minLength: 1
+      description: Why the operator releases the lock. The activity row carries it.
+  additionalProperties: false
+
+FleetLockReleaseResponse:
+  type: object
+  description: >
+    The released row. It names the owner of the run that held the lock.
+  required: [name, runId, cluster, tenant, jobPath, state]
+  properties:
+    name:
+      type: string
+    runId:
+      type: string
+    cluster:
+      type: string
+    tenant:
+      type: string
+    jobPath:
+      type: string
+    cellInstance:
+      type: string
+      description: The cell instance that held the lock.
+    state:
+      type: string
+      enum: [released]
+  additionalProperties: false
+
 CreateRunRequest:
   type: object
   description: >

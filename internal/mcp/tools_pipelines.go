@@ -19,8 +19,8 @@ import (
 //
 // Design D1a: these tools call the same internal services the
 // pipelines HTTP handlers call (internal/api's RunPipeline, ListRuns,
-// GetRun, GetRunLog, ListFleetLocks, ProceedRunInput, AbortRunInput,
-// ReplayRun), so
+// GetRun, GetRunLog, ListFleetLocks, ReleaseFleetLock, ProceedRunInput,
+// AbortRunInput, ReplayRun), so
 // each tool authorizes and reads exactly as its HTTP counterpart does.
 // No tool here calls a controller-scoped check; the authorization table
 // lives in specs/pipelines-api.
@@ -44,6 +44,7 @@ func registerPipelinesTools(mcpServer *server.MCPServer, deps *api.Dependencies)
 	registerGetRunTool(mcpServer, deps)
 	registerGetRunLogTool(mcpServer, deps)
 	registerListFleetLocksTool(mcpServer, deps)
+	registerReleaseFleetLockTool(mcpServer, deps)
 	registerProceedRunInputTool(mcpServer, deps)
 	registerAbortRunInputTool(mcpServer, deps)
 	registerReplayRunTool(mcpServer, deps)
@@ -371,6 +372,35 @@ func registerListFleetLocksTool(mcpServer *server.MCPServer, deps *api.Dependenc
 			return mcp.NewToolResultError(serr.Error()), nil
 		}
 		return resultJSON(map[string]any{"items": items, "count": len(items)})
+	})
+}
+
+// registerReleaseFleetLockTool registers release_fleet_lock: the operator
+// force release of one releasing lock that no live pod holds. It calls the
+// same service as POST /locks/release, so it needs the same cluster-wide
+// fleetlocks:release verb and writes the same activity row.
+func registerReleaseFleetLockTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
+	releaseTool := mcp.NewTool("release_fleet_lock",
+		mcp.WithDescription("Force-release one releasing fleet lock whose holder runs on no live pod. "+
+			"The record store refuses a held or waiting lock, and a lock whose cell instance the "+
+			"placement still runs. Confirm first that the holder's build runs on no cell. "+
+			"Needs the cluster-wide fleetlocks:release verb."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Qualified lock name, as list_fleet_locks answers it")),
+		mcp.WithString("runId", mcp.Required(), mcp.Description("Run that holds the releasing lock")),
+		mcp.WithString("reason", mcp.Required(), mcp.Description("Why the lock is released. The audit record carries it.")),
+	)
+	addTool(mcpServer, kindDelete, releaseTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		claims, toolErr := requirePipelineCaller(ctx, deps)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		args := getArgs(req)
+		result, serr := api.NewServer(deps).ReleaseFleetLock(ctx, claims,
+			strArg(args, "name"), strArg(args, "runId"), strArg(args, "reason"), "mcp")
+		if serr != nil {
+			return mcp.NewToolResultError(serr.Error()), nil
+		}
+		return resultJSON(result)
 	})
 }
 

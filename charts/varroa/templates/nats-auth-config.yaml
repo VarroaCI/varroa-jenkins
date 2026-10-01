@@ -220,6 +220,9 @@ stringData:
               // cell's mite, the same subject the operator publishes safe
               // restarts on.
               "mite.*.*.*.out"
+              // Fleet lock force release: ask the recorder to delete a
+              // releasing lock that no live pod holds.
+              "varroa.recordstore.fleetlock.release"
 {{- end }}
             ]
             subscribe: [
@@ -254,6 +257,9 @@ stringData:
               // The tenant purge reply and the tenant sync reply: the
               // operator owns the request inbox.
               "_INBOX_operator.>"
+              // The fleet lock release reply: the BFF owns the request
+              // inbox.
+              "_INBOX_bff.>"
               // Live run notifications: tell the BFF that a run changed,
               // so a reader refetches the record without a reload.
               "runs.>"
@@ -290,6 +296,8 @@ stringData:
               // Placement's tenant sync: announce a tenant's placement,
               // and answer a request for a tenant's build records.
               "varroa.recordstore.tenant.sync"
+              // Fleet lock force release: answer the BFF's request.
+              "varroa.recordstore.fleetlock.release"
               "_INBOX_recorder.>"
             ]
           }

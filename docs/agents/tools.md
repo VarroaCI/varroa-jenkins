@@ -46,10 +46,11 @@ Authorization runs before a result enters the list, so a hidden controller,
 job, or run never appears. The last three kinds need the record store; when
 it is not wired, `search` still returns the first four.
 
-The MCP server also exposes seven pipeline tools: `run_pipeline`, `list_runs`,
-`get_run`, `get_run_log`, `list_fleet_locks`, `proceed_run_input`, and
-`abort_run_input`. They operate on the build record store. The `run_pipeline`
-tool starts a build and returns a `runId` and an `intentKey`.
+The MCP server also exposes nine pipeline tools: `run_pipeline`, `list_runs`,
+`get_run`, `get_run_log`, `list_fleet_locks`, `release_fleet_lock`,
+`proceed_run_input`, `abort_run_input`, and `replay_run`. They operate on the
+build record store. The `run_pipeline` tool starts a build and returns a
+`runId` and an `intentKey`.
 The `list_runs` tool takes `limit` with the same default of 50 and the same
 maximum of 200 as `list_activity`. The `get_run` tool returns one run's
 detail. The `get_run_log` tool returns a bounded tail of the run's console

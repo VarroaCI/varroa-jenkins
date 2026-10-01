@@ -14,23 +14,31 @@ Helm values before you start.
 A job that must not run twice at the same time takes a fleet lock. The `varroa.lock` step holds
 the lock, and a second run waits for it. See
 [Cross-tenant pipelines](../config/cross-tenant-pipelines.md) for the lock name form, the three
-lock states, and the timeout budget. This page does not repeat them.
+lock states, and the timeout budget.
 
 The **Locks** card on the team home lists the locks your tenant holds and the locks its runs wait
 on. A row names the lock, the state, the holder, and the time since the wait or the acquisition
-started. The card reads the locks again on a `lock` event from the run stream, at most once every
-two seconds. It shows no queue position.
+started. The card reads the locks again on a `lock` event, at most once every two seconds. It
+shows no queue position.
 
 An operator opens `/locks` to list every lock of every cluster, across every tenant. That page needs
-the `fleetlocks:read` verb, which `varroa:operator` and `varroa:admin` hold. The page polls and
-opens no stream.
+the `fleetlocks:read` verb, which `varroa:operator` and `varroa:admin` hold. The page polls.
 
-Both views are read-only, so neither page releases a lock. A stuck lock frees itself in three
-ways:
+Neither page releases a lock. A stuck lock frees itself in three ways:
 
 - The holder's step releases the lock when its block ends.
 - The holder's run reaches a terminal state.
 - The Varroa operator confirms that the holder's cell instance is gone.
+
+Otherwise, force-release a `releasing` lock whose build runs on no cell.
+
+```bash
+varroactl locks release <lock name> --run <run id> --reason "<why>"
+```
+
+This needs the `fleetlocks:release` verb. Varroa refuses a held lock, or one whose pod still runs.
+Each release writes a `fleetlock.force_released` activity row. A lost reply writes
+`fleetlock.force_release_unconfirmed`; read `/locks` before you retry.
 
 ## Read a failure digest
 

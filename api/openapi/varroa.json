@@ -8338,6 +8338,73 @@
         ],
         "type": "object"
       },
+      "components_schemas_FleetLockReleaseRequest": {
+        "additionalProperties": false,
+        "description": "POST /locks/release. name and runId identify the lock row. reason is stored in the audit record, so it is required.\n",
+        "properties": {
+          "name": {
+            "description": "The qualified lock name, as the lock reads answer it.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the operator releases the lock. The activity row carries it.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "runId": {
+            "description": "The run that holds the releasing lock.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "runId",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "components_schemas_FleetLockReleaseResponse": {
+        "additionalProperties": false,
+        "description": "The released row. It names the owner of the run that held the lock.\n",
+        "properties": {
+          "cellInstance": {
+            "description": "The cell instance that held the lock.",
+            "type": "string"
+          },
+          "cluster": {
+            "type": "string"
+          },
+          "jobPath": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "released"
+            ],
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "runId",
+          "cluster",
+          "tenant",
+          "jobPath",
+          "state"
+        ],
+        "type": "object"
+      },
       "components_schemas_FleetPluginClassCount": {
         "additionalProperties": false,
         "properties": {
@@ -18150,6 +18217,56 @@
           }
         },
         "summary": "Lists every fleet lock of every cluster, across every tenant. Requires the fleetlocks:read verb on a cluster-wide binding.",
+        "tags": [
+          "Pipelines"
+        ]
+      }
+    },
+    "/api/v1/locks/release": {
+      "post": {
+        "description": "Deletes the releasing row that name and runId identify. The recorder refuses a row in another state, and a row whose cell instance the stored placement still names as a member, because that pod can still run the holder's build. A release publishes one lock notification and writes one fleetlock.force_released activity row that names the actor and the reason. Confirm first that the holder's build runs on no cell.\n",
+        "operationId": "releaseFleetLock",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/components_schemas_FleetLockReleaseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_FleetLockReleaseResponse"
+                }
+              }
+            },
+            "description": "The lock was released."
+          },
+          "400": {
+            "$ref": "#/components/responses/components_responses_BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/components_responses_ServiceUnavailable"
+          }
+        },
+        "summary": "Force-releases one releasing fleet lock that no live pod holds. Requires the fleetlocks:release verb on a cluster-wide binding.",
         "tags": [
           "Pipelines"
         ]

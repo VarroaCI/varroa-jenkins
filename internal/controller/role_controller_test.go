@@ -242,7 +242,7 @@ func buildRoleForTest(t *testing.T, name string) *v1alpha1.VarroaRole {
 }
 
 // TestBuiltinRoles_FleetLockVerbMatrix proves the fleet-lock verbs:
-// operator holds read, admin holds it through its wildcard and carries no
+// operator holds read and release, admin holds both through its wildcard and carries no
 // fleetlocks rule, and developer and viewer carry no rule at all. One
 // fleet-wide lock read discloses every tenant's lock names and job paths
 // at once, so a read verb for a developer or a viewer would disclose a
@@ -261,8 +261,8 @@ func TestBuiltinRoles_FleetLockVerbMatrix(t *testing.T) {
 	if rule == nil {
 		t.Fatal("role operator: expected a fleetlocks rule, found none")
 	}
-	if !stringSlicesEqual(rule.Verbs, []string{"read"}) {
-		t.Errorf("role operator: fleetlocks verbs = %v, want [read]", rule.Verbs)
+	if !stringSlicesEqual(rule.Verbs, []string{"read", "release"}) {
+		t.Errorf("role operator: fleetlocks verbs = %v, want [read release]", rule.Verbs)
 	}
 
 	for _, name := range []string{"admin", "developer", "viewer"} {
@@ -317,7 +317,7 @@ func TestRoleReconciler_RewritesDriftedFleetLockRule(t *testing.T) {
 	if rule == nil {
 		t.Fatal("expected the reconciler to restore the fleetlocks rule, found none")
 	}
-	if !stringSlicesEqual(rule.Verbs, []string{"read"}) {
-		t.Errorf("restored fleetlocks verbs = %v, want [read]", rule.Verbs)
+	if !stringSlicesEqual(rule.Verbs, []string{"read", "release"}) {
+		t.Errorf("restored fleetlocks verbs = %v, want [read release]", rule.Verbs)
 	}
 }

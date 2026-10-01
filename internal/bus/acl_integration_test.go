@@ -258,6 +258,8 @@ func startACLTestServer(t *testing.T) *server.Server {
 						"$JS.API.CONSUMER.CREATE.KV_mite_presence",
 						"$JS.API.CONSUMER.CREATE.KV_mite_presence.>",
 						"$JS.API.CONSUMER.*.KV_mite_presence.>",
+						// Fleet lock force release request to the recorder.
+						"varroa.recordstore.fleetlock.release",
 					},
 					[]string{
 						"events.brood.>",
@@ -278,6 +280,8 @@ func startACLTestServer(t *testing.T) *server.Server {
 					[]string{
 						"$JS.API.INFO",
 						"_INBOX_gateway.>",
+						// The fleet lock release reply to the BFF's inbox.
+						"_INBOX_bff.>",
 						"$JS.API.STREAM.CREATE.varroa_builds",
 						"$JS.API.STREAM.UPDATE.varroa_builds",
 						"$JS.API.STREAM.INFO.varroa_builds",
@@ -289,6 +293,7 @@ func startACLTestServer(t *testing.T) *server.Server {
 					},
 					[]string{
 						"varroa.ledger.claim",
+						"varroa.recordstore.fleetlock.release",
 						"_INBOX_recorder.>",
 					},
 				),
@@ -334,7 +339,7 @@ func TestACLIntegration(t *testing.T) {
 	op := connectACL(t, url, "operator", "op_pass", "_INBOX_operator")
 	gw := connectACL(t, url, "gateway", "gw_pass", "_INBOX_gateway")
 	bf := connectACL(t, url, "bff", "bff_pass", "_INBOX_bff")
-	_ = connectACL(t, url, "recorder", "rec_pass", "_INBOX_recorder")
+	rec := connectACL(t, url, "recorder", "rec_pass", "_INBOX_recorder")
 
 	// -----------------------------------------------------------------------
 	// ALLOW: the operator's desired-state request reaches the gateway, and
@@ -520,6 +525,29 @@ func TestACLIntegration(t *testing.T) {
 		}
 		if string(resp.Data) != "bff-reply" {
 			t.Fatalf("expected 'bff-reply', got %q", string(resp.Data))
+		}
+	})
+
+	// -----------------------------------------------------------------------
+	// ALLOW: the BFF's fleet lock release request reaches the recorder, and
+	// the recorder's reply reaches the BFF's inbox
+	// -----------------------------------------------------------------------
+	t.Run("bff_recorder_fleet_lock_release", func(t *testing.T) {
+		sub, err := rec.SubscribeRequest(FleetLockReleaseSubject, "recorder", func([]byte) []byte {
+			return []byte("recorder-reply")
+		})
+		if err != nil {
+			t.Fatalf("recorder SubscribeRequest for fleet lock release: %v", err)
+		}
+		defer func() { _ = sub.Unsubscribe() }()
+		rec.NATSConn().Flush()
+
+		resp, err := bf.Request(FleetLockReleaseSubject, []byte("{}"), 3*time.Second)
+		if err != nil {
+			t.Fatalf("bff fleet lock release request: %v", err)
+		}
+		if string(resp.Data) != "recorder-reply" {
+			t.Fatalf("expected 'recorder-reply', got %q", string(resp.Data))
 		}
 	})
 

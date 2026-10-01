@@ -703,6 +703,11 @@ func main() {
 			}
 			apiDeps.RecordStore = reader
 			apiDeps.Backfill = recordstore.NewActivityBackfill(reader)
+			// The force release goes to the recorder, which owns every
+			// write to varroa.fleet_locks. It needs the bus for that.
+			if busConn != nil {
+				apiDeps.FleetLockReleaser = api.NewBusFleetLockReleaser(busConn)
+			}
 
 			if blobURL := os.Getenv("VARROA_BLOBSTORE_URL"); blobURL != "" {
 				store, err := blob.Open(context.Background(), blobURL, rsPool)

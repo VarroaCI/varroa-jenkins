@@ -159,6 +159,26 @@ federation, activity persistence, and SSE fanout.
   through the same `tenantGrants`/`grantsAllow` pair the team listing uses.
   The row shape carries no holder and no queue position: a consumer that
   wants a lock's holder groups the rows it already has by name.
+- **Fleet lock force release** (`fleetlock_release.go`) serves
+  `POST /locks/release` (`{name, runId, reason}`, all required, no other
+  key). `Server.ReleaseFleetLock` is the one implementation the route and
+  the `release_fleet_lock` MCP tool share. It checks the cluster-wide
+  `CanReleaseFleetLocks` gate and the body before it sends anything, then
+  asks the recorder through the `FleetLockReleaser` seam
+  (`deps.FleetLockReleaser`, wired over `bus.FleetLockReleaseSubject` only
+  when the record store is on; nil answers 503). The BFF never writes
+  `varroa.fleet_locks`. It maps `not_found` to 404, `not_releasing` and
+  `holder_live` to 409, and `released` to 200, and only on `released` it
+  writes one `fleetlock.force_released` activity row on the global subject
+  of the lock's cluster (source `user` or `mcp`). The wait ignores the
+  caller's cancellation (`context.WithoutCancel`), and a request a recorder
+  received with no reply writes one `fleetlock.force_release_unconfirmed`
+  row instead (on the cluster `fleetLockCluster` read from the row before
+  the request; that read fails closed: a failed read answers 503, a
+  missing row 404, and a caller gone during it sends nothing), because the recorder can have committed; so does an error
+  reply the recorder marks `unknown` (a failed commit). No responder
+  (`ErrFleetLockReleaseNotDelivered`) and any other error reply
+  (`ErrFleetLockReleaseFailed`) change no row and write nothing.
 - **The team cell read** (`handleGetTeamCell`, `handlers_pipelines.go`) serves
   `GET /pipelines/{team}/cell`. It reads the `Team` object first and falls
   back to `TenantResolver`, so a pipelines Team awaiting its first cell

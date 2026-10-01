@@ -162,6 +162,8 @@ paths:
     $ref: './paths/cellpools.yaml#/~1api~1v1~1cellpools~1{name}'
   /api/v1/locks:
     $ref: './paths/locks.yaml#/~1api~1v1~1locks'
+  /api/v1/locks/release:
+    $ref: './paths/locks.yaml#/~1api~1v1~1locks~1release'
   /api/v1/identity-settings:
     $ref: './paths/users.yaml#/~1api~1v1~1identity-settings'
   /api/v1/builtin-roles:

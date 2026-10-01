@@ -42,6 +42,7 @@ func NewRouter(deps *Dependencies) http.Handler {
 	// Fleet locks: the cluster-wide lock list, beside the cell-pool
 	// family because both are flat fleet views.
 	mux.HandleFunc("GET /locks", srv.handleListAllFleetLocks)
+	mux.HandleFunc("POST /locks/release", srv.handleReleaseFleetLock)
 	// Controllers: GET list (creation is declarative via the Kubernetes API).
 	mux.HandleFunc("/controllers", srv.HandleControllers)
 	// Clusters: GET list, + cluster-scoped dispatch.

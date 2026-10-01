@@ -268,6 +268,14 @@ func run(ctx context.Context, cfg Config) error {
 		<-ctx.Done()
 		return sub.Unsubscribe()
 	}
+	fleetLockReleaseResponderFn := func(ctx context.Context) error {
+		sub, err := recordstore.RegisterFleetLockReleaseResponder(busConn, pool, runNotifier, logger)
+		if err != nil {
+			return err
+		}
+		<-ctx.Done()
+		return sub.Unsubscribe()
+	}
 	maintenanceFn := func(ctx context.Context) error { //nolint:unparam // matches runWorkers' func(context.Context) error shape; RunMaintenance logs its own failures and never returns one to the caller
 		recordstore.RunMaintenance(ctx, pool, sqlDB, maintCfg, logger)
 		return nil
@@ -291,6 +299,7 @@ func run(ctx context.Context, cfg Config) error {
 			namedWorker{"tenant purge responder", tenantPurgeResponderFn},
 			namedWorker{"tenant sync responder", tenantSyncResponderFn},
 			namedWorker{"cross-tenant responder", crossTenantResponderFn},
+			namedWorker{"fleet lock release responder", fleetLockReleaseResponderFn},
 			namedWorker{"maintenance", maintenanceFn},
 			namedWorker{"activity ingest", activityIngestFn},
 			namedWorker{"run notifier", runNotifierFn},

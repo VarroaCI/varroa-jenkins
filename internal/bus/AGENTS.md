@@ -63,7 +63,10 @@ control plane's async transport — no other package talks to NATS directly.
   rows after it leaves a cell), and `varroa.recordstore.tenant.sync`
   (core NATS request-reply, operator to recorder, queue group
   `recorder`: announce a tenant's placement, or ask for a tenant's
-  build records to seed a cell).
+  build records to seed a cell), and `varroa.recordstore.fleetlock.release`
+  (core NATS request-reply, BFF to recorder, queue group `recorder`:
+  force-release one releasing fleet lock; the BFF publishes it and the
+  recorder answers on `_INBOX_bff.>`, both gated on `recordStore.enabled`).
 - **JetStream streams** (`jetstream.go`) — `ActivityStreamName` /
   `ActivityStreamConfig`: subjects `activity.>`, `LimitsPolicy` +
   `DiscardOld`, fixed limits `MaxAge=72h`, `MaxMsgs=1000000`,

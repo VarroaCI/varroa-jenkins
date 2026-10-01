@@ -353,6 +353,16 @@ func (a *Authorizer) CanReadFleetLocks(claims *auth.Claims) bool {
 	return hasVerb(a.globalEffective(claims), "fleetlocks", "read")
 }
 
+// CanReleaseFleetLocks checks if the caller can force-release a releasing
+// fleet lock. The release can reach any tenant's lock, so the decision
+// takes the cluster-wide partition, as CanReadFleetLocks does.
+func (a *Authorizer) CanReleaseFleetLocks(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "fleetlocks", "release")
+}
+
 // CanReadCatalogSources checks if the caller can read CatalogSources.
 func (a *Authorizer) CanReadCatalogSources(claims *auth.Claims) bool {
 	if claims == nil {

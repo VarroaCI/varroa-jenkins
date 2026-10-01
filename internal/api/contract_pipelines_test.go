@@ -193,5 +193,16 @@ func init() {
 			Claims:     adminClaims,
 			WantStatus: http.StatusServiceUnavailable,
 		},
+		// The force release checks the gate and the body before the
+		// releaser, so an admin with no record store gets the 503 shape.
+		// fleetlock_release_test.go covers every other status.
+		contractCase{
+			Name:       "releaseFleetLock-recordStoreDisabled",
+			Method:     "POST",
+			Path:       "/api/v1/locks/release",
+			Body:       map[string]string{"name": "payments/deploy", "runId": "run-1", "reason": "the old pod is gone"},
+			Claims:     adminClaims,
+			WantStatus: http.StatusServiceUnavailable,
+		},
 	)
 }
