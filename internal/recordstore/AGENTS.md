@@ -235,7 +235,10 @@ of the fleet's audit activity, once a controller becomes disposable.
   test drops and recreates schema `varroa` during setup, so a repeated run
   starts clean. The `blob` test binary runs at the same time and owns a
   sibling database, `<db>_blob`, that it creates on first use; no other
-  test binary may share the DSN's database with this harness.
+  test binary may share the DSN's database with this harness. Seed a
+  monthly-partitioned table only inside the window its migration creates
+  (`00001` for `runs` and `log_chunks`, `00002` for `activity`). That
+  window runs from the previous month to two months ahead of the clock.
 - **Cluster-wide roles in a grants test** (`grants_test.go`) — a Postgres
   role is instance-wide, not per-database. A grants test creates
   `varroa_client`/`varroa_gateway` only when the role does not already

@@ -105,7 +105,11 @@ func TestJobWindowStatsIgnoresRunBeforeTheWindow(t *testing.T) {
 	ctx := context.Background()
 
 	jobPath := "acme/app-window"
-	windowStart := time.Now().UTC().Add(-30 * 24 * time.Hour)
+	// Use a short window, not the 30-day card window. Migration 00001
+	// creates partitions from the first day of the previous month. A seed
+	// 30 days back can fall before that day early in a month. This occurs
+	// when the previous month has 30 days or fewer.
+	windowStart := time.Now().UTC().Add(-2 * time.Hour)
 
 	oldDuration := int64(999999)
 	seedJobSummaryRun(t, db, jobPath, windowStart.Add(-time.Hour), "FAILURE", &oldDuration)
