@@ -22,14 +22,16 @@ var cellLintRules = []lint.Rule{
 }
 
 // assembleCellState is what assembleCellContent computes for one cell tick:
-// the merged items.yaml ready to send as-is, the tenant clouds to append to
-// jenkins.clouds, the SYSTEM-scope credentials those clouds need, each
-// tenant's pipeline-template fragment, and the tenantWarnings to record.
+// the merged items.yaml with no tenant credential, the tenant clouds to
+// append to jenkins.clouds, the SYSTEM-scope credentials those clouds need,
+// each tenant's pipeline-template fragment, each tenant folder's projected
+// credentials, and the tenantWarnings to record.
 type assembleCellState struct {
 	ItemsYAML         string
 	Clouds            []bundle.TenantCloud
 	CloudCredentials  []tenantCloudCredential
 	TemplateFragments []bundle.CellTemplateFragment
+	FolderCredentials []bundle.CellFolderCredentials
 	Warnings          []v1alpha1.TenantWarning
 }
 
@@ -46,6 +48,7 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 		clouds    []bundle.TenantCloud
 		creds     []tenantCloudCredential
 		fragments []bundle.CellTemplateFragment
+		folderCrd []bundle.CellFolderCredentials
 		warnings  []v1alpha1.TenantWarning
 	)
 
@@ -94,7 +97,14 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 			}
 			folder := &rerooted.Items[0]
 
-			warnings = append(warnings, r.projectTenantCredentials(ctx, team.Name, agentNamespace, folder)...)
+			// Projected onto a separate folder item and carried: a value
+			// from a tenant Secret must not reach ResolveVars or the
+			// unresolved-variable check, which run on ItemsYAML after this.
+			projected := &items.Item{Kind: folder.Kind, Name: folder.Name}
+			warnings = append(warnings, r.projectTenantCredentials(ctx, team.Name, agentNamespace, projected)...)
+			if prop := folderCredentialsPropertyOf(projected); len(prop.FolderCredentials) > 0 {
+				folderCrd = append(folderCrd, bundle.CellFolderCredentials{Folder: folder.Name, Entries: prop.FolderCredentials})
+			}
 
 			folder.Properties = append(folder.Properties, items.Property{
 				Kubernetes: &items.KubernetesFolderProperty{PermittedClouds: []string{team.Name}},
@@ -142,6 +152,7 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 		Clouds:            clouds,
 		CloudCredentials:  creds,
 		TemplateFragments: fragments,
+		FolderCredentials: folderCrd,
 		Warnings:          warnings,
 	}, nil
 }

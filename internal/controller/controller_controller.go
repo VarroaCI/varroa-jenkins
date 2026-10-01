@@ -664,6 +664,16 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 		}
 	}
 
+	// Add each placed tenant's projected folder credentials, after
+	// ResolveVars and the unresolved-variable check. A credential value is
+	// Secret data and must reach Jenkins exactly as the Secret holds it. A
+	// no-op for a controller that is not a cell.
+	withCreds, credErr := injectTenantFolderCredentials(mat.ItemsYAML, mat.CellFolderCredentials)
+	if credErr != nil {
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("inject tenant folder credentials: %w", credErr)
+	}
+	mat.ItemsYAML = withCreds
+
 	// Inject the bundle's own pipeline-template set, after ResolveVars and
 	// the unresolved-variable check above (design D7). An earlier
 	// injection would fail that check: a template body holds its own

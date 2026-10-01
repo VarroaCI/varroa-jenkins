@@ -352,7 +352,11 @@ sections describe.
   then once per entry in `mat.CellTemplateFragments` (a cell only, one entry
   per placed tenant, `frag.Folder` stamped by `applyCellContent`) — after
   `ResolveVars`, never before, because a template body holds its own
-  `${...}` Groovy text that is not a catalog variable (design D7). Returns
+  `${...}` Groovy text that is not a catalog variable (design D7). In the
+  same place, `injectTenantFolderCredentials` adds each entry of
+  `mat.CellFolderCredentials` to its tenant folder in `mat.ItemsYAML`. A
+  credential value is Secret data: `ResolveVars` would change a `${...}` text
+  in it, and the check would fail every tenant of the cell on it. Returns
   `(*bundle.MaterializedBundle, cb.Status.ResolvedHash, bundleIdentity, error)`.
   On its one success return path it also calls `clearBundleFailed(cr)`, the
   single seam every caller shares for retiring a stale `ConditionBundleFailed`.
@@ -928,8 +932,10 @@ sections describe.
     reads each `Team` named in `cr.Status.Cell.Tenants`, skipping and
     logging one that is gone rather than failing the tick), and
     `cell_tenant_credentials.go` (`projectTenantCredentials` projects a
-    tenant's `varroa.dev/tenant-credential=true` Secrets into its re-rooted
-    folder's credentials at `GLOBAL` scope, skipping and warning on a
+    tenant's `varroa.dev/tenant-credential=true` Secrets at `GLOBAL` scope.
+    `assembleCellContent` projects onto a separate folder item and carries
+    the result on `assembleCellState.FolderCredentials`, never in the merged
+    items. It skips and warns on a
     malformed, unknown-kind, or duplicate-id Secret; the kinds are
     `usernamePassword`, `secretText`, and `sshPrivateKey`, which becomes a
     `basicSSHUserPrivateKey` with a direct-entry key).

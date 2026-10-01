@@ -260,6 +260,11 @@ func (r *Reconciler) applyCellContent(ctx context.Context, cr *v1alpha1.Controll
 	// ResolveVars and the unresolved-variable check both complete.
 	mat.CellTemplateFragments = state.TemplateFragments
 
+	// Carried, not injected, for the same reason: a tenant credential value
+	// is Secret data. ResolveVars would change a ${...} text in it, and the
+	// unresolved-variable check would fail the whole cell on it.
+	mat.CellFolderCredentials = state.FolderCredentials
+
 	recordCellTenantWarnings(cr, state.Warnings)
 	return nil
 }

@@ -140,9 +140,9 @@ Expect `"status":"True","reason":"TenantPlaced"`.
   `varroa.dev/credential-kind` is `usernamePassword` (data keys `username` and `password`),
   `secretText` (data key `secret`), or `sshPrivateKey` (data keys `privateKey` and `username`,
   optional `passphrase`). Varroa skips a `Secret` with a missing key, an unknown kind, or a
-  duplicate id, and the `Team`'s `TenantWarnings` condition records it. The controller diff drops
-  comments and shows each credential as `<redacted>`, so a rotation shows no change. A GitHub
-  deploy key:
+  duplicate id, and the `Team`'s `TenantWarnings` condition records it. A value reaches Jenkins as
+  written, `${` included. The controller diff drops comments and shows each credential as
+  `<redacted>`, so a rotation shows no change. A GitHub deploy key:
 
   ```yaml
   apiVersion: v1
@@ -209,8 +209,8 @@ The door verifies the delivery by forge: GitHub with an HMAC-SHA256 `X-Hub-Signa
 GitLab with `X-Gitlab-Token`, anything else with `X-Varroa-Token`. An unsigned or mismatched
 delivery answers `400`.
 
-A delivery buffers for at most one hour, so a tenant that moves cells inside that hour still
-receives it. After that hour, only the forge's own retry recovers it.
+A delivery buffers for up to one hour, so a tenant that moves cells in that hour still
+receives it. After that, only the forge's retry recovers it.
 
 **Verify:**
 
@@ -237,8 +237,8 @@ writes the new placement first, then both cells' tenant lists. A claim carrying 
 generation is refused, so a lost cell never grants a build after the move.
 
 A voluntary move (a rebalance, or a profile change) waits. The reconciler drops the tenant's
-folder from the old cell first (`Placed=False`, reason `TenantMoving`), waits for that cell to
-confirm the folder is idle, then performs the same two-step move.
+folder from the old cell first (`Placed=False`, reason `TenantMoving`), waits until that cell
+confirms the folder is idle, then does the same two-step move.
 
 **Roll.** A cell that reports `CellReady=False` past `cells.unreadyGracePeriod`, for a reason
 other than the three configuration gates, gets its pod deleted once and the reason `CellRolled`.
@@ -246,7 +246,7 @@ The roll waits up to 30 minutes from the pod start while an init container runs 
 restart. The message then reads `plugins-init running for 12m`. The grace counts from the init
 finish. A pod that has not started Jenkins gets a 30-second delete grace.
 
-**Teardown.** Teardown releases the placement record, so the name is free at once.
+**Teardown.** Teardown frees the placement record and the name at once.
 
 **Eviction.** Past twice that grace period, the operator sets `status.cell.evacuate`, and every
 tenant moves off on its next placement tick. The init wait applies here too. Only recovery clears
@@ -315,8 +315,8 @@ child seeds only after branch indexing creates it; the operator retries until th
 | `RehydrationTruncated` | False | Seeds exceed one bundle; some jobs hold only a build number. | Wait; number-only bundles cover every job before full records resume. |
 | `RehydrationFailed` | False | The mite rejected the bundle, or `rehydrateDeadline` passed. | Read the message. A give-up needs a fresh generation: move the tenant or roll the cell. |
 
-A build can still wait on the claim reason `NOT_READY` while `Rehydrated` is `True`. The
-claimer retries on its own.
+A build can still wait on the claim reason `NOT_READY` while `Rehydrated` is `True`; the
+claimer retries.
 
 ## Interrupted runs
 

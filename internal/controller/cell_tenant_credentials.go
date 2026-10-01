@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"sort"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
 )
 
@@ -160,4 +163,39 @@ func folderCredentialsPropertyOf(folder *items.Item) *items.FolderCredentialsPro
 	prop := &items.FolderCredentialsProperty{}
 	folder.Properties = append(folder.Properties, items.Property{FolderCredentialsProperty: prop})
 	return prop
+}
+
+// injectTenantFolderCredentials adds each tenant's projected credentials to
+// the top-level folder of the same name in itemsYAML. The caller runs it
+// after ResolveVars and the unresolved-variable check, so a value reaches
+// Jenkins exactly as the Secret holds it. A folder that is not in itemsYAML
+// is an error, because assembleCellContent carries credentials only for a
+// folder it also merged.
+func injectTenantFolderCredentials(itemsYAML string, folders []bundle.CellFolderCredentials) (string, error) {
+	if len(folders) == 0 {
+		return itemsYAML, nil
+	}
+	manifest, err := items.Parse(itemsYAML)
+	if err != nil {
+		return "", err
+	}
+	for _, f := range folders {
+		var folder *items.Item
+		for i := range manifest.Items {
+			if manifest.Items[i].Name == f.Folder && manifest.Items[i].IsFolder() {
+				folder = &manifest.Items[i]
+				break
+			}
+		}
+		if folder == nil {
+			return "", fmt.Errorf("tenant folder %q is not in the cell items", f.Folder)
+		}
+		prop := folderCredentialsPropertyOf(folder)
+		prop.FolderCredentials = append(prop.FolderCredentials, f.Entries...)
+	}
+	out, err := yaml.Marshal(manifest)
+	if err != nil {
+		return "", fmt.Errorf("marshal cell items: %w", err)
+	}
+	return string(out), nil
 }

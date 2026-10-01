@@ -139,6 +139,9 @@ index parsing, and pre-apply content validation.
   `MaterializedBundle.PipelineTemplatesYAML` carries the controller's own
   delivered template set; `CellTemplateFragments` carries one entry per
   placed tenant, for a cell — neither is ever subject to `ResolveVars`.
+  `CellFolderCredentials` carries each placed tenant's projected folder
+  credentials, for a cell. It holds Secret values, so it is never subject to
+  `ResolveVars` and no ConfigMap write reads it.
 - **`ResolveVars(content, vars)`** — plain `${name}` `strings.ReplaceAll`, no
   templating engine. `InjectedVariableNames` (resolver.go:288) is the
   authoritative list of injectable `varroa_*` names — keep in lockstep with

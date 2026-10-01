@@ -17,6 +17,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
 	"github.com/varroaci/varroa-jenkins/internal/oci"
 )
 
@@ -71,6 +72,21 @@ type MaterializedBundle struct {
 	// ResolveVars, like PipelineTemplatesYAML. The caller merges each
 	// fragment into the final jenkins.yaml after the resolve step.
 	CellTemplateFragments []CellTemplateFragment
+
+	// CellFolderCredentials holds each placed tenant's projected folder
+	// credentials, for a cell. A value comes from a tenant Secret, not from
+	// bundle content, so no entry is ever subject to ResolveVars or to the
+	// unresolved-variable check. The caller adds each entry to ItemsYAML
+	// after both steps. No code path that writes a ConfigMap reads this
+	// field.
+	CellFolderCredentials []CellFolderCredentials
+}
+
+// CellFolderCredentials is the projected credentials of one tenant folder.
+// Folder is the name of the tenant's top-level folder item.
+type CellFolderCredentials struct {
+	Folder  string
+	Entries []items.FolderCredentialEntry
 }
 
 // CellTemplateFragment is one placed tenant's pipeline-templates.yaml

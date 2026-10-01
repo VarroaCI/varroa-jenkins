@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"gopkg.in/yaml.v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -385,9 +386,16 @@ func TestApplyCellContent_TenantCredentialsNeverReachAConfigMap(t *testing.T) {
 	if err := rec.applyCellContent(context.Background(), cr, mat, "http://cell1-svc.ns1.svc.cluster.local:8080"); err != nil {
 		t.Fatalf("applyCellContent: %v", err)
 	}
+	carried, err := yaml.Marshal(mat.CellFolderCredentials)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, value := range []string{secretValue, keyBody, passphrase} {
-		if !containsSubstr(mat.ItemsYAML, value) {
-			t.Fatalf("expected %q in items.yaml (transported over the mTLS mite stream), got:\n%s", value, mat.ItemsYAML)
+		if containsSubstr(mat.ItemsYAML, value) {
+			t.Fatalf("value %q must not be in items.yaml before ResolveVars, got:\n%s", value, mat.ItemsYAML)
+		}
+		if !containsSubstr(string(carried), value) {
+			t.Fatalf("expected %q in the carried folder credentials, got:\n%s", value, carried)
 		}
 	}
 	for name, data := range client.configMapData {
@@ -398,5 +406,149 @@ func TestApplyCellContent_TenantCredentialsNeverReachAConfigMap(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// A tenant credential value is Secret data. A ${...} text in it must reach
+// Jenkins as written, and must not stop the push of any tenant on the cell.
+func TestResolveBundleForController_CellCredentialWithInterpolationTextKeepsTheCell(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	payments := &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec: v1alpha1.TeamSpec{
+			Namespaces: []string{tenantCredentialTestNamespace},
+			Pipelines:  &v1alpha1.TeamPipelinesSpec{Profile: "lts", AgentNamespace: tenantCredentialTestNamespace},
+		},
+	}
+	seedTenantBundle(client, payments, "payments-bundle", cleanPipelineItemsYAML)
+	seedTenantCredentialSecret(t, client, "cred-literal",
+		map[string]string{"varroa.dev/credential-id": "literal", "varroa.dev/credential-kind": "secretText"},
+		map[string][]byte{"secret": []byte("abc${def}")},
+	)
+	seedTenantCredentialSecret(t, client, "cred-varname",
+		map[string]string{
+			"varroa.dev/credential-id":          "varname",
+			"varroa.dev/credential-kind":        "usernamePassword",
+			"varroa.dev/credential-description": "uses ${varroa_controller_name}",
+		},
+		map[string][]byte{"username": []byte("u${x}"), "password": []byte("${varroa_controller_name}")},
+	)
+
+	other := &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "team-b"},
+		Spec: v1alpha1.TeamSpec{
+			Namespaces: []string{"team-b-ns"},
+			Pipelines:  &v1alpha1.TeamPipelinesSpec{Profile: "lts", AgentNamespace: "team-b-ns"},
+		},
+	}
+	seedTenantBundle(client, other, "team-b-bundle", cleanPipelineItemsYAML)
+	client.labeledSecrets = append(client.labeledSecrets, labeledSecretFixture{
+		name: "cred-b", namespace: "team-b-ns",
+		labels: map[string]string{"varroa.dev/tenant-credential": "true"},
+	})
+	client.secretAnnotations["cred-b"] = map[string]string{"varroa.dev/credential-id": "b-token", "varroa.dev/credential-kind": "secretText"}
+	client.existingSecrets["cred-b"] = map[string][]byte{"secret": []byte("team-b-value")}
+
+	crdstore.MustSeed(client.store, payments)
+	crdstore.MustSeed(client.store, other)
+	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"payments", "team-b"}}
+
+	mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	if err != nil {
+		t.Fatalf("resolveBundleForController: %v", err)
+	}
+
+	manifest, err := items.Parse(mat.ItemsYAML)
+	if err != nil {
+		t.Fatalf("parse items: %v", err)
+	}
+	got := map[string]items.FolderCredential{}
+	for _, it := range manifest.Items {
+		for _, p := range it.Properties {
+			if p.FolderCredentialsProperty == nil {
+				continue
+			}
+			for _, e := range p.FolderCredentialsProperty.FolderCredentials {
+				for _, c := range e.Credentials {
+					switch {
+					case c.SecretText != nil:
+						got[it.Name+"/"+c.SecretText.ID] = c
+					case c.UsernamePassword != nil:
+						got[it.Name+"/"+c.UsernamePassword.ID] = c
+					}
+				}
+			}
+		}
+	}
+	if c, ok := got["payments/literal"]; !ok || c.SecretText.Secret != "abc${def}" {
+		t.Errorf("payments/literal = %+v, want secret abc${def}", c.SecretText)
+	}
+	c, ok := got["payments/varname"]
+	if !ok {
+		t.Fatalf("payments/varname is missing, got %+v", got)
+	}
+	up := c.UsernamePassword
+	if up.Password != "${varroa_controller_name}" || up.Username != "u${x}" || up.Description != "uses ${varroa_controller_name}" {
+		t.Errorf("a credential field changed through ResolveVars: %+v", up)
+	}
+	if c, ok := got["team-b/b-token"]; !ok || c.SecretText.Secret != "team-b-value" {
+		t.Errorf("the other tenant's credential is missing or changed: %+v", got)
+	}
+}
+
+func TestInjectTenantFolderCredentials_AppendsToTenantFolder(t *testing.T) {
+	in := `items:
+  - kind: folder
+    name: payments
+    properties:
+      - folderCredentialsProperty:
+          folderCredentials:
+            - credentials:
+                - secretText:
+                    id: from-bundle
+                    scope: GLOBAL
+                    secret: bundle-value
+  - kind: folder
+    name: team-b
+`
+	entry := items.FolderCredentialEntry{Credentials: []items.FolderCredential{{
+		SecretText: &items.SecretTextCredential{ID: "projected", Scope: "GLOBAL", Secret: "x${y}"},
+	}}}
+	out, err := injectTenantFolderCredentials(in, []bundle.CellFolderCredentials{{Folder: "payments", Entries: []items.FolderCredentialEntry{entry}}})
+	if err != nil {
+		t.Fatalf("inject: %v", err)
+	}
+	manifest, err := items.Parse(out)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	prop := folderCredentialsPropertyOf(&manifest.Items[0])
+	if len(prop.FolderCredentials) != 2 {
+		t.Fatalf("want the bundle entry and the projected entry, got %+v", prop.FolderCredentials)
+	}
+	if got := prop.FolderCredentials[1].Credentials[0].SecretText; got == nil || got.Secret != "x${y}" {
+		t.Errorf("projected entry = %+v", got)
+	}
+	if len(manifest.Items[1].Properties) != 0 {
+		t.Errorf("another folder changed: %+v", manifest.Items[1])
+	}
+}
+
+func TestInjectTenantFolderCredentials_MissingFolderFails(t *testing.T) {
+	_, err := injectTenantFolderCredentials("items:\n  - kind: folder\n    name: payments\n",
+		[]bundle.CellFolderCredentials{{Folder: "gone"}})
+	if err == nil {
+		t.Fatal("expected an error for a folder that is not in the items")
+	}
+}
+
+func TestInjectTenantFolderCredentials_NoCredentialsKeepsTheText(t *testing.T) {
+	in := "items:\n    - kind: folder\n      name: payments\n"
+	out, err := injectTenantFolderCredentials(in, nil)
+	if err != nil || out != in {
+		t.Fatalf("inject with no credentials = %q, %v; want the input unchanged", out, err)
 	}
 }
