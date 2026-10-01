@@ -43,13 +43,6 @@ func init() {
 	)
 }
 
-// desiredWatcher is the seam over the desired-state KV bucket. *bus.KV
-// satisfies it; tests substitute a fake that fails the Watch() setup call so
-// the retry path is exercisable without a live JetStream.
-type desiredWatcher interface {
-	Watch(key string) (nats.KeyWatcher, error)
-}
-
 // buildEventPublisher is the seam over the JetStream publish calls the
 // build-event worker uses. *bus.Conn satisfies it; tests substitute a fake
 // so a rejected publish, a retry, and a dropped heartbeat are exercisable
@@ -80,20 +73,19 @@ type pendingImperative struct {
 // BusHandler implements StreamHandler by bridging the mite gRPC stream to the
 // NATS bus. It replaces the in-memory Registry for the gateway tier.
 //
-// Command delivery (operator→mite) uses the last-value mite_desired KV bucket:
-// the gateway watches the mite's desired-state key and forwards the current
-// value (on attach) plus every update to the gRPC stream. This means a
-// reconnecting mite receives only the newest desired state, never a replay of
-// stale ones, and there is no per-mite durable consumer to race over.
+// Desired-state delivery (operator→mite) is a core NATS request on
+// bus.MiteDesiredSubject: the gateway that holds the stream forwards each
+// request to the mite and answers the operator after the send succeeds.
+// NATS stores no copy, so a reconnecting mite receives nothing until the
+// operator pushes again on the new connection epoch.
 type BusHandler struct {
 	cluster    string
 	conn       *bus.Conn
 	kv         *bus.KV // snapshot KV
 	presenceKV *bus.KV // presence KV (written on connect/heartbeat, deleted on disconnect)
-	// desiredKV is the desired-state KV (watched and forwarded to the mite).
-	// Nil-valued when the gateway runs without a desired bucket — always
-	// compare with desiredKV == nil, never against a typed nil *bus.KV.
-	desiredKV desiredWatcher
+	// desired is the desired-state request source. Nil when the handler
+	// runs without a bus connection; serveDesiredState then returns at once.
+	desired desiredSource
 
 	activityPub *activity.Publisher // publishes enriched events to activity.* subjects
 
@@ -328,10 +320,10 @@ func (h *BusHandler) log() *slog.Logger {
 }
 
 // NewBusHandler creates a handler that bridges to the NATS bus.
-// snapshotKV: mite_snapshots. presenceKV: mite_presence. desiredKV: mite_desired.
+// snapshotKV: mite_snapshots. presenceKV: mite_presence.
 // activityPub: publishes enriched activity events (may be nil; if nil, activity
 // events are not published).
-func NewBusHandler(cluster string, conn *bus.Conn, snapshotKV, presenceKV, desiredKV *bus.KV, activityPub *activity.Publisher) *BusHandler {
+func NewBusHandler(cluster string, conn *bus.Conn, snapshotKV, presenceKV *bus.KV, activityPub *activity.Publisher) *BusHandler {
 	h := &BusHandler{
 		cluster:                    cluster,
 		conn:                       conn,
@@ -372,10 +364,10 @@ func NewBusHandler(cluster string, conn *bus.Conn, snapshotKV, presenceKV, desir
 	// two fields directly with a fake.
 	h.publisher = conn
 	h.ledger = conn
-	// Guard the interface assignment: storing a typed nil *bus.KV would make
-	// h.desiredKV non-nil and send watchDesiredState into a nil-pointer call.
-	if desiredKV != nil {
-		h.desiredKV = desiredKV
+	// Guard the interface assignment: storing a source over a nil conn would
+	// make h.desired non-nil and send serveDesiredState into a nil-pointer call.
+	if conn != nil {
+		h.desired = natsDesiredSource{conn: conn}
 	}
 	// Start the content TTL sweeper goroutine.
 	go h.contentSweeper()
@@ -445,8 +437,8 @@ func (h *BusHandler) putPresence(ns, name, version string) {
 	}
 }
 
-// OnConnect caches cert expiry, writes initial presence, and starts the desired-
-// state watch goroutine that forwards commands to the mite stream.
+// OnConnect caches cert expiry, writes initial presence, and starts the
+// desired-state goroutine that forwards commands to the mite stream.
 func (h *BusHandler) OnConnect(name, ns, version string, certExpiry interface{}, send Sender, _ interface{}) int64 {
 	key := ns + "/" + name
 	h.log().Info("mite connected", "controller", key, "version", version)
@@ -493,14 +485,19 @@ func (h *BusHandler) OnConnect(name, ns, version string, certExpiry interface{},
 	h.lastHeartbeat[key] = time.Now()
 	h.mu.Unlock()
 
-	go h.watchDesiredState(ctx, ns, name, send)
+	// The desired-state subscription opens before the connection is
+	// announced, and presence is written before the connected event. The
+	// operator wakes on that event, reads the new epoch from presence, and
+	// pushes at once. Either step out of order loses that push.
+	desiredInbox := h.subscribeDesired(ns, name)
+	go h.serveDesiredState(ctx, ns, name, send, desiredInbox)
 	go h.watchImperative(ctx, ns, name, epoch, send)
 	go h.watchContent(ctx, ns, name, send)
 	go h.watchTail(ctx, ns, name, send)
 	h.startBuildEventWorker(ctx, ns, name, epoch, send)
 
-	h.publishBroodEvent("connected", ns, name, version)
 	h.putPresence(ns, name, version)
+	h.publishBroodEvent("connected", ns, name, version)
 	return epoch
 }
 
@@ -1173,10 +1170,7 @@ func (h *BusHandler) releasePendingImperatives(ns, name string, token int64) {
 	}
 }
 
-// OnDisconnect stops the watch goroutine and clears volatile state. The desired
-// KV key is intentionally NOT deleted here — it is the persistent desired state
-// and must survive a mite/gateway reconnect. It is removed only on Controller
-// deletion (operator-side ClearDesired).
+// OnDisconnect stops the watch goroutines and clears volatile state.
 func (h *BusHandler) OnDisconnect(name, ns string, token int64) {
 	key := ns + "/" + name
 
@@ -1282,51 +1276,6 @@ func (h *BusHandler) OnDisconnect(name, ns string, token int64) {
 	h.publishBroodEvent("disconnected", ns, name, "")
 }
 
-// watchDesiredState watches the mite's desired-state KV key and forwards each
-// value (current value on attach + every update) to the gRPC stream. A failed
-// send is logged but not retried here: the reconciler re-Puts on hash divergence
-// each tick, so a transient failure self-heals on the next reconcile.
-func (h *BusHandler) watchDesiredState(ctx context.Context, ns, name string, send Sender) {
-	if h.desiredKV == nil {
-		return
-	}
-	key := bus.DesiredKey(h.cluster, ns, name)
-	pacer := h.newRebuildPacer()
-	for {
-		w, ok := h.establishDesiredWatch(ctx, ns, name, key)
-		if !ok {
-			return // context cancelled: the mite disconnected
-		}
-		start := time.Now()
-		reconnect := h.pumpDesired(ctx, w, ns, name, send)
-		_ = w.Stop()
-		if !reconnect {
-			return // context cancelled
-		}
-		// The watcher died while the mite is still connected. Without
-		// re-establishing here the connection is starved of desired state for
-		// the rest of the pod's life.
-		h.markWatchDegraded(ctx, ns, name, "desired", "desired-state watch closed unexpectedly")
-		if !pacer.wait(ctx, time.Since(start)) {
-			return
-		}
-	}
-}
-
-// establishDesiredWatch retries the KV watch setup with capped exponential
-// backoff until it succeeds or ctx is cancelled. It never gives up while the
-// mite is connected, so a transient failure cannot starve the connection of
-// every desired-state push. Returns ok=false only when ctx is done.
-func (h *BusHandler) establishDesiredWatch(ctx context.Context, ns, name, key string) (nats.KeyWatcher, bool) {
-	var w nats.KeyWatcher
-	ok := h.retryEstablish(ctx, ns, name, "desired", func() error {
-		var err error
-		w, err = h.desiredKV.Watch(key)
-		return err
-	})
-	return w, ok
-}
-
 // retryEstablish runs setup until it succeeds or ctx is cancelled, backing off
 // exponentially between attempts and marking the controller degraded for as
 // long as it keeps failing. It is the shared guard for every bus→stream
@@ -1365,38 +1314,6 @@ func (h *BusHandler) retryEstablish(ctx context.Context, ns, name, watchKind str
 		}
 		if delay *= 2; delay > maxWatchBackoff {
 			delay = maxWatchBackoff
-		}
-	}
-}
-
-// pumpDesired forwards watcher updates to the mite stream. It returns true when
-// the watcher died and should be re-established, false when ctx was cancelled.
-func (h *BusHandler) pumpDesired(ctx context.Context, w nats.KeyWatcher, ns, name string, send Sender) bool {
-	for {
-		select {
-		case <-ctx.Done():
-			return false
-		case entry, ok := <-w.Updates():
-			// Channel closed: watcher stopped or server disconnected.
-			if !ok {
-				return true
-			}
-			// nil marks end of the initial replay; skip.
-			if entry == nil {
-				continue
-			}
-			// Only forward Puts; a Delete (Controller removed) clears state.
-			if entry.Operation() != nats.KeyValuePut {
-				continue
-			}
-			var op mitev1.OperatorMessage
-			if err := json.Unmarshal(entry.Value(), &op); err != nil {
-				h.log().Error("unmarshal desired failed", "controller", ns+"/"+name, "error", err)
-				continue
-			}
-			if err := send(&op); err != nil {
-				h.log().Error("send desired to mite failed", "controller", ns+"/"+name, "error", err)
-			}
 		}
 	}
 }
@@ -1767,7 +1684,7 @@ func (h *BusHandler) watchContent(ctx context.Context, ns, name string, send Sen
 	if h.conn == nil || h.conn.NATSConn() == nil {
 		return
 	}
-	// Retried for the same reason as the desired-state watch: giving up
+	// Retried for the same reason as the desired-state subscription: giving up
 	// after one setup error leaves the mite unable to serve content fetches for
 	// the rest of the connection, with no operator-visible signal.
 	pacer := h.newRebuildPacer()

@@ -57,13 +57,6 @@ const (
 	// the stream). Entries are keyed <cluster>/<ns>/<name> with a short TTL.
 	KVPresenceBucket = "mite_presence"
 
-	// KVDesiredBucket holds the latest desired-state command per mite, keyed
-	// <cluster>/<ns>/<name>. Last-value semantics: Put overwrites; Watch delivers the
-	// current value on attach plus updates. This is the operator→mite command
-	// channel (level-triggered desired state). Imperative one-shot commands, if
-	// ever added, must NOT use this bucket — see internal/bus/jetstream.go.
-	KVDesiredBucket = "mite_desired"
-
 	// KVConsumedTokensBucket stores consumed bootstrap-token jtis (keyed by
 	// jti) for cross-replica single-use enforcement. Written create-only by
 	// the gateway; entries evict via the bucket TTL.
@@ -138,6 +131,16 @@ func MiteInSubject(cluster, ns, name string) string {
 // Format: mite.<cluster>.<ns>.<name>.out
 func MiteOutSubject(cluster, ns, name string) string {
 	return fmt.Sprintf("mite.%s.%s.%s.out", cluster, ns, name)
+}
+
+// MiteDesiredSubject returns the subject for the desired-state request
+// (core NATS, not JetStream). The operator sends the command as a request,
+// and the gateway that holds the mite stream answers after it forwards the
+// command. No stream may capture this subject: the command carries
+// credential values, and NATS must keep no copy of them.
+// Format: mite.<cluster>.<ns>.<name>.desired
+func MiteDesiredSubject(cluster, ns, name string) string {
+	return fmt.Sprintf("mite.%s.%s.%s.desired", cluster, ns, name)
 }
 
 // MiteContentSubject returns the subject for on-demand content-fetch

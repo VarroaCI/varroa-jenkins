@@ -1053,10 +1053,13 @@ func TestGate_AppliedBundleHashAdvanceOnSuccessMatch(t *testing.T) {
 
 	cr := newGateCtrl("ctl-hash", 0, "", nil)
 	cr.Status.AppliedBundleHash = ""
+	// DesiredStateHash is stamped only after a delivered push, so every
+	// Send in this test is delivered.
+	rec.miteTransport = &scriptedSendTransport{Transport: rec.miteTransport}
 
-	// Tick 1: first push — DesiredStateHash is set by handleConnected before Send.
+	// Tick 1: first push stamps DesiredStateHash.
 	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
-	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}) // Send fails (no real stream)
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	desiredAfterTick1 := cr.Status.DesiredStateHash
 	if desiredAfterTick1 == "" {
 		t.Fatal("expected DesiredStateHash to be set on first tick")
@@ -1071,7 +1074,7 @@ func TestGate_AppliedBundleHashAdvanceOnSuccessMatch(t *testing.T) {
 		Hash:      desiredAfterTick1,
 		Succeeded: true,
 	}
-	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}) // Send fails
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if cr.Status.AppliedBundleHash != "hash-xyz" {
 		t.Fatalf("expected AppliedBundleHash=hash-xyz after successful apply, got %s", cr.Status.AppliedBundleHash)
 	}
@@ -1082,7 +1085,7 @@ func TestGate_AppliedBundleHashAdvanceOnSuccessMatch(t *testing.T) {
 		Hash:      "hash-xyz", // old desired hash, not the current one
 		Succeeded: true,
 	}
-	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}) // Send fails
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if cr.Status.AppliedBundleHash == "hash-newer" {
 		t.Fatal("AppliedBundleHash should NOT advance to newer hash without a matching apply result for it")
 	}

@@ -15,21 +15,16 @@ stringData:
           password: "{{ htpasswd "ignored" (include "varroa.nats.operatorPassword" .) | trimPrefix "ignored:" }}"
           permissions: {
             publish: [
-              "$KV.mite_desired.>"
+              // Desired-state request to the gateway that holds the
+              // mite stream. Core NATS only: the command carries credential
+              // values, and no stream or bucket may store it.
+              "mite.*.*.*.desired"
               "mite.*.*.*.out"
               "events.brood.*"
               "activity.>"
               "mite.*.*.*.content"
               "$JS.API.INFO"
               "_INBOX_bff.>"
-              "$JS.API.STREAM.*.KV_mite_desired"
-              "$JS.API.STREAM.MSG.*.KV_mite_desired"
-              "$JS.API.STREAM.MSG.*.KV_mite_desired.>"
-              "$JS.API.DIRECT.GET.KV_mite_desired"
-              "$JS.API.DIRECT.GET.KV_mite_desired.>"
-              "$JS.API.CONSUMER.CREATE.KV_mite_desired"
-              "$JS.API.CONSUMER.CREATE.KV_mite_desired.>"
-              "$JS.API.CONSUMER.*.KV_mite_desired.>"
               "$JS.API.STREAM.*.KV_mite_snapshots"
               "$JS.API.STREAM.MSG.*.KV_mite_snapshots"
               "$JS.API.STREAM.MSG.*.KV_mite_snapshots.>"
@@ -117,16 +112,6 @@ stringData:
               "$JS.API.CONSUMER.*.varroa.>"
               "$JS.API.CONSUMER.MSG.NEXT.varroa.>"
               "$JS.ACK.varroa.>"
-              "$JS.API.STREAM.*.KV_mite_desired"
-              "$JS.API.STREAM.MSG.*.KV_mite_desired"
-              "$JS.API.STREAM.MSG.*.KV_mite_desired.>"
-              "$JS.API.DIRECT.GET.KV_mite_desired"
-              "$JS.API.DIRECT.GET.KV_mite_desired.>"
-              "$JS.API.CONSUMER.CREATE.KV_mite_desired"
-              "$JS.API.CONSUMER.CREATE.KV_mite_desired.>"
-              "$JS.API.CONSUMER.*.KV_mite_desired.>"
-              # JetStream flow-control replies for KV watchers (ordered push consumers) — see #339
-              "$JS.FC.KV_mite_desired.>"
               "$JS.API.STREAM.*.KV_mite_snapshots"
               "$JS.API.STREAM.MSG.*.KV_mite_snapshots"
               "$JS.API.STREAM.MSG.*.KV_mite_snapshots.>"
@@ -172,7 +157,9 @@ stringData:
 {{- end }}
             ]
             subscribe: [
-              "$KV.mite_desired.>"
+              // Desired-state requests from the operator. The gateway
+              // answers in the operator's inbox after the send succeeds.
+              "mite.*.*.*.desired"
               "mite.*.*.*.content"
               "_INBOX_gateway.>"
 {{- if .Values.recordStore.enabled }}

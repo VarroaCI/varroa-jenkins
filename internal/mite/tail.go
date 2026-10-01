@@ -122,7 +122,7 @@ func marshalTailReply(r tailReply) []byte {
 
 // watchTail subscribes the connected mite's TailSubject with the gateway
 // queue group and answers every start/stop request until ctx is
-// cancelled, following the retry-until-connected pattern watchDesiredState
+// cancelled, following the retry-until-connected pattern serveDesiredState
 // and watchContent use for their own subscriptions.
 func (h *BusHandler) watchTail(ctx context.Context, ns, name string, send Sender) {
 	if h.conn == nil {

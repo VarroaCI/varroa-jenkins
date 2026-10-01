@@ -31,8 +31,10 @@ control plane's async transport — no other package talks to NATS directly.
   `VARROA_CLUSTER_NAME`, defaulting to `DefaultCluster = "core"`; must be a
   DNS-1123 label ≤63 chars or the process fails fast at startup. Nearly every
   subject is namespaced by this cluster token.
-- **Subjects** (`subjects.go`) — `mite.<cluster>.<ns>.<name>.{in,out,content}`
-  (mite command/telemetry/content channels), `activity.<cluster>.<ns>.<ctrl>`
+- **Subjects** (`subjects.go`) — `mite.<cluster>.<ns>.<name>.{in,out,content,desired}`
+  (mite command/telemetry/content channels; `desired` is the core NATS
+  desired-state request, operator to gateway, which no stream may capture
+  because the command carries credential values), `activity.<cluster>.<ns>.<ctrl>`
   / `activity.<cluster>._global` (`ActivitySubject`/`ActivityGlobalSubject`,
   wildcard `ActivityWildcard = "activity.>"`), `events.brood.>`
   (`WebhookSubject`/`WebhookWildcard`, hibernation webhook replay;
@@ -73,10 +75,9 @@ control plane's async transport — no other package talks to NATS directly.
   or updates this stream. The Postgres `activity` table
   (`internal/recordstore`) is the durable copy, sized by
   `recordStore.retention.activity`. `WebhookStreamName = "varroa_webhooks"` backs
-  hibernation replay. The legacy `DefaultStreamName` (`"varroa"`,
-  `mite.*.*.*.out`, `WorkQueuePolicy`) is retained for one-shot imperative
-  commands but the operator→mite command path now runs over the
-  `mite_desired` last-value KV, not this stream. `varroa_builds` (subjects
+  hibernation replay. `DefaultStreamName` (`"varroa"`, `mite.*.*.*.out`,
+  `WorkQueuePolicy`) carries one-shot imperative commands and token grants.
+  The desired-state command uses neither a stream nor a KV bucket. `varroa_builds` (subjects
   `builds.<cluster>.<ns>.<cell>`, `WorkQueuePolicy` + `DiscardNew`,
   `MaxBytes=1GiB`) carries build events from the gateway to the recorder through a
   durable pull consumer named `recorder`; `internal/recordstore` owns this
@@ -97,7 +98,9 @@ control plane's async transport — no other package talks to NATS directly.
 - **KV buckets** (`kv.go`, `subjects.go`) — `KVSnapshotBucket = "mite_snapshots"`
   (latest mite state, key `SnapshotKey(cluster, ns, name)`),
   `KVClustersBucket = "varroa_clusters"` (cluster directory, see below), plus
-  an observability-intent bucket keyed `"obs/<cluster>/<ns>/<name>"`.
+  an observability-intent bucket keyed `"obs/<cluster>/<ns>/<name>"`. There
+  is no desired-state bucket: never add one, because the command carries
+  credential values.
   `EnsureKV`/`KV.Put`/`KV.Get`/`KV.Watch` wrap `nats.KeyValue` with
   `ErrKVKeyExists` normalized from `nats.ErrKeyExists`.
 - **Cluster directory** (`clusters.go`) — `ClusterInfo` JSON value in

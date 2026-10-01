@@ -58,6 +58,10 @@ the packaged CRDs. Does not own the Go source it packages
   (NATS TLS + per-service ACL creds); `examples-item-rbac.yaml` (off by default,
   `examples.itemRbac.enabled`).
 - KV watchers require `$JS.FC.KV_<bucket>.>` publish grants.
+- `nats-auth-config.yaml` grants no identity any `mite_desired` KV
+  operation. The desired-state command carries credential values and travels
+  only on `mite.*.*.*.desired` (operator publish, gateway subscribe).
+  `tests/test-nats-bus-security.sh` asserts both rules.
 - **`cells:`** (`values.yaml`) **seeds a `CellPool`; it configures no live
   pool.** Each of the five values populates a `CellPool` the operator creates
   for a requested profile, and the operator never rewrites the spec of a pool

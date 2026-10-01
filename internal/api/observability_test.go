@@ -166,9 +166,8 @@ func (s *stubTransport) Connected(_, _ string) bool                       { retu
 func (s *stubTransport) Info(_, _ string) (string, time.Time, time.Time, bool) {
 	return "", time.Time{}, time.Time{}, false
 }
-func (s *stubTransport) ConnEpoch(_, _ string) (int64, bool)               { return 0, false }
-func (s *stubTransport) StreamDegraded(_, _ string) (string, bool)         { return "", false }
-func (s *stubTransport) ClearDesired(_ context.Context, _, _ string) error { return nil }
+func (s *stubTransport) ConnEpoch(_, _ string) (int64, bool)       { return 0, false }
+func (s *stubTransport) StreamDegraded(_, _ string) (string, bool) { return "", false }
 func (s *stubTransport) IdleGauges(_, _ string) (*mitev1.IdleGauges, time.Time, bool) {
 	return nil, time.Time{}, false
 }

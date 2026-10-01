@@ -201,11 +201,6 @@ func main() {
 		logger.Error("failed to create presence KV", "error", err)
 		os.Exit(1)
 	}
-	desiredKV, err := busConn.EnsureKV(bus.KVDesiredBucket, 0)
-	if err != nil {
-		logger.Error("failed to create desired KV", "error", err)
-		os.Exit(1)
-	}
 	// Cross-replica bootstrap-token single-use. Bucket TTL must be >= the 15m
 	// token TTL (minted in controller_controller.go) so consumed entries outlive
 	// their token before evicting. EnsureKV does not retro-update the TTL of a
@@ -221,7 +216,7 @@ func main() {
 	// --- Activity publisher (mode-agnostic, publishes to activity.* subjects) ---
 	actPub := activity.NewPublisher(cluster, busConn)
 
-	handler := mitesrv.NewBusHandler(cluster, busConn, snapshotKV, presenceKV, desiredKV, actPub)
+	handler := mitesrv.NewBusHandler(cluster, busConn, snapshotKV, presenceKV, actPub)
 	srv.SetStreamHandler(handler)
 	defer handler.Close()
 	logger.Info("gateway using bus transport for mite streams", "endpoint", endpoint)

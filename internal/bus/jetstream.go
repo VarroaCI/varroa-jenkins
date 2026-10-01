@@ -8,11 +8,9 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-// NOTE: As of the last-value desired-state refactor, the command stream and
-// these consumer helpers are NOT used by the operator→mite path (that moved to
-// the mite_desired KV bucket, see internal/bus/subjects.go). They are retained
-// for future IMPERATIVE one-shot commands (e.g. "restart now"), which are
-// edge-triggered and must use a durable subject rather than the last-value KV.
+// The command stream carries only imperative one-shot commands. The
+// desired-state command does not use JetStream: it travels as a core NATS
+// request on MiteDesiredSubject, so no stream stores its credential values.
 
 // replicaArg resolves the effective replica count from an optional variadic
 // argument. When omitted it defaults to 1; any value < 1 is clamped to 1.

@@ -17,22 +17,29 @@ type broodEvent struct {
 	Cluster   string `json:"cluster"`
 }
 
-// broodEventDisconnected is the one event value this subscriber acts
-// on. The gateway publishes it within about 40 seconds of a mite stream
-// ending.
-const broodEventDisconnected = "disconnected"
+// broodEventDisconnected and broodEventConnected are the two event values
+// this subscriber acts on. The gateway publishes disconnected within about
+// 40 seconds of a mite stream ending, and connected when a stream opens.
+const (
+	broodEventDisconnected = "disconnected"
+	broodEventConnected    = "connected"
+)
 
 // broodReconcileTrigger is the subset of the Controller reconciler the
-// brood subscriber needs.
+// brood subscriber needs. TriggerReconcile routes a wake to the owning
+// shard. TriggerOwnedReconcile enqueues only on the owning replica.
 type broodReconcileTrigger interface {
 	TriggerReconcile(cluster, name, namespace string)
+	TriggerOwnedReconcile(cluster, name, namespace string)
 }
 
 // startBroodWatch subscribes to the operator's own brood subject. On a
 // disconnected event it enqueues a reconcile for the named Controller,
 // which performs the pod read, and wakes the tenant ticker, so the
 // placement announcement carries the new state without waiting for the
-// interval.
+// interval. On a connected event the owning replica reconciles at once.
+// That reconcile reads the new epoch and pushes the desired state, which
+// NATS does not keep for a reconnecting mite.
 //
 // The event decides nothing. It only removes latency: every rule that
 // acts on a lost cell rests on the operator's own pod read, so a missed
@@ -49,7 +56,7 @@ func startBroodWatch(conn *bus.Conn, cluster string, trigger broodReconcileTrigg
 
 // handleBroodEvent applies the subscriber's rules to one message. It
 // ignores a malformed payload, a message naming a foreign cluster, and
-// every event but disconnected.
+// every event but disconnected and connected.
 func handleBroodEvent(data []byte, cluster string, trigger broodReconcileTrigger,
 	wake chan<- struct{}, logger *slog.Logger) {
 	var ev broodEvent
@@ -60,14 +67,20 @@ func handleBroodEvent(data []byte, cluster string, trigger broodReconcileTrigger
 	if ev.Cluster != cluster {
 		return
 	}
-	if ev.Event != broodEventDisconnected {
-		return
-	}
 	if ev.Name == "" || ev.Namespace == "" {
 		return
 	}
-	if trigger != nil {
-		trigger.TriggerReconcile(cluster, ev.Name, ev.Namespace)
+	switch ev.Event {
+	case broodEventDisconnected:
+		if trigger != nil {
+			trigger.TriggerReconcile(cluster, ev.Name, ev.Namespace)
+		}
+		notifyWake(wake)
+	case broodEventConnected:
+		// Every replica receives this broadcast, and so does the owner.
+		// A routed wake from each other replica only adds patches.
+		if trigger != nil {
+			trigger.TriggerOwnedReconcile(cluster, ev.Name, ev.Namespace)
+		}
 	}
-	notifyWake(wake)
 }

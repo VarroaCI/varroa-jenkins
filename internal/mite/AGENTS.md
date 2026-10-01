@@ -20,7 +20,7 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   `StreamHandler.OnCrossTenantRequest`.
 - Does not own: cert issuance internals (`internal/ca`), NATS bus primitives
   `BusHandler` bridges into (`internal/bus`), or the operator reconciler that
-  decides desired state and writes the `mite_desired` KV key
+  decides desired state and sends the desired-state request
   (`internal/controller`). `proto/mitev1/` is generated protobuf, lint-excluded
   — a wire-contract boundary, not for hand-editing.
 
@@ -62,9 +62,16 @@ signing/replay protection, and the Jenkins-facing JWT signer.
 - **`StreamHandler`** (`stream_handler.go`) — `RegistryHandler` backs the
   in-memory `Registry` (BFF/single-process; `OnContentResponse`/
   `OnJenkinsActivity` are no-ops — no bus to route to). `BusHandler` backs the
-  gateway: bridges every event to NATS via `internal/bus` helpers. Command
-  delivery is **last-value KV** (`watchDesiredState` watches `mite_desired`,
-  never replays stale commands). Every bus→stream watcher establishes through
+  gateway: bridges every event to NATS via `internal/bus` helpers.
+  Desired-state delivery is a **core NATS request** (`desired_bridge.go`):
+  `serveDesiredState` subscribes `bus.MiteDesiredSubject`, forwards each
+  request to the stream, and answers the operator only after the send
+  succeeds. A failed send gets no answer, because during a reconnect another
+  replica can hold the live stream. NATS stores no copy, so nothing replays to
+  a reconnecting mite. `OnConnect` opens the desired subscription and writes
+  presence **before** it publishes the `connected` brood event: the operator
+  wakes on that event, reads the new epoch from presence, and pushes at once,
+  and either step out of order loses that push. Every bus→stream watcher establishes through
   `retryEstablish` — capped exponential backoff, retried for the life of the
   connection, never abandoned. Returning after a single setup error silently
   starves a connected mite of all desired state; while a watch is down
@@ -115,8 +122,7 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   intent key, so the run claim keeps it to one build.
   `OnPluginInventory` publishes the inventory to `MiteInSubject` and writes it
   to KV under `bus.PluginInventoryKey`, mirroring `OnObservabilityReport`.
-  `OnDisconnect` does **not** delete the desired-state KV key — only
-  operator-side `ClearDesired` on Controller deletion does. `REPLAY_WEBHOOK`
+  `REPLAY_WEBHOOK`
   results route to `WebhookResultSubject`, bypassing the reconciler's shared
   result buffer. `watchContent` bridges synchronous content-fetch with a 15s
   TTL sweep (`contentSweeper`) against orphaned replies.

@@ -33,7 +33,7 @@ func TestBusScheme(t *testing.T) {
 		{"kv snapshot", SnapshotKey("core", "team-a", "foo"), "core/team-a/foo"},
 		{"kv obs", ObservabilityKey("core", "team-a", "foo"), "obs/core/team-a/foo"},
 		{"kv presence", PresenceKey("core", "team-a", "foo"), "core/team-a/foo"},
-		{"kv desired", DesiredKey("core", "team-a", "foo"), "core/team-a/foo"},
+		{"mite desired", MiteDesiredSubject("core", "team-a", "foo"), "mite.core.team-a.foo.desired"},
 		{"varroa stream", StreamConfig("varroa").Subjects[0], "mite.*.*.*.out"},
 		{"activity stream", ActivityStreamConfig("varroa_activity").Subjects[0], "activity.>"},
 		{"webhook", WebhookSubject("core", "team-a", "foo"), "webhook.core.team-a.foo"},

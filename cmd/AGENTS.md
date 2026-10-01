@@ -42,12 +42,16 @@ stating what it is/is not responsible for:
   (`brood_watch.go`): a `disconnected` event enqueues an on-demand
   reconcile for the named Controller, which performs the pod read, and
   wakes the `team` ticker through its buffered, size-one `wake` channel.
+  A `connected` event calls `TriggerOwnedReconcile`, which enqueues only on
+  the replica that owns the Controller and routes no wake patch, because
+  every replica receives the broadcast. That reconcile reads the new epoch
+  and pushes the desired state, which NATS does not keep.
   **The event decides nothing** — it only removes latency, so a foreign
   cluster, any other event value, and a missed message all cost one tick
   and no more, and the wake send never blocks.
 - **`gateway/`** (`bin/varroa-gateway`) — terminates mTLS/gRPC from mite
   sidecars on `:9090` and bridges each `CommandStream` to NATS
-  (`mite.<cluster>.<ns>.<name>.{in,out,content}`). Loads the shared CA from the `varroa-ca`
+  (`mite.<cluster>.<ns>.<name>.{in,out,content,desired}`). Loads the shared CA from the `varroa-ca`
   Secret. Also serves an apikey-verify HTTP endpoint (default `:9092`). Does
   not reconcile controllers.
 - **`bff/`** (`bin/varroa-bff`) — Backend-For-Frontend; REST API + SSE on

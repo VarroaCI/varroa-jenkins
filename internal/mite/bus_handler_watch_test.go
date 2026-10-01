@@ -23,90 +23,102 @@ func (h *BusHandler) streamDegraded(key string) (string, bool) {
 	return reason, reason != ""
 }
 
-// fakeKeyWatcher is a hand-driven nats.KeyWatcher. Tests push entries onto
-// updates and close it to simulate a watcher that dies mid-connection.
-type fakeKeyWatcher struct {
-	updates chan nats.KeyValueEntry
-	mu      sync.Mutex
-	stopped bool
+// fakeDesiredInbox is a hand-driven desiredInbox. Tests push requests onto
+// reqs and close dead to simulate a subscription that dies mid-connection.
+type fakeDesiredInbox struct {
+	reqs chan desiredRequest
+	dead chan struct{}
+
+	mu           sync.Mutex
+	unsubscribed bool
 }
 
-func newFakeKeyWatcher() *fakeKeyWatcher {
-	return &fakeKeyWatcher{updates: make(chan nats.KeyValueEntry, 8)}
+func newFakeDesiredInbox() *fakeDesiredInbox {
+	return &fakeDesiredInbox{reqs: make(chan desiredRequest, 8), dead: make(chan struct{})}
 }
 
-func (w *fakeKeyWatcher) Context() context.Context           { return nil }
-func (w *fakeKeyWatcher) Updates() <-chan nats.KeyValueEntry { return w.updates }
-func (w *fakeKeyWatcher) Error() <-chan error                { return nil }
-
-func (w *fakeKeyWatcher) isStopped() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.stopped
+func (f *fakeDesiredInbox) Next(timeout time.Duration) (desiredRequest, error) {
+	select {
+	case r := <-f.reqs:
+		return r, nil
+	case <-f.dead:
+		return desiredRequest{}, nats.ErrBadSubscription
+	case <-time.After(timeout):
+		return desiredRequest{}, nats.ErrTimeout
+	}
 }
-func (w *fakeKeyWatcher) Stop() error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.stopped = true
+
+func (f *fakeDesiredInbox) Unsubscribe() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.unsubscribed = true
 	return nil
 }
 
-// fakeEntry is a minimal nats.KeyValueEntry carrying a Put operation.
-type fakeEntry struct {
-	key   string
-	value []byte
+// flakyDesiredSource fails the first failures calls to SubscribeDesired,
+// then hands back inbox. It records every attempt.
+type flakyDesiredSource struct {
+	mu       sync.Mutex
+	failures int
+	attempts int
+	inbox    *fakeDesiredInbox
 }
 
-func (e *fakeEntry) Bucket() string             { return "mite_desired" }
-func (e *fakeEntry) Key() string                { return e.key }
-func (e *fakeEntry) Value() []byte              { return e.value }
-func (e *fakeEntry) Revision() uint64           { return 1 }
-func (e *fakeEntry) Created() time.Time         { return time.Time{} }
-func (e *fakeEntry) Delta() uint64              { return 0 }
-func (e *fakeEntry) Operation() nats.KeyValueOp { return nats.KeyValuePut }
-
-// flakyDesiredKV fails the first failures calls to Watch, then hands back a
-// live watcher. It records every attempt so the test can assert on retries.
-type flakyDesiredKV struct {
-	mu        sync.Mutex
-	failures  int
-	attempts  int
-	watcher   *fakeKeyWatcher
-	attempted chan struct{}
-}
-
-func (f *flakyDesiredKV) Watch(_ string) (nats.KeyWatcher, error) {
+func (f *flakyDesiredSource) SubscribeDesired(_ string) (desiredInbox, error) {
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.attempts++
-	n := f.attempts
-	f.mu.Unlock()
-	select {
-	case f.attempted <- struct{}{}:
-	default:
-	}
-	if n <= f.failures {
+	if f.attempts <= f.failures {
 		return nil, errors.New("context deadline exceeded")
 	}
-	return f.watcher, nil
+	return f.inbox, nil
 }
 
-func (f *flakyDesiredKV) attemptCount() int {
+func (f *flakyDesiredSource) attemptCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.attempts
 }
 
-// TestWatchDesiredStateRetriesFailedWatchSetup asserts that a
-// transient Watch() setup failure at connect time must not permanently starve
-// the mite of desired state: the goroutine must retry rather than log and
-// return, so desired state published after the failure still reaches the stream.
-func TestWatchDesiredStateRetriesFailedWatchSetup(t *testing.T) {
-	w := newFakeKeyWatcher()
-	kv := &flakyDesiredKV{failures: 2, watcher: w, attempted: make(chan struct{}, 16)}
+// swappableDesiredSource returns whatever its next func hands back.
+type swappableDesiredSource struct {
+	next func() (desiredInbox, error)
+}
+
+func (s *swappableDesiredSource) SubscribeDesired(_ string) (desiredInbox, error) {
+	return s.next()
+}
+
+// desiredReq builds a request carrying a desired-state command with the
+// given id, and a confirm func that records the answer on confirmed.
+func desiredReq(t *testing.T, id string, confirmed chan<- string) desiredRequest {
+	t.Helper()
+	payload, err := json.Marshal(&mitev1.OperatorMessage{
+		Message: &mitev1.OperatorMessage_DesiredState{
+			DesiredState: &mitev1.DesiredStateCommand{CommandId: id},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return desiredRequest{Data: payload, Confirm: func() error {
+		if confirmed != nil {
+			confirmed <- id
+		}
+		return nil
+	}}
+}
+
+// TestServeDesiredStateRetriesFailedSubscribe asserts that a transient
+// subscribe failure at connect time does not starve the mite of desired
+// state: the goroutine retries, and a later request still reaches the stream.
+func TestServeDesiredStateRetriesFailedSubscribe(t *testing.T) {
+	inbox := newFakeDesiredInbox()
+	src := &flakyDesiredSource{failures: 2, inbox: inbox}
 
 	h := &BusHandler{
 		cluster:      "core",
-		desiredKV:    kv,
+		desired:      src,
 		watchBackoff: 5 * time.Millisecond,
 		cancels:      make(map[string]context.CancelFunc),
 	}
@@ -119,43 +131,86 @@ func TestWatchDesiredStateRetriesFailedWatchSetup(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go h.watchDesiredState(ctx, "varroa", "varroa-ci", send)
+	go h.serveDesiredState(ctx, "varroa", "varroa-ci", send, nil)
 
-	// Wait for the watch to be established (3rd attempt succeeds).
-	waitFor(t, func() bool { return kv.attemptCount() >= 3 }, 2*time.Second,
-		"watch setup was never retried after transient failure")
+	waitFor(t, func() bool { return src.attemptCount() >= 3 }, 2*time.Second,
+		"subscribe was never retried after a transient failure")
 
-	// Desired state published after the transient failure must still arrive.
-	payload, err := json.Marshal(&mitev1.OperatorMessage{
-		Message: &mitev1.OperatorMessage_Imperative{
-			Imperative: &mitev1.ImperativeCommand{CommandId: "cmd-1"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	w.updates <- &fakeEntry{key: "core/varroa/varroa-ci", value: payload}
+	inbox.reqs <- desiredReq(t, "cmd-1", nil)
 
 	select {
 	case op := <-delivered:
-		if got := op.GetImperative().CommandId; got != "cmd-1" {
+		if got := op.GetDesiredState().CommandId; got != "cmd-1" {
 			t.Fatalf("command_id = %q, want cmd-1", got)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("desired state never reached the mite stream after watch retry")
+		t.Fatal("desired state never reached the mite stream after subscribe retry")
 	}
 }
 
-// TestWatchDesiredStateReestablishesClosedWatch covers the second half of the
-// silent-starvation hole: a watcher that dies later (server disconnect closes
-// Updates()) must be re-established while the mite is still connected.
-func TestWatchDesiredStateReestablishesClosedWatch(t *testing.T) {
-	first := newFakeKeyWatcher()
-	second := newFakeKeyWatcher()
+// TestServeDesiredStateRepliesOnlyAfterSend asserts the delivery rule: the
+// operator gets an answer only after the send to the mite stream succeeds.
+// A failed send gets no answer, because another gateway replica may hold the
+// live stream during a reconnect.
+func TestServeDesiredStateRepliesOnlyAfterSend(t *testing.T) {
+	inbox := newFakeDesiredInbox()
+	h := &BusHandler{
+		cluster:      "core",
+		desired:      &flakyDesiredSource{inbox: inbox},
+		watchBackoff: 5 * time.Millisecond,
+		cancels:      make(map[string]context.CancelFunc),
+	}
+
+	var mu sync.Mutex
+	failNext := true
+	sent := make(chan string, 4)
+	send := func(op *mitev1.OperatorMessage) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if failNext {
+			failNext = false
+			return errors.New("stream closed")
+		}
+		sent <- op.GetDesiredState().CommandId
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.serveDesiredState(ctx, "varroa", "reply-ctl", send, inbox)
+
+	confirmed := make(chan string, 4)
+	inbox.reqs <- desiredReq(t, "lost", confirmed)
+	inbox.reqs <- desiredReq(t, "kept", confirmed)
+
+	select {
+	case id := <-confirmed:
+		if id != "kept" {
+			t.Fatalf("confirmed %q; a failed send must get no answer", id)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a delivered command was never confirmed")
+	}
+	if id := <-sent; id != "kept" {
+		t.Fatalf("sent %q, want kept", id)
+	}
+	select {
+	case id := <-confirmed:
+		t.Fatalf("unexpected second confirm %q", id)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+// TestServeDesiredStateRebuildsLostSubscription covers the second half of
+// the silent-starvation hole: a subscription that dies later must be rebuilt
+// while the mite is still connected.
+func TestServeDesiredStateRebuildsLostSubscription(t *testing.T) {
+	first := newFakeDesiredInbox()
+	second := newFakeDesiredInbox()
 
 	var mu sync.Mutex
 	calls := 0
-	kv := &swappableDesiredKV{next: func() (nats.KeyWatcher, error) {
+	src := &swappableDesiredSource{next: func() (desiredInbox, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		calls++
@@ -166,10 +221,12 @@ func TestWatchDesiredStateReestablishesClosedWatch(t *testing.T) {
 	}}
 
 	h := &BusHandler{
-		cluster:      "core",
-		desiredKV:    kv,
-		watchBackoff: 5 * time.Millisecond,
-		cancels:      make(map[string]context.CancelFunc),
+		cluster:       "core",
+		desired:       src,
+		watchBackoff:  5 * time.Millisecond,
+		watchDegraded: make(map[string]map[string]string),
+		miteVersion:   make(map[string]string),
+		cancels:       make(map[string]context.CancelFunc),
 	}
 
 	delivered := make(chan *mitev1.OperatorMessage, 4)
@@ -180,72 +237,60 @@ func TestWatchDesiredStateReestablishesClosedWatch(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go h.watchDesiredState(ctx, "varroa", "varroa-ci", send)
+	go h.serveDesiredState(ctx, "varroa", "varroa-ci", send, nil)
 
-	// Kill the first watcher the way a server disconnect would.
 	waitFor(t, func() bool { mu.Lock(); defer mu.Unlock(); return calls >= 1 }, 2*time.Second,
-		"first watch was never established")
-	close(first.updates)
+		"first subscription was never established")
+	close(first.dead)
 
 	waitFor(t, func() bool { mu.Lock(); defer mu.Unlock(); return calls >= 2 }, 2*time.Second,
-		"watch was not re-established after the updates channel closed")
-
-	payload, err := json.Marshal(&mitev1.OperatorMessage{
-		Message: &mitev1.OperatorMessage_Imperative{
-			Imperative: &mitev1.ImperativeCommand{CommandId: "cmd-2"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
+		"subscription was not rebuilt after it died")
+	first.mu.Lock()
+	unsubscribed := first.unsubscribed
+	first.mu.Unlock()
+	if !unsubscribed {
+		t.Fatal("the dead subscription was not released")
 	}
-	second.updates <- &fakeEntry{key: "core/varroa/varroa-ci", value: payload}
+
+	second.reqs <- desiredReq(t, "cmd-2", nil)
 
 	select {
 	case op := <-delivered:
-		if got := op.GetImperative().CommandId; got != "cmd-2" {
+		if got := op.GetDesiredState().CommandId; got != "cmd-2" {
 			t.Fatalf("command_id = %q, want cmd-2", got)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("desired state never reached the mite stream after watch re-establish")
+		t.Fatal("desired state never reached the mite stream after the rebuild")
 	}
 }
 
-// TestWatchDesiredStateMarksAndClearsDegraded asserts the failure is visible:
-// a failing watch setup marks the controller degraded, and a successful
-// re-establish clears it. Retry alone is not the fix — an exhausted or
-// flapping watch must stop the CR from claiming health.
-func TestWatchDesiredStateMarksAndClearsDegraded(t *testing.T) {
-	w := newFakeKeyWatcher()
-	kv := &flakyDesiredKV{failures: 3, watcher: w, attempted: make(chan struct{}, 16)}
+// TestServeDesiredStateMarksAndClearsDegraded asserts the failure is
+// visible: a failing subscribe marks the controller degraded, and a
+// successful retry clears it.
+func TestServeDesiredStateMarksAndClearsDegraded(t *testing.T) {
+	src := &flakyDesiredSource{failures: 3, inbox: newFakeDesiredInbox()}
 
 	h := &BusHandler{
 		cluster:      "core",
-		desiredKV:    kv,
+		desired:      src,
 		watchBackoff: 20 * time.Millisecond,
 		cancels:      make(map[string]context.CancelFunc),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go h.watchDesiredState(ctx, "varroa", "flaky-ctl", func(*mitev1.OperatorMessage) error { return nil })
+	go h.serveDesiredState(ctx, "varroa", "flaky-ctl", func(*mitev1.OperatorMessage) error { return nil }, nil)
 
 	waitFor(t, func() bool {
 		reason, degraded := h.streamDegraded("varroa/flaky-ctl")
 		return degraded && reason != ""
-	}, 2*time.Second, "watch failure was never marked degraded")
+	}, 2*time.Second, "subscribe failure was never marked degraded")
 
 	waitFor(t, func() bool {
 		_, degraded := h.streamDegraded("varroa/flaky-ctl")
 		return !degraded
-	}, 3*time.Second, "degraded flag was never cleared after the watch recovered")
+	}, 3*time.Second, "degraded flag was never cleared after the subscription recovered")
 }
-
-// swappableDesiredKV returns whatever its next func hands back.
-type swappableDesiredKV struct {
-	next func() (nats.KeyWatcher, error)
-}
-
-func (s *swappableDesiredKV) Watch(_ string) (nats.KeyWatcher, error) { return s.next() }
 
 func waitFor(t *testing.T, cond func() bool, timeout time.Duration, msg string) {
 	t.Helper()
@@ -367,27 +412,27 @@ func TestWatchKindsTrackDegradationIndependently(t *testing.T) {
 	}
 }
 
-// TestWatchDesiredStateDoesNotSpinOnInstantDeath pins the rebuild pacer. A
-// watch whose setup succeeds but which dies immediately would otherwise loop at
-// full speed: retryEstablish only backs off while setup is *failing*, and it
-// succeeds here every time.
-func TestWatchDesiredStateDoesNotSpinOnInstantDeath(t *testing.T) {
+// TestServeDesiredStateDoesNotSpinOnInstantDeath pins the rebuild pacer. A
+// subscription whose setup succeeds but which dies immediately would
+// otherwise loop at full speed: retryEstablish only backs off while setup is
+// failing, and it succeeds here every time.
+func TestServeDesiredStateDoesNotSpinOnInstantDeath(t *testing.T) {
 	var mu sync.Mutex
 	establishes := 0
 
-	// Every watcher handed out is already dead, so each pump returns instantly.
-	kv := &swappableDesiredKV{next: func() (nats.KeyWatcher, error) {
+	// Every subscription handed out is already dead.
+	src := &swappableDesiredSource{next: func() (desiredInbox, error) {
 		mu.Lock()
 		establishes++
 		mu.Unlock()
-		w := newFakeKeyWatcher()
-		close(w.updates)
-		return w, nil
+		in := newFakeDesiredInbox()
+		close(in.dead)
+		return in, nil
 	}}
 
 	h := &BusHandler{
 		cluster:       "core",
-		desiredKV:     kv,
+		desired:       src,
 		watchBackoff:  50 * time.Millisecond,
 		watchDegraded: make(map[string]map[string]string),
 		miteVersion:   make(map[string]string),
@@ -395,7 +440,7 @@ func TestWatchDesiredStateDoesNotSpinOnInstantDeath(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go h.watchDesiredState(ctx, "varroa", "spin-ctl", func(*mitev1.OperatorMessage) error { return nil })
+	go h.serveDesiredState(ctx, "varroa", "spin-ctl", func(*mitev1.OperatorMessage) error { return nil }, nil)
 
 	time.Sleep(300 * time.Millisecond)
 	cancel()
@@ -410,7 +455,7 @@ func TestWatchDesiredStateDoesNotSpinOnInstantDeath(t *testing.T) {
 		t.Fatalf("rebuild loop spun: %d establish attempts in 300ms, want <= 10", got)
 	}
 	if got < 2 {
-		t.Fatalf("watch was not rebuilt at all: %d attempts", got)
+		t.Fatalf("subscription was not rebuilt at all: %d attempts", got)
 	}
 }
 
@@ -503,15 +548,15 @@ func TestOnDisconnectIgnoresSupersededStream(t *testing.T) {
 // h.cancels, and the old stream's OnDisconnect is (correctly) ignored as
 // superseded — so without cancelling here they run for the life of the gateway
 // pod, forwarding desired state into a dead stream. Proven by the first
-// watcher being stopped, which only happens when its goroutine exits.
+// subscription being released, which only happens when its goroutine exits.
 func TestOnConnectCancelsSupersededConnection(t *testing.T) {
-	first := newFakeKeyWatcher()
-	second := newFakeKeyWatcher()
+	first := newFakeDesiredInbox()
+	second := newFakeDesiredInbox()
 
 	var mu sync.Mutex
 	calls := 0
 	h := newTestBusHandler()
-	h.desiredKV = &swappableDesiredKV{next: func() (nats.KeyWatcher, error) {
+	h.desired = &swappableDesiredSource{next: func() (desiredInbox, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		calls++
@@ -524,14 +569,21 @@ func TestOnConnectCancelsSupersededConnection(t *testing.T) {
 	send := func(*mitev1.OperatorMessage) error { return nil }
 
 	_ = h.OnConnect("ctl", "varroa", "v1", time.Time{}, send, nil)
-	waitFor(t, func() bool { mu.Lock(); defer mu.Unlock(); return calls >= 1 }, 2*time.Second,
-		"first connection never established its desired watch")
+	mu.Lock()
+	opened := calls
+	mu.Unlock()
+	if opened != 1 {
+		t.Fatalf("OnConnect opened %d desired subscriptions before it returned, want 1", opened)
+	}
 
 	// The mite reconnects before the old stream tore down.
 	_ = h.OnConnect("ctl", "varroa", "v1", time.Time{}, send, nil)
 
-	waitFor(t, first.isStopped, 2*time.Second,
-		"superseded connection's watch goroutine kept running after reconnect")
+	waitFor(t, func() bool {
+		first.mu.Lock()
+		defer first.mu.Unlock()
+		return first.unsubscribed
+	}, 2*time.Second, "superseded connection's desired goroutine kept running after reconnect")
 }
 
 // newTestBusHandler builds a BusHandler with every map initialised and no bus

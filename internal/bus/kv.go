@@ -136,9 +136,6 @@ func PresenceKey(cluster, ns, name string) string {
 	return cluster + "/" + ns + "/" + name
 }
 
-// DesiredKey returns the KV key for a mite's desired state: "<cluster>/<ns>/<name>".
-func DesiredKey(cluster, ns, name string) string { return cluster + "/" + ns + "/" + name }
-
 // PluginInventoryKey returns the KV key for a mite's plugin inventory:
 // "inv/<cluster>/<ns>/<name>". Uses the snapshot KV bucket with a prefix.
 func PluginInventoryKey(cluster, ns, name string) string {

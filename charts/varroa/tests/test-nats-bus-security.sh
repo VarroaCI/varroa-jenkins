@@ -5,10 +5,10 @@
 # Verifies that `helm template` produces:
 #   - TLS required (cert_file/key_file in nats config)
 #   - Three users (operator, gateway, bff) with per-service ACLs
-#   - Operator-only publish to $KV.mite_desired.>
-#   - Gateway-only subscribe to $KV.mite_desired.>
-#   - Gateway and BFF have per-bucket JetStream flow-control publish grants
-#   - BFF has NO mite_desired access (publish or subscribe)
+#   - Operator-only publish to mite.*.*.*.desired (the desired-state request)
+#   - Gateway-only subscribe to mite.*.*.*.desired
+#   - No identity holds any mite_desired KV grant (the bucket must not exist)
+#   - BFF has a per-bucket JetStream flow-control publish grant
 #   - No NAMES/LIST grants
 #   - No fakemite user
 #   - Bus passwords reach the components as a mounted file, never an env var
@@ -71,35 +71,52 @@ user_count=$(grep -c 'user: "operator"\|user: "gateway"\|user: "bff"' <<<"$RENDE
 [[ "$user_count" -ge 3 ]]
 check "Three users (operator, gateway, bff) defined" $?
 
-# 3. operator publish includes $KV.mite_desired.>
-grep -q '\$KV.mite_desired.>' <<<"$operator_block"
-check "Operator can publish to \$KV.mite_desired.>" $?
+# Scope a user block to its publish or its subscribe list.
+publish_list() { awk '/publish: \[/{p=1;next} p && /\]/{exit} p{print}' <<<"$1"; }
+subscribe_list() { awk '/subscribe: \[/{p=1;next} p && /\]/{exit} p{print}' <<<"$1"; }
+
+# 3. operator publishes the desired-state request and does not subscribe to it
+grep -q '"mite\.\*\.\*\.\*\.desired"' <<<"$(publish_list "$operator_block")"
+check "Operator can publish to mite.*.*.*.desired" $?
+if grep -q 'desired' <<<"$(subscribe_list "$operator_block")"; then
+  check "Operator does NOT subscribe to mite.*.*.*.desired" 1
+else
+  check "Operator does NOT subscribe to mite.*.*.*.desired" 0
+fi
 
 # 3b. operator publish includes mite.*.*.*.out (token grant + imperative commands)
 grep -q 'mite.\*.\*.\*.out' <<<"$operator_block"
 check "Operator can publish to mite.*.*.*.out (token grant)" $?
 
-# 4. gateway subscribe includes $KV.mite_desired.>
-grep -q '\$KV.mite_desired.>' <<<"$gateway_block"
-check "Gateway can subscribe to \$KV.mite_desired.>" $?
+# 4. gateway subscribes to the desired-state request and does not publish it
+grep -q '"mite\.\*\.\*\.\*\.desired"' <<<"$(subscribe_list "$gateway_block")"
+check "Gateway can subscribe to mite.*.*.*.desired" $?
+if grep -q 'desired' <<<"$(publish_list "$gateway_block")"; then
+  check "Gateway does NOT publish to mite.*.*.*.desired" 1
+else
+  check "Gateway does NOT publish to mite.*.*.*.desired" 0
+fi
 
 # 4b. gateway publish includes $JS.ACK.varroa.> (ack the per-controller imperative consumer)
 grep -q '\$JS.ACK.varroa.>' <<<"$gateway_block"
 check "Gateway can publish \$JS.ACK.varroa.> (imperative consumer ack)" $?
 
-# 4c. gateway publish includes the flow-control grant for the mite_desired KV watcher
-grep -q '\$JS.FC.KV_mite_desired.>' <<<"$gateway_block"
-check "Gateway can publish \$JS.FC.KV_mite_desired.> (KV watcher flow control)" $?
-
 # 4d. BFF publish includes the flow-control grant for the varroa_clusters KV watcher
 grep -q '\$JS.FC.KV_varroa_clusters.>' <<<"$bff_block"
 check "BFF can publish \$JS.FC.KV_varroa_clusters.> (KV watcher flow control)" $?
 
-# 5. BFF has NO $KV.mite_desired.> in publish or subscribe
-if grep -q '\$KV.mite_desired' <<<"$bff_block"; then
-  check "BFF has NO mite_desired access" 1
+# 5. The desired-state command carries credential values, so no identity
+# holds any grant on the mite_desired bucket, and the bff holds no grant on
+# the desired-state subject.
+if grep -q 'mite_desired' <<<"$RENDER"; then
+  check "No identity holds a mite_desired KV grant" 1
 else
-  check "BFF has NO mite_desired access" 0
+  check "No identity holds a mite_desired KV grant" 0
+fi
+if grep -q 'desired' <<<"$bff_block"; then
+  check "BFF has NO desired-state access" 1
+else
+  check "BFF has NO desired-state access" 0
 fi
 
 # 6. No NAMES or LIST grants
@@ -282,6 +299,12 @@ check "gateway (recordStore enabled) publishes varroa.ledger.claim" $?
 operator_rs_block=$(awk 'index($0, "user: \"operator\""){capture=1} capture{print} capture && $0 == "        }"{exit}' <<<"$RS_RENDER")
 grep -q 'varroa.ledger.actions.>' <<<"$operator_rs_block"
 check "operator (recordStore enabled) subscribes varroa.ledger.actions.>" $?
+
+if grep -q 'mite_desired' <<<"$RS_RENDER"; then
+  check "recordStore enabled: no identity holds a mite_desired KV grant" 1
+else
+  check "recordStore enabled: no identity holds a mite_desired KV grant" 0
+fi
 
 # 13. Live tail (control-bus-security): the bff subscribes to logs.> and
 # publishes to varroa.tail.> only when the record store is enabled, and no

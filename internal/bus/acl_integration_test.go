@@ -16,15 +16,7 @@
 // │                                                                             │
 // │  operator:                                                                  │
 // │    publish:                                                                 │
-// │      $KV.mite_desired.>                                                     │
-// │      $JS.API.STREAM.*.KV_mite_desired                                       │
-// │      $JS.API.STREAM.MSG.*.KV_mite_desired                                   │
-// │      $JS.API.STREAM.MSG.*.KV_mite_desired.>                                 │
-// │      $JS.API.DIRECT.GET.KV_mite_desired                                     │
-// │      $JS.API.DIRECT.GET.KV_mite_desired.>                                   │
-// │      $JS.API.CONSUMER.CREATE.KV_mite_desired                                │
-// │      $JS.API.CONSUMER.CREATE.KV_mite_desired.>                              │
-// │      $JS.API.CONSUMER.*.KV_mite_desired.>                                   │
+// │      mite.*.*.*.desired                                                     │
 // │      $JS.API.STREAM.*.KV_mite_snapshots                                     │
 // │      $JS.API.STREAM.MSG.*.KV_mite_snapshots                                 │
 // │      $JS.API.STREAM.MSG.*.KV_mite_snapshots.>                               │
@@ -60,14 +52,6 @@
 // │      $JS.API.STREAM.*.varroa                                                │
 // │      $JS.API.CONSUMER.CREATE.varroa.>                                       │
 // │      $JS.API.CONSUMER.*.varroa.>                                            │
-// │      $JS.API.STREAM.*.KV_mite_desired                                       │
-// │      $JS.API.STREAM.MSG.*.KV_mite_desired                                   │
-// │      $JS.API.STREAM.MSG.*.KV_mite_desired.>                                 │
-// │      $JS.API.DIRECT.GET.KV_mite_desired                                     │
-// │      $JS.API.DIRECT.GET.KV_mite_desired.>                                   │
-// │      $JS.API.CONSUMER.CREATE.KV_mite_desired                                │
-// │      $JS.API.CONSUMER.CREATE.KV_mite_desired.>                              │
-// │      $JS.API.CONSUMER.*.KV_mite_desired.>                                   │
 // │      $JS.API.STREAM.*.KV_mite_snapshots                                     │
 // │      $JS.API.STREAM.MSG.*.KV_mite_snapshots                                 │
 // │      $JS.API.STREAM.MSG.*.KV_mite_snapshots.>                               │
@@ -93,7 +77,7 @@
 // │      $JS.API.CONSUMER.CREATE.KV_varroa_consumed_tokens.>                  │
 // │      $JS.API.CONSUMER.*.KV_varroa_consumed_tokens.>                       │
 // │    subscribe:                                                               │
-// │      $KV.mite_desired.>                                                     │
+// │      mite.*.*.*.desired                                                     │
 // │      mite.*.*.content                                                       │
 // │      _INBOX_gateway.>                                                       │
 // │                                                                             │
@@ -126,7 +110,8 @@
 // │  NO service is granted:                                                     │
 // │      $JS.API.STREAM.NAMES, $JS.API.STREAM.LIST                              │
 // │      $JS.API.CONSUMER.NAMES.*, $JS.API.CONSUMER.LIST.*                     │
-// │      $KV.mite_desired.> (sub for non-gateway, pub for non-operator)         │
+// │      mite.*.*.*.desired (sub for non-gateway, pub for non-operator)        │
+// │      any KV_mite_desired operation (the bucket does not exist)            │
 // └────────────────────────────────────────────────────────────────────────────┘
 package bus
 
@@ -164,16 +149,10 @@ func startACLTestServer(t *testing.T) *server.Server {
 					// publish allow-list (D3 + D4)
 					[]string{
 						"$JS.API.INFO",
-						"$KV.mite_desired.>",
-						// KV_mite_desired JS API
-						"$JS.API.STREAM.*.KV_mite_desired",
-						"$JS.API.STREAM.MSG.*.KV_mite_desired",
-						"$JS.API.STREAM.MSG.*.KV_mite_desired.>",
-						"$JS.API.DIRECT.GET.KV_mite_desired",
-						"$JS.API.DIRECT.GET.KV_mite_desired.>",
-						"$JS.API.CONSUMER.CREATE.KV_mite_desired",
-						"$JS.API.CONSUMER.CREATE.KV_mite_desired.>",
-						"$JS.API.CONSUMER.*.KV_mite_desired.>",
+						// desired-state request to the gateway (core NATS)
+						"mite.*.*.*.desired",
+						// content-fetch request to the gateway (the chart grants it)
+						"mite.*.*.*.content",
 						// KV_mite_snapshots JS API
 						"$JS.API.STREAM.*.KV_mite_snapshots",
 						"$JS.API.STREAM.MSG.*.KV_mite_snapshots",
@@ -219,15 +198,6 @@ func startACLTestServer(t *testing.T) *server.Server {
 						"$JS.API.STREAM.*.varroa",
 						"$JS.API.CONSUMER.CREATE.varroa.>",
 						"$JS.API.CONSUMER.*.varroa.>",
-						// KV_mite_desired JS API
-						"$JS.API.STREAM.*.KV_mite_desired",
-						"$JS.API.STREAM.MSG.*.KV_mite_desired",
-						"$JS.API.STREAM.MSG.*.KV_mite_desired.>",
-						"$JS.API.DIRECT.GET.KV_mite_desired",
-						"$JS.API.DIRECT.GET.KV_mite_desired.>",
-						"$JS.API.CONSUMER.CREATE.KV_mite_desired",
-						"$JS.API.CONSUMER.CREATE.KV_mite_desired.>",
-						"$JS.API.CONSUMER.*.KV_mite_desired.>",
 						// KV_mite_snapshots JS API
 						"$JS.API.STREAM.*.KV_mite_snapshots",
 						"$JS.API.STREAM.MSG.*.KV_mite_snapshots",
@@ -257,7 +227,7 @@ func startACLTestServer(t *testing.T) *server.Server {
 						"$JS.API.CONSUMER.*.KV_varroa_consumed_tokens.>",
 					},
 					[]string{
-						"$KV.mite_desired.>",
+						"mite.*.*.*.desired",
 						"mite.*.*.*.content",
 						"_INBOX_gateway.>",
 					},
@@ -367,39 +337,22 @@ func TestACLIntegration(t *testing.T) {
 	_ = connectACL(t, url, "recorder", "rec_pass", "_INBOX_recorder")
 
 	// -----------------------------------------------------------------------
-	// ALLOW: operator can create and Put to mite_desired KV
+	// ALLOW: the operator's desired-state request reaches the gateway, and
+	// the gateway's confirm reaches the operator's inbox
 	// -----------------------------------------------------------------------
-	t.Run("operator_put_desired", func(t *testing.T) {
-		kv, err := op.EnsureKV(KVDesiredBucket, 0)
+	t.Run("operator_request_desired_to_gateway", func(t *testing.T) {
+		subj := MiteDesiredSubject(DefaultCluster, "ns1", "ctrl1")
+		sub, err := gw.NATSConn().Subscribe(subj, func(m *nats.Msg) {
+			_ = m.Respond(nil)
+		})
 		if err != nil {
-			t.Fatalf("operator EnsureKV(mite_desired): %v", err)
+			t.Fatalf("gateway subscribe desired: %v", err)
 		}
-		if err := kv.PutString("ns1/ctrl1", `{"desired":"running"}`); err != nil {
-			t.Fatalf("operator Put to mite_desired: %v", err)
-		}
-	})
+		defer sub.Unsubscribe()
+		gw.NATSConn().Flush()
 
-	// -----------------------------------------------------------------------
-	// ALLOW: gateway can Watch mite_desired KV
-	// -----------------------------------------------------------------------
-	t.Run("gateway_watch_desired", func(t *testing.T) {
-		kv, err := gw.EnsureKV(KVDesiredBucket, 0)
-		if err != nil {
-			t.Fatalf("gateway EnsureKV(mite_desired): %v", err)
-		}
-		watcher, err := kv.Watch("ns1/ctrl1")
-		if err != nil {
-			t.Fatalf("gateway Watch(mite_desired): %v", err)
-		}
-		defer watcher.Stop()
-		select {
-		case entry := <-watcher.Updates():
-			if entry == nil {
-				t.Fatal("expected non-nil entry from Watch")
-			}
-			t.Logf("gateway received desired update: %s", string(entry.Value()))
-		case <-time.After(3 * time.Second):
-			t.Fatal("timed out waiting for Watch update")
+		if _, err := op.Request(subj, []byte(`{"desired":"running"}`), 3*time.Second); err != nil {
+			t.Fatalf("operator desired-state request: %v", err)
 		}
 	})
 
@@ -571,19 +524,19 @@ func TestACLIntegration(t *testing.T) {
 	})
 
 	// -----------------------------------------------------------------------
-	// DENY: bff Put to mite_desired KV must be refused
+	// DENY: no identity may create the mite_desired bucket. The desired-state
+	// command carries credential values, so no grant may store it in a bucket.
 	// -----------------------------------------------------------------------
-	t.Run("deny_bff_put_desired", func(t *testing.T) {
-		// bff is not granted $KV.mite_desired.> nor the JS API for KV_mite_desired.
-		_, err := bf.EnsureKV(KVDesiredBucket, 0)
-		if err == nil {
-			t.Fatal("expected error for bff EnsureKV(mite_desired), got nil")
+	t.Run("deny_every_identity_desired_bucket", func(t *testing.T) {
+		for name, c := range map[string]*Conn{"operator": op, "gateway": gw, "bff": bf} {
+			if _, err := c.EnsureKV("mite_desired", 0); err == nil {
+				t.Fatalf("%s EnsureKV(mite_desired) succeeded; it must be denied", name)
+			}
 		}
-		t.Logf("bff EnsureKV(mite_desired) correctly denied: %v", err)
 	})
 
 	// -----------------------------------------------------------------------
-	// DENY: operator subscribing to $KV.mite_desired.> is not allowed
+	// DENY: operator subscribing to the desired-state subject is not allowed
 	// (permissions violations are delivered asynchronously by nats.go)
 	// -----------------------------------------------------------------------
 	t.Run("deny_operator_sub_desired", func(t *testing.T) {
@@ -604,7 +557,7 @@ func TestACLIntegration(t *testing.T) {
 		defer nc.Close()
 
 		// Subscribe to a subject not in operator's allow-list.
-		sub, err := nc.Subscribe("$KV.mite_desired.>", func(_ *nats.Msg) {})
+		sub, err := nc.Subscribe("mite.*.*.*.desired", func(_ *nats.Msg) {})
 		if err != nil {
 			t.Fatalf("Subscribe itself must succeed (async denial): %v", err)
 		}
@@ -618,9 +571,9 @@ func TestACLIntegration(t *testing.T) {
 		got := asyncErr
 		asyncMu.Unlock()
 		if got == nil {
-			t.Fatal("expected async permissions violation for operator subscribe $KV.mite_desired.>")
+			t.Fatal("expected async permissions violation for operator subscribe mite.*.*.*.desired")
 		}
-		t.Logf("operator subscribe $KV.mite_desired.> correctly denied: %v", got)
+		t.Logf("operator subscribe mite.*.*.*.desired correctly denied: %v", got)
 	})
 
 	// -----------------------------------------------------------------------

@@ -3,10 +3,12 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/nats-io/nats-server/v2/server"
+	"github.com/nats-io/nats.go"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
@@ -41,53 +43,74 @@ func newBusTransport(t *testing.T, s *server.Server) *BusTransport {
 	if err != nil {
 		t.Fatalf("presence kv: %v", err)
 	}
-	des, err := conn.EnsureKV(bus.KVDesiredBucket, 0)
-	if err != nil {
-		t.Fatalf("desired kv: %v", err)
-	}
-	return NewBusTransport(bus.DefaultCluster, conn, snap, pres, des)
+	return NewBusTransport(bus.DefaultCluster, conn, snap, pres)
 }
 
-// Send is last-value: a second Send overwrites the first; only the latest
-// desired state remains in KV.
-func TestBusTransport_SendIsLastValue(t *testing.T) {
-	tr := newBusTransport(t, startNATS(t))
+// Send delivers the command as a request to the gateway subscriber and
+// stores no copy in JetStream: no KV bucket and no stream holds it.
+func TestBusTransport_SendRequestsGatewayAndStoresNothing(t *testing.T) {
+	s := startNATS(t)
+	tr := newBusTransport(t, s)
 	ctx := context.Background()
 
-	mk := func(hash string) *mitev1.OperatorMessage {
-		return &mitev1.OperatorMessage{Message: &mitev1.OperatorMessage_DesiredState{
-			DesiredState: &mitev1.DesiredStateCommand{DesiredStateHash: hash},
-		}}
+	gw, err := bus.Connect(s.ClientURL())
+	if err != nil {
+		t.Fatalf("gateway connect: %v", err)
 	}
-	if err := tr.Send(ctx, "ns", "c1", mk("v1")); err != nil {
-		t.Fatalf("send v1: %v", err)
+	t.Cleanup(gw.Close)
+	got := make(chan []byte, 1)
+	sub, err := gw.Subscribe(bus.MiteDesiredSubject(bus.DefaultCluster, "ns", "c1"), func(m *nats.Msg) {
+		got <- m.Data
+		_ = m.Respond(nil)
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
 	}
-	if err := tr.Send(ctx, "ns", "c1", mk("v2")); err != nil {
-		t.Fatalf("send v2: %v", err)
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	// The server must register the subscription before the request.
+	if err := gw.NATSConn().Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
 	}
 
-	data, err := tr.desiredKV.Get(bus.DesiredKey(bus.DefaultCluster, "ns", "c1"))
-	if err != nil || data == nil {
-		t.Fatalf("get desired: data=%v err=%v", data, err)
+	msg := &mitev1.OperatorMessage{Message: &mitev1.OperatorMessage_DesiredState{
+		DesiredState: &mitev1.DesiredStateCommand{DesiredStateHash: "v1", ItemsYaml: "password: s3cr3t"},
+	}}
+	if err := tr.Send(ctx, "ns", "c1", msg); err != nil {
+		t.Fatalf("send: %v", err)
 	}
+
 	var op mitev1.OperatorMessage
-	if err := json.Unmarshal(data, &op); err != nil {
+	if err := json.Unmarshal(<-got, &op); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	ds, ok := op.Message.(*mitev1.OperatorMessage_DesiredState)
-	if !ok || ds.DesiredState == nil {
-		t.Fatalf("expected DesiredState message, got %T", op.Message)
-	}
-	if got := ds.DesiredState.DesiredStateHash; got != "v2" {
-		t.Fatalf("want last value v2, got %q", got)
+	if ds := op.GetDesiredState(); ds == nil || ds.DesiredStateHash != "v1" {
+		t.Fatalf("gateway received %+v, want hash v1", ds)
 	}
 
-	// ClearDesired removes it.
-	if err := tr.ClearDesired(ctx, "ns", "c1"); err != nil {
-		t.Fatalf("clear: %v", err)
+	js, err := gw.NATSConn().JetStream()
+	if err != nil {
+		t.Fatalf("jetstream: %v", err)
 	}
-	if data, _ := tr.desiredKV.Get(bus.DesiredKey(bus.DefaultCluster, "ns", "c1")); data != nil {
-		t.Fatalf("expected nil after clear, got %v", data)
+	if _, err := js.KeyValue("mite_desired"); !errors.Is(err, nats.ErrBucketNotFound) {
+		t.Fatalf("mite_desired bucket lookup: err=%v, want ErrBucketNotFound", err)
+	}
+	if name, err := js.StreamNameBySubject(bus.MiteDesiredSubject(bus.DefaultCluster, "ns", "c1")); err == nil {
+		t.Fatalf("stream %q captures the desired-state subject", name)
+	}
+}
+
+// Send with no gateway subscriber answers ErrMiteUnreachable at once.
+func TestBusTransport_SendNoResponderReturnsErrMiteUnreachable(t *testing.T) {
+	tr := newBusTransport(t, startNATS(t))
+	start := time.Now()
+	err := tr.Send(context.Background(), "ns", "nobody", &mitev1.OperatorMessage{
+		Message: &mitev1.OperatorMessage_DesiredState{DesiredState: &mitev1.DesiredStateCommand{}},
+	})
+	if !errors.Is(err, ErrMiteUnreachable) {
+		t.Fatalf("send err = %v, want ErrMiteUnreachable", err)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Fatalf("send took %v; a missing responder must fail at once", time.Since(start))
 	}
 }
 
@@ -284,9 +307,5 @@ func TestBusReadModelTransport_PublishSafeRestart(t *testing.T) {
 
 	if err := tr.Send(context.Background(), ns, name, nil); err == nil {
 		t.Error("BusReadModelTransport.Send should return error")
-	}
-
-	if err := tr.ClearDesired(context.Background(), ns, name); err == nil {
-		t.Error("BusReadModelTransport.ClearDesired should return error")
 	}
 }

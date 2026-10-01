@@ -258,18 +258,13 @@ func main() {
 		logger.Error("failed to ensure KV bucket", "bucket", bus.KVPresenceBucket, "error", err)
 		os.Exit(1)
 	}
-	desiredKV, err := busConn.EnsureKV(bus.KVDesiredBucket, 0)
-	if err != nil {
-		logger.Error("failed to ensure KV bucket", "bucket", bus.KVDesiredBucket, "error", err)
-		os.Exit(1)
-	}
 	clustersKV, err := busConn.EnsureKV(bus.KVClustersBucket, bus.ClusterEntryTTL)
 	if err != nil {
 		logger.Error("failed to ensure KV bucket", "bucket", bus.KVClustersBucket, "error", err)
 		os.Exit(1)
 	}
 
-	miteTransport := transport.NewBusTransport(cluster, busConn, snapshotKV, presenceKV, desiredKV)
+	miteTransport := transport.NewBusTransport(cluster, busConn, snapshotKV, presenceKV)
 	miteTransport.Logger = logger
 
 	// --- Bundle resolver ---

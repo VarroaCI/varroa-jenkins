@@ -171,7 +171,13 @@ sections describe.
     instead); builds+pushes the `DesiredStateCommand` with a 5-minute convergence
     short-circuit (skip push if hash+RBAC unchanged and pushed recently), bypassed by
     `forcePush` (mite reconnect epoch change) or the one-shot force-reprovision
-    annotation.
+    annotation. NATS keeps no copy of the command, so `DesiredStateHash` and
+    `LastDesiredPushAt` are stamped only after `Send` succeeds. On
+    `transport.ErrMiteUnreachable` the push raises no `ReconcileBlocked`. The
+    connection epoch is recorded only after a delivered push, and a reconnect
+    whose hash equals `DesiredStateHash` is pushed past the pause, manual-mode,
+    and wave gates (`redeliver`), because the removed KV bucket no longer
+    replays it.
   - `handleRunning` never changes the phase of a disconnected mite. Its
     `provisioningTimeout` guard skips a controller whose `StreamLost`
     transition is later than `ProvisioningStartedAt` (`streamLostSince`); a

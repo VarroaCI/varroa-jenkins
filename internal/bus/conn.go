@@ -393,6 +393,12 @@ func (c *Conn) RequestWithContext(ctx context.Context, subject string, data []by
 	}
 }
 
+// IsNoReply reports whether a request error means that no subscriber
+// answered: the server found no responder, or the wait ran out.
+func IsNoReply(err error) bool {
+	return errors.Is(err, nats.ErrNoResponders) || errors.Is(err, nats.ErrTimeout)
+}
+
 // DataHandler is a simplified subscription callback that receives only
 // the message data (not the full nats.Msg). This lets callers use bus
 // subscriptions without importing the nats package.

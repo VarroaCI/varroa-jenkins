@@ -1230,6 +1230,17 @@ func (r *Reconciler) TriggerReconcile(cluster, name, namespace string) {
 	r.wakeController(namespace + "/" + name)
 }
 
+// TriggerOwnedReconcile enqueues a reconcile for the Controller only when
+// this replica owns it. It never routes a wake to another shard. Use it for
+// a broadcast that every replica receives, because the owner receives the
+// same message and a routed wake from each other replica only adds patches.
+func (r *Reconciler) TriggerOwnedReconcile(cluster, name, namespace string) {
+	_ = cluster // operator always acts on its own cluster
+	if r.ownsController(namespace, name) {
+		r.enqueueReconcile(namespace + "/" + name)
+	}
+}
+
 // SetProvisioningDefaults caches the cluster-wide ProvisioningDefaults for
 // resolution of default reconciliation policies.
 func (r *Reconciler) SetProvisioningDefaults(defaults *v1alpha1.ProvisioningDefaults) {
@@ -2116,11 +2127,6 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 			r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedFinalizeFailed, err.Error())
 			return fmt.Errorf("finalize: %w", err)
 		}
-		// Remove the mite's persisted desired state so it does not outlive the CR.
-		if err := r.miteTransport.ClearDesired(ctx, cr.Namespace, cr.Name); err != nil {
-			logger.Error("clear desired state failed", "error", err)
-		}
-
 		// Clean up token record.
 		r.miteTokenMu.Lock()
 		delete(r.miteTokens, cr.Namespace+"/"+cr.Name)
@@ -3761,15 +3767,27 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 
 	// Detect (re)connection via epoch change and force a push so the
 	// mite always gets a fresh token. Also clear the cached token so it
-	// is re-minted for the new process.
-	forcePush := false
-	if epoch, ok := r.miteTransport.ConnEpoch(cr.Namespace, cr.Name); ok && epoch != r.lastMiteEpoch[key] {
-		r.lastMiteEpoch[key] = epoch
+	// is re-minted for the new process. The epoch is recorded only after
+	// a delivered push: NATS keeps no copy of the command, so every tick
+	// that delivers nothing must force the push again.
+	reconnected := false
+	var connEpoch int64
+	if epoch, ok := r.miteTransport.ConnEpoch(cr.Namespace, cr.Name); ok {
+		// miteTokenMu also guards lastMiteEpoch, because reconciles of
+		// different controllers run at once.
 		r.miteTokenMu.Lock()
-		delete(r.miteTokens, key)
+		if epoch != r.lastMiteEpoch[key] {
+			connEpoch = epoch
+			delete(r.miteTokens, key)
+			reconnected = true
+		}
 		r.miteTokenMu.Unlock()
-		forcePush = true
 	}
+	forcePush := reconnected
+	// A reconnected mite gets the state it already had again, past the
+	// pause, manual-mode, and wave gates. Those gates hold back a new
+	// state, and this one was already delivered.
+	redeliver := reconnected && cr.Status.DesiredStateHash == desiredHash
 
 	// An explicit reprovision request forces a re-push regardless of the
 	// convergence window. Reconcile consumed the annotation one-shot before
@@ -3819,7 +3837,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 	// (empty AppliedBundleHash) and explicit reprovision still proceed.
 	// Evaluated before the manual-mode and wave-gate checks so pause supersedes
 	// all other gating behavior.
-	if targetBundleHash != "" && bundleErr == nil {
+	if targetBundleHash != "" && bundleErr == nil && !redeliver {
 		cb, cbErr := r.getComposedBundle(ctx, bundleIdent.Name, bundleIdent.Namespace)
 		paused := cbErr == nil && cb != nil &&
 			strings.EqualFold(strings.TrimSpace(cb.Annotations["varroa.dev/rollout-paused"]), "true")
@@ -3855,7 +3873,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 
 	// Check reconciliation mode.
 	policy := r.effectivePolicy(cr)
-	if policy.Mode == v1alpha1.ReconciliationModeManual {
+	if policy.Mode == v1alpha1.ReconciliationModeManual && !redeliver {
 		// If the desired state hash hasn't changed since the last push
 		// (ApproveRestart sets DesiredStateHash), the mite is still applying
 		// the new configuration. Don't re-set PendingRestart yet — wait for
@@ -3891,7 +3909,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 	gateEvaluated := false
 	hadBlocked := cr.Status.Rollout != nil
 	overrideActive := strings.EqualFold(strings.TrimSpace(cr.Annotations[v1alpha1.AnnotationRolloutOverride]), "true")
-	gateWouldApply := wave > 0 &&
+	gateWouldApply := !redeliver && wave > 0 &&
 		cr.Status.AppliedBundleHash != "" &&
 		cr.Status.AppliedBundleHash != targetBundleHash &&
 		!reprovisionRequested
@@ -3930,7 +3948,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 			return nil
 		}
 		cr.Status.Rollout = nil
-	} else {
+	} else if !redeliver {
 		// Clear any stale rollout state if we're no longer gated (wave 0,
 		// override active, reprovision, already on target, etc.).
 		cr.Status.Rollout = nil
@@ -3948,7 +3966,9 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 
 	// Automatic mode: push desired state to mite.
 	// Populate policy fields: idle mode sets ApplyWhen; drain timeout is always set.
-	if policy.Mode == v1alpha1.ReconciliationModeIdle {
+	// A manual-mode redelivery keeps the idle gating its approval carried.
+	if policy.Mode == v1alpha1.ReconciliationModeIdle ||
+		(redeliver && policy.Mode == v1alpha1.ReconciliationModeManual) {
 		desired.ApplyWhen = "idle"
 	}
 	desired.MaxDeferSec = int64(policy.MaxDeferSeconds)
@@ -3976,9 +3996,10 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		// source.
 	}
 
-	cr.Status.DesiredStateHash = desiredHash
-
-	if err := func() error {
+	// The hash and the push time are stamped only after a delivered push.
+	// NATS keeps no copy of the command, so a stamp after a failed push
+	// would let the convergence short-circuit skip the retry.
+	sendErr := func() error {
 		_, span := tracer.Start(ctx, "desiredState.push")
 		defer span.End()
 		span.SetAttributes(attribute.String("hash", desiredHash))
@@ -3987,11 +4008,24 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 				DesiredState: desired,
 			},
 		})
-	}(); err != nil {
-		r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedDesiredStatePushFailed, err.Error())
-		return fmt.Errorf("send desired state: %w", err)
+	}()
+	switch {
+	case errors.Is(sendErr, transport.ErrMiteUnreachable):
+		// No gateway holds the mite stream. This is not a blocked
+		// reconcile: nothing is stamped, so the next tick pushes again.
+		logger.Info("desired state not delivered; no gateway holds the mite stream", "error", sendErr)
+	case sendErr != nil:
+		r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedDesiredStatePushFailed, sendErr.Error())
+		return fmt.Errorf("send desired state: %w", sendErr)
+	default:
+		cr.Status.DesiredStateHash = desiredHash
+		cr.Status.LastDesiredPushAt = &now
+		if reconnected {
+			r.miteTokenMu.Lock()
+			r.lastMiteEpoch[key] = connEpoch
+			r.miteTokenMu.Unlock()
+		}
 	}
-	cr.Status.LastDesiredPushAt = &now
 
 	r.checkPluginRollFailed(ctx, cr, resolvedBundle, logger)
 

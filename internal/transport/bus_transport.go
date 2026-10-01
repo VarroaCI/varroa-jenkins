@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -21,7 +22,6 @@ type BusTransport struct {
 	conn       *bus.Conn
 	snapshotKV *bus.KV
 	presenceKV *bus.KV
-	desiredKV  *bus.KV
 
 	mu      sync.Mutex
 	results map[string]chan *mitev1.CommandResult  // keyed by "ns/name"
@@ -46,16 +46,14 @@ func (b *BusTransport) log() *slog.Logger {
 	return slog.Default()
 }
 
-// NewBusTransport creates a BusTransport. snapshotKV holds mite snapshots,
-// presenceKV holds liveness records, and desiredKV holds the latest desired
-// state per mite (last-value; written here by Send, watched by the gateway).
-func NewBusTransport(cluster string, conn *bus.Conn, snapshotKV, presenceKV, desiredKV *bus.KV) *BusTransport {
+// NewBusTransport creates a BusTransport. snapshotKV holds mite snapshots and
+// presenceKV holds liveness records.
+func NewBusTransport(cluster string, conn *bus.Conn, snapshotKV, presenceKV *bus.KV) *BusTransport {
 	return &BusTransport{
 		cluster:    cluster,
 		conn:       conn,
 		snapshotKV: snapshotKV,
 		presenceKV: presenceKV,
-		desiredKV:  desiredKV,
 		results:    make(map[string]chan *mitev1.CommandResult),
 		subs:       make(map[string]*bus.Sub),
 		reports:    make(map[string]*mitev1.ObservabilityReport),
@@ -139,13 +137,16 @@ func (b *BusTransport) handleTokenRefresh(ns, name string) {
 	}
 }
 
-// Send stores the latest desired state for the mite. Last-value semantics: this
-// overwrites any previous unsent desired state (the mite only needs the newest).
-// The gateway's KV watch forwards it to the live gRPC stream. The value persists
-// in KV across gateway/mite restarts, so delivery survives reconnects without a
-// durable queue. A single KV Put is fast and non-blocking relative to a
-// JetStream publish-ack, which also addresses the prior reconcile-blocking issue.
-func (b *BusTransport) Send(_ context.Context, ns, name string, msg *mitev1.OperatorMessage) error {
+// desiredRequestTimeout bounds how long Send waits for the gateway to
+// confirm that it forwarded the desired state to the mite stream.
+const desiredRequestTimeout = 5 * time.Second
+
+// Send delivers the desired state to the mite as a core NATS request. The
+// gateway that holds the mite stream answers after it forwards the command.
+// NATS keeps no copy of the command, because the command carries credential
+// values. When no gateway answers, Send returns ErrMiteUnreachable. The
+// reconciler sends the command again on the next tick or on the reconnect.
+func (b *BusTransport) Send(ctx context.Context, ns, name string, msg *mitev1.OperatorMessage) error {
 	// Ensure the NATS subscription for this mite's inbound subject exists
 	// before the mite connects, so TokenRefreshRequest messages are never
 	// published without a subscriber. The subscription is idempotent.
@@ -155,11 +156,17 @@ func (b *BusTransport) Send(_ context.Context, ns, name string, msg *mitev1.Oper
 	if err != nil {
 		return err
 	}
-	return b.desiredKV.Put(bus.DesiredKey(b.cluster, ns, name), data)
+	if _, err := b.conn.RequestWithContext(ctx, bus.MiteDesiredSubject(b.cluster, ns, name), data, desiredRequestTimeout); err != nil {
+		if bus.IsNoReply(err) {
+			return fmt.Errorf("%w: %v", ErrMiteUnreachable, err)
+		}
+		return fmt.Errorf("desired-state request: %w", err)
+	}
+	return nil
 }
 
 // SendImperative publishes an edge-triggered one-shot command to the JetStream
-// durable subject (NOT the last-value desiredKV), so the command survives
+// durable subject (NOT the desired-state request path), so the command survives
 // gateway restarts. JetStream delivery is at-least-once (a lost ack triggers
 // redelivery); the gateway only acks a command after the mite reports a matching
 // CommandResult, and the mite's actions (e.g. safe restart) are idempotent, so a
@@ -173,11 +180,6 @@ func (b *BusTransport) SendImperative(_ context.Context, ns, name string, cmd *m
 	}
 	_, err = b.conn.PublishJetStream(bus.MiteOutSubject(b.cluster, ns, name), data)
 	return err
-}
-
-// ClearDesired removes stored desired state for the mite (Controller deletion).
-func (b *BusTransport) ClearDesired(_ context.Context, ns, name string) error {
-	return b.desiredKV.Delete(bus.DesiredKey(b.cluster, ns, name))
 }
 
 // ObservabilityReport returns the latest observability report seen on the mite's

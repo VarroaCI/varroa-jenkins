@@ -68,12 +68,8 @@ func TestBusHandler_OnJenkinsActivity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure presence kv: %v", err)
 	}
-	desiredKV, err := busConn.EnsureKV(bus.KVDesiredBucket, 0)
-	if err != nil {
-		t.Fatalf("ensure desired kv: %v", err)
-	}
 
-	handler := NewBusHandler(bus.DefaultCluster, busConn, snapshotKV, presenceKV, desiredKV, nil)
+	handler := NewBusHandler(bus.DefaultCluster, busConn, snapshotKV, presenceKV, nil)
 	handler.Logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	t.Cleanup(handler.Close)
 
@@ -311,12 +307,8 @@ func TestJenkinsActivity_AntiSpoof(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure presence kv: %v", err)
 	}
-	desiredKV, err := busConn.EnsureKV(bus.KVDesiredBucket, 0)
-	if err != nil {
-		t.Fatalf("ensure desired kv: %v", err)
-	}
 
-	handler := NewBusHandler(bus.DefaultCluster, busConn, snapshotKV, presenceKV, desiredKV, nil)
+	handler := NewBusHandler(bus.DefaultCluster, busConn, snapshotKV, presenceKV, nil)
 	handler.Logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	t.Cleanup(handler.Close)
 

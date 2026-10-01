@@ -28,6 +28,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
 	"github.com/varroaci/varroa-jenkins/internal/controller/runners"
+	"github.com/varroaci/varroa-jenkins/internal/controller/sharding"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/mite"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
@@ -3149,6 +3150,183 @@ func TestDesiredStateHashConsistentWhenPluginsSuppressed(t *testing.T) {
 	}
 }
 
+// scriptedSendTransport wraps a Transport. Send answers sendErr, counts
+// each call, and keeps the last command; epoch, when non-zero, is the connection epoch ConnEpoch
+// reports. Every other method goes to the wrapped transport.
+type scriptedSendTransport struct {
+	transport.Transport
+	sendErr error
+	sends   int
+	epoch   int64
+	last    *mitev1.DesiredStateCommand
+}
+
+func (s *scriptedSendTransport) Send(_ context.Context, _, _ string, msg *mitev1.OperatorMessage) error {
+	s.sends++
+	s.last = msg.GetDesiredState()
+	return s.sendErr
+}
+
+func (s *scriptedSendTransport) ConnEpoch(ns, name string) (int64, bool) {
+	if s.epoch != 0 {
+		return s.epoch, true
+	}
+	return s.Transport.ConnEpoch(ns, name)
+}
+
+// TestConnectedPush_UnreachableMiteDoesNotStampHashOrBlock pins the
+// Connected-phase rule for a push that no gateway forwarded. NATS keeps no
+// copy of the command, so the push must not stamp DesiredStateHash or
+// LastDesiredPushAt, must not raise ReconcileBlocked, and must re-arm the
+// reconnect push so the next tick sends again.
+func TestConnectedPush_UnreachableMiteDoesNotStampHashOrBlock(t *testing.T) {
+	client := newTestClientWithGateBundle()
+	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
+	rec, registry := newTestReconcilerForGate(client)
+	tr := &scriptedSendTransport{Transport: rec.miteTransport, sendErr: transport.ErrMiteUnreachable, epoch: 7}
+	rec.miteTransport = tr
+
+	cr := newGateCtrl("ctl-unreach", 0, "", nil)
+	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+
+	if err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}); err != nil {
+		t.Fatalf("handleConnected returned %v; an unreachable mite is not a reconcile error", err)
+	}
+	if tr.sends != 1 {
+		t.Fatalf("sends = %d, want 1", tr.sends)
+	}
+	if cr.Status.DesiredStateHash != "" {
+		t.Fatalf("DesiredStateHash = %q after an undelivered push, want empty", cr.Status.DesiredStateHash)
+	}
+	if cr.Status.LastDesiredPushAt != nil {
+		t.Fatal("LastDesiredPushAt was stamped after an undelivered push")
+	}
+	for _, c := range cr.Status.Conditions {
+		if c.Type == v1alpha1.ConditionReconcileBlocked && c.Status == metav1.ConditionTrue {
+			t.Fatalf("ReconcileBlocked raised for an unreachable mite: %s", c.Reason)
+		}
+	}
+
+	// The same epoch on the next tick still forces the push.
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if tr.sends != 2 {
+		t.Fatalf("sends = %d after the second tick, want 2", tr.sends)
+	}
+
+	// A delivered push stamps both fields.
+	tr.sendErr = nil
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if cr.Status.DesiredStateHash == "" || cr.Status.LastDesiredPushAt == nil {
+		t.Fatal("a delivered push did not stamp DesiredStateHash and LastDesiredPushAt")
+	}
+}
+
+// TestConnectedPush_ReconnectRedeliversPastManualGate pins the replay rule
+// that replaces the removed KV bucket. A reconnected mite gets the state it
+// already had again, even in manual mode, and the epoch is recorded only
+// after that delivery.
+func TestConnectedPush_ReconnectRedeliversPastManualGate(t *testing.T) {
+	client := newTestClientWithGateBundle()
+	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
+	rec, registry := newTestReconcilerForGate(client)
+	tr := &scriptedSendTransport{Transport: rec.miteTransport, epoch: 1}
+	rec.miteTransport = tr
+
+	cr := newGateCtrl("ctl-redeliver", 0, "", nil)
+	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+
+	// Tick 1, automatic mode: the first push is delivered.
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if tr.sends != 1 || cr.Status.DesiredStateHash == "" {
+		t.Fatalf("first push: sends=%d hash=%q, want one delivered push", tr.sends, cr.Status.DesiredStateHash)
+	}
+
+	// Tick 2, manual mode, same connection: the manual gate holds.
+	cr.Spec.ReconciliationPolicy.Mode = v1alpha1.ReconciliationModeManual
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if tr.sends != 1 {
+		t.Fatalf("same connection in manual mode: sends=%d, want 1", tr.sends)
+	}
+
+	// The mite reconnects. The same state goes out again past the gate.
+	tr.epoch = 2
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if tr.sends != 2 {
+		t.Fatalf("reconnect in manual mode: sends=%d, want 2", tr.sends)
+	}
+	if cr.Status.PendingRestart != nil {
+		t.Fatal("a redelivery of the delivered state set PendingRestart")
+	}
+	if tr.last == nil || tr.last.ApplyWhen != "idle" {
+		t.Fatal("a manual-mode redelivery lost the idle gating of its approval")
+	}
+
+	// The delivered push recorded the epoch, so the next tick holds again.
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if tr.sends != 2 {
+		t.Fatalf("after the redelivery: sends=%d, want 2", tr.sends)
+	}
+}
+
+// TestConnectedPush_SendFailureBlocksWithoutStamp pins the other failure
+// path: an error that is not ErrMiteUnreachable raises ReconcileBlocked
+// and stamps nothing.
+func TestConnectedPush_SendFailureBlocksWithoutStamp(t *testing.T) {
+	client := newTestClientWithGateBundle()
+	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
+	rec, registry := newTestReconcilerForGate(client)
+	rec.miteTransport = &scriptedSendTransport{Transport: rec.miteTransport, sendErr: errors.New("marshal failed")}
+
+	cr := newGateCtrl("ctl-fail", 0, "", nil)
+	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+
+	if err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}); err == nil {
+		t.Fatal("handleConnected returned nil for a failed push")
+	}
+	if cr.Status.DesiredStateHash != "" || cr.Status.LastDesiredPushAt != nil {
+		t.Fatal("a failed push stamped DesiredStateHash or LastDesiredPushAt")
+	}
+	blocked := false
+	for _, c := range cr.Status.Conditions {
+		if c.Type == v1alpha1.ConditionReconcileBlocked && c.Reason == v1alpha1.ReasonReconcileBlockedDesiredStatePushFailed {
+			blocked = true
+		}
+	}
+	if !blocked {
+		t.Fatal("a failed push did not raise ReconcileBlocked/DesiredStatePushFailed")
+	}
+}
+
+// TestTriggerOwnedReconcile_SkipsForeignShard pins that the owner-only
+// trigger enqueues for an owned Controller and does nothing, not even a
+// routing patch, for one this replica does not own.
+func TestTriggerOwnedReconcile_SkipsForeignShard(t *testing.T) {
+	ring := sharding.NewRing(8)
+	held := sharding.NewShardSet()
+	held.Add(ring.ShardFor("ns/owned"))
+
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	rec.SetShardOwnership(ring, held)
+	foreign := "foreign-0"
+	for i := 0; held.Held(ring.ShardFor("ns/" + foreign)); i++ {
+		foreign = fmt.Sprintf("foreign-%d", i+1)
+	}
+
+	rec.TriggerOwnedReconcile("core", "owned", "ns")
+	if got := len(rec.reconcileEvents); got != 1 {
+		t.Fatalf("owned controller: %d enqueued, want 1", got)
+	}
+	rec.TriggerOwnedReconcile("core", foreign, "ns")
+	if got := len(rec.reconcileEvents); got != 1 {
+		t.Fatalf("foreign controller: %d enqueued, want still 1", got)
+	}
+	ctrlGVR, _ := crdstore.GVRFor[v1alpha1.Controller]()
+	if n := len(client.store.MetaPatches(ctrlGVR)); n != 0 {
+		t.Fatalf("foreign controller: %d metadata patches, want 0", n)
+	}
+}
+
 // captureTransport is a minimal mite transport that captures the last pushed
 // desired state command.
 type captureTransport struct {
@@ -3201,8 +3379,6 @@ func (c *captureTransport) SendImperative(_ context.Context, ns, name string, cm
 }
 
 func (c *captureTransport) Connected(ns, name string) bool { return true }
-
-func (c *captureTransport) ClearDesired(_ context.Context, ns, name string) error { return nil }
 
 func (c *captureTransport) ObservabilityReport(ns, name string) *mitev1.ObservabilityReport {
 	return nil

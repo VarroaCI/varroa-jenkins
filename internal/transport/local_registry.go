@@ -84,16 +84,12 @@ func (l *LocalRegistry) Registry() *mite.Registry {
 }
 
 // SendImperative forwards an imperative command over the in-process stream,
-// mirroring Send. Unlike Send (which uses last-value KV), this is direct.
+// mirroring Send.
 func (l *LocalRegistry) SendImperative(_ context.Context, ns, name string, cmd *mitev1.ImperativeCommand) error {
 	return l.reg.Send(name, ns, &mitev1.OperatorMessage{
 		Message: &mitev1.OperatorMessage_Imperative{Imperative: cmd},
 	})
 }
-
-// ClearDesired is a no-op for the in-process registry: desired state is never
-// persisted (sends go straight to the live stream).
-func (l *LocalRegistry) ClearDesired(_ context.Context, _, _ string) error { return nil }
 
 // ObservabilityReport delegates to Registry.GetObservabilityReport.
 func (l *LocalRegistry) ObservabilityReport(ns, name string) *mitev1.ObservabilityReport {
