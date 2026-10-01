@@ -281,6 +281,10 @@ type BusHandler struct {
 	tailAckTimeout   time.Duration
 	tailErrTTL       time.Duration
 
+	// imperativeAckWait overrides imperativeAckWaitDefault. Zero means the
+	// default; tests shrink it so a redelivery test runs in seconds.
+	imperativeAckWait time.Duration
+
 	// logMu guards logRuns and the gateway-wide pending-bytes counter,
 	// kept separate from mu so a log append never contends with the
 	// heartbeat/presence path.
@@ -304,6 +308,13 @@ const (
 	// healthyWatchUptime is how long an established watch must survive before a
 	// later death is treated as a fresh incident rather than a flapping one.
 	healthyWatchUptime = 1 * time.Minute
+
+	// imperativeAckWaitDefault is the ack wait of each per-mite imperative
+	// consumer. The gateway marks each pending command in progress four
+	// times per ack wait, so the ack wait must exceed that heartbeat
+	// interval with margin. The value bounds how long a command that a
+	// crashed gateway held waits before the stream delivers it again.
+	imperativeAckWaitDefault = 60 * time.Second
 )
 
 // Ensure BusHandler implements StreamHandler.
@@ -1528,6 +1539,8 @@ func (h *BusHandler) watchImperative(ctx context.Context, ns, name string, token
 	streamName := "varroa"
 	consumer := "imp-" + h.cluster + "-" + ns + "-" + name
 
+	go h.markImperativesInProgress(ctx, ns, name, token)
+
 	// Setup is retried with backoff rather than abandoned on first error: a
 	// permanent return here silently drops every imperative command (safe
 	// restart, brood ops) for the life of the connection.
@@ -1542,10 +1555,16 @@ func (h *BusHandler) watchImperative(ctx context.Context, ns, name string, token
 				return fmt.Errorf("ensure imperative stream: %w", err)
 			}
 			// Ensure a durable consumer per mite (idempotent).
+			// EnsureConsumer updates a live durable in place, so a changed
+			// ack wait applies on the next mite connection. MaxDeliver stays
+			// unbounded: a failed run-record publish relies on a repeat, and
+			// the stream's 24-hour MaxAge is the bound.
 			if err := h.conn.EnsureConsumer(streamName, consumer, &nats.ConsumerConfig{
 				Durable:       consumer,
 				FilterSubject: bus.MiteOutSubject(h.cluster, ns, name),
 				AckPolicy:     nats.AckExplicitPolicy,
+				AckWait:       h.imperativeAckWaitOrDefault(),
+				MaxDeliver:    -1,
 			}); err != nil {
 				return fmt.Errorf("ensure imperative consumer: %w", err)
 			}
@@ -1621,8 +1640,10 @@ func (h *BusHandler) forwardImperative(ctx context.Context, m *nats.Msg, ns, nam
 	}
 	var op mitev1.OperatorMessage
 	if err := json.Unmarshal(m.Data, &op); err != nil {
-		h.log().Error("imperative unmarshal failed", "controller", ns+"/"+name, "error", err)
-		_ = m.Nak()
+		// A message that does not decode never decodes. A nak would make
+		// the stream deliver it again at once, for the life of the stream.
+		h.log().Error("imperative unmarshal failed, terminating the message", "controller", ns+"/"+name, "error", err)
+		_ = m.Term()
 		return
 	}
 	imp := op.GetImperative()

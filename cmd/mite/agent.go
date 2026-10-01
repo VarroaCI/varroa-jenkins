@@ -1118,10 +1118,10 @@ type commandMailbox struct {
 	imperative []commandWork // bounded FIFO
 	signal     chan struct{} // cap 1, non-blocking notify
 	// active holds the identifier of every imperative command that is
-	// queued or running. The gateway's consumer redelivers a command
-	// that holds no acknowledgement after 30 seconds, and a trigger can
-	// wait five minutes for Jenkins. A redelivery of an active command
-	// is therefore dropped, so it cannot fill the queue.
+	// queued or running. The stream can deliver a command again while
+	// it still runs, for example after a gateway restart. A redelivery
+	// of an active command is therefore dropped, so it cannot fill the
+	// queue.
 	active map[string]bool
 	// desiredFirst, when set and true, makes take answer the desired slot
 	// before the imperative queue. A trigger that runs before the items

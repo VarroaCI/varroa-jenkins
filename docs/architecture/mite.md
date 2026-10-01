@@ -36,6 +36,8 @@ The mite sends a heartbeat every 15 seconds. A broken stream reconnects with exp
 
 Each desired-state command has a deadline. The default is 20 minutes. Set `ProvisioningDefaults.spec.commandDeadlineSec` to change it for the installation.
 
+The gateway extends the 60-second ack wait of a running one-shot command, such as a build trigger, every 15 seconds. A slow command does not repeat.
+
 The effective reconciliation policy controls termination draining. The default drain timeout is 900 seconds. During termination the mite places Jenkins in quiet-down mode, waits for running builds, then exits when builds finish or the timeout expires.
 
 ## Build Claims and Build Events
@@ -87,9 +89,8 @@ restart at any tier costs a delay and not a lost event.
    `CommandStream`, which makes the mite reconnect.
 
 After a reconnect the mite replays every retained event, in order, before it forwards anything
-new. A mite restart loses its own retention set, but not the event: the plugin's spool is the
-durable tier, and it keeps resending an unacknowledged event until the mite is back and
-acknowledges it.
+new. A mite restart loses its retention set, but the plugin's spool resends each
+unacknowledged event.
 
 ## Diagnose a Mite
 

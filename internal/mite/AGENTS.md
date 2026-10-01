@@ -91,9 +91,19 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   skips, and so the nak lands after this stream's pump is cancelled. A pod roll
   often reconnects the mite before the old stream tears down, so a release
   placed after the superseded check never runs and the command waits out the
-  consumer's 30-second ack timeout instead. The token scope is what makes the early
+  consumer's ack wait instead. The token scope is what makes the early
   release safe: `pendingAcks` is keyed by controller, so an unscoped nak would
   also redeliver a command the replacement connection already runs.
+  The consumer sets an explicit `AckWait` (`imperativeAckWaitDefault`, 60s)
+  and `MaxDeliver: -1`. While a connection lives, `markImperativesInProgress`
+  (`imperative_progress.go`) sends `InProgress()` for each of that token's
+  `pendingAcks` entries every quarter ack wait, so a command that waits in
+  the mite's serial queue never repeats. The ack wait must exceed that
+  heartbeat interval with margin; it bounds how long a command a crashed
+  gateway held waits for a repeat, never a command's length.
+  `EnsureConsumer` updates the live durable in place on the next mite
+  connection. A message that does not decode is terminated (`Term()`),
+  never naked, because a nak repeats it at once forever.
   `forwardImperative` (one fetched message) refuses a cancelled context and
   naks it, and it re-reads the context **under `h.mu`** before it files the
   ack, because `OnConnect` and `OnDisconnect` both cancel a pump while they

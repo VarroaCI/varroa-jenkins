@@ -41,8 +41,9 @@ func startNATS(t *testing.T) *server.Server {
 }
 
 // startGatewayWithCA starts a gRPC gateway server with BusHandler.
-// It returns the CA so tests can issue client certs.
-func startGatewayWithCA(t *testing.T, natsURL string) (*bus.Conn, net.Listener, *ca.CA) {
+// It returns the CA so tests can issue client certs. Each opt edits the
+// BusHandler before the server serves.
+func startGatewayWithCA(t *testing.T, natsURL string, opts ...func(*BusHandler)) (*bus.Conn, net.Listener, *ca.CA) {
 	t.Helper()
 
 	certAuth, err := ca.NewCA()
@@ -71,7 +72,11 @@ func startGatewayWithCA(t *testing.T, natsURL string) (*bus.Conn, net.Listener, 
 	}
 	srv := NewServer(certAuth, tokenSigner, "localhost")
 	srv.ServerEndpoint = "127.0.0.1:0"
-	srv.SetStreamHandler(NewBusHandler(bus.DefaultCluster, busConn, snapshotKV, presenceKV, desiredKV, nil))
+	handler := NewBusHandler(bus.DefaultCluster, busConn, snapshotKV, presenceKV, desiredKV, nil)
+	for _, opt := range opts {
+		opt(handler)
+	}
+	srv.SetStreamHandler(handler)
 	srv.Logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")

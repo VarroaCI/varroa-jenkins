@@ -138,7 +138,7 @@ func TestImperativeRedeliveredWhenReplacementConnectsFirst(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 	gconn1.Close()
 
-	// 10 seconds is well inside the consumer's 30-second ack timeout, so a pass
+	// 10 seconds is well inside the consumer's 60-second ack wait, so a pass
 	// proves the disconnect released the command.
 	awaitImperative(t, imps2, 10*time.Second, "replacement mite")
 	assertNoSecondCopy(t, imps2)

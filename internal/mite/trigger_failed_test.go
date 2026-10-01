@@ -45,7 +45,7 @@ func seedPendingImperative(t *testing.T, h *BusHandler, conn *bus.Conn, cmd *mit
 	if err := conn.EnsureConsumer(stream, consumer, &nats.ConsumerConfig{
 		Durable:       consumer,
 		AckPolicy:     nats.AckExplicitPolicy,
-		AckWait:       30 * time.Second,
+		AckWait:       h.imperativeAckWaitOrDefault(),
 		MaxDeliver:    -1,
 		FilterSubject: subject,
 	}); err != nil {

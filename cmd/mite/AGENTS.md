@@ -44,7 +44,8 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
     never queued); imperative commands go through a bounded (cap 16) FIFO
     that drops a delivery whose command identifier is already queued or
     running (`commandMailbox.active`, released by `finish`), because the
-    gateway redelivers an unacknowledged command every 30 seconds. The FIFO
+    stream can deliver a command again while it runs, for example after a
+    gateway restart. The FIFO
     must not silently drop a new command — a full queue ends the stream session.
     While the items gate is closed, `take` answers the desired slot before
     the imperative queue (`commandMailbox.desiredFirst`), and `takeDesired`

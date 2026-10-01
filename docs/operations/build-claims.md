@@ -89,7 +89,7 @@ Jenkins-native trigger gets no run record, and `NOT_READY` and `NOT_HOME` mark n
 A retried request reads `granted` again when it carries the same `intent_key` and the same `run_id` as an earlier
 granted claim, and that run has not started. A `duplicate` means the intent key belongs to a different run, for example two triggers
 racing on the same commit. It also answers a repeat for a run whose start the ledger recorded.
-That repeat comes from a redelivered command. A redelivery that reaches another cell before the
+That repeat comes from a redelivered command. A redelivery that reaches a new cell pod before the
 ledger records the start still reads `granted`.
 
 A retried request from a new cell instance can carry a fresh build number. The ledger refreshes
