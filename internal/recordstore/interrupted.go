@@ -32,6 +32,11 @@ const (
 	// not bring back. One reason covers both windows: in each case the
 	// recorder tried to resume the run and the run did not come back.
 	ReasonResumeTimeout = "resume-timeout"
+	// ReasonStartLost names a run whose owner marked the start and whose
+	// start event did not reach the store within ClaimExpiryAge. The owner
+	// can still be alive, so the mark is provisional: a later run.started
+	// supersedes it.
+	ReasonStartLost = "start-lost"
 )
 
 // interruptedRetryAutomatic is the Team.spec.pipelines.interruptedRetry

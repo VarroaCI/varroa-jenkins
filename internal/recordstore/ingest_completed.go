@@ -31,7 +31,9 @@ const summaryCompletedGuardSQL = `$15::text IS NOT NULL
 // TRIGGER_FAILED row, or a row that still holds the accepted keys. It
 // removes the accepted keys from every owner write, whether or not the
 // stored row held them, because the owner arm is always a real write. A
-// foreign completion leaves every stored key in place.
+// foreign completion leaves every stored key in place. The owner arm
+// also removes the marking keys of a start-lost mark, because the real
+// result replaces that provisional end.
 //
 // A completion whose payload carries a summary value raises the summary
 // column and the payload's summary_seq key, under the guard
@@ -119,7 +121,7 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 			-- no terminal column at all.
 			payload = (CASE
 			                WHEN runs.result IS NOT DISTINCT FROM '`+ResultTriggerFailed+`' AND $13 THEN COALESCE(runs.payload, '{}'::jsonb) `+triggerPayloadKeysSQL+`
-			                WHEN COALESCE(runs.payload ? 'accepted_at', false) AND $13 THEN COALESCE(runs.payload, '{}'::jsonb) `+acceptedSupersedeKeysSQL+`
+			                WHEN (COALESCE(runs.payload ? 'accepted_at', false) OR `+startLostRunSQL+`) AND $13 THEN COALESCE(runs.payload, '{}'::jsonb) `+acceptedSupersedeKeysSQL+`
 			                WHEN $13 THEN COALESCE(runs.payload, '{}'::jsonb) `+acceptedPayloadKeysSQL+`
 			                ELSE COALESCE(runs.payload, '{}'::jsonb) END)
 			          || (EXCLUDED.payload - 'summary_seq')

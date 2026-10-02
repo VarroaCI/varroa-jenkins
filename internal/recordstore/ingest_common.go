@@ -71,6 +71,13 @@ func supersedeSQL(realWrite string) string {
 	return `(runs.result IS NOT DISTINCT FROM '` + ResultTriggerFailed + `' OR COALESCE(runs.payload ? 'accepted_at', false)) AND ` + realWrite
 }
 
+// startLostRunSQL matches a stored row that holds a start-lost mark. The
+// mark is provisional, because its owner can still build the run. Only
+// applyRunStarted supersedes such a row, and only the owner's
+// run.completed clears its reason. supersedeSQL never matches it, because
+// the row records a build.
+const startLostRunSQL = `(runs.result IS NOT DISTINCT FROM 'INTERRUPTED' AND runs.payload->>'interrupted_reason' IS NOT DISTINCT FROM '` + ReasonStartLost + `')`
+
 // triggerPayloadKeysSQL removes the four trigger keys from a stored
 // payload. A superseding write applies it before its own merge, and keeps
 // every other stored key.

@@ -1112,7 +1112,21 @@ of the fleet's audit activity, once a controller becomes disposable.
   `recorder_retry_skipped_total` with reason `parameterized` and not
   published. It applies `sweepConsumerSkip` itself, and `RunBackstopRound`
   runs it before `SweepInterruptedRuns`, so the sweep never marks the
-  accepted row as a queued run.
+  accepted row as a queued run. A second class, `selectStaleMarkedIntents`,
+  ends an intent the same guard admits whose `start_marked_at` is older
+  than `ClaimExpiryAge`, whatever its owner's state, with the reason
+  `start-lost`. A Jenkins process can restart inside a live pod, and the
+  pod keeps its `cell_instance`, so no liveness reading proves that loss.
+  The two classes share one `markedLostBatch`, the confirmed class first.
+  **A `start-lost` mark is provisional**: a granted item can wait for an
+  executor after its mark. It therefore publishes no cancel and no retry
+  (an automatic one counts `recorder_retry_skipped_total` with reason
+  `start-lost`) and deletes no run-state objects. `applyRunStarted` supersedes it
+  through `startLostRunSQL` (`ingest_common.go`): the row goes `RUNNING`,
+  loses its result, end, and marking keys, and takes
+  `interrupted_superseded_at`. The owner's `run.completed` also removes
+  its marking keys. `supersedeSQL` never matches such a row, because it
+  records a build.
 - **Backstop cron scheduler and the interrupted sweep's round**
   (`backstop_round.go`, `backstop_policy.go`, `backstop_candidates.go`,
   `backstop_fire.go`, `backstop_metrics.go`, `action_metrics.go`,

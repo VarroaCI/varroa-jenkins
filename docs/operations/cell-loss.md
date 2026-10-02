@@ -66,10 +66,13 @@ activity feed. The reason names the signal that decided.
 | `tenant-moved` | the tenant moved and the old instance stopped reporting |
 | `no-heartbeat` | the run was silent for fifteen minutes on a cell reported not alive |
 | `resume-timeout` | the mesh claimed the run and the run did not come back |
+| `start-lost` | no start event arrived 75 minutes after the start mark |
 
 A `cell-lost` mark sends no cancel command, because the pod is gone and holds no process to stop. A
 fleet lock the lost run held is released on the same schedule. A pod read that proved its owner
 gone ends the five-minute wait.
+
+A `start-lost` mark sends no cancel and no retry: the build can still start and replace it.
 
 The lost instance's agent pods keep running. A resume adopts a pod that ran a build step, so a
 Running pod stays for about 41 minutes, or about 46 when no running cell holds the slot. A pod that is not Running goes within about four minutes. See
@@ -89,11 +92,10 @@ so the rebuilt run keeps its identity and its build number. Five rules gate it.
 | The build carries no parameters | no re-fire; a person runs the build again |
 | The tenant holds a live cell and cell instance | the re-fire retries every 60 seconds |
 | The recorder has not re-fired this build | no second re-fire, ever |
-| The build holds no start mark | no re-fire; the run ends `cell-rolled` |
+| The build holds no start mark | no re-fire; the run ends `cell-rolled` or `start-lost` |
 
-The third rule holds a re-fire until a replacement pod reports, which takes minutes. The second
-rule is permanent: Varroa stores no parameters for a build that never started, so a re-fire would
-run the job with each declared default.
+The second rule is permanent: Varroa stores no parameters for a build that never started, so a
+re-fire would run the job with each declared default.
 
 ## A backstop fire during a cell roll
 
@@ -103,8 +105,7 @@ its Jenkins before it sends the trigger. A trigger that still reaches no Jenkins
 
 A re-fire waits until every earlier fire of the occurrence has failed, or until ten minutes have
 passed since the last fire. It also waits until `cronGrace` has passed since the last fire. It goes to the job's home slot. The backstop re-fires one occurrence
-at most three times, and the run of the last failure names that limit in its error text. Any
-other failure code is permanent, so no round fires that occurrence again.
+at most three times. Any other failure code is permanent, so no round fires that occurrence again.
 
 ## Metrics
 

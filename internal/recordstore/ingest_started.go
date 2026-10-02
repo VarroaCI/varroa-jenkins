@@ -27,6 +27,12 @@ import (
 // the row it supersedes was marked INTERRUPTED. A late started write into
 // an interrupted real run supersedes nothing and leaves the stamp alone.
 //
+// A start-lost mark is the one interrupted real run a started write
+// supersedes (startLostRunSQL). The mark records only that no start event
+// arrived in time, and this event is that start. The write sets the row
+// RUNNING, clears the result, the end, and the marking keys, and stamps
+// interrupted_superseded_at.
+//
 // A run.started that reports a number below the intent's stored number,
 // from an instance other than the intent's current owner, describes a
 // build of a superseded grant: the ledger moved and refreshed the intent
@@ -76,6 +82,7 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 		return dispatchResult{}, fmt.Errorf("marshal envelope: %w", err)
 	}
 
+	startedSupersede := "(" + supersedeSQL("TRUE") + " OR " + startLostRunSQL + ")"
 	var status string
 	err = tx.QueryRow(ctx, `
 		INSERT INTO varroa.runs (
@@ -98,15 +105,15 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 			cause        = COALESCE(EXCLUDED.cause, runs.cause),
 			params       = COALESCE(EXCLUDED.params, runs.params),
 			replay_of    = COALESCE(EXCLUDED.replay_of, runs.replay_of),
-			status       = `+runsStatusMergeSQL("TRUE")+`,
-			cell         = CASE WHEN `+supersedeSQL("TRUE")+` THEN EXCLUDED.cell ELSE runs.cell END,
-			namespace    = CASE WHEN `+supersedeSQL("TRUE")+` THEN EXCLUDED.namespace ELSE runs.namespace END,
-			result       = CASE WHEN `+supersedeSQL("TRUE")+` THEN NULL::text ELSE runs.result END,
-			ended_at     = CASE WHEN `+supersedeSQL("TRUE")+` THEN NULL::timestamptz ELSE runs.ended_at END,
-			interrupted_superseded_at = CASE WHEN `+supersedeSQL("TRUE")+` AND runs.result = 'INTERRUPTED' THEN now() ELSE runs.interrupted_superseded_at END,
+			status       = CASE WHEN `+startLostRunSQL+` THEN EXCLUDED.status ELSE `+runsStatusMergeSQL("TRUE")+` END,
+			cell         = CASE WHEN `+startedSupersede+` THEN EXCLUDED.cell ELSE runs.cell END,
+			namespace    = CASE WHEN `+startedSupersede+` THEN EXCLUDED.namespace ELSE runs.namespace END,
+			result       = CASE WHEN `+startedSupersede+` THEN NULL::text ELSE runs.result END,
+			ended_at     = CASE WHEN `+startedSupersede+` THEN NULL::timestamptz ELSE runs.ended_at END,
+			interrupted_superseded_at = CASE WHEN `+startedSupersede+` AND runs.result = 'INTERRUPTED' THEN now() ELSE runs.interrupted_superseded_at END,
 			payload      = (CASE
 			                     WHEN runs.result IS NOT DISTINCT FROM '`+ResultTriggerFailed+`' THEN COALESCE(runs.payload, '{}'::jsonb) `+triggerPayloadKeysSQL+`
-			                     WHEN COALESCE(runs.payload ? 'accepted_at', false) THEN COALESCE(runs.payload, '{}'::jsonb) `+acceptedSupersedeKeysSQL+`
+			                     WHEN COALESCE(runs.payload ? 'accepted_at', false) OR `+startLostRunSQL+` THEN COALESCE(runs.payload, '{}'::jsonb) `+acceptedSupersedeKeysSQL+`
 			                     ELSE COALESCE(runs.payload, '{}'::jsonb) END) `+acceptedPayloadKeysSQL+` || EXCLUDED.payload
 		RETURNING status
 	`,
