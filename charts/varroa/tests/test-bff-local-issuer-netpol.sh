@@ -66,11 +66,6 @@ RULE=$(issuer_rule "$(bff_policy "$(helm template "$ROOT" "${COMMON[@]}" "${BFF_
   --set auth.mode=local --set dex.enabled=false)")")
 check "mode local admits controller pods" has 'app.kubernetes.io/managed-by: varroa-operator' "$RULE"
 
-echo "--- mode local without auth.bffUrl ---"
-INGRESS=$(awk '/^  ingress:/{f=1} /^  egress:/{f=0} f' <<<"$(bff_policy "$(helm template "$ROOT" \
-  "${COMMON[@]}" --set auth.mode=local --set dex.enabled=false)")")
-check "no bffUrl admits no controller pods" lacks 'managed-by: varroa-operator' "$INGRESS"
-
 echo "--- mode ldap ---"
 RULE=$(issuer_rule "$(bff_policy "$(helm template "$ROOT" "${COMMON[@]}" "${BFF_URL[@]}" \
   --set auth.mode=ldap --set dex.enabled=false)")")

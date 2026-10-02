@@ -71,8 +71,8 @@ func main() {
 	kubeconfigPath := flag.String("kubeconfig", "", "Kubeconfig path (bypasses in-cluster config)")
 	oidcIssuer := flag.String("oidc-issuer", envDefault("VARROA_OIDC_ISSUER", ""), "OIDC issuer URL (for bundle variable injection)")
 	oidcClientID := flag.String("oidc-client-id", envDefault("VARROA_OIDC_CLIENT_ID", "varroa"), "OIDC client ID")
-	authMode := flag.String("auth-mode", envDefault("VARROA_AUTH_MODE", "oidc"), "Auth mode: oidc or local")
-	bffURL := flag.String("bff-url", envDefault("VARROA_BFF_URL", ""), "BFF URL (required when auth-mode=local or with --local-accounts)")
+	authMode := flag.String("auth-mode", envDefault("VARROA_AUTH_MODE", "oidc"), "Auth mode: oidc, local, or ldap")
+	bffURL := flag.String("bff-url", envDefault("VARROA_BFF_URL", ""), "BFF URL (required when auth-mode=local or ldap, or with --local-accounts)")
 	localAccounts := flag.Bool("local-accounts", envBool("VARROA_LOCAL_ACCOUNTS", false), "Accept declared local accounts beside OIDC (auth-mode=oidc only)")
 	oidcClientSecret := flag.String("oidc-client-secret", envDefault("VARROA_OIDC_CLIENT_SECRET", ""), "OIDC client secret")
 	oidcRedirectURL := flag.String("oidc-redirect-url", envDefault("VARROA_OIDC_REDIRECT_URL", ""), "OIDC redirect URL (for Varroa login link)")
@@ -110,6 +110,12 @@ func main() {
 
 	if *localAccounts && (*authMode != "oidc" || *bffURL == "") {
 		logger.Error("--local-accounts needs auth-mode=oidc and --bff-url", "authMode", *authMode)
+		os.Exit(1)
+	}
+
+	controllerIss, err := controllerIssuer(*authMode, *oidcIssuer, *bffURL)
+	if err != nil {
+		logger.Error("invalid auth configuration", "error", err)
 		os.Exit(1)
 	}
 
@@ -276,16 +282,10 @@ func main() {
 	// --- Bundle resolver ---
 	resolver := bundle.NewResolver("/tmp/varroa-bundles")
 	resolver.Logger = logger
-	// In local auth mode the BFF is the OIDC issuer — Jenkins pods
-	// discover /.well-known/jwks.json from the BFF to validate user tokens.
-	if *authMode == "local" && *bffURL != "" {
-		resolver.SetOIDCConfig(*bffURL, *oidcClientID, *oidcClientSecret)
-		logger.Info("local auth bundle variables configured", "issuer", *bffURL)
+	if controllerIss != "" {
+		resolver.SetOIDCConfig(controllerIss, *oidcClientID, *oidcClientSecret)
 		resolver.SetOIDCClaims(*oidcUserClaim, *oidcGroupClaim)
-	} else if *oidcIssuer != "" {
-		resolver.SetOIDCConfig(*oidcIssuer, *oidcClientID, *oidcClientSecret)
-		logger.Info("OIDC bundle variables configured", "issuer", *oidcIssuer)
-		resolver.SetOIDCClaims(*oidcUserClaim, *oidcGroupClaim)
+		logger.Info("controller issuer configured", "authMode", *authMode, "issuer", controllerIss)
 	}
 	// Beside OIDC, Jenkins pods also accept local account sessions that the
 	// BFF issues, and discover their keys from the BFF.
@@ -1630,6 +1630,22 @@ func localAuthPlan(authMode string, localAccounts bool) (reconcilers, bootstrapA
 		return true, true
 	}
 	return localAccounts && authMode == "oidc", false
+}
+
+// controllerIssuer selects the issuer that Jenkins controllers trust for
+// dashboard sessions. In local and ldap modes the BFF signs the sessions, so
+// the BFF URL is the issuer and the controllers fetch its JWKS. Any other mode
+// uses the configured OIDC issuer, which can be empty.
+func controllerIssuer(authMode, oidcIssuer, bffURL string) (string, error) {
+	switch authMode {
+	case "local", "ldap":
+		if bffURL == "" {
+			return "", fmt.Errorf("auth-mode %s needs --bff-url: the BFF issues the sessions that controllers verify", authMode)
+		}
+		return bffURL, nil
+	default:
+		return oidcIssuer, nil
+	}
 }
 
 func envBool(key string, fallback bool) bool {

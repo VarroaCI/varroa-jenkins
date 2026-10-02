@@ -26,6 +26,8 @@ the packaged CRDs. Does not own the Go source it packages
   and the BFF; `templates/local-accounts-guard.yaml` fails the render unless
   `auth.mode` is `oidc` and `auth.bffUrl` is set
   (`tests/test-local-accounts.sh`).
+  `templates/auth-mode-guard.yaml` fails the render when `auth.mode` is `local`
+  or `ldap` and `auth.bffUrl` is empty (`tests/test-auth-mode-bffurl-guard.sh`).
   With a local issuer (`varroa.localIssuerInUse`: a set `auth.bffUrl` and
   `auth.mode` `local` or `ldap`, or `auth.localAccounts.enabled`), `varroa-np-bff` admits controller
   pods on the BFF port: one peer pairs `networkPolicy.tenantNamespaceSelector`

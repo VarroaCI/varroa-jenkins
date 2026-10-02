@@ -70,6 +70,9 @@ dex:
   enabled: false
 ```
 
+The BFF signs LDAP sessions, so the chart requires `auth.bffUrl`.
+Controllers verify the sessions with the BFF keys at that URL.
+
 Set these BFF environment variables:
 
 | Setting | Variable |
@@ -104,6 +107,7 @@ dex:
   enabled: false
 ```
 
+The chart requires `auth.bffUrl` in this mode.
 Create users through the dashboard or users API.
 
 ## Add local accounts beside OIDC

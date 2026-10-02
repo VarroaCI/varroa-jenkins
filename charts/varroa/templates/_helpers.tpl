@@ -234,8 +234,8 @@ Hive-mode helper: returns "true" when .Values.mode is "hive".
 
 {{/*
 Local issuer: true when the BFF issues sessions that Jenkins controllers
-verify. Each controller then fetches the BFF's JWKS from auth.bffUrl. An
-empty auth.bffUrl gives controllers no issuer URL, so nothing fetches.
+verify. Each controller then fetches the BFF's JWKS from auth.bffUrl. The
+auth-mode and local-accounts guards make auth.bffUrl a requirement here.
 */}}
 {{- define "varroa.localIssuerInUse" -}}
 {{- if and .Values.auth.bffUrl (or (eq .Values.auth.mode "local") (eq .Values.auth.mode "ldap") .Values.auth.localAccounts.enabled) -}}true{{- end -}}

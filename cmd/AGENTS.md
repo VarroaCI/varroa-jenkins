@@ -24,7 +24,10 @@ stating what it is/is not responsible for:
   reconciler for `Controller` CRDs; drives the `Pending→Provisioning→Running→
   Connected→Failed` phase state machine over NATS and serves the per-controller
   hibernation wake interstitial on `VARROA_WAKE_PORT` (default `8082`) from every
-  replica. No gRPC/OIDC. One leader replica queue-subscribes
+  replica. No gRPC/OIDC. `controllerIssuer` (`main.go`) is the only choice of
+  the issuer that controllers trust: the BFF URL in `local` and `ldap` modes,
+  else the OIDC issuer. The operator exits in those two modes without
+  `--bff-url`. One leader replica queue-subscribes
   `varroa.ledger.actions.<own cluster>` in the `operator-workers` group
   (`subscribeLedgerActions` in `ledger_action.go`). Never subscribe the
   `varroa.ledger.actions.>` wildcard: every cluster's operator shares the
