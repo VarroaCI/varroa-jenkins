@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/nats-io/nats-server/v2/server"
-	"github.com/nats-io/nats.go"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/bus/bustest"
 )
 
 func startLedgerActionNATS(t *testing.T) *server.Server {
@@ -37,7 +37,7 @@ func ledgerActionSubscriber(t *testing.T, s *server.Server, cluster string) *ato
 	}
 	t.Cleanup(conn.Close)
 	var got atomic.Int64
-	if _, err := subscribeLedgerActions(conn, cluster, "operator-workers", func(*nats.Msg) {
+	if _, err := subscribeLedgerActions(conn, cluster, "operator-workers", func(string, []byte) {
 		got.Add(1)
 	}); err != nil {
 		t.Fatalf("subscribe %s: %v", cluster, err)
@@ -102,4 +102,59 @@ func TestSubscribeLedgerActions_EachClusterReceivesOnlyItsOwn(t *testing.T) {
 	if got := coreGot.Load(); got != coreActions {
 		t.Fatalf("core operator received %d actions after the member-c action, want %d", got, coreActions)
 	}
+}
+
+// denyConn connects to d as user and closes the connection at cleanup.
+func denyConn(t *testing.T, d *bustest.DenyServer, user, pass string) *bus.Conn {
+	t.Helper()
+	c, err := bus.Connect(d.URL(), bus.Config{Username: user, Password: pass, StartupTimeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("connect %s: %v", user, err)
+	}
+	t.Cleanup(c.Close)
+	return c
+}
+
+// publishReaches publishes one message on subject and reports whether got
+// grows within 200 ms.
+func publishReaches(t *testing.T, pub *bus.Conn, subject string, data []byte, got *atomic.Int64) bool {
+	t.Helper()
+	before := got.Load()
+	if err := pub.Publish(subject, data); err != nil {
+		t.Fatalf("publish %s: %v", subject, err)
+	}
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if got.Load() > before {
+			return true
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return false
+}
+
+// TestSubscribeLedgerActions_RecoversAfterDeniedSubscribe starts the
+// subscriber while NATS denies its subject, as before an authorization
+// reload reaches the server. The subscribe returns no error, and the
+// subscriber receives actions after the reload adds the grant.
+func TestSubscribeLedgerActions_RecoversAfterDeniedSubscribe(t *testing.T) {
+	subject := bus.LedgerActionSubject("core")
+	d := bustest.StartDenyServer(t, subject)
+	conn := denyConn(t, d, bustest.RestrictedUser, bustest.RestrictedPassword)
+	pub := denyConn(t, d, bustest.ClientUser, bustest.ClientPassword)
+
+	var got atomic.Int64
+	l, err := subscribeLedgerActions(conn, "core", "operator-workers", func(string, []byte) { got.Add(1) })
+	if err != nil {
+		t.Fatalf("a denied subscribe must not return an error: %v", err)
+	}
+	defer func() { _ = l.Unsubscribe() }()
+	if publishReaches(t, pub, subject, []byte("{}"), &got) {
+		t.Fatal("a denied subscriber received an action")
+	}
+
+	d.SetDeny()
+	bustest.Eventually(t, "the ledger-action subscriber did not recover after the reload", func() bool {
+		return publishReaches(t, pub, subject, []byte("{}"), &got)
+	})
 }

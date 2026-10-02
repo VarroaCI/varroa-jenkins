@@ -11,7 +11,9 @@ control plane's async transport — no other package talks to NATS directly.
 ## Ownership
 
 - Owns: connection/TLS setup (`conn.go`), subscription-denial watchers
-  (`denied.go`), the self-healing request responder (`responder.go`),
+  (`denied.go`), the self-healing request responder (`responder.go`) and
+  plain listener (`listener.go`), the deny-and-reload NATS test server
+  (`bustest/`),
   subject naming (`subjects.go`),
   JetStream stream configs (`jetstream.go`), KV helpers (`kv.go`), the
   cluster directory (`clusters.go`, `cluster.go`), gateway↔operator
@@ -141,16 +143,35 @@ control plane's async transport — no other package talks to NATS directly.
   reading it afterwards: a denial can also arrive later.
   The gateway confirms each subscription and rebuilds through its pacer.
   The operator's `BusTransport.ensureSub` reads the watcher lazily on its
-  next call instead, because the reconcile tick calls it again.
-- **Request responder** (`responder.go`) — `ServeRequests(subject, queue,
-  handler)` returns a `Responder` that holds one request-reply
-  subscription and subscribes again after each denial. The first attempt
-  runs before it returns; a denial of that attempt returns no error. The
-  retry backoff is 1 s, doubling to 30 s, the gateway's values. It logs the
-  first denial at Error, later ones at Debug, and one Info line on
-  recovery. It holds exactly one denial watcher. `Unsubscribe` waits for
-  the goroutine to exit and releases the watcher. The recorder's six
-  responders use it.
+  next call instead, because the reconcile tick calls it again. Every
+  other long-lived subscription goes through `ServeRequests` or `Listen`.
+  Never hold one through a bare `Subscribe`, `QueueSubscribe`, or
+  `SubscribeData`: a denial at start or on a reload kills it until the pod
+  restarts. The BFF's per-run log tail (`internal/api/runlog_tail.go`) is
+  the one known exception; a viewer reconnect rebuilds it.
+- **Self-healing subscriptions** (`responder.go`, `listener.go`) —
+  `ServeRequests(subject, queue, handler)` returns a `Responder` for one
+  request-reply subscription. `Listen(subject, queue, handler)` returns a
+  `Listener` for one plain subscription; its `SubjectHandler` receives the
+  subject and the payload, and a non-empty queue selects queue-group
+  delivery. Both share one loop. Each registers its denial watcher before
+  the subscribe call and returns after that call and one flush, so a
+  request sent after the return finds the subscription. The loop confirms
+  the subscription in the background and subscribes again after each
+  denial, so a start with many subscriptions never waits for the server.
+  A denial returns no error; only a local subscribe failure does. The
+  retry backoff is 1 s, doubling to 30 s, the gateway's values. The loop
+  logs the first denial at Error, later ones at Debug, and one Info line
+  (`<kind> subscription accepted again`) on recovery. Each holds exactly
+  one subscription and one denial watcher. `Unsubscribe` waits for the
+  goroutine to exit and releases both. Users: the recorder's six
+  responders; the operator's command responders, wake, ledger-action,
+  brood, and webhook-result subscriptions; the BFF's brood, activity, and
+  run fan-outs.
+- **Test server** (`bustest/`) — `StartDenyServer(t, deny...)` runs an
+  embedded NATS server whose restricted user may not subscribe to the deny
+  list; `SetDeny` reloads it in place. It does not import `bus`, so the
+  tests of `bus` use it too.
 - **Logging** — a `Conn`'s logger is supplied only through `Config.Logger` and
   is installed by `Connect` before any handler closure exists. There is no
   exported logger field: the NATS callbacks read it from library goroutines and

@@ -422,5 +422,5 @@ go test -race -count=1 ./internal/<pkg>/...        # single package
 - [mite](mite/AGENTS.md) — gateway gRPC server bridging mite sidecars to NATS/operator; owns the build-event/claim bridge (`build_events.go`, `claim_bridge.go`)
 - [bundle](bundle/AGENTS.md) — ComposedBundle composition, git/catalog resolution, JCasC merge, and the delivered pipeline-template set (`pipelinetemplate/`)
 - [rbac](rbac/AGENTS.md) — VarroaRole/JenkinsRole resolution and role-strategy YAML generation
-- [bus](bus/AGENTS.md) — NATS/JetStream transport: subjects, streams, KV buckets, cluster directory, subscription-denial watchers and the self-healing request responder
+- [bus](bus/AGENTS.md) — NATS/JetStream transport: subjects, streams, KV buckets, cluster directory, subscription-denial watchers, the self-healing request responder and listener, the `bustest` deny server
 - [recordstore](recordstore/AGENTS.md) — build-record Postgres store: schema, migrations, ledger, the placement fence, the cross-tenant grant evaluator and responder, the upstream fan-out, the fleet lock table, the tenant-sync responder, the backstop scheduler, blob abstraction; the `runs` row carries the `source`, `summary`, `inputs`, and `replay_of` columns

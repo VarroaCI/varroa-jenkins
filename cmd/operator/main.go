@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
 	batchv1 "k8s.io/api/batch/v1"
@@ -1535,7 +1534,7 @@ func (r *operatorCommandRunner) Start(ctx context.Context) error {
 	}
 
 	for _, sp := range subscriptions {
-		sub, err := r.busConn.SubscribeRequest(sp.subject, operatorQueue, sp.handler)
+		sub, err := r.busConn.ServeRequests(sp.subject, operatorQueue, sp.handler)
 		if err != nil {
 			return fmt.Errorf("subscribe %s: %w", sp.name, err)
 		}
@@ -1549,17 +1548,12 @@ func (r *operatorCommandRunner) Start(ctx context.Context) error {
 	// Hibernation wake: the BFF publishes at-most-once on wake.<cluster>.<ns>.<ctrl>
 	// (nil payload; identity is in the subject). It does not fit the request/reply
 	// subscription table above — it is a wildcard fire-and-forget subject whose
-	// handler needs msg.Subject to recover ns/name. Queue-subscribed so a single
+	// handler needs the subject to recover ns/name. Queue-subscribed so a single
 	// leader replica services each wake.
-	wakeHibernateSub, err := r.busConn.QueueSubscribe(bus.WakeSubjectWildcard(r.cluster), operatorQueue,
-		func(msg *nats.Msg) {
-			ns, name, ok := bus.ParseWakeSubject(msg.Subject)
-			if !ok {
-				r.logger.Warn("ignoring malformed wake subject", "subject", msg.Subject)
-				return
-			}
+	wakeHibernateSub, err := subscribeHibernationWake(r.busConn, r.cluster, operatorQueue,
+		func(ns, name string) {
 			r.reconciler.WakeHibernatedController(context.Background(), ns, name)
-		})
+		}, r.logger)
 	if err != nil {
 		return fmt.Errorf("subscribe hibernation wake: %w", err)
 	}
@@ -1574,8 +1568,8 @@ func (r *operatorCommandRunner) Start(ctx context.Context) error {
 	// subject of its own cluster only. The queue group spreads the actions
 	// of one cluster across the replicas of that cluster's operator.
 	ledgerActionSub, err := subscribeLedgerActions(r.busConn, r.cluster, operatorQueue,
-		func(msg *nats.Msg) {
-			handleLedgerAction(context.Background(), r.logger, msg.Subject, r.cluster, r.reconciler, msg.Data)
+		func(subject string, data []byte) {
+			handleLedgerAction(context.Background(), r.logger, subject, r.cluster, r.reconciler, data)
 		})
 	if err != nil {
 		return fmt.Errorf("subscribe ledger actions: %w", err)
@@ -1604,6 +1598,22 @@ func (r *operatorCommandRunner) Start(ctx context.Context) error {
 	<-replayDone
 	r.logger.Info("operator command subscribers unregistered (lost leadership)")
 	return nil
+}
+
+// subscribeHibernationWake queue-subscribes to the wake subjects of
+// cluster and calls wake with the namespace and name of each well-formed
+// subject. The Listener subscribes again after NATS denies the
+// subscription, so a pod that starts before an authorization reload
+// receives wakes after it.
+func subscribeHibernationWake(conn *bus.Conn, cluster, queue string, wake func(ns, name string), logger *slog.Logger) (*bus.Listener, error) {
+	return conn.Listen(bus.WakeSubjectWildcard(cluster), queue, func(subject string, _ []byte) {
+		ns, name, ok := bus.ParseWakeSubject(subject)
+		if !ok {
+			logger.Warn("ignoring malformed wake subject", "subject", subject)
+			return
+		}
+		wake(ns, name)
+	})
 }
 
 func envDefault(key, fallback string) string {

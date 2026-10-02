@@ -2,7 +2,11 @@ package main
 
 import (
 	"log/slog"
+	"sync/atomic"
 	"testing"
+
+	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/bus/bustest"
 )
 
 // fakeBroodTrigger records every reconcile call the brood subscriber
@@ -128,4 +132,44 @@ func TestHandleBroodEventFullWakeChannel(t *testing.T) {
 	if len(wake) != 1 {
 		t.Fatalf("wake channel holds %d tokens, want 1", len(wake))
 	}
+}
+
+// TestStartBroodWatch_RecoversAfterGrantRemovedAndRestored removes the
+// grant of a live brood subscription with an authorization reload, and
+// restores it with a later one. The server does not restore the
+// subscription with the grant, so the watch must subscribe again.
+func TestStartBroodWatch_RecoversAfterGrantRemovedAndRestored(t *testing.T) {
+	subject := bus.BroodSubject("core")
+	d := bustest.StartDenyServer(t)
+	conn := denyConn(t, d, bustest.RestrictedUser, bustest.RestrictedPassword)
+	pub := denyConn(t, d, bustest.ClientUser, bustest.ClientPassword)
+
+	wake := make(chan struct{}, 1)
+	var got atomic.Int64
+	go func() {
+		for range wake {
+			got.Add(1)
+		}
+	}()
+	t.Cleanup(func() { close(wake) })
+
+	l, err := startBroodWatch(conn, "core", nil, wake, slog.Default())
+	if err != nil {
+		t.Fatalf("startBroodWatch: %v", err)
+	}
+	t.Cleanup(func() { _ = l.Unsubscribe() })
+	event := []byte(`{"event":"disconnected","name":"c1","namespace":"ns","cluster":"core"}`)
+	bustest.Eventually(t, "the brood watch never received", func() bool {
+		return publishReaches(t, pub, subject, event, &got)
+	})
+
+	d.SetDeny(subject)
+	bustest.Eventually(t, "the brood watch still receives after the grant was removed", func() bool {
+		return !publishReaches(t, pub, subject, event, &got)
+	})
+
+	d.SetDeny()
+	bustest.Eventually(t, "the brood watch did not recover after the grant was restored", func() bool {
+		return publishReaches(t, pub, subject, event, &got)
+	})
 }

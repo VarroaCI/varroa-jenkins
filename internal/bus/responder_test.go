@@ -2,13 +2,13 @@ package bus
 
 import (
 	"errors"
-	"net"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
+
+	"github.com/varroaci/varroa-jenkins/internal/bus/bustest"
 )
 
 const (
@@ -17,68 +17,38 @@ const (
 	responderTestBackoff = 20 * time.Millisecond
 )
 
-// responderServer runs an embedded nats-server whose "responder" user may
-// not subscribe to the subjects in deny. setDeny reloads the authorization
-// the way the chart's config reloader does: the client keeps its
-// connection, and nats.go sends no denied subscription again.
+// responderServer wraps a bustest.DenyServer whose restricted user may not
+// subscribe to the subjects of its deny list.
 type responderServer struct {
-	t    *testing.T
-	srv  *server.Server
-	port int
-}
-
-func (d *responderServer) opts(deny []string) *server.Options {
-	perms := &server.Permissions{
-		Publish:   &server.SubjectPermission{Allow: []string{">"}},
-		Subscribe: &server.SubjectPermission{Allow: []string{">"}, Deny: deny},
-	}
-	return &server.Options{
-		Host: "127.0.0.1",
-		Port: d.port,
-		Users: []*server.User{
-			{Username: "responder", Password: "r", Permissions: perms},
-			{Username: "requester", Password: "q"},
-		},
-	}
+	*bustest.DenyServer
+	t *testing.T
 }
 
 func startResponderServer(t *testing.T, deny ...string) *responderServer {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
-	d := &responderServer{t: t, port: port}
-	srv, err := server.NewServer(d.opts(deny))
-	if err != nil {
-		t.Fatalf("new server: %v", err)
-	}
-	srv.Start()
-	if !srv.ReadyForConnections(5 * time.Second) {
-		t.Fatal("nats server not ready")
-	}
-	t.Cleanup(srv.Shutdown)
-	d.srv = srv
-	return d
+	return &responderServer{DenyServer: bustest.StartDenyServer(t, deny...), t: t}
 }
 
-func (d *responderServer) setDeny(deny ...string) {
-	d.t.Helper()
-	if err := d.srv.ReloadOptions(d.opts(deny)); err != nil {
-		d.t.Fatalf("reload: %v", err)
-	}
-}
+func (d *responderServer) setDeny(deny ...string) { d.SetDeny(deny...) }
 
 func (d *responderServer) connect(user, pass string) *Conn {
 	d.t.Helper()
-	c, err := Connect(d.srv.ClientURL(), Config{Username: user, Password: pass, StartupTimeout: 5 * time.Second})
+	c, err := Connect(d.URL(), Config{Username: user, Password: pass, StartupTimeout: 5 * time.Second})
 	if err != nil {
 		d.t.Fatalf("connect %s: %v", user, err)
 	}
 	d.t.Cleanup(c.Close)
 	return c
+}
+
+// restricted connects as the user the deny list applies to.
+func (d *responderServer) restricted() *Conn {
+	return d.connect(bustest.RestrictedUser, bustest.RestrictedPassword)
+}
+
+// client connects as the user with every grant.
+func (d *responderServer) client() *Conn {
+	return d.connect(bustest.ClientUser, bustest.ClientPassword)
 }
 
 func echoHandler(data []byte) []byte { return append([]byte("echo:"), data...) }
@@ -131,8 +101,8 @@ func watcherCount(c *Conn, subject string) int {
 // without a reconnect.
 func TestServeRequests_RecoversAfterDeniedSubscribe(t *testing.T) {
 	d := startResponderServer(t, responderTestSubject)
-	rc := d.connect("responder", "r")
-	qc := d.connect("requester", "q")
+	rc := d.restricted()
+	qc := d.client()
 
 	r, err := rc.serveRequests(responderTestSubject, "recorder", echoHandler, responderTestBackoff)
 	if err != nil {
@@ -156,8 +126,8 @@ func TestServeRequests_RecoversAfterDeniedSubscribe(t *testing.T) {
 // not restore it with the grant, so only a new subscribe recovers it.
 func TestServeRequests_RecoversAfterGrantRemovedAndRestored(t *testing.T) {
 	d := startResponderServer(t)
-	rc := d.connect("responder", "r")
-	qc := d.connect("requester", "q")
+	rc := d.restricted()
+	qc := d.client()
 
 	r, err := rc.serveRequests(responderTestSubject, "recorder", echoHandler, responderTestBackoff)
 	if err != nil {
@@ -177,8 +147,8 @@ func TestServeRequests_RecoversAfterGrantRemovedAndRestored(t *testing.T) {
 // another subject does not rebuild an accepted responder.
 func TestServeRequests_IgnoresDenialOfOtherSubject(t *testing.T) {
 	d := startResponderServer(t, responderTestOther)
-	rc := d.connect("responder", "r")
-	qc := d.connect("requester", "q")
+	rc := d.restricted()
+	qc := d.client()
 
 	var mu sync.Mutex
 	calls := 0
@@ -216,8 +186,8 @@ func TestServeRequests_IgnoresDenialOfOtherSubject(t *testing.T) {
 // subscribe attempt behind it.
 func TestServeRequests_UnsubscribeReleasesWatcher(t *testing.T) {
 	d := startResponderServer(t, responderTestSubject)
-	rc := d.connect("responder", "r")
-	qc := d.connect("requester", "q")
+	rc := d.restricted()
+	qc := d.client()
 
 	r, err := rc.serveRequests(responderTestSubject, "recorder", echoHandler, responderTestBackoff)
 	if err != nil {
@@ -242,5 +212,27 @@ func TestServeRequests_UnsubscribeReleasesWatcher(t *testing.T) {
 	time.Sleep(10 * responderTestBackoff) // A stray rebuild has time to happen.
 	if answered(qc) {
 		t.Fatal("a subscribe attempt followed Unsubscribe")
+	}
+}
+
+// TestServeRequests_ReturnsBeforeConfirm pins that ServeRequests returns
+// after one subscribe call and leaves the confirm to the background loop.
+// A confirm waits subscribeConfirmWait for an accepted subscription, so a
+// serial confirm of every responder would delay the last one by the sum.
+func TestServeRequests_ReturnsBeforeConfirm(t *testing.T) {
+	d := startResponderServer(t)
+	rc := d.restricted()
+
+	const n = 20
+	start := time.Now()
+	for i := 0; i < n; i++ {
+		r, err := rc.serveRequests(responderTestSubject, "recorder", echoHandler, responderTestBackoff)
+		if err != nil {
+			t.Fatalf("ServeRequests: %v", err)
+		}
+		defer func() { _ = r.Unsubscribe() }()
+	}
+	if elapsed := time.Since(start); elapsed >= n*subscribeConfirmWait/2 {
+		t.Fatalf("%d ServeRequests calls took %s; the confirm must not block the call", n, elapsed)
 	}
 }

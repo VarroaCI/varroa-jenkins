@@ -104,9 +104,10 @@ func (r *Reconciler) RunWebhookReplay(ctx context.Context, conn *bus.Conn, clust
 	// Correlate mite replay results (delivered on whreply.<cluster>.>) back to
 	// the goroutine awaiting each command_id.
 	waiters := &replayWaiters{chans: make(map[string]chan *mitev1.CommandResult)}
-	resultSub, err := conn.Subscribe(bus.WebhookResultWildcard(cluster), func(msg *nats.Msg) {
+	// The Listener subscribes again after NATS denies the subscription.
+	resultSub, err := conn.Listen(bus.WebhookResultWildcard(cluster), "", func(_ string, data []byte) {
 		var res mitev1.CommandResult
-		if err := json.Unmarshal(msg.Data, &res); err != nil {
+		if err := json.Unmarshal(data, &res); err != nil {
 			r.Logger.Warn("unmarshal replay result failed", "error", err)
 			return
 		}

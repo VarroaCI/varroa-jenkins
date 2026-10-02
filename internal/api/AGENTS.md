@@ -452,6 +452,8 @@ federation, activity persistence, and SSE fanout.
   handler-driven events; `BusFanout` (`bus_fanout.go`) additionally subscribes
   `activity.>` and generic bus subjects and redelivers them as `Record`s to per-key
   subscribers — this backs live tailing for `/activity/stream` and `/stream/brood`.
+  `BusFanout` and `RunFanout` subscribe through `bus.Conn.Listen`, so they
+  recover from a denied subscription without a restart.
   `HandleBroodStream`/`HandleControllerStream`/`HandleMiteStream` (`sse/handlers.go`)
   are the actual chunked-flush SSE `http.HandlerFunc`s.
 - `handlers.go` (~3350 lines, the largest file) is the central handler file:

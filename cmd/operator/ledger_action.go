@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/nats-io/nats.go"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -39,15 +38,16 @@ func bindLedgerActionMetrics() {
 }
 
 // subscribeLedgerActions queue-subscribes handler to the ledger-action
-// subject of cluster only. The operators of every cluster share one core
+// subject of cluster only, through a Listener that subscribes again after
+// NATS denies the subscription. The operators of every cluster share one core
 // NATS and one queue-group name. NATS keeps a separate queue group for
 // each subscription subject, so a subject that names one cluster gives
 // that cluster's actions only to that cluster's operator replicas. A
 // shared wildcard subject would join every cluster to one queue group,
 // and NATS would give a share of one cluster's actions to the other
 // clusters.
-func subscribeLedgerActions(conn *bus.Conn, cluster, queue string, handler nats.MsgHandler) (*nats.Subscription, error) {
-	return conn.QueueSubscribe(bus.LedgerActionSubject(cluster), queue, handler)
+func subscribeLedgerActions(conn *bus.Conn, cluster, queue string, handler bus.SubjectHandler) (*bus.Listener, error) {
+	return conn.Listen(bus.LedgerActionSubject(cluster), queue, handler)
 }
 
 // ledgerActionRunner is the narrow slice of *controller.Reconciler the

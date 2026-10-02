@@ -41,15 +41,18 @@ type broodReconcileTrigger interface {
 // That reconcile reads the new epoch and pushes the desired state, which
 // NATS does not keep for a reconnecting mite.
 //
+// The Listener subscribes again after NATS denies the subscription, at
+// start or on an authorization reload.
+//
 // The event decides nothing. It only removes latency: every rule that
 // acts on a lost cell rests on the operator's own pod read, so a missed
 // event costs one tick and no more.
 func startBroodWatch(conn *bus.Conn, cluster string, trigger broodReconcileTrigger,
-	wake chan<- struct{}, logger *slog.Logger) (*bus.Sub, error) {
+	wake chan<- struct{}, logger *slog.Logger) (*bus.Listener, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return conn.SubscribeData(bus.BroodSubject(cluster), func(data []byte) {
+	return conn.Listen(bus.BroodSubject(cluster), "", func(_ string, data []byte) {
 		handleBroodEvent(data, cluster, trigger, wake, logger)
 	})
 }

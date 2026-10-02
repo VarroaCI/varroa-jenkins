@@ -146,7 +146,9 @@ no image stage.
 NATS Secret is followed without a restart. The chart always passes it; the
 `BUS_PASSWORD` env is the no-file fallback for local runs. Each passes its
 logger in `bus.Config` (never assigned after `Connect`) and registers the
-`varroa.bus.connected` gauge. Operator
+`varroa.bus.connected` gauge. Every long-lived subscription goes through
+`bus.Conn.ServeRequests` or `bus.Conn.Listen`, which subscribe again after
+NATS denies the subscription at start or on an authorization reload. Operator
 readiness (`/readyz`) fails while the bus is down; operator liveness
 (`/healthz`) does not, so a bus outage never becomes a restart loop. Gateway and
 BFF `/healthz` report a `bus` field but always return 200, because the BFF still

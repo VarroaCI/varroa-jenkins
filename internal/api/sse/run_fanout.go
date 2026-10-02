@@ -67,7 +67,11 @@ func NewRunFanout(conn *bus.Conn, meter metric.Meter) *RunFanout {
 // to local subscribers. One replica holds one subscription. Start blocks
 // until ctx is cancelled.
 func (rf *RunFanout) Start(ctx context.Context) error {
-	sub, err := rf.conn.SubscribeData(bus.RunNotifyWildcard, rf.deliverPayload)
+	// The Listener subscribes again after NATS denies the subscription, at
+	// start or on an authorization reload.
+	sub, err := rf.conn.Listen(bus.RunNotifyWildcard, "", func(_ string, data []byte) {
+		rf.deliverPayload(data)
+	})
 	if err != nil {
 		return err
 	}
