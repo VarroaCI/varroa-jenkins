@@ -19,16 +19,16 @@ const claimQueueGroup = "recorder"
 const ClaimBudget = 3500 * time.Millisecond
 
 // RegisterClaimResponder subscribes ledger to bus.LedgerClaimSubject with
-// queue group "recorder". metrics may be nil. The returned Sub stops the
-// subscription when unsubscribed.
-func RegisterClaimResponder(conn *bus.Conn, ledger *Ledger, metrics *ClaimMetrics, logger *slog.Logger) (*bus.Sub, error) {
+// queue group "recorder". metrics may be nil. The returned Responder subscribes
+// again after a denial and stops when unsubscribed.
+func RegisterClaimResponder(conn *bus.Conn, ledger *Ledger, metrics *ClaimMetrics, logger *slog.Logger) (*bus.Responder, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	handler := func(data []byte) []byte {
 		return handleClaim(logger, ledger, metrics, data)
 	}
-	return conn.SubscribeRequest(bus.LedgerClaimSubject, claimQueueGroup, handler)
+	return conn.ServeRequests(bus.LedgerClaimSubject, claimQueueGroup, handler)
 }
 
 // handleClaim decodes a ClaimRequest, runs it against ledger, and encodes

@@ -51,7 +51,7 @@ type CrossTenantDeps struct {
 }
 
 // RegisterCrossTenantResponder subscribes to bus.LedgerCrossTenantSubject
-// with queue group "recorder". The returned Sub stops the subscription
+// with queue group "recorder". The returned Responder subscribes again after a denial and stops
 // when unsubscribed. It registers its own CrossTenantMetrics;
 // registration failure is logged and the responder still starts, with
 // that instrument counting nothing. lockMetrics is the one
@@ -60,7 +60,7 @@ type CrossTenantDeps struct {
 // shared instrument set, registered once, never twice on the same
 // meter. notifier publishes the lock notifications of the three lock
 // kinds, and a nil notifier publishes nothing.
-func RegisterCrossTenantResponder(conn *bus.Conn, pool *pgxpool.Pool, store crossTenantBlobSigner, lockMetrics *FleetLockMetrics, notifier *RunNotifier, logger *slog.Logger) (*bus.Sub, error) {
+func RegisterCrossTenantResponder(conn *bus.Conn, pool *pgxpool.Pool, store crossTenantBlobSigner, lockMetrics *FleetLockMetrics, notifier *RunNotifier, logger *slog.Logger) (*bus.Responder, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -81,7 +81,7 @@ func RegisterCrossTenantResponder(conn *bus.Conn, pool *pgxpool.Pool, store cros
 	handler := func(data []byte) []byte {
 		return handleCrossTenantBytes(logger, deps, data)
 	}
-	return conn.SubscribeRequest(bus.LedgerCrossTenantSubject, crossTenantQueueGroup, handler)
+	return conn.ServeRequests(bus.LedgerCrossTenantSubject, crossTenantQueueGroup, handler)
 }
 
 // handleCrossTenantBytes decodes a CrossTenantRequest, dispatches it by

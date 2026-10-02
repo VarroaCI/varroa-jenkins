@@ -63,16 +63,16 @@ type TenantPurgeResponse struct {
 }
 
 // RegisterTenantPurgeResponder subscribes to bus.TenantPurgeSubject with
-// queue group "recorder". The returned Sub stops the subscription when
+// queue group "recorder". The returned Responder subscribes again after a denial and stops when
 // unsubscribed.
-func RegisterTenantPurgeResponder(conn *bus.Conn, pool *pgxpool.Pool, logger *slog.Logger) (*bus.Sub, error) {
+func RegisterTenantPurgeResponder(conn *bus.Conn, pool *pgxpool.Pool, logger *slog.Logger) (*bus.Responder, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	handler := func(data []byte) []byte {
 		return handleTenantPurge(logger, pool, data)
 	}
-	return conn.SubscribeRequest(bus.TenantPurgeSubject, tenantPurgeQueueGroup, handler)
+	return conn.ServeRequests(bus.TenantPurgeSubject, tenantPurgeQueueGroup, handler)
 }
 
 // handleTenantPurge decodes a TenantPurgeRequest, deletes the matching

@@ -129,16 +129,17 @@ func ForceReleaseFleetLock(ctx context.Context, pool *pgxpool.Pool, req FleetLoc
 
 // RegisterFleetLockReleaseResponder subscribes to
 // bus.FleetLockReleaseSubject with queue group "recorder". notifier
-// publishes the lock notification of each released row.
+// publishes the lock notification of each released row. The returned
+// Responder subscribes again after a denial and stops when unsubscribed.
 func RegisterFleetLockReleaseResponder(conn *bus.Conn, pool *pgxpool.Pool, notifier *RunNotifier,
-	logger *slog.Logger) (*bus.Sub, error) {
+	logger *slog.Logger) (*bus.Responder, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	handler := func(data []byte) []byte {
 		return handleFleetLockRelease(pool, notifier, logger, data)
 	}
-	return conn.SubscribeRequest(bus.FleetLockReleaseSubject, fleetLockReleaseQueueGroup, handler)
+	return conn.ServeRequests(bus.FleetLockReleaseSubject, fleetLockReleaseQueueGroup, handler)
 }
 
 // handleFleetLockRelease decodes one request and answers its reply body.

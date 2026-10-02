@@ -45,16 +45,16 @@ type ownerLookupResponse struct {
 }
 
 // RegisterOwnerResponder subscribes to bus.LedgerOwnerSubject with queue
-// group "recorder". The returned Sub stops the subscription when
+// group "recorder". The returned Responder subscribes again after a denial and stops when
 // unsubscribed.
-func RegisterOwnerResponder(conn *bus.Conn, pool *pgxpool.Pool, logger *slog.Logger) (*bus.Sub, error) {
+func RegisterOwnerResponder(conn *bus.Conn, pool *pgxpool.Pool, logger *slog.Logger) (*bus.Responder, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	handler := func(data []byte) []byte {
 		return handleOwnerLookup(logger, pool, data)
 	}
-	return conn.SubscribeRequest(bus.LedgerOwnerSubject, ownerQueueGroup, handler)
+	return conn.ServeRequests(bus.LedgerOwnerSubject, ownerQueueGroup, handler)
 }
 
 // handleOwnerLookup decodes an ownerLookupRequest, reads the run's

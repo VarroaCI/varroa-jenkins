@@ -256,6 +256,16 @@ of the fleet's audit activity, once a controller becomes disposable.
 - **`blob/`** — the storage abstraction for build logs and build
   artifacts, behind `gocloud.dev/blob`: the `pgblob` driver for tier one
   and S3/GCS/Azure/file wiring for tier two. See its own `AGENTS.md`.
+- **Responder subscriptions** — every `Register*Responder` (claim, owner,
+  tenant purge, tenant sync, cross-tenant, fleet lock release) subscribes
+  through `bus.Conn.ServeRequests` and returns a `*bus.Responder`. NATS can
+  deny the subscription at start or remove it on an authorization reload.
+  The `Responder` subscribes again, so the recorder needs no restart.
+  The two pull consumers (`RunIngestConsumer`, `RunActivityIngestConsumer`)
+  need no such path. Their only subscription is the private
+  `_INBOX_recorder.>` inbox, whose grant no deploy changes. Each fetch is a
+  new publish, so a denied fetch times out and the loop retries by itself.
+  A denied ack causes a redelivery after the ack wait.
 - **Ledger and claim responder** (`ledger*.go`) — the design writes the
   claim types as `ledger.ClaimRequest`/`ledger.ClaimResponse`; this
   package holds them as `ClaimRequest`/`ClaimResponse` with no separate

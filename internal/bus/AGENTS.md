@@ -11,7 +11,8 @@ control plane's async transport — no other package talks to NATS directly.
 ## Ownership
 
 - Owns: connection/TLS setup (`conn.go`), subscription-denial watchers
-  (`denied.go`), subject naming (`subjects.go`),
+  (`denied.go`), the self-healing request responder (`responder.go`),
+  subject naming (`subjects.go`),
   JetStream stream configs (`jetstream.go`), KV helpers (`kv.go`), the
   cluster directory (`clusters.go`, `cluster.go`), gateway↔operator
   request/reply schemas (`operator.go`, `config.go`), the mite presence
@@ -141,6 +142,15 @@ control plane's async transport — no other package talks to NATS directly.
   The gateway confirms each subscription and rebuilds through its pacer.
   The operator's `BusTransport.ensureSub` reads the watcher lazily on its
   next call instead, because the reconcile tick calls it again.
+- **Request responder** (`responder.go`) — `ServeRequests(subject, queue,
+  handler)` returns a `Responder` that holds one request-reply
+  subscription and subscribes again after each denial. The first attempt
+  runs before it returns; a denial of that attempt returns no error. The
+  retry backoff is 1 s, doubling to 30 s, the gateway's values. It logs the
+  first denial at Error, later ones at Debug, and one Info line on
+  recovery. It holds exactly one denial watcher. `Unsubscribe` waits for
+  the goroutine to exit and releases the watcher. The recorder's six
+  responders use it.
 - **Logging** — a `Conn`'s logger is supplied only through `Config.Logger` and
   is installed by `Connect` before any handler closure exists. There is no
   exported logger field: the NATS callbacks read it from library goroutines and

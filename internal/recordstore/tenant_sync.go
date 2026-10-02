@@ -30,7 +30,7 @@ const tenantSyncTimeout = 10 * time.Second
 const maxDeadInstances = 10
 
 // RegisterTenantSyncResponder subscribes to bus.TenantSyncSubject with
-// queue group "recorder". The returned Sub stops the subscription when
+// queue group "recorder". The returned Responder subscribes again after a denial and stops when
 // unsubscribed. It registers its own InterruptedMetrics for the
 // interrupted-run marking an "announce" request triggers (design D9)
 // and its own ActionMetrics for the actions that marking publishes;
@@ -42,7 +42,7 @@ const maxDeadInstances = 10
 // lock notifications the announce hook's fleet-lock release owes, and a
 // nil notifier publishes nothing.
 func RegisterTenantSyncResponder(conn *bus.Conn, pool *pgxpool.Pool, grace time.Duration,
-	stateDeleter ObjectDeleter, notifier *RunNotifier, logger *slog.Logger) (*bus.Sub, error) {
+	stateDeleter ObjectDeleter, notifier *RunNotifier, logger *slog.Logger) (*bus.Responder, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -57,7 +57,7 @@ func RegisterTenantSyncResponder(conn *bus.Conn, pool *pgxpool.Pool, grace time.
 	handler := func(data []byte) []byte {
 		return handleTenantSync(conn, logger, pool, metrics, actionMetrics, stateDeleter, grace, notifier, data)
 	}
-	return conn.SubscribeRequest(bus.TenantSyncSubject, tenantSyncQueueGroup, handler)
+	return conn.ServeRequests(bus.TenantSyncSubject, tenantSyncQueueGroup, handler)
 }
 
 // handleTenantSync decodes a TenantSyncRequest and dispatches it by
