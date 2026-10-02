@@ -142,11 +142,20 @@ new capabilities are added to the BFF/OpenAPI spec first, then surfaced here.
   `activity.go` does for a path the generated client does not cover). Exits
   zero on an empty findings list, non-zero otherwise, printing each finding's
   severity/path/message. Contacts no cell and reads no record-store data.
+- **`locks list` (`locks.go`)** — `varroactl locks list [--team TEAM]`
+  reads every fleet lock through the generated client's
+  `ListAllFleetLocksWithResponse` (`GET /locks`, cluster-wide
+  `fleetlocks:read`), or one team's locks through
+  `ListTeamFleetLocksWithResponse` (`GET /pipelines/{team}/locks`). Columns:
+  `NAME STATE RUN TENANT CLUSTER JOB AGE`; `wide` adds `SINCE` and `LINK`.
+  AGE counts from `waitingSince` on a waiting row and from `acquiredAt`
+  otherwise. `-o name` prints the lock name of each row, so a name repeats
+  for a holder and its waiters; a script that needs the run uses `-o json`.
 - **`locks release` (`locks.go`)** — `varroactl locks release NAME --run
   RUN_ID --reason TEXT` force-releases one releasing fleet lock through the
   generated client's `ReleaseFleetLockWithResponse` (`POST /locks/release`).
   A missing name, run, or reason is a usage error raised before any
-  request. The `locks` group holds no other verb.
+  request.
 - **`break-glass` (`breakglass.go`)** — `varroactl break-glass NAME [-n NS]
   [--cluster C] --reason TEXT [--ttl 15m] [--target URL] [--listen ADDR]`
   requests a short-lived admin grant for a headless controller through the

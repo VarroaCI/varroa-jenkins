@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -13,14 +14,26 @@ func init() {
 	registerRootCommand(addLocksGroup)
 }
 
-// addLocksGroup registers the top-level "locks" command group. Its one
-// verb, release, force-releases a releasing fleet lock through POST
-// /locks/release.
+// addLocksGroup registers the top-level "locks" command group. list reads
+// the fleet locks, and release force-releases a releasing fleet lock
+// through POST /locks/release.
 func addLocksGroup(root *cobra.Command) {
 	locksCmd := &cobra.Command{
 		Use:   "locks",
 		Short: "Manage fleet locks",
 	}
+
+	listCmd := &cobra.Command{
+		Use:   "list [--team TEAM]",
+		Short: "List the fleet locks of every tenant, or of one team",
+		Long: "List the fleet locks. With no flag, the command reads every lock of every cluster\n" +
+			"through GET /locks, which needs the cluster-wide fleetlocks:read verb. With --team,\n" +
+			"it reads the locks of one team's tenants through GET /pipelines/{team}/locks.",
+		Args: cobra.NoArgs,
+		RunE: runLocksList,
+	}
+	listCmd.Flags().String("team", "", "list only the locks of this team's tenants")
+	locksCmd.AddCommand(listCmd)
 
 	releaseCmd := &cobra.Command{
 		Use:   "release NAME --run RUN_ID --reason TEXT",
@@ -70,4 +83,102 @@ func runLocksRelease(cmd *cobra.Command, args []string) error {
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "released fleet lock %s (run %s, tenant %s, cluster %s)\n",
 		out.Name, out.RunId, out.Tenant, out.Cluster)
 	return nil
+}
+
+// runLocksList implements "varroactl locks list".
+func runLocksList(cmd *cobra.Command, _ []string) error {
+	team, _ := cmd.Flags().GetString("team")
+	team = strings.TrimSpace(team)
+
+	c, err := apiClient(cmd)
+	if err != nil {
+		return err
+	}
+	var (
+		items  []client.ComponentsSchemasFleetLock
+		status int
+		body   []byte
+		ok     bool
+	)
+	if team == "" {
+		resp, err := c.ListAllFleetLocksWithResponse(cmd.Context())
+		if err != nil {
+			return err
+		}
+		status, body = resp.StatusCode(), resp.Body
+		if ok = resp.JSON200 != nil; ok {
+			items = resp.JSON200.Items
+		}
+	} else {
+		resp, err := c.ListTeamFleetLocksWithResponse(cmd.Context(), team)
+		if err != nil {
+			return err
+		}
+		status, body = resp.StatusCode(), resp.Body
+		if ok = resp.JSON200 != nil; ok {
+			items = resp.JSON200.Items
+		}
+	}
+	if status >= 400 || !ok {
+		return errFromResponse(body, status)
+	}
+	return renderFleetLocks(cmd, items)
+}
+
+// renderFleetLocks applies the uniform output formats. The name format
+// prints the lock name of each row. A lock name repeats on its holder row
+// and each waiting row, so a script that needs the run uses -o json.
+func renderFleetLocks(cmd *cobra.Command, items []client.ComponentsSchemasFleetLock) error {
+	out := cmd.OutOrStdout()
+	o, _ := cmd.Flags().GetString("output")
+	noHeaders, _ := cmd.Flags().GetBool("no-headers")
+	if items == nil {
+		items = []client.ComponentsSchemasFleetLock{}
+	}
+
+	switch o {
+	case "json":
+		return printJSON(out, items)
+	case "yaml":
+		return printYAML(out, items)
+	case "name":
+		for _, item := range items {
+			_, _ = fmt.Fprintln(out, item.Name)
+		}
+		return nil
+	}
+
+	wide := o == "wide"
+	headers := []string{"NAME", "STATE", "RUN", "TENANT", "CLUSTER", "JOB", "AGE"}
+	if wide {
+		headers = append(headers, "SINCE", "LINK")
+	}
+	rows := make([][]string, len(items))
+	for i, item := range items {
+		since := fleetLockSince(item)
+		age, sinceText := "-", "-"
+		if since != nil {
+			age, sinceText = formatAge(*since), since.UTC().Format(time.RFC3339)
+		}
+		row := []string{item.Name, string(item.State), item.RunId, item.Tenant, item.Cluster, item.JobPath, age}
+		if wide {
+			link := "-"
+			if item.RunLink != nil && *item.RunLink != "" {
+				link = *item.RunLink
+			}
+			row = append(row, sinceText, link)
+		}
+		rows[i] = row
+	}
+	printTable(out, headers, rows, noHeaders)
+	return nil
+}
+
+// fleetLockSince answers the time a row's current state began: the wait
+// start of a waiting row, and the acquisition of a held or releasing row.
+func fleetLockSince(item client.ComponentsSchemasFleetLock) *time.Time {
+	if item.State == client.Waiting {
+		return item.WaitingSince
+	}
+	return item.AcquiredAt
 }

@@ -98,7 +98,8 @@ varroactl builds team-a/checkout-api
 # Check a pipeline template marker before it is committed.
 varroactl lint marker --team team-a --marker .varroa/pipeline.yaml
 
-# Force-release a releasing fleet lock that no live pod holds.
+# List the fleet locks, then force-release a releasing lock that no live pod holds.
+varroactl locks list --team team-a -o wide
 varroactl locks release team-a/deploy-prod --run <run id> --reason "<why>"
 ```
 
