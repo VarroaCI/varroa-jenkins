@@ -351,6 +351,24 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.bff.service.port }}
+{{- if include "varroa.localIssuerInUse" . }}
+    # Local issuer: the Jenkins JVM of each controller pod fetches the BFF's
+    # OIDC discovery document and JWKS to verify a BFF-issued session.
+    - from:
+{{- if .Values.networkPolicy.tenantNamespaceSelector }}
+        - namespaceSelector:
+            matchLabels:
+{{- .Values.networkPolicy.tenantNamespaceSelector | toYaml | nindent 14 }}
+{{- else }}
+        - namespaceSelector: {}
+{{- end }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/managed-by: varroa-operator
+      ports:
+        - protocol: TCP
+          port: {{ .Values.bff.service.port }}
+{{- end }}
 {{- if .Values.networkPolicy.metricsIngress }}
     - from:
 {{ toYaml .Values.networkPolicy.metricsIngress | nindent 8 }}

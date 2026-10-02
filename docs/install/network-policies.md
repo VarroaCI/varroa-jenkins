@@ -1,6 +1,6 @@
 # Configure Network Policies
 
-The chart can apply default-deny ingress and egress policies to the Varroa release namespace. The feature is disabled by default and requires a CNI that enforces Kubernetes `NetworkPolicy`.
+The chart can apply default-deny ingress and egress policies to the Varroa release namespace. It is off by default and needs a CNI that enforces `NetworkPolicy`.
 
 The chart does not isolate controller namespaces. Apply separate policies there for Jenkins and agent workloads.
 
@@ -9,6 +9,7 @@ The chart does not isolate controller namespaces. Apply separate policies there 
 | Source | Destination | Port | Purpose |
 |---|---|---:|---|
 | Controller namespaces | Gateway | 9090, 9092/TCP | mite and key checks |
+| Controller pods, local issuer | BFF | 8080/TCP | Session keys |
 | Control plane | NATS | 4222/TCP | Bus |
 | Control plane | Kubernetes API | 443, 6443/TCP | Resources |
 | Ingress controller | Dashboard, BFF | 8080/TCP | HTTP |
@@ -46,11 +47,11 @@ through a restrictive policy of its own needs the same destination as the blob s
 above, added to that namespace's own policy. See
 [Build logs and artifacts](../operations/build-logs-and-artifacts.md#agent-namespace-egress).
 
-Cluster DNS is also required. Add any build-time destinations used by Jenkins or agents to tenant policies.
+Cluster DNS is also required. Add the build-time destinations of Jenkins and agents to tenant policies.
 
 ## Enable the Chart Policies
 
-Start with selectors and API server addresses for your cluster:
+Set the selectors and API server addresses:
 
 ```yaml
 networkPolicy:
@@ -65,7 +66,7 @@ networkPolicy:
   metricsIngress: []
 ```
 
-Label every controller namespace selected by the policy:
+Label every controller namespace:
 
 ```bash
 kubectl label namespace jenkins-platform varroa.dev/tenant=true

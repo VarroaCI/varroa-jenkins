@@ -26,6 +26,14 @@ the packaged CRDs. Does not own the Go source it packages
   and the BFF; `templates/local-accounts-guard.yaml` fails the render unless
   `auth.mode` is `oidc` and `auth.bffUrl` is set
   (`tests/test-local-accounts.sh`).
+  With a local issuer (`varroa.localIssuerInUse`: a set `auth.bffUrl` and
+  `auth.mode` `local` or `ldap`, or `auth.localAccounts.enabled`), `varroa-np-bff` admits controller
+  pods on the BFF port: one peer pairs `networkPolicy.tenantNamespaceSelector`
+  with the fleet label `app.kubernetes.io/managed-by: varroa-operator`. Each
+  controller's Jenkins JVM fetches the BFF's discovery document and JWKS from
+  `auth.bffUrl`. The operator-built cell policy has no BFF egress, because a
+  headless cell gets only offline-verified tokens
+  (`tests/test-bff-local-issuer-netpol.sh`).
   The internet-facing BFF holds no cluster-wide Secret write and no cluster-wide
   ConfigMap read: its `configmaps` `get` (version-profile plugin sets, issue #416)
   lives on the release-namespace `Role` in `bff/role.yaml`, because
@@ -330,7 +338,7 @@ the packaged CRDs. Does not own the Go source it packages
   (`test-hive-mode.sh`, `test-secret-rbac-scoping.sh`, `test-nats-bus-security.sh`,
   `test-recorder-netpol.sh`, `test-recorder-chart.sh`, `test-activity-stream-acl.sh`,
   `test-runner-door-nginx.sh`, `test-cells-guard.sh`, `test-hive-recordstore.sh`, `test-artifact-sts.sh`,
-  `test-nats-encryption.sh`); not the
+  `test-nats-encryption.sh`, `test-bff-local-issuer-netpol.sh`); not the
   `helm unittest` plugin.
 - **The agent WebSocket door needs one nginx block, no Ingress change.**
   `frontend/nginx.conf`'s `location /runners/` block proxies to the BFF
@@ -401,6 +409,7 @@ bash charts/varroa/tests/test-recorder-chart.sh
 bash charts/varroa/tests/test-runner-door-nginx.sh
 bash charts/varroa/tests/test-cellpool-rbac.sh
 bash charts/varroa/tests/test-hive-recordstore.sh
+bash charts/varroa/tests/test-bff-local-issuer-netpol.sh
 ```
 
 - **Record-store Postgres NetworkPolicy** — in `recordStore.postgres.mode: cnpg` the chart renders

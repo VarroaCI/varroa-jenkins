@@ -233,6 +233,15 @@ Hive-mode helper: returns "true" when .Values.mode is "hive".
 {{- define "varroa.isHive" -}}{{- if eq (.Values.mode | default "full") "hive" -}}true{{- end -}}{{- end -}}
 
 {{/*
+Local issuer: true when the BFF issues sessions that Jenkins controllers
+verify. Each controller then fetches the BFF's JWKS from auth.bffUrl. An
+empty auth.bffUrl gives controllers no issuer URL, so nothing fetches.
+*/}}
+{{- define "varroa.localIssuerInUse" -}}
+{{- if and .Values.auth.bffUrl (or (eq .Values.auth.mode "local") (eq .Values.auth.mode "ldap") .Values.auth.localAccounts.enabled) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 Bus URL resolution: per-tier value → global bus.url → tier-specific
 busURL → in-cluster default nats://<release>-nats:4222.
 Usage: {{ include "varroa.busURL" (dict "root" $ "tier" "operator") }}

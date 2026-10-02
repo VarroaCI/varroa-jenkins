@@ -8,7 +8,7 @@ Set `auth.mode` in Helm values.
 | `ldap` | LDAP directory | LDAP group search |
 | `local` | Varroa `User` resources | Varroa groups |
 
-Authorization is configured separately with [Varroa RBAC](varroa-rbac.md).
+Configure authorization with [Varroa RBAC](varroa-rbac.md).
 
 ## Use direct OIDC
 
@@ -34,7 +34,7 @@ absolute HTTPS origin. Check the username and groups in `/api/v1/me`.
 
 ## Use Dex as an OIDC broker
 
-Use Dex when an upstream provider needs a Dex connector.
+Use Dex when a provider needs a Dex connector.
 
 ```yaml
 auth:
@@ -63,13 +63,14 @@ Add the connector under `dex.config`.
 ```yaml
 auth:
   mode: ldap
+  bffUrl: "http://<release>-varroa-bff.<namespace>.svc.cluster.local:8080"
   cookieDomain: .varroa.example.com
   dashboardUrl: https://app.varroa.example.com
 dex:
   enabled: false
 ```
 
-Configure the BFF with these environment variables:
+Set these BFF environment variables:
 
 | Setting | Variable |
 |---|---|
@@ -128,23 +129,22 @@ spec:
   password: <initial-password>
 ```
 
-An account needs `purpose` and signs in as `local:<name>` from the login
-page. Each sign-in
-writes an `auth.local.login` activity event. A failed attempt on a declared
+An account needs `purpose` and signs in as `local:<name>`.
+Each sign-in writes an `auth.local.login` event. A failed attempt on a declared
 account writes `auth.local.login_failed`. An unknown name writes no event.
 
 ## Configure controller SSO safely
 
 The `varroa_token` browser cookie is shared with controller hosts through
 `auth.cookieDomain`. Choose the narrowest parent domain containing only Varroa
-and managed Jenkins hosts. Use TLS on every host and do not host untrusted
-applications under that domain.
+and managed Jenkins hosts. Use TLS on every host. Host no untrusted applications
+under that domain.
 
 Helm creates and keeps the shared OIDC state secret unless
 `auth.oidc.stateSecret` is set.
 
-Controllers need network access to the discovery and JWKS endpoints of each
-issuer.
+Controllers must reach the discovery and JWKS endpoints of each issuer.
+A member cluster has no BFF, so set its `auth.bffUrl` to the public dashboard origin.
 
 ## Troubleshoot
 

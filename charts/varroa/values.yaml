@@ -197,6 +197,8 @@ networkPolicy:
     kubernetes.io/metadata.name: ingress-nginx
   # Namespace selector for tenant/controller namespaces allowed to reach the
   # gateway (mite gRPC :9090 + apikey verify :9092). {} = all namespaces.
+  # With a local issuer (auth.bffUrl set, and auth.mode local or ldap or
+  # auth.localAccounts), controller pods here also reach the BFF for its JWKS.
   tenantNamespaceSelector: {}
   # kube-apiserver egress for operator/gateway/bff/dex.
   # Empty cidrs = 0.0.0.0/0 on the listed ports; pin to your apiserver endpoint IPs.
@@ -408,8 +410,8 @@ dex:
 auth:
   # -- Auth mode: "oidc", "ldap", or "local".
   mode: oidc
-  # -- BFF URL, required when mode=local or localAccounts.enabled (the issuer
-  # URL for local JWT validation).
+  # -- BFF URL, required when mode=local, mode=ldap, or localAccounts.enabled
+  # (the issuer URL for local JWT validation).
   bffUrl: ""
   # -- Declared local accounts beside OIDC. Needs mode=oidc and bffUrl.
   # Each local account is a User with spec.purpose "service" or "break-glass".
