@@ -23,6 +23,16 @@ const (
 // window, so a lost run can wait this long before its resume arms.
 const SilentCellWindow = silentHeartbeatWindow
 
+// liveOwnerSilentWindow is the heartbeat gap that ends a RUNNING run when
+// no liveness reading proves its owner gone. A Jenkins container can die
+// and restart inside a live pod, and a freestyle build it held then sends
+// no heartbeat and no completion. The plugin and the mite drop a
+// heartbeat during a transport outage, so this window must stay far
+// above the heartbeat interval and above a gateway or NATS outage. It
+// must also stay above silentHeartbeatWindow plus cellAliveStaleAfter, so
+// a dead cell still ends with the no-heartbeat reason and its cancel.
+const liveOwnerSilentWindow = 60 * time.Minute
+
 // cellAliveStaleAfter is twice the ten-minute announce resync interval
 // (internal/controller/cells.syncResyncInterval), design D9's "twice the
 // announce interval" rule. A cell-liveness reading older than this

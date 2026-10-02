@@ -1131,6 +1131,26 @@ of the fleet's audit activity, once a controller becomes disposable.
   `interrupted_superseded_at`. The owner's `run.completed` also removes
   its marking keys. `supersedeSQL` never matches such a row, because it
   records a build.
+- **The heartbeat-lost test** (`interrupted.go`) — `evaluateInterruption`
+  applies it last, after `cellLivenessGone` answers alive. It ends a
+  `RUNNING` run whose `livenessBaseline` is older than
+  `liveOwnerSilentWindow` (60 minutes, `cell_liveness.go`) with the reason
+  `heartbeat-lost`, whatever the placement says: no row, a live member,
+  and a non-member owner all reach it. A Jenkins container that restarts
+  inside a live pod keeps its `cell_instance`, and a freestyle build it
+  held sends no completion. `MarkMovedRunsForTenant` never applies it.
+  The marking write re-reads `heartbeat_received_at` against the window,
+  so a heartbeat that lands after the candidate read stops the mark.
+  **The mark is provisional** (`provisionalMark`): it publishes no cancel
+  and no retry (an automatic one counts `recorder_retry_skipped_total`
+  with reason `heartbeat-lost`), deletes no run-state objects, and keeps
+  the run's pending `inputs`; `runInputWritableSQL` and
+  `inputsHeartbeatGuardSQL` still let a settled input leave that set. Only the
+  owner's `run.completed` replaces it (`heartbeatLostRunSQL`,
+  `ingest_common.go`): the real result wins, `interrupted_reason` goes,
+  and `heartbeatLostLogSummarySQL` removes the log summary's
+  `incomplete_reason` when the real `run.log` reports `incomplete` false.
+  A `run.started` and a foreign completion leave the mark.
 - **Backstop cron scheduler and the interrupted sweep's round**
   (`backstop_round.go`, `backstop_policy.go`, `backstop_candidates.go`,
   `backstop_fire.go`, `backstop_metrics.go`, `action_metrics.go`,

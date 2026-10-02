@@ -17,8 +17,10 @@ const runInputSequenceSQL = `$11::bigint >= COALESCE((runs.payload->>'inputs_seq
 
 // runInputWritableSQL is the status test every run.input arm reads. A
 // completed run holds no pending input, so such a row refuses the write
-// whatever the payload's seq holds.
-const runInputWritableSQL = `runs.status <> 'COMPLETED'`
+// whatever the payload's seq holds. A heartbeat-lost mark is the one
+// exception: its owner can still wait on an input, and the mark keeps the
+// set, so a settled input must still leave it.
+const runInputWritableSQL = `(runs.status <> 'COMPLETED' OR ` + heartbeatLostRunSQL + `)`
 
 // applyRunInput replaces the run's whole pending set with the payload's
 // set, and inserts a QUEUED placeholder row when the run holds none yet.

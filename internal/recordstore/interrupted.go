@@ -37,7 +37,17 @@ const (
 	// can still be alive, so the mark is provisional: a later run.started
 	// supersedes it.
 	ReasonStartLost = "start-lost"
+	// ReasonHeartbeatLost names a RUNNING run whose heartbeat stopped for
+	// liveOwnerSilentWindow while no liveness reading proves its owner
+	// gone. The owner can still be alive behind a transport outage, so
+	// the mark is provisional: the owner's run.completed replaces it.
+	ReasonHeartbeatLost = "heartbeat-lost"
 )
+
+// retrySkipHeartbeatLost is recorder_retry_skipped_total's reason for a
+// retry of a run marked heartbeat-lost. Its owner can still hold the
+// build, and a retry would then run the job twice.
+const retrySkipHeartbeatLost = "heartbeat-lost"
 
 // interruptedRetryAutomatic is the Team.spec.pipelines.interruptedRetry
 // value that makes a mark publish one automatic retry_run action.
@@ -101,9 +111,15 @@ func livenessBaseline(c runInterruptCandidate) time.Time {
 
 // evaluateInterruption applies the mesh guard, then the confirmed test,
 // then the moved test, then the silent test, to one QUEUED or RUNNING
-// run. It answers the reason the first test that holds names. No test
-// fires without a cell-liveness reading naming the run's own owning cell
-// instance.
+// run. It answers the reason the first test that holds names. None of
+// these tests fires without a cell-liveness reading naming the run's own
+// owning cell instance.
+//
+// The heartbeat-lost test applies last, to a RUNNING run alone, and
+// needs no liveness reading: no placement row, a live member, and an
+// owner outside the member list all reach it. A Jenkins container that
+// restarts inside a live pod keeps the pod's cell instance, so only the
+// heartbeat gap shows that a build it held is gone.
 func evaluateInterruption(now time.Time, c runInterruptCandidate, row tenantPlacementLivenessRow,
 	exists bool, grace time.Duration) (reason string, ok bool) {
 	if reason, ok, decided := evaluateResumeGuard(now, c); decided {
@@ -123,9 +139,18 @@ func evaluateInterruption(now time.Time, c runInterruptCandidate, row tenantPlac
 		return ReasonTenantMoved, true
 	case livenessSilent:
 		return ReasonNoHeartbeat, true
-	default:
-		return "", false
 	}
+	if c.status == StatusRunning && anchor.Before(now.Add(-liveOwnerSilentWindow)) {
+		return ReasonHeartbeatLost, true
+	}
+	return "", false
+}
+
+// provisionalMark reports whether reason names a mark the run's owner can
+// still replace. Such a mark deletes no run-state objects, publishes no
+// cancel, and publishes no automatic retry.
+func provisionalMark(reason string) bool {
+	return reason == ReasonHeartbeatLost
 }
 
 // resumeDispatched reports whether the mesh moved this run's owner to a
@@ -268,6 +293,14 @@ func selectCandidatesForTenant(ctx context.Context, pool *pgxpool.Pool, cluster,
 // against the resume's own request time. A target that proved itself
 // between the candidate read and this write must not be marked. Both
 // values carry the recorder's own clock.
+//
+// A heartbeat-lost mark re-reads the heartbeat receive stamp the same
+// way. That mark rests on the gap alone, so a heartbeat that arrives
+// between the candidate read and this write must stop it.
+//
+// A heartbeat-lost mark also keeps the run's pending input set. Its owner
+// can still wait on that input, and no later event restores a set on a
+// completed row. The owner's run.completed clears it.
 func markInterrupted(ctx context.Context, pool *pgxpool.Pool, run runInterruptCandidate, reason string, now time.Time) (bool, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -294,7 +327,7 @@ func markInterruptedTx(ctx context.Context, tx pgx.Tx, run runInterruptCandidate
 		SET status = 'COMPLETED',
 		    result = 'INTERRUPTED',
 		    ended_at = $2,
-		    inputs = NULL,
+		    inputs = CASE WHEN $3::text = '`+ReasonHeartbeatLost+`' THEN inputs ELSE NULL END,
 		    payload = (COALESCE(payload, '{}'::jsonb) || jsonb_build_object('interrupted_reason', $3::text))
 		        || jsonb_build_object('log_summary',
 		             CASE
@@ -312,7 +345,10 @@ func markInterruptedTx(ctx context.Context, tx pgx.Tx, run runInterruptCandidate
 		        AND (heartbeat_received_at IS NULL
 		             OR heartbeat_received_at <= (payload->'mesh'->'resume'->>'requested_at')::timestamptz))
 		  )
-	`, run.runID, now, reason, run.status)
+		  AND ($3::text <> '`+ReasonHeartbeatLost+`'
+		       OR heartbeat_received_at IS NULL
+		       OR heartbeat_received_at <= $5)
+	`, run.runID, now, reason, run.status, now.Add(-liveOwnerSilentWindow))
 	if err != nil {
 		return false, fmt.Errorf("mark run interrupted: %w", err)
 	}
@@ -406,6 +442,10 @@ func decodeInterruptedRetry(policy json.RawMessage) string {
 // so there is nothing to cancel, and the store holds no parameters to
 // retry with.
 //
+// A provisional mark publishes neither action either. Its owner can
+// still hold the build, so a cancel would stop a live build and a retry
+// would run the job twice. An automatic retry it skips is counted.
+//
 // The cancel names the run's own cell, which holds the process to stop.
 // The retry names home, the job's home member (retryAddress). The caller
 // answers home through jobHomeOf over the placement its mark decision
@@ -422,6 +462,13 @@ func afterMark(ctx context.Context, conn *bus.Conn, home JobHome,
 
 	if reason == ReasonResumeTimeout {
 		metrics.addResumeTimeout(ctx)
+	}
+
+	if provisionalMark(reason) {
+		if interruptedRetry == interruptedRetryAutomatic {
+			metrics.addRetrySkipped(ctx, retrySkipHeartbeatLost)
+		}
+		return
 	}
 
 	if reason == ReasonNoHeartbeat || (reason == ReasonResumeTimeout && run.resumeDispatched()) {
@@ -538,8 +585,9 @@ func markedStatusLabel(status string) string {
 // marked, for the TenantSyncResponse InterruptedMarked field. The sweep
 // marks the rest as their heartbeats age: this is the fast path design
 // D9 gives a cell roll, not a separate rule, so the silent test never
-// fires here. The confirmed test does fire here, because a pod read
-// proves the loss and needs no heartbeat window.
+// fires here, and neither does the heartbeat-lost test. The confirmed
+// test does fire here, because a pod read proves the loss and needs no
+// heartbeat window.
 func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, metrics *InterruptedMetrics,
 	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, cluster, tenant string,
 	row tenantPlacementLivenessRow, now time.Time, grace time.Duration, logger *slog.Logger) (int, error) {
@@ -560,7 +608,7 @@ func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.C
 			continue
 		}
 		reason, ok := evaluateInterruption(now, c, row, true, grace)
-		if !ok || reason == ReasonNoHeartbeat {
+		if !ok || reason == ReasonNoHeartbeat || reason == ReasonHeartbeatLost {
 			continue
 		}
 		changed, err := markInterrupted(ctx, pool, c, reason, now)
@@ -665,7 +713,9 @@ func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 		if reason == ReasonCellLost {
 			metrics.addCellLoss(ctx, "sweep")
 		}
-		deleteRunState(ctx, pool, stateDeleter, c, logger)
+		if !provisionalMark(reason) {
+			deleteRunState(ctx, pool, stateDeleter, c, logger)
+		}
 		afterMark(ctx, conn, jobHomeOf(row.members, exists, c.jobPath), metrics, actionMetrics, c, reason,
 			decodeInterruptedRetry(row.policy), logger)
 		marked++

@@ -452,7 +452,8 @@ func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID,
 	// buildRunInputs then maps the fields one by one. A NULL column, a
 	// malformed column, and an empty array all leave the slice nil. The
 	// block tests no status: a terminal row holds no input on the write
-	// side, so the read hides no live input.
+	// side, except a provisional heartbeat-lost mark, whose owner can
+	// still wait on that input. The read hides no live input.
 	if len(run.Inputs) > 0 {
 		var stored []recordstore.StoredRunInput
 		if json.Unmarshal(run.Inputs, &stored) == nil {

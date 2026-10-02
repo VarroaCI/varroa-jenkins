@@ -58,14 +58,15 @@ type heartbeatSummary struct {
 // inputs_seq, only when its set differs from the stored one, and never on
 // a completed row. A completed run holds no pending input, so a heartbeat
 // that races the completion must not restore the set the completion
-// cleared.
+// cleared. A heartbeat-lost mark is the one exception, as it is for
+// runInputWritableSQL.
 //
 // The distinctness test is what stops the churn. Every heartbeat carries
 // the key, and a run that never paused holds NULL beside an empty set,
 // which the payload maps to NULL too. Such a run therefore leaves both
 // the column and the key untouched.
 const inputsHeartbeatGuardSQL = `$15::boolean
-	AND runs.status <> 'COMPLETED'
+	AND (runs.status <> 'COMPLETED' OR ` + heartbeatLostRunSQL + `)
 	AND $17::bigint >= COALESCE((runs.payload->>'inputs_seq')::bigint, 0)
 	AND runs.inputs IS DISTINCT FROM $16::jsonb`
 

@@ -25,8 +25,8 @@ minutes for a silent run on the current instance.
 
 The operator keeps the replaced instance of each cell in `status.cell.previousInstance`, and
 reports it in every announcement. A pod that rolls while the operator restarts, or while the
-recorder is down, is therefore still confirmed. The 70 to 130 seconds start when the recorder
-accepts the next announcement, not when the pod rolled.
+recorder is down, is therefore still confirmed. The 70 to 130 seconds start at the next
+accepted announcement.
 
 The recorder also compares each announcement with the members it stored. A replaced or removed
 member pod becomes an unconfirmed dead instance with the five-minute window. This covers two
@@ -37,9 +37,8 @@ the list.
 The recorder refuses a late announcement from an old operator replica: a lower generation, a
 pod it knows replaced, or an object that a new one of the same name replaced.
 
-The recorder measures each window on its own clock, and stamps the time each heartbeat arrives.
-A heartbeat from an instance that no longer owns the run moves no window. A drifting cell clock
-therefore moves none.
+The recorder measures each window on its own clock, so a drifting cell clock moves none. A
+heartbeat from an instance that no longer owns the run moves no window.
 
 ## The grace
 
@@ -67,12 +66,15 @@ activity feed. The reason names the signal that decided.
 | `no-heartbeat` | the run was silent for fifteen minutes on a cell reported not alive |
 | `resume-timeout` | the mesh claimed the run and the run did not come back |
 | `start-lost` | no start event arrived 75 minutes after the start mark |
+| `heartbeat-lost` | the running build was silent for 60 minutes |
 
 A `cell-lost` mark sends no cancel command, because the pod is gone and holds no process to stop. A
 fleet lock the lost run held is released on the same schedule. A pod read that proved its owner
 gone ends the five-minute wait.
 
 A `start-lost` mark sends no cancel and no retry: the build can still start and replace it.
+A `heartbeat-lost` mark sends neither, and the build's own completion replaces it. It also ends a
+run on a dead cell when a stopped operator reports no liveness.
 
 The lost instance's agent pods keep running. A resume adopts a pod that ran a build step, so a
 Running pod stays for about 41 minutes, or about 46 when no running cell holds the slot. A pod that is not Running goes within about four minutes. See

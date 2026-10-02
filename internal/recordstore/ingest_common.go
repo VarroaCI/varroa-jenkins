@@ -78,6 +78,22 @@ func supersedeSQL(realWrite string) string {
 // the row records a build.
 const startLostRunSQL = `(runs.result IS NOT DISTINCT FROM 'INTERRUPTED' AND runs.payload->>'interrupted_reason' IS NOT DISTINCT FROM '` + ReasonStartLost + `')`
 
+// heartbeatLostRunSQL matches a stored row that holds a heartbeat-lost
+// mark. The mark is provisional, because its owner can still finish the
+// run. Only the owner's run.completed replaces such a row, and it also
+// removes the mark's reason.
+const heartbeatLostRunSQL = `(runs.result IS NOT DISTINCT FROM 'INTERRUPTED' AND runs.payload->>'interrupted_reason' IS NOT DISTINCT FROM '` + ReasonHeartbeatLost + `')`
+
+// heartbeatLostLogSummarySQL removes the mark's incomplete_reason from the
+// stored log summary when the real run.log reports the log complete. The
+// mark writes incomplete true with a reason, and the real run.log, which
+// the mite publishes just before run.completed, sets incomplete false but
+// sets no reason. It answers an empty object otherwise, so the caller can
+// merge it unconditionally.
+const heartbeatLostLogSummarySQL = `CASE WHEN runs.payload->'log_summary'->>'incomplete' = 'false'
+	THEN jsonb_build_object('log_summary', (runs.payload->'log_summary') - 'incomplete_reason')
+	ELSE '{}'::jsonb END`
+
 // triggerPayloadKeysSQL removes the four trigger keys from a stored
 // payload. A superseding write applies it before its own merge, and keeps
 // every other stored key.
