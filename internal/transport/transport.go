@@ -97,4 +97,10 @@ type Transport interface {
 	// controller of the same name drains no result of the old mite. A
 	// transport that keeps no such entry does nothing.
 	Forget(ns, name string)
+
+	// ForgetMatching does what Forget does for every mite whose ns and name
+	// match. The operator calls it for the mites of controllers that it no
+	// longer owns, so only the owning replica answers a mite. match runs
+	// under the transport lock and must not call the transport.
+	ForgetMatching(match func(ns, name string) bool)
 }

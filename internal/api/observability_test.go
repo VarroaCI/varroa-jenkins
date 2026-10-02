@@ -193,6 +193,8 @@ func (s *stubTransport) PutPluginClassification(_ context.Context, _, _ string, 
 
 func (s *stubTransport) Forget(_, _ string) {}
 
+func (s *stubTransport) ForgetMatching(func(ns, name string) bool) {}
+
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

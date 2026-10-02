@@ -53,6 +53,10 @@ type testManagerWrap struct {
 	m        *ShardManager
 	identity string
 	acquired *[][]int // pointer to shared slice so onAcquired closure mutations are visible
+	released *[][]int // each onReleased call, in order
+	// heldInHook records, per released shard, whether the held set still
+	// had the shard while onReleased ran.
+	heldInHook map[int]bool
 }
 
 func newHarness(t *testing.T, startTime time.Time) *testHarness {
@@ -79,15 +83,30 @@ func (h *testHarness) addManager(identity string, ring *Ring) *testManagerWrap {
 		acquired = append(acquired, cp)
 	}
 
+	released := make([][]int, 0)
+	heldInHook := make(map[int]bool)
+	onReleased := func(shards []int) {
+		mu.Lock()
+		defer mu.Unlock()
+		cp := make([]int, len(shards))
+		copy(cp, shards)
+		released = append(released, cp)
+		for _, s := range shards {
+			heldInHook[s] = held.Held(s)
+		}
+	}
+
 	leases := h.cs.CoordinationV1().Leases(h.ns)
-	m := NewShardManager(leases, h.ns, identity, ring, held, onAcquired, slog.Default())
+	m := NewShardManager(leases, h.ns, identity, ring, held, onAcquired, onReleased, slog.Default())
 	m.clock = h.clock.Now
 	m.interval = 1 * time.Millisecond // fast for tests
 
 	w := &testManagerWrap{
-		m:        m,
-		identity: identity,
-		acquired: &acquired,
+		m:          m,
+		identity:   identity,
+		acquired:   &acquired,
+		released:   &released,
+		heldInHook: heldInHook,
 	}
 	h.managers = append(h.managers, w)
 	return w
@@ -510,5 +529,120 @@ func TestShardManager_RenewalSkipsFreshLeases(t *testing.T) {
 	h.runRebalances(1)
 	if shardUpdates != 4 {
 		t.Fatalf("expected 4 shard renewals once under the threshold, got %d", shardUpdates)
+	}
+}
+
+// releasedShards flattens every onReleased call of w into one set.
+func releasedShards(w *testManagerWrap) map[int]bool {
+	out := make(map[int]bool)
+	for _, call := range *w.released {
+		for _, s := range call {
+			out[s] = true
+		}
+	}
+	return out
+}
+
+// TestShardManager_OnReleasedWhenANewcomerTakesShards pins that a replica
+// reports each shard that it gives to a new replica.
+func TestShardManager_OnReleasedWhenANewcomerTakesShards(t *testing.T) {
+	h := newHarness(t, time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC))
+	ring := NewRing(8)
+
+	w0 := h.addManager("op-0", ring)
+	h.runRebalances(1)
+	if len(*w0.released) != 0 {
+		t.Fatalf("onReleased calls before a newcomer = %v, want none", *w0.released)
+	}
+
+	h.addManager("op-1", ring)
+	// op-0 sees the presence lease of op-1 only on the second pass.
+	h.runRebalances(2)
+
+	got := releasedShards(w0)
+	if len(got) == 0 {
+		t.Fatal("op-0 released no shard to the newcomer")
+	}
+	for s := 0; s < ring.Shards(); s++ {
+		if got[s] == w0.m.held.Held(s) {
+			t.Fatalf("shard %d: released %v, still held %v; want exactly one", s, got[s], w0.m.held.Held(s))
+		}
+	}
+}
+
+// TestShardManager_OnReleasedWhenTheLeaseIsLost pins that a replica reports
+// a shard whose lease another replica holds.
+func TestShardManager_OnReleasedWhenTheLeaseIsLost(t *testing.T) {
+	h := newHarness(t, time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC))
+	ring := NewRing(8)
+
+	w := h.addManager("op-0", ring)
+	h.runRebalances(1)
+
+	leaseName := "varroa-shard-0.varroa.dev"
+	lease, err := h.cs.CoordinationV1().Leases(h.ns).Get(context.Background(), leaseName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get lease: %v", err)
+	}
+	other := "other"
+	lease.Spec.HolderIdentity = &other
+	if _, err := h.cs.CoordinationV1().Leases(h.ns).Update(context.Background(), lease, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("failed to mutate lease: %v", err)
+	}
+
+	h.runRebalances(1)
+
+	if got := releasedShards(w); len(got) != 1 || !got[0] {
+		t.Fatalf("released shards = %v, want only shard 0", got)
+	}
+}
+
+// TestShardManager_OnReleasedRunsBeforeTheClaim pins that a shard dropped
+// and claimed again in one pass is not held while onReleased runs, and that
+// onAcquired reports it after that.
+func TestShardManager_OnReleasedRunsBeforeTheClaim(t *testing.T) {
+	h := newHarness(t, time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC))
+	ring := NewRing(8)
+
+	w := h.addManager("op-0", ring)
+	h.runRebalances(1)
+	acquiredBefore := len(*w.acquired)
+
+	if err := h.cs.CoordinationV1().Leases(h.ns).Delete(context.Background(),
+		"varroa-shard-0.varroa.dev", metav1.DeleteOptions{}); err != nil {
+		t.Fatalf("failed to delete lease: %v", err)
+	}
+
+	h.runRebalances(1)
+
+	if got := releasedShards(w); !got[0] {
+		t.Fatalf("released shards = %v, want shard 0", got)
+	}
+	if w.heldInHook[0] {
+		t.Fatal("shard 0 was held while onReleased ran")
+	}
+	if !w.m.held.Held(0) {
+		t.Fatal("op-0 did not claim shard 0 again")
+	}
+	if len(*w.acquired) != acquiredBefore+1 || (*w.acquired)[acquiredBefore][0] != 0 {
+		t.Fatalf("onAcquired calls = %v, want a last call with shard 0", *w.acquired)
+	}
+}
+
+// TestShardManager_GracefulStopCallsNoReleaseHook pins that the shutdown
+// release does not call onReleased.
+func TestShardManager_GracefulStopCallsNoReleaseHook(t *testing.T) {
+	h := newHarness(t, time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC))
+	ring := NewRing(8)
+
+	w := h.addManager("op-0", ring)
+	h.runRebalances(1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	w.m.releaseAll(ctx)
+
+	if len(*w.released) != 0 {
+		t.Fatalf("onReleased calls after a graceful stop = %v, want none", *w.released)
 	}
 }

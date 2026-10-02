@@ -3407,8 +3407,10 @@ type captureTransport struct {
 	drainResults         []*mitev1.CommandResult
 	streamDegraded       bool
 	streamDegradedReason string
-	// forgotten records each ns/name that Forget received.
+	// forgotten records each ns/name that Forget or ForgetMatching dropped.
 	forgotten []string
+	// known lists the ns/name keys that ForgetMatching tests.
+	known []string
 }
 
 func (c *captureTransport) Send(_ context.Context, ns, name string, msg *mitev1.OperatorMessage) error {
@@ -3480,6 +3482,15 @@ func (c *captureTransport) PutPluginClassification(_ context.Context, _, _ strin
 
 func (c *captureTransport) Forget(ns, name string) {
 	c.forgotten = append(c.forgotten, ns+"/"+name)
+}
+
+func (c *captureTransport) ForgetMatching(match func(ns, name string) bool) {
+	for _, key := range c.known {
+		ns, name, _ := strings.Cut(key, "/")
+		if match(ns, name) {
+			c.forgotten = append(c.forgotten, key)
+		}
+	}
 }
 
 //nolint:unparam

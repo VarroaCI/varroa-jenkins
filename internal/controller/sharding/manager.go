@@ -26,6 +26,11 @@ type ShardManager struct {
 	ring       *Ring
 	held       *ShardSet          // shared with the Reconciler (read side)
 	onAcquired func(shards []int) // Reconciler.EnqueueShards; called outside the CAS loop
+	// onReleased receives the shards that one rebalance pass dropped. It runs
+	// outside the CAS loop and before the pass claims shards, so a shard
+	// dropped and claimed again in one pass starts from a clean state. The
+	// shutdown release does not call it.
+	onReleased func(shards []int)
 	logger     *slog.Logger
 
 	interval      time.Duration    // rebalance period, default 10s
@@ -39,7 +44,7 @@ type ShardManager struct {
 
 // NewShardManager creates a new ShardManager.
 func NewShardManager(leases coordinationv1client.LeaseInterface, namespace, identity string,
-	ring *Ring, held *ShardSet, onAcquired func([]int), logger *slog.Logger) *ShardManager {
+	ring *Ring, held *ShardSet, onAcquired, onReleased func([]int), logger *slog.Logger) *ShardManager {
 	m := &ShardManager{
 		leases:        leases,
 		namespace:     namespace,
@@ -47,6 +52,7 @@ func NewShardManager(leases coordinationv1client.LeaseInterface, namespace, iden
 		ring:          ring,
 		held:          held,
 		onAcquired:    onAcquired,
+		onReleased:    onReleased,
 		logger:        logger,
 		interval:      10 * time.Second,
 		leaseDuration: 30,
@@ -177,16 +183,19 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 	}
 
 	// Step 5: Renew held shards — drop any where we lost the lock.
+	released := make([]int, 0)
 	for _, shard := range m.held.Shards() {
 		lease, exists := shardLeaseMap[shard]
 		if !exists {
 			m.held.Remove(shard)
+			released = append(released, shard)
 			m.addHandoff(ctx, "released")
 			continue
 		}
 		holder := lease.Spec.HolderIdentity
 		if holder == nil || *holder != m.identity {
 			m.held.Remove(shard)
+			released = append(released, shard)
 			m.addHandoff(ctx, "released")
 			continue
 		}
@@ -207,6 +216,7 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 		updatedLease.Spec.LeaseDurationSeconds = &m.leaseDuration
 		if _, err := m.leases.Update(ctx, updatedLease, metav1.UpdateOptions{}); err != nil {
 			m.held.Remove(shard)
+			released = append(released, shard)
 			m.addHandoff(ctx, "released")
 			continue
 		}
@@ -218,6 +228,7 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 			continue
 		}
 		m.held.Remove(shard)
+		released = append(released, shard)
 		// Release the lease.
 		lease, exists := shardLeaseMap[shard]
 		if !exists {
@@ -227,6 +238,12 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 		}
 		m.releaseLease(ctx, lease)
 		m.addHandoff(ctx, "released")
+	}
+
+	// Notify on released shards before any claim. The hook then sees a
+	// dropped shard as not held, even when step 7 claims it again.
+	if len(released) > 0 && m.onReleased != nil {
+		m.onReleased(released)
 	}
 
 	// Step 7: Acquire desired but not held shards.

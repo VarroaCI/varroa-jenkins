@@ -41,6 +41,9 @@ func (l *LocalRegistry) Send(_ context.Context, ns, name string, msg *mitev1.Ope
 // them when the mite stream ends.
 func (l *LocalRegistry) Forget(_, _ string) {}
 
+// ForgetMatching does nothing, for the same reason as Forget.
+func (l *LocalRegistry) ForgetMatching(func(ns, name string) bool) {}
+
 // DrainResults delegates to Registry.DrainResults.
 func (l *LocalRegistry) DrainResults(ns, name string) []*mitev1.CommandResult {
 	return l.reg.DrainResults(name, ns)

@@ -697,6 +697,7 @@ func main() {
 		ring,
 		shardSet,
 		reconciler.EnqueueShards,
+		func([]int) { reconciler.ForgetUnowned() },
 		logger,
 	)
 	if err := mgr.Add(sm); err != nil {
@@ -1154,7 +1155,10 @@ func main() {
 
 	// 9. Shard resync safety net (10m, every replica): re-enqueues owned
 	// controllers so a shard acquisition that raced a failed list or full
-	// event channel cannot strand its controllers indefinitely.
+	// event channel cannot strand its controllers indefinitely. It also
+	// forgets the mite of each controller that this replica does not own,
+	// because a reconcile in flight during a shard release can subscribe
+	// to that mite again after the release hook ran.
 	if err := mgr.Add(&tickerRunnable{
 		name:     "shard-resync",
 		interval: 10 * time.Minute,
@@ -1163,6 +1167,7 @@ func main() {
 		jitter:       time.Minute,
 		everyReplica: true,
 		tick: func(_ context.Context) {
+			reconciler.ForgetUnowned()
 			reconciler.ResyncOwned()
 		},
 		logger: logger,

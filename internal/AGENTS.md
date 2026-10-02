@@ -156,7 +156,10 @@ reading each package's entry point):
   NotFound; `ApproveRestart` refuses a controller under deletion and
   reads it again after its send. `BusTransport.Forget` unsubscribes, releases the denial
   watcher, and deletes the result channel and the cached report; a report
-  callback stores only while its entry is still current. Not related to git — bundle
+  callback stores only while its entry is still current.
+  `Transport.ForgetMatching` does the same for every mite that a predicate
+  matches; the operator uses it to drop the mites of controllers that it no
+  longer owns (see `controller/AGENTS.md`, `sharding/`). Not related to git — bundle
   git materialization lives in `bundle/resolver.go`.
 - **`mcp/`** — MCP (Model Context Protocol) Streamable-HTTP server exposing
   Varroa's CRUD surface as MCP tools; built on `internal/api.Dependencies` so it

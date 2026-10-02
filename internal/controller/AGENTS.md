@@ -1153,7 +1153,15 @@ sections describe.
   it terms only when the `Team` itself is gone.
 - `sharding/` (`ring.go`, `manager.go`) — consistent-hash shard ownership so multiple
   operator replicas split the `Controller` watch set; `SetShardOwnership`/
-  `ownsController`/`EnqueueShards` on `*Reconciler` consume it.
+  `ownsController`/`EnqueueShards` on `*Reconciler` consume it. Only the owning
+  replica may hold the inbound subscription of a mite: each holder answers the
+  mite's token refresh, and a held result channel fills with no reader.
+  `ShardManager` calls `onReleased` once per rebalance pass with the shards that
+  the pass dropped, before the pass claims shards. The operator wires it to
+  `Reconciler.ForgetUnowned`, which calls `Transport.ForgetMatching` for every
+  controller that the replica does not own. The 10-minute shard-resync tick calls
+  `ForgetUnowned` too, because a reconcile in flight during a release can
+  subscribe again. The shutdown release (`releaseAll`) calls no hook.
 - `pluginlock/lock.go` — the embedded plugin-lock baseline
   (`pluginlock.Baseline()`, `PluginEntry`) used as the last-resort version-profile
   match when no `JenkinsVersionProfile` matches a controller's version.

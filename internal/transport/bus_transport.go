@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -187,9 +188,37 @@ func (b *BusTransport) storeReport(key string, entry *inboundSub, report *mitev1
 // result channel. A result that a callback delivers after Forget goes to the
 // old channel, which no reader holds.
 func (b *BusTransport) Forget(ns, name string) {
-	key := ns + "/" + name
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.forgetLocked(ns + "/" + name)
+}
+
+// ForgetMatching forgets every mite whose ns and name match. It reads the
+// keys of all three maps, because a failed subscribe can leave a report
+// without a subscription.
+func (b *BusTransport) ForgetMatching(match func(ns, name string) bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	keys := make(map[string]struct{}, len(b.subs))
+	for key := range b.subs {
+		keys[key] = struct{}{}
+	}
+	for key := range b.results {
+		keys[key] = struct{}{}
+	}
+	for key := range b.reports {
+		keys[key] = struct{}{}
+	}
+	for key := range keys {
+		ns, name, ok := strings.Cut(key, "/")
+		if ok && match(ns, name) {
+			b.forgetLocked(key)
+		}
+	}
+}
+
+// forgetLocked removes every entry of key. The caller holds b.mu.
+func (b *BusTransport) forgetLocked(key string) {
 	if cur, ok := b.subs[key]; ok {
 		cur.close()
 		delete(b.subs, key)

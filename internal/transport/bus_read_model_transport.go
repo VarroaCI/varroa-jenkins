@@ -31,6 +31,9 @@ func (t *BusReadModelTransport) Send(_ context.Context, _, _ string, _ *mitev1.O
 // result buffer.
 func (t *BusReadModelTransport) Forget(_, _ string) {}
 
+// ForgetMatching does nothing, for the same reason as Forget.
+func (t *BusReadModelTransport) ForgetMatching(func(ns, name string) bool) {}
+
 // SendImperative delegates to the publish-only PublishSafeRestart method.
 func (t *BusReadModelTransport) SendImperative(ctx context.Context, ns, name string, cmd *mitev1.ImperativeCommand) error {
 	return t.model.PublishSafeRestart(ctx, ns, name, cmd)

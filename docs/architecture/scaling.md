@@ -16,7 +16,7 @@ Scale the Varroa control plane independently from Jenkins workloads. Each `Contr
 
 Gateway and BFF HPAs target 70 percent CPU utilization and require the Kubernetes metrics API. Resource requests must remain set for CPU scaling to work.
 
-Operator replicas divide controller ownership through virtual shards. Increase `operator.maxConcurrentReconciles` only when the Kubernetes API and NATS can absorb more concurrent work. `operator.shardCount` must match across every replica. Changing it is disruptive and requires restarting all operator replicas together.
+Operator replicas divide controller ownership through virtual shards. A replica that loses a shard stops listening to the mites of that shard. Increase `operator.maxConcurrentReconciles` only when the Kubernetes API and NATS can absorb more concurrent work. `operator.shardCount` must match across every replica. Changing it is disruptive and requires restarting all operator replicas together.
 
 ## Jenkins Capacity
 

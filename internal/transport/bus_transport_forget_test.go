@@ -155,3 +155,40 @@ func TestBusTransport_CloseClearsReports(t *testing.T) {
 		t.Fatalf("reports after Close = %d, want 0", len(tr.reports))
 	}
 }
+
+// TestBusTransport_ForgetMatchingDropsOnlyMatchingMites pins that
+// ForgetMatching ends the subscription and drops the entries of each
+// matching mite, and keeps every other mite.
+func TestBusTransport_ForgetMatchingDropsOnlyMatchingMites(t *testing.T) {
+	tr := newBusTransport(t, startNATS(t))
+	base := tr.conn.NATSConn().NumSubscriptions()
+
+	tr.DrainResults("ns", "moved-a")
+	tr.DrainResults("ns", "moved-b")
+	tr.DrainResults("ns", "owned")
+	tr.mu.Lock()
+	tr.reports["ns/report-only"] = &mitev1.ObservabilityReport{}
+	tr.mu.Unlock()
+	if n := tr.conn.NATSConn().NumSubscriptions() - base; n != 3 {
+		t.Fatalf("new NATS subscriptions = %d, want 3", n)
+	}
+
+	tr.ForgetMatching(func(ns, name string) bool {
+		return ns == "ns" && name != "owned"
+	})
+
+	if n := tr.conn.NATSConn().NumSubscriptions() - base; n != 1 {
+		t.Fatalf("NATS subscriptions after ForgetMatching = %d, want 1", n)
+	}
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	if _, ok := tr.subs["ns/owned"]; !ok || len(tr.subs) != 1 {
+		t.Fatalf("subscriptions = %v, want only ns/owned", tr.subs)
+	}
+	if _, ok := tr.results["ns/owned"]; !ok || len(tr.results) != 1 {
+		t.Fatalf("result channels = %d, want only ns/owned", len(tr.results))
+	}
+	if len(tr.reports) != 0 {
+		t.Fatalf("reports = %d, want 0", len(tr.reports))
+	}
+}

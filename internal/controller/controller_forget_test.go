@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/controller/sharding"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
@@ -140,6 +142,50 @@ func TestApproveRestart_KeepsTheMiteOfALiveController(t *testing.T) {
 	if err := rec.ApproveRestart(context.Background(), "", "ns", "live", "approve"); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
+	if len(tr.forgotten) != 0 {
+		t.Fatalf("forgotten = %v, want none", tr.forgotten)
+	}
+}
+
+// TestForgetUnowned_ForgetsOnlyMitesOfUnheldShards pins that a replica
+// forgets the mite of each controller in a shard that it does not hold, and
+// keeps the mite of each controller that it owns.
+func TestForgetUnowned_ForgetsOnlyMitesOfUnheldShards(t *testing.T) {
+	rec := newTestReconciler(newTestClient())
+	ring := sharding.NewRing(256)
+	held := sharding.NewShardSet()
+	rec.SetShardOwnership(ring, held)
+
+	var owned, moved string
+	for i := 0; owned == "" || moved == ""; i++ {
+		name := fmt.Sprintf("c%d", i)
+		switch shard := ring.ShardFor("ns/" + name); {
+		case owned == "":
+			owned = name
+			held.Add(shard)
+		case !held.Held(shard):
+			moved = name
+		}
+	}
+	tr := &captureTransport{known: []string{"ns/" + owned, "ns/" + moved}}
+	rec.miteTransport = tr
+
+	rec.ForgetUnowned()
+
+	if len(tr.forgotten) != 1 || tr.forgotten[0] != "ns/"+moved {
+		t.Fatalf("forgotten = %v, want [ns/%s]", tr.forgotten, moved)
+	}
+}
+
+// TestForgetUnowned_UnshardedForgetsNothing pins that a reconciler without
+// shard ownership owns every controller and forgets no mite.
+func TestForgetUnowned_UnshardedForgetsNothing(t *testing.T) {
+	rec := newTestReconciler(newTestClient())
+	tr := &captureTransport{known: []string{"ns/a", "ns/b"}}
+	rec.miteTransport = tr
+
+	rec.ForgetUnowned()
+
 	if len(tr.forgotten) != 0 {
 		t.Fatalf("forgotten = %v, want none", tr.forgotten)
 	}

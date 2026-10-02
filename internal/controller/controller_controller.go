@@ -1332,6 +1332,21 @@ func (r *Reconciler) forgetIfDeleted(ctx context.Context, ns, name string) {
 	}
 }
 
+// ForgetUnowned forgets the mite of every controller that this replica does
+// not own. Only the owner may hold the inbound subscription of a mite: every
+// holder answers the token refresh of the mite, and a held result channel
+// fills while no reconcile drains it. The shard manager calls it on a shard
+// release, and the shard resync tick calls it to catch a reconcile that was
+// in flight during the release.
+func (r *Reconciler) ForgetUnowned() {
+	if r.miteTransport == nil || r.shardRing == nil || r.shardSet == nil {
+		return
+	}
+	r.miteTransport.ForgetMatching(func(ns, name string) bool {
+		return !r.ownsController(ns, name)
+	})
+}
+
 // ownsController returns true if this replica owns the controller identified
 // by namespace/name. When sharding is not wired (nil ring or set), owns all.
 func (r *Reconciler) ownsController(ns, name string) bool {
