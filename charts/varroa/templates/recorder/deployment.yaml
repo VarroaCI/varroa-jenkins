@@ -19,10 +19,7 @@ spec:
         {{- include "varroa.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: varroa-recorder
-      {{- with .Values.global.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+      {{- include "varroa.imagePullSecrets" . | nindent 6 }}
       {{- with .Values.recorder.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}

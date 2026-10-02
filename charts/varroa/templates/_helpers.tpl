@@ -290,3 +290,34 @@ Usage: {{ include "varroa.jetStreamReplicas" $ }}
 {{- if gt $n 3 -}}{{- $n = 3 -}}{{- end -}}
 {{- $n -}}
 {{- end -}}
+
+{{- /*
+varroa.imagePullSecrets renders the pod-level imagePullSecrets list from
+global.image.pullSecretNames. The NATS subchart reads the same global key,
+so one value covers every pod of the release. Renders nothing when the
+list is empty. varroa.pullSecretNames answers the names joined by commas,
+and fails the render on a value that is not a list of strings.
+Usage: {{- include "varroa.imagePullSecrets" . | nindent 6 }}
+*/}}
+{{- define "varroa.pullSecretNames" -}}
+{{- $names := dig "image" "pullSecretNames" list (.Values.global | default dict) -}}
+{{- if not (kindIs "slice" $names) -}}
+{{- fail "global.image.pullSecretNames must be a list of Secret names" -}}
+{{- end -}}
+{{- range $names -}}
+{{- if not (kindIs "string" .) -}}
+{{- fail (printf "global.image.pullSecretNames must hold Secret names as strings, not %v" .) -}}
+{{- end -}}
+{{- end -}}
+{{- join "," $names -}}
+{{- end -}}
+
+{{- define "varroa.imagePullSecrets" -}}
+{{- $names := splitList "," (include "varroa.pullSecretNames" .) | compact -}}
+{{- with $names }}
+imagePullSecrets:
+{{- range . }}
+  - name: {{ . | quote }}
+{{- end }}
+{{- end }}
+{{- end -}}

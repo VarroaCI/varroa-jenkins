@@ -70,6 +70,16 @@ Without this guard such an upgrade would run NATS with a plain-text store.
 {{- end -}}
 
 {{- /*
+The chart and the NATS subchart read global.image.pullSecretNames. Fail
+the render on the retired key, so a pull Secret does not disappear.
+varroa.pullSecretNames fails on a value that is not a list of names.
+*/ -}}
+{{- if hasKey (.Values.global | default dict) "imagePullSecrets" -}}
+{{- fail "global.imagePullSecrets is retired; set global.image.pullSecretNames to a list of Secret names instead" -}}
+{{- end -}}
+{{- $_ := include "varroa.pullSecretNames" . -}}
+
+{{- /*
 The NATS subchart does not read these keys. Fail the render so a value
 set on them does not disappear without notice.
 */ -}}

@@ -19,10 +19,7 @@ spec:
         {{- include "varroa.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-operator") }}
-      {{- with .Values.global.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+      {{- include "varroa.imagePullSecrets" . | nindent 6 }}
       {{- with .Values.operator.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -187,11 +184,9 @@ spec:
             - name: VARROA_UPDATE_CENTER_URL
               value: {{ printf "http://varroa-updatecenter.%s.svc:8080" .Release.Namespace | quote }}
 {{- end }}
-{{- if .Values.global.imagePullSecrets }}
+{{- with (include "varroa.pullSecretNames" .) }}
             - name: VARROA_IMAGE_PULL_SECRETS
-{{- $pullNames := list }}
-{{- range .Values.global.imagePullSecrets }}{{ $pullNames = append $pullNames .name }}{{- end }}
-              value: {{ join "," $pullNames | quote }}
+              value: {{ . | quote }}
 {{- end }}
             {{- if .Values.operator.gitCache.enabled }}
             - name: VARROA_GIT_CACHE_DIR

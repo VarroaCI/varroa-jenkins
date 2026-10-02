@@ -48,8 +48,8 @@ kubectl create secret docker-registry registry-credentials \
 
 ```yaml
 global:
-  imagePullSecrets:
-    - name: registry-credentials
+  image:
+    pullSecretNames: [registry-credentials]  # every pod, NATS too
 operator:
   image: {repository: registry.example.com/varroa-jenkins, tag: "<version>"}
 gateway:

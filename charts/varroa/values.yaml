@@ -3,7 +3,11 @@
 # =============================================================================
 
 global:
-  imagePullSecrets: []
+  image:
+    # -- Names of the image pull Secrets for every pod of the release. Each
+    # Secret must exist in the release namespace. The NATS subchart reads
+    # this same key, so the NATS and nats-box pods get the same list.
+    pullSecretNames: []
   # -- Ingress hostname suffix for all services (e.g. example.com → dex.example.com)
   domain: ""
 

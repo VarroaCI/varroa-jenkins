@@ -54,7 +54,8 @@ the packaged CRDs. Does not own the Go source it packages
   `get` or `roles`/`rolebindings` write in a namespace breaks the grant: the
   Kubernetes escalation check refuses a `Role` the writer cannot itself hold.
 - **Root templates**: `_helpers.tpl` (`varroa.fullname`, `varroa.isHive`,
-  `varroa.natsServerCount`, `varroa.jetStreamReplicas`, `varroa.podPlacement` —
+  `varroa.natsServerCount`, `varroa.jetStreamReplicas`, `varroa.imagePullSecrets`,
+  `varroa.podPlacement` —
   renders `nodeSelector`/`tolerations`/`affinity` from a component's values
   scope, e.g. `{{- include "varroa.podPlacement" .Values.operator }}`; wired
   into operator/gateway/bff/dex deployments immediately
@@ -193,6 +194,13 @@ the packaged CRDs. Does not own the Go source it packages
   `nats.config.nats.port` or `nats.config.monitor.port`. `mode-guard.yaml` fails a render that sets a retired
   key: `nats.image`, `nats.persistence`, or `nats.service.port`/`monitorPort`/`type`.
   Asserted by `tests/test-nats-values.sh`.
+- **One pull Secret list for every pod.** `global.image.pullSecretNames` is a
+  list of Secret names. Every Deployment renders it through the
+  `varroa.imagePullSecrets` helper, and the operator gets it as
+  `VARROA_IMAGE_PULL_SECRETS`. The NATS subchart reads the same global key, so
+  the NATS StatefulSet and nats-box get it too. `mode-guard.yaml` fails a
+  render that sets the retired `global.imagePullSecrets`. Asserted by
+  `tests/test-image-pull-secrets.sh`.
 - **`nats.config.cluster.enabled`/`nats.config.cluster.replicas` are the ONLY real
   clustering knobs** for the vendored nats-1.2.0 subchart (its `stateful-set.yaml`
   hardcodes `replicas: 1` whenever `cluster.enabled` is false, ignoring `replicas`
