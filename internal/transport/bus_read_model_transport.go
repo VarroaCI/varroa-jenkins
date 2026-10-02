@@ -27,6 +27,10 @@ func (t *BusReadModelTransport) Send(_ context.Context, _, _ string, _ *mitev1.O
 	return fmt.Errorf("BusReadModelTransport does not support Send")
 }
 
+// Forget does nothing. The read model keeps no per-mite subscription and no
+// result buffer.
+func (t *BusReadModelTransport) Forget(_, _ string) {}
+
 // SendImperative delegates to the publish-only PublishSafeRestart method.
 func (t *BusReadModelTransport) SendImperative(ctx context.Context, ns, name string, cmd *mitev1.ImperativeCommand) error {
 	return t.model.PublishSafeRestart(ctx, ns, name, cmd)

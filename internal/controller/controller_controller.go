@@ -1312,6 +1312,26 @@ func (r *Reconciler) SetShardOwnership(ring *sharding.Ring, held *sharding.Shard
 	r.shardSet = held
 }
 
+// forgetMite drops the per-mite entries that the transport keeps for a
+// deleted controller.
+func (r *Reconciler) forgetMite(ns, name string) {
+	if r.miteTransport != nil {
+		r.miteTransport.Forget(ns, name)
+	}
+}
+
+// forgetIfDeleted forgets the mite of ns/name when the Controller is gone or
+// under deletion. A read error other than NotFound forgets nothing.
+func (r *Reconciler) forgetIfDeleted(ctx context.Context, ns, name string) {
+	cr, err := crdstore.Get[v1alpha1.Controller](ctx, r.store, name, ns)
+	switch {
+	case apierrors.IsNotFound(err):
+		r.forgetMite(ns, name)
+	case err == nil && !cr.DeletionTimestamp.IsZero():
+		r.forgetMite(ns, name)
+	}
+}
+
 // ownsController returns true if this replica owns the controller identified
 // by namespace/name. When sharding is not wired (nil ring or set), owns all.
 func (r *Reconciler) ownsController(ns, name string) bool {
@@ -1860,6 +1880,11 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 	if err != nil {
 		return fmt.Errorf("get controller: %w", err)
 	}
+	// A send to a controller under deletion subscribes to its mite again
+	// after the deletion released the subscription.
+	if !cr.DeletionTimestamp.IsZero() {
+		return fmt.Errorf("controller %s is being deleted", key)
+	}
 
 	pol := r.effectivePolicy(cr)
 	drainSec := int64(pol.DrainTimeoutSeconds)
@@ -1949,12 +1974,17 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 		// reload: push with Reload=true (existing behavior, no idle gating).
 	}
 
-	if err := r.miteTransport.Send(ctx, namespace, name, &mitev1.OperatorMessage{
+	sendErr := r.miteTransport.Send(ctx, namespace, name, &mitev1.OperatorMessage{
 		Message: &mitev1.OperatorMessage_DesiredState{
 			DesiredState: desired,
 		},
-	}); err != nil {
-		return fmt.Errorf("send desired state: %w", err)
+	})
+	// The deletion can complete between the check above and the send, and
+	// the send subscribes to the mite again. The second read releases that
+	// subscription.
+	r.forgetIfDeleted(ctx, namespace, name)
+	if sendErr != nil {
+		return fmt.Errorf("send desired state: %w", sendErr)
 	}
 
 	if action == "restart" {
@@ -2150,6 +2180,7 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 		delete(r.miteTokens, cr.Namespace+"/"+cr.Name)
 		delete(r.lastMiteEpoch, cr.Namespace+"/"+cr.Name)
 		r.miteTokenMu.Unlock()
+		r.forgetMite(cr.Namespace, cr.Name)
 
 		// Reset both per-controller gauges to 0 on deletion so series do not
 		// stick at 1 if the controller is deleted while in a conflict/stale state.

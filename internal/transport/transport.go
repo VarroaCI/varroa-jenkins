@@ -90,4 +90,11 @@ type Transport interface {
 
 	// PutPluginClassification stores a classified inventory in the read model.
 	PutPluginClassification(ctx context.Context, ns, name string, c *ClassifiedInventory) error
+
+	// Forget drops every per-mite entry that the transport keeps for ns/name:
+	// an inbound subscription, buffered command results, and a cached report.
+	// The reconciler calls it when the controller is deleted, so a new
+	// controller of the same name drains no result of the old mite. A
+	// transport that keeps no such entry does nothing.
+	Forget(ns, name string)
 }

@@ -3407,6 +3407,8 @@ type captureTransport struct {
 	drainResults         []*mitev1.CommandResult
 	streamDegraded       bool
 	streamDegradedReason string
+	// forgotten records each ns/name that Forget received.
+	forgotten []string
 }
 
 func (c *captureTransport) Send(_ context.Context, ns, name string, msg *mitev1.OperatorMessage) error {
@@ -3474,6 +3476,10 @@ func (c *captureTransport) PluginClassification(_, _ string) (*transport.Classif
 
 func (c *captureTransport) PutPluginClassification(_ context.Context, _, _ string, _ *transport.ClassifiedInventory) error {
 	return nil
+}
+
+func (c *captureTransport) Forget(ns, name string) {
+	c.forgotten = append(c.forgotten, ns+"/"+name)
 }
 
 //nolint:unparam

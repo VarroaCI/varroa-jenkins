@@ -37,6 +37,10 @@ func (l *LocalRegistry) Send(_ context.Context, ns, name string, msg *mitev1.Ope
 	return l.reg.Send(name, ns, msg)
 }
 
+// Forget does nothing. The gateway owns the registry entries, and it removes
+// them when the mite stream ends.
+func (l *LocalRegistry) Forget(_, _ string) {}
+
 // DrainResults delegates to Registry.DrainResults.
 func (l *LocalRegistry) DrainResults(ns, name string) []*mitev1.CommandResult {
 	return l.reg.DrainResults(name, ns)

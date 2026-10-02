@@ -131,6 +131,7 @@ func (b *BusTransport) ensureSub(ns, name string) {
 	}
 
 	denied, release := b.conn.WatchSubscribeDenied(subject)
+	entry := &inboundSub{denied: denied, release: release, wasDenied: wasDenied}
 	sub, err := b.conn.SubscribeData(subject, func(data []byte) {
 		var mm mitev1.MiteMessage
 		if err := json.Unmarshal(data, &mm); err != nil {
@@ -146,9 +147,7 @@ func (b *BusTransport) ensureSub(ns, name string) {
 			return
 		}
 		if report := mm.GetObservabilityReport(); report != nil {
-			b.mu.Lock()
-			b.reports[key] = report
-			b.mu.Unlock()
+			b.storeReport(key, entry, report)
 			return
 		}
 		if mm.GetTokenRefreshRequest() != nil {
@@ -163,7 +162,40 @@ func (b *BusTransport) ensureSub(ns, name string) {
 		}
 		return
 	}
-	b.subs[key] = &inboundSub{sub: sub, denied: denied, release: release, wasDenied: wasDenied, subscribedAt: time.Now()}
+	entry.sub = sub
+	entry.subscribedAt = time.Now()
+	b.subs[key] = entry
+}
+
+// storeReport keeps report as the latest report of key while entry is still
+// the current subscription of key. A callback can run after Forget or a
+// rebuild replaced entry, and its report must not come back into b.reports.
+func (b *BusTransport) storeReport(key string, entry *inboundSub, report *mitev1.ObservabilityReport) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.subs[key] != entry {
+		return
+	}
+	b.reports[key] = report
+}
+
+// Forget removes every entry that BusTransport keeps for the mite of ns/name.
+// It unsubscribes from the inbound subject, releases the denial watcher, and
+// deletes the result channel and the latest report. The reconciler calls it
+// when the controller is deleted. A later call for the same key, from a new
+// controller of the same name, starts with a new subscription and an empty
+// result channel. A result that a callback delivers after Forget goes to the
+// old channel, which no reader holds.
+func (b *BusTransport) Forget(ns, name string) {
+	key := ns + "/" + name
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if cur, ok := b.subs[key]; ok {
+		cur.close()
+		delete(b.subs, key)
+	}
+	delete(b.results, key)
+	delete(b.reports, key)
 }
 
 // handleTokenRefresh mints a fresh Jenkins token and publishes a TokenGrant to
@@ -400,6 +432,7 @@ func (b *BusTransport) Close() {
 		delete(b.subs, key)
 		delete(b.results, key)
 	}
+	clear(b.reports)
 }
 
 // FetchLastApplied requests the mite's last-applied content via a NATS

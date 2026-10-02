@@ -126,6 +126,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	cr, err := crdstore.Get[v1alpha1.Controller](ctx, r.store, req.Name, req.Namespace)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
+			// The deletion branch forgets the mite too. This call covers a
+			// controller whose finalizer was removed without that branch.
+			r.forgetMite(req.Namespace, req.Name)
 			return reconcile.Result{}, nil
 		}
 		r.Logger.Error("get controller failed", "namespace", req.Namespace, "name", req.Name, "error", err)

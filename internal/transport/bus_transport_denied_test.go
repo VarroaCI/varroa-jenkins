@@ -339,3 +339,36 @@ func TestBusTransport_EnsureSubConcurrentAfterDenial(t *testing.T) {
 		t.Fatalf("results = %d, want exactly 1", len(got))
 	}
 }
+
+// TestBusTransport_ForgetReleasesTheDenialWatcher pins that Forget releases
+// the denial watcher of the entry: a later denial of the same subject does
+// not reach it.
+func TestBusTransport_ForgetReleasesTheDenialWatcher(t *testing.T) {
+	ns, name := "varroa-system", "cell-gone"
+	subject := bus.MiteInSubject(bus.DefaultCluster, ns, name)
+	d := startDeniedInboundServer(t, subject)
+	op := d.connect("operator", "op")
+	tr := NewBusTransport(bus.DefaultCluster, op, nil, nil)
+
+	tr.DrainResults(ns, name)
+	tr.mu.Lock()
+	entry := tr.subs[ns+"/"+name]
+	tr.mu.Unlock()
+	waitDenied(t, entry.denied)
+
+	tr.Forget(ns, name)
+
+	watch, release := op.WatchSubscribeDenied(subject)
+	defer release()
+	sub, err := op.SubscribeData(subject, func([]byte) {})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+	waitDenied(t, watch)
+	select {
+	case <-entry.denied:
+		t.Fatal("the watcher of the forgotten entry still got a denial")
+	default:
+	}
+}
