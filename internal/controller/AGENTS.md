@@ -1159,7 +1159,9 @@ sections describe.
   `ShardManager` calls `onReleased` once per rebalance pass with the shards that
   the pass dropped, before the pass claims shards. The operator wires it to
   `Reconciler.ForgetUnowned`, which calls `Transport.ForgetMatching` for every
-  controller that the replica does not own. The 10-minute shard-resync tick calls
+  controller that the replica does not own. `ApproveRestart` returns
+  `ErrNotShardOwner` on a replica that does not own the controller, before any
+  read; it runs outside the workqueue, so it carries its own gate. The 10-minute shard-resync tick calls
   `ForgetUnowned` too, because a reconcile in flight during a release can
   subscribe again. The shutdown release (`releaseAll`) calls no hook.
 - `pluginlock/lock.go` — the embedded plugin-lock baseline

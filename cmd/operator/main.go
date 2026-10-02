@@ -712,7 +712,8 @@ func main() {
 	}
 
 	// Register BFF command subscribers as a leader-elected runnable so only
-	// the active replica processes reconcile/wake/approveRestart requests.
+	// the active replica processes reconcile and wake requests. Approve
+	// restart is served on every replica by approveRestartRunner.
 	crud := &controller.CommandCRUD{
 		Client:            clientsetClient,
 		Store:             clientsetClient,
@@ -756,6 +757,17 @@ func main() {
 		logger:         logger,
 	}); err != nil {
 		logger.Error("failed to add operator command runner", "error", err)
+		os.Exit(1)
+	}
+
+	// Approve restart runs on every replica; only the shard owner replies.
+	if err := mgr.Add(&approveRestartRunner{
+		busConn:    busConn,
+		cluster:    cluster,
+		reconciler: reconciler,
+		logger:     logger,
+	}); err != nil {
+		logger.Error("failed to add approve restart runner", "error", err)
 		os.Exit(1)
 	}
 
@@ -1222,7 +1234,7 @@ func main() {
 }
 
 // operatorCommandRunner subscribes to NATS request-reply subjects for BFF
-// commands (reconcile, nudge, wake, hibernate, approveRestart) and controller
+// commands (reconcile, nudge, wake, hibernate) and controller
 // CRUD operations.
 // It implements manager.LeaderElectionRunnable so only the elected leader
 // processes requests; non-leaders leave the queue group, letting NATS route
@@ -1344,23 +1356,6 @@ func (r *operatorCommandRunner) Start(ctx context.Context) error {
 		{"reprovision", bus.OperatorReprovisionSubject(r.cluster), reconcileAction("reprovision", func(req bus.ReconcileRequest) {
 			r.reconciler.Reprovision(r.cluster, req.Namespace, req.Name)
 		})},
-		{"approve restart", bus.OperatorApproveSubject(r.cluster), func(data []byte) []byte {
-			var req bus.ApproveRestartRequest
-			if err := json.Unmarshal(data, &req); err != nil {
-				r.logger.Warn("approve restart request decode failed", "error", err)
-				resp, _ := json.Marshal(bus.ApproveRestartResponse{Error: "invalid request"})
-				return resp
-			}
-			if err := r.reconciler.ApproveRestart(context.Background(), r.cluster, req.Namespace, req.Name, req.Action); err != nil {
-				r.logger.Warn("approve restart failed",
-					"controller", req.Namespace+"/"+req.Name,
-					"action", req.Action, "error", err)
-				resp, _ := json.Marshal(bus.ApproveRestartResponse{Error: err.Error()})
-				return resp
-			}
-			resp, _ := json.Marshal(bus.ApproveRestartResponse{})
-			return resp
-		}},
 		{"approve deletion", bus.OperatorApproveDeletionSubject(r.cluster), func(data []byte) []byte {
 			var req bus.ApproveDeletionRequest
 			if err := json.Unmarshal(data, &req); err != nil {

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -188,5 +189,93 @@ func TestForgetUnowned_UnshardedForgetsNothing(t *testing.T) {
 
 	if len(tr.forgotten) != 0 {
 		t.Fatalf("forgotten = %v, want none", tr.forgotten)
+	}
+}
+
+// TestApproveRestart_RefusesANonOwner pins that a replica that does not own
+// the controller refuses the approve before any read, send, or status write.
+func TestApproveRestart_RefusesANonOwner(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+	cr := testController("elsewhere", "ns", v1alpha1.ControllerPhaseConnected)
+	cr.Status.PendingRestart = &v1alpha1.PendingRestart{}
+	crdstore.MustSeed(client.store, cr)
+	rec.SetShardOwnership(sharding.NewRing(256), sharding.NewShardSet())
+	tr := &captureTransport{}
+	rec.miteTransport = tr
+
+	err := rec.ApproveRestart(context.Background(), "", "ns", "elsewhere", "approve")
+	if !errors.Is(err, ErrNotShardOwner) {
+		t.Fatalf("err = %v, want ErrNotShardOwner", err)
+	}
+	if tr.lastDesired != nil {
+		t.Fatal("a non-owner sent a desired state")
+	}
+	got, getErr := crdstore.Get[v1alpha1.Controller](context.Background(), client.store, "elsewhere", "ns")
+	if getErr != nil {
+		t.Fatalf("get controller: %v", getErr)
+	}
+	if got.Status.PendingRestart == nil {
+		t.Fatal("a non-owner cleared the pending restart")
+	}
+}
+
+// TestApproveRestart_OwnerSends pins that the replica that holds the
+// controller's shard sends the desired state.
+func TestApproveRestart_OwnerSends(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+	cr := testController("mine", "ns", v1alpha1.ControllerPhaseConnected)
+	cr.Status.PendingRestart = &v1alpha1.PendingRestart{}
+	crdstore.MustSeed(client.store, cr)
+	ring := sharding.NewRing(256)
+	held := sharding.NewShardSet()
+	held.Add(ring.ShardFor("ns/mine"))
+	rec.SetShardOwnership(ring, held)
+	tr := &captureTransport{}
+	rec.miteTransport = tr
+
+	if err := rec.ApproveRestart(context.Background(), "", "ns", "mine", "approve"); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if tr.lastDesired == nil {
+		t.Fatal("the owner sent no desired state")
+	}
+}
+
+// shardMovingTransport drops the controller's shard from the held set when
+// a send arrives, the way a rebalance that runs during the send does.
+type shardMovingTransport struct {
+	*captureTransport
+	onSend func()
+}
+
+func (s *shardMovingTransport) Send(ctx context.Context, ns, name string, msg *mitev1.OperatorMessage) error {
+	s.onSend()
+	return s.captureTransport.Send(ctx, ns, name, msg)
+}
+
+// TestApproveRestart_ForgetsTheMiteWhenTheShardMovesDuringTheSend pins that
+// a replica that loses the shard during the send drops the subscription
+// that the send made.
+func TestApproveRestart_ForgetsTheMiteWhenTheShardMovesDuringTheSend(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+	cr := testController("moving", "ns", v1alpha1.ControllerPhaseConnected)
+	cr.Status.PendingRestart = &v1alpha1.PendingRestart{}
+	crdstore.MustSeed(client.store, cr)
+	ring := sharding.NewRing(256)
+	held := sharding.NewShardSet()
+	shard := ring.ShardFor("ns/moving")
+	held.Add(shard)
+	rec.SetShardOwnership(ring, held)
+	tr := &shardMovingTransport{captureTransport: &captureTransport{}, onSend: func() { held.Remove(shard) }}
+	rec.miteTransport = tr
+
+	if err := rec.ApproveRestart(context.Background(), "", "ns", "moving", "approve"); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if len(tr.forgotten) != 1 || tr.forgotten[0] != "ns/moving" {
+		t.Fatalf("forgotten = %v, want [ns/moving]", tr.forgotten)
 	}
 }

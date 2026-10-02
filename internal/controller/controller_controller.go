@@ -1809,6 +1809,11 @@ func (r *Reconciler) WakeHibernatedController(ctx context.Context, namespace, na
 // controller; the caller maps this to a conflict response.
 var ErrControllerStopped = errors.New("controller is stopped (spec.powerState=Stopped)")
 
+// ErrNotShardOwner reports that this replica does not own the controller.
+// Every replica receives an approve request, and only the owner may act on
+// it. The caller sends no reply, so the owner's reply is the only one.
+var ErrNotShardOwner = errors.New("controller is not owned by this operator replica")
+
 // HibernateController parks a controller on demand via the status
 // compare-and-swap helper, independent of spec.hibernation.enabled, then
 // nudges the owning replica so the hibernated branch scales the workload
@@ -1889,6 +1894,11 @@ func (r *Reconciler) Reprovision(cluster, namespace, name string) {
 // or "force" (release manual-drift push immediately).
 func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, name, action string) error {
 	_ = cluster // operator always acts on its own cluster
+	// A send from a replica that does not own the controller subscribes to
+	// the mite there, and its status writes race the owner's.
+	if !r.ownsController(namespace, name) {
+		return ErrNotShardOwner
+	}
 	key := namespace + "/" + name
 	logger := r.Logger.With("controller", key)
 	cr, err := crdstore.Get[v1alpha1.Controller](ctx, r.store, name, namespace)
@@ -1989,6 +1999,12 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 		// reload: push with Reload=true (existing behavior, no idle gating).
 	}
 
+	// The shard can move during the reads above. The new owner received
+	// this request as a non-owner and dropped it, so this replica replies
+	// with an error that the caller can retry.
+	if !r.ownsController(namespace, name) {
+		return fmt.Errorf("controller %s moved to another operator replica; retry the approve", key)
+	}
 	sendErr := r.miteTransport.Send(ctx, namespace, name, &mitev1.OperatorMessage{
 		Message: &mitev1.OperatorMessage_DesiredState{
 			DesiredState: desired,
@@ -1998,6 +2014,11 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 	// the send subscribes to the mite again. The second read releases that
 	// subscription.
 	r.forgetIfDeleted(ctx, namespace, name)
+	// A shard move during the send leaves the subscription on a replica
+	// that no longer owns the mite.
+	if !r.ownsController(namespace, name) {
+		r.forgetMite(namespace, name)
+	}
 	if sendErr != nil {
 		return fmt.Errorf("send desired state: %w", sendErr)
 	}
