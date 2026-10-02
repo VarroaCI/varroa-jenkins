@@ -752,7 +752,10 @@ sections describe.
     does. A voluntary move completes only once
     `Controller.status.cell.appliedTenants` no longer holds the tenant; the
     `Team` finalizer holds through teardown until the schedule purge
-    succeeds or `maxPurgeAttempts` (10) is spent, then a bounded
+    succeeds or `maxPurgeAttempts` (10) is spent (a teardown purge sets
+    `PurgeRequest.TeamDeleted` from the `Team`'s `DeletionTimestamp`, and
+    the recorder then retires the `Team`'s uid; a dropped `spec.pipelines`
+    leaves it false), then a bounded
     `teardownBoundedWait` (10 minutes) release, in both cases raising a
     warning event before releasing — warnings order by tenant then reason.
     Teardown stage two also holds on `cells.Inputs.AgentPodsPending`, inside

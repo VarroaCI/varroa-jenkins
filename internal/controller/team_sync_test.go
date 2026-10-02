@@ -260,3 +260,31 @@ func TestLoggedAnnounceLogsAStaleRefusal(t *testing.T) {
 		t.Fatalf("an accepted announce logged: %q", buf.String())
 	}
 }
+
+// TestNewNATSPurgeRequester_CarriesTeamDeleted asserts that the purge
+// request puts the deletion of the Team on the wire as team_deleted, beside
+// the incarnation the recorder retires.
+func TestNewNATSPurgeRequester_CarriesTeamDeleted(t *testing.T) {
+	conn := startTestSyncBus(t)
+
+	var raw map[string]any
+	sub, err := conn.SubscribeRequest(bus.TenantPurgeSubject, "recorder", func(data []byte) []byte {
+		_ = json.Unmarshal(data, &raw)
+		resp, _ := json.Marshal(recordstore.TenantPurgeResponse{})
+		return resp
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	ok, err := NewNATSPurgeRequester(conn)(context.Background(), cells.PurgeRequest{
+		Cluster: "core", Tenant: "payments", OldGeneration: 4, Incarnation: "uid-a", TeamDeleted: true,
+	})
+	if err != nil || !ok {
+		t.Fatalf("purge = %v, %v; want success", ok, err)
+	}
+	if raw["team_deleted"] != true || raw["incarnation"] != "uid-a" {
+		t.Fatalf("request = %v, want team_deleted true and incarnation uid-a", raw)
+	}
+}

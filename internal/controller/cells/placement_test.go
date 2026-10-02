@@ -1020,6 +1020,9 @@ func TestPlace_Move_PurgeRequestCarriesOldGeneration(t *testing.T) {
 	if captured.Cell != "cell-a" || captured.CellNamespace != "cells-ns" {
 		t.Errorf("the purge must name the old cell and its namespace: %+v", captured)
 	}
+	if captured.TeamDeleted {
+		t.Errorf("a move purge must not report a deleted Team: %+v", captured)
+	}
 }
 
 func TestPlace_Move_PurgeFailureDoesNotBlock(t *testing.T) {

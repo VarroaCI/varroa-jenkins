@@ -1593,6 +1593,7 @@ func NewNATSPurgeRequester(conn *bus.Conn) cells.PurgeFunc {
 			Cell:                req.Cell,
 			CellNamespace:       req.CellNamespace,
 			Incarnation:         req.Incarnation,
+			TeamDeleted:         req.TeamDeleted,
 		})
 		if err != nil {
 			return false, fmt.Errorf("marshal tenant purge request: %w", err)

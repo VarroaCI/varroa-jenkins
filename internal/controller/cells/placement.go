@@ -117,6 +117,12 @@ type PurgeRequest struct {
 	// value with the one its placement row holds and keeps a row a newer
 	// tenant of the same name already owns.
 	Incarnation string
+	// TeamDeleted reports that the Team object is under deletion. The
+	// recorder then retires Incarnation, so a late announcement of the
+	// deleted Team cannot restore the placement row. A teardown for a Team
+	// that only drops spec.pipelines leaves it false, because that Team
+	// keeps its uid. A move never sets it.
+	TeamDeleted bool
 }
 
 // PurgeFunc requests a tenant's job_schedules purge and reports whether the
@@ -813,6 +819,22 @@ func requestPurge(ctx context.Context, in Inputs, team *v1alpha1.Team, oldGenera
 	return ok && err == nil
 }
 
+// requestTeardownPurge requests the whole-tenant purge of a teardown. It
+// reports a deleted Team, so the recorder retires the Team's incarnation.
+// A nil RequestPurge answers a failure, the same way requestPurge does.
+func requestTeardownPurge(ctx context.Context, in Inputs, team *v1alpha1.Team, generation int64) (bool, error) {
+	if in.RequestPurge == nil {
+		return false, nil
+	}
+	return in.RequestPurge(ctx, PurgeRequest{
+		Cluster:       in.ClusterIdentity,
+		Tenant:        team.Name,
+		OldGeneration: generation,
+		Incarnation:   string(team.UID),
+		TeamDeleted:   team.DeletionTimestamp != nil && !team.DeletionTimestamp.IsZero(),
+	})
+}
+
 // teamAgentNamespace answers the tenant's spec.pipelines.agentNamespace,
 // or the empty string for a Team with no pipelines spec.
 func teamAgentNamespace(team *v1alpha1.Team) string {
@@ -1322,7 +1344,7 @@ func teardown(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alp
 		// has drained, so teardown completes at once. The purge is still
 		// attempted, best effort, but never holds the finalizer: no cell
 		// remains to drain.
-		requestPurge(ctx, in, team, status.Placement.Generation, "", "")
+		_, _ = requestTeardownPurge(ctx, in, team, status.Placement.Generation)
 		finishTeardown(status, out, hasFinalizer)
 		return
 	}
@@ -1341,15 +1363,7 @@ func teardown(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alp
 		return
 	}
 
-	ok, err := false, error(nil)
-	if in.RequestPurge != nil {
-		ok, err = in.RequestPurge(ctx, PurgeRequest{
-			Cluster:       in.ClusterIdentity,
-			Tenant:        team.Name,
-			OldGeneration: status.Placement.Generation,
-			Incarnation:   string(team.UID),
-		})
-	}
+	ok, err := requestTeardownPurge(ctx, in, team, status.Placement.Generation)
 	if ok && err == nil {
 		finishTeardown(status, out, hasFinalizer)
 		return

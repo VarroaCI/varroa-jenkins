@@ -215,6 +215,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   `00024_tenant_placements_retired_incarnations.sql` adds
   `tenant_placements.retired_incarnations`, a jsonb list of the
   incarnations a take-over replaced, newest first. It defaults to `[]`.
+  The migration's own comment says a teardown purge adds no entry; a
+  teardown for a deleted `Team` now adds one (`retireDeletedTeam`), and
+  the applied migration stays unedited.
   A later migration never edits an applied one. `migrationsFS` (`migrations.go`) embeds
   every file under `migrations/` into the binary through `embed.FS`, so
   the recorder needs no separate deploy artifact. Monthly partition
@@ -425,8 +428,14 @@ of the fleet's audit activity, once a controller becomes disposable.
   take-over announcement already deleted what the old tenant left (see the
   tenant sync responder below). An empty value on either side means
   unknown and matches, and a tenant with no placement row is purged too,
-  because the schedule rows can outlive it. The operator side of this
-  contract lives outside this package.
+  because the schedule rows can outlive it. **A teardown for a deleted
+  `Team` retires its incarnation** (`retireDeletedTeam`): the request sets
+  `team_deleted`, and the purge adds `incarnation` to
+  `retired_incarnations` in the same transaction, so a late announcement
+  of that `Team` is stale and cannot restore the reset row. A retiring
+  purge with no row writes no row. A request that names a cell and sets
+  `team_deleted` is refused. The operator side of this contract lives
+  outside this package.
 - **Tenant sync responder** (`tenant_sync.go`, `tenant_sync_types.go`) —
   `RegisterTenantSyncResponder` subscribes `bus.TenantSyncSubject` with
   queue group `recorder`. It answers two request kinds: `announce`
@@ -444,9 +453,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   stored value. **A take-over retires the stored incarnation**
   (`retireIncarnation`): it adds that value to `retired_incarnations`.
   The list keeps eight entries and has no time limit, because a
-  `metadata.uid` never comes back. A teardown purge retires nothing,
-  because a `Team` that drops `spec.pipelines` keeps its uid and can add
-  the field again. **A take-over deletes every `job_schedules` row of the
+  `metadata.uid` never comes back. A teardown purge retires only the
+  incarnation of a deleted `Team`: a `Team` that drops `spec.pipelines`
+  keeps its uid and can add the field again. **A take-over deletes every `job_schedules` row of the
   name** (`deleteTenantJobSchedules`), inside the same transaction: a cell
   exports a tenant's jobs only after the announce that placed it, so at
   that moment every row belongs to the tenant before this one, and a row

@@ -188,3 +188,24 @@ func TestHandleTenantPurge_MissingFields(t *testing.T) {
 		}
 	}
 }
+
+// TestHandleTenantPurge_TeamDeletedWithACellIsRefused asserts a slot move
+// that reports a deleted Team answers an error without touching the pool.
+// A move that retired the incarnation would refuse the tenant's own next
+// announcement.
+func TestHandleTenantPurge_TeamDeletedWithACellIsRefused(t *testing.T) {
+	body, err := json.Marshal(TenantPurgeRequest{
+		Cluster: "core", Tenant: "payments", PlacementGeneration: 1,
+		Cell: "cell-a", CellNamespace: "cells", Incarnation: "uid-a", TeamDeleted: true,
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	var resp TenantPurgeResponse
+	if err := json.Unmarshal(handleTenantPurge(slog.Default(), nil, body), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.Error == "" {
+		t.Fatal("want a non-empty error for a slot move that reports a deleted Team")
+	}
+}
