@@ -68,6 +68,8 @@ import type {
   CellPoolScaleRequest,
   CellGrants,
   FleetLockListResponse,
+  FleetLockReleaseRequest,
+  FleetLockReleaseResponse,
   PipelineTeamList,
 } from "../types";
 import type { ControllerDetail } from "../hooks/useControllers";
@@ -1136,6 +1138,20 @@ export function listFleetLocks(team: string): Promise<FleetLockListResponse> {
  */
 export function listAllFleetLocks(): Promise<FleetLockListResponse> {
   return bffFetch<FleetLockListResponse>("/locks");
+}
+
+/**
+ * Force-releases one releasing fleet lock. The caller needs the
+ * cluster-wide fleetlocks:release verb. The server answers 409 for a lock
+ * that is not releasing or whose holder pod still runs, and 404 for an
+ * unknown lock.
+ */
+export function releaseFleetLock(body: FleetLockReleaseRequest): Promise<FleetLockReleaseResponse> {
+  return bffFetch<FleetLockReleaseResponse>("/locks/release", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 /**

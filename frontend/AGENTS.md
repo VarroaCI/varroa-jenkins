@@ -146,7 +146,11 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   carries **no** sidebar row and no `navPermissions.ts` door: a caller
   reaches it by its own URL. It polls `GET /locks` on the cells cadence and
   opens no stream. That read covers every cluster, so a waiting row finds a
-  holder on another cluster, and each row names its own cluster.
+  holder on another cluster, and each row names its own cluster. A caller
+  with the cluster-wide `fleetlocks:release` verb gets a **Force release**
+  action on each `releasing` row. Its dialog requires a reason, posts
+  `POST /locks/release`, shows a refusal as the HTTP status and the server
+  message, and reads `GET /locks` again after every attempt.
   `CellTab.tsx` is the Cell tab of
   `ControllerDetail.tsx`, rendered only when the detail response reports
   `kind` `cell`. Its role, agent namespace, and placement generation

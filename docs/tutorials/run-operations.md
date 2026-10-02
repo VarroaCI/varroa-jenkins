@@ -21,29 +21,28 @@ on. A row names the lock, the state, the holder, and the time since the wait or 
 started. The card reads the locks again on a `lock` event, at most once every two seconds. It
 shows no queue position.
 
-An operator opens `/locks` to list every lock of every cluster, across every tenant. That page needs
+An operator opens `/locks` to list every lock of every cluster and tenant. That page needs
 the `fleetlocks:read` verb, which `varroa:operator` and `varroa:admin` hold. The page polls.
 
-Neither page releases a lock. A stuck lock frees itself in three ways:
+A stuck lock frees itself in three ways:
 
 - The holder's step releases the lock when its block ends.
 - The holder's run reaches a terminal state.
 - The Varroa operator confirms that the holder's cell instance is gone.
 
-Otherwise, force-release a `releasing` lock whose build runs on no cell.
+Otherwise, force-release a `releasing` lock whose build runs on no cell. Use **Force release** on `/locks`, or:
 
 ```bash
 varroactl locks release <lock name> --run <run id> --reason "<why>"
 ```
 
-This needs the `fleetlocks:release` verb. Varroa refuses a held lock, or one whose pod still runs.
+Both need the `fleetlocks:release` verb. Varroa refuses a held lock or a live pod.
 Each release writes a `fleetlock.force_released` activity row. A lost reply writes
 `fleetlock.force_release_unconfirmed`; read `/locks` before you retry.
 
 ## Read a failure digest
 
-A run that fails leads with a **Digest** card, above the **Pipeline** card. The card appears for a
-run that carries a result, that did not succeed, and that started.
+A run that fails leads with a **Digest** card, above the **Pipeline** card.
 
 These runs carry a card: `UNSTABLE`, `FAILURE`, `ABORTED`, `NOT_BUILT`, and a started
 `INTERRUPTED`. These runs carry no card: a run with no result yet, a successful run, a refused
@@ -66,7 +65,7 @@ fallback.
 The card carries no log tail when the server cannot read the log. The **Log** tab then shows what
 the store holds.
 
-A record that holds none of the five parts still shows the card, with no part in it.
+A record with none of the five parts shows an empty card.
 
 ## Attach a summary line
 
@@ -83,8 +82,7 @@ attaches nothing: the run keeps the last text that was not empty.
 The call cuts the text at 512 bytes of UTF-8. The cut stops at the largest whole character at or
 under that limit, so the stored text stays valid UTF-8. Text under the limit stays unchanged.
 
-The call touches the run's own object and needs no network round trip. Call it in an early stage
-to show the line while the run continues.
+The call needs no network round trip. Call it early to show the line during the run.
 
 ## Answer a paused input
 

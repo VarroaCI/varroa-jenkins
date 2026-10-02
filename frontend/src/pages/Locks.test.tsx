@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createTestQueryClient } from "../test/render-utils";
@@ -8,9 +8,19 @@ import { createFleetLock } from "../test/factories";
 import Locks from "./Locks";
 
 const mockListAllFleetLocks = vi.fn();
+const mockReleaseFleetLock = vi.fn();
 vi.mock("../api/client", () => ({
   listAllFleetLocks: (...args: unknown[]) => mockListAllFleetLocks(...args),
+  releaseFleetLock: (...args: unknown[]) => mockReleaseFleetLock(...args),
 }));
+
+/** The permissions the page reads. The default grants read only. */
+let mockPermissions: unknown = { global: { fleetlocks: { read: true } }, scopes: [] };
+vi.mock("../context/AuthContext", () => ({
+  useAuth: () => ({ permissions: mockPermissions }),
+}));
+
+const RELEASE_PERMISSIONS = { global: { fleetlocks: { read: true, release: true } }, scopes: [] };
 
 /** The page opens no stream, so this spy stays uncalled. */
 const eventSourceSpy = vi.fn();
@@ -27,6 +37,8 @@ function renderPage() {
 
 beforeEach(() => {
   mockListAllFleetLocks.mockReset();
+  mockReleaseFleetLock.mockReset();
+  mockPermissions = { global: { fleetlocks: { read: true } }, scopes: [] };
   eventSourceSpy.mockClear();
   vi.stubGlobal("EventSource", eventSourceSpy);
 });
@@ -129,5 +141,120 @@ describe("Locks", () => {
 
     await waitFor(() => expect(mockListAllFleetLocks).toHaveBeenCalledTimes(1));
     expect(eventSourceSpy).not.toHaveBeenCalled();
+  });
+
+  describe("force release", () => {
+    function seedReleasing() {
+      mockListAllFleetLocks.mockResolvedValue({
+        items: [
+          createFleetLock({ name: "payments/deploy", state: "releasing", runId: "run-7", tenant: "payments" }),
+          createFleetLock({ name: "payments/smoke", state: "held" }),
+        ],
+      });
+    }
+
+    async function openDialog() {
+      fireEvent.click(await screen.findByRole("button", { name: "Force release" }));
+      return screen.getByRole("dialog");
+    }
+
+    it("shows the action only on a releasing row for a caller with fleetlocks:release", async () => {
+      mockPermissions = RELEASE_PERMISSIONS;
+      seedReleasing();
+      renderPage();
+
+      const buttons = await screen.findAllByRole("button", { name: "Force release" });
+      expect(buttons).toHaveLength(1);
+      const row = screen.getByText("payments/deploy").closest("tr") as HTMLElement;
+      expect(within(row).getByRole("button", { name: "Force release" })).toBeInTheDocument();
+    });
+
+    it("hides the action from a caller without the release verb", async () => {
+      seedReleasing();
+      renderPage();
+
+      await waitFor(() => expect(screen.getByText("payments/deploy")).toBeInTheDocument());
+      expect(screen.queryByRole("button", { name: "Force release" })).not.toBeInTheDocument();
+    });
+
+    it("requires a reason and states the no-cell rule", async () => {
+      mockPermissions = RELEASE_PERMISSIONS;
+      seedReleasing();
+      renderPage();
+
+      const dialog = await openDialog();
+      expect(within(dialog).getByText(/runs on no cell/)).toBeInTheDocument();
+      const confirm = within(dialog).getByRole("button", { name: "Force release" });
+      expect(confirm).toBeDisabled();
+      fireEvent.change(within(dialog).getByLabelText("Reason"), { target: { value: "   " } });
+      expect(confirm).toBeDisabled();
+      expect(mockReleaseFleetLock).not.toHaveBeenCalled();
+    });
+
+    it("posts name, runId, and reason, closes, and reads the list again", async () => {
+      mockPermissions = RELEASE_PERMISSIONS;
+      seedReleasing();
+      mockReleaseFleetLock.mockResolvedValue({
+        name: "payments/deploy", runId: "run-7", cluster: "core", tenant: "payments",
+        jobPath: "payments/app-a", state: "released",
+      });
+      renderPage();
+
+      const dialog = await openDialog();
+      fireEvent.change(within(dialog).getByLabelText("Reason"), { target: { value: " pod is gone " } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Force release" }));
+
+      await waitFor(() =>
+        expect(mockReleaseFleetLock).toHaveBeenCalledWith({
+          name: "payments/deploy", runId: "run-7", reason: "pod is gone",
+        }),
+      );
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await waitFor(() => expect(mockListAllFleetLocks).toHaveBeenCalledTimes(2));
+    });
+
+    it.each([
+      [409, "the placement still runs the holder's cell instance c-1; cancel the build or delete that pod"],
+      [409, "the lock is held; only a releasing lock can be force-released"],
+      [404, "fleet lock not found"],
+      [503, "the record store did not confirm the release; read the lock again before you retry"],
+    ])("shows the %i status and the server message", async (status, message) => {
+      mockPermissions = RELEASE_PERMISSIONS;
+      seedReleasing();
+      mockReleaseFleetLock.mockRejectedValue(new ApiError(status, "fixed copy", { error: message }));
+      renderPage();
+
+      const dialog = await openDialog();
+      fireEvent.change(within(dialog).getByLabelText("Reason"), { target: { value: "stuck" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Force release" }));
+
+      const alert = await within(dialog).findByRole("alert");
+      expect(alert).toHaveTextContent(`${status}: ${message}`);
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      await waitFor(() => expect(mockListAllFleetLocks).toHaveBeenCalledTimes(2));
+    });
+
+    it("focuses the reason and closes on Escape without a request", async () => {
+      mockPermissions = RELEASE_PERMISSIONS;
+      seedReleasing();
+      renderPage();
+
+      const dialog = await openDialog();
+      expect(within(dialog).getByLabelText("Reason")).toHaveFocus();
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(mockReleaseFleetLock).not.toHaveBeenCalled();
+    });
+
+    it("closes on Cancel without a request", async () => {
+      mockPermissions = RELEASE_PERMISSIONS;
+      seedReleasing();
+      renderPage();
+
+      const dialog = await openDialog();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(mockReleaseFleetLock).not.toHaveBeenCalled();
+    });
   });
 });

@@ -2116,6 +2116,25 @@ export interface FleetLockListResponse {
   items: FleetLock[];
 }
 
+/** The body of POST /locks/release. reason goes into the audit record. */
+export interface FleetLockReleaseRequest {
+  name: string;
+  runId: string;
+  reason: string;
+}
+
+/** The released row that POST /locks/release answers. */
+export interface FleetLockReleaseResponse {
+  name: string;
+  runId: string;
+  cluster: string;
+  tenant: string;
+  jobPath: string;
+  cellInstance?: string;
+  /** Always "released". */
+  state: string;
+}
+
 // The run log SSE stream (D5) carries six named event kinds. The event
 // stream itself has no OpenAPI schema (it is documented in the path's
 // description, not in components/schemas.yaml), so these mirror design.md's
