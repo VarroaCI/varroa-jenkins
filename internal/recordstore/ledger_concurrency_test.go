@@ -60,6 +60,12 @@ func subscribeCancelActions(t *testing.T, conn *bus.Conn, buffer int) chan Ledge
 	return received
 }
 
+// waitConcurrencyCancel blocks until every concurrency cancel that l
+// started has returned, so its metrics are final.
+func (l *Ledger) waitConcurrencyCancel() {
+	l.concurrencyWG.Wait()
+}
+
 // TestConcurrencyCancelPublishesForOlderRun asserts a granted claim for a
 // cancelInProgress tenant publishes one cancel_run action for an older,
 // non-terminal run of the same group, and counts it under both
@@ -104,6 +110,8 @@ func TestConcurrencyCancelPublishesForOlderRun(t *testing.T) {
 		t.Fatal("want a cancel_run action for the older run")
 	}
 
+	// The cancel adds to the counters after its publish returns.
+	ledger.waitConcurrencyCancel()
 	if got := metricValue(t, reader, "recorder_concurrency_cancel_total"); got != 1 {
 		t.Fatalf("recorder_concurrency_cancel_total = %d, want 1", got)
 	}
@@ -178,6 +186,7 @@ collect:
 		t.Fatalf("published cancels = %d, want 8", got)
 	}
 
+	ledger.waitConcurrencyCancel()
 	if got := metricValue(t, reader, "recorder_concurrency_cancel_total"); got != 8 {
 		t.Fatalf("recorder_concurrency_cancel_total = %d, want 8", got)
 	}
@@ -227,20 +236,23 @@ func TestConcurrencyCancelAnswersClaimBeforePublishing(t *testing.T) {
 
 	ledger := NewLedger(pool, nil)
 	ledger.SetConcurrencyCancel(conn, nil, nil, nil)
+	// The gate holds the cancel goroutine, so the test, not the
+	// scheduler, decides when the cancel can publish.
+	gate := make(chan struct{})
+	ledger.concurrencyGate = gate
 	resp := ledger.Claim(context.Background(), req)
 	if resp.Decision != DecisionGranted {
 		t.Fatalf("claim: want granted, got %+v", resp)
 	}
 
-	// The claim's own database work (a transaction commit) already takes
-	// longer than a bare function return, so the cancel's own
-	// goroutine, database read, and publish have essentially never
-	// finished by the time Claim returns.
+	// Claim returned while the cancel still waits at the gate, so no
+	// cancel_run can exist yet.
 	select {
 	case a := <-received:
 		t.Fatalf("want the claim answered before any cancel_run publish, got %+v already published", a)
 	default:
 	}
+	close(gate)
 
 	select {
 	case a := <-received:

@@ -68,3 +68,30 @@ Without this guard such an upgrade would run NATS with a plain-text store.
 {{- fail "JetStream encryption is not configured: set nats.config.jetstream.merge.cipher, nats.config.jetstream.merge.key (<< $JS_KEY >>), and nats.container.env.JS_KEY. An upgrade with --reuse-values drops these chart defaults; use --reset-then-reuse-values." -}}
 {{- end -}}
 {{- end -}}
+
+{{- /*
+The NATS subchart does not read these keys. Fail the render so a value
+set on them does not disappear without notice.
+*/ -}}
+{{- $natsValues := .Values.nats | default dict -}}
+{{- if hasKey $natsValues "image" -}}
+{{- fail "nats.image is not read by the NATS subchart; set nats.container.image instead" -}}
+{{- end -}}
+{{- if hasKey $natsValues "persistence" -}}
+{{- fail "nats.persistence is not read by the NATS subchart; set nats.config.jetstream.fileStore.pvc.size and .storageClassName instead" -}}
+{{- end -}}
+{{- $natsService := $natsValues.service | default dict -}}
+{{- range $key := list "port" "monitorPort" -}}
+{{- if hasKey $natsService $key -}}
+{{- fail (printf "nats.service.%s is not read by the NATS subchart; the chart fixes the client port at 4222 and the monitor port at 8222" $key) -}}
+{{- end -}}
+{{- end -}}
+{{- if hasKey $natsService "type" -}}
+{{- fail "nats.service.type is not read by the NATS subchart; set nats.external.enabled and nats.external.serviceType to expose NATS outside the cluster" -}}
+{{- end -}}
+{{- if ne (dig "config" "nats" "port" 4222 $natsValues | int) 4222 -}}
+{{- fail "nats.config.nats.port must stay 4222: the bus URL, the NetworkPolicies, and the external Service name that port" -}}
+{{- end -}}
+{{- if ne (dig "config" "monitor" "port" 8222 $natsValues | int) 8222 -}}
+{{- fail "nats.config.monitor.port must stay 8222: the NetworkPolicies name that port" -}}
+{{- end -}}

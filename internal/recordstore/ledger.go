@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -46,6 +47,13 @@ type Ledger struct {
 	concurrencyMetrics       *ConcurrencyMetrics
 	concurrencyActionMetrics *ActionMetrics
 	concurrencyLogger        *slog.Logger
+
+	// concurrencyWG counts each running concurrency cancel. A test waits
+	// on it before it reads the metrics, which the cancel adds after its
+	// publish. concurrencyGate, when a test sets it, holds each cancel
+	// until the test closes it. Production code leaves it nil.
+	concurrencyWG   sync.WaitGroup
+	concurrencyGate chan struct{}
 
 	// vetoMarking and vetoNotifier wire the veto mark. A false
 	// vetoMarking (NewLedger's default, until SetVetoMarking is called)
@@ -89,8 +97,16 @@ func (l *Ledger) startConcurrencyCancel(req ClaimRequest, createdAt time.Time) {
 	if l.concurrencyConn == nil {
 		return
 	}
-	go runConcurrencyCancel(context.Background(), l.pool, l.concurrencyConn, l.concurrencyMetrics,
-		l.concurrencyActionMetrics, req, createdAt, l.concurrencyLogger)
+	gate := l.concurrencyGate
+	l.concurrencyWG.Add(1)
+	go func() {
+		defer l.concurrencyWG.Done()
+		if gate != nil {
+			<-gate
+		}
+		runConcurrencyCancel(context.Background(), l.pool, l.concurrencyConn, l.concurrencyMetrics,
+			l.concurrencyActionMetrics, req, createdAt, l.concurrencyLogger)
+	}()
 }
 
 // Claim answers one varroa.ledger.claim request. It parses the intent

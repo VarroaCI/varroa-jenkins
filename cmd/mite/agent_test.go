@@ -1473,38 +1473,47 @@ func TestCertRenewalConcurrentAccess(t *testing.T) {
 	agent.keypair = priv
 	agent.miteDir = t.TempDir() // keep cert writes off the real shared path
 
-	newResp := func() *mitev1.RegisterResponse {
+	// Issue every certificate before the goroutines start. Issuance is not
+	// under test, and t.Fatalf must run on the test goroutine.
+	const renewals = 50
+	resps := make([]*mitev1.RegisterResponse, renewals+1)
+	for i := range resps {
 		cert, err := certAuth.IssueMiteCert("test", "ns", pub, "")
 		if err != nil {
 			t.Fatalf("issue cert: %v", err)
 		}
 		certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
-		return &mitev1.RegisterResponse{CertificatePem: string(certPEM), CaPem: string(certAuth.CAPEM())}
+		resps[i] = &mitev1.RegisterResponse{CertificatePem: string(certPEM), CaPem: string(certAuth.CAPEM())}
 	}
 
-	if err := agent.storeCertFromResponse(newResp()); err != nil {
+	if err := agent.storeCertFromResponse(resps[0]); err != nil {
 		t.Fatalf("initial storeCertFromResponse: %v", err)
 	}
 
+	// The test has no deadline of its own. The race detector is the
+	// assertion, and go test -timeout catches a hang with every stack.
 	var wg sync.WaitGroup
+	writerDone := make(chan struct{})
 
 	// Writer: mirrors the renewal loop calling storeCertFromResponse.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 50; i++ {
-			if err := agent.storeCertFromResponse(newResp()); err != nil {
+		defer close(writerDone)
+		for _, resp := range resps[1:] {
+			if err := agent.storeCertFromResponse(resp); err != nil {
 				t.Errorf("storeCertFromResponse: %v", err)
 				return
 			}
 		}
 	}()
 
-	// Reader: mirrors connect()'s certMu-guarded read of a.cert.
+	// Reader: mirrors connect()'s certMu-guarded read of a.cert. It reads
+	// until the writer stops, so every write overlaps a read.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 200; i++ {
+		for {
 			agent.certMu.Lock()
 			cert := agent.cert
 			agent.certMu.Unlock()
@@ -1512,17 +1521,13 @@ func TestCertRenewalConcurrentAccess(t *testing.T) {
 				t.Error("cert unexpectedly nil")
 				return
 			}
+			select {
+			case <-writerDone:
+				return
+			default:
+			}
 		}
 	}()
 
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("timed out waiting for concurrent cert access")
-	}
+	wg.Wait()
 }

@@ -181,9 +181,16 @@ the packaged CRDs. Does not own the Go source it packages
   components mount. No pod carries a checksum of the key Secret. The chart
   never renders `prev_encryption_key`: a restart with it loses every durable
   consumer on 2.10.16 and 2.11.17. NATS converts a plain store in place on the first
-  start with a key. `nats.image`, `nats.persistence`, and `nats.service` are
-  not read by the subchart: the server image is the subchart default
-  `container.image` (2.10.16). Asserted by `tests/test-nats-encryption.sh`.
+  start with a key. Asserted by `tests/test-nats-encryption.sh`.
+- **NATS values go to the subchart's own keys.** `nats.container.image` pins the
+  server at `nats:2.10.16-alpine`; a change is a server upgrade that needs a live
+  test against the existing JetStream store. The JetStream volume is
+  `nats.config.jetstream.fileStore.pvc.*`. The client port 4222 and the monitor
+  port 8222 are fixed: the bus URL, the NetworkPolicies, the external Service,
+  and `NOTES.txt` all name them, and `mode-guard.yaml` fails a render that changes
+  `nats.config.nats.port` or `nats.config.monitor.port`. `mode-guard.yaml` fails a render that sets a retired
+  key: `nats.image`, `nats.persistence`, or `nats.service.port`/`monitorPort`/`type`.
+  Asserted by `tests/test-nats-values.sh`.
 - **`nats.config.cluster.enabled`/`nats.config.cluster.replicas` are the ONLY real
   clustering knobs** for the vendored nats-1.2.0 subchart (its `stateful-set.yaml`
   hardcodes `replicas: 1` whenever `cluster.enabled` is false, ignoring `replicas`
@@ -334,12 +341,16 @@ the packaged CRDs. Does not own the Go source it packages
   would admit every source; a NodePort path masquerades the source, so the
   list must hold the addresses the traffic arrives from). `tests/test-hive-recordstore.sh`
   asserts all of it.
-- **`tests/*.sh`** — golden-render bash assertions over `helm template` output
-  (`test-hive-mode.sh`, `test-secret-rbac-scoping.sh`, `test-nats-bus-security.sh`,
-  `test-recorder-netpol.sh`, `test-recorder-chart.sh`, `test-activity-stream-acl.sh`,
-  `test-runner-door-nginx.sh`, `test-cells-guard.sh`, `test-hive-recordstore.sh`, `test-artifact-sts.sh`,
-  `test-nats-encryption.sh`, `test-bff-local-issuer-netpol.sh`); not the
-  `helm unittest` plugin.
+- **`tests/test-*.sh`** — golden-render bash assertions over `helm template` output,
+  not the `helm unittest` plugin. `make chart-test` runs every `test-*.sh` file
+  and names each failed test; the **Chart tests** job in both `pr.yaml` workflows
+  runs it. A new test needs no list entry. Each test exits non-zero on a failure.
+  The tools are `helm`, `yq` v4, `python3`, `envsubst`, and `docker` (the nginx
+  check skips without it). The tests expect release namespace `default`, which
+  `make chart-test` pins through `HELM_NAMESPACE`. A test that runs a container
+  sends files on stdin: the CI docker daemon cannot see the runner's `/tmp`.
+  Run one test with `bash`, for example
+  `bash charts/varroa/tests/test-bff-local-issuer-netpol.sh`.
 - **The agent WebSocket door needs one nginx block, no Ingress change.**
   `frontend/nginx.conf`'s `location /runners/` block proxies to the BFF
   (`VARROA_API_HOST:8080`) and forwards the WebSocket upgrade: `Upgrade`,
@@ -390,26 +401,9 @@ the packaged CRDs. Does not own the Go source it packages
 
 ```bash
 helm lint charts/varroa
-helm template charts/varroa
-bash charts/varroa/tests/test-hive-mode.sh
-bash charts/varroa/tests/test-secret-rbac-scoping.sh
-bash charts/varroa/tests/test-nats-bus-security.sh
-bash charts/varroa/tests/test-nats-encryption.sh
-bash charts/varroa/tests/test-mcp-netpol.sh
-bash charts/varroa/tests/test-dex-grpc-disabled.sh
-bash charts/varroa/tests/test-updatecenter-seed-default.sh
-bash charts/varroa/tests/test-cells-guard.sh
-bash charts/varroa/tests/test-cells-operator-env.sh
-bash charts/varroa/tests/test-updatecenter-uploads-nil-guard.sh
-bash charts/varroa/tests/test-updatecenter-archive-url.sh
-bash charts/varroa/tests/test-bff-configmap-rbac.sh
-bash charts/varroa/tests/test-operator-bff-sa-env.sh
-bash charts/varroa/tests/test-recorder-netpol.sh
-bash charts/varroa/tests/test-recorder-chart.sh
-bash charts/varroa/tests/test-runner-door-nginx.sh
-bash charts/varroa/tests/test-cellpool-rbac.sh
-bash charts/varroa/tests/test-hive-recordstore.sh
-bash charts/varroa/tests/test-bff-local-issuer-netpol.sh
+helm dependency build charts/varroa   # once; fetches the NATS subchart
+make chart-test
+bash charts/varroa/tests/test-bff-local-issuer-netpol.sh   # one test
 ```
 
 - **Record-store Postgres NetworkPolicy** — in `recordStore.postgres.mode: cnpg` the chart renders

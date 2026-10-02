@@ -137,6 +137,25 @@ jobs:
           go run ./hack/localdev/cmd/validate-oci-layout \
             --dir hack/localdev/pluginpack-fixture
 
+  chart-tests:
+    name: Chart tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-ci-tools
+        with:
+          helm: "true"
+          yq: "true"
+          envsubst: "true"
+          python3: "true"
+          make: "true"
+      - name: Fetch chart dependencies
+        run: |
+          helm repo add nats https://nats-io.github.io/k8s/helm/charts/ --force-update
+          helm dependency build charts/varroa
+      - name: Run the chart golden tests
+        run: make chart-test
+
   govulncheck:
     name: Vulncheck
     runs-on: ubuntu-latest

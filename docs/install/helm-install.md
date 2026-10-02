@@ -1,6 +1,6 @@
 # Install with Helm
 
-The OCI chart installs the operator, gateway, BFF, dashboard, NATS JetStream, and CRDs. The operator seeds a set of default Jenkins version profiles itself on start. See [Jenkins Versions](../config/jenkins-versions.md#default-profiles). Dex is enabled by default. Network policies and the in-cluster update center are opt-in.
+The OCI chart installs the operator, gateway, BFF, dashboard, NATS JetStream, and CRDs. The operator seeds default Jenkins version profiles on start. See [Jenkins Versions](../config/jenkins-versions.md#default-profiles). Dex is enabled by default. Network policies and the in-cluster update center are opt-in.
 
 Complete [Prerequisites](prerequisites.md) first.
 
@@ -73,7 +73,7 @@ Wait for all control-plane pods to become `Ready`. NATS cannot start until its v
 | Authentication | `auth.*`, `dex.*` |
 | Dashboard routing | `global.domain`, `frontend.host`, `ingress.*` |
 | Control-plane capacity | `operator.*`, `gateway.hpa.*`, `bff.hpa.*` |
-| NATS durability | `nats.config.cluster.*`, `jetStreamReplicas` |
+| NATS server and storage | `nats.container.image`, `nats.config.cluster.*`, `nats.config.jetstream.fileStore.pvc.*`, `jetStreamReplicas` |
 | Activity retention | `recordStore.retention.activity` |
 | Network isolation | `networkPolicy.*` |
 | Plugin service | `updateCenter.*` |

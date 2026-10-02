@@ -374,7 +374,11 @@ of the fleet's audit activity, once a controller becomes disposable.
   `cancelInProgress` tenant's group (`<cluster>/<tenant>/<job_path>`)
   publishes one `cancel_run` action per non-`COMPLETED` older run, oldest
   first, capped at eight; the rest count in
-  `recorder_concurrency_cancel_skipped_total`.
+  `recorder_concurrency_cancel_skipped_total`. The cancel adds to its
+  counters after each publish, so a test waits on `Ledger.concurrencyWG`
+  before it reads them. A test can set `Ledger.concurrencyGate` to hold
+  the cancel until it closes the channel. Production code leaves the gate
+  nil.
 - **Placement fence** (`ledger_fence_placement.go`,
   `ledger_fence_metrics.go`) — `PlacementFence` is the placement-fencing
   capability's `Fence`. `Check` reads the claim's `(cluster, tenant)` row

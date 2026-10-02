@@ -91,7 +91,10 @@ if command -v docker >/dev/null 2>&1; then
   RENDERED_CONF=$(mktemp)
   trap 'rm -f "$RENDERED_CONF"' EXIT
   VARROA_API_HOST=localhost envsubst '${VARROA_API_HOST}' <"$NGINX_CONF" >"$RENDERED_CONF"
-  if docker run --rm -v "$RENDERED_CONF:/etc/nginx/conf.d/default.conf:ro" nginx:alpine nginx -t \
+  # Send the config on stdin, not a bind mount. A CI runner that uses a
+  # docker-in-docker daemon cannot see the runner's own /tmp.
+  if docker run --rm -i nginx:alpine \
+      sh -c 'cat >/etc/nginx/conf.d/default.conf && nginx -t' <"$RENDERED_CONF" \
       >/tmp/runner-door-nginx-t.log 2>&1; then
     check "nginx -t accepts the rendered config" 0
   else

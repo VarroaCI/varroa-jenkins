@@ -33,6 +33,10 @@ inputs:
     description: Install envsubst (apt gettext-base).
     required: false
     default: "false"
+  python3:
+    description: Install python3 (apt).
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -152,3 +156,16 @@ runs:
         sudo apt-get update -qq
         sudo apt-get install -y -qq gettext-base
         command -v envsubst
+
+    - name: Install python3
+      if: inputs.python3 == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v python3 >/dev/null 2>&1; then
+          echo "python3 already present: $(python3 --version)"
+          exit 0
+        fi
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq python3
+        python3 --version

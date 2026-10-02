@@ -60,7 +60,7 @@ frontend:
   image: {repository: registry.example.com/varroa-jenkins-frontend, tag: "<version>"}
 ```
 
-Mirror and override enabled dependency images too. Set `ProvisioningDefaults.spec.imagePullSecrets` for controller pods. Each named Secret must exist in the controller namespace.
+Mirror and override enabled dependency images too. NATS reads `nats.container.image`. Set `ProvisioningDefaults.spec.imagePullSecrets` for controller pods. Each named Secret must exist in the controller namespace.
 
 ## Enable the Offline Update Center
 

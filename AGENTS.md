@@ -21,6 +21,7 @@ Varroa is a Kubernetes-native operator for managing Jenkins controllers at scale
 make build          # compile bin/varroa-jenkins
 make test           # all Go tests with race detector
 make lint           # golangci-lint
+make chart-test     # every chart golden test (after helm dependency build charts/varroa)
 make localdev       # full local stack on kind
 
 go test -v -race -count=1 ./internal/bundle/...   # single package

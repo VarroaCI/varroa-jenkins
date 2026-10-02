@@ -34,7 +34,7 @@
   Internal Services
 ================================================================================
 {{- if .Values.nats.enabled }}
-  NATS bus:          {{ .Release.Name }}-nats:{{ .Values.nats.service.port }}
+  NATS bus:          {{ .Release.Name }}-nats:4222
 {{- end }}
 {{- if .Values.gateway.enabled }}
   Gateway (gRPC):    {{ .Release.Name }}-varroa-gateway:{{ .Values.gateway.service.grpcPort }}
@@ -57,7 +57,7 @@
   Operator:          {{ .Release.Name }}-varroa-operator ({{ .Values.operator.replicas }} replica(s), {{ .Values.operator.shardCount }} shards)
 {{- end }}
 {{- if .Values.nats.enabled }}
-  NATS bus:          {{ .Release.Name }}-nats:{{ .Values.nats.service.port }}
+  NATS bus:          {{ .Release.Name }}-nats:4222
 {{- end }}
 
 Set global.domain in values.yaml to see external URLs.

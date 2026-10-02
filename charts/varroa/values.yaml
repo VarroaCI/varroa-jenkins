@@ -637,7 +637,7 @@ bff:
 # can no longer drift silently.
 #
 # NOTE ON UPGRADES: EnsureStream falls back to UpdateStream, so existing durable
-# streams scale R1->R3 in place on the next reconcile (NATS 2.11). Existing KV
+# streams scale R1->R3 in place on the next reconcile. Existing KV
 # buckets do NOT update their replica count in place — CreateKeyValue only sets
 # replicas on first creation. To adopt R3 for a pre-existing soft-state bucket,
 # delete and recreate it; the soft state repopulates within ~30-90s (acceptable).
@@ -654,14 +654,10 @@ jetStreamReplicas: null  # null = derive from nats.config.cluster.{enabled,repli
 # ---------------------------------------------------------------------------
 nats:
   enabled: true
-  image:
-    repository: nats
-    tag: 2.11-alpine
-    pullPolicy: IfNotPresent
-  service:
-    type: ClusterIP
-    port: 4222
-    monitorPort: 8222
+  # The NATS subchart reads the server image, the JetStream volume
+  # (config.jetstream.fileStore.pvc.size/storageClassName), and the Service
+  # from its own keys. The retired keys nats.image, nats.persistence, and
+  # nats.service.port/monitorPort/type fail the render (mode-guard.yaml).
   # NOTE: top-level nats.resources is ineffective for the NATS subchart.
   # Resources are set via nats.container.merge.resources below.
   config:
@@ -718,6 +714,11 @@ nats:
         secret:
           secretName: varroa-nats-auth-config
   container:
+    # The NATS server version. A change is a server upgrade: test it live
+    # against the existing JetStream store first.
+    image:
+      repository: nats
+      tag: 2.10.16-alpine
     # The JetStream encryption key. Only the NATS container reads it. The
     # varroa chart mints the Secret (see encryption.createSecret).
     env:
@@ -740,10 +741,6 @@ nats:
         name: nats-auth-config
         mountPath: /etc/nats-auth
         readOnly: true
-  persistence:
-    enabled: true
-    size: 10Gi
-    storageClass: ""
   # The JetStream encryption key Secret (varroa-nats-js-key). The key
   # must stay the same for the life of the NATS volumes: a lost or changed
   # key loses all JetStream state.
