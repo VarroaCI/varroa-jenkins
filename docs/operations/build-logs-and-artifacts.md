@@ -94,16 +94,17 @@ A log's manifest can report `incomplete` true with a short reason token:
 
 | Token | Meaning |
 |---|---|
-| `plugin-drop` | The plugin discarded incoming bytes at its own cap before the build finished. |
+| `plugin-drop` | The plugin discarded bytes at its own cap before the build finished. |
 | `terminal-response` | A chunk post ended on a permanent HTTP error before the build finished. |
+| `jenkins-restart` | A Jenkins restart lost the completion; the boot reconcile rebuilt it. |
 | `rejected` | The gateway refused a chunk on the run-ownership check. |
 | `gateway-gap` | The gateway observed a sequence number it can never fill for the run. |
 | `finalize-deadline` | The finalization deadline passed with chunks still unstored. |
 | `not-finalized` | The recorder's sweep finalized a run that never produced a final chunk. |
-| `no-summary` | The run record carries no log summary at all, usually a lost cell. |
+| `no-summary` | The run record carries no log summary. |
 
-A run with no summary is still incomplete, not complete: the read path serves every chunk it did
-store, but the manifest reports the gap.
+A run with no summary is still incomplete, not complete: the read path serves every stored
+chunk, but the manifest reports the gap.
 
 ## Agent-namespace egress
 

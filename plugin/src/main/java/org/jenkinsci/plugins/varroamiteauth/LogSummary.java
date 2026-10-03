@@ -20,6 +20,13 @@ public final class LogSummary {
     /** {@code incomplete_reason} for a chunk that ended on a terminal 400 or 413 before {@code finish}. */
     public static final String REASON_TERMINAL_RESPONSE = "terminal-response";
 
+    /**
+     * {@code incomplete_reason} for a completion that the boot reconcile
+     * rebuilt after a Jenkins stop lost it. The process that counted the
+     * run's log chunks, and any cap drop, is gone with the original summary.
+     */
+    public static final String REASON_JENKINS_RESTART = "jenkins-restart";
+
     private final long chunkCount;
     private final long droppedBytes;
     private final boolean incomplete;

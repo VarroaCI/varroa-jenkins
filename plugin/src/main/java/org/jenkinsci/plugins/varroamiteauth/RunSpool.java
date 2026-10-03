@@ -83,30 +83,48 @@ public class RunSpool {
 
     private final Path baseDir;
     private final long capBytesPerRun;
+    /**
+     * The live-run journal whose entry a spooled {@code COMPLETED} event
+     * supersedes, or {@code null} for none. The entry goes only once the
+     * completion is on disk, because until then the entry is the only
+     * durable record of the run.
+     */
+    private final RunJournal journal;
     private final java.util.concurrent.atomic.AtomicLong droppedCount = new java.util.concurrent.atomic.AtomicLong();
 
     public RunSpool() {
-        this(resolveBaseDir(), readCapBytes());
+        this(resolveBaseDir(), readCapBytes(), new RunJournal());
     }
 
-    /** Package-private constructor for testing: injects the base directory and the cap. */
+    /** Package-private constructor for testing: injects the base directory and the cap, with no journal. */
     RunSpool(Path baseDir, long capBytesPerRun) {
+        this(baseDir, capBytesPerRun, null);
+    }
+
+    /** Package-private constructor for testing: injects the base directory, the cap, and the journal. */
+    RunSpool(Path baseDir, long capBytesPerRun, RunJournal journal) {
         this.baseDir = baseDir;
         this.capBytesPerRun = capBytesPerRun;
+        this.journal = journal;
     }
 
     /**
      * Writes a spool file for {@code event}. A {@code HEARTBEAT} event is
      * never written. Evicts the oldest non-{@code COMPLETED} file of the
      * run when the write would put the run's directory above the byte cap.
+     * Returns true only when the event's file is on disk. A {@code
+     * COMPLETED} event on disk deletes the run's journal entry.
      */
-    public void append(String runId, BuildEvent event) {
+    public boolean append(String runId, BuildEvent event) {
         if (event == null || event.isHeartbeat()) {
-            return;
+            return false;
         }
         RunLock lock = acquireLock(runId);
         try {
             synchronized (lock) {
+                // The cap eviction never removes the file just written, so
+                // an eviction failure after the rename still leaves it.
+                boolean written = false;
                 try {
                     Path dir = runDir(runId);
                     Files.createDirectories(dir);
@@ -119,10 +137,15 @@ public class RunSpool {
                     byte[] body = event.toJson().toString().getBytes(StandardCharsets.UTF_8);
                     Files.write(temp, body);
                     Files.move(temp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                    written = true;
                     evictToCap(dir, file);
                 } catch (IOException e) {
                     LOGGER.log(Level.WARNING, "RunSpool: failed to write spool file for run " + runId, e);
                 }
+                if (written && journal != null && BuildEvent.PHASE_COMPLETED.equals(event.getPhase())) {
+                    journal.remove(runId);
+                }
+                return written;
             }
         } finally {
             releaseLock(runId, lock);

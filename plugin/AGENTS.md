@@ -184,6 +184,22 @@ the root AGENTS.md greenfield rule.
   with none. `VarroaTemplateDefinitions.java` decides which run that is. It names the
   definitions by `FlowDefinition` class, because this package holds no compile dependency
   on `template`'s flow definitions.
+- **Boot reconcile** (ends a build that a Jenkins stop ended without `onCompleted`; gated by
+  `VARROA_CLAIM_GATE`): `RunJournal.java` keeps one file per live run at
+  `$JENKINS_HOME/varroa/live/<run_id>.json` (atomic rename, UUID names only, an unreadable
+  file is deleted). `Runs.onStarted` writes the entry and saves `build.xml` for a run that
+  is not a `WorkflowRun`, because core writes that file only at completion and a build
+  without it does not load. `RunSpool.append` deletes the entry once a `COMPLETED` event is
+  on disk (never `Runs.onCompleted`, whose event first waits in the in-memory sink);
+  `Runs.onDeleted` deletes it too; the heartbeat tick sets its modification time. `VarroaBootReconcile.java` runs at
+  `@Initializer(after = JOB_CONFIG_ADAPTED)`. Per entry: a spooled `COMPLETED` or an entry
+  older than `ENTRY_MAX_AGE_MILLIS` (7 days) is deleted with no event; a building build
+  keeps its entry; a missing pipeline build is deleted with no event; every other entry
+  gets one `COMPLETED` event from `VarroaRunRecorder.bootCompletedEvent`. The event is
+  written to the spool **before** the entry is deleted, and a failed spool write
+  (`RunSpool.append` returns false) keeps the entry. It carries the loaded result, or
+  `ABORTED` for a missing build, and a log summary with `incomplete` and `jenkins-restart`.
+  The gateway stamps `cell_instance`, so a container restart in the same pod is the owner.
 - **Claim gate** (admits a queue item and claims a run id before dispatch, with no I/O
   under the Jenkins queue lock): `VarroaQueueDecisionHandler.java`
   (`Queue.QueueDecisionHandler`, stamps `VarroaIntentAction.java`), `IntentKey.java`

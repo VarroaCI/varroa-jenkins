@@ -155,6 +155,9 @@ public final class VarroaRunRecorder {
 
     private static final RunSpool SPOOL = new RunSpool();
 
+    /** The live-run journal that {@link VarroaBootReconcile} reads at boot. */
+    private static final RunJournal JOURNAL = new RunJournal();
+
     /** Identity and the shared sequence counter for one run. */
     private static final class RunState {
         final String runId;
@@ -451,7 +454,7 @@ public final class VarroaRunRecorder {
 
     private static volatile String gateOverrideForTesting;
 
-    private static boolean gateEnabled() {
+    static boolean gateEnabled() {
         String override = gateOverrideForTesting;
         String raw = override != null ? override : System.getenv(VarroaQueueDecisionHandler.GATE_ENV);
         return raw != null && !raw.isEmpty() && !"0".equals(raw);
@@ -572,6 +575,9 @@ public final class VarroaRunRecorder {
         }
         for (RunState state : snapshot) {
             emitHeartbeat(state);
+            // The modification time records the last moment the run was
+            // live here, so a boot reconcile can date the run's end.
+            JOURNAL.touch(state.runId);
         }
     }
 
@@ -686,6 +692,7 @@ public final class VarroaRunRecorder {
                 String runId = resolveRunId(action);
                 RunState state = registerRun(jobPath, buildNumber, runId, action.getIntentKey());
                 ensureHeartbeatStarted();
+                journalStart(run, action, runId, jobPath, buildNumber);
 
                 if (VarroaTemplateDefinitions.isTemplateDefined(run.getParent())) {
                     // D8a: FlowDefinition.create() can attach a
@@ -783,6 +790,116 @@ public final class VarroaRunRecorder {
                 removeState(jobPath, buildNumber);
             }
         }
+
+        @Override
+        public void onDeleted(Run<?, ?> run) {
+            try {
+                journalRemove(run, "");
+            } catch (Exception e) {
+                LOGGER.log(Level.FINE, "VarroaRunRecorder.Runs: failed to clear the journal entry of a deleted run", e);
+            }
+        }
+    }
+
+    /**
+     * Writes the run's journal entry. For a run that is not a pipeline it
+     * also saves {@code build.xml}: Jenkins core writes that file only
+     * when the build completes, and a build without it does not load
+     * after a Jenkins stop. With the file, the build loads as completed
+     * with the result {@code ABORTED}. A pipeline run saves the file
+     * itself.
+     */
+    private static void journalStart(Run<?, ?> run, VarroaIntentAction action, String runId, String jobPath,
+            long buildNumber) {
+        boolean pipeline = run instanceof WorkflowRun;
+        JOURNAL.write(new RunJournal.Entry(runId, action.getIntentKey(), jobPath, buildNumber,
+                action.getDeliveryId(), run.getStartTimeInMillis(), pipeline));
+        if (!pipeline) {
+            try {
+                run.save();
+            } catch (IOException e) {
+                LOGGER.log(Level.WARNING, "VarroaRunRecorder: failed to save the build record of "
+                        + jobPath + "#" + buildNumber, e);
+            }
+        }
+    }
+
+    /**
+     * Deletes the run's journal entry under every run id the run can
+     * carry: the live state's id, the claim registry's id, and the
+     * action's own id. The entry was written under one of them.
+     *
+     * <p>A completion does not call this. {@link RunSpool#append} deletes
+     * the entry once the run's {@code COMPLETED} event is on disk, so a
+     * stop while the event waits in the sink leaves the entry for the
+     * boot reconcile.
+     */
+    private static void journalRemove(Run<?, ?> run, String stateRunId) {
+        JOURNAL.remove(stateRunId);
+        VarroaIntentAction action = run.getAction(VarroaIntentAction.class);
+        if (action != null && !action.getRunId().isEmpty()) {
+            JOURNAL.remove(action.getRunId());
+            JOURNAL.remove(resolveRunId(action));
+        }
+    }
+
+    /**
+     * Builds the {@code COMPLETED} event for a run that a Jenkins stop
+     * ended without a {@code RunListener.onCompleted} call. Returns
+     * {@code null} when the size caps drop the event.
+     *
+     * <p>{@code run} is the loaded build, or {@code null} when the build
+     * does not load. A loaded build reports its loaded result and its own
+     * metadata. A missing build reports {@code ABORTED} and the journal's
+     * identity alone. A build that recorded no duration ends at the
+     * entry's last-seen time, never before its start.
+     *
+     * <p>The log summary always reports {@code incomplete} with the reason
+     * {@link LogSummary#REASON_JENKINS_RESTART}: the process that counted
+     * the log chunks is gone. Without a summary the gateway would report
+     * the log complete. A build that recorded a duration also gets the
+     * summary, because a cap drop it saw died with the process, and a
+     * short log must never read as complete.
+     */
+    static BuildEvent bootCompletedEvent(RunJournal.Entry entry, Run<?, ?> run, long nowMillis) {
+        BuildEvent.Builder b = BuildEvent.builder()
+                .phase(BuildEvent.PHASE_COMPLETED)
+                .seq(nowMillis)
+                .emittedAtMillis(nowMillis)
+                .runId(entry.runId)
+                .intentKey(entry.intentKey)
+                .jobPath(entry.jobPath)
+                .buildNumber(entry.buildNumber)
+                .deliveryId(entry.deliveryId);
+        long startedAt = entry.startedAtMillis;
+        boolean recordedDuration = false;
+        if (run != null) {
+            applyCommonMetadata(b, run, true);
+            b.stages(rebuildStages(run));
+            applyTemplateFields(b, run);
+            VarroaSummaryAction summaryAction = run.getAction(VarroaSummaryAction.class);
+            if (summaryAction != null && !summaryAction.getSummary().isEmpty()) {
+                b.summary(summaryAction.getSummary());
+            }
+            startedAt = run.getStartTimeInMillis();
+            recordedDuration = run.getDuration() > 0;
+            if (run.getResult() == null) {
+                b.result(Result.ABORTED.toString());
+            }
+        } else {
+            b.result(Result.ABORTED.toString());
+            b.startedAtMillis(startedAt);
+        }
+        if (!recordedDuration) {
+            long endedAt = Math.max(startedAt, entry.lastSeenMillis);
+            b.durationMillis(endedAt - startedAt);
+            b.completedAtMillis(endedAt);
+        }
+        b.logSummary(LogSummary.builder()
+                .incomplete(true)
+                .incompleteReason(LogSummary.REASON_JENKINS_RESTART)
+                .build());
+        return applyCaps(b.build());
     }
 
     static String resolveRunId(VarroaIntentAction action) {

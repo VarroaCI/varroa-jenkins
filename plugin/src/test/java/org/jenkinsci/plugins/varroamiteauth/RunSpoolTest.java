@@ -45,6 +45,42 @@ public class RunSpoolTest {
     }
 
     @Test
+    public void appendReportsWhetherTheFileIsOnDisk() throws Exception {
+        RunSpool spool = new RunSpool(tmp.getRoot().toPath(), RunSpool.DEFAULT_CAP_BYTES);
+        assertTrue(spool.append("run-1", event(0, BuildEvent.PHASE_COMPLETED)));
+        assertFalse("a heartbeat is never written", spool.append("run-1", event(1, BuildEvent.PHASE_HEARTBEAT)));
+
+        RunSpool blocked = new RunSpool(tmp.newFile("not-a-dir").toPath(), RunSpool.DEFAULT_CAP_BYTES);
+        assertFalse(blocked.append("run-2", event(0, BuildEvent.PHASE_COMPLETED)));
+    }
+
+    @Test
+    public void spooledCompletedDeletesTheJournalEntry() throws Exception {
+        RunJournal journal = new RunJournal(tmp.newFolder("live").toPath());
+        RunSpool spool = new RunSpool(tmp.newFolder("spool").toPath(), RunSpool.DEFAULT_CAP_BYTES, journal);
+        String runId = Uuid7.next();
+        journal.write(new RunJournal.Entry(runId, "intent", "job", 1, "", 1_000L, false));
+
+        spool.append(runId, BuildEvent.builder().seq(0).phase(BuildEvent.PHASE_STARTED).runId(runId).build());
+        assertEquals("a started event keeps the entry", 1, journal.readAll().size());
+
+        spool.append(runId, BuildEvent.builder().seq(1).phase(BuildEvent.PHASE_COMPLETED).runId(runId).build());
+        assertTrue(journal.readAll().isEmpty());
+    }
+
+    @Test
+    public void failedCompletedWriteKeepsTheJournalEntry() throws Exception {
+        RunJournal journal = new RunJournal(tmp.newFolder("live").toPath());
+        RunSpool spool = new RunSpool(tmp.newFile("not-a-spool").toPath(), RunSpool.DEFAULT_CAP_BYTES, journal);
+        String runId = Uuid7.next();
+        journal.write(new RunJournal.Entry(runId, "intent", "job", 1, "", 1_000L, false));
+
+        assertFalse(spool.append(runId, BuildEvent.builder().seq(1).phase(BuildEvent.PHASE_COMPLETED).runId(runId).build()));
+
+        assertEquals(1, journal.readAll().size());
+    }
+
+    @Test
     public void appendWritesOneFilePerEvent() {
         RunSpool spool = new RunSpool(tmp.getRoot().toPath(), RunSpool.DEFAULT_CAP_BYTES);
         spool.append("run-1", event(0, BuildEvent.PHASE_STARTED));

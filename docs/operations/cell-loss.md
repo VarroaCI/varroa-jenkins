@@ -10,14 +10,14 @@ windows.
 
 ## Two signals make one fact
 
-A stream loss alone is never proof: a network partition leaves a live Jenkins process that still
-runs builds. A dead stream only makes the operator reconcile sooner.
+A stream loss alone is never proof: a network partition leaves a live Jenkins process running
+builds. A dead stream only makes the operator reconcile sooner.
 
 A pod read is proof. The operator writes the pod's unique identifier into
 `Controller.status.cell.instance`. A pod that is absent, `Failed`, or `Succeeded` counts as no
 pod; a `Running` or `Pending` pod does not. A failed read clears nothing, so an API outage never
-reports a live cell as gone. The operator names each confirmed instance, with the time its read
-proved it, in the placement announcement.
+reports a live cell as gone. The placement announcement names each confirmed instance and the
+time its read proved it.
 
 A confirmed loss reaches a mark in about 70 to 130 seconds. Without a confirmation the recorder
 falls back to two fixed windows: five minutes for a run whose owning instance changed, and fifteen
@@ -25,7 +25,7 @@ minutes for a silent run on the current instance.
 
 The operator keeps the replaced instance of each cell in `status.cell.previousInstance`, and
 reports it in every announcement. A pod that rolls while the operator restarts, or while the
-recorder is down, is therefore still confirmed. The 70 to 130 seconds start at the next
+recorder is down, is still confirmed. The 70 to 130 seconds start at the next
 accepted announcement.
 
 The recorder also compares each announcement with the members it stored. A replaced or removed
@@ -68,13 +68,14 @@ activity feed. The reason names the signal that decided.
 | `start-lost` | no start event arrived 75 minutes after the start mark |
 | `heartbeat-lost` | the running build was silent for 60 minutes |
 
-A `cell-lost` mark sends no cancel command, because the pod is gone and holds no process to stop. A
+A `cell-lost` mark sends no cancel command: the pod is gone. A
 fleet lock the lost run held is released on the same schedule. A pod read that proved its owner
 gone ends the five-minute wait.
 
 A `start-lost` mark sends no cancel and no retry: the build can still start and replace it.
-A `heartbeat-lost` mark sends neither, and the build's own completion replaces it. It also ends a
-run on a dead cell when a stopped operator reports no liveness.
+A `heartbeat-lost` mark sends neither, and the build's own completion replaces it. A Jenkins restart
+in the same pod sends it at boot. The mark also
+ends a run on a dead cell when a stopped operator reports no liveness.
 
 The lost instance's agent pods keep running. A resume adopts a pod that ran a build step, so a
 Running pod stays for about 41 minutes, or about 46 when no running cell holds the slot. A pod that is not Running goes within about four minutes. See

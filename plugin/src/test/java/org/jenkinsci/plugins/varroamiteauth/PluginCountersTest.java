@@ -25,7 +25,7 @@ public class PluginCountersTest {
     @Test
     public void snapshotStartsEveryCounterAtZero() {
         Map<String, Long> snapshot = PluginCounters.snapshot();
-        assertEquals(13, snapshot.size());
+        assertEquals(14, snapshot.size());
         for (Long value : snapshot.values()) {
             assertEquals(Long.valueOf(0L), value);
         }
