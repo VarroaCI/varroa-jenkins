@@ -13,7 +13,11 @@ import (
 // them. The merge never lowers a stored finalized true back to false:
 // the maintenance round's log-finalization sweep (task 6.6) sets that
 // marker, and a delayed writer heartbeat carrying finalized false must
-// not reopen a log the sweep already closed.
+// not reopen a log the sweep already closed. The merge also keeps a
+// stored incomplete_reason that ranks at least as high as the incoming
+// one in logReasonRanks, so a later generic marker never replaces a
+// precise cause. A run.log that reports incomplete false removes the
+// stored reason, because a complete log has no reason.
 func applyRunLog(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) error {
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO varroa.runs (
@@ -26,9 +30,12 @@ func applyRunLog(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEn
 		ON CONFLICT (created_at, run_id) DO UPDATE SET
 			payload = (COALESCE(runs.payload, '{}'::jsonb) `+acceptedPayloadKeysSQL+`) || jsonb_build_object(
 				'log_summary',
-				COALESCE(runs.payload->'log_summary', '{}'::jsonb) || EXCLUDED.payload->'log_summary'
+				(COALESCE(runs.payload->'log_summary', '{}'::jsonb) || (EXCLUDED.payload->'log_summary')
 					|| CASE WHEN runs.payload->'log_summary'->>'finalized' = 'true'
-							THEN '{"finalized": true}'::jsonb ELSE '{}'::jsonb END)
+							THEN '{"finalized": true}'::jsonb ELSE '{}'::jsonb END
+					|| `+logReasonKeepSQL(`runs.payload->'log_summary'->>'incomplete_reason'`, `EXCLUDED.payload->'log_summary'->>'incomplete_reason'`)+`)
+					- (CASE WHEN EXCLUDED.payload->'log_summary'->>'incomplete' = 'false'
+							THEN ARRAY['incomplete_reason'] ELSE ARRAY[]::text[] END))
 	`,
 		intent.runID, intent.createdAt, intent.intentKey, intent.cluster, intent.namespace,
 		intent.cellValue(), intent.tenant, intent.jobPath,

@@ -228,6 +228,40 @@ func TestMarkInterruptedFinalizesIncompleteWhenSummaryExists(t *testing.T) {
 	}
 }
 
+// TestMarkInterruptedKeepsAStoredIncompleteReason asserts the marking
+// transaction keeps a reason the log summary already holds, and still
+// finalizes the summary.
+func TestMarkInterruptedKeepsAStoredIncompleteReason(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
+	if _, err := db.Exec(`
+		UPDATE varroa.runs SET payload = jsonb_build_object('log_summary',
+			jsonb_build_object('incomplete', true, 'incomplete_reason', 'gateway-gap'))
+		WHERE run_id = $1
+	`, runID); err != nil {
+		t.Fatalf("seed a log summary with a reason: %v", err)
+	}
+	c := fetchRunningCandidate(t, pool, runID)
+
+	if _, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now()); err != nil {
+		t.Fatalf("markInterrupted: %v", err)
+	}
+
+	var finalized, incomplete bool
+	var incompleteReason string
+	if err := db.QueryRow(`
+		SELECT (payload->'log_summary'->>'finalized')::boolean,
+		       (payload->'log_summary'->>'incomplete')::boolean,
+		       payload->'log_summary'->>'incomplete_reason'
+		FROM varroa.runs WHERE run_id = $1
+	`, runID).Scan(&finalized, &incomplete, &incompleteReason); err != nil {
+		t.Fatalf("read run: %v", err)
+	}
+	if !finalized || !incomplete || incompleteReason != "gateway-gap" {
+		t.Fatalf("finalized=%v incomplete=%v incomplete_reason=%q, want true/true/gateway-gap", finalized, incomplete, incompleteReason)
+	}
+}
+
 // TestMarkInterruptedSummaryDecodesAsAPIExpects asserts the log_summary
 // object markInterrupted writes decodes through the exact type the BFF
 // uses to parse it — the regression this finding covers: a string

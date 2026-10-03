@@ -367,6 +367,35 @@ func TestRunCompletedKeepsTheReasonOfAnIncompleteLog(t *testing.T) {
 	}
 }
 
+// TestRunLogPreciseReasonReplacesTheHeartbeatLostMarkReason asserts the
+// owner's real run.log replaces the mark's generic reason with its own
+// precise one, and the owner's completion keeps it.
+func TestRunLogPreciseReasonReplacesTheHeartbeatLostMarkReason(t *testing.T) {
+	g, db, runID, intentKey := markHeartbeatLost(t)
+
+	runLog := newTestEnvelope(t, runID, intentKey, KindRunLog, map[string]any{
+		"chunk_count": 3, "incomplete": true, "incomplete_reason": "plugin-drop",
+	})
+	if _, err := g.Apply(context.Background(), runLog); err != nil {
+		t.Fatalf("apply run.log: %v", err)
+	}
+	success := "SUCCESS"
+	completed := newTestEnvelope(t, runID, intentKey, KindRunCompleted, RunCompletedPayload{Result: &success})
+	if _, err := g.Apply(context.Background(), completed); err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+
+	var incompleteReason sql.NullString
+	if err := db.QueryRow(`
+		SELECT payload->'log_summary'->>'incomplete_reason' FROM varroa.runs WHERE run_id = $1
+	`, runID).Scan(&incompleteReason); err != nil {
+		t.Fatalf("read run: %v", err)
+	}
+	if incompleteReason.String != "plugin-drop" {
+		t.Fatalf("incomplete_reason = %v, want plugin-drop", incompleteReason)
+	}
+}
+
 // TestForeignCompletionLeavesAHeartbeatLostMark asserts a completion from
 // another instance changes no terminal column of a heartbeat-lost mark.
 func TestForeignCompletionLeavesAHeartbeatLostMark(t *testing.T) {

@@ -44,9 +44,6 @@ A viewer of a running build gets a live tail, not a poll:
    viewer detaches, the lease expires within 90 seconds. The mite tells the plugin to stop, and
    the build reverts to its normal flush interval.
 
-A tail therefore never outlives its viewers, and no build runs at the fast flush interval with
-nobody watching.
-
 ## Postgres and S3 tier behaviour
 
 `recordStore.blobs.mode` selects the tier for both logs and artifacts:
@@ -101,10 +98,10 @@ A log's manifest can report `incomplete` true with a short reason token:
 | `gateway-gap` | The gateway observed a sequence number it can never fill for the run. |
 | `finalize-deadline` | The finalization deadline passed with chunks still unstored. |
 | `not-finalized` | The recorder's sweep finalized a run that never produced a final chunk. |
-| `no-summary` | The run record carries no log summary. |
+| `no-summary` | The run record carries no log summary. The read path still serves every stored chunk. |
 
-A run with no summary is still incomplete, not complete: the read path serves every stored
-chunk, but the manifest reports the gap.
+The record keeps the most precise reason: a plugin token, then `rejected` or `gateway-gap`, then
+the last three tokens. Inside one rank, the first reason stays.
 
 ## Agent-namespace egress
 
@@ -134,8 +131,8 @@ namespace's egress is configured separately. See
   confirm a viewer is still attached and the tail lease is renewing. A lease with no renewal
   clears itself within 90 seconds and the build falls back to its normal flush interval, which is
   expected once every viewer has left.
-- A build's log reads `incomplete` after it finished: read the manifest's `incompleteReason`.
-  Match it against the [Incomplete logs](#incomplete-logs) table above. `no-summary` usually means
+- A build's log reads `incomplete` after it finished: find the manifest's `incompleteReason` in
+  the [Incomplete logs](#incomplete-logs) table. `no-summary` usually means
   the cell was lost before it could report a finish. `gateway-gap` or `rejected` point at the
   gateway's own rejection counters.
 - Artifacts do not appear in object storage, and the controller shows `ArtifactStorage`

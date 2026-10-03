@@ -3,6 +3,7 @@ package recordstore
 import (
 	"encoding/json"
 	"errors"
+	"strconv"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -93,6 +94,51 @@ const heartbeatLostRunSQL = `(runs.result IS NOT DISTINCT FROM 'INTERRUPTED' AND
 const heartbeatLostLogSummarySQL = `CASE WHEN runs.payload->'log_summary'->>'incomplete' = 'false'
 	THEN jsonb_build_object('log_summary', (runs.payload->'log_summary') - 'incomplete_reason')
 	ELSE '{}'::jsonb END`
+
+// logReasonNotFinalized is the incomplete_reason the recorder writes when
+// it finalizes a log that never produced its final chunk.
+const logReasonNotFinalized = "not-finalized"
+
+// logReasonRanks is the single precedence table for a log summary's
+// incomplete_reason. A higher rank names a more precise cause. A plugin
+// token outranks a gateway token, and a gateway token outranks a generic
+// timeout or backstop token. The gateway's logSummaryPayload applies the
+// same order when it merges its own reason into a completion.
+var logReasonRanks = []struct {
+	token string
+	rank  int
+}{
+	{"plugin-drop", 3},
+	{"terminal-response", 3},
+	{"jenkins-restart", 3},
+	{"rejected", 2},
+	{"gateway-gap", 2},
+	{"finalize-deadline", 1},
+	{logReasonNotFinalized, 1},
+	{"no-summary", 1},
+}
+
+// logReasonRankSQL returns a SQL expression that answers the rank of the
+// reason expr. An absent, empty, or unknown reason answers 0.
+func logReasonRankSQL(expr string) string {
+	sql := "(CASE " + expr
+	for _, r := range logReasonRanks {
+		sql += " WHEN '" + r.token + "' THEN " + strconv.Itoa(r.rank)
+	}
+	return sql + " ELSE 0 END)"
+}
+
+// logReasonKeepSQL returns a jsonb expression that restores the stored
+// incomplete_reason after a writer merged its own reason over it. It
+// answers the stored reason when that reason is not empty and its rank is
+// at least the incoming rank, so the first reason wins inside one rank.
+// It answers an empty object otherwise, so the caller appends it last to
+// the log summary merge.
+func logReasonKeepSQL(stored, incoming string) string {
+	return `(CASE WHEN COALESCE(` + stored + `, '') <> '' AND ` +
+		logReasonRankSQL(stored) + ` >= ` + logReasonRankSQL(incoming) +
+		` THEN jsonb_build_object('incomplete_reason', ` + stored + `) ELSE '{}'::jsonb END)`
+}
 
 // triggerPayloadKeysSQL removes the four trigger keys from a stored
 // payload. A superseding write applies it before its own merge, and keeps

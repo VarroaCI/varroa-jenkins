@@ -332,7 +332,8 @@ func markInterruptedTx(ctx context.Context, tx pgx.Tx, run runInterruptCandidate
 		        || jsonb_build_object('log_summary',
 		             CASE
 		                 WHEN payload -> 'log_summary' IS NOT NULL
-		                 THEN COALESCE(payload -> 'log_summary', '{}'::jsonb) || '{"finalized": true, "incomplete": true, "incomplete_reason": "not-finalized"}'::jsonb
+		                 THEN COALESCE(payload -> 'log_summary', '{}'::jsonb) || '{"finalized": true, "incomplete": true, "incomplete_reason": "`+logReasonNotFinalized+`"}'::jsonb
+		                      || `+logReasonKeepSQL(`payload->'log_summary'->>'incomplete_reason'`, `'`+logReasonNotFinalized+`'`)+`
 		                 ELSE '{"finalized": true, "incomplete": true, "incomplete_reason": "no-summary"}'::jsonb
 		             END)
 		WHERE run_id = $1 AND status = $4

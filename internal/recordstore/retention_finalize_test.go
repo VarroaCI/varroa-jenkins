@@ -101,6 +101,46 @@ func TestFinalizeStaleLogsClosesTerminalRunWithNoSummary(t *testing.T) {
 	}
 }
 
+// TestFinalizeStaleLogsKeepsAStoredReason asserts the sweep finalizes a
+// run whose summary already holds a reason, and keeps that reason.
+func TestFinalizeStaleLogsKeepsAStoredReason(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	runID := startRunForFinalize(t, pool, "manual:finalize-keep-reason-1")
+	g := NewIngester(pool, nil, nil)
+	for _, env := range []IngestEnvelope{
+		newTestEnvelope(t, runID, "manual:finalize-keep-reason-1", KindRunLog, map[string]any{
+			"incomplete": true, "incomplete_reason": "jenkins-restart",
+		}),
+		newTestEnvelope(t, runID, "manual:finalize-keep-reason-1", KindRunCompleted, RunCompletedPayload{}),
+	} {
+		if _, err := g.Apply(context.Background(), env); err != nil {
+			t.Fatalf("apply %s: %v", env.Kind, err)
+		}
+	}
+	oldEnded := time.Now().UTC().Add(-2 * time.Hour)
+	if _, err := db.Exec(`UPDATE varroa.runs SET ended_at = $1 WHERE run_id = $2`, oldEnded, runID); err != nil {
+		t.Fatalf("backdate ended_at: %v", err)
+	}
+
+	n, err := finalizeStaleLogs(context.Background(), pool, HeartbeatLiveness{}, time.Minute, time.Now().UTC())
+	if err != nil || n != 1 {
+		t.Fatalf("finalizeStaleLogs: n=%d err=%v, want 1 run finalized", n, err)
+	}
+
+	var finalized, incomplete bool
+	var reason string
+	if err := db.QueryRow(`
+		SELECT (payload->'log_summary'->>'finalized')::bool, (payload->'log_summary'->>'incomplete')::bool,
+		       payload->'log_summary'->>'incomplete_reason'
+		FROM varroa.runs WHERE run_id = $1
+	`, runID).Scan(&finalized, &incomplete, &reason); err != nil {
+		t.Fatalf("read log summary: %v", err)
+	}
+	if !finalized || !incomplete || reason != "jenkins-restart" {
+		t.Fatalf("finalized=%v incomplete=%v reason=%q, want true/true/jenkins-restart", finalized, incomplete, reason)
+	}
+}
+
 // TestFinalizeStaleLogsLeavesRunInsideTheWait asserts a terminal run
 // whose heartbeat is inside C3's finalize wait is left alone.
 func TestFinalizeStaleLogsLeavesRunInsideTheWait(t *testing.T) {

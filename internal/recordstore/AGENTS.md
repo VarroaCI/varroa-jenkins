@@ -1164,6 +1164,18 @@ of the fleet's audit activity, once a controller becomes disposable.
   and `heartbeatLostLogSummarySQL` removes the log summary's
   `incomplete_reason` when the real `run.log` reports `incomplete` false.
   A `run.started` and a foreign completion leave the mark.
+- **Log incomplete-reason precedence** (`logReasonRanks`,
+  `logReasonKeepSQL`, `ingest_common.go`) — the one rank table of the log
+  summary's `incomplete_reason`: plugin tokens 3, gateway tokens 2, generic
+  tokens (`finalize-deadline`, `not-finalized`, `no-summary`) 1.
+  `applyRunLog`, `finalizeLogSummary`, and `markInterruptedTx` each append
+  `logReasonKeepSQL` last, so a stored reason stays unless the incoming one
+  ranks higher, and the first reason wins inside one rank. `incomplete` is
+  not merged by OR: the owner's real `run.log` must lower a provisional
+  mark's flag, and a `run.log` with `incomplete` false also removes the
+  stored reason. In jsonb SQL, `a || b->'k'` reads as `(a || b)->'k'`, and
+  `a || b - 'k'` reads as `a || (b - 'k')`. Put each operand in
+  parentheses, or the merge replaces or keeps the wrong object.
 - **Backstop cron scheduler and the interrupted sweep's round**
   (`backstop_round.go`, `backstop_policy.go`, `backstop_candidates.go`,
   `backstop_fire.go`, `backstop_metrics.go`, `action_metrics.go`,

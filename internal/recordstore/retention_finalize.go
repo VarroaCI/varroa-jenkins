@@ -49,11 +49,12 @@ type finalizeCandidate struct {
 // whose status is terminal, or whose owning cell liveness reports gone,
 // whose log summary is absent or reports finalized false, and whose wait
 // anchor is older than wait. It creates the summary when absent, then
-// sets finalized true and incomplete true with reason "not-finalized". It
-// never lowers a finalized that is already true, and it skips a run
-// whose Liveness call errors. It returns how many runs the guarded
-// update actually changed, so a concurrent write that makes the update
-// skip a row is never miscounted as finalized.
+// sets finalized true and incomplete true with reason "not-finalized"
+// unless the summary already holds a reason. It never lowers a finalized
+// that is already true, and it skips a run whose Liveness call errors.
+// It returns how many runs the guarded update actually changed, so a
+// concurrent write that makes the update skip a row is never miscounted
+// as finalized.
 //
 // It reads candidates in keyset batches of retentionBatchSize, ordered by
 // (created_at, run_id), so one hourly round never holds an unbounded
@@ -206,7 +207,9 @@ func waitAnchor(c finalizeCandidate) *time.Time {
 }
 
 // finalizeLogSummary creates runs.payload.log_summary when absent, then
-// sets finalized true and incomplete true with reason "not-finalized".
+// sets finalized true and incomplete true. It writes the reason
+// "not-finalized" only when the summary holds no reason, because a stored
+// reason names a more precise cause or arrived first in the same rank.
 // It reports whether the guarded update actually changed the row.
 //
 // The WHERE guard repeats the monotonic finalized check at write time,
@@ -225,7 +228,8 @@ func finalizeLogSummary(ctx context.Context, db maintDB, runID string, writerHea
 		UPDATE varroa.runs
 		SET payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object(
 			'log_summary',
-			COALESCE(payload->'log_summary', '{}'::jsonb) || '{"finalized": true, "incomplete": true, "incomplete_reason": "not-finalized"}'::jsonb
+			COALESCE(payload->'log_summary', '{}'::jsonb) || '{"finalized": true, "incomplete": true, "incomplete_reason": "`+logReasonNotFinalized+`"}'::jsonb
+				|| `+logReasonKeepSQL(`payload->'log_summary'->>'incomplete_reason'`, `'`+logReasonNotFinalized+`'`)+`
 		)
 		WHERE run_id = $1
 		  AND (payload->'log_summary'->>'finalized') IS DISTINCT FROM 'true'
