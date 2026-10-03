@@ -30,7 +30,7 @@ index parsing, and pre-apply content validation.
 
 ## Local Contracts
 
-- **`Composer.Compose`** (`composer.go:74`) — validates each input is exactly
+- **`Composer.Compose`** (`composer.go`) — validates each input is exactly
   one of `ItemRef`/`GitSource`/`OCISource`, then per input in list order:
   - `itemRef`: resolved via `ItemLookup.GetCatalogItemCRD`, **local-first with
     operator-namespace fallback** when `ref.Namespace` is unset (explicit
@@ -72,7 +72,7 @@ index parsing, and pre-apply content validation.
     named template by version constraint (`pipelinetemplate.ResolveTemplate`)
     and validates the job's declared `values` against that template's
     parameter schema, appending a compose error per failure.
-- **`MergeJenkinsYAML(base, overlay)`** (`composer.go:351`) — merges a
+- **`MergeJenkinsYAML(base, overlay)`** (`composer.go`) — merges a
   `JenkinsVersionProfile` JCasC overlay onto composed `jenkins.yaml`; overlay
   wins on scalar conflict, maps deep-merge. Empty side short-circuits.
 - **`InjectTenantClouds(jcascYAML, clouds)`** (`tenant_clouds.go`) — appends

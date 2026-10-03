@@ -44,7 +44,7 @@ func TestComposer_JcascMerge(t *testing.T) {
 		"ns/jcasc-2": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemJCasC}, Status: v1alpha1.CatalogItemStatus{Content: "unclassified:\n  url: https://example.com\n", ContentHash: "a2", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{
 			itemRef("jcasc-1"),
@@ -75,7 +75,7 @@ func TestComposer_MergeConflict(t *testing.T) {
 		"ns/jcasc-2": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemJCasC}, Status: v1alpha1.CatalogItemStatus{Content: "security:\n  realm: saml\n", ContentHash: "a2", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{
 			itemRef("jcasc-1"),
@@ -98,7 +98,7 @@ func TestComposer_MergeOverride(t *testing.T) {
 		"ns/jcasc-2": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemJCasC}, Status: v1alpha1.CatalogItemStatus{Content: "security:\n  realm: saml\n", ContentHash: "a2", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		JcascMergeStrategy: "override",
 		Inputs: []v1alpha1.ComposedInput{
@@ -127,7 +127,7 @@ func TestComposer_PodTemplateWrap(t *testing.T) {
 		"ns/pod-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPodTemplate}, Status: v1alpha1.CatalogItemStatus{Content: "- name: maven\n  image: maven:3.9\n", ContentHash: "p1", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("pod-1")},
 	}
@@ -164,7 +164,7 @@ func TestComposer_MultiplePodTemplates(t *testing.T) {
 		"ns/pod-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPodTemplate}, Status: v1alpha1.CatalogItemStatus{Content: "- name: maven\n  image: maven:3.9\n", ContentHash: "p1", Valid: true}},
 		"ns/pod-2": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPodTemplate}, Status: v1alpha1.CatalogItemStatus{Content: "- name: node\n  image: node:20\n", ContentHash: "p2", Valid: true}},
 	}}
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("pod-1"), itemRef("pod-2")},
 	}
@@ -198,7 +198,7 @@ func TestComposer_PodTemplateWithJCasCCloud(t *testing.T) {
 		"ns/pod-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPodTemplate}, Status: v1alpha1.CatalogItemStatus{Content: "- name: dind\n  image: docker:dind\n", ContentHash: "p1", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("jcasc-cloud"), itemRef("pod-1")},
 	}
@@ -235,7 +235,7 @@ func TestComposer_PodTemplateWithJCasCCloudAndExistingTemplates(t *testing.T) {
 		"ns/pod-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPodTemplate}, Status: v1alpha1.CatalogItemStatus{Content: "- name: dind\n  image: docker:dind\n", ContentHash: "p1", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("jcasc-cloud"), itemRef("pod-1")},
 	}
@@ -264,7 +264,7 @@ func TestComposer_PodTemplateWithMultipleKubernetesClouds(t *testing.T) {
 		"ns/pod-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPodTemplate}, Status: v1alpha1.CatalogItemStatus{Content: "- name: dind\n  image: docker:dind\n", ContentHash: "p1", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("jcasc-clouds"), itemRef("pod-1")},
 	}
@@ -292,7 +292,7 @@ func TestComposer_VariablePrecedence(t *testing.T) {
 		}, Status: v1alpha1.CatalogItemStatus{Content: "namespace: ${namespace}\nreplicas: ${replicas}\n", ContentHash: "v1", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Variables: map[string]string{"namespace": "spec-val"},
 		Inputs: []v1alpha1.ComposedInput{
@@ -351,7 +351,7 @@ func TestComposer_PipelineTemplateReachesTemplateSet(t *testing.T) {
 		"ns/item-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem}, Status: v1alpha1.CatalogItemStatus{Content: "items:\n- name: plain-job\n", ContentHash: "i1", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("item-1")},
 	}
@@ -381,7 +381,7 @@ func TestComposer_PipelineTemplateOnlyBundleEmitsNoItems(t *testing.T) {
 		"ns/pt-2": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: pipelineTemplateDoc("node-service", "2.0.0"), ContentHash: "pt2", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("pt-2")},
 	}
@@ -412,7 +412,7 @@ func TestComposer_PipelineTemplateVariablesDoNotResolve(t *testing.T) {
 		}, Status: v1alpha1.CatalogItemStatus{Content: pipelineTemplateDoc("go-service", "1.0.0"), ContentHash: "pt1", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{
 			{ItemRef: &v1alpha1.ComposedItemRef{Name: "pt-1", Variables: map[string]string{"environment": "ref-val"}}},
@@ -438,7 +438,7 @@ func TestComposer_PipelineTemplateIdentityCollision_DifferingContentIsError(t *t
 		"ns/pt-2": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: docB, ContentHash: "b", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("pt-2")},
 	}
@@ -467,7 +467,7 @@ func TestComposer_PipelineTemplateIdentityCollision_IdenticalContentDeduplicates
 		"ns/pt-2": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: doc, ContentHash: "a", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("pt-2")},
 	}
@@ -527,7 +527,7 @@ items:
 		"ns/item-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem}, Status: v1alpha1.CatalogItemStatus{Content: itemsContent, ContentHash: "b", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("item-1")},
 	}
@@ -558,7 +558,7 @@ items:
 		"ns/item-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem}, Status: v1alpha1.CatalogItemStatus{Content: itemsContent, ContentHash: "b", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("item-1")},
 	}
@@ -594,7 +594,7 @@ items:
 		"ns/item-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem}, Status: v1alpha1.CatalogItemStatus{Content: itemsContent, ContentHash: "b", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("item-1")},
 	}
@@ -635,7 +635,7 @@ items:
 		"ns/item-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem}, Status: v1alpha1.CatalogItemStatus{Content: itemsContent, ContentHash: "b", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("item-1")},
 	}
@@ -660,7 +660,7 @@ func TestComposer_PluginDedup(t *testing.T) {
 		"ns/plug-2": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPlugin}, Status: v1alpha1.CatalogItemStatus{Content: "plugins:\n- artifactId: git\n  version: \"6.0\"\n", ContentHash: "pl2", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("plug-1"), itemRef("plug-2")},
 	}
@@ -702,7 +702,7 @@ func TestComposer_JcascEmbeddedPlugins(t *testing.T) {
 		}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("theme")},
 	}
@@ -732,7 +732,7 @@ func TestComposer_PinnedHashDrift(t *testing.T) {
 		"ns/item-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemJCasC}, Status: v1alpha1.CatalogItemStatus{Content: "key: val\n", ContentHash: "abc123", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{
 			{ItemRef: &v1alpha1.ComposedItemRef{Name: "item-1", PinnedContentHash: "def456"}},
@@ -754,7 +754,7 @@ func TestComposer_PinnedHashDrift(t *testing.T) {
 func TestComposer_MissingItem(t *testing.T) {
 	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("nonexistent")},
 	}
@@ -772,7 +772,7 @@ func TestComposer_ResolvedHash(t *testing.T) {
 		"ns/jc-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemJCasC}, Status: v1alpha1.CatalogItemStatus{Content: "key: val\n", ContentHash: "a1", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("jc-1")},
 	}
@@ -796,7 +796,7 @@ func TestComposer_AllFiveSections(t *testing.T) {
 		"ns/rbac-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemRBAC}, Status: v1alpha1.CatalogItemStatus{Content: "roles:\n  admin:\n    permissions:\n    - Overall/Administer\n", ContentHash: "r1", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{
 			itemRef("jc-1"), itemRef("plug-1"), itemRef("item-1"), itemRef("rbac-1"),
@@ -827,7 +827,7 @@ func TestComposer_AllFiveSections(t *testing.T) {
 }
 
 func TestComposer_UnionValidation(t *testing.T) {
-	c := NewComposer(&fakeItemLookup{}, nil, "", "", "", "", "")
+	c := NewComposer(&fakeItemLookup{}, nil, "", "")
 
 	// Neither set.
 	_, err := c.Compose(context.Background(), "ns", &v1alpha1.ComposedBundleSpec{
@@ -919,7 +919,7 @@ func TestComposer_ComposeErrorsSurfaced(t *testing.T) {
 		"ns/item-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem}, Status: v1alpha1.CatalogItemStatus{Content: "bad yaml {{{", ContentHash: "i1", Valid: true}},
 		"ns/rbac-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemRBAC}, Status: v1alpha1.CatalogItemStatus{Content: "also bad {{{", ContentHash: "r1", Valid: true}},
 	}}
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("item-1"), itemRef("rbac-1")},
 	}
@@ -943,7 +943,7 @@ func TestComposer_GitInputMissingWorkDir(t *testing.T) {
 		t.Fatalf("precondition: workDir should not exist yet, stat err=%v", err)
 	}
 
-	c := NewComposer(&fakeItemLookup{}, NewResolver(t.TempDir()), workDir, "", "", "", "")
+	c := NewComposer(&fakeItemLookup{}, NewResolver(t.TempDir()), workDir, "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{
 			{GitSource: &v1alpha1.GitBundleSource{
@@ -975,7 +975,7 @@ func TestComposer_ItemRef_LocalHit(t *testing.T) {
 		Spec:   v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemJCasC},
 		Status: v1alpha1.CatalogItemStatus{Content: "key: local\n", ContentHash: "abc", Valid: true},
 	})
-	c := NewComposer(f, nil, "", "", "", "", "operator-ns")
+	c := NewComposer(f, nil, "", "operator-ns")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("my-item")},
 	}
@@ -1002,7 +1002,7 @@ func TestComposer_ItemRef_OperatorFallback(t *testing.T) {
 		Status: v1alpha1.CatalogItemStatus{Content: "key: operator\n", ContentHash: "def", Valid: true},
 	})
 	// No item in bundle ns.
-	c := NewComposer(f, nil, "", "", "", "", "operator-ns")
+	c := NewComposer(f, nil, "", "operator-ns")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("platform-item")},
 	}
@@ -1032,7 +1032,7 @@ func TestComposer_ItemRef_LocalWinsOverOperator(t *testing.T) {
 		Spec:   v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemJCasC},
 		Status: v1alpha1.CatalogItemStatus{Content: "key: operator\n", ContentHash: "operator", Valid: true},
 	})
-	c := NewComposer(f, nil, "", "", "", "", "operator-ns")
+	c := NewComposer(f, nil, "", "operator-ns")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("shared-item")},
 	}
@@ -1054,7 +1054,7 @@ func TestComposer_ItemRef_LocalWinsOverOperator(t *testing.T) {
 func TestComposer_ItemRef_BothMiss(t *testing.T) {
 	// (d) absent from both → name in result.Missing.
 	f := &fakeItemLookup{}
-	c := NewComposer(f, nil, "", "", "", "", "operator-ns")
+	c := NewComposer(f, nil, "", "operator-ns")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("nowhere-item")},
 	}
@@ -1074,7 +1074,7 @@ func TestComposer_ItemRef_NoOperatorNamespace(t *testing.T) {
 		Spec:   v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemJCasC},
 		Status: v1alpha1.CatalogItemStatus{Content: "key: op\n", ContentHash: "op", Valid: true},
 	})
-	c := NewComposer(f, nil, "", "", "", "", "") // empty operatorNamespace
+	c := NewComposer(f, nil, "", "") // empty operatorNamespace
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("only-op-item")},
 	}
@@ -1102,7 +1102,7 @@ func TestComposer_RejectsGroovyItemRefAsInput(t *testing.T) {
 		},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("groovy-item"), itemRef("jcasc-item")},
 	}
@@ -1162,7 +1162,7 @@ func TestComposer_RejectsInvalidItemRefAsInput(t *testing.T) {
 		},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("bad-item"), itemRef("good-item")},
 	}

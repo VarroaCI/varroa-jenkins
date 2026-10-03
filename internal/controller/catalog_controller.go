@@ -741,7 +741,7 @@ func (r *CatalogReconciler) ReconcileComposedBundle(ctx context.Context, cb *v1a
 	}
 
 	// Run the composition pipeline with pre-resolved git auth.
-	composer := bundle.NewComposer(storeItemLookup{r.store}, r.resolver, r.workDir, "", "", "", r.operatorNamespace)
+	composer := bundle.NewComposer(storeItemLookup{r.store}, r.resolver, r.workDir, r.operatorNamespace)
 	result, err := composer.Compose(ctx, cb.Namespace, &cb.Spec, resolvedAuth, resolvedOCIAuth)
 	if err != nil {
 		status := r.buildStatus(cb, v1alpha1.ComposedBundleInvalid, len(cb.Spec.Inputs), "",

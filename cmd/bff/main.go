@@ -51,7 +51,6 @@ import (
 	ldappkg "github.com/varroaci/varroa-jenkins/internal/auth/ldap"
 	localpkg "github.com/varroaci/varroa-jenkins/internal/auth/local"
 	"github.com/varroaci/varroa-jenkins/internal/auth/schedule"
-	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
@@ -607,12 +606,6 @@ func main() {
 	reconcilerProxy := controller.NewNATSReconcilerProxy(busConn)
 	reconcilerProxy.SetLogger(logger)
 
-	// Build a bundle resolver for controller reconcile operations.
-	bundleResolver := bundle.NewResolver("/tmp/varroa-bundles")
-	bundleResolver.Logger = logger
-	if *oidcIssuer != "" {
-		bundleResolver.SetOIDCConfig(*oidcIssuer, *oidcClientID, *oidcClientSecret)
-	}
 	// Derive dashboard host for path-mode host-equality check.
 	dashboardHost := ""
 	if (*authMode == "local" || *authMode == "ldap") && *bffURL != "" {

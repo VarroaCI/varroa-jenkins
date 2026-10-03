@@ -14,7 +14,7 @@ import (
 // OCI materialization is verified in resolver_oci_test.go.
 func TestComposer_OCISource_UnionGuard(t *testing.T) {
 	f := &fakeItemLookup{}
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 
 	// A single OCISource input should pass the union guard.
 	spec := &v1alpha1.ComposedBundleSpec{
@@ -35,7 +35,7 @@ func TestComposer_OCISource_UnionGuard(t *testing.T) {
 // TestComposer_OCISource_NeedsResolver guards that a resolver is required.
 func TestComposer_OCISource_NeedsResolver(t *testing.T) {
 	f := &fakeItemLookup{}
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{
@@ -54,7 +54,7 @@ func TestComposer_OCISource_NeedsResolver(t *testing.T) {
 // TestComposer_Union_ThreeWayGuard_NeitherSet ensures the three-way guard
 // catches an input with none of the three fields set.
 func TestComposer_Union_ThreeWayGuard_NeitherSet(t *testing.T) {
-	c := NewComposer(&fakeItemLookup{}, nil, "", "", "", "", "")
+	c := NewComposer(&fakeItemLookup{}, nil, "", "")
 
 	_, err := c.Compose(context.Background(), "ns", &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{{}},
@@ -70,7 +70,7 @@ func TestComposer_Union_ThreeWayGuard_NeitherSet(t *testing.T) {
 // TestComposer_Union_ThreeWayGuard_MultipleSet ensures the three-way guard
 // catches an input with multiple fields set.
 func TestComposer_Union_ThreeWayGuard_MultipleSet(t *testing.T) {
-	c := NewComposer(&fakeItemLookup{}, nil, "", "", "", "", "")
+	c := NewComposer(&fakeItemLookup{}, nil, "", "")
 
 	_, err := c.Compose(context.Background(), "ns", &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{{
@@ -102,7 +102,7 @@ func TestComposer_Union_ThreeWayGuard_MultipleSet(t *testing.T) {
 // resolvedOCIAuth errors (same as GitSource's missing auth pattern).
 func TestComposer_OCISource_MissingAuth(t *testing.T) {
 	r := NewResolver(t.TempDir())
-	c := NewComposer(&fakeItemLookup{}, r, t.TempDir(), "", "", "", "")
+	c := NewComposer(&fakeItemLookup{}, r, t.TempDir(), "")
 
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{
@@ -125,7 +125,7 @@ func TestComposer_OCISource_MissingAuth(t *testing.T) {
 // OCI pull will fail (no registry), but it should error softly into result.Errors.
 func TestComposer_OCISource_WithResolverAndAuth(t *testing.T) {
 	r := NewResolver(t.TempDir())
-	c := NewComposer(&fakeItemLookup{}, r, t.TempDir(), "", "", "", "")
+	c := NewComposer(&fakeItemLookup{}, r, t.TempDir(), "")
 
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{

@@ -1008,7 +1008,7 @@ func TestHandleBundlesPreviewInvalidJSON(t *testing.T) {
 func TestHandleBundlesPreview_OCIAuthError(t *testing.T) {
 	fc := newFakeClient()
 	// Create a minimal composer (with no resolver — OCI source will find it missing).
-	composer := bundle.NewComposer(fc, nil, t.TempDir(), "", "", "", "")
+	composer := bundle.NewComposer(fc, nil, t.TempDir(), "")
 	cr, crStore := newTestConfigCRUD(fc, "", composer)
 	_ = crStore
 
@@ -1059,7 +1059,7 @@ func TestComposeBundle_GitSecretRefHostNotAllowed(t *testing.T) {
 	// Composer needs to be non-nil (composeBundle calls c.Composer.Compose),
 	// but the host check fires in resolveComposedBundleGitAuth before the
 	// composer reaches the git input.
-	composer := bundle.NewComposer(fc, nil, t.TempDir(), "", "", "", "")
+	composer := bundle.NewComposer(fc, nil, t.TempDir(), "")
 	cr, crStore := newTestConfigCRUD(fc, "", composer)
 	_ = crStore
 
@@ -1108,7 +1108,7 @@ func TestComposeBundle_PinPreflight(t *testing.T) {
 			Content: "plugins:\n  - artifactId: git\n    version: 999.999\n",
 		},
 	}
-	composer := bundle.NewComposer(fc, nil, t.TempDir(), "", "", "", "")
+	composer := bundle.NewComposer(fc, nil, t.TempDir(), "")
 	cr, crStore := newTestConfigCRUD(fc, "", composer)
 	_ = crStore
 
@@ -1152,7 +1152,7 @@ func TestComposeBundle_PinPreflightAllClear(t *testing.T) {
 			Content: "plugins:\n  - artifactId: git\n    version: 5.10.1\n",
 		},
 	}
-	composer := bundle.NewComposer(fc, nil, t.TempDir(), "", "", "", "")
+	composer := bundle.NewComposer(fc, nil, t.TempDir(), "")
 	cr, crStore := newTestConfigCRUD(fc, "", composer)
 	_ = crStore
 
@@ -1186,7 +1186,7 @@ func TestComposeBundle_GitSecretRefAnnotationsErrorFailsClosed(t *testing.T) {
 		"password": []byte("s3cret"),
 	}
 	fc.secretAnnotationsErr = errors.New("api server unavailable")
-	composer := bundle.NewComposer(fc, nil, t.TempDir(), "", "", "", "")
+	composer := bundle.NewComposer(fc, nil, t.TempDir(), "")
 	cr, crStore := newTestConfigCRUD(fc, "", composer)
 	_ = crStore
 

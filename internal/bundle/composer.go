@@ -27,21 +27,15 @@ type Composer struct {
 	lookup            ItemLookup
 	resolver          *Resolver
 	workDir           string
-	oidcIssuer        string
-	oidcClientID      string
-	oidcClientSecret  string
 	operatorNamespace string
 }
 
 // NewComposer creates a new Composer.
-func NewComposer(lookup ItemLookup, resolver *Resolver, workDir string, oidcIssuer, oidcClientID, oidcClientSecret string, operatorNamespace string) *Composer {
+func NewComposer(lookup ItemLookup, resolver *Resolver, workDir, operatorNamespace string) *Composer {
 	return &Composer{
 		lookup:            lookup,
 		resolver:          resolver,
 		workDir:           workDir,
-		oidcIssuer:        oidcIssuer,
-		oidcClientID:      oidcClientID,
-		oidcClientSecret:  oidcClientSecret,
 		operatorNamespace: operatorNamespace,
 	}
 }

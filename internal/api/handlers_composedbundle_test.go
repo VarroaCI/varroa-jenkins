@@ -230,7 +230,7 @@ func (f *fakeConfigBroodForTest) PauseComposedBundle(ctx context.Context, cluste
 func (f *fakeConfigBroodForTest) ComposeBundle(ctx context.Context, cluster, ns string, spec json.RawMessage) (*bus.BundleComposePreview, error) {
 	var s v1alpha1.ComposedBundleSpec
 	json.Unmarshal(spec, &s)
-	composer := bundle.NewComposer(f.client, nil, "", "", "", "", f.operatorNamespace)
+	composer := bundle.NewComposer(f.client, nil, "", f.operatorNamespace)
 	result, err := composer.Compose(ctx, ns, &s, nil, nil)
 	if err != nil {
 		return nil, err

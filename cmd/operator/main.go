@@ -294,7 +294,7 @@ func main() {
 	}
 
 	// Create Composer for composed bundles (catalog-driven).
-	composer := bundle.NewComposer(storeItemLookupAdapter{clientsetClient}, resolver, "/tmp/varroa-composed", *oidcIssuer, *oidcClientID, *oidcClientSecret, operatorNamespace)
+	composer := bundle.NewComposer(storeItemLookupAdapter{clientsetClient}, resolver, "/tmp/varroa-composed", operatorNamespace)
 
 	// Create catalog reconciler for CatalogSource sync and ComposedBundle
 	// status updates. Uses the resolver's GitCloner for authenticated clones.

@@ -367,7 +367,7 @@ func TestStarterSeededObjectsCompose(t *testing.T) {
 		t.Fatalf("get bundle: %v", err)
 	}
 
-	composer := bundle.NewComposer(starterItemLookup{store}, nil, t.TempDir(), "", "", "", "varroa-system")
+	composer := bundle.NewComposer(starterItemLookup{store}, nil, t.TempDir(), "varroa-system")
 	res, err := composer.Compose(ctx, "varroa-system", &cb.Spec, nil, nil)
 	if err != nil {
 		t.Fatalf("Compose: %v", err)

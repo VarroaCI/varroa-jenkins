@@ -53,7 +53,7 @@ func TestComposer_ExplicitNamespace_IgnoresDuplicates(t *testing.T) {
 		"op-ns/theme":  jcascItem("marker:\n  who: operator-ns\n"),
 		"team-b/theme": jcascItem("marker:\n  who: team-b\n"),
 	}}
-	c := NewComposer(r, nil, "", "", "", "", "op-ns")
+	c := NewComposer(r, nil, "", "op-ns")
 	spec := &v1alpha1.ComposedBundleSpec{Inputs: []v1alpha1.ComposedInput{explicitRef("theme", "team-b")}}
 	result, err := c.Compose(context.Background(), "team-a", spec, nil, nil)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestComposer_ExplicitNamespace_MissNotSubstituted(t *testing.T) {
 	r := &recordingItemLookup{items: map[string]*v1alpha1.CatalogItem{
 		"team-a/theme": jcascItem("marker:\n  who: bundle-ns\n"),
 	}}
-	c := NewComposer(r, nil, "", "", "", "", "op-ns")
+	c := NewComposer(r, nil, "", "op-ns")
 	spec := &v1alpha1.ComposedBundleSpec{Inputs: []v1alpha1.ComposedInput{explicitRef("theme", "team-b")}}
 	result, err := c.Compose(context.Background(), "team-a", spec, nil, nil)
 	if err != nil {
@@ -100,7 +100,7 @@ func TestComposer_ExplicitNamespace_EmptyOperatorNS(t *testing.T) {
 	r := &recordingItemLookup{items: map[string]*v1alpha1.CatalogItem{
 		"team-b/theme": jcascItem("marker:\n  who: team-b\n"),
 	}}
-	c := NewComposer(r, nil, "", "", "", "", "") // empty operator ns
+	c := NewComposer(r, nil, "", "") // empty operator ns
 	spec := &v1alpha1.ComposedBundleSpec{Inputs: []v1alpha1.ComposedInput{explicitRef("theme", "team-b")}}
 	result, err := c.Compose(context.Background(), "team-a", spec, nil, nil)
 	if err != nil {
@@ -119,7 +119,7 @@ func TestComposer_Unset_LocalHit_NoShadow(t *testing.T) {
 	r := &recordingItemLookup{items: map[string]*v1alpha1.CatalogItem{
 		"team-a/theme": jcascItem("marker:\n  who: bundle-ns\n"),
 	}}
-	c := NewComposer(r, nil, "", "", "", "", "op-ns")
+	c := NewComposer(r, nil, "", "op-ns")
 	spec := &v1alpha1.ComposedBundleSpec{Inputs: []v1alpha1.ComposedInput{itemRef("theme")}}
 	result, err := c.Compose(context.Background(), "team-a", spec, nil, nil)
 	if err != nil {
@@ -139,7 +139,7 @@ func TestComposer_Unset_LocalHit_ShadowWarning(t *testing.T) {
 		"team-a/theme": jcascItem("marker:\n  who: bundle-ns\n"),
 		"op-ns/theme":  jcascItem("marker:\n  who: operator-ns\n"),
 	}}
-	c := NewComposer(r, nil, "", "", "", "", "op-ns")
+	c := NewComposer(r, nil, "", "op-ns")
 	spec := &v1alpha1.ComposedBundleSpec{Inputs: []v1alpha1.ComposedInput{itemRef("theme")}}
 	result, err := c.Compose(context.Background(), "team-a", spec, nil, nil)
 	if err != nil {
@@ -164,7 +164,7 @@ func TestComposer_Unset_LocalHit_NoWarningWhenOpNSEmptyOrEqual(t *testing.T) {
 	}
 	// operator ns empty
 	r1 := &recordingItemLookup{items: items}
-	c1 := NewComposer(r1, nil, "", "", "", "", "")
+	c1 := NewComposer(r1, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{Inputs: []v1alpha1.ComposedInput{itemRef("theme")}}
 	res1, err := c1.Compose(context.Background(), "team-a", spec, nil, nil)
 	if err != nil {
@@ -175,7 +175,7 @@ func TestComposer_Unset_LocalHit_NoWarningWhenOpNSEmptyOrEqual(t *testing.T) {
 	}
 	// operator ns equal to bundle ns
 	r2 := &recordingItemLookup{items: items}
-	c2 := NewComposer(r2, nil, "", "", "", "", "team-a")
+	c2 := NewComposer(r2, nil, "", "team-a")
 	res2, err := c2.Compose(context.Background(), "team-a", spec, nil, nil)
 	if err != nil {
 		t.Fatalf("Compose error: %v", err)
@@ -190,7 +190,7 @@ func TestComposer_Unset_FallbackHit_NoWarning(t *testing.T) {
 	r := &recordingItemLookup{items: map[string]*v1alpha1.CatalogItem{
 		"op-ns/theme": jcascItem("marker:\n  who: operator-ns\n"),
 	}}
-	c := NewComposer(r, nil, "", "", "", "", "op-ns")
+	c := NewComposer(r, nil, "", "op-ns")
 	spec := &v1alpha1.ComposedBundleSpec{Inputs: []v1alpha1.ComposedInput{itemRef("theme")}}
 	result, err := c.Compose(context.Background(), "team-a", spec, nil, nil)
 	if err != nil {
@@ -207,7 +207,7 @@ func TestComposer_Unset_FallbackHit_NoWarning(t *testing.T) {
 // Row 6: unset, both miss → Missing bare name, no warning.
 func TestComposer_Unset_BothMiss(t *testing.T) {
 	r := &recordingItemLookup{items: map[string]*v1alpha1.CatalogItem{}}
-	c := NewComposer(r, nil, "", "", "", "", "op-ns")
+	c := NewComposer(r, nil, "", "op-ns")
 	spec := &v1alpha1.ComposedBundleSpec{Inputs: []v1alpha1.ComposedInput{itemRef("theme")}}
 	result, err := c.Compose(context.Background(), "team-a", spec, nil, nil)
 	if err != nil {
