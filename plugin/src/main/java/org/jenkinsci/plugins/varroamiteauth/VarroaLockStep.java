@@ -111,6 +111,9 @@ public class VarroaLockStep extends Step {
 
     static final class Execution extends StepExecution {
 
+        /** What one renew reply means for the hold. */
+        private enum RenewOutcome { HELD, RELEASING, ENDED, RETRY }
+
         private static final long serialVersionUID = 1L;
 
         private final String nameArg;
@@ -140,6 +143,7 @@ public class VarroaLockStep extends Step {
         // and a waiter does not wait out the lease.
         private final AtomicBoolean holdEnded = new AtomicBoolean(false);
         private boolean releasingWarned;
+        private transient String lastRetryReason = "";
 
         private transient Random random;
 
@@ -187,11 +191,7 @@ public class VarroaLockStep extends Step {
                     LOGGER.log(Level.WARNING,
                             "varroaLock: could not restore the held token after a resume", e);
                 }
-                // The body resumes at once and does not wait for this call.
-                // The recorder can have released the lock while the JVM was
-                // down, so the first renew runs now and a lost reply cancels
-                // the body without a full renew interval of unfenced work.
-                renewNow();
+                confirmHoldAfterResume();
             } else {
                 attemptAcquire();
             }
@@ -224,7 +224,16 @@ public class VarroaLockStep extends Step {
                 ownerTenant = reply.getString("tenant", tenantArg);
                 String state = reply.getString("state", "waiting");
                 if ("held".equals(state)) {
-                    fenceToken = reply.getLong("fence_token", 0L);
+                    // A zero token reads as "not yet acquired" on a resume,
+                    // which would start a second body, so it fails closed.
+                    long token = reply.getLong("fence_token", 0L);
+                    if (token <= 0) {
+                        releaseLock();
+                        getContext().onFailure(new AbortException("varroaLock: " + displayName()
+                                + " answered held with no fence token"));
+                        return;
+                    }
+                    fenceToken = token;
                     onAcquired();
                     return;
                 }
@@ -264,42 +273,128 @@ public class VarroaLockStep extends Step {
             Timer.get().schedule(this::renew, VarroaPollPolicy.LOCK_RENEW_MILLIS, TimeUnit.MILLISECONDS);
         }
 
-        private void renewNow() {
-            Timer.get().schedule(this::renew, 0L, TimeUnit.MILLISECONDS);
-        }
-
         private void renew() {
             if (released.get() || holdEnded.get()) {
                 return;
             }
+            RenewOutcome outcome = renewOnce();
+            if (outcome == RenewOutcome.ENDED) {
+                return;
+            }
+            if (outcome == RenewOutcome.RELEASING && !releasingWarned) {
+                releasingWarned = true;
+                logWarning(displayName() + " is releasing after an interruption; "
+                        + "the body keeps running until it ends or its cell dies");
+            }
+            scheduleRenew();
+        }
+
+        /**
+         * Holds the resumed body until the recorder confirms the hold.
+         * Workflow-cps keeps the whole program paused until every step's
+         * {@code onResume} returns, so this method runs synchronously and
+         * the body cannot advance while it runs. It occupies one Jenkins
+         * pool thread for each resumed build that holds a lock, for at
+         * most {@link VarroaPollPolicy#LOCK_RESUME_GATE_MILLIS}.
+         *
+         * <p>Only {@code held} with the stored token lets the body run.
+         * {@code lost}, {@code releasing}, a permanent veto, a different
+         * token, or no answer inside the bound ends the hold, and the body
+         * never runs another statement. A process the body started on an
+         * agent before the restart keeps running until that cancel stops
+         * its step.
+         */
+        private void confirmHoldAfterResume() {
+            logInfo("confirming the hold on " + displayName() + " after a resume");
+            long startedAt = System.currentTimeMillis();
+            while (!released.get() && !holdEnded.get()) {
+                RenewOutcome outcome = renewOnce();
+                switch (outcome) {
+                    case HELD:
+                        logInfo("the recorder confirmed the hold on " + displayName());
+                        scheduleRenew();
+                        return;
+                    case RELEASING:
+                        endHold(new AbortException("varroaLock: " + displayName()
+                                + " is releasing after an interruption, so the resumed body does not run"));
+                        return;
+                    case ENDED:
+                        return;
+                    default:
+                        break;
+                }
+                long elapsed = System.currentTimeMillis() - startedAt;
+                long remaining = VarroaPollPolicy.LOCK_RESUME_GATE_MILLIS - elapsed;
+                if (remaining <= 0) {
+                    endHold(new AbortException("varroaLock: could not confirm the hold on " + displayName()
+                            + " after a resume: " + lastRetryReason));
+                    return;
+                }
+                try {
+                    Thread.sleep(Math.min(VarroaPollPolicy.nextDelayMillis(elapsed, random()), remaining));
+                } catch (InterruptedException e) {
+                    // Fail closed: an unconfirmed hold must not let the body run.
+                    Thread.currentThread().interrupt();
+                    endHold(new AbortException("varroaLock: interrupted while confirming the hold on "
+                            + displayName() + " after a resume"));
+                    return;
+                }
+            }
+        }
+
+        /**
+         * Sends one renew and maps the reply. It ends the hold itself on
+         * {@code lost}, on a permanent veto, and on a token that differs
+         * from the stored one, and answers {@link RenewOutcome#ENDED}.
+         */
+        private RenewOutcome renewOnce() {
             try {
                 VarroaCrossTenantReply reply = VarroaCrossTenantReply.parse(
                         VarroaCrossTenantOps.client().crossTenantLockRenew(callerJobPath, tenantArg, nameArg, runId,
                                 VarroaPollPolicy.LOCK_LEASE_SECONDS));
                 if (reply.isFailure()) {
-                    scheduleRenew();
-                    return;
+                    lastRetryReason = reply.describe();
+                    return RenewOutcome.RETRY;
                 }
                 String reasonCode = reply.getString("reason_code", "");
                 if (isPermanentVeto(reasonCode)) {
                     // A revoked grant or a fenced cell never renews again,
                     // so the hold ends here, the same as a lost lease.
                     endHold(vetoFailure(reply));
-                    return;
+                    return RenewOutcome.ENDED;
+                }
+                if (!reasonCode.isEmpty()) {
+                    lastRetryReason = reply.describeVeto();
+                    return RenewOutcome.RETRY;
                 }
                 String state = reply.getString("state", "");
                 if ("lost".equals(state)) {
                     endHold(new AbortException("varroaLock: the lease for " + displayName() + " was lost"));
-                    return;
+                    return RenewOutcome.ENDED;
                 }
-                if ("releasing".equals(state) && !releasingWarned) {
-                    releasingWarned = true;
-                    logWarning(displayName() + " is releasing after an interruption; "
-                            + "the body keeps running until it ends or its cell dies");
+                if ("held".equals(state)) {
+                    // A held row always carries a token, so a reply with
+                    // none is malformed and must not confirm the hold.
+                    long token = reply.getLong("fence_token", 0L);
+                    if (token <= 0) {
+                        lastRetryReason = "a held renew reply carried no fence token";
+                        return RenewOutcome.RETRY;
+                    }
+                    if (token != fenceToken) {
+                        endHold(new AbortException("varroaLock: the recorder holds " + displayName()
+                                + " under another fence token"));
+                        return RenewOutcome.ENDED;
+                    }
+                    return RenewOutcome.HELD;
                 }
-                scheduleRenew();
+                if ("releasing".equals(state)) {
+                    return RenewOutcome.RELEASING;
+                }
+                lastRetryReason = "unexpected renew state '" + state + "'";
+                return RenewOutcome.RETRY;
             } catch (Exception e) {
-                scheduleRenew();
+                lastRetryReason = String.valueOf(e.getMessage());
+                return RenewOutcome.RETRY;
             }
         }
 
@@ -324,6 +419,17 @@ public class VarroaLockStep extends Step {
                 getContext().onFailure(cause);
             } catch (Exception ignored) {
                 // The context is already closed.
+            }
+        }
+
+        private void logInfo(String message) {
+            try {
+                TaskListener listener = getContext().get(TaskListener.class);
+                if (listener != null) {
+                    listener.getLogger().println("varroaLock: " + message);
+                }
+            } catch (Exception ignored) {
+                // Best-effort logging only.
             }
         }
 

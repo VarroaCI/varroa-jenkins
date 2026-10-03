@@ -13,6 +13,7 @@ final class VarroaPollPolicy {
     private static final long DEFAULT_PENDING_WARN_MILLIS = 10L * 60 * 1000;
     private static final long DEFAULT_PENDING_CEILING_MILLIS = 24L * 60 * 60 * 1000;
     private static final long DEFAULT_LOCK_RENEW_MILLIS = 60L * 1000;
+    private static final long DEFAULT_LOCK_RESUME_GATE_MILLIS = VarroaPollPolicy.LOCK_LEASE_SECONDS * 1000;
 
     /** D8: a {@code pending} wait warns once it has run this long. Mutable so a test can shrink it. */
     static long PENDING_WARN_MILLIS = DEFAULT_PENDING_WARN_MILLIS;
@@ -26,6 +27,13 @@ final class VarroaPollPolicy {
     /** D11: the lock step renews on this cadence. Mutable so a test can shrink it. */
     static long LOCK_RENEW_MILLIS = DEFAULT_LOCK_RENEW_MILLIS;
 
+    /**
+     * A resumed lock step stops trying to confirm its hold after this long
+     * and ends the hold. It equals the lease: past it, the recorder can
+     * already have freed the row. Mutable so a test can shrink it.
+     */
+    static long LOCK_RESUME_GATE_MILLIS = DEFAULT_LOCK_RESUME_GATE_MILLIS;
+
     private VarroaPollPolicy() {
     }
 
@@ -36,11 +44,17 @@ final class VarroaPollPolicy {
         LOCK_RENEW_MILLIS = lockRenewMillis;
     }
 
+    /** Test seam: shrinks the bound on a resumed lock step's first renew. */
+    static void setResumeGateForTesting(long resumeGateMillis) {
+        LOCK_RESUME_GATE_MILLIS = resumeGateMillis;
+    }
+
     /** Test seam: restores every bound to its production default. */
     static void resetBoundsForTesting() {
         PENDING_WARN_MILLIS = DEFAULT_PENDING_WARN_MILLIS;
         PENDING_CEILING_MILLIS = DEFAULT_PENDING_CEILING_MILLIS;
         LOCK_RENEW_MILLIS = DEFAULT_LOCK_RENEW_MILLIS;
+        LOCK_RESUME_GATE_MILLIS = DEFAULT_LOCK_RESUME_GATE_MILLIS;
     }
 
     /** The base interval for a poll that has been running {@code elapsedMillis}. */

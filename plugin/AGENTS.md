@@ -312,10 +312,17 @@ the root AGENTS.md greenfield rule.
   through an `EnvironmentExpander`. `varroa.lock` reads `name`, `tenant`, and `token`
   from that stack. That stack is `transient`, so a resumed build restores an empty one:
   `Execution.onResume` re-pushes the held tenant, name, and token before it reschedules
-  the renewal, or `varroa.lock.token` reads null inside a block that holds a lock. Its
-  first renew runs at once (`renewNow`), not after `LOCK_RENEW_MILLIS`: the body resumes
-  without waiting, and a lock the recorder released while the JVM was down must cancel it
-  after one round trip. Later renewals keep the interval.
+  the renewal, or `varroa.lock.token` reads null inside a block that holds a lock. It then
+  renews synchronously in `confirmHoldAfterResume` and returns only on an answer:
+  workflow-cps keeps the program paused until every `onResume` returns, so the body cannot
+  run on an unconfirmed hold. Only `held` with the stored token resumes the body. `lost`,
+  `releasing`, a permanent veto, or another token ends the hold through `endHold`. A failed
+  renew retries on the acquire cadence (`VarroaPollPolicy.nextDelayMillis`) until
+  `LOCK_RESUME_GATE_MILLIS` (the 300 s lease), then ends the hold. The gate holds one pool
+  thread per resumed build that holds a lock. Later renewals keep `LOCK_RENEW_MILLIS`. A
+  mid-run `releasing` reply only warns. `renewOnce` is the one renew reply mapping both paths
+  use. A program that holds the `varroa` global variable fails to load after a restart, so
+  `VarroaLockStepResumeRestartTest` calls the `varroaLock` step directly.
   `VarroaCallSeqAction.java` is the run-scoped `s<n>` sequence `varroaBuild` uses for its
   intent key. `MiteLoopbackClient.java` gained one method per cross-tenant kind, a
   `forCrossTenant()` factory reading `VARROA_CROSSTENANT_CONNECT_TIMEOUT_MS` (default

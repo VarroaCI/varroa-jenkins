@@ -129,13 +129,13 @@ A `Jenkinsfile` `triggers {}` block also works, but only the items form
 [survives a cell restart](items.md#schedule-a-job).
 
 `result` is a threshold: `SUCCESS`, `UNSTABLE`, or `FAILURE`. The default is `SUCCESS`, meaning
-this result or better. A job declares exactly one `varroaUpstream` trigger. A job that needs
+this result or better. A job declares one `varroaUpstream` trigger. A job that needs
 two producers calls `varroa.build` from each producer's pipeline instead.
 
 The trigger reaches the subscriber job's home slot.
 
-A new trigger goes live only after the subscriber's cell exports its schedules, up to ten minutes
-later. A producer run that completes before that export starts no subscriber build.
+A new trigger goes live only after the subscriber's cell exports its schedules, within ten
+minutes. A producer run that completes before that export starts no subscriber build.
 
 ## The export grant
 
@@ -162,7 +162,7 @@ names allowed to use it. A `job` glob matches the tenant's own job paths. A `loc
 the bare names of the tenant's own locks. Three metacharacters apply: `*` matches any characters
 except `/`, `**` crosses `/`, and `?` matches one character.
 
-An edit to `exports` reaches the record store that enforces it within one reconcile tick.
+An `exports` edit reaches the enforcing record store within one reconcile tick.
 
 An ungranted call fails with a message that starts "cross-tenant triggers go through Varroa."
 
@@ -171,9 +171,9 @@ An ungranted call fails with a message that starts "cross-tenant triggers go thr
 A job's page shows its declared upstream and downstream cross-tenant relationships on the
 **Triggers** card, as an **Upstream** row and a **Downstream** row. Each row names the other
 tenant, the other job, and the result threshold, and marks a row **grant missing** when the
-producer has not exported the job. Such an edge still shows.
+producer has not exported the job.
 
-The same data is available over the API:
+The API carries the same data:
 
 ```json
 "dependencies": {
@@ -184,15 +184,14 @@ The same data is available over the API:
 
 ## The fleet lock
 
-Each tenant owns its own lock namespace. `varroa.lock` names a lock with two arguments:
+Each tenant owns a lock namespace. `varroa.lock` names a lock with two arguments:
 
 | Argument | Meaning |
 |---|---|
-| `name` | the bare lock name. It must not contain `/`. |
-| `tenant` | the tenant that owns the lock. Leave it out to use the caller's own tenant. |
+| `name` | the bare lock name, with no `/` |
+| `tenant` | the tenant that owns the lock. Omit it for the caller's own tenant. |
 
-Two tenants that both take
-`deploy-prod` hold two different locks. A caller takes another tenant's lock only when that tenant
+A caller takes another tenant's lock only when that tenant
 exports the name under `locks`.
 
 The lock list shows each lock as the owner tenant, a `/`, and the bare name. A controller tenant
@@ -224,9 +223,8 @@ Restart that cell to release the lock.
 
 ### Fencing tokens
 
-Every time a lock is acquired, Varroa mints a fencing token, an increasing number, fleet-wide. A
-held lock exposes its token two ways inside the block: `varroa.lock.token`, and the environment
-variable `VARROA_LOCK_TOKEN`.
+Each acquire mints a fencing token, a number that increases fleet-wide. The block reads it as
+`varroa.lock.token` or `$VARROA_LOCK_TOKEN`.
 
 Use the token to protect a resource the lock guards, such as a deployment target:
 
@@ -239,6 +237,9 @@ varroa.lock(name: 'deploy-prod', timeout: 300) {
 `deploy.sh` stores the highest token it accepted and refuses a lower one. A holder can lose its
 lock without knowing it, after a network partition. Its late write carries the old, lower token,
 so the target refuses it.
+
+After a Jenkins restart, the block waits up to 5 minutes for the recorder to confirm the lock. A
+lost or unconfirmed lock stops it. An agent process the block started runs until its step stops.
 
 ## Step failures
 

@@ -1,10 +1,14 @@
 package org.jenkinsci.plugins.varroamiteauth;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.cloudbees.hudson.plugins.folder.Folder;
@@ -26,18 +30,22 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
+import org.jenkinsci.plugins.workflow.steps.BodyExecution;
 import org.jenkinsci.plugins.workflow.steps.StepContext;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
+import org.mockito.ArgumentCaptor;
 import org.jvnet.hudson.test.JenkinsRule;
 
 import net.sf.json.JSONObject;
@@ -278,6 +286,19 @@ public class VarroaLockStepTest {
         assertEquals(1, warnings);
     }
 
+    @Test
+    public void aHeldAcquireReplyWithNoFenceTokenFailsTheBuild() throws Exception {
+        FakeLockHandler handler = new FakeLockHandler();
+        handler.omitAcquireToken("alpha/deploy-prod");
+        installClient(handler);
+
+        WorkflowJob p = newPipeline("varroa.lock(name: 'deploy-prod') { echo 'IN-BODY' }");
+        WorkflowRun run = buildSync(p, "run-no-token", Result.FAILURE);
+        j.assertLogContains("answered held with no fence token", run);
+        j.assertLogNotContains("IN-BODY", run);
+        assertEquals("the step releases the row it never entered", 1, handler.releaseCount("alpha/deploy-prod"));
+    }
+
     // ---- the tenant argument and the bare-name rule ----
 
     @Test
@@ -388,35 +409,29 @@ public class VarroaLockStepTest {
      * {@code VarroaActiveLocksAction}'s stack is transient, so a resumed
      * build restores it empty. {@code onResume} must push the held name
      * and fence token back before {@code varroa.lock.token} reads them
-     * again. This drives {@code Execution.onResume()} directly, the same
-     * way {@link #concurrentReleaseAttemptsReleaseTheLockExactlyOnce()}
-     * drives {@code releaseLock()} directly: the defect is in the resume
-     * bookkeeping itself, not in the acquire/renew network calls, so no
-     * lock server is needed.
+     * again. This drives {@code Execution.onResume()} directly with a
+     * mocked context, the same way {@link
+     * #concurrentReleaseAttemptsReleaseTheLockExactlyOnce()} drives
+     * {@code releaseLock()} directly.
      */
     @Test
     public void onResumeRestoresTheHeldNameAndFenceToken() throws Exception {
+        FakeLockHandler handler = new FakeLockHandler();
+        handler.heldOnRenew("alpha/resume-test", 42L);
+        installClient(handler);
+
         WorkflowJob p = newPipeline("echo 'noop'");
         WorkflowRun run = buildSync(p, "run-resume", Result.SUCCESS);
 
         assertNull("no lock is held before the resume restores one",
                 VarroaActiveLocksAction.currentTokenMap(run));
 
-        StepContext context = mock(StepContext.class);
-        when(context.get(Run.class)).thenReturn(run);
-
-        VarroaLockStep step = new VarroaLockStep("resume-test");
-        VarroaLockStep.Execution exec = new VarroaLockStep.Execution(step, context);
-
-        java.lang.reflect.Field ownerTenantField = VarroaLockStep.Execution.class.getDeclaredField("ownerTenant");
-        ownerTenantField.setAccessible(true);
-        ownerTenantField.set(exec, "alpha");
-
-        java.lang.reflect.Field fenceTokenField = VarroaLockStep.Execution.class.getDeclaredField("fenceToken");
-        fenceTokenField.setAccessible(true);
-        fenceTokenField.set(exec, 42L);
-
-        exec.onResume();
+        VarroaLockStep.Execution exec = resumedExecution(run, "resume-test", 42L);
+        try {
+            exec.onResume();
+        } finally {
+            exec.releaseLockForTesting();
+        }
 
         Map<String, Object> token = VarroaActiveLocksAction.currentTokenMap(run);
         assertNotNull("onResume must restore the held lock's entry", token);
@@ -425,48 +440,175 @@ public class VarroaLockStepTest {
         assertEquals(42L, token.get("token"));
     }
 
+    // ---- the resume gate: the body waits for the first renew ----
+
     /**
-     * The body of a resumed build runs at once. The recorder can have
-     * released the lock while the JVM was down, so {@code onResume} must
-     * renew at once and not after a full renew interval. The interval
-     * here stays at its production default of 60 seconds, so a renew
-     * inside the bound below can only come from the resume itself.
+     * Workflow-cps keeps a resumed program paused until every step's
+     * {@code onResume} returns. {@code onResume} must therefore not return
+     * before the first renew answers, or the body runs unconfirmed.
      */
     @Test
-    public void onResumeRenewsAtOnce() throws Exception {
+    public void onResumeReturnsOnlyAfterTheFirstRenewAnswers() throws Exception {
         FakeLockHandler handler = new FakeLockHandler();
-        handler.releasingOnRenew("alpha/deploy-prod");
+        handler.heldOnRenew("alpha/deploy-prod", 7L);
+        CountDownLatch reply = handler.holdRenewReplies();
         installClient(handler);
 
-        WorkflowJob p = newPipeline("echo 'noop'");
-        WorkflowRun run = buildSync(p, "run-resume-renew", Result.SUCCESS);
+        WorkflowRun run = buildSync(newPipeline("echo 'noop'"), "run-resume-gate", Result.SUCCESS);
+        VarroaLockStep.Execution exec = resumedExecution(run, "deploy-prod", 7L);
+        BodyExecution body = mockBody(exec);
 
-        StepContext context = mock(StepContext.class);
-        when(context.get(Run.class)).thenReturn(run);
-
-        VarroaLockStep step = new VarroaLockStep("deploy-prod");
-        VarroaLockStep.Execution exec = new VarroaLockStep.Execution(step, context);
-
-        java.lang.reflect.Field ownerTenantField = VarroaLockStep.Execution.class.getDeclaredField("ownerTenant");
-        ownerTenantField.setAccessible(true);
-        ownerTenantField.set(exec, "alpha");
-
-        java.lang.reflect.Field fenceTokenField = VarroaLockStep.Execution.class.getDeclaredField("fenceToken");
-        fenceTokenField.setAccessible(true);
-        fenceTokenField.set(exec, 7L);
-
+        Thread resume = new Thread(exec::onResume);
         try {
-            exec.onResume();
-            long deadline = System.currentTimeMillis() + 10_000L;
-            while (handler.renewCount("alpha/deploy-prod") == 0 && System.currentTimeMillis() < deadline) {
-                Thread.sleep(50);
-            }
-            assertEquals("onResume must renew once at once, not after the 60-second interval",
-                    1, handler.renewCount("alpha/deploy-prod"));
+            resume.start();
+            waitForRenews(handler, "alpha/deploy-prod", 1);
+            Thread.sleep(500);
+            assertTrue("onResume must wait while the first renew is in flight", resume.isAlive());
+
+            reply.countDown();
+            resume.join(10_000L);
+            assertFalse("onResume must return once the renew answers held", resume.isAlive());
+            verify(body, never()).cancel(any(Throwable.class));
+            assertFalse(exec.isReleasedForTesting());
         } finally {
-            // Stops the renew loop, which otherwise reschedules itself.
+            reply.countDown();
             exec.releaseLockForTesting();
         }
+    }
+
+    @Test
+    public void onResumeRetriesAFailedRenewOnThePollCadence() throws Exception {
+        FakeLockHandler handler = new FakeLockHandler();
+        handler.heldOnRenew("alpha/deploy-prod", 7L);
+        handler.failOnRenew("alpha/deploy-prod", "UNAVAILABLE", 2);
+        installClient(handler);
+
+        WorkflowRun run = buildSync(newPipeline("echo 'noop'"), "run-resume-retry", Result.SUCCESS);
+        VarroaLockStep.Execution exec = resumedExecution(run, "deploy-prod", 7L);
+        BodyExecution body = mockBody(exec);
+
+        long startedAt = System.currentTimeMillis();
+        try {
+            exec.onResume();
+        } finally {
+            exec.releaseLockForTesting();
+        }
+        long elapsed = System.currentTimeMillis() - startedAt;
+        assertEquals("two failures, then the confirming renew", 3, handler.renewCount("alpha/deploy-prod"));
+        assertTrue("retries follow the 2-second poll cadence, not the 60-second interval: " + elapsed,
+                elapsed < 15_000L);
+        verify(body, never()).cancel(any(Throwable.class));
+    }
+
+    @Test
+    public void onResumeEndsTheHoldOnALostRenew() throws Exception {
+        FakeLockHandler handler = new FakeLockHandler();
+        handler.loseOnRenew("alpha/deploy-prod");
+        assertResumeEndsTheHold(handler, "was lost");
+    }
+
+    @Test
+    public void onResumeEndsTheHoldOnAReleasingRenew() throws Exception {
+        FakeLockHandler handler = new FakeLockHandler();
+        handler.releasingOnRenew("alpha/deploy-prod");
+        assertResumeEndsTheHold(handler, "is releasing after an interruption");
+    }
+
+    @Test
+    public void onResumeEndsTheHoldOnAPermanentRenewVeto() throws Exception {
+        FakeLockHandler handler = new FakeLockHandler();
+        handler.vetoOnRenew("alpha/deploy-prod", "FENCED");
+        assertResumeEndsTheHold(handler, "FENCED");
+    }
+
+    @Test
+    public void onResumeEndsTheHoldOnAnotherFenceToken() throws Exception {
+        FakeLockHandler handler = new FakeLockHandler();
+        handler.heldOnRenew("alpha/deploy-prod", 99L);
+        assertResumeEndsTheHold(handler, "another fence token");
+    }
+
+    @Test
+    public void onResumeDoesNotConfirmAHeldReplyWithNoFenceToken() throws Exception {
+        VarroaPollPolicy.setResumeGateForTesting(1_000L);
+        FakeLockHandler handler = new FakeLockHandler();
+        handler.heldOnRenew("alpha/deploy-prod", 0L);
+        assertResumeEndsTheHold(handler, "carried no fence token");
+    }
+
+    @Test
+    public void onResumeEndsTheHoldWhenTheGateBoundElapses() throws Exception {
+        VarroaPollPolicy.setResumeGateForTesting(1_000L);
+        FakeLockHandler handler = new FakeLockHandler();
+        handler.failOnRenew("alpha/deploy-prod", "UNAVAILABLE", Integer.MAX_VALUE);
+        assertResumeEndsTheHold(handler, "could not confirm the hold on alpha/deploy-prod after a resume");
+    }
+
+    @Test
+    public void onResumeStopsWaitingWhenTheStepIsReleased() throws Exception {
+        FakeLockHandler handler = new FakeLockHandler();
+        handler.failOnRenew("alpha/deploy-prod", "UNAVAILABLE", Integer.MAX_VALUE);
+        installClient(handler);
+
+        WorkflowRun run = buildSync(newPipeline("echo 'noop'"), "run-resume-stop", Result.SUCCESS);
+        VarroaLockStep.Execution exec = resumedExecution(run, "deploy-prod", 7L);
+        BodyExecution body = mockBody(exec);
+
+        Thread resume = new Thread(exec::onResume);
+        resume.start();
+        waitForRenews(handler, "alpha/deploy-prod", 1);
+        exec.releaseLockForTesting();
+        resume.join(10_000L);
+        assertFalse("a released step must stop waiting for the renew", resume.isAlive());
+        verify(body, never()).cancel(any(Throwable.class));
+    }
+
+    private void assertResumeEndsTheHold(FakeLockHandler handler, String expectedMessage) throws Exception {
+        installClient(handler);
+        WorkflowRun run = buildSync(newPipeline("echo 'noop'"), "run-resume-end", Result.SUCCESS);
+        VarroaLockStep.Execution exec = resumedExecution(run, "deploy-prod", 7L);
+        BodyExecution body = mockBody(exec);
+
+        exec.onResume();
+
+        ArgumentCaptor<Throwable> cause = ArgumentCaptor.forClass(Throwable.class);
+        verify(body).cancel(cause.capture());
+        assertTrue("unexpected cause: " + cause.getValue().getMessage(),
+                cause.getValue().getMessage().contains(expectedMessage));
+        int renews = handler.renewCount("alpha/deploy-prod");
+        Thread.sleep(300);
+        assertEquals("an ended hold schedules no further renew", renews, handler.renewCount("alpha/deploy-prod"));
+    }
+
+    /** An execution in the state a resumed build restores: the lock held under {@code token}. */
+    private static VarroaLockStep.Execution resumedExecution(WorkflowRun run, String name, long token)
+            throws Exception {
+        StepContext context = mock(StepContext.class);
+        when(context.get(Run.class)).thenReturn(run);
+        VarroaLockStep.Execution exec = new VarroaLockStep.Execution(new VarroaLockStep(name), context);
+        setField(exec, "ownerTenant", "alpha");
+        setField(exec, "fenceToken", token);
+        return exec;
+    }
+
+    private static BodyExecution mockBody(VarroaLockStep.Execution exec) throws Exception {
+        BodyExecution body = mock(BodyExecution.class);
+        setField(exec, "body", body);
+        return body;
+    }
+
+    private static void setField(Object target, String field, Object value) throws Exception {
+        java.lang.reflect.Field f = VarroaLockStep.Execution.class.getDeclaredField(field);
+        f.setAccessible(true);
+        f.set(target, value);
+    }
+
+    private static void waitForRenews(FakeLockHandler handler, String name, int count) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 10_000L;
+        while (handler.renewCount(name) < count && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+        assertTrue("no renew arrived", handler.renewCount(name) >= count);
     }
 
     // ---- released races across the Timer thread and stop()/finish() ----
@@ -571,6 +713,10 @@ public class VarroaLockStepTest {
             String vetoOnRenew;
             boolean loseOnRenew;
             boolean releasingOnRenew;
+            Long heldOnRenewToken;
+            boolean omitAcquireToken;
+            String failOnRenewCode;
+            int failOnRenewTimes;
         }
 
         // Fleet-wide (D11), not one counter per name: two different lock
@@ -579,6 +725,7 @@ public class VarroaLockStepTest {
         private final java.util.Map<String, State> states = new java.util.concurrent.ConcurrentHashMap<>();
         private final AtomicInteger totalCalls = new AtomicInteger();
         private volatile String lastTargetTenant;
+        private volatile CountDownLatch renewReplyGate;
 
         private State state(String name) {
             return states.computeIfAbsent(name, n -> new State());
@@ -610,6 +757,32 @@ public class VarroaLockStepTest {
 
         void releasingOnRenew(String name) {
             state(name).releasingOnRenew = true;
+        }
+
+        /**
+         * Answers every renew of {@code name} with {@code held} under {@code token}, whatever the
+         * holder. A token of 0 or less sends no {@code fence_token} field.
+         */
+        void heldOnRenew(String name, long token) {
+            state(name).heldOnRenewToken = token;
+        }
+
+        /** Answers {@code times} renews of {@code name} with the failure {@code code}, then behaves normally. */
+        void failOnRenew(String name, String code, int times) {
+            state(name).failOnRenewCode = code;
+            state(name).failOnRenewTimes = times;
+        }
+
+        /** Grants every acquire of {@code name} with no {@code fence_token} field. */
+        void omitAcquireToken(String name) {
+            state(name).omitAcquireToken = true;
+        }
+
+        /** Holds every renew reply until the returned latch opens. */
+        CountDownLatch holdRenewReplies() {
+            CountDownLatch latch = new CountDownLatch(1);
+            renewReplyGate = latch;
+            return latch;
         }
 
         int acquireCount(String name) {
@@ -671,7 +844,9 @@ public class VarroaLockStepTest {
                             st.waiting.remove(runId);
                             st.fenceToken = fenceSeq.incrementAndGet();
                             out.put("state", "held");
-                            out.put("fence_token", st.fenceToken);
+                            if (!st.omitAcquireToken) {
+                                out.put("fence_token", st.fenceToken);
+                            }
                             out.put("tenant", owner);
                         } else {
                             if (!st.waiting.contains(runId)) {
@@ -682,13 +857,22 @@ public class VarroaLockStepTest {
                         break;
                     case "lock_renew":
                         st.renewCount.incrementAndGet();
-                        if (st.vetoOnRenew != null) {
+                        if (st.failOnRenewCode != null && st.failOnRenewTimes > 0) {
+                            st.failOnRenewTimes--;
+                            out.put("code", st.failOnRenewCode);
+                            out.put("error", "failed by the fake recorder");
+                        } else if (st.vetoOnRenew != null) {
                             out.put("reason_code", st.vetoOnRenew);
                             out.put("message", "vetoed by the fake recorder");
                         } else if (st.loseOnRenew) {
                             out.put("state", "lost");
                         } else if (st.releasingOnRenew) {
                             out.put("state", "releasing");
+                        } else if (st.heldOnRenewToken != null) {
+                            out.put("state", "held");
+                            if (st.heldOnRenewToken > 0) {
+                                out.put("fence_token", st.heldOnRenewToken);
+                            }
                         } else if (Objects.equals(st.holder, runId)) {
                             out.put("state", "held");
                             out.put("fence_token", st.fenceToken);
@@ -705,6 +889,14 @@ public class VarroaLockStepTest {
                         st.waiting.remove(runId);
                         out.put("state", "released");
                         break;
+                }
+            }
+            CountDownLatch gate = renewReplyGate;
+            if ("lock_renew".equals(kind) && gate != null) {
+                try {
+                    gate.await(30, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                 }
             }
             byte[] resp = out.toString().getBytes(StandardCharsets.UTF_8);
