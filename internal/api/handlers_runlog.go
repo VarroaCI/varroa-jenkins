@@ -267,7 +267,9 @@ func (s *Server) runLogStreamLoop(
 				live = nil
 				continue
 			}
-			s.emitRunLogLiveChunk(w, flusher, assembler, raw)
+			if s.emitRunLogLiveChunk(ctx, w, flusher, run, assembler, raw) {
+				return
+			}
 		case <-ticks:
 			if s.pollRunLogOnce(ctx, w, flusher, run, &known, assembler) {
 				return
@@ -277,26 +279,70 @@ func (s *Server) runLogStreamLoop(
 }
 
 // emitRunLogLiveChunk decodes one raw relay message and emits every line
-// it (and any buffered partial) now yields. A malformed message is
-// dropped silently: the relay is best-effort, and the next poll or a
-// client reconnect recovers from a lost or garbled chunk.
-func (s *Server) emitRunLogLiveChunk(w io.Writer, flusher runLogFlusher, assembler *runLogLiveAssembler, raw []byte) {
+// it (and any buffered partial) now yields. done is true when the stream
+// must end: a write failed, or a gap could not be filled. A malformed
+// message is dropped silently, because the next chunk then starts after
+// the watermark and the gap path fills its bytes from the blob store.
+//
+// A chunk that starts after the watermark means the relay lost at least
+// one chunk. The handler then fills the gap from the blob store, which
+// holds every relayed chunk before its relay message is published. When
+// that read fails or ends before the chunk does, the stream ends without
+// an end event, and the client reconnects with its own from offset.
+func (s *Server) emitRunLogLiveChunk(ctx context.Context, w io.Writer, flusher runLogFlusher, run recordstore.Run, assembler *runLogLiveAssembler, raw []byte) (done bool) {
 	var chunk runLiveLogChunk
 	if err := json.Unmarshal(raw, &chunk); err != nil {
-		return
+		return false
 	}
-	for _, ln := range assembler.feed(chunk) {
+	lines, gap := assembler.feed(chunk)
+	if gap {
+		resynced, ok := s.resyncRunLogFromBlob(ctx, run, assembler, chunk.Offset+chunk.Len)
+		if !ok {
+			return true
+		}
+		lines = resynced
+	}
+	for _, ln := range lines {
 		if writeRunLogEvent(w, flusher, "line", runLogLineToEvent(ln)) != nil {
-			return
+			return true
 		}
 	}
+	return false
+}
+
+// resyncRunLogFromBlob moves assembler to the blob store's copy of the
+// log and returns the lines past its position. need is the lowest blob
+// length the caller accepts: the end offset of the chunk that showed a
+// gap, or the watermark at the end of the stream. Each gap, and the end
+// of each stream, costs one read of the whole console object and its
+// index; the read stops at the blob end. ok is false when a read fails
+// or the console object ends before need, and the assembler then stays
+// unchanged.
+func (s *Server) resyncRunLogFromBlob(ctx context.Context, run recordstore.Run, assembler *runLogLiveAssembler, need int64) (lines []runLogLine, ok bool) {
+	consoleData, err := readRunLogObject(ctx, s.deps.BlobStore, blob.LogKey(run.RunID))
+	if err != nil {
+		s.deps.Logger.Warn("run log tail gap: read run log failed", "run_id", run.RunID, "error", err)
+		return nil, false
+	}
+	if int64(len(consoleData)) < need {
+		s.deps.Logger.Warn("run log tail gap: blob ends before the live chunk", "run_id", run.RunID, "blob_bytes", len(consoleData), "chunk_end", need)
+		return nil, false
+	}
+	entries, _, err := readRunLogIndex(ctx, s.deps.BlobStore, blob.LogIndexKey(run.RunID))
+	if err != nil {
+		s.deps.Logger.Warn("run log tail gap: read run log index failed", "run_id", run.RunID, "error", err)
+		return nil, false
+	}
+	return assembler.resync(consoleData, splitRunLogLines(consoleData, entries)), true
 }
 
 // pollRunLogOnce re-reads run's record, emits a stage event for every
 // stage diffRunLogStages reports new or changed, and — only once
-// LogSummary.finalized is set — flushes assembler's buffered partial
+// LogSummary.finalized is set — reads the blob store a last time, emits
+// the lines past assembler's watermark, flushes its buffered partial
 // line, emits end, and reports done true. assembler may be nil, when
-// the caller tracks no live-tail state.
+// the caller tracks no live-tail state; the caller then needs no blob
+// store.
 func (s *Server) pollRunLogOnce(ctx context.Context, w io.Writer, flusher runLogFlusher, run recordstore.Run, known *map[string]string, assembler *runLogLiveAssembler) bool {
 	latest, stages, err := s.deps.RecordStore.GetRun(ctx, run.RunID)
 	if err != nil {
@@ -319,10 +365,25 @@ func (s *Server) pollRunLogOnce(ctx context.Context, w io.Writer, flusher runLog
 		return false
 	}
 
-	// The run is ending. A fragment still buffered here never got a
-	// completing live chunk — no tail was attached, or the run finalized
-	// first — so it is emitted now as its own final line, before end.
+	// The run is ending, and the blob store now holds the whole log. A
+	// lost last relay message shows no gap, because no later chunk
+	// arrives, and a run that stopped before the stream opened has no
+	// tail at all. One last read from the blob store emits every line
+	// past the watermark. When that read fails, the stream ends without
+	// end, so the client reconnects and replays the finalized log.
+	//
+	// A fragment still buffered after that read is the log's unterminated
+	// last line, so it is emitted now as its own final line, before end.
 	if assembler != nil {
+		lines, ok := s.resyncRunLogFromBlob(ctx, run, assembler, assembler.watermark)
+		if !ok {
+			return true
+		}
+		for _, ln := range lines {
+			if writeRunLogEvent(w, flusher, "line", runLogLineToEvent(ln)) != nil {
+				return true
+			}
+		}
 		if ln, flushed := assembler.flushPartial(); flushed {
 			if writeRunLogEvent(w, flusher, "line", runLogLineToEvent(ln)) != nil {
 				return true

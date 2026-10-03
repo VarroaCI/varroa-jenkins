@@ -281,3 +281,183 @@ func TestHandleStreamRunLog_DuplicateRunAttachesNoLiveTail(t *testing.T) {
 		t.Fatalf("expected no tail-control start request for a DUPLICATE run, got %d", got)
 	}
 }
+
+// --- A live chunk after a byte gap ---
+
+// growingConsoleStore answers the first read of the run's console object
+// with first, and every later read from the wrapped store. It stands in
+// for a blob that grows after the handler's history read, while the
+// relay message of the chunk in between is lost.
+type growingConsoleStore struct {
+	blob.Store
+	runID         string
+	first         []byte
+	onConsoleRead func()
+	reads         atomic.Int32
+}
+
+func (g *growingConsoleStore) NewRangeReader(ctx context.Context, key string, offset, length int64) (io.ReadCloser, error) {
+	if key == blob.LogKey(g.runID) && g.reads.Add(1) == 1 {
+		if g.onConsoleRead != nil {
+			g.onConsoleRead()
+		}
+		return io.NopCloser(strings.NewReader(string(g.first))), nil
+	}
+	return g.Store.NewRangeReader(ctx, key, offset, length)
+}
+
+// runLogGapFixture opens a stream on a running run whose history read
+// sees "alpha\n" only. The blob store then holds full. During the
+// history read the fixture publishes one live chunk, "live\n", at
+// liveOffset, so the chunk that holds the bytes in between never reaches
+// the tail. It returns the response and the time the handler took.
+func runLogGapFixture(t *testing.T, runID, rawQuery string, full []byte, liveOffset int64) (*httptest.ResponseRecorder, time.Duration) {
+	t.Helper()
+	natsSrv := startRunLogTestNATS(t)
+	conn, err := bus.Connect(natsSrv.ClientURL())
+	if err != nil {
+		t.Fatalf("bus connect: %v", err)
+	}
+	t.Cleanup(conn.Close)
+
+	const cluster, ns, cell = "core", "ns1", "cell1"
+	gw := &fakeTailGateway{}
+	gw.subscribe(t, conn, ns, cell)
+
+	realStore := newRunLogTestStore(t)
+	putRunLogConsole(t, realStore, runID, full)
+
+	store := &growingConsoleStore{Store: realStore, runID: runID, first: []byte("alpha\n"), onConsoleRead: func() {
+		liveBytes := []byte("live\n")
+		chunk := runLiveLogChunk{RunID: runID, Seq: 2, Offset: liveOffset, Len: int64(len(liveBytes)), Data: liveBytes}
+		body, marshalErr := json.Marshal(chunk)
+		if marshalErr != nil {
+			t.Errorf("marshal live chunk: %v", marshalErr)
+			return
+		}
+		if pubErr := conn.Publish(bus.LogSubject(cluster, ns, cell, runID), body); pubErr != nil {
+			t.Errorf("publish live chunk: %v", pubErr)
+		}
+	}}
+
+	run := recordstore.Run{
+		RunID: runID, Cluster: cluster, Namespace: ns, Cell: cell,
+		Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: recordstore.StatusRunning,
+		Payload: json.RawMessage(`{}`),
+	}
+	reader := newFakeRecordReader()
+	reader.addRun(run)
+
+	srv := newRunFixtureServer(reader, store)
+	srv.runLogTailReg = newRunTailRegistry(conn)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	start := time.Now()
+	rec := doStreamRunLogRequest(ctx, srv, runID, rawQuery)
+	return rec, time.Since(start)
+}
+
+// runLogLineEvents decodes every line event of body, in order.
+func runLogLineEvents(t *testing.T, body string) []runLogLineEvent {
+	t.Helper()
+	events := eventsNamed(parseSSEEvents(body), "line")
+	out := make([]runLogLineEvent, 0, len(events))
+	for _, ev := range events {
+		var le runLogLineEvent
+		if err := json.Unmarshal([]byte(ev.Data), &le); err != nil {
+			t.Fatalf("decode line event %q: %v", ev.Data, err)
+		}
+		out = append(out, le)
+	}
+	return out
+}
+
+func assertRunLogLines(t *testing.T, got []runLogLineEvent, want []runLogLineEvent) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("lines = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i].N != want[i].N || got[i].Off != want[i].Off || got[i].Text != want[i].Text {
+			t.Fatalf("line %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// TestHandleStreamRunLog_LiveGapResyncsFromBlob proves that a live chunk
+// after a byte gap makes the handler emit the lost lines from the blob
+// store, with true numbers and offsets, and then the chunk's own line,
+// each once.
+func TestHandleStreamRunLog_LiveGapResyncsFromBlob(t *testing.T) {
+	rec, _ := runLogGapFixture(t, "run-gap-1", "", []byte("alpha\nlost\nlive\n"), 11)
+	assertRunLogLines(t, runLogLineEvents(t, rec.Body.String()), []runLogLineEvent{
+		{N: 1, Off: 0, Text: "alpha"},
+		{N: 2, Off: 6, Text: "lost"},
+		{N: 3, Off: 11, Text: "live"},
+	})
+}
+
+// TestHandleStreamRunLog_LiveGapResyncKeepsFromLineNumbering proves the
+// resync continues a fromLine override rather than reverting to the
+// absolute line count.
+func TestHandleStreamRunLog_LiveGapResyncKeepsFromLineNumbering(t *testing.T) {
+	rec, _ := runLogGapFixture(t, "run-gap-2", "from=0&fromLine=10", []byte("alpha\nlost\nlive\n"), 11)
+	assertRunLogLines(t, runLogLineEvents(t, rec.Body.String()), []runLogLineEvent{
+		{N: 10, Off: 0, Text: "alpha"},
+		{N: 11, Off: 6, Text: "lost"},
+		{N: 12, Off: 11, Text: "live"},
+	})
+}
+
+// TestHandleStreamRunLog_LiveGapEndsStreamWhenBlobLags proves that a gap
+// the blob store cannot fill ends the stream at once, with no end event
+// and no line after the gap, so the client reconnects with its own from
+// offset.
+func TestHandleStreamRunLog_LiveGapEndsStreamWhenBlobLags(t *testing.T) {
+	rec, took := runLogGapFixture(t, "run-gap-3", "", []byte("alpha\n"), 11)
+	if took >= 2*time.Second {
+		t.Fatalf("handler ran %v, want it to end the stream at the gap", took)
+	}
+	body := rec.Body.String()
+	if n := len(eventsNamed(parseSSEEvents(body), "end")); n != 0 {
+		t.Fatalf("end events = %d, want 0", n)
+	}
+	assertRunLogLines(t, runLogLineEvents(t, body), []runLogLineEvent{{N: 1, Off: 0, Text: "alpha"}})
+}
+
+// failingSSEWriter refuses every write, like a client that went away.
+type failingSSEWriter struct{ writes atomic.Int32 }
+
+func (f *failingSSEWriter) Write([]byte) (int, error) {
+	f.writes.Add(1)
+	return 0, io.ErrClosedPipe
+}
+
+func (f *failingSSEWriter) Flush() {}
+
+// TestRunLogStreamLoop_LiveWriteErrorEndsStream proves a failed write of
+// a live line ends the stream loop instead of waiting for the next tick.
+func TestRunLogStreamLoop_LiveWriteErrorEndsStream(t *testing.T) {
+	srv := runPollTestServer(newFakeRecordReader())
+	live := make(chan []byte, 1)
+	body, err := json.Marshal(runLiveLogChunk{RunID: "run-gap-4", Offset: 0, Len: 4, Data: []byte("one\n")})
+	if err != nil {
+		t.Fatalf("marshal live chunk: %v", err)
+	}
+	live <- body
+
+	w := &failingSSEWriter{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		srv.runLogStreamLoop(ctx, w, w, recordstore.Run{RunID: "run-gap-4"}, map[string]string{}, nil, live, newRunLogLiveAssembler(0, 1))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream loop kept running after a failed write")
+	}
+}

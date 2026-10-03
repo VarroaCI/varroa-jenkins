@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
 
 // syncSSEWriter is a concurrency-safe io.Writer + Flush(), standing in
@@ -117,10 +120,13 @@ func TestPollRunLogOnce_FlushesBufferedPartialBeforeEnd(t *testing.T) {
 	}
 	reader.addRun(run)
 	srv := runPollTestServer(reader)
+	store := newRunLogTestStore(t)
+	putRunLogConsole(t, store, run.RunID, []byte("unterminated tail"))
+	srv.deps.BlobStore = store
 	rec := &syncSSEWriter{}
 	known := map[string]string{}
 
-	assembler := newRunLogLiveAssembler(0, 1)
+	assembler := newRunLogLiveAssembler(17, 1)
 	assembler.seedPartial([]byte("unterminated tail"), 0)
 
 	if done := srv.pollRunLogOnce(context.Background(), rec, rec, run, &known, assembler); !done {
@@ -226,6 +232,7 @@ func TestRunLogStreamLoop_AlreadyStoppedRunStillObservesMarker(t *testing.T) {
 	}
 	reader.addRun(run)
 	srv := runPollTestServer(reader)
+	srv.deps.BlobStore = newRunLogTestStore(t)
 
 	ticks := make(chan time.Time, 1)
 	rec := &syncSSEWriter{}
@@ -257,5 +264,86 @@ func TestRunLogStreamLoop_AlreadyStoppedRunStillObservesMarker(t *testing.T) {
 	}
 	if e.Result != "SUCCESS" || !e.LogComplete {
 		t.Fatalf("end event = %+v, want result=SUCCESS logComplete=true", e)
+	}
+}
+
+// TestPollRunLogOnce_EmitsLinesPastWatermarkBeforeEnd proves the
+// finalizing poll reads the blob store a last time. A lost last relay
+// message shows no gap, so only that read emits its lines.
+func TestPollRunLogOnce_EmitsLinesPastWatermarkBeforeEnd(t *testing.T) {
+	reader := newFakeRecordReader()
+	run := recordstore.Run{
+		RunID: "run-poll-tail", Status: recordstore.StatusCompleted,
+		Payload: json.RawMessage(`{"log_summary":{"finalized":true,"incomplete":false}}`),
+	}
+	reader.addRun(run)
+	srv := runPollTestServer(reader)
+	store := newRunLogTestStore(t)
+	putRunLogConsole(t, store, run.RunID, []byte("a\nb\nc"))
+	srv.deps.BlobStore = store
+	rec := &syncSSEWriter{}
+	known := map[string]string{}
+
+	// The stream already emitted line 1, "a".
+	if done := srv.pollRunLogOnce(context.Background(), rec, rec, run, &known, newRunLogLiveAssembler(2, 2)); !done {
+		t.Fatal("expected end within one poll once the marker is set")
+	}
+
+	events := parseSSEEvents(rec.String())
+	var got []runLogLineEvent
+	for _, ev := range events {
+		if ev.Event == "end" {
+			break
+		}
+		if ev.Event != "line" {
+			continue
+		}
+		var le runLogLineEvent
+		if err := json.Unmarshal([]byte(ev.Data), &le); err != nil {
+			t.Fatalf("decode line event: %v", err)
+		}
+		got = append(got, le)
+	}
+	want := []runLogLineEvent{{N: 2, Off: 2, Text: "b"}, {N: 3, Off: 4, Text: "c"}}
+	if len(got) != len(want) {
+		t.Fatalf("lines before end = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i].N != want[i].N || got[i].Off != want[i].Off || got[i].Text != want[i].Text {
+			t.Fatalf("line %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if n := len(eventsNamed(events, "end")); n != 1 {
+		t.Fatalf("end events = %d, want 1", n)
+	}
+}
+
+// failingRangeStore refuses every range read.
+type failingRangeStore struct{ blob.Store }
+
+func (failingRangeStore) NewRangeReader(context.Context, string, int64, int64) (io.ReadCloser, error) {
+	return nil, errors.New("blob read failed")
+}
+
+// TestPollRunLogOnce_BlobReadFailureEndsWithoutEnd proves a failed last
+// read ends the stream with no end event, so the client reconnects and
+// replays the finalized log.
+func TestPollRunLogOnce_BlobReadFailureEndsWithoutEnd(t *testing.T) {
+	reader := newFakeRecordReader()
+	run := recordstore.Run{
+		RunID: "run-poll-fail", Status: recordstore.StatusCompleted,
+		Payload: json.RawMessage(`{"log_summary":{"finalized":true,"incomplete":false}}`),
+	}
+	reader.addRun(run)
+	srv := runPollTestServer(reader)
+	srv.deps.BlobStore = failingRangeStore{Store: newRunLogTestStore(t)}
+	rec := &syncSSEWriter{}
+	known := map[string]string{}
+
+	if done := srv.pollRunLogOnce(context.Background(), rec, rec, run, &known, newRunLogLiveAssembler(0, 1)); !done {
+		t.Fatal("expected the stream to end")
+	}
+	if n := len(eventsNamed(parseSSEEvents(rec.String()), "end")); n != 0 {
+		t.Fatalf("end events = %d, want 0", n)
 	}
 }

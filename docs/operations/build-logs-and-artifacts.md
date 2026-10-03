@@ -32,17 +32,17 @@ sequence gap and marks the run's log incomplete. See [Incomplete logs](#incomple
 
 ## Live tail
 
-A viewer watching a running build's console gets a live tail, not a poll:
+A viewer of a running build gets a live tail, not a poll:
 
 1. The dashboard asks the gateway to start a tail for the run. The gateway records a 90-second
    lease and pushes a tail-start control message to the mite.
 2. The mite calls the Jenkins plugin's tail endpoint, which switches that build to a short flush
    interval.
-3. While the lease is live, the gateway also publishes each stored chunk on a live subject, so
-   every attached viewer sees it without polling the blob store.
-4. The dashboard renews the lease every 30 seconds while a viewer stays attached. Renewal stops
-   when the last viewer detaches, and the lease then expires within 90 seconds. The mite tells
-   the plugin to stop, and the build reverts to its normal flush interval.
+3. While the lease is live, the gateway also publishes each stored chunk on a live subject. The
+   BFF reads a missed live chunk from the blob store.
+4. The dashboard renews the lease every 30 seconds while a viewer stays attached. After the last
+   viewer detaches, the lease expires within 90 seconds. The mite tells the plugin to stop, and
+   the build reverts to its normal flush interval.
 
 A tail therefore never outlives its viewers, and no build runs at the fast flush interval with
 nobody watching.

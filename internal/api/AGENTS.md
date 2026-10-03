@@ -394,7 +394,13 @@ federation, activity persistence, and SSE fanout.
   bus subscription per run per replica, reference-counted across every local viewer,
   renewed every 30 seconds, released on every disconnect. The subscription is a
   `bus.Listener`, so it subscribes again after a NATS denial. Its `Unsubscribe` waits for
-  the loop, so the release calls it outside the registry lock. `pipelines_service.go`
+  the loop, so the release calls it outside the registry lock. A live chunk that starts
+  after the assembler watermark (`runlog_live.go`) is a gap: the handler never joins it. It
+  reads the console object and index again (`resyncRunLogFromBlob`) and emits the lost lines
+  with continued numbers. The gateway relays a chunk only after its blob writes land. When the
+  read fails or the blob ends before the chunk, the stream ends without `end`, and the client
+  reconnects with `from`. The finalizing poll reads the blob once more before `end`, because a
+  lost last chunk shows no gap. `pipelines_service.go`
   (`internal/mcp`'s non-HTTP entry point) wraps the same unexported handler logic —
   `listRunsMerged`, `resolveTeamTenants`, `createRun`, `runByID`, `answerRunInput` — so the
   MCP tools and the REST paths share one implementation of every rule.

@@ -23,23 +23,39 @@ type runLiveLogChunk struct {
 	Data    []byte `json:"data"`
 }
 
+// liveChunkVerdict is what applyLiveChunkWatermark decides for one live
+// chunk.
+type liveChunkVerdict int
+
+const (
+	// liveChunkDrop: the whole chunk lies at or below the watermark.
+	liveChunkDrop liveChunkVerdict = iota
+	// liveChunkApply: the chunk starts at or before the watermark and ends
+	// after it.
+	liveChunkApply
+	// liveChunkGap: the chunk starts after the watermark. The relay lost
+	// at least one chunk before it, because the gateway publishes
+	// contiguous offsets in order.
+	liveChunkGap
+)
+
 // applyLiveChunkWatermark trims chunk to the bytes at or after
-// watermark, the end offset of the last line already emitted. ok is
-// false when the whole chunk lies at or below the watermark, so the
-// caller drops it and emits no line for it.
-func applyLiveChunkWatermark(watermark int64, chunk runLiveLogChunk) (trimmed []byte, newWatermark int64, ok bool) {
+// watermark, the end offset of the last line already emitted. For a
+// drop or a gap it returns no bytes and the unchanged watermark, so the
+// caller emits no line for the chunk.
+func applyLiveChunkWatermark(watermark int64, chunk runLiveLogChunk) (trimmed []byte, newWatermark int64, verdict liveChunkVerdict) {
 	end := chunk.Offset + chunk.Len
 	if end <= watermark {
-		return nil, watermark, false
+		return nil, watermark, liveChunkDrop
+	}
+	if chunk.Offset > watermark {
+		return nil, watermark, liveChunkGap
 	}
 	skip := watermark - chunk.Offset
-	if skip < 0 {
-		skip = 0
-	}
 	if skip > int64(len(chunk.Data)) {
 		skip = int64(len(chunk.Data))
 	}
-	return chunk.Data[skip:], end, true
+	return chunk.Data[skip:], end, liveChunkApply
 }
 
 // runLogLiveAssembler buffers a live tail's not-yet-newline-terminated
@@ -72,15 +88,21 @@ func (a *runLogLiveAssembler) seedPartial(fragment []byte, off int64) {
 // feed applies chunk's watermark trim, appends the surviving bytes to
 // any buffered partial line, and returns every complete line the
 // combined bytes now yield. A trailing run with no newline is
-// re-buffered for the next chunk, not emitted. Every line this call
+// re-buffered for the next chunk, not emitted. gap is true when chunk
+// starts after the watermark: feed then changes no state and returns no
+// line, because joining the chunk would give every later line a wrong
+// number and a wrong offset. Every line this call
 // yields is attributed to chunk's own stageId, nodeId, and ts — an
 // approximation for a line whose earlier bytes arrived in a prior chunk,
 // accepted because a console line only ever splits across a write-buffer
 // boundary within the same stage.
-func (a *runLogLiveAssembler) feed(chunk runLiveLogChunk) []runLogLine {
-	trimmed, newWatermark, ok := applyLiveChunkWatermark(a.watermark, chunk)
-	if !ok {
-		return nil
+func (a *runLogLiveAssembler) feed(chunk runLiveLogChunk) (lines []runLogLine, gap bool) {
+	trimmed, newWatermark, verdict := applyLiveChunkWatermark(a.watermark, chunk)
+	switch verdict {
+	case liveChunkDrop:
+		return nil, false
+	case liveChunkGap:
+		return nil, true
 	}
 	a.watermark = newWatermark
 	a.partial = append(a.partial, trimmed...)
@@ -100,6 +122,33 @@ func (a *runLogLiveAssembler) feed(chunk runLiveLogChunk) []runLogLine {
 		a.partialOff += int64(idx) + 1
 		a.partial = a.partial[idx+1:]
 	}
+	return out, false
+}
+
+// resync replaces the assembler's live position with the blob store's
+// copy of the console stream. consoleData is the whole console object
+// and all is splitRunLogLines' result for it. resync returns every line
+// that starts at or after the buffered partial line's offset, numbered
+// on from nextLine, and keeps an unterminated last line as the new
+// partial line. The watermark moves to the end of consoleData.
+func (a *runLogLiveAssembler) resync(consoleData []byte, all []runLogLine) []runLogLine {
+	total := int64(len(consoleData))
+	resumed := all[resumeLineIndex(all, a.partialOff):]
+	a.partial = nil
+	a.partialOff = total
+	if len(resumed) > 0 && total > 0 && consoleData[total-1] != '\n' {
+		last := resumed[len(resumed)-1]
+		a.partial = append([]byte(nil), consoleData[last.Off:]...)
+		a.partialOff = last.Off
+		resumed = resumed[:len(resumed)-1]
+	}
+	out := make([]runLogLine, 0, len(resumed))
+	for _, ln := range resumed {
+		ln.N = a.nextLine
+		a.nextLine++
+		out = append(out, ln)
+	}
+	a.watermark = total
 	return out
 }
 
