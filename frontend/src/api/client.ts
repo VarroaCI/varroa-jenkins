@@ -1144,7 +1144,8 @@ export function listAllFleetLocks(): Promise<FleetLockListResponse> {
  * Force-releases one releasing fleet lock. The caller needs the
  * cluster-wide fleetlocks:release verb. The server answers 409 for a lock
  * that is not releasing or whose holder pod still runs, and 404 for an
- * unknown lock.
+ * unknown lock. The second 409 carries holderCell in its body (a
+ * FleetLockReleaseConflict), which the ApiError body holds.
  */
 export function releaseFleetLock(body: FleetLockReleaseRequest): Promise<FleetLockReleaseResponse> {
   return bffFetch<FleetLockReleaseResponse>("/locks/release", {

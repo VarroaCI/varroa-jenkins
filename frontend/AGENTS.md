@@ -150,7 +150,9 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   with the cluster-wide `fleetlocks:release` verb gets a **Force release**
   action on each `releasing` row. Its dialog requires a reason, posts
   `POST /locks/release`, shows a refusal as the HTTP status and the server
-  message, and reads `GET /locks` again after every attempt.
+  message, and reads `GET /locks` again after every attempt. A 409 that
+  carries `holderCell` adds a link to that cell's controller page, where
+  Restart keeps its own permission check; the dialog makes no restart call.
   `CellTab.tsx` is the Cell tab of
   `ControllerDetail.tsx`, rendered only when the detail response reports
   `kind` `cell`. Its role, agent namespace, and placement generation

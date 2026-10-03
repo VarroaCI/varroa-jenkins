@@ -85,6 +85,29 @@ func TestLocksRelease_ReportsARefusal(t *testing.T) {
 	}
 }
 
+// TestLocksRelease_HolderLivePrintsTheRestartCommand asserts a refusal
+// for a live holder pod names the restart command of the holder cell.
+func TestLocksRelease_HolderLivePrintsTheRestartCommand(t *testing.T) {
+	testSetup(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":"cell cells/cell-a on cluster core still runs the holder's pod pod-a.",` +
+			`"holderCell":{"cluster":"core","namespace":"cells","name":"cell-a"}}`))
+	}))
+	defer srv.Close()
+	root := newRootCmd()
+	root.SetArgs([]string{"locks", "release", "acme/deploy-prod", "--run", "run-1", "--reason", "x", "--server", srv.URL})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("a refusal returned no error")
+	}
+	if !strings.Contains(err.Error(), "varroactl restart controller cells/cell-a --cluster core") ||
+		!strings.Contains(err.Error(), "error from server (409)") {
+		t.Fatalf("error = %q, want the refusal and the restart command of the holder cell", err)
+	}
+}
+
 // fleetLockServer answers want with the lock list body and fails the test
 // on any other request.
 func fleetLockServer(t *testing.T, want string, body string) *httptest.Server {

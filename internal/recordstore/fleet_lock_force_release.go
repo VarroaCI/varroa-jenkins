@@ -36,7 +36,8 @@ const (
 	FleetLockForceNotReleasing = "not_releasing"
 	// FleetLockForceHolderLive reports that the stored placement still
 	// names the row's cell instance as a member. That pod can still run
-	// the holder's build.
+	// the holder's build. The reply names the member's cell, because a
+	// restart of that cell is the operator's way to end the holder.
 	FleetLockForceHolderLive = "holder_live"
 )
 
@@ -56,25 +57,29 @@ type FleetLockForceReleaseRequest struct {
 
 // FleetLockForceReleaseResponse is the reply body. Outcome is one of the
 // FleetLockForce values, and the row fields describe the row the request
-// named. Error is set only for a malformed request or a server fault.
-// Unknown is set beside Error when the fault came at the commit, so the
-// row can be gone.
+// named. HolderCell and HolderNamespace are set on holder_live only: they
+// name the cell of the member that runs the row's cell instance. Error is
+// set only for a malformed request or a server fault. Unknown is set
+// beside Error when the fault came at the commit, so the row can be gone.
 type FleetLockForceReleaseResponse struct {
-	Outcome      string `json:"outcome,omitempty"`
-	Cluster      string `json:"cluster,omitempty"`
-	Tenant       string `json:"tenant,omitempty"`
-	JobPath      string `json:"job_path,omitempty"`
-	CellInstance string `json:"cell_instance,omitempty"`
-	State        string `json:"state,omitempty"`
-	Error        string `json:"error,omitempty"`
-	Unknown      bool   `json:"unknown,omitempty"`
+	Outcome         string `json:"outcome,omitempty"`
+	Cluster         string `json:"cluster,omitempty"`
+	Tenant          string `json:"tenant,omitempty"`
+	JobPath         string `json:"job_path,omitempty"`
+	CellInstance    string `json:"cell_instance,omitempty"`
+	HolderCell      string `json:"holder_cell,omitempty"`
+	HolderNamespace string `json:"holder_namespace,omitempty"`
+	State           string `json:"state,omitempty"`
+	Error           string `json:"error,omitempty"`
+	Unknown         bool   `json:"unknown,omitempty"`
 }
 
 // ForceReleaseFleetLock deletes the releasing fleet_locks row that name
 // and runID identify, in one transaction that holds the row FOR UPDATE.
 // It answers FleetLockForceNotFound for no row, FleetLockForceNotReleasing
-// for a row in another state, and FleetLockForceHolderLive when the stored
-// placement row names the row's cell instance as a current member. A
+// for a row in another state, and FleetLockForceHolderLive, with that
+// member's cell and namespace, when the stored placement row names the
+// row's cell instance as a current member. A
 // deleted row publishes one lock notification, after the commit, through
 // notifier. A nil notifier publishes nothing.
 func ForceReleaseFleetLock(ctx context.Context, pool *pgxpool.Pool, req FleetLockForceReleaseRequest,
@@ -107,8 +112,9 @@ func ForceReleaseFleetLock(ctx context.Context, pool *pgxpool.Pool, req FleetLoc
 		return FleetLockForceReleaseResponse{}, err
 	}
 	if exists {
-		if _, live := memberForInstance(row.members, resp.CellInstance); live {
+		if m, live := memberForInstance(row.members, resp.CellInstance); live {
 			resp.Outcome = FleetLockForceHolderLive
+			resp.HolderCell, resp.HolderNamespace = m.Cell, m.Namespace
 			return resp, nil
 		}
 	}
@@ -165,7 +171,7 @@ func handleFleetLockRelease(pool *pgxpool.Pool, notifier *RunNotifier, logger *s
 	}
 	logger.Info("fleet lock force release", "name", req.Name, "run_id", req.RunID, "outcome", resp.Outcome,
 		"cluster", resp.Cluster, "tenant", resp.Tenant, "cell_instance", resp.CellInstance,
-		"actor", req.Actor, "reason", req.Reason)
+		"holder_cell", resp.HolderCell, "actor", req.Actor, "reason", req.Reason)
 	return marshalFleetLockRelease(logger, resp)
 }
 

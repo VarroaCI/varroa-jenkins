@@ -649,7 +649,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   transaction reads the row `FOR UPDATE` and answers `not_found`,
   `not_releasing` (a held or waiting row), `holder_live` (the stored
   placement names the row's `cell_instance` as a member, through
-  `memberForInstance`), or deletes the row and answers `released`. The
+  `memberForInstance`; the reply then names that member's cell and
+  namespace in `holder_cell`/`holder_namespace`, because a restart of that
+  cell is the release: it deletes the pod, so the operator confirms the
+  instance gone), or deletes the row and answers `released`. The rule never
+  widens to a live member, because a transport outage also silences a live
+  holder. The
   placement row is read without a lock, so it cannot deadlock with the
   announce. A request with no name, run id, actor, or reason answers an
   error and writes nothing. A failed commit answers an error reply marked

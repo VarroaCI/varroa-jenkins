@@ -312,7 +312,10 @@ the root AGENTS.md greenfield rule.
   through an `EnvironmentExpander`. `varroa.lock` reads `name`, `tenant`, and `token`
   from that stack. That stack is `transient`, so a resumed build restores an empty one:
   `Execution.onResume` re-pushes the held tenant, name, and token before it reschedules
-  the renewal, or `varroa.lock.token` reads null inside a block that holds a lock.
+  the renewal, or `varroa.lock.token` reads null inside a block that holds a lock. Its
+  first renew runs at once (`renewNow`), not after `LOCK_RENEW_MILLIS`: the body resumes
+  without waiting, and a lock the recorder released while the JVM was down must cancel it
+  after one round trip. Later renewals keep the interval.
   `VarroaCallSeqAction.java` is the run-scoped `s<n>` sequence `varroaBuild` uses for its
   intent key. `MiteLoopbackClient.java` gained one method per cross-tenant kind, a
   `forCrossTenant()` factory reading `VARROA_CROSSTENANT_CONNECT_TIMEOUT_MS` (default

@@ -97,6 +97,17 @@ type FleetLockReleaseResult struct {
 	State        string `json:"state"`
 }
 
+// FleetLockHolderCell is the cell that still runs a releasing lock's
+// holder, the holderCell a holder_live refusal of POST /locks/release
+// carries (components/schemas.yaml#FleetLockHolderCell). A restart of
+// that cell ends the holder, and the confirmed-gone path then releases
+// the lock.
+type FleetLockHolderCell struct {
+	Cluster   string `json:"cluster"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+}
+
 // fleetLockReleaseBody is the request body of POST /locks/release.
 type fleetLockReleaseBody struct {
 	Name   string `json:"name"`
@@ -173,8 +184,10 @@ func (s *Server) ReleaseFleetLock(ctx context.Context, claims *auth.Claims, name
 			Message: fmt.Sprintf("the lock is %s; only a releasing lock can be force-released", resp.State)}
 	case recordstore.FleetLockForceHolderLive:
 		return nil, &ServiceError{Status: http.StatusConflict,
-			Message: fmt.Sprintf("the placement still runs the holder's cell instance %s; cancel the build or delete that pod",
-				resp.CellInstance)}
+			Message: fmt.Sprintf("cell %s/%s on cluster %s still runs the holder's pod %s. "+
+				"Restart that cell when its Jenkins does not run. The lock then releases with no force release",
+				resp.HolderNamespace, resp.HolderCell, resp.Cluster, resp.CellInstance),
+			HolderCell: &FleetLockHolderCell{Cluster: resp.Cluster, Namespace: resp.HolderNamespace, Name: resp.HolderCell}}
 	default:
 		return nil, &ServiceError{Status: http.StatusInternalServerError,
 			Message: fmt.Sprintf("unknown release outcome %q", resp.Outcome)}

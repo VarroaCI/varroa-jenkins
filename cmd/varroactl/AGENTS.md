@@ -155,7 +155,8 @@ new capabilities are added to the BFF/OpenAPI spec first, then surfaced here.
   RUN_ID --reason TEXT` force-releases one releasing fleet lock through the
   generated client's `ReleaseFleetLockWithResponse` (`POST /locks/release`).
   A missing name, run, or reason is a usage error raised before any
-  request.
+  request. A 409 whose `JSON409.HolderCell` is set appends the
+  `varroactl restart controller NS/NAME --cluster C` command for that cell.
 - **`break-glass` (`breakglass.go`)** — `varroactl break-glass NAME [-n NS]
   [--cluster C] --reason TEXT [--ttl 15m] [--target URL] [--listen ADDR]`
   requests a short-lived admin grant for a headless controller through the

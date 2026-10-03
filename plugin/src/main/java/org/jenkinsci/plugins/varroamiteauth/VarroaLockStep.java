@@ -187,7 +187,11 @@ public class VarroaLockStep extends Step {
                     LOGGER.log(Level.WARNING,
                             "varroaLock: could not restore the held token after a resume", e);
                 }
-                scheduleRenew();
+                // The body resumes at once and does not wait for this call.
+                // The recorder can have released the lock while the JVM was
+                // down, so the first renew runs now and a lost reply cancels
+                // the body without a full renew interval of unfenced work.
+                renewNow();
             } else {
                 attemptAcquire();
             }
@@ -258,6 +262,10 @@ public class VarroaLockStep extends Step {
 
         private void scheduleRenew() {
             Timer.get().schedule(this::renew, VarroaPollPolicy.LOCK_RENEW_MILLIS, TimeUnit.MILLISECONDS);
+        }
+
+        private void renewNow() {
+            Timer.get().schedule(this::renew, 0L, TimeUnit.MILLISECONDS);
         }
 
         private void renew() {

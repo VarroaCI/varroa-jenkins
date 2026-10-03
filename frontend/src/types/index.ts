@@ -2135,6 +2135,21 @@ export interface FleetLockReleaseResponse {
   state: string;
 }
 
+/** The cell that still runs a releasing lock's holder. A restart of that
+ * cell ends the holder, and the lock then releases. */
+export interface FleetLockHolderCell {
+  cluster: string;
+  namespace: string;
+  name: string;
+}
+
+/** The 409 body of POST /locks/release. holderCell is present only when a
+ * live pod still runs the lock's holder. */
+export interface FleetLockReleaseConflict {
+  error: string;
+  holderCell?: FleetLockHolderCell;
+}
+
 // The run log SSE stream (D5) carries six named event kinds. The event
 // stream itself has no OpenAPI schema (it is documented in the path's
 // description, not in components/schemas.yaml), so these mirror design.md's

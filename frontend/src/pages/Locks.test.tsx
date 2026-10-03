@@ -214,7 +214,7 @@ describe("Locks", () => {
     });
 
     it.each([
-      [409, "the placement still runs the holder's cell instance c-1; cancel the build or delete that pod"],
+      [409, "cell cells/cell-a on cluster core still runs the holder's pod c-1."],
       [409, "the lock is held; only a releasing lock can be force-released"],
       [404, "fleet lock not found"],
       [503, "the record store did not confirm the release; read the lock again before you retry"],
@@ -232,6 +232,40 @@ describe("Locks", () => {
       expect(alert).toHaveTextContent(`${status}: ${message}`);
       expect(screen.getByRole("dialog")).toBeInTheDocument();
       await waitFor(() => expect(mockListAllFleetLocks).toHaveBeenCalledTimes(2));
+    });
+
+    it("links the holder cell when a live pod still runs the holder", async () => {
+      mockPermissions = RELEASE_PERMISSIONS;
+      seedReleasing();
+      mockReleaseFleetLock.mockRejectedValue(new ApiError(409, "fixed copy", {
+        error: "cell cells/cell-a on cluster core still runs the holder's pod c-1.",
+        holderCell: { cluster: "core", namespace: "cells", name: "cell-a" },
+      }));
+      renderPage();
+
+      const dialog = await openDialog();
+      fireEvent.change(within(dialog).getByLabelText("Reason"), { target: { value: "stuck" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Force release" }));
+
+      const link = await within(dialog).findByRole("link", { name: "cells/cell-a" });
+      expect(link).toHaveAttribute("href", "/controllers/core/cells/cell-a");
+      expect(within(dialog).getByText(/when its Jenkins does not run/)).toBeInTheDocument();
+    });
+
+    it("shows no cell link for a refusal with no holder cell", async () => {
+      mockPermissions = RELEASE_PERMISSIONS;
+      seedReleasing();
+      mockReleaseFleetLock.mockRejectedValue(new ApiError(409, "fixed copy", {
+        error: "the lock is held; only a releasing lock can be force-released",
+      }));
+      renderPage();
+
+      const dialog = await openDialog();
+      fireEvent.change(within(dialog).getByLabelText("Reason"), { target: { value: "stuck" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Force release" }));
+
+      await within(dialog).findByRole("alert");
+      expect(within(dialog).queryByRole("link")).not.toBeInTheDocument();
     });
 
     it("focuses the reason and closes on Escape without a request", async () => {

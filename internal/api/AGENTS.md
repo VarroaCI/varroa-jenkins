@@ -168,7 +168,10 @@ federation, activity persistence, and SSE fanout.
   (`deps.FleetLockReleaser`, wired over `bus.FleetLockReleaseSubject` only
   when the record store is on; nil answers 503). The BFF never writes
   `varroa.fleet_locks`. It maps `not_found` to 404, `not_releasing` and
-  `holder_live` to 409, and `released` to 200, and only on `released` it
+  `holder_live` to 409, and `released` to 200. Only the `holder_live` 409
+  carries `holderCell {cluster, namespace, name}` (`ServiceError.HolderCell`,
+  schema `FleetLockReleaseConflict`), and its message names the restart of
+  that cell. Only on `released` it
   writes one `fleetlock.force_released` activity row on the global subject
   of the lock's cluster (source `user` or `mcp`). The wait ignores the
   caller's cancellation (`context.WithoutCancel`), and a request a recorder

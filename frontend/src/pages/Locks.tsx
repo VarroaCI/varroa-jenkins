@@ -10,7 +10,8 @@ import { useAuth } from "../context/AuthContext";
 import { ApiError } from "../hooks/useApi";
 import { canDoGlobal } from "../hooks/usePermissions";
 import { holderOf, holdsLock } from "../lib/fleetLocks";
-import type { FleetLock } from "../types";
+import { controllerRoute } from "../routing";
+import type { FleetLock, FleetLockHolderCell } from "../types";
 import styles from "./Locks.module.css";
 
 /** CELLS_POLL_MS is the cadence the cells page reads at. This page holds
@@ -103,6 +104,18 @@ function releaseRefusal(err: unknown): string {
 }
 
 /**
+ * holderCellOf answers the holder cell a 409 refusal names, or null. Only a
+ * refusal for a live holder pod carries one.
+ */
+function holderCellOf(err: unknown): FleetLockHolderCell | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null;
+  const body = err.body;
+  if (!body || typeof body !== "object" || !("holderCell" in body)) return null;
+  const cell = (body as { holderCell?: FleetLockHolderCell }).holderCell;
+  return cell && cell.cluster && cell.namespace && cell.name ? cell : null;
+}
+
+/**
  * ReleaseDialog asks for the reason of one force release. The reason is
  * required, because the audit record carries it. The page reads the list
  * again after every attempt, so a release that landed with no reply also
@@ -123,6 +136,7 @@ function ReleaseDialog({ row, onClose }: { row: FleetLock; onClose: () => void }
     },
   });
   const blank = reason.trim() === "";
+  const holderCell = release.isError ? holderCellOf(release.error) : null;
 
   // Escape closes the dialog, as every other dialog of the app does.
   useEffect(() => {
@@ -169,6 +183,15 @@ function ReleaseDialog({ row, onClose }: { row: FleetLock; onClose: () => void }
         {release.isError && (
           <p className={styles.refusal} role="alert">
             {releaseRefusal(release.error)}
+          </p>
+        )}
+        {holderCell && (
+          <p className={styles.dialogText}>
+            Restart cell{" "}
+            <Link to={controllerRoute(holderCell.cluster, holderCell.namespace, holderCell.name)}>
+              {holderCell.namespace}/{holderCell.name}
+            </Link>{" "}
+            on {holderCell.cluster} when its Jenkins does not run. The lock then releases.
           </p>
         )}
         <div className={styles.dialogActions}>

@@ -39,8 +39,9 @@ func addLocksGroup(root *cobra.Command) {
 		Use:   "release NAME --run RUN_ID --reason TEXT",
 		Short: "Force-release a releasing fleet lock that no live pod holds",
 		Long: "Force-release one releasing fleet lock. The record store refuses a held or waiting lock,\n" +
-			"and a lock whose cell instance the placement still runs. Confirm first that the holder's\n" +
-			"build runs on no cell. Needs the cluster-wide fleetlocks:release verb.",
+			"and a lock whose cell instance the placement still runs. That refusal names the holder cell\n" +
+			"and the restart command for it. Confirm first that the holder's build runs on no cell.\n" +
+			"Needs the cluster-wide fleetlocks:release verb.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: runLocksRelease,
 	}
@@ -76,6 +77,10 @@ func runLocksRelease(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if hc := holderCellOf(resp); hc != nil {
+		return fmt.Errorf("%w\nRestart the holder cell when its Jenkins does not run: varroactl restart controller %s/%s --cluster %s",
+			errFromResponse(resp.Body, resp.StatusCode()), hc.Namespace, hc.Name, hc.Cluster)
+	}
 	if resp.HTTPResponse.StatusCode >= 400 || resp.JSON200 == nil {
 		return errFromResponse(resp.Body, resp.StatusCode())
 	}
@@ -83,6 +88,15 @@ func runLocksRelease(cmd *cobra.Command, args []string) error {
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "released fleet lock %s (run %s, tenant %s, cluster %s)\n",
 		out.Name, out.RunId, out.Tenant, out.Cluster)
 	return nil
+}
+
+// holderCellOf answers the holder cell a 409 refusal names, or nil. Only
+// a refusal for a live holder pod carries one.
+func holderCellOf(resp *client.ReleaseFleetLockResponse) *client.ComponentsSchemasFleetLockHolderCell {
+	if resp.JSON409 == nil {
+		return nil
+	}
+	return resp.JSON409.HolderCell
 }
 
 // runLocksList implements "varroactl locks list".

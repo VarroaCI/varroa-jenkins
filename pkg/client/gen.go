@@ -2009,9 +2009,25 @@ type ComponentsSchemasFleetLock struct {
 // ComponentsSchemasFleetLockState defines model for ComponentsSchemasFleetLock.State.
 type ComponentsSchemasFleetLockState string
 
+// ComponentsSchemasFleetLockHolderCell The cell that still runs a releasing lock's holder. A restart of that cell ends the holder, and the lock then releases.
+type ComponentsSchemasFleetLockHolderCell struct {
+	Cluster   string `json:"cluster"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+}
+
 // ComponentsSchemasFleetLockListResponse GET /pipelines/{team}/locks and GET /locks. Both routes answer the rows in lock name order. In one name, the holder comes first, and the waiters follow in the order they began to wait.
 type ComponentsSchemasFleetLockListResponse struct {
 	Items []ComponentsSchemasFleetLock `json:"items"`
+}
+
+// ComponentsSchemasFleetLockReleaseConflict The 409 body of POST /locks/release. holderCell is present only when a live pod still runs the lock's holder.
+type ComponentsSchemasFleetLockReleaseConflict struct {
+	// Error Human-readable refusal message.
+	Error string `json:"error"`
+
+	// HolderCell The cell that still runs a releasing lock's holder. A restart of that cell ends the holder, and the lock then releases.
+	HolderCell *ComponentsSchemasFleetLockHolderCell `json:"holderCell,omitempty"`
 }
 
 // ComponentsSchemasFleetLockReleaseRequest POST /locks/release. name and runId identify the lock row. reason is stored in the audit record, so it is required.
@@ -18852,7 +18868,7 @@ type ReleaseFleetLockResponse struct {
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON403      *ComponentsResponsesForbidden
 	JSON404      *ComponentsResponsesNotFound
-	JSON409      *ComponentsResponsesConflict
+	JSON409      *ComponentsSchemasFleetLockReleaseConflict
 	JSON503      *ComponentsResponsesServiceUnavailable
 }
 
@@ -26770,7 +26786,7 @@ func ParseReleaseFleetLockResponse(rsp *http.Response) (*ReleaseFleetLockRespons
 		response.JSON404 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
-		var dest ComponentsResponsesConflict
+		var dest ComponentsSchemasFleetLockReleaseConflict
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

@@ -125,6 +125,37 @@ func TestReleaseFleetLock_MapsRefusals(t *testing.T) {
 	}
 }
 
+// TestReleaseFleetLock_HolderLiveCarriesHolderCell asserts the 409 of a
+// holder_live refusal names the holder cell in its body and its message,
+// so every surface can point the operator at that cell's restart.
+func TestReleaseFleetLock_HolderLiveCarriesHolderCell(t *testing.T) {
+	srv, sink := releaseTestServer(t, &fakeFleetLockReleaser{resp: recordstore.FleetLockForceReleaseResponse{
+		Outcome: recordstore.FleetLockForceHolderLive, Cluster: "core", CellInstance: "pod-a",
+		HolderCell: "cell-a", HolderNamespace: "cells",
+	}}, releaseRule)
+	rec := doReleaseRequest(t, srv, releaseBody)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error      string               `json:"error"`
+		HolderCell *FleetLockHolderCell `json:"holderCell"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	want := FleetLockHolderCell{Cluster: "core", Namespace: "cells", Name: "cell-a"}
+	if body.HolderCell == nil || *body.HolderCell != want {
+		t.Fatalf("holderCell = %+v, want %+v", body.HolderCell, want)
+	}
+	if !strings.Contains(body.Error, "cells/cell-a") || !strings.Contains(body.Error, "Restart") {
+		t.Fatalf("error = %q, want the holder cell and the restart step", body.Error)
+	}
+	if len(sink.events) != 0 {
+		t.Fatalf("a refusal wrote activity: %+v", sink.events)
+	}
+}
+
 // TestReleaseFleetLock_AuditsAnUnknownOutcome asserts a request the
 // recorder can have acted on with no reply writes one unconfirmed audit
 // row, so a committed release never lacks its audit record.

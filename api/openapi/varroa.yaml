@@ -6205,6 +6205,22 @@ components:
       - state
       - runId
       type: object
+    components_schemas_FleetLockHolderCell:
+      additionalProperties: false
+      description: |
+        The cell that still runs a releasing lock's holder. A restart of that cell ends the holder, and the lock then releases.
+      properties:
+        cluster:
+          type: string
+        name:
+          type: string
+        namespace:
+          type: string
+      required:
+      - cluster
+      - namespace
+      - name
+      type: object
     components_schemas_FleetLockListResponse:
       additionalProperties: false
       description: |
@@ -6216,6 +6232,19 @@ components:
           type: array
       required:
       - items
+      type: object
+    components_schemas_FleetLockReleaseConflict:
+      additionalProperties: false
+      description: |
+        The 409 body of POST /locks/release. holderCell is present only when a live pod still runs the lock's holder.
+      properties:
+        error:
+          description: Human-readable refusal message.
+          type: string
+        holderCell:
+          $ref: '#/components/schemas/components_schemas_FleetLockHolderCell'
+      required:
+      - error
       type: object
     components_schemas_FleetLockReleaseRequest:
       additionalProperties: false
@@ -13002,7 +13031,7 @@ paths:
   /api/v1/locks/release:
     post:
       description: |
-        Deletes the releasing row that name and runId identify. The recorder refuses a row in another state, and a row whose cell instance the stored placement still names as a member, because that pod can still run the holder's build. A release publishes one lock notification and writes one fleetlock.force_released activity row that names the actor and the reason. Confirm first that the holder's build runs on no cell.
+        Deletes the releasing row that name and runId identify. The recorder refuses a row in another state, and a row whose cell instance the stored placement still names as a member, because that pod can still run the holder's build. That refusal names the holder cell in holderCell. Restart that cell when its Jenkins does not run, and the lock then releases with no force release. A release publishes one lock notification and writes one fleetlock.force_released activity row that names the actor and the reason. Confirm first that the holder's build runs on no cell.
       operationId: releaseFleetLock
       requestBody:
         content:
@@ -13026,7 +13055,12 @@ paths:
         "404":
           $ref: '#/components/responses/components_responses_NotFound'
         "409":
-          $ref: '#/components/responses/components_responses_Conflict'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_FleetLockReleaseConflict'
+          description: The lock is not releasing, or a live pod still runs its holder.
+            The second refusal carries holderCell.
         "503":
           $ref: '#/components/responses/components_responses_ServiceUnavailable'
       summary: Force-releases one releasing fleet lock that no live pod holds. Requires

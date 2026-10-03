@@ -425,6 +425,50 @@ public class VarroaLockStepTest {
         assertEquals(42L, token.get("token"));
     }
 
+    /**
+     * The body of a resumed build runs at once. The recorder can have
+     * released the lock while the JVM was down, so {@code onResume} must
+     * renew at once and not after a full renew interval. The interval
+     * here stays at its production default of 60 seconds, so a renew
+     * inside the bound below can only come from the resume itself.
+     */
+    @Test
+    public void onResumeRenewsAtOnce() throws Exception {
+        FakeLockHandler handler = new FakeLockHandler();
+        handler.releasingOnRenew("alpha/deploy-prod");
+        installClient(handler);
+
+        WorkflowJob p = newPipeline("echo 'noop'");
+        WorkflowRun run = buildSync(p, "run-resume-renew", Result.SUCCESS);
+
+        StepContext context = mock(StepContext.class);
+        when(context.get(Run.class)).thenReturn(run);
+
+        VarroaLockStep step = new VarroaLockStep("deploy-prod");
+        VarroaLockStep.Execution exec = new VarroaLockStep.Execution(step, context);
+
+        java.lang.reflect.Field ownerTenantField = VarroaLockStep.Execution.class.getDeclaredField("ownerTenant");
+        ownerTenantField.setAccessible(true);
+        ownerTenantField.set(exec, "alpha");
+
+        java.lang.reflect.Field fenceTokenField = VarroaLockStep.Execution.class.getDeclaredField("fenceToken");
+        fenceTokenField.setAccessible(true);
+        fenceTokenField.set(exec, 7L);
+
+        try {
+            exec.onResume();
+            long deadline = System.currentTimeMillis() + 10_000L;
+            while (handler.renewCount("alpha/deploy-prod") == 0 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(50);
+            }
+            assertEquals("onResume must renew once at once, not after the 60-second interval",
+                    1, handler.renewCount("alpha/deploy-prod"));
+        } finally {
+            // Stops the renew loop, which otherwise reschedules itself.
+            exec.releaseLockForTesting();
+        }
+    }
+
     // ---- released races across the Timer thread and stop()/finish() ----
 
     @Test

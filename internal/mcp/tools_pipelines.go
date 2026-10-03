@@ -383,7 +383,9 @@ func registerReleaseFleetLockTool(mcpServer *server.MCPServer, deps *api.Depende
 	releaseTool := mcp.NewTool("release_fleet_lock",
 		mcp.WithDescription("Force-release one releasing fleet lock whose holder runs on no live pod. "+
 			"The record store refuses a held or waiting lock, and a lock whose cell instance the "+
-			"placement still runs. Confirm first that the holder's build runs on no cell. "+
+			"placement still runs. That refusal names the holder cell: restart that cell when its "+
+			"Jenkins does not run, and the lock then releases with no force release. "+
+			"Confirm first that the holder's build runs on no cell. "+
 			"Needs the cluster-wide fleetlocks:release verb."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Qualified lock name, as list_fleet_locks answers it")),
 		mcp.WithString("runId", mcp.Required(), mcp.Description("Run that holds the releasing lock")),

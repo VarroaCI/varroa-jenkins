@@ -41,9 +41,12 @@
       Deletes the releasing row that name and runId identify. The recorder
       refuses a row in another state, and a row whose cell instance the
       stored placement still names as a member, because that pod can still
-      run the holder's build. A release publishes one lock notification and
-      writes one fleetlock.force_released activity row that names the actor
-      and the reason. Confirm first that the holder's build runs on no cell.
+      run the holder's build. That refusal names the holder cell in
+      holderCell. Restart that cell when its Jenkins does not run, and the
+      lock then releases with no force release. A release publishes one
+      lock notification and writes one fleetlock.force_released activity
+      row that names the actor and the reason. Confirm first that the
+      holder's build runs on no cell.
     requestBody:
       required: true
       content:
@@ -66,6 +69,12 @@
       "404":
         $ref: '../components/responses.yaml#/NotFound'
       "409":
-        $ref: '../components/responses.yaml#/Conflict'
+        description: >-
+          The lock is not releasing, or a live pod still runs its holder.
+          The second refusal carries holderCell.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/FleetLockReleaseConflict'
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'

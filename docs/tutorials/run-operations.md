@@ -26,9 +26,9 @@ the `fleetlocks:read` verb, which `varroa:operator` and `varroa:admin` hold. The
 
 A stuck lock frees itself in three ways:
 
-- The holder's step releases the lock when its block ends.
+- The holder's block ends.
 - The holder's run reaches a terminal state.
-- The Varroa operator confirms that the holder's cell instance is gone.
+- The Varroa operator confirms the holder's pod gone.
 
 Otherwise, force-release a `releasing` lock whose build runs on no cell. Use **Force release** on `/locks`, or:
 
@@ -36,8 +36,9 @@ Otherwise, force-release a `releasing` lock whose build runs on no cell. Use **F
 varroactl locks release <lock name> --run <run id> --reason "<why>"
 ```
 
-Both need the `fleetlocks:release` verb. Varroa refuses a held lock or a live pod.
-Each release writes a `fleetlock.force_released` activity row. A lost reply writes
+Both need the `fleetlocks:release` verb. Varroa refuses a held lock or a live pod, and names
+its cell. Restart that cell when its Jenkins is down. Each release writes a
+`fleetlock.force_released` activity row. A lost reply writes
 `fleetlock.force_release_unconfirmed`; read `/locks` before you retry.
 
 ## Read a failure digest
