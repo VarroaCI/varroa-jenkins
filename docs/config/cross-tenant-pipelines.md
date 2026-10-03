@@ -191,7 +191,7 @@ Each tenant owns its own lock namespace. `varroa.lock` names a lock with two arg
 | `name` | the bare lock name. It must not contain `/`. |
 | `tenant` | the tenant that owns the lock. Leave it out to use the caller's own tenant. |
 
-A name that contains `/` fails the step before it sends a request. Two tenants that both take
+Two tenants that both take
 `deploy-prod` hold two different locks. A caller takes another tenant's lock only when that tenant
 exports the name under `locks`.
 
@@ -201,7 +201,7 @@ is `<namespace>/<controller>`, so its lock `deploy-prod` shows as `team-pay/ci/d
 Inside the block, `varroa.lock.name` reads the bare name, and `varroa.lock.tenant` reads the owner
 tenant. Both read `null` outside a block.
 
-The recorder can refuse a lock call. The step handles each refusal as follows.
+The step handles each recorder refusal as follows.
 
 | Reason | Step behavior |
 |---|---|
@@ -213,8 +213,8 @@ A lock moves through three states.
 | State | Meaning |
 |---|---|
 | `held` | one run holds the lock |
-| `waiting` | one or more runs wait for the current holder |
-| `releasing` | the holder's run was marked interrupted; the lock is not yet free |
+| `waiting` | runs wait for the holder; a row leaves when its run ends |
+| `releasing` | the holder's run was marked interrupted (the move takes at most one minute); the lock is not yet free |
 
 A lock leaves `releasing` when the holder's run reaches a terminal state, when the operator
 confirms the holder's cell instance gone, or on a

@@ -24,12 +24,9 @@ import (
 // connection, so each step drains its own rows before the next
 // statement runs.
 func sweepFleetLocks(ctx context.Context, db maintDB, now time.Time, notifier *RunNotifier) (moved, expired int, err error) {
-	movedRows, moved, err := moveInterruptedHoldersToReleasing(ctx, db, "", now)
+	moved, err = moveInterruptedFleetLockHolders(ctx, db, now, notifier)
 	if err != nil {
-		return 0, 0, fmt.Errorf("move interrupted fleet lock holders: %w", err)
-	}
-	for _, row := range movedRows {
-		notifier.Notify(lockNotification(row.cluster, row.tenant, row.jobPath, row.name, row.runID, FleetLockStateReleasing))
+		return 0, 0, err
 	}
 
 	expired, err = deleteExpiredFleetLocksNotifying(ctx, db, now, notifier)
@@ -37,6 +34,29 @@ func sweepFleetLocks(ctx context.Context, db maintDB, now time.Time, notifier *R
 		return moved, 0, err
 	}
 	return moved, expired, nil
+}
+
+// moveInterruptedFleetLockHolders moves every held row of an
+// INTERRUPTED run to releasing, fleet-wide, and publishes one releasing
+// notification per moved row through notifier after the statement
+// commits. It answers how many rows it moved.
+//
+// The once-a-minute backstop round, the tenant-sync announce, and the
+// hourly maintenance round call it. The marking transaction must never
+// call it, because the marking touches no fleet_locks row. db is a pool
+// or a held connection, never an open transaction: the statement then
+// commits on its own before the publish. A concurrent move of the same
+// row re-checks state = 'held' and returns no row, so each moved row
+// gets one notification only. A nil notifier publishes nothing.
+func moveInterruptedFleetLockHolders(ctx context.Context, db fleetLockExecer, now time.Time, notifier *RunNotifier) (int, error) {
+	movedRows, moved, err := moveInterruptedHoldersToReleasing(ctx, db, "", now)
+	if err != nil {
+		return 0, fmt.Errorf("move interrupted fleet lock holders: %w", err)
+	}
+	for _, row := range movedRows {
+		notifier.Notify(lockNotification(row.cluster, row.tenant, row.jobPath, row.name, row.runID, FleetLockStateReleasing))
+	}
+	return moved, nil
 }
 
 // deleteExpiredFleetLocksNotifying deletes expired, non-releasing

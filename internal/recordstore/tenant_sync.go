@@ -208,8 +208,8 @@ type tenantPlacementRow struct {
 // the write commits, and reports the count in the response's
 // InterruptedMarked field (design D9). conn and
 // metrics feed that marking; a nil metrics counts nothing. notifier
-// carries the fleet-lock release's own lock notifications, and a nil
-// notifier publishes nothing.
+// carries the lock notifications of the fleet-lock move and release,
+// and a nil notifier publishes nothing.
 func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool.Pool, metrics *InterruptedMetrics,
 	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, grace time.Duration,
 	notifier *RunNotifier, logger *slog.Logger, req TenantSyncRequest) (TenantSyncResponse, error) {
@@ -412,6 +412,16 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 		grace, time.Now(), logger); refireErr != nil {
 		logger.Error("unstarted-intent re-fire after announce failed",
 			"cluster", req.Cluster, "tenant", req.Tenant, "error", refireErr)
+	}
+
+	// The held-to-releasing move runs after the marking and before the
+	// release confirmation. A cell-lost mark of this announce then
+	// releases its lock in the same announce, when the grace already
+	// elapsed. The move is fleet-wide, so it also reaches a run that
+	// another path marked.
+	if _, moveErr := moveInterruptedFleetLockHolders(ctx, pool, time.Now(), notifier); moveErr != nil {
+		logger.Error("fleet lock holder move after announce failed",
+			"cluster", req.Cluster, "tenant", req.Tenant, "error", moveErr)
 	}
 
 	// The fleet lock's second release confirmation (design.md D11) can

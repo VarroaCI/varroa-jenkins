@@ -143,6 +143,29 @@ func TestFleetLockStateMachine_TerminalEventDeletesHeldRow(t *testing.T) {
 	}
 }
 
+// TestFleetLockStateMachine_TerminalEventDeletesWaitingRow asserts an
+// ingested terminal run.completed deletes a waiting row of its run. A run
+// that ended can never acquire, so the row must not wait for its lease.
+func TestFleetLockStateMachine_TerminalEventDeletesWaitingRow(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:sm-terminal-waiting")
+
+	now := time.Now()
+	insertFleetLockRow(t, db, fleetLockStateMachineTestName, runID.String(), FleetLockStateWaiting,
+		now.Add(-time.Minute), now.Add(5*time.Minute))
+
+	g := NewIngester(pool, nil, nil)
+	env := newTestEnvelope(t, runID, "manual:sm-terminal-waiting", KindRunCompleted,
+		RunCompletedPayload{Result: strPtr("FAILURE")})
+	if _, err := g.Apply(context.Background(), env); err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+
+	if _, _, found := fleetLockRowState(t, db, runID.String()); found {
+		t.Fatal("a terminal event must delete a waiting row of its run")
+	}
+}
+
 // TestFleetLockStateMachine_DeadInstanceEntryReleasesRow asserts a
 // rolled dead_instances entry older than the window releases a releasing
 // row with no confirmation.

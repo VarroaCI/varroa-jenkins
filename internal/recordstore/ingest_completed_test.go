@@ -253,6 +253,8 @@ func TestApplyRunCompletedForeignInstanceReportsNoReleasedLock(t *testing.T) {
 	now := time.Now()
 	insertFleetLockRow(t, db, "alpha/deploy-prod", runID.String(), FleetLockStateHeld,
 		now.Add(-time.Minute), now.Add(5*time.Minute))
+	insertFleetLockRow(t, db, "alpha/deploy-gate", runID.String(), FleetLockStateWaiting,
+		now.Add(-time.Minute), now.Add(5*time.Minute))
 
 	completed := newTestEnvelope(t, runID, "manual:completed-foreign-lock", KindRunCompleted,
 		RunCompletedPayload{Result: strPtr("SUCCESS")})
@@ -271,6 +273,79 @@ func TestApplyRunCompletedForeignInstanceReportsNoReleasedLock(t *testing.T) {
 	}
 	if state != FleetLockStateHeld {
 		t.Fatalf("state = %q, want the row held: a foreign completion releases nothing", state)
+	}
+	if err := db.QueryRow(`SELECT state FROM varroa.fleet_locks WHERE name = $1 AND run_id = $2`,
+		"alpha/deploy-gate", runID.String()).Scan(&state); err != nil {
+		t.Fatalf("read waiting fleet lock row: %v", err)
+	}
+	if state != FleetLockStateWaiting {
+		t.Fatalf("state = %q, want the row waiting: a foreign completion deletes no waiting row", state)
+	}
+}
+
+// TestApplyRunCompletedDeletesWaitingLockRows asserts the owner's
+// terminal run.completed deletes the run's waiting rows beside its held
+// row, and reports one entry per deleted row.
+func TestApplyRunCompletedDeletesWaitingLockRows(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:completed-waiting")
+	g := NewIngester(pool, nil, nil)
+
+	now := time.Now()
+	insertFleetLockRow(t, db, "alpha/deploy-prod", runID.String(), FleetLockStateHeld,
+		now.Add(-time.Minute), now.Add(5*time.Minute))
+	insertFleetLockRow(t, db, "alpha/deploy-gate", runID.String(), FleetLockStateWaiting,
+		now.Add(-time.Minute), now.Add(5*time.Minute))
+
+	completed := newTestEnvelope(t, runID, "manual:completed-waiting", KindRunCompleted,
+		RunCompletedPayload{Result: strPtr("FAILURE")})
+	res, err := g.Apply(context.Background(), completed)
+	if err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+	if len(res.ReleasedFleetLocks) != 2 {
+		t.Fatalf("released locks = %+v, want the held and the waiting row", res.ReleasedFleetLocks)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM varroa.fleet_locks WHERE run_id = $1`, runID.String()).Scan(&n); err != nil {
+		t.Fatalf("count fleet lock rows: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("%d fleet lock rows left, want none for a completed run", n)
+	}
+}
+
+// TestApplyRunCompletedKeepsOtherRunsWaitingRows asserts the delete
+// matches the completed run alone: another run's waiting row on the same
+// lock stays.
+func TestApplyRunCompletedKeepsOtherRunsWaitingRows(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:completed-other-waiter")
+	g := NewIngester(pool, nil, nil)
+
+	now := time.Now()
+	other := newTestUUIDv7String()
+	insertFleetLockRow(t, db, "alpha/deploy-prod", runID.String(), FleetLockStateHeld,
+		now.Add(-2*time.Minute), now.Add(5*time.Minute))
+	insertFleetLockRow(t, db, "alpha/deploy-prod", other, FleetLockStateWaiting,
+		now.Add(-time.Minute), now.Add(5*time.Minute))
+
+	completed := newTestEnvelope(t, runID, "manual:completed-other-waiter", KindRunCompleted,
+		RunCompletedPayload{Result: strPtr("SUCCESS")})
+	res, err := g.Apply(context.Background(), completed)
+	if err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+	if len(res.ReleasedFleetLocks) != 1 {
+		t.Fatalf("released locks = %+v, want the completed run's held row only", res.ReleasedFleetLocks)
+	}
+	var state string
+	if err := db.QueryRow(`SELECT state FROM varroa.fleet_locks WHERE name = $1 AND run_id = $2`,
+		"alpha/deploy-prod", other).Scan(&state); err != nil {
+		t.Fatalf("read the other run's row: %v", err)
+	}
+	if state != FleetLockStateWaiting {
+		t.Fatalf("state = %q, want the other run's row still waiting", state)
 	}
 }
 

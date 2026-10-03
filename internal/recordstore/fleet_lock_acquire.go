@@ -401,10 +401,11 @@ type fleetLockExecer interface {
 // narrows the move to one lock name, for the acquire transaction's own
 // step 1, which must run before any expiry test so an expired lock of an
 // interrupted run is never deleted; an empty name moves every lock name
-// at once, for the maintenance round's own first step. Because the move
-// re-derives wherever the table is read, a recorder that stops between
-// the interruption marking and this move loses nothing: the next
-// acquire or the next maintenance round reaches the same state.
+// at once, for moveInterruptedFleetLockHolders, which the backstop
+// round, the tenant-sync announce, and the maintenance round call.
+// Because the move re-derives wherever the table is read, a recorder
+// that stops between the interruption marking and this move loses
+// nothing: the next acquire or the next round reaches the same state.
 //
 // It answers every moved row's own identity beside the count, so a
 // caller publishes one notification per moved row.

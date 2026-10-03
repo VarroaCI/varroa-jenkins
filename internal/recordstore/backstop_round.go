@@ -79,9 +79,10 @@ func (cfg BackstopConfig) grace() time.Duration {
 // RunBackstopRound tries the backstop advisory lock on one acquired
 // connection, and on success runs the mesh takeover, the end of marked
 // lost runs, D9's interrupted sweep, the claim-expiry sweep, the
-// unstarted-intent re-fire, the fleet lock release check, and D11's
-// backstop cron round, in that order, before releasing it. It reports whether this call took the lock; a replica that does not
-// returns false, nil.
+// unstarted-intent re-fire, the fleet lock holder move, the fleet lock
+// release check, and D11's backstop cron round, in that order, before
+// releasing it. It reports whether this call took the lock; a replica
+// that does not returns false, nil.
 func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, cfg BackstopConfig) (bool, error) {
 	pgConn, err := pool.Acquire(ctx)
 	if err != nil {
@@ -129,6 +130,14 @@ func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c
 
 	if err := runRefireRound(ctx, pool, conn, cfg.SweepMetrics, cfg.ActionMetrics, now, grace, logger); err != nil {
 		logger.Warn("unstarted-intent re-fire round failed", "error", err)
+	}
+
+	// The held-to-releasing move runs after every marking step of this
+	// round and before the release check. A lock of a run this round
+	// marked then reaches releasing at once, and a holder whose pod is
+	// already confirmed gone leaves the table in the same round.
+	if _, err := moveInterruptedFleetLockHolders(ctx, pool, now, cfg.RunNotifier); err != nil {
+		logger.Warn("fleet lock holder move round failed", "error", err)
 	}
 
 	// The release check reads the stored placement row. A confirmation

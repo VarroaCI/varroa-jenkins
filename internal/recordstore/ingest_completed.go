@@ -148,13 +148,14 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 	}
 
 	// The fleet lock's first release confirmation (design.md D11): a
-	// terminal run.completed for the holder deletes a held or a
-	// releasing row of this run, whichever it finds. It runs only for
-	// the real terminal write, in the same transaction as the runs row
-	// it confirms, so a crash after commit never strands a lock a
-	// finished run no longer protects.
+	// terminal run.completed deletes every fleet_locks row of this run,
+	// held, releasing, or waiting. A run that ended can never acquire, so
+	// its waiting row carries no information. It runs only for the real
+	// terminal write, in the same transaction as the runs row it
+	// confirms, so a crash after commit never strands a lock a finished
+	// run no longer protects.
 	if owner {
-		releasedLocks, err = deleteHeldFleetLocksForRun(ctx, tx, intent.runID.String())
+		releasedLocks, err = deleteFleetLocksForRun(ctx, tx, intent.runID.String())
 		if err != nil {
 			return false, RunCompletedPayload{}, nil, err
 		}
@@ -170,15 +171,16 @@ type ReleasedFleetLock struct {
 	Cluster, Tenant, JobPath, LockName string
 }
 
-// deleteHeldFleetLocksForRun deletes every held or releasing fleet_locks
-// row of one run, and answers each deleted row's own identity. The
+// deleteFleetLocksForRun deletes every held, releasing, or waiting
+// fleet_locks row of one run, and answers each deleted row's own
+// identity. The
 // statement's own affected-row count cannot name a row, and the
 // notification needs the deleted row's own cluster, tenant, job path,
 // and qualified lock name. It drains and closes its rows before it
 // returns, so the caller's transaction can commit.
-func deleteHeldFleetLocksForRun(ctx context.Context, tx pgx.Tx, runID string) ([]ReleasedFleetLock, error) {
+func deleteFleetLocksForRun(ctx context.Context, tx pgx.Tx, runID string) ([]ReleasedFleetLock, error) {
 	rows, err := tx.Query(ctx, `
-		DELETE FROM varroa.fleet_locks WHERE run_id = $1 AND state IN ('held', 'releasing')
+		DELETE FROM varroa.fleet_locks WHERE run_id = $1 AND state IN ('held', 'releasing', 'waiting')
 		RETURNING cluster, tenant, job_path, name
 	`, runID)
 	if err != nil {

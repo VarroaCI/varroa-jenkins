@@ -938,3 +938,37 @@ func TestTenantSyncAnnounceStaleAnnounceMarksNoRun(t *testing.T) {
 		t.Fatalf("run status = %s, want RUNNING", status)
 	}
 }
+
+// TestTenantSyncAnnounceReleasesLockOfRunItMarks asserts an announce that
+// marks a run cell-lost also moves that run's held lock to releasing and
+// releases it in the same announce, because the old pod is confirmed gone
+// past the grace.
+func TestTenantSyncAnnounceReleasesLockOfRunItMarks(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestSyncConn(t)
+	runID := seedStaleRunOn(t, db, "cell-a", "pod-a1")
+
+	sendTenantSync(t, pool, conn, announceMembers(1, []member{activeMember("cell-a", 0, "pod-a1")}))
+	now := time.Now()
+	insertLockRowForTenant(t, db, testTenant+"/deploy", runID, testTenant, testJobPath,
+		FleetLockStateHeld, now.Add(-10*time.Minute), now.Add(5*time.Minute))
+	if _, err := db.Exec(`UPDATE varroa.fleet_locks SET cell_instance = 'pod-a1' WHERE run_id = $1`, runID); err != nil {
+		t.Fatalf("set cell_instance: %v", err)
+	}
+
+	fresh := announceMembers(1, []member{activeMember("cell-a", 0, "pod-a2")})
+	confirmed := now.Add(-time.Hour)
+	fresh.DeadInstances = []TenantSyncDeadInstance{{Instance: "pod-a1", LastSeenAt: confirmed, ConfirmedGoneAt: &confirmed}}
+	resp := sendTenantSync(t, pool, conn, fresh)
+	if !resp.Ok || resp.InterruptedMarked != 1 {
+		t.Fatalf("announce reply = %+v, want ok with one marked run", resp)
+	}
+
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM varroa.fleet_locks WHERE run_id = $1`, runID).Scan(&n); err != nil {
+		t.Fatalf("count locks: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("%d lock rows left, want the marked run's lock released in the same announce", n)
+	}
+}

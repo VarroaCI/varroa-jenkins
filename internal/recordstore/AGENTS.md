@@ -627,11 +627,18 @@ of the fleet's audit activity, once a controller becomes disposable.
   `moveInterruptedHoldersToReleasing` (`fleet_lock_acquire.go`) is the one
   shared implementation of the derived move, behind the `fleetLockExecer`
   interface, which declares `Query` beside `Exec`: the acquire
-  transaction's own step calls it with one lock name, and the maintenance
-  round's `sweepFleetLocks` (`retention_fleet_locks.go`) calls it with an
-  empty name to move every held row of an interrupted run fleet-wide,
-  before its own bounded-batch expiry delete, which skips a `releasing`
-  row exactly as the acquire's own expiry delete does. It answers every
+  transaction's own step calls it with one lock name.
+  `moveInterruptedFleetLockHolders` (`retention_fleet_locks.go`) calls it
+  with an empty name to move every held row of an interrupted run
+  fleet-wide, and publishes one `releasing` notification per moved row.
+  Three callers run that helper outside any transaction: the backstop
+  round, after its marking steps and before
+  `ReleaseConfirmedFleetLocksRound`, so a marked run's lock reaches
+  `releasing` in the same round; the tenant-sync announce, after
+  `MarkMovedRunsForTenant` and before `ReleaseConfirmedFleetLocks`; and
+  the maintenance round's `sweepFleetLocks`, before its own bounded-batch
+  expiry delete, which skips a `releasing` row exactly as the acquire's
+  own expiry delete does. The marking transaction never calls it. It answers every
   moved row's own identity beside the count, because each moved row earns
   its own notification. A `releasing` row leaves the table on exactly two
   confirmations: an ingested terminal `run.completed` for the holder
@@ -797,7 +804,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   `applyRunCompleted` (`ingest_completed.go`) reports `owner`, whether its
   write was the run's real terminal write, not a foreign instance's
   payload-only merge; on `owner`, in the same transaction as the `runs`
-  write, it deletes this run's `held`/`releasing` fleet_locks rows and
+  write, it deletes this run's `waiting`/`held`/`releasing` fleet_locks
+  rows (a run that ended can never acquire) and
   reports each deleted row's own identity, the first of the two release
   confirmations `fleet_lock_release.go`'s own bullet names. `Apply`
   carries those rows onto `ApplyResult.ReleasedFleetLocks`, and
@@ -1163,7 +1171,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   D11. `RunBackstopRound` holds one round on `backstopLockKey`, the third
   fixed advisory-lock key after `migrateLockKey` and `maintenanceLockKey`,
   and runs `EndMarkedLostIntents`, `SweepInterruptedRuns`, `ExpireUnclaimedRuns`,
-  `ReleaseConfirmedFleetLocksRound`, and `runBackstopSchedule` inside the
+  `moveInterruptedFleetLockHolders`, `ReleaseConfirmedFleetLocksRound`, and
+  `runBackstopSchedule` inside the
   same hold, so one ticker and one lock cover them all. The round computes no
   fire minute of its own: `isBackstopCandidate` admits only an occurrence
   Jenkins itself exported (`JobSchedule.NextFireTimes`) that is past the

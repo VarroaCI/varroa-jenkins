@@ -372,3 +372,146 @@ func TestRunBackstopRoundCatchUpOneFiresOnce(t *testing.T) {
 		t.Fatalf("fired occurrence = %q, want the newest %q", reason, want)
 	}
 }
+
+// lockNotifications answers the lock-kind payloads sent captured, in
+// publish order.
+func lockNotifications(sent *captureSend) []RunNotification {
+	var out []RunNotification
+	for i := 0; i < sent.count(); i++ {
+		if p := sent.payload(i); p.Kind == "lock" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// seedHeldLockOfRun inserts a held fleet_locks row of runID under
+// fleetLockStateMachineTestName, owned by testTenant and stamped with
+// the owning cell instance pod-a.
+func seedHeldLockOfRun(t *testing.T, db *sql.DB, runID string) {
+	t.Helper()
+	now := time.Now()
+	insertLockRowForTenant(t, db, fleetLockStateMachineTestName, runID, testTenant, testJobPath,
+		FleetLockStateHeld, now.Add(-time.Minute), now.Add(5*time.Minute))
+	if _, err := db.Exec(`UPDATE varroa.fleet_locks SET cell_instance = 'pod-a' WHERE name = $1 AND run_id = $2`,
+		fleetLockStateMachineTestName, runID); err != nil {
+		t.Fatalf("set cell_instance: %v", err)
+	}
+}
+
+// TestRunBackstopRoundMovesInterruptedHolderToReleasing asserts the
+// round moves the held lock of a run it marks to releasing in the same
+// round, and publishes one releasing notification. A second round moves
+// nothing and publishes no lock notification.
+func TestRunBackstopRoundMovesInterruptedHolderToReleasing(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
+	seedHeldLockOfRun(t, db, runID.String())
+
+	// The owner stays alive, so the mark is heartbeat-lost and no release
+	// confirmation deletes the row in the same round.
+	now := time.Now()
+	silent := now.Add(-liveOwnerSilentWindow - 5*time.Minute)
+	if _, err := db.Exec(`UPDATE varroa.runs SET heartbeat_received_at = $1 WHERE run_id = $2`, silent, runID); err != nil {
+		t.Fatalf("backdate heartbeat_received_at: %v", err)
+	}
+	seedTenantPlacementLiveness(t, db, "pod-a", true, &now, &now, nil)
+
+	conn, cleanup := newSweepTestBus(t)
+	defer cleanup()
+	freshenSweepConsumer(t, conn)
+
+	sweepMetrics, err := NewInterruptedMetrics()
+	if err != nil {
+		t.Fatalf("new interrupted metrics: %v", err)
+	}
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	cfg := BackstopConfig{MaxSweepPending: DefaultSweepMaxPending, SweepMetrics: sweepMetrics, RunNotifier: notifier}
+
+	if _, err := RunBackstopRound(context.Background(), pool, conn, cfg); err != nil {
+		t.Fatalf("RunBackstopRound: %v", err)
+	}
+
+	var reason string
+	if err := db.QueryRow(`SELECT payload->>'interrupted_reason' FROM varroa.runs WHERE run_id = $1`, runID).Scan(&reason); err != nil {
+		t.Fatalf("read run: %v", err)
+	}
+	if reason != ReasonHeartbeatLost {
+		t.Fatalf("interrupted_reason = %q, want %q", reason, ReasonHeartbeatLost)
+	}
+	state, releasingSince, found := fleetLockRowState(t, db, runID.String())
+	if !found || state != FleetLockStateReleasing {
+		t.Fatalf("state = %q, found = %v, want releasing", state, found)
+	}
+	if !releasingSince.Valid {
+		t.Fatal("releasing_since was not stamped")
+	}
+	locks := lockNotifications(sent)
+	if len(locks) != 1 {
+		t.Fatalf("lock notifications = %+v, want one", locks)
+	}
+	if got := locks[0]; got.State != FleetLockStateReleasing || got.LockName != fleetLockStateMachineTestName ||
+		got.RunID != runID.String() || got.Tenant != testTenant {
+		t.Fatalf("lock notification = %+v, want the moved row's own releasing notification", got)
+	}
+
+	if _, err := RunBackstopRound(context.Background(), pool, conn, cfg); err != nil {
+		t.Fatalf("second RunBackstopRound: %v", err)
+	}
+	notifier.Close()
+	if got := len(lockNotifications(sent)); got != 1 {
+		t.Fatalf("lock notifications after a second round = %d, want 1: a repeat round moves nothing", got)
+	}
+}
+
+// TestRunBackstopRoundReleasesConfirmedGoneHolderInOneRound asserts a
+// cell-lost mark of a holder whose pod is already confirmed gone deletes
+// the lock row in the same round: the move runs before the release
+// check.
+func TestRunBackstopRoundReleasesConfirmedGoneHolderInOneRound(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
+	seedHeldLockOfRun(t, db, runID.String())
+
+	now := time.Now()
+	lastSeen := now.Add(-2 * time.Minute)
+	confirmed := now.Add(-time.Minute)
+	seedTenantPlacementLiveness(t, db, "pod-b", true, &now, &now, []TenantSyncDeadInstance{{
+		Instance: "pod-a", LastSeenAt: lastSeen, ConfirmedGoneAt: &confirmed,
+	}})
+
+	conn, cleanup := newSweepTestBus(t)
+	defer cleanup()
+	freshenSweepConsumer(t, conn)
+
+	sweepMetrics, err := NewInterruptedMetrics()
+	if err != nil {
+		t.Fatalf("new interrupted metrics: %v", err)
+	}
+	notifier, sent, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	cfg := BackstopConfig{MaxSweepPending: DefaultSweepMaxPending, SweepMetrics: sweepMetrics, RunNotifier: notifier}
+
+	if _, err := RunBackstopRound(context.Background(), pool, conn, cfg); err != nil {
+		t.Fatalf("RunBackstopRound: %v", err)
+	}
+
+	var result string
+	if err := db.QueryRow(`SELECT result FROM varroa.runs WHERE run_id = $1`, runID).Scan(&result); err != nil {
+		t.Fatalf("read run: %v", err)
+	}
+	if result != "INTERRUPTED" {
+		t.Fatalf("result = %q, want INTERRUPTED", result)
+	}
+	if state, _, found := fleetLockRowState(t, db, runID.String()); found {
+		t.Fatalf("lock row state = %q, want the row deleted in the same round", state)
+	}
+	// The notifier holds the second notification of one run until the
+	// interval ends; Close publishes it.
+	notifier.Close()
+	locks := lockNotifications(sent)
+	if len(locks) != 2 || locks[0].State != FleetLockStateReleasing || locks[1].State != FleetLockStateReleased {
+		t.Fatalf("lock notifications = %+v, want releasing then released", locks)
+	}
+}
