@@ -43,14 +43,16 @@ type runTailReply struct {
 
 // runTailEntry is one run's shared lease: the coordinates a renewal
 // needs, the live subscription, the renewal loop's stop signal, and the
-// viewer channels this entry fans a raw relay message out to.
+// viewer channels this entry fans a raw relay message out to. The
+// subscription is a bus.Listener, so it subscribes again after NATS
+// denies it.
 type runTailEntry struct {
 	cluster, ns, name string
 	runID             string
 	jobPath           string
 	buildNumber       int64
 
-	sub       *bus.Sub
+	sub       *bus.Listener
 	stopRenew chan struct{}
 	viewers   map[chan []byte]struct{}
 }
@@ -107,7 +109,9 @@ func (reg *runTailRegistry) attach(cluster, ns, name, runID, jobPath string, bui
 		return viewerCh, release, nil
 	}
 
-	sub, err := reg.conn.SubscribeData(bus.LogSubject(cluster, ns, name, runID), func(data []byte) {
+	// A denial returns no error here: the Listener subscribes again in the
+	// background. Only a local subscribe failure takes the error path.
+	sub, err := reg.conn.Listen(bus.LogSubject(cluster, ns, name, runID), "", func(_ string, data []byte) {
 		reg.broadcast(runID, data)
 	})
 	if err != nil {
@@ -188,6 +192,8 @@ func (reg *runTailRegistry) detachFunc(runID string, viewerCh chan []byte) func(
 			if entry.stopRenew != nil {
 				close(entry.stopRenew)
 			}
+			// Unsubscribe waits for the Listener loop to exit, so it
+			// must stay outside reg.mu.
 			if entry.sub != nil {
 				_ = entry.sub.Unsubscribe()
 			}

@@ -147,8 +147,8 @@ control plane's async transport — no other package talks to NATS directly.
   other long-lived subscription goes through `ServeRequests` or `Listen`.
   Never hold one through a bare `Subscribe`, `QueueSubscribe`, or
   `SubscribeData`: a denial at start or on a reload kills it until the pod
-  restarts. The BFF's per-run log tail (`internal/api/runlog_tail.go`) is
-  the one known exception; a viewer reconnect rebuilds it.
+  restarts. The BFF's per-run log tail (`internal/api/runlog_tail.go`)
+  uses `Listen` too.
 - **Self-healing subscriptions** (`responder.go`, `listener.go`) —
   `ServeRequests(subject, queue, handler)` returns a `Responder` for one
   request-reply subscription. `Listen(subject, queue, handler)` returns a
