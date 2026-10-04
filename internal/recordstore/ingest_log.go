@@ -16,8 +16,11 @@ import (
 // not reopen a log the sweep already closed. The merge also keeps a
 // stored incomplete_reason that ranks at least as high as the incoming
 // one in logReasonRanks, so a later generic marker never replaces a
-// precise cause. A run.log that reports incomplete false removes the
-// stored reason, because a complete log has no reason.
+// precise cause. A run.log that reports incomplete false removes a
+// stored generic reason, because a complete log has no reason. It keeps a
+// stored reason of logReasonLossRank or higher, and the incomplete flag
+// with it: a second completion of one run can report a complete log after
+// the first one recorded a loss, and the loss stays true.
 func applyRunLog(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEnvelope) error {
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO varroa.runs (
@@ -33,8 +36,10 @@ func applyRunLog(ctx context.Context, tx pgx.Tx, intent *intentRow, env IngestEn
 				(COALESCE(runs.payload->'log_summary', '{}'::jsonb) || (EXCLUDED.payload->'log_summary')
 					|| CASE WHEN runs.payload->'log_summary'->>'finalized' = 'true'
 							THEN '{"finalized": true}'::jsonb ELSE '{}'::jsonb END
-					|| `+logReasonKeepSQL(`runs.payload->'log_summary'->>'incomplete_reason'`, `EXCLUDED.payload->'log_summary'->>'incomplete_reason'`)+`)
-					- (CASE WHEN EXCLUDED.payload->'log_summary'->>'incomplete' = 'false'
+					|| `+logReasonKeepSQL(`runs.payload->'log_summary'->>'incomplete_reason'`, `EXCLUDED.payload->'log_summary'->>'incomplete_reason'`)+`
+					|| (CASE WHEN `+logReasonLossKeptSQL+`
+							THEN '{"incomplete": true}'::jsonb ELSE '{}'::jsonb END))
+					- (CASE WHEN EXCLUDED.payload->'log_summary'->>'incomplete' = 'false' AND NOT `+logReasonLossKeptSQL+`
 							THEN ARRAY['incomplete_reason'] ELSE ARRAY[]::text[] END))
 	`,
 		intent.runID, intent.createdAt, intent.intentKey, intent.cluster, intent.namespace,

@@ -89,21 +89,22 @@ See [Artifact credentials](artifact-credentials.md).
 
 ## Incomplete logs
 
-A log's manifest can report `incomplete` true with a short reason token:
+A log's manifest can report `incomplete` true with a reason token:
 
 | Token | Meaning |
 |---|---|
-| `plugin-drop` | The plugin discarded bytes at its own cap before the build finished. |
-| `terminal-response` | A chunk post ended on a permanent HTTP error before the build finished. |
+| `plugin-drop` | The plugin discarded bytes at its own cap. |
+| `terminal-response` | A chunk post ended on a permanent HTTP error. |
 | `jenkins-restart` | A Jenkins restart lost the completion; the boot reconcile rebuilt it. |
 | `rejected` | The gateway refused a chunk on the run-ownership check. |
-| `gateway-gap` | The gateway observed a sequence number it can never fill for the run. |
-| `finalize-deadline` | The finalization deadline passed with chunks still unstored. |
-| `not-finalized` | The recorder's sweep finalized a run that never produced a final chunk. |
-| `no-summary` | The run record carries no log summary. The read path still serves every stored chunk. |
+| `gateway-gap` | The gateway observed a sequence number it can never fill. |
+| `finalize-deadline` | The finalization deadline passed with chunks unstored. |
+| `not-finalized` | The recorder's sweep finalized a run that produced no final chunk. |
+| `no-summary` | The run record carries no log summary. The read path serves every stored chunk. |
 
 The record keeps the most precise reason: a plugin token, then `rejected` or `gateway-gap`, then
-the last three tokens. Inside one rank, the first reason stays.
+the last three tokens. Inside one rank, the first reason stays. A complete log clears only those
+three.
 
 ## Agent-namespace egress
 

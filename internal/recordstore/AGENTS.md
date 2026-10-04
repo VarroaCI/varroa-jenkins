@@ -1182,8 +1182,10 @@ of the fleet's audit activity, once a controller becomes disposable.
   `logReasonKeepSQL` last, so a stored reason stays unless the incoming one
   ranks higher, and the first reason wins inside one rank. `incomplete` is
   not merged by OR: the owner's real `run.log` must lower a provisional
-  mark's flag, and a `run.log` with `incomplete` false also removes the
-  stored reason. In jsonb SQL, `a || b->'k'` reads as `(a || b)->'k'`, and
+  mark's flag, and a `run.log` with `incomplete` false removes a stored
+  rank-1 reason. A stored reason of rank 2 or 3 (`logReasonLossRank`,
+  `logReasonLossKeptSQL`) records a loss, so it and its `incomplete` true
+  stay: a second completion of one run can claim a complete log. In jsonb SQL, `a || b->'k'` reads as `(a || b)->'k'`, and
   `a || b - 'k'` reads as `a || (b - 'k')`. Put each operand in
   parentheses, or the merge replaces or keeps the wrong object.
 - **Backstop cron scheduler and the interrupted sweep's round**

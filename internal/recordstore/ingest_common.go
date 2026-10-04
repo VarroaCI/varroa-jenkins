@@ -118,6 +118,18 @@ var logReasonRanks = []struct {
 	{"no-summary", 1},
 }
 
+// logReasonLossRank is the lowest rank whose reason records a loss a
+// writer observed: a plugin token or a gateway token. A later run.log that
+// reports incomplete false cannot undo such a loss, so the stored flag and
+// reason stay. A reason below this rank is a generic timeout or backstop
+// token, and a later complete log clears it.
+const logReasonLossRank = 2
+
+// logReasonLossKeptSQL matches a stored log summary that reports
+// incomplete true with a reason of logReasonLossRank or higher.
+var logReasonLossKeptSQL = `(runs.payload->'log_summary'->>'incomplete' = 'true' AND ` +
+	logReasonRankSQL(`runs.payload->'log_summary'->>'incomplete_reason'`) + ` >= ` + strconv.Itoa(logReasonLossRank) + `)`
+
 // logReasonRankSQL returns a SQL expression that answers the rank of the
 // reason expr. An absent, empty, or unknown reason answers 0.
 func logReasonRankSQL(expr string) string {

@@ -116,6 +116,22 @@ func TestLogReasonRanksCoverEveryToken(t *testing.T) {
 	}
 }
 
+// TestLogReasonLossRankKeepsOnlyObservedLosses asserts the loss boundary
+// splits the rank table at the plugin and gateway tokens: every token at
+// or above logReasonLossRank records an observed loss, and every token
+// below it is a generic timeout or backstop token.
+func TestLogReasonLossRankKeepsOnlyObservedLosses(t *testing.T) {
+	losses := map[string]bool{
+		"plugin-drop": true, "terminal-response": true, "jenkins-restart": true,
+		"rejected": true, "gateway-gap": true,
+	}
+	for _, r := range logReasonRanks {
+		if got := r.rank >= logReasonLossRank; got != losses[r.token] {
+			t.Fatalf("token %q at rank %d: kept against a complete log = %v, want %v", r.token, r.rank, got, losses[r.token])
+		}
+	}
+}
+
 // TestApplyRunLogMergesKeyByKey asserts a later run.log adds its own keys
 // and keeps every stored key it does not carry, such as the chunk count
 // of the completion's summary.
@@ -147,6 +163,81 @@ func TestApplyRunLogMergesKeyByKey(t *testing.T) {
 	if chunkCount != 4 || droppedBytes != 7 || !incomplete || !finalized || reason != "jenkins-restart" {
 		t.Fatalf("chunk_count=%d dropped_bytes=%d incomplete=%v finalized=%v reason=%q, want 4/7/true/true/jenkins-restart",
 			chunkCount, droppedBytes, incomplete, finalized, reason)
+	}
+}
+
+// applyCompletions applies each completion to a fresh running run as the
+// gateway publishes it: a run.log envelope, then a run.completed envelope.
+// It then applies the gateway's finalize-deadline marker, and answers the
+// stored incomplete flag and incomplete_reason.
+func applyCompletions(t *testing.T, summaries ...map[string]any) (bool, string) {
+	t.Helper()
+	pool, db := setupLedgerPool(t)
+	intentKey := "manual:" + newTestUUIDv7String()
+	runID := startRunForFinalize(t, pool, intentKey)
+	g := NewIngester(pool, nil, nil)
+	result := "FAILURE"
+	for _, s := range summaries {
+		for _, env := range []IngestEnvelope{
+			newTestEnvelope(t, runID, intentKey, KindRunLog, s),
+			newTestEnvelope(t, runID, intentKey, KindRunCompleted, RunCompletedPayload{Result: &result}),
+		} {
+			if _, err := g.Apply(context.Background(), env); err != nil {
+				t.Fatalf("apply %s %v: %v", env.Kind, s, err)
+			}
+		}
+	}
+	marker := newTestEnvelope(t, runID, intentKey, KindRunLog, incompleteWith("finalize-deadline"))
+	if _, err := g.Apply(context.Background(), marker); err != nil {
+		t.Fatalf("apply finalize-deadline marker: %v", err)
+	}
+	var incomplete sql.NullBool
+	var reason sql.NullString
+	if err := db.QueryRow(`
+		SELECT (payload->'log_summary'->>'incomplete')::bool, payload->'log_summary'->>'incomplete_reason'
+		FROM varroa.runs WHERE run_id = $1
+	`, runID).Scan(&incomplete, &reason); err != nil {
+		t.Fatalf("read log summary: %v", err)
+	}
+	return incomplete.Bool, reason.String
+}
+
+// TestTwoCompletionsKeepTheRestartReason asserts a run that reaches the
+// store with two completions keeps the boot reconcile's jenkins-restart
+// reason in both orders. The listener's completion reports a complete
+// log, and the gateway's finalize-deadline marker follows both.
+func TestTwoCompletionsKeepTheRestartReason(t *testing.T) {
+	boot := map[string]any{"incomplete": true, "incomplete_reason": "jenkins-restart", "finalized": false}
+	listener := map[string]any{"chunk_count": 6, "dropped_bytes": 0, "incomplete": false, "finalized": false}
+	cases := []struct {
+		name  string
+		order []map[string]any
+	}{
+		{"boot-then-listener", []map[string]any{boot, listener}},
+		{"listener-then-boot", []map[string]any{listener, boot}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			incomplete, reason := applyCompletions(t, c.order...)
+			assertLogReason(t, incomplete, reason, "jenkins-restart")
+		})
+	}
+}
+
+// TestApplyRunLogKeepsAGatewayReasonAgainstACompleteLog asserts a run.log
+// that reports incomplete false keeps a stored gateway reason and the
+// incomplete flag, because a later complete claim cannot undo a loss.
+func TestApplyRunLogKeepsAGatewayReasonAgainstACompleteLog(t *testing.T) {
+	incomplete, reason := applyLogSummaries(t, incompleteWith("gateway-gap"), map[string]any{"incomplete": false})
+	assertLogReason(t, incomplete, reason, "gateway-gap")
+}
+
+// TestApplyRunLogCompleteLogDropsAFinalizeDeadlineReason asserts a
+// run.log that reports incomplete false removes a stored generic reason.
+func TestApplyRunLogCompleteLogDropsAFinalizeDeadlineReason(t *testing.T) {
+	incomplete, reason := applyLogSummaries(t, incompleteWith("finalize-deadline"), map[string]any{"incomplete": false})
+	if incomplete || reason != "" {
+		t.Fatalf("incomplete=%v incomplete_reason=%q, want false and no reason", incomplete, reason)
 	}
 }
 
