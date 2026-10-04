@@ -3,8 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -326,5 +329,84 @@ func TestPipelinesRunFollow_EndToEnd(t *testing.T) {
 	code := run([]string{"run", "payments/checkout-api", "--follow", "--server", srv.URL})
 	if code == 0 {
 		t.Fatal("expected non-zero exit: the followed run finished with FAILURE")
+	}
+}
+
+// TestLogsFollowRun_ReconnectResumesWithoutRepeat drops the stream after
+// two lines. The reconnect must carry the resume cursor, and a line the
+// server sends again must not print twice.
+func TestLogsFollowRun_ReconnectResumesWithoutRepeat(t *testing.T) {
+	defer overrideSignalCtx()()
+	testSetup(t)
+	runID := uuid.Must(uuid.NewV7()).String()
+
+	var requests atomic.Int32
+	queries := make(chan string, 4)
+	srv := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		queries <- r.URL.RawQuery
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		if requests.Add(1) == 1 {
+			_, _ = fmt.Fprintf(w, "event: line\ndata: {\"n\":1,\"off\":0,\"text\":\"alpha\"}\n\n")
+			_, _ = fmt.Fprintf(w, "event: line\ndata: {\"n\":2,\"off\":6,\"text\":\"beta\"}\n\n")
+			flusher.Flush()
+			return
+		}
+		_, _ = fmt.Fprintf(w, "event: line\ndata: {\"n\":2,\"off\":6,\"text\":\"beta\"}\n\n")
+		_, _ = fmt.Fprintf(w, "event: gap\ndata: {\"seq\":3,\"off\":0}\n\n")
+		_, _ = fmt.Fprintf(w, "event: line\ndata: {\"n\":3,\"off\":11,\"text\":\"gamma\"}\n\n")
+		_, _ = fmt.Fprintf(w, "event: end\ndata: {\"result\":\"SUCCESS\",\"logComplete\":true}\n\n")
+		flusher.Flush()
+		<-r.Context().Done()
+	})
+	defer srv.Close()
+
+	old := os.Stdout
+	pr, pw, _ := os.Pipe()
+	os.Stdout = pw
+	code := run([]string{"logs", runID, "-f", "--server", srv.URL})
+	_ = pw.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(pr)
+
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	if got, want := string(out), "alpha\nbeta\ngamma\n"; got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+	close(queries)
+	var got []string
+	for q := range queries {
+		got = append(got, q)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 requests, got %d: %v", len(got), got)
+	}
+	if got[0] != "" {
+		t.Errorf("first request must carry no cursor, got %q", got[0])
+	}
+	if got[1] != "from=7&fromLine=3" {
+		t.Errorf("reconnect query = %q, want from=7&fromLine=3", got[1])
+	}
+}
+
+func TestRunLogWatermark_SkipsReplayedLineAtOrBelowWatermark(t *testing.T) {
+	var mark runLogWatermark
+	if got := mark.resumeURL("http://bff/api/v1/runs/r/log"); got != "" {
+		t.Errorf("resumeURL before any line = %q, want empty", got)
+	}
+	if !mark.accept(runLogLineEvent{N: 1, Off: 0}) {
+		t.Fatal("first line at offset 0 must print")
+	}
+	if !mark.accept(runLogLineEvent{N: 2, Off: 6}) {
+		t.Fatal("a line past the watermark must print")
+	}
+	if mark.accept(runLogLineEvent{N: 2, Off: 6}) || mark.accept(runLogLineEvent{N: 1, Off: 0}) {
+		t.Error("a line at or below the watermark must not print")
+	}
+	if got, want := mark.resumeURL("http://bff/api/v1/runs/r/log"), "http://bff/api/v1/runs/r/log?from=7&fromLine=3"; got != want {
+		t.Errorf("resumeURL = %q, want %q", got, want)
 	}
 }

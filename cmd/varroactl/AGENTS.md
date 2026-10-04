@@ -132,7 +132,11 @@ new capabilities are added to the BFF/OpenAPI spec first, then surfaced here.
   columns `BUILD RESULT BRANCH DURATION AGE`). `logs` gains a run form
   instead of a second command: a UUIDv7 argument names a run and everything
   else names a controller, one-shot by default, `-f`/`--follow` streams
-  either form until it ends. `run`/`builds` register as new top-level
+  either form until it ends. The run-log follow (`followRunLog`) keeps a
+  `runLogWatermark` from `line` events only, never from `gap` frames. It
+  reconnects through `stream.Config.ResumeURL` with
+  `from=<off+1>&fromLine=<n+1>`, and it skips a line at or below the
+  watermark. `run`/`builds` register as new top-level
   commands (`registerRootCommand`); the run form extends the existing
   `logs` command in place via `findCommand(root, "logs")`.
 - **`lint marker` (`lint.go`)** — `varroactl lint marker --team <team>

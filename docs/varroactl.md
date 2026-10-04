@@ -123,7 +123,7 @@ Selector-based brood operations can include `--clusters <names>` or `--clusters 
 
 Use `-o table`, `wide`, `json`, `yaml`, or `name`. Follow controller state with `watch`, `logs`, `events controller`, `mite`, or `activity`.
 
-`logs` also reads a pipeline run's log. Pass a controller argument (`NS/NAME`) or a run identifier (a UUIDv7). A run identifier holds no `/`, so the two forms never collide. Without `-f` the command prints the log once and exits. With `-f` it streams the log until the run ends:
+`logs` also reads a pipeline run's log. Pass a controller argument (`NS/NAME`) or a run identifier (a UUIDv7). A run identifier holds no `/`, so the two forms never collide. Without `-f` the command prints the log once and exits. With `-f` it streams the log until the run ends. After a reconnect, it continues after the last line it printed:
 
 ```bash
 varroactl logs 0192f0a1-1c2d-7abc-9def-0123456789ab -f

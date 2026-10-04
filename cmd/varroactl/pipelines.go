@@ -11,7 +11,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -362,9 +364,50 @@ type runEndEvent struct {
 	IncompleteReason string `json:"incompleteReason"`
 }
 
-// runLogLineEvent is one "line" event's payload (design D5).
+// runLogLineEvent is one "line" event's payload (design D5). N is the
+// line number and Off is the byte offset where the line starts.
 type runLogLineEvent struct {
+	N    int64  `json:"n"`
+	Off  int64  `json:"off"`
 	Text string `json:"text"`
+}
+
+// runLogWatermark records the last line the command printed. Only a
+// "line" event moves it. A "gap" event can name an offset below a line
+// the command already printed, so it must never move the watermark.
+type runLogWatermark struct {
+	seen bool
+	off  int64
+	n    int64
+}
+
+// accept reports whether line is new, and moves the watermark to it when
+// it is. A line at or below the watermark offset is a replay.
+func (w *runLogWatermark) accept(line runLogLineEvent) bool {
+	if w.seen && line.Off <= w.off {
+		return false
+	}
+	w.seen, w.off, w.n = true, line.Off, line.N
+	return true
+}
+
+// resumeURL answers base with the resume cursor the BFF reads: from is
+// one byte past the last printed line's start, so the server starts at
+// the next line, and fromLine is that next line's number. It answers ""
+// before the first line, which tells the stream to reuse base.
+func (w *runLogWatermark) resumeURL(base string) string {
+	if !w.seen {
+		return ""
+	}
+	u, err := url.Parse(base)
+	if err != nil {
+		return ""
+	}
+	q := u.Query()
+	q.Set("from", strconv.FormatInt(w.off+1, 10))
+	q.Set("fromLine", strconv.FormatInt(w.n+1, 10))
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // runRunLogsFollow is streamcmds.go's entry point for `logs RUN -f`.
@@ -393,11 +436,14 @@ func followRunLog(cmd *cobra.Command, runID string) error {
 
 	var end runEndEvent
 	var sawEnd bool
+	var mark runLogWatermark
+	baseURL := cfg.URL
+	cfg.ResumeURL = func() string { return mark.resumeURL(baseURL) }
 
 	streamErr := stream.Stream(ctx, cfg, func(e stream.Event) error {
 		switch e.Name {
 		case "line":
-			printRunLogLine(e)
+			printRunLogLine(e, &mark)
 		case "end":
 			_ = json.Unmarshal(e.Data, &end)
 			sawEnd = true
@@ -420,11 +466,15 @@ func followRunLog(cmd *cobra.Command, runID string) error {
 	return nil
 }
 
-// printRunLogLine renders a single "line" event's text.
-func printRunLogLine(e stream.Event) {
+// printRunLogLine renders a single "line" event's text. It skips a line
+// that mark reports as a replay.
+func printRunLogLine(e stream.Event, mark *runLogWatermark) {
 	var line runLogLineEvent
 	if err := json.Unmarshal(e.Data, &line); err != nil {
 		_, _ = fmt.Fprintln(os.Stdout, string(e.Data))
+		return
+	}
+	if !mark.accept(line) {
 		return
 	}
 	_, _ = fmt.Fprintln(os.Stdout, line.Text)

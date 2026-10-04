@@ -36,7 +36,8 @@ catalog.
 - `stream.go` — `Stream()` (reconnecting loop, exponential backoff via
   `BackoffConfig`/`DefaultBackoff`) and `ParseSSE()` (one-shot parser).
   `Config` carries URL, bearer token, UA, `OnConnect(reconnected bool)`,
-  backoff params. Used for every endpoint excluded from `gen.go` (activity,
+  backoff params, and `ResumeURL`. `Stream` calls `ResumeURL` before each
+  reconnect, never before the first attempt; an empty result selects `URL`. Used for every endpoint excluded from `gen.go` (activity,
   brood, controller events/mite, log-follow).
 
 ### `pkg/templates`
