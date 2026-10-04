@@ -54,7 +54,7 @@ class Varroa implements Serializable {
      * token}, all null with no lock held (D11), so no read throws.
      */
     def getLock() {
-        def current = org.jenkinsci.plugins.varroamiteauth.VarroaCrossTenantBridge.currentLockToken(script)
+        def current = org.jenkinsci.plugins.varroamiteauth.VarroaCrossTenantBridge.currentLockToken()
         return current != null ? current : [name: null, tenant: null, token: null]
     }
 }

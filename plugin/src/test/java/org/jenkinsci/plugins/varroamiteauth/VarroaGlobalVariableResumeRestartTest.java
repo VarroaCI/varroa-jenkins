@@ -1,5 +1,7 @@
 package org.jenkinsci.plugins.varroamiteauth;
 
+import static org.junit.Assert.assertEquals;
+
 import com.cloudbees.hudson.plugins.folder.Folder;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -13,6 +15,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import net.sf.json.JSONObject;
 
@@ -41,13 +45,18 @@ public class VarroaGlobalVariableResumeRestartTest {
 
     private HttpServer server;
 
+    /** The {@code caller_job_path} of every status request, in arrival order. */
+    private final List<String> statusCallers = new CopyOnWriteArrayList<>();
+
     @Before
     public void startRecorder() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/v1/cross-tenant/build",
                 ex -> respond(ex, "{\"run_id\":\"\",\"state\":\"pending\"}"));
-        server.createContext("/v1/cross-tenant/status",
-                ex -> respond(ex, "{\"run_id\":\"run-9\",\"state\":\"running\"}"));
+        server.createContext("/v1/cross-tenant/status", ex -> {
+            statusCallers.add(readBody(ex).getString("caller_job_path"));
+            respond(ex, "{\"run_id\":\"run-9\",\"state\":\"running\"}");
+        });
         server.createContext("/v1/cross-tenant/lock", VarroaGlobalVariableResumeRestartTest::lock);
         server.start();
         Path tokenFile = tmp.getRoot().toPath().resolve("token");
@@ -77,6 +86,7 @@ public class VarroaGlobalVariableResumeRestartTest {
             j.assertBuildStatus(Result.SUCCESS, run);
             j.assertLogNotContains("ClassNotFoundException", run);
             j.assertLogContains("after-sleep state=running runId=run-9", run);
+            assertEquals(List.of("alpha/deploy"), statusCallers);
         });
     }
 
@@ -116,15 +126,19 @@ public class VarroaGlobalVariableResumeRestartTest {
 
     /** Grants every acquire and confirms every renew under fence token 5. */
     private static void lock(HttpExchange exchange) throws java.io.IOException {
-        ByteArrayOutputStream buf = new ByteArrayOutputStream();
-        exchange.getRequestBody().transferTo(buf);
-        JSONObject req = JSONObject.fromObject(buf.toString(StandardCharsets.UTF_8));
+        JSONObject req = readBody(exchange);
         String kind = req.getString("kind");
         if ("lock_acquire".equals(kind) || "lock_renew".equals(kind)) {
             respond(exchange, "{\"state\":\"held\",\"fence_token\":5,\"tenant\":\"alpha\"}");
         } else {
             respond(exchange, "{\"state\":\"released\"}");
         }
+    }
+
+    private static JSONObject readBody(HttpExchange exchange) throws java.io.IOException {
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        exchange.getRequestBody().transferTo(buf);
+        return JSONObject.fromObject(buf.toString(StandardCharsets.UTF_8));
     }
 
     private static void respond(HttpExchange exchange, String json) throws java.io.IOException {

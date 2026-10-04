@@ -293,7 +293,10 @@ the root AGENTS.md greenfield rule.
   `lock.token` property (backed by `VarroaCrossTenantBridge.currentLockToken`, which is not
   on the sandbox allowlist); `VarroaRunHandle.groovy` is the returned run handle, plus
   `refresh()` (backed by `VarroaCrossTenantBridge.refresh`, since D1 lists no public status
-  step) and `copyArtifact` (calls the `varroaArtifact` step). `VarroaBuildStep.java`
+  step) and `copyArtifact` (calls the `varroaArtifact` step). The sandbox permits every
+  constructor of both classes, so a script can build a handle from any map. Both bridge
+  methods therefore resolve the run from `CpsThread.current()`, never from an argument, and
+  the handle holds no caller job path. `VarroaBuildStep.java`
   (`varroaBuild`) and `VarroaLockStep.java`'s waiting phase (`varroaLock`) hold no CPS
   thread while waiting: both reschedule themselves on `jenkins.util.Timer` between polls,
   on the shared cadence in `VarroaPollPolicy.java`. `VarroaLastSuccessfulStep.java` and

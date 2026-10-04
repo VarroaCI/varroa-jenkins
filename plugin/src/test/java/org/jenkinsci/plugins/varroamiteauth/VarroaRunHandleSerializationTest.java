@@ -38,7 +38,6 @@ public class VarroaRunHandleSerializationTest {
         handle.put("url", "http://varroa.test/run-42");
         handle.put("artifacts", List.of(Map.of("path", "out.jar")));
         handle.put("intentKey", "upstream:run-1:s1");
-        handle.put("callerJobPath", "alpha/caller");
 
         XStream2 xstream = new XStream2();
         String xml = xstream.toXML(handle);

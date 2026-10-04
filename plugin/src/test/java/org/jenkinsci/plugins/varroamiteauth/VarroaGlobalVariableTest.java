@@ -1,5 +1,8 @@
 package org.jenkinsci.plugins.varroamiteauth;
 
+import static org.junit.Assert.assertEquals;
+
+import com.cloudbees.hudson.plugins.folder.Folder;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
@@ -12,6 +15,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import net.sf.json.JSONObject;
@@ -74,9 +79,13 @@ public class VarroaGlobalVariableTest {
     }
 
     private static String requestKind(HttpExchange exchange) throws java.io.IOException {
+        return readBody(exchange).getString("kind");
+    }
+
+    private static JSONObject readBody(HttpExchange exchange) throws java.io.IOException {
         ByteArrayOutputStream buf = new ByteArrayOutputStream();
         exchange.getRequestBody().transferTo(buf);
-        return JSONObject.fromObject(buf.toString(StandardCharsets.UTF_8)).getString("kind");
+        return JSONObject.fromObject(buf.toString(StandardCharsets.UTF_8));
     }
 
     @Test
@@ -151,12 +160,71 @@ public class VarroaGlobalVariableTest {
     public void aSandboxedScriptCannotCallTheBridgeDirectly() throws Exception {
         WorkflowJob p = j.jenkins.createProject(WorkflowJob.class, "p-" + System.nanoTime());
         p.setDefinition(new CpsFlowDefinition(
-                "org.jenkinsci.plugins.varroamiteauth.VarroaCrossTenantBridge.currentLockToken(this)",
+                "org.jenkinsci.plugins.varroamiteauth.VarroaCrossTenantBridge.currentLockToken()",
                 true));
 
         WorkflowRun run = j.buildAndAssertStatus(Result.FAILURE, p);
 
         j.assertLogContains("Scripts not permitted to use staticMethod "
                 + "org.jenkinsci.plugins.varroamiteauth.VarroaCrossTenantBridge currentLockToken", run);
+
+        WorkflowJob q = j.jenkins.createProject(WorkflowJob.class, "q-" + System.nanoTime());
+        q.setDefinition(new CpsFlowDefinition(
+                "org.jenkinsci.plugins.varroamiteauth.VarroaCrossTenantBridge.refresh('beta', 'beta/deploy', 'run-x', '')",
+                true));
+
+        WorkflowRun refreshRun = j.buildAndAssertStatus(Result.FAILURE, q);
+
+        j.assertLogContains("Scripts not permitted to use staticMethod "
+                + "org.jenkinsci.plugins.varroamiteauth.VarroaCrossTenantBridge refresh", refreshRun);
+    }
+
+    @Test
+    public void aForgedHandleRefreshByRunIdNamesTheCallingJob() throws Exception {
+        assertForgedHandleNamesTheCallingJob("runId: 'run-x'", "run_id", "run-x");
+    }
+
+    @Test
+    public void aForgedHandleRefreshByIntentKeyNamesTheCallingJob() throws Exception {
+        assertForgedHandleNamesTheCallingJob("intentKey: 'upstream:run-y:s1'", "intent_key", "upstream:run-y:s1");
+    }
+
+    /**
+     * A sandboxed script builds a handle that names another tenant's job as
+     * its caller. Every request that refresh() sends must still name the
+     * script's own job: the status read, and the artifact list read that a
+     * completed reply causes.
+     */
+    private void assertForgedHandleNamesTheCallingJob(String idField, String idKey, String idValue)
+            throws Exception {
+        installClient();
+        List<JSONObject> requests = new CopyOnWriteArrayList<>();
+        server.createContext("/v1/cross-tenant/status", ex -> {
+            requests.add(readBody(ex));
+            respond(ex, "{\"run_id\":\"run-x\",\"state\":\"completed\",\"result\":\"SUCCESS\"}");
+        });
+        server.createContext("/v1/cross-tenant/artifact", ex -> {
+            requests.add(readBody(ex));
+            respond(ex, "{\"artifacts\":[]}");
+        });
+
+        Folder tenant = j.jenkins.createProject(Folder.class, "alpha");
+        WorkflowJob p = tenant.createProject(WorkflowJob.class, "caller");
+        p.setDefinition(new CpsFlowDefinition(
+                "def h = new varroa.VarroaRunHandle([callerJobPath: 'beta/victim', " + idField
+                        + ", tenant: 'beta', job: 'beta/deploy'], this)\n"
+                        + "echo(\"state=${h.refresh().state}\")\n",
+                true));
+
+        WorkflowRun run = j.buildAndAssertStatus(Result.SUCCESS, p);
+
+        j.assertLogContains("state=completed", run);
+        assertEquals(2, requests.size());
+        assertEquals("status", requests.get(0).getString("kind"));
+        assertEquals(idValue, requests.get(0).getString(idKey));
+        assertEquals("artifact_list", requests.get(1).getString("kind"));
+        for (JSONObject req : requests) {
+            assertEquals("alpha/caller", req.getString("caller_job_path"));
+        }
     }
 }

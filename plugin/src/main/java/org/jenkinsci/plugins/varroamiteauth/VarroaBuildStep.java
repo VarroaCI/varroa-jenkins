@@ -298,7 +298,6 @@ public class VarroaBuildStep extends Step {
             m.put("url", "");
             m.put("artifacts", List.of());
             m.put("intentKey", intentKey);
-            m.put("callerJobPath", callerJobPath);
             return m;
         }
 

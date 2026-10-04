@@ -22,8 +22,6 @@ class VarroaRunHandle implements Serializable {
     final List artifacts
     final String intentKey
 
-    /** The calling run's own job path: needed to re-read the record, never a public property. */
-    private final String callerJobPath
     private final script
 
     VarroaRunHandle(Map fields, script) {
@@ -38,14 +36,17 @@ class VarroaRunHandle implements Serializable {
         this.url = fields.url ?: ''
         this.artifacts = fields.artifacts ?: []
         this.intentKey = fields.intentKey ?: ''
-        this.callerJobPath = fields.callerJobPath ?: ''
         this.script = script
     }
 
-    /** Re-reads the record and returns a new handle (D1). */
+    /**
+     * Re-reads the record and returns a new handle (D1). The bridge names
+     * the running pipeline's own job as the caller: a script can build a
+     * handle from any map, so the handle holds no caller identity.
+     */
     def refresh() {
         def raw = org.jenkinsci.plugins.varroamiteauth.VarroaCrossTenantBridge.refresh(
-                callerJobPath, tenant, job, runId, intentKey)
+                tenant, job, runId, intentKey)
         return new VarroaRunHandle(raw, script)
     }
 

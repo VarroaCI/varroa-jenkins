@@ -37,7 +37,9 @@ final class VarroaCrossTenantOps {
      * Builds a run-handle map (D1's handle properties) from a {@code
      * build} or {@code status} reply. Fetches the artifact list once more
      * when the state is {@code completed}, because a run only carries
-     * artifacts once it has finished.
+     * artifacts once it has finished. {@code callerJobPath} names the
+     * caller of that fetch only: the map never carries it, because a
+     * script can build a handle from any map.
      */
     static Map<String, Object> handleMap(VarroaCrossTenantReply reply, String tenant, String job,
             String callerJobPath, String intentKey) {
@@ -71,7 +73,6 @@ final class VarroaCrossTenantOps {
         m.put("url", reply.getString("url", ""));
         m.put("artifacts", "completed".equals(state) ? artifactList(callerJobPath, runId) : List.of());
         m.put("intentKey", intentKey != null ? intentKey : "");
-        m.put("callerJobPath", callerJobPath != null ? callerJobPath : "");
         return m;
     }
 
