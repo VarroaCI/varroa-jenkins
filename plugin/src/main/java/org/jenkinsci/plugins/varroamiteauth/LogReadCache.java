@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -50,6 +51,12 @@ final class LogReadCache implements LogChunkBuffer.ChunkCache {
 
     private static final String TOMBSTONE_NAME = ".tombstone";
     private static final String CHUNK_SUFFIX = ".chunk";
+    private static final char FIELD_SEPARATOR = '~';
+    private static final String ACCEPTED_NAME = ".accepted";
+    private static final String ACCEPTED_TEMP_NAME = ".accepted.tmp";
+    private static final String FINAL_NAME = ".final";
+    private static final String DROPPED_NAME = ".dropped";
+    private static final String DROPPED_TEMP_NAME = ".dropped.tmp";
 
     private final Path baseDir;
     private final long perRunCapBytes;
@@ -79,18 +86,23 @@ final class LogReadCache implements LogChunkBuffer.ChunkCache {
         Object lock = lockFor(chunk.runId);
         synchronized (lock) {
             if (isTombstonedLocked(chunk.runId)) {
+                addDroppedLocked(chunk.runId, chunk.droppedBytes);
                 return;
             }
             long newTotal = runBytes.getOrDefault(chunk.runId, 0L) + chunk.data.length;
             if (newTotal > perRunCapBytes) {
                 tombstoneLocked(chunk.runId);
+                addDroppedLocked(chunk.runId, chunk.droppedBytes);
                 return;
             }
             try {
                 Path dir = runDir(chunk.runId);
                 Files.createDirectories(dir);
-                Path file = dir.resolve(fileName(chunk.seq, chunk.nodeId));
+                Path file = dir.resolve(fileName(chunk));
                 Files.write(file, chunk.data);
+                if (chunk.isFinal) {
+                    Files.write(dir.resolve(FINAL_NAME), new byte[0]);
+                }
                 runBytes.put(chunk.runId, newTotal);
                 totalBytes.addAndGet(chunk.data.length);
                 lastTouchedMillis.put(chunk.runId, clock.getAsLong());
@@ -100,6 +112,125 @@ final class LogReadCache implements LogChunkBuffer.ChunkCache {
             }
         }
         maybeEvictTotal();
+    }
+
+    /**
+     * Records that the mite resolved every chunk of {@code runId} up to
+     * and including {@code seq}. The value goes to one small file in the
+     * run's directory, written to a temporary file and then renamed, so a
+     * crash leaves the old value or the new value, never a partial one.
+     */
+    @Override
+    public void recordResolved(String runId, long seq) {
+        Object lock = lockFor(runId);
+        synchronized (lock) {
+            try {
+                Path dir = runDir(runId);
+                writeLongFileLocked(dir.resolve(ACCEPTED_TEMP_NAME), dir.resolve(ACCEPTED_NAME), seq);
+            } catch (IOException e) {
+                LOGGER.log(Level.WARNING, "LogReadCache: failed to record the resolved seq=" + seq
+                        + " for run " + runId, e);
+            }
+        }
+    }
+
+    /**
+     * Returns where a new buffer for {@code runId} continues: the next
+     * {@code seq} and the cached chunks to post again first. A run with
+     * no directory starts at 0. A run whose cache holds the final chunk
+     * replays nothing, because that run already ended.
+     *
+     * <p>The gateway ignores a chunk at or below the sequence it already
+     * stored, and it indexes only an unbroken run of sequences. So the
+     * next {@code seq} is above every cached and every resolved chunk,
+     * and the replay starts at the first chunk the mite did not resolve.
+     */
+    ResumePoint resumePoint(String runId, String jobPath, long buildNumber) {
+        Object lock = lockFor(runId);
+        synchronized (lock) {
+            Path dir = runDir(runId);
+            if (!Files.isDirectory(dir)) {
+                return ResumePoint.FRESH;
+            }
+            long resolved = readLongFileLocked(dir.resolve(ACCEPTED_NAME), -1L);
+            if (isTombstonedLocked(runId)) {
+                // No chunk file is left to post again. The gateway cannot
+                // fill a hole, and every chunk above a hole stays unread, so
+                // the run continues at the watermark. The sender keeps one
+                // post in flight per build, so at most one new chunk can
+                // land on a seq the mite already stored.
+                return new ResumePoint(resolved + 1, List.of(), readLongFileLocked(dir.resolve(DROPPED_NAME), 0L));
+            }
+            long highest = resolved;
+            long dropped = 0L;
+            List<Path> pending = new ArrayList<>();
+            for (Path file : listChunkFilesLocked(dir)) {
+                ParsedName parsed = parseName(file.getFileName().toString());
+                if (parsed == null) {
+                    continue;
+                }
+                highest = Math.max(highest, parsed.seq);
+                dropped += parsed.droppedBytes;
+                if (parsed.seq > resolved) {
+                    pending.add(file);
+                }
+            }
+            if (Files.exists(dir.resolve(FINAL_NAME))) {
+                return new ResumePoint(highest + 1, List.of(), dropped);
+            }
+            List<LogChunk> replay = new ArrayList<>();
+            for (Path file : pending) {
+                ParsedName parsed = parseName(file.getFileName().toString());
+                try {
+                    byte[] data = Files.readAllBytes(file);
+                    replay.add(new LogChunk(runId, jobPath, buildNumber, parsed.seq, parsed.nodeId, parsed.stageId,
+                            data, parsed.firstLineUnixMs, parsed.droppedBytes, false));
+                } catch (IOException e) {
+                    LOGGER.log(Level.WARNING, "LogReadCache: failed to read " + file + " for a replay", e);
+                }
+            }
+            return new ResumePoint(highest + 1, replay, dropped);
+        }
+    }
+
+    /** The number in {@code file}, or {@code absent} when the file is missing or unreadable. Caller holds the run's lock. */
+    private static long readLongFileLocked(Path file, long absent) {
+        if (!Files.isRegularFile(file)) {
+            return absent;
+        }
+        try {
+            String raw = new String(Files.readAllBytes(file), StandardCharsets.US_ASCII).trim();
+            return Math.max(absent, Long.parseLong(raw));
+        } catch (IOException | NumberFormatException e) {
+            LOGGER.log(Level.WARNING, "LogReadCache: failed to read " + file, e);
+            return absent;
+        }
+    }
+
+    /** Writes {@code value} to {@code target} through a temporary file and a rename. Caller holds the run's lock. */
+    private static void writeLongFileLocked(Path temp, Path target, long value) throws IOException {
+        Files.createDirectories(target.getParent());
+        Files.write(temp, Long.toString(value).getBytes(StandardCharsets.US_ASCII));
+        Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+    }
+
+    /**
+     * Adds {@code bytes} to a tombstoned run's dropped total. The tombstone
+     * deletes the chunk files whose names carry the dropped counts, so this
+     * file is the only drop record a resume can still read. Caller holds
+     * the run's lock.
+     */
+    private void addDroppedLocked(String runId, long bytes) {
+        if (bytes <= 0) {
+            return;
+        }
+        Path dir = runDir(runId);
+        try {
+            long total = readLongFileLocked(dir.resolve(DROPPED_NAME), 0L) + bytes;
+            writeLongFileLocked(dir.resolve(DROPPED_TEMP_NAME), dir.resolve(DROPPED_NAME), total);
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "LogReadCache: failed to record the dropped bytes of run " + runId, e);
+        }
     }
 
     /** Returns the whole run's cached bytes in {@code seq} order, or the pointer text when absent. */
@@ -171,9 +302,31 @@ final class LogReadCache implements LogChunkBuffer.ChunkCache {
         return Files.exists(runDir(runId).resolve(TOMBSTONE_NAME));
     }
 
-    /** Writes the tombstone first, then deletes every chunk file. Caller holds the run's lock. */
+    /**
+     * Records the dropped total of the run's chunk files, writes the
+     * tombstone, then deletes every chunk file. Caller holds the run's lock.
+     */
     private void tombstoneLocked(String runId) {
         Path dir = runDir(runId);
+        long dropped = 0L;
+        if (Files.isDirectory(dir)) {
+            for (Path file : listChunkFilesLocked(dir)) {
+                ParsedName parsed = parseName(file.getFileName().toString());
+                if (parsed != null) {
+                    dropped += parsed.droppedBytes;
+                }
+            }
+        }
+        // Only a tombstone writes this file before the run is tombstoned, so
+        // a set, not an add, keeps a retry after a crash exact.
+        try {
+            writeLongFileLocked(dir.resolve(DROPPED_TEMP_NAME), dir.resolve(DROPPED_NAME), dropped);
+        } catch (IOException e) {
+            // The chunk names are the only other drop record, so keep them.
+            LOGGER.log(Level.WARNING, "LogReadCache: failed to record the dropped bytes of run " + runId
+                    + "; the run is not tombstoned", e);
+            return;
+        }
         try {
             Files.createDirectories(dir);
             Files.write(dir.resolve(TOMBSTONE_NAME), new byte[0]);
@@ -298,9 +451,19 @@ final class LogReadCache implements LogChunkBuffer.ChunkCache {
         return baseDir.resolve(runId);
     }
 
-    private static String fileName(long seq, String nodeId) {
-        String encoded = URLEncoder.encode(nodeId != null ? nodeId : "", StandardCharsets.UTF_8);
-        return String.format(Locale.ROOT, "%020d-%s%s", seq, encoded, CHUNK_SUFFIX);
+    /**
+     * The chunk file name: {@code <seq>-<nodeId>~<stageId>~<droppedBytes>~<firstLineUnixMs>.chunk}.
+     * The name carries every field a replay must post again. {@link URLEncoder}
+     * encodes a {@code ~} in an id, so the separator never occurs inside a field.
+     */
+    private static String fileName(LogChunk chunk) {
+        return String.format(Locale.ROOT, "%020d-%s%c%s%c%d%c%d%s", chunk.seq, encode(chunk.nodeId), FIELD_SEPARATOR,
+                encode(chunk.stageId), FIELD_SEPARATOR, chunk.droppedBytes, FIELD_SEPARATOR, chunk.firstLineUnixMs,
+                CHUNK_SUFFIX);
+    }
+
+    private static String encode(String value) {
+        return URLEncoder.encode(value != null ? value : "", StandardCharsets.UTF_8);
     }
 
     private static ParsedName parseName(String name) {
@@ -308,8 +471,19 @@ final class LogReadCache implements LogChunkBuffer.ChunkCache {
         if (dash < 0 || !name.endsWith(CHUNK_SUFFIX)) {
             return null;
         }
-        String nodeIdEncoded = name.substring(dash + 1, name.length() - CHUNK_SUFFIX.length());
-        return new ParsedName(URLDecoder.decode(nodeIdEncoded, StandardCharsets.UTF_8));
+        String[] fields = name.substring(dash + 1, name.length() - CHUNK_SUFFIX.length())
+                .split(String.valueOf(FIELD_SEPARATOR), -1);
+        if (fields.length != 4) {
+            return null;
+        }
+        try {
+            return new ParsedName(Long.parseLong(name.substring(0, dash)),
+                    URLDecoder.decode(fields[0], StandardCharsets.UTF_8),
+                    URLDecoder.decode(fields[1], StandardCharsets.UTF_8),
+                    Long.parseLong(fields[2]), Long.parseLong(fields[3]));
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     /** Total cached bytes across every run. Package-private for testing. */
@@ -340,10 +514,36 @@ final class LogReadCache implements LogChunkBuffer.ChunkCache {
     }
 
     private static final class ParsedName {
+        final long seq;
         final String nodeId;
+        final String stageId;
+        final long droppedBytes;
+        final long firstLineUnixMs;
 
-        ParsedName(String nodeId) {
+        ParsedName(long seq, String nodeId, String stageId, long droppedBytes, long firstLineUnixMs) {
+            this.seq = seq;
             this.nodeId = nodeId;
+            this.stageId = stageId;
+            this.droppedBytes = droppedBytes;
+            this.firstLineUnixMs = firstLineUnixMs;
+        }
+    }
+
+    /**
+     * Where a new buffer continues a run: the next {@code seq}, the cached
+     * chunks to post first, and the bytes the earlier JVM already dropped.
+     */
+    static final class ResumePoint {
+        static final ResumePoint FRESH = new ResumePoint(0L, List.of(), 0L);
+
+        final long nextSeq;
+        final List<LogChunk> replay;
+        final long droppedBytes;
+
+        ResumePoint(long nextSeq, List<LogChunk> replay, long droppedBytes) {
+            this.nextSeq = nextSeq;
+            this.replay = List.copyOf(replay);
+            this.droppedBytes = droppedBytes;
         }
     }
 }

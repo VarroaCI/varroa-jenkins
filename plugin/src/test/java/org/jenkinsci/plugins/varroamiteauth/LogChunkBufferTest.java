@@ -275,6 +275,135 @@ public class LogChunkBufferTest {
         assertEquals(0, LogChunkBuffer.stuckQueueWarningCount());
     }
 
+    // ---- Resume after a JVM restart ----
+
+    private final List<Long> resolved = new CopyOnWriteArrayList<>();
+
+    private LogChunkBuffer.ChunkCache watermarkCache() {
+        return new LogChunkBuffer.ChunkCache() {
+            @Override
+            public void write(LogChunk chunk) {
+                cached.add(chunk);
+            }
+
+            @Override
+            public void recordResolved(String runId, long seq) {
+                resolved.add(seq);
+            }
+        };
+    }
+
+    private LogChunkBuffer resumedBuffer(LogReadCache.ResumePoint resume) {
+        return new LogChunkBuffer("run-1", "folder/job", 7, sender, watermarkCache(),
+                1_000_000, 1_000_000, () -> 1_000, clockMillis::get, resume);
+    }
+
+    private static LogChunk cachedChunk(long seq, String text) {
+        return new LogChunk("run-1", "folder/job", 7, seq, "", "", bytes(text), 1L, 0L, false);
+    }
+
+    @Test
+    public void aResumedBufferContinuesAtTheResumeSeq() {
+        LogChunkBuffer buffer = resumedBuffer(new LogReadCache.ResumePoint(5L, List.of(), 0L));
+        buffer.append("", "", bytes("Resuming build"), 0, 14);
+        LogSummary summary = buffer.finish();
+
+        assertEquals(2, posted.size());
+        assertEquals(5L, posted.get(0).seq);
+        assertEquals(6L, posted.get(1).seq);
+        assertTrue(posted.get(1).isFinal);
+        assertEquals("chunk_count is the final seq plus 1", 7L, summary.getChunkCount());
+    }
+
+    @Test
+    public void aResumedBufferKeepsTheEarlierDropsInItsSummary() {
+        LogChunkBuffer buffer = resumedBuffer(new LogReadCache.ResumePoint(2L, List.of(), 40L));
+        LogSummary summary = buffer.finish();
+
+        assertEquals(40L, summary.getDroppedBytes());
+        assertTrue(summary.isIncomplete());
+        assertEquals(LogSummary.REASON_PLUGIN_DROP, summary.getIncompleteReason());
+    }
+
+    @Test
+    public void replayChunksArePostedBeforeNewChunks() {
+        LogChunkBuffer buffer = resumedBuffer(new LogReadCache.ResumePoint(4L,
+                List.of(cachedChunk(2, "two"), cachedChunk(3, "three")), 0L));
+        buffer.append("", "", bytes("new"), 0, 3);
+        buffer.finish();
+
+        assertEquals(4, posted.size());
+        assertEquals(2L, posted.get(0).seq);
+        assertEquals("two", new String(posted.get(0).data, StandardCharsets.UTF_8));
+        assertEquals(3L, posted.get(1).seq);
+        assertEquals(4L, posted.get(2).seq);
+        assertEquals("new", new String(posted.get(2).data, StandardCharsets.UTF_8));
+        assertEquals(5L, posted.get(3).seq);
+    }
+
+    @Test
+    public void replayChunksAreNotWrittenToTheCacheAgain() {
+        LogChunkBuffer buffer = resumedBuffer(new LogReadCache.ResumePoint(3L, List.of(cachedChunk(2, "two")), 0L));
+        buffer.finish();
+
+        for (LogChunk c : cached) {
+            assertTrue("only the new final chunk reaches the cache", c.isFinal);
+        }
+    }
+
+    @Test
+    public void anAcceptedReplayChunkReleasesItsBytes() {
+        LogChunkBuffer buffer = resumedBuffer(new LogReadCache.ResumePoint(3L, List.of(cachedChunk(2, "two")), 0L));
+        assertEquals(0L, LogChunkBuffer.globalOutstandingForTesting());
+        buffer.finish();
+        assertEquals(0L, LogChunkBuffer.globalOutstandingForTesting());
+    }
+
+    @Test
+    public void everyResolvedChunkRecordsTheWatermark() {
+        LogChunkBuffer buffer = resumedBuffer(new LogReadCache.ResumePoint(3L, List.of(cachedChunk(2, "two")), 0L));
+        buffer.append("", "", bytes("abc"), 0, 3);
+        buffer.finish();
+
+        assertEquals(List.of(2L, 3L, 4L), resolved);
+    }
+
+    @Test
+    public void shutdownFlushesTheOpenSegmentAndDropsLaterWrites() {
+        LogChunkBuffer buffer = newBuffer(1_000_000, 1_000_000, 1_000_000);
+        buffer.append("", "", bytes("Pausing (shutting down)"), 0, 23);
+        assertEquals(0, posted.size());
+
+        LogChunkBuffer.flushAndDetachAll();
+
+        assertTrue(buffer.isDetachedForTesting());
+        assertEquals(1, posted.size());
+        assertEquals(1, cached.size());
+        assertEquals("Pausing (shutting down)", new String(cached.get(0).data, StandardCharsets.UTF_8));
+
+        buffer.append("", "", bytes("late"), 0, 4);
+        clockMillis.addAndGet(LogChunkBuffer.DEFAULT_FLUSH_MS + 1);
+        buffer.tickForTesting(clockMillis.get());
+        assertEquals("a write after the shutdown flush takes no seq", 1, cached.size());
+    }
+
+    @Test
+    public void shutdownRecordsAPendingDropWithNoBufferedBytes() {
+        LogChunkSender stuck = new LogChunkSender("http://127.0.0.1:9095/v1/log", new LoopbackTokenFile(),
+                (url, chunk, token, timeout) -> new LogChunkSender.Attempt(503, -1, false),
+                ms -> { throw new InterruptedException("stop"); }, neverRunsExecutor());
+        LogChunkBuffer buffer = new LogChunkBuffer("run-drop", "folder/job", 1, stuck, recordingCache(),
+                4, 1_000_000, () -> 4, clockMillis::get);
+        buffer.append("", "", bytes("abcd"), 0, 4); // closes at the 4-byte chunk cap and fills the build cap
+        buffer.append("", "", bytes("EFG"), 0, 3); // dropped: the open segment stays empty
+
+        LogChunkBuffer.flushAndDetachAll();
+
+        assertEquals(2, cached.size());
+        assertEquals(0, cached.get(1).data.length);
+        assertEquals(3L, cached.get(1).droppedBytes);
+    }
+
     @Test
     public void aStaleOpenSegmentClosesOnTheTimeTrigger() {
         LogChunkBuffer buffer = newBuffer(1_000_000, 1_000_000, 1_000_000);

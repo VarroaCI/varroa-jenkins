@@ -388,7 +388,27 @@ the root AGENTS.md greenfield rule.
   before it reaches `LogChunkBuffer.java` (ordered chunks, a per-build cap,
   node-id splitting). `LogChunkSender.java` posts each build's chunks one at
   a time to the mite loopback with a jittered backoff. `LogReadCache.java`
-  serves `overallLog`/`stepLog` reads back from disk. `TailEndpoint.java` is
+  serves `overallLog`/`stepLog` reads back from disk.
+  **A resumed build continues its log `seq`; it never starts again at 0.** The
+  gateway ignores a chunk at or below the `seq` it already stored. A restart at 0
+  loses the first chunks after the resume, the `Resuming build` line and the lines
+  each step writes in `onResume`. When the resumed part writes few chunks, the gateway
+  also ignores the final chunk, and the log stays incomplete. The read cache keeps
+  each run's resolved watermark in `<runId>/.accepted` (the highest `seq` the mite
+  answered `202`, `400`, or `413`, written by temporary file and rename) and a
+  `.final` marker. `LogReadCache.resumePoint` gives a building run the next `seq`
+  above every cached and resolved chunk, and the cached chunks above the watermark.
+  A chunk file name, `<seq>-<nodeId>~<stageId>~<droppedBytes>~<firstLineUnixMs>.chunk`,
+  carries every field a replay posts. `LogChunkBuffer` posts those chunks again
+  before any new chunk, and it seeds its dropped-byte total from every cached chunk.
+  A tombstone deletes the chunk files, so it first moves their dropped total into
+  `<runId>/.dropped`, and later drops of that run add to it. The gateway
+  indexes only an unbroken run of `seq`s, so the replay starts at or below the first
+  chunk the mite did not resolve. `VarroaLogStorageFactory.flushOnShutdown`
+  (`@Terminator` after `FlowExecutionList.EXECUTIONS_SUSPENDED`) writes every open
+  segment to the cache and detaches each buffer, so the pause line survives and a
+  later write takes no `seq`. A build that moves to another cell has no cache there
+  and still starts at 0. `TailEndpoint.java` is
   the `@Extension RootAction` at `/varroa-log/tail`, requiring
   `ROLE:varroa:system-mite`; its request body is `{"runId", "jobPath",
   "buildNumber", "action", "leaseSeconds"}` in camelCase, the shape the
@@ -554,8 +574,9 @@ the root AGENTS.md greenfield rule.
   arms a window per flow node, and a build that resumes inside one long step
   fires none, so this process would otherwise replicate nothing for the whole
   step and a second loss would resume from the dead process's copy.
-  `VarroaLogStorageFactory` needs no change: it resolves the run from
-  the same persisted action.
+  `VarroaLogStorageFactory` resolves the run from the same persisted action, and
+  it continues the run's log `seq` from the read cache (see the log storage
+  bullet).
 - **Run-state replication** (the pipeline mesh's plugin half):
   `RunStatePusher.java` holds one instance per run, armed by
   `VarroaRunRecorder.Graph.onNewHead` and by `Flows`'s own resume attach, and

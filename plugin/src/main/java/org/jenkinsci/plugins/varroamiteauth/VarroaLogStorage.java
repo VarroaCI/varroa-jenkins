@@ -34,12 +34,13 @@ final class VarroaLogStorage implements LogStorage {
     private final LogReadCache cache;
     private final ConcurrentHashMap<String, String> stageIdCache = new ConcurrentHashMap<>();
 
-    VarroaLogStorage(String runId, String jobPath, long buildNumber, LogChunkSender sender, LogReadCache cache) {
+    VarroaLogStorage(String runId, String jobPath, long buildNumber, LogChunkSender sender, LogReadCache cache,
+            LogReadCache.ResumePoint resume) {
         this.runId = runId;
         this.jobPath = jobPath;
         this.buildNumber = buildNumber;
         this.cache = cache;
-        this.buffer = new LogChunkBuffer(runId, jobPath, buildNumber, sender, cache);
+        this.buffer = new LogChunkBuffer(runId, jobPath, buildNumber, sender, cache, resume);
     }
 
     @Override

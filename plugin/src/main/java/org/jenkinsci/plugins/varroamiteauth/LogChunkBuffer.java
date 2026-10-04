@@ -93,6 +93,9 @@ final class LogChunkBuffer implements LogChunkSender.Owner {
     private long openStartedAtMillis;
 
     private long seq;
+
+    /** Highest {@code seq} already recorded as resolved in the cache. Only the sender's worker for this build writes it. */
+    private volatile long resolvedSeq = -1L;
     private long pendingDropped;
     private long totalDropped;
     private long buildOutstandingBytes;
@@ -103,21 +106,42 @@ final class LogChunkBuffer implements LogChunkSender.Owner {
     private boolean stuckWarned;
 
     private volatile boolean closed;
+    private volatile boolean detached;
     private volatile boolean tailActive;
     private boolean capDropped;
     private boolean terminalResponse;
     private LogSummary finishedSummary;
 
-    LogChunkBuffer(String runId, String jobPath, long buildNumber, LogChunkSender sender, ChunkCache cache) {
+    LogChunkBuffer(String runId, String jobPath, long buildNumber, LogChunkSender sender, ChunkCache cache,
+            LogReadCache.ResumePoint resume) {
         this(runId, jobPath, buildNumber, sender, cache, readLongEnv("VARROA_LOG_BUILD_BUFFER_BYTES", DEFAULT_BUILD_BUFFER_BYTES),
                 readLongEnv("VARROA_LOG_TOTAL_BUFFER_BYTES", DEFAULT_TOTAL_BUFFER_BYTES),
-                LogChunkSender::currentChunkCapBytes, System::currentTimeMillis);
+                LogChunkSender::currentChunkCapBytes, System::currentTimeMillis, resume);
     }
 
-    /** Package-private constructor for testing: injects every cap and the clock. */
+    /** Package-private constructor for testing: injects every cap and the clock, and starts at {@code seq} 0. */
     LogChunkBuffer(String runId, String jobPath, long buildNumber, LogChunkSender sender, ChunkCache cache,
             long buildCapBytes, long totalCapBytes, java.util.function.LongSupplier chunkCapBytes,
             java.util.function.LongSupplier clock) {
+        this(runId, jobPath, buildNumber, sender, cache, buildCapBytes, totalCapBytes, chunkCapBytes, clock,
+                LogReadCache.ResumePoint.FRESH);
+    }
+
+    /**
+     * Package-private constructor for testing: injects every cap, the
+     * clock, and the resume point.
+     *
+     * <p>A new JVM must not start a resumed build at {@code seq} 0. The
+     * gateway ignores a chunk at or below the sequence it already stored,
+     * so the first chunks after the resume would never reach the stored
+     * log. The buffer therefore continues at {@code resume.nextSeq}, and it
+     * posts {@code resume.replay} before any new chunk. The gateway indexes
+     * only an unbroken run of sequences, so the replay must start at or
+     * below the first chunk the mite did not accept.
+     */
+    LogChunkBuffer(String runId, String jobPath, long buildNumber, LogChunkSender sender, ChunkCache cache,
+            long buildCapBytes, long totalCapBytes, java.util.function.LongSupplier chunkCapBytes,
+            java.util.function.LongSupplier clock, LogReadCache.ResumePoint resume) {
         this.runId = runId;
         this.jobPath = jobPath;
         this.buildNumber = buildNumber;
@@ -128,9 +152,23 @@ final class LogChunkBuffer implements LogChunkSender.Owner {
         this.chunkCapBytes = chunkCapBytes;
         this.clock = clock;
         this.openStartedAtMillis = clock.getAsLong();
+        this.seq = resume.nextSeq;
+        // The summary of a resumed build must still report what the
+        // earlier JVM dropped, or a truncated log reads as complete.
+        this.totalDropped = resume.droppedBytes;
+        this.capDropped = resume.droppedBytes > 0;
         ACTIVE.add(this);
         LIVE_RUN_IDS.add(runId);
         ensureTicker();
+        synchronized (lock) {
+            for (LogChunk chunk : resume.replay) {
+                int bytes = chunk.accountedBytes();
+                buildOutstandingBytes += bytes;
+                GLOBAL_OUTSTANDING_BYTES.addAndGet(bytes);
+                chunksInFlight++;
+                sender.enqueue(this, chunk);
+            }
+        }
     }
 
     /** Switches the flush interval. {@link TailEndpoint} and its lease expiry call this. */
@@ -148,7 +186,7 @@ final class LogChunkBuffer implements LogChunkSender.Owner {
             return;
         }
         synchronized (lock) {
-            if (closed) {
+            if (closed || detached) {
                 return;
             }
             String n = nodeId != null ? nodeId : "";
@@ -242,6 +280,39 @@ final class LogChunkBuffer implements LogChunkSender.Owner {
         }
     }
 
+    /**
+     * Closes the open segment of every live buffer and stops each one
+     * from taking more bytes. Jenkins calls this at shutdown, after it
+     * pauses every build, so the pause line reaches the read cache and the
+     * next JVM posts it again. A later write in this JVM would take a
+     * {@code seq} that the next JVM also assigns, so it is discarded.
+     */
+    static void flushAndDetachAll() {
+        for (LogChunkBuffer buffer : ACTIVE) {
+            buffer.flushAndDetach();
+        }
+    }
+
+    private void flushAndDetach() {
+        synchronized (lock) {
+            if (closed || detached) {
+                return;
+            }
+            // A segment that holds only a dropped-byte count still closes,
+            // so the next JVM can read the drop from the cache.
+            if ((openNodeId != null && openData.size() > 0) || pendingDropped > 0) {
+                closeSegmentLocked(false);
+            }
+            detached = true;
+            ACTIVE.remove(this);
+        }
+    }
+
+    /** {@code true} once {@link #flushAndDetachAll()} has detached this buffer. Package-private for testing. */
+    boolean isDetachedForTesting() {
+        return detached;
+    }
+
     /** {@code true} once {@link #finish()} has run. */
     boolean isClosed() {
         return closed;
@@ -284,7 +355,7 @@ final class LogChunkBuffer implements LogChunkSender.Owner {
 
     private void tick(long nowMillis) {
         synchronized (lock) {
-            if (closed || openNodeId == null) {
+            if (closed || detached || openNodeId == null) {
                 return;
             }
             long interval = tailActive
@@ -315,6 +386,16 @@ final class LogChunkBuffer implements LogChunkSender.Owner {
     }
 
     private void release(LogChunk chunk) {
+        if (chunk.seq > resolvedSeq) {
+            // The sender resolves one chunk of a build at a time, in seq
+            // order, so this chunk's seq is also the build's watermark.
+            resolvedSeq = chunk.seq;
+            try {
+                cache.recordResolved(runId, chunk.seq);
+            } catch (Exception e) {
+                LOGGER.log(Level.WARNING, "LogChunkBuffer: failed to record the resolved seq for run " + runId, e);
+            }
+        }
         int bytes = chunk.accountedBytes();
         boolean drained;
         synchronized (lock) {
@@ -447,5 +528,9 @@ final class LogChunkBuffer implements LogChunkSender.Owner {
     /** Sink for a finished chunk, written before the chunk enters the sender queue. */
     interface ChunkCache {
         void write(LogChunk chunk);
+
+        /** Records that the mite resolved every chunk of {@code runId} up to and including {@code seq}. */
+        default void recordResolved(String runId, long seq) {
+        }
     }
 }

@@ -30,6 +30,8 @@ bytes, and it counts every byte it drops.
 If the mite process restarts, its retained buffer is lost. The gateway detects the resulting
 sequence gap and marks the run's log incomplete. See [Incomplete logs](#incomplete-logs) below.
 
+After a Jenkins restart, a resumed build continues its sequence from the plugin's local log cache.
+
 ## Live tail
 
 A viewer of a running build gets a live tail, not a poll:

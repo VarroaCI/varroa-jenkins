@@ -2,6 +2,7 @@ package org.jenkinsci.plugins.varroamiteauth;
 
 import hudson.Extension;
 import hudson.ExtensionList;
+import hudson.init.Terminator;
 import hudson.model.Queue;
 import hudson.model.Run;
 
@@ -11,6 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import org.jenkinsci.plugins.workflow.flow.FlowExecutionList;
 import org.jenkinsci.plugins.workflow.flow.FlowExecutionOwner;
 import org.jenkinsci.plugins.workflow.log.LogStorage;
 import org.jenkinsci.plugins.workflow.log.LogStorageFactory;
@@ -28,6 +30,8 @@ public class VarroaLogStorageFactory implements LogStorageFactory {
     private static final Logger LOGGER = Logger.getLogger(VarroaLogStorageFactory.class.getName());
 
     static final String LOG_URL_ENV = "VARROA_MITE_LOG_URL";
+
+    private static final long JVM_START_MILLIS = java.lang.management.ManagementFactory.getRuntimeMXBean().getStartTime();
 
     /**
      * Overrides {@link #activationUrl()} in a test, where the process
@@ -84,13 +88,37 @@ public class VarroaLogStorageFactory implements LogStorageFactory {
             long buildNumber = run.getNumber();
 
             VarroaLogStorage storage = runIdToStorage.computeIfAbsent(runId,
-                    id -> new VarroaLogStorage(id, jobPath, buildNumber, sender(url), readCache()));
+                    id -> newStorage(run, id, jobPath, buildNumber, url));
             ownerUrlToRunId.putIfAbsent(ownerUrl, runId);
             return storage;
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "VarroaLogStorageFactory: forBuild failed, falling back to FileLogStorage", e);
             return null;
         }
+    }
+
+    /**
+     * Builds the run's storage at the point where this run's cached log
+     * ends. A build that resumes in a new JVM continues its {@code seq}
+     * from the read cache on disk, because the gateway ignores a chunk at
+     * or below a sequence it already stored. A build that started before
+     * this JVM and has no cached chunk can only start at 0, so its first
+     * chunks after the resume can miss the stored log.
+     */
+    private VarroaLogStorage newStorage(Run<?, ?> run, String runId, String jobPath, long buildNumber, String url) {
+        LogReadCache cache = readCache();
+        // A finished build only reads its log, so it continues nothing.
+        LogReadCache.ResumePoint resume = run.isBuilding()
+                ? cache.resumePoint(runId, jobPath, buildNumber)
+                : LogReadCache.ResumePoint.FRESH;
+        if (resume.nextSeq > 0) {
+            LOGGER.log(Level.INFO, "VarroaLogStorageFactory: run {0} continues its log at seq {1} and posts {2} cached chunk(s) again",
+                    new Object[] {runId, resume.nextSeq, resume.replay.size()});
+        } else if (run.isBuilding() && run.getStartTimeInMillis() > 0 && run.getStartTimeInMillis() < JVM_START_MILLIS) {
+            LOGGER.log(Level.WARNING, "VarroaLogStorageFactory: run {0} started before this JVM and has no cached log;"
+                    + " it starts its log at seq 0", runId);
+        }
+        return new VarroaLogStorage(runId, jobPath, buildNumber, sender(url), cache, resume);
     }
 
     /**
@@ -116,6 +144,16 @@ public class VarroaLogStorageFactory implements LogStorageFactory {
         }
         storage.setTailActive(active);
         return true;
+    }
+
+    /**
+     * Writes every build's open log segment to the read cache when Jenkins
+     * stops. It runs after Jenkins pauses every build, so the pause line
+     * is part of the segment.
+     */
+    @Terminator(requires = FlowExecutionList.EXECUTIONS_SUSPENDED)
+    public static void flushOnShutdown() {
+        LogChunkBuffer.flushAndDetachAll();
     }
 
     /** Clears every cached entry. Package-private for testing. */
