@@ -8,14 +8,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// setupLedgerPool prepares a fresh schema through setupTestDB, then opens
-// a pgxpool.Pool over the same DSN for the ledger under test. It returns
+// setupLedgerPool prepares a fresh database through setupTestDBDSN, then
+// opens a pgxpool.Pool over that database for the ledger under test. It returns
 // both so a test can assert on rows through db while exercising the
 // ledger through pool.
 func setupLedgerPool(t *testing.T) (*pgxpool.Pool, *sql.DB) {
 	t.Helper()
-	db := setupTestDB(t)
-	dsn := requireTestDSN(t)
+	db, dsn := setupTestDBDSN(t)
 
 	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {

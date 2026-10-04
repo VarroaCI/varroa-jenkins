@@ -34,7 +34,7 @@ func migrateTo(t *testing.T, db *sql.DB, version int64) {
 // first sweep after the upgrade marks the whole fleet interrupted. This test
 // is the guard on that outcome.
 func TestMigrationBackfillsTheReceiveStampForALiveRun(t *testing.T) {
-	dsn := requireTestDSN(t)
+	dsn := emptyTestDB(t)
 	ctx := context.Background()
 
 	db, err := sql.Open("pgx", dsn)
@@ -43,9 +43,6 @@ func TestMigrationBackfillsTheReceiveStampForALiveRun(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	if _, err := db.ExecContext(ctx, "DROP SCHEMA IF EXISTS varroa CASCADE"); err != nil {
-		t.Fatalf("drop schema varroa: %v", err)
-	}
 	if _, err := db.ExecContext(ctx, "CREATE SCHEMA varroa"); err != nil {
 		t.Fatalf("create schema varroa: %v", err)
 	}
@@ -98,7 +95,7 @@ func TestMigrationBackfillsTheReceiveStampForALiveRun(t *testing.T) {
 // owner_tenant from the first segment of each stored lock name. Every row
 // that exists before the migration belongs to a cell tenant.
 func TestMigrationBackfillsTheFleetLockOwner(t *testing.T) {
-	dsn := requireTestDSN(t)
+	dsn := emptyTestDB(t)
 	ctx := context.Background()
 
 	db, err := sql.Open("pgx", dsn)
@@ -107,9 +104,6 @@ func TestMigrationBackfillsTheFleetLockOwner(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	if _, err := db.ExecContext(ctx, "DROP SCHEMA IF EXISTS varroa CASCADE"); err != nil {
-		t.Fatalf("drop schema varroa: %v", err)
-	}
 	if _, err := db.ExecContext(ctx, "CREATE SCHEMA varroa"); err != nil {
 		t.Fatalf("create schema varroa: %v", err)
 	}

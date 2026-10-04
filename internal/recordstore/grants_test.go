@@ -120,9 +120,8 @@ func TestEnsureGrantsIdempotent(t *testing.T) {
 // UPDATE nor DELETE is ever granted, on the parent or by default: the
 // recorder stays the record tables' only writer of those verbs.
 func TestEnsureGrantsGatewayRole(t *testing.T) {
-	db := setupTestDB(t)
+	db, dsn := setupTestDBDSN(t)
 	ctx := context.Background()
-	dsn := requireTestDSN(t)
 
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {

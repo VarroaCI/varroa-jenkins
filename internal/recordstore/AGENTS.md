@@ -238,10 +238,10 @@ of the fleet's audit activity, once a controller becomes disposable.
 - **`VARROA_TEST_DSN` harness** (`testutil_test.go`) — a test that needs a
   live database reads this environment variable and calls `t.Skip` when it
   is unset, so `make test` stays green with no database present. Each such
-  test drops and recreates schema `varroa` during setup, so a repeated run
-  starts clean. The `blob` test binary runs at the same time and owns a
-  sibling database, `<db>_blob`, that it creates on first use; no other
-  test binary may share the DSN's database with this harness. Seed a
+  test gets its own database, cloned from a migrated template (see
+  Verification), so a repeated run starts clean. The `blob` test binary runs
+  at the same time and owns a sibling database, `<db>_blob`, that it creates
+  on first use. Seed a
   monthly-partitioned table only inside the window its migration creates
   (`00001` for `runs` and `log_chunks`, `00002` for `activity`). That
   window runs from the previous month to two months ahead of the clock.
@@ -1372,12 +1372,28 @@ VARROA_TEST_DSN='postgres://user:pass@host:port/db?sslmode=disable' \
 go test -race -count=1 ./internal/recordstore/...   # DSN unset: tests skip
 ```
 
-The DSN must be a URL and its role must hold `CREATEDB`: the `blob` test
+The DSN must be a URL and its role must hold `CREATEDB`. The `blob` test
 binary creates and uses `<db>_blob`, so the two packages run at the same
 time without `-p 1`.
 
-The package runs about 7 minutes with a live DSN. Under runner contention it can
-run longer than Go's default 10-minute test timeout. The `Record store` job in
+The package tests do not use the DSN's own database for a migrated schema.
+`testutil_test.go` owns these databases:
+
+- `<db>_tmpl`: the binary drops it, creates it, and migrates it once per run.
+- `<db>_t<pid>_<n>`: `setupTestDB` and `setupTestDBDSN` clone one from the
+  template for each test. `emptyTestDB` creates one from `template0` for a
+  migration test. A cleanup drops each one `WITH (FORCE)`.
+- At start, the binary drops each `<db>_t<pid>_<n>` that has no session.
+
+A test that opens its own pool uses the DSN that `setupTestDBDSN` returns.
+Each run recreates the template. A session advisory lock on the template
+name makes a second `recordstore` test binary on the same DSN wait until the
+first exits. The wait stops one minute before the binary's own `-timeout`. The `blob` binary does not take this
+lock: two `blob` binaries on one DSN share `<db>_blob`.
+
+The package runs about 4 minutes on a workstation with a live DSN. The
+`Record store` job runs it in about twice that time. Under runner contention
+it can run longer than Go's default 10-minute test timeout. The job in
 `.github/workflows/pr.yaml` sets `-timeout 30m` for this reason. Keep the
 flag on every command that runs `./internal/recordstore/...` with a live DSN.
 

@@ -369,8 +369,7 @@ func (c *countingTracer) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQuer
 // TestCellUsageManyRunsOneStatement asserts the batch read answers eight
 // cells with the schema check plus one aggregate statement.
 func TestCellUsageManyRunsOneStatement(t *testing.T) {
-	db := setupTestDB(t)
-	dsn := requireTestDSN(t)
+	db, dsn := setupTestDBDSN(t)
 
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {

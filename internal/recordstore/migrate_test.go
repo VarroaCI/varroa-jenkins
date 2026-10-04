@@ -11,7 +11,7 @@ import (
 // empty database both succeed, and that exactly one of them applies
 // migration 1.
 func TestRunMigrationsConcurrent(t *testing.T) {
-	dsn := requireTestDSN(t)
+	dsn := emptyTestDB(t)
 	ctx := context.Background()
 
 	admin, err := sql.Open("pgx", dsn)
@@ -21,10 +21,6 @@ func TestRunMigrationsConcurrent(t *testing.T) {
 	t.Cleanup(func() {
 		_ = admin.Close()
 	})
-	if _, err := admin.ExecContext(ctx, "DROP SCHEMA IF EXISTS varroa CASCADE"); err != nil {
-		t.Fatalf("drop schema varroa: %v", err)
-	}
-
 	const runners = 2
 	errs := make([]error, runners)
 	var wg sync.WaitGroup

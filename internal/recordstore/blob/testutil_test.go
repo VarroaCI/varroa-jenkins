@@ -43,9 +43,9 @@ var (
 
 // blobTestDSN returns a DSN for this binary's own database, named after
 // the DSN's database plus blobDatabaseSuffix. It creates the database
-// when it is absent. The parent package's tests drop and recreate schema
+// when it is absent. Other test binaries drop and recreate schema
 // "varroa" in the DSN's database throughout their run, and go test runs
-// the two test binaries at the same time, so a blob test that shared that
+// the test binaries at the same time, so a blob test that shared that
 // database would lose its tables mid-test. The DSN must be a URL
 // (postgres://...), the form every documented invocation uses, and its
 // role must hold CREATEDB.
