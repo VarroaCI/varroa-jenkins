@@ -474,10 +474,17 @@ public final class VarroaRunRecorder {
 
     // --- Sink and spool (D11) ---
 
-    private static void emit(BuildEvent event) {
+    /**
+     * Offers the event to the sink, and spools it when the sink is full.
+     * Returns false when the event reached neither the sink nor the spool.
+     */
+    private static boolean emit(BuildEvent event) {
         BuildEventSink sink = BuildEventSink.get();
         boolean accepted = sink.offer(event);
-        if (!accepted && !event.isHeartbeat()) {
+        if (!accepted && event.isHeartbeat()) {
+            return false;
+        }
+        if (!accepted) {
             // The sink is full. Move every event of this same run still
             // waiting in the sink into the spool first, in the order the
             // sink held them, before spooling this one. Without this
@@ -487,12 +494,14 @@ public final class VarroaRunRecorder {
             for (BuildEvent queued : sink.drainRun(event.getRunId())) {
                 SPOOL.append(queued.getRunId(), queued);
             }
-            SPOOL.append(event.getRunId(), event);
+            boolean spooled = SPOOL.append(event.getRunId(), event);
             BuildEventDispatcher dispatcher = VarroaBuildEventLifecycle.current();
             if (dispatcher != null) {
                 dispatcher.noteSpooled(event.getRunId());
             }
+            return spooled;
         }
+        return true;
     }
 
     /** Applies the D11 caps and the oversize ladder, then emits the result, unless it was dropped. */
@@ -734,6 +743,31 @@ public final class VarroaRunRecorder {
                 if (state != null) {
                     emitUnresolvedPodTemplates(run, state);
                 }
+                boolean failedLoad = FailedProgramLoad.matches(run);
+                if (failedLoad) {
+                    // The build did no work in this process. Its completion
+                    // is the boot reconcile's event, from whichever caller
+                    // claims it first.
+                    RunJournal.Entry entry = journalEntryOf(action, runId);
+                    List<String> claimIds = claimIdsOf(run, entry != null ? entry.runId : runId);
+                    if (!FailedProgramLoad.claim(claimIds)) {
+                        finishLogStorage(runId);
+                        LOGGER.log(Level.FINE, () -> "VarroaRunRecorder.Runs: the boot reconcile already ended "
+                                + jobPath + "#" + buildNumber);
+                        return;
+                    }
+                    if (entry != null) {
+                        finishLogStorage(runId);
+                        BuildEvent event = bootCompletedEvent(entry, run, System.currentTimeMillis());
+                        if (event == null || !emit(event)) {
+                            // The size caps dropped the event, or the spool
+                            // refused it, so this process holds nothing to
+                            // send. The boot reconcile can still send its own.
+                            FailedProgramLoad.release(claimIds);
+                        }
+                        return;
+                    }
+                }
                 // A completion with no live state still orders after every
                 // earlier event of the run, so it stamps the wall clock and
                 // not a fresh counter.
@@ -773,7 +807,8 @@ public final class VarroaRunRecorder {
                         b.testReport(VarroaTestReport.reportPointer(artifacts, reportSize, testCases.size()));
                     }
                 }
-                b.logSummary(finishLogStorage(runId));
+                LogSummary logSummary = finishLogStorage(runId);
+                b.logSummary(failedLoad ? restartLogSummary() : logSummary);
                 applyTemplateFields(b, run);
                 // The completion reads the run's own action and never the
                 // cached value, so a run that lost its heartbeat still
@@ -851,8 +886,10 @@ public final class VarroaRunRecorder {
      * <p>{@code run} is the loaded build, or {@code null} when the build
      * does not load. A loaded build reports its loaded result and its own
      * metadata. A missing build reports {@code ABORTED} and the journal's
-     * identity alone. A build that recorded no duration ends at the
-     * entry's last-seen time, never before its start.
+     * identity alone. A build that recorded no duration, or whose program
+     * did not load, ends at the entry's last-seen time, never before its
+     * start. The run listener also sends this event for a build whose
+     * program did not load, when it claims the completion first.
      *
      * <p>The log summary always reports {@code incomplete} with the reason
      * {@link LogSummary#REASON_JENKINS_RESTART}: the process that counted
@@ -882,7 +919,9 @@ public final class VarroaRunRecorder {
                 b.summary(summaryAction.getSummary());
             }
             startedAt = run.getStartTimeInMillis();
-            recordedDuration = run.getDuration() > 0;
+            // finish() sets the duration of a build whose program did not
+            // load, but that build did no work in this process.
+            recordedDuration = run.getDuration() > 0 && !FailedProgramLoad.matches(run);
             if (run.getResult() == null) {
                 b.result(Result.ABORTED.toString());
             }
@@ -895,11 +934,43 @@ public final class VarroaRunRecorder {
             b.durationMillis(endedAt - startedAt);
             b.completedAtMillis(endedAt);
         }
-        b.logSummary(LogSummary.builder()
+        b.logSummary(restartLogSummary());
+        return applyCaps(b.build());
+    }
+
+    private static LogSummary restartLogSummary() {
+        return LogSummary.builder()
                 .incomplete(true)
                 .incompleteReason(LogSummary.REASON_JENKINS_RESTART)
-                .build());
-        return applyCaps(b.build());
+                .build();
+    }
+
+    /**
+     * Returns the journal entry of a run, read under the run ids the entry
+     * can carry, or {@code null} when none is present.
+     */
+    private static RunJournal.Entry journalEntryOf(VarroaIntentAction action, String runId) {
+        RunJournal.Entry entry = JOURNAL.read(runId);
+        if (entry == null && !runId.equals(action.getRunId())) {
+            entry = JOURNAL.read(action.getRunId());
+        }
+        return entry;
+    }
+
+    /**
+     * Returns every run id a run can carry, plus {@code extraRunId}: the
+     * ids under which the boot reconcile and the run listener claim the
+     * completion of a build whose program did not load.
+     */
+    static List<String> claimIdsOf(Run<?, ?> run, String extraRunId) {
+        List<String> ids = new ArrayList<>();
+        ids.add(extraRunId);
+        VarroaIntentAction action = run.getAction(VarroaIntentAction.class);
+        if (action != null && !action.getRunId().isEmpty()) {
+            ids.add(action.getRunId());
+            ids.add(resolveRunId(action));
+        }
+        return ids;
     }
 
     static String resolveRunId(VarroaIntentAction action) {

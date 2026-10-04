@@ -200,6 +200,15 @@ the root AGENTS.md greenfield rule.
   (`RunSpool.append` returns false) keeps the entry. It carries the loaded result, or
   `ABORTED` for a missing build, and a log summary with `incomplete` and `jenkins-restart`.
   The gateway stamps `cell_instance`, so a container restart in the same pod is the owner.
+  A pipeline build whose program does not load also fires `Runs.onCompleted` about one
+  second after the load. `FailedProgramLoad.java` matches such a build: it started before
+  this boot, and its single head is a `FlowEndNode` whose `ErrorAction` holds workflow-cps's
+  `AbortException("Failed to load program")` (`VarroaFailedLoadRestartTest` pins the literal).
+  The boot reconcile and the listener each call `FailedProgramLoad.claim` under every run id
+  the build carries; only the winner sends `COMPLETED`. The listener sends the boot event
+  shape (`bootCompletedEvent`), so either order ends the build at the journal's last-seen time
+  with `jenkins-restart`. A lost claim skips only the event; the listener still closes the log
+  storage. Either side releases the claim when the caps drop its event or the spool refuses it.
 - **Claim gate** (admits a queue item and claims a run id before dispatch, with no I/O
   under the Jenkins queue lock): `VarroaQueueDecisionHandler.java`
   (`Queue.QueueDecisionHandler`, stamps `VarroaIntentAction.java`), `IntentKey.java`

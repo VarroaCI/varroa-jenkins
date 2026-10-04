@@ -109,6 +109,22 @@ final class RunJournal {
     }
 
     /**
+     * Returns the entry of one run, or {@code null} when none is present
+     * or the file does not parse. A file that does not parse is deleted
+     * with a warning.
+     */
+    Entry read(String runId) {
+        if (!isValidRunId(runId)) {
+            return null;
+        }
+        Path file = baseDir().resolve(runId + FILE_SUFFIX);
+        if (!Files.isRegularFile(file)) {
+            return null;
+        }
+        return readEntry(file);
+    }
+
+    /**
      * Returns every readable entry, in file-name order. A file that does
      * not parse is deleted with a warning, because no later read can
      * repair it.

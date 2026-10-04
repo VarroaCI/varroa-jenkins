@@ -94,7 +94,7 @@ A log's manifest can report `incomplete` true with a reason token:
 |---|---|
 | `plugin-drop` | The plugin discarded bytes at its own cap. |
 | `terminal-response` | A chunk post ended on a permanent HTTP error. |
-| `jenkins-restart` | A Jenkins restart lost the completion; the boot reconcile rebuilt it. |
+| `jenkins-restart` | A Jenkins restart ended the build; the plugin rebuilt its completion. |
 | `rejected` | The gateway refused a chunk on the run-ownership check. |
 | `gateway-gap` | The gateway observed a sequence number it can never fill. |
 | `finalize-deadline` | The finalization deadline passed with chunks unstored. |

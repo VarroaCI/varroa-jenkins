@@ -52,6 +52,25 @@ public class RunJournalTest {
     }
 
     @Test
+    public void readReturnsTheEntryOfOneRun() {
+        String runId = Uuid7.next();
+        journal.write(entry(runId));
+        journal.write(entry(Uuid7.next()));
+
+        RunJournal.Entry read = journal.read(runId);
+        assertNotNull(read);
+        assertEquals(runId, read.runId);
+        assertEquals("team/job", read.jobPath);
+        assertTrue(read.lastSeenMillis > 0);
+    }
+
+    @Test
+    public void readAnswersNullForAMissingRun() {
+        assertNull(journal.read(Uuid7.next()));
+        assertNull("an id that is not a UUID names no file", journal.read("../escape"));
+    }
+
+    @Test
     public void writeIsAtomicNoTmpLeft() throws Exception {
         journal.write(entry(Uuid7.next()));
         journal.write(entry(Uuid7.next()));

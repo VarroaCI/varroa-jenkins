@@ -9,6 +9,7 @@ import hudson.security.ACLContext;
 
 import jenkins.model.Jenkins;
 
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -29,6 +30,10 @@ import java.util.logging.Logger;
  * to the run's spool before it deletes the entry, so a stop between the
  * two steps loses no event. A second boot then finds the spooled event
  * and sends no second one.
+ *
+ * <p>A pipeline build whose program does not load also gets a run
+ * listener completion. {@link FailedProgramLoad#claim} lets only one of
+ * the two send its event.
  */
 public final class VarroaBootReconcile {
 
@@ -40,12 +45,19 @@ public final class VarroaBootReconcile {
      */
     static final long ENTRY_MAX_AGE_MILLIS = TimeUnit.DAYS.toMillis(7);
 
+    /** Set by a test to stop the boot initializer, so the run listener ends a build first. */
+    private static volatile boolean skipAtBootForTesting;
+
     private VarroaBootReconcile() {
+    }
+
+    static void setSkipAtBootForTesting(boolean skip) {
+        skipAtBootForTesting = skip;
     }
 
     @Initializer(after = InitMilestone.JOB_CONFIG_ADAPTED)
     public static void reconcileAtBoot() {
-        if (!VarroaRunRecorder.gateEnabled()) {
+        if (!VarroaRunRecorder.gateEnabled() || skipAtBootForTesting) {
             return;
         }
         try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
@@ -100,11 +112,25 @@ public final class VarroaBootReconcile {
             journal.remove(entry.runId);
             return false;
         }
+        // A build whose program did not load gets a second completion from
+        // the run listener about one second after the load. The claim
+        // comes before the event is built, so only one of the two sends.
+        List<String> claimIds = List.of();
+        if (run != null && FailedProgramLoad.matches(run)) {
+            claimIds = VarroaRunRecorder.claimIdsOf(run, entry.runId);
+            if (!FailedProgramLoad.claim(claimIds)) {
+                LOGGER.log(Level.INFO, () -> "VarroaBootReconcile: the run listener already ended the build "
+                        + entry.jobPath + "#" + entry.buildNumber + " of run " + entry.runId + "; keeping its entry");
+                return false;
+            }
+        }
         BuildEvent event = VarroaRunRecorder.bootCompletedEvent(entry, run, nowMillis);
         if (event != null) {
             if (!spool.append(entry.runId, event)) {
                 // The entry is the only record of the lost run. It stays,
-                // so the next boot tries again.
+                // so the next boot tries again. The run listener can now
+                // send the completion of a build whose program did not load.
+                FailedProgramLoad.release(claimIds);
                 LOGGER.log(Level.WARNING, () -> "VarroaBootReconcile: failed to spool the completion of run "
                         + entry.runId + "; keeping its entry");
                 return false;
@@ -116,6 +142,10 @@ public final class VarroaBootReconcile {
             PluginCounters.increment(PluginCounters.RUNS_RECONCILED_AT_BOOT);
             LOGGER.log(Level.INFO, () -> "VarroaBootReconcile: ended the lost build " + entry.jobPath + "#"
                     + entry.buildNumber + " of run " + entry.runId + " with result " + event.getResult());
+        } else {
+            // The size caps dropped the event, so this boot sent nothing.
+            // The run listener can still send its own completion.
+            FailedProgramLoad.release(claimIds);
         }
         journal.remove(entry.runId);
         return event != null;
