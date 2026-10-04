@@ -8,6 +8,9 @@ import hudson.model.Run;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -30,6 +33,13 @@ public class VarroaLogStorageFactory implements LogStorageFactory {
     private static final Logger LOGGER = Logger.getLogger(VarroaLogStorageFactory.class.getName());
 
     static final String LOG_URL_ENV = "VARROA_MITE_LOG_URL";
+
+    /**
+     * The file in a build directory that names the next log {@code seq}
+     * of a build that moved to this cell. The mite writes it before the
+     * build loads, and it must use the same name.
+     */
+    static final String LOG_NEXT_SEQ_FILE = "varroa-log-next-seq";
 
     private static final long JVM_START_MILLIS = java.lang.management.ManagementFactory.getRuntimeMXBean().getStartTime();
 
@@ -102,15 +112,19 @@ public class VarroaLogStorageFactory implements LogStorageFactory {
      * ends. A build that resumes in a new JVM continues its {@code seq}
      * from the read cache on disk, because the gateway ignores a chunk at
      * or below a sequence it already stored. A build that started before
-     * this JVM and has no cached chunk can only start at 0, so its first
-     * chunks after the resume can miss the stored log.
+     * this JVM and has no cached chunk continues from the value the mite
+     * wrote into its build directory when the build moved to this cell.
+     * With neither, it can only start at 0, so its first chunks after the
+     * resume can miss the stored log.
      */
     private VarroaLogStorage newStorage(Run<?, ?> run, String runId, String jobPath, long buildNumber, String url) {
         LogReadCache cache = readCache();
         // A finished build only reads its log, so it continues nothing.
-        LogReadCache.ResumePoint resume = run.isBuilding()
-                ? cache.resumePoint(runId, jobPath, buildNumber)
-                : LogReadCache.ResumePoint.FRESH;
+        LogReadCache.ResumePoint resume = LogReadCache.ResumePoint.FRESH;
+        if (run.isBuilding()) {
+            seedFromMove(run, runId, cache);
+            resume = cache.resumePoint(runId, jobPath, buildNumber);
+        }
         if (resume.nextSeq > 0) {
             LOGGER.log(Level.INFO, "VarroaLogStorageFactory: run {0} continues its log at seq {1} and posts {2} cached chunk(s) again",
                     new Object[] {runId, resume.nextSeq, resume.replay.size()});
@@ -119,6 +133,32 @@ public class VarroaLogStorageFactory implements LogStorageFactory {
                     + " it starts its log at seq 0", runId);
         }
         return new VarroaLogStorage(runId, jobPath, buildNumber, sender(url), cache, resume);
+    }
+
+    /**
+     * Seeds the read cache from the {@link #LOG_NEXT_SEQ_FILE} file of a
+     * build that moved to this cell. The seed only raises the watermark, so
+     * a later restart in the same pod reads the file again and changes
+     * nothing. A missing or unreadable file seeds nothing.
+     */
+    static void seedFromMove(Run<?, ?> run, String runId, LogReadCache cache) {
+        Path file = run.getRootDir().toPath().resolve(LOG_NEXT_SEQ_FILE);
+        if (!Files.isRegularFile(file)) {
+            return;
+        }
+        long next;
+        try {
+            next = Long.parseLong(new String(Files.readAllBytes(file), StandardCharsets.US_ASCII).trim());
+        } catch (IOException | NumberFormatException e) {
+            LOGGER.log(Level.WARNING, "VarroaLogStorageFactory: failed to read " + file + " for run " + runId, e);
+            return;
+        }
+        if (next <= 0) {
+            return;
+        }
+        LOGGER.log(Level.INFO, "VarroaLogStorageFactory: run {0} moved to this cell and continues its log at seq {1} or above",
+                new Object[] {runId, next});
+        cache.seedResolved(runId, next - 1);
     }
 
     /**

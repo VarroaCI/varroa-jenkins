@@ -297,6 +297,11 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   the generation, so each fetch sets `RunStateRequest.pusher_epoch` and
   `RunStateRequest.state_gen`, and the gateway reads that exact object. A
   path alone names nothing.
+  A `log_next_seq` above 0 is written to `varroa-log-next-seq` in the
+  restored build directory before the reload, so every load path finds it.
+  The plugin reads the same file name. A failed write is logged and does
+  not fail the command, because a resumed build with a short log is worth
+  more than a build that never resumes.
   A node's own `config.xml` is never overwritten, and a `409` from the
   adopt route counts as success for that file. Each fetch is retried
   three times with a doubling wait, bounded by the command's own

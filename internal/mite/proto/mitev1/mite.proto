@@ -674,6 +674,10 @@ message ResumeBuildPayload {
   string instance = 5;
   int64 deadline_unix = 6;
   repeated ResumeStateFile state_files = 7;
+  // log_next_seq is the next console log sequence that the gateway
+  // accepts for the run. The target holds no copy of the log, so the
+  // build continues its log at this value. 0 means no value.
+  int64 log_next_seq = 8;
 }
 
 message MiteMessage {

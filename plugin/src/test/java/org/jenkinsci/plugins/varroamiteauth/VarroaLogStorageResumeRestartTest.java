@@ -10,11 +10,15 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Stream;
 
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
@@ -92,6 +96,56 @@ public class VarroaLogStorageResumeRestartTest {
             assertTrue("the sequence must have no hole at " + seq, mite.bySeq.containsKey(seq));
         }
         assertEquals(finalSeq + 1, mite.bySeq.size());
+    }
+
+    /**
+     * Models a move to another cell: between the two boots the read cache
+     * is gone, and the build directory holds the value the mite writes.
+     * The resume line must take that value, not 0.
+     */
+    @Test
+    public void aMovedBuildContinuesFromTheHintFile() throws Throwable {
+        sessions.then(j -> {
+            WorkflowJob p = j.jenkins.createProject(WorkflowJob.class, "resume-log");
+            p.setDefinition(new CpsFlowDefinition(SCRIPT, true));
+            WorkflowRun run = (WorkflowRun) p.scheduleBuild2(0,
+                    new VarroaIntentAction(RUN_ID, "", null, System.currentTimeMillis())).waitForStart();
+            j.waitForMessage("Sleeping for", run);
+            awaitChunkContaining("Sleeping for");
+        });
+        long hint = mite.highestSeq.get() + 10;
+        Path home = sessions.getHome().toPath();
+        deleteTree(home.resolve("varroa-log-cache"));
+        Files.writeString(home.resolve("jobs/resume-log/builds/1").resolve(VarroaLogStorageFactory.LOG_NEXT_SEQ_FILE),
+                Long.toString(hint), StandardCharsets.US_ASCII);
+
+        sessions.then(j -> {
+            WorkflowRun run = j.jenkins.getItemByFullName("resume-log", WorkflowJob.class).getBuildByNumber(1);
+            j.waitForCompletion(run);
+            j.assertBuildStatusSuccess(run);
+            VarroaLogStorageFactory.get().finish(RUN_ID);
+            awaitFinalChunk();
+        });
+
+        assertTrue("no sequence may carry two different chunks: " + mite.conflicts, mite.conflicts.isEmpty());
+        Long resumingSeq = seqOfChunkContaining("Resuming build");
+        assertNotNull("the resume line must reach the mite; chunks: " + mite.bySeq, resumingSeq);
+        assertEquals("the resume line must take the hint", hint, resumingSeq.longValue());
+        assertNotNull(seqOfChunkContaining("after-sleep"));
+        for (long seq = hint; seq <= mite.finalSeq.get(); seq++) {
+            assertTrue("the moved sequence must have no hole at " + seq, mite.bySeq.containsKey(seq));
+        }
+    }
+
+    private static void deleteTree(Path root) throws IOException {
+        if (!Files.exists(root)) {
+            return;
+        }
+        try (Stream<Path> paths = Files.walk(root)) {
+            for (Path p : paths.sorted(Comparator.reverseOrder()).toList()) {
+                Files.delete(p);
+            }
+        }
     }
 
     private Long seqOfChunkContaining(String text) {

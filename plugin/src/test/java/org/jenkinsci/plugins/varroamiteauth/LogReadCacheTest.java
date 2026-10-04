@@ -256,6 +256,42 @@ public class LogReadCacheTest {
     }
 
     @Test
+    public void seedResolvedCreatesTheRunAndContinuesAboveIt() {
+        Path base = tmp.getRoot().toPath();
+        newCache(base).seedResolved("run-moved", 41);
+
+        LogReadCache.ResumePoint resume = newCache(base).resumePoint("run-moved", "folder/job", 1);
+
+        assertEquals(42L, resume.nextSeq);
+        assertTrue(resume.replay.isEmpty());
+    }
+
+    @Test
+    public void seedResolvedNeverLowersTheWatermark() {
+        Path base = tmp.getRoot().toPath();
+        LogReadCache cache = newCache(base);
+        cache.recordResolved("run-s", 9);
+        cache.seedResolved("run-s", 3);
+
+        assertEquals(10L, newCache(base).resumePoint("run-s", "folder/job", 1).nextSeq);
+
+        cache.seedResolved("run-s", 20);
+        assertEquals(21L, newCache(base).resumePoint("run-s", "folder/job", 1).nextSeq);
+    }
+
+    @Test
+    public void seedResolvedStaysBelowACachedChunkAboveIt() {
+        Path base = tmp.getRoot().toPath();
+        LogReadCache cache = newCache(base);
+        cache.write(chunk("run-c", 7, "", "a".getBytes(StandardCharsets.UTF_8)));
+        cache.seedResolved("run-c", 4);
+
+        LogReadCache.ResumePoint resume = newCache(base).resumePoint("run-c", "folder/job", 1);
+
+        assertEquals(8L, resume.nextSeq);
+    }
+
+    @Test
     public void aTombstonedRunContinuesAboveTheWatermark() {
         Path base = tmp.getRoot().toPath();
         LogReadCache original = new LogReadCache(base, 4L, LogReadCache.DEFAULT_TOTAL_TARGET_BYTES,

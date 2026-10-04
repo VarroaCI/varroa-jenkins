@@ -101,11 +101,18 @@ func (s *recordingSender) logAcks() []*mitev1.LogAck {
 // in this file names the same controller, "ns1"/"cell1".
 func newLogTestHandler(t *testing.T, owner *fakeOwnerRequester, sender *recordingSender) *BusHandler {
 	t.Helper()
-	const ns, name = "ns1", "cell1"
 	store, err := blob.Open(context.Background(), "file://"+t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("open blob store: %v", err)
 	}
+	return newLogTestHandlerOnStore(t, owner, sender, store)
+}
+
+// newLogTestHandlerOnStore builds the same handler over an existing blob
+// store, so a test can model a gateway restart over stored state.
+func newLogTestHandlerOnStore(t *testing.T, owner *fakeOwnerRequester, sender *recordingSender, store blob.Store) *BusHandler {
+	t.Helper()
+	const ns, name = "ns1", "cell1"
 	h := &BusHandler{
 		cluster:        "core",
 		cellInstances:  make(map[string]string),

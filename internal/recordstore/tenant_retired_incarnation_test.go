@@ -61,7 +61,7 @@ func TestARetiredIncarnationCannotTakeTheRowBack(t *testing.T) {
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logs, nil))
 	var resp TenantSyncResponse
-	if err := json.Unmarshal(handleTenantSync(conn, logger, pool, nil, nil, nil, testGrace, nil, body), &resp); err != nil {
+	if err := json.Unmarshal(handleTenantSync(conn, logger, pool, nil, nil, nil, nil, testGrace, nil, body), &resp); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 	if !resp.Stale || resp.Ok {

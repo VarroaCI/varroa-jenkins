@@ -569,6 +569,13 @@ func (a *Agent) applyResumeBuild(ctx context.Context, payload *mitev1.ResumeBuil
 		"slowest_file", slowestPath, "slowest_fetch", slowestFetch.String(),
 		"elapsed", time.Since(started).String())
 
+	// A failed write does not fail the command. A resumed build with a
+	// short log is worth more than a build that never resumes.
+	if err := writeResumeLogNextSeq(home, payload); err != nil {
+		a.Logger.Error("resume log sequence write failed",
+			"run_id", payload.RunId, "log_next_seq", payload.LogNextSeq, "error", err)
+	}
+
 	for _, name := range nodeNames {
 		if _, err := os.Stat(filepath.Join(home, "nodes", name, "config.xml")); err != nil {
 			continue
@@ -681,6 +688,28 @@ func resumeAlreadyFinished(home string, payload *mitev1.ResumeBuildPayload, answ
 		return "build-record"
 	}
 	return ""
+}
+
+// resumeLogNextSeqFile is the file in the restored build directory that
+// carries the command's log_next_seq to the plugin. The plugin reads the
+// same name.
+const resumeLogNextSeqFile = "varroa-log-next-seq"
+
+// writeResumeLogNextSeq writes the command's log_next_seq into the
+// restored build directory. The write comes before the reload, so every
+// path that loads the build finds the value. The plugin holds no copy of
+// the log on this cell, and without the value it starts the log at 0.
+// A zero value writes nothing, because the plugin starts at 0 anyway.
+func writeResumeLogNextSeq(home string, payload *mitev1.ResumeBuildPayload) error {
+	if payload.LogNextSeq <= 0 {
+		return nil
+	}
+	dir := resumeBuildDir(home, payload)
+	if dir == "" {
+		return errors.New("the command names no build record for the log sequence")
+	}
+	data := []byte(strconv.FormatInt(payload.LogNextSeq, 10))
+	return writeRehydrationFileAt(filepath.Join(dir, resumeLogNextSeqFile), data, true)
 }
 
 // resumeBuildDir answers the directory of the command's own build under

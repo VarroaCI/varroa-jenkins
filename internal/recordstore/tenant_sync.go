@@ -40,9 +40,11 @@ const maxDeadInstances = 10
 // grace is the confirmed-gone grace the announce hook's own marking,
 // fleet-lock release, and intent re-fire apply. notifier publishes the
 // lock notifications the announce hook's fleet-lock release owes, and a
-// nil notifier publishes nothing.
+// nil notifier publishes nothing. logs reads a moved run's stored
+// console log for the resume action the announce hook's takeover
+// publishes, and a nil logs sends no log sequence.
 func RegisterTenantSyncResponder(conn *bus.Conn, pool *pgxpool.Pool, grace time.Duration,
-	stateDeleter ObjectDeleter, notifier *RunNotifier, logger *slog.Logger) (*bus.Responder, error) {
+	stateDeleter ObjectDeleter, logs LogIndexReader, notifier *RunNotifier, logger *slog.Logger) (*bus.Responder, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -55,7 +57,7 @@ func RegisterTenantSyncResponder(conn *bus.Conn, pool *pgxpool.Pool, grace time.
 		logger.Warn("action metrics registration failed; the tenant sync responder starts anyway", "error", err)
 	}
 	handler := func(data []byte) []byte {
-		return handleTenantSync(conn, logger, pool, metrics, actionMetrics, stateDeleter, grace, notifier, data)
+		return handleTenantSync(conn, logger, pool, metrics, actionMetrics, stateDeleter, logs, grace, notifier, data)
 	}
 	return conn.ServeRequests(bus.TenantSyncSubject, tenantSyncQueueGroup, handler)
 }
@@ -64,7 +66,7 @@ func RegisterTenantSyncResponder(conn *bus.Conn, pool *pgxpool.Pool, grace time.
 // Kind. A body the decoder rejects, and a kind outside the three known
 // values, both answer an error reply and write nothing.
 func handleTenantSync(conn *bus.Conn, logger *slog.Logger, pool *pgxpool.Pool, metrics *InterruptedMetrics,
-	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, grace time.Duration,
+	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, logs LogIndexReader, grace time.Duration,
 	notifier *RunNotifier, data []byte) []byte {
 	var req TenantSyncRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -77,7 +79,7 @@ func handleTenantSync(conn *bus.Conn, logger *slog.Logger, pool *pgxpool.Pool, m
 
 	switch req.Kind {
 	case TenantSyncKindAnnounce:
-		resp, err := handleTenantSyncAnnounce(ctx, conn, pool, metrics, actionMetrics, stateDeleter, grace, notifier, logger, req)
+		resp, err := handleTenantSyncAnnounce(ctx, conn, pool, metrics, actionMetrics, stateDeleter, logs, grace, notifier, logger, req)
 		if err != nil {
 			logger.Error("tenant sync announce failed", "cluster", req.Cluster, "tenant", req.Tenant, "error", err)
 			return marshalTenantSyncResponse(logger, TenantSyncResponse{Error: "tenant sync announce failed"})
@@ -211,7 +213,7 @@ type tenantPlacementRow struct {
 // carries the lock notifications of the fleet-lock move and release,
 // and a nil notifier publishes nothing.
 func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool.Pool, metrics *InterruptedMetrics,
-	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, grace time.Duration,
+	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, logs LogIndexReader, grace time.Duration,
 	notifier *RunNotifier, logger *slog.Logger, req TenantSyncRequest) (TenantSyncResponse, error) {
 	if req.Cluster == "" || req.Tenant == "" {
 		return TenantSyncResponse{}, errors.New("announce request needs a cluster and a tenant")
@@ -387,7 +389,7 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 	// shielded before the marking sees it. No rule depends on that
 	// order: the dispatch tests its own window, and the marking write
 	// tests the same window against the committed record.
-	if _, takeoverErr := TakeOverLostRuns(ctx, pool, conn, metrics, actionMetrics, req.Cluster, req.Tenant,
+	if _, takeoverErr := TakeOverLostRuns(ctx, pool, conn, metrics, actionMetrics, logs, req.Cluster, req.Tenant,
 		grace, time.Now(), logger); takeoverErr != nil {
 		logger.Error("resume takeover after announce failed",
 			"cluster", req.Cluster, "tenant", req.Tenant, "error", takeoverErr)

@@ -416,3 +416,26 @@ func TestHandleLedgerAction_ResumeRunCarriesEachFileEpoch(t *testing.T) {
 		}
 	}
 }
+
+// TestHandleLedgerAction_ResumeRunCarriesTheLogNextSeq proves the
+// operator copies the action's log sequence into the command. The target
+// holds no copy of the log, so the command is its only source.
+func TestHandleLedgerAction_ResumeRunCarriesTheLogNextSeq(t *testing.T) {
+	rec := &fakeLedgerActionRunner{}
+	action := recordstore.LedgerAction{
+		Kind: "resume_run", Cluster: "core",
+		Namespace: "cells-ns", Controller: "cell-a",
+		RunID: "run-9", JobPath: "team/job-a", Instance: "pod-live",
+		Files:      []recordstore.ResumeFile{{RelPath: "jobs/team/jobs/job-a/builds/5/build.xml", Epoch: 1}},
+		LogNextSeq: 42,
+	}
+	data, _ := json.Marshal(action)
+	handleLedgerAction(context.Background(), testLogger(), "varroa.ledger.actions.core", "core", rec, data)
+
+	if len(rec.sent) != 1 || rec.sent[0].ResumeBuild == nil {
+		t.Fatalf("expected one resume command, got %+v", rec.sent)
+	}
+	if got := rec.sent[0].ResumeBuild.LogNextSeq; got != 42 {
+		t.Fatalf("log_next_seq = %d, want 42", got)
+	}
+}

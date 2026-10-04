@@ -1156,6 +1156,7 @@ type ResumeBuildPayload struct {
 	Instance     string             `json:"instance"`
 	DeadlineUnix int64              `json:"deadline_unix,omitempty"`
 	StateFiles   []*ResumeStateFile `json:"state_files,omitempty"`
+	LogNextSeq   int64              `json:"log_next_seq,omitempty"`
 }
 
 // ResumeStateFile is one stored file a resume must materialize: the path

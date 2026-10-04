@@ -180,6 +180,7 @@ func run(ctx context.Context, cfg Config) error {
 		ClaimExpiryMetrics: claimExpiryMetrics,
 		RunNotifier:        runNotifier,
 		StateDeleter:       store,
+		LogReader:          store,
 		Logger:             logger,
 	}
 
@@ -253,7 +254,7 @@ func run(ctx context.Context, cfg Config) error {
 		return sub.Unsubscribe()
 	}
 	tenantSyncResponderFn := func(ctx context.Context) error {
-		sub, err := recordstore.RegisterTenantSyncResponder(busConn, pool, confirmedGoneGrace, store, runNotifier, logger)
+		sub, err := recordstore.RegisterTenantSyncResponder(busConn, pool, confirmedGoneGrace, store, store, runNotifier, logger)
 		if err != nil {
 			return err
 		}

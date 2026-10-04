@@ -58,6 +58,13 @@ type LedgerAction struct {
 	Instance string       `json:"instance,omitempty"`
 	Files    []ResumeFile `json:"files,omitempty"`
 	Deadline *time.Time   `json:"deadline,omitempty"`
+
+	// LogNextSeq applies to resume_run alone. It is the next console
+	// log sequence that the gateway accepts for the run, read from the
+	// stored log. The target has no local copy of the log, so without
+	// this value it starts again at 0, and the gateway drops every chunk
+	// at or below the sequence it already stored. 0 sends no value.
+	LogNextSeq int64 `json:"log_next_seq,omitempty"`
 }
 
 // ResumeFile is one stored state file of a resume action: the path under

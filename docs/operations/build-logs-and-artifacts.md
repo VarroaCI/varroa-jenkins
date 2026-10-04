@@ -19,18 +19,17 @@ A Pipeline step writes a line of console output. The chain from there to durable
 3. The gateway stamps the chunk with the cluster, namespace, and controller name it read from
    the mTLS connection. It checks that the run belongs to this controller, then appends the
    chunk to the blob store and to a per-chunk index.
-4. The gateway acknowledges the chunk only after both writes land. The mite then drops it from
-   its retained buffer.
+4. The gateway acknowledges the chunk only after both writes land.
 
-A build that outruns this chain does not lose stored data. The retained buffer at the mite
-applies back pressure instead: once it reaches its bound, the mite answers `503` on the next
-chunk and the plugin retries with backoff. Only the plugin's own per-build cap discards incoming
+A build that outruns this chain loses no stored data. The mite's retained buffer applies
+back pressure: at its bound, the mite answers `503` and the plugin retries with backoff. Only the plugin's own per-build cap discards incoming
 bytes, and it counts every byte it drops.
 
 If the mite process restarts, its retained buffer is lost. The gateway detects the resulting
 sequence gap and marks the run's log incomplete. See [Incomplete logs](#incomplete-logs) below.
 
-After a Jenkins restart, a resumed build continues its sequence from the plugin's local log cache.
+A resumed build continues its sequence. After a Jenkins restart, it reads the plugin's log cache.
+After a move to another cell, it reads the stored log.
 
 ## Live tail
 

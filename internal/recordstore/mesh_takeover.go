@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -174,8 +175,11 @@ type meshCandidate struct {
 // removes one round of latency. No rule depends on that order: the
 // dispatch tests its own window, and the marking write tests the same
 // window against the committed record.
+//
+// logs reads the run's stored console log, so the action can name the
+// next log sequence. A nil logs sends no sequence.
 func TakeOverLostRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn,
-	metrics *InterruptedMetrics, actionMetrics *ActionMetrics, cluster, tenant string,
+	metrics *InterruptedMetrics, actionMetrics *ActionMetrics, logs LogIndexReader, cluster, tenant string,
 	grace time.Duration, now time.Time, logger *slog.Logger) (int, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -198,7 +202,7 @@ func TakeOverLostRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn,
 	}
 
 	armMeshCandidates(ctx, pool, metrics, candidates, row, grace, now, logger)
-	return dispatchMeshResumes(ctx, pool, conn, metrics, actionMetrics, candidates, now, logger), nil
+	return dispatchMeshResumes(ctx, pool, conn, metrics, actionMetrics, logs, candidates, now, logger), nil
 }
 
 // armMeshCandidates runs step A over every candidate. The arm needs no
@@ -256,7 +260,7 @@ func armMeshRun(ctx context.Context, pool *pgxpool.Pool, c meshCandidate, now ti
 
 // dispatchMeshResumes runs step B over every armed candidate.
 func dispatchMeshResumes(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn,
-	metrics *InterruptedMetrics, actionMetrics *ActionMetrics, candidates []meshCandidate,
+	metrics *InterruptedMetrics, actionMetrics *ActionMetrics, logs LogIndexReader, candidates []meshCandidate,
 	now time.Time, logger *slog.Logger) int {
 	published := 0
 	for _, c := range candidates {
@@ -282,6 +286,7 @@ func dispatchMeshResumes(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn
 		if !ok {
 			continue
 		}
+		action.LogNextSeq = resumeLogNextSeq(ctx, logs, c.runID, logger)
 		// The publish is outside the transaction. A lost action
 		// produces no resume, and the recorder never republishes: the
 		// run then reaches its deadline and takes the ordinary path.
@@ -406,6 +411,33 @@ func dispatchMeshResume(ctx context.Context, pool *pgxpool.Pool, metrics *Interr
 	}, true, nil
 }
 
+// logNextSeqReadFailures counts the resume actions that went out with
+// no log sequence because the stored log could not be read.
+var logNextSeqReadFailures atomic.Int64
+
+// resumeLogNextSeq reads the next log sequence of a run the takeover
+// already moved. The read runs after the commit, so no blob read holds
+// the transaction's row locks open, and the value is as new as the
+// publish allows.
+//
+// A read failure answers 0 and does not stop the resume: a resumed build
+// with a short log is worth more than a lost build. The target then
+// starts its log at 0, and the gateway drops the chunks at or below the
+// sequence it already stored.
+func resumeLogNextSeq(ctx context.Context, logs LogIndexReader, runID string, logger *slog.Logger) int64 {
+	if logs == nil {
+		return 0
+	}
+	next, err := StoredLogNextSeq(ctx, logs, runID)
+	if err != nil {
+		failures := logNextSeqReadFailures.Add(1)
+		logger.Warn("resume log sequence read failed; the action sends no log sequence",
+			"run_id", runID, "log_next_seq_read_failures", failures, "error", err)
+		return 0
+	}
+	return next
+}
+
 // resumeFileList orders the run's stored files with the build record
 // last. Jenkins reads that file to rebuild the run, so writing it last
 // means a reload never sees a run whose flow program is still missing.
@@ -475,7 +507,7 @@ func selectMeshCandidates(ctx context.Context, pool *pgxpool.Pool, cluster, tena
 // runTakeoverRound runs the takeover for every (cluster, tenant) that
 // holds a RUNNING run naming an owning instance.
 func runTakeoverRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, metrics *InterruptedMetrics,
-	actionMetrics *ActionMetrics, now time.Time, grace time.Duration, logger *slog.Logger) error {
+	actionMetrics *ActionMetrics, logs LogIndexReader, now time.Time, grace time.Duration, logger *slog.Logger) error {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -484,7 +516,7 @@ func runTakeoverRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, m
 		return err
 	}
 	for _, p := range pairs {
-		if _, err := TakeOverLostRuns(ctx, pool, conn, metrics, actionMetrics,
+		if _, err := TakeOverLostRuns(ctx, pool, conn, metrics, actionMetrics, logs,
 			p.cluster, p.tenant, grace, now, logger); err != nil {
 			logger.Warn("resume takeover failed", "cluster", p.cluster, "tenant", p.tenant, "error", err)
 		}

@@ -113,7 +113,15 @@ func readMeshResume(t *testing.T, db *sql.DB, runID uuid.UUID) (armedAt, armExpi
 // test on error.
 func runTakeover(t *testing.T, pool *pgxpool.Pool, conn *bus.Conn, metrics *InterruptedMetrics, actionMetrics *ActionMetrics) int {
 	t.Helper()
-	published, err := TakeOverLostRuns(context.Background(), pool, conn, metrics, actionMetrics,
+	return runTakeoverWithLogs(t, pool, conn, metrics, actionMetrics, nil)
+}
+
+// runTakeoverWithLogs runs one takeover round that reads each moved
+// run's stored log through logs.
+func runTakeoverWithLogs(t *testing.T, pool *pgxpool.Pool, conn *bus.Conn, metrics *InterruptedMetrics,
+	actionMetrics *ActionMetrics, logs LogIndexReader) int {
+	t.Helper()
+	published, err := TakeOverLostRuns(context.Background(), pool, conn, metrics, actionMetrics, logs,
 		testCluster, testTenant, testGrace, time.Now(), nil)
 	if err != nil {
 		t.Fatalf("TakeOverLostRuns: %v", err)
@@ -518,5 +526,58 @@ func TestTakeOverLostRunsPublishesNoLockNotification(t *testing.T) {
 	}
 	if state != FleetLockStateHeld || instance != "pod-live" {
 		t.Fatalf("lock state=%q instance=%q, want held on pod-live", state, instance)
+	}
+}
+
+// TestDispatchMeshResumeCarriesTheLogNextSeq asserts the resume action
+// names the next log sequence the gateway accepts for the moved run.
+func TestDispatchMeshResumeCarriesTheLogNextSeq(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestActionConn(t)
+	received := collectActions(t, conn)
+
+	runID := seedMeshRunningRun(t, pool, db)
+	seedMeshPlacement(t, db, "pod-live", "pod-live")
+	store := newLogSeqTestStore(t)
+	writeStoredLog(t, store, runID.String(), 3)
+
+	if got := runTakeoverWithLogs(t, pool, conn, nil, nil, store); got != 1 {
+		t.Fatalf("published = %d, want 1", got)
+	}
+	select {
+	case a := <-received:
+		if a.LogNextSeq != 3 {
+			t.Fatalf("log_next_seq = %d, want 3", a.LogNextSeq)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("want a resume_run action published")
+	}
+}
+
+// TestDispatchMeshResumeIndexReadFailureSendsZero asserts a log read
+// failure does not stop the resume. The action goes out with no log
+// sequence.
+func TestDispatchMeshResumeIndexReadFailureSendsZero(t *testing.T) {
+	pool, db := setupLedgerPool(t)
+	conn := newTestActionConn(t)
+	received := collectActions(t, conn)
+
+	seedMeshRunningRun(t, pool, db)
+	seedMeshPlacement(t, db, "pod-live", "pod-live")
+
+	before := logNextSeqReadFailures.Load()
+	if got := runTakeoverWithLogs(t, pool, conn, nil, nil, failingLogReader{}); got != 1 {
+		t.Fatalf("published = %d, want 1", got)
+	}
+	select {
+	case a := <-received:
+		if a.Kind != LedgerActionResumeRun || a.LogNextSeq != 0 {
+			t.Fatalf("action = %+v, want a resume_run with no log sequence", a)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("want a resume_run action published")
+	}
+	if after := logNextSeqReadFailures.Load(); after != before+1 {
+		t.Fatalf("read failures = %d, want %d", after, before+1)
 	}
 }

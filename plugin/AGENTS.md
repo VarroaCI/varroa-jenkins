@@ -410,8 +410,12 @@ the root AGENTS.md greenfield rule.
   chunk the mite did not resolve. `VarroaLogStorageFactory.flushOnShutdown`
   (`@Terminator` after `FlowExecutionList.EXECUTIONS_SUSPENDED`) writes every open
   segment to the cache and detaches each buffer, so the pause line survives and a
-  later write takes no `seq`. A build that moves to another cell has no cache there
-  and still starts at 0. `TailEndpoint.java` is
+  later write takes no `seq`. A build that moves to another cell has no cache there.
+  The mite writes the recorder's next `seq` into `varroa-log-next-seq` in the restored
+  build directory (`VarroaLogStorageFactory.LOG_NEXT_SEQ_FILE`; the mite's
+  `resumeLogNextSeqFile` must name the same file). `seedFromMove` raises `.accepted` to
+  that value minus 1 before `resumePoint` runs, through `LogReadCache.seedResolved`,
+  which never lowers the watermark. The file stays on disk. `TailEndpoint.java` is
   the `@Extension RootAction` at `/varroa-log/tail`, requiring
   `ROLE:varroa:system-mite`; its request body is `{"runId", "jobPath",
   "buildNumber", "action", "leaseSeconds"}` in camelCase, the shape the

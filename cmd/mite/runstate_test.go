@@ -122,6 +122,9 @@ func startAdoptAndReloadStub(t *testing.T) *resumeStub {
 	})
 	mux.HandleFunc("/job/"+strings.ReplaceAll(stubJobPath, "/", "/job/")+"/reload", func(w http.ResponseWriter, r *http.Request) {
 		stub.reloadHit.Store(true)
+		if hook := stub.onReload.Load(); hook != nil {
+			(*hook)()
+		}
 		stub.note("reload")
 		w.WriteHeader(http.StatusOK)
 	})
@@ -175,6 +178,7 @@ type resumeStub struct {
 	adoptedName atomic.Value
 	reloadHit   atomic.Bool
 	loadBody    atomic.Value
+	onReload    atomic.Pointer[func()]
 
 	mu            sync.Mutex
 	calls         []string
@@ -805,5 +809,52 @@ func TestApplyResumeBuild_FetchesEachFileAtItsEpoch(t *testing.T) {
 			t.Fatalf("request for %q names push %d/%d, want %d/%d",
 				req.Relpath, req.PusherEpoch, req.StateGen, push[0], push[1])
 		}
+	}
+}
+
+// TestApplyResumeBuild_WritesTheLogNextSeqBeforeTheReload proves the
+// resume writes the command's log sequence into the restored build
+// directory. The plugin reads it when Jenkins loads the build.
+func TestApplyResumeBuild_WritesTheLogNextSeqBeforeTheReload(t *testing.T) {
+	stub := startAdoptAndReloadStub(t)
+	home := t.TempDir()
+	buildDir := filepath.Join(home, "jobs", "team", "jobs", "pipeline", "builds", "7")
+	var atReload atomic.Value
+	hook := func() {
+		data, _ := os.ReadFile(filepath.Join(buildDir, resumeLogNextSeqFile))
+		atReload.Store(string(data))
+	}
+	stub.onReload.Store(&hook)
+
+	agent := newResumeAgent(t, home, []byte("<build/>"))
+	if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
+		RunId: "run-1", JobPath: stubJobPath, BuildNumber: 7,
+		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/team/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
+		Instance:   agent.cfg.CellInstance,
+		LogNextSeq: 12,
+	}); err != nil {
+		t.Fatalf("applyResumeBuild: %v", err)
+	}
+	if got, _ := atReload.Load().(string); got != "12" {
+		t.Fatalf("log sequence file at the reload = %q, want 12", got)
+	}
+}
+
+// TestApplyResumeBuild_ZeroLogNextSeqWritesNoFile proves a command with
+// no log sequence leaves no file. The plugin then starts the log at 0.
+func TestApplyResumeBuild_ZeroLogNextSeqWritesNoFile(t *testing.T) {
+	startAdoptAndReloadStub(t)
+	home := t.TempDir()
+	agent := newResumeAgent(t, home, []byte("<build/>"))
+	if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
+		RunId: "run-1", JobPath: stubJobPath, BuildNumber: 7,
+		StateFiles: []*mitev1.ResumeStateFile{{Relpath: "jobs/team/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen}},
+		Instance:   agent.cfg.CellInstance,
+	}); err != nil {
+		t.Fatalf("applyResumeBuild: %v", err)
+	}
+	path := filepath.Join(home, "jobs", "team", "jobs", "pipeline", "builds", "7", resumeLogNextSeqFile)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("stat %s = %v, want no file", path, err)
 	}
 }

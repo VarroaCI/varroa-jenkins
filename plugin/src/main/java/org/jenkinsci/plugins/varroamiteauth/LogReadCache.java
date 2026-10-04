@@ -135,6 +135,31 @@ final class LogReadCache implements LogChunkBuffer.ChunkCache {
     }
 
     /**
+     * Raises the resolved watermark of {@code runId} to at least {@code seq}.
+     * A build that moves to another cell has no cache there, so this is how
+     * it continues above the log the gateway already stored. The watermark
+     * only goes up: a cache on this cell that is already higher stays.
+     */
+    void seedResolved(String runId, long seq) {
+        if (seq < 0) {
+            return;
+        }
+        Object lock = lockFor(runId);
+        synchronized (lock) {
+            Path dir = runDir(runId);
+            if (readLongFileLocked(dir.resolve(ACCEPTED_NAME), -1L) >= seq) {
+                return;
+            }
+            try {
+                writeLongFileLocked(dir.resolve(ACCEPTED_TEMP_NAME), dir.resolve(ACCEPTED_NAME), seq);
+            } catch (IOException e) {
+                LOGGER.log(Level.WARNING, "LogReadCache: failed to seed the resolved seq=" + seq
+                        + " for run " + runId, e);
+            }
+        }
+    }
+
+    /**
      * Returns where a new buffer for {@code runId} continues: the next
      * {@code seq} and the cached chunks to post again first. A run with
      * no directory starts at 0. A run whose cache holds the final chunk

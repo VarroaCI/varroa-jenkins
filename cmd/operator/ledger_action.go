@@ -233,12 +233,14 @@ func handleLedgerAction(ctx context.Context, logger *slog.Logger, subject, ownCl
 				// moment the recorder gave up, which only this field
 				// carries.
 				DeadlineUnix: ledgerActionDeadlineUnix(action.Deadline),
+				LogNextSeq:   action.LogNextSeq,
 			},
 		}
 		logger.Info("resume_run dispatching",
 			"controller", action.Namespace+"/"+action.Controller,
 			"instance", action.Instance, "run_id", action.RunID,
-			"job_path", action.JobPath, "files", len(action.Files))
+			"job_path", action.JobPath, "files", len(action.Files),
+			"log_next_seq", action.LogNextSeq)
 		if err := rec.SendImperativeCommand(ctx, action.Namespace, action.Controller, cmd); err != nil {
 			logger.Error("ledger action resume_run send failed",
 				"controller", action.Namespace+"/"+action.Controller,

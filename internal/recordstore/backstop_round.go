@@ -47,6 +47,10 @@ type BackstopConfig struct {
 	// StateDeleter skips the delete, the same rule MaintenanceConfig's
 	// LogStore follows. cmd/recorder passes a blob.Store value.
 	StateDeleter ObjectDeleter
+	// LogReader reads a moved run's stored console log, so a resume
+	// action names the next log sequence. A nil LogReader sends no
+	// sequence. cmd/recorder passes a blob.Store value.
+	LogReader LogIndexReader
 	// Now returns the round's reference time. A nil Now defaults to
 	// time.Now in UTC, so a test can pin the round to a fixed instant.
 	Now func() time.Time
@@ -107,7 +111,7 @@ func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c
 	grace := cfg.grace()
 	// The mesh takeover runs before the sweep, so an armed run is
 	// shielded before the sweep reads it as a candidate.
-	if err := runTakeoverRound(ctx, pool, conn, cfg.SweepMetrics, cfg.ActionMetrics, now, grace, logger); err != nil {
+	if err := runTakeoverRound(ctx, pool, conn, cfg.SweepMetrics, cfg.ActionMetrics, cfg.LogReader, now, grace, logger); err != nil {
 		logger.Warn("resume takeover round failed", "error", err)
 	}
 

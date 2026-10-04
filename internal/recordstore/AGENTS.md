@@ -80,7 +80,13 @@ of the fleet's audit activity, once a controller becomes disposable.
   holding an entry whose epoch or generation is not positive: such an entry
   names no object, so the run takes the ordinary confirmed-loss path.
   `LedgerAction.Files` is `[]ResumeFile{RelPath, Epoch, StateGen}`, and the
-  build record stays last. `TakeOverLostRuns` claims a lost run in two steps: it
+  build record stays last. `LedgerAction.LogNextSeq` is the next log `seq`
+  the gateway accepts, read by `StoredLogNextSeq` (`log_next_seq.go`) after
+  the takeover commits. It parses the gateway's log index itself, because
+  this package cannot import `internal/mite`; its rule must equal the
+  gateway's `recoverRunState`, and `TestStoredLogNextSeqMatchesGatewayRecovery`
+  in `internal/mite` pins the two. A read failure publishes 0 and logs the
+  running failure count. `TakeOverLostRuns` claims a lost run in two steps: it
   arms every `RUNNING` run whose owner is confirmed gone and whose anchor
   is fresh, then dispatches once `resumeTargetForRun` answers a seeded
   member. `resumeTargetForRun` is the **only** reader of the placement row
