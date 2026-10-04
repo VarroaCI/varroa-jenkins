@@ -289,11 +289,10 @@ export default function BuildPage() {
       // after `from`. One byte past this line's start selects the next
       // line, so a reconnect never replays the line already rendered.
       logWatermarkRef.current = { from: ev.off + 1, fromLine: ev.n + 1 };
-    } else if (frame.type === "gap") {
-      // A gap event names an offset the client has consumed, because the
-      // bytes it reports are unrecoverable. It advances the watermark too.
-      logWatermarkRef.current = { from: (frame.data as RunLogGapEvent).off };
     }
+    // A gap frame leaves the watermark alone. Its offset names lost bytes,
+    // and it can lie before the last line or past the bytes the page read.
+    // The line watermark already points at the first line not rendered.
     logFramesRef.current.push(frame);
     setLogVersion((v) => v + 1);
     if (frame.type === "end") setLogEnded(true);

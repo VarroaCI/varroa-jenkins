@@ -226,6 +226,23 @@ describe("RunLogViewer", () => {
     expect(screen.getByText("Missing bytes at sequence 4.")).toBeInTheDocument();
   });
 
+  it("shows one gap row per sequence when a reconnect sends the gap again", () => {
+    const gap: RunLogViewerEvent = { type: "gap", data: { seq: 4, off: 100 } };
+    const { rerender } = render(
+      <RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[gap]} version={1} />,
+    );
+    rerender(
+      <RunLogViewer
+        runId="r1"
+        runTerminal={false} logFinalized={false}
+        frames={[gap, { type: "gap", data: { seq: 4, off: 100 } }, { type: "gap", data: { seq: 5, off: 200 } }]}
+        version={3}
+      />,
+    );
+    expect(screen.getAllByText("Missing bytes at sequence 4.")).toHaveLength(1);
+    expect(screen.getByText("Missing bytes at sequence 5.")).toBeInTheDocument();
+  });
+
   it("states the log is still being written for a stopped, unfinalized run after meta and before end", () => {
     const { rerender } = render(
       <RunLogViewer runId="r1" runTerminal logFinalized={false} frames={[]} version={0} />,

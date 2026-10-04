@@ -498,7 +498,7 @@ describe("BuildPage — log stream resume", () => {
     expect(latestResumeUrl()()).toBe("/api/v1/runs/run-1/log?from=513&fromLine=8");
   });
 
-  it("carries from=<offset> with no fromLine from the last gap frame on reconnect", async () => {
+  it("keeps no resume offset when a gap frame arrives before any line frame", async () => {
     mockGetRun.mockResolvedValue(baseRun());
     const { repaint } = renderPage();
     await screen.findByText(/Build #42/);
@@ -510,7 +510,39 @@ describe("BuildPage — log stream resume", () => {
       repaint();
     });
 
-    expect(latestResumeUrl()()).toBe("/api/v1/runs/run-1/log?from=900");
+    expect(latestResumeUrl()()).toBe("/api/v1/runs/run-1/log");
+  });
+
+  it("keeps fromLine and the line watermark across a gap frame before the last line", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    const { repaint } = renderPage();
+    await screen.findByText(/Build #42/);
+
+    await act(async () => {
+      logFrame({ type: "line", data: { n: 7, off: 512, ts: 1700000000000, text: "building" } });
+      logFrame({ type: "gap", data: { seq: 4, off: 0 } });
+    });
+    await act(async () => {
+      repaint();
+    });
+
+    expect(latestResumeUrl()()).toBe("/api/v1/runs/run-1/log?from=513&fromLine=8");
+  });
+
+  it("keeps the line watermark when a gap frame lies past the last line", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    const { repaint } = renderPage();
+    await screen.findByText(/Build #42/);
+
+    await act(async () => {
+      logFrame({ type: "line", data: { n: 7, off: 512, ts: 1700000000000, text: "building" } });
+      logFrame({ type: "gap", data: { seq: 4, off: 900 } });
+    });
+    await act(async () => {
+      repaint();
+    });
+
+    expect(latestResumeUrl()()).toBe("/api/v1/runs/run-1/log?from=513&fromLine=8");
   });
 
   it("closes the run log stream on the end frame, so the page stops reconnecting", async () => {

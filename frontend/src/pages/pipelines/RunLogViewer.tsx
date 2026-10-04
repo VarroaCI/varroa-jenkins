@@ -110,6 +110,9 @@ export const RunLogViewer = forwardRef<RunLogViewerHandle, RunLogViewerProps>(
     // The count of frames this viewer has applied. The count starts at zero,
     // so a remount replays every frame the page holds.
     const appliedRef = useRef(0);
+    // The sequences that already have a gap row. The server sends every gap
+    // again on each reconnect, so the viewer shows one row per sequence.
+    const gapSeqsRef = useRef<Set<number>>(new Set());
 
     const virtualizer = useVirtualizer({
       count: rows.length,
@@ -158,6 +161,8 @@ export const RunLogViewer = forwardRef<RunLogViewerHandle, RunLogViewerProps>(
           appended.push({ kind: "line", ...ev });
         } else if (frame.type === "gap") {
           const ev = frame.data as RunLogGapEvent;
+          if (gapSeqsRef.current.has(ev.seq)) continue;
+          gapSeqsRef.current.add(ev.seq);
           appended.push({ kind: "gap", seq: ev.seq, off: ev.off });
         } else {
           flush();

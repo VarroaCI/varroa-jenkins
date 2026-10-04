@@ -231,7 +231,9 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   ANSI colour via `ansi.ts`'s `parseAnsiLine`. `RunLogViewer` applies the
   frames the page hands it, in order, and it never calls `useEventStream`
   itself. It unmounts while another tab is active, so the page holds the
-  frames, not the viewer.
+  frames, not the viewer. The stream sends every `gap` frame again on each
+  reconnect, so the viewer shows one gap row per `seq`. A `gap` frame never
+  changes the page's resume watermark or its `fromLine`.
   `BuildPage.tsx` passes the record's `logFinalized` flag to the viewer. The
   viewer shows its "still being written" notice only for a terminal run with
   that flag false, after the `meta` frame and before the `end` frame. The
