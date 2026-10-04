@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/metric/noop"
 )
 
 // meshRolledInstance is the instance a replacement pod reports after the
@@ -52,11 +53,11 @@ func TestTakeOverLostRunsRedispatchesAfterFailure(t *testing.T) {
 	seedMeshFleetLock(t, db, runID)
 	seedMeshPlacement(t, db, resumeFailedTarget, resumeFailedTarget)
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(noop.NewMeterProvider())
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
-	actionMetrics, err := NewActionMetrics()
+	actionMetrics, err := NewActionMetrics(noop.NewMeterProvider())
 	if err != nil {
 		t.Fatalf("new action metrics: %v", err)
 	}
@@ -118,15 +119,17 @@ func TestTakeOverLostRunsRedispatchesAfterFailure(t *testing.T) {
 // still names the failed instance is never picked again, and that the
 // refusal is counted apart from a tenant with no replacement at all.
 func TestTakeOverLostRunsSkipsExcludedInstance(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
-	reader := useTestMeterProvider(t)
+	mp, reader := newTestMeterProvider(t)
 	g := NewIngester(pool, nil, nil)
 
 	runID := seedMeshRunningRun(t, pool, db)
 	seedMeshPlacement(t, db, resumeFailedTarget, resumeFailedTarget)
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}

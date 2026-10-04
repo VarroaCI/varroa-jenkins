@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
@@ -52,7 +53,7 @@ type CrossTenantDeps struct {
 
 // RegisterCrossTenantResponder subscribes to bus.LedgerCrossTenantSubject
 // with queue group "recorder". The returned Responder subscribes again after a denial and stops
-// when unsubscribed. It registers its own CrossTenantMetrics;
+// when unsubscribed. It registers its own CrossTenantMetrics on mp;
 // registration failure is logged and the responder still starts, with
 // that instrument counting nothing. lockMetrics is the one
 // FleetLockMetrics the caller also wires into the maintenance round's
@@ -60,11 +61,11 @@ type CrossTenantDeps struct {
 // shared instrument set, registered once, never twice on the same
 // meter. notifier publishes the lock notifications of the three lock
 // kinds, and a nil notifier publishes nothing.
-func RegisterCrossTenantResponder(conn *bus.Conn, pool *pgxpool.Pool, store crossTenantBlobSigner, lockMetrics *FleetLockMetrics, notifier *RunNotifier, logger *slog.Logger) (*bus.Responder, error) {
+func RegisterCrossTenantResponder(mp metric.MeterProvider, conn *bus.Conn, pool *pgxpool.Pool, store crossTenantBlobSigner, lockMetrics *FleetLockMetrics, notifier *RunNotifier, logger *slog.Logger) (*bus.Responder, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	metrics, err := NewCrossTenantMetrics()
+	metrics, err := NewCrossTenantMetrics(mp)
 	if err != nil {
 		logger.Warn("cross-tenant metrics registration failed; the cross-tenant responder starts anyway", "error", err)
 	}

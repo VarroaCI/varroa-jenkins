@@ -71,6 +71,8 @@ func (l *Ledger) waitConcurrencyCancel() {
 // non-terminal run of the same group, and counts it under both
 // recorder_concurrency_cancel_total and recorder_actions_published_total.
 func TestConcurrencyCancelPublishesForOlderRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedTenantPlacementPolicy(t, db, `{"concurrency":"cancelInProgress"}`)
 
@@ -80,12 +82,12 @@ func TestConcurrencyCancelPublishesForOlderRun(t *testing.T) {
 	conn := newTestActionConn(t)
 	received := subscribeCancelActions(t, conn, 4)
 
-	reader := useTestMeterProvider(t)
-	concurrencyMetrics, err := NewConcurrencyMetrics()
+	mp, reader := newTestMeterProvider(t)
+	concurrencyMetrics, err := NewConcurrencyMetrics(mp)
 	if err != nil {
 		t.Fatalf("new concurrency metrics: %v", err)
 	}
-	actionMetrics, err := NewActionMetrics()
+	actionMetrics, err := NewActionMetrics(mp)
 	if err != nil {
 		t.Fatalf("new action metrics: %v", err)
 	}
@@ -123,6 +125,8 @@ func TestConcurrencyCancelPublishesForOlderRun(t *testing.T) {
 // runs produce eight published cancels, oldest first, and three counted
 // skipped.
 func TestConcurrencyCancelBoundedAtEight(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedTenantPlacementPolicy(t, db, `{"concurrency":"cancelInProgress"}`)
 
@@ -139,12 +143,12 @@ func TestConcurrencyCancelBoundedAtEight(t *testing.T) {
 	conn := newTestActionConn(t)
 	received := subscribeCancelActions(t, conn, olderCount)
 
-	reader := useTestMeterProvider(t)
-	concurrencyMetrics, err := NewConcurrencyMetrics()
+	mp, reader := newTestMeterProvider(t)
+	concurrencyMetrics, err := NewConcurrencyMetrics(mp)
 	if err != nil {
 		t.Fatalf("new concurrency metrics: %v", err)
 	}
-	actionMetrics, err := NewActionMetrics()
+	actionMetrics, err := NewActionMetrics(mp)
 	if err != nil {
 		t.Fatalf("new action metrics: %v", err)
 	}

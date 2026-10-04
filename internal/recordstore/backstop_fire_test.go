@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel/metric/noop"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
@@ -111,6 +112,8 @@ func TestSelectReadyFiresBoundedAt100(t *testing.T) {
 // one build.scheduled.backstop activity row, and counts both
 // recorder_cron_fired_total and recorder_actions_published_total.
 func TestFireOnePublishesWakeThenRetryAndWritesActivity(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
 
@@ -127,12 +130,12 @@ func TestFireOnePublishesWakeThenRetryAndWritesActivity(t *testing.T) {
 	t.Cleanup(func() { _ = sub.Unsubscribe() })
 	conn.NATSConn().Flush()
 
-	reader := useTestMeterProvider(t)
-	backstopMetrics, err := NewBackstopMetrics()
+	mp, reader := newTestMeterProvider(t)
+	backstopMetrics, err := NewBackstopMetrics(mp)
 	if err != nil {
 		t.Fatalf("new backstop metrics: %v", err)
 	}
-	actionMetrics, err := NewActionMetrics()
+	actionMetrics, err := NewActionMetrics(mp)
 	if err != nil {
 		t.Fatalf("new action metrics: %v", err)
 	}
@@ -196,6 +199,8 @@ func TestFireOnePublishesWakeThenRetryAndWritesActivity(t *testing.T) {
 // occurrence"). Reversing the order would instead let a failed publish
 // leave a row behind, suppressing a retry for the whole grace window.
 func TestFireOnePublishesActionsEvenWhenActivityInsertFails(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
 
@@ -212,12 +217,12 @@ func TestFireOnePublishesActionsEvenWhenActivityInsertFails(t *testing.T) {
 	t.Cleanup(func() { _ = sub.Unsubscribe() })
 	conn.NATSConn().Flush()
 
-	reader := useTestMeterProvider(t)
-	backstopMetrics, err := NewBackstopMetrics()
+	mp, reader := newTestMeterProvider(t)
+	backstopMetrics, err := NewBackstopMetrics(mp)
 	if err != nil {
 		t.Fatalf("new backstop metrics: %v", err)
 	}
-	actionMetrics, err := NewActionMetrics()
+	actionMetrics, err := NewActionMetrics(mp)
 	if err != nil {
 		t.Fatalf("new action metrics: %v", err)
 	}
@@ -301,7 +306,7 @@ func TestFireOneAndOrdinaryFireShareOneIntentKey(t *testing.T) {
 
 	// The backstop round independently computes the same key for the
 	// same job and occurrence, with no knowledge of the ordinary claim.
-	backstopMetrics, err := NewBackstopMetrics()
+	backstopMetrics, err := NewBackstopMetrics(noop.NewMeterProvider())
 	if err != nil {
 		t.Fatalf("new backstop metrics: %v", err)
 	}

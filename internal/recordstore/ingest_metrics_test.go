@@ -12,7 +12,7 @@ import (
 // TestIngestMetricsRegisterAndRecord asserts every ingest instrument
 // registers on the varroa-recorder meter and records a value.
 func TestIngestMetricsRegisterAndRecord(t *testing.T) {
-	reader := useTestMeterProvider(t)
+	mp, reader := newTestMeterProvider(t)
 
 	s := startIngestTestServer(t)
 	conn, err := bus.Connect(s.ClientURL())
@@ -27,7 +27,7 @@ func TestIngestMetricsRegisterAndRecord(t *testing.T) {
 		t.Fatalf("ensure consumer: %v", err)
 	}
 
-	metrics, err := NewIngestMetrics(conn, bus.BuildsStreamName, RecorderConsumerName)
+	metrics, err := NewIngestMetrics(mp, conn, bus.BuildsStreamName, RecorderConsumerName)
 	if err != nil {
 		t.Fatalf("new ingest metrics: %v", err)
 	}

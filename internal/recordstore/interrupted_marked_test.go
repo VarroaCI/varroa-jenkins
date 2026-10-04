@@ -273,9 +273,11 @@ func TestEndMarkedLostIntentSupersedesAnAcceptedRow(t *testing.T) {
 // TestEndMarkedLostIntentSkipsTheRetryOfAParameterizedIntent asserts that
 // the run ends and no retry runs with declared defaults.
 func TestEndMarkedLostIntentSkipsTheRetryOfAParameterizedIntent(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
-	reader := useTestMeterProvider(t)
-	metrics, err := NewInterruptedMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -408,9 +410,11 @@ func readMarkedRun(t *testing.T, db *sql.DB, runID uuid.UUID) (status string, re
 // mark is older than ClaimExpiryAge. It publishes no action, counts the
 // skipped retry, and a second round writes nothing.
 func TestEndStaleMarkedIntentEndsALiveOwnerAfterTheAge(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
-	reader := useTestMeterProvider(t)
-	metrics, err := NewInterruptedMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}

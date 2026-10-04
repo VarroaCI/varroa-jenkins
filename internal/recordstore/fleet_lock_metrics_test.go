@@ -40,6 +40,8 @@ func fanoutGaugeValue(t *testing.T, reader *sdkmetric.ManualReader, name string)
 // including the releasing gauge, and recorder_fleet_lock_expired_total
 // registers as a counter.
 func TestFleetLockMetrics_GaugesReportStoredRowCounts(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	now := time.Now()
@@ -51,8 +53,8 @@ func TestFleetLockMetrics_GaugesReportStoredRowCounts(t *testing.T) {
 	insertFleetLockRow(t, db, "alpha/lock-f", newTestUUIDv7String(), FleetLockStateReleasing, now, now.Add(5*time.Minute))
 	insertFleetLockRow(t, db, "alpha/lock-g", newTestUUIDv7String(), FleetLockStateReleasing, now, now.Add(5*time.Minute))
 
-	reader := useTestMeterProvider(t)
-	if _, err := NewFleetLockMetrics(pool); err != nil {
+	mp, reader := newTestMeterProvider(t)
+	if _, err := NewFleetLockMetrics(mp, pool); err != nil {
 		t.Fatalf("new fleet lock metrics: %v", err)
 	}
 

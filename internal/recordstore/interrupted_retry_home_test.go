@@ -81,14 +81,16 @@ func TestAfterMarkRetry_UnplacedControllerKeepsTheRunCell(t *testing.T) {
 // TestAfterMarkRetry_UnboundHomeSlotPublishesNothing asserts a home slot
 // that holds no member publishes no retry and counts one unplaced skip.
 func TestAfterMarkRetry_UnboundHomeSlotPublishesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	jobPath := testTenant + "/retry-unbound"
 	seedGrantPlacement(t, db, testCluster, testTenant, jsTestNS, "cell-a", 1, "{}")
 	setPlacementMembers(t, db, testTenant,
 		[]member{activeMember("cell-a", 0, "i0")}, map[string]int32{jobPath: 1})
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewInterruptedMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}

@@ -148,6 +148,8 @@ func subscribeClusterActions(t *testing.T, conn *bus.Conn) chan LedgerAction {
 // reason and one activity row. It publishes no cancel and no retry, it
 // counts the skipped retry, and it deletes no run-state objects.
 func TestSweepEndsASilentRunOnALiveOwner(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
 	seedSilentRunOnLiveOwner(t, db, runID, liveOwnerSilentWindow+time.Minute, `{"interruptedRetry": "automatic"}`)
@@ -157,8 +159,8 @@ func TestSweepEndsASilentRunOnALiveOwner(t *testing.T) {
 	freshenSweepConsumer(t, conn)
 	received := subscribeClusterActions(t, conn)
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewInterruptedMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}

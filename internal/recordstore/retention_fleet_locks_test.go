@@ -98,14 +98,16 @@ func TestSweepFleetLocks_ExpiredReleasingRowIsKept(t *testing.T) {
 // under the maintenance advisory lock, not only through sweepFleetLocks
 // called directly.
 func TestSweepFleetLocks_MetricsCountedThroughMaintenanceRound(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	now := time.Now()
 	insertFleetLockRow(t, db, fleetLockStateMachineTestName, newTestUUIDv7String(), FleetLockStateHeld,
 		now.Add(-20*time.Minute), now.Add(-time.Minute))
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewFleetLockMetrics(pool)
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewFleetLockMetrics(mp, pool)
 	if err != nil {
 		t.Fatalf("new fleet lock metrics: %v", err)
 	}
@@ -252,6 +254,8 @@ func TestSweepFleetLocks_ReleasingRowPublishesNothing(t *testing.T) {
 // TestSweepFleetLocks_NilNotifierStillDeletesRows asserts a maintenance
 // round with no LockNotifier completes and deletes the same rows.
 func TestSweepFleetLocks_NilNotifierStillDeletesRows(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	now := time.Now()
@@ -259,8 +263,8 @@ func TestSweepFleetLocks_NilNotifierStillDeletesRows(t *testing.T) {
 	insertFleetLockRow(t, db, fleetLockStateMachineTestName, runID, FleetLockStateHeld,
 		now.Add(-20*time.Minute), now.Add(-time.Minute))
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewFleetLockMetrics(pool)
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewFleetLockMetrics(mp, pool)
 	if err != nil {
 		t.Fatalf("new fleet lock metrics: %v", err)
 	}

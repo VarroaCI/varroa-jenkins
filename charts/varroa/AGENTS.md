@@ -304,8 +304,9 @@ the packaged CRDs. Does not own the Go source it packages
   its own `telemetry.services.recorder` values entry — the same shape as
   operator/gateway/bff. Without `OTEL_METRICS_ENABLED=true`,
   `internal/telemetry.InitTelemetry` never wires the Prometheus bridge, so
-  every `otel.Meter("varroa-recorder")` counter in `internal/recordstore`
-  stays off `/metrics` (issue #666). `tests/test-recorder-chart.sh`
+  every `internal/recordstore` counter on the `"varroa-recorder"` meter
+  of the global provider `cmd/recorder` passes stays off `/metrics`
+  (issue #666). `tests/test-recorder-chart.sh`
   section (f2) asserts the env block and the
   `telemetry.services.recorder.metrics.enabled` toggle.
   In `cnpg` mode `postgres-cluster.yaml`'s `spec.managed.roles` carries three

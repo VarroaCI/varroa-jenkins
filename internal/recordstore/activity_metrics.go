@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
@@ -25,8 +24,8 @@ type ActivityMetrics struct {
 // reads the activity-recorder consumer's pending count for the backlog
 // gauge; a lookup failure during one collection skips that collection
 // rather than erroring the whole callback.
-func NewActivityMetrics(conn *bus.Conn, streamName, consumerName string) (*ActivityMetrics, error) {
-	meter := otel.Meter("varroa-recorder")
+func NewActivityMetrics(mp metric.MeterProvider, conn *bus.Conn, streamName, consumerName string) (*ActivityMetrics, error) {
+	meter := mp.Meter("varroa-recorder")
 	m := &ActivityMetrics{}
 
 	var err error

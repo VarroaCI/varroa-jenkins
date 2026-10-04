@@ -148,8 +148,10 @@ func runRefire(t *testing.T, pool *pgxpool.Pool, conn *bus.Conn, metrics *Interr
 // trigger_run action carrying the stored identity and naming the
 // tenant's CURRENT cell, and stamps refired_at.
 func TestRefirePublishesAndMarks(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
-	reader := useTestMeterProvider(t)
+	mp, reader := newTestMeterProvider(t)
 	conn := newTestActionConn(t)
 	received := collectActions(t, conn)
 
@@ -157,7 +159,7 @@ func TestRefirePublishesAndMarks(t *testing.T) {
 	runID := seedRefireIntent(t, db, intentKey, refireDeadInstance, "")
 	seedRefirePlacement(t, db, "pod-new", "pod-new", true)
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -230,14 +232,16 @@ func TestRefireSecondRoundPublishesNothing(t *testing.T) {
 // filter on that column. A marker left behind would lose the queued
 // build forever. A later round with a live connection then publishes.
 func TestRefireClearsTheMarkerOnAPublishFailure(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
-	reader := useTestMeterProvider(t)
+	mp, reader := newTestMeterProvider(t)
 
 	intentKey := "manual:" + newTestUUIDv7String()
 	seedRefireIntent(t, db, intentKey, refireDeadInstance, "")
 	seedRefirePlacement(t, db, "pod-new", "pod-new", true)
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -330,6 +334,8 @@ func TestRefireMarkerAdmitsOneWriter(t *testing.T) {
 // placement with no live instance defers and leaves refired_at null. A
 // started build's runs row blocks the re-fire.
 func TestRefireRefusalRules(t *testing.T) {
+	t.Parallel()
+
 	t.Run("a live cell re-fires nothing", func(t *testing.T) {
 		pool, db := setupLedgerPool(t)
 		conn := newTestActionConn(t)
@@ -349,14 +355,14 @@ func TestRefireRefusalRules(t *testing.T) {
 
 	t.Run("a parameterized intent is skipped", func(t *testing.T) {
 		pool, db := setupLedgerPool(t)
-		reader := useTestMeterProvider(t)
+		mp, reader := newTestMeterProvider(t)
 		conn := newTestActionConn(t)
 
 		intentKey := "manual:" + newTestUUIDv7String()
 		seedRefireIntent(t, db, intentKey, refireDeadInstance, "deadbeefdeadbeefdeadbeefdeadbeef")
 		seedRefirePlacement(t, db, "pod-new", "pod-new", true)
 
-		metrics, err := NewInterruptedMetrics()
+		metrics, err := NewInterruptedMetrics(mp)
 		if err != nil {
 			t.Fatalf("new interrupted metrics: %v", err)
 		}
@@ -386,7 +392,7 @@ func TestRefireRefusalRules(t *testing.T) {
 
 	t.Run("a missing live instance defers the re-fire", func(t *testing.T) {
 		pool, db := setupLedgerPool(t)
-		reader := useTestMeterProvider(t)
+		mp, reader := newTestMeterProvider(t)
 		conn := newTestActionConn(t)
 
 		intentKey := "manual:" + newTestUUIDv7String()
@@ -394,7 +400,7 @@ func TestRefireRefusalRules(t *testing.T) {
 		// The operator clears its stored instance at the confirmation.
 		seedRefirePlacement(t, db, "", "", true)
 
-		metrics, err := NewInterruptedMetrics()
+		metrics, err := NewInterruptedMetrics(mp)
 		if err != nil {
 			t.Fatalf("new interrupted metrics: %v", err)
 		}
@@ -513,8 +519,10 @@ func ingestRejectedTrigger(t *testing.T, pool *pgxpool.Pool, metrics *Interrupte
 // the same transaction that records the failure, and the next round
 // re-selects the intent.
 func TestRefireRejectedTriggerClearsTheMarker(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
-	reader := useTestMeterProvider(t)
+	mp, reader := newTestMeterProvider(t)
 	conn := newTestActionConn(t)
 	received := collectActions(t, conn)
 
@@ -522,7 +530,7 @@ func TestRefireRejectedTriggerClearsTheMarker(t *testing.T) {
 	runID := seedRefireIntent(t, db, intentKey, refireDeadInstance, "")
 	seedRefirePlacement(t, db, "pod-new", "pod-new", true)
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -561,8 +569,10 @@ func TestRefireRejectedTriggerClearsTheMarker(t *testing.T) {
 // TestRefireUnreachableTriggerClearsTheMarker asserts a re-fired trigger
 // that reached no Jenkins clears the marker, like a rejected one.
 func TestRefireUnreachableTriggerClearsTheMarker(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
-	reader := useTestMeterProvider(t)
+	mp, reader := newTestMeterProvider(t)
 	conn := newTestActionConn(t)
 	received := collectActions(t, conn)
 
@@ -570,7 +580,7 @@ func TestRefireUnreachableTriggerClearsTheMarker(t *testing.T) {
 	runID := seedRefireIntent(t, db, intentKey, refireDeadInstance, "")
 	seedRefirePlacement(t, db, "pod-new", "pod-new", true)
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -593,8 +603,10 @@ func TestRefireUnreachableTriggerClearsTheMarker(t *testing.T) {
 // keeps the marker. No retry fixes a job that is absent or disabled, so
 // the intent stays for a person.
 func TestRefirePermanentRejectionKeepsTheMarker(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
-	reader := useTestMeterProvider(t)
+	mp, reader := newTestMeterProvider(t)
 	conn := newTestActionConn(t)
 	received := collectActions(t, conn)
 
@@ -602,7 +614,7 @@ func TestRefirePermanentRejectionKeepsTheMarker(t *testing.T) {
 	runID := seedRefireIntent(t, db, intentKey, refireDeadInstance, "")
 	seedRefirePlacement(t, db, "pod-new", "pod-new", true)
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -628,8 +640,10 @@ func TestRefirePermanentRejectionKeepsTheMarker(t *testing.T) {
 // bounded. A retried run keeps its own run identifier, so the runs table
 // holds one row for every attempt; refire_attempts is the only bound.
 func TestRefireAttemptBoundStopsTheSixthAttempt(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
-	reader := useTestMeterProvider(t)
+	mp, reader := newTestMeterProvider(t)
 	conn := newTestActionConn(t)
 	received := collectActions(t, conn)
 
@@ -637,7 +651,7 @@ func TestRefireAttemptBoundStopsTheSixthAttempt(t *testing.T) {
 	runID := seedRefireIntent(t, db, intentKey, refireDeadInstance, "")
 	seedRefirePlacement(t, db, "pod-new", "pod-new", true)
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -19,8 +18,8 @@ type CrossTenantMetrics struct {
 
 // NewCrossTenantMetrics registers recorder_crosstenant_requests_total
 // and recorder_crosstenant_grant_denied_total.
-func NewCrossTenantMetrics() (*CrossTenantMetrics, error) {
-	meter := otel.Meter("varroa-recorder")
+func NewCrossTenantMetrics(mp metric.MeterProvider) (*CrossTenantMetrics, error) {
+	meter := mp.Meter("varroa-recorder")
 
 	requests, err := meter.Int64Counter("recorder_crosstenant_requests_total",
 		metric.WithDescription("Requests on the cross-tenant subject, labelled by kind and outcome"))

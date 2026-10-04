@@ -13,7 +13,7 @@ import (
 // recorder_activity_* instruments register on the varroa-recorder meter
 // and record a value.
 func TestActivityMetricsRegisterAndRecord(t *testing.T) {
-	reader := useTestMeterProvider(t)
+	mp, reader := newTestMeterProvider(t)
 
 	s := startIngestTestServer(t)
 	conn, err := bus.Connect(s.ClientURL())
@@ -28,7 +28,7 @@ func TestActivityMetricsRegisterAndRecord(t *testing.T) {
 		t.Fatalf("ensure consumer: %v", err)
 	}
 
-	metrics, err := NewActivityMetrics(conn, bus.ActivityStreamName, ActivityRecorderConsumerName)
+	metrics, err := NewActivityMetrics(mp, conn, bus.ActivityStreamName, ActivityRecorderConsumerName)
 	if err != nil {
 		t.Fatalf("new activity metrics: %v", err)
 	}

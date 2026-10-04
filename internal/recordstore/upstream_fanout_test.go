@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric/noop"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
@@ -137,13 +138,15 @@ func (fx *fanoutTestFixture) deps(metrics *UpstreamFanoutMetrics) FanoutDeps {
 // varroa-upstream/<producer-tenant> actor and the t<digest> intent-key
 // seq.
 func TestRunUpstreamFanout_PublishesGrantedSubscriber(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	fx.setExports([]string{"beta"})
 	seedGrantPlacement(t, fx.db, testCluster, "beta", "jenkins", "cell-b", 1, "{}")
 	fx.seedSubscriber(testCluster, "beta", false)
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewUpstreamFanoutMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewUpstreamFanoutMetrics(mp)
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}
@@ -182,6 +185,8 @@ func TestRunUpstreamFanout_PublishesGrantedSubscriber(t *testing.T) {
 // acceptance: 40 granted subscribers publish 32 actions and count 8
 // over_cap skips.
 func TestRunUpstreamFanout_FortySubscribersCapAt32(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 
 	names := make([]string, 40)
@@ -194,8 +199,8 @@ func TestRunUpstreamFanout_FortySubscribersCapAt32(t *testing.T) {
 		fx.seedSubscriber(testCluster, name, false)
 	}
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewUpstreamFanoutMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewUpstreamFanoutMetrics(mp)
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}
@@ -248,7 +253,7 @@ func TestRunUpstreamFanout_RedeliveryDerivesStableKeys(t *testing.T) {
 		fx.seedSubscriber(testCluster, name, false)
 	}
 
-	metrics, err := NewUpstreamFanoutMetrics()
+	metrics, err := NewUpstreamFanoutMetrics(noop.NewMeterProvider())
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}
@@ -303,13 +308,15 @@ func TestRunUpstreamFanout_RedeliveryDerivesStableKeys(t *testing.T) {
 // TestRunUpstreamFanout_DisabledSubscriberSkipped asserts a disabled
 // subscriber row is counted with reason "disabled" and builds nothing.
 func TestRunUpstreamFanout_DisabledSubscriberSkipped(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	fx.setExports([]string{"beta"})
 	seedGrantPlacement(t, fx.db, testCluster, "beta", "jenkins", "cell-b", 1, "{}")
 	fx.seedSubscriber(testCluster, "beta", true)
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewUpstreamFanoutMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewUpstreamFanoutMetrics(mp)
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}
@@ -328,13 +335,15 @@ func TestRunUpstreamFanout_DisabledSubscriberSkipped(t *testing.T) {
 // TestRunUpstreamFanout_DeniedSubscriberSkipped asserts a subscriber not
 // listed in the producer's exports is counted with reason "denied".
 func TestRunUpstreamFanout_DeniedSubscriberSkipped(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	fx.setExports([]string{"payments"})
 	seedGrantPlacement(t, fx.db, testCluster, "beta", "jenkins", "cell-b", 1, "{}")
 	fx.seedSubscriber(testCluster, "beta", false)
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewUpstreamFanoutMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewUpstreamFanoutMetrics(mp)
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}
@@ -350,13 +359,15 @@ func TestRunUpstreamFanout_DeniedSubscriberSkipped(t *testing.T) {
 // TestRunUpstreamFanout_UnplacedSubscriberSkipped asserts a subscriber
 // with no tenant_placements row is counted with reason "unplaced".
 func TestRunUpstreamFanout_UnplacedSubscriberSkipped(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	fx.setExports([]string{"beta"})
 	// beta subscribes but is never placed.
 	fx.seedSubscriber(testCluster, "beta", false)
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewUpstreamFanoutMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewUpstreamFanoutMetrics(mp)
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}
@@ -374,13 +385,15 @@ func TestRunUpstreamFanout_UnplacedSubscriberSkipped(t *testing.T) {
 // itself answers no error: a lost publish never rolls the source run's
 // record back.
 func TestRunUpstreamFanout_PublishFailureCountsAndContinues(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	fx.setExports([]string{"beta"})
 	seedGrantPlacement(t, fx.db, testCluster, "beta", "jenkins", "cell-b", 1, "{}")
 	fx.seedSubscriber(testCluster, "beta", false)
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewUpstreamFanoutMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewUpstreamFanoutMetrics(mp)
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}
@@ -401,14 +414,16 @@ func TestRunUpstreamFanout_PublishFailureCountsAndContinues(t *testing.T) {
 // TestRunUpstreamFanout_ThresholdBelowResultDoesNotFire asserts a
 // producer result below the subscriber's threshold selects no row.
 func TestRunUpstreamFanout_ThresholdBelowResultDoesNotFire(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	fx.producer.Result = "FAILURE"
 	fx.setExports([]string{"beta"})
 	seedGrantPlacement(t, fx.db, testCluster, "beta", "jenkins", "cell-b", 1, "{}")
 	fx.seedSubscriber(testCluster, "beta", false)
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewUpstreamFanoutMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewUpstreamFanoutMetrics(mp)
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}
@@ -429,6 +444,8 @@ func TestRunUpstreamFanout_ThresholdBelowResultDoesNotFire(t *testing.T) {
 // never fires on a different cluster's completion, design.md D9's own
 // rule.
 func TestRunUpstreamFanout_ClusterResolutionExcludesOtherClusterSubscriber(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	// acme is also placed on "other", and the subscriber lives there too.
 	seedGrantPlacement(t, fx.db, "other", "acme", "jenkins", "cell-p2", 1, "{}")
@@ -436,8 +453,8 @@ func TestRunUpstreamFanout_ClusterResolutionExcludesOtherClusterSubscriber(t *te
 	seedGrantPlacement(t, fx.db, "other", "beta", "jenkins", "cell-b", 1, "{}")
 	fx.seedSubscriber("other", "beta", false)
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewUpstreamFanoutMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewUpstreamFanoutMetrics(mp)
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}
@@ -468,7 +485,7 @@ func TestRunUpstreamFanout_MemberClusterSubscriberPublishesOnItsCluster(t *testi
 	seedGrantPlacement(t, fx.db, "member-a", "beta", "jenkins", "cell-b", 1, "{}")
 	fx.seedSubscriber("member-a", "beta", false)
 
-	metrics, err := NewUpstreamFanoutMetrics()
+	metrics, err := NewUpstreamFanoutMetrics(noop.NewMeterProvider())
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}

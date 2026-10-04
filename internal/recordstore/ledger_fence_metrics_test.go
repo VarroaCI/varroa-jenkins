@@ -41,11 +41,13 @@ func metricValueByReason(t *testing.T, reader *sdkmetric.ManualReader, reason st
 // counts one FENCED veto and one CROSS_TENANT veto under their own
 // reason label, reading the counter after each claim.
 func TestFenceVetoMetricCountsByReason(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
-	reader := useTestMeterProvider(t)
+	mp, reader := newTestMeterProvider(t)
 
-	metrics, err := NewFenceMetrics()
+	metrics, err := NewFenceMetrics(mp)
 	if err != nil {
 		t.Fatalf("new fence metrics: %v", err)
 	}

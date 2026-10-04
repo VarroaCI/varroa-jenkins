@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel/metric/noop"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
@@ -263,7 +264,7 @@ func TestRunBackstopRoundRunsInterruptedSweepInSameRound(t *testing.T) {
 	defer cleanup()
 	freshenSweepConsumer(t, conn)
 
-	sweepMetrics, err := NewInterruptedMetrics()
+	sweepMetrics, err := NewInterruptedMetrics(noop.NewMeterProvider())
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -439,7 +440,7 @@ func TestRunBackstopRoundMovesInterruptedHolderToReleasing(t *testing.T) {
 	defer cleanup()
 	freshenSweepConsumer(t, conn)
 
-	sweepMetrics, err := NewInterruptedMetrics()
+	sweepMetrics, err := NewInterruptedMetrics(noop.NewMeterProvider())
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -505,7 +506,7 @@ func TestRunBackstopRoundReleasesConfirmedGoneHolderInOneRound(t *testing.T) {
 	defer cleanup()
 	freshenSweepConsumer(t, conn)
 
-	sweepMetrics, err := NewInterruptedMetrics()
+	sweepMetrics, err := NewInterruptedMetrics(noop.NewMeterProvider())
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}

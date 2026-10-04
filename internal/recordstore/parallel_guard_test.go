@@ -11,87 +11,17 @@ import (
 	"testing"
 )
 
-// Reasons a database test stays serial.
-const (
-	// serialReasonMeter: the test installs a global meter provider
-	// through useTestMeterProvider.
-	serialReasonMeter = "replaces the global meter provider"
-	// serialReasonRole: the test checks or creates a cluster-wide
-	// Postgres role, and its role-absent check must run before any
-	// parallel test creates that role.
-	serialReasonRole = "reads or creates a cluster-wide role"
-)
+// serialReasonRole is why a database test stays serial: the test checks
+// or creates a cluster-wide Postgres role, and its role-absent check must
+// run before any parallel test creates that role.
+const serialReasonRole = "reads or creates a cluster-wide role"
 
 // serialDatabaseTests lists every database test that must not call
 // t.Parallel. Every other database test calls t.Parallel as its first
 // statement. TestDatabaseTestsRunInParallel enforces both rules.
 var serialDatabaseTests = map[string]string{
-	"TestActivityConsumerCreatesMissingPartition":                           serialReasonMeter,
-	"TestActivityConsumerDuplicateRedelivery":                               serialReasonMeter,
-	"TestActivityConsumerExpiredEventDropped":                               serialReasonMeter,
-	"TestActivityConsumerInsertsRow":                                        serialReasonMeter,
-	"TestActivityConsumerUndecodablePayload":                                serialReasonMeter,
-	"TestAfterMarkRetry_UnboundHomeSlotPublishesNothing":                    serialReasonMeter,
-	"TestAnnounceHookMarksCellLostWithAFreshHeartbeat":                      serialReasonMeter,
-	"TestClaimResponderStartMark":                                           serialReasonMeter,
-	"TestConcurrencyCancelBoundedAtEight":                                   serialReasonMeter,
-	"TestConcurrencyCancelPublishesForOlderRun":                             serialReasonMeter,
-	"TestCrossTenantMetrics_RequestsAndGrantDeniedCountThroughDispatch":     serialReasonMeter,
-	"TestEndMarkedLostIntentSkipsTheRetryOfAParameterizedIntent":            serialReasonMeter,
-	"TestEndStaleMarkedIntentEndsALiveOwnerAfterTheAge":                     serialReasonMeter,
-	"TestExpireUnclaimedRunsEndsAnAbandonedGrant":                           serialReasonMeter,
-	"TestExpireUnclaimedRunsMarksAnAgedQueuedRun":                           serialReasonMeter,
-	"TestFenceVetoMetricCountsByReason":                                     serialReasonMeter,
-	"TestFireOnePublishesActionsEvenWhenActivityInsertFails":                serialReasonMeter,
-	"TestFireOnePublishesWakeThenRetryAndWritesActivity":                    serialReasonMeter,
-	"TestFleetLockMetrics_GaugesReportStoredRowCounts":                      serialReasonMeter,
-	"TestHandleClaimLogsNothingOnGrant":                                     serialReasonMeter,
-	"TestIngestConsumerAcknowledgesMalformedEnvelope":                       serialReasonMeter,
-	"TestRefireAttemptBoundStopsTheSixthAttempt":                            serialReasonMeter,
-	"TestRefireClearsTheMarkerOnAPublishFailure":                            serialReasonMeter,
-	"TestRefirePermanentRejectionKeepsTheMarker":                            serialReasonMeter,
-	"TestRefirePublishesAndMarks":                                           serialReasonMeter,
-	"TestRefireRejectedTriggerClearsTheMarker":                              serialReasonMeter,
-	"TestRefireUnreachableTriggerClearsTheMarker":                           serialReasonMeter,
-	"TestRefireRefusalRules":                                                serialReasonMeter,
-	"TestRunUpstreamFanout_ARedeliveredCompletionPublishesOnce":             serialReasonMeter,
-	"TestRunUpstreamFanout_AddressesTheSubscriberHomeSlot":                  serialReasonMeter,
-	"TestRunUpstreamFanout_BothKindsBuildOnce":                              serialReasonMeter,
-	"TestRunUpstreamFanout_CapCoversBothSetsTogether":                       serialReasonMeter,
-	"TestRunUpstreamFanout_ClusterResolutionExcludesOtherClusterSubscriber": serialReasonMeter,
-	"TestRunUpstreamFanout_DeniedSubscriberSkipped":                         serialReasonMeter,
-	"TestRunUpstreamFanout_DisabledSubscriberSkipped":                       serialReasonMeter,
-	"TestRunUpstreamFanout_FiresAfterAHomeMove":                             serialReasonMeter,
-	"TestRunUpstreamFanout_ForeignListedPathIsDroppedAndCountedOnce":        serialReasonMeter,
-	"TestRunUpstreamFanout_FortySubscribersCapAt32":                         serialReasonMeter,
-	"TestRunUpstreamFanout_NativeEdgeIgnoresTheRelativePath":                serialReasonMeter,
-	"TestRunUpstreamFanout_NativeEdgeMatchesTheQualifiedPath":               serialReasonMeter,
-	"TestRunUpstreamFanout_NativeEdgeReachesSlotOneHolder":                  serialReasonMeter,
-	"TestRunUpstreamFanout_NativeThresholdBelowResultDoesNotFire":           serialReasonMeter,
-	"TestRunUpstreamFanout_NativeThresholdMetFires":                         serialReasonMeter,
-	"TestRunUpstreamFanout_OneDisabledDeclarationDoesNotHideTheOther":       serialReasonMeter,
-	"TestRunUpstreamFanout_OneSlotTenantKeepsTheSlotZeroCell":               serialReasonMeter,
-	"TestRunUpstreamFanout_PublishFailureCountsAndContinues":                serialReasonMeter,
-	"TestRunUpstreamFanout_PublishesGrantedSubscriber":                      serialReasonMeter,
-	"TestRunUpstreamFanout_TakeoverAddressesThePromotedCell":                serialReasonMeter,
-	"TestRunUpstreamFanout_ThresholdBelowResultDoesNotFire":                 serialReasonMeter,
-	"TestRunUpstreamFanout_UnboundHomeSlotCountsUnplaced":                   serialReasonMeter,
-	"TestRunUpstreamFanout_UnplacedSubscriberSkipped":                       serialReasonMeter,
-	"TestSweepEndsASilentRunOnALiveOwner":                                   serialReasonMeter,
-	"TestSweepFleetLocks_MetricsCountedThroughMaintenanceRound":             serialReasonMeter,
-	"TestSweepFleetLocks_NilNotifierStillDeletesRows":                       serialReasonMeter,
-	"TestSweepInterruptedRunsMarksASilentRun":                               serialReasonMeter,
-	"TestSweepInterruptedRunsSkipsOnPendingBacklog":                         serialReasonMeter,
-	"TestSweepInterruptedRunsSkipsOnStaleConsumer":                          serialReasonMeter,
-	"TestSweepMarksCellLostAndCountsIt":                                     serialReasonMeter,
-	"TestSweepSkipsQueuedPlaceholderWithNoOwningInstance":                   serialReasonMeter,
-	"TestTakeOverLostRunsArmsOnlyOnce":                                      serialReasonMeter,
-	"TestTakeOverLostRunsArmsWithNoTarget":                                  serialReasonMeter,
-	"TestTakeOverLostRunsPublishesNoLockNotification":                       serialReasonMeter,
-	"TestTakeOverLostRunsSkipsExcludedInstance":                             serialReasonMeter,
-	"TestVetoMarksAnAcceptedRun":                                            serialReasonMeter,
-	"TestEnsureGrantsGatewayRole":                                           serialReasonRole,
-	"TestEnsureGrantsIdempotent":                                            serialReasonRole,
+	"TestEnsureGrantsGatewayRole": serialReasonRole,
+	"TestEnsureGrantsIdempotent":  serialReasonRole,
 }
 
 // databaseEntryPoints are the helpers through which a test reaches the
@@ -102,8 +32,9 @@ var databaseEntryPoints = []string{"testDatabases", "requireTestDSN"}
 // TestDatabaseTestsRunInParallel parses the test files of this package.
 // It fails when a database test outside serialDatabaseTests does not
 // start with t.Parallel, when a listed test calls t.Parallel, when a
-// test that reaches useTestMeterProvider is not serial, and when a
-// listed name is not a database test.
+// test file calls SetMeterProvider, and when a listed name is not a
+// database test. A test gives each metrics constructor its own provider
+// from newTestMeterProvider, so no test replaces the global provider.
 func TestDatabaseTestsRunInParallel(t *testing.T) {
 	t.Parallel()
 
@@ -123,6 +54,9 @@ func TestDatabaseTestsRunInParallel(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parse %s: %v", name, err)
 		}
+		for _, pos := range setMeterProviderCalls(file) {
+			t.Errorf("%s replaces the global meter provider: pass a provider from newTestMeterProvider to the constructor", fset.Position(pos))
+		}
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Body == nil {
@@ -140,11 +74,7 @@ func TestDatabaseTestsRunInParallel(t *testing.T) {
 	for _, fn := range tests {
 		name := fn.Name.Name
 		parallel := startsWithParallel(fn)
-		meter := reaches(name, "useTestMeterProvider")
 		if !reaches(name, databaseEntryPoints...) {
-			if meter && parallel {
-				t.Errorf("%s replaces the global meter provider: remove its t.Parallel call", name)
-			}
 			continue
 		}
 		databaseTests[name] = true
@@ -154,9 +84,6 @@ func TestDatabaseTestsRunInParallel(t *testing.T) {
 			t.Errorf("%s is in serialDatabaseTests but calls t.Parallel", name)
 		case !serial && !parallel:
 			t.Errorf("%s uses the database: call t.Parallel as its first statement, or list it in serialDatabaseTests", name)
-		}
-		if !serial && meter {
-			t.Errorf("%s replaces the global meter provider: list it in serialDatabaseTests", name)
 		}
 	}
 
@@ -170,6 +97,31 @@ func TestDatabaseTestsRunInParallel(t *testing.T) {
 	for _, name := range stale {
 		t.Errorf("serialDatabaseTests lists %s, which is not a database test of this package", name)
 	}
+}
+
+// setMeterProviderCalls returns the position of every call to a function
+// or method named SetMeterProvider in file. A parallel test sees the
+// global provider another test installs, so no test may call it.
+func setMeterProviderCalls(file *ast.File) []token.Pos {
+	var calls []token.Pos
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		switch fun := call.Fun.(type) {
+		case *ast.Ident:
+			if fun.Name == "SetMeterProvider" {
+				calls = append(calls, call.Pos())
+			}
+		case *ast.SelectorExpr:
+			if fun.Sel.Name == "SetMeterProvider" {
+				calls = append(calls, call.Pos())
+			}
+		}
+		return true
+	})
+	return calls
 }
 
 // isTestingTFunc reports whether fn takes one *testing.T parameter.

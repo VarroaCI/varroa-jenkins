@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -35,8 +34,8 @@ const (
 
 // NewActionMetrics registers recorder_actions_published_total on the
 // "varroa-recorder" meter.
-func NewActionMetrics() (*ActionMetrics, error) {
-	meter := otel.Meter("varroa-recorder")
+func NewActionMetrics(mp metric.MeterProvider) (*ActionMetrics, error) {
+	meter := mp.Meter("varroa-recorder")
 	published, err := meter.Int64Counter("recorder_actions_published_total",
 		metric.WithDescription("Ledger actions published on the action subject, labelled by kind"))
 	if err != nil {

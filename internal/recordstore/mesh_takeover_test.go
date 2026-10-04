@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/metric/noop"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
@@ -134,14 +135,16 @@ func runTakeoverWithLogs(t *testing.T, pool *pgxpool.Pool, conn *bus.Conn, metri
 // arm_expires, and no instance, while the tenant reports no live
 // replacement.
 func TestTakeOverLostRunsArmsWithNoTarget(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
-	reader := useTestMeterProvider(t)
+	mp, reader := newTestMeterProvider(t)
 
 	runID := seedMeshRunningRun(t, pool, db)
 	seedMeshPlacement(t, db, "", "")
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -164,14 +167,16 @@ func TestTakeOverLostRunsArmsWithNoTarget(t *testing.T) {
 // TestTakeOverLostRunsArmsOnlyOnce asserts a second round over the same
 // unarmed run leaves the first arm unchanged and arms nothing more.
 func TestTakeOverLostRunsArmsOnlyOnce(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
-	reader := useTestMeterProvider(t)
+	mp, reader := newTestMeterProvider(t)
 
 	runID := seedMeshRunningRun(t, pool, db)
 	seedMeshPlacement(t, db, "", "")
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -210,11 +215,11 @@ func TestTakeOverLostRunsDispatchesToLiveTarget(t *testing.T) {
 	seedMeshFleetLock(t, db, runID)
 	seedMeshPlacement(t, db, "pod-live", "pod-live")
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(noop.NewMeterProvider())
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
-	actionMetrics, err := NewActionMetrics()
+	actionMetrics, err := NewActionMetrics(noop.NewMeterProvider())
 	if err != nil {
 		t.Fatalf("new action metrics: %v", err)
 	}
@@ -347,7 +352,7 @@ func TestDispatchMeshResumeRollsBackOnRealCompletion(t *testing.T) {
 		t.Fatalf("simulate a real completion: %v", err)
 	}
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(noop.NewMeterProvider())
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -427,7 +432,7 @@ func TestDispatchMeshResumeReadsTheRecordedEpoch(t *testing.T) {
 	seedMeshFleetLock(t, db, runID)
 	seedMeshPlacement(t, db, "pod-live", "pod-live")
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(noop.NewMeterProvider())
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -492,19 +497,21 @@ func TestDispatchMeshResumeReadsTheRecordedEpoch(t *testing.T) {
 // publishes nothing for the row either, because the row's own state did
 // not change: it stays held.
 func TestTakeOverLostRunsPublishesNoLockNotification(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
-	useTestMeterProvider(t)
+	mp := noop.NewMeterProvider()
 
 	runID := seedMeshRunningRun(t, pool, db)
 	seedMeshFleetLock(t, db, runID)
 	seedMeshPlacement(t, db, "pod-live", "pod-live")
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
-	actionMetrics, err := NewActionMetrics()
+	actionMetrics, err := NewActionMetrics(mp)
 	if err != nil {
 		t.Fatalf("new action metrics: %v", err)
 	}
@@ -540,6 +547,8 @@ func TestTakeOverLostRunsPublishesNoLockNotification(t *testing.T) {
 // TestDispatchMeshResumeCarriesTheLogNextSeq asserts the resume action
 // names the next log sequence the gateway accepts for the moved run.
 func TestDispatchMeshResumeCarriesTheLogNextSeq(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
 	received := collectActions(t, conn)
@@ -566,6 +575,8 @@ func TestDispatchMeshResumeCarriesTheLogNextSeq(t *testing.T) {
 // failure does not stop the resume. The action goes out with no log
 // sequence.
 func TestDispatchMeshResumeIndexReadFailureSendsZero(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
 	received := collectActions(t, conn)

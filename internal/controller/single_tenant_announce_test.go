@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/metric/noop"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -174,7 +175,7 @@ func TestAnnounceSingleTenantPlacement_ClaimGranted(t *testing.T) {
 	defer pool.Close()
 
 	conn := startTestSyncBus(t)
-	sub, err := recordstore.RegisterTenantSyncResponder(conn, pool, recordstore.DefaultConfirmedGoneGrace, nil, nil, nil, nil)
+	sub, err := recordstore.RegisterTenantSyncResponder(noop.NewMeterProvider(), conn, pool, recordstore.DefaultConfirmedGoneGrace, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("register responder: %v", err)
 	}

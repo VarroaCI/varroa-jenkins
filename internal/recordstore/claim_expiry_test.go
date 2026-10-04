@@ -56,9 +56,11 @@ func readStatusResult(t *testing.T, db *sql.DB, runID uuid.UUID) (string, sql.Nu
 // CLAIM_EXPIRED, and writes one activity row, one notification, and one
 // count.
 func TestExpireUnclaimedRunsMarksAnAgedQueuedRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
-	reader := useTestMeterProvider(t)
-	metrics, err := NewClaimExpiryMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewClaimExpiryMetrics(mp)
 	if err != nil {
 		t.Fatalf("register metrics: %v", err)
 	}

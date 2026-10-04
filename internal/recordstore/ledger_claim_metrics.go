@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -24,8 +23,8 @@ type ClaimMetrics struct {
 
 // NewClaimMetrics registers recorder_claims_vetoed_total,
 // recorder_claim_veto_marked_total, and recorder_start_marks_total.
-func NewClaimMetrics() (*ClaimMetrics, error) {
-	meter := otel.Meter("varroa-recorder")
+func NewClaimMetrics(mp metric.MeterProvider) (*ClaimMetrics, error) {
+	meter := mp.Meter("varroa-recorder")
 
 	vetoed, err := meter.Int64Counter("recorder_claims_vetoed_total",
 		metric.WithDescription("Claims the recorder vetoed, labelled by reason"))

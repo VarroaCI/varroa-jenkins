@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 )
 
@@ -18,8 +17,8 @@ type BackstopMetrics struct {
 }
 
 // NewBackstopMetrics registers the backstop scheduler's counters.
-func NewBackstopMetrics() (*BackstopMetrics, error) {
-	meter := otel.Meter("varroa-recorder")
+func NewBackstopMetrics(mp metric.MeterProvider) (*BackstopMetrics, error) {
+	meter := mp.Meter("varroa-recorder")
 
 	fired, err := meter.Int64Counter("recorder_cron_fired_total",
 		metric.WithDescription("Backstop triggers published"))

@@ -15,7 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 )
 
@@ -269,30 +269,17 @@ func emptyTestDB(t *testing.T) string {
 	return testDatabases(t).newDatabase(t, "template0")
 }
 
-// serialGuardEnv is the environment variable requireSerialTest sets. Its
-// value has no meaning.
-const serialGuardEnv = "VARROA_TEST_SERIAL_GUARD"
-
-// requireSerialTest fails t when t runs in parallel. t.Setenv panics in
-// a parallel test, so a helper that changes process-wide state calls this
-// first.
-func requireSerialTest(t *testing.T) {
+// newTestMeterProvider returns a meter provider with a manual reader,
+// and the reader. The provider is local to the calling test, so the test
+// can run in parallel. Never install it as the global provider.
+func newTestMeterProvider(t *testing.T) (metric.MeterProvider, *sdkmetric.ManualReader) {
 	t.Helper()
-	t.Setenv(serialGuardEnv, "1")
-}
-
-// useTestMeterProvider installs a meter provider with a manual reader as
-// the global provider until t ends, and returns the reader. Every metrics
-// constructor in this package reads the global provider, so the calling
-// test must not run in parallel. List it in serialDatabaseTests when it
-// uses the database.
-func useTestMeterProvider(t *testing.T) *sdkmetric.ManualReader {
-	t.Helper()
-	requireSerialTest(t)
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	prev := otel.GetMeterProvider()
-	otel.SetMeterProvider(mp)
-	t.Cleanup(func() { otel.SetMeterProvider(prev) })
-	return reader
+	t.Cleanup(func() {
+		if err := mp.Shutdown(context.Background()); err != nil {
+			t.Errorf("shut down test meter provider: %v", err)
+		}
+	})
+	return mp, reader
 }

@@ -221,6 +221,8 @@ func applyCompletions(t *testing.T, summaries ...map[string]any) (bool, string) 
 // reason in both orders. The listener's completion reports a complete
 // log, and the gateway's finalize-deadline marker follows both.
 func TestTwoCompletionsKeepTheRestartReason(t *testing.T) {
+	t.Parallel()
+
 	boot := map[string]any{"incomplete": true, "incomplete_reason": "jenkins-restart", "finalized": false}
 	listener := map[string]any{"chunk_count": 6, "dropped_bytes": 0, "incomplete": false, "finalized": false}
 	cases := []struct {
@@ -242,6 +244,8 @@ func TestTwoCompletionsKeepTheRestartReason(t *testing.T) {
 // that reports incomplete false keeps a stored gateway reason and the
 // incomplete flag, because a later complete claim cannot undo a loss.
 func TestApplyRunLogKeepsAGatewayReasonAgainstACompleteLog(t *testing.T) {
+	t.Parallel()
+
 	incomplete, reason := applyLogSummaries(t, incompleteWith("gateway-gap"), map[string]any{"incomplete": false})
 	assertLogReason(t, incomplete, reason, "gateway-gap")
 }
@@ -249,6 +253,8 @@ func TestApplyRunLogKeepsAGatewayReasonAgainstACompleteLog(t *testing.T) {
 // TestApplyRunLogCompleteLogDropsAFinalizeDeadlineReason asserts a
 // run.log that reports incomplete false removes a stored generic reason.
 func TestApplyRunLogCompleteLogDropsAFinalizeDeadlineReason(t *testing.T) {
+	t.Parallel()
+
 	incomplete, reason := applyLogSummaries(t, incompleteWith("finalize-deadline"), map[string]any{"incomplete": false})
 	if incomplete || reason != "" {
 		t.Fatalf("incomplete=%v incomplete_reason=%q, want false and no reason", incomplete, reason)

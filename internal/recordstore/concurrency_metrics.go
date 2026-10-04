@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 )
 
@@ -17,8 +16,8 @@ type ConcurrencyMetrics struct {
 }
 
 // NewConcurrencyMetrics registers the concurrency-cancel counters.
-func NewConcurrencyMetrics() (*ConcurrencyMetrics, error) {
-	meter := otel.Meter("varroa-recorder")
+func NewConcurrencyMetrics(mp metric.MeterProvider) (*ConcurrencyMetrics, error) {
+	meter := mp.Meter("varroa-recorder")
 
 	cancel, err := meter.Int64Counter("recorder_concurrency_cancel_total",
 		metric.WithDescription("cancel_run actions published for a cancelInProgress tenant's older runs"))

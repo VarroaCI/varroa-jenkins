@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel/metric/noop"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
@@ -70,9 +71,11 @@ func metricValue(t *testing.T, reader *sdkmetric.ManualReader, name string) int6
 // TestActivityConsumerInsertsRow asserts a well-formed event is stored
 // and acknowledged.
 func TestActivityConsumerInsertsRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
-	useTestMeterProvider(t)
+	mp := noop.NewMeterProvider()
 
 	s := startIngestTestServer(t)
 	conn, err := bus.Connect(s.ClientURL())
@@ -83,7 +86,7 @@ func TestActivityConsumerInsertsRow(t *testing.T) {
 	if err := EnsureActivityStream(conn, 1); err != nil {
 		t.Fatalf("ensure activity stream: %v", err)
 	}
-	metrics, err := NewActivityMetrics(conn, bus.ActivityStreamName, ActivityRecorderConsumerName)
+	metrics, err := NewActivityMetrics(mp, conn, bus.ActivityStreamName, ActivityRecorderConsumerName)
 	if err != nil {
 		t.Fatalf("new activity metrics: %v", err)
 	}
@@ -108,9 +111,11 @@ func TestActivityConsumerInsertsRow(t *testing.T) {
 // TestActivityConsumerDuplicateRedelivery asserts a redelivered event
 // is acknowledged and counted as a duplicate, without a second row.
 func TestActivityConsumerDuplicateRedelivery(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
-	reader := useTestMeterProvider(t)
+	mp, reader := newTestMeterProvider(t)
 
 	s := startIngestTestServer(t)
 	conn, err := bus.Connect(s.ClientURL())
@@ -121,7 +126,7 @@ func TestActivityConsumerDuplicateRedelivery(t *testing.T) {
 	if err := EnsureActivityStream(conn, 1); err != nil {
 		t.Fatalf("ensure activity stream: %v", err)
 	}
-	metrics, err := NewActivityMetrics(conn, bus.ActivityStreamName, ActivityRecorderConsumerName)
+	metrics, err := NewActivityMetrics(mp, conn, bus.ActivityStreamName, ActivityRecorderConsumerName)
 	if err != nil {
 		t.Fatalf("new activity metrics: %v", err)
 	}
@@ -149,9 +154,11 @@ func TestActivityConsumerDuplicateRedelivery(t *testing.T) {
 // the configured retention is acknowledged, counted expired, and writes
 // no row.
 func TestActivityConsumerExpiredEventDropped(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
-	reader := useTestMeterProvider(t)
+	mp, reader := newTestMeterProvider(t)
 
 	s := startIngestTestServer(t)
 	conn, err := bus.Connect(s.ClientURL())
@@ -162,7 +169,7 @@ func TestActivityConsumerExpiredEventDropped(t *testing.T) {
 	if err := EnsureActivityStream(conn, 1); err != nil {
 		t.Fatalf("ensure activity stream: %v", err)
 	}
-	metrics, err := NewActivityMetrics(conn, bus.ActivityStreamName, ActivityRecorderConsumerName)
+	metrics, err := NewActivityMetrics(mp, conn, bus.ActivityStreamName, ActivityRecorderConsumerName)
 	if err != nil {
 		t.Fatalf("new activity metrics: %v", err)
 	}
@@ -193,9 +200,11 @@ func TestActivityConsumerExpiredEventDropped(t *testing.T) {
 // does not decode as an activity event is acknowledged, counted, and
 // never stops the consumer from processing the rest of the batch.
 func TestActivityConsumerUndecodablePayload(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
-	reader := useTestMeterProvider(t)
+	mp, reader := newTestMeterProvider(t)
 
 	s := startIngestTestServer(t)
 	conn, err := bus.Connect(s.ClientURL())
@@ -206,7 +215,7 @@ func TestActivityConsumerUndecodablePayload(t *testing.T) {
 	if err := EnsureActivityStream(conn, 1); err != nil {
 		t.Fatalf("ensure activity stream: %v", err)
 	}
-	metrics, err := NewActivityMetrics(conn, bus.ActivityStreamName, ActivityRecorderConsumerName)
+	metrics, err := NewActivityMetrics(mp, conn, bus.ActivityStreamName, ActivityRecorderConsumerName)
 	if err != nil {
 		t.Fatalf("new activity metrics: %v", err)
 	}
@@ -237,9 +246,11 @@ func TestActivityConsumerUndecodablePayload(t *testing.T) {
 // month has no partition yet still gets stored: the consumer creates
 // that month's partition and retries the insert once.
 func TestActivityConsumerCreatesMissingPartition(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
-	useTestMeterProvider(t)
+	mp := noop.NewMeterProvider()
 
 	s := startIngestTestServer(t)
 	conn, err := bus.Connect(s.ClientURL())
@@ -250,7 +261,7 @@ func TestActivityConsumerCreatesMissingPartition(t *testing.T) {
 	if err := EnsureActivityStream(conn, 1); err != nil {
 		t.Fatalf("ensure activity stream: %v", err)
 	}
-	metrics, err := NewActivityMetrics(conn, bus.ActivityStreamName, ActivityRecorderConsumerName)
+	metrics, err := NewActivityMetrics(mp, conn, bus.ActivityStreamName, ActivityRecorderConsumerName)
 	if err != nil {
 		t.Fatalf("new activity metrics: %v", err)
 	}
@@ -292,7 +303,7 @@ func TestActivityConsumerLegacySubjectUnattributed(t *testing.T) {
 	if err := EnsureActivityStream(conn, 1); err != nil {
 		t.Fatalf("ensure activity stream: %v", err)
 	}
-	metrics, err := NewActivityMetrics(conn, bus.ActivityStreamName, ActivityRecorderConsumerName)
+	metrics, err := NewActivityMetrics(noop.NewMeterProvider(), conn, bus.ActivityStreamName, ActivityRecorderConsumerName)
 	if err != nil {
 		t.Fatalf("new activity metrics: %v", err)
 	}
@@ -349,7 +360,7 @@ func TestActivityConsumerSubstitutesMessageTimestamp(t *testing.T) {
 	if err := conn.EnsureConsumer(bus.ActivityStreamName, ActivityRecorderConsumerName, activityRecorderConsumerConfig()); err != nil {
 		t.Fatalf("ensure consumer: %v", err)
 	}
-	metrics, err := NewActivityMetrics(conn, bus.ActivityStreamName, ActivityRecorderConsumerName)
+	metrics, err := NewActivityMetrics(noop.NewMeterProvider(), conn, bus.ActivityStreamName, ActivityRecorderConsumerName)
 	if err != nil {
 		t.Fatalf("new activity metrics: %v", err)
 	}
@@ -431,7 +442,7 @@ func TestActivityConsumerInsertFailureNotAcked(t *testing.T) {
 	if err := conn.EnsureConsumer(bus.ActivityStreamName, ActivityRecorderConsumerName, activityRecorderConsumerConfig()); err != nil {
 		t.Fatalf("ensure consumer: %v", err)
 	}
-	metrics, err := NewActivityMetrics(conn, bus.ActivityStreamName, ActivityRecorderConsumerName)
+	metrics, err := NewActivityMetrics(noop.NewMeterProvider(), conn, bus.ActivityStreamName, ActivityRecorderConsumerName)
 	if err != nil {
 		t.Fatalf("new activity metrics: %v", err)
 	}

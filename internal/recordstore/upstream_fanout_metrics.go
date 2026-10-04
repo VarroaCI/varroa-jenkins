@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -18,8 +17,8 @@ type UpstreamFanoutMetrics struct {
 
 // NewUpstreamFanoutMetrics registers recorder_upstream_fanout_total and
 // recorder_upstream_fanout_skipped_total.
-func NewUpstreamFanoutMetrics() (*UpstreamFanoutMetrics, error) {
-	meter := otel.Meter("varroa-recorder")
+func NewUpstreamFanoutMetrics(mp metric.MeterProvider) (*UpstreamFanoutMetrics, error) {
+	meter := mp.Meter("varroa-recorder")
 
 	published, err := meter.Int64Counter("recorder_upstream_fanout_total",
 		metric.WithDescription("trigger_run actions the upstream fan-out published"))

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
@@ -42,8 +41,8 @@ type IngestMetrics struct {
 // consumer's pending count and the stream's byte count for the two
 // backlog gauges; a lookup failure during one collection skips that
 // collection rather than erroring the whole callback.
-func NewIngestMetrics(conn *bus.Conn, streamName, consumerName string) (*IngestMetrics, error) {
-	meter := otel.Meter("varroa-recorder")
+func NewIngestMetrics(mp metric.MeterProvider, conn *bus.Conn, streamName, consumerName string) (*IngestMetrics, error) {
+	meter := mp.Meter("varroa-recorder")
 	m := &IngestMetrics{}
 
 	var err error

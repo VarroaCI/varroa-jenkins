@@ -247,12 +247,14 @@ of the fleet's audit activity, once a controller becomes disposable.
   test gets its own database, cloned from a migrated template (see
   Verification), so a repeated run starts clean. **A database test calls
   `t.Parallel()` as its first statement.** `serialDatabaseTests`
-  (`parallel_guard_test.go`) lists the exceptions: a test that calls
-  `useTestMeterProvider`, because every metrics constructor reads the
-  global meter provider, and the two grants tests, because a role is
-  cluster-wide. `useTestMeterProvider` calls `t.Setenv`, which panics in a
-  parallel test. `TestDatabaseTestsRunInParallel` parses the test files
-  and fails on a missing call or a stale list entry. The `blob` test binary runs
+  (`parallel_guard_test.go`) lists the exceptions: the two grants tests,
+  because a role is cluster-wide. Every metrics constructor and both
+  `Register*Responder` functions take a `metric.MeterProvider`. A test
+  that reads a metric passes the provider from `newTestMeterProvider`.
+  Other tests pass `noop.NewMeterProvider()`. No test replaces the global
+  provider. `TestDatabaseTestsRunInParallel` parses the test files and
+  fails on a missing call, a stale list entry, or a `SetMeterProvider`
+  call. The `blob` test binary runs
   at the same time and owns a sibling database, `<db>_blob`, that it creates
   on first use. Seed a
   monthly-partitioned table only inside the window its migration creates
@@ -781,7 +783,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   (`ingest_stream.go`) creates the `varroa_builds` stream, and
   `cmd/recorder` is the only caller. `IngestMetrics`
   (`ingest_metrics.go`) holds the `recorder_ingest_*` instruments on
-  `otel.Meter("varroa-recorder")`. The `job.schedules` kind rides the same
+  the `"varroa-recorder"` meter of the provider `cmd/recorder` passes.
+  The `job.schedules` kind rides the same
   `varroa_builds` stream and the same `recorder` consumer as every
   `run.*` kind; it carries an empty `run_id`, so `Ingester.Apply` skips
   the intent lookup for it. The `run.trigger_failed` kind takes the same

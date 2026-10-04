@@ -16,10 +16,12 @@ import (
 // never redelivered, and counted toward recorder_ingest_unknown_total.
 // A permanent input error must not retry forever.
 func TestIngestConsumerAcknowledgesMalformedEnvelope(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	payloadRunID := seedGrantedIntent(t, pool, "manual:malformed-payload")
 
-	reader := useTestMeterProvider(t)
+	mp, reader := newTestMeterProvider(t)
 
 	s := startIngestTestServer(t)
 	conn, err := bus.Connect(s.ClientURL())
@@ -33,7 +35,7 @@ func TestIngestConsumerAcknowledgesMalformedEnvelope(t *testing.T) {
 	if err := EnsureIngestConsumer(conn, bus.BuildsStreamName); err != nil {
 		t.Fatalf("ensure consumer: %v", err)
 	}
-	metrics, err := NewIngestMetrics(conn, bus.BuildsStreamName, RecorderConsumerName)
+	metrics, err := NewIngestMetrics(mp, conn, bus.BuildsStreamName, RecorderConsumerName)
 	if err != nil {
 		t.Fatalf("new ingest metrics: %v", err)
 	}

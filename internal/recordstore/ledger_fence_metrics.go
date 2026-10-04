@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -16,8 +15,8 @@ type FenceMetrics struct {
 }
 
 // NewFenceMetrics registers recorder_fence_veto_total.
-func NewFenceMetrics() (*FenceMetrics, error) {
-	meter := otel.Meter("varroa-recorder")
+func NewFenceMetrics(mp metric.MeterProvider) (*FenceMetrics, error) {
+	meter := mp.Meter("varroa-recorder")
 
 	veto, err := meter.Int64Counter("recorder_fence_veto_total",
 		metric.WithDescription("Claims the placement fence vetoed, labelled by reason"))

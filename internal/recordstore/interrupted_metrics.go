@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -34,8 +33,8 @@ type InterruptedMetrics struct {
 // "outcome" and "reason"). It also registers the pipeline mesh's
 // recorder_run_resume_total (labelled "outcome" and "reason") and
 // recorder_run_resume_timeout_total.
-func NewInterruptedMetrics() (*InterruptedMetrics, error) {
-	meter := otel.Meter("varroa-recorder")
+func NewInterruptedMetrics(mp metric.MeterProvider) (*InterruptedMetrics, error) {
+	meter := mp.Meter("varroa-recorder")
 
 	marked, err := meter.Int64Counter("recorder_interrupted_marked_total",
 		metric.WithDescription("Runs marked interrupted, labelled by path (announce or sweep) and status (queued or running)"))

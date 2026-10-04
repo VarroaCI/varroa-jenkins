@@ -121,7 +121,10 @@ func run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("connect to bus: %w", err)
 	}
 	defer busConn.Close()
-	if err := busConn.RegisterMetrics(otel.Meter("varroa-recorder"), "recorder"); err != nil {
+	// The recorder reads the global meter provider only here and passes
+	// it to every record store constructor.
+	mp := otel.GetMeterProvider()
+	if err := busConn.RegisterMetrics(mp.Meter("varroa-recorder"), "recorder"); err != nil {
 		logger.Warn("failed to register bus metrics", "error", err)
 	}
 	busConn.SetReplicas(cfg.JetStreamReplicas)
@@ -136,36 +139,36 @@ func run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("ensure activity stream: %w", err)
 	}
 
-	fenceMetrics, err := recordstore.NewFenceMetrics()
+	fenceMetrics, err := recordstore.NewFenceMetrics(mp)
 	if err != nil {
 		return fmt.Errorf("register fence metrics: %w", err)
 	}
 	ledger := recordstore.NewLedger(pool, recordstore.NewPlacementFence(pool, fenceMetrics))
-	claimMetrics, err := recordstore.NewClaimMetrics()
+	claimMetrics, err := recordstore.NewClaimMetrics(mp)
 	if err != nil {
 		return fmt.Errorf("register claim metrics: %w", err)
 	}
 
-	actionMetrics, err := recordstore.NewActionMetrics()
+	actionMetrics, err := recordstore.NewActionMetrics(mp)
 	if err != nil {
 		return fmt.Errorf("register action metrics: %w", err)
 	}
-	concurrencyMetrics, err := recordstore.NewConcurrencyMetrics()
+	concurrencyMetrics, err := recordstore.NewConcurrencyMetrics(mp)
 	if err != nil {
 		return fmt.Errorf("register concurrency metrics: %w", err)
 	}
 	ledger.SetConcurrencyCancel(busConn, concurrencyMetrics, actionMetrics, logger)
 	wireGrantHold(ledger, busConn, cfg)
 
-	sweepMetrics, err := recordstore.NewInterruptedMetrics()
+	sweepMetrics, err := recordstore.NewInterruptedMetrics(mp)
 	if err != nil {
 		return fmt.Errorf("register interrupted-sweep metrics: %w", err)
 	}
-	backstopMetrics, err := recordstore.NewBackstopMetrics()
+	backstopMetrics, err := recordstore.NewBackstopMetrics(mp)
 	if err != nil {
 		return fmt.Errorf("register backstop metrics: %w", err)
 	}
-	claimExpiryMetrics, err := recordstore.NewClaimExpiryMetrics()
+	claimExpiryMetrics, err := recordstore.NewClaimExpiryMetrics(mp)
 	if err != nil {
 		return fmt.Errorf("register claim-expiry metrics: %w", err)
 	}
@@ -185,21 +188,21 @@ func run(ctx context.Context, cfg Config) error {
 	}
 
 	ingester := recordstore.NewIngester(pool, busConn, logger)
-	metrics, err := recordstore.NewIngestMetrics(busConn, bus.BuildsStreamName, recordstore.RecorderConsumerName)
+	metrics, err := recordstore.NewIngestMetrics(mp, busConn, bus.BuildsStreamName, recordstore.RecorderConsumerName)
 	if err != nil {
 		return fmt.Errorf("register ingest metrics: %w", err)
 	}
 	activityIngester := recordstore.NewActivityIngester(pool)
-	activityMetrics, err := recordstore.NewActivityMetrics(busConn, bus.ActivityStreamName, recordstore.ActivityRecorderConsumerName)
+	activityMetrics, err := recordstore.NewActivityMetrics(mp, busConn, bus.ActivityStreamName, recordstore.ActivityRecorderConsumerName)
 	if err != nil {
 		return fmt.Errorf("register activity metrics: %w", err)
 	}
 
-	fleetLockMetrics, err := recordstore.NewFleetLockMetrics(pool)
+	fleetLockMetrics, err := recordstore.NewFleetLockMetrics(mp, pool)
 	if err != nil {
 		return fmt.Errorf("register fleet lock metrics: %w", err)
 	}
-	fanoutMetrics, err := recordstore.NewUpstreamFanoutMetrics()
+	fanoutMetrics, err := recordstore.NewUpstreamFanoutMetrics(mp)
 	if err != nil {
 		return fmt.Errorf("register upstream fan-out metrics: %w", err)
 	}
@@ -254,7 +257,7 @@ func run(ctx context.Context, cfg Config) error {
 		return sub.Unsubscribe()
 	}
 	tenantSyncResponderFn := func(ctx context.Context) error {
-		sub, err := recordstore.RegisterTenantSyncResponder(busConn, pool, confirmedGoneGrace, store, store, runNotifier, logger)
+		sub, err := recordstore.RegisterTenantSyncResponder(mp, busConn, pool, confirmedGoneGrace, store, store, runNotifier, logger)
 		if err != nil {
 			return err
 		}
@@ -262,7 +265,7 @@ func run(ctx context.Context, cfg Config) error {
 		return sub.Unsubscribe()
 	}
 	crossTenantResponderFn := func(ctx context.Context) error {
-		sub, err := recordstore.RegisterCrossTenantResponder(busConn, pool, store, fleetLockMetrics, runNotifier, logger)
+		sub, err := recordstore.RegisterCrossTenantResponder(mp, busConn, pool, store, fleetLockMetrics, runNotifier, logger)
 		if err != nil {
 			return err
 		}

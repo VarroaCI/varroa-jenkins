@@ -126,9 +126,11 @@ func TestMarkableVeto(t *testing.T) {
 // Varroa run marks the row at once, keeps the accepted keys, writes one
 // activity row, publishes one notification, and counts one mark.
 func TestVetoMarksAnAcceptedRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
-	reader := useTestMeterProvider(t)
-	metrics, err := NewClaimMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewClaimMetrics(mp)
 	if err != nil {
 		t.Fatalf("new claim metrics: %v", err)
 	}

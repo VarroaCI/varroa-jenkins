@@ -11,8 +11,8 @@ import (
 // newTestClaimMetrics registers ClaimMetrics on a fresh manual reader.
 func newTestClaimMetrics(t *testing.T) (*ClaimMetrics, func(reason string) int64) {
 	t.Helper()
-	reader := useTestMeterProvider(t)
-	metrics, err := NewClaimMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewClaimMetrics(mp)
 	if err != nil {
 		t.Fatalf("new claim metrics: %v", err)
 	}
@@ -117,6 +117,8 @@ func TestHandleClaimNilMetricsIsSafe(t *testing.T) {
 // TestHandleClaimLogsNothingOnGrant asserts a granted claim logs no
 // refusal line and counts no veto.
 func TestHandleClaimLogsNothingOnGrant(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 
 	var buf bytes.Buffer

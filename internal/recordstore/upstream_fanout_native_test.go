@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel/metric/noop"
 )
 
 // seedNativeSubscriber inserts one job_schedules row whose trigger type
@@ -28,12 +30,14 @@ func (fx *fanoutTestFixture) seedNativeSubscriber(jobName, spec, threshold strin
 // producer's tenant-qualified job path, and that the same-tenant grant
 // order allows it with no export.
 func TestRunUpstreamFanout_NativeEdgeMatchesTheQualifiedPath(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	fx.seedNativeSubscriber("deploy",
 		fanoutProducerTenant+"/build,"+fanoutProducerTenant+"/test", "SUCCESS", false)
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewUpstreamFanoutMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewUpstreamFanoutMetrics(mp)
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}
@@ -64,11 +68,13 @@ func TestRunUpstreamFanout_NativeEdgeMatchesTheQualifiedPath(t *testing.T) {
 // match uses the qualified path on both sides. A list holding the
 // relative form alone never matches.
 func TestRunUpstreamFanout_NativeEdgeIgnoresTheRelativePath(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	fx.seedNativeSubscriber("deploy", "build", "SUCCESS", false)
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewUpstreamFanoutMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewUpstreamFanoutMetrics(mp)
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}
@@ -84,12 +90,14 @@ func TestRunUpstreamFanout_NativeEdgeIgnoresTheRelativePath(t *testing.T) {
 // TestRunUpstreamFanout_NativeThresholdBelowResultDoesNotFire asserts
 // the threshold test runs inside the native selection.
 func TestRunUpstreamFanout_NativeThresholdBelowResultDoesNotFire(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	fx.producer.Result = "FAILURE"
 	fx.seedNativeSubscriber("deploy", fanoutProducerTenant+"/build", "SUCCESS", false)
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewUpstreamFanoutMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewUpstreamFanoutMetrics(mp)
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}
@@ -105,12 +113,14 @@ func TestRunUpstreamFanout_NativeThresholdBelowResultDoesNotFire(t *testing.T) {
 // TestRunUpstreamFanout_NativeThresholdMetFires asserts the native
 // selection reads each row's own threshold, not one fixed value.
 func TestRunUpstreamFanout_NativeThresholdMetFires(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	fx.producer.Result = "FAILURE"
 	fx.seedNativeSubscriber("deploy", fanoutProducerTenant+"/build", "FAILURE", false)
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewUpstreamFanoutMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewUpstreamFanoutMetrics(mp)
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}
@@ -128,11 +138,13 @@ func TestRunUpstreamFanout_NativeThresholdMetFires(t *testing.T) {
 // and counts exactly one cross_tenant skip, whatever the number of
 // foreign paths.
 func TestRunUpstreamFanout_ForeignListedPathIsDroppedAndCountedOnce(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	fx.seedNativeSubscriber("deploy", "other/build,other/test", "SUCCESS", false)
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewUpstreamFanoutMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewUpstreamFanoutMetrics(mp)
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}
@@ -153,13 +165,15 @@ func TestRunUpstreamFanout_ForeignListedPathIsDroppedAndCountedOnce(t *testing.T
 // both trigger kinds contributes one candidate for each, and that the
 // de-duplication leaves exactly one action.
 func TestRunUpstreamFanout_BothKindsBuildOnce(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	fx.seedNativeSubscriber(fanoutSubscriberJob,
 		fanoutProducerTenant+"/build", "SUCCESS", false)
 	fx.seedSubscriber(testCluster, fanoutProducerTenant, false)
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewUpstreamFanoutMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewUpstreamFanoutMetrics(mp)
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}
@@ -192,13 +206,15 @@ func TestRunUpstreamFanout_BothKindsBuildOnce(t *testing.T) {
 // asserts the de-duplication runs after the disabled test, so a disabled
 // native row leaves the subscription's own candidate standing.
 func TestRunUpstreamFanout_OneDisabledDeclarationDoesNotHideTheOther(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	fx.seedNativeSubscriber(fanoutSubscriberJob,
 		fanoutProducerTenant+"/build", "SUCCESS", true)
 	fx.seedSubscriber(testCluster, fanoutProducerTenant, false)
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewUpstreamFanoutMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewUpstreamFanoutMetrics(mp)
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}
@@ -229,6 +245,8 @@ func TestRunUpstreamFanout_OneDisabledDeclarationDoesNotHideTheOther(t *testing.
 // TestRunUpstreamFanout_CapCoversBothSetsTogether asserts the 32-row cap
 // applies to the de-duplicated joined list, never to each set.
 func TestRunUpstreamFanout_CapCoversBothSetsTogether(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 
 	callers := make([]string, 0, 20)
@@ -244,8 +262,8 @@ func TestRunUpstreamFanout_CapCoversBothSetsTogether(t *testing.T) {
 			fanoutProducerTenant+"/build", "SUCCESS", false)
 	}
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewUpstreamFanoutMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewUpstreamFanoutMetrics(mp)
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}
@@ -288,12 +306,14 @@ func TestRunUpstreamFanout_CapCoversBothSetsTogether(t *testing.T) {
 // answered duplicate, and the second run's accepted-trigger row recorded
 // a build that never ran.
 func TestRunUpstreamFanout_ARedeliveredCompletionPublishesOnce(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedGrantPlacement(t, db, testCluster, testTenant, testNamespace, "cell-a", 1, "{}")
 
 	conn := newTestActionConn(t)
-	useTestMeterProvider(t)
-	metrics, err := NewUpstreamFanoutMetrics()
+	mp := noop.NewMeterProvider()
+	metrics, err := NewUpstreamFanoutMetrics(mp)
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}

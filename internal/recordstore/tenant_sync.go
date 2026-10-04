@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
@@ -31,7 +32,7 @@ const maxDeadInstances = 10
 
 // RegisterTenantSyncResponder subscribes to bus.TenantSyncSubject with
 // queue group "recorder". The returned Responder subscribes again after a denial and stops when
-// unsubscribed. It registers its own InterruptedMetrics for the
+// unsubscribed. It registers on mp its own InterruptedMetrics for the
 // interrupted-run marking an "announce" request triggers (design D9)
 // and its own ActionMetrics for the actions that marking publishes;
 // registration failure is logged and the responder still starts, with
@@ -43,16 +44,16 @@ const maxDeadInstances = 10
 // nil notifier publishes nothing. logs reads a moved run's stored
 // console log for the resume action the announce hook's takeover
 // publishes, and a nil logs sends no log sequence.
-func RegisterTenantSyncResponder(conn *bus.Conn, pool *pgxpool.Pool, grace time.Duration,
+func RegisterTenantSyncResponder(mp metric.MeterProvider, conn *bus.Conn, pool *pgxpool.Pool, grace time.Duration,
 	stateDeleter ObjectDeleter, logs LogIndexReader, notifier *RunNotifier, logger *slog.Logger) (*bus.Responder, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		logger.Warn("interrupted-run metrics registration failed; the tenant sync responder starts anyway", "error", err)
 	}
-	actionMetrics, err := NewActionMetrics()
+	actionMetrics, err := NewActionMetrics(mp)
 	if err != nil {
 		logger.Warn("action metrics registration failed; the tenant sync responder starts anyway", "error", err)
 	}

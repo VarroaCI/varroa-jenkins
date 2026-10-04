@@ -384,9 +384,11 @@ func TestUnmarkedIntentStillTransfers(t *testing.T) {
 // TestClaimResponderStartMark: the responder routes a start mark on
 // bus.LedgerClaimSubject to MarkStart and counts it by decision.
 func TestClaimResponderStartMark(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
-	reader := useTestMeterProvider(t)
-	metrics, err := NewClaimMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewClaimMetrics(mp)
 	if err != nil {
 		t.Fatalf("new claim metrics: %v", err)
 	}

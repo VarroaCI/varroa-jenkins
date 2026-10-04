@@ -12,8 +12,8 @@ import (
 // reader and the actions the round published.
 func runFanoutForHome(t *testing.T, fx *fanoutTestFixture) (*sdkmetric.ManualReader, chan LedgerAction) {
 	t.Helper()
-	reader := useTestMeterProvider(t)
-	metrics, err := NewUpstreamFanoutMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewUpstreamFanoutMetrics(mp)
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
 	}
@@ -45,6 +45,8 @@ func wantFanoutAddress(t *testing.T, received chan LedgerAction, namespace, cell
 // action names the member of the subscriber job's home slot, not the
 // cell the stored schedule row names.
 func TestRunUpstreamFanout_AddressesTheSubscriberHomeSlot(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	fx.setExports([]string{"beta"})
 	seedGrantPlacement(t, fx.db, testCluster, "beta", "cells", "cell-a", 1, "{}")
@@ -62,6 +64,8 @@ func TestRunUpstreamFanout_AddressesTheSubscriberHomeSlot(t *testing.T) {
 // action names the cell that now holds the home slot after a takeover,
 // not the former holder the stored row names.
 func TestRunUpstreamFanout_TakeoverAddressesThePromotedCell(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	fx.setExports([]string{"beta"})
 	seedGrantPlacement(t, fx.db, testCluster, "beta", "cells", "cell-a", 1, "{}")
@@ -83,6 +87,8 @@ func TestRunUpstreamFanout_TakeoverAddressesThePromotedCell(t *testing.T) {
 // subscriber job whose home moved, after the old home exported again and
 // before the new home exported at all.
 func TestRunUpstreamFanout_FiresAfterAHomeMove(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	fx.setExports([]string{"beta"})
 	seedGrantPlacement(t, fx.db, testCluster, "beta", "jenkins", "cell-a", 1, "{}")
@@ -124,6 +130,8 @@ func TestRunUpstreamFanout_FiresAfterAHomeMove(t *testing.T) {
 // TestRunUpstreamFanout_UnboundHomeSlotCountsUnplaced asserts a home slot
 // that holds no member publishes nothing and counts reason "unplaced".
 func TestRunUpstreamFanout_UnboundHomeSlotCountsUnplaced(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	fx.setExports([]string{"beta"})
 	seedGrantPlacement(t, fx.db, testCluster, "beta", "cells", "cell-a", 1, "{}")
@@ -151,6 +159,8 @@ func TestRunUpstreamFanout_UnboundHomeSlotCountsUnplaced(t *testing.T) {
 // placement row with an empty member list answers its scalar cell, the
 // synthetic slot-0 member, and not the stored schedule row's cell.
 func TestRunUpstreamFanout_OneSlotTenantKeepsTheSlotZeroCell(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	fx.setExports([]string{"beta"})
 	seedGrantPlacement(t, fx.db, testCluster, "beta", "jenkins", "cell-b", 1, "{}")
@@ -164,6 +174,8 @@ func TestRunUpstreamFanout_OneSlotTenantKeepsTheSlotZeroCell(t *testing.T) {
 // upstream edge inside one tenant reaches the holder of the subscriber
 // job's home slot when the stored row names slot 0's cell.
 func TestRunUpstreamFanout_NativeEdgeReachesSlotOneHolder(t *testing.T) {
+	t.Parallel()
+
 	fx := newFanoutFixture(t)
 	setPlacementMembers(t, fx.db, fanoutProducerTenant,
 		[]member{activeMember("cell-a", 0, "i0"), activeMember("cell-p1", 1, "i1")},

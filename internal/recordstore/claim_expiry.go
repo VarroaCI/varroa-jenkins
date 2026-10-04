@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
@@ -45,8 +44,8 @@ type ClaimExpiryMetrics struct {
 }
 
 // NewClaimExpiryMetrics registers recorder_claim_expired_total.
-func NewClaimExpiryMetrics() (*ClaimExpiryMetrics, error) {
-	meter := otel.Meter("varroa-recorder")
+func NewClaimExpiryMetrics(mp metric.MeterProvider) (*ClaimExpiryMetrics, error) {
+	meter := mp.Meter("varroa-recorder")
 	expired, err := meter.Int64Counter("recorder_claim_expired_total",
 		metric.WithDescription("Accepted runs marked TRIGGER_FAILED because no claim reached the ledger, or a granted claim built nothing"))
 	if err != nil {

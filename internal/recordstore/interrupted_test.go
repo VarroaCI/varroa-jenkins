@@ -12,6 +12,7 @@ import (
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric/noop"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
@@ -815,6 +816,8 @@ func freshenSweepConsumer(t *testing.T, conn *bus.Conn) {
 // sweep marks it, publishes one cancel_run action, and counts the mark
 // under path "sweep".
 func TestSweepInterruptedRunsMarksASilentRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
 
@@ -840,8 +843,8 @@ func TestSweepInterruptedRunsMarksASilentRun(t *testing.T) {
 	t.Cleanup(func() { _ = sub.Unsubscribe() })
 	conn.NATSConn().Flush()
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewInterruptedMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -882,6 +885,8 @@ func TestSweepInterruptedRunsMarksASilentRun(t *testing.T) {
 // no run and counts a skip when the consumer's pending count is at or
 // above maxPending.
 func TestSweepInterruptedRunsSkipsOnPendingBacklog(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
 	conn, cleanup := newSweepTestBus(t)
@@ -893,8 +898,8 @@ func TestSweepInterruptedRunsSkipsOnPendingBacklog(t *testing.T) {
 		}
 	}
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewInterruptedMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -923,6 +928,8 @@ func TestSweepInterruptedRunsSkipsOnPendingBacklog(t *testing.T) {
 // its round, and counts it, when the consumer has never processed a
 // message.
 func TestSweepInterruptedRunsSkipsOnStaleConsumer(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	conn, cleanup := newSweepTestBus(t)
 	defer cleanup()
@@ -933,8 +940,8 @@ func TestSweepInterruptedRunsSkipsOnStaleConsumer(t *testing.T) {
 		t.Fatalf("publish a pending message: %v", err)
 	}
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewInterruptedMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -1081,7 +1088,7 @@ func TestSweepMarksQueuedRunWithDeadAcceptingInstance(t *testing.T) {
 	t.Cleanup(func() { _ = sub.Unsubscribe() })
 	conn.NATSConn().Flush()
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(noop.NewMeterProvider())
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -1146,7 +1153,7 @@ func TestSweepLeavesQueuedRunWithLiveAcceptingInstanceAlone(t *testing.T) {
 	defer cleanup()
 	freshenSweepConsumer(t, conn)
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(noop.NewMeterProvider())
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -1172,6 +1179,8 @@ func TestSweepLeavesQueuedRunWithLiveAcceptingInstanceAlone(t *testing.T) {
 // row with no run_intents row and no accepted_instance payload key is
 // skipped and counted, rather than evaluated with an empty instance.
 func TestSweepSkipsQueuedPlaceholderWithNoOwningInstance(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := uuid.Must(uuid.NewV7())
 	if _, err := db.Exec(`
@@ -1185,8 +1194,8 @@ func TestSweepSkipsQueuedPlaceholderWithNoOwningInstance(t *testing.T) {
 	defer cleanup()
 	freshenSweepConsumer(t, conn)
 
-	reader := useTestMeterProvider(t)
-	metrics, err := NewInterruptedMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -1244,7 +1253,7 @@ func TestSweepMarksClaimedQueuedRunThroughIntentInstance(t *testing.T) {
 	conn, cleanup := newSweepTestBus(t)
 	defer cleanup()
 	freshenSweepConsumer(t, conn)
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(noop.NewMeterProvider())
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -1382,15 +1391,17 @@ func cellLossCountByPath(t *testing.T, reader *sdkmetric.ManualReader, path stri
 // confirmation alone decides. It also asserts
 // recorder_cell_loss_confirmed_total counts one "announce" mark.
 func TestAnnounceHookMarksCellLostWithAFreshHeartbeat(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
-	reader := useTestMeterProvider(t)
+	mp, reader := newTestMeterProvider(t)
 	conn := newTestSyncConn(t)
 
 	now := time.Now().UTC()
 	runID := seedAcceptedOnlyRunRowInstance(t, db, "pod-old", now.Add(-40*time.Second))
 	confirmed := now.Add(-45 * time.Second)
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -1423,8 +1434,10 @@ func TestAnnounceHookMarksCellLostWithAFreshHeartbeat(t *testing.T) {
 // confirmed loss with the cell-lost reason and counts it under the
 // "sweep" path.
 func TestSweepMarksCellLostAndCountsIt(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
-	reader := useTestMeterProvider(t)
+	mp, reader := newTestMeterProvider(t)
 	conn, cleanup := newSweepTestBus(t)
 	defer cleanup()
 	freshenSweepConsumer(t, conn)
@@ -1436,7 +1449,7 @@ func TestSweepMarksCellLostAndCountsIt(t *testing.T) {
 		Instance: "pod-old", LastSeenAt: now.Add(-40 * time.Second), ConfirmedGoneAt: &confirmed,
 	}}, `{}`)
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(mp)
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -1484,7 +1497,7 @@ func TestSweepMarksCellLostOnAnIdleConsumer(t *testing.T) {
 		Instance: "pod-old", LastSeenAt: now.Add(-40 * time.Second), ConfirmedGoneAt: &confirmed,
 	}}, `{}`)
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(noop.NewMeterProvider())
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}

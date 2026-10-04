@@ -225,9 +225,11 @@ func TestRunStartedCountsAGrantMismatch(t *testing.T) {
 // class: an aged queued run with a GRANTED intent and no build ends as
 // TRIGGER_FAILED with CLAIM_ABANDONED, and a recent one stays queued.
 func TestExpireUnclaimedRunsEndsAnAbandonedGrant(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
-	reader := useTestMeterProvider(t)
-	metrics, err := NewClaimExpiryMetrics()
+	mp, reader := newTestMeterProvider(t)
+	metrics, err := NewClaimExpiryMetrics(mp)
 	if err != nil {
 		t.Fatalf("register metrics: %v", err)
 	}

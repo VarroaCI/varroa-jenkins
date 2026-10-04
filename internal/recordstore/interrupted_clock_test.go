@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel/metric/noop"
 )
 
 // TestSweepMarksARunWhosePodClockRunsFast asserts the silent test reads
@@ -30,7 +32,7 @@ func TestSweepMarksARunWhosePodClockRunsFast(t *testing.T) {
 	defer cleanup()
 	freshenSweepConsumer(t, conn)
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(noop.NewMeterProvider())
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
@@ -79,7 +81,7 @@ func TestSweepLeavesARunWhosePodClockRunsSlow(t *testing.T) {
 	defer cleanup()
 	freshenSweepConsumer(t, conn)
 
-	metrics, err := NewInterruptedMetrics()
+	metrics, err := NewInterruptedMetrics(noop.NewMeterProvider())
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}

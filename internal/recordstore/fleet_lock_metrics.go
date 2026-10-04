@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,8 +26,8 @@ type FleetLockMetrics struct {
 // on every collection; a lookup failure skips that one collection
 // instead of erroring the whole callback, matching the ingest backlog
 // gauges' own convention.
-func NewFleetLockMetrics(pool *pgxpool.Pool) (*FleetLockMetrics, error) {
-	meter := otel.Meter("varroa-recorder")
+func NewFleetLockMetrics(mp metric.MeterProvider, pool *pgxpool.Pool) (*FleetLockMetrics, error) {
+	meter := mp.Meter("varroa-recorder")
 	m := &FleetLockMetrics{}
 
 	var err error
