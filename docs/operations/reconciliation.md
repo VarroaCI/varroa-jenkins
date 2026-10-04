@@ -20,4 +20,4 @@ varroactl approve controller <namespace>/<name>
 varroactl reconcile controller <namespace>/<name>
 ```
 
-Approval applies the pending action when safety checks permit it. A running build, rollout-wave gate, or maintenance window can delay work. Inspect the controller status and activity feed, then use [Troubleshooting](troubleshooting.md) if the reason does not clear.
+Approval applies the pending action when safety checks permit it. A running build, rollout-wave gate, or maintenance window can delay work. A busy reconcile can make an approval fail after 20 seconds with no change; retry it. Inspect the controller status and activity feed, then use [Troubleshooting](troubleshooting.md) if the reason does not clear.

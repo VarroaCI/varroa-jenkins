@@ -6,17 +6,24 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 )
 
 type fakeApproveDeleter struct {
-	err   error
+	err error
+	// left is the time to the context deadline at the call; zero means
+	// the context had no deadline.
+	left  time.Duration
 	calls []string // "ns/name/path"
 }
 
-func (f *fakeApproveDeleter) ApproveDeletion(_ context.Context, _, namespace, name, path string) error {
+func (f *fakeApproveDeleter) ApproveDeletion(ctx context.Context, _, namespace, name, path string) error {
+	if d, ok := ctx.Deadline(); ok {
+		f.left = time.Until(d)
+	}
 	f.calls = append(f.calls, namespace+"/"+name+"/"+path)
 	return f.err
 }
@@ -75,5 +82,16 @@ func TestHandleApproveDeletion_InvalidRequest(t *testing.T) {
 	}
 	if len(rec.calls) != 0 {
 		t.Fatalf("ApproveDeletion calls = %v, want none", rec.calls)
+	}
+}
+
+// TestHandleApproveDeletion_SetsARequestDeadline pins that the handler gives the
+// approve a deadline under the requester's timeout, so the approve cannot
+// hold the controller lock without a limit.
+func TestHandleApproveDeletion_SetsARequestDeadline(t *testing.T) {
+	rec := &fakeApproveDeleter{}
+	handleApproveDeletion(context.Background(), slog.Default(), rec, "core", mustJSON(t, bus.ApproveDeletionRequest{Namespace: "team-a", Name: "ctrl", Path: "folder/job"}))
+	if rec.left <= 0 || rec.left > approveRequestTimeout {
+		t.Fatalf("deadline left = %v, want a deadline of at most %v", rec.left, approveRequestTimeout)
 	}
 }

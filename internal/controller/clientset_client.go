@@ -3258,6 +3258,23 @@ func (c *ClientsetClient) PatchControllerStatus(ctx context.Context, name, names
 	if status == nil {
 		return fmt.Errorf("status must not be nil")
 	}
+	patch := map[string]interface{}{
+		"status": controllerStatusPatch(status),
+	}
+	patchBytes, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("marshal status patch: %w", err)
+	}
+	_, err = c.dynamic.Resource(controllerGVR).Namespace(namespace).Patch(
+		ctx, name, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status",
+	)
+	return err
+}
+
+// controllerStatusPatch builds the status body of the PatchControllerStatus
+// merge patch. The test client applies the same body to its store, so the
+// two must not diverge.
+func controllerStatusPatch(status *v1alpha1.ControllerStatus) map[string]interface{} {
 	conditions := status.Conditions
 	if conditions == nil {
 		conditions = []v1alpha1.ControllerCondition{}
@@ -3361,17 +3378,7 @@ func (c *ClientsetClient) PatchControllerStatus(ctx context.Context, name, names
 			"rehydration":              status.Cell.Rehydration,
 		}
 	}
-	patch := map[string]interface{}{
-		"status": statusPatch,
-	}
-	patchBytes, err := json.Marshal(patch)
-	if err != nil {
-		return fmt.Errorf("marshal status patch: %w", err)
-	}
-	_, err = c.dynamic.Resource(controllerGVR).Namespace(namespace).Patch(
-		ctx, name, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status",
-	)
-	return err
+	return statusPatch
 }
 
 // PatchControllerCellStatus merge-patches exactly

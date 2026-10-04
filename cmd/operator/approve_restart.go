@@ -6,10 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 )
+
+// approveRequestTimeout limits the work of one approve request on the
+// operator. It stays under the requester's 60-second timeout, and it limits
+// how long an approve holds the controller lock that the tick also takes.
+const approveRequestTimeout = 55 * time.Second
 
 // approveRestarter is the slice of *controller.Reconciler that the approve
 // restart handler needs, kept as an interface so the handler is testable
@@ -29,6 +35,8 @@ func handleApproveRestart(ctx context.Context, logger *slog.Logger, rec approveR
 		resp, _ := json.Marshal(bus.ApproveRestartResponse{Error: "invalid request"})
 		return resp
 	}
+	ctx, cancel := context.WithTimeout(ctx, approveRequestTimeout)
+	defer cancel()
 	if err := rec.ApproveRestart(ctx, cluster, req.Namespace, req.Name, req.Action); err != nil {
 		if errors.Is(err, controller.ErrNotShardOwner) {
 			return nil

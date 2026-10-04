@@ -29,6 +29,8 @@ func handleApproveDeletion(ctx context.Context, logger *slog.Logger, rec approve
 		resp, _ := json.Marshal(bus.ApproveDeletionResponse{Error: "invalid request"})
 		return resp
 	}
+	ctx, cancel := context.WithTimeout(ctx, approveRequestTimeout)
+	defer cancel()
 	if err := rec.ApproveDeletion(ctx, cluster, req.Namespace, req.Name, req.Path); err != nil {
 		if errors.Is(err, controller.ErrNotShardOwner) {
 			return nil

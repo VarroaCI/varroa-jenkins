@@ -66,6 +66,10 @@ const (
 	// defaultMaxConcurrentReconciles limits how many controllers can be in Reconcile() at once.
 	defaultMaxConcurrentReconciles = 8
 
+	// defaultApproveLockWait leaves the approve time for its own work
+	// inside the 60-second approve request.
+	defaultApproveLockWait = 20 * time.Second
+
 	// minReconcileInterval is the floor for per-controller interval configuration.
 	minReconcileInterval = 10 * time.Second
 
@@ -252,6 +256,16 @@ type Reconciler struct {
 	// downloadProbe checks an explicit plugin download URL during
 	// provisioning. Tests replace it so that no test makes a real request.
 	downloadProbe func(ctx context.Context, base, name, version string) downloadProbeResult
+
+	// controllerLocks serializes Reconcile with ApproveRestart and
+	// ApproveDeletion for one controller. The tick writes status from its
+	// first read, so an approve that writes between that read and the end
+	// write is lost. Only the shard owner runs either path, so a lock in
+	// this process is enough.
+	controllerLocks *keyLock
+	// approveLockWait limits how long an approve waits for a tick that
+	// holds controllerLocks. The approve request has its own deadline.
+	approveLockWait time.Duration
 }
 
 // rehydrationPendingMark is one cell key + tenant's deadline-anchor
@@ -1163,6 +1177,8 @@ func NewReconciler(r *bundle.Resolver, client ResourceClient, store crdstore.Bac
 		numberSeededJobs:        make(map[string]map[string]bool),
 		numberOnlyPending:       make(map[string]numberOnlyPendingBlock),
 		rehydrationPendingSince: make(map[string]rehydrationPendingMark),
+		controllerLocks:         newKeyLock(),
+		approveLockWait:         defaultApproveLockWait,
 	}
 	// Replaces the default allow-all gate with the composed core↔plugin
 	// compat + upgradePolicy gate. Assigned post-construction because it is a
@@ -1809,6 +1825,18 @@ func (r *Reconciler) WakeHibernatedController(ctx context.Context, namespace, na
 // controller; the caller maps this to a conflict response.
 var ErrControllerStopped = errors.New("controller is stopped (spec.powerState=Stopped)")
 
+// lockForApprove takes the controller lock for an approve. It waits at most
+// approveLockWait for the tick that holds the lock, then returns an error
+// that tells the user to retry. On success the caller must call unlock.
+func (r *Reconciler) lockForApprove(ctx context.Context, key string) (unlock func(), err error) {
+	waitCtx, cancel := context.WithTimeout(ctx, r.approveLockWait)
+	defer cancel()
+	if err := r.controllerLocks.lock(waitCtx, key); err != nil {
+		return nil, fmt.Errorf("controller %s is reconciling; retry the approve: %w", key, err)
+	}
+	return func() { r.controllerLocks.unlock(key) }, nil
+}
+
 // ErrNotShardOwner reports that this replica does not own the controller.
 // Every replica receives an approve request, and only the owner may act on
 // it. The caller sends no reply, so the owner's reply is the only one.
@@ -1900,6 +1928,11 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 		return ErrNotShardOwner
 	}
 	key := namespace + "/" + name
+	unlock, err := r.lockForApprove(ctx, key)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	logger := r.Logger.With("controller", key)
 	cr, err := crdstore.Get[v1alpha1.Controller](ctx, r.store, name, namespace)
 	if err != nil {
@@ -2137,6 +2170,11 @@ func (r *Reconciler) ApproveDeletion(ctx context.Context, cluster, namespace, na
 		return ErrNotShardOwner
 	}
 	key := namespace + "/" + name
+	unlock, err := r.lockForApprove(ctx, key)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	logger := r.Logger.With("controller", key)
 	cr, err := crdstore.Get[v1alpha1.Controller](ctx, r.store, name, namespace)
 	if err != nil {

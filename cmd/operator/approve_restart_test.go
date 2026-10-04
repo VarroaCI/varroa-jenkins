@@ -6,17 +6,24 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 )
 
 type fakeApproveRestarter struct {
-	err   error
+	err error
+	// left is the time to the context deadline at the call; zero means
+	// the context had no deadline.
+	left  time.Duration
 	calls []string // "ns/name/action"
 }
 
-func (f *fakeApproveRestarter) ApproveRestart(_ context.Context, _, namespace, name, action string) error {
+func (f *fakeApproveRestarter) ApproveRestart(ctx context.Context, _, namespace, name, action string) error {
+	if d, ok := ctx.Deadline(); ok {
+		f.left = time.Until(d)
+	}
 	f.calls = append(f.calls, namespace+"/"+name+"/"+action)
 	return f.err
 }
@@ -59,5 +66,16 @@ func TestHandleApproveRestart_OwnerReplies(t *testing.T) {
 	}
 	if failed.Error != "no pending restart for team-a/ctrl" {
 		t.Fatalf("failure reply error = %q, want the error text", failed.Error)
+	}
+}
+
+// TestHandleApproveRestart_SetsARequestDeadline pins that the handler gives the
+// approve a deadline under the requester's timeout, so the approve cannot
+// hold the controller lock without a limit.
+func TestHandleApproveRestart_SetsARequestDeadline(t *testing.T) {
+	rec := &fakeApproveRestarter{}
+	handleApproveRestart(context.Background(), slog.Default(), rec, "core", mustJSON(t, bus.ApproveRestartRequest{Namespace: "team-a", Name: "ctrl", Action: "approve"}))
+	if rec.left <= 0 || rec.left > approveRequestTimeout {
+		t.Fatalf("deadline left = %v, want a deadline of at most %v", rec.left, approveRequestTimeout)
 	}
 }

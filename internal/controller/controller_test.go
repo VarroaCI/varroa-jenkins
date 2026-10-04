@@ -43,7 +43,10 @@ var testKey = []byte("test-key-32-bytes-long-xxxxx")
 // testClient is a fake ResourceClient for testing.
 type testClient struct {
 	listProfilesErr error // when set, ListJenkinsVersionProfileCRDs returns it
-	services        []string
+	// statusToStore makes PatchControllerStatus also merge-patch the store
+	// with the production patch body, so a test sees what the tick writes.
+	statusToStore bool
+	services      []string
 	// tenantServices records every CreateOrUpdateTenantService call, and
 	// tenantServiceErr refuses the write when set.
 	tenantServices             []tenantServiceCall
@@ -668,6 +671,13 @@ func (t *testClient) PatchControllerStatus(_ context.Context, name, namespace st
 	status.DeepCopyInto(cp)
 	t.lastPatchedStatus = cp
 	t.patchCount++
+	if t.statusToStore {
+		gvr, err := crdstore.GVRFor[v1alpha1.Controller]()
+		if err != nil {
+			return err
+		}
+		return t.store.PatchObjectStatus(context.Background(), gvr, namespace, name, controllerStatusPatch(status))
+	}
 	return nil
 }
 

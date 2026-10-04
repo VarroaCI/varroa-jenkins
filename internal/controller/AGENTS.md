@@ -528,17 +528,19 @@ sections describe.
 - `SetProvisioningDefaults` and `RootDomain` share `provisioningDefaultsMu`; the
   every-replica defaults refresh feeds both reconcile policy and wake-server host
   resolution without racing HTTP requests.
-- `PatchControllerStatus` (`clientset_client.go:1442`) sends a JSON **merge patch**.
-  Fields only added to the patch map when non-empty (`status.X != "" / != nil`
-  guards — e.g. `AppliedBundleHash`, `FirstConnectedAt`, `WakeToken`,
-  `LastDesiredPushAt`) are **sticky**: a merge patch that omits a key can never clear
-  it server-side. Fields always included (even zero-valued) — `phase`, `conditions`,
-  `overlayWarnings`, `pendingPluginRoll`, `approvedPluginRollChecksum`,
-  `pendingItemDeletions` (an empty list when nil), `liveDrift`,
-  `rollout`, `lastReconcileError`, `lastReconcileErrorAt` — are the only ones that can
-  be cleared. When adding a status field, decide up front whether it must ever be
-  cleared; if so it must be unconditional in `statusPatch`, not behind a non-empty
-  guard.
+- `PatchControllerStatus` (`clientset_client.go`) sends a JSON **merge patch** with no
+  `resourceVersion` precondition. `controllerStatusPatch` builds its body, and the
+  test client applies the same body to its store. Fields only added to the body when
+  non-empty (`status.X != "" / != nil` guards — e.g. `desiredStateHash`,
+  `AppliedBundleHash`, `FirstConnectedAt`, `WakeToken`, `LastDesiredPushAt`) are
+  **sticky**: a merge patch that omits a key can never clear it server-side. Fields
+  always included (even zero-valued) — `phase`, `conditions`, `overlayWarnings`,
+  `pendingRestart`, `pendingPluginRoll`, `approvedPluginRollChecksum`,
+  `pendingItemDeletions` (an empty list when nil), `restartDrain`, `liveDrift`,
+  `rollout`, `lastReconcileError`, `lastReconcileErrorAt`, `pluginInventory` — are the
+  only ones that can be cleared. When adding a status field, decide up front whether
+  it must ever be cleared; if so it must be unconditional in `controllerStatusPatch`,
+  not behind a non-empty guard.
 - **`status.cell.tenants` has exactly one writer: `PatchControllerCellStatus`**
   (`clientset_client.go`). It sends a narrow merge patch carrying only
   `status.cell.tenants`, never the whole `status.cell` object, and only the
@@ -1164,7 +1166,13 @@ sections describe.
   return `ErrNotShardOwner` on a replica that does not own the controller, before
   any read; they run outside the workqueue, so each carries its own gate. Their
   status writes go through `crdstore.MutateStatus` and change only the approve's
-  own fields, never `PatchControllerStatus`. A `plugin-roll` approval approves
+  own fields, never `PatchControllerStatus`. `Reconcile` and both approve methods
+  take `controllerLocks` (`keylock.go`) for the controller's `namespace/name`. The
+  tick holds it from its first read to its end status write, so it cannot write
+  back stale approve fields. The lock is local to the process: this is correct only
+  because the shard owner alone runs the tick and the approve. An approve waits at
+  most `approveLockWait` (20s) and then fails with a plain-text "retry the approve"
+  error. It writes nothing and sends nothing to the mite. A `plugin-roll` approval approves
   only the target checksum that it read (`errPluginRollChanged` otherwise). The 10-minute shard-resync tick calls
   `ForgetUnowned` too, because a reconcile in flight during a release can
   subscribe again. The shutdown release (`releaseAll`) calls no hook.
