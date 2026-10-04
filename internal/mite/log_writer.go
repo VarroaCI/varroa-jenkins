@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
@@ -23,8 +24,27 @@ const (
 	perRunPendingMaxBytes  = 64 * 1024 * 1024 // 64 MiB
 
 	defaultLogPendingMaxBytes = 2147483648 // 2 GiB, VARROA_GATEWAY_LOG_PENDING_BYTES
-	gatewayBudgetPauseMinMS   = 1000
-	gatewayBudgetPauseMaxMS   = 8000
+
+	// logBusyPauseMS is the BUSY pause for the per-run bound and for an
+	// owner lookup that failed.
+	logBusyPauseMS = 1000
+
+	// The gateway-budget BUSY pause is the time the measured drain rate
+	// needs to free the refused chunk's bytes, within this floor and
+	// cap. A pause longer than that time leaves the drain idle while
+	// every refused chunk waits, so a small budget caps the stored
+	// throughput at one budget per pause.
+	gatewayBudgetPauseFloor = 100 * time.Millisecond
+	gatewayBudgetPauseCap   = 8000 * time.Millisecond
+
+	// logDrainWindow is the shortest span one drain-rate sample covers.
+	// A gap between two freed chunks longer than this starts a new
+	// window, so idle time never lowers the measured rate.
+	logDrainWindow = 250 * time.Millisecond
+
+	// logDrainStallAfter is how long the drain may free no bytes before
+	// the gateway-budget pause counts as stalled and grows toward its cap.
+	logDrainStallAfter = time.Second
 
 	logAppendBackoffFloor = 250 * time.Millisecond
 	logAppendBackoffCap   = 2000 * time.Millisecond
@@ -58,6 +78,7 @@ const (
 
 var (
 	logChunksRejected metric.Int64Counter
+	logChunksBusy     metric.Int64Counter
 	logAppendRetries  metric.Int64Counter
 )
 
@@ -65,6 +86,9 @@ func init() {
 	meter := otel.Meter("varroa-gateway")
 	logChunksRejected, _ = meter.Int64Counter("varroa.gateway.log.chunk.rejected",
 		metric.WithDescription("Console-log chunks the gateway rejected (foreign run, empty run id, or the finalize deadline)"),
+	)
+	logChunksBusy, _ = meter.Int64Counter("varroa.gateway.log.chunk.busy",
+		metric.WithDescription("Console-log chunks the gateway answered BUSY, by reason"),
 	)
 	logAppendRetries, _ = meter.Int64Counter("varroa.gateway.log.append.retries",
 		metric.WithDescription("Blob store append retries for console-log chunks and index entries"),
@@ -116,6 +140,14 @@ type runLogState struct {
 	queue       []queuedLogChunk
 	queueBytes  int64
 	draining    bool
+
+	// lastDequeue is when the drain goroutine last took a chunk off
+	// queue. The writer heartbeat compares it with the oldest queued
+	// chunk to find a drain that makes no progress.
+	lastDequeue time.Time
+	// lastStallWarn is when warnStalledDrainLocked last warned for
+	// this run. It bounds the warning to one per heartbeat interval.
+	lastStallWarn time.Time
 
 	offset int64 // running byte count appended to logs/<run_id>
 
@@ -292,7 +324,7 @@ func (h *BusHandler) OnLogChunk(name, ns string, chunk *mitev1.LogChunk) {
 		h.sendLogAck(ns, name, chunk.RunId, chunk.Seq, logAckStatusRejected, logReasonForeignRun, 0)
 		return
 	case ownerUnknown:
-		h.sendLogAck(ns, name, chunk.RunId, chunk.Seq, logAckStatusBusy, logReasonOwnerLookupFail, gatewayBudgetPauseMinMS)
+		h.answerBusy(ns, name, chunk, logReasonOwnerLookupFail, logBusyPauseMS)
 		return
 	}
 
@@ -317,16 +349,18 @@ func (h *BusHandler) OnLogChunk(name, ns string, chunk *mitev1.LogChunk) {
 	} else {
 		h.logBudgetCrossedAt = time.Time{}
 	}
-	pauseMS := h.gatewayBudgetPauseMSLocked()
 
 	if overRun || overBudget {
+		h.warnStalledDrainLocked(chunk.RunId, st, time.Now())
+		pauseMS := logBusyPauseMS
+		reason := logReasonRunPendingFull
+		if !overRun {
+			pauseMS = h.gatewayBudgetPauseMSLocked(time.Now(), h.logTotalPendingBytes+size-h.logPendingMaxBytesOrDefault())
+			reason = logReasonGatewayBudgetFul
+		}
 		st.mu.Unlock()
 		h.logMu.Unlock()
-		if overRun {
-			h.sendLogAck(ns, name, chunk.RunId, chunk.Seq, logAckStatusBusy, logReasonRunPendingFull, gatewayBudgetPauseMinMS)
-		} else {
-			h.sendLogAck(ns, name, chunk.RunId, chunk.Seq, logAckStatusBusy, logReasonGatewayBudgetFul, pauseMS)
-		}
+		h.answerBusy(ns, name, chunk, reason, pauseMS)
 		return
 	}
 
@@ -352,18 +386,83 @@ func (h *BusHandler) logPendingMaxBytesOrDefault() int64 {
 	return h.logPendingMaxBytes
 }
 
+// answerBusy answers BUSY for one refused chunk and counts it by reason.
+func (h *BusHandler) answerBusy(ns, name string, chunk *mitev1.LogChunk, reason string, pauseMS int) {
+	logChunksBusy.Add(context.Background(), 1, metric.WithAttributes(attribute.String("reason", reason)))
+	h.log().Debug("log chunk busy", "run_id", chunk.RunId, "controller", ns+"/"+name,
+		"seq", chunk.Seq, "reason", reason, "pause_ms", pauseMS)
+	h.sendLogAck(ns, name, chunk.RunId, chunk.Seq, logAckStatusBusy, reason, pauseMS)
+}
+
+// logDrainMeter measures the bytes the drain goroutines free per
+// second, across every run. Caller must hold h.logMu for every method.
+type logDrainMeter struct {
+	windowStart time.Time
+	windowBytes int64
+	rate        float64 // bytes per second; 0 until one window completes
+	lastFreed   time.Time
+}
+
+// freed records n bytes that a drain goroutine released at now.
+func (m *logDrainMeter) freed(now time.Time, n int64) {
+	if m.windowStart.IsZero() || now.Sub(m.lastFreed) > logDrainWindow {
+		m.windowStart = now
+		m.windowBytes = 0
+	}
+	m.windowBytes += n
+	m.lastFreed = now
+	age := now.Sub(m.windowStart)
+	if age < logDrainWindow {
+		return
+	}
+	sample := float64(m.windowBytes) / age.Seconds()
+	if m.rate == 0 {
+		m.rate = sample
+	} else {
+		m.rate = (m.rate + sample) / 2
+	}
+	m.windowStart = now
+	m.windowBytes = 0
+}
+
 // gatewayBudgetPauseMSLocked computes the BUSY pause_ms for the
-// gateway-wide budget: 1000 ms at first, growing to 8000 ms while the
-// budget stays crossed. Caller must hold h.logMu.
-func (h *BusHandler) gatewayBudgetPauseMSLocked() int {
-	if h.logBudgetCrossedAt.IsZero() {
-		return gatewayBudgetPauseMinMS
+// gateway-wide budget. need is how many bytes the drain must free
+// before the refused chunk fits. While the drain makes progress, the
+// pause is the time the measured rate needs to free need. While it
+// makes no progress, the pause grows from the floor by the time it has
+// stalled. The result carries up to 20% jitter, within floor and cap,
+// so refused runs do not all re-send at one moment. Caller must hold
+// h.logMu.
+func (h *BusHandler) gatewayBudgetPauseMSLocked(now time.Time, need int64) int {
+	m := &h.logDrain
+	var d time.Duration
+	if !m.lastFreed.IsZero() && now.Sub(m.lastFreed) < logDrainStallAfter {
+		if m.rate > 0 && need > 0 {
+			d = time.Duration(float64(need) / m.rate * float64(time.Second))
+		}
+	} else {
+		stallStart := m.lastFreed
+		if h.logBudgetCrossedAt.After(stallStart) {
+			stallStart = h.logBudgetCrossedAt
+		}
+		d = gatewayBudgetPauseFloor + now.Sub(stallStart)
 	}
-	ms := gatewayBudgetPauseMinMS + int(time.Since(h.logBudgetCrossedAt)/time.Second)*1000
-	if ms > gatewayBudgetPauseMaxMS {
-		ms = gatewayBudgetPauseMaxMS
+	d = clampBudgetPause(d)
+	if spread := int64(d) / 5; spread > 0 {
+		d += time.Duration(rand.Int63n(2*spread+1) - spread)
 	}
-	return ms
+	return int(clampBudgetPause(d) / time.Millisecond)
+}
+
+// clampBudgetPause bounds d to the gateway-budget pause floor and cap.
+func clampBudgetPause(d time.Duration) time.Duration {
+	if d < gatewayBudgetPauseFloor {
+		return gatewayBudgetPauseFloor
+	}
+	if d > gatewayBudgetPauseCap {
+		return gatewayBudgetPauseCap
+	}
+	return d
 }
 
 // isTerminalRunStatus reports whether status is one of the record
@@ -469,6 +568,7 @@ func (h *BusHandler) runHeartbeat(ctx context.Context, ns, name, runID string, s
 		}
 		st.mu.Lock()
 		hasWork := st.hasHeartbeatWorkLocked()
+		h.warnStalledDrainLocked(runID, st, time.Now())
 		st.mu.Unlock()
 		if !hasWork {
 			st.mu.Lock()
@@ -480,6 +580,29 @@ func (h *BusHandler) runHeartbeat(ctx context.Context, ns, name, runID string, s
 			"writer_heartbeat_unix_ms": time.Now().UnixMilli(),
 		})
 	}
+}
+
+// warnStalledDrainLocked logs a warning when the run holds queued chunks
+// and no chunk has left the queue for one heartbeat interval: the drain
+// goroutine is gone, or it is blocked. Either holds the queued bytes
+// against the gateway-wide budget. The writer heartbeat calls it for a
+// terminal run, and a BUSY refusal calls it for a live run, so it warns
+// at most once per heartbeat interval. Caller must hold st.mu.
+func (h *BusHandler) warnStalledDrainLocked(runID string, st *runLogState, now time.Time) {
+	if len(st.queue) == 0 {
+		return
+	}
+	since := st.queue[0].admitted
+	if st.lastDequeue.After(since) {
+		since = st.lastDequeue
+	}
+	if now.Sub(since) < logHeartbeatInterval || now.Sub(st.lastStallWarn) < logHeartbeatInterval {
+		return
+	}
+	st.lastStallWarn = now
+	h.log().Warn("log run drain made no progress", "run_id", runID,
+		"queued", len(st.queue), "queued_bytes", st.queueBytes, "draining", st.draining,
+		"ack_seq", st.ackSeq, "stalled_for", now.Sub(since).Round(time.Second))
 }
 
 // publishRunLogBestEffort publishes one run.log envelope with a single
@@ -617,11 +740,14 @@ func (h *BusHandler) drainRun(ctx context.Context, runID string, st *runLogState
 			st.mu.Unlock()
 			return
 		}
+		now := time.Now()
 		st.queue = st.queue[1:]
 		st.queueBytes -= size
+		st.lastDequeue = now
 		st.mu.Unlock()
 		h.logMu.Lock()
 		h.logTotalPendingBytes -= size
+		h.logDrain.freed(now, size)
 		h.logMu.Unlock()
 	}
 }
@@ -1273,6 +1399,7 @@ func (h *BusHandler) abandonRun(runID string, st *runLogState) {
 	st.pendingEntries = nil
 	st.pendingData = nil
 	st.rejectedForever = true
+	wasDraining := st.draining
 	st.draining = false
 	hbCancel := st.heartbeatCancel
 	st.heartbeatCancel = nil
@@ -1285,7 +1412,12 @@ func (h *BusHandler) abandonRun(runID string, st *runLogState) {
 	}
 	st.incomplete = true
 	st.incompleteReason = reason
+	ackSeq := st.ackSeq
 	st.mu.Unlock()
+
+	h.log().Warn("abandoning a run's log", "run_id", runID, "controller", ns+"/"+name,
+		"reason", reason, "ack_seq", ackSeq, "queued", len(pending), "queued_bytes", freedBytes,
+		"stranded", len(stranded), "draining", wasDraining)
 
 	if hbCancel != nil {
 		hbCancel()

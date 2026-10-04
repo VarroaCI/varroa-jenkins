@@ -230,7 +230,7 @@ func (h *BusHandler) OnRunStateChunk(name, ns string, chunk *mitev1.RunStateChun
 		h.rejectRunState(ctx, ns, name, chunk, stateReasonForeignRun)
 		return
 	case ownerUnknown:
-		h.sendRunStateAck(ns, name, chunk, stateAckStatusBusy, stateReasonBudgetFull, gatewayBudgetPauseMinMS)
+		h.sendRunStateAck(ns, name, chunk, stateAckStatusBusy, stateReasonBudgetFull, stateBudgetPauseMinMS)
 		return
 	}
 	if tuple.status != "" && isTerminalRunStatus(tuple.status) {
@@ -429,7 +429,7 @@ func (h *BusHandler) storeRunStateObject(ctx context.Context, e *runStateEntry, 
 	}
 	if err := h.logStore.Replace(ctx, key, bytes.NewReader(body), opts); err != nil {
 		h.log().Warn("run-state object write failed", "run_id", chunk.RunId, "relpath", chunk.Relpath, "error", err)
-		return runStateOutcome{status: stateAckStatusBusy, reason: stateReasonBudgetFull, pauseMS: gatewayBudgetPauseMinMS}
+		return runStateOutcome{status: stateAckStatusBusy, reason: stateReasonBudgetFull, pauseMS: stateBudgetPauseMinMS}
 	}
 
 	h.stateMu.Lock()
@@ -495,16 +495,22 @@ func (h *BusHandler) dropRunStateBufferLocked(e *runStateEntry, relpath string) 
 	delete(e.buffers, relpath)
 }
 
+// The run-state busy pause starts at stateBudgetPauseMinMS and grows to
+// stateBudgetPauseMaxMS while the run-state bound stays crossed.
+const (
+	stateBudgetPauseMinMS = 1000
+	stateBudgetPauseMaxMS = 8000
+)
+
 // stateBudgetPauseMSLocked computes the busy pause for the gateway-wide
-// run-state bound, on the log path's own ladder. Caller must hold
-// h.stateMu.
+// run-state bound. Caller must hold h.stateMu.
 func (h *BusHandler) stateBudgetPauseMSLocked() int {
 	if h.stateBudgetCrossedAt.IsZero() {
-		return gatewayBudgetPauseMinMS
+		return stateBudgetPauseMinMS
 	}
-	ms := gatewayBudgetPauseMinMS + int(time.Since(h.stateBudgetCrossedAt)/time.Second)*1000
-	if ms > gatewayBudgetPauseMaxMS {
-		ms = gatewayBudgetPauseMaxMS
+	ms := stateBudgetPauseMinMS + int(time.Since(h.stateBudgetCrossedAt)/time.Second)*1000
+	if ms > stateBudgetPauseMaxMS {
+		ms = stateBudgetPauseMaxMS
 	}
 	return ms
 }

@@ -316,7 +316,22 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   one of the reason tokens `empty-run-id`, `finalize-deadline`, or
   `foreign-run`. `VARROA_GATEWAY_LOG_PENDING_BYTES` (default 2 GiB) bounds
   total pending bytes across every run; over the bound `OnLogChunk` answers
-  `BUSY` with a jittered pause instead of blocking the read loop.
+  `BUSY` instead of blocking the read loop. **The budget pause follows the
+  drain**: `gatewayBudgetPauseMSLocked` answers the time `logDrainMeter`'s
+  measured rate needs to free the refused chunk's bytes, 100 ms to 8000 ms,
+  with up to 20% jitter, and grows toward the cap only while the drain frees
+  nothing for `logDrainStallAfter` (1s). The mite re-sends a refused chunk
+  only when the pause closes, so a fixed pause caps the stored rate at one
+  budget per pause and leaves the drain idle; with a small budget the
+  finalize deadline then cuts the log's tail. The per-run bound and a failed
+  owner lookup answer a fixed 1000 ms (`logBusyPauseMS`); the run-state
+  budget keeps its own 1000-to-8000 ms ladder (`run_state.go`). `answerBusy`
+  logs each `BUSY` at debug level and counts `varroa.gateway.log.chunk.busy`
+  by reason; `abandonRun` logs one warning with the run's queue and drain
+  state; `warnStalledDrainLocked` warns, at most once per heartbeat interval,
+  when a run's queue makes no progress for one heartbeat interval. The writer
+  heartbeat calls it for a terminal run and a `BUSY` refusal for a live run,
+  because only a terminal run has a heartbeat.
   `checkOwner` (`log_owner.go`) verifies a chunk's `(cluster, namespace,
   cell, cell_instance)` against C1's ledger over the `varroa.ledger.owner`
   request-reply subject, cached 30 minutes on a match and 60 seconds on a

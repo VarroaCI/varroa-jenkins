@@ -1,11 +1,16 @@
 package mite
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"math/rand"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1549,5 +1554,316 @@ func TestOnLogChunkSecondMoveReplacesAnEmptyPartOfTheFirstMove(t *testing.T) {
 	}
 	if got, want := readStoredLog(t, h.logStore, runID), "a0 a1 b2 c3 c4 "; got != want {
 		t.Fatalf("stored log = %q, want %q", got, want)
+	}
+}
+
+// --- gateway-budget pause under a small budget ---
+
+// latencyAppendStore adds a fixed latency to every Append.
+type latencyAppendStore struct {
+	blob.Store
+	latency time.Duration
+}
+
+func (s latencyAppendStore) Append(ctx context.Context, key string, seq int64, p []byte, opts blob.ObjectOptions) error {
+	select {
+	case <-time.After(s.latency):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return s.Store.Append(ctx, key, seq, p, opts)
+}
+
+// busyHonoringMite follows the mite loopback's BUSY rules: it forwards a
+// chunk at once unless the run's pause window is open, records the
+// sequence each BUSY ack refuses, extends the pause window, and re-sends
+// only the refused sequences it still retains when the window closes.
+type busyHonoringMite struct {
+	sendMu  sync.Mutex
+	toGW    chan *mitev1.LogChunk
+	mu      sync.Mutex
+	held    map[int64]*mitev1.LogChunk
+	paused  time.Time
+	refused map[int64]struct{}
+	slot    *busyResendSlot
+}
+
+type busyResendSlot struct{ timer *time.Timer }
+
+func newBusyHonoringMite() *busyHonoringMite {
+	return &busyHonoringMite{
+		toGW:    make(chan *mitev1.LogChunk, 64),
+		held:    make(map[int64]*mitev1.LogChunk),
+		refused: make(map[int64]struct{}),
+	}
+}
+
+// post answers what POST /v1/log answers: false is a 503.
+func (m *busyHonoringMite) post(c *mitev1.LogChunk) bool {
+	m.mu.Lock()
+	paused := time.Now().Before(m.paused)
+	m.mu.Unlock()
+	if paused {
+		return false
+	}
+	m.sendMu.Lock()
+	m.toGW <- c
+	m.mu.Lock()
+	m.held[c.Seq] = c
+	m.mu.Unlock()
+	m.sendMu.Unlock()
+	return true
+}
+
+func (m *busyHonoringMite) onAck(a *mitev1.LogAck) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	switch a.Status {
+	case logAckStatusStored, logAckStatusRejected:
+		for seq := range m.held {
+			if seq <= a.AckSeq {
+				delete(m.held, seq)
+			}
+		}
+		for seq := range m.refused {
+			if seq <= a.AckSeq {
+				delete(m.refused, seq)
+			}
+		}
+	case logAckStatusBusy:
+		m.refused[a.AckSeq] = struct{}{}
+		until := time.Now().Add(time.Duration(a.PauseMs) * time.Millisecond)
+		if m.paused.After(until) {
+			until = m.paused
+		}
+		m.paused = until
+		if m.slot != nil {
+			m.slot.timer.Stop()
+		}
+		slot := &busyResendSlot{}
+		slot.timer = time.AfterFunc(time.Until(until), func() { m.resend(slot) })
+		m.slot = slot
+	}
+}
+
+func (m *busyHonoringMite) resend(slot *busyResendSlot) {
+	m.sendMu.Lock()
+	defer m.sendMu.Unlock()
+	m.mu.Lock()
+	if m.slot != slot {
+		m.mu.Unlock()
+		return
+	}
+	m.slot = nil
+	seqs := make([]int64, 0, len(m.refused))
+	for seq := range m.refused {
+		seqs = append(seqs, seq)
+	}
+	m.refused = make(map[int64]struct{})
+	sort.Slice(seqs, func(i, j int) bool { return seqs[i] < seqs[j] })
+	out := make([]*mitev1.LogChunk, 0, len(seqs))
+	for _, seq := range seqs {
+		if c, ok := m.held[seq]; ok {
+			out = append(out, c)
+		}
+	}
+	m.mu.Unlock()
+	for _, c := range out {
+		m.toGW <- c
+	}
+}
+
+// pluginBackoff mirrors LogChunkSender.backoffMillis: a jittered wait
+// from 250 ms up to a base that doubles per attempt, capped at 5 s.
+func pluginBackoff(attempt int) time.Duration {
+	base := 250 * time.Millisecond << min(attempt, 8)
+	if base > 5*time.Second {
+		base = 5 * time.Second
+	}
+	span := int64(base - 250*time.Millisecond)
+	return 250*time.Millisecond + time.Duration(rand.Int63n(span+1))
+}
+
+// TestOnLogChunkSmallBudgetStoresEveryChunkOfAChattyBuild sends a chatty
+// build through a 2048-byte budget. Each chunk is about one tenth of the
+// budget, so each pause admits about ten chunks. A pause that does not
+// track the drain leaves the drain idle for most of each pause, and the
+// finalize deadline then cuts the log's tail.
+func TestOnLogChunkSmallBudgetStoresEveryChunkOfAChattyBuild(t *testing.T) {
+	const (
+		chunks       = 120
+		chunkBytes   = 205
+		finalizeWait = 6 * time.Second
+	)
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{
+		Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1",
+		Status: "COMPLETED", AnchorUnixMs: time.Now().UnixMilli(),
+	})
+	base, err := blob.Open(context.Background(), "file://"+t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("open blob store: %v", err)
+	}
+	h := newLogTestHandlerOnStore(t, owner, &recordingSender{}, latencyAppendStore{base, time.Millisecond})
+	h.logPendingMaxBytes = 2048
+	h.logFinalizeWait = finalizeWait
+
+	m := newBusyHonoringMite()
+	acks := make(chan *mitev1.LogAck, 64)
+	h.buildWorkers["ns1/cell1"] = &registeredBuildWorker{worker: &buildEventWorker{send: func(msg *mitev1.OperatorMessage) error {
+		if a := msg.GetLogAck(); a != nil {
+			acks <- a
+		}
+		return nil
+	}}}
+	done := make(chan struct{})
+	defer close(done)
+	go func() { // the gateway's stream read loop
+		for {
+			select {
+			case c := <-m.toGW:
+				h.OnLogChunk("cell1", "ns1", c)
+			case <-done:
+				return
+			}
+		}
+	}()
+	go func() { // the mite's dispatch loop
+		for {
+			select {
+			case a := <-acks:
+				m.onAck(a)
+			case <-done:
+				return
+			}
+		}
+	}()
+	go func() { // the plugin's per-run sender
+		for seq := 0; seq < chunks; seq++ {
+			c := &mitev1.LogChunk{
+				RunId: runID, JobPath: "j", BuildNumber: 1, Seq: int64(seq), CellInstance: "inst1",
+				Data: []byte(fmt.Sprintf("line %04d %0*d\n", seq, chunkBytes-11, 0)), Final: seq == chunks-1,
+			}
+			for attempt := 1; !m.post(c); attempt++ {
+				select {
+				case <-time.After(pluginBackoff(attempt)):
+				case <-done:
+					return
+				}
+			}
+		}
+	}()
+
+	deadline := time.Now().Add(finalizeWait + time.Second)
+	for !h.runFinalized(runID) {
+		if time.Now().After(deadline) {
+			h.logMu.Lock()
+			st := h.logRuns[runID]
+			h.logMu.Unlock()
+			st.mu.Lock()
+			defer st.mu.Unlock()
+			t.Fatalf("stored through seq %d of %d before the finalize deadline (incomplete=%v reason=%q)",
+				st.ackSeq, chunks-1, st.incomplete, st.incompleteReason)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if incomplete, reason := h.runIncompleteness(runID); incomplete {
+		t.Fatalf("run finalized but incomplete: %s", reason)
+	}
+	if got := len(readStoredLog(t, h.logStore, runID)); got != chunks*chunkBytes {
+		t.Fatalf("stored log holds %d bytes, want %d", got, chunks*chunkBytes)
+	}
+}
+
+func TestGatewayBudgetPauseTracksDrainRate(t *testing.T) {
+	now := time.Now()
+	floorMS := int(gatewayBudgetPauseFloor / time.Millisecond)
+	capMS := int(gatewayBudgetPauseCap / time.Millisecond)
+	cases := []struct {
+		name         string
+		rate         float64
+		lastFreedAgo time.Duration
+		crossedAgo   time.Duration
+		need         int64
+		minMS, maxMS int
+	}{
+		{name: "fast drain answers the floor", rate: 1 << 20, lastFreedAgo: 10 * time.Millisecond, crossedAgo: time.Second, need: 2048, minMS: floorMS, maxMS: floorMS * 6 / 5},
+		{name: "pause is the time to free need", rate: 20480, lastFreedAgo: 10 * time.Millisecond, crossedAgo: time.Second, need: 10240, minMS: 400, maxMS: 600},
+		{name: "slow drain answers the cap", rate: 100, lastFreedAgo: 10 * time.Millisecond, crossedAgo: time.Second, need: 10240, minMS: capMS * 4 / 5, maxMS: capMS},
+		{name: "no progress grows from the floor", rate: 20480, lastFreedAgo: 3 * time.Second, crossedAgo: 3 * time.Second, need: 2048, minMS: (floorMS + 3000) * 4 / 5, maxMS: (floorMS + 3000) * 6 / 5},
+		{name: "a long stall answers the cap", rate: 20480, lastFreedAgo: 30 * time.Second, crossedAgo: 30 * time.Second, need: 2048, minMS: capMS * 4 / 5, maxMS: capMS},
+		{name: "a fresh crossing after idle answers the floor", lastFreedAgo: time.Minute, crossedAgo: 0, need: 2048, minMS: floorMS, maxMS: floorMS * 6 / 5},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &BusHandler{}
+			h.logDrain = logDrainMeter{rate: tc.rate, lastFreed: now.Add(-tc.lastFreedAgo)}
+			h.logBudgetCrossedAt = now.Add(-tc.crossedAgo)
+			for i := 0; i < 50; i++ {
+				got := h.gatewayBudgetPauseMSLocked(now, tc.need)
+				if got < tc.minMS || got > tc.maxMS {
+					t.Fatalf("pause = %d ms, want %d..%d ms", got, tc.minMS, tc.maxMS)
+				}
+			}
+		})
+	}
+}
+
+func TestGatewayBudgetPauseGrowsOnlyWithoutDrainProgress(t *testing.T) {
+	now := time.Now()
+	h := &BusHandler{}
+	// The budget has stayed crossed for five seconds, but the drain
+	// freed bytes 10 ms ago: the pause stays at the drain's own pace.
+	h.logBudgetCrossedAt = now.Add(-5 * time.Second)
+	h.logDrain = logDrainMeter{rate: 1 << 20, lastFreed: now.Add(-10 * time.Millisecond)}
+	if got, limit := h.gatewayBudgetPauseMSLocked(now, 2048), int(gatewayBudgetPauseFloor/time.Millisecond)*6/5; got > limit {
+		t.Fatalf("pause = %d ms with the drain making progress, want at most %d ms", got, limit)
+	}
+}
+
+func TestLogDrainMeterIgnoresIdleTime(t *testing.T) {
+	var m logDrainMeter
+	start := time.Now()
+	// 2048 bytes over 300 ms: about 6827 bytes per second.
+	for i := 0; i <= 6; i++ {
+		m.freed(start.Add(time.Duration(i)*50*time.Millisecond), 2048/6)
+	}
+	first := m.rate
+	if first < 5000 || first > 9000 {
+		t.Fatalf("rate after a busy window = %.0f B/s, want about 6800", first)
+	}
+	// A ten-second idle gap, then the same pace again: the gap starts a
+	// new window and does not lower the rate.
+	idle := start.Add(10 * time.Second)
+	for i := 0; i <= 6; i++ {
+		m.freed(idle.Add(time.Duration(i)*50*time.Millisecond), 2048/6)
+	}
+	if m.rate < first/2 {
+		t.Fatalf("rate after an idle gap = %.0f B/s, want near %.0f", m.rate, first)
+	}
+}
+
+func TestWarnStalledDrainNamesARunWhoseQueueMakesNoProgress(t *testing.T) {
+	var buf bytes.Buffer
+	h := &BusHandler{Logger: slog.New(slog.NewTextHandler(&buf, nil))}
+	now := time.Now()
+	st := &runLogState{queue: []queuedLogChunk{{chunk: &mitev1.LogChunk{Seq: 4}, admitted: now.Add(-2 * logHeartbeatInterval)}}}
+
+	st.lastDequeue = now.Add(-time.Second)
+	h.warnStalledDrainLocked("run-1", st, now)
+	if buf.Len() != 0 {
+		t.Fatalf("warned for a drain that dequeued a second ago: %s", buf.String())
+	}
+
+	st.lastDequeue = time.Time{}
+	h.warnStalledDrainLocked("run-1", st, now)
+	if !strings.Contains(buf.String(), "log run drain made no progress") || !strings.Contains(buf.String(), "run_id=run-1") {
+		t.Fatalf("no stalled-drain warning, got %q", buf.String())
+	}
+	warned := buf.Len()
+	h.warnStalledDrainLocked("run-1", st, now.Add(time.Second))
+	if buf.Len() != warned {
+		t.Fatalf("warned twice inside one heartbeat interval: %s", buf.String())
 	}
 }

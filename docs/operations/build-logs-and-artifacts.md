@@ -1,8 +1,8 @@
 # Build Logs and Artifacts
 
 The build record store can hold a Pipeline build's console log and archived artifacts outside
-the controller. This needs the [build record store](build-records.md). A controller with the
-store disabled keeps its console log and artifacts on local disk, the way Jenkins always has.
+the controller. This needs the [build record store](build-records.md). Without the store, a
+controller keeps both on local disk.
 
 Log storage works under both blob tiers. Artifact storage needs the S3 tier and one more
 plugin, `artifact-manager-s3`, pinned in the controller's `JenkinsVersionProfile`.
@@ -23,7 +23,7 @@ A Pipeline step writes a line of console output. The chain from there to durable
 
 A build that outruns this chain loses no stored data. The mite's retained buffer applies
 back pressure: at its bound, the mite answers `503` and the plugin retries with backoff. When the
-gateway refuses a chunk as busy, the mite sends it again after the gateway's pause. Only the plugin's own per-build cap discards incoming
+gateway refuses a chunk as busy, the mite sends it again once the gateway has room. Only the plugin's own per-build cap discards incoming
 bytes, and it counts every byte it drops.
 
 If the mite process restarts, its retained buffer is lost. The gateway detects the resulting
@@ -52,11 +52,8 @@ A viewer of a running build gets a live tail, not a poll:
 
 | Mode | Log chunks | Artifacts |
 |---|---|---|
-| `postgres` | Rows in `varroa.log_chunks`, no external egress. | Not supported. The operator reports `ArtifactStorage` `False` with reason `LocalOnly`, and the controller keeps Jenkins' own local artifact manager. |
+| `postgres` | Rows in `varroa.log_chunks`, no external egress. | Not supported, because `artifact-manager-s3` needs S3. The operator reports `ArtifactStorage` `False` with reason `LocalOnly`, and the controller keeps Jenkins' own local artifact manager. |
 | `s3` | Objects in the configured bucket. | Objects in the same bucket, under a per-cell prefix. |
-
-Artifact storage is S3-only because the Jenkins plugin that writes artifacts to object storage,
-`artifact-manager-s3`, has no Postgres-backed equivalent.
 
 ## Retention
 

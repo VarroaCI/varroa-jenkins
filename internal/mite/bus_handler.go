@@ -287,9 +287,13 @@ type BusHandler struct {
 	logRuns              map[string]*runLogState // keyed by run_id
 	logTotalPendingBytes int64
 	// logBudgetCrossedAt is when the gateway-wide pending budget was
-	// first found crossed, zeroed once it drops back under. It paces the
-	// BUSY pause_ms growth from 1000 ms to 8000 ms.
+	// first found crossed, zeroed once it drops back under. While the
+	// drain makes no progress, the BUSY pause grows from this moment.
 	logBudgetCrossedAt time.Time
+	// logDrain measures the bytes the drain goroutines free per second.
+	// The gateway-budget BUSY pause is the time this rate needs to free
+	// a refused chunk's bytes.
+	logDrain logDrainMeter
 
 	Logger *slog.Logger
 }
