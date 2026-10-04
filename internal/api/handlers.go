@@ -721,6 +721,7 @@ type ReconciliationPolicyJSON struct {
 type PendingRestartJSON struct {
 	DetectedAt       string   `json:"detectedAt"`
 	DesiredStateHash string   `json:"desiredStateHash"`
+	ContentHash      string   `json:"contentHash,omitempty"`
 	Changes          []string `json:"changes,omitempty"`
 }
 
@@ -991,6 +992,7 @@ func (s *Server) handleControllerDetail(w http.ResponseWriter, r *http.Request, 
 		resp.PendingRestart = &PendingRestartJSON{
 			DetectedAt:       cr.Status.PendingRestart.DetectedAt.Format(time.RFC3339),
 			DesiredStateHash: cr.Status.PendingRestart.DesiredStateHash,
+			ContentHash:      cr.Status.PendingRestart.ContentHash,
 			Changes:          cr.Status.PendingRestart.Changes,
 		}
 	}
@@ -1593,7 +1595,7 @@ func (s *Server) handleReconcile(w http.ResponseWriter, r *http.Request, cluster
 }
 
 // handleApproveRestart handles POST /controllers/{ns}/{name}/approve.
-// Body: {"action": "reload" | "restart"}
+// Body: {"action": "reload" | "restart" | ..., "expectedContentHash": "..."}
 func (s *Server) handleApproveRestart(w http.ResponseWriter, r *http.Request, cluster, namespace, name string) {
 	if r.Method != http.MethodPost {
 		s.writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -1605,7 +1607,8 @@ func (s *Server) handleApproveRestart(w http.ResponseWriter, r *http.Request, cl
 	}
 
 	var body struct {
-		Action string `json:"action"`
+		Action              string `json:"action"`
+		ExpectedContentHash string `json:"expectedContentHash"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		s.writeJSONError(w, http.StatusBadRequest, "invalid request body")
@@ -1622,12 +1625,17 @@ func (s *Server) handleApproveRestart(w http.ResponseWriter, r *http.Request, cl
 		return
 	}
 
-	if err := s.deps.Reconciler.ApproveRestart(r.Context(), cluster, namespace, name, body.Action); err != nil {
-		if strings.Contains(err.Error(), "no pending restart") {
+	if err := s.deps.Reconciler.ApproveRestart(r.Context(), cluster, namespace, name, body.Action, body.ExpectedContentHash); err != nil {
+		var changed *controller.PendingRestartChangedError
+		if errors.As(err, &changed) {
+			s.writeJSONErrorStatus(w, http.StatusConflict, changed.Error(), map[string]interface{}{"changes": changed.Changes})
+			return
+		}
+		if errors.Is(err, controller.ErrNoPendingRestart) {
 			s.writeJSONError(w, http.StatusConflict, err.Error())
 			return
 		}
-		s.writeJSONError(w, http.StatusInternalServerError, err.Error())
+		s.writeActionError(w, err)
 		return
 	}
 

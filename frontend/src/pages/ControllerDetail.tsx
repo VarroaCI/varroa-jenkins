@@ -10,7 +10,7 @@ import { ApiError, bffFetch } from "../hooks/useApi";
 import { ForbiddenPage, GenericErrorPage, NotFoundPage } from "../components/RecoveryState";
 import { useComposedBundles } from "../hooks/useCatalog";
 import { useToast } from "../components/Toast";
-import { BFF_BASE, updateController, ControllerConflictError, approveRestart, reprovisionController, restartController, setPowerState, hibernateController, wakeController, approveDeletion, getProvisioningConfig, getVersionProfiles, parsePreflightChecks } from "../api/client";
+import { BFF_BASE, updateController, ControllerConflictError, approveRestart, pendingChangeChanged, reprovisionController, restartController, setPowerState, hibernateController, wakeController, approveDeletion, getProvisioningConfig, getVersionProfiles, parsePreflightChecks } from "../api/client";
 import VersionPicker from "../components/VersionPicker";
 import { overlayJenkinsImage } from "../lib/overlay";
 import { upgradeInfo, versionsDiffer } from "../lib/versionCatalog";
@@ -342,9 +342,17 @@ export default function ControllerDetail() {
   });
 
   const reloadConfig = useMutation({
-    mutationFn: () => approveRestart(cluster, namespace, name, "reload"),
+    mutationFn: () => approveRestart(cluster, namespace, name, "reload", ctrl?.pendingRestart?.contentHash),
     onSuccess: () => { toast("Reload triggered"); invalidateAll(); },
-    onError: (e) => toast(`Reload failed: ${e instanceof Error ? e.message : "unknown"}`),
+    onError: (e) => {
+      const changes = pendingChangeChanged(e);
+      if (changes) {
+        toast(pendingChangedCopy(changes));
+        invalidateAll();
+        return;
+      }
+      toast(`Reload failed: ${e instanceof Error ? e.message : "unknown"}`);
+    },
   });
 
   const [reconcilePending, setReconcilePending] = useState(false);
@@ -2260,6 +2268,13 @@ export function PluginConflictBanner({
   );
 }
 
+// pendingChangedCopy is the message for an approval that the BFF refused
+// because the pending change changed.
+function pendingChangedCopy(changes: string[]): string {
+  const sections = changes.length ? changes.join(", ") : "unknown";
+  return `The pending change changed (${sections}). Review it and approve again.`;
+}
+
 function PendingRestartBanner({
   pendingRestart,
   cluster,
@@ -2284,12 +2299,21 @@ function PendingRestartBanner({
   const handleApprove = async (action: "reload" | "restart") => {
     setApproving(action);
     try {
-      await approveRestart(cluster, namespace, name, action);
+      await approveRestart(cluster, namespace, name, action, pendingRestart.contentHash);
       toast(`Configuration ${action === "reload" ? "reload" : "restart"} approved`);
       queryClient.invalidateQueries({ queryKey: ["controller", cluster, namespace, name] });
       queryClient.invalidateQueries({ queryKey: ["controllers"] });
     } catch (e) {
-      toast(`Failed: ${e instanceof Error ? e.message : "unknown"}`);
+      const changes = pendingChangeChanged(e);
+      if (changes) {
+        // The pending change is not the one on screen. Read it again so
+        // the banner shows the change that the user must approve.
+        toast(pendingChangedCopy(changes));
+        queryClient.invalidateQueries({ queryKey: ["controller", cluster, namespace, name] });
+        queryClient.invalidateQueries({ queryKey: ["controllers"] });
+      } else {
+        toast(`Failed: ${e instanceof Error ? e.message : "unknown"}`);
+      }
     }
     setApproving(null);
     setShowRestartConfirm(false);

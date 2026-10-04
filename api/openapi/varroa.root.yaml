@@ -378,6 +378,8 @@ components:
       $ref: './components/schemas.yaml#/ApplyResult'
     ApplySectionResult:
       $ref: './components/schemas.yaml#/ApplySectionResult'
+    ApproveConflict:
+      $ref: './components/schemas.yaml#/ApproveConflict'
     BindingFederationStatus:
       $ref: './components/schemas.yaml#/BindingFederationStatus'
     BuiltinRoleRef:
@@ -613,6 +615,8 @@ components:
   responses:
     BadRequest:
       $ref: './components/responses.yaml#/BadRequest'
+    ApproveConflict:
+      $ref: './components/responses.yaml#/ApproveConflict'
     Conflict:
       $ref: './components/responses.yaml#/Conflict'
     Forbidden:

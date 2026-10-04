@@ -5,7 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import ControllerDetail from "./ControllerDetail";
 import { useEventStream } from "../hooks/useEventStream";
-import { restartController } from "../api/client";
+import { approveRestart, restartController } from "../api/client";
+import { ApiError } from "../hooks/useApi";
 import type { PodOverrides, ResourceOverlay, ProbesSpec, ControllerSpec } from "../types";
 
 const queryClient = new QueryClient({
@@ -47,6 +48,7 @@ vi.mock("../api/client", async () => {
     updateController: (...args: unknown[]) => mockUpdateController(...args),
     previewControllerOverlay: (...args: unknown[]) => mockPreviewControllerOverlay(...args),
     ControllerConflictError: actual.ControllerConflictError,
+    pendingChangeChanged: actual.pendingChangeChanged,
     BFF_BASE: "/api/v1",
     approveRestart: vi.fn(),
     reprovisionController: vi.fn(),
@@ -1205,6 +1207,33 @@ describe("ControllerDetail — Permission matrix", () => {
     renderWithProviders(<ControllerDetail />);
 
     expect(screen.getByText(/Reload Configuration/)).toBeInTheDocument();
+  });
+
+  it("sends the reviewed content hash with the approval", async () => {
+    const user = userEvent.setup();
+    vi.mocked(approveRestart).mockResolvedValueOnce({ status: "approved", action: "reload" });
+    setControllerData({ pendingRestart: { detectedAt: new Date().toISOString(), desiredStateHash: "abc", contentHash: "seen", changes: ["config"] } } as any);
+    renderWithProviders(<ControllerDetail />);
+
+    await user.click(screen.getByText(/Reload Configuration/));
+    expect(approveRestart).toHaveBeenCalledWith("core", "my-ns", "my-ctrl", "reload", "seen");
+  });
+
+  it("refetches the controller and names the new changes when approve answers 409", async () => {
+    const user = userEvent.setup();
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    vi.mocked(approveRestart).mockRejectedValueOnce(
+      new ApiError(409, "conflict", { error: "the pending change changed (rbac, items); review it and approve again", changes: ["rbac", "items"] }),
+    );
+    setControllerData({ pendingRestart: { detectedAt: new Date().toISOString(), desiredStateHash: "abc", contentHash: "seen", changes: ["config"] } } as any);
+    renderWithProviders(<ControllerDetail />);
+
+    await user.click(screen.getByText(/Reload Configuration/));
+    await waitFor(() =>
+      expect(mockToast).toHaveBeenCalledWith("The pending change changed (rbac, items). Review it and approve again."),
+    );
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["controller", "core", "my-ns", "my-ctrl"] });
+    invalidate.mockRestore();
   });
 
   it("hides Reload Configuration when approve-restart is denied", () => {

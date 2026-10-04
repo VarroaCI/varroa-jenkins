@@ -244,17 +244,32 @@ export function updateController(
   });
 }
 
-// Approve restart
+// Approve restart. expectedContentHash is the contentHash of the pending
+// change that the user reviewed; the BFF refuses with 409 when the pending
+// change has another hash.
 export function approveRestart(
   cluster: string,
   ns: string,
   name: string,
   action: "reload" | "restart",
+  expectedContentHash?: string,
 ): Promise<{ status: string; action: string }> {
   return bffFetch<{ status: string; action: string }>(
     `${ctrlBase(cluster, ns, name)}/approve`,
-    { method: "POST", body: JSON.stringify({ action }) }
+    { method: "POST", body: JSON.stringify(expectedContentHash ? { action, expectedContentHash } : { action }) }
   );
+}
+
+/**
+ * pendingChangeChanged answers the sections of the new pending change when
+ * an approval failed because the pending change changed, and null for any
+ * other error.
+ */
+export function pendingChangeChanged(e: unknown): string[] | null {
+  if (!(e instanceof ApiError) || e.status !== 409) return null;
+  const body = e.body;
+  if (!body || typeof body !== "object" || !("changes" in body) || !Array.isArray(body.changes)) return null;
+  return body.changes.filter((c): c is string => typeof c === "string");
 }
 
 // Approve item deletion

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -16,15 +17,17 @@ type fakeApproveRestarter struct {
 	err error
 	// left is the time to the context deadline at the call; zero means
 	// the context had no deadline.
-	left  time.Duration
-	calls []string // "ns/name/action"
+	left     time.Duration
+	calls    []string // "ns/name/action"
+	expected string
 }
 
-func (f *fakeApproveRestarter) ApproveRestart(ctx context.Context, _, namespace, name, action string) error {
+func (f *fakeApproveRestarter) ApproveRestart(ctx context.Context, _, namespace, name, action, expectedContentHash string) error {
 	if d, ok := ctx.Deadline(); ok {
 		f.left = time.Until(d)
 	}
 	f.calls = append(f.calls, namespace+"/"+name+"/"+action)
+	f.expected = expectedContentHash
 	return f.err
 }
 
@@ -59,13 +62,49 @@ func TestHandleApproveRestart_OwnerReplies(t *testing.T) {
 		t.Fatalf("ApproveRestart calls = %v, want [team-a/ctrl/approve]", rec.calls)
 	}
 
-	rec = &fakeApproveRestarter{err: errors.New("no pending restart for team-a/ctrl")}
+	rec = &fakeApproveRestarter{err: errors.New("send desired state: boom")}
 	var failed bus.ApproveRestartResponse
 	if err := json.Unmarshal(handleApproveRestart(context.Background(), slog.Default(), rec, "core", req), &failed); err != nil {
 		t.Fatalf("decode failure reply: %v", err)
 	}
-	if failed.Error != "no pending restart for team-a/ctrl" {
-		t.Fatalf("failure reply error = %q, want the error text", failed.Error)
+	if failed.Error != "send desired state: boom" || failed.Code != bus.CodeInternal {
+		t.Fatalf("failure reply = %+v, want the error text with code internal", failed)
+	}
+}
+
+// TestHandleApproveRestart_NoPendingRestartRepliesConflict pins that the
+// refusal for a controller with no pending restart is a conflict that keeps
+// its message.
+func TestHandleApproveRestart_NoPendingRestartRepliesConflict(t *testing.T) {
+	rec := &fakeApproveRestarter{err: fmt.Errorf("%w for team-a/ctrl", controller.ErrNoPendingRestart)}
+	var resp bus.ApproveRestartResponse
+	req := mustJSON(t, bus.ApproveRestartRequest{Namespace: "team-a", Name: "ctrl", Action: "approve"})
+	if err := json.Unmarshal(handleApproveRestart(context.Background(), slog.Default(), rec, "core", req), &resp); err != nil {
+		t.Fatalf("decode reply: %v", err)
+	}
+	if resp.Code != bus.CodeConflict || resp.Error != "no pending restart for team-a/ctrl" || len(resp.Changes) != 0 {
+		t.Fatalf("reply = %+v, want a conflict with the message and no changes", resp)
+	}
+}
+
+// TestHandleApproveRestart_ContentChangedRepliesConflictWithChanges pins
+// that a refusal for a changed pending change is a conflict that names the
+// new sections, and that the handler passes the reviewed hash through.
+func TestHandleApproveRestart_ContentChangedRepliesConflictWithChanges(t *testing.T) {
+	rec := &fakeApproveRestarter{err: &controller.PendingRestartChangedError{Changes: []string{"config", "rbac"}}}
+	var resp bus.ApproveRestartResponse
+	req := mustJSON(t, bus.ApproveRestartRequest{Namespace: "team-a", Name: "ctrl", Action: "approve", ExpectedContentHash: "seen"})
+	if err := json.Unmarshal(handleApproveRestart(context.Background(), slog.Default(), rec, "core", req), &resp); err != nil {
+		t.Fatalf("decode reply: %v", err)
+	}
+	if resp.Code != bus.CodeConflict || len(resp.Changes) != 2 || resp.Changes[0] != "config" || resp.Changes[1] != "rbac" {
+		t.Fatalf("reply = %+v, want a conflict that names config and rbac", resp)
+	}
+	if resp.Error == "" {
+		t.Fatal("reply carries no error text")
+	}
+	if rec.expected != "seen" {
+		t.Fatalf("expected content hash = %q, want seen", rec.expected)
 	}
 }
 

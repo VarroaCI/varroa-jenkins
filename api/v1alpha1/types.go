@@ -778,6 +778,13 @@ type PendingRestart struct {
 	// DesiredStateHash is the pending desired state hash.
 	DesiredStateHash string `json:"desiredStateHash"`
 
+	// ContentHash is the hash of the content that the user reviews: the
+	// JCasC, RBAC, and items of the pending desired state. Tenant homes
+	// stay outside it. An approval refuses when the content it builds
+	// again has a different hash.
+	// +optional
+	ContentHash string `json:"contentHash,omitempty"`
+
 	// Changes lists which config sections changed (e.g., "plugins", "config", "rbac", "items").
 	// +optional
 	Changes []string `json:"changes,omitempty"`

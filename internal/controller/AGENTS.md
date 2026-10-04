@@ -1173,7 +1173,15 @@ sections describe.
   because the shard owner alone runs the tick and the approve. An approve waits at
   most `approveLockWait` (20s) and then fails with a plain-text "retry the approve"
   error. It writes nothing and sends nothing to the mite. A `plugin-roll` approval approves
-  only the target checksum that it read (`errPluginRollChanged` otherwise). The 10-minute shard-resync tick calls
+  only the target checksum that it read (`errPluginRollChanged` otherwise). An
+  `approve`/`restart`/`force`/`reload` approval sends only the content that
+  `pendingRestart.contentHash` names (`computeDesiredContentHash`: JCasC, RBAC, and
+  items, never tenant homes). On a mismatch it sends nothing, records the new content
+  through `raisePendingRestart`, and returns `*PendingRestartChangedError` with the new
+  sections. A non-empty `expectedContentHash` must equal the pending content hash too.
+  `raisePendingRestart` is the only code that sets `pendingRestart`: for the same content
+  hash it keeps `detectedAt` and `changes`. A missing pending restart is
+  `ErrNoPendingRestart`. The 10-minute shard-resync tick calls
   `ForgetUnowned` too, because a reconcile in flight during a release can
   subscribe again. The shutdown release (`releaseAll`) calls no hook.
 - `pluginlock/lock.go` — the embedded plugin-lock baseline

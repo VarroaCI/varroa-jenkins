@@ -1916,11 +1916,37 @@ func (r *Reconciler) Reprovision(cluster, namespace, name string) {
 	}
 }
 
+// ErrNoPendingRestart is the refusal of an approval for a controller with no
+// pending restart.
+var ErrNoPendingRestart = errors.New("no pending restart")
+
+// PendingRestartChangedError is the refusal of an approval whose pending
+// change is not the one that the caller reviewed. Changes names the
+// sections of the current pending change.
+type PendingRestartChangedError struct {
+	Changes []string
+}
+
+func (e *PendingRestartChangedError) Error() string {
+	return fmt.Sprintf("the pending change changed (%s); review it and approve again", strings.Join(e.Changes, ", "))
+}
+
+// pendingChanges answers the sections of a pending restart, and "unknown"
+// when it names none, so a refusal always names at least one section.
+func pendingChanges(p *v1alpha1.PendingRestart) []string {
+	if p == nil || len(p.Changes) == 0 {
+		return []string{"unknown"}
+	}
+	return append([]string(nil), p.Changes...)
+}
+
 // ApproveRestart applies a pending configuration change. action must be
 // "reload" (JCasC reload), "restart" (drain-aware safe restart),
 // "force-restart" (immediate restart), "approve" (release manual-drift push with idle gating),
-// or "force" (release manual-drift push immediately).
-func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, name, action string) error {
+// or "force" (release manual-drift push immediately). A non-empty
+// expectedContentHash is the content hash of the pending change that the
+// caller reviewed; the approval refuses when the pending change differs.
+func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, name, action, expectedContentHash string) error {
 	_ = cluster // operator always acts on its own cluster
 	// A send from a replica that does not own the controller subscribes to
 	// the mite there, and its status writes race the owner's.
@@ -1984,28 +2010,13 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 	}
 
 	if cr.Status.PendingRestart == nil {
-		return fmt.Errorf("no pending restart for %s", key)
+		return fmt.Errorf("%w for %s", ErrNoPendingRestart, key)
 	}
 
-	// Re-fetch bundle content from the materialized ConfigMap and resolve vars.
-	resolvedBundle, _, _, _, err := r.resolveBundleForController(ctx, cr)
+	desired, err := r.assembleApproveState(ctx, cr)
 	if err != nil {
-		return fmt.Errorf("resolve bundle: %w", err)
+		return err
 	}
-
-	contrib, err := r.runnerContribution(ctx, cr)
-	if err != nil {
-		return fmt.Errorf("build runner contribution: %w", err)
-	}
-
-	desired, err := r.buildDesiredStateCommand(cr, resolvedBundle, contrib)
-	if err != nil {
-		return fmt.Errorf("build desired state: %w", err)
-	}
-	// The mite replaces its tenant set from every cell push, so a push
-	// without tenant_homes holds back every tenant's triggers. The entries
-	// are also inside the hash below.
-	r.attachTenantHomes(ctx, cr, r.listPlacedTeams(ctx, cr), desired)
 
 	// Set the Reload flag on the DesiredStateCommand for "reload" action
 	// before sending so the mite receives it.
@@ -2014,6 +2025,12 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 	}
 
 	desiredHash := computeDesiredStateHash(desired)
+
+	// The approval sends only the content that the pending restart holds.
+	// Tenant homes are placement data, so they go out as current.
+	if err := r.checkPendingContent(ctx, cr, desired, desiredHash, expectedContentHash); err != nil {
+		return err
+	}
 
 	// "restart" action: release the manual-mode push and issue a drain-aware
 	// safe restart (re-honors idle gating).
@@ -2093,6 +2110,70 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 
 	r.wakeController(key)
 
+	return nil
+}
+
+// assembleApproveState builds the desired state that an approval sends
+// from the current inputs.
+func (r *Reconciler) assembleApproveState(ctx context.Context, cr *v1alpha1.Controller) (*mitev1.DesiredStateCommand, error) {
+	// Re-fetch bundle content from the materialized ConfigMap and resolve vars.
+	resolvedBundle, _, _, _, err := r.resolveBundleForController(ctx, cr)
+	if err != nil {
+		return nil, fmt.Errorf("resolve bundle: %w", err)
+	}
+
+	contrib, err := r.runnerContribution(ctx, cr)
+	if err != nil {
+		return nil, fmt.Errorf("build runner contribution: %w", err)
+	}
+
+	desired, err := r.buildDesiredStateCommand(cr, resolvedBundle, contrib)
+	if err != nil {
+		return nil, fmt.Errorf("build desired state: %w", err)
+	}
+	// The mite replaces its tenant set from every cell push, so a push
+	// without tenant_homes holds back every tenant's triggers. The entries
+	// are also inside the full hash.
+	r.attachTenantHomes(ctx, cr, r.listPlacedTeams(ctx, cr), desired)
+	return desired, nil
+}
+
+// checkPendingContent refuses an approval when the content that it built
+// again differs from the content of the pending restart. It then records
+// the new content as the pending restart, so the user can review it. It
+// also refuses when the caller reviewed other content than the pending
+// restart holds.
+func (r *Reconciler) checkPendingContent(ctx context.Context, cr *v1alpha1.Controller,
+	desired *mitev1.DesiredStateCommand, desiredHash, expectedContentHash string) error {
+	contentHash := computeDesiredContentHash(desired)
+	if cr.Status.PendingRestart.ContentHash != contentHash {
+		changes := computeChangedSections(r.miteTransport.Snapshot(cr.Namespace, cr.Name), desired)
+		now := metav1Now()
+		var recorded []string
+		gone := false
+		if _, err := crdstore.MutateStatus(ctx, r.store, cr.Name, cr.Namespace, func(fresh *v1alpha1.Controller) (bool, error) {
+			// A pending restart that another write cleared is not raised
+			// again here; the tick raises it when it is still due.
+			gone = fresh.Status.PendingRestart == nil
+			if gone {
+				return false, nil
+			}
+			raisePendingRestart(&fresh.Status, now, desiredHash, contentHash, changes)
+			recorded = pendingChanges(fresh.Status.PendingRestart)
+			return true, nil
+		}); err != nil {
+			return fmt.Errorf("record the new pending change: %w", err)
+		}
+		if gone {
+			return fmt.Errorf("%w for %s/%s", ErrNoPendingRestart, cr.Namespace, cr.Name)
+		}
+		r.Logger.Info("approve refused: the pending content changed",
+			"controller", cr.Namespace+"/"+cr.Name, "changes", recorded)
+		return &PendingRestartChangedError{Changes: recorded}
+	}
+	if expectedContentHash != "" && expectedContentHash != contentHash {
+		return &PendingRestartChangedError{Changes: pendingChanges(cr.Status.PendingRestart)}
+	}
 	return nil
 }
 
@@ -4105,21 +4186,15 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		// failure for this hash.
 		if cr.Status.DesiredStateHash == desiredHash {
 			if hasResultFailureForHash(results, desired, desiredHash) {
-				cr.Status.PendingRestart = &v1alpha1.PendingRestart{
-					DetectedAt:       now,
-					DesiredStateHash: desiredHash,
-					Changes:          computeChangedSections(snapshot, desired),
-				}
+				raisePendingRestart(&cr.Status, now, desiredHash, computeDesiredContentHash(desired),
+					computeChangedSections(snapshot, desired))
 				logger.Info("manual mode, mite reported failure for pending hash, re-flagging")
 			}
 			return nil
 		}
 		// Manual mode: set PendingRestart instead of auto-pushing.
-		cr.Status.PendingRestart = &v1alpha1.PendingRestart{
-			DetectedAt:       now,
-			DesiredStateHash: desiredHash,
-			Changes:          computeChangedSections(snapshot, desired),
-		}
+		raisePendingRestart(&cr.Status, now, desiredHash, computeDesiredContentHash(desired),
+			computeChangedSections(snapshot, desired))
 		logger.Info("manual mode, config drift detected, pending approval")
 		return nil
 	}
@@ -6343,6 +6418,39 @@ func computeDesiredStateHash(cmd *mitev1.DesiredStateCommand) string {
 	// too: the role of a controller does not change the applied content.
 	h.Write([]byte(tenantHomesHash(cmd.TenantHomes)))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// computeDesiredContentHash answers the hash of the content that a user
+// reviews before an approval: the JCasC, RBAC, and items. Tenant homes are
+// placement data that the operator owns, so they stay outside this hash.
+// Each section is framed with its name and length, so content that moves
+// from one section to another changes the hash.
+func computeDesiredContentHash(cmd *mitev1.DesiredStateCommand) string {
+	h := sha256.New()
+	for _, part := range []struct{ name, body string }{
+		{"jcasc", cmd.JcascYaml}, {"rbac", cmd.RbacYaml}, {"items", cmd.ItemsYaml},
+	} {
+		fmt.Fprintf(h, "%s:%d:", part.name, len(part.body))
+		h.Write([]byte(part.body))
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// raisePendingRestart records a pending restart for a desired state. While
+// the content hash stays the same, it keeps DetectedAt and Changes and
+// updates only the full hash. A tenant home move thus does not change what
+// the user reviews.
+func raisePendingRestart(status *v1alpha1.ControllerStatus, now metav1.Time, desiredHash, contentHash string, changes []string) {
+	if p := status.PendingRestart; p != nil && contentHash != "" && p.ContentHash == contentHash {
+		p.DesiredStateHash = desiredHash
+		return
+	}
+	status.PendingRestart = &v1alpha1.PendingRestart{
+		DetectedAt:       now,
+		DesiredStateHash: desiredHash,
+		ContentHash:      contentHash,
+		Changes:          changes,
+	}
 }
 
 // tenantHomesHash answers a stable hash of a desired state's tenant home

@@ -83,7 +83,7 @@ func TestReconcile_PluginRollApproveDuringTheTickSurvivesTheEndWrite(t *testing.
 	crdstore.MustSeed(client.store, cr)
 
 	err := approveDuringTick(t, client, rec, func() error {
-		return rec.ApproveRestart(context.Background(), "", "ns", "mine", "plugin-roll")
+		return rec.ApproveRestart(context.Background(), "", "ns", "mine", "plugin-roll", "")
 	})
 	if err != nil {
 		t.Fatalf("approve plugin roll: %v", err)
@@ -138,7 +138,7 @@ func TestApproveRestart_WaitsForANormalTick(t *testing.T) {
 		time.Sleep(30 * time.Millisecond)
 		rec.controllerLocks.unlock("ns/mine")
 	}()
-	if err := rec.ApproveRestart(context.Background(), "", "ns", "mine", "plugin-roll"); err != nil {
+	if err := rec.ApproveRestart(context.Background(), "", "ns", "mine", "plugin-roll", ""); err != nil {
 		t.Fatalf("approve plugin roll: %v", err)
 	}
 	if got := getMine(t, client.store); got.Status.ApprovedPluginRollChecksum != "abc" {
@@ -163,7 +163,7 @@ func TestApproveRestart_ReturnsARetryableErrorWhenTheTickHoldsTheLock(t *testing
 		t.Fatalf("lock: %v", err)
 	}
 	defer rec.controllerLocks.unlock("ns/mine")
-	err := rec.ApproveRestart(context.Background(), "", "ns", "mine", "plugin-roll")
+	err := rec.ApproveRestart(context.Background(), "", "ns", "mine", "plugin-roll", "")
 	if err == nil || !strings.Contains(err.Error(), "retry the approve") {
 		t.Fatalf("err = %v, want a retryable error", err)
 	}

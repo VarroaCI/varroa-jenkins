@@ -621,6 +621,15 @@ type ComponentsSchemasApplySectionResult struct {
 	Ok    bool    `json:"ok"`
 }
 
+// ComponentsSchemasApproveConflict Refusal of an approval. changes is present when the pending change is not the one the caller approved.
+type ComponentsSchemasApproveConflict struct {
+	// Changes The sections of the current pending change.
+	Changes *[]string `json:"changes,omitempty"`
+
+	// Error Human-readable error message.
+	Error string `json:"error"`
+}
+
 // ComponentsSchemasBackupSpec Backup configuration (transcribed from v1alpha1.BackupSpec).
 type ComponentsSchemasBackupSpec struct {
 	// Enabled Whether backups are enabled.
@@ -2459,9 +2468,12 @@ type ComponentsSchemasPendingPluginRoll struct {
 
 // ComponentsSchemasPendingRestart Pending restart information.
 type ComponentsSchemasPendingRestart struct {
-	Changes          *[]string `json:"changes,omitempty"`
-	DesiredStateHash string    `json:"desiredStateHash"`
-	DetectedAt       string    `json:"detectedAt"`
+	Changes *[]string `json:"changes,omitempty"`
+
+	// ContentHash Hash of the JCasC, RBAC, and items of the pending change. Send it as expectedContentHash to approve this change only.
+	ContentHash      *string `json:"contentHash,omitempty"`
+	DesiredStateHash string  `json:"desiredStateHash"`
+	DetectedAt       string  `json:"detectedAt"`
 }
 
 // ComponentsSchemasPermissionScopes Scope-aware introspection result for /me/permissions.
@@ -4227,6 +4239,9 @@ type ComponentsParametersTeam = string
 // ComponentsParametersTeamQuery defines model for components_parameters_teamQuery.
 type ComponentsParametersTeamQuery = string
 
+// ComponentsResponsesApproveConflict Refusal of an approval. changes is present when the pending change is not the one the caller approved.
+type ComponentsResponsesApproveConflict = ComponentsSchemasApproveConflict
+
 // ComponentsResponsesBadRequest defines model for components_responses_BadRequest.
 type ComponentsResponsesBadRequest = ComponentsSchemasError
 
@@ -4407,6 +4422,9 @@ type PatchControllerParams struct {
 type ApproveControllerJSONBody struct {
 	// Action The action to approve.
 	Action ApproveControllerJSONBodyAction `json:"action"`
+
+	// ExpectedContentHash The contentHash of the pending change that the caller reviewed. When present, the approval refuses unless the pending change has this hash. A caller that omits it approves the pending change that exists at that moment. Only the reload, restart, approve, and force actions check it; force-restart and plugin-roll ignore it.
+	ExpectedContentHash *string `json:"expectedContentHash,omitempty"`
 }
 
 // ApproveControllerJSONBodyAction defines parameters for ApproveController.
@@ -17772,7 +17790,7 @@ type ApproveControllerResponse struct {
 	JSON400 *ComponentsResponsesBadRequest
 	JSON401 *ComponentsResponsesUnauthorized
 	JSON403 *ComponentsResponsesForbidden
-	JSON409 *ComponentsResponsesConflict
+	JSON409 *ComponentsResponsesApproveConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -24715,7 +24733,7 @@ func ParseApproveControllerResponse(rsp *http.Response) (*ApproveControllerRespo
 		response.JSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
-		var dest ComponentsResponsesConflict
+		var dest ComponentsResponsesApproveConflict
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

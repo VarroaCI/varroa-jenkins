@@ -43,7 +43,7 @@ type fakeReconcilerAPI struct{}
 func (fakeReconcilerAPI) TriggerReconcile(_, _, _ string) {}
 func (fakeReconcilerAPI) WakeController(_, _, _ string)   {}
 func (fakeReconcilerAPI) Reprovision(_, _, _ string)      {}
-func (fakeReconcilerAPI) ApproveRestart(_ context.Context, _, _, _, _ string) error {
+func (fakeReconcilerAPI) ApproveRestart(_ context.Context, _, _, _, _, _ string) error {
 	return nil
 }
 func (fakeReconcilerAPI) ApproveDeletion(_ context.Context, _, _, _, _ string) error {

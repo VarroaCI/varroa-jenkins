@@ -34,6 +34,13 @@ Conflict:
       schema:
         $ref: './schemas.yaml#/Error'
 
+ApproveConflict:
+  description: Conflict — no pending restart, or the pending change is not the one the caller approved.
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/ApproveConflict'
+
 MethodNotAllowed:
   description: Method not allowed on this endpoint.
   content:

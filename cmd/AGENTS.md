@@ -29,6 +29,8 @@ stating what it is/is not responsible for:
   (`approve_deletion.go`) with no queue group; only the replica that owns the
   controller's shard replies. `ApproveRestart` and `ApproveDeletion` return
   `ErrNotShardOwner` on any other replica, and the handler then sends no reply.
+  `approveRestartRefusal` replies `code: conflict` for `ErrNoPendingRestart` and for
+  `PendingRestartChangedError`, which also carries `changes`; the BFF maps both to 409.
   With no owner during a handoff, the BFF request times out. Each handler gives
   the approve a 55-second deadline (`approveRequestTimeout`), under the BFF's
   60-second request timeout. The deadline also limits how long an approve holds

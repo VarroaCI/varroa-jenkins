@@ -4563,6 +4563,13 @@ spec:
                     items:
                       type: string
                     type: array
+                  contentHash:
+                    description: |-
+                      ContentHash is the hash of the content that the user reviews: the
+                      JCasC, RBAC, and items of the pending desired state. Tenant homes
+                      stay outside it. An approval refuses when the content it builds
+                      again has a different hash.
+                    type: string
                   desiredStateHash:
                     description: DesiredStateHash is the pending desired state hash.
                     type: string

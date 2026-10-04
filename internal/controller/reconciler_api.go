@@ -16,8 +16,11 @@ type ReconcilerAPI interface {
 	Reprovision(cluster, namespace, name string)
 
 	// ApproveRestart applies a pending configuration change. action must be
-	// "reload" (JCasC reload) or "restart" (Jenkins safe restart).
-	ApproveRestart(ctx context.Context, cluster, namespace, name, action string) error
+	// "reload" (JCasC reload) or "restart" (Jenkins safe restart). A
+	// non-empty expectedContentHash is the content hash of the pending change
+	// that the caller reviewed. A refusal for changed content is a
+	// *PendingRestartChangedError.
+	ApproveRestart(ctx context.Context, cluster, namespace, name, action, expectedContentHash string) error
 
 	// ApproveDeletion authorizes deleting a previously-deferred item, issuing a
 	// targeted delete to the mite. The path must match a pending deletion entry.

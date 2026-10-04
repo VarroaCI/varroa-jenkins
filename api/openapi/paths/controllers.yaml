@@ -374,6 +374,9 @@
                 type: string
                 enum: [reload, restart, approve, force, force-restart, plugin-roll]
                 description: The action to approve.
+              expectedContentHash:
+                type: string
+                description: The contentHash of the pending change that the caller reviewed. When present, the approval refuses unless the pending change has this hash. A caller that omits it approves the pending change that exists at that moment. Only the reload, restart, approve, and force actions check it; force-restart and plugin-roll ignore it.
             additionalProperties: false
     responses:
       "202":
@@ -396,7 +399,7 @@
       "403":
         $ref: '../components/responses.yaml#/Forbidden'
       "409":
-        $ref: '../components/responses.yaml#/Conflict'
+        $ref: '../components/responses.yaml#/ApproveConflict'
 
 /api/v1/clusters/{cluster}/controllers/{ns}/{name}/approve-deletion:
   post:

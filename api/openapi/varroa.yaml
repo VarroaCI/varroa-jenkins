@@ -143,6 +143,8 @@ components:
       schema:
         type: string
   responses:
+    ApproveConflict:
+      $ref: '#/components/responses/components_responses_ApproveConflict'
     BadRequest:
       $ref: '#/components/responses/components_responses_BadRequest'
     Conflict:
@@ -157,6 +159,13 @@ components:
       $ref: '#/components/responses/components_responses_NotFound'
     Unauthorized:
       $ref: '#/components/responses/components_responses_Unauthorized'
+    components_responses_ApproveConflict:
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/components_schemas_ApproveConflict'
+      description: Conflict — no pending restart, or the pending change is not the
+        one the caller approved.
     components_responses_BadRequest:
       content:
         application/json:
@@ -333,6 +342,22 @@ components:
       required:
       - name
       - ok
+      type: object
+    ApproveConflict:
+      additionalProperties: false
+      description: Refusal of an approval. changes is present when the pending change
+        is not the one the caller approved.
+      properties:
+        changes:
+          description: The sections of the current pending change.
+          items:
+            type: string
+          type: array
+        error:
+          description: Human-readable error message.
+          type: string
+      required:
+      - error
       type: object
     BindingFederationStatus:
       description: Federation outcome of a binding on one hive, or a federation fault
@@ -1874,6 +1899,10 @@ components:
           items:
             type: string
           type: array
+        contentHash:
+          description: Hash of the JCasC, RBAC, and items of the pending change. Send
+            it as expectedContentHash to approve this change only.
+          type: string
         desiredStateHash:
           type: string
         detectedAt:
@@ -3716,6 +3745,22 @@ components:
       required:
       - name
       - ok
+      type: object
+    components_schemas_ApproveConflict:
+      additionalProperties: false
+      description: Refusal of an approval. changes is present when the pending change
+        is not the one the caller approved.
+      properties:
+        changes:
+          description: The sections of the current pending change.
+          items:
+            type: string
+          type: array
+        error:
+          description: Human-readable error message.
+          type: string
+      required:
+      - error
       type: object
     components_schemas_BackupSpec:
       additionalProperties: false
@@ -7036,6 +7081,10 @@ components:
           items:
             type: string
           type: array
+        contentHash:
+          description: Hash of the JCasC, RBAC, and items of the pending change. Send
+            it as expectedContentHash to approve this change only.
+          type: string
         desiredStateHash:
           type: string
         detectedAt:
@@ -11640,6 +11689,14 @@ paths:
                   - force-restart
                   - plugin-roll
                   type: string
+                expectedContentHash:
+                  description: The contentHash of the pending change that the caller
+                    reviewed. When present, the approval refuses unless the pending
+                    change has this hash. A caller that omits it approves the pending
+                    change that exists at that moment. Only the reload, restart, approve,
+                    and force actions check it; force-restart and plugin-roll ignore
+                    it.
+                  type: string
               required:
               - action
               type: object
@@ -11667,7 +11724,7 @@ paths:
         "403":
           $ref: '#/components/responses/components_responses_Forbidden'
         "409":
-          $ref: '#/components/responses/components_responses_Conflict'
+          $ref: '#/components/responses/components_responses_ApproveConflict'
       summary: Approves a pending restart, reload, or plugin-roll action.
       tags:
       - controllers

@@ -399,7 +399,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		if deps.Reconciler == nil {
 			return mcp.NewToolResultError("reconciler not available"), nil
 		}
-		if err := deps.Reconciler.ApproveRestart(ctx, cluster, ns, name, "restart"); err != nil {
+		if err := deps.Reconciler.ApproveRestart(ctx, cluster, ns, name, "restart", ""); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to restart controller: %v", err)), nil
 		}
 		emitActivityForCluster(deps, claims, cluster, activity.Event{

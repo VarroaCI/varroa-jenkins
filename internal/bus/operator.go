@@ -156,12 +156,19 @@ type ApproveRestartRequest struct {
 	Name      string `json:"name"`
 	Namespace string `json:"namespace"`
 	Action    string `json:"action"` // "reload" or "restart"
+	// ExpectedContentHash is the content hash of the pending change that
+	// the caller reviewed. It is empty when the caller did not review one.
+	ExpectedContentHash string `json:"expectedContentHash,omitempty"`
 }
 
 // ApproveRestartResponse is the reply for operator.<cluster>.approverestart.
-// An empty Error field indicates success.
+// An empty Error field indicates success. Changes names the sections of the
+// current pending change when the operator refuses because that change is
+// not the one that the caller approved.
 type ApproveRestartResponse struct {
-	Error string `json:"error,omitempty"`
+	Error   string   `json:"error,omitempty"`
+	Code    string   `json:"code,omitempty"`
+	Changes []string `json:"changes,omitempty"`
 }
 
 // ApproveDeletionRequest is the payload for operator.<cluster>.approvedeletion.

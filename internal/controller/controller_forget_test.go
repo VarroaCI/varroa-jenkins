@@ -80,7 +80,7 @@ func TestApproveRestart_RefusesAControllerUnderDeletion(t *testing.T) {
 		},
 	})
 
-	err := rec.ApproveRestart(context.Background(), "", "ns", "deleting-cr", "approve")
+	err := rec.ApproveRestart(context.Background(), "", "ns", "deleting-cr", "approve", "")
 	if err == nil || !strings.Contains(err.Error(), "being deleted") {
 		t.Fatalf("err = %v, want a refusal for a controller under deletion", err)
 	}
@@ -108,7 +108,7 @@ func TestApproveRestart_ForgetsAMiteDeletedDuringTheSend(t *testing.T) {
 	client := newTestClientWithBundle()
 	rec := newTestReconciler(client)
 	cr := testController("racing", "ns", v1alpha1.ControllerPhaseConnected)
-	cr.Status.PendingRestart = &v1alpha1.PendingRestart{}
+	cr.Status.PendingRestart = pendingRestartFor(t, rec, cr)
 	crdstore.MustSeed(client.store, cr)
 	tr := &deletingSendTransport{captureTransport: &captureTransport{}}
 	tr.onSend = func() {
@@ -118,7 +118,7 @@ func TestApproveRestart_ForgetsAMiteDeletedDuringTheSend(t *testing.T) {
 	}
 	rec.miteTransport = tr
 
-	if err := rec.ApproveRestart(context.Background(), "", "ns", "racing", "approve"); err != nil {
+	if err := rec.ApproveRestart(context.Background(), "", "ns", "racing", "approve", ""); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	if tr.lastDesired == nil {
@@ -135,12 +135,12 @@ func TestApproveRestart_KeepsTheMiteOfALiveController(t *testing.T) {
 	client := newTestClientWithBundle()
 	rec := newTestReconciler(client)
 	cr := testController("live", "ns", v1alpha1.ControllerPhaseConnected)
-	cr.Status.PendingRestart = &v1alpha1.PendingRestart{}
+	cr.Status.PendingRestart = pendingRestartFor(t, rec, cr)
 	crdstore.MustSeed(client.store, cr)
 	tr := &captureTransport{}
 	rec.miteTransport = tr
 
-	if err := rec.ApproveRestart(context.Background(), "", "ns", "live", "approve"); err != nil {
+	if err := rec.ApproveRestart(context.Background(), "", "ns", "live", "approve", ""); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	if len(tr.forgotten) != 0 {
@@ -198,13 +198,13 @@ func TestApproveRestart_RefusesANonOwner(t *testing.T) {
 	client := newTestClientWithBundle()
 	rec := newTestReconciler(client)
 	cr := testController("elsewhere", "ns", v1alpha1.ControllerPhaseConnected)
-	cr.Status.PendingRestart = &v1alpha1.PendingRestart{}
+	cr.Status.PendingRestart = pendingRestartFor(t, rec, cr)
 	crdstore.MustSeed(client.store, cr)
 	rec.SetShardOwnership(sharding.NewRing(256), sharding.NewShardSet())
 	tr := &captureTransport{}
 	rec.miteTransport = tr
 
-	err := rec.ApproveRestart(context.Background(), "", "ns", "elsewhere", "approve")
+	err := rec.ApproveRestart(context.Background(), "", "ns", "elsewhere", "approve", "")
 	if !errors.Is(err, ErrNotShardOwner) {
 		t.Fatalf("err = %v, want ErrNotShardOwner", err)
 	}
@@ -226,7 +226,7 @@ func TestApproveRestart_OwnerSends(t *testing.T) {
 	client := newTestClientWithBundle()
 	rec := newTestReconciler(client)
 	cr := testController("mine", "ns", v1alpha1.ControllerPhaseConnected)
-	cr.Status.PendingRestart = &v1alpha1.PendingRestart{}
+	cr.Status.PendingRestart = pendingRestartFor(t, rec, cr)
 	crdstore.MustSeed(client.store, cr)
 	ring := sharding.NewRing(256)
 	held := sharding.NewShardSet()
@@ -235,7 +235,7 @@ func TestApproveRestart_OwnerSends(t *testing.T) {
 	tr := &captureTransport{}
 	rec.miteTransport = tr
 
-	if err := rec.ApproveRestart(context.Background(), "", "ns", "mine", "approve"); err != nil {
+	if err := rec.ApproveRestart(context.Background(), "", "ns", "mine", "approve", ""); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	if tr.lastDesired == nil {
@@ -262,7 +262,7 @@ func TestApproveRestart_ForgetsTheMiteWhenTheShardMovesDuringTheSend(t *testing.
 	client := newTestClientWithBundle()
 	rec := newTestReconciler(client)
 	cr := testController("moving", "ns", v1alpha1.ControllerPhaseConnected)
-	cr.Status.PendingRestart = &v1alpha1.PendingRestart{}
+	cr.Status.PendingRestart = pendingRestartFor(t, rec, cr)
 	crdstore.MustSeed(client.store, cr)
 	ring := sharding.NewRing(256)
 	held := sharding.NewShardSet()
@@ -272,7 +272,7 @@ func TestApproveRestart_ForgetsTheMiteWhenTheShardMovesDuringTheSend(t *testing.
 	tr := &shardMovingTransport{captureTransport: &captureTransport{}, onSend: func() { held.Remove(shard) }}
 	rec.miteTransport = tr
 
-	if err := rec.ApproveRestart(context.Background(), "", "ns", "moving", "approve"); err != nil {
+	if err := rec.ApproveRestart(context.Background(), "", "ns", "moving", "approve", ""); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	if len(tr.forgotten) != 1 || tr.forgotten[0] != "ns/moving" {
@@ -505,7 +505,7 @@ func TestApproveRestart_PluginRollKeepsAConcurrentOwnerWrite(t *testing.T) {
 	arm()
 	rec.miteTransport = &captureTransport{}
 
-	if err := rec.ApproveRestart(context.Background(), "", "ns", "mine", "plugin-roll"); err != nil {
+	if err := rec.ApproveRestart(context.Background(), "", "ns", "mine", "plugin-roll", ""); err != nil {
 		t.Fatalf("approve plugin roll: %v", err)
 	}
 	if !fired() {
@@ -539,7 +539,7 @@ func TestApproveRestart_PluginRollRefusesAChangedTarget(t *testing.T) {
 	arm()
 	rec.miteTransport = &captureTransport{}
 
-	err := rec.ApproveRestart(context.Background(), "", "ns", "mine", "plugin-roll")
+	err := rec.ApproveRestart(context.Background(), "", "ns", "mine", "plugin-roll", "")
 	if !errors.Is(err, errPluginRollChanged) {
 		t.Fatalf("err = %v, want errPluginRollChanged", err)
 	}
@@ -563,7 +563,7 @@ func TestApproveRestart_RestartTakesTheAttemptCountFromTheFreshRead(t *testing.T
 	rec := newTestReconciler(client)
 	cr := testController("mine", "ns", v1alpha1.ControllerPhaseConnected)
 	cr.ResourceVersion = "1"
-	cr.Status.PendingRestart = &v1alpha1.PendingRestart{}
+	cr.Status.PendingRestart = pendingRestartFor(t, rec, cr)
 	cr.Status.RestartDrain = &v1alpha1.RestartDrainStatus{AttemptCount: 1}
 	crdstore.MustSeed(client.store, cr)
 	// The second read after the send is the compare-and-swap read: the
@@ -577,7 +577,7 @@ func TestApproveRestart_RestartTakesTheAttemptCountFromTheFreshRead(t *testing.T
 	tr := &deletingSendTransport{captureTransport: &captureTransport{}, onSend: arm}
 	rec.miteTransport = tr
 
-	if err := rec.ApproveRestart(context.Background(), "", "ns", "mine", "restart"); err != nil {
+	if err := rec.ApproveRestart(context.Background(), "", "ns", "mine", "restart", ""); err != nil {
 		t.Fatalf("approve restart: %v", err)
 	}
 	if !fired() {
@@ -610,14 +610,15 @@ func TestApproveRestart_KeepsAPendingRestartRaisedAfterTheRead(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := testController("mine", "ns", v1alpha1.ControllerPhaseConnected)
 	cr.ResourceVersion = "1"
-	cr.Status.PendingRestart = &v1alpha1.PendingRestart{DesiredStateHash: "a"}
+	cr.Status.PendingRestart = pendingRestartFor(t, rec, cr)
+	cr.Status.PendingRestart.DesiredStateHash = "a"
 	crdstore.MustSeed(client.store, cr)
 	arm, fired := afterNthControllerGet(t, client.store, 2, func() {
 		ownerStatusWrite(t, client.store, map[string]any{"pendingRestart": map[string]any{"desiredStateHash": "b"}})
 	})
 	rec.miteTransport = &deletingSendTransport{captureTransport: &captureTransport{}, onSend: arm}
 
-	if err := rec.ApproveRestart(context.Background(), "", "ns", "mine", "approve"); err != nil {
+	if err := rec.ApproveRestart(context.Background(), "", "ns", "mine", "approve", ""); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	if !fired() {

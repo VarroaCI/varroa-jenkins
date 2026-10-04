@@ -161,7 +161,7 @@ func (g *guardReconciler) TriggerReconcile(_, _, _ string) {}
 func (g *guardReconciler) WakeController(_, _, _ string)   {}
 func (g *guardReconciler) Reprovision(_, _, _ string)      {}
 
-func (g *guardReconciler) ApproveRestart(_ context.Context, _, _, _, _ string) error { return nil }
+func (g *guardReconciler) ApproveRestart(_ context.Context, _, _, _, _, _ string) error { return nil }
 func (g *guardReconciler) ApproveDeletion(_ context.Context, _, _, _, _ string) error {
 	return nil
 }

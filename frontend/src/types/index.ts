@@ -101,6 +101,8 @@ export interface ReconciliationPolicy {
 export interface PendingRestart {
   detectedAt: string;
   desiredStateHash: string;
+  /** Hash of the reviewed content; the approve call sends it as expectedContentHash. */
+  contentHash?: string;
   changes?: string[];
 }
 
