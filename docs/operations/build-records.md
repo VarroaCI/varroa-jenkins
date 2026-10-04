@@ -60,7 +60,7 @@ component the same way `bff.*` configures the BFF.
 ## Install CloudNativePG first
 
 `recordStore.postgres.mode: cnpg` needs the [CloudNativePG](https://cloudnative-pg.io/) operator
-in the cluster, which the chart does not install. Install it before you enable the store:
+in the cluster. The chart does not install it:
 
 ```bash
 kubectl apply --server-side -f \
@@ -75,10 +75,10 @@ Pin the operator version and upgrade it on your schedule.
 |---|---|---|
 | `varroa_recorder` | CloudNativePG, as the database owner | the recorder; runs migrations and writes every table |
 | `varroa_client` | CloudNativePG, as a managed role | the BFF; reads runs, stages, tests, and artifacts |
-| `varroa_gateway` | CloudNativePG, as a managed role | the gateway, only in `postgres` blob mode; reads every table and inserts log chunks |
+| `varroa_gateway` | CloudNativePG, as a managed role | the gateway, only in `postgres` blob mode; reads every table and writes log chunks |
 
-`varroa_gateway` inserts only into `varroa.log_chunks` and its later partitions. The recorder
-alone writes every other table.
+`varroa_gateway` writes only to `varroa.log_chunks` and its later partitions, and never deletes a
+row. The recorder alone writes every other table.
 
 `external` mode skips the three roles and uses one DSN for the recorder, the BFF and the
 gateway. Point `existingSecret` at a role that owns schema `varroa`.

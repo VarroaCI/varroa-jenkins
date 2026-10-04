@@ -82,6 +82,30 @@ func (s *bucketStore) Append(ctx context.Context, key string, seq int64, p []byt
 	return s.writePart(ctx, partKey(key, seq), p, opts)
 }
 
+// Overwrite writes one part object at sequence seq, with the digest in
+// object metadata, over any part already there.
+func (s *bucketStore) Overwrite(ctx context.Context, key string, seq int64, p []byte, opts ObjectOptions) error {
+	if err := opts.Validate(); err != nil {
+		return err
+	}
+	return s.writeObject(ctx, partKey(key, seq), p, opts)
+}
+
+// PartSeqs lists the sequence of every part under key at or above from.
+func (s *bucketStore) PartSeqs(ctx context.Context, key string, from int64) ([]int64, error) {
+	parts, err := s.listParts(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	seqs := []int64{}
+	for _, part := range parts {
+		if part.seq >= from {
+			seqs = append(seqs, part.seq)
+		}
+	}
+	return seqs, nil
+}
+
 // NewRangeReader concatenates the parts under key in ascending sequence
 // order, starting at offset. It stops at the first missing sequence.
 func (s *bucketStore) NewRangeReader(ctx context.Context, key string, offset, length int64) (io.ReadCloser, error) {

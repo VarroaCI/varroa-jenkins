@@ -31,6 +31,18 @@ type Store interface {
 	// ErrChunkConflict.
 	Append(ctx context.Context, key string, seq int64, p []byte, opts ObjectOptions) error
 
+	// Overwrite writes one chunk at sequence seq, over any part that
+	// sequence already holds. Append stays write-once. Only a writer
+	// that knows the stored part is stale may call Overwrite: the log
+	// writer calls it for a part that a lost writer left above a hole.
+	Overwrite(ctx context.Context, key string, seq int64, p []byte, opts ObjectOptions) error
+
+	// PartSeqs lists the sequence of every chunked part of key at or
+	// above from, in ascending order, holes included. Unlike
+	// NewRangeReader, it does not stop at a missing sequence. It
+	// returns an empty list when key holds no such part.
+	PartSeqs(ctx context.Context, key string, from int64) ([]int64, error)
+
 	// NewRangeReader concatenates the parts of a chunked object in
 	// ascending sequence order, starting offset bytes from the start.
 	// length -1 reads to the end. It stops at the first missing sequence

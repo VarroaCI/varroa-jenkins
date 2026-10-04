@@ -115,11 +115,12 @@ func TestEnsureGrantsIdempotent(t *testing.T) {
 
 // TestEnsureGrantsGatewayRole asserts varroa_gateway can insert into a
 // varroa.log_chunks partition created after EnsureGrants ran, through the
-// parent, and cannot UPDATE or DELETE (design D8.2, F8 in the common
-// brief). The INSERT-on-the-parent grant carries forward to any later
-// partition automatically; the SELECT default privilege does too. Neither
-// UPDATE nor DELETE is ever granted, on the parent or by default: the
-// recorder stays the record tables' only writer of those verbs.
+// parent, can replace the digest and bytes of a part, and cannot UPDATE
+// another column or DELETE (design D8.2, F8 in the common brief). The
+// INSERT-on-the-parent grant carries forward to any later partition
+// automatically; the SELECT default privilege does too. The column UPDATE
+// grant serves blob.Store.Overwrite alone. DELETE is never granted, on
+// the parent or by default.
 func TestEnsureGrantsGatewayRole(t *testing.T) {
 	db, dsn := setupTestDBDSN(t)
 	ctx := context.Background()
@@ -167,10 +168,18 @@ func TestEnsureGrantsGatewayRole(t *testing.T) {
 		t.Fatalf("varroa_gateway insert through the parent: %v", err)
 	}
 
+	// blob.Store.Overwrite: the column grant covers digest and bytes.
+	if _, err := conn.ExecContext(ctx, `INSERT INTO varroa.log_chunks
+		(object_key, chunk_seq, created_at, object_class, digest, bytes)
+		VALUES ($1, 0, $2, 'log', 'sha256:y', '\x01')
+		ON CONFLICT (created_at, object_key, chunk_seq) DO UPDATE
+		SET digest = EXCLUDED.digest, bytes = EXCLUDED.bytes`, "gateway-role-test", createdAt); err != nil {
+		t.Fatalf("varroa_gateway overwrite of digest and bytes: %v", err)
+	}
 	if _, err := conn.ExecContext(ctx,
-		"UPDATE varroa.log_chunks SET digest = 'sha256:y' WHERE object_key = $1", "gateway-role-test",
+		"UPDATE varroa.log_chunks SET object_key = 'moved' WHERE object_key = $1", "gateway-role-test",
 	); err == nil {
-		t.Fatal("want varroa_gateway UPDATE on varroa.log_chunks to be refused")
+		t.Fatal("want varroa_gateway UPDATE of object_key on varroa.log_chunks to be refused")
 	}
 	if _, err := conn.ExecContext(ctx,
 		"DELETE FROM varroa.log_chunks WHERE object_key = $1", "gateway-role-test",

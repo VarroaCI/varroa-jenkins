@@ -142,6 +142,53 @@ func (s *pgStore) Append(ctx context.Context, key string, seq int64, p []byte, o
 	return nil
 }
 
+// Overwrite inserts one row, or replaces the bytes and digest of the
+// row already at the same primary key. It sets no other column, because
+// role varroa_gateway holds UPDATE on digest and bytes alone.
+func (s *pgStore) Overwrite(ctx context.Context, key string, seq int64, p []byte, opts ObjectOptions) error {
+	if err := opts.Validate(); err != nil {
+		return err
+	}
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO varroa.log_chunks (object_key, chunk_seq, created_at, object_class, content_type, digest, bytes)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (created_at, object_key, chunk_seq) DO UPDATE
+		SET digest = EXCLUDED.digest, bytes = EXCLUDED.bytes
+	`, key, seq, opts.CreatedAt, opts.ObjectClass, nullableString(opts.ContentType), sha256Digest(p), p); err != nil {
+		return fmt.Errorf("overwrite chunk: %w", err)
+	}
+	return nil
+}
+
+// PartSeqs lists the sequence of every chunked row of key at or above
+// from. The native row, at chunk_seq -1, is never a part.
+func (s *pgStore) PartSeqs(ctx context.Context, key string, from int64) ([]int64, error) {
+	if from < 0 {
+		from = 0
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT chunk_seq FROM varroa.log_chunks
+		WHERE object_key = $1 AND chunk_seq >= $2
+		ORDER BY chunk_seq ASC
+	`, key, from)
+	if err != nil {
+		return nil, fmt.Errorf("query part sequences: %w", err)
+	}
+	defer rows.Close()
+	seqs := []int64{}
+	for rows.Next() {
+		var seq int64
+		if err := rows.Scan(&seq); err != nil {
+			return nil, fmt.Errorf("scan part sequence: %w", err)
+		}
+		seqs = append(seqs, seq)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate part sequences: %w", err)
+	}
+	return seqs, nil
+}
+
 // NewRangeReader concatenates the chunked parts of key in ascending
 // sequence order, starting at offset. It stops at the first missing
 // sequence, so a live log gap is a short read, not an error.

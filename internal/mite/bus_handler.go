@@ -232,6 +232,9 @@ type BusHandler struct {
 	// the same value the recorder's finalize sweep does. <= 0 means the
 	// default.
 	logFinalizeWait time.Duration
+	// logOwnerRecheckAge overrides logOwnerRecheckAfter when above zero.
+	// Only a test sets it.
+	logOwnerRecheckAge time.Duration
 	// ownerCache is the bounded run-ownership cache OnLogChunk consults
 	// before it writes one byte.
 	ownerCache *ownerCache

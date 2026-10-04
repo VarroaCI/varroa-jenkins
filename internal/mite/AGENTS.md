@@ -337,11 +337,35 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   otherwise notice the deadline already exited. `abandonRun` is
   idempotent (an `st.rejectedForever` check and the flag it guards share
   one critical section), so the timer's idle-path call and a concurrent
-  drain-triggered call from `appendChunk` returning `appendDeadlineHit`
+  drain-triggered call from `appendChunk` returning `appendAbandon`
   never both act; `drainRun`'s post-append dequeue re-checks
   `rejectedForever` too, so an abandon that lands between a chunk's
   successful append and its dequeue never slices an already-cleared
-  queue. `BuildLogManifest` (`log_manifest.go`) is the
+  queue. Each queued item (`queuedLogChunk`) carries its sender's
+  `ns`/`name`, and `drainRun` acks each chunk to that sender, because a
+  moved run can hold chunks of two cells in one queue. `runLogState.writer`
+  records `ns/name/cell_instance`, and each index entry carries it as
+  `writer` so `recoverRunState` restores it after a restart.
+  `adoptWriter` treats a chunk from another writer as a move: after a
+  fresh ledger read (`confirmOwner` invalidates the owner cache first) it
+  empties every stored part above `ackSeq` (`blankPartsAboveAckSeq`,
+  through `PartSeqs` and an empty `Overwrite`) and drops the old writer's
+  `pendingEntries`, or refuses the chunk `foreign-run` when the sender does
+  not own the run. The empty parts matter: once the new writer fills the
+  hole, an old part above it would read after the new writer's bytes, and
+  restart recovery would index it. The blank pass skips the run of parts
+  directly above `ackSeq` that a recovered entry at `ackSeq` already
+  counts (`ackSeqRecovered`, `runLogState.readableThrough`), and a conflict inside that run abandons
+  the run as `gateway-gap`, because new bytes there would move every later
+  offset. `ownerRecheck` reads the owner again
+  before each write attempt of a chunk queued longer than
+  `logOwnerRecheckAfter` (15s, below the 30s confirmed-gone grace), so a
+  store stall cannot land an old cell's chunk after a takeover. The same-writer rule is unchanged: a repeat at or below
+  `ackSeq`, or still pending, is acked `STORED`, and a `BUSY` ack names the
+  refused chunk's `seq`. `retryWrite` returns `ErrChunkConflict` at once;
+  a log-key conflict from the owner replaces the stale part through
+  `blob.Store.Overwrite` (`replaceStalePart`), and an index-key conflict
+  abandons the run. A drop or a replace marks the run `gateway-gap`. `BuildLogManifest` (`log_manifest.go`) is the
   computed-never-stored view a reader calls: it walks the index, marks any
   byte range the index does not cover as a hole, and reports `incomplete`
   with a reason token (`no-summary` when the run carries no `LogSummary` at

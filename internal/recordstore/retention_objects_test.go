@@ -131,6 +131,14 @@ func (r *recordingBlobStore) Put(context.Context, string, io.Reader, blob.Object
 	return nil
 }
 
+func (r *recordingBlobStore) PartSeqs(context.Context, string, int64) ([]int64, error) {
+	return nil, nil
+}
+
+func (r *recordingBlobStore) Overwrite(context.Context, string, int64, []byte, blob.ObjectOptions) error {
+	return nil
+}
+
 func (r *recordingBlobStore) Append(context.Context, string, int64, []byte, blob.ObjectOptions) error {
 	return nil
 }
@@ -420,6 +428,14 @@ func (r *prefixRecordingStore) Put(context.Context, string, io.Reader, blob.Obje
 }
 
 func (r *prefixRecordingStore) Replace(context.Context, string, io.Reader, blob.ObjectOptions) error {
+	return nil
+}
+
+func (r *prefixRecordingStore) PartSeqs(context.Context, string, int64) ([]int64, error) {
+	return nil, nil
+}
+
+func (r *prefixRecordingStore) Overwrite(context.Context, string, int64, []byte, blob.ObjectOptions) error {
 	return nil
 }
 

@@ -3,6 +3,7 @@ package mite
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math/rand"
 	"sync"
 	"time"
@@ -31,6 +32,13 @@ const (
 	logHeartbeatInterval = 30 * time.Second
 
 	defaultLogFinalizeWait = 60 * time.Second // VARROA_RECORDSTORE_LOG_FINALIZE_WAIT
+
+	// logOwnerRecheckAfter is how long a chunk may wait after its
+	// admission before a write of it needs a fresh owner read. It stays
+	// below the record store's default confirmed-gone grace (30s), so a
+	// chunk admitted before its cell died is checked again before a mesh
+	// takeover can hand the run to another cell.
+	logOwnerRecheckAfter = 15 * time.Second
 )
 
 // LogAck status and reason tokens (design.md D3/D4).
@@ -74,7 +82,27 @@ func init() {
 // incompleteness and finalization knowledge. One instance lives for as
 // long as the run has pending or unacknowledged work.
 type runLogState struct {
+	// ns and name name the run's current writer: set by the first call
+	// that creates this state, and moved to a new writer by appendChunk.
+	// abandonRun answers and publishes for that writer.
 	ns, name string
+
+	// writer is the "ns/name/cell_instance" of the cell whose chunks
+	// this state last appended. A chunk from another writer means the
+	// run moved to another cell: the parts the old writer left above a
+	// hole belong to a log the new writer does not continue.
+	writer string
+
+	// ackSeqRecovered reports that the index entry at ackSeq is a
+	// recovered entry, which can count the bytes of several parts.
+	// recoverRunState sets it.
+	ackSeqRecovered bool
+
+	// readableThrough is the highest part sequence above ackSeq whose
+	// bytes the recovered entry at ackSeq counts. blankPartsAboveAckSeq
+	// sets it. A part at or below it must never be emptied or replaced:
+	// the index and offset already count its bytes. -1 means none.
+	readableThrough int64
 
 	// jobPath is the run's job path, recorded from the first call that
 	// creates this state and never changed after. publishRunLogBestEffort
@@ -85,7 +113,7 @@ type runLogState struct {
 
 	mu          sync.Mutex
 	established bool // restart recovery has run for this run
-	queue       []*mitev1.LogChunk
+	queue       []queuedLogChunk
 	queueBytes  int64
 	draining    bool
 
@@ -132,6 +160,16 @@ type runLogState struct {
 	// deadline"). Before a deadline is known, it never fires.
 	appendCtx    context.Context
 	appendCancel context.CancelFunc
+}
+
+// queuedLogChunk is one admitted chunk and the controller that sent it.
+// The drain goroutine answers each chunk to its own sender, because a
+// run that moves to another cell can hold chunks of two cells in one
+// queue.
+type queuedLogChunk struct {
+	chunk    *mitev1.LogChunk
+	ns, name string
+	admitted time.Time
 }
 
 // hasHeartbeatWorkLocked reports whether the run still holds pending or
@@ -203,7 +241,7 @@ func (h *BusHandler) getOrCreateRunState(runID, ns, name, jobPath string) *runLo
 	st, ok := h.logRuns[runID]
 	if !ok {
 		appendCtx, appendCancel := context.WithCancel(context.Background())
-		st = &runLogState{ns: ns, name: name, jobPath: jobPath, ackSeq: -1, appendCtx: appendCtx, appendCancel: appendCancel}
+		st = &runLogState{ns: ns, name: name, jobPath: jobPath, ackSeq: -1, readableThrough: -1, appendCtx: appendCtx, appendCancel: appendCancel}
 		h.logRuns[runID] = st
 	}
 	return st
@@ -292,7 +330,7 @@ func (h *BusHandler) OnLogChunk(name, ns string, chunk *mitev1.LogChunk) {
 		return
 	}
 
-	st.queue = append(st.queue, chunk)
+	st.queue = append(st.queue, queuedLogChunk{chunk: chunk, ns: ns, name: name, admitted: time.Now()})
 	st.queueBytes += size
 	draining := st.draining
 	st.draining = true
@@ -301,7 +339,7 @@ func (h *BusHandler) OnLogChunk(name, ns string, chunk *mitev1.LogChunk) {
 	h.logMu.Unlock()
 
 	if !draining {
-		go h.drainRun(st.appendCtx, chunk.RunId, ns, name, st)
+		go h.drainRun(st.appendCtx, chunk.RunId, st)
 	}
 }
 
@@ -365,9 +403,9 @@ func (h *BusHandler) markRunTerminal(ns, name, runID, jobPath string, anchor tim
 
 	if cancel != nil {
 		if d := time.Until(deadline); d <= 0 {
-			h.runDeadlineFired(ns, name, runID, st, cancel)
+			h.runDeadlineFired(runID, st, cancel)
 		} else {
-			time.AfterFunc(d, func() { h.runDeadlineFired(ns, name, runID, st, cancel) })
+			time.AfterFunc(d, func() { h.runDeadlineFired(runID, st, cancel) })
 		}
 	}
 }
@@ -382,13 +420,13 @@ func (h *BusHandler) markRunTerminal(ns, name, runID, jobPath string, anchor tim
 //
 // A running drain goroutine reaches the same deadline on its own next
 // store call and abandons the run itself
-// (drainRun -> appendChunk -> appendDeadlineHit); calling abandonRun here
+// (drainRun -> appendChunk -> appendAbandon); calling abandonRun here
 // too would race that goroutine's queue mutation, so this path defers to
 // it. The gap this call closes is the run that goes idle with a pending
 // entry or an open hole and never gets another chunk: nothing else would
 // ever call abandonRun for it, so the heartbeat would run forever and the
 // stranded sequence would never be released or reported.
-func (h *BusHandler) runDeadlineFired(ns, name, runID string, st *runLogState, cancel context.CancelFunc) {
+func (h *BusHandler) runDeadlineFired(runID string, st *runLogState, cancel context.CancelFunc) {
 	if cancel != nil {
 		cancel()
 	}
@@ -399,7 +437,7 @@ func (h *BusHandler) runDeadlineFired(ns, name, runID string, st *runLogState, c
 	st.mu.Unlock()
 
 	if idle && needsAbandon {
-		h.abandonRun(ns, name, runID, st)
+		h.abandonRun(runID, st)
 	}
 }
 
@@ -528,14 +566,32 @@ type appendOutcome int
 
 const (
 	appendDone appendOutcome = iota
-	appendDeadlineHit
+	// appendAbandon means the run cannot continue: the finalize
+	// deadline passed, or the index holds a conflicting entry. The
+	// caller abandons the run.
+	appendAbandon
+)
+
+// writeResult is what retryWrite resolved to.
+type writeResult int
+
+const (
+	writeDone writeResult = iota
+	// writeDeadline means the finalize deadline ended the retry.
+	writeDeadline
+	// writeConflict means the store holds different bytes at the
+	// sequence. A retry of the same bytes can never succeed.
+	writeConflict
+	// writeRefused means a fresh owner read found that the chunk's
+	// sender no longer owns the run.
+	writeRefused
 )
 
 // drainRun is the run's single append-pipeline goroutine: one append in
 // flight per run, chunks processed strictly in queue order. It exits
 // once the queue empties, and restarts (from OnLogChunk) on the next
 // arrival.
-func (h *BusHandler) drainRun(ctx context.Context, runID, ns, name string, st *runLogState) {
+func (h *BusHandler) drainRun(ctx context.Context, runID string, st *runLogState) {
 	for {
 		st.mu.Lock()
 		if len(st.queue) == 0 {
@@ -543,15 +599,15 @@ func (h *BusHandler) drainRun(ctx context.Context, runID, ns, name string, st *r
 			st.mu.Unlock()
 			return
 		}
-		chunk := st.queue[0]
+		item := st.queue[0]
 		st.mu.Unlock()
 
-		if h.appendChunk(ctx, runID, ns, name, st, chunk) == appendDeadlineHit {
-			h.abandonRun(ns, name, runID, st)
+		if h.appendChunk(ctx, runID, item.ns, item.name, st, item.chunk, item.admitted) == appendAbandon {
+			h.abandonRun(runID, st)
 			return
 		}
 
-		size := int64(len(chunk.Data))
+		size := int64(len(item.chunk.Data))
 		st.mu.Lock()
 		if st.rejectedForever {
 			// runDeadlineFired's idle path ran abandonRun concurrently,
@@ -575,7 +631,7 @@ func (h *BusHandler) drainRun(ctx context.Context, runID, ns, name string, st *r
 // the chunk, and flushes whatever prefix of pendingEntries the chunk
 // makes contiguous. It recovers the run's state from the store on first
 // touch.
-func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk) appendOutcome {
+func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk, admitted time.Time) appendOutcome {
 	st.mu.Lock()
 	established := st.established
 	st.mu.Unlock()
@@ -587,13 +643,17 @@ func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st
 			}
 			h.log().Warn("log run recovery failed, retrying", "run_id", runID, "error", err)
 			if deadlinePassed(st) {
-				return appendDeadlineHit
+				return appendAbandon
 			}
 			time.Sleep(logAppendBackoffFloor)
 		}
 		st.mu.Lock()
 		st.established = true
 		st.mu.Unlock()
+	}
+
+	if proceed, outcome := h.adoptWriter(ctx, runID, ns, name, st, chunk); !proceed {
+		return outcome
 	}
 
 	st.mu.Lock()
@@ -614,8 +674,20 @@ func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st
 
 	createdAt := runCreatedAtFromUUIDv7(runID)
 	logOpts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: createdAt}
-	if !h.retryAppend(ctx, runID, st, blob.LogKey(runID), chunk.Seq, chunk.Data, logOpts) {
-		return appendDeadlineHit
+	recheck := h.ownerRecheck(ctx, runID, ns, name, st, chunk, admitted)
+	logKey := blob.LogKey(runID)
+	switch h.retryWrite(ctx, runID, st, logKey, chunk.Seq, recheck, func(c context.Context) error {
+		return h.logStore.Append(c, logKey, chunk.Seq, chunk.Data, logOpts)
+	}) {
+	case writeDeadline:
+		return appendAbandon
+	case writeRefused:
+		h.refuseStaleWriterChunk(ns, name, runID, chunk)
+		return appendDone
+	case writeConflict:
+		if proceed, outcome := h.replaceStalePart(ctx, runID, ns, name, st, chunk, logOpts, recheck); !proceed {
+			return outcome
+		}
 	}
 
 	// The log bytes are durable at their own sequence regardless of
@@ -628,6 +700,7 @@ func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st
 	entry := LogIndexEntry{
 		Seq: chunk.Seq, NodeID: chunk.NodeId, StageID: chunk.StageId, TsMs: chunk.FirstLineUnixMs,
 		Len: int64(len(chunk.Data)), Dropped: chunk.DroppedBytes, Final: chunk.Final,
+		Writer: logWriterKey(ns, name, chunk),
 	}
 	st.mu.Lock()
 	if st.pendingEntries == nil {
@@ -643,8 +716,8 @@ func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st
 	var finalWritten bool
 	if fillsHole {
 		fw, outcome := h.flushContiguousLogIndex(ctx, ns, name, runID, st, createdAt)
-		if outcome == appendDeadlineHit {
-			return appendDeadlineHit
+		if outcome == appendAbandon {
+			return appendAbandon
 		}
 		finalWritten = fw
 	}
@@ -698,17 +771,30 @@ func (h *BusHandler) flushContiguousLogIndex(ctx context.Context, ns, name, runI
 		line, err := json.Marshal(e)
 		if err != nil {
 			h.log().Error("marshal log index entry failed", "run_id", runID, "seq", e.Seq, "error", err)
-			return finalWritten, appendDeadlineHit
+			return finalWritten, appendAbandon
 		}
 		line = append(line, '\n')
 		indexOpts := blob.ObjectOptions{ObjectClass: "log", ContentType: "application/x-ndjson", CreatedAt: createdAt}
-		if !h.retryAppend(ctx, runID, st, blob.LogIndexKey(runID), e.Seq, line, indexOpts) {
-			return finalWritten, appendDeadlineHit
+		switch h.retryAppend(ctx, runID, st, blob.LogIndexKey(runID), e.Seq, line, indexOpts) {
+		case writeDone:
+		case writeConflict:
+			// The index only ever grows in sequence order, so a
+			// conflicting entry at the next sequence leaves no offset
+			// this writer can trust. The run ends as a gap.
+			h.log().Error("log index entry conflicts with a stored entry", "run_id", runID, "seq", e.Seq)
+			st.mu.Lock()
+			st.incomplete = true
+			st.incompleteReason = logReasonGatewayGap
+			st.mu.Unlock()
+			return finalWritten, appendAbandon
+		default:
+			return finalWritten, appendAbandon
 		}
 
 		st.mu.Lock()
 		st.offset += e.Len
 		st.ackSeq = e.Seq
+		st.ackSeqRecovered = false
 		delete(st.pendingEntries, e.Seq)
 		data := st.pendingData[e.Seq]
 		delete(st.pendingData, e.Seq)
@@ -735,39 +821,59 @@ func (h *BusHandler) ackStored(ns, name, runID string, st *runLogState) {
 	h.sendLogAck(ns, name, runID, ackSeq, logAckStatusStored, "", 0)
 }
 
-// retryAppend retries store.Append with a 250ms-to-2000ms jittered
-// backoff until it succeeds or the run's finalize deadline passes. It
-// never substitutes different bytes at seq: every retry sends the exact
-// same data, so an ambiguous timeout after a durable write resolves on
-// the next attempt instead of returning ErrChunkConflict.
+// retryAppend appends data at seq through retryWrite.
+func (h *BusHandler) retryAppend(ctx context.Context, runID string, st *runLogState, key string, seq int64, data []byte, opts blob.ObjectOptions) writeResult {
+	return h.retryWrite(ctx, runID, st, key, seq, nil, func(c context.Context) error {
+		return h.logStore.Append(c, key, seq, data, opts)
+	})
+}
+
+// retryWrite retries write with a 250ms-to-2000ms jittered backoff until
+// it succeeds or the run's finalize deadline passes. It never
+// substitutes different bytes at seq: every retry sends the exact same
+// data, so an ambiguous timeout after a durable write resolves on the
+// next attempt. ErrChunkConflict therefore means that another writer
+// stored the part, and a retry can never succeed: it returns
+// writeConflict at once.
 //
 // ctx is st.appendCtx: it ends at the run's finalize deadline (design.md
 // D4, "The heartbeat and the retry both end at that deadline"), so a
-// call already blocked inside Store.Append when the deadline arrives
-// still returns instead of holding the pending queue open forever.
-func (h *BusHandler) retryAppend(ctx context.Context, runID string, st *runLogState, key string, seq int64, data []byte, opts blob.ObjectOptions) bool {
+// call already blocked inside the store when the deadline arrives still
+// returns instead of holding the pending queue open forever.
+//
+// recheck, when not nil, runs before each attempt. Any answer other
+// than writeDone ends the retry with that answer.
+func (h *BusHandler) retryWrite(ctx context.Context, runID string, st *runLogState, key string, seq int64, recheck func() writeResult, write func(context.Context) error) writeResult {
 	delay := logAppendBackoffFloor
 	for {
 		if deadlinePassed(st) {
-			return false
+			return writeDeadline
 		}
-		err := h.logStore.Append(ctx, key, seq, data, opts)
+		if recheck != nil {
+			if r := recheck(); r != writeDone {
+				return r
+			}
+		}
+		err := write(ctx)
 		if err == nil {
-			return true
+			return writeDone
+		}
+		if errors.Is(err, blob.ErrChunkConflict) {
+			return writeConflict
 		}
 		if ctx.Err() != nil {
 			// The deadline ended appendCtx while this call was in
-			// flight: the append is abandoned, not retried.
-			return false
+			// flight: the write is abandoned, not retried.
+			return writeDeadline
 		}
 		logAppendRetries.Add(ctx, 1)
 		h.log().Warn("log append retry", "run_id", runID, "key", key, "seq", seq, "error", err)
 		if deadlinePassed(st) {
-			return false
+			return writeDeadline
 		}
 		select {
 		case <-ctx.Done():
-			return false
+			return writeDeadline
 		case <-time.After(jitteredDelay(delay)):
 		}
 		delay *= 2
@@ -775,6 +881,244 @@ func (h *BusHandler) retryAppend(ctx context.Context, runID string, st *runLogSt
 			delay = logAppendBackoffCap
 		}
 	}
+}
+
+// adoptWriter records the chunk's sender as the run's writer. It reports
+// false, with the outcome to return, when the chunk must not be
+// appended.
+//
+// A chunk from a writer other than the current one means the run moved
+// to another cell. A stale owner-cache match can still admit the old
+// writer's chunk after the move, so the new writer must own the run in a
+// fresh ledger read. The old writer's pending parts are then dropped:
+// they sit above a hole that the old writer can no longer fill, and the
+// new writer continues the log at that hole. The new writer's own chunks
+// at those sequences replace the dropped parts through replaceStalePart.
+func (h *BusHandler) adoptWriter(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk) (bool, appendOutcome) {
+	writer := logWriterKey(ns, name, chunk)
+	st.mu.Lock()
+	if st.writer == "" || st.writer == writer {
+		st.writer = writer
+		st.mu.Unlock()
+		return true, appendDone
+	}
+	st.mu.Unlock()
+
+	decision, ok := h.confirmOwner(ctx, runID, ns, name, chunk.CellInstance, st)
+	if !ok {
+		return false, appendAbandon
+	}
+	if decision != ownerMatched {
+		h.refuseStaleWriterChunk(ns, name, runID, chunk)
+		return false, appendDone
+	}
+
+	blanked, ok := h.blankPartsAboveAckSeq(ctx, runID, st)
+	if !ok {
+		return false, appendAbandon
+	}
+
+	st.mu.Lock()
+	dropped := len(st.pendingEntries)
+	st.pendingEntries = nil
+	st.pendingData = nil
+	st.writer = writer
+	st.ns, st.name = ns, name
+	if dropped > 0 || blanked > 0 {
+		st.incomplete = true
+		st.incompleteReason = logReasonGatewayGap
+	}
+	st.mu.Unlock()
+
+	if dropped > 0 || blanked > 0 {
+		h.log().Warn("run moved to another cell, dropping the old cell's log parts above a hole",
+			"run_id", runID, "writer", writer, "dropped", dropped, "blanked", blanked)
+		h.publishRunLogBestEffort(ns, name, runID, st.jobPath, map[string]interface{}{
+			"incomplete": true, "incomplete_reason": logReasonGatewayGap,
+		})
+	}
+	return true, appendDone
+}
+
+// logWriterKey names the writer of a chunk: the sender's namespace and
+// cell, and the cell instance the mite stamped.
+func logWriterKey(ns, name string, chunk *mitev1.LogChunk) string {
+	return ns + "/" + name + "/" + chunk.CellInstance
+}
+
+// blankPartsAboveAckSeq replaces every stored log part above ackSeq with
+// an empty part, before a new writer appends anything, and skips the
+// parts that restart recovery already counted. No index entry names a
+// part above that readable run. Once the new writer fills the hole below it, the
+// range reader would read the old part's bytes after the new writer's,
+// and restart recovery would index them as a recovered entry and drop
+// the new writer's chunk at that sequence. An empty part adds no bytes.
+// The new writer's own chunk at that sequence then conflicts with the
+// empty part and replaces it through replaceStalePart. ok is false when
+// the finalize deadline passed first.
+func (h *BusHandler) blankPartsAboveAckSeq(ctx context.Context, runID string, st *runLogState) (blanked int, ok bool) {
+	st.mu.Lock()
+	from := st.ackSeq + 1
+	recovered := st.ackSeqRecovered
+	st.mu.Unlock()
+
+	key := blob.LogKey(runID)
+	var seqs []int64
+	for {
+		var err error
+		seqs, err = h.logStore.PartSeqs(ctx, key, from)
+		if err == nil {
+			break
+		}
+		h.log().Warn("list log parts failed, retrying", "run_id", runID, "error", err)
+		if deadlinePassed(st) {
+			return 0, false
+		}
+		select {
+		case <-ctx.Done():
+			return 0, false
+		case <-time.After(logAppendBackoffFloor):
+		}
+	}
+
+	// A recovered entry at ackSeq counts the bytes of the run of parts
+	// directly above it. Without one, such a run holds only empty parts
+	// of an earlier blank pass, and emptying them again is harmless.
+	readable := 0
+	for recovered && readable < len(seqs) && seqs[readable] == from+int64(readable) {
+		readable++
+	}
+	st.mu.Lock()
+	st.readableThrough = from + int64(readable) - 1
+	st.mu.Unlock()
+
+	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: runCreatedAtFromUUIDv7(runID)}
+	for _, seq := range seqs[readable:] {
+		if h.retryWrite(ctx, runID, st, key, seq, nil, func(c context.Context) error {
+			return h.logStore.Overwrite(c, key, seq, []byte{}, opts)
+		}) != writeDone {
+			return blanked, false
+		}
+		blanked++
+	}
+	return blanked, true
+}
+
+// replaceStalePart handles a log part that already holds other bytes at
+// the chunk's sequence. The sequence is above ackSeq and not in
+// pendingEntries, so no index entry names that part: a writer that lost
+// the run left it above a hole. When the chunk's sender owns the run in
+// a fresh ledger read, the chunk replaces the part, and the run is
+// marked as a gap because the old part's lines are lost. Otherwise the
+// sender is the stale writer, and its chunk is refused, because it must
+// not replace a part of the writer that now owns the run.
+func (h *BusHandler) replaceStalePart(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk, opts blob.ObjectOptions, recheck func() writeResult) (bool, appendOutcome) {
+	st.mu.Lock()
+	counted := chunk.Seq <= st.readableThrough
+	if counted {
+		st.incomplete = true
+		st.incompleteReason = logReasonGatewayGap
+	}
+	st.mu.Unlock()
+	if counted {
+		// A recovered entry already counts this part's bytes. New bytes
+		// of another length would move every later offset.
+		h.log().Error("log part conflicts inside a recovered entry", "run_id", runID, "seq", chunk.Seq)
+		return false, appendAbandon
+	}
+
+	decision, ok := h.confirmOwner(ctx, runID, ns, name, chunk.CellInstance, st)
+	if !ok {
+		return false, appendAbandon
+	}
+	if decision != ownerMatched {
+		h.refuseStaleWriterChunk(ns, name, runID, chunk)
+		return false, appendDone
+	}
+
+	key := blob.LogKey(runID)
+	switch h.retryWrite(ctx, runID, st, key, chunk.Seq, recheck, func(c context.Context) error {
+		return h.logStore.Overwrite(c, key, chunk.Seq, chunk.Data, opts)
+	}) {
+	case writeDone:
+	case writeRefused:
+		h.refuseStaleWriterChunk(ns, name, runID, chunk)
+		return false, appendDone
+	default:
+		return false, appendAbandon
+	}
+
+	st.mu.Lock()
+	st.incomplete = true
+	st.incompleteReason = logReasonGatewayGap
+	st.mu.Unlock()
+	h.log().Warn("replaced a log part that a lost writer left above a hole", "run_id", runID, "seq", chunk.Seq)
+	h.publishRunLogBestEffort(ns, name, runID, st.jobPath, map[string]interface{}{
+		"incomplete": true, "incomplete_reason": logReasonGatewayGap,
+	})
+	return true, appendDone
+}
+
+// confirmOwner reads the run's owner from the ledger again, past the
+// owner cache, and compares it with the caller. It retries an
+// unverifiable answer until the finalize deadline. ok is false when the
+// deadline passed first.
+func (h *BusHandler) confirmOwner(ctx context.Context, runID, ns, name, instance string, st *runLogState) (ownerDecision, bool) {
+	for {
+		if h.ownerCache != nil {
+			h.ownerCache.invalidate(runID)
+		}
+		decision, _ := h.checkOwner(ctx, h.cluster, ns, name, instance, runID)
+		if decision != ownerUnknown {
+			return decision, true
+		}
+		if deadlinePassed(st) {
+			return ownerUnknown, false
+		}
+		select {
+		case <-ctx.Done():
+			return ownerUnknown, false
+		case <-time.After(logAppendBackoffFloor):
+		}
+	}
+}
+
+// ownerRecheck answers the recheck that retryWrite runs before each
+// attempt to write chunk. A chunk that waited longer than
+// logOwnerRecheckAfter since its admission, or since its last check,
+// needs a fresh owner read: a store stall can hold an old cell's chunk
+// in this queue past a mesh takeover, and the chunk must not land on a
+// sequence the new owner already emptied or wrote.
+func (h *BusHandler) ownerRecheck(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk, admitted time.Time) func() writeResult {
+	after := logOwnerRecheckAfter
+	if h.logOwnerRecheckAge > 0 {
+		after = h.logOwnerRecheckAge
+	}
+	last := admitted
+	return func() writeResult {
+		if time.Since(last) < after {
+			return writeDone
+		}
+		decision, ok := h.confirmOwner(ctx, runID, ns, name, chunk.CellInstance, st)
+		if !ok {
+			return writeDeadline
+		}
+		if decision != ownerMatched {
+			return writeRefused
+		}
+		last = time.Now()
+		return writeDone
+	}
+}
+
+// refuseStaleWriterChunk answers REJECTED{foreign-run} for one chunk of
+// a writer that no longer owns the run. The run itself stays open for
+// the writer that owns it.
+func (h *BusHandler) refuseStaleWriterChunk(ns, name, runID string, chunk *mitev1.LogChunk) {
+	logChunksRejected.Add(context.Background(), 1)
+	h.log().Warn("refusing a log chunk from a writer that no longer owns the run",
+		"run_id", runID, "controller", ns+"/"+name, "cell_instance", chunk.CellInstance, "seq", chunk.Seq)
+	h.sendLogAck(ns, name, runID, chunk.Seq, logAckStatusRejected, logReasonForeignRun, 0)
 }
 
 // jitteredDelay applies up to +/-20% jitter to d, floored at
@@ -866,12 +1210,24 @@ func (h *BusHandler) recoverRunState(ctx context.Context, runID string, st *runL
 		ackSeq = seq
 	}
 
+	// The writer of the last indexed entry is the run's writer, so a
+	// moved build's first chunk after a gateway restart still reads as
+	// a writer change.
+	writer := ""
+	for seq := ackSeq; seq >= 0 && writer == ""; seq-- {
+		writer = entries[seq].Writer
+	}
+
 	st.mu.Lock()
 	st.offset = bytesRead
 	st.ackSeq = ackSeq
 	st.pendingEntries = nil
 	st.pendingData = nil
 	st.finalDurable = finalSeen
+	if st.writer == "" {
+		st.writer = writer
+	}
+	st.ackSeqRecovered = ackSeq >= 0 && entries[ackSeq].Recovered
 	st.mu.Unlock()
 	return nil
 }
@@ -899,12 +1255,13 @@ func (h *BusHandler) recoverRunState(ctx context.Context, runID string, st *runL
 // hole), so writing one with a synthetic offset would claim a byte
 // position through the gap a reader can never actually reach. Leaving it
 // unwritten is the smaller, and the only truthful, shape.
-func (h *BusHandler) abandonRun(ns, name, runID string, st *runLogState) {
+func (h *BusHandler) abandonRun(runID string, st *runLogState) {
 	st.mu.Lock()
 	if st.rejectedForever {
 		st.mu.Unlock()
 		return
 	}
+	ns, name := st.ns, st.name
 	pending := st.queue
 	st.queue = nil
 	freedBytes := st.queueBytes
@@ -923,7 +1280,7 @@ func (h *BusHandler) abandonRun(ns, name, runID string, st *runLogState) {
 	// A gap this run will now never fill is a more precise cause than a
 	// slow store: reasonGap wins when both are true of one run.
 	reason := logReasonFinalizeDeadline
-	if len(stranded) > 0 {
+	if len(stranded) > 0 || st.incompleteReason == logReasonGatewayGap {
 		reason = logReasonGatewayGap
 	}
 	st.incomplete = true
@@ -941,8 +1298,8 @@ func (h *BusHandler) abandonRun(ns, name, runID string, st *runLogState) {
 	h.logTotalPendingBytes -= freedBytes
 	h.logMu.Unlock()
 
-	for _, chunk := range pending {
-		h.sendLogAck(ns, name, runID, chunk.Seq, logAckStatusRejected, logReasonFinalizeDeadline, 0)
+	for _, item := range pending {
+		h.sendLogAck(item.ns, item.name, runID, item.chunk.Seq, logAckStatusRejected, logReasonFinalizeDeadline, 0)
 	}
 	// The mite still retains a stranded sequence: it was never covered
 	// by a STORED ack_seq, so LogAck's own reason enumeration applies —

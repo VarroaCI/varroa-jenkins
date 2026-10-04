@@ -3,6 +3,7 @@ package blob
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -118,6 +119,85 @@ func RunConformance(
 		}
 		if err := store.Append(ctx, key, 0, []byte("second"), logOpts); !errors.Is(err, ErrChunkConflict) {
 			t.Fatalf("conflicting retry: got %v, want ErrChunkConflict", err)
+		}
+	})
+
+	readKey := func(t *testing.T, key string) string {
+		t.Helper()
+		r, err := store.NewRangeReader(ctx, key, 0, -1)
+		if err != nil {
+			t.Fatalf("NewRangeReader: %v", err)
+		}
+		defer func() { _ = r.Close() }()
+		got, err := io.ReadAll(r)
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		return string(got)
+	}
+
+	t.Run("OverwriteReplacesAPart", func(t *testing.T) {
+		key := "conformance/overwrite-replace"
+		if err := store.Append(ctx, key, 0, []byte("old "), logOpts); err != nil {
+			t.Fatalf("append 0: %v", err)
+		}
+		if err := store.Append(ctx, key, 1, []byte("stale"), logOpts); err != nil {
+			t.Fatalf("append 1: %v", err)
+		}
+		if err := store.Overwrite(ctx, key, 1, []byte("fresh"), logOpts); err != nil {
+			t.Fatalf("overwrite 1: %v", err)
+		}
+		if got := readKey(t, key); got != "old fresh" {
+			t.Fatalf("got %q, want %q", got, "old fresh")
+		}
+	})
+
+	t.Run("OverwriteWritesAnAbsentPart", func(t *testing.T) {
+		key := "conformance/overwrite-absent"
+		if err := store.Overwrite(ctx, key, 0, []byte("first"), logOpts); err != nil {
+			t.Fatalf("overwrite 0: %v", err)
+		}
+		if got := readKey(t, key); got != "first" {
+			t.Fatalf("got %q, want %q", got, "first")
+		}
+	})
+
+	t.Run("AppendAfterOverwriteKeepsWriteOnce", func(t *testing.T) {
+		key := "conformance/overwrite-then-append"
+		if err := store.Append(ctx, key, 0, []byte("stale"), logOpts); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+		if err := store.Overwrite(ctx, key, 0, []byte("fresh"), logOpts); err != nil {
+			t.Fatalf("overwrite: %v", err)
+		}
+		if err := store.Append(ctx, key, 0, []byte("fresh"), logOpts); err != nil {
+			t.Fatalf("identical append after overwrite: got %v, want nil", err)
+		}
+		if err := store.Append(ctx, key, 0, []byte("stale"), logOpts); !errors.Is(err, ErrChunkConflict) {
+			t.Fatalf("append of the replaced bytes: got %v, want ErrChunkConflict", err)
+		}
+	})
+
+	t.Run("PartSeqsListsPartsAboveAHole", func(t *testing.T) {
+		key := "conformance/part-seqs"
+		for _, seq := range []int64{0, 1, 3, 5} {
+			if err := store.Append(ctx, key, seq, []byte("x"), logOpts); err != nil {
+				t.Fatalf("append %d: %v", seq, err)
+			}
+		}
+		got, err := store.PartSeqs(ctx, key, 1)
+		if err != nil {
+			t.Fatalf("PartSeqs: %v", err)
+		}
+		if fmt.Sprint(got) != "[1 3 5]" {
+			t.Fatalf("PartSeqs from 1 = %v, want [1 3 5]", got)
+		}
+		none, err := store.PartSeqs(ctx, "conformance/part-seqs-absent", 0)
+		if err != nil {
+			t.Fatalf("PartSeqs of an absent key: %v", err)
+		}
+		if len(none) != 0 {
+			t.Fatalf("PartSeqs of an absent key = %v, want none", none)
 		}
 	})
 

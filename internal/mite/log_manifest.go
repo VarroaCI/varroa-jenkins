@@ -23,6 +23,11 @@ type LogIndexEntry struct {
 	Dropped   int64  `json:"dropped,omitempty"`
 	Final     bool   `json:"final,omitempty"`
 	Recovered bool   `json:"recovered,omitempty"`
+	// Writer is the "namespace/cell/cell_instance" of the sender of the
+	// chunk. A restarted gateway reads it back to tell a moved build's
+	// first chunk from a repeat of the same writer. A crash-repair entry
+	// carries none.
+	Writer string `json:"writer,omitempty"`
 }
 
 // LogManifest is the computed, never-stored view of one run's console

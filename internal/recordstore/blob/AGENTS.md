@@ -34,6 +34,16 @@ GCS, Azure Blob, and the local filesystem.
   chunk_seq) DO NOTHING` plus a stored-digest comparison. The
   `gocloud.dev` adapter checks it against the part's `digest` object
   metadata.
+- **`Overwrite` replaces one part** — it writes `(key, seq)` over any
+  stored part and stores the new digest, so `Append` stays write-once
+  against the new bytes. Only the gateway log writer calls it, for a log
+  part that a lost writer left above a hole. `pgblob` uses `ON CONFLICT
+  … DO UPDATE` that sets `digest` and `bytes` alone, because role
+  `varroa_gateway` holds `UPDATE` on those two columns and no other.
+- **`PartSeqs` lists past a hole** — it answers every chunked part's
+  sequence at or above `from`, holes included, where `NewRangeReader`
+  stops at the first missing part. The log writer uses it to find the
+  old parts a moved build must empty.
 - **`Open`** (`open.go`) accepts `pgblob:`, `s3://`, `gs://`, `azblob://`,
   and `file://`. `pgblob:` needs a non-nil `*pgxpool.Pool`; every other
   scheme opens a `gocloud.dev/blob` bucket and ignores the pool. Every
