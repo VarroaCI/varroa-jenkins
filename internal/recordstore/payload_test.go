@@ -12,6 +12,8 @@ import (
 // the complete ingest envelope into payload is section 5's job; this test
 // covers only the column and its round trip.
 func TestRunStagesPayloadHoldsUntypedField(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 

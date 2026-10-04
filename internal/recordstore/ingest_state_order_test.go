@@ -15,6 +15,8 @@ import (
 // generation's own key must be reported for deletion. That key holds the
 // object the late write stored, and no reader needs it.
 func TestApplyRunStateKeepsTheHigherGeneration(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -48,6 +50,8 @@ func TestApplyRunStateKeepsTheHigherGeneration(t *testing.T) {
 // stored push deletes no object. A redelivery names the winner's own
 // key, so a delete would remove the object the record keeps.
 func TestApplyRunStateRedeliveredPushDeletesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedGrantedIntent(t, pool, intentKey)

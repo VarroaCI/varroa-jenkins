@@ -127,8 +127,7 @@ func TestFireOnePublishesWakeThenRetryAndWritesActivity(t *testing.T) {
 	t.Cleanup(func() { _ = sub.Unsubscribe() })
 	conn.NATSConn().Flush()
 
-	reader, restore := swapMeterProvider(t)
-	defer restore()
+	reader := useTestMeterProvider(t)
 	backstopMetrics, err := NewBackstopMetrics()
 	if err != nil {
 		t.Fatalf("new backstop metrics: %v", err)
@@ -213,8 +212,7 @@ func TestFireOnePublishesActionsEvenWhenActivityInsertFails(t *testing.T) {
 	t.Cleanup(func() { _ = sub.Unsubscribe() })
 	conn.NATSConn().Flush()
 
-	reader, restore := swapMeterProvider(t)
-	defer restore()
+	reader := useTestMeterProvider(t)
 	backstopMetrics, err := NewBackstopMetrics()
 	if err != nil {
 		t.Fatalf("new backstop metrics: %v", err)
@@ -269,6 +267,8 @@ func TestFireOnePublishesActionsEvenWhenActivityInsertFails(t *testing.T) {
 // one intent key: whichever claims it second answers duplicate, so
 // exactly one build runs.
 func TestFireOneAndOrdinaryFireShareOneIntentKey(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	conn := newTestActionConn(t)
 

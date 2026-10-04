@@ -11,6 +11,8 @@ import (
 // against one database never both run: one takes the advisory lock and
 // runs, the other skips.
 func TestRunMaintenanceRoundOneReplicaSkips(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	cfg := MaintenanceConfig{
 		RunRetention:      365 * 24 * time.Hour,
@@ -88,6 +90,8 @@ func TestRunMaintenanceRoundOneReplicaSkips(t *testing.T) {
 // so the test proves mutual exclusion instead of inferring it from
 // timing.
 func TestRunMaintenanceRoundExcludesASecondRoundWhileTheFirstHoldsTheLock(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	baseCfg := MaintenanceConfig{
 		RunRetention:      365 * 24 * time.Hour,

@@ -297,6 +297,8 @@ func TestIsCrossTenantActor(t *testing.T) {
 // a tenant with no stored placement is vetoed NOT_READY through the
 // real PlacementFence, and writes no run_intents row.
 func TestPlacementFenceMissingRowVetoWritesNoIntentRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, NewPlacementFence(pool, nil))
 
@@ -313,6 +315,8 @@ func TestPlacementFenceMissingRowVetoWritesNoIntentRow(t *testing.T) {
 // fully seeded placement row, with an applied seed and no pending job,
 // is granted.
 func TestPlacementFenceGrantsAMatchingClaim(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedTenantPlacement(t, db, testTenant, testNamespace, "cell-a", 3, "pod-a", "pod-a", nil)
 	ledger := NewLedger(pool, NewPlacementFence(pool, nil))
@@ -329,6 +333,8 @@ func TestPlacementFenceGrantsAMatchingClaim(t *testing.T) {
 // PlacementFence's Check answers an error, not a decision, when its
 // database read fails.
 func TestPlacementFenceCheckFailsClosedOnReadError(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	fence := NewPlacementFence(pool, nil)
 	pool.Close()
@@ -343,6 +349,8 @@ func TestPlacementFenceCheckFailsClosedOnReadError(t *testing.T) {
 // claim carrying an upstream: intent key and a matching export grant is
 // granted, replacing decidePlacement's own permanent cross-tenant veto.
 func TestPlacementFenceGrantsCrossTenantUpstreamClaim(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	if _, err := db.Exec(`
 		INSERT INTO varroa.tenant_placements
@@ -366,6 +374,8 @@ func TestPlacementFenceGrantsCrossTenantUpstreamClaim(t *testing.T) {
 // a granted cross-tenant claim still runs the seed orders: an unseeded
 // tenant answers NOT_READY, not granted.
 func TestPlacementFenceGrantedCrossTenantClaimStillWaitsForTheSeed(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	if _, err := db.Exec(`
 		INSERT INTO varroa.tenant_placements
@@ -389,6 +399,8 @@ func TestPlacementFenceGrantedCrossTenantClaimStillWaitsForTheSeed(t *testing.T)
 // cross-tenant claim with no matching export grant is still vetoed
 // CROSS_TENANT, opening with the frozen message.
 func TestPlacementFenceRefusesUngrantedCrossTenantClaim(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	if _, err := db.Exec(`
 		INSERT INTO varroa.tenant_placements
@@ -424,6 +436,8 @@ func TestPlacementFenceRefusesUngrantedCrossTenantClaim(t *testing.T) {
 // blocks on it, then commits the claim and confirms the bump only
 // proceeds afterward.
 func TestClaimFenceLockSerializesAgainstConcurrentAnnounce(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedTenantPlacement(t, db, testTenant, testNamespace, "cell-a", 3, "pod-a", "pod-a", nil)
 	fence := NewPlacementFence(pool, nil)

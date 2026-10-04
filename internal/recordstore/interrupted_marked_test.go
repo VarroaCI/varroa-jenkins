@@ -96,6 +96,8 @@ func countInterruptedActivity(t *testing.T, db *sql.DB) int {
 // activity row, one notification, and one automatic retry. A second
 // round writes nothing.
 func TestEndMarkedLostIntentEndsTheRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := uuid.Must(uuid.NewV7())
 	seedMarkedIntent(t, db, runID, time.Time{}, markedLostOwner, "", true)
@@ -174,6 +176,8 @@ func TestEndMarkedLostIntentEndsTheRun(t *testing.T) {
 // TestEndMarkedLostIntentLeavesAnUnconfirmedOwner asserts that a dead
 // entry with no pod-read confirmation ends nothing.
 func TestEndMarkedLostIntentLeavesAnUnconfirmedOwner(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := uuid.Must(uuid.NewV7())
 	seedMarkedIntent(t, db, runID, time.Time{}, markedLostOwner, "", true)
@@ -194,6 +198,8 @@ func TestEndMarkedLostIntentLeavesAnUnconfirmedOwner(t *testing.T) {
 // TestEndMarkedLostIntentSkipsAnUnmarkedIntent asserts that an unmarked
 // intent stays with the re-fire and never reaches this end.
 func TestEndMarkedLostIntentSkipsAnUnmarkedIntent(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := uuid.Must(uuid.NewV7())
 	seedMarkedIntent(t, db, runID, time.Time{}, markedLostOwner, "", false)
@@ -222,6 +228,8 @@ func TestEndMarkedLostIntentSkipsAnUnmarkedIntent(t *testing.T) {
 // row which records no build becomes the run's RUNNING record before the
 // mark, so the interrupted sweep never marks it as a queued run.
 func TestEndMarkedLostIntentSupersedesAnAcceptedRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	createdAt := time.Now().UTC().Add(-3 * time.Minute)
 	runID := seedAcceptedOnlyRunRowInstance(t, db, markedLostOwner, createdAt)
@@ -266,8 +274,7 @@ func TestEndMarkedLostIntentSupersedesAnAcceptedRow(t *testing.T) {
 // the run ends and no retry runs with declared defaults.
 func TestEndMarkedLostIntentSkipsTheRetryOfAParameterizedIntent(t *testing.T) {
 	pool, db := setupLedgerPool(t)
-	reader, restore := swapMeterProvider(t)
-	defer restore()
+	reader := useTestMeterProvider(t)
 	metrics, err := NewInterruptedMetrics()
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
@@ -298,6 +305,8 @@ func TestEndMarkedLostIntentSkipsTheRetryOfAParameterizedIntent(t *testing.T) {
 // intent whose owner holds no confirmation takes no place in the batch,
 // so it never holds a confirmed loss out of it.
 func TestSelectMarkedLostIntentsReadsOnlyConfirmedOwners(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	confirmed := uuid.Must(uuid.NewV7())
 	seedMarkedIntent(t, db, confirmed, time.Time{}, markedLostOwner, "", true)
@@ -319,6 +328,8 @@ func TestSelectMarkedLostIntentsReadsOnlyConfirmedOwners(t *testing.T) {
 // TestExpireUnclaimedRunsSkipsAMarkedIntent asserts that the
 // claim-abandoned class leaves a run whose intent holds a start mark.
 func TestExpireUnclaimedRunsSkipsAMarkedIntent(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	accepted := claimExpiryNow.Add(-ClaimExpiryAge - time.Minute)
 	runID := seedAcceptedOnlyRunRowInstance(t, db, "pod-a", accepted)
@@ -398,8 +409,7 @@ func readMarkedRun(t *testing.T, db *sql.DB, runID uuid.UUID) (status string, re
 // skipped retry, and a second round writes nothing.
 func TestEndStaleMarkedIntentEndsALiveOwnerAfterTheAge(t *testing.T) {
 	pool, db := setupLedgerPool(t)
-	reader, restore := swapMeterProvider(t)
-	defer restore()
+	reader := useTestMeterProvider(t)
 	metrics, err := NewInterruptedMetrics()
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
@@ -446,6 +456,8 @@ func TestEndStaleMarkedIntentEndsALiveOwnerAfterTheAge(t *testing.T) {
 // TestEndStaleMarkedIntentKeepsARecentMark asserts that a live owner's
 // mark younger than ClaimExpiryAge ends nothing.
 func TestEndStaleMarkedIntentKeepsARecentMark(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedStaleMarkedRun(t, db, ClaimExpiryAge-time.Minute, `{}`)
 
@@ -465,6 +477,8 @@ func TestEndStaleMarkedIntentKeepsARecentMark(t *testing.T) {
 // whose owner is confirmed gone ends with cell-rolled, because the
 // confirmed class runs first.
 func TestEndStaleMarkedIntentPrefersConfirmedGone(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := uuid.Must(uuid.NewV7())
 	seedMarkedIntent(t, db, runID, time.Time{}, markedLostOwner, "", true)
@@ -486,6 +500,8 @@ func TestEndStaleMarkedIntentPrefersConfirmedGone(t *testing.T) {
 // TestEndStaleMarkedIntentLeavesAHeartbeatRow asserts that a row a
 // heartbeat wrote records a build, so the start-lost class leaves it.
 func TestEndStaleMarkedIntentLeavesAHeartbeatRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedStaleMarkedRun(t, db, ClaimExpiryAge+time.Minute, `{}`)
 	var createdAt time.Time
@@ -515,6 +531,8 @@ func TestEndStaleMarkedIntentLeavesAHeartbeatRow(t *testing.T) {
 // TestEndStaleMarkedIntentHonoursTheConsumerGate asserts that a backlog
 // on the recorder's consumer holds the start-lost class too.
 func TestEndStaleMarkedIntentHonoursTheConsumerGate(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedStaleMarkedRun(t, db, ClaimExpiryAge+time.Minute, `{}`)
 
@@ -544,6 +562,8 @@ func TestEndStaleMarkedIntentHonoursTheConsumerGate(t *testing.T) {
 // interrupted_superseded_at. The owner's completion then writes the real
 // result.
 func TestRunStartedSupersedesAStartLostMark(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedStaleMarkedRun(t, db, ClaimExpiryAge+time.Minute, `{}`)
 
@@ -586,6 +606,8 @@ func TestRunStartedSupersedesAStartLostMark(t *testing.T) {
 // completion, with no start event, replaces a start-lost mark and
 // removes its reason.
 func TestRunCompletedClearsAStartLostReason(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedStaleMarkedRun(t, db, ClaimExpiryAge+time.Minute, `{}`)
 
@@ -615,6 +637,8 @@ func TestRunCompletedClearsAStartLostReason(t *testing.T) {
 // applies only to start-lost: a late start of a run marked cell-rolled
 // changes no terminal column.
 func TestRunStartedKeepsACellRolledMark(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := uuid.Must(uuid.NewV7())
 	seedMarkedIntent(t, db, runID, time.Time{}, markedLostOwner, "", true)
@@ -648,6 +672,8 @@ func TestRunStartedKeepsACellRolledMark(t *testing.T) {
 // renewed after the candidate read keeps the run: the locked re-read
 // applies the age cutoff too.
 func TestEndStaleMarkedIntentRereadsTheAgeUnderTheLock(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedStaleMarkedRun(t, db, ClaimExpiryAge+time.Minute, `{}`)
 	now := time.Now().UTC()

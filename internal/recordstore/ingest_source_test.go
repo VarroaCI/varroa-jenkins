@@ -52,6 +52,8 @@ func readRunColumns(t *testing.T, db *sql.DB, runID uuid.UUID) (branch string, r
 // TestApplyRunSourceSecondEventKeepsDefinitionPath asserts a second
 // run.source event adds its own keys and drops none the first wrote.
 func TestApplyRunSourceSecondEventKeepsDefinitionPath(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:source-second")
 	g := NewIngester(pool, nil, nil)
@@ -99,6 +101,8 @@ func TestApplyRunSourceSecondEventKeepsDefinitionPath(t *testing.T) {
 // TestApplyRunSourceAllocationEventAddsPodTemplates asserts the allocation
 // event adds its pod templates and keeps the keys the second event wrote.
 func TestApplyRunSourceAllocationEventAddsPodTemplates(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:source-allocation")
 	g := NewIngester(pool, nil, nil)
@@ -183,6 +187,8 @@ func TestApplyRunSourceAllocationEventAddsPodTemplates(t *testing.T) {
 // TestApplyRunSourceLowerSeqChangesNothing asserts a lower seq applies
 // the accepted-key strip alone, and the stored values stay.
 func TestApplyRunSourceLowerSeqChangesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:source-lower")
 	g := NewIngester(pool, nil, nil)
@@ -240,6 +246,8 @@ func TestApplyRunSourceLowerSeqChangesNothing(t *testing.T) {
 // TestApplyRunSourceEqualSeqIsIdempotent asserts a redelivered envelope
 // writes the same values again and leaves the row readable.
 func TestApplyRunSourceEqualSeqIsIdempotent(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:source-equal")
 	g := NewIngester(pool, nil, nil)
@@ -270,6 +278,8 @@ func TestApplyRunSourceEqualSeqIsIdempotent(t *testing.T) {
 // TestApplyRunSourceZeroSeqApplies asserts a zero seq merges over a
 // stored zero, because a resumed build's first event carries it.
 func TestApplyRunSourceZeroSeqApplies(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:source-zero")
 	g := NewIngester(pool, nil, nil)
@@ -313,6 +323,8 @@ func TestApplyRunSourceZeroSeqApplies(t *testing.T) {
 // TestApplyRunSourceEmptyRevisionClearsNothing asserts an event that
 // carries no branch and no revision leaves both stored values alone.
 func TestApplyRunSourceEmptyRevisionClearsNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:source-empty")
 	g := NewIngester(pool, nil, nil)
@@ -350,6 +362,8 @@ func TestApplyRunSourceEmptyRevisionClearsNothing(t *testing.T) {
 // TestApplyRunSourceBeforeRunStartedInsertsQueuedRow asserts E1 reaching
 // the recorder before run.started writes the placeholder row.
 func TestApplyRunSourceBeforeRunStartedInsertsQueuedRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:source-first")
 	g := NewIngester(pool, nil, nil)

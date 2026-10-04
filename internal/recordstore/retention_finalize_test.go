@@ -58,6 +58,8 @@ func readLogSummaryFinalized(t *testing.T, db *sql.DB, runID uuid.UUID) (found b
 // run with no log summary at all gets one, marked finalized and
 // incomplete.
 func TestFinalizeStaleLogsClosesTerminalRunWithNoSummary(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := startRunForFinalize(t, pool, "manual:finalize-no-summary-1")
 
@@ -104,6 +106,8 @@ func TestFinalizeStaleLogsClosesTerminalRunWithNoSummary(t *testing.T) {
 // TestFinalizeStaleLogsKeepsAStoredReason asserts the sweep finalizes a
 // run whose summary already holds a reason, and keeps that reason.
 func TestFinalizeStaleLogsKeepsAStoredReason(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := startRunForFinalize(t, pool, "manual:finalize-keep-reason-1")
 	g := NewIngester(pool, nil, nil)
@@ -144,6 +148,8 @@ func TestFinalizeStaleLogsKeepsAStoredReason(t *testing.T) {
 // TestFinalizeStaleLogsLeavesRunInsideTheWait asserts a terminal run
 // whose heartbeat is inside C3's finalize wait is left alone.
 func TestFinalizeStaleLogsLeavesRunInsideTheWait(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := startRunForFinalize(t, pool, "manual:finalize-inside-wait-1")
 
@@ -179,6 +185,8 @@ func TestFinalizeStaleLogsLeavesRunInsideTheWait(t *testing.T) {
 // TestFinalizeStaleLogsNeverLowersFinalizedTrue asserts a run already
 // marked finalized true is left unchanged.
 func TestFinalizeStaleLogsNeverLowersFinalizedTrue(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := startRunForFinalize(t, pool, "manual:finalize-already-true-1")
 
@@ -216,6 +224,8 @@ func TestFinalizeStaleLogsNeverLowersFinalizedTrue(t *testing.T) {
 // whose heartbeat is 20 minutes old is finalized by the heartbeat-only
 // Liveness this change ships, while a fresh heartbeat is left alone.
 func TestFinalizeStaleLogsUsesHeartbeatForARunningRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := startRunForFinalize(t, pool, "manual:finalize-stale-heartbeat-1")
 
@@ -255,6 +265,8 @@ func TestFinalizeStaleLogsUsesHeartbeatForARunningRun(t *testing.T) {
 // TestFinalizeStaleLogsSkipsOnLivenessError asserts a Liveness error
 // makes the sweep skip that run for the round.
 func TestFinalizeStaleLogsSkipsOnLivenessError(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := startRunForFinalize(t, pool, "manual:finalize-liveness-error-1")
 
@@ -296,6 +308,8 @@ func (r *recordingLiveness) CellGone(_ context.Context, run RunLiveness) (bool, 
 // placement-aware Liveness can look up the right cell without an
 // undocumented extra lookup.
 func TestFinalizeStaleLogsPassesCellIdentityToLiveness(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := startRunForFinalize(t, pool, "manual:finalize-cell-identity-1")
 
@@ -327,6 +341,8 @@ func TestFinalizeStaleLogsPassesCellIdentityToLiveness(t *testing.T) {
 // candidate select and the finalize update leaves the log summary
 // un-finalized.
 func TestFinalizeStaleLogsSkipsWhenHeartbeatRacesTheUpdate(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := startRunForFinalize(t, pool, "manual:finalize-race-1")
 	g := NewIngester(pool, nil, nil)
@@ -386,6 +402,8 @@ func TestFinalizeStaleLogsSkipsWhenHeartbeatRacesTheUpdate(t *testing.T) {
 // string, a fractional JSON number, and a JSON integer wider than
 // bigint.
 func TestFinalizeStaleLogsIsolatesMalformedHeartbeat(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name  string
 		value any
@@ -447,6 +465,8 @@ func TestFinalizeStaleLogsIsolatesMalformedHeartbeat(t *testing.T) {
 // open, even though the run carries no writer heartbeat at all and the
 // writer-heartbeat guard alone cannot see the change.
 func TestFinalizeStaleLogsProtectsFallbackAnchorFromRace(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := startRunForFinalize(t, pool, "manual:finalize-fallback-race-1")
 

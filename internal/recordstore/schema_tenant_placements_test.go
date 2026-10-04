@@ -8,6 +8,8 @@ import (
 // TestTenantPlacementsPrimaryKey asserts the (cluster, tenant) primary
 // key rejects a duplicate row.
 func TestTenantPlacementsPrimaryKey(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 
@@ -32,6 +34,8 @@ func TestTenantPlacementsPrimaryKey(t *testing.T) {
 // pending-jobs list, a dead cell, no liveness timestamp, and an empty
 // dead-instances list.
 func TestTenantPlacementsSeedAndLivenessDefaults(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 

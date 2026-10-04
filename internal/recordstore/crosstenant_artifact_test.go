@@ -47,6 +47,8 @@ func seedCrossTenantArtifact(t *testing.T, db *sql.DB, runID, blobKey string) {
 // 3.7's first two acceptances: the signed key equals the stored key, and
 // the lifetime is 300 seconds.
 func TestCrossTenantArtifactURL_SignsStoredKeyForFixedLifetime(t *testing.T) {
+	t.Parallel()
+
 	deps, db := statusTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	runID := seedCrossTenantRun(t, deps.Pool, "alpha", "alpha/release")
@@ -86,6 +88,8 @@ func TestCrossTenantArtifactURL_SignsStoredKeyForFixedLifetime(t *testing.T) {
 // TestCrossTenantArtifactURL_MissingPathAnswersNotFound asserts a path the
 // run did not record answers NOT_FOUND with an error that names the path.
 func TestCrossTenantArtifactURL_MissingPathAnswersNotFound(t *testing.T) {
+	t.Parallel()
+
 	deps, db := statusTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	runID := seedCrossTenantRun(t, deps.Pool, "alpha", "alpha/release")
@@ -114,6 +118,8 @@ func TestCrossTenantArtifactURL_MissingPathAnswersNotFound(t *testing.T) {
 // TestCrossTenantArtifactList_UnknownRunIDAnswersNotFound asserts both
 // artifact kinds answer NOT_FOUND for a run_id with no record.
 func TestCrossTenantArtifactList_UnknownRunIDAnswersNotFound(t *testing.T) {
+	t.Parallel()
+
 	deps, _ := statusTestDeps(t)
 	req := CrossTenantRequest{
 		Cluster:      testCluster,
@@ -142,6 +148,8 @@ func TestCrossTenantArtifactList_UnknownRunIDAnswersNotFound(t *testing.T) {
 // 3.7's third acceptance: pgblob answers an error naming
 // recordStore.blobs.mode.
 func TestCrossTenantArtifactURL_PgblobAnswersBlobsModeError(t *testing.T) {
+	t.Parallel()
+
 	deps, db := statusTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	runID := seedCrossTenantRun(t, deps.Pool, "alpha", "alpha/release")
@@ -171,6 +179,8 @@ func TestCrossTenantArtifactURL_PgblobAnswersBlobsModeError(t *testing.T) {
 // TestCrossTenantArtifactURL_UngrantedCallerAnswersCrossTenant covers
 // task 3.7's fourth acceptance: an ungranted caller gets CROSS_TENANT.
 func TestCrossTenantArtifactURL_UngrantedCallerAnswersCrossTenant(t *testing.T) {
+	t.Parallel()
+
 	deps, db := statusTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	seedTenantPlacement(t, db, "beta", "ns-beta", "cell-beta", 0, "pod-b", "pod-b", nil)
@@ -198,6 +208,8 @@ func TestCrossTenantArtifactURL_UngrantedCallerAnswersCrossTenant(t *testing.T) 
 // TestCrossTenantArtifactList_ExcludesBlobKey asserts artifact_list
 // answers path/size/digest/content_type but never the stored blob_key.
 func TestCrossTenantArtifactList_ExcludesBlobKey(t *testing.T) {
+	t.Parallel()
+
 	deps, db := statusTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	runID := seedCrossTenantRun(t, deps.Pool, "alpha", "alpha/release")

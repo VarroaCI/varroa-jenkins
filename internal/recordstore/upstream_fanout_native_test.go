@@ -32,7 +32,7 @@ func TestRunUpstreamFanout_NativeEdgeMatchesTheQualifiedPath(t *testing.T) {
 	fx.seedNativeSubscriber("deploy",
 		fanoutProducerTenant+"/build,"+fanoutProducerTenant+"/test", "SUCCESS", false)
 
-	reader := fanoutTestMeter(t)
+	reader := useTestMeterProvider(t)
 	metrics, err := NewUpstreamFanoutMetrics()
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
@@ -67,7 +67,7 @@ func TestRunUpstreamFanout_NativeEdgeIgnoresTheRelativePath(t *testing.T) {
 	fx := newFanoutFixture(t)
 	fx.seedNativeSubscriber("deploy", "build", "SUCCESS", false)
 
-	reader := fanoutTestMeter(t)
+	reader := useTestMeterProvider(t)
 	metrics, err := NewUpstreamFanoutMetrics()
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
@@ -88,7 +88,7 @@ func TestRunUpstreamFanout_NativeThresholdBelowResultDoesNotFire(t *testing.T) {
 	fx.producer.Result = "FAILURE"
 	fx.seedNativeSubscriber("deploy", fanoutProducerTenant+"/build", "SUCCESS", false)
 
-	reader := fanoutTestMeter(t)
+	reader := useTestMeterProvider(t)
 	metrics, err := NewUpstreamFanoutMetrics()
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
@@ -109,7 +109,7 @@ func TestRunUpstreamFanout_NativeThresholdMetFires(t *testing.T) {
 	fx.producer.Result = "FAILURE"
 	fx.seedNativeSubscriber("deploy", fanoutProducerTenant+"/build", "FAILURE", false)
 
-	reader := fanoutTestMeter(t)
+	reader := useTestMeterProvider(t)
 	metrics, err := NewUpstreamFanoutMetrics()
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
@@ -131,7 +131,7 @@ func TestRunUpstreamFanout_ForeignListedPathIsDroppedAndCountedOnce(t *testing.T
 	fx := newFanoutFixture(t)
 	fx.seedNativeSubscriber("deploy", "other/build,other/test", "SUCCESS", false)
 
-	reader := fanoutTestMeter(t)
+	reader := useTestMeterProvider(t)
 	metrics, err := NewUpstreamFanoutMetrics()
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
@@ -158,7 +158,7 @@ func TestRunUpstreamFanout_BothKindsBuildOnce(t *testing.T) {
 		fanoutProducerTenant+"/build", "SUCCESS", false)
 	fx.seedSubscriber(testCluster, fanoutProducerTenant, false)
 
-	reader := fanoutTestMeter(t)
+	reader := useTestMeterProvider(t)
 	metrics, err := NewUpstreamFanoutMetrics()
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
@@ -197,7 +197,7 @@ func TestRunUpstreamFanout_OneDisabledDeclarationDoesNotHideTheOther(t *testing.
 		fanoutProducerTenant+"/build", "SUCCESS", true)
 	fx.seedSubscriber(testCluster, fanoutProducerTenant, false)
 
-	reader := fanoutTestMeter(t)
+	reader := useTestMeterProvider(t)
 	metrics, err := NewUpstreamFanoutMetrics()
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
@@ -244,7 +244,7 @@ func TestRunUpstreamFanout_CapCoversBothSetsTogether(t *testing.T) {
 			fanoutProducerTenant+"/build", "SUCCESS", false)
 	}
 
-	reader := fanoutTestMeter(t)
+	reader := useTestMeterProvider(t)
 	metrics, err := NewUpstreamFanoutMetrics()
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)
@@ -292,7 +292,7 @@ func TestRunUpstreamFanout_ARedeliveredCompletionPublishesOnce(t *testing.T) {
 	seedGrantPlacement(t, db, testCluster, testTenant, testNamespace, "cell-a", 1, "{}")
 
 	conn := newTestActionConn(t)
-	fanoutTestMeter(t)
+	useTestMeterProvider(t)
 	metrics, err := NewUpstreamFanoutMetrics()
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)

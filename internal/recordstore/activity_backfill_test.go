@@ -12,6 +12,8 @@ import (
 // when the Go predicate rejects roughly half of a batch: the reader must
 // keep pulling batches until it fills limit or the source is exhausted.
 func TestPgBackfillQuery_PredicateRejectsHalf(t *testing.T) {
+	t.Parallel()
+
 	const n = 60
 	base := time.Now().UTC().Truncate(time.Second)
 	events := make([]activity.Event, n)
@@ -74,6 +76,8 @@ func TestPgBackfillQuery_PredicateRejectsHalf(t *testing.T) {
 // ten-batch bound stops the loop and reports HasMore true even though no
 // authorized match was found, per D4: "hasMore is therefore not exact."
 func TestPgBackfillQuery_TenRejectedBatchesReportsHasMore(t *testing.T) {
+	t.Parallel()
+
 	// limit=5 means each batch reads 6 raw rows; 10 batches need at least
 	// 60 rows so every batch is full (HasMore stays true through all ten).
 	const n = 120
@@ -122,6 +126,8 @@ func TestPgBackfillQuery_TenRejectedBatchesReportsHasMore(t *testing.T) {
 // scope admits, but the Go predicate rejects, never reaches the response
 // — Authorize stays authoritative over the Scope pushdown (D5).
 func TestPgBackfillQuery_ScopeAdmitsPredicateRejects(t *testing.T) {
+	t.Parallel()
+
 	base := time.Now().UTC().Truncate(time.Second)
 	events := []activity.Event{
 		{Timestamp: base, Cluster: "core", Namespace: "ns-a", Controller: "ctrl-x", Source: "user", Type: "t"},
@@ -149,6 +155,8 @@ func TestPgBackfillQuery_ScopeAdmitsPredicateRejects(t *testing.T) {
 // and returns newest-first, matching the retired ring/JetStream backfills'
 // contract.
 func TestPgBackfillRecent(t *testing.T) {
+	t.Parallel()
+
 	base := time.Now().UTC().Truncate(time.Second)
 	events := []activity.Event{
 		{Timestamp: base, Cluster: "core", Namespace: "ns-a", Controller: "ctrl-a", Source: "user", Type: "t", Message: "first"},
@@ -174,6 +182,8 @@ func TestPgBackfillRecent(t *testing.T) {
 // TestPgBackfillRetention proves Retention delegates to
 // Reader.ActivityRetentionDays.
 func TestPgBackfillRetention(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	reader := NewReader(pool, 30)
 	bf := NewActivityBackfill(reader)

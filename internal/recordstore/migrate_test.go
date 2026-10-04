@@ -11,6 +11,8 @@ import (
 // empty database both succeed, and that exactly one of them applies
 // migration 1.
 func TestRunMigrationsConcurrent(t *testing.T) {
+	t.Parallel()
+
 	dsn := emptyTestDB(t)
 	ctx := context.Background()
 

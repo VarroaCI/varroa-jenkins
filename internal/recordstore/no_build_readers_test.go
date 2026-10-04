@@ -51,6 +51,8 @@ func markRunInterruptedRaw(t *testing.T, db *sql.DB, runID uuid.UUID) {
 // TestRunsRowExistsExcludesAcceptedOnly asserts runsRowExists answers
 // false for an accepted-only row, before and after the sweep marks it.
 func TestRunsRowExistsExcludesAcceptedOnly(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -78,6 +80,8 @@ func TestRunsRowExistsExcludesAcceptedOnly(t *testing.T) {
 // heartbeat-first placeholder, whose payload is null, answers true: the
 // COALESCE guard must not exclude a live run with no payload at all.
 func TestRunsRowExistsAcceptsHeartbeatFirstPlaceholder(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	runID := seedGrantedIntent(t, pool, "manual:heartbeat-first-1")
@@ -120,6 +124,8 @@ func runsRowExistsForTest(ctx context.Context, pool *pgxpool.Pool, runID uuid.UU
 // rule deletes a GRANTED intent whose only row is accepted-only, and
 // keeps one whose row the sweep has marked.
 func TestOrphanDeleteRemovesAcceptedOnlyKeepsMarked(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	ledger := NewLedger(pool, nil)
@@ -181,6 +187,8 @@ func TestOrphanDeleteRemovesAcceptedOnlyKeepsMarked(t *testing.T) {
 // TestRehydrationExcludesAcceptedOnly asserts the rehydration
 // enumeration and record selection both exclude an accepted-only row.
 func TestRehydrationExcludesAcceptedOnly(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -211,6 +219,8 @@ func TestRehydrationExcludesAcceptedOnly(t *testing.T) {
 // TestJobWindowStatsExcludesAcceptedOnly asserts JobWindowStats counts
 // an accepted-only row in nothing.
 func TestJobWindowStatsExcludesAcceptedOnly(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -235,6 +245,8 @@ func TestJobWindowStatsExcludesAcceptedOnly(t *testing.T) {
 // last-run tile, and the duration trend all skip an accepted-only row,
 // before and after the sweep marks it.
 func TestJobSummaryExcludesAcceptedOnly(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -272,6 +284,8 @@ func TestJobSummaryExcludesAcceptedOnly(t *testing.T) {
 // TestCellUsageExcludesAcceptedOnly asserts the cell-usage runs and
 // failed counts skip an accepted-only row.
 func TestCellUsageExcludesAcceptedOnly(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -292,6 +306,8 @@ func TestCellUsageExcludesAcceptedOnly(t *testing.T) {
 // status and no finalization anchor for an accepted-only row, and that a
 // later run.started still resolves the real state.
 func TestLookupOwnerExcludesAcceptedOnly(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -332,6 +348,8 @@ func TestLookupOwnerExcludesAcceptedOnly(t *testing.T) {
 // TestListRunsGetRunSearchRecordsKeepAcceptedOnly asserts ListRuns,
 // GetRun, and SearchRecords all keep an accepted-only row.
 func TestListRunsGetRunSearchRecordsKeepAcceptedOnly(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()

@@ -105,6 +105,8 @@ func assertHeld(t *testing.T, resp ClaimResponse, runID string) {
 // instance waits while no dead-instance entry confirms the stored owner
 // gone and the grant is new. The row keeps its owner.
 func TestRepeatOtherInstanceHeldWhileOwnerLive(t *testing.T) {
+	t.Parallel()
+
 	ledger, db := newHeldLedgerWithDB(t, freshConsumer)
 
 	req := newTestClaimRequest("manual:hold-live", 1)
@@ -124,6 +126,8 @@ func TestRepeatOtherInstanceHeldWhileOwnerLive(t *testing.T) {
 // older than the grace releases the hold, and the move refreshes
 // granted_at.
 func TestRepeatOtherInstanceMovesAfterConfirmedGone(t *testing.T) {
+	t.Parallel()
+
 	ledger, db := newHeldLedgerWithDB(t, freshConsumer)
 
 	req := newTestClaimRequest("manual:hold-gone", 1)
@@ -151,6 +155,8 @@ func TestRepeatOtherInstanceMovesAfterConfirmedGone(t *testing.T) {
 // TestRepeatOtherInstanceHeldWithinGrace: a confirmation newer than the
 // grace keeps the hold, and so does an entry with no confirmation.
 func TestRepeatOtherInstanceHeldWithinGrace(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name string
 		ago  *time.Duration
@@ -177,6 +183,8 @@ func TestRepeatOtherInstanceHeldWithinGrace(t *testing.T) {
 // the moved window releases the hold with no dead-instance entry. A live
 // owner that started the build would have sent a heartbeat by then.
 func TestRepeatOtherInstanceMovesAfterHeartbeatWindow(t *testing.T) {
+	t.Parallel()
+
 	ledger, db := newHeldLedgerWithDB(t, freshConsumer)
 
 	req := newTestClaimRequest("manual:hold-window", 1)
@@ -199,6 +207,8 @@ func TestRepeatOtherInstanceMovesAfterHeartbeatWindow(t *testing.T) {
 // passes still holds the claim while the ingest consumer is behind or its
 // state is not readable, because the owner's start can be in transit.
 func TestRepeatOtherInstanceHeldWhileConsumerBacklogged(t *testing.T) {
+	t.Parallel()
+
 	stale := time.Now().Add(-5 * time.Minute)
 	cases := []struct {
 		name     string
@@ -237,6 +247,8 @@ func TestRepeatOtherInstanceHeldWhileConsumerBacklogged(t *testing.T) {
 // while the repeat waits. The next retry answers duplicate and leaves the
 // started run's own row alone.
 func TestHeldRepeatAnswersDuplicateOnceStartIngested(t *testing.T) {
+	t.Parallel()
+
 	ledger, db := newHeldLedgerWithDB(t, freshConsumer)
 
 	req := newTestClaimRequest("manual:hold-started", 1)
@@ -264,6 +276,8 @@ func TestHeldRepeatAnswersDuplicateOnceStartIngested(t *testing.T) {
 // TestRepeatSameInstanceNeverHeld: a repeat from the stored owner moves no
 // owner, so the hold never reads the consumer for it.
 func TestRepeatSameInstanceNeverHeld(t *testing.T) {
+	t.Parallel()
+
 	ledger := newHeldLedger(t, func(context.Context) (*nats.ConsumerInfo, error) {
 		t.Fatal("the hold read the consumer for a same-instance repeat")
 		return nil, nil
@@ -281,6 +295,8 @@ func TestRepeatSameInstanceNeverHeld(t *testing.T) {
 // holds no grant to wait for. A request that names no instance is never
 // the owner, so the hold covers it.
 func TestRepeatEmptyStoredInstanceNeverHeld(t *testing.T) {
+	t.Parallel()
+
 	ledger := newHeldLedger(t, freshConsumer)
 
 	req := newTestClaimRequest("manual:hold-empty-stored", 1)
@@ -300,6 +316,8 @@ func TestRepeatEmptyStoredInstanceNeverHeld(t *testing.T) {
 // operator confirmed gone past the grace. The repeat claim from the
 // replacement cell therefore passes the hold at once.
 func TestRefireClaimPassesHold(t *testing.T) {
+	t.Parallel()
+
 	ledger, db := newHeldLedgerWithDB(t, freshConsumer)
 
 	req := newTestClaimRequest("manual:hold-refire", 1)
@@ -320,6 +338,8 @@ func TestRefireClaimPassesHold(t *testing.T) {
 // a new run, and an ownership move each write granted_at. A same-instance
 // repeat leaves it alone.
 func TestGrantedAtWrittenOnInsertTransferAndMove(t *testing.T) {
+	t.Parallel()
+
 	ledger, db := newHeldLedgerWithDB(t, freshConsumer)
 	age := func(key string) {
 		t.Helper()
@@ -361,6 +381,8 @@ func TestGrantedAtWrittenOnInsertTransferAndMove(t *testing.T) {
 // TestUnwiredLedgerRunsNoHold: a Ledger that SetGrantHold never touched
 // moves the owner on a repeat from another instance at once.
 func TestUnwiredLedgerRunsNoHold(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 	if ledger.GrantHoldWired() {
@@ -382,6 +404,8 @@ func TestUnwiredLedgerRunsNoHold(t *testing.T) {
 // released claim runs between two transactions, so it holds no lock on
 // the intent row or the placement row.
 func TestGrantHoldReadsConsumerWithNoRowLock(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 	req := newTestClaimRequest("manual:hold-nolock", 1)

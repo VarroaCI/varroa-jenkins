@@ -16,6 +16,8 @@ import (
 // bus.LedgerOwnerSubject over an in-process NATS server, drives a known
 // run, an unknown run, and a timeout, and asserts each answer.
 func TestOwnerResponderIntegration(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 
 	s := startResponderTestServer(t)
@@ -97,6 +99,8 @@ func TestOwnerResponderIntegration(t *testing.T) {
 // exercised directly against a closed pool, so every query fails
 // deterministically without needing a NATS server.
 func TestHandleOwnerLookupDatabaseErrorAnswersErrorNotFound(t *testing.T) {
+	t.Parallel()
+
 	dsn := requireTestDSN(t)
 	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {

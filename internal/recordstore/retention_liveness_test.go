@@ -36,6 +36,8 @@ func seedTenantPlacementLiveness(t *testing.T, db *sql.DB, cellInstance string,
 // a run whose owning instance appears in dead_instances with a
 // last_seen_at past the moved window, task 9.1b's first acceptance test.
 func TestPlacementLivenessDeadInstanceGone(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	past := time.Now().Add(-6 * time.Minute)
@@ -59,6 +61,8 @@ func TestPlacementLivenessDeadInstanceGone(t *testing.T) {
 // answers false for a run whose instance changed but was never confirmed
 // dead, task 9.1b's second acceptance test.
 func TestPlacementLivenessChangedInstanceAloneAnswersNotGone(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	seedTenantPlacementLiveness(t, db, "pod-new", true, nil, nil, nil)
@@ -82,6 +86,8 @@ func TestPlacementLivenessChangedInstanceAloneAnswersNotGone(t *testing.T) {
 // dead — the same answer the interrupted-run sweep would reach, task
 // 9.1b's third acceptance test.
 func TestFinalizeStaleLogsSeesPlacementLivenessAnswer(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
@@ -116,6 +122,8 @@ func TestFinalizeStaleLogsSeesPlacementLivenessAnswer(t *testing.T) {
 // not by the pod's own occurred_at. The run's pod reports a heartbeat one
 // minute old, and the recorder received nothing for 17 minutes.
 func TestPlacementLivenessReadsTheReceiveStamp(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	now := time.Now()

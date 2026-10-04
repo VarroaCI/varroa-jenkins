@@ -50,6 +50,8 @@ func forwardRequest(intentKey string) CrossTenantRequest {
 // responder uses a supplied key unchanged when the caller tenant equals
 // the target tenant.
 func TestCrossTenantBuild_SameTenantForwardKeepsItsKey(t *testing.T) {
+	t.Parallel()
+
 	deps, _ := buildForwardTestDeps(t)
 	actions := subscribeLedgerActions(t, deps)
 	supplied := "cron:alpha/nightly:2026-09-17T03:00"
@@ -76,6 +78,8 @@ func TestCrossTenantBuild_SameTenantForwardKeepsItsKey(t *testing.T) {
 // asserts a repeat forward of one key finds the first intent and
 // publishes no second action.
 func TestCrossTenantBuild_SecondForwardOfOneCronAnswersTheExistingRun(t *testing.T) {
+	t.Parallel()
+
 	deps, db := buildForwardTestDeps(t)
 	actions := subscribeLedgerActions(t, deps)
 	supplied := "cron:alpha/nightly:2026-09-17T03:00"
@@ -118,6 +122,8 @@ func TestCrossTenantBuild_SecondForwardOfOneCronAnswersTheExistingRun(t *testing
 // whose tenants differ and that carries an intent key is refused with
 // code=INTERNAL, and that it publishes nothing.
 func TestCrossTenantBuild_CrossTenantCallMayNotSupplyAKey(t *testing.T) {
+	t.Parallel()
+
 	deps, _ := buildForwardTestDeps(t)
 	actions := subscribeLedgerActions(t, deps)
 
@@ -142,6 +148,8 @@ func TestCrossTenantBuild_CrossTenantCallMayNotSupplyAKey(t *testing.T) {
 // key outside the allocated schemes answers reason_code=INVALID_KEY and
 // publishes nothing.
 func TestCrossTenantBuild_UnparsableKeyAnswersInvalidKey(t *testing.T) {
+	t.Parallel()
+
 	deps, _ := buildForwardTestDeps(t)
 	actions := subscribeLedgerActions(t, deps)
 
@@ -162,6 +170,8 @@ func TestCrossTenantBuild_UnparsableKeyAnswersInvalidKey(t *testing.T) {
 // TestCrossTenantBuild_NoKeyStillDerivesOne asserts a call that carries
 // no intent key derives the key exactly as it does today.
 func TestCrossTenantBuild_NoKeyStillDerivesOne(t *testing.T) {
+	t.Parallel()
+
 	deps, _ := buildForwardTestDeps(t)
 	actions := subscribeLedgerActions(t, deps)
 
@@ -186,6 +196,8 @@ func TestCrossTenantBuild_NoKeyStillDerivesOne(t *testing.T) {
 // TestCrossTenantBuild_MalformedSeqIsStillRefusedWithAKey asserts the
 // seq format test keeps its place before the key is read.
 func TestCrossTenantBuild_MalformedSeqIsStillRefusedWithAKey(t *testing.T) {
+	t.Parallel()
+
 	deps, _ := buildForwardTestDeps(t)
 
 	req := forwardRequest("cron:alpha/nightly:2026-09-17T03:00")
@@ -203,6 +215,8 @@ func TestCrossTenantBuild_MalformedSeqIsStillRefusedWithAKey(t *testing.T) {
 // TestCrossTenantBuild_ForwardKeepsTheCallerRunID asserts a forward
 // triggers the home with the caller's run id and answers that id.
 func TestCrossTenantBuild_ForwardKeepsTheCallerRunID(t *testing.T) {
+	t.Parallel()
+
 	deps, _ := buildForwardTestDeps(t)
 	actions := subscribeLedgerActions(t, deps)
 	supplied := "manual:" + forwardCallerRunID
@@ -234,6 +248,8 @@ func TestCrossTenantBuild_ForwardKeepsTheCallerRunID(t *testing.T) {
 // a forward whose run id the ledger cannot claim answers INVALID_KEY and
 // publishes nothing.
 func TestCrossTenantBuild_ForwardRejectsACallerRunIDThatIsNotUUIDv7(t *testing.T) {
+	t.Parallel()
+
 	deps, _ := buildForwardTestDeps(t)
 	actions := subscribeLedgerActions(t, deps)
 
@@ -253,6 +269,8 @@ func TestCrossTenantBuild_ForwardRejectsACallerRunIDThatIsNotUUIDv7(t *testing.T
 // forward whose home is the calling cell answers NOT_READY, so the
 // claimer claims instead, and publishes nothing.
 func TestCrossTenantBuild_ForwardToTheCallingCellAnswersNotReady(t *testing.T) {
+	t.Parallel()
+
 	deps, _ := buildForwardTestDeps(t)
 	actions := subscribeLedgerActions(t, deps)
 
@@ -272,6 +290,8 @@ func TestCrossTenantBuild_ForwardToTheCallingCellAnswersNotReady(t *testing.T) {
 // forward whose home slot holds no cell answers NOT_READY, never the
 // PENDING answer a claimer reads as a success.
 func TestCrossTenantBuild_ForwardToAnUnboundHomeAnswersNotReady(t *testing.T) {
+	t.Parallel()
+
 	deps, db := buildForwardTestDeps(t)
 	actions := subscribeLedgerActions(t, deps)
 	seedTenantPlacementMembers(t, db, "alpha", 1, []member{

@@ -55,6 +55,8 @@ func readCommandRefusal(t *testing.T, db *sql.DB, runID uuid.UUID) *storedComman
 // TestApplyCommandRefusedStoresTheRefusal asserts the write merges one
 // notice into the run's payload and keeps every other payload key.
 func TestApplyCommandRefusedStoresTheRefusal(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
@@ -89,6 +91,8 @@ func TestApplyCommandRefusedStoresTheRefusal(t *testing.T) {
 // TestApplyCommandRefusedIgnoresAnotherTenantsRun asserts an envelope that
 // names another tenant or another job writes nothing onto the run.
 func TestApplyCommandRefusedIgnoresAnotherTenantsRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
@@ -117,6 +121,8 @@ func TestApplyCommandRefusedIgnoresAnotherTenantsRun(t *testing.T) {
 // arrives late leaves the newer stored notice in place, and a newer
 // notice replaces an older one.
 func TestApplyCommandRefusedKeepsTheNewerRefusal(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
@@ -149,6 +155,8 @@ func TestApplyCommandRefusedKeepsTheNewerRefusal(t *testing.T) {
 // TestApplyCommandRefusedWithNoRunIsANoOp asserts a notice for a run with no
 // row writes nothing and answers no error, so the consumer acknowledges it.
 func TestApplyCommandRefusedWithNoRunIsANoOp(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	runID := uuid.MustParse(newTestUUIDv7String())
@@ -174,6 +182,8 @@ func TestApplyCommandRefusedWithNoRunIsANoOp(t *testing.T) {
 // ErrMalformedEnvelope, so the consumer drops the message and never
 // retries it.
 func TestApplyCommandRefusedRejectsAMalformedRunID(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 

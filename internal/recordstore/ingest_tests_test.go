@@ -14,6 +14,8 @@ import (
 // TestApplyRunTestsReplaysToOneRow delivers a run.tests envelope twice
 // and asserts one row per (run_id, suite).
 func TestApplyRunTestsReplaysToOneRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:tests-replay-1")
 	g := NewIngester(pool, nil, nil)
@@ -49,6 +51,8 @@ func TestApplyRunTestsReplaysToOneRow(t *testing.T) {
 // TestApplyRunTestsSumsAcrossSuites asserts runs.tests_total sums every
 // suite the run has reported, so a replay never double counts one.
 func TestApplyRunTestsSumsAcrossSuites(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:tests-sum-1")
 	g := NewIngester(pool, nil, nil)
@@ -83,6 +87,8 @@ func TestApplyRunTestsSumsAcrossSuites(t *testing.T) {
 // TestApplyRunArtifactsReplaysToOneRow delivers a run.artifacts envelope
 // twice and asserts one row per (run_id, path).
 func TestApplyRunArtifactsReplaysToOneRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:artifacts-replay-1")
 	g := NewIngester(pool, nil, nil)
@@ -109,6 +115,8 @@ func TestApplyRunArtifactsReplaysToOneRow(t *testing.T) {
 // TestApplyRunChangesReplaysToOneRow delivers a run.changes envelope
 // twice and asserts the changes column is set once and unchanged.
 func TestApplyRunChangesReplaysToOneRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:changes-replay-1")
 	g := NewIngester(pool, nil, nil)
@@ -165,6 +173,8 @@ func failedCase(name string) RunTestCasePayload {
 // row per case with the run's own scope, that a replay changes nothing, and
 // that a later envelope replaces the stored set.
 func TestApplyRunTestsReplacesCaseSet(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:cases-replace-1")
 	g := NewIngester(pool, nil, nil)
@@ -217,6 +227,8 @@ func TestApplyRunTestsReplacesCaseSet(t *testing.T) {
 // TestApplyRunTestsAbsentCasesKeepsSet asserts that a payload with no
 // cases key changes no case row, and that an empty list clears the set.
 func TestApplyRunTestsAbsentCasesKeepsSet(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:cases-absent-1")
 	g := NewIngester(pool, nil, nil)
@@ -252,6 +264,8 @@ func TestApplyRunTestsAbsentCasesKeepsSet(t *testing.T) {
 // TestApplyRunTestsDedupesCases asserts that a payload naming one case
 // twice writes one row, keeps the first, and fails no transaction.
 func TestApplyRunTestsDedupesCases(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:cases-dup-1")
 	g := NewIngester(pool, nil, nil)
@@ -280,6 +294,8 @@ func TestApplyRunTestsDedupesCases(t *testing.T) {
 // TestApplyRunTestsStoresReport asserts the report key and the payload
 // merge, and that a later envelope with no report keeps the stored key.
 func TestApplyRunTestsStoresReport(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:report-1")
 	g := NewIngester(pool, nil, nil)
@@ -329,6 +345,8 @@ func TestApplyRunTestsStoresReport(t *testing.T) {
 // runs row whose payload is NULL, the state a heartbeat-first placeholder
 // row holds.
 func TestApplyRunTestsMergesReportOntoNullPayload(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:report-null-1")
 	g := NewIngester(pool, nil, nil)

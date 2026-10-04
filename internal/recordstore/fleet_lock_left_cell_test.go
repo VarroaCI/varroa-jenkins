@@ -25,6 +25,8 @@ func insertReleasingLock(t *testing.T, db *sql.DB, runID, cellInstance string) {
 // The operator reads those pods again, so the stored row is the durable
 // list.
 func TestTenantSyncAnnounceAnswersTheUnconfirmedEntries(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	now := time.Now().UTC()
@@ -63,6 +65,8 @@ func TestTenantSyncAnnounceAnswersTheUnconfirmedEntries(t *testing.T) {
 // with no cell clears the dropped tag, keeps the stored cell, and leaves
 // the reply's unconfirmed list.
 func TestTenantSyncAnnounceConfirmationOfADroppedEntry(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -88,6 +92,8 @@ func TestTenantSyncAnnounceConfirmationOfADroppedEntry(t *testing.T) {
 // entry of a held or releasing lock's owning instance. The run of a
 // releasing lock is INTERRUPTED, so the run arms of the keep set miss it.
 func TestDeadInstancesTrimKeepsAFleetLockInstance(t *testing.T) {
+	t.Parallel()
+
 	for _, state := range []string{FleetLockStateReleasing, FleetLockStateHeld} {
 		t.Run(state, func(t *testing.T) {
 			pool, db := setupLedgerPool(t)
@@ -126,6 +132,8 @@ func TestDeadInstancesTrimKeepsAFleetLockInstance(t *testing.T) {
 // check reads the stored placement row. A confirmation past the grace
 // releases the lock with no new announce; anything less releases nothing.
 func TestReleaseConfirmedFleetLocksRound(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	old := now.Add(-time.Minute)
 	young := now.Add(-time.Second)
@@ -179,6 +187,8 @@ func TestReleaseConfirmedFleetLocksRound(t *testing.T) {
 // TestRunBackstopRoundReleasesAConfirmedFleetLock asserts the once-a-minute
 // round runs the release check.
 func TestRunBackstopRoundReleasesAConfirmedFleetLock(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	now := time.Now().UTC()
 	confirmed := now.Add(-time.Minute)

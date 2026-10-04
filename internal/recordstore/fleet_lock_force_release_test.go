@@ -19,6 +19,8 @@ func forceReleaseRequest() FleetLockForceReleaseRequest {
 // cell instance the placement names as no member is deleted, and only that
 // delete publishes a notification.
 func TestForceReleaseFleetLock(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name        string
 		insert      bool
@@ -97,6 +99,8 @@ func TestForceReleaseFleetLock(t *testing.T) {
 // holder_live reply names the cell of the member that runs the row's cell
 // instance, also when that member is not slot 0.
 func TestForceReleaseFleetLock_HolderLiveNamesTheMemberCell(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	insertReleasingLock(t, db, "run-2", "pod-b1")
 	members, err := json.Marshal([]member{
@@ -130,6 +134,8 @@ func TestForceReleaseFleetLock_HolderLiveNamesTheMemberCell(t *testing.T) {
 // new pod, the operator confirms the old instance gone, and the backstop
 // round then releases the lock with no force release.
 func TestForceReleaseFleetLock_RestartedHolderCellReleasesTheLock(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	now := time.Now().UTC()
 	insertReleasingLock(t, db, "run-1", "pod-a")
@@ -167,6 +173,8 @@ func TestForceReleaseFleetLock_RestartedHolderCellReleasesTheLock(t *testing.T) 
 // TestFleetLockReleaseResponderRoundTrip asserts the responder answers over
 // the bus, and refuses a request with no reason before any write.
 func TestFleetLockReleaseResponderRoundTrip(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	insertReleasingLock(t, db, "run-1", "pod-a")

@@ -106,6 +106,8 @@ func TestEvaluateInterruptionNamesCellRolledOnTheHomeSlot(t *testing.T) {
 // TestTenantPurgeScopesTheDeleteByCell asserts a slot move purges one
 // cell's schedule rows and leaves every other slot's rows in place.
 func TestTenantPurgeScopesTheDeleteByCell(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -157,6 +159,8 @@ func seedTenantSchedule(t *testing.T, db *sql.DB, namespace, cell, jobPath strin
 // cell of the same name. A delete on the name alone would drop the other
 // namespace's rows, and that tenant would lose every schedule it reported.
 func TestTenantPurgeKeepsASameNamedCellInAnotherNamespace(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -211,6 +215,8 @@ func TestTenantPurgeRefusesACellWithNoNamespace(t *testing.T) {
 // TestTenantPurgeWithNoCellDeletesTheWholeTenant asserts teardown keeps
 // today's whole-tenant delete.
 func TestTenantPurgeWithNoCellDeletesTheWholeTenant(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -244,6 +250,8 @@ func TestTenantPurgeWithNoCellDeletesTheWholeTenant(t *testing.T) {
 // the tenant passes the placement orders, and that a cell the tenant has
 // left still gets the permanent FENCED.
 func TestCheckPlacementAllowsACallerOnSlotOne(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	evaluator := NewGrantEvaluator(pool)
@@ -286,6 +294,8 @@ func TestCheckPlacementAllowsACallerOnSlotOne(t *testing.T) {
 // on a current member whose resolver cache is behind gets the retryable
 // NOT_READY, and that its next attempt is allowed.
 func TestCheckPlacementHoldsAStaleGenerationFromALiveMember(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	evaluator := NewGrantEvaluator(pool)
@@ -317,6 +327,8 @@ func TestCheckPlacementHoldsAStaleGenerationFromALiveMember(t *testing.T) {
 // TestReadTenantCellInstanceNamesTheHomeSlot asserts the lock acquire
 // records the instance of the member that runs the build, not slot 0's.
 func TestReadTenantCellInstanceNamesTheHomeSlot(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	seedTenantPlacementMembers(t, db, testTenant, 3, fenceScenarioMembers(),
@@ -342,6 +354,8 @@ func TestReadTenantCellInstanceNamesTheHomeSlot(t *testing.T) {
 // TestResolveCrossTenantTargetPlacementNamesTheHomeSlot asserts a
 // cross-tenant trigger routes to the target job's home slot's holder.
 func TestResolveCrossTenantTargetPlacementNamesTheHomeSlot(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	seedTenantPlacementMembers(t, db, "beta", 3, []member{

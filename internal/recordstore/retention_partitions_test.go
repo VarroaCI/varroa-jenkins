@@ -11,6 +11,8 @@ import (
 // TestEnsurePartitionsIdempotent asserts calling EnsurePartitions twice
 // for the same instant errors neither time.
 func TestEnsurePartitionsIdempotent(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	now := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
 
@@ -27,6 +29,8 @@ func TestEnsurePartitionsIdempotent(t *testing.T) {
 // retention window, not just the four-month window runs and log_chunks
 // share.
 func TestEnsurePartitionsActivityReachesBackToRetention(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	now := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
 
@@ -54,6 +58,8 @@ func TestEnsurePartitionsActivityReachesBackToRetention(t *testing.T) {
 // created_at falls in the previous month inserts successfully, because
 // EnsurePartitions creates that month's partition.
 func TestEnsurePartitionsAcceptsPreviousMonthInsert(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	now := time.Date(2026, 9, 1, 0, 30, 0, 0, time.UTC)
 

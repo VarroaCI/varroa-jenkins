@@ -68,6 +68,8 @@ func waitForRow(t *testing.T, check func() bool) {
 // "recorder" consumer picks up one published build event and writes the
 // row.
 func TestIngestConsumerConsumesPublishedEnvelope(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:consumer-1")
 
@@ -107,6 +109,8 @@ func TestIngestConsumerConsumesPublishedEnvelope(t *testing.T) {
 // a young event with no intent still NAKs, and an expired one is
 // acknowledged once and never redelivered.
 func TestIngestConsumerDispositionTable(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	s := startIngestTestServer(t)
@@ -206,6 +210,8 @@ func TestIngestConsumerDispositionTable(t *testing.T) {
 // and a below-minimum schema version are acknowledged, and an
 // above-maximum schema version is retried.
 func TestIngestConsumerUnknownKindAndSchemaVersion(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 
 	s := startIngestTestServer(t)

@@ -38,6 +38,8 @@ func seedReplicatedRun(t *testing.T, pool *pgxpool.Pool, ingester *Ingester, pat
 // write deletes every object its record names by key, except the
 // build.xml, and deletes no prefix.
 func TestTerminalWriteKeepsTheBuildRecord(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	fake := &prefixRecordingStore{}
 	ingester := NewIngester(pool, nil, nil)
@@ -64,6 +66,8 @@ func TestTerminalWriteKeepsTheBuildRecord(t *testing.T) {
 // TestTerminalWriteWithNoBuildRecordDeletesThePrefix asserts a run whose
 // record names no build.xml loses its whole prefix at the terminal write.
 func TestTerminalWriteWithNoBuildRecordDeletesThePrefix(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	fake := &prefixRecordingStore{}
 	ingester := NewIngester(pool, nil, nil)
@@ -90,6 +94,8 @@ func TestTerminalWriteWithNoBuildRecordDeletesThePrefix(t *testing.T) {
 // TestInterruptionCleanupKeepsTheBuildRecord asserts the recorder's own
 // interruption marking keeps the build.xml of the marked run.
 func TestInterruptionCleanupKeepsTheBuildRecord(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ingester := NewIngester(pool, nil, nil)
 	runID, _ := seedReplicatedRun(t, pool, ingester, meshProgramPath, meshBuildRecordPath)
@@ -114,6 +120,8 @@ func TestInterruptionCleanupKeepsTheBuildRecord(t *testing.T) {
 // TestBackstopKeepsTheBuildRecord asserts the hourly backstop deletes a
 // terminal run's objects by key and keeps its build.xml.
 func TestBackstopKeepsTheBuildRecord(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ingester := NewIngester(pool, nil, nil)
 	runID, _ := seedReplicatedRun(t, pool, ingester, meshProgramPath, meshBuildRecordPath)
@@ -219,6 +227,8 @@ func (r *rowCheckingStore) DeletePrefix(ctx context.Context, prefix string) erro
 // still exists, before its partition drops. A run inside the cutoff
 // keeps its prefix.
 func TestRetentionRoundDeletesTheRetainedScriptBeforeThePartitionDrop(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -288,6 +298,8 @@ func TestRetentionRoundDeletesTheRetainedScriptBeforeThePartitionDrop(t *testing
 // step deletes the prefix of a run created before the cutoff and leaves a
 // run created after it.
 func TestDeleteRetainedRunScriptsTestsCreatedAtAlone(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	runID := seedTerminalRunAt(t, pool, db, "manual:"+newTestUUIDv7String(), time.Now().UTC())

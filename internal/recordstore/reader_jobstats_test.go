@@ -24,6 +24,8 @@ func seedJobStatsStage(t *testing.T, db *sql.DB, runID uuid.UUID, createdAt time
 // TestJobWindowStatsEmptyWindow asserts a job with no run in the window
 // reports zero builds and no rate, median, or slowest stage.
 func TestJobWindowStatsEmptyWindow(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -52,6 +54,8 @@ func TestJobWindowStatsEmptyWindow(t *testing.T) {
 // them, and asserts the pass rate, the median run duration, and the
 // stage whose median duration is greatest.
 func TestJobWindowStatsComputesRateMedianAndSlowestStage(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -100,6 +104,8 @@ func TestJobWindowStatsComputesRateMedianAndSlowestStage(t *testing.T) {
 // before since never reaches Builds, PassRate, or MedianDurationMs, even
 // though it belongs to the same job.
 func TestJobWindowStatsIgnoresRunBeforeTheWindow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -169,6 +175,8 @@ func seedJobQueueWaitRun(t *testing.T, db *sql.DB, jobPath string, createdAt tim
 // runs, beside the build count and the duration median it already
 // reports.
 func TestJobWindowStatsReportsMedianQueueWait(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -202,6 +210,8 @@ func TestJobWindowStatsReportsMedianQueueWait(t *testing.T) {
 // only window run never started reports no queue wait and no duration
 // median, while its build count still reports.
 func TestJobWindowStatsQueueWaitAbsentWithoutStartedRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()

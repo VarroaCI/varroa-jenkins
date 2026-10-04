@@ -8,6 +8,8 @@ import (
 // TestApplyRunStageReplaysToOneRow delivers a run.stage envelope twice
 // and asserts one row per natural key (run_id, stage_id).
 func TestApplyRunStageReplaysToOneRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:stage-replay-1")
 	g := NewIngester(pool, nil, nil)
@@ -35,6 +37,8 @@ func TestApplyRunStageReplaysToOneRow(t *testing.T) {
 // then SUCCESS delivery for one stage_id leaves one row at SUCCESS, and
 // a redelivered IN_PROGRESS leaves it there.
 func TestApplyRunStageTerminalReplacesInProgress(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:stage-terminal-1")
 	g := NewIngester(pool, nil, nil)
@@ -80,6 +84,8 @@ func TestApplyRunStageTerminalReplacesInProgress(t *testing.T) {
 // run_stages.payload, and that payload holds the complete envelope, not
 // only the inner payload object.
 func TestApplyRunStageUntypedFieldSurvivesInPayload(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:stage-untyped-1")
 	g := NewIngester(pool, nil, nil)
@@ -117,6 +123,8 @@ func TestApplyRunStageUntypedFieldSurvivesInPayload(t *testing.T) {
 // TestApplyRunStageSkippedAndPausedAreStored asserts NOT_EXECUTED and
 // PAUSED stage statuses both insert.
 func TestApplyRunStageSkippedAndPausedAreStored(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:stage-skip-1")
 	g := NewIngester(pool, nil, nil)

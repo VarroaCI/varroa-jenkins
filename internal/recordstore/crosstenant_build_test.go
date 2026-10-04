@@ -71,6 +71,8 @@ func subscribeLedgerActionsOn(t *testing.T, deps CrossTenantDeps, cluster string
 // with an empty run_id, and its first acceptance: the published action
 // carries actor svc-<caller-tenant>.
 func TestCrossTenantBuild_NoRowPublishesTriggerRunPending(t *testing.T) {
+	t.Parallel()
+
 	deps, _ := buildTestDeps(t)
 	actions := subscribeLedgerActions(t, deps)
 
@@ -128,6 +130,8 @@ func TestCrossTenantBuild_NoRowPublishesTriggerRunPending(t *testing.T) {
 // target_tenant, and the recorder must qualify it before the grant
 // check reaches platform's exported "release" job.
 func TestCrossTenantBuild_RelativeJobPathReachesExportedGrant(t *testing.T) {
+	t.Parallel()
+
 	deps, db := buildTestDeps(t)
 	seedGrantPlacement(t, db, "core", "platform", "ns-p", "cell-p", 1,
 		`{"exports":[{"job":"release","callers":["alpha"]}]}`)
@@ -171,6 +175,8 @@ func TestCrossTenantBuild_RelativeJobPathReachesExportedGrant(t *testing.T) {
 // publishes the trigger_run action on member-a's subject. Only the member-a
 // operator subscribes there.
 func TestCrossTenantBuild_MemberClusterTargetPublishesOnItsCluster(t *testing.T) {
+	t.Parallel()
+
 	deps, db := buildTestDeps(t)
 	seedGrantPlacement(t, db, "member-a", "platform", "ns-p", "cell-p", 1,
 		`{"exports":[{"job":"release","callers":["alpha"]}]}`)
@@ -216,6 +222,8 @@ func TestCrossTenantBuild_MemberClusterTargetPublishesOnItsCluster(t *testing.T)
 // s<n> seq form: a request whose seq does not match it is refused with
 // no grant lookup and no published action.
 func TestCrossTenantBuild_MalformedSeqRejected(t *testing.T) {
+	t.Parallel()
+
 	deps, _ := buildTestDeps(t)
 	actions := subscribeLedgerActions(t, deps)
 
@@ -253,6 +261,8 @@ func TestCrossTenantBuild_MalformedSeqRejected(t *testing.T) {
 // TestCrossTenantBuild_WritesNoRunIntentsRow covers task 3.3's second
 // acceptance: the recorder writes no run_intents row of its own.
 func TestCrossTenantBuild_WritesNoRunIntentsRow(t *testing.T) {
+	t.Parallel()
+
 	deps, db := buildTestDeps(t)
 	_ = subscribeLedgerActions(t, deps)
 
@@ -285,6 +295,8 @@ func TestCrossTenantBuild_WritesNoRunIntentsRow(t *testing.T) {
 // 3.3's third acceptance: a request repeated after the target's claim
 // created the row asserts no second action and the stored run_id.
 func TestCrossTenantBuild_RepeatAfterClaimAnswersStoredRunID(t *testing.T) {
+	t.Parallel()
+
 	deps, db := buildTestDeps(t)
 	actions := subscribeLedgerActions(t, deps)
 

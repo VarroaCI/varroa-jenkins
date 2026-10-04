@@ -21,6 +21,8 @@ func insertFleetLock(ctx context.Context, db *sql.DB, name, runID, state string)
 // TestFleetLocksOneHolderRejectsASecondHeldRow asserts the partial
 // unique index refuses a second "held" row for one lock name.
 func TestFleetLocksOneHolderRejectsASecondHeldRow(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 
@@ -36,6 +38,8 @@ func TestFleetLocksOneHolderRejectsASecondHeldRow(t *testing.T) {
 // index covers "releasing" too, so a lock under cancellation admits no
 // second holder.
 func TestFleetLocksHeldBesideReleasingIsRejected(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 
@@ -50,6 +54,8 @@ func TestFleetLocksHeldBesideReleasingIsRejected(t *testing.T) {
 // TestFleetLocksNameOverLongIsRejected asserts the 200-byte CHECK
 // constraint refuses a 201-byte qualified name.
 func TestFleetLocksNameOverLongIsRejected(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 
@@ -65,6 +71,8 @@ func TestFleetLocksNameOverLongIsRejected(t *testing.T) {
 // TestFleetLocksDefaults asserts fence_token defaults to 0 and
 // releasing_since and acquired_at stay null on an ordinary insert.
 func TestFleetLocksDefaults(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 
@@ -97,6 +105,8 @@ func TestFleetLocksDefaults(t *testing.T) {
 // TestFleetLockFenceSeqIsMonotonic asserts varroa.fleet_lock_fence_seq
 // hands out a strictly increasing sequence, fleet-wide.
 func TestFleetLockFenceSeqIsMonotonic(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 
@@ -116,6 +126,8 @@ func TestFleetLockFenceSeqIsMonotonic(t *testing.T) {
 // owner_tenant fails. A row with an empty owner would hold its name
 // against every caller and appear in no owner's read.
 func TestFleetLocksOwnerTenantHasNoDefault(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 

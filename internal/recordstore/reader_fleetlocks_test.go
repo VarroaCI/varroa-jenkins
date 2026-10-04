@@ -53,6 +53,8 @@ func seedLockReadFixture(t *testing.T, db *sql.DB) {
 // beta's prefix, withholds beta's own row, withholds another cluster's
 // row, and orders a holder before its waiters.
 func TestReaderListFleetLocks_TenantScope(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedLockReadFixture(t, db)
 
@@ -99,6 +101,8 @@ func TestReaderListFleetLocks_TenantScope(t *testing.T) {
 // answers every tenant's rows of every cluster as one ordered list, and
 // each row carries its own cluster.
 func TestReaderListAllFleetLocks_EveryCluster(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedLockReadFixture(t, db)
 
@@ -132,6 +136,8 @@ func TestReaderListAllFleetLocks_EveryCluster(t *testing.T) {
 // answer the row's own state and its own waitingSince, and answer no
 // rank, position, or holder field.
 func TestReaderListFleetLocks_RowCarriesNoQueuePosition(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedReaderLock(t, db, "alpha/deploy-prod", "run-alpha-held", testCluster, "alpha", "alpha/deploy-prod", "held", readerLockClock)
 	seedReaderLock(t, db, "alpha/deploy-prod", "run-alpha-wait-1", testCluster, "alpha", "alpha/deploy-prod", "waiting", readerLockClock.Add(time.Minute))
@@ -199,6 +205,8 @@ func TestReaderListFleetLocks_RowCarriesNoQueuePosition(t *testing.T) {
 // the controller tenant team-pay/ci owns, and a "_" in a tenant matches
 // no other character.
 func TestReaderListFleetLocks_OwnerIsExactNotPrefix(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedReaderLockOwned(t, db, "team-pay/deploy-prod", "team-pay", "run-pay", testCluster,
 		"team-pay", "team-pay/deploy", "held", readerLockClock)

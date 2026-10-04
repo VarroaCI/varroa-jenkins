@@ -11,6 +11,8 @@ import (
 // minute old, and the recorder received nothing for 17 minutes. A rule
 // that read the pod clock would hold this dead build RUNNING forever.
 func TestSweepMarksARunWhosePodClockRunsFast(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
 
@@ -58,6 +60,8 @@ func TestSweepMarksARunWhosePodClockRunsFast(t *testing.T) {
 // minute ago. A rule that read the pod clock would interrupt this live
 // build and cancel it.
 func TestSweepLeavesARunWhosePodClockRunsSlow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
 

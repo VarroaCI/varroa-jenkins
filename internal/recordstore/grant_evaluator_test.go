@@ -24,6 +24,8 @@ func seedGrantPlacement(t *testing.T, db *sql.DB, cluster, tenant, namespace, ce
 // on order 1. The member order runs before the generation order, and the
 // generation order answers the retryable NOT_READY.
 func TestCheckPlacementOrders(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	evaluator := NewGrantEvaluator(pool)
 	ctx := context.Background()
@@ -168,6 +170,8 @@ func TestCheckPlacementOrders(t *testing.T) {
 // TestCheckOrders covers the tenant-export-grant capability's eight
 // grant orders on both resource kinds.
 func TestCheckOrders(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	evaluator := NewGrantEvaluator(pool)
 	ctx := context.Background()
@@ -331,6 +335,8 @@ func TestCheckOrders(t *testing.T) {
 // a caller listed on any matching entry, not only the first one a
 // broader glob also matches.
 func TestCheckOrder12UnionOfOverlappingExportEntries(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	evaluator := NewGrantEvaluator(pool)
 	ctx := context.Background()
@@ -364,6 +370,8 @@ func TestCheckOrder12UnionOfOverlappingExportEntries(t *testing.T) {
 // TestCheckNoSuchTargetTenant asserts order 9: a target tenant with no
 // placement row anywhere is refused, naming the tenant.
 func TestCheckNoSuchTargetTenant(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	evaluator := NewGrantEvaluator(pool)
 	ctx := context.Background()
@@ -396,6 +404,8 @@ func TestCheckNoSuchTargetTenant(t *testing.T) {
 // that exists in two clusters, and not in the caller's own, is refused
 // rather than guessed.
 func TestCheckAmbiguousTargetTenant(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	evaluator := NewGrantEvaluator(pool)
 	ctx := context.Background()

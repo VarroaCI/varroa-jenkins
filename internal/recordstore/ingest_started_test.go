@@ -12,6 +12,8 @@ import (
 // TestApplyRunStartedWritesRun asserts a run.started envelope raises
 // status to RUNNING and writes its typed columns.
 func TestApplyRunStartedWritesRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:started-1")
 	g := NewIngester(pool, nil, nil)
@@ -44,6 +46,8 @@ func TestApplyRunStartedWritesRun(t *testing.T) {
 // before run.started still leaves one row at COMPLETED with an intact
 // result.
 func TestApplyRunCompletedBeforeStarted(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:outoforder-1")
 	g := NewIngester(pool, nil, nil)
@@ -88,6 +92,8 @@ func TestApplyRunCompletedBeforeStarted(t *testing.T) {
 // TestApplyRunLogMergesUnderKey asserts run.log merges into
 // runs.payload.log_summary and touches no other column.
 func TestApplyRunLogMergesUnderKey(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:log-1")
 	g := NewIngester(pool, nil, nil)
@@ -129,6 +135,8 @@ func TestApplyRunLogMergesUnderKey(t *testing.T) {
 // TestApplyRunLogSweepThenLateRunLogNeverReopensFinalized runs the real
 // sweep instead of this stand-in update.
 func TestApplyRunLogNeverReopensFinalized(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:log-finalized-1")
 	g := NewIngester(pool, nil, nil)
@@ -179,6 +187,8 @@ func TestApplyRunLogNeverReopensFinalized(t *testing.T) {
 // delivers a late run.log carrying finalized:false, and asserts the
 // marker stays true while the other summary fields still merge.
 func TestApplyRunLogSweepThenLateRunLogNeverReopensFinalized(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:log-real-sweep-1")
 	g := NewIngester(pool, nil, nil)
@@ -234,6 +244,8 @@ func TestApplyRunLogSweepThenLateRunLogNeverReopensFinalized(t *testing.T) {
 // heartbeat_received_at from the recorder's own clock, and changes no
 // other column.
 func TestApplyRunHeartbeatTouchesTheTwoHeartbeatColumns(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:heartbeat-1")
 	g := NewIngester(pool, nil, nil)
@@ -320,6 +332,8 @@ func TestApplyRunHeartbeatTouchesTheTwoHeartbeatColumns(t *testing.T) {
 // stamp only rises. Two recorder replicas hold two clocks, and a
 // liveness window that moved backward would mark a live run.
 func TestApplyRunHeartbeatNeverLowersTheReceiveStamp(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:heartbeat-monotonic-1")
 	g := NewIngester(pool, nil, nil)
@@ -402,6 +416,8 @@ func countRunsRows(t *testing.T, db *sql.DB, runID uuid.UUID) int {
 // reported superseded and writes nothing; the new instance's start for
 // the fresh number then records the run and consumes the intent.
 func TestSupersededStartWritesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 	g := NewIngester(pool, nil, nil)
@@ -452,6 +468,8 @@ func TestSupersededStartWritesNothing(t *testing.T) {
 // old-instance start for the old number, arriving after the real start,
 // changes neither table.
 func TestSupersededStartAfterRealStartChangesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 	g := NewIngester(pool, nil, nil)
@@ -489,6 +507,8 @@ func TestSupersededStartAfterRealStartChangesNothing(t *testing.T) {
 // an ownership move without a refresh leaves the number as it was, and
 // the moved instance's own start must record the run.
 func TestEqualNumberFromForeignInstanceIsARealStart(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 	g := NewIngester(pool, nil, nil)
@@ -527,6 +547,8 @@ func TestEqualNumberFromForeignInstanceIsARealStart(t *testing.T) {
 // Another intent of the job holds that number as an unstarted grant, so
 // the owner takes it and the holder keeps no number.
 func TestLowerNumberFromOwnerTakesOrdinaryPath(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 	g := NewIngester(pool, nil, nil)
@@ -594,6 +616,8 @@ func readReplayOf(t *testing.T, db *sql.DB, runID uuid.UUID) (string, bool) {
 // TestApplyRunStartedWritesReplayOf asserts a run.started envelope that
 // carries replay_of stores the source run identifier in the column.
 func TestApplyRunStartedWritesReplayOf(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:replay-of-1")
 	g := NewIngester(pool, nil, nil)
@@ -616,6 +640,8 @@ func TestApplyRunStartedWritesReplayOf(t *testing.T) {
 // no replay_of key, or with a value that is not a UUID, leaves the column
 // NULL and still records the run.
 func TestApplyRunStartedLeavesReplayOfNull(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 
@@ -647,6 +673,8 @@ func TestApplyRunStartedLeavesReplayOfNull(t *testing.T) {
 // TestRedeliveredStartKeepsReplayOf asserts a later run.started with no
 // replay_of key keeps the stored source run identifier.
 func TestRedeliveredStartKeepsReplayOf(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:replay-of-4")
 	g := NewIngester(pool, nil, nil)

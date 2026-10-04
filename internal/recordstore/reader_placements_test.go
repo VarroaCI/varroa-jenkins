@@ -9,6 +9,8 @@ import (
 // cluster that holds a placement of the tenant, ordered by cluster, and no
 // row of another tenant.
 func TestListTenantPlacementsAnswersEveryCluster(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -56,6 +58,8 @@ func TestListTenantPlacementsAnswersEveryCluster(t *testing.T) {
 // placement row of every tenant, ordered by tenant and then by cluster,
 // with the stored generation.
 func TestListAllTenantPlacementsAnswersEveryTenant(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()

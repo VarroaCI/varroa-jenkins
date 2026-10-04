@@ -10,6 +10,8 @@ import (
 // into runs.payload with no typed column and no migration: the whole
 // envelope round-trips under the "run.started" key.
 func TestApplyRunStartedKeepsTemplateFields(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:template-started-1")
 	g := NewIngester(pool, nil, nil)
@@ -54,6 +56,8 @@ func TestApplyRunStartedKeepsTemplateFields(t *testing.T) {
 // TestApplyRunCompletedKeepsTemplateFields is the run.completed sibling of
 // TestApplyRunStartedKeepsTemplateFields.
 func TestApplyRunCompletedKeepsTemplateFields(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:template-completed-1")
 	g := NewIngester(pool, nil, nil)
@@ -90,6 +94,8 @@ func TestApplyRunCompletedKeepsTemplateFields(t *testing.T) {
 // no template keys at all, matching design.md D14's "all four are empty
 // for a job with no template" for the stored payload.
 func TestApplyRunStartedNoTemplateFields(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:template-none-1")
 	g := NewIngester(pool, nil, nil)

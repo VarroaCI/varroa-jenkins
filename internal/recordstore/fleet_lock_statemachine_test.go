@@ -32,6 +32,8 @@ func fleetLockRowState(t *testing.T, db *sql.DB, runID string) (state string, re
 // acceptance test: the interrupted-run marking transaction touches no
 // fleet_locks row of the run it marks.
 func TestFleetLockStateMachine_MarkingWritesNoRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	req := newTestClaimRequest("manual:sm-marking", 0)
@@ -63,6 +65,8 @@ func TestFleetLockStateMachine_MarkingWritesNoRow(t *testing.T) {
 // held row of an interrupted run to releasing, stamps releasing_since,
 // deletes nothing, and promotes no waiter.
 func TestFleetLockStateMachine_MoveLeavesReleasingPromotesNoWaiter(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	holderRunID := newTestUUIDv7String()
@@ -101,6 +105,8 @@ func TestFleetLockStateMachine_MoveLeavesReleasingPromotesNoWaiter(t *testing.T)
 // task 4.3's acceptance: an ingested terminal run.completed for the
 // holder deletes a releasing row.
 func TestFleetLockStateMachine_TerminalEventDeletesReleasingRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:sm-terminal-releasing")
 
@@ -124,6 +130,8 @@ func TestFleetLockStateMachine_TerminalEventDeletesReleasingRow(t *testing.T) {
 // 4.3's acceptance: an ingested terminal run.completed for the holder
 // deletes a held row exactly as before.
 func TestFleetLockStateMachine_TerminalEventDeletesHeldRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:sm-terminal-held")
 
@@ -147,6 +155,8 @@ func TestFleetLockStateMachine_TerminalEventDeletesHeldRow(t *testing.T) {
 // ingested terminal run.completed deletes a waiting row of its run. A run
 // that ended can never acquire, so the row must not wait for its lease.
 func TestFleetLockStateMachine_TerminalEventDeletesWaitingRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:sm-terminal-waiting")
 
@@ -170,6 +180,8 @@ func TestFleetLockStateMachine_TerminalEventDeletesWaitingRow(t *testing.T) {
 // rolled dead_instances entry older than the window releases a releasing
 // row with no confirmation.
 func TestFleetLockStateMachine_DeadInstanceEntryReleasesRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	runID := newTestUUIDv7String()
@@ -206,6 +218,8 @@ func TestFleetLockStateMachine_DeadInstanceEntryReleasesRow(t *testing.T) {
 // task 4.3's acceptance: a changed placement with no dead_instances
 // entry naming the old instance keeps the row.
 func TestFleetLockStateMachine_TenantMoveWithNoDeadInstanceKeepsRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	runID := newTestUUIDv7String()
@@ -237,6 +251,8 @@ func TestFleetLockStateMachine_TenantMoveWithNoDeadInstanceKeepsRow(t *testing.T
 // The operator sends such an entry for a member that leaves a live cell,
 // and that cell can still be deploying.
 func TestFleetLockStateMachine_MemberLeavingALiveCellKeepsRow(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now()
 	staleSeen := now.Add(-6 * time.Minute)
 	cases := []struct {
@@ -285,6 +301,8 @@ func TestFleetLockStateMachine_MemberLeavingALiveCellKeepsRow(t *testing.T) {
 // acceptance: a stale cell_alive_at counts cell_alive as absent, so a
 // stopped operator releases no lock.
 func TestFleetLockStateMachine_StaleCellAliveAtKeepsRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	runID := newTestUUIDv7String()
@@ -320,6 +338,8 @@ func TestFleetLockStateMachine_StaleCellAliveAtKeepsRow(t *testing.T) {
 // owning instance already changed, is released through the
 // dead_instances confirmation alone.
 func TestFleetLockStateMachine_OwnerDiedWithPodReleasedWithoutCancel(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	runID := newTestUUIDv7String()
@@ -355,6 +375,8 @@ func TestFleetLockStateMachine_OwnerDiedWithPodReleasedWithoutCancel(t *testing.
 // releases a releasing row, with a last_seen_at far inside the
 // five-minute window. The same row with no confirmation is kept.
 func TestFleetLockStateMachine_PodReadConfirmationReleasesInSeconds(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now()
 	confirmed := now.Add(-45 * time.Second)
 	recentSeen := now.Add(-time.Minute)
@@ -409,6 +431,8 @@ func TestFleetLockStateMachine_PodReadConfirmationReleasesInSeconds(t *testing.T
 // round, with no expiry deleting the row first. This is also task 4.4's
 // fourth acceptance test.
 func TestFleetLockStateMachine_RestartReachesReleasingThroughMaintenance(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	runID := newTestUUIDv7String()
@@ -446,6 +470,8 @@ func TestFleetLockStateMachine_RestartReachesReleasingThroughMaintenance(t *test
 // the next waiter's poll answers held. The move and the deletion each
 // run through their own production paths first.
 func TestFleetLockStateMachine_NextWaiterPromotedAfterRelease(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	holderRunID := newTestUUIDv7String()

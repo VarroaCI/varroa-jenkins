@@ -77,6 +77,8 @@ func acquireForCaller(t *testing.T, deps CrossTenantDeps, runID string) CrossTen
 // waiter polls first and still stays waiting, and only the older waiter
 // is promoted.
 func TestFleetLockAcquire_FIFOOrderAcrossThreeWaiters(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	// pendingJobs is non-nil here only to prove GrantEvaluator.CheckPlacement
 	// ignores it: pending-job gating is decidePlacement's claim-path order,
@@ -137,6 +139,8 @@ func handleCrossTenantLockReleaseForTest(t *testing.T, deps CrossTenantDeps, run
 // no row. A stale generation alone answers the retryable NOT_READY, so
 // it is not the shape this test drives.
 func TestFleetLockAcquire_StaleCellAnswersFenced(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 5, "pod-a", "pod-a", nil)
 
@@ -168,6 +172,8 @@ func TestFleetLockAcquire_StaleCellAnswersFenced(t *testing.T) {
 // TestFleetLockAcquire_UngrantedCrossTenantAnswersCrossTenant covers
 // task 3.8's third acceptance.
 func TestFleetLockAcquire_UngrantedCrossTenantAnswersCrossTenant(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	seedTenantPlacement(t, db, "beta", "ns-beta", "cell-beta", 0, "pod-b", "pod-b", nil)
@@ -192,6 +198,8 @@ func TestFleetLockAcquire_UngrantedCrossTenantAnswersCrossTenant(t *testing.T) {
 // TestFleetLockAcquire_ReleasingRowKeepsAWaiterWaiting covers task 3.8's
 // fourth acceptance.
 func TestFleetLockAcquire_ReleasingRowKeepsAWaiterWaiting(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 
@@ -210,6 +218,8 @@ func TestFleetLockAcquire_ReleasingRowKeepsAWaiterWaiting(t *testing.T) {
 // TestFleetLockAcquire_SuccessiveHoldersGetIncreasingTokens covers task
 // 3.8's fifth acceptance.
 func TestFleetLockAcquire_SuccessiveHoldersGetIncreasingTokens(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 
@@ -232,6 +242,8 @@ func TestFleetLockAcquire_SuccessiveHoldersGetIncreasingTokens(t *testing.T) {
 // task 3.8's sixth acceptance: an expired held row of an interrupted run
 // becomes releasing and is not deleted.
 func TestFleetLockAcquire_ExpiredInterruptedHolderBecomesReleasing(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 
@@ -259,6 +271,8 @@ func TestFleetLockAcquire_ExpiredInterruptedHolderBecomesReleasing(t *testing.T)
 // task 3.9's first acceptance: 20 concurrent acquires leave exactly one
 // holder and reach no caller with a database error.
 func TestFleetLockAcquire_ConcurrentAcquiresLeaveExactlyOneHolder(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 
@@ -320,6 +334,8 @@ func TestFleetLockAcquire_ConcurrentAcquiresLeaveExactlyOneHolder(t *testing.T) 
 // state a second violation always finds and asserts the read that
 // follows it answers exactly what the acceptance names.
 func TestFleetLockAcquire_RepeatedViolationAnswersWaiting(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	now := time.Now().UTC()
 	insertFleetLockRow(t, db, "alpha/deploy-prod", "winner-run", "held", now.Add(-time.Minute), now.Add(5*time.Minute))
@@ -343,6 +359,8 @@ func TestFleetLockAcquire_RepeatedViolationAnswersWaiting(t *testing.T) {
 // own coalescing rule, so the test ends the run's interval before it
 // counts.
 func TestFleetLockAcquire_PublishesWaitingThenHeld(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	notifier, sent, _ := newCaptureNotifier(t)
@@ -387,6 +405,8 @@ func TestFleetLockAcquire_PublishesWaitingThenHeld(t *testing.T) {
 // acquire that only refreshes the row's expiry publishes nothing,
 // because the row's state did not change.
 func TestFleetLockAcquire_RepeatPollPublishesNothing(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	now := time.Now().UTC()
@@ -420,6 +440,8 @@ func TestFleetLockAcquire_RepeatPollPublishesNothing(t *testing.T) {
 // promotion whose own predicate matches no row publishes nothing: the
 // other run still holds the lock, so this caller's poll writes no state.
 func TestFleetLockAcquire_PromotionIntoAHeldRowPublishesNothing(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	now := time.Now().UTC()
@@ -455,6 +477,8 @@ func TestFleetLockAcquire_PromotionIntoAHeldRowPublishesNothing(t *testing.T) {
 // transaction's expiry delete of two waiters publishes two released
 // notifications, each naming its own row.
 func TestFleetLockAcquire_ExpiryDeletePublishesOnePerRow(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	now := time.Now().UTC()
@@ -493,6 +517,8 @@ func TestFleetLockAcquire_ExpiryDeletePublishesOnePerRow(t *testing.T) {
 // column, the cell-instance read, and both of the caller's own
 // notifications.
 func TestFleetLockAcquire_StoresCallerJobPathOnTheRowAndItsNotifications(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	// Two members, so the caller's job path is homed on slot 1 rather
 	// than slot 0: a stored cell_instance of pod-b proves the read
@@ -559,6 +585,8 @@ func TestFleetLockAcquire_StoresCallerJobPathOnTheRowAndItsNotifications(t *test
 // TestFleetLockAcquire_NilNotifierPublishesNothing asserts an acquire
 // with no notifier completes and panics nothing.
 func TestFleetLockAcquire_NilNotifierPublishesNothing(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	deps.LockNotifier = nil
@@ -593,6 +621,8 @@ func readLockOwner(t *testing.T, db *sql.DB, name string) (string, bool) {
 // controller takes its own lock with no grant. Its tenant holds a "/",
 // and an empty target_tenant still names that whole tenant as the owner.
 func TestFleetLockAcquire_ControllerTenantTakesItsOwnLock(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, controllerTenant, "team-pay", "ci", 0, "ci-0", "ci-0", nil)
 
@@ -630,6 +660,8 @@ func TestFleetLockAcquire_ControllerTenantTakesItsOwnLock(t *testing.T) {
 // takes a lock a controller tenant owns through a lock export. The grant
 // matches the bare name, and the row names the whole controller tenant.
 func TestFleetLockAcquire_GrantedControllerOwnedLock(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	seedTenantPlacement(t, db, controllerTenant, "team-pay", "ci", 0, "ci-0", "ci-0", nil)
@@ -662,6 +694,8 @@ func TestFleetLockAcquire_GrantedControllerOwnedLock(t *testing.T) {
 // TestFleetLockAcquire_SlashInNameAnswersInvalidName asserts an acquire
 // whose name holds a "/" is vetoed with INVALID_NAME and writes no row.
 func TestFleetLockAcquire_SlashInNameAnswersInvalidName(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 
@@ -695,6 +729,8 @@ func TestFleetLockAcquire_SlashInNameAnswersInvalidName(t *testing.T) {
 // names another tenant's run id on the same lock is vetoed, and neither
 // refreshes nor promotes that tenant's row.
 func TestFleetLockAcquire_OtherTenantRunIDIsRefused(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "beta", "ns-beta", "cell-beta", 0, "pod-b", "pod-b", nil)
 
@@ -751,6 +787,8 @@ func countFleetLockRowsOfRun(t *testing.T, db *sql.DB, runID string) int {
 // sends a late acquire after the run's terminal run.completed. A holder
 // exists, so without the guard the acquire would insert a waiting row.
 func TestFleetLockAcquire_AfterTerminalCompletionAnswersRunEndedAndWritesNoRow(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	runID := seedGrantedIntent(t, deps.Pool, "manual:late-acquire-waiting")
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
@@ -772,6 +810,8 @@ func TestFleetLockAcquire_AfterTerminalCompletionAnswersRunEndedAndWritesNoRow(t
 // TestFleetLockAcquire_AfterTerminalCompletionNeverPromotesToHeld sends a
 // late acquire for a free lock. Without the guard it would answer held.
 func TestFleetLockAcquire_AfterTerminalCompletionNeverPromotesToHeld(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	runID := seedGrantedIntent(t, deps.Pool, "manual:late-acquire-held")
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
@@ -793,6 +833,8 @@ func TestFleetLockAcquire_AfterTerminalCompletionNeverPromotesToHeld(t *testing.
 // TestFleetLockAcquire_InterruptedRunStillAcquires asserts an
 // INTERRUPTED run can still take a lock: its owner can still be alive.
 func TestFleetLockAcquire_InterruptedRunStillAcquires(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	runID := newTestUUIDv7String()
@@ -807,6 +849,8 @@ func TestFleetLockAcquire_InterruptedRunStillAcquires(t *testing.T) {
 // COMPLETED row that records no build does not end the run: a later
 // run.started replaces such a row.
 func TestFleetLockAcquire_TriggerFailedOrAcceptedRowStillAcquires(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 
@@ -837,6 +881,8 @@ func TestFleetLockAcquire_TriggerFailedOrAcceptedRowStillAcquires(t *testing.T) 
 // TestFleetLockAcquire_RunWithNoRunsRowStillAcquires asserts a run the
 // store has no runs row for has not ended.
 func TestFleetLockAcquire_RunWithNoRunsRowStillAcquires(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 
@@ -849,6 +895,8 @@ func TestFleetLockAcquire_RunWithNoRunsRowStillAcquires(t *testing.T) {
 // against the run's terminal run.completed. Whichever commits first, no
 // lock row of the run may stay.
 func TestFleetLockAcquire_ConcurrentCompletionLeavesNoRow(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 

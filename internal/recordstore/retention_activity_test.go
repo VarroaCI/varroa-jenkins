@@ -35,6 +35,8 @@ func insertActivityRow(t *testing.T, db *sql.DB, ts time.Time, controller string
 // is deleted when retention is 30d (step 5a), proving activity expiry is
 // exact rather than rounded to a partition boundary.
 func TestMaintenanceRoundDeletesExpiredActivityRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	now := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
@@ -70,6 +72,8 @@ func TestMaintenanceRoundDeletesExpiredActivityRow(t *testing.T) {
 // expired and a fresh row survives once the expired row is deleted by
 // step 5a.
 func TestMaintenanceRoundKeepsPartitionWithLiveRows(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	now := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
@@ -109,6 +113,8 @@ func TestMaintenanceRoundKeepsPartitionWithLiveRows(t *testing.T) {
 // TestMaintenanceRoundDropsFullyExpiredActivityPartition proves step 5b
 // drops a partition whose whole range is older than retention.activity.
 func TestMaintenanceRoundDropsFullyExpiredActivityPartition(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	now := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
@@ -145,6 +151,8 @@ func TestMaintenanceRoundDropsFullyExpiredActivityPartition(t *testing.T) {
 // watermark row survives, because the watermark must outlive an empty
 // set to keep rejecting a stale envelope.
 func TestMaintenanceRoundLeavesJobScheduleCellsAlone(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	now := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
@@ -177,6 +185,8 @@ func TestMaintenanceRoundLeavesJobScheduleCellsAlone(t *testing.T) {
 // only a later whole-cell set that omits a row, or C5's tenant purge,
 // deletes one.
 func TestMaintenanceRoundLeavesJobSchedulesAlone(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	now := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)

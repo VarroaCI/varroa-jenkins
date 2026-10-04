@@ -81,6 +81,8 @@ func activeMember(cell string, slot int32, instance string) member {
 // TestAnnounceStoresTheMemberListWhole asserts the announce writes the
 // whole member list and recomputes the home map inside the same call.
 func TestAnnounceStoresTheMemberListWhole(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	seedJobHomePaths(t, db, "acme/api", "acme/web")
@@ -113,6 +115,8 @@ func TestAnnounceStoresTheMemberListWhole(t *testing.T) {
 // TestAnnounceRecomputeIsIdempotent asserts a repeat announce with the
 // same member list writes the same map.
 func TestAnnounceRecomputeIsIdempotent(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	seedJobHomePaths(t, db, "acme/api", "acme/web", "acme/ops")
@@ -135,6 +139,8 @@ func TestAnnounceRecomputeIsIdempotent(t *testing.T) {
 // to two re-homes only onto slot 1, and that a scale back re-homes only
 // the jobs of the slot it removes.
 func TestJobHomeScaleUpMovesOnlyOntoTheNewSlot(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	var paths []string
@@ -189,6 +195,8 @@ func TestJobHomeScaleUpMovesOnlyOntoTheNewSlot(t *testing.T) {
 // TestJobHomesAnUnseenJobAnswersItsComputedHome asserts a path the
 // recorder has never stored resolves to its hash slot through memberForJob.
 func TestJobHomesAnUnseenJobAnswersItsComputedHome(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	seedJobHomePaths(t, db, "acme/api")
@@ -212,6 +220,8 @@ func TestJobHomesAnUnseenJobAnswersItsComputedHome(t *testing.T) {
 // home of a job that first appears between two announces, and that a
 // repeat round writes nothing.
 func TestRefreshJobHomesStoresANewJob(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	seedJobHomePaths(t, db, "acme/api")
@@ -250,6 +260,8 @@ func TestRefreshJobHomesStoresANewJob(t *testing.T) {
 // rule: a member whose instance changed loses its own seed state, and a
 // member whose instance is unchanged keeps what the request reports.
 func TestAnnounceClearsOnlyTheChangedMemberSeed(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -336,6 +348,8 @@ func readScheduleRowAddress(t *testing.T, db *sql.DB, jobPath string) (scheduleR
 // cell, at the placement's generation. A row whose home does not move
 // keeps its address and its generation.
 func TestRefreshJobHomesMovesTheScheduleRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	moved := pathOnSlot(t, 1)
@@ -371,6 +385,8 @@ func TestRefreshJobHomesMovesTheScheduleRow(t *testing.T) {
 // TestRefreshJobHomesLeavesARowOnAnUnboundSlot asserts a home slot that
 // holds no cell leaves the row as it is.
 func TestRefreshJobHomesLeavesARowOnAnUnboundSlot(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	moved := pathOnSlot(t, 1)
@@ -398,6 +414,8 @@ func TestRefreshJobHomesLeavesARowOnAnUnboundSlot(t *testing.T) {
 // while a schedule ingest holds its FOR SHARE home read, so the write
 // cannot move a row between that read and the ingest's upsert.
 func TestRefreshJobHomesWaitsForAnIngestHomeRead(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	moved := pathOnSlot(t, 1)

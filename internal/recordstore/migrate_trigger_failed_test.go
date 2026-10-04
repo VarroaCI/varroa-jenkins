@@ -10,6 +10,8 @@ import (
 // TestRunsAcceptsTriggerFailedResult asserts that migration 00008 widens
 // runs_result_check, so a runs row can hold the result TRIGGER_FAILED.
 func TestRunsAcceptsTriggerFailedResult(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 
 	runID := uuid.Must(uuid.NewV7()).String()

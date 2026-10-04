@@ -64,6 +64,8 @@ func readLockRow(t *testing.T, db *sql.DB, runID uuid.UUID) (instance string, ge
 // asserts the move raises the lock's stored generation, so the resumed
 // run renews its own lock after the takeover.
 func TestTakeoverResumesOnTheJobsHomeSlot(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
 	received := collectActions(t, conn)
@@ -107,6 +109,8 @@ func TestTakeoverResumesOnTheJobsHomeSlot(t *testing.T) {
 // changes no row: the guard names the dead instance, which the first move
 // already replaced.
 func TestTakeoverRepeatWritesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
 	received := collectActions(t, conn)
@@ -141,6 +145,8 @@ func TestTakeoverRepeatWritesNothing(t *testing.T) {
 // resolves the run's own job path, so a slot-1 job never resumes on slot
 // 0's cell.
 func TestResumeTargetAnswersTheHomeSlotMember(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedMeshSlotPlacement(t, db, 7, "pod-live", map[string]int32{testJobPath: 1})
 

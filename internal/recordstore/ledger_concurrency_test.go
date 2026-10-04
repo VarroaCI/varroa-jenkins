@@ -80,8 +80,7 @@ func TestConcurrencyCancelPublishesForOlderRun(t *testing.T) {
 	conn := newTestActionConn(t)
 	received := subscribeCancelActions(t, conn, 4)
 
-	reader, restore := swapMeterProvider(t)
-	defer restore()
+	reader := useTestMeterProvider(t)
 	concurrencyMetrics, err := NewConcurrencyMetrics()
 	if err != nil {
 		t.Fatalf("new concurrency metrics: %v", err)
@@ -140,8 +139,7 @@ func TestConcurrencyCancelBoundedAtEight(t *testing.T) {
 	conn := newTestActionConn(t)
 	received := subscribeCancelActions(t, conn, olderCount)
 
-	reader, restore := swapMeterProvider(t)
-	defer restore()
+	reader := useTestMeterProvider(t)
 	concurrencyMetrics, err := NewConcurrencyMetrics()
 	if err != nil {
 		t.Fatalf("new concurrency metrics: %v", err)
@@ -198,6 +196,8 @@ collect:
 // TestConcurrencyCancelAllowTenantPublishesNothing asserts a tenant
 // whose policy is allow (the default) triggers no cancel_run action.
 func TestConcurrencyCancelAllowTenantPublishesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedTenantPlacementPolicy(t, db, `{"concurrency":"allow"}`)
 
@@ -225,6 +225,8 @@ func TestConcurrencyCancelAllowTenantPublishesNothing(t *testing.T) {
 // returns its decision before the concurrency cancel publishes,
 // following design D10's "answer the claim before the cancel".
 func TestConcurrencyCancelAnswersClaimBeforePublishing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedTenantPlacementPolicy(t, db, `{"concurrency":"cancelInProgress"}`)
 

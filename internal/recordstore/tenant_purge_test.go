@@ -67,6 +67,8 @@ func countTenantRows(t *testing.T, db *sql.DB, tenant string) int {
 // generation, leaves the newer-generation and other-tenant rows in
 // place, and answers a repeat with the same success.
 func TestTenantPurgeResponderIntegration(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ing := NewIngester(pool, nil, nil)
 

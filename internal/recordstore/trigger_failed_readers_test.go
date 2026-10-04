@@ -47,6 +47,8 @@ func seedSyntheticRowForRun(t *testing.T, db *sql.DB, runID uuid.UUID, createdAt
 // carries only the real build. A synthetic row holds a null build number, and
 // the mite refuses a seeded build numbered zero, which fails the whole bundle.
 func TestRehydrationSeedSkipsATriggerFailedRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -81,6 +83,8 @@ func TestRehydrationSeedSkipsATriggerFailedRun(t *testing.T) {
 // only record is a refused trigger reaches no seed at all. It holds no
 // job_numbers row either, because the trigger reached no claim gate.
 func TestRehydrationEnumerationSkipsATriggerFailedOnlyJob(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -105,6 +109,8 @@ func TestRehydrationEnumerationSkipsATriggerFailedOnlyJob(t *testing.T) {
 // a recorded build, so it must not make the ledger keep the old owner and then
 // judge the real completion foreign.
 func TestClaimMovesOwnershipPastATriggerFailedRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	ledger := NewLedger(pool, nil)
@@ -148,6 +154,8 @@ func TestClaimMovesOwnershipPastATriggerFailedRow(t *testing.T) {
 // and a summary marked incomplete would survive a later supersede and mislabel
 // the real run's log.
 func TestFinalizeStaleLogsSkipsATriggerFailedRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	runID := seedSyntheticTriggerFailedRun(t, db, testJobPath, time.Now().UTC().Add(-2*time.Hour))
@@ -180,6 +188,8 @@ func TestFinalizeStaleLogsSkipsATriggerFailedRun(t *testing.T) {
 // would otherwise become the real run's log-finalization anchor, and the first
 // log chunk could then miss a deadline that already passed.
 func TestOwnerLookupIgnoresATriggerFailedRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	ledger := NewLedger(pool, nil)
@@ -227,6 +237,8 @@ func TestOwnerLookupIgnoresATriggerFailedRow(t *testing.T) {
 // orphan-intent rule keeps its meaning: a synthetic row is no recorded build,
 // so a granted intent older than the orphan age still leaves the table.
 func TestSweepIntentsDeletesAnOrphanPastATriggerFailedRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	ledger := NewLedger(pool, nil)
@@ -270,6 +282,8 @@ func TestSweepIntentsDeletesAnOrphanPastATriggerFailedRow(t *testing.T) {
 // The run identifier repeats when the operator redelivers the same trigger
 // action, so the intent can arrive after the refused trigger.
 func TestCrossTenantRunStateIgnoresATriggerFailedRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	ledger := NewLedger(pool, nil)

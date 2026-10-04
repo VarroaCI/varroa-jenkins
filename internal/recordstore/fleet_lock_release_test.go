@@ -10,6 +10,8 @@ import (
 // confirmation that deletes two releasing rows publishes two released
 // notifications, each carrying that row's own job path.
 func TestReleaseConfirmedFleetLocks_PublishesOnePerRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	now := time.Now().UTC()
 
@@ -89,6 +91,8 @@ func TestReleaseConfirmedFleetLocks_PublishesOnePerRow(t *testing.T) {
 // TestReleaseConfirmedFleetLocks_NilNotifierReleasesWithoutPublishing
 // asserts a confirmation with no notifier still deletes its rows.
 func TestReleaseConfirmedFleetLocks_NilNotifierReleasesWithoutPublishing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	now := time.Now().UTC()
 
@@ -120,6 +124,8 @@ func TestReleaseConfirmedFleetLocks_NilNotifierReleasesWithoutPublishing(t *test
 // TestFleetLockRelease_ControllerTenantReleasesItsOwnLock asserts a
 // non-cell controller releases its own lock by the bare name alone.
 func TestFleetLockRelease_ControllerTenantReleasesItsOwnLock(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, controllerTenant, "team-pay", "ci", 0, "ci-0", "ci-0", nil)
 
@@ -151,6 +157,8 @@ func TestFleetLockRelease_ControllerTenantReleasesItsOwnLock(t *testing.T) {
 // TestFleetLockRelease_SlashInNameAnswersInvalidName asserts a release
 // whose name holds a "/" is vetoed and deletes nothing.
 func TestFleetLockRelease_SlashInNameAnswersInvalidName(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 
 	now := time.Now().UTC()
@@ -174,6 +182,8 @@ func TestFleetLockRelease_SlashInNameAnswersInvalidName(t *testing.T) {
 // tenant other than the row's own holder deletes nothing, even when it
 // names the lock's owner and the holder's run id.
 func TestFleetLockRelease_OtherTenantCannotRelease(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 
 	now := time.Now().UTC()

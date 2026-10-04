@@ -149,7 +149,7 @@ func runRefire(t *testing.T, pool *pgxpool.Pool, conn *bus.Conn, metrics *Interr
 // tenant's CURRENT cell, and stamps refired_at.
 func TestRefirePublishesAndMarks(t *testing.T) {
 	pool, db := setupLedgerPool(t)
-	reader := useManualMeter(t)
+	reader := useTestMeterProvider(t)
 	conn := newTestActionConn(t)
 	received := collectActions(t, conn)
 
@@ -199,6 +199,8 @@ func TestRefirePublishesAndMarks(t *testing.T) {
 // second round over the same intent publishes no second action, because
 // refired_at is set.
 func TestRefireSecondRoundPublishesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
 	received := collectActions(t, conn)
@@ -229,7 +231,7 @@ func TestRefireSecondRoundPublishesNothing(t *testing.T) {
 // build forever. A later round with a live connection then publishes.
 func TestRefireClearsTheMarkerOnAPublishFailure(t *testing.T) {
 	pool, db := setupLedgerPool(t)
-	reader := useManualMeter(t)
+	reader := useTestMeterProvider(t)
 
 	intentKey := "manual:" + newTestUUIDv7String()
 	seedRefireIntent(t, db, intentKey, refireDeadInstance, "")
@@ -293,6 +295,8 @@ func TestRefireClearsTheMarkerOnAPublishFailure(t *testing.T) {
 // intent leave exactly one winner, which is what makes two recorder
 // replicas publish one action between them.
 func TestRefireMarkerAdmitsOneWriter(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	intentKey := "manual:" + newTestUUIDv7String()
@@ -345,7 +349,7 @@ func TestRefireRefusalRules(t *testing.T) {
 
 	t.Run("a parameterized intent is skipped", func(t *testing.T) {
 		pool, db := setupLedgerPool(t)
-		reader := useManualMeter(t)
+		reader := useTestMeterProvider(t)
 		conn := newTestActionConn(t)
 
 		intentKey := "manual:" + newTestUUIDv7String()
@@ -382,7 +386,7 @@ func TestRefireRefusalRules(t *testing.T) {
 
 	t.Run("a missing live instance defers the re-fire", func(t *testing.T) {
 		pool, db := setupLedgerPool(t)
-		reader := useManualMeter(t)
+		reader := useTestMeterProvider(t)
 		conn := newTestActionConn(t)
 
 		intentKey := "manual:" + newTestUUIDv7String()
@@ -510,7 +514,7 @@ func ingestRejectedTrigger(t *testing.T, pool *pgxpool.Pool, metrics *Interrupte
 // re-selects the intent.
 func TestRefireRejectedTriggerClearsTheMarker(t *testing.T) {
 	pool, db := setupLedgerPool(t)
-	reader := useManualMeter(t)
+	reader := useTestMeterProvider(t)
 	conn := newTestActionConn(t)
 	received := collectActions(t, conn)
 
@@ -558,7 +562,7 @@ func TestRefireRejectedTriggerClearsTheMarker(t *testing.T) {
 // that reached no Jenkins clears the marker, like a rejected one.
 func TestRefireUnreachableTriggerClearsTheMarker(t *testing.T) {
 	pool, db := setupLedgerPool(t)
-	reader := useManualMeter(t)
+	reader := useTestMeterProvider(t)
 	conn := newTestActionConn(t)
 	received := collectActions(t, conn)
 
@@ -590,7 +594,7 @@ func TestRefireUnreachableTriggerClearsTheMarker(t *testing.T) {
 // the intent stays for a person.
 func TestRefirePermanentRejectionKeepsTheMarker(t *testing.T) {
 	pool, db := setupLedgerPool(t)
-	reader := useManualMeter(t)
+	reader := useTestMeterProvider(t)
 	conn := newTestActionConn(t)
 	received := collectActions(t, conn)
 
@@ -625,7 +629,7 @@ func TestRefirePermanentRejectionKeepsTheMarker(t *testing.T) {
 // holds one row for every attempt; refire_attempts is the only bound.
 func TestRefireAttemptBoundStopsTheSixthAttempt(t *testing.T) {
 	pool, db := setupLedgerPool(t)
-	reader := useManualMeter(t)
+	reader := useTestMeterProvider(t)
 	conn := newTestActionConn(t)
 	received := collectActions(t, conn)
 
@@ -669,6 +673,8 @@ func TestRefireAttemptBoundStopsTheSixthAttempt(t *testing.T) {
 // and its intent key, so a following claim from the new instance answers
 // granted with the same run identifier.
 func TestRefireAndMarkAreIndependent(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
 	collectActions(t, conn)
@@ -735,6 +741,8 @@ func TestRefireAndMarkAreIndependent(t *testing.T) {
 // intent whose owner marked the start. The owner can have started the
 // build, and a re-fire would then run it a second time.
 func TestRefireSkipsMarkedIntent(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	intentKey := "manual:" + newTestUUIDv7String()

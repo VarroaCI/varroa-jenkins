@@ -92,6 +92,8 @@ func readTenantPlacement(t *testing.T, db *sql.DB, tenant string) storedTenantPl
 // it asserts a fresh placement's tenant, namespace, cell, and generation
 // land exactly as announced.
 func TestTenantSyncAnnounceStoresRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -122,6 +124,8 @@ func TestTenantSyncAnnounceStoresRow(t *testing.T) {
 // test for kind "records": it seeds one completed run and asserts the
 // responder's reply matches ListRehydrationRecords.
 func TestTenantSyncRecordsAnswersFromListRehydrationRecords(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	n := int64(1)
@@ -145,6 +149,8 @@ func TestTenantSyncRecordsAnswersFromListRehydrationRecords(t *testing.T) {
 // TestTenantSyncUnknownKindIsError asserts a request naming a kind other
 // than announce or records answers an error and writes nothing.
 func TestTenantSyncUnknownKindIsError(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -166,6 +172,8 @@ func TestTenantSyncUnknownKindIsError(t *testing.T) {
 // above generation 0 loses its seed state when a later announce raises
 // the generation, even though the request still names the old seed.
 func TestTenantSyncAnnounceClearsSeedOnGenerationRise(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -209,6 +217,8 @@ func TestTenantSyncAnnounceClearsSeedOnGenerationRise(t *testing.T) {
 // the same generation names a new cell instance, matching a pod roll
 // with no generation change.
 func TestTenantSyncAnnounceClearsSeedOnCellInstanceChange(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -247,6 +257,8 @@ func TestTenantSyncAnnounceClearsSeedOnCellInstanceChange(t *testing.T) {
 // seeds itself from the announced cell instance on the very first
 // announce.
 func TestTenantSyncAnnounceGenerationZeroSeedsImmediately(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -273,6 +285,8 @@ func TestTenantSyncAnnounceGenerationZeroSeedsImmediately(t *testing.T) {
 // single-tenant controller would lose its seed state on every pod
 // restart and the fence would hold its builds forever.
 func TestTenantSyncAnnounceGenerationZeroRestartRepeatsSeed(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -313,6 +327,8 @@ func TestTenantSyncAnnounceGenerationZeroRestartRepeatsSeed(t *testing.T) {
 // replacing it, keeps the entry a RUNNING run names, and trims the rest
 // to ten.
 func TestTenantSyncAnnounceMergesAndTrimsDeadInstances(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	insertStubRunsRow(t, db, newTestUUIDv7String())
@@ -370,6 +386,8 @@ func TestTenantSyncAnnounceMergesAndTrimsDeadInstances(t *testing.T) {
 // with a null refired_at holds no runs row, so the first two arms of the
 // keep set would miss it.
 func TestDeadInstancesTrimKeepsPendingRefireEntry(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -523,6 +541,8 @@ func sendTenantSyncWithMetrics(t *testing.T, pool *pgxpool.Pool, conn *bus.Conn,
 // its agent namespace, and a later announce replaces the stored value
 // with the announced one.
 func TestTenantSyncAnnounceStoresAgentNamespace(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -567,6 +587,8 @@ func derivedEntry(t *testing.T, db *sql.DB, instance string) (TenantSyncDeadInst
 // cell reports a new instance leaves its old instance in dead_instances,
 // tagged rolled and with no confirmation, while the operator reports none.
 func TestTenantSyncAnnounceDerivesARolledMemberInstance(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -590,6 +612,8 @@ func TestTenantSyncAnnounceDerivesARolledMemberInstance(t *testing.T) {
 // whose cell the request drops leaves its instance in dead_instances,
 // tagged dropped.
 func TestTenantSyncAnnounceDerivesADroppedMemberInstance(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -609,6 +633,8 @@ func TestTenantSyncAnnounceDerivesADroppedMemberInstance(t *testing.T) {
 // the moved window. The operator sends such an entry for a member that
 // leaves a live cell. A later entry with a confirmation releases the lock.
 func TestTenantSyncAnnounceUnconfirmedLeftMemberKeepsAReleasingLock(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	now := time.Now().UTC()
@@ -645,6 +671,8 @@ func TestTenantSyncAnnounceUnconfirmedLeftMemberKeepsAReleasingLock(t *testing.T
 // TestTenantSyncAnnounceDerivationIsIdempotent asserts a repeated announce
 // keeps the derived entry as it is and adds no second one.
 func TestTenantSyncAnnounceDerivationIsIdempotent(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -668,6 +696,8 @@ func TestTenantSyncAnnounceDerivationIsIdempotent(t *testing.T) {
 // stale announce from an old shard owner therefore never lists the live
 // pod dead.
 func TestTenantSyncAnnounceStaleAnnounceDerivesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -685,6 +715,8 @@ func TestTenantSyncAnnounceStaleAnnounceDerivesNothing(t *testing.T) {
 // below the stored generation derives nothing from the member list it
 // names.
 func TestTenantSyncAnnounceLowerGenerationDerivesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -723,6 +755,8 @@ func assertStaleReply(t *testing.T, resp TenantSyncResponse) {
 // TestTenantSyncAnnounceStaleAnnounceKeepsTheStoredRow asserts an old
 // shard owner's announce, which names a replaced pod, changes no column.
 func TestTenantSyncAnnounceStaleAnnounceKeepsTheStoredRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	seedJobHomePaths(t, db, "acme/api", "acme/web")
@@ -744,6 +778,8 @@ func TestTenantSyncAnnounceStaleAnnounceKeepsTheStoredRow(t *testing.T) {
 // TestTenantSyncAnnounceStaleAnnounceKeepsTheSeed asserts the seed of the
 // live pod survives a stale announce and the fresh announce after it.
 func TestTenantSyncAnnounceStaleAnnounceKeepsTheSeed(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -778,6 +814,8 @@ func TestTenantSyncAnnounceStaleAnnounceKeepsTheSeed(t *testing.T) {
 // TestTenantSyncAnnounceLowerGenerationKeepsTheCell asserts an announce
 // below the stored generation keeps the stored cell and members.
 func TestTenantSyncAnnounceLowerGenerationKeepsTheCell(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -794,6 +832,8 @@ func TestTenantSyncAnnounceLowerGenerationKeepsTheCell(t *testing.T) {
 // a new incarnation takes the row over at a lower generation, even when it
 // names an instance the old tenant listed as confirmed gone.
 func TestTenantSyncAnnounceTakeOverBelowTheStoredGenerationIsAccepted(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -818,6 +858,8 @@ func TestTenantSyncAnnounceTakeOverBelowTheStoredGenerationIsAccepted(t *testing
 // returns to a live pod it left is not refused. The recorder lists that
 // pod as dropped, and a dropped entry proves no replacement.
 func TestTenantSyncAnnounceReturnToALeftPodIsAccepted(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -845,6 +887,8 @@ func TestTenantSyncAnnounceReturnToALeftPodIsAccepted(t *testing.T) {
 // that later rolls is derived again, tagged rolled and with a fresh
 // last_seen_at, because the return removed its old dropped entry.
 func TestTenantSyncAnnounceReturnThenRollDerivesRolled(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -876,6 +920,8 @@ func TestTenantSyncAnnounceReturnThenRollDerivesRolled(t *testing.T) {
 // not the scalar cell_instance, so without the removal the rolled entry
 // would release the lock of a live pod.
 func TestTenantSyncAnnounceNamedPodKeepsItsLock(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -914,6 +960,8 @@ func TestTenantSyncAnnounceNamedPodKeepsItsLock(t *testing.T) {
 // TestTenantSyncAnnounceStaleAnnounceMarksNoRun asserts a stale announce
 // runs no interrupted-run marking against the live pod's run.
 func TestTenantSyncAnnounceStaleAnnounceMarksNoRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	runID := seedStaleRunOn(t, db, "cell-a", "pod-a2")
@@ -944,6 +992,8 @@ func TestTenantSyncAnnounceStaleAnnounceMarksNoRun(t *testing.T) {
 // releases it in the same announce, because the old pod is confirmed gone
 // past the grace.
 func TestTenantSyncAnnounceReleasesLockOfRunItMarks(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	runID := seedStaleRunOn(t, db, "cell-a", "pod-a1")

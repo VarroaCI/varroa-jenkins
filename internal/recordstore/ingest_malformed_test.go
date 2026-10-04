@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"go.opentelemetry.io/otel"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
@@ -21,11 +19,7 @@ func TestIngestConsumerAcknowledgesMalformedEnvelope(t *testing.T) {
 	pool, _ := setupLedgerPool(t)
 	payloadRunID := seedGrantedIntent(t, pool, "manual:malformed-payload")
 
-	reader := sdkmetric.NewManualReader()
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	prev := otel.GetMeterProvider()
-	otel.SetMeterProvider(mp)
-	t.Cleanup(func() { otel.SetMeterProvider(prev) })
+	reader := useTestMeterProvider(t)
 
 	s := startIngestTestServer(t)
 	conn, err := bus.Connect(s.ClientURL())

@@ -14,6 +14,8 @@ import (
 // search_tsv write and asserts the generated column is populated from
 // the pinned expression.
 func TestActivitySearchTSVGenerated(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 
@@ -42,6 +44,8 @@ func TestActivitySearchTSVGenerated(t *testing.T) {
 // pinned expression against runs and job_schedules is answered by an
 // index scan, proving the expression index accelerates it.
 func TestSearchExpressionIndexesAreUsed(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 
@@ -108,6 +112,8 @@ func assertIndexScan(ctx context.Context, t *testing.T, db *sql.DB, query string
 // TestJobSchedulesPrimaryKey asserts the (cluster, tenant, job_path,
 // trigger_type) primary key rejects a duplicate row.
 func TestJobSchedulesPrimaryKey(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 
@@ -133,6 +139,8 @@ func TestJobSchedulesPrimaryKey(t *testing.T) {
 // watermark row survives an empty set deleting every job_schedules row
 // of that cell.
 func TestJobScheduleCellsPrimaryKeyAndSurvival(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 

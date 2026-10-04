@@ -37,6 +37,8 @@ func waitForRowLockWaiter(t *testing.T, db *sql.DB, fragment string) {
 // loaded the intent row holds a lock a concurrent claim on the same run
 // waits for, and that the claim proceeds once the transaction commits.
 func TestLoadIntentBlocksConcurrentClaim(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	ledger := NewLedger(pool, nil)
@@ -87,6 +89,8 @@ func TestLoadIntentBlocksConcurrentClaim(t *testing.T) {
 // intent, and then compares against the refreshed number: the old
 // instance's start for the old number reads as superseded.
 func TestClaimRefreshBlocksConcurrentLoadIntent(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	ledger := NewLedger(pool, nil)

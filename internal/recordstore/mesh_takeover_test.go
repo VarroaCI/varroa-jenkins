@@ -136,7 +136,7 @@ func runTakeoverWithLogs(t *testing.T, pool *pgxpool.Pool, conn *bus.Conn, metri
 func TestTakeOverLostRunsArmsWithNoTarget(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
-	reader := useManualMeter(t)
+	reader := useTestMeterProvider(t)
 
 	runID := seedMeshRunningRun(t, pool, db)
 	seedMeshPlacement(t, db, "", "")
@@ -166,7 +166,7 @@ func TestTakeOverLostRunsArmsWithNoTarget(t *testing.T) {
 func TestTakeOverLostRunsArmsOnlyOnce(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
-	reader := useManualMeter(t)
+	reader := useTestMeterProvider(t)
 
 	runID := seedMeshRunningRun(t, pool, db)
 	seedMeshPlacement(t, db, "", "")
@@ -200,6 +200,8 @@ func TestTakeOverLostRunsArmsOnlyOnce(t *testing.T) {
 // row, and that the published resume_run action's Files list ends with
 // the build record.
 func TestTakeOverLostRunsDispatchesToLiveTarget(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
 	received := collectActions(t, conn)
@@ -271,6 +273,8 @@ func TestTakeOverLostRunsDispatchesToLiveTarget(t *testing.T) {
 // TestTakeOverLostRunsSecondDispatchPublishesNothing asserts a repeat
 // round over an already-dispatched run moves nothing further.
 func TestTakeOverLostRunsSecondDispatchPublishesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
 	received := collectActions(t, conn)
@@ -299,6 +303,8 @@ func TestTakeOverLostRunsSecondDispatchPublishesNothing(t *testing.T) {
 // rolls the whole transaction back: statement 3 changes no row, so the
 // first two statements' moves are undone.
 func TestDispatchMeshResumeRollsBackOnRealCompletion(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	runID := seedMeshRunningRun(t, pool, db)
@@ -413,6 +419,8 @@ func TestResumeFileListOrdersBuildRecordLast(t *testing.T) {
 // read with. An ingest that supersedes an epoch deletes the older object,
 // so an action built from a stale copy could name an object that is gone.
 func TestDispatchMeshResumeReadsTheRecordedEpoch(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	runID := seedMeshRunningRun(t, pool, db)
@@ -486,7 +494,7 @@ func TestDispatchMeshResumeReadsTheRecordedEpoch(t *testing.T) {
 func TestTakeOverLostRunsPublishesNoLockNotification(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
-	useManualMeter(t)
+	useTestMeterProvider(t)
 
 	runID := seedMeshRunningRun(t, pool, db)
 	seedMeshFleetLock(t, db, runID)

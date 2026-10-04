@@ -26,6 +26,8 @@ func seedUpstreamTrigger(t *testing.T, db *sql.DB, cluster, tenant, jobPath, ups
 // downstream edge on the producer's job, both granted when the
 // producer's exports cover the subscriber.
 func TestJobDependencies_UpstreamAndDownstream(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -71,6 +73,8 @@ func TestJobDependencies_UpstreamAndDownstream(t *testing.T) {
 // than the producer still resolves granted: the grant check must
 // resolve the subscriber's own placement, not the producer's cluster.
 func TestJobDependencies_DownstreamSubscriberInAnotherCluster(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -99,6 +103,8 @@ func TestJobDependencies_DownstreamSubscriberInAnotherCluster(t *testing.T) {
 // whose producer grants nobody still appears, with Granted false, rather
 // than being dropped from the list.
 func TestJobDependencies_UngrantedEdgeStaysVisible(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -132,6 +138,8 @@ func TestJobDependencies_UngrantedEdgeStaysVisible(t *testing.T) {
 // varroa-upstream trigger and no subscriber reports two empty, non-nil
 // arrays.
 func TestJobDependencies_EmptyForNoEdge(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()

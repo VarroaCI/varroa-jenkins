@@ -24,6 +24,8 @@ func insertLockRowForTenant(t *testing.T, db *sql.DB, name, runID, tenant, jobPa
 // TestSweepFleetLocks_ExpiredRowIsDeleted asserts task 4.4's first
 // acceptance test: an ordinary expired row is deleted.
 func TestSweepFleetLocks_ExpiredRowIsDeleted(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	now := time.Now()
@@ -46,6 +48,8 @@ func TestSweepFleetLocks_ExpiredRowIsDeleted(t *testing.T) {
 // acceptance test: a row whose lease was renewed, and so has not
 // expired, survives the round.
 func TestSweepFleetLocks_RenewedRowIsKept(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	now := time.Now()
@@ -68,6 +72,8 @@ func TestSweepFleetLocks_RenewedRowIsKept(t *testing.T) {
 // TestSweepFleetLocks_ExpiredReleasingRowIsKept asserts task 4.4's third
 // acceptance test: the sweep skips a releasing row, whatever its lease.
 func TestSweepFleetLocks_ExpiredReleasingRowIsKept(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	now := time.Now()
@@ -98,7 +104,7 @@ func TestSweepFleetLocks_MetricsCountedThroughMaintenanceRound(t *testing.T) {
 	insertFleetLockRow(t, db, fleetLockStateMachineTestName, newTestUUIDv7String(), FleetLockStateHeld,
 		now.Add(-20*time.Minute), now.Add(-time.Minute))
 
-	reader := fanoutTestMeter(t)
+	reader := useTestMeterProvider(t)
 	metrics, err := NewFleetLockMetrics(pool)
 	if err != nil {
 		t.Fatalf("new fleet lock metrics: %v", err)
@@ -129,6 +135,8 @@ func TestSweepFleetLocks_MetricsCountedThroughMaintenanceRound(t *testing.T) {
 // move across three tenants publishes three releasing notifications,
 // each carrying that row's own tenant and job path.
 func TestSweepFleetLocks_MovePublishesOneNotificationPerMovedRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	now := time.Now()
@@ -174,6 +182,8 @@ func TestSweepFleetLocks_MovePublishesOneNotificationPerMovedRow(t *testing.T) {
 // expired row of each of two tenants publishes two released
 // notifications in one batch, each naming its own row.
 func TestSweepFleetLocks_PublishesOneNotificationPerDeletedRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	now := time.Now()
@@ -212,6 +222,8 @@ func TestSweepFleetLocks_PublishesOneNotificationPerDeletedRow(t *testing.T) {
 // row survives the sweep, whatever its lease, and publishes nothing,
 // because its state does not change.
 func TestSweepFleetLocks_ReleasingRowPublishesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	now := time.Now()
@@ -247,7 +259,7 @@ func TestSweepFleetLocks_NilNotifierStillDeletesRows(t *testing.T) {
 	insertFleetLockRow(t, db, fleetLockStateMachineTestName, runID, FleetLockStateHeld,
 		now.Add(-20*time.Minute), now.Add(-time.Minute))
 
-	reader := fanoutTestMeter(t)
+	reader := useTestMeterProvider(t)
 	metrics, err := NewFleetLockMetrics(pool)
 	if err != nil {
 		t.Fatalf("new fleet lock metrics: %v", err)

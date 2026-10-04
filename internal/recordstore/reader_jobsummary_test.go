@@ -28,6 +28,8 @@ func seedJobSummaryRun(t *testing.T, db *sql.DB, jobPath string, createdAt time.
 // the right recent results, last run, and duration trend for each of
 // two jobs, without conflating them.
 func TestListJobSummariesGroupsByJobPath(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -82,6 +84,8 @@ func TestListJobSummariesGroupsByJobPath(t *testing.T) {
 // finished runs, newest first, and that a run with no result yet
 // (RUNNING) is skipped rather than occupying one of the five slots.
 func TestJobSummaryRecentResultsCapsAtFiveAndSkipsUnfinishedRuns(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -126,6 +130,8 @@ func TestJobSummaryRecentResultsCapsAtFiveAndSkipsUnfinishedRuns(t *testing.T) {
 // when every one of them lacks a duration, the trend stays empty
 // instead of reaching further back for an older run that has one.
 func TestJobSummaryDurationTrendDoesNotReachPastTheNewestRuns(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -149,6 +155,8 @@ func TestJobSummaryDurationTrendDoesNotReachPastTheNewestRuns(t *testing.T) {
 // TestGetJobSummaryUnknownJobHasNoRecentResults asserts a job with no
 // run at all returns an empty RecentResults and a nil LastRun.
 func TestGetJobSummaryUnknownJobHasNoRecentResults(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -170,6 +178,8 @@ func TestGetJobSummaryUnknownJobHasNoRecentResults(t *testing.T) {
 // job's waits, no value for a job that never started a build, and no
 // contribution from a run created before the window.
 func TestListJobSummariesAddsQueueWaitMedians(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()

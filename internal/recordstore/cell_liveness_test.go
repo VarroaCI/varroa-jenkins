@@ -209,6 +209,8 @@ func TestCellLivenessGoneNoConfirmationKeepsTheMovedWindow(t *testing.T) {
 // jsonb, and answers nil for an entry that holds none. The field lives
 // inside the existing column, so this needs no migration.
 func TestReadTenantPlacementLivenessRowCarriesConfirmation(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	confirmed := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
 

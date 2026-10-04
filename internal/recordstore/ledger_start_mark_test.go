@@ -52,6 +52,8 @@ func noConsumerRead(t *testing.T) func(context.Context) (*nats.ConsumerInfo, err
 // TestMarkStartStoresMarkForOwner: the owner's mark answers granted with
 // the stored number and writes start_marked_at.
 func TestMarkStartStoresMarkForOwner(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -74,6 +76,8 @@ func TestMarkStartStoresMarkForOwner(t *testing.T) {
 // TestMarkStartRepeatIsIdempotent: a second mark from the owner answers
 // granted and keeps the first mark time.
 func TestMarkStartRepeatIsIdempotent(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -91,6 +95,8 @@ func TestMarkStartRepeatIsIdempotent(t *testing.T) {
 // TestMarkStartOtherInstanceAnswersDuplicate: a mark from an instance the
 // intent does not name answers duplicate and writes nothing.
 func TestMarkStartOtherInstanceAnswersDuplicate(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -112,6 +118,8 @@ func TestMarkStartOtherInstanceAnswersDuplicate(t *testing.T) {
 // TestMarkStartMovedRunAnswersDuplicate: after a transfer to a new run, a
 // mark for the old run answers duplicate with the stored run.
 func TestMarkStartMovedRunAnswersDuplicate(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -135,6 +143,8 @@ func TestMarkStartMovedRunAnswersDuplicate(t *testing.T) {
 // no longer names ends that run's accepted-trigger row DUPLICATE, and a
 // mark from a former owner of the same run leaves the run's row alone.
 func TestMarkStartMovedRunMarksItsRowDuplicate(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 	status := func(runID string) string {
@@ -175,6 +185,8 @@ func TestMarkStartMovedRunMarksItsRowDuplicate(t *testing.T) {
 // TestMarkStartConsumedOwnerAnswersGranted: a mark for a consumed intent
 // of the same owner answers granted and writes nothing.
 func TestMarkStartConsumedOwnerAnswersGranted(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -194,6 +206,8 @@ func TestMarkStartConsumedOwnerAnswersGranted(t *testing.T) {
 // TestMarkStartLowerGenerationFenced: a mark with a generation below the
 // stored one answers FENCED and writes nothing.
 func TestMarkStartLowerGenerationFenced(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -214,6 +228,8 @@ func TestMarkStartLowerGenerationFenced(t *testing.T) {
 // TestMarkStartMissingIntentVetoed: a mark for a key no grant holds
 // answers INVALID_KEY and inserts no row.
 func TestMarkStartMissingIntentVetoed(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -228,6 +244,8 @@ func TestMarkStartMissingIntentVetoed(t *testing.T) {
 // TestMarkStartFenceVetoWritesNothing: a fence refusal reaches the caller
 // unchanged and stores no mark.
 func TestMarkStartFenceVetoWritesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	req := newTestClaimRequest("manual:mark-fence", 1)
 	mustGrant(t, NewLedger(pool, nil), req)
@@ -244,6 +262,8 @@ func TestMarkStartFenceVetoWritesNothing(t *testing.T) {
 // TestMarkStartFailsClosed: a fence that cannot answer, and a database
 // that does not answer, give an empty decision with a code.
 func TestMarkStartFailsClosed(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	req := newTestClaimRequest("manual:mark-closed", 1)
 	mustGrant(t, NewLedger(pool, nil), req)
@@ -265,6 +285,8 @@ func TestMarkStartFailsClosed(t *testing.T) {
 // another instance for a marked intent answers duplicate at once. It
 // reads no consumer, keeps the owner, and leaves the run's own row alone.
 func TestMarkedRepeatFromOtherInstanceAnswersDuplicate(t *testing.T) {
+	t.Parallel()
+
 	ledger, db := newHeldLedgerWithDB(t, noConsumerRead(t))
 
 	req := newTestClaimRequest("manual:marked-repeat", 1)
@@ -297,6 +319,8 @@ func TestMarkedRepeatFromOtherInstanceAnswersDuplicate(t *testing.T) {
 // TestMarkedRepeatFromSameInstanceReanswers: the owner's own repeat for a
 // marked intent answers granted with the stored number.
 func TestMarkedRepeatFromSameInstanceReanswers(t *testing.T) {
+	t.Parallel()
+
 	ledger, _ := newHeldLedgerWithDB(t, noConsumerRead(t))
 
 	req := newTestClaimRequest("manual:marked-same", 1)
@@ -313,6 +337,8 @@ func TestMarkedRepeatFromSameInstanceReanswers(t *testing.T) {
 // not take over a marked intent. It answers duplicate and the row keeps
 // the marked run.
 func TestMarkedIntentNeverTransfers(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -335,6 +361,8 @@ func TestMarkedIntentNeverTransfers(t *testing.T) {
 // at a higher generation, and the old owner's later mark answers
 // duplicate.
 func TestUnmarkedIntentStillTransfers(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -357,7 +385,7 @@ func TestUnmarkedIntentStillTransfers(t *testing.T) {
 // bus.LedgerClaimSubject to MarkStart and counts it by decision.
 func TestClaimResponderStartMark(t *testing.T) {
 	pool, db := setupLedgerPool(t)
-	reader := useManualMeter(t)
+	reader := useTestMeterProvider(t)
 	metrics, err := NewClaimMetrics()
 	if err != nil {
 		t.Fatalf("new claim metrics: %v", err)

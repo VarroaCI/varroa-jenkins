@@ -10,6 +10,8 @@ import (
 // SKIPPED precedes every SKIPPED row, and that each group orders by suite,
 // class name, and test name.
 func TestListTestCasesOrdersFailedFirst(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:cases-order-1")
 	g := NewIngester(pool, nil, nil)
@@ -55,6 +57,8 @@ func TestListTestCasesOrdersFailedFirst(t *testing.T) {
 // one row per run for one class and name, newest first, and honors the
 // limit.
 func TestListTestCaseHistoryNewestFirst(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	reader := NewReader(pool)

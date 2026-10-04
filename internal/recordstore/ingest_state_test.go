@@ -40,6 +40,8 @@ func readMeshFiles(t *testing.T, db *sql.DB, runID uuid.UUID) []runStateFile {
 // mesh.state_at and adds one mesh.files entry carrying the pushed
 // bytes, seq, and state_gen.
 func TestApplyRunStateStoresFileAndSetsAnchor(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -73,6 +75,8 @@ func TestApplyRunStateStoresFileAndSetsAnchor(t *testing.T) {
 // unchanged: the gateway's own counter is advisory and must not end a
 // run's replication.
 func TestApplyRunStateCapWarningLeavesAnchorUnchanged(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -108,6 +112,8 @@ func TestApplyRunStateCapWarningLeavesAnchorUnchanged(t *testing.T) {
 // TestApplyRunStateUpsertsByRelPath asserts a repeated relpath leaves
 // one mesh.files entry, carrying the newer bytes, seq, and state_gen.
 func TestApplyRunStateUpsertsByRelPath(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -134,6 +140,8 @@ func TestApplyRunStateUpsertsByRelPath(t *testing.T) {
 // mesh.state_at to JSON null, sets mesh.rejected_reason, clears
 // mesh.resume, and reports the run for a prefix delete.
 func TestApplyRunStateCapDeletesStateAndClearsResume(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -235,6 +243,8 @@ func readResumeInstance(t *testing.T, db *sql.DB, runID uuid.UUID) (string, bool
 // and a record left in place would shield the run from every
 // interruption test for the rest of its life.
 func TestHeartbeatFromTheTargetClearsTheResume(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -261,6 +271,8 @@ func TestHeartbeatFromTheTargetClearsTheResume(t *testing.T) {
 // dead instance had in flight clears nothing. Only the named target
 // proves the resume.
 func TestHeartbeatFromTheDeadInstanceKeepsTheResume(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -294,6 +306,8 @@ func TestHeartbeatFromTheDeadInstanceKeepsTheResume(t *testing.T) {
 // clear compares against the recorder's own receive clock and never the
 // pod's.
 func TestHeartbeatBeforeTheRequestKeepsTheResume(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -321,6 +335,8 @@ func TestHeartbeatBeforeTheRequestKeepsTheResume(t *testing.T) {
 // that arrives after a newer one leaves the record on the newer epoch,
 // and reports the older epoch's own key for deletion.
 func TestApplyRunStateKeepsTheHigherEpoch(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -353,6 +369,8 @@ func TestApplyRunStateKeepsTheHigherEpoch(t *testing.T) {
 // TestApplyRunStateSupersedesTheOlderObject asserts a newer epoch
 // replaces the entry and deletes the older epoch's object.
 func TestApplyRunStateSupersedesTheOlderObject(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -384,6 +402,8 @@ func TestApplyRunStateSupersedesTheOlderObject(t *testing.T) {
 // generation's own object. Two generations name two keys, so the older
 // object is one no reader needs.
 func TestApplyRunStateSupersedesTheOlderGeneration(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -450,6 +470,8 @@ func TestHasStateRejectsAnEntryWithNoPush(t *testing.T) {
 // named the epochs it read, and its target fetches them one at a time, so
 // a delete could remove an object the target still needs.
 func TestApplyRunStateKeepsTheObjectADispatchedResumeNames(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -529,6 +551,8 @@ func readMeshCapState(t *testing.T, db *sql.DB, runID uuid.UUID) (string, string
 // the objects the cap deletes, so the cap keeps the resume, the anchor,
 // and every object. It records mesh.cap_warned_at alone.
 func TestApplyRunStateCapHoldsWhileAResumeIsDispatched(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -573,6 +597,8 @@ func TestApplyRunStateCapHoldsWhileAResumeIsDispatched(t *testing.T) {
 // held cap is a wait and not an exemption. Once the target's heartbeat
 // clears mesh.resume, the next report ends the run's replication.
 func TestApplyRunStateCapEndsReplicationOnceTheResumeClears(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedGrantedIntent(t, pool, intentKey)

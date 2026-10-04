@@ -64,6 +64,8 @@ func seedRehydrationRunFull(t *testing.T, db *sql.DB, jobPath string, buildNumbe
 // one job and asserts a per-job limit of five returns the five newest,
 // newest first.
 func TestListRehydrationRecordsNewestFirst(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -98,6 +100,8 @@ func TestListRehydrationRecordsNewestFirst(t *testing.T) {
 // job-path list enumerates every job path holding a job_numbers row or
 // a completed run, including a multibranch child job.
 func TestListRehydrationRecordsEnumeratesJobPaths(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -136,6 +140,8 @@ func TestListRehydrationRecordsEnumeratesJobPaths(t *testing.T) {
 // successful run followed by twenty failures and asserts a request for
 // ten records still carries the successful run.
 func TestListRehydrationRecordsReturnsLastSuccessBeyondTheLimit(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -175,6 +181,8 @@ func TestListRehydrationRecordsReturnsLastSuccessBeyondTheLimit(t *testing.T) {
 // TestListRehydrationRecordsZeroLimitStillReturnsLastSuccess asserts a
 // per-job limit of zero still returns the job's one successful run.
 func TestListRehydrationRecordsZeroLimitStillReturnsLastSuccess(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -198,6 +206,8 @@ func TestListRehydrationRecordsZeroLimitStillReturnsLastSuccess(t *testing.T) {
 // build number still comes from job_numbers after every intent and run
 // of a job is deleted, matching retention's own promise.
 func TestListRehydrationRecordsNextNumberSurvivesRetention(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -231,6 +241,8 @@ func TestListRehydrationRecordsNextNumberSurvivesRetention(t *testing.T) {
 // TestListRehydrationRecordsOversizedRequestIsRefused asserts a request
 // naming 33 job paths is refused and reads nothing.
 func TestListRehydrationRecordsOversizedRequestIsRefused(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -248,6 +260,8 @@ func TestListRehydrationRecordsOversizedRequestIsRefused(t *testing.T) {
 // record carries its parameters, its masked parameter names, and its
 // changes.
 func TestListRehydrationRecordsCarriesParamsMaskedNamesAndChanges(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 

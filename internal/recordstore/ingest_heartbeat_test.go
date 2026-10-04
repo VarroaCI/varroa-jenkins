@@ -45,6 +45,8 @@ func startRunForSummary(t *testing.T, pool *pgxpool.Pool, runID uuid.UUID, inten
 // payload carries a summary value writes both the summary column and the
 // payload's summary_seq key.
 func TestHeartbeatRaisesTheSummaryAndItsWatermark(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	const intentKey = "manual:heartbeat-summary-1"
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -66,6 +68,8 @@ func TestHeartbeatRaisesTheSummaryAndItsWatermark(t *testing.T) {
 // nor the watermark. A redelivered or reordered heartbeat therefore
 // cannot restore an older line of text.
 func TestStaleHeartbeatLeavesTheSummaryAlone(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	const intentKey = "manual:heartbeat-summary-stale-1"
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -88,6 +92,8 @@ func TestStaleHeartbeatLeavesTheSummaryAlone(t *testing.T) {
 // the summary_seq key, whatever its seq. A run that never calls
 // varroa.summary therefore keeps both values null for its whole life.
 func TestHeartbeatWithoutASummaryChangesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	const intentKey = "manual:heartbeat-summary-absent-1"
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -110,6 +116,8 @@ func TestHeartbeatWithoutASummaryChangesNothing(t *testing.T) {
 // null and the concatenation that writes summary_seq reads a null left
 // operand.
 func TestHeartbeatSummaryOnANullPayloadRowStillRaises(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	const intentKey = "manual:heartbeat-summary-null-payload-1"
 	runID := seedGrantedIntent(t, pool, intentKey)

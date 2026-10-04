@@ -66,6 +66,8 @@ func statusTestDeps(t *testing.T) (CrossTenantDeps, *sql.DB) {
 // TestCrossTenantStatus_NoGrantAnswersCrossTenant covers task 3.4's
 // first acceptance: a caller with no grant gets CROSS_TENANT.
 func TestCrossTenantStatus_NoGrantAnswersCrossTenant(t *testing.T) {
+	t.Parallel()
+
 	deps, db := statusTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	seedTenantPlacement(t, db, "beta", "ns-beta", "cell-beta", 0, "pod-b", "pod-b", nil)
@@ -89,6 +91,8 @@ func TestCrossTenantStatus_NoGrantAnswersCrossTenant(t *testing.T) {
 // TestCrossTenantStatus_OwnTenantNeedsNoGrant covers task 3.4's second
 // acceptance: a caller inside its own tenant needs no grant.
 func TestCrossTenantStatus_OwnTenantNeedsNoGrant(t *testing.T) {
+	t.Parallel()
+
 	deps, db := statusTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	runID := seedCrossTenantRun(t, deps.Pool, "alpha", "alpha/release")
@@ -117,6 +121,8 @@ func TestCrossTenantStatus_OwnTenantNeedsNoGrant(t *testing.T) {
 // TestCrossTenantStatus_UnknownIntentKeyAnswersPending covers task 3.4's
 // third acceptance: an intent_key with no row answers pending.
 func TestCrossTenantStatus_UnknownIntentKeyAnswersPending(t *testing.T) {
+	t.Parallel()
+
 	deps, _ := statusTestDeps(t)
 
 	resp, err := handleCrossTenantStatus(context.Background(), deps, CrossTenantRequest{
@@ -138,6 +144,8 @@ func TestCrossTenantStatus_UnknownIntentKeyAnswersPending(t *testing.T) {
 // TestCrossTenantStatus_UnknownRunIDAnswersNotFound asserts a run_id with
 // no record answers NOT_FOUND with an error that names the identifier.
 func TestCrossTenantStatus_UnknownRunIDAnswersNotFound(t *testing.T) {
+	t.Parallel()
+
 	deps, _ := statusTestDeps(t)
 	runID := newTestUUIDv7String()
 
@@ -160,6 +168,8 @@ func TestCrossTenantStatus_UnknownRunIDAnswersNotFound(t *testing.T) {
 // TestCrossTenantStatus_BothIdentifiersRefused covers task 3.4's fourth
 // acceptance: a body carrying both identifiers is refused.
 func TestCrossTenantStatus_BothIdentifiersRefused(t *testing.T) {
+	t.Parallel()
+
 	deps, _ := statusTestDeps(t)
 
 	resp, err := handleCrossTenantStatus(context.Background(), deps, CrossTenantRequest{
@@ -182,6 +192,8 @@ func TestCrossTenantStatus_BothIdentifiersRefused(t *testing.T) {
 // TestCrossTenantStatus_NeitherIdentifierRefused asserts a body naming
 // neither run_id nor intent_key is refused the same way.
 func TestCrossTenantStatus_NeitherIdentifierRefused(t *testing.T) {
+	t.Parallel()
+
 	deps, _ := statusTestDeps(t)
 
 	resp, err := handleCrossTenantStatus(context.Background(), deps, CrossTenantRequest{
@@ -200,6 +212,8 @@ func TestCrossTenantStatus_NeitherIdentifierRefused(t *testing.T) {
 // 3.5's first acceptance: a job with no successful run answers an empty
 // result.
 func TestCrossTenantLastSuccessful_NoSuccessfulRunAnswersEmpty(t *testing.T) {
+	t.Parallel()
+
 	deps, db := statusTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 
@@ -225,6 +239,8 @@ func TestCrossTenantLastSuccessful_NoSuccessfulRunAnswersEmpty(t *testing.T) {
 // TestCrossTenantLastSuccessful_UngrantedCallerAnswersCrossTenant covers
 // task 3.5's second acceptance: an ungranted caller gets CROSS_TENANT.
 func TestCrossTenantLastSuccessful_UngrantedCallerAnswersCrossTenant(t *testing.T) {
+	t.Parallel()
+
 	deps, db := statusTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	seedTenantPlacement(t, db, "beta", "ns-beta", "cell-beta", 0, "pod-b", "pod-b", nil)
@@ -252,6 +268,8 @@ func TestCrossTenantLastSuccessful_UngrantedCallerAnswersCrossTenant(t *testing.
 // the grant check and before it reads the stored, qualified
 // runs.job_path.
 func TestCrossTenantLastSuccessful_RelativeJobPathReachesExportedGrant(t *testing.T) {
+	t.Parallel()
+
 	deps, db := statusTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	seedGrantPlacement(t, db, testCluster, "platform", "ns-platform", "cell-platform", 0,

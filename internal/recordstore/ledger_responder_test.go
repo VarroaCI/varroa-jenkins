@@ -33,6 +33,8 @@ func startResponderTestServer(t *testing.T) *server.Server {
 // bus.LedgerClaimSubject over an in-process NATS server, issues a
 // request, and asserts a granted reply.
 func TestClaimResponderIntegration(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 
 	s := startResponderTestServer(t)

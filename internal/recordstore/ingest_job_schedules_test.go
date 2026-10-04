@@ -72,6 +72,8 @@ func countJobScheduleRows(t *testing.T, db *sql.DB) int {
 // --- 10.4: no intent needed, two-tenant generations, fire-time round trip ---
 
 func TestApplyJobSchedules_NoIntentNeeded(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 
@@ -100,6 +102,8 @@ func TestApplyJobSchedules_NoIntentNeeded(t *testing.T) {
 }
 
 func TestApplyJobSchedules_TwoTenantsTwoGenerations(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 
@@ -127,6 +131,8 @@ func TestApplyJobSchedules_TwoTenantsTwoGenerations(t *testing.T) {
 }
 
 func TestApplyJobSchedules_FireTimesRoundTrip(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	reader := NewReader(pool)
 	g := NewIngester(pool, nil, nil)
@@ -168,6 +174,8 @@ func TestApplyJobSchedules_FireTimesRoundTrip(t *testing.T) {
 }
 
 func TestApplyJobSchedules_RemovedTriggerDisappears(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	ctx := context.Background()
@@ -210,6 +218,8 @@ func TestApplyJobSchedules_RemovedTriggerDisappears(t *testing.T) {
 }
 
 func TestApplyJobSchedules_TruncatedSetDeletesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	ctx := context.Background()
@@ -254,6 +264,8 @@ func TestApplyJobSchedules_TruncatedSetDeletesNothing(t *testing.T) {
 // upstream columns store in the same transaction as every other column
 // and the reader returns them, design.md D9.
 func TestApplyJobSchedules_VarroaUpstreamRoundTrip(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	reader := NewReader(pool)
 	g := NewIngester(pool, nil, nil)
@@ -289,6 +301,8 @@ func TestApplyJobSchedules_VarroaUpstreamRoundTrip(t *testing.T) {
 // removed varroa-upstream trigger stops firing on the next set: the row
 // disappears from the table.
 func TestApplyJobSchedules_VarroaUpstreamRemovedTriggerDeletesRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	ctx := context.Background()
@@ -334,6 +348,8 @@ func TestApplyJobSchedules_VarroaUpstreamRemovedTriggerDeletesRow(t *testing.T) 
 // truncated set deletes no varroa-upstream row, even one the truncated
 // envelope omitted.
 func TestApplyJobSchedules_VarroaUpstreamTruncatedSetDeletesNone(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	ctx := context.Background()
@@ -386,6 +402,8 @@ func TestApplyJobSchedules_VarroaUpstreamTruncatedSetDeletesNone(t *testing.T) {
 // row's insert, run inside the same transaction, never commits, and the
 // watermark stays at the previous envelope's value.
 func TestApplyJobSchedules_LaterRowFailureRollsBackWholeEnvelope(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	ctx := context.Background()
@@ -452,6 +470,8 @@ func TestApplyJobSchedules_LaterRowFailureRollsBackWholeEnvelope(t *testing.T) {
 // --- 10.4b: the watermark guard ---
 
 func TestApplyJobSchedules_StaleEnvelopeChangesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	ctx := context.Background()
@@ -496,6 +516,8 @@ func TestApplyJobSchedules_StaleEnvelopeChangesNothing(t *testing.T) {
 // strict-newer rule: an envelope whose occurred_at exactly equals the
 // stored watermark is rejected the same as an older one, not applied.
 func TestApplyJobSchedules_EqualWatermarkNotApplied(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	ctx := context.Background()
@@ -536,6 +558,8 @@ func TestApplyJobSchedules_EqualWatermarkNotApplied(t *testing.T) {
 }
 
 func TestApplyJobSchedules_EmptyUntruncatedDeletesAllKeepsWatermark(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	ctx := context.Background()
@@ -573,6 +597,8 @@ func TestApplyJobSchedules_EmptyUntruncatedDeletesAllKeepsWatermark(t *testing.T
 }
 
 func TestApplyJobSchedules_StaleAfterEmptySetRestoresNoRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	ctx := context.Background()
@@ -616,6 +642,8 @@ func TestApplyJobSchedules_StaleAfterEmptySetRestoresNoRow(t *testing.T) {
 }
 
 func TestApplyJobSchedules_ConcurrentAppliesSerializeOnWatermark(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -668,6 +696,8 @@ func TestApplyJobSchedules_ConcurrentAppliesSerializeOnWatermark(t *testing.T) {
 }
 
 func TestApplyJobSchedules_ConcurrentFirstEnvelopesCreateOneWatermark(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -722,6 +752,8 @@ func TestApplyJobSchedules_ConcurrentFirstEnvelopesCreateOneWatermark(t *testing
 // --- 10.5: the reader ---
 
 func TestListJobSchedules_ListsTenantRowsInOrder(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	reader := NewReader(pool)
 	g := NewIngester(pool, nil, nil)
@@ -806,6 +838,8 @@ func scheduleBase() time.Time {
 }
 
 func TestApplyJobSchedules_KeepsPassedOccurrences(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	t0 := scheduleBase()
@@ -818,6 +852,8 @@ func TestApplyJobSchedules_KeepsPassedOccurrences(t *testing.T) {
 }
 
 func TestApplyJobSchedules_DropsOccurrencesPastTheWindow(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	t0 := scheduleBase()
@@ -832,6 +868,8 @@ func TestApplyJobSchedules_DropsOccurrencesPastTheWindow(t *testing.T) {
 }
 
 func TestApplyJobSchedules_SpecChangeReplacesOccurrences(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	t0 := scheduleBase()
@@ -844,6 +882,8 @@ func TestApplyJobSchedules_SpecChangeReplacesOccurrences(t *testing.T) {
 }
 
 func TestApplyJobSchedules_CapsPassedOccurrences(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	t0 := scheduleBase()
@@ -862,6 +902,8 @@ func TestApplyJobSchedules_CapsPassedOccurrences(t *testing.T) {
 }
 
 func TestApplyJobSchedules_WindowFollowsTenantGrace(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedTenantPlacementPolicy(t, db, `{"cronGrace":"1m"}`)
 	if _, err := db.Exec(`UPDATE varroa.tenant_placements SET namespace = $1, cell = $2 WHERE cluster = $3 AND tenant = $4`,
@@ -881,6 +923,8 @@ func TestApplyJobSchedules_WindowFollowsTenantGrace(t *testing.T) {
 }
 
 func TestApplyJobSchedules_DisabledChangeReplacesOccurrences(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	t0 := scheduleBase()

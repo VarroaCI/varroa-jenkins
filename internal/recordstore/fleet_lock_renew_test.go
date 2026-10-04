@@ -27,6 +27,8 @@ func readLockGeneration(t *testing.T, db *sql.DB, name, runID string) int64 {
 // A generation test would refuse this renew, and the build would lose a
 // lock it still holds.
 func TestFleetLockRenew_GenerationRaiseKeepsALiveHold(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 6, "pod-a", "pod-a", nil)
 
@@ -64,6 +66,8 @@ func TestFleetLockRenew_GenerationRaiseKeepsALiveHold(t *testing.T) {
 // whose resolver cache is behind still renews. The generation carries no
 // identity the lock's own cell_instance does not already carry.
 func TestFleetLockRenew_LowerCallerGenerationRefusesNothing(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 5, "pod-a", "pod-a", nil)
 
@@ -98,6 +102,8 @@ func TestFleetLockRenew_LowerCallerGenerationRefusesNothing(t *testing.T) {
 // orders still run first: a renew from a cell the tenant holds no member
 // on answers the permanent FENCED, and the lease lapses.
 func TestFleetLockRenew_MovedTenantIsStillFenced(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 5, "pod-a", "pod-a", nil)
 
@@ -125,6 +131,8 @@ func TestFleetLockRenew_MovedTenantIsStillFenced(t *testing.T) {
 // second acceptance: a renew after the owning tenant revoked the
 // cross-prefix grant is refused.
 func TestFleetLockRenew_RevokedGrantAnswersCrossTenant(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	// beta exports nothing: the grant alpha once held is gone.
@@ -153,6 +161,8 @@ func TestFleetLockRenew_RevokedGrantAnswersCrossTenant(t *testing.T) {
 // TestFleetLockRenew_NoMatchingRowAnswersLost covers task 3.10's third
 // acceptance.
 func TestFleetLockRenew_NoMatchingRowAnswersLost(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 
@@ -176,6 +186,8 @@ func TestFleetLockRenew_NoMatchingRowAnswersLost(t *testing.T) {
 // acceptance: a release answers released even when no row remains, and
 // a repeated release changes nothing.
 func TestFleetLockRelease_IsIdempotent(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 
 	now := time.Now().UTC()
@@ -205,6 +217,8 @@ func TestFleetLockRelease_IsIdempotent(t *testing.T) {
 // fifth acceptance: a renew of a releasing row succeeds, keeps its
 // state, and extends the lease.
 func TestFleetLockRenew_ReleasingRowExtendsTheLease(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 
@@ -237,6 +251,8 @@ func TestFleetLockRenew_ReleasingRowExtendsTheLease(t *testing.T) {
 // notification, and a second release, which finds no row, publishes
 // nothing.
 func TestFleetLockRelease_PublishesOnceAndNoOpPublishesNothing(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 
 	now := time.Now().UTC()
@@ -273,6 +289,8 @@ func TestFleetLockRelease_PublishesOnceAndNoOpPublishesNothing(t *testing.T) {
 // TestFleetLockRenew_PublishesNothing asserts a renew publishes nothing,
 // whatever it answers: it changes only values no reader renders.
 func TestFleetLockRenew_PublishesNothing(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name  string
 		state string
@@ -320,6 +338,8 @@ func TestFleetLockRenew_PublishesNothing(t *testing.T) {
 // TestFleetLockRenew_ControllerTenantRenewsItsOwnLock asserts a non-cell
 // controller renews its own lock with no grant and no target tenant.
 func TestFleetLockRenew_ControllerTenantRenewsItsOwnLock(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, controllerTenant, "team-pay", "ci", 0, "ci-0", "ci-0", nil)
 
@@ -352,6 +372,8 @@ func TestFleetLockRenew_ControllerTenantRenewsItsOwnLock(t *testing.T) {
 // TestFleetLockRenew_SlashInNameAnswersInvalidName asserts a renew whose
 // name holds a "/" is vetoed with INVALID_NAME.
 func TestFleetLockRenew_SlashInNameAnswersInvalidName(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 
@@ -375,6 +397,8 @@ func TestFleetLockRenew_SlashInNameAnswersInvalidName(t *testing.T) {
 // names another tenant's run id reads no fence token and extends no
 // lease: the row belongs to another tenant, so the caller gets lost.
 func TestFleetLockRenew_OtherTenantRunIDAnswersLost(t *testing.T) {
+	t.Parallel()
+
 	deps, db := lockTestDeps(t)
 	seedTenantPlacement(t, db, "beta", "ns-beta", "cell-beta", 0, "pod-b", "pod-b", nil)
 

@@ -47,6 +47,8 @@ func readRunNumber(t *testing.T, db *sql.DB, runID uuid.UUID) *int64 {
 // is the truth, so every run keeps its reported number, and a run whose
 // grant another run took gets no number until it starts.
 func TestClaimBurstStartsInAnotherOrderKeepEveryNumber(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 	g := NewIngester(pool, nil, nil)
@@ -90,6 +92,8 @@ func TestClaimBurstStartsInAnotherOrderKeepEveryNumber(t *testing.T) {
 // reported number, so two builds claim one number and the recorder cannot
 // tell which one Jenkins numbered correctly.
 func TestClaimBurstStartOverAConsumedNumberStoresNull(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 	g := NewIngester(pool, nil, nil)
@@ -114,6 +118,8 @@ func TestClaimBurstStartOverAConsumedNumberStoresNull(t *testing.T) {
 // run whose grant another run took at run.started: the intent holds no
 // number, so a repeat claim reserves a fresh one.
 func TestReanswerOfATakenGrantReservesAFreshNumber(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 	g := NewIngester(pool, nil, nil)
@@ -147,6 +153,8 @@ func TestReanswerOfATakenGrantReservesAFreshNumber(t *testing.T) {
 // answers the stale number again; a repeat that names the number as a
 // conflict gets a fresh one, and the old number stays burned.
 func TestNumberConflictReclaimRefreshesOnTheSameInstance(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -184,6 +192,8 @@ func TestNumberConflictReclaimRefreshesOnTheSameInstance(t *testing.T) {
 // run.started that reports a number other than its grant is flagged, and
 // the field changes no stored value.
 func TestRunStartedCountsAGrantMismatch(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 	g := NewIngester(pool, nil, nil)
@@ -216,7 +226,7 @@ func TestRunStartedCountsAGrantMismatch(t *testing.T) {
 // TRIGGER_FAILED with CLAIM_ABANDONED, and a recent one stays queued.
 func TestExpireUnclaimedRunsEndsAnAbandonedGrant(t *testing.T) {
 	pool, db := setupLedgerPool(t)
-	reader := useManualMeter(t)
+	reader := useTestMeterProvider(t)
 	metrics, err := NewClaimExpiryMetrics()
 	if err != nil {
 		t.Fatalf("register metrics: %v", err)
@@ -268,6 +278,8 @@ func TestExpireUnclaimedRunsEndsAnAbandonedGrant(t *testing.T) {
 // marks at most one batch over both classes, and the abandoned class comes
 // first, so a full backlog of unclaimed runs never starves it.
 func TestExpireUnclaimedRunsSharesOneBatch(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	accepted := claimExpiryNow.Add(-2 * ClaimExpiryAge)
@@ -312,6 +324,8 @@ func TestExpireUnclaimedRunsSharesOneBatch(t *testing.T) {
 // three grants from 1 that start as 16, 17, and 18 leave the intents at
 // 16..18 and the watermark at 19.
 func TestTheLedgerKeepsNoGrantAfterTheStart(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 	g := NewIngester(pool, nil, nil)

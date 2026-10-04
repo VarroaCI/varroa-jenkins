@@ -59,7 +59,8 @@ func ensureTestRole(ctx context.Context, t *testing.T, db *sql.DB, role string) 
 // never runs DROP ROLE. CI always exercises the role-absent path for
 // real, because each job starts from a fresh Postgres instance; a local
 // shared instance that already carries the role skips the check and logs
-// why instead of asserting nothing.
+// why instead of asserting nothing. The test stays serial, so its
+// role-absent check runs before any parallel test starts.
 func TestEnsureGrantsIdempotent(t *testing.T) {
 	db := setupTestDB(t)
 	ctx := context.Background()

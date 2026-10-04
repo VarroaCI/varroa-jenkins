@@ -56,6 +56,8 @@ func tenantRow(t *testing.T, usage map[string]CellUsage, cell string) CellTenant
 // slot 1's cell joins that cell's counts. Reading the scalar cell alone
 // would under-report every member above slot 0.
 func TestCellUsageCountsATwoSlotTenantOnBothCells(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	seedMemberPlacement(t, db, cellUsageScheduleTenant, usageMemberSet())
@@ -81,6 +83,8 @@ func TestCellUsageCountsATwoSlotTenantOnBothCells(t *testing.T) {
 // TestCellUsageNamesEachTenantsRole asserts an active member reads as
 // "slot <n>" and a standby reads as "standby" with no running build.
 func TestCellUsageNamesEachTenantsRole(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	seedMemberPlacement(t, db, cellUsageScheduleTenant, usageMemberSet())
@@ -110,6 +114,8 @@ func TestCellUsageNamesEachTenantsRole(t *testing.T) {
 // the operator has not re-announced since the upgrade still appears on
 // its scalar cell, with the role "slot 0".
 func TestCellUsageAnEmptyMemberListReadsAsSlotZero(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	seedCellPlacement(t, db, "cell-a", cellUsageScheduleTenant)
@@ -133,6 +139,8 @@ func TestCellUsageAnEmptyMemberListReadsAsSlotZero(t *testing.T) {
 // TestCellTenantUsageReadsASecondSlot asserts the per-job read joins a
 // tenant's own member cell, not only slot 0's.
 func TestCellTenantUsageReadsASecondSlot(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	seedMemberPlacement(t, db, cellUsageScheduleTenant, usageMemberSet())

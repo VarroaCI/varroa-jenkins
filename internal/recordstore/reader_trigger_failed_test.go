@@ -30,6 +30,8 @@ func seedTriggerFailedRun(t *testing.T, db *sql.DB, jobPath string, createdAt ti
 // TestGetRunReadsTriggerFailedThroughBoundedStep asserts GetRun answers a run
 // that holds no intent row, through the bounded fallback.
 func TestGetRunReadsTriggerFailedThroughBoundedStep(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 
@@ -50,6 +52,8 @@ func TestGetRunReadsTriggerFailedThroughBoundedStep(t *testing.T) {
 // TestGetRunReadsTriggerFailedOutsideTheWindow asserts the fallback does not
 // depend on the window. The bound is a fast path, and it can never hide a row.
 func TestGetRunReadsTriggerFailedOutsideTheWindow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 
@@ -88,6 +92,8 @@ func TestGetRunReadsTriggerFailedOutsideTheWindow(t *testing.T) {
 // TestGetRunUnknownIdentifierIsNotFound asserts an identifier no runs row holds
 // answers ErrRunNotFound, after both steps.
 func TestGetRunUnknownIdentifierIsNotFound(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	reader := NewReader(pool)
 
@@ -100,6 +106,8 @@ func TestGetRunUnknownIdentifierIsNotFound(t *testing.T) {
 // TestTriggerFailedChangesNoJobStatistic asserts a job whose only run is a
 // failed trigger reads as a job that has never run.
 func TestTriggerFailedChangesNoJobStatistic(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -145,6 +153,8 @@ func TestTriggerFailedChangesNoJobStatistic(t *testing.T) {
 // TestTriggerFailedIsStillListed asserts the run stays listable, and still
 // answers a result filter naming TRIGGER_FAILED.
 func TestTriggerFailedIsStillListed(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()

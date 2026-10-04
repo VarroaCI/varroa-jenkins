@@ -9,6 +9,8 @@ import (
 // envelope of the latest event of each kind under that kind's own key,
 // so a later kind's write never replaces an earlier kind's fields.
 func TestRunsPayloadKeyedByKind(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:payload-by-kind-1")
 	g := NewIngester(pool, nil, nil)

@@ -16,6 +16,8 @@ import (
 // reads the same source. Without it the trim drops the only evidence the
 // sweep can mark that run with, and the run stays RUNNING for good.
 func TestDeadInstancesTrimKeepsARunningRunAcceptedInstance(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -65,6 +67,8 @@ func TestDeadInstancesTrimKeepsARunningRunAcceptedInstance(t *testing.T) {
 // liveness reading measures the age of the recorder's own receive stamp,
 // so a fixture that ages the pod stamp alone leaves the cell live.
 func TestAnnounceMarksARunWhoseKeptDeadInstanceSurvivedTheTrim(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -132,6 +136,8 @@ func TestAnnounceMarksARunWhoseKeptDeadInstanceSurvivedTheTrim(t *testing.T) {
 // read its own rehydration state one tick late, and an empty report would
 // otherwise fence every build of the tenant until the next resync.
 func TestTenantSyncAnnounceKeepsAnAppliedSeedOnAnEmptyReport(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -161,6 +167,8 @@ func TestTenantSyncAnnounceKeepsAnAppliedSeedOnAnEmptyReport(t *testing.T) {
 // and a deferred job together, so keeping the instance never clears the
 // job list, and the job keeps its own hold.
 func TestTenantSyncAnnounceKeepsADeferredJobWhileItKeepsTheSeed(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -195,6 +203,8 @@ func TestTenantSyncAnnounceKeepsADeferredJobWhileItKeepsTheSeed(t *testing.T) {
 // survive it, or the job passes both seed orders with no record on the
 // cell.
 func TestTenantSyncAnnounceKeepsADeferredMemberJobThroughAResend(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -240,6 +250,8 @@ func TestTenantSyncAnnounceKeepsADeferredMemberJobThroughAResend(t *testing.T) {
 // union above never holds a job past the seed report that drops it. An
 // announcement that reports a seed of its own replaces the whole list.
 func TestTenantSyncAnnounceTakesTheJobListOfAnAppliedReport(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -270,6 +282,8 @@ func TestTenantSyncAnnounceTakesTheJobListOfAnAppliedReport(t *testing.T) {
 // above never holds a seed past the cell instance it belongs to. The new
 // pod holds no seed, so the row clears.
 func TestTenantSyncAnnounceClearsTheSeedOnAnInstanceChange(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -295,6 +309,8 @@ func TestTenantSyncAnnounceClearsTheSeedOnAnInstanceChange(t *testing.T) {
 // keeps the seed it already reported when the next announcement reports
 // none.
 func TestTenantSyncAnnounceKeepsAnAppliedMemberSeedOnAnEmptyReport(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -375,6 +391,8 @@ func assertRunInterrupted(t *testing.T, db *sql.DB, runID string) {
 // pod. The operator names only the newer replaced pod, and the recorder
 // derives the older one from its own member list.
 func TestAnnounceMarksARunOnTheOlderOfTwoRolls(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	runID := seedStaleRunOn(t, db, "cell-a", "pod-a1")
@@ -396,6 +414,8 @@ func TestAnnounceMarksARunOnTheOlderOfTwoRolls(t *testing.T) {
 // cell that left the tenant with no operator entry still ends the run of
 // its last pod.
 func TestAnnounceMarksARunOnADeletedCellWithNoOperatorEntry(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	runID := seedStaleRunOn(t, db, "cell-b", "pod-b1")

@@ -11,6 +11,8 @@ import (
 // at generation 1, and the announce never lowers a stored generation, so
 // without the reset every claim of the new tenant answers NOT_READY.
 func TestTeardownPurgeResetsThePlacementGeneration(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -40,6 +42,8 @@ func TestTeardownPurgeResetsThePlacementGeneration(t *testing.T) {
 // teardown never rolls that pod, so the member instance is unchanged, and
 // the generation raise is the only thing that clears the seed.
 func TestATenantCreatedAgainInheritsNoSeed(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -80,6 +84,8 @@ func TestATenantCreatedAgainInheritsNoSeed(t *testing.T) {
 // lives on, and lowering its generation would open the fence to a claim
 // the move has already left behind.
 func TestMovePurgeKeepsThePlacementGeneration(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -105,6 +111,8 @@ func TestMovePurgeKeepsThePlacementGeneration(t *testing.T) {
 // created again and announced before the retry arrived, so its row
 // belongs to the new incarnation.
 func TestTeardownPurgeKeepsANewerPlacementGeneration(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -130,6 +138,8 @@ func TestTeardownPurgeKeepsANewerPlacementGeneration(t *testing.T) {
 // new tenant announces inside that window, so the row already belongs to
 // the new incarnation.
 func TestTenantPurgeIgnoresANewerIncarnation(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -165,6 +175,8 @@ func TestTenantPurgeIgnoresANewerIncarnation(t *testing.T) {
 // written before the column existed, so the announced generation is the
 // only proof: a tenant never lowers its own generation.
 func TestALowerGenerationTakesOverARowWithNoIncarnation(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -199,6 +211,8 @@ func TestALowerGenerationTakesOverARowWithNoIncarnation(t *testing.T) {
 // test tells them apart. The live cell exports its own set again on its
 // ten-minute poll.
 func TestTheFirstStampDropsTheSchedulesOfARowWithNoIncarnation(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -229,6 +243,8 @@ func TestTheFirstStampDropsTheSchedulesOfARowWithNoIncarnation(t *testing.T) {
 // that already names an incarnation keeps the schedule rows of its own
 // tenant on every later announcement.
 func TestAStampedRowKeepsItsSchedules(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -251,6 +267,8 @@ func TestAStampedRowKeepsItsSchedules(t *testing.T) {
 // carries on at its own generation, so its seed and its stored generation
 // stay, and the announcement stamps the incarnation alone.
 func TestAHigherGenerationKeepsARowWithNoIncarnation(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -281,6 +299,8 @@ func TestAHigherGenerationKeepsARowWithNoIncarnation(t *testing.T) {
 // sit at generation 1, which the old tenant's generation test admits, so
 // the incarnation test is the only thing that holds them.
 func TestTenantPurgeKeepsANewerIncarnationsSchedules(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -319,6 +339,8 @@ func TestTenantPurgeKeepsANewerIncarnationsSchedules(t *testing.T) {
 // keep firing the old tenant's cron under the new tenant's name. Another
 // tenant's rows stay.
 func TestTakeOverDropsTheOldIncarnationsSchedules(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -352,6 +374,8 @@ func TestTakeOverDropsTheOldIncarnationsSchedules(t *testing.T) {
 // the row it names. The tenant is gone and no new one has announced, so
 // the stored incarnation is the one the purge carries.
 func TestTenantPurgeResetsItsOwnIncarnation(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -378,6 +402,8 @@ func TestTenantPurgeResetsItsOwnIncarnation(t *testing.T) {
 // value is empty, which means unknown, and an unknown value matches every
 // purge.
 func TestTenantPurgeResetsARowWithNoIncarnation(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -403,6 +429,8 @@ func TestTenantPurgeResetsARowWithNoIncarnation(t *testing.T) {
 // keeps the stored value. The purge reads that column, so an empty report
 // must never erase it.
 func TestAnnounceStoresTheIncarnation(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -430,6 +458,8 @@ func TestAnnounceStoresTheIncarnation(t *testing.T) {
 // the old tenant left, so the new tenant's claims pass the fence on that
 // first announcement.
 func TestANewIncarnationTakesTheRowOver(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 

@@ -26,6 +26,8 @@ func parseTestUUID(t *testing.T, s string) uuid.UUID {
 // them with a small limit, asserting the pages together cover every run
 // exactly once.
 func TestListRunsPagesWithNoGapOrRepeat(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 	ingester := NewIngester(pool, nil, nil)
@@ -78,6 +80,8 @@ func TestListRunsPagesWithNoGapOrRepeat(t *testing.T) {
 // matching runs, and pages through them with the same cursor an
 // unfiltered listing uses.
 func TestListRunsFiltersStatusAndBranchAcrossTheSameCursor(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 	ingester := NewIngester(pool, nil, nil)
@@ -149,6 +153,8 @@ func TestListRunsFiltersStatusAndBranchAcrossTheSameCursor(t *testing.T) {
 // TestGetIntentByKeyKnownAndUnknown asserts a known intent key returns
 // its run id, and an unknown key returns found false with no error.
 func TestGetIntentByKeyKnownAndUnknown(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 	reader := NewReader(pool)
@@ -186,6 +192,8 @@ var partitionNamePattern = regexp.MustCompile(`runs_p\d{6}`)
 // TestGetRunScansOnePartition asserts the query plan GetRun issues on
 // varroa.runs touches exactly one partition.
 func TestGetRunScansOnePartition(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 	ingester := NewIngester(pool, nil, nil)
@@ -235,6 +243,8 @@ func TestGetRunScansOnePartition(t *testing.T) {
 // method returns ErrSchemaTooOld once the applied schema version is set
 // below the compiled minimum.
 func TestSchemaVersionBelowMinimumFailsEveryMethod(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -287,6 +297,8 @@ func TestSchemaVersionBelowMinimumFailsEveryMethod(t *testing.T) {
 // TestSchemaVersionMissingTableFails asserts SchemaVersion returns
 // ErrSchemaTooOld when varroa.goose_db_version does not exist.
 func TestSchemaVersionMissingTableFails(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -304,6 +316,8 @@ func TestSchemaVersionMissingTableFails(t *testing.T) {
 // ErrSchemaTooOld when the query itself fails, not only when the
 // version is readable but too low.
 func TestSchemaVersionDatabaseErrorFails(t *testing.T) {
+	t.Parallel()
+
 	dsn := requireTestDSN(t)
 	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {

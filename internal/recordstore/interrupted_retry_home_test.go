@@ -31,6 +31,8 @@ func interruptedRetryRun(jobPath string) runInterruptCandidate {
 // names the member of the job's home slot, not the cell of the marked
 // run.
 func TestAfterMarkRetry_AddressesTheHomeSlot(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	jobPath := testTenant + "/retry-home"
 	seedGrantPlacement(t, db, testCluster, testTenant, jsTestNS, "cell-a", 1, "{}")
@@ -58,6 +60,8 @@ func TestAfterMarkRetry_AddressesTheHomeSlot(t *testing.T) {
 // TestAfterMarkRetry_UnplacedControllerKeepsTheRunCell asserts a tenant
 // with no placement row retries on the marked run's own cell.
 func TestAfterMarkRetry_UnplacedControllerKeepsTheRunCell(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 
 	conn, cleanup := newSweepTestBus(t)
@@ -83,8 +87,7 @@ func TestAfterMarkRetry_UnboundHomeSlotPublishesNothing(t *testing.T) {
 	setPlacementMembers(t, db, testTenant,
 		[]member{activeMember("cell-a", 0, "i0")}, map[string]int32{jobPath: 1})
 
-	reader, restore := swapMeterProvider(t)
-	defer restore()
+	reader := useTestMeterProvider(t)
 	metrics, err := NewInterruptedMetrics()
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
@@ -107,6 +110,8 @@ func TestAfterMarkRetry_UnboundHomeSlotPublishesNothing(t *testing.T) {
 // sends the automatic retry of a run whose cell-a instance is gone to the
 // member that now holds the job's home slot.
 func TestSweepInterruptedRuns_RetryAddressesTheHomeSlot(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
 

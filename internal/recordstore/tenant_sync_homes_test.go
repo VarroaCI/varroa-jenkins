@@ -6,6 +6,8 @@ import "testing"
 // kind answers what the announce stored, so the operator computes no home
 // of its own.
 func TestTenantSyncHomesAnswersTheMemberListAndTheMap(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	seedJobHomePaths(t, db, "acme/api", "acme/web")
@@ -37,6 +39,8 @@ func TestTenantSyncHomesAnswersTheMemberListAndTheMap(t *testing.T) {
 // TestTenantSyncHomesOnAnUnannouncedTenant asserts a tenant with no row
 // answers an empty list and an empty map, never an error.
 func TestTenantSyncHomesOnAnUnannouncedTenant(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -58,6 +62,8 @@ func TestTenantSyncHomesOnAnUnannouncedTenant(t *testing.T) {
 // announced with no member list answers the synthetic slot-0 member, so
 // the caller needs no branch.
 func TestTenantSyncHomesOnASingleMemberTenant(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -81,6 +87,8 @@ func TestTenantSyncHomesOnASingleMemberTenant(t *testing.T) {
 // TestTenantSyncHomesNeedsAClusterAndATenant asserts a request with no
 // tenant answers an error and reads nothing.
 func TestTenantSyncHomesNeedsAClusterAndATenant(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -97,6 +105,8 @@ func TestTenantSyncHomesNeedsAClusterAndATenant(t *testing.T) {
 // row to the new slot's cell at the new generation, and leaves each other
 // row as it is.
 func TestAnnounceScaleMovesTheRehomedScheduleRows(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	moved := pathOnSlot(t, 1)

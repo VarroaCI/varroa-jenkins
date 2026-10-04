@@ -73,6 +73,8 @@ func readRunPayload(t *testing.T, db *sql.DB, runID string) map[string]json.RawM
 // TestApplyTriggerFailedWritesRun asserts one envelope stores one runs row
 // with the columns and payload keys the design names, and writes no intent.
 func TestApplyTriggerFailedWritesRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 
@@ -145,6 +147,8 @@ func TestApplyTriggerFailedWritesRun(t *testing.T) {
 // second row, and reports that its insert wrote nothing. The recorder counts
 // the metric either way, and the log line names the skipped insert.
 func TestApplyTriggerFailedIsIdempotent(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 
@@ -185,6 +189,8 @@ func TestApplyTriggerFailedIsIdempotent(t *testing.T) {
 // TestApplyTriggerFailedMalformedRunID asserts an identifier that is not a
 // UUIDv7 is a malformed envelope, so the consumer drops it.
 func TestApplyTriggerFailedMalformedRunID(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 
@@ -197,6 +203,8 @@ func TestApplyTriggerFailedMalformedRunID(t *testing.T) {
 // TestApplyTriggerFailedYieldsToRealRun asserts an envelope that arrives after
 // a real run writes nothing.
 func TestApplyTriggerFailedYieldsToRealRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	runID := seedGrantedIntent(t, pool, "manual:tf-3")
@@ -234,6 +242,8 @@ func TestApplyTriggerFailedYieldsToRealRun(t *testing.T) {
 // TestRunStartedSupersedesTriggerFailed asserts a real run supersedes the
 // synthetic row in place, and keeps an earlier log summary.
 func TestRunStartedSupersedesTriggerFailed(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	runID := seedGrantedIntentOnCell(t, pool, "manual:tf-4", "cell-b")
@@ -288,6 +298,8 @@ func TestRunStartedSupersedesTriggerFailed(t *testing.T) {
 // supersedes the synthetic row and keeps the failed trigger's actor, and that a
 // later run.started then sets its own.
 func TestOwningCompletionSupersedesTriggerFailed(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	runID := seedGrantedIntent(t, pool, "manual:tf-5")
@@ -341,6 +353,8 @@ func TestOwningCompletionSupersedesTriggerFailed(t *testing.T) {
 // TestForeignCompletionSupersedesNothing asserts a completion from another
 // instance leaves the TRIGGER_FAILED state as it is.
 func TestForeignCompletionSupersedesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	runID := seedGrantedIntent(t, pool, "manual:tf-6")
@@ -380,6 +394,8 @@ func TestForeignCompletionSupersedesNothing(t *testing.T) {
 // conflict clause is what makes that interleaving safe: both writes compute one
 // primary key, so one blocks on the other and then re-evaluates.
 func TestTriggerFailedWriteOrders(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 

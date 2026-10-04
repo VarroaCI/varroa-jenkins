@@ -15,6 +15,8 @@ import (
 // through the real consumer and asserts one row per natural key with
 // identical column values after the second delivery (Contract F5).
 func TestIngestConsumerReplaySafety(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:replay-all-1")
 

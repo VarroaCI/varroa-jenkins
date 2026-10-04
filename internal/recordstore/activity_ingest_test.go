@@ -12,6 +12,8 @@ import (
 // message writes exactly one row: the second Insert of the same key
 // reports it was not newly inserted, and the table still holds one row.
 func TestActivityIngesterInsertConflictIgnoring(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ing := NewActivityIngester(pool)
 	ctx := context.Background()
@@ -53,6 +55,8 @@ func TestActivityIngesterInsertConflictIgnoring(t *testing.T) {
 // carries the severity Event.Normalize derives, proving the recorder
 // calls Normalize before the write.
 func TestActivityIngesterInsertStoresDerivedSeverity(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ing := NewActivityIngester(pool)
 	ctx := context.Background()
@@ -84,6 +88,8 @@ func TestActivityIngesterInsertStoresDerivedSeverity(t *testing.T) {
 // TestActivityIngesterInsertNullsZeroBuildNumber asserts a zero build
 // number stores SQL NULL, matching D1's nullable build_number column.
 func TestActivityIngesterInsertNullsZeroBuildNumber(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ing := NewActivityIngester(pool)
 	ctx := context.Background()

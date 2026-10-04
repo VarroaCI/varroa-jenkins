@@ -16,6 +16,8 @@ import (
 // TestDuplicateBackstopMarksSecondLiveRun asserts a second live run of
 // one revision is marked DUPLICATE and publishes one cancel_run action.
 func TestDuplicateBackstopMarksSecondLiveRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	s := startDuplicateTestServer(t)
@@ -95,6 +97,8 @@ func TestDuplicateBackstopMarksSecondLiveRun(t *testing.T) {
 // arriving before run.started for a revision a RUNNING run also holds
 // leaves the arriving run COMPLETED and publishes no action.
 func TestDuplicateBackstopFinishedArrivingRunIsLeftAlone(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 
@@ -142,6 +146,8 @@ func TestDuplicateBackstopFinishedArrivingRunIsLeftAlone(t *testing.T) {
 // run.started reporting a revision only a COMPLETED run holds keeps the
 // new run RUNNING and publishes no action.
 func TestDuplicateBackstopFinishedRevisionIsNotADuplicate(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 
@@ -181,6 +187,8 @@ func TestDuplicateBackstopFinishedRevisionIsNotADuplicate(t *testing.T) {
 // TestDuplicateBackstopSkipsEmptyRevision asserts an empty scm_revision
 // never triggers the backstop, even for two live runs of the same job.
 func TestDuplicateBackstopSkipsEmptyRevision(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 
@@ -213,6 +221,8 @@ func TestDuplicateBackstopSkipsEmptyRevision(t *testing.T) {
 // TestDuplicateStaysTerminalAfterLaterCompletion asserts a later
 // run.completed for the marked run leaves its status at DUPLICATE.
 func TestDuplicateStaysTerminalAfterLaterCompletion(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 
@@ -260,6 +270,8 @@ func TestDuplicateStaysTerminalAfterLaterCompletion(t *testing.T) {
 // run.started writes for one revision produce exactly one DUPLICATE row
 // and one published action.
 func TestDuplicateBackstopConcurrentStarts(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	s := startDuplicateTestServer(t)
@@ -368,6 +380,8 @@ func startDuplicateTestServer(t *testing.T) *server.Server {
 // run.started carrying a claim revision stops a live run whose revision
 // a run.source event wrote.
 func TestDuplicateBackstopMatchesRevisionRunSourceWrote(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 
@@ -416,6 +430,8 @@ func TestDuplicateBackstopMatchesRevisionRunSourceWrote(t *testing.T) {
 // that reports a revision a live run holds marks no run and publishes
 // no action.
 func TestApplyRunSourceRaisesNoDuplicateBackstop(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	s := startDuplicateTestServer(t)

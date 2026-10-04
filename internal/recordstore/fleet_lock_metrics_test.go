@@ -51,7 +51,7 @@ func TestFleetLockMetrics_GaugesReportStoredRowCounts(t *testing.T) {
 	insertFleetLockRow(t, db, "alpha/lock-f", newTestUUIDv7String(), FleetLockStateReleasing, now, now.Add(5*time.Minute))
 	insertFleetLockRow(t, db, "alpha/lock-g", newTestUUIDv7String(), FleetLockStateReleasing, now, now.Add(5*time.Minute))
 
-	reader := fanoutTestMeter(t)
+	reader := useTestMeterProvider(t)
 	if _, err := NewFleetLockMetrics(pool); err != nil {
 		t.Fatalf("new fleet lock metrics: %v", err)
 	}

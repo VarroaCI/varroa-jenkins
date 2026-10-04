@@ -54,6 +54,8 @@ func countBackstopActivity(t *testing.T, db *sql.DB, jobPath string) int {
 // TestRunBackstopRoundOnlyOneReplicaRuns asserts a second call finds the
 // backstop advisory lock already held and skips its round.
 func TestRunBackstopRoundOnlyOneReplicaRuns(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	conn, cleanup := newSweepTestBus(t)
 	defer cleanup()
@@ -85,6 +87,8 @@ func TestRunBackstopRoundOnlyOneReplicaRuns(t *testing.T) {
 // policy sets cronBackstop off produces no fire, even for an otherwise
 // clear candidate occurrence.
 func TestRunBackstopRoundDropsPairWithBackstopOff(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedTenantPlacementPolicy(t, db, `{"cronBackstop":false}`)
 
@@ -115,6 +119,8 @@ func TestRunBackstopRoundDropsPairWithBackstopOff(t *testing.T) {
 // backstop-scheduler capability's defaults (backstop on, catch-up one,
 // grace 5m).
 func TestRunBackstopRoundSingleTenantUsesDefaults(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	g := NewIngester(pool, nil, nil)
@@ -160,6 +166,8 @@ func TestRunBackstopRoundSingleTenantUsesDefaults(t *testing.T) {
 // whose cell is not the job's home produces no fire: that row came from
 // a cell the job has left.
 func TestRunBackstopRoundSkipsRowOffItsHome(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedGrantPlacement(t, db, testCluster, testTenant, jsTestNS, "cell-a", 1, "{}")
 
@@ -199,6 +207,8 @@ func TestRunBackstopRoundSkipsRowOffItsHome(t *testing.T) {
 // tenant's stored generation. A generation raise does not move a row
 // whose home keeps its cell.
 func TestRunBackstopRoundFiresHomeRowBelowGeneration(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedGrantPlacement(t, db, testCluster, testTenant, jsTestNS, "cell-a", 3, "{}")
 
@@ -238,6 +248,8 @@ func TestRunBackstopRoundFiresHomeRowBelowGeneration(t *testing.T) {
 // marked interrupted by a bare RunBackstopRound call, with no separate
 // sweep call.
 func TestRunBackstopRoundRunsInterruptedSweepInSameRound(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
 
@@ -274,6 +286,8 @@ func TestRunBackstopRoundRunsInterruptedSweepInSameRound(t *testing.T) {
 // that passes while a cell rolls stays a candidate after the new pod's
 // first export, which names only future occurrences.
 func TestRunBackstopRoundFiresMissAcrossALaterExport(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	g := NewIngester(pool, nil, nil)
@@ -343,6 +357,8 @@ func TestRunBackstopRoundFiresMissAcrossALaterExport(t *testing.T) {
 // fires one build for a run of kept misses: a later round does not fire
 // an older miss that the earlier fire superseded.
 func TestRunBackstopRoundCatchUpOneFiresOnce(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	g := NewIngester(pool, nil, nil)
@@ -404,6 +420,8 @@ func seedHeldLockOfRun(t *testing.T, db *sql.DB, runID string) {
 // round, and publishes one releasing notification. A second round moves
 // nothing and publishes no lock notification.
 func TestRunBackstopRoundMovesInterruptedHolderToReleasing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
 	seedHeldLockOfRun(t, db, runID.String())
@@ -470,6 +488,8 @@ func TestRunBackstopRoundMovesInterruptedHolderToReleasing(t *testing.T) {
 // the lock row in the same round: the move runs before the release
 // check.
 func TestRunBackstopRoundReleasesConfirmedGoneHolderInOneRound(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
 	seedHeldLockOfRun(t, db, runID.String())

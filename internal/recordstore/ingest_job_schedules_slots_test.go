@@ -56,6 +56,8 @@ func readScheduleCell(t *testing.T, db *sql.DB, tenant, jobPath string) string {
 // of a slot-0 job writes no row, and that the stored row still names slot
 // 0's cell.
 func TestApplyJobSchedules_StandbyExportIsDropped(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	seedScheduleMembers(t, db, "acme", map[string]int32{"acme/app": 0})
@@ -86,6 +88,8 @@ func TestApplyJobSchedules_StandbyExportIsDropped(t *testing.T) {
 // the gate compares the namespace and the cell together. A cell of the
 // home's name in another namespace is not the home.
 func TestApplyJobSchedules_SameNamedCellInAnotherNamespaceIsDropped(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	seedScheduleMembers(t, db, "acme", map[string]int32{"acme/app": 0})
@@ -123,6 +127,8 @@ func TestApplyJobSchedules_SameNamedCellInAnotherNamespaceIsDropped(t *testing.T
 // TestApplyJobSchedules_TheHomeStoresTheRow asserts slot 1's holder owns
 // the row of a job homed on slot 1.
 func TestApplyJobSchedules_TheHomeStoresTheRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	seedScheduleMembers(t, db, "acme", map[string]int32{"acme/api": 1})
@@ -144,6 +150,8 @@ func TestApplyJobSchedules_TheHomeStoresTheRow(t *testing.T) {
 // dropped row fails no envelope: the home rows are stored and the cell's
 // watermark still advances.
 func TestApplyJobSchedules_MixedEnvelopeStoresItsHomeRows(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	seedScheduleMembers(t, db, "acme", map[string]int32{"acme/web": 0, "acme/api": 1})
@@ -187,6 +195,8 @@ func TestApplyJobSchedules_MixedEnvelopeStoresItsHomeRows(t *testing.T) {
 // the old home's next export after its home moves. The row names the new
 // home at once, so only the new home's export can delete it.
 func TestApplyJobSchedules_HomeMoveKeepsTheRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 	g := NewIngester(pool, nil, nil)
@@ -231,6 +241,8 @@ func TestApplyJobSchedules_HomeMoveKeepsTheRow(t *testing.T) {
 // with one active slot, and a tenant with no placement row at all, both
 // store every row they export.
 func TestApplyJobSchedules_SingleMemberTenantStoresEveryRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	if _, err := db.Exec(`

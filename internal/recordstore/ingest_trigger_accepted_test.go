@@ -46,6 +46,8 @@ func newTriggerAcceptedEnvelope(t *testing.T, runID, intentKey string) IngestEnv
 // QUEUED runs row with the two accepted keys, the actor, and every
 // build column left null, and writes no intent.
 func TestApplyTriggerAcceptedWritesQueuedRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 
@@ -98,6 +100,8 @@ func TestApplyTriggerAcceptedWritesQueuedRun(t *testing.T) {
 // TestApplyTriggerAcceptedIsIdempotent asserts a redelivered envelope
 // stores no second row.
 func TestApplyTriggerAcceptedIsIdempotent(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 
@@ -133,6 +137,8 @@ func TestApplyTriggerAcceptedIsIdempotent(t *testing.T) {
 // arrives after a real run writes nothing and leaves the payload
 // untouched.
 func TestApplyTriggerAcceptedYieldsToRealRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	runID := seedGrantedIntent(t, pool, "manual:ta-3")
@@ -178,6 +184,8 @@ func TestApplyTriggerAcceptedYieldsToRealRun(t *testing.T) {
 // TestApplyTriggerAcceptedYieldsToTriggerFailed asserts an accepted
 // envelope that arrives after a refused-trigger row writes nothing.
 func TestApplyTriggerAcceptedYieldsToTriggerFailed(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	runID := newTestUUIDv7String()
@@ -212,6 +220,8 @@ func TestApplyTriggerAcceptedYieldsToTriggerFailed(t *testing.T) {
 // TestRunStartedSupersedesAcceptedTrigger asserts a later run.started
 // removes the accepted keys and moves the row to RUNNING.
 func TestRunStartedSupersedesAcceptedTrigger(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	runID := seedGrantedIntent(t, pool, "manual:ta-5")
@@ -247,6 +257,8 @@ func TestRunStartedSupersedesAcceptedTrigger(t *testing.T) {
 // run.changes, run.heartbeat, and run.tests removes the accepted keys
 // from a row that still holds them.
 func TestPlaceholdersRemoveAcceptedKeys(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name    string
 		kind    string
@@ -312,6 +324,8 @@ func seedAcceptedOnlyMarkedRow(t *testing.T, pool *pgxpool.Pool, db *sql.DB, int
 // over a row the sweep marked interrupted supersedes it to RUNNING with
 // a clean payload, and stamps interrupted_superseded_at.
 func TestRunStartedSupersedesMarkedAcceptedRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedAcceptedOnlyMarkedRow(t, pool, db, "manual:ta-6")
 
@@ -349,6 +363,8 @@ func TestRunStartedSupersedesMarkedAcceptedRow(t *testing.T) {
 // another instance leaves the accepted keys and the QUEUED status in
 // place.
 func TestForeignCompletionLeavesAcceptedKeys(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	runID := seedGrantedIntent(t, pool, "manual:ta-7")
@@ -387,6 +403,8 @@ func TestForeignCompletionLeavesAcceptedKeys(t *testing.T) {
 // an interrupted real run supersedes nothing: the status stays COMPLETED,
 // the result stays INTERRUPTED, and interrupted_superseded_at stays null.
 func TestLateStartedLeavesInterruptedRealRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	runID := seedGrantedIntent(t, pool, "manual:ta-8")

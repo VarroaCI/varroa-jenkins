@@ -36,6 +36,8 @@ func TestReasonCodesHoldsAllSix(t *testing.T) {
 // TestDefaultFenceAllows asserts the allow-all default answers a
 // well-formed claim with a granted decision.
 func TestDefaultFenceAllows(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -60,6 +62,8 @@ func (f denyingFence) Check(_ context.Context, _ ClaimRequest) (FenceResult, err
 // TestFenceDenialPassesReasonCodeThrough asserts a Fence denial reaches
 // the caller unchanged and writes no row.
 func TestFenceDenialPassesReasonCodeThrough(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, denyingFence{reasonCode: ReasonNotReady})
 
@@ -82,6 +86,8 @@ func (erroringFence) Check(_ context.Context, _ ClaimRequest) (FenceResult, erro
 // TestFenceErrorFailsClosed asserts a Fence error answers with
 // code=UNAVAILABLE and an empty decision.
 func TestFenceErrorFailsClosed(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, erroringFence{})
 
@@ -100,6 +106,8 @@ func TestFenceErrorFailsClosed(t *testing.T) {
 // TestGenerationIsRecordedForLaterOwner asserts the stored intent holds
 // the request's placement_generation.
 func TestGenerationIsRecordedForLaterOwner(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 

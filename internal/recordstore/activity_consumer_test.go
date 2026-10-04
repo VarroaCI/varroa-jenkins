@@ -9,7 +9,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
-	"go.opentelemetry.io/otel"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
@@ -73,11 +72,7 @@ func metricValue(t *testing.T, reader *sdkmetric.ManualReader, name string) int6
 func TestActivityConsumerInsertsRow(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 
-	reader := sdkmetric.NewManualReader()
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	prev := otel.GetMeterProvider()
-	otel.SetMeterProvider(mp)
-	t.Cleanup(func() { otel.SetMeterProvider(prev) })
+	useTestMeterProvider(t)
 
 	s := startIngestTestServer(t)
 	conn, err := bus.Connect(s.ClientURL())
@@ -115,11 +110,7 @@ func TestActivityConsumerInsertsRow(t *testing.T) {
 func TestActivityConsumerDuplicateRedelivery(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 
-	reader := sdkmetric.NewManualReader()
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	prev := otel.GetMeterProvider()
-	otel.SetMeterProvider(mp)
-	t.Cleanup(func() { otel.SetMeterProvider(prev) })
+	reader := useTestMeterProvider(t)
 
 	s := startIngestTestServer(t)
 	conn, err := bus.Connect(s.ClientURL())
@@ -160,11 +151,7 @@ func TestActivityConsumerDuplicateRedelivery(t *testing.T) {
 func TestActivityConsumerExpiredEventDropped(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 
-	reader := sdkmetric.NewManualReader()
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	prev := otel.GetMeterProvider()
-	otel.SetMeterProvider(mp)
-	t.Cleanup(func() { otel.SetMeterProvider(prev) })
+	reader := useTestMeterProvider(t)
 
 	s := startIngestTestServer(t)
 	conn, err := bus.Connect(s.ClientURL())
@@ -208,11 +195,7 @@ func TestActivityConsumerExpiredEventDropped(t *testing.T) {
 func TestActivityConsumerUndecodablePayload(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 
-	reader := sdkmetric.NewManualReader()
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	prev := otel.GetMeterProvider()
-	otel.SetMeterProvider(mp)
-	t.Cleanup(func() { otel.SetMeterProvider(prev) })
+	reader := useTestMeterProvider(t)
 
 	s := startIngestTestServer(t)
 	conn, err := bus.Connect(s.ClientURL())
@@ -256,11 +239,7 @@ func TestActivityConsumerUndecodablePayload(t *testing.T) {
 func TestActivityConsumerCreatesMissingPartition(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 
-	reader := sdkmetric.NewManualReader()
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	prev := otel.GetMeterProvider()
-	otel.SetMeterProvider(mp)
-	t.Cleanup(func() { otel.SetMeterProvider(prev) })
+	useTestMeterProvider(t)
 
 	s := startIngestTestServer(t)
 	conn, err := bus.Connect(s.ClientURL())
@@ -300,6 +279,8 @@ func TestActivityConsumerCreatesMissingPartition(t *testing.T) {
 // pre-cutover three-token subject is stored with whatever cluster its
 // payload carries, and is never re-attributed.
 func TestActivityConsumerLegacySubjectUnattributed(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	s := startIngestTestServer(t)
@@ -352,6 +333,8 @@ func TestActivityConsumerLegacySubjectUnattributed(t *testing.T) {
 // separate publishes would each get their own message timestamp, which
 // is not what a redelivery is.
 func TestActivityConsumerSubstitutesMessageTimestamp(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	s := startIngestTestServer(t)
@@ -425,6 +408,8 @@ func TestActivityConsumerSubstitutesMessageTimestamp(t *testing.T) {
 // case), then, after the backoff redelivers it, through a healthy
 // ingester that inserts the row and acknowledges.
 func TestActivityConsumerInsertFailureNotAcked(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	dsn := requireTestDSN(t)
 

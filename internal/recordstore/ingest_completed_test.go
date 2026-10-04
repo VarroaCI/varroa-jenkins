@@ -10,6 +10,8 @@ import (
 // from the owning cell instance replaces a synthetic INTERRUPTED result
 // and stamps interrupted_superseded_at.
 func TestApplyRunCompletedSupersedesInterruption(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:interrupt-1")
 	g := NewIngester(pool, nil, nil)
@@ -60,6 +62,8 @@ func TestApplyRunCompletedSupersedesInterruption(t *testing.T) {
 // once a real result exists, an update naming WHERE status = 'RUNNING'
 // (the shape C6's interruption sweep uses) matches no row.
 func TestApplyRunCompletedWhereRunningMatchesNoCompletedRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:no-reinterrupt-1")
 	g := NewIngester(pool, nil, nil)
@@ -102,6 +106,8 @@ func TestApplyRunCompletedWhereRunningMatchesNoCompletedRow(t *testing.T) {
 // from a non-owning cell instance changes no terminal column and merges
 // into payload.foreign_completion instead.
 func TestApplyRunCompletedForeignInstanceIsAuditOnly(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:foreign-1")
 	g := NewIngester(pool, nil, nil)
@@ -141,6 +147,8 @@ func TestApplyRunCompletedForeignInstanceIsAuditOnly(t *testing.T) {
 // TestApplyRunCompletedFillsAbsentRevision asserts a completion writes
 // the newest changelog entry's revision when the row holds none.
 func TestApplyRunCompletedFillsAbsentRevision(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:completed-fill")
 	g := NewIngester(pool, nil, nil)
@@ -173,6 +181,8 @@ func TestApplyRunCompletedFillsAbsentRevision(t *testing.T) {
 // TestApplyRunCompletedKeepsSetRevision asserts a completion never
 // replaces a revision the row already holds.
 func TestApplyRunCompletedKeepsSetRevision(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:completed-keep")
 	g := NewIngester(pool, nil, nil)
@@ -210,6 +220,8 @@ func TestApplyRunCompletedKeepsSetRevision(t *testing.T) {
 // reports one entry per fleet lock it deleted, each naming that row's
 // own values, and that a run holding two nested locks reports both.
 func TestApplyRunCompletedReportsReleasedLocks(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:completed-release")
 	g := NewIngester(pool, nil, nil)
@@ -246,6 +258,8 @@ func TestApplyRunCompletedReportsReleasedLocks(t *testing.T) {
 // TestApplyRunCompletedForeignInstanceReportsNoReleasedLock asserts a
 // foreign completion releases nothing and reports no entry.
 func TestApplyRunCompletedForeignInstanceReportsNoReleasedLock(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:completed-foreign-lock")
 	g := NewIngester(pool, nil, nil)
@@ -287,6 +301,8 @@ func TestApplyRunCompletedForeignInstanceReportsNoReleasedLock(t *testing.T) {
 // terminal run.completed deletes the run's waiting rows beside its held
 // row, and reports one entry per deleted row.
 func TestApplyRunCompletedDeletesWaitingLockRows(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:completed-waiting")
 	g := NewIngester(pool, nil, nil)
@@ -319,6 +335,8 @@ func TestApplyRunCompletedDeletesWaitingLockRows(t *testing.T) {
 // matches the completed run alone: another run's waiting row on the same
 // lock stays.
 func TestApplyRunCompletedKeepsOtherRunsWaitingRows(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:completed-other-waiter")
 	g := NewIngester(pool, nil, nil)
@@ -356,6 +374,8 @@ func TestApplyRunCompletedKeepsOtherRunsWaitingRows(t *testing.T) {
 // summary column and the payload's summary_seq key, and that a seq above
 // a prior heartbeat's watermark wins.
 func TestApplyRunCompletedRaisesTheSummaryAndItsWatermark(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	const intentKey = "manual:completed-summary-1"
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -386,6 +406,8 @@ func TestApplyRunCompletedRaisesTheSummaryAndItsWatermark(t *testing.T) {
 // clears the run's pending set and raises the inputs watermark, so a later
 // run.input changes nothing.
 func TestApplyRunCompletedClearsThePendingSet(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	const intentKey = "manual:completed-inputs-1"
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -429,6 +451,8 @@ func TestApplyRunCompletedClearsThePendingSet(t *testing.T) {
 // races an owning completion cannot restore the set the completion
 // cleared, whatever seq the heartbeat carries.
 func TestHeartbeatOnACompletedRunRestoresNoPendingSet(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	const intentKey = "manual:completed-inputs-2"
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -457,6 +481,8 @@ func TestHeartbeatOnACompletedRunRestoresNoPendingSet(t *testing.T) {
 // TestApplyRunCompletedForeignInstanceKeepsThePendingSet proves a foreign
 // completion clears nothing and raises nothing.
 func TestApplyRunCompletedForeignInstanceKeepsThePendingSet(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	const intentKey = "manual:completed-inputs-foreign-1"
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -492,6 +518,8 @@ func TestApplyRunCompletedForeignInstanceKeepsThePendingSet(t *testing.T) {
 // non-owning instance, leave both the summary column and the watermark at
 // their stored values.
 func TestApplyRunCompletedStaleSummaryCannotLowerTheWatermark(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	const intentKey = "manual:completed-summary-stale-1"
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -530,6 +558,8 @@ func TestApplyRunCompletedStaleSummaryCannotLowerTheWatermark(t *testing.T) {
 // completion whose payload carries no summary value writes neither the
 // summary column nor a summary_seq key.
 func TestApplyRunCompletedWithoutASummaryWritesNoWatermark(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	const intentKey = "manual:completed-summary-absent-1"
 	runID := seedGrantedIntent(t, pool, intentKey)
@@ -564,6 +594,8 @@ func TestApplyRunCompletedWithoutASummaryWritesNoWatermark(t *testing.T) {
 // that inserts the row, because no earlier event wrote one, writes the
 // summary text and the summary_seq key in that same insert.
 func TestApplyRunCompletedInsertsTheSummaryForANewRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	const intentKey = "manual:completed-summary-insert-1"
 	runID := seedGrantedIntent(t, pool, intentKey)

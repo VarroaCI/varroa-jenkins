@@ -157,8 +157,7 @@ func TestSweepEndsASilentRunOnALiveOwner(t *testing.T) {
 	freshenSweepConsumer(t, conn)
 	received := subscribeClusterActions(t, conn)
 
-	reader, restore := swapMeterProvider(t)
-	defer restore()
+	reader := useTestMeterProvider(t)
 	metrics, err := NewInterruptedMetrics()
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
@@ -212,6 +211,8 @@ func TestSweepEndsASilentRunOnALiveOwner(t *testing.T) {
 // TestSweepLeavesASilentRunOnALiveOwnerInsideTheWindow asserts a run on a
 // live owner whose heartbeat is younger than the window stays RUNNING.
 func TestSweepLeavesASilentRunOnALiveOwnerInsideTheWindow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
 	seedSilentRunOnLiveOwner(t, db, runID, liveOwnerSilentWindow-time.Minute, `{}`)
@@ -241,6 +242,8 @@ func TestSweepLeavesASilentRunOnALiveOwnerInsideTheWindow(t *testing.T) {
 // never applies the heartbeat-lost test: it runs the confirmed and moved
 // tests alone.
 func TestMarkMovedRunsForTenantSkipsHeartbeatLost(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
 	seedSilentRunOnLiveOwner(t, db, runID, liveOwnerSilentWindow+time.Minute, `{}`)
@@ -261,6 +264,8 @@ func TestMarkMovedRunsForTenantSkipsHeartbeatLost(t *testing.T) {
 // write re-reads the heartbeat receive stamp for a heartbeat-lost mark: a
 // heartbeat that lands after the candidate read stops the mark.
 func TestMarkInterruptedHeartbeatLostRereadsTheHeartbeat(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedRunningRun(t, pool, newTestClaimRequest("manual:"+newTestUUIDv7String(), 0))
 	seedSilentRunOnLiveOwner(t, db, runID, liveOwnerSilentWindow+time.Minute, `{}`)
@@ -299,6 +304,8 @@ func markHeartbeatLost(t *testing.T) (*Ingester, *sql.DB, uuid.UUID, string) {
 // reason goes, and the log summary loses the mark's incomplete_reason
 // once the real run.log reports the log complete.
 func TestRunCompletedSupersedesAHeartbeatLostMark(t *testing.T) {
+	t.Parallel()
+
 	g, db, runID, intentKey := markHeartbeatLost(t)
 
 	runLog := newTestEnvelope(t, runID, intentKey, KindRunLog, map[string]any{
@@ -344,6 +351,8 @@ func TestRunCompletedSupersedesAHeartbeatLostMark(t *testing.T) {
 // completion keeps the log summary's incomplete_reason when the log is
 // still incomplete, and removes only the mark's reason.
 func TestRunCompletedKeepsTheReasonOfAnIncompleteLog(t *testing.T) {
+	t.Parallel()
+
 	g, db, runID, intentKey := markHeartbeatLost(t)
 
 	success := "SUCCESS"
@@ -371,6 +380,8 @@ func TestRunCompletedKeepsTheReasonOfAnIncompleteLog(t *testing.T) {
 // owner's real run.log replaces the mark's generic reason with its own
 // precise one, and the owner's completion keeps it.
 func TestRunLogPreciseReasonReplacesTheHeartbeatLostMarkReason(t *testing.T) {
+	t.Parallel()
+
 	g, db, runID, intentKey := markHeartbeatLost(t)
 
 	runLog := newTestEnvelope(t, runID, intentKey, KindRunLog, map[string]any{
@@ -399,6 +410,8 @@ func TestRunLogPreciseReasonReplacesTheHeartbeatLostMarkReason(t *testing.T) {
 // TestForeignCompletionLeavesAHeartbeatLostMark asserts a completion from
 // another instance changes no terminal column of a heartbeat-lost mark.
 func TestForeignCompletionLeavesAHeartbeatLostMark(t *testing.T) {
+	t.Parallel()
+
 	g, db, runID, intentKey := markHeartbeatLost(t)
 
 	success := "SUCCESS"
@@ -422,6 +435,8 @@ func TestForeignCompletionLeavesAHeartbeatLostMark(t *testing.T) {
 // does not supersede a heartbeat-lost mark: only the owner's completion
 // replaces it.
 func TestRunStartedLeavesAHeartbeatLostMark(t *testing.T) {
+	t.Parallel()
+
 	g, db, runID, intentKey := markHeartbeatLost(t)
 
 	buildNumber := int64(7)
@@ -445,6 +460,8 @@ func TestRunStartedLeavesAHeartbeatLostMark(t *testing.T) {
 // keeps the run's pending input set, a settled run.input still clears it,
 // and the owner's completion clears it.
 func TestHeartbeatLostMarkKeepsThePendingInputs(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedRunningRun(t, pool, newTestClaimRequest(intentKey, 0))

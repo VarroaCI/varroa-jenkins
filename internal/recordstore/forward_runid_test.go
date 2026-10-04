@@ -57,6 +57,8 @@ func alphaEnvelope(t *testing.T, runID, intentKey, kind, cell, instance string,
 // a NOT_HOME veto and a forward. The run id the API answered is the run
 // that builds, and the store holds one row for it.
 func TestNotHomeForwardCompletesTheAPIRunID(t *testing.T) {
+	t.Parallel()
+
 	deps, db := buildForwardTestDeps(t)
 	actions := subscribeLedgerActions(t, deps)
 	g := NewIngester(deps.Pool, nil, nil)
@@ -158,6 +160,8 @@ func TestNotHomeForwardCompletesTheAPIRunID(t *testing.T) {
 // newer accept on another cell moves an accepted-only row, and that an
 // older accept redelivered after it never moves the row back.
 func TestTriggerAccepted_SecondAcceptRebindsAnAcceptedOnlyRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	ctx := context.Background()
@@ -193,6 +197,8 @@ func TestTriggerAccepted_SecondAcceptRebindsAnAcceptedOnlyRow(t *testing.T) {
 // TestTriggerAccepted_SecondAcceptLeavesARunningRow asserts a late
 // accept never moves a row that records a build.
 func TestTriggerAccepted_SecondAcceptLeavesARunningRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	ctx := context.Background()
@@ -228,6 +234,8 @@ func TestTriggerAccepted_SecondAcceptLeavesARunningRow(t *testing.T) {
 // TestTriggerAccepted_SecondAcceptLeavesADuplicateRow asserts a late
 // accept never moves a terminal DUPLICATE row.
 func TestTriggerAccepted_SecondAcceptLeavesADuplicateRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	ctx := context.Background()
@@ -312,6 +320,8 @@ func TestFenceNotHomeNamesTheHomeSlot(t *testing.T) {
 // TestJobHome_NewJobAnswersItsComputedHome asserts the dispatcher reads
 // the computed hash home of a job the map does not name yet.
 func TestJobHome_NewJobAnswersItsComputedHome(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedScheduleMembers(t, db, "beta", map[string]int32{})
 
@@ -327,6 +337,8 @@ func TestJobHome_NewJobAnswersItsComputedHome(t *testing.T) {
 // TestJobSchedules_NewJobRowIsStoredByTheHashHome asserts the schedule
 // gate admits a new job's row from its hash home alone.
 func TestJobSchedules_NewJobRowIsStoredByTheHashHome(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	seedScheduleMembers(t, db, "acme", map[string]int32{})
@@ -352,6 +364,8 @@ func TestJobSchedules_NewJobRowIsStoredByTheHashHome(t *testing.T) {
 // TestJobSchedules_NewJobHomeDoesNotFlap asserts a new job's stored home
 // stays on its hash slot over two exports and two recomputes.
 func TestJobSchedules_NewJobHomeDoesNotFlap(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	ctx := context.Background()
@@ -391,6 +405,8 @@ func TestJobSchedules_NewJobHomeDoesNotFlap(t *testing.T) {
 // TestLedgerClaimCarriesTheHomeSlot asserts the ledger copies the
 // fence's home slot onto a NOT_HOME reply and onto no other reply.
 func TestLedgerClaimCarriesTheHomeSlot(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedTenantPlacementMembers(t, db, testTenant, 3, fenceScenarioMembers(), map[string]int32{testJobPath: 0})
 	ledger := NewLedger(pool, NewPlacementFence(pool, nil))

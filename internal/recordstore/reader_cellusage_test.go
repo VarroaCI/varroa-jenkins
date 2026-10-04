@@ -87,6 +87,8 @@ func wantCounts(t *testing.T, got CellUsageCounts, want CellUsageCounts) {
 // TestCellUsageCountsEachTenant asserts the four counts for a placed
 // tenant with runs, and four zeros for a placed tenant with none.
 func TestCellUsageCountsEachTenant(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -122,6 +124,8 @@ func TestCellUsageCountsEachTenant(t *testing.T) {
 // TestCellUsageExcludesTriggerFailed asserts a TRIGGER_FAILED row counts
 // in no value.
 func TestCellUsageExcludesTriggerFailed(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -141,6 +145,8 @@ func TestCellUsageExcludesTriggerFailed(t *testing.T) {
 // TestCellUsageCountsLongRunningBuild asserts a run started three days
 // ago still counts in runningNow, and stays outside the 24-hour window.
 func TestCellUsageCountsLongRunningBuild(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -160,6 +166,8 @@ func TestCellUsageCountsLongRunningBuild(t *testing.T) {
 // TestCellUsageCountsDistinctJobPaths asserts one job with two trigger
 // rows counts once, and a job with trigger type "none" counts.
 func TestCellUsageCountsDistinctJobPaths(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -180,6 +188,8 @@ func TestCellUsageCountsDistinctJobPaths(t *testing.T) {
 // TestCellUsageDropsDepartedTenant asserts a tenant that moved to
 // another cell leaves the first cell's totals.
 func TestCellUsageDropsDepartedTenant(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -202,6 +212,8 @@ func TestCellUsageDropsDepartedTenant(t *testing.T) {
 // a cell in another namespace counts on the new cell, because the
 // aggregate carries no namespace term.
 func TestCellUsageCountsTransferredRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -235,6 +247,8 @@ func sumJobUsage(rows []CellJobUsage) CellUsageCounts {
 // returns that tenant's rows alone, and no row for a tenant the
 // placement table binds to another cell.
 func TestCellTenantUsageReadsOneTenant(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -271,6 +285,8 @@ func TestCellTenantUsageReadsOneTenant(t *testing.T) {
 // with a schedule row and no run appears, and a job with a run and no
 // schedule row appears as well.
 func TestCellTenantUsageSplitsTheLoadByJob(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -315,6 +331,8 @@ func TestCellTenantUsageSplitsTheLoadByJob(t *testing.T) {
 // TestCellTenantUsageExcludesTriggerFailedPerJob asserts a failed trigger
 // counts in no job's row, exactly as it counts in no cell total.
 func TestCellTenantUsageExcludesTriggerFailedPerJob(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -336,6 +354,8 @@ func TestCellTenantUsageExcludesTriggerFailedPerJob(t *testing.T) {
 // window still reaches its job's row, because the running scan carries no
 // time bound.
 func TestCellTenantUsageCountsALongRunningBuild(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -369,6 +389,8 @@ func (c *countingTracer) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQuer
 // TestCellUsageManyRunsOneStatement asserts the batch read answers eight
 // cells with the schema check plus one aggregate statement.
 func TestCellUsageManyRunsOneStatement(t *testing.T) {
+	t.Parallel()
+
 	db, dsn := setupTestDBDSN(t)
 
 	config, err := pgxpool.ParseConfig(dsn)
@@ -413,6 +435,8 @@ func TestCellUsageManyRunsOneStatement(t *testing.T) {
 // TestCellUsageMethodsRefuseAnOldSchema asserts each cell-usage method
 // answers ErrSchemaTooOld below the compiled minimum.
 func TestCellUsageMethodsRefuseAnOldSchema(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -436,6 +460,8 @@ func TestCellUsageMethodsRefuseAnOldSchema(t *testing.T) {
 // tenant row carries its placement row's generation and announced agent
 // namespace, and an empty namespace for a row that names none.
 func TestCellUsageCarriesPlacementGenerationAndAgentNamespace(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 

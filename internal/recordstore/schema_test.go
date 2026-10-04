@@ -238,6 +238,8 @@ var expectedColumns = map[string][]columnSpec{
 // TestSchemaMatchesDesign runs every migration and compares the resulting
 // schema against the record store's thirteen tables, column for column.
 func TestSchemaMatchesDesign(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 
@@ -340,6 +342,8 @@ func assertColumns(ctx context.Context, t *testing.T, db *sql.DB, table string, 
 // 00001 and migration 00002 each created the initial four partitions, so
 // a fresh install accepts writes right away.
 func TestPartitionStrategy(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 
@@ -394,6 +398,8 @@ func TestPartitionStrategy(t *testing.T) {
 // partitioning, matching the allocation: only runs, log_chunks, and
 // activity are partitioned.
 func TestNonPartitionedTables(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 
@@ -417,6 +423,8 @@ func TestNonPartitionedTables(t *testing.T) {
 
 // TestIndexesExist asserts every index D1 names is present.
 func TestIndexesExist(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 
@@ -461,6 +469,8 @@ func TestIndexesExist(t *testing.T) {
 // TestLedgerUniqueConstraints asserts both run_intents UNIQUE constraints
 // reject a conflicting row.
 func TestLedgerUniqueConstraints(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 
@@ -491,6 +501,8 @@ func TestLedgerUniqueConstraints(t *testing.T) {
 // TestJobNumbersPrimaryKey asserts the (cluster, tenant, job_path)
 // primary key rejects a duplicate row.
 func TestJobNumbersPrimaryKey(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 
@@ -512,6 +524,8 @@ func TestJobNumbersPrimaryKey(t *testing.T) {
 // TestRunsStatusCheckAllowsDuplicate asserts the runs.status CHECK
 // constraint accepts DUPLICATE.
 func TestRunsStatusCheckAllowsDuplicate(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 
@@ -528,6 +542,8 @@ func TestRunsStatusCheckAllowsDuplicate(t *testing.T) {
 // equals C2's nine-value enumeration exactly: every named value inserts,
 // and a value outside the set is rejected.
 func TestRunStagesStatusCheck(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 

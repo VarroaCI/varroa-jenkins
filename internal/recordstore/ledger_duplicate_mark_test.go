@@ -50,6 +50,8 @@ func runTerminalState(t *testing.T, g *Ingester, runID uuid.UUID) (string, *time
 // instance is alive, so without this mark a healthy cell holds the row
 // at QUEUED for good.
 func TestDuplicateClaimMarksTheAcceptedRowTerminal(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	ledger := NewLedger(pool, nil)
@@ -86,6 +88,8 @@ func TestDuplicateClaimMarksTheAcceptedRowTerminal(t *testing.T) {
 // race order: the claim answers duplicate first, and the accepted-trigger
 // row that follows is written DUPLICATE, never QUEUED.
 func TestAnAcceptedTriggerOfATakenKeyIsTerminalAtOnce(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 	ledger := NewLedger(pool, nil)
@@ -114,6 +118,8 @@ func TestAnAcceptedTriggerOfATakenKeyIsTerminalAtOnce(t *testing.T) {
 // trigger whose key names its own run identifier is an ordinary queued
 // run, and no mark touches it.
 func TestAnAcceptedTriggerOfItsOwnKeyStaysQueued(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 

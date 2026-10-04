@@ -61,6 +61,8 @@ func seedCurrentStagesRow(t *testing.T, db *sql.DB, runID uuid.UUID, row current
 // stage in progress for one run, and no entry for a run whose only stage
 // has already finished.
 func TestCurrentStagesAnswersOneStagePerRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()
@@ -84,6 +86,8 @@ func TestCurrentStagesAnswersOneStagePerRun(t *testing.T) {
 // TestCurrentStagesAnswersNoEntryForAnUnknownRun asserts a run id the
 // store holds no in-progress stage for carries no map entry.
 func TestCurrentStagesAnswersNoEntryForAnUnknownRun(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	reader := NewReader(pool)
 
@@ -99,6 +103,8 @@ func TestCurrentStagesAnswersNoEntryForAnUnknownRun(t *testing.T) {
 // TestCurrentStagesAnswersAnEmptyListWithoutAQuery asserts an empty run
 // list answers an empty map.
 func TestCurrentStagesAnswersAnEmptyListWithoutAQuery(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	reader := NewReader(pool)
 
@@ -114,6 +120,8 @@ func TestCurrentStagesAnswersAnEmptyListWithoutAQuery(t *testing.T) {
 // TestCurrentStagesPicksTheLaterStartedStage asserts a run that holds two
 // top-level stages in progress answers the one that started later.
 func TestCurrentStagesPicksTheLaterStartedStage(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 
@@ -137,6 +145,8 @@ func TestCurrentStagesPicksTheLaterStartedStage(t *testing.T) {
 // wins over a later-created stage in progress that carries no started_at
 // yet, such as a sibling of a parallel branch.
 func TestCurrentStagesPrefersAStartedStage(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 
@@ -161,6 +171,8 @@ func TestCurrentStagesPrefersAStartedStage(t *testing.T) {
 // writes one created_at for every stage row of a run, so started_at alone
 // orders these rows.
 func TestCurrentStagesAnswersTheTopLevelStageOfAFanOut(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 
@@ -186,6 +198,8 @@ func TestCurrentStagesAnswersTheTopLevelStageOfAFanOut(t *testing.T) {
 // TestCurrentStagesObeysASchemaTooOld asserts the call refuses a store
 // whose schema version is below this reader's minimum.
 func TestCurrentStagesObeysASchemaTooOld(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool)
 	ctx := context.Background()

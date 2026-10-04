@@ -15,6 +15,8 @@ import (
 // with no started_at comes last. Two rows with the same started_at come
 // in numeric order of their ids, so id 4 comes before id 12.
 func TestListStagesAnswersStageStartOrder(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	reader := NewReader(pool).(*pgReader)
 

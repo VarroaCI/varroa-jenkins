@@ -273,6 +273,8 @@ func TestFenceMessageNamesTheCellAndTheJob(t *testing.T) {
 // This is the rule that makes a slot takeover safe: under FENCED the
 // plugin cancels every in-flight build of every other slot.
 func TestFenceTakeoverIsolatesTheOtherSlot(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedTenantPlacementMembers(t, db, testTenant, 3, fenceScenarioMembers(),
 		map[string]int32{testJobPath: 0})
@@ -307,6 +309,8 @@ func TestFenceTakeoverIsolatesTheOtherSlot(t *testing.T) {
 // map reaches the fence: a claim for a slot-0 job from slot 1's holder
 // answers NOT_HOME.
 func TestFenceRefusesANonHomeSlotThroughTheReadPath(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedTenantPlacementMembers(t, db, testTenant, 3, fenceScenarioMembers(),
 		map[string]int32{testJobPath: 0})
@@ -327,6 +331,8 @@ func TestFenceRefusesANonHomeSlotThroughTheReadPath(t *testing.T) {
 // TestFenceGrantsTheHomeSlotThroughTheReadPath asserts a claim from the
 // job's own home slot, on a multi-slot tenant, is granted.
 func TestFenceGrantsTheHomeSlotThroughTheReadPath(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedTenantPlacementMembers(t, db, testTenant, 3, fenceScenarioMembers(),
 		map[string]int32{testJobPath: 1})

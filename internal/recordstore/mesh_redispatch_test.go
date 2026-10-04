@@ -41,6 +41,8 @@ func failResumeOn(t *testing.T, g *Ingester, runID uuid.UUID, instance string) {
 // remaining arm window: the next round dispatches to the replacement
 // instance the tenant now reports.
 func TestTakeOverLostRunsRedispatchesAfterFailure(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
 	received := collectActions(t, conn)
@@ -118,7 +120,7 @@ func TestTakeOverLostRunsRedispatchesAfterFailure(t *testing.T) {
 func TestTakeOverLostRunsSkipsExcludedInstance(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
-	reader := useManualMeter(t)
+	reader := useTestMeterProvider(t)
 	g := NewIngester(pool, nil, nil)
 
 	runID := seedMeshRunningRun(t, pool, db)

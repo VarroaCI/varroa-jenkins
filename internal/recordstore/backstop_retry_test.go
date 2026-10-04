@@ -70,6 +70,8 @@ func retryOf(t *testing.T, actions []LedgerAction) LedgerAction {
 // Jenkins fires again on a later round, under the same intent key and on
 // the job's home. Each re-fire needs the grace window since the last fire.
 func TestBackstopRefiresUnreachableTrigger(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedGrantPlacement(t, db, testCluster, testTenant, jsTestNS, "cell-a", 1, "{}")
 	g := NewIngester(pool, nil, nil)
@@ -119,6 +121,8 @@ func TestBackstopRefiresUnreachableTrigger(t *testing.T) {
 // TestBackstopDoesNotRefireAPermanentFailure asserts TRIGGER_REJECTED ends
 // the occurrence: no later round fires it again.
 func TestBackstopDoesNotRefireAPermanentFailure(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedGrantPlacement(t, db, testCluster, testTenant, jsTestNS, "cell-a", 1, "{}")
 	g := NewIngester(pool, nil, nil)
@@ -148,6 +152,8 @@ func TestBackstopDoesNotRefireAPermanentFailure(t *testing.T) {
 // booting cell gets no further fire, even past the grace window, until
 // backstopAnswerWait passes.
 func TestBackstopWaitsForAnAnsweredFire(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedGrantPlacement(t, db, testCluster, testTenant, jsTestNS, "cell-a", 1, "{}")
 	g := NewIngester(pool, nil, nil)
@@ -183,6 +189,8 @@ func TestBackstopWaitsForAnAnsweredFire(t *testing.T) {
 // once plus maxBackstopRefires times, and the last failed run names the
 // cap in its error text.
 func TestBackstopStopsAfterTheRefireCap(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedGrantPlacement(t, db, testCluster, testTenant, jsTestNS, "cell-a", 1, "{}")
 	g := NewIngester(pool, nil, nil)
@@ -228,6 +236,8 @@ func TestBackstopStopsAfterTheRefireCap(t *testing.T) {
 // paces a re-fire when the fire's activity row is missing: the failed
 // run's own mint time stands in for it.
 func TestBackstopPacesAFireWithNoActivityRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedGrantPlacement(t, db, testCluster, testTenant, jsTestNS, "cell-a", 1, "{}")
 	g := NewIngester(pool, nil, nil)
@@ -262,6 +272,8 @@ func TestBackstopPacesAFireWithNoActivityRow(t *testing.T) {
 // TestBackstopCountsUnansweredFires asserts a fire that never answers
 // still spends its attempt, so unanswered re-fires stop at the limit too.
 func TestBackstopCountsUnansweredFires(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	seedGrantPlacement(t, db, testCluster, testTenant, jsTestNS, "cell-a", 1, "{}")
 	g := NewIngester(pool, nil, nil)

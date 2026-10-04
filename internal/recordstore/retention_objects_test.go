@@ -21,6 +21,8 @@ import (
 // partitions and asserts a cutoff at the fourth month's start drops
 // exactly the first three.
 func TestDropExpiredPartitionsSeedsFourMonths(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -77,6 +79,8 @@ func TestDropExpiredPartitionsSeedsFourMonths(t *testing.T) {
 // TestDeleteExpiredLogObjectsDeletesBothKeys writes both log keys for one
 // run, expires it, and asserts both keys are gone.
 func TestDeleteExpiredLogObjectsDeletesBothKeys(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	ctx := context.Background()
 	store := blob.NewPGBlobStore(pool)
@@ -153,6 +157,8 @@ func (r *recordingBlobStore) NewObjectReader(context.Context, string, int64, int
 // deletes an expired artifact through Delete on its stored blob_key
 // verbatim, and never calls DeletePrefix.
 func TestDeleteExpiredArtifactsNeverCallsDeletePrefix(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -231,6 +237,8 @@ func TestDeleteExpiredArtifactsNeverCallsDeletePrefix(t *testing.T) {
 // partition past retention.logs but not past retention.artifacts
 // survives.
 func TestMaintenanceRoundAppliesRetentionAcrossFourMonths(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -441,6 +449,8 @@ func (r *prefixRecordingStore) NewObjectReader(context.Context, string, int64, i
 // hourly backstop removes the run-state prefix of a run terminal for two
 // hours and keeps the prefix of a run terminal for ten minutes.
 func TestDeleteExpiredRunStateRemovesOnlyOldTerminalRuns(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	now := time.Now().UTC()

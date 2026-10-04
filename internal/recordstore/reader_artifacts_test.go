@@ -38,6 +38,8 @@ func TestIsInternalArtifactPath(t *testing.T) {
 // TestListArtifactsOmitsInternalKeys asserts the artifact list holds the
 // user's files alone, while GetArtifact still reads the internal report.
 func TestListArtifactsOmitsInternalKeys(t *testing.T) {
+	t.Parallel()
+
 	deps, db := statusTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	runID := seedCrossTenantRun(t, deps.Pool, "alpha", "alpha/release")
@@ -69,6 +71,8 @@ func TestListArtifactsOmitsInternalKeys(t *testing.T) {
 // TestCrossTenantArtifactsOmitInternalKeys asserts a cross-tenant caller
 // can neither list nor sign an internal key.
 func TestCrossTenantArtifactsOmitInternalKeys(t *testing.T) {
+	t.Parallel()
+
 	deps, db := statusTestDeps(t)
 	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
 	runID := seedCrossTenantRun(t, deps.Pool, "alpha", "alpha/release")

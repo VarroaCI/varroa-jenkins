@@ -245,7 +245,14 @@ of the fleet's audit activity, once a controller becomes disposable.
   live database reads this environment variable and calls `t.Skip` when it
   is unset, so `make test` stays green with no database present. Each such
   test gets its own database, cloned from a migrated template (see
-  Verification), so a repeated run starts clean. The `blob` test binary runs
+  Verification), so a repeated run starts clean. **A database test calls
+  `t.Parallel()` as its first statement.** `serialDatabaseTests`
+  (`parallel_guard_test.go`) lists the exceptions: a test that calls
+  `useTestMeterProvider`, because every metrics constructor reads the
+  global meter provider, and the two grants tests, because a role is
+  cluster-wide. `useTestMeterProvider` calls `t.Setenv`, which panics in a
+  parallel test. `TestDatabaseTestsRunInParallel` parses the test files
+  and fails on a missing call or a stale list entry. The `blob` test binary runs
   at the same time and owns a sibling database, `<db>_blob`, that it creates
   on first use. Seed a
   monthly-partitioned table only inside the window its migration creates
@@ -1386,7 +1393,7 @@ of the fleet's audit activity, once a controller becomes disposable.
 
 ```bash
 VARROA_TEST_DSN='postgres://user:pass@host:port/db?sslmode=disable' \
-  go test -race -count=1 -timeout 30m ./internal/recordstore/...
+  go test -race -count=1 -parallel 8 -timeout 30m ./internal/recordstore/...
 go test -race -count=1 ./internal/recordstore/...   # DSN unset: tests skip
 ```
 
@@ -1400,7 +1407,10 @@ The package tests do not use the DSN's own database for a migrated schema.
 - `<db>_tmpl`: the binary drops it, creates it, and migrates it once per run.
 - `<db>_t<pid>_<n>`: `setupTestDB` and `setupTestDBDSN` clone one from the
   template for each test. `emptyTestDB` creates one from `template0` for a
-  migration test. A cleanup drops each one `WITH (FORCE)`.
+  migration test. A cleanup drops each one `WITH (FORCE)`. Parallel tests
+  clone and drop at the same time. No lock surrounds these statements,
+  because each drop waits on a checkpoint. A clone that Postgres refuses
+  with SQLSTATE `55006` is retried.
 - At start, the binary drops each `<db>_t<pid>_<n>` that has no session.
 
 A test that opens its own pool uses the DSN that `setupTestDBDSN` returns.
@@ -1409,11 +1419,13 @@ name makes a second `recordstore` test binary on the same DSN wait until the
 first exits. The wait stops one minute before the binary's own `-timeout`. The `blob` binary does not take this
 lock: two `blob` binaries on one DSN share `<db>_blob`.
 
-The package runs about 4 minutes on a workstation with a live DSN. The
-`Record store` job runs it in about twice that time. Under runner contention
-it can run longer than Go's default 10-minute test timeout. The job in
-`.github/workflows/pr.yaml` sets `-timeout 30m` for this reason. Keep the
-flag on every command that runs `./internal/recordstore/...` with a live DSN.
+The `Record store` job in `.github/workflows/pr.yaml` runs the package with
+`-parallel 8`. Before the tests, it turns off `fsync`, `full_page_writes`,
+and `synchronous_commit` on its throwaway Postgres service. With these, the
+package runs in about 40 seconds on a workstation. Under runner contention
+it can run longer than Go's default 10-minute test timeout, so the job sets
+`-timeout 30m`. Keep the flag on every command that runs
+`./internal/recordstore/...` with a live DSN.
 
 ## Child DOX Index
 

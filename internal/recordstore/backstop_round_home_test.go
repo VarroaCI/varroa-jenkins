@@ -50,6 +50,8 @@ func collectBackstopActions(t *testing.T, conn *bus.Conn) func(n int) []LedgerAc
 // the retry_run of a backstop fire both name the member of the job's
 // home slot.
 func TestRunBackstopSchedule_FiresOnTheHomeSlot(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	jobPath := testTenant + "/home-fire"
 	ingestCronSchedule(t, NewIngester(pool, nil, nil), testTenant, jobPath, 1, time.Now().UTC().Add(-10*time.Minute))
@@ -89,6 +91,8 @@ func TestRunBackstopSchedule_FiresOnTheHomeSlot(t *testing.T) {
 // TestRunBackstopSchedule_UnplacedControllerKeepsTheRowCell asserts a
 // tenant with no placement row fires on the cell its schedule row names.
 func TestRunBackstopSchedule_UnplacedControllerKeepsTheRowCell(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	jobPath := testTenant + "/unplaced-fire"
 	ingestCronSchedule(t, NewIngester(pool, nil, nil), testTenant, jobPath, 0, time.Now().UTC().Add(-10*time.Minute))
@@ -112,6 +116,8 @@ func TestRunBackstopSchedule_UnplacedControllerKeepsTheRowCell(t *testing.T) {
 // slot that holds no member fires nothing and writes no activity row, so
 // a later round can fire the occurrence.
 func TestRunBackstopSchedule_UnboundHomeSlotFiresNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	jobPath := testTenant + "/unbound-fire"
 	ingestCronSchedule(t, NewIngester(pool, nil, nil), testTenant, jobPath, 1, time.Now().UTC().Add(-10*time.Minute))

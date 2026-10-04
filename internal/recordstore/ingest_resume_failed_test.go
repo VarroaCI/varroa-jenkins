@@ -121,6 +121,8 @@ func seedRunWithDispatchedResume(t *testing.T, pool *pgxpool.Pool, db *sql.DB) (
 // lists the failed instance, and leaves the arm untouched. The arm
 // window is never extended: a failure buys the run no time.
 func TestApplyResumeFailedRearmsRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 
@@ -156,6 +158,8 @@ func TestApplyResumeFailedRearmsRun(t *testing.T) {
 // proves the target reached the build load leaves the record alone. A
 // second target must never adopt a build the first may already hold.
 func TestApplyResumeFailedHeldCodeWritesNothing(t *testing.T) {
+	t.Parallel()
+
 	for _, code := range []string{"RESUME_LOAD_FAILED", "RESUME_NOT_BUILDING"} {
 		t.Run(code, func(t *testing.T) {
 			pool, db := setupLedgerPool(t)
@@ -185,6 +189,8 @@ func TestApplyResumeFailedHeldCodeWritesNothing(t *testing.T) {
 // earlier attempt whose instance the record no longer names, and a run
 // that is no longer RUNNING.
 func TestApplyResumeFailedGuardsOnInstance(t *testing.T) {
+	t.Parallel()
+
 	t.Run("a repeat changes nothing", func(t *testing.T) {
 		pool, db := setupLedgerPool(t)
 		g := NewIngester(pool, nil, nil)

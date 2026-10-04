@@ -14,6 +14,8 @@ import (
 // either identifier: a redelivered trigger that a claim then granted is
 // live, and the caller must keep waiting on it.
 func TestCrossTenantRunPrefersTheIntentOverATriggerFailedRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -99,6 +101,8 @@ func assertTriggerFailedReply(t *testing.T, resp CrossTenantResponse, runID, rea
 // by intent key reads a vetoed run's TRIGGER_FAILED result and veto code,
 // not pending.
 func TestCrossTenantStatus_VetoedRunByIntentKey(t *testing.T) {
+	t.Parallel()
+
 	deps, db := statusTestDeps(t)
 	runID, intentKey := seedVetoedCrossTenantRun(t, deps.Pool, db, ReasonFenced)
 
@@ -119,6 +123,8 @@ func TestCrossTenantStatus_VetoedRunByIntentKey(t *testing.T) {
 // TestCrossTenantStatus_VetoedRunByRunID asserts a caller that polls by
 // run identifier reads a vetoed run's result, not NOT_FOUND.
 func TestCrossTenantStatus_VetoedRunByRunID(t *testing.T) {
+	t.Parallel()
+
 	deps, db := statusTestDeps(t)
 	runID, _ := seedVetoedCrossTenantRun(t, deps.Pool, db, ReasonCrossTenant)
 
@@ -140,6 +146,8 @@ func TestCrossTenantStatus_VetoedRunByRunID(t *testing.T) {
 // beta does not export release to reads the grant veto alone, by either
 // identifier.
 func TestCrossTenantStatus_VetoedRunNeedsTheGrant(t *testing.T) {
+	t.Parallel()
+
 	deps, db := statusTestDeps(t)
 	runID, intentKey := seedVetoedCrossTenantRun(t, deps.Pool, db, ReasonFenced)
 	seedGrantPlacement(t, db, testCluster, "gamma", "ns-gamma", "cell-gamma", 1, "{}")

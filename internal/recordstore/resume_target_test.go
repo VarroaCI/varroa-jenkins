@@ -52,6 +52,8 @@ func withResumeTargetRefusal(t *testing.T, pool *pgxpool.Pool, run meshCandidate
 // owner, and a rehydrated_instance that differs from the live instance,
 // each answer not-ok. All three holding answers ok with the member.
 func TestResumeTargetForRunThreeTests(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name               string
 		cell               string
@@ -99,6 +101,8 @@ func TestResumeTargetForRunThreeTests(t *testing.T) {
 // TestResumeTargetForRunNoPlacementRow asserts a tenant with no
 // tenant_placements row answers not-ok, with no error.
 func TestResumeTargetForRunNoPlacementRow(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	run := meshCandidate{cluster: testCluster, tenant: testTenant, cellInstance: "pod-dead"}
 	_, ok := withResumeTargetTx(t, pool, run)

@@ -65,6 +65,8 @@ func applyHeartbeatFrom(t *testing.T, pool *pgxpool.Pool, runID uuid.UUID, insta
 // column stands above the resume's own request time forever, and both
 // the resume guard and the marking write then refuse the run for good.
 func TestLateHeartbeatFromTheDeadOwnerLeavesTheRunMarkable(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedDispatchedRun(t, pool, db)
 
@@ -99,6 +101,8 @@ func TestLateHeartbeatFromTheDeadOwnerLeavesTheRunMarkable(t *testing.T) {
 // resumed build gives, so it raises both columns and clears the resume
 // record.
 func TestHeartbeatFromTheResumeTargetRaisesTheStamps(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedDispatchedRun(t, pool, db)
 
@@ -117,6 +121,8 @@ func TestHeartbeatFromTheResumeTargetRaisesTheStamps(t *testing.T) {
 // unchanged: a run with no resume record, whose own owner heartbeats,
 // raises both columns.
 func TestHeartbeatFromTheOwnerRaisesTheStamps(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedRunningRun(t, pool, newTestClaimRequest(intentKey, 0))
@@ -155,6 +161,8 @@ func applyHeartbeatWithInputs(t *testing.T, pool *pgxpool.Pool, runID uuid.UUID,
 // differs from the stored one raises the column and the watermark, in
 // both directions.
 func TestHeartbeatRaisesAndClearsThePendingSet(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedRunningRun(t, pool, newTestClaimRequest(intentKey, 0))
@@ -185,6 +193,8 @@ func TestHeartbeatRaisesAndClearsThePendingSet(t *testing.T) {
 // distinctness test stops the write churn of a run whose set never
 // changed.
 func TestHeartbeatWithMatchingSetChangesNeitherColumn(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedRunningRun(t, pool, newTestClaimRequest(intentKey, 0))
@@ -206,6 +216,8 @@ func TestHeartbeatWithMatchingSetChangesNeitherColumn(t *testing.T) {
 // always carried an empty set keeps no inputs_seq key, so a heartbeat
 // changes neither column for it.
 func TestHeartbeatOnARunThatNeverPausedWritesNoWatermark(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedRunningRun(t, pool, newTestClaimRequest(intentKey, 0))
@@ -224,6 +236,8 @@ func TestHeartbeatOnARunThatNeverPausedWritesNoWatermark(t *testing.T) {
 // TestHeartbeatWithoutTheInputsKeyChangesNeitherColumn proves a heartbeat
 // that carries no inputs key leaves a stored set and its watermark alone.
 func TestHeartbeatWithoutTheInputsKeyChangesNeitherColumn(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := seedRunningRun(t, pool, newTestClaimRequest(intentKey, 0))

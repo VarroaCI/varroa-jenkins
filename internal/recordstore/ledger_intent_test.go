@@ -12,6 +12,8 @@ import (
 // run_intents row exists, and a later claim with the same key can still
 // be granted.
 func TestAVetoWritesNoRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, denyingFence{reasonCode: ReasonNotReady})
 
@@ -33,6 +35,8 @@ func TestAVetoWritesNoRow(t *testing.T) {
 // TestRunStartedConsumesIntent asserts a run.started event moves a
 // granted intent to CONSUMED and sets consumed_at.
 func TestRunStartedConsumesIntent(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 

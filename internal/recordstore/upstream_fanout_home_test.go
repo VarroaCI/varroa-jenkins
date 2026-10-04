@@ -12,7 +12,7 @@ import (
 // reader and the actions the round published.
 func runFanoutForHome(t *testing.T, fx *fanoutTestFixture) (*sdkmetric.ManualReader, chan LedgerAction) {
 	t.Helper()
-	reader := fanoutTestMeter(t)
+	reader := useTestMeterProvider(t)
 	metrics, err := NewUpstreamFanoutMetrics()
 	if err != nil {
 		t.Fatalf("new fan-out metrics: %v", err)

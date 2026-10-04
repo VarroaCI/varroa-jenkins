@@ -38,6 +38,8 @@ func seedActivityEvents(t *testing.T, events []activity.Event) *pgxpool.Pool {
 // filters from D4's mapping table, including the Controller field's two
 // accepted forms.
 func TestListActivity_FilterMapping(t *testing.T) {
+	t.Parallel()
+
 	base := time.Now().UTC().Truncate(time.Second)
 	events := []activity.Event{
 		{Timestamp: base, Cluster: "c1", Namespace: "ns1", Controller: "ctrl1", Source: "user", Severity: "info", Actor: "alice", Type: "login", Message: "alice logged in"},
@@ -88,6 +90,8 @@ func tPtr(t time.Time) *time.Time { return &t }
 // SQL: a Namespaces-scoped query never returns a row outside it, and never
 // returns a global (empty-controller) row unless Global is also set.
 func TestListActivity_ScopePushdown(t *testing.T) {
+	t.Parallel()
+
 	base := time.Now().UTC().Truncate(time.Second)
 	events := []activity.Event{
 		{Timestamp: base, Cluster: "c1", Namespace: "ns-a", Controller: "ctrl-a", Source: "user", Type: "t"},
@@ -126,6 +130,8 @@ func TestListActivity_ScopePushdown(t *testing.T) {
 // TestListActivity_KeysetPaging_NoGapNoRepeat pages 300 seeded rows in
 // both directions and asserts every row is returned exactly once.
 func TestListActivity_KeysetPaging_NoGapNoRepeat(t *testing.T) {
+	t.Parallel()
+
 	const n = 300
 	base := time.Now().UTC().Truncate(time.Second)
 	events := make([]activity.Event, n)
@@ -210,6 +216,8 @@ func TestListActivity_KeysetPaging_NoGapNoRepeat(t *testing.T) {
 // event_key) keyset paging must still return every row exactly once: the
 // event_key tiebreaker, not ts alone, decides where a page cuts.
 func TestListActivity_KeysetPaging_TiedTimestamps(t *testing.T) {
+	t.Parallel()
+
 	const n = 20
 	base := time.Now().UTC().Truncate(time.Second)
 	events := make([]activity.Event, n)
@@ -292,6 +300,8 @@ func TestListActivity_KeysetPaging_TiedTimestamps(t *testing.T) {
 // D4 names: a filter mismatch and a cursor older than the retention
 // window.
 func TestListActivity_CursorErrors(t *testing.T) {
+	t.Parallel()
+
 	base := time.Now().UTC().Truncate(time.Second)
 	events := []activity.Event{
 		{Timestamp: base, Cluster: "c1", Namespace: "ns", Controller: "ctrl", Source: "user", Type: "t"},
@@ -333,6 +343,8 @@ func TestListActivity_CursorErrors(t *testing.T) {
 // TestActivityRetentionDays proves ActivityRetentionDays reports the day
 // count NewReader was constructed with, and still runs checkSchema.
 func TestActivityRetentionDays(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 
 	r := NewReader(pool, 30)

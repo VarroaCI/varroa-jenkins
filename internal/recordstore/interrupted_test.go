@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -80,6 +79,8 @@ func newTestActionConn(t *testing.T) *bus.Conn {
 // terminal write, the reason value, the no-summary finalize marker for a
 // run that never had one, and the build.interrupted activity row.
 func TestMarkInterruptedWritesTerminalRecordReasonAndActivity(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
 	c := fetchRunningCandidate(t, pool, runID)
@@ -124,6 +125,8 @@ func TestMarkInterruptedWritesTerminalRecordReasonAndActivity(t *testing.T) {
 // clears a paused run's pending set, so a run that ends while paused
 // holds none.
 func TestMarkInterruptedClearsThePendingSet(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := startRunForFinalize(t, pool, intentKey)
@@ -158,6 +161,8 @@ func TestMarkInterruptedClearsThePendingSet(t *testing.T) {
 // against a real missing-partition error, with no seam added to
 // markInterrupted.
 func TestMarkInterruptedRollsBackWhenActivityInsertFails(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
 	c := fetchRunningCandidate(t, pool, runID)
@@ -194,6 +199,8 @@ func TestMarkInterruptedRollsBackWhenActivityInsertFails(t *testing.T) {
 // "not-finalized", not "no-summary", and both fields decode as the
 // booleans the API's Finalized/Incomplete fields expect.
 func TestMarkInterruptedFinalizesIncompleteWhenSummaryExists(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
 	if _, err := db.Exec(`
@@ -232,6 +239,8 @@ func TestMarkInterruptedFinalizesIncompleteWhenSummaryExists(t *testing.T) {
 // transaction keeps a reason the log summary already holds, and still
 // finalizes the summary.
 func TestMarkInterruptedKeepsAStoredIncompleteReason(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
 	if _, err := db.Exec(`
@@ -268,6 +277,8 @@ func TestMarkInterruptedKeepsAStoredIncompleteReason(t *testing.T) {
 // "finalized" value fails that decode and silently drops the run's
 // terminal "end" event and its incomplete/incomplete_reason fields.
 func TestMarkInterruptedSummaryDecodesAsAPIExpects(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
 	c := fetchRunningCandidate(t, pool, runID)
@@ -301,6 +312,8 @@ func TestMarkInterruptedSummaryDecodesAsAPIExpects(t *testing.T) {
 // the run's payload carries interrupted_reason after a mark, and a
 // fresh read of the run returns that same payload.
 func TestMarkInterruptedReasonReadableThroughGetRun(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	reader := NewReader(pool)
 	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
@@ -337,6 +350,8 @@ func TestMarkInterruptedReasonReadableThroughGetRun(t *testing.T) {
 // WHERE status = 'RUNNING' guard leaves a row a real completion already
 // won, and reports no change.
 func TestMarkInterruptedSkipsAlreadyTerminalRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
 	c := fetchRunningCandidate(t, pool, runID)
@@ -465,6 +480,8 @@ func TestEvaluateResumeGuardRows(t *testing.T) {
 // candidate before the arm committed, but the mark's own SQL re-reads
 // the committed payload and finds a live arm window.
 func TestMarkInterruptedNoopsWhenAnArmRacesTheMark(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
 	c := fetchRunningCandidate(t, pool, runID)
@@ -709,6 +726,8 @@ func TestAfterMarkPublishesCancelOnlyForNoHeartbeat(t *testing.T) {
 // publishes one retry_run action with the retry:<run-id> intent key, and
 // that no run_intents row is written for it.
 func TestAfterMarkPublishesAutomaticRetry(t *testing.T) {
+	t.Parallel()
+
 	_, db := setupLedgerPool(t)
 	conn := newTestActionConn(t)
 	received := make(chan LedgerAction, 4)
@@ -821,8 +840,7 @@ func TestSweepInterruptedRunsMarksASilentRun(t *testing.T) {
 	t.Cleanup(func() { _ = sub.Unsubscribe() })
 	conn.NATSConn().Flush()
 
-	reader, restore := swapMeterProvider(t)
-	defer restore()
+	reader := useTestMeterProvider(t)
 	metrics, err := NewInterruptedMetrics()
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
@@ -875,8 +893,7 @@ func TestSweepInterruptedRunsSkipsOnPendingBacklog(t *testing.T) {
 		}
 	}
 
-	reader, restore := swapMeterProvider(t)
-	defer restore()
+	reader := useTestMeterProvider(t)
 	metrics, err := NewInterruptedMetrics()
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
@@ -916,8 +933,7 @@ func TestSweepInterruptedRunsSkipsOnStaleConsumer(t *testing.T) {
 		t.Fatalf("publish a pending message: %v", err)
 	}
 
-	reader, restore := swapMeterProvider(t)
-	defer restore()
+	reader := useTestMeterProvider(t)
 	metrics, err := NewInterruptedMetrics()
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
@@ -963,18 +979,6 @@ func newSweepTestBus(t *testing.T) (*bus.Conn, func()) {
 		conn.Close()
 		s.Shutdown()
 	}
-}
-
-// swapMeterProvider installs a fresh ManualReader-backed MeterProvider as
-// the global provider, following the ledger_fence_metrics_test.go
-// pattern, and returns a restore func.
-func swapMeterProvider(t *testing.T) (*sdkmetric.ManualReader, func()) {
-	t.Helper()
-	reader := sdkmetric.NewManualReader()
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	prev := otel.GetMeterProvider()
-	otel.SetMeterProvider(mp)
-	return reader, func() { otel.SetMeterProvider(prev) }
 }
 
 // sumCounterByAttr sums every data point of metricName whose attrKey
@@ -1051,6 +1055,8 @@ func seedPlacementLivenessWithPolicy(t *testing.T, db *sql.DB, cellInstance stri
 // no cancel_run or retry_run even though the tenant's policy is
 // automatic.
 func TestSweepMarksQueuedRunWithDeadAcceptingInstance(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	past := time.Now().UTC().Add(-6 * time.Minute)
@@ -1128,6 +1134,8 @@ func TestSweepMarksQueuedRunWithDeadAcceptingInstance(t *testing.T) {
 // TestSweepLeavesQueuedRunWithLiveAcceptingInstanceAlone asserts a live
 // accepting instance marks nothing.
 func TestSweepLeavesQueuedRunWithLiveAcceptingInstanceAlone(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	past := time.Now().UTC().Add(-time.Hour)
@@ -1177,8 +1185,7 @@ func TestSweepSkipsQueuedPlaceholderWithNoOwningInstance(t *testing.T) {
 	defer cleanup()
 	freshenSweepConsumer(t, conn)
 
-	reader, restore := swapMeterProvider(t)
-	defer restore()
+	reader := useTestMeterProvider(t)
 	metrics, err := NewInterruptedMetrics()
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
@@ -1208,6 +1215,8 @@ func TestSweepSkipsQueuedPlaceholderWithNoOwningInstance(t *testing.T) {
 // run that holds a granted intent, but no accepted_instance payload key,
 // is marked through the intent's own cell_instance.
 func TestSweepMarksClaimedQueuedRunThroughIntentInstance(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -1263,6 +1272,8 @@ func TestSweepMarksClaimedQueuedRunThroughIntentInstance(t *testing.T) {
 // announce-triggered fast path marks a queued run of the tenant's old
 // cell, through its accepted_instance.
 func TestMarkMovedRunsForTenantMarksQueuedRunOfOldCell(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -1365,18 +1376,6 @@ func cellLossCountByPath(t *testing.T, reader *sdkmetric.ManualReader, path stri
 	return total
 }
 
-// useManualMeter installs a manual metric reader for the duration of the
-// test and answers it.
-func useManualMeter(t *testing.T) *sdkmetric.ManualReader {
-	t.Helper()
-	reader := sdkmetric.NewManualReader()
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	prev := otel.GetMeterProvider()
-	otel.SetMeterProvider(mp)
-	t.Cleanup(func() { otel.SetMeterProvider(prev) })
-	return reader
-}
-
 // TestAnnounceHookMarksCellLostWithAFreshHeartbeat asserts the announce
 // hook does not skip a cell-lost reading. The run's heartbeat is 40
 // seconds old, far inside the five-minute window, and the pod-read
@@ -1384,7 +1383,7 @@ func useManualMeter(t *testing.T) *sdkmetric.ManualReader {
 // recorder_cell_loss_confirmed_total counts one "announce" mark.
 func TestAnnounceHookMarksCellLostWithAFreshHeartbeat(t *testing.T) {
 	pool, db := setupLedgerPool(t)
-	reader := useManualMeter(t)
+	reader := useTestMeterProvider(t)
 	conn := newTestSyncConn(t)
 
 	now := time.Now().UTC()
@@ -1425,7 +1424,7 @@ func TestAnnounceHookMarksCellLostWithAFreshHeartbeat(t *testing.T) {
 // "sweep" path.
 func TestSweepMarksCellLostAndCountsIt(t *testing.T) {
 	pool, db := setupLedgerPool(t)
-	reader := useManualMeter(t)
+	reader := useTestMeterProvider(t)
 	conn, cleanup := newSweepTestBus(t)
 	defer cleanup()
 	freshenSweepConsumer(t, conn)
@@ -1471,6 +1470,8 @@ func TestSweepMarksCellLostAndCountsIt(t *testing.T) {
 // would refresh the floor, so the lost run would otherwise wait for a
 // build that never comes.
 func TestSweepMarksCellLostOnAnIdleConsumer(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn, cleanup := newSweepTestBus(t)
 	defer cleanup()
@@ -1511,6 +1512,8 @@ func TestSweepMarksCellLostOnAnIdleConsumer(t *testing.T) {
 // keeps a dead_instances entry an unclaimed queued run names through its
 // accepted_instance payload value.
 func TestDeadInstancesTrimKeepsUnclaimedQueuedRunEntry(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 

@@ -4,8 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"go.opentelemetry.io/otel"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
@@ -15,11 +13,7 @@ import (
 // recorder_activity_* instruments register on the varroa-recorder meter
 // and record a value.
 func TestActivityMetricsRegisterAndRecord(t *testing.T) {
-	reader := sdkmetric.NewManualReader()
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	prev := otel.GetMeterProvider()
-	otel.SetMeterProvider(mp)
-	t.Cleanup(func() { otel.SetMeterProvider(prev) })
+	reader := useTestMeterProvider(t)
 
 	s := startIngestTestServer(t)
 	conn, err := bus.Connect(s.ClientURL())

@@ -3,6 +3,7 @@ package recordstore
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -13,6 +14,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"go.opentelemetry.io/otel"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 )
 
 // testDSNEnv is the environment variable a record-store database test reads
@@ -62,9 +66,18 @@ var (
 	testDBOnce sync.Once
 	testDBInit *testDBState
 	testDBErr  error
-	// testDBMu serializes every CREATE DATABASE and DROP DATABASE.
-	// Postgres refuses a clone while another session reads the template.
+	// testDBMu guards the per-test database counter only. Parallel tests
+	// create and drop their databases at the same time, because a lock
+	// around those statements makes every test wait on a drop checkpoint.
 	testDBMu sync.Mutex
+)
+
+// cloneRetryAttempts and cloneRetryDelay bound the retry of a clone that
+// Postgres refuses with SQLSTATE 55006. Postgres refuses a clone while a
+// session is connected to the source database.
+const (
+	cloneRetryAttempts = 20
+	cloneRetryDelay    = 250 * time.Millisecond
 )
 
 // testDatabases prepares the template database once per test binary and
@@ -187,21 +200,40 @@ func (s *testDBState) newDatabase(t *testing.T, source string) string {
 
 	testDBMu.Lock()
 	s.next++
-	name := fmt.Sprintf("%s%s%d_%d", s.baseName, testDatabaseInfix, os.Getpid(), s.next)
-	_, err := s.admin.ExecContext(ctx, "CREATE DATABASE "+pgx.Identifier{name}.Sanitize()+" TEMPLATE "+pgx.Identifier{source}.Sanitize())
+	n := s.next
 	testDBMu.Unlock()
-	if err != nil {
+	name := fmt.Sprintf("%s%s%d_%d", s.baseName, testDatabaseInfix, os.Getpid(), n)
+	if err := s.cloneDatabase(ctx, name, source); err != nil {
 		t.Fatalf("create test database %s: %v", name, err)
 	}
 
 	t.Cleanup(func() {
-		testDBMu.Lock()
-		defer testDBMu.Unlock()
 		if _, err := s.admin.ExecContext(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{name}.Sanitize()+" WITH (FORCE)"); err != nil {
 			t.Errorf("drop test database %s: %v", name, err)
 		}
 	})
 	return s.dsnFor(name)
+}
+
+// cloneDatabase creates database name from source. It retries a clone
+// that Postgres refuses because a session is connected to source.
+func (s *testDBState) cloneDatabase(ctx context.Context, name, source string) error {
+	stmt := "CREATE DATABASE " + pgx.Identifier{name}.Sanitize() + " TEMPLATE " + pgx.Identifier{source}.Sanitize()
+	var err error
+	for attempt := 0; attempt < cloneRetryAttempts; attempt++ {
+		if _, err = s.admin.ExecContext(ctx, stmt); err == nil {
+			return nil
+		}
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "55006" {
+			return err
+		}
+		if attempt == cloneRetryAttempts-1 {
+			break
+		}
+		time.Sleep(cloneRetryDelay)
+	}
+	return err
 }
 
 // setupTestDBDSN gives t its own database, cloned from the migrated
@@ -235,4 +267,32 @@ func setupTestDB(t *testing.T) *sql.DB {
 func emptyTestDB(t *testing.T) string {
 	t.Helper()
 	return testDatabases(t).newDatabase(t, "template0")
+}
+
+// serialGuardEnv is the environment variable requireSerialTest sets. Its
+// value has no meaning.
+const serialGuardEnv = "VARROA_TEST_SERIAL_GUARD"
+
+// requireSerialTest fails t when t runs in parallel. t.Setenv panics in
+// a parallel test, so a helper that changes process-wide state calls this
+// first.
+func requireSerialTest(t *testing.T) {
+	t.Helper()
+	t.Setenv(serialGuardEnv, "1")
+}
+
+// useTestMeterProvider installs a meter provider with a manual reader as
+// the global provider until t ends, and returns the reader. Every metrics
+// constructor in this package reads the global provider, so the calling
+// test must not run in parallel. List it in serialDatabaseTests when it
+// uses the database.
+func useTestMeterProvider(t *testing.T) *sdkmetric.ManualReader {
+	t.Helper()
+	requireSerialTest(t)
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	prev := otel.GetMeterProvider()
+	otel.SetMeterProvider(mp)
+	t.Cleanup(func() { otel.SetMeterProvider(prev) })
+	return reader
 }

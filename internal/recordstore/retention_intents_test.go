@@ -9,6 +9,8 @@ import (
 // TestSweepIntentsLeavesLiveClaim asserts a claim granted two minutes ago,
 // with no run.started yet, survives the sweep.
 func TestSweepIntentsLeavesLiveClaim(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	ledger := NewLedger(pool, nil)
@@ -37,6 +39,8 @@ func TestSweepIntentsLeavesLiveClaim(t *testing.T) {
 // bound comes from the oldest surviving runs partition, so an intent
 // whose run monthly rounding still keeps is not deleted.
 func TestSweepIntentsOutlivesRunUnderMonthlyRounding(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -79,6 +83,8 @@ func TestSweepIntentsOutlivesRunUnderMonthlyRounding(t *testing.T) {
 // TestSweepIntentsLeavesJobNumbers asserts a full sweep of a job's runs
 // and intents leaves the job's job_numbers row unchanged.
 func TestSweepIntentsLeavesJobNumbers(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	ledger := NewLedger(pool, nil)

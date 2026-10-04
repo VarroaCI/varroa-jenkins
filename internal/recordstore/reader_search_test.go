@@ -91,6 +91,8 @@ func TestSearchFetchLimitExceedsPerKindCap(t *testing.T) {
 // in internal/api/handlers.go), applied after per-row authorization; this
 // test proves only the reader's own fetch bound.
 func TestSearchRecords_FetchLimit(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	r := NewReader(pool)
 	ctx := context.Background()
@@ -140,6 +142,8 @@ func TestSearchRecords_FetchLimit(t *testing.T) {
 // "A prefix matches a job path token": a caller searching a prefix finds
 // a readable job path that starts with it.
 func TestSearchRecords_TokenPrefixMatchesJobPath(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	r := NewReader(pool)
 	ctx := context.Background()
@@ -159,6 +163,8 @@ func TestSearchRecords_TokenPrefixMatchesJobPath(t *testing.T) {
 // namespaces and asserts a JobRunNamespaces list admits only the
 // readable namespace, proving the job/run namespace pushdown.
 func TestSearchRecords_ScopePushdown(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	r := NewReader(pool)
 	ctx := context.Background()
@@ -196,6 +202,8 @@ func TestSearchRecords_ScopePushdown(t *testing.T) {
 // caller's tenant grants, and asserts SearchRecords returns the
 // in-tenant row but not the out-of-tenant row (ruling y).
 func TestSearchRecords_TenantPushdown(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	r := NewReader(pool)
 	ctx := context.Background()
@@ -233,6 +241,8 @@ func TestSearchRecords_TenantPushdown(t *testing.T) {
 // the ns-a row is ever read, and a post-fetch namespace drop could not
 // recover it.
 func TestSearchRecords_NamespaceFilterAppliesInSQL(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	r := NewReader(pool)
 	ctx := context.Background()
@@ -263,6 +273,8 @@ func TestSearchRecords_NamespaceFilterAppliesInSQL(t *testing.T) {
 // cluster-wide pipelines grant reaches every tenant, but a Namespace
 // filter still applies as an AND'd exact match).
 func TestSearchRecords_AllTenantsWithNamespaceFilter(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	r := NewReader(pool)
 	ctx := context.Background()
@@ -296,6 +308,8 @@ func TestSearchRecords_AllTenantsWithNamespaceFilter(t *testing.T) {
 // ok=false case (an empty or punctuation-only query) returns no record
 // results without sending a query Postgres cannot parse.
 func TestSearchRecords_EmptyQueryMatchesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	r := NewReader(pool)
 	ctx := context.Background()
@@ -314,6 +328,8 @@ func TestSearchRecords_EmptyQueryMatchesNothing(t *testing.T) {
 // queries repeat the pinned expressions identically, so Postgres answers
 // each with an index scan rather than a sequential scan.
 func TestSearchRecordsExpressionIndexesAreUsed(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 

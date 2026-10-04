@@ -34,6 +34,8 @@ func setPlacementMembers(t *testing.T, db *sql.DB, tenant string, members []memb
 // TestResolveJobHome covers the four answers of the home read: no row,
 // an empty member list, a two-slot home map, and an unbound slot.
 func TestResolveJobHome(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -80,6 +82,8 @@ func TestResolveJobHome(t *testing.T) {
 // TestJobHomeCacheReadsEachPlacementOnce asserts the round cache answers
 // a later call from the first read, so one round reads one row once.
 func TestJobHomeCacheReadsEachPlacementOnce(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	seedGrantPlacement(t, db, testCluster, "duo", "cells", "cell-d0", 1, "{}")

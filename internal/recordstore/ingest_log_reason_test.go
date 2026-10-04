@@ -47,6 +47,8 @@ func assertLogReason(t *testing.T, incomplete bool, got, want string) {
 // gateway's finalize-deadline marker, which follows a boot-reconciled
 // completion, keeps the plugin's jenkins-restart reason.
 func TestApplyRunLogKeepsAPluginReasonAgainstAGenericOne(t *testing.T) {
+	t.Parallel()
+
 	incomplete, reason := applyLogSummaries(t,
 		map[string]any{"chunk_count": 4, "incomplete": true, "incomplete_reason": "jenkins-restart", "finalized": false},
 		incompleteWith("finalize-deadline"))
@@ -56,6 +58,8 @@ func TestApplyRunLogKeepsAPluginReasonAgainstAGenericOne(t *testing.T) {
 // TestApplyRunLogKeepsAPluginReasonAgainstAGatewayOne asserts a gateway
 // reason never replaces a stored plugin reason.
 func TestApplyRunLogKeepsAPluginReasonAgainstAGatewayOne(t *testing.T) {
+	t.Parallel()
+
 	incomplete, reason := applyLogSummaries(t, incompleteWith("jenkins-restart"), incompleteWith("gateway-gap"))
 	assertLogReason(t, incomplete, reason, "jenkins-restart")
 }
@@ -63,6 +67,8 @@ func TestApplyRunLogKeepsAPluginReasonAgainstAGatewayOne(t *testing.T) {
 // TestApplyRunLogPluginReasonReplacesAGatewayOne asserts a plugin reason
 // replaces a stored gateway reason, the order logSummaryPayload applies.
 func TestApplyRunLogPluginReasonReplacesAGatewayOne(t *testing.T) {
+	t.Parallel()
+
 	incomplete, reason := applyLogSummaries(t, incompleteWith("gateway-gap"), incompleteWith("plugin-drop"))
 	assertLogReason(t, incomplete, reason, "plugin-drop")
 }
@@ -70,6 +76,8 @@ func TestApplyRunLogPluginReasonReplacesAGatewayOne(t *testing.T) {
 // TestApplyRunLogPreciseReasonReplacesAGenericOne asserts a gateway reason
 // replaces a stored generic reason.
 func TestApplyRunLogPreciseReasonReplacesAGenericOne(t *testing.T) {
+	t.Parallel()
+
 	incomplete, reason := applyLogSummaries(t, incompleteWith("finalize-deadline"), incompleteWith("gateway-gap"))
 	assertLogReason(t, incomplete, reason, "gateway-gap")
 }
@@ -77,6 +85,8 @@ func TestApplyRunLogPreciseReasonReplacesAGenericOne(t *testing.T) {
 // TestApplyRunLogKeepsTheFirstReasonInsideOneRank asserts the first
 // stored reason wins against a later reason of the same rank.
 func TestApplyRunLogKeepsTheFirstReasonInsideOneRank(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct{ first, second string }{
 		{"finalize-deadline", "not-finalized"},
 		{"jenkins-restart", "plugin-drop"},
@@ -94,6 +104,8 @@ func TestApplyRunLogKeepsTheFirstReasonInsideOneRank(t *testing.T) {
 // carries no reason, such as the gateway's finalized marker, keeps the
 // stored reason.
 func TestApplyRunLogKeepsAReasonAgainstAMarkerWithNone(t *testing.T) {
+	t.Parallel()
+
 	incomplete, reason := applyLogSummaries(t, incompleteWith("gateway-gap"), map[string]any{"finalized": true})
 	assertLogReason(t, incomplete, reason, "gateway-gap")
 }
@@ -136,6 +148,8 @@ func TestLogReasonLossRankKeepsOnlyObservedLosses(t *testing.T) {
 // and keeps every stored key it does not carry, such as the chunk count
 // of the completion's summary.
 func TestApplyRunLogMergesKeyByKey(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	intentKey := "manual:" + newTestUUIDv7String()
 	runID := startRunForFinalize(t, pool, intentKey)
@@ -245,6 +259,8 @@ func TestApplyRunLogCompleteLogDropsAFinalizeDeadlineReason(t *testing.T) {
 // incomplete false removes the stored reason, so the record never holds
 // a reason for a complete log.
 func TestApplyRunLogCompleteLogDropsTheReason(t *testing.T) {
+	t.Parallel()
+
 	incomplete, reason := applyLogSummaries(t, incompleteWith("not-finalized"), map[string]any{"incomplete": false})
 	if incomplete || reason != "" {
 		t.Fatalf("incomplete=%v incomplete_reason=%q, want false and no reason", incomplete, reason)

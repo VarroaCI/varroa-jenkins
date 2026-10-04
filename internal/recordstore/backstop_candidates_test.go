@@ -13,6 +13,8 @@ const backstopTestGrace = 5 * time.Minute
 // TestIsBackstopCandidateRequiresPastGrace asserts an occurrence inside
 // the grace window is not a candidate, and one past it is.
 func TestIsBackstopCandidateRequiresPastGrace(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	reader := NewReader(pool)
 	now := time.Now().UTC()
@@ -39,6 +41,8 @@ func TestIsBackstopCandidateRequiresPastGrace(t *testing.T) {
 // TestIsBackstopCandidateRejectsOlderThan24Hours asserts a stale
 // occurrence produces no candidate.
 func TestIsBackstopCandidateRejectsOlderThan24Hours(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	reader := NewReader(pool)
 	now := time.Now().UTC()
@@ -57,6 +61,8 @@ func TestIsBackstopCandidateRejectsOlderThan24Hours(t *testing.T) {
 // occurrence already holds a cron: intent is not a candidate: the cell
 // fired on its own.
 func TestIsBackstopCandidateRejectsWhenIntentExists(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	reader := NewReader(pool)
 	now := time.Now().UTC()
@@ -85,6 +91,8 @@ func TestIsBackstopCandidateRejectsWhenIntentExists(t *testing.T) {
 // whose build.scheduled.backstop row is newer than the grace window is
 // not a candidate: the round already fired for it recently.
 func TestIsBackstopCandidateRejectsRecentActivityRow(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	reader := NewReader(pool)
 	now := time.Now().UTC()
@@ -110,6 +118,8 @@ func TestIsBackstopCandidateRejectsRecentActivityRow(t *testing.T) {
 // TestSelectCandidateOccurrencesEmptyListProducesNothing asserts an empty
 // exported-occurrence list produces no candidate.
 func TestSelectCandidateOccurrencesEmptyListProducesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	reader := NewReader(pool)
 	now := time.Now().UTC()
@@ -129,6 +139,8 @@ func TestSelectCandidateOccurrencesEmptyListProducesNothing(t *testing.T) {
 // window. Jenkins's own CronTab computes next_fire_times, so the round
 // never sees a Saturday occurrence for such a job in the first place.
 func TestIsBackstopCandidateWeekdayJobNoCandidateOnSaturday(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	reader := NewReader(pool)
 
@@ -154,6 +166,8 @@ func TestIsBackstopCandidateWeekdayJobNoCandidateOnSaturday(t *testing.T) {
 // build.scheduled.backstop row ages past the grace window: an action is
 // at-most-once, so a permanent skip would strand a lost fire.
 func TestIsBackstopCandidateFiresAgainAfterSuppressionWindowPasses(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	reader := NewReader(pool)
 	now := time.Now().UTC()
@@ -184,6 +198,8 @@ func TestIsBackstopCandidateFiresAgainAfterSuppressionWindowPasses(t *testing.T)
 // candidate: the suppression match scopes on cluster, not job path
 // alone, because two clusters can carry the same job path.
 func TestIsBackstopCandidateIgnoresOtherClusterActivityRow(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	reader := NewReader(pool)
 	now := time.Now().UTC()

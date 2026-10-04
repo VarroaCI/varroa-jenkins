@@ -127,7 +127,7 @@ func TestMarkableVeto(t *testing.T) {
 // activity row, publishes one notification, and counts one mark.
 func TestVetoMarksAnAcceptedRun(t *testing.T) {
 	pool, db := setupLedgerPool(t)
-	reader := fanoutTestMeter(t)
+	reader := useTestMeterProvider(t)
 	metrics, err := NewClaimMetrics()
 	if err != nil {
 		t.Fatalf("new claim metrics: %v", err)
@@ -174,6 +174,8 @@ func TestVetoMarksAnAcceptedRun(t *testing.T) {
 // the recorder before run.trigger_accepted inserts the failed row, and the
 // later accepted insert keeps it.
 func TestVetoBeforeAcceptanceKeepsTheFailedRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := newVetoMarkingLedger(pool, denyingFence{reasonCode: ReasonFenced}, nil)
 
@@ -194,6 +196,8 @@ func TestVetoBeforeAcceptanceKeepsTheFailedRow(t *testing.T) {
 // does not cancel on leave a QUEUED row as it is, and insert no row for
 // a run with none.
 func TestNotReadyAndNotHomeMarkNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	for _, reason := range []string{ReasonNotReady, ReasonNotHome} {
 		ledger := newVetoMarkingLedger(pool, denyingFence{reasonCode: reason}, nil)
@@ -219,6 +223,8 @@ func TestNotReadyAndNotHomeMarkNothing(t *testing.T) {
 // TestNativeOriginMarksNothing asserts a claim whose origin is not
 // VARROA_INTENT marks no run and inserts no row.
 func TestNativeOriginMarksNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := newVetoMarkingLedger(pool, denyingFence{reasonCode: ReasonFenced}, nil)
 
@@ -245,6 +251,8 @@ func TestNativeOriginMarksNothing(t *testing.T) {
 // TestVetoLeavesARunWithAnIntent asserts a veto never marks a run the
 // ledger already granted.
 func TestVetoLeavesARunWithAnIntent(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	runID := newTestUUIDv7String()
@@ -261,6 +269,8 @@ func TestVetoLeavesARunWithAnIntent(t *testing.T) {
 // TestFencedRepeatMarksTheRequesterOnly asserts a FENCED answer from the
 // intent table marks the requesting run, not the stored run it names.
 func TestFencedRepeatMarksTheRequesterOnly(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := newVetoMarkingLedger(pool, nil, nil)
 
@@ -290,6 +300,8 @@ func TestFencedRepeatMarksTheRequesterOnly(t *testing.T) {
 // TestInvalidKeyMarksAParseableRun asserts an INVALID_KEY veto with a
 // valid run identifier marks that run.
 func TestInvalidKeyMarksAParseableRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := newVetoMarkingLedger(pool, nil, nil)
 
@@ -306,6 +318,8 @@ func TestInvalidKeyMarksAParseableRun(t *testing.T) {
 // TestInvalidRunIDMarksNothing asserts a run identifier that is not a
 // UUIDv7 writes nothing.
 func TestInvalidRunIDMarksNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := newVetoMarkingLedger(pool, nil, nil)
 
@@ -329,6 +343,8 @@ func TestInvalidRunIDMarksNothing(t *testing.T) {
 // TestVetoLeavesAStartedRun asserts a veto never marks a run that holds a
 // build number.
 func TestVetoLeavesAStartedRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := newVetoMarkingLedger(pool, denyingFence{reasonCode: ReasonFenced}, nil)
 
@@ -355,6 +371,8 @@ func TestVetoLeavesAStartedRun(t *testing.T) {
 // TestRunStartedSupersedesAVetoedRun asserts a late real start replaces
 // a vetoed run's row.
 func TestRunStartedSupersedesAVetoedRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 
@@ -387,6 +405,8 @@ func TestRunStartedSupersedesAVetoedRun(t *testing.T) {
 // TestClaimExpirySkipsAVetoedRun asserts the claim-expiry sweep leaves a
 // vetoed run alone, whatever its accepted_at.
 func TestClaimExpirySkipsAVetoedRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	runID := newTestUUIDv7String()

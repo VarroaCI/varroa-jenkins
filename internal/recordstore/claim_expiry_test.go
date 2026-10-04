@@ -57,7 +57,7 @@ func readStatusResult(t *testing.T, db *sql.DB, runID uuid.UUID) (string, sql.Nu
 // count.
 func TestExpireUnclaimedRunsMarksAnAgedQueuedRun(t *testing.T) {
 	pool, db := setupLedgerPool(t)
-	reader := useManualMeter(t)
+	reader := useTestMeterProvider(t)
 	metrics, err := NewClaimExpiryMetrics()
 	if err != nil {
 		t.Fatalf("register metrics: %v", err)
@@ -131,6 +131,8 @@ func TestExpireUnclaimedRunsMarksAnAgedQueuedRun(t *testing.T) {
 // TestExpireUnclaimedRunsLeavesAYoungRun asserts a queued run inside the
 // age limit stays QUEUED.
 func TestExpireUnclaimedRunsLeavesAYoungRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	accepted := claimExpiryNow.Add(-ClaimExpiryAge + time.Minute)
@@ -152,6 +154,8 @@ func TestExpireUnclaimedRunsLeavesAYoungRun(t *testing.T) {
 // class never marks a run the ledger holds an intent for. A GRANTED
 // intent with no build ends through the claim-abandoned class instead.
 func TestExpireUnclaimedRunsLeavesARunWithAnIntent(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	accepted := claimExpiryNow.Add(-3 * ClaimExpiryAge)
@@ -174,6 +178,8 @@ func TestExpireUnclaimedRunsLeavesARunWithAnIntent(t *testing.T) {
 // TestExpireUnclaimedRunsLeavesARunWithAResume asserts a queued run that
 // holds a mesh resume record stays QUEUED. The mesh owns that run.
 func TestExpireUnclaimedRunsLeavesARunWithAResume(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	accepted := claimExpiryNow.Add(-2 * ClaimExpiryAge)
@@ -202,6 +208,8 @@ func TestExpireUnclaimedRunsLeavesARunWithAResume(t *testing.T) {
 // TestExpireUnclaimedRunsBoundsOneRound asserts one round marks at most
 // claimExpiryBatch runs, and the next round marks the rest.
 func TestExpireUnclaimedRunsBoundsOneRound(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	accepted := claimExpiryNow.Add(-2 * ClaimExpiryAge)
@@ -245,6 +253,8 @@ func TestExpireUnclaimedRunsBoundsOneRound(t *testing.T) {
 // TestRunStartedSupersedesAnExpiredRun asserts a late claim and a late
 // run.started replace an expired row with the real run.
 func TestRunStartedSupersedesAnExpiredRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 

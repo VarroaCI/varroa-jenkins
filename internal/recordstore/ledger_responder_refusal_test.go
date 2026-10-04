@@ -11,7 +11,7 @@ import (
 // newTestClaimMetrics registers ClaimMetrics on a fresh manual reader.
 func newTestClaimMetrics(t *testing.T) (*ClaimMetrics, func(reason string) int64) {
 	t.Helper()
-	reader := fanoutTestMeter(t)
+	reader := useTestMeterProvider(t)
 	metrics, err := NewClaimMetrics()
 	if err != nil {
 		t.Fatalf("new claim metrics: %v", err)

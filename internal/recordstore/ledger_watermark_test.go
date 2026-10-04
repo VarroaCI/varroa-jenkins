@@ -8,6 +8,8 @@ import (
 
 // TestNextBuildNumberNoRow asserts a job with no job_numbers row returns 1.
 func TestNextBuildNumberNoRow(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	ctx := context.Background()
 
@@ -25,6 +27,8 @@ func TestNextBuildNumberNoRow(t *testing.T) {
 // with the same run_id answers the stored number again with no further
 // advance.
 func TestGrantAdvancesWatermark(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	jobPath := "acme/watermark-grant"
@@ -56,6 +60,8 @@ func TestGrantAdvancesWatermark(t *testing.T) {
 // TestTransferKeepsStoredRunIDReservesNoNumber asserts a transfer that
 // keeps the stored run_id (a re-answer) reserves no new number.
 func TestTransferKeepsStoredRunIDReservesNoNumber(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	ctx := context.Background()
 	jobPath := "acme/watermark-reanswer"
@@ -81,6 +87,8 @@ func TestTransferKeepsStoredRunIDReservesNoNumber(t *testing.T) {
 // transfer that carries a new run_id writes a newly reserved number into
 // the intent row.
 func TestTransferWithNewRunIDReservesNewNumber(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	jobPath := "acme/watermark-transfer"
@@ -119,6 +127,8 @@ func TestTransferWithNewRunIDReservesNewNumber(t *testing.T) {
 // jenkins_next_build_number=41 against a watermark of 12 grants 41 and
 // never grants a number below 41 for that job again.
 func TestJenkinsNextBuildNumberLiftsWatermark(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	jobPath := "acme/watermark-lift"
@@ -153,6 +163,8 @@ func TestJenkinsNextBuildNumberLiftsWatermark(t *testing.T) {
 // lifts next_number to build_number+1 when that is higher, and creates
 // the row when none exists.
 func TestRaiseWatermarkForStartedBuild(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	ctx := context.Background()
 	jobPath := "acme/watermark-started"
@@ -171,6 +183,8 @@ func TestRaiseWatermarkForStartedBuild(t *testing.T) {
 // TestNumberingSurvivesRetention asserts NextBuildNumber reads
 // job_numbers even after every intent and run of a job is gone.
 func TestNumberingSurvivesRetention(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	jobPath := "acme/watermark-retained"
@@ -194,6 +208,8 @@ func TestNumberingSurvivesRetention(t *testing.T) {
 // TestNextBuildNumberAtBigintMaximumErrors asserts NextBuildNumber
 // returns an error when next_number already equals the bigint maximum.
 func TestNextBuildNumberAtBigintMaximumErrors(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	jobPath := "acme/watermark-ceiling"
@@ -240,6 +256,8 @@ func seedJobNumbers(t *testing.T, db *sql.DB, jobPath string, next int64) {
 // number once, and a further re-answer with the same counter reserves
 // nothing.
 func TestStaleReanswerAdvancesWatermarkOnce(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	jobPath := "acme/watermark-stale-once"
@@ -275,6 +293,8 @@ func TestStaleReanswerAdvancesWatermarkOnce(t *testing.T) {
 // new instance whose counter is far past the stored number grants the
 // reported counter and moves the watermark past it.
 func TestStaleReanswerLiftsWatermarkToReported(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ctx := context.Background()
 	jobPath := "acme/watermark-stale-lift"

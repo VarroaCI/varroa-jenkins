@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -44,11 +43,7 @@ func metricValueByReason(t *testing.T, reader *sdkmetric.ManualReader, reason st
 func TestFenceVetoMetricCountsByReason(t *testing.T) {
 	pool, db := setupLedgerPool(t)
 
-	reader := sdkmetric.NewManualReader()
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	prev := otel.GetMeterProvider()
-	otel.SetMeterProvider(mp)
-	t.Cleanup(func() { otel.SetMeterProvider(prev) })
+	reader := useTestMeterProvider(t)
 
 	metrics, err := NewFenceMetrics()
 	if err != nil {
@@ -92,6 +87,8 @@ func TestFenceVetoMetricCountsByReason(t *testing.T) {
 // TestFenceMetricsNilIsSafe asserts a PlacementFence built with no
 // metrics answers a veto normally and panics nowhere.
 func TestFenceMetricsNilIsSafe(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, NewPlacementFence(pool, nil))
 

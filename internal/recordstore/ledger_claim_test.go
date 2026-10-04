@@ -136,6 +136,8 @@ func assertStartedRunUnchanged(t *testing.T, db *sql.DB, intentKey, runID string
 // TestNewKeyGrantedWritesOneRow asserts a new key is granted and writes
 // exactly one run_intents row.
 func TestNewKeyGrantedWritesOneRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -152,6 +154,8 @@ func TestNewKeyGrantedWritesOneRow(t *testing.T) {
 // that fails rolls the intent insert back with it, in the same
 // transaction.
 func TestFailedWatermarkAdvanceRollsBackIntent(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -177,6 +181,8 @@ func TestFailedWatermarkAdvanceRollsBackIntent(t *testing.T) {
 // TestStoredCreatedAtEqualsIdentifierTimestamp asserts run_intents.created_at
 // equals the timestamp embedded in the run_id.
 func TestStoredCreatedAtEqualsIdentifierTimestamp(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -204,6 +210,8 @@ func TestStoredCreatedAtEqualsIdentifierTimestamp(t *testing.T) {
 // TestNonUUIDv7RunIDIsVetoedInvalidKey asserts a UUIDv4 run_id is vetoed
 // with INVALID_KEY and writes no row.
 func TestNonUUIDv7RunIDIsVetoedInvalidKey(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -220,6 +228,8 @@ func TestNonUUIDv7RunIDIsVetoedInvalidKey(t *testing.T) {
 // TestUnallocatedSchemeIsVetoedInvalidKey asserts an unparsable intent
 // key is vetoed with INVALID_KEY and writes no row.
 func TestUnallocatedSchemeIsVetoedInvalidKey(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -236,6 +246,8 @@ func TestUnallocatedSchemeIsVetoedInvalidKey(t *testing.T) {
 // repeat of a key with the same run_id answers granted and leaves one
 // row.
 func TestRepeatSameRunIDGrantedOneRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -253,6 +265,8 @@ func TestRepeatSameRunIDGrantedOneRow(t *testing.T) {
 // table — a different run_id at the stored generation answers
 // duplicate.
 func TestDifferentRunIDSameGenerationDuplicate(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -275,6 +289,8 @@ func TestDifferentRunIDSameGenerationDuplicate(t *testing.T) {
 // runs row answers granted and moves the ownership columns and the
 // build number.
 func TestHigherGenerationTransfersOwnership(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -332,6 +348,8 @@ func insertAcceptedOnlyRunsRow(t *testing.T, db *sql.DB, runID string) {
 // accepted-only: such a row records no build, so it must not block the
 // transfer the way a real runs row does.
 func TestHigherGenerationTransfersAcceptedOnlyRun(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -369,6 +387,8 @@ func TestHigherGenerationTransfersAcceptedOnlyRun(t *testing.T) {
 // TestLowerGenerationFenced: row 1 of the decision table — a lower
 // generation answers vetoed with FENCED and leaves the row unchanged.
 func TestLowerGenerationFenced(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -390,6 +410,8 @@ func TestLowerGenerationFenced(t *testing.T) {
 // TestHigherGenerationBlockedByExistingRunsRow: a higher generation does
 // not transfer an intent whose runs row exists.
 func TestHigherGenerationBlockedByExistingRunsRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -418,6 +440,8 @@ func TestHigherGenerationBlockedByExistingRunsRow(t *testing.T) {
 // intent run.started already consumed, answers duplicate and writes
 // nothing.
 func TestRepeatConsumedIntentHigherGenerationDuplicate(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -446,6 +470,8 @@ func TestRepeatConsumedIntentHigherGenerationDuplicate(t *testing.T) {
 // runs row, answers granted with cell, cell_instance, and
 // placement_generation moved to the request's values.
 func TestRepeatDifferentCellInstanceMovesOwnership(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -478,6 +504,8 @@ func TestRepeatDifferentCellInstanceMovesOwnership(t *testing.T) {
 // TestRepeatSameCellInstanceUnchanged: a repeat of the same key from the
 // same cell instance answers granted with every column unchanged.
 func TestRepeatSameCellInstanceUnchanged(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -533,6 +561,8 @@ func readNextNumber(t *testing.T, db *sql.DB) int64 {
 // the same run from a new cell instance whose counter already passed the
 // stored number moves ownership and receives a fresh number.
 func TestRepeatStaleNumberDifferentInstanceRefreshesAndMoves(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -562,6 +592,8 @@ func TestRepeatStaleNumberDifferentInstanceRefreshesAndMoves(t *testing.T) {
 // changes no column, because that counter passed the number by running
 // the build.
 func TestRepeatStaleNumberSameInstanceKeepsNumber(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -590,6 +622,8 @@ func TestRepeatStaleNumberSameInstanceKeepsNumber(t *testing.T) {
 // only the accepted keys and the sweep's INTERRUPTED mark records no
 // build, so it does not block the refresh.
 func TestRepeatStaleNumberMarkedAcceptedRowRefreshes(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -622,6 +656,8 @@ func TestRepeatStaleNumberMarkedAcceptedRowRefreshes(t *testing.T) {
 // TestRepeatCurrentNumberReservesNothing: a repeat whose counter equals
 // the stored number answers the stored number and reserves nothing.
 func TestRepeatCurrentNumberReservesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -646,6 +682,8 @@ func TestRepeatCurrentNumberReservesNothing(t *testing.T) {
 // TestRepeatZeroNextNumberNeverRefreshes: a request that carries no
 // counter never refreshes, even when the stored number is stale.
 func TestRepeatZeroNextNumberNeverRefreshes(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -674,6 +712,8 @@ func TestRepeatZeroNextNumberNeverRefreshes(t *testing.T) {
 // instance keeps the stored number even with a passed counter, so every
 // refreshed intent names an owner.
 func TestRepeatWithoutInstanceNeverRefreshes(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -700,6 +740,8 @@ func TestRepeatWithoutInstanceNeverRefreshes(t *testing.T) {
 // and writes nothing to run_intents, job_numbers, or runs. A second build
 // of a started run is what the answer prevents.
 func TestRepeatConsumedIntentDuplicate(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -729,6 +771,8 @@ func TestRepeatConsumedIntentDuplicate(t *testing.T) {
 // records a build answers duplicate to a repeat from a new pod, and the
 // answer leaves the real run's row, the intent, and the watermark alone.
 func TestRepeatRecordedBuildDuplicate(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -757,6 +801,8 @@ func TestRepeatRecordedBuildDuplicate(t *testing.T) {
 // answers granted and moves the owner. The duplicate answer must never
 // mark that row DUPLICATE either.
 func TestRepeatQueuedRunRowIsNotStarted(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -800,6 +846,8 @@ func TestRepeatQueuedRunRowIsNotStarted(t *testing.T) {
 // runs row records. The claim answers granted, moves the owner, and
 // refreshes a stale number, so a re-fired build still runs.
 func TestRepeatUnstartedIntentFromNewPodStillGranted(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 
@@ -827,6 +875,8 @@ func TestRepeatUnstartedIntentFromNewPodStillGranted(t *testing.T) {
 // passed counter serialize on the row lock, so one reservation serves
 // both answers.
 func TestConcurrentRepeatClaimsRefreshOnce(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 

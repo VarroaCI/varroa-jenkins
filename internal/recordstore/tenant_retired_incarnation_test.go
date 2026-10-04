@@ -21,6 +21,8 @@ func announceIncarnation(generation int64, instance, incarnation string) TenantS
 // TestATakeOverRetiresTheOldIncarnation asserts a take-over adds the
 // stored incarnation to the retired list.
 func TestATakeOverRetiresTheOldIncarnation(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -40,6 +42,8 @@ func TestATakeOverRetiresTheOldIncarnation(t *testing.T) {
 // of a replaced tenant object is refused as stale. It changes no column
 // and keeps the new tenant's schedule rows, and the log names the reason.
 func TestARetiredIncarnationCannotTakeTheRowBack(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -85,6 +89,8 @@ func TestARetiredIncarnationCannotTakeTheRowBack(t *testing.T) {
 // no deleted Team leaves the retired list alone. A Team that drops spec.pipelines keeps its uid, and
 // its next announcement after it adds the field again is accepted.
 func TestTenantPurgeRetiresNoIncarnation(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -108,6 +114,8 @@ func TestTenantPurgeRetiresNoIncarnation(t *testing.T) {
 // a deleted Team retires its incarnation. A late announcement of that Team
 // is then stale, and the row keeps the reset generation.
 func TestADeletedTeamPurgeRetiresItsIncarnation(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -143,6 +151,8 @@ func TestADeletedTeamPurgeRetiresItsIncarnation(t *testing.T) {
 // for a deleted Team leaves a row that a newer Team of the same name
 // already owns.
 func TestADeletedTeamPurgeOfANewerIncarnationRetiresNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -163,6 +173,8 @@ func TestADeletedTeamPurgeOfANewerIncarnationRetiresNothing(t *testing.T) {
 // Team with no placement row writes no row, so a deleted tenant never gets
 // a row of its own.
 func TestADeletedTeamPurgeWithNoRowWritesNoRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 
 	if err := purgeTenant(t.Context(), slog.Default(), pool, TenantPurgeRequest{
@@ -185,6 +197,8 @@ func TestADeletedTeamPurgeWithNoRowWritesNoRow(t *testing.T) {
 // deleted and created again under one name takes the row over, and a late
 // announcement of the old object is refused.
 func TestSingleTenantTakeOverRetiresTheOldUID(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -218,6 +232,8 @@ func TestSingleTenantTakeOverRetiresTheOldUID(t *testing.T) {
 // take-over arm adds no entry. The stored row names no incarnation, so no
 // value exists to retire.
 func TestATakeOverOfARowWithNoIncarnationRetiresNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 
@@ -237,6 +253,8 @@ func TestATakeOverOfARowWithNoIncarnationRetiresNothing(t *testing.T) {
 // keeps an unconfirmed entry for an instance it names. A stale request
 // writes nothing, so it proves nothing live.
 func TestAStaleAnnouncementRemovesNoEntry(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	conn := newTestSyncConn(t)
 

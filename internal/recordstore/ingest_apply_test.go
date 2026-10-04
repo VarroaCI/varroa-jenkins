@@ -12,6 +12,8 @@ import (
 // TestApplyUnknownKindIsRejected asserts Apply returns ErrUnknownKind for
 // a kind outside the eight-kind set, with no database write.
 func TestApplyUnknownKindIsRejected(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:unknown-kind-1")
 	g := NewIngester(pool, nil, nil)
@@ -25,6 +27,8 @@ func TestApplyUnknownKindIsRejected(t *testing.T) {
 // TestApplyIntentMissingIsRejected asserts Apply returns ErrIntentMissing
 // for a run_id with no run_intents row.
 func TestApplyIntentMissingIsRejected(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	g := NewIngester(pool, nil, nil)
 
@@ -51,6 +55,8 @@ func TestApplyIntentMissingIsRejected(t *testing.T) {
 // build number commits with a null build_number, moves the intent to
 // CONSUMED with a null build number, and reports ApplyResult.Conflict.
 func TestApplyBuildNumberConflictStoresNullAndFlagsConflict(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runA := seedGrantedIntent(t, pool, "manual:conflict-a") // reserves build_number 1
 	runB := seedGrantedIntent(t, pool, "manual:conflict-b") // reserves build_number 2
@@ -101,6 +107,8 @@ func TestApplyBuildNumberConflictStoresNullAndFlagsConflict(t *testing.T) {
 // TestApplyFailedWritePublishesNothing asserts a write that returns an
 // error publishes no run notification.
 func TestApplyFailedWritePublishesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:notify-rollback")
 	g := NewIngester(pool, nil, nil)
@@ -120,6 +128,8 @@ func TestApplyFailedWritePublishesNothing(t *testing.T) {
 // TestApplySupersededStartPublishesNothing asserts a run.started that
 // dispatch reports superseded publishes no notification.
 func TestApplySupersededStartPublishesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	ledger := NewLedger(pool, nil)
 	g := NewIngester(pool, nil, nil)
@@ -146,6 +156,8 @@ func TestApplySupersededStartPublishesNothing(t *testing.T) {
 // TestApplyRunStagePublishesOneNotification asserts a committed run.stage
 // publishes exactly one stage notification.
 func TestApplyRunStagePublishesOneNotification(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:notify-stage")
 	g := NewIngester(pool, nil, nil)
@@ -175,6 +187,8 @@ func TestApplyRunStagePublishesOneNotification(t *testing.T) {
 // TestApplyRunSourcePublishesOneNotification asserts a committed
 // run.source write publishes exactly one run notification.
 func TestApplyRunSourcePublishesOneNotification(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:notify-source")
 	g := NewIngester(pool, nil, nil)
@@ -205,6 +219,8 @@ func TestApplyRunSourcePublishesOneNotification(t *testing.T) {
 // TestApplyRefusedRunSourcePublishesNothing asserts a run.source write
 // the guard refused publishes no notification.
 func TestApplyRefusedRunSourcePublishesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:notify-source-refused")
 	g := NewIngester(pool, nil, nil)
@@ -242,6 +258,8 @@ func TestApplyRefusedRunSourcePublishesNothing(t *testing.T) {
 // TestApplyBuildNumberConflictPublishesOnce asserts the retried
 // run.started publishes one notification, after the retry commits.
 func TestApplyBuildNumberConflictPublishesOnce(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	runA := seedGrantedIntent(t, pool, "manual:notify-conflict-a") // reserves build_number 1
 	runB := seedGrantedIntent(t, pool, "manual:notify-conflict-b") // reserves build_number 2
@@ -280,6 +298,8 @@ func TestApplyBuildNumberConflictPublishesOnce(t *testing.T) {
 // notifier whose send fails still leaves the record in place, and still
 // lets the durable consumer acknowledge the build event.
 func TestIngestConsumerAcknowledgesBuildEventWhenPublishFails(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:notify-send-error")
 
@@ -354,6 +374,8 @@ func countNotifications(t *testing.T, notifier *RunNotifier, sent *captureSend, 
 // notification and one lock notification, the second naming the deleted
 // row's own lock name and job path.
 func TestIngestNotifyPublishesOneRunAndOneLockNotification(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:lock-notify-one")
 
@@ -394,6 +416,8 @@ func TestIngestNotifyPublishesOneRunAndOneLockNotification(t *testing.T) {
 // terminal run.completed that holds two locks publishes one run
 // notification and one lock notification per released row.
 func TestIngestNotifyPublishesTwoLockNotificationsForNestedLocks(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:lock-notify-two")
 
@@ -433,6 +457,8 @@ func TestIngestNotifyPublishesTwoLockNotificationsForNestedLocks(t *testing.T) {
 // terminal run.completed that holds no lock publishes the run
 // notification alone.
 func TestIngestNotifyPublishesOnlyTheRunNotificationWithNoLock(t *testing.T) {
+	t.Parallel()
+
 	pool, _ := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:lock-notify-none")
 

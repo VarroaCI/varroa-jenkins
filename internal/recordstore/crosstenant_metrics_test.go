@@ -53,7 +53,7 @@ func TestCrossTenantRequestOutcome(t *testing.T) {
 // veto, labelled by reason.
 func TestCrossTenantMetrics_RequestsAndGrantDeniedCountThroughDispatch(t *testing.T) {
 	deps, db := lockTestDeps(t)
-	reader := fanoutTestMeter(t)
+	reader := useTestMeterProvider(t)
 	metrics, err := NewCrossTenantMetrics()
 	if err != nil {
 		t.Fatalf("new cross-tenant metrics: %v", err)

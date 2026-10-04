@@ -49,6 +49,8 @@ func inputSeqPtr(seq int64) *int64 { return &seq }
 // TestApplyRunInputLaterSetReplacesTheStoredSet asserts the stored set is
 // the payload's set, so a settled input leaves the record.
 func TestApplyRunInputLaterSetReplacesTheStoredSet(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:input-replace")
 	g := NewIngester(pool, nil, nil)
@@ -82,6 +84,8 @@ func TestApplyRunInputLaterSetReplacesTheStoredSet(t *testing.T) {
 // TestApplyRunInputEqualSeqApplies asserts an equal seq applies, so a
 // redelivered envelope stays safe.
 func TestApplyRunInputEqualSeqApplies(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:input-equal")
 	g := NewIngester(pool, nil, nil)
@@ -110,6 +114,8 @@ func TestApplyRunInputEqualSeqApplies(t *testing.T) {
 // TestApplyRunInputLowerSeqChangesNothing asserts the guard refuses a
 // write below the stored watermark and leaves the stored set in place.
 func TestApplyRunInputLowerSeqChangesNothing(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:input-lower")
 	g := NewIngester(pool, nil, nil)
@@ -142,6 +148,8 @@ func TestApplyRunInputLowerSeqChangesNothing(t *testing.T) {
 // TestApplyRunInputEmptySetWritesNull asserts an empty set clears the
 // column and raises the watermark.
 func TestApplyRunInputEmptySetWritesNull(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:input-empty")
 	g := NewIngester(pool, nil, nil)
@@ -175,6 +183,8 @@ func TestApplyRunInputEmptySetWritesNull(t *testing.T) {
 // payload is still NULL takes the write, because the accepted-key strip
 // reads a coalesced payload.
 func TestApplyRunInputNullPayloadTakesTheWrite(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:input-null-payload")
 	g := NewIngester(pool, nil, nil)
@@ -210,6 +220,8 @@ func TestApplyRunInputNullPayloadTakesTheWrite(t *testing.T) {
 // TestApplyRunInputBeforeRunStartedInsertsQueuedRow asserts a run.input
 // envelope that arrives first writes the placeholder row.
 func TestApplyRunInputBeforeRunStartedInsertsQueuedRow(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:input-first")
 	g := NewIngester(pool, nil, nil)
@@ -239,6 +251,8 @@ func TestApplyRunInputBeforeRunStartedInsertsQueuedRow(t *testing.T) {
 // TestApplyRunInputCompletedRowRefusesTheWrite asserts a terminal run
 // takes no pending set.
 func TestApplyRunInputCompletedRowRefusesTheWrite(t *testing.T) {
+	t.Parallel()
+
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:input-completed")
 	g := NewIngester(pool, nil, nil)

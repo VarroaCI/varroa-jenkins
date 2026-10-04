@@ -10,6 +10,8 @@ import (
 // reader depends on. An empty "members" list resolves to one synthetic
 // slot-0 member, and an empty "job_homes" map resolves every job to slot 0.
 func TestTenantPlacementsMemberColumnDefaults(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 
@@ -37,6 +39,8 @@ func TestTenantPlacementsMemberColumnDefaults(t *testing.T) {
 // TestTenantPlacementsMemberColumnsAreNotNull asserts both new columns
 // refuse a null. A reader decodes them without a null test.
 func TestTenantPlacementsMemberColumnsAreNotNull(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 
@@ -59,6 +63,8 @@ func TestTenantPlacementsMemberColumnsAreNotNull(t *testing.T) {
 // The record store holds exactly thirteen tables in schema varroa after
 // every migration runs.
 func TestSchemaHoldsThirteenTables(t *testing.T) {
+	t.Parallel()
+
 	db := setupTestDB(t)
 	ctx := context.Background()
 
