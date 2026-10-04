@@ -1920,12 +1920,14 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 		if err := r.client.DeleteControllerPod(ctx, namespace, name); err != nil {
 			return fmt.Errorf("force-restart via pod delete: %w", err)
 		}
-		cr.Status.RestartDrain = nil
-		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
-			Type: v1alpha1.ConditionRestartDeferred, Status: metav1.ConditionFalse, Reason: "ForceRestarted",
-		})
 		logger.Info("force-restart issued", "commandId", cmdID)
-		if err := r.client.PatchControllerStatus(ctx, name, namespace, &cr.Status); err != nil {
+		if _, err := crdstore.MutateStatus(ctx, r.store, name, namespace, func(fresh *v1alpha1.Controller) (bool, error) {
+			fresh.Status.RestartDrain = nil
+			fresh.Status.Conditions = setCondition(fresh.Status.Conditions, v1alpha1.ControllerCondition{
+				Type: v1alpha1.ConditionRestartDeferred, Status: metav1.ConditionFalse, Reason: "ForceRestarted",
+			})
+			return true, nil
+		}); err != nil {
 			logger.Warn("failed to patch status after force-restart", "error", err)
 		}
 		r.emitOperatorEvent("restart.approved", cr, "force restart approved by user", "")
@@ -1936,13 +1938,13 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 	// Plugin-roll branch: when PendingPluginRoll is set, record the one-shot
 	// approval checksum so the next reconcile bumps the annotation.
 	if action == "plugin-roll" && cr.Status.PendingPluginRoll != nil {
-		cr.Status.ApprovedPluginRollChecksum = cr.Status.PendingPluginRoll.TargetChecksum
-		cr.Status.PendingPluginRoll = nil
-		logger.Info("plugin-roll approved, will roll on next reconcile",
-			"targetChecksum", cr.Status.ApprovedPluginRollChecksum)
-		if err := r.client.PatchControllerStatus(ctx, name, namespace, &cr.Status); err != nil {
+		target := cr.Status.PendingPluginRoll.TargetChecksum
+		if _, err := crdstore.MutateStatus(ctx, r.store, name, namespace, func(fresh *v1alpha1.Controller) (bool, error) {
+			return approvePluginRoll(&fresh.Status, target)
+		}); err != nil {
 			return fmt.Errorf("persist plugin-roll approval: %w", err)
 		}
+		logger.Info("plugin-roll approved, will roll on next reconcile", "targetChecksum", target)
 		r.emitOperatorEvent("pluginRoll.approved", cr, "plugin roll approved by user", "")
 		r.wakeController(key)
 		return nil
@@ -2023,9 +2025,11 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 		return fmt.Errorf("send desired state: %w", sendErr)
 	}
 
+	var restartCmdID string
+	var restartAt time.Time
 	if action == "restart" {
-		cr.Status.DesiredStateHash = desiredHash
-		if err := r.issueSafeRestart(ctx, cr, drainSec); err != nil {
+		var err error
+		if restartCmdID, restartAt, err = r.deletePodForSafeRestart(ctx, namespace, name); err != nil {
 			return fmt.Errorf("issue safe-restart: %w", err)
 		}
 		logger.Info("restart requested, desired state pushed with idle gating + safe-restart")
@@ -2033,11 +2037,22 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 		logger.Info("manual config action completed", "action", action)
 	}
 
-	// Clear the pending restart flag.
-	cr.Status.PendingRestart = nil
-	cr.Status.DesiredStateHash = desiredHash
-
-	if err := r.client.PatchControllerStatus(ctx, name, namespace, &cr.Status); err != nil {
+	// The owner's reconcile can write status during the send. The
+	// compare-and-swap changes only the approve's own fields on a fresh read,
+	// so it never writes back a stale field.
+	approvedPending := cr.Status.PendingRestart.DesiredStateHash
+	if _, err := crdstore.MutateStatus(ctx, r.store, name, namespace, func(fresh *v1alpha1.Controller) (bool, error) {
+		// A pending restart raised after the read is not the one approved,
+		// so it stays for the user to approve.
+		if fresh.Status.PendingRestart != nil && fresh.Status.PendingRestart.DesiredStateHash == approvedPending {
+			fresh.Status.PendingRestart = nil
+		}
+		fresh.Status.DesiredStateHash = desiredHash
+		if action == "restart" {
+			setRestartDrain(&fresh.Status, restartCmdID, restartAt, drainSec)
+		}
+		return true, nil
+	}); err != nil {
 		logger.Warn("failed to clear pending restart", "action", action, "error", err)
 	}
 
@@ -2052,31 +2067,72 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 // with a deadline covering drain+restart, and sets RestartDrain for backoff
 // tracking. This is the single owner of CommandID+cooldown bookkeeping.
 func (r *Reconciler) issueSafeRestart(ctx context.Context, cr *v1alpha1.Controller, drainTimeoutSec int64) error {
+	cmdID, now, err := r.deletePodForSafeRestart(ctx, cr.Namespace, cr.Name)
+	if err != nil {
+		return err
+	}
+	setRestartDrain(&cr.Status, cmdID, now, drainTimeoutSec)
+	return nil
+}
+
+// deletePodForSafeRestart deletes the controller pod and returns the command
+// ID and the time of the restart.
+func (r *Reconciler) deletePodForSafeRestart(ctx context.Context, namespace, name string) (string, time.Time, error) {
 	now := time.Now()
 	cmdID := fmt.Sprintf("%d", now.UnixNano())
-	if err := r.client.DeleteControllerPod(ctx, cr.Namespace, cr.Name); err != nil {
-		return fmt.Errorf("restart via pod delete: %w", err)
+	if err := r.client.DeleteControllerPod(ctx, namespace, name); err != nil {
+		return "", time.Time{}, fmt.Errorf("restart via pod delete: %w", err)
 	}
+	return cmdID, now, nil
+}
 
+// setRestartDrain records the backoff state of a safe restart. It keeps the
+// attempt count of the current drain and takes the hash from
+// status.DesiredStateHash, so the caller sets that hash first.
+func setRestartDrain(status *v1alpha1.ControllerStatus, cmdID string, now time.Time, drainTimeoutSec int64) {
 	attempt := 0
-	if cr.Status.RestartDrain != nil {
-		attempt = cr.Status.RestartDrain.AttemptCount
+	if status.RestartDrain != nil {
+		attempt = status.RestartDrain.AttemptCount
 	}
-	cr.Status.RestartDrain = &v1alpha1.RestartDrainStatus{
-		DesiredStateHash: cr.Status.DesiredStateHash,
+	status.RestartDrain = &v1alpha1.RestartDrainStatus{
+		DesiredStateHash: status.DesiredStateHash,
 		CommandID:        cmdID,
 		AttemptCount:     attempt,
 		NextRetryAt:      &metav1.Time{Time: now.Add(time.Duration(drainTimeoutSec+restartHeadroomSec) * time.Second)},
 	}
-	return nil
+}
+
+// errNoPendingPluginRoll is the answer to a plugin-roll approval that finds
+// no pending roll at its write.
+var errNoPendingPluginRoll = errors.New("no plugin roll is pending any more; it was approved or is no longer needed")
+
+// errPluginRollChanged is the answer to a plugin-roll approval whose target
+// is no longer the pending target.
+var errPluginRollChanged = errors.New("the pending plugin roll changed after it was read; check the pending roll and approve it again")
+
+// approvePluginRoll records target as the approved plugin-roll checksum and
+// clears the pending roll. It approves only the target that the caller read:
+// a different pending target returns errPluginRollChanged. With no pending
+// roll it returns errNoPendingPluginRoll: an approval or a managed-set change
+// removed the roll, and this call cannot tell which target that was.
+func approvePluginRoll(status *v1alpha1.ControllerStatus, target string) (bool, error) {
+	if status.PendingPluginRoll == nil {
+		return false, errNoPendingPluginRoll
+	}
+	if status.PendingPluginRoll.TargetChecksum != target {
+		return false, errPluginRollChanged
+	}
+	status.ApprovedPluginRollChecksum = target
+	status.PendingPluginRoll = nil
+	return true, nil
 }
 
 // ApproveDeletion authorizes deleting a previously-deferred item even though a
 // build may be running, issuing a targeted delete to the mite.
 func (r *Reconciler) ApproveDeletion(ctx context.Context, cluster, namespace, name, path string) error {
 	_ = cluster // operator always acts on its own cluster
-	// The status write below sends the whole status from this read, so on a
-	// replica that does not own the controller it races the owner's writes.
+	// Only the shard owner holds the mite's subscription, so a send from
+	// another replica subscribes to the mite there.
 	if !r.ownsController(namespace, name) {
 		return ErrNotShardOwner
 	}
@@ -2086,14 +2142,7 @@ func (r *Reconciler) ApproveDeletion(ctx context.Context, cluster, namespace, na
 	if err != nil {
 		return fmt.Errorf("get controller: %w", err)
 	}
-	idx := -1
-	for i, d := range cr.Status.PendingItemDeletions {
-		if d.Path == path {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
+	if !slices.ContainsFunc(cr.Status.PendingItemDeletions, func(d v1alpha1.PendingDeletion) bool { return d.Path == path }) {
 		return fmt.Errorf("no pending deletion for %q on %s", path, key)
 	}
 
@@ -2115,20 +2164,42 @@ func (r *Reconciler) ApproveDeletion(ctx context.Context, cluster, namespace, na
 		return nil
 	}
 
-	cr.Status.PendingItemDeletions = append(cr.Status.PendingItemDeletions[:idx], cr.Status.PendingItemDeletions[idx+1:]...)
-	if len(cr.Status.PendingItemDeletions) == 0 {
-		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
-			Type:   v1alpha1.ConditionDeletionPending,
-			Status: metav1.ConditionFalse,
-			Reason: v1alpha1.ReasonNoDeletionPending,
-		})
-	}
-	if err := r.client.PatchControllerStatus(ctx, name, namespace, &cr.Status); err != nil {
+	// The shard can still move, and the owner's reconcile can write status,
+	// after the check above. The compare-and-swap removes only this entry
+	// from a fresh read, so it never writes back a stale field.
+	if _, err := crdstore.MutateStatus(ctx, r.store, name, namespace, func(fresh *v1alpha1.Controller) (bool, error) {
+		return removePendingDeletion(&fresh.Status, path), nil
+	}); err != nil {
 		logger.Warn("failed to clear pending deletion", "error", err)
 	}
 	r.emitOperatorEvent("deletion.approved", cr, "item deletion approved by user", path)
 	r.wakeController(key)
 	return nil
+}
+
+// removePendingDeletion removes the pending deletion entry for path from
+// status and reports whether it found one. It sets DeletionPending to False
+// when the list becomes empty.
+func removePendingDeletion(status *v1alpha1.ControllerStatus, path string) bool {
+	idx := -1
+	for i, d := range status.PendingItemDeletions {
+		if d.Path == path {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return false
+	}
+	status.PendingItemDeletions = append(status.PendingItemDeletions[:idx], status.PendingItemDeletions[idx+1:]...)
+	if len(status.PendingItemDeletions) == 0 {
+		status.Conditions = setCondition(status.Conditions, v1alpha1.ControllerCondition{
+			Type:   v1alpha1.ConditionDeletionPending,
+			Status: metav1.ConditionFalse,
+			Reason: v1alpha1.ReasonNoDeletionPending,
+		})
+	}
+	return true
 }
 
 // computeChangedSections compares old and new component hashes and returns

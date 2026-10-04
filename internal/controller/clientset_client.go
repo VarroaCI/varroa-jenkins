@@ -3305,9 +3305,13 @@ func (c *ClientsetClient) PatchControllerStatus(ctx context.Context, name, names
 	statusPatch["pendingRestart"] = status.PendingRestart
 	statusPatch["pendingPluginRoll"] = status.PendingPluginRoll
 	statusPatch["approvedPluginRollChecksum"] = status.ApprovedPluginRollChecksum
-	if status.PendingItemDeletions != nil {
-		statusPatch["pendingItemDeletions"] = status.PendingItemDeletions
+	// pendingItemDeletions is always sent: a merge patch keeps an omitted
+	// key, so a nil list must go out as an empty list to clear stale entries.
+	pendingItemDeletions := status.PendingItemDeletions
+	if pendingItemDeletions == nil {
+		pendingItemDeletions = []v1alpha1.PendingDeletion{}
 	}
+	statusPatch["pendingItemDeletions"] = pendingItemDeletions
 	statusPatch["restartDrain"] = status.RestartDrain
 	statusPatch["liveDrift"] = status.LiveDrift
 	if status.LastDesiredPushAt != nil {

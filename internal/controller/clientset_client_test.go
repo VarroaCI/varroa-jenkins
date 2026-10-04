@@ -1481,6 +1481,49 @@ func TestPatchControllerStatus_ClearsLastReconcileErrorAt(t *testing.T) {
 	}
 }
 
+// TestPatchControllerStatus_NilPendingDeletionsClearsStoredEntries pins
+// that a nil pendingItemDeletions list clears a stored entry. A merge patch
+// keeps an omitted key, so the patch must send an empty list.
+func TestPatchControllerStatus_NilPendingDeletionsClearsStoredEntries(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "Controller"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("ControllerList"), &unstructured.UnstructuredList{})
+
+	existing := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "Controller",
+		"metadata":   map[string]interface{}{"name": "ctrl", "namespace": "ns"},
+		"status": map[string]interface{}{
+			"phase":                "Connected",
+			"pendingItemDeletions": []interface{}{map[string]interface{}{"path": "team/job"}},
+		},
+	}}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{controllerGVR: "ControllerList"},
+		existing,
+	)
+	c := &ClientsetClient{dynamic: dyn}
+
+	if err := c.PatchControllerStatus(context.Background(), "ctrl", "ns", &v1alpha1.ControllerStatus{
+		Phase: v1alpha1.ControllerPhaseConnected,
+	}); err != nil {
+		t.Fatalf("PatchControllerStatus failed: %v", err)
+	}
+
+	got, err := dyn.Resource(controllerGVR).Namespace("ns").Get(context.Background(), "ctrl", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get failed: %v", err)
+	}
+	list, _, err := unstructured.NestedSlice(got.Object, "status", "pendingItemDeletions")
+	if err != nil {
+		t.Fatalf("read pendingItemDeletions: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("pendingItemDeletions = %v, want empty", list)
+	}
+}
+
 // TestPatchControllerStatus_CellPatchShape asserts task 5.3a: the
 // end-of-reconcile status patch builds status.cell as an explicit partial
 // map carrying only the controller reconciler's own fields — warm,

@@ -533,7 +533,8 @@ sections describe.
   guards — e.g. `AppliedBundleHash`, `FirstConnectedAt`, `WakeToken`,
   `LastDesiredPushAt`) are **sticky**: a merge patch that omits a key can never clear
   it server-side. Fields always included (even zero-valued) — `phase`, `conditions`,
-  `overlayWarnings`, `pendingPluginRoll`, `approvedPluginRollChecksum`, `liveDrift`,
+  `overlayWarnings`, `pendingPluginRoll`, `approvedPluginRollChecksum`,
+  `pendingItemDeletions` (an empty list when nil), `liveDrift`,
   `rollout`, `lastReconcileError`, `lastReconcileErrorAt` — are the only ones that can
   be cleared. When adding a status field, decide up front whether it must ever be
   cleared; if so it must be unconditional in `statusPatch`, not behind a non-empty
@@ -1161,7 +1162,10 @@ sections describe.
   `Reconciler.ForgetUnowned`, which calls `Transport.ForgetMatching` for every
   controller that the replica does not own. `ApproveRestart` and `ApproveDeletion`
   return `ErrNotShardOwner` on a replica that does not own the controller, before
-  any read; they run outside the workqueue, so each carries its own gate. The 10-minute shard-resync tick calls
+  any read; they run outside the workqueue, so each carries its own gate. Their
+  status writes go through `crdstore.MutateStatus` and change only the approve's
+  own fields, never `PatchControllerStatus`. A `plugin-roll` approval approves
+  only the target checksum that it read (`errPluginRollChanged` otherwise). The 10-minute shard-resync tick calls
   `ForgetUnowned` too, because a reconcile in flight during a release can
   subscribe again. The shutdown release (`releaseAll`) calls no hook.
 - `pluginlock/lock.go` — the embedded plugin-lock baseline

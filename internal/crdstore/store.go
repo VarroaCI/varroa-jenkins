@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/util/retry"
 )
 
 // Backend is the unstructured-level storage seam. Implemented by
@@ -176,6 +177,41 @@ func UpdateStatus[T any](ctx context.Context, b Backend, obj *T) error {
 	}
 	mergeCreateResult(obj, updated)
 	return nil
+}
+
+// MutateStatus is a compare-and-swap on the /status subresource. It reads
+// the live object, calls mutate on it, and writes the status back with the
+// read resourceVersion. A concurrent write since the read makes the write
+// conflict, and MutateStatus then reads again and calls mutate again, up to
+// retry.DefaultRetry attempts. So mutate must derive every change from the
+// object it receives and must have no side effects. When mutate reports no
+// change, MutateStatus writes nothing and returns false.
+//
+// The write sends the whole status from the fresh read, so it keeps every
+// field that mutate does not touch. A blind merge patch from an earlier read
+// would put back stale values of those fields.
+func MutateStatus[T any](ctx context.Context, b Backend, name, namespace string, mutate func(obj *T) (bool, error)) (bool, error) {
+	var changed bool
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		changed = false
+		obj, err := Get[T](ctx, b, name, namespace)
+		if err != nil {
+			return err
+		}
+		c, err := mutate(obj)
+		if err != nil || !c {
+			return err
+		}
+		if err := UpdateStatus(ctx, b, obj); err != nil {
+			return err
+		}
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return changed, nil
 }
 
 // ErrNotOwned is returned by ApplyOwned when the live object exists and the

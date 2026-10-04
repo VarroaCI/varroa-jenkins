@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -372,3 +373,133 @@ func TestFailAlways_PersistentError(t *testing.T) {
 // --- helpers ---
 
 func strPtr(s string) *string { return &s }
+
+func seedCASController(t *testing.T, f *Fake) {
+	t.Helper()
+	MustSeed(f, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "ctrl", Namespace: "ns", ResourceVersion: "1"},
+		Status:     v1alpha1.ControllerStatus{Phase: "Connected", ConfigHash: "old"},
+	})
+}
+
+// TestMutateStatus_RetriesOnConflictAndKeepsAConcurrentWrite pins that a
+// write between the read and the status update makes MutateStatus read
+// again, and that the final status holds both writes.
+func TestMutateStatus_RetriesOnConflictAndKeepsAConcurrentWrite(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	seedCASController(t, f)
+	gvr, _ := GVRFor[v1alpha1.Controller]()
+	fired := false
+	f.SetAfterGet(gvr, func(ns, name string) {
+		if fired {
+			return
+		}
+		fired = true
+		if err := f.PatchObjectStatus(ctx, gvr, ns, name, map[string]any{"configHash": "owner"}); err != nil {
+			t.Errorf("concurrent patch: %v", err)
+		}
+	})
+
+	calls := 0
+	changed, err := MutateStatus(ctx, f, "ctrl", "ns", func(c *v1alpha1.Controller) (bool, error) {
+		calls++
+		c.Status.RBACHash = "approve"
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("MutateStatus: %v", err)
+	}
+	if !changed {
+		t.Fatal("changed = false, want true")
+	}
+	if calls != 2 {
+		t.Fatalf("mutate calls = %d, want 2", calls)
+	}
+	got, err := Get[v1alpha1.Controller](ctx, f, "ctrl", "ns")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status.ConfigHash != "owner" || got.Status.RBACHash != "approve" {
+		t.Fatalf("status = configHash %q rbacHash %q, want owner and approve", got.Status.ConfigHash, got.Status.RBACHash)
+	}
+	if got.Status.Phase != "Connected" {
+		t.Fatalf("phase = %q, want Connected", got.Status.Phase)
+	}
+}
+
+// TestMutateStatus_NoChangeWritesNothing pins that a mutate that reports no
+// change leaves the stored object and its resourceVersion as they are.
+func TestMutateStatus_NoChangeWritesNothing(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	seedCASController(t, f)
+
+	changed, err := MutateStatus(ctx, f, "ctrl", "ns", func(*v1alpha1.Controller) (bool, error) {
+		return false, nil
+	})
+	if err != nil || changed {
+		t.Fatalf("MutateStatus = %v, %v; want false, nil", changed, err)
+	}
+	got, _ := Get[v1alpha1.Controller](ctx, f, "ctrl", "ns")
+	if got.ResourceVersion != "1" {
+		t.Fatalf("resourceVersion = %q, want 1", got.ResourceVersion)
+	}
+}
+
+// TestMutateStatus_ReturnsTheMutateError pins that a mutate error stops the
+// write and reaches the caller.
+func TestMutateStatus_ReturnsTheMutateError(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	seedCASController(t, f)
+	refused := errors.New("refused")
+
+	changed, err := MutateStatus(ctx, f, "ctrl", "ns", func(*v1alpha1.Controller) (bool, error) {
+		return true, refused
+	})
+	if !errors.Is(err, refused) || changed {
+		t.Fatalf("MutateStatus = %v, %v; want false, refused", changed, err)
+	}
+}
+
+// TestMutateStatus_ReturnsTheConflictAfterTheRetryBudget pins that a status
+// write that always conflicts ends with the conflict, not a silent success.
+func TestMutateStatus_ReturnsTheConflictAfterTheRetryBudget(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	seedCASController(t, f)
+	gvr, _ := GVRFor[v1alpha1.Controller]()
+	f.FailAlways("updatestatus", gvr, apierrors.NewConflict(
+		schema.GroupResource{Group: gvr.Group, Resource: gvr.Resource}, "ctrl", errors.New("stale")))
+
+	changed, err := MutateStatus(ctx, f, "ctrl", "ns", func(c *v1alpha1.Controller) (bool, error) {
+		c.Status.RBACHash = "approve"
+		return true, nil
+	})
+	if !apierrors.IsConflict(err) || changed {
+		t.Fatalf("MutateStatus = %v, %v; want false and a conflict", changed, err)
+	}
+}
+
+// TestFakeUpdateObjectStatus_BumpsResourceVersion pins that a second writer
+// that holds the same read loses the precondition.
+func TestFakeUpdateObjectStatus_BumpsResourceVersion(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	seedCASController(t, f)
+
+	first, _ := Get[v1alpha1.Controller](ctx, f, "ctrl", "ns")
+	second, _ := Get[v1alpha1.Controller](ctx, f, "ctrl", "ns")
+	first.Status.ConfigHash = "first"
+	if err := UpdateStatus(ctx, f, first); err != nil {
+		t.Fatalf("first UpdateStatus: %v", err)
+	}
+	if first.ResourceVersion != "2" {
+		t.Fatalf("resourceVersion after write = %q, want 2", first.ResourceVersion)
+	}
+	second.Status.ConfigHash = "second"
+	if err := UpdateStatus(ctx, f, second); !apierrors.IsConflict(err) {
+		t.Fatalf("second UpdateStatus = %v, want a conflict", err)
+	}
+}

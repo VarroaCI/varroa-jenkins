@@ -244,7 +244,8 @@ func (f *Fake) UpdateObject(_ context.Context, gvr schema.GroupVersionResource, 
 // UpdateObjectStatus replaces only the stored object's "status" field,
 // leaving spec/metadata untouched — mirroring the real ClientsetClient's
 // /status subresource semantics, where a plain UpdateObject leaves .status
-// unchanged. Uses the same optimistic-concurrency check as UpdateObject.
+// unchanged. Uses the same optimistic-concurrency check as UpdateObject,
+// and advances the stored resourceVersion like PatchObjectStatus.
 func (f *Fake) UpdateObjectStatus(_ context.Context, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
 	if err := f.inject("updatestatus", gvr); err != nil {
 		return nil, err
@@ -265,8 +266,12 @@ func (f *Fake) UpdateObjectStatus(_ context.Context, gvr schema.GroupVersionReso
 	}
 	clone := stored.DeepCopy()
 	clone.Object["status"] = obj.Object["status"]
+	// The apiserver moves the resourceVersion on every status write. A Fake
+	// that froze it would let a second writer with the same read pass the
+	// precondition.
+	bumpResourceVersion(clone)
 	f.objects[gvr][key] = clone
-	return clone, nil
+	return clone.DeepCopy(), nil
 }
 
 // DeleteObject removes the object. A missing object is not an error.

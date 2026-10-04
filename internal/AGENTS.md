@@ -25,7 +25,7 @@ reading each package's entry point):
   8-method unstructured-level `Backend` seam (implemented by
   `controller.ClientsetClient` and the in-memory `Fake`), package-level
   generic helpers (`Get[T]`/`List[T]`/`Apply[T]`/`ApplyOwned[T]`/`Create`/
-  `Update`/`Delete`/`PatchStatus`/`PatchAnnotations`/`PatchFinalizers`), and a static
+  `Update`/`UpdateStatus`/`MutateStatus`/`Delete`/`PatchStatus`/`PatchAnnotations`/`PatchFinalizers`), and a static
   type→GVR registry covering all 18 kinds. Every CRD read/write in the
   operator, BFF, and MCP goes through it; new kinds register here instead
   of adding interface methods. `registry.go` is the **only** place a kind
@@ -47,7 +47,12 @@ reading each package's entry point):
   Gets, creates when absent (looping back to `Get` on `AlreadyExists`), returns
   `ErrNotOwned` for a live object the caller's predicate rejects, and Updates
   carrying the **live** resourceVersion so a concurrent write conflicts instead
-  of being clobbered.
+  of being clobbered. `MutateStatus` is the status compare-and-swap: it reads
+  the live object, calls a side-effect-free mutate function, and writes the
+  status subresource with the read resourceVersion, reading again on each
+  conflict. A writer that owns only some status fields uses it in place of a
+  blind `PatchStatus`. `Fake.UpdateObjectStatus` advances the resourceVersion,
+  so a test seeds a non-empty resourceVersion to exercise the precondition.
 - **`auth/`** — OIDC/Dex, local, and LDAP auth providers (`AuthMode` =
   `oidc|local|ldap`) plus HTTP middleware (`middleware.go`) that resolves
   request claims; subpackages `auth/local`, `auth/ldap`, `auth/identity`,
