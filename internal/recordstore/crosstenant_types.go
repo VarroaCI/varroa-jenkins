@@ -96,8 +96,9 @@ type CrossTenantRequest struct {
 // answer, and INTERNAL for any other fault. NOT_FOUND is the one added
 // code: the request names a run identifier or an artifact path the
 // recorder does not hold. ReasonCode and Message carry a veto, which is
-// never a server fault: a GrantEvaluator veto, or INVALID_NAME for a
-// lock name that is empty or holds a "/".
+// never a server fault: a GrantEvaluator veto, INVALID_NAME for a lock
+// name that is empty or holds a "/", or RUN_ENDED for a lock acquire of
+// a run that already ended.
 type CrossTenantResponse struct {
 	Kind       string `json:"kind,omitempty"`
 	ReasonCode string `json:"reason_code,omitempty"`

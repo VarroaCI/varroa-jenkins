@@ -204,7 +204,7 @@ The step handles each recorder refusal as follows.
 
 | Reason | Step behavior |
 |---|---|
-| `FENCED`, `CROSS_TENANT`, `NOT_HOME`, `INVALID_NAME` | fails the build with the recorder's message, on an acquire or a renew. A renew failure also stops the block. |
+| `FENCED`, `CROSS_TENANT`, `NOT_HOME`, `INVALID_NAME`, `RUN_ENDED` | fails the build with the recorder's message, on an acquire or a renew. A renew failure also stops the block. `RUN_ENDED` answers an acquire for a run that already ended. |
 | `NOT_READY`, `THROTTLED` | keeps polling, because the refusal is temporary |
 
 A lock moves through three states.

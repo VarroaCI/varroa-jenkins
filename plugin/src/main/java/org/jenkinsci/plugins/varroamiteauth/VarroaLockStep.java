@@ -547,6 +547,7 @@ public class VarroaLockStep extends Step {
                 case "CROSS_TENANT":
                 case "NOT_HOME":
                 case "INVALID_NAME":
+                case "RUN_ENDED":
                     return true;
                 default:
                     return false;

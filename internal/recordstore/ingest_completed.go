@@ -179,6 +179,11 @@ type ReleasedFleetLock struct {
 // and qualified lock name. It drains and closes its rows before it
 // returns, so the caller's transaction can commit.
 func deleteFleetLocksForRun(ctx context.Context, tx pgx.Tx, runID string) ([]ReleasedFleetLock, error) {
+	// The run's advisory lock comes after the runs upsert and before the
+	// delete. lockFleetLockRun states the lock order both sides keep.
+	if err := lockFleetLockRun(ctx, tx, runID); err != nil {
+		return nil, err
+	}
 	rows, err := tx.Query(ctx, `
 		DELETE FROM varroa.fleet_locks WHERE run_id = $1 AND state IN ('held', 'releasing', 'waiting')
 		RETURNING cluster, tenant, job_path, name

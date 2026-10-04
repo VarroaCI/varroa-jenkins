@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -25,6 +26,21 @@ const fleetLockOneHolderConstraint = "fleet_locks_one_holder"
 // a "/". It is a veto, never a server fault, so it rides ReasonCode, and
 // Code keeps its own C1 rule.
 const ReasonInvalidName = "INVALID_NAME"
+
+// ReasonRunEnded vetoes a lock_acquire for a run whose terminal
+// run.completed the recorder already ingested. The terminal write deleted
+// every lock row of the run, so a later acquire must write none. It is a
+// permanent veto: the plugin step stops polling on it.
+const ReasonRunEnded = "RUN_ENDED"
+
+// fleetLockRunLockClass is the first key of the two-key transaction
+// advisory lock that serializes one run's lock_acquire against its
+// terminal run.completed. The second key is hashtext(run_id).
+const fleetLockRunLockClass int32 = 0x564c4b52
+
+// errFleetLockRunEnded reports that the caller's run already ended. The
+// acquire transaction then writes nothing.
+var errFleetLockRunEnded = errors.New("fleet lock caller run already ended")
 
 // resolveLockTarget resolves one lock call to the tenant that owns the
 // lock and to the bare lock name. Name is always bare: the tenant never
@@ -105,6 +121,10 @@ func handleCrossTenantLockAcquire(ctx context.Context, deps CrossTenantDeps, req
 	if errors.Is(err, errFleetLockRunOfOtherTenant) {
 		return CrossTenantResponse{ReasonCode: ReasonCrossTenant, Message: crossTenantMessage +
 			" Run " + req.RunID + " already holds or waits on this lock for another tenant."}, nil
+	}
+	if errors.Is(err, errFleetLockRunEnded) {
+		return CrossTenantResponse{ReasonCode: ReasonRunEnded, Message: "Run " + req.RunID +
+			" already ended. The recorder writes no lock row for an ended run."}, nil
 	}
 	if err != nil {
 		return CrossTenantResponse{}, err
@@ -259,6 +279,17 @@ func acquireFleetLockOnce(ctx context.Context, pool *pgxpool.Pool, metrics *Flee
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if err := lockFleetLockRun(ctx, tx, p.RunID); err != nil {
+		return fleetLockAcquireOutcome{}, err
+	}
+	ended, err := fleetLockRunEnded(ctx, tx, p.RunID)
+	if err != nil {
+		return fleetLockAcquireOutcome{}, err
+	}
+	if ended {
+		return fleetLockAcquireOutcome{}, errFleetLockRunEnded
+	}
+
 	now := time.Now().UTC()
 
 	moved, _, err := moveInterruptedHoldersToReleasing(ctx, tx, p.Name, now)
@@ -317,6 +348,49 @@ func acquireFleetLockOnce(ctx context.Context, pool *pgxpool.Pool, metrics *Flee
 	}
 	publishAcquireNotifications(notifier, moved, expiredRows, inserted, false, p)
 	return fleetLockAcquireOutcome{state: FleetLockStateWaiting, holder: holder, position: position, expiresAt: expiresAt}, nil
+}
+
+// lockFleetLockRun takes the transaction advisory lock of one run. The
+// acquire transaction and the terminal run.completed both take it, so
+// the second of the two sees the first one's committed work: an acquire
+// that waits reads the ended run, and a terminal delete that waits sees
+// the row the acquire inserted. This holds also for a run with no runs
+// row yet, which no row lock can cover.
+//
+// Lock order constraint: the acquire takes this lock as its first
+// statement and never locks a varroa.runs row. The terminal write locks
+// its varroa.runs row first and takes this lock second. Keep both orders,
+// or the two transactions can deadlock.
+func lockFleetLockRun(ctx context.Context, tx pgx.Tx, runID string) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2))`, fleetLockRunLockClass, runID); err != nil {
+		return fmt.Errorf("lock fleet lock run: %w", err)
+	}
+	return nil
+}
+
+// fleetLockRunEnded reports whether the caller's run already ended: its
+// runs row is COMPLETED with a result other than INTERRUPTED, and it
+// records a build. An INTERRUPTED mark is provisional, because its owner
+// can still be alive. A TRIGGER_FAILED row or an accepted row records no
+// build, and a later run.started replaces it. A run id that is not a
+// UUID, or a run with no runs row, has not ended.
+func fleetLockRunEnded(ctx context.Context, tx pgx.Tx, runID string) (bool, error) {
+	id, parseErr := uuid.Parse(runID)
+	if parseErr != nil {
+		return false, nil //nolint:nilerr // a run id that is not a UUID names no runs row, so the run has not ended
+	}
+	var ended bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM varroa.runs r
+			WHERE r.run_id = $1 AND r.status = 'COMPLETED'
+			  AND r.result IS DISTINCT FROM 'INTERRUPTED'
+			  AND `+recordsBuildRunSQL+`
+		)
+	`, id).Scan(&ended); err != nil {
+		return false, fmt.Errorf("read fleet lock caller run state: %w", err)
+	}
+	return ended, nil
 }
 
 // deleteExpiredFleetLockRows deletes every expired row of one lock name

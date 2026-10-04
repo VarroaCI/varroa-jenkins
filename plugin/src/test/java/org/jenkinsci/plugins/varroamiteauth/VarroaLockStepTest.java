@@ -373,6 +373,20 @@ public class VarroaLockStepTest {
     }
 
     @Test
+    public void aRunEndedAcquireVetoStopsPolling() throws Exception {
+        FakeLockHandler handler = new FakeLockHandler();
+        handler.vetoOnAcquire("alpha/deploy-prod", "RUN_ENDED", Integer.MAX_VALUE);
+        installClient(handler);
+
+        WorkflowJob p = newPipeline(
+                "node('varroa-tenant-alpha') { varroa.lock(name: 'deploy-prod') { echo 'unreachable' } }");
+        WorkflowRun run = buildSync(p, "run-1", Result.FAILURE);
+        j.assertLogContains("varroaLock: RUN_ENDED: vetoed by the fake recorder (lock deploy-prod)", run);
+        j.assertLogNotContains("unreachable", run);
+        assertEquals("RUN_ENDED is a permanent veto", 1, handler.acquireCount("alpha/deploy-prod"));
+    }
+
+    @Test
     public void aRetryableAcquireVetoKeepsPolling() throws Exception {
         FakeLockHandler handler = new FakeLockHandler();
         handler.vetoOnAcquire("alpha/deploy-prod", "NOT_READY", 1);

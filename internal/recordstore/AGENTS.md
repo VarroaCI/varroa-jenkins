@@ -612,7 +612,17 @@ of the fleet's audit activity, once a controller becomes disposable.
   `name` is `<owner_tenant>/<bare>` and `owner_tenant` carries the owner.
   An acquire or a renew whose owner is not the caller also calls
   `GrantEvaluator.Check` with `resource_kind` `lock` and the bare name.
-  The `lock_acquire` reply carries `tenant`, the resolved owner. `acquireFleetLock` runs the five-step transaction
+  The `lock_acquire` reply carries `tenant`, the resolved owner. Before its
+  steps, the acquire transaction takes the run's advisory lock
+  (`lockFleetLockRun`: `pg_advisory_xact_lock(fleetLockRunLockClass,
+  hashtext(run_id))`) and reads the run (`fleetLockRunEnded`). A run that
+  is `COMPLETED`, not `INTERRUPTED`, and records a build writes no row and
+  answers the permanent veto `RUN_ENDED` (`ReasonRunEnded`).
+  `deleteFleetLocksForRun` takes the same lock after the `runs` upsert, so
+  a late poll and the terminal delete never leave a row of an ended run.
+  Lock order: the acquire takes the advisory lock first and never locks a
+  `runs` row; the terminal write locks its `runs` row first.
+  `acquireFleetLock` runs the five-step transaction
   (the derived `held`-to-`releasing` move for an `INTERRUPTED` run, the expiry
   delete, the waiting insert, the FIFO promotion by `(waiting_since, run_id)`,
   and the reply) with the one retry `isFleetLockOneHolderViolation` names after

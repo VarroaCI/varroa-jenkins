@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // lockTestDeps opens a fresh schema and a pgxpool.Pool for a fleet-lock
@@ -722,5 +724,168 @@ func TestFleetLockAcquire_OtherTenantRunIDIsRefused(t *testing.T) {
 	}
 	if state != FleetLockStateWaiting || !got.Equal(expires.Truncate(time.Microsecond)) {
 		t.Fatalf("row changed: state %q expires_at %s, want waiting and %s", state, got, expires)
+	}
+}
+
+// completeRunForLockTest ingests the owner's terminal run.completed for
+// runID, which deletes every fleet lock row of the run.
+func completeRunForLockTest(t *testing.T, deps CrossTenantDeps, runID uuid.UUID, intentKey string) {
+	t.Helper()
+	env := newTestEnvelope(t, runID, intentKey, KindRunCompleted, RunCompletedPayload{Result: strPtr("SUCCESS")})
+	if _, err := NewIngester(deps.Pool, nil, nil).Apply(context.Background(), env); err != nil {
+		t.Fatalf("apply run.completed: %v", err)
+	}
+}
+
+// countFleetLockRowsOfRun counts every fleet lock row of runID.
+func countFleetLockRowsOfRun(t *testing.T, db *sql.DB, runID string) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM varroa.fleet_locks WHERE run_id = $1`, runID).Scan(&n); err != nil {
+		t.Fatalf("count fleet lock rows: %v", err)
+	}
+	return n
+}
+
+// TestFleetLockAcquire_AfterTerminalCompletionAnswersRunEndedAndWritesNoRow
+// sends a late acquire after the run's terminal run.completed. A holder
+// exists, so without the guard the acquire would insert a waiting row.
+func TestFleetLockAcquire_AfterTerminalCompletionAnswersRunEndedAndWritesNoRow(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	runID := seedGrantedIntent(t, deps.Pool, "manual:late-acquire-waiting")
+	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
+
+	if r := acquireForCaller(t, deps, "holder-run"); r.State != FleetLockStateHeld {
+		t.Fatalf("holder state: got %q, want %q", r.State, FleetLockStateHeld)
+	}
+	completeRunForLockTest(t, deps, runID, "manual:late-acquire-waiting")
+
+	resp := acquireForCaller(t, deps, runID.String())
+	if resp.ReasonCode != ReasonRunEnded {
+		t.Fatalf("late acquire: got %+v, want reason %q", resp, ReasonRunEnded)
+	}
+	if n := countFleetLockRowsOfRun(t, db, runID.String()); n != 0 {
+		t.Fatalf("%d fleet lock rows for an ended run, want none", n)
+	}
+}
+
+// TestFleetLockAcquire_AfterTerminalCompletionNeverPromotesToHeld sends a
+// late acquire for a free lock. Without the guard it would answer held.
+func TestFleetLockAcquire_AfterTerminalCompletionNeverPromotesToHeld(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	runID := seedGrantedIntent(t, deps.Pool, "manual:late-acquire-held")
+	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
+	completeRunForLockTest(t, deps, runID, "manual:late-acquire-held")
+
+	resp := acquireForCaller(t, deps, runID.String())
+	if resp.ReasonCode != ReasonRunEnded || resp.State != "" || resp.FenceToken != 0 {
+		t.Fatalf("late acquire: got %+v, want only reason %q", resp, ReasonRunEnded)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM varroa.fleet_locks`).Scan(&n); err != nil {
+		t.Fatalf("count fleet lock rows: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("%d fleet lock rows, want none", n)
+	}
+}
+
+// TestFleetLockAcquire_InterruptedRunStillAcquires asserts an
+// INTERRUPTED run can still take a lock: its owner can still be alive.
+func TestFleetLockAcquire_InterruptedRunStillAcquires(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
+	runID := newTestUUIDv7String()
+	insertInterruptedRun(t, db, runID)
+
+	if resp := acquireForCaller(t, deps, runID); resp.State != FleetLockStateHeld {
+		t.Fatalf("interrupted run acquire: got %+v, want held", resp)
+	}
+}
+
+// TestFleetLockAcquire_TriggerFailedOrAcceptedRowStillAcquires asserts a
+// COMPLETED row that records no build does not end the run: a later
+// run.started replaces such a row.
+func TestFleetLockAcquire_TriggerFailedOrAcceptedRowStillAcquires(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
+
+	triggerFailed := newTestUUIDv7String()
+	if _, err := db.Exec(`
+		INSERT INTO varroa.runs (run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path, status, result)
+		VALUES ($1, now(), $2, $3, 'ns-alpha', 'cell-alpha', 'alpha', 'alpha/release', 'COMPLETED', $4)
+	`, triggerFailed, "manual:trigger-failed-"+triggerFailed, testCluster, ResultTriggerFailed); err != nil {
+		t.Fatalf("insert trigger-failed run: %v", err)
+	}
+	accepted := newTestUUIDv7String()
+	if _, err := db.Exec(`
+		INSERT INTO varroa.runs (run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path, status, result, payload)
+		VALUES ($1, now(), $2, $3, 'ns-alpha', 'cell-alpha', 'alpha', 'alpha/release', 'COMPLETED', 'ABORTED',
+		        jsonb_build_object('accepted_at', now()))
+	`, accepted, "manual:accepted-"+accepted, testCluster); err != nil {
+		t.Fatalf("insert accepted run: %v", err)
+	}
+
+	if resp := acquireForCaller(t, deps, triggerFailed); resp.State != FleetLockStateHeld {
+		t.Fatalf("trigger-failed run acquire: got %+v, want held", resp)
+	}
+	if resp := acquireForCaller(t, deps, accepted); resp.State != FleetLockStateWaiting {
+		t.Fatalf("accepted run acquire: got %+v, want waiting", resp)
+	}
+}
+
+// TestFleetLockAcquire_RunWithNoRunsRowStillAcquires asserts a run the
+// store has no runs row for has not ended.
+func TestFleetLockAcquire_RunWithNoRunsRowStillAcquires(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
+
+	if resp := acquireForCaller(t, deps, newTestUUIDv7String()); resp.State != FleetLockStateHeld {
+		t.Fatalf("acquire: got %+v, want held", resp)
+	}
+}
+
+// TestFleetLockAcquire_ConcurrentCompletionLeavesNoRow races an acquire
+// against the run's terminal run.completed. Whichever commits first, no
+// lock row of the run may stay.
+func TestFleetLockAcquire_ConcurrentCompletionLeavesNoRow(t *testing.T) {
+	deps, db := lockTestDeps(t)
+	seedTenantPlacement(t, db, "alpha", "ns-alpha", "cell-alpha", 0, "pod-a", "pod-a", nil)
+
+	for i := 0; i < 20; i++ {
+		key := "manual:race-" + newTestUUIDv7String()
+		runID := seedGrantedIntent(t, deps.Pool, key)
+		env := newTestEnvelope(t, runID, key, KindRunCompleted, RunCompletedPayload{Result: strPtr("SUCCESS")})
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		var acquireErr, completeErr error
+		var resp CrossTenantResponse
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			resp, acquireErr = handleCrossTenantLockAcquire(context.Background(), deps, CrossTenantRequest{
+				Cluster: testCluster, Namespace: "ns-alpha", Cell: "cell-alpha",
+				CallerTenant: "alpha", Name: fleetLockTestName, RunID: runID.String(),
+			})
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			_, completeErr = NewIngester(deps.Pool, nil, nil).Apply(context.Background(), env)
+		}()
+		close(start)
+		wg.Wait()
+
+		if acquireErr != nil || completeErr != nil {
+			t.Fatalf("iteration %d: acquire error %v, completion error %v", i, acquireErr, completeErr)
+		}
+		if resp.ReasonCode != "" && resp.ReasonCode != ReasonRunEnded {
+			t.Fatalf("iteration %d: acquire answered %+v", i, resp)
+		}
+		if n := countFleetLockRowsOfRun(t, db, runID.String()); n != 0 {
+			t.Fatalf("iteration %d: %d fleet lock rows left for an ended run (acquire answered %+v)", i, n, resp)
+		}
 	}
 }

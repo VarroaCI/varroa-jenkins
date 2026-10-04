@@ -307,7 +307,7 @@ the root AGENTS.md greenfield rule.
   controller tenant holds a `/` of its own. An empty `tenant` sends no `target_tenant`,
   and the recorder resolves the caller's own tenant. A name that is empty or holds a `/`
   fails `start()` before any call. A permanent recorder veto (`FENCED`, `CROSS_TENANT`,
-  `NOT_HOME`, `INVALID_NAME`; `Execution.isPermanentVeto`) fails the build on an acquire
+  `NOT_HOME`, `INVALID_NAME`, `RUN_ENDED`; `Execution.isPermanentVeto`) fails the build on an acquire
   or a renew. `NOT_READY` and `THROTTLED` keep it polling. The step records the acquired lock on
   `VarroaActiveLocksAction.java` (a transient, per-run stack, innermost lock last, keyed
   on the owner tenant plus the bare name, with the owner read from the acquire reply's
