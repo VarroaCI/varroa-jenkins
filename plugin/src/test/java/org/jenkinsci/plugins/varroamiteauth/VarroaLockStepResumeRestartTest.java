@@ -42,9 +42,15 @@ import net.sf.json.JSONObject;
  */
 public class VarroaLockStepResumeRestartTest {
 
-    // The script calls the step itself, not varroa.lock: a program that
-    // holds the varroa global variable fails to load after a restart.
     private static final String SCRIPT = "varroaLock(name: 'deploy-prod') {\n"
+            + "  echo 'in-body'\n"
+            + "  sleep(time: 2, unit: 'SECONDS')\n"
+            + "  echo 'after-sleep'\n"
+            + "}";
+
+    // The same body through the global variable: the saved program holds a
+    // varroa.Varroa instance, so the restart must load that class by name.
+    private static final String GLOBAL_VARIABLE_SCRIPT = "varroa.lock(name: 'deploy-prod') {\n"
             + "  echo 'in-body'\n"
             + "  sleep(time: 2, unit: 'SECONDS')\n"
             + "  echo 'after-sleep'\n"
@@ -97,6 +103,22 @@ public class VarroaLockStepResumeRestartTest {
     }
 
     @Test
+    public void aVarroaLockBodyLoadsAndContinuesAfterARestart() throws Throwable {
+        startBuildAndRestart(GLOBAL_VARIABLE_SCRIPT);
+        sessions.then(j -> {
+            WorkflowRun run = awaitGate(j);
+
+            recorder.renewState = "held";
+            recorder.renewGate.countDown();
+            j.waitForCompletion(run);
+            j.assertBuildStatus(Result.SUCCESS, run);
+            j.assertLogNotContains("ClassNotFoundException", run);
+            j.assertLogContains("the recorder confirmed the hold on alpha/deploy-prod", run);
+            j.assertLogContains("after-sleep", run);
+        });
+    }
+
+    @Test
     public void aResumedBodyNeverRunsAfterALostRenew() throws Throwable {
         startBuildAndRestart();
         sessions.then(j -> {
@@ -112,11 +134,15 @@ public class VarroaLockStepResumeRestartTest {
     }
 
     private void startBuildAndRestart() throws Throwable {
+        startBuildAndRestart(SCRIPT);
+    }
+
+    private void startBuildAndRestart(String script) throws Throwable {
         sessions.then(j -> {
             Folder tenant = j.jenkins.createProject(Folder.class, "alpha");
             VarroaTenantResolverTest.hostTenants(j, "alpha");
             WorkflowJob p = tenant.createProject(WorkflowJob.class, "deploy");
-            p.setDefinition(new CpsFlowDefinition(SCRIPT, true));
+            p.setDefinition(new CpsFlowDefinition(script, true));
             WorkflowRun run = (WorkflowRun) p.scheduleBuild2(0,
                     new VarroaIntentAction("run-restart", "", null, System.currentTimeMillis())).waitForStart();
             j.waitForMessage("in-body", run);

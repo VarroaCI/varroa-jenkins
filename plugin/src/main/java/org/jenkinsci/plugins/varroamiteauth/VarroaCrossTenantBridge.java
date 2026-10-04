@@ -4,7 +4,6 @@ import hudson.model.Run;
 
 import java.util.Map;
 
-import org.jenkinsci.plugins.scriptsecurity.sandbox.whitelists.Whitelisted;
 import org.jenkinsci.plugins.workflow.cps.CpsScript;
 
 /**
@@ -13,10 +12,9 @@ import org.jenkinsci.plugins.workflow.cps.CpsScript;
  * VarroaGlobalVariable} loads. They run in a different package, so normal
  * Java visibility, not CPS trust, decides what they may call directly.
  *
- * <p>Both methods carry {@link Whitelisted}: a marker plugin resource
- * loaded through the same {@code GroovyShell} as the calling pipeline can
- * still run under that pipeline's own sandbox setting, so this door stays
- * open whether or not it does.
+ * <p>Neither method is on the sandbox allowlist. The two resources compile
+ * in the trusted Pipeline shell, so they need no allowlist entry, and a
+ * sandboxed script must not call this class directly.
  */
 public final class VarroaCrossTenantBridge {
 
@@ -28,7 +26,6 @@ public final class VarroaCrossTenantBridge {
      * id when one is known, otherwise by intent key. Throws when the
      * recorder does not answer.
      */
-    @Whitelisted
     public static Map<String, Object> refresh(String callerJobPath, String tenant, String job,
             String runId, String intentKey) {
         return VarroaCrossTenantOps.refresh(callerJobPath, tenant, job, runId, intentKey);
@@ -41,7 +38,6 @@ public final class VarroaCrossTenantBridge {
      * from Java, so the Groovy caller never calls {@code CpsScript}'s own
      * run accessor directly.
      */
-    @Whitelisted
     public static Map<String, Object> currentLockToken(CpsScript script) {
         Run<?, ?> run = script.$buildNoException();
         return run != null ? VarroaActiveLocksAction.currentTokenMap(run) : null;

@@ -281,14 +281,17 @@ the root AGENTS.md greenfield rule.
   `pipeline-input-step`, and `junit` are **test-scope** dependencies only: no main-scope
   class names a type of any of the three.
 - **Cross-tenant pipeline API** (the `varroa` global variable; D1, D2, D11, D12):
-  `VarroaGlobalVariable.java` compiles `varroa/Varroa.groovy` and
-  `varroa/VarroaRunHandle.groovy` (plugin resources, not classpath `.class` files) into
-  the pipeline's own `GroovyClassLoader` on first use — that shell's `loadClass` cannot
-  find these resources on its own source path, so the source text is read via this
-  plugin's own classloader and handed to `GroovyClassLoader.parseClass(String, String)`
-  directly. `Varroa.groovy` exposes `build`, `lastSuccessful`, `lock`, `summary`, and the
-  `lock.token` property (backed by `VarroaCrossTenantBridge.currentLockToken`, `@Whitelisted`
-  for sandboxed pipelines); `VarroaRunHandle.groovy` is the returned run handle, plus
+  `VarroaGlobalVariable.java` loads `varroa.Varroa` by name through the Pipeline shell's
+  `loadClass`, the docker-workflow pattern. Both classes are plugin `.groovy` resources, and
+  they compile in the trusted Pipeline shell. `VarroaGroovySourceAllowlist.java` lets the
+  Pipeline class loader read exactly the two URLs this plugin's own class loader returns
+  for them. The sandbox does not check their code, so they call only the five steps and
+  `VarroaCrossTenantBridge`. The `@Whitelisted` advice in the archived
+  `add-cross-tenant-pipeline-api` review log describes a removed direct parse. Never parse their source directly: a saved program holds a `varroa.Varroa`
+  instance, and a restarted Jenkins resolves its class by name before `getValue` runs.
+  `Varroa.groovy` exposes `build`, `lastSuccessful`, `lock`, `summary`, and the
+  `lock.token` property (backed by `VarroaCrossTenantBridge.currentLockToken`, which is not
+  on the sandbox allowlist); `VarroaRunHandle.groovy` is the returned run handle, plus
   `refresh()` (backed by `VarroaCrossTenantBridge.refresh`, since D1 lists no public status
   step) and `copyArtifact` (calls the `varroaArtifact` step). `VarroaBuildStep.java`
   (`varroaBuild`) and `VarroaLockStep.java`'s waiting phase (`varroaLock`) hold no CPS
@@ -321,8 +324,7 @@ the root AGENTS.md greenfield rule.
   `LOCK_RESUME_GATE_MILLIS` (the 300 s lease), then ends the hold. The gate holds one pool
   thread per resumed build that holds a lock. Later renewals keep `LOCK_RENEW_MILLIS`. A
   mid-run `releasing` reply only warns. `renewOnce` is the one renew reply mapping both paths
-  use. A program that holds the `varroa` global variable fails to load after a restart, so
-  `VarroaLockStepResumeRestartTest` calls the `varroaLock` step directly.
+  use.
   `VarroaCallSeqAction.java` is the run-scoped `s<n>` sequence `varroaBuild` uses for its
   intent key. `MiteLoopbackClient.java` gained one method per cross-tenant kind, a
   `forCrossTenant()` factory reading `VARROA_CROSSTENANT_CONNECT_TIMEOUT_MS` (default

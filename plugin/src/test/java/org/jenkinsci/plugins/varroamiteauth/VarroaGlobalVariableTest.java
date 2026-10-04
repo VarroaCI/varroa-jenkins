@@ -146,4 +146,17 @@ public class VarroaGlobalVariableTest {
         j.assertLogContains("lockNameOutside=null lockTenantOutside=null", run);
         j.assertLogContains("lastSuccessful=null", run);
     }
+
+    @Test
+    public void aSandboxedScriptCannotCallTheBridgeDirectly() throws Exception {
+        WorkflowJob p = j.jenkins.createProject(WorkflowJob.class, "p-" + System.nanoTime());
+        p.setDefinition(new CpsFlowDefinition(
+                "org.jenkinsci.plugins.varroamiteauth.VarroaCrossTenantBridge.currentLockToken(this)",
+                true));
+
+        WorkflowRun run = j.buildAndAssertStatus(Result.FAILURE, p);
+
+        j.assertLogContains("Scripts not permitted to use staticMethod "
+                + "org.jenkinsci.plugins.varroamiteauth.VarroaCrossTenantBridge currentLockToken", run);
+    }
 }
