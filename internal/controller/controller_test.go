@@ -3411,6 +3411,8 @@ type captureTransport struct {
 	forgotten []string
 	// known lists the ns/name keys that ForgetMatching tests.
 	known []string
+	// imperatives records each command that SendImperative received.
+	imperatives []*mitev1.ImperativeCommand
 }
 
 func (c *captureTransport) Send(_ context.Context, ns, name string, msg *mitev1.OperatorMessage) error {
@@ -3451,6 +3453,7 @@ func (c *captureTransport) IdleGauges(ns, name string) (*mitev1.IdleGauges, time
 }
 
 func (c *captureTransport) SendImperative(_ context.Context, ns, name string, cmd *mitev1.ImperativeCommand) error {
+	c.imperatives = append(c.imperatives, cmd)
 	return nil
 }
 

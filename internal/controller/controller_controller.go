@@ -2075,6 +2075,11 @@ func (r *Reconciler) issueSafeRestart(ctx context.Context, cr *v1alpha1.Controll
 // build may be running, issuing a targeted delete to the mite.
 func (r *Reconciler) ApproveDeletion(ctx context.Context, cluster, namespace, name, path string) error {
 	_ = cluster // operator always acts on its own cluster
+	// The status write below sends the whole status from this read, so on a
+	// replica that does not own the controller it races the owner's writes.
+	if !r.ownsController(namespace, name) {
+		return ErrNotShardOwner
+	}
 	key := namespace + "/" + name
 	logger := r.Logger.With("controller", key)
 	cr, err := crdstore.Get[v1alpha1.Controller](ctx, r.store, name, namespace)
@@ -2099,6 +2104,15 @@ func (r *Reconciler) ApproveDeletion(ctx context.Context, cluster, namespace, na
 		Target:    path,
 	}); err != nil {
 		return fmt.Errorf("send delete-item: %w", err)
+	}
+	// A shard move during the send makes the read above stale. The new
+	// owner rewrites the pending list from the mite's next result, so this
+	// replica skips the status write.
+	if !r.ownsController(namespace, name) {
+		logger.Info("shard moved during approve deletion; the new owner settles the status", "path", path)
+		r.emitOperatorEvent("deletion.approved", cr, "item deletion approved by user", path)
+		r.wakeController(key)
+		return nil
 	}
 
 	cr.Status.PendingItemDeletions = append(cr.Status.PendingItemDeletions[:idx], cr.Status.PendingItemDeletions[idx+1:]...)

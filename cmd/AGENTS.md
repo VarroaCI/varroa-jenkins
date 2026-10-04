@@ -25,10 +25,11 @@ stating what it is/is not responsible for:
   Connected→Failed` phase state machine over NATS and serves the per-controller
   hibernation wake interstitial on `VARROA_WAKE_PORT` (default `8082`) from every
   replica. No gRPC/OIDC. Every replica serves `operator.<cluster>.approverestart`
-  with no queue group (`approve_restart.go`); only the replica that owns the
-  controller's shard replies. `ApproveRestart` returns `ErrNotShardOwner` on any
-  other replica, and `handleApproveRestart` then sends no reply. With no owner
-  during a handoff, the BFF request times out. `controllerIssuer` (`main.go`) is the only choice of
+  (`approve_restart.go`) and `operator.<cluster>.approvedeletion`
+  (`approve_deletion.go`) with no queue group; only the replica that owns the
+  controller's shard replies. `ApproveRestart` and `ApproveDeletion` return
+  `ErrNotShardOwner` on any other replica, and the handler then sends no reply.
+  With no owner during a handoff, the BFF request times out. `controllerIssuer` (`main.go`) is the only choice of
   the issuer that controllers trust: the BFF URL in `local` and `ldap` modes,
   else the OIDC issuer. The operator exits in those two modes without
   `--bff-url`. One leader replica queue-subscribes

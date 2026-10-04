@@ -279,3 +279,112 @@ func TestApproveRestart_ForgetsTheMiteWhenTheShardMovesDuringTheSend(t *testing.
 		t.Fatalf("forgotten = %v, want [ns/moving]", tr.forgotten)
 	}
 }
+
+// TestApproveDeletion_RefusesANonOwner pins that a replica that does not own
+// the controller refuses the approve before any send or status write.
+func TestApproveDeletion_RefusesANonOwner(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := testController("elsewhere", "ns", v1alpha1.ControllerPhaseConnected)
+	cr.Status.PendingItemDeletions = []v1alpha1.PendingDeletion{{Path: "team/job"}}
+	crdstore.MustSeed(client.store, cr)
+	rec.SetShardOwnership(sharding.NewRing(256), sharding.NewShardSet())
+	tr := &captureTransport{}
+	rec.miteTransport = tr
+
+	err := rec.ApproveDeletion(context.Background(), "", "ns", "elsewhere", "team/job")
+	if !errors.Is(err, ErrNotShardOwner) {
+		t.Fatalf("err = %v, want ErrNotShardOwner", err)
+	}
+	if len(tr.imperatives) != 0 {
+		t.Fatalf("a non-owner sent %d imperative commands", len(tr.imperatives))
+	}
+	if client.patchCount != 0 {
+		t.Fatalf("a non-owner wrote the status %d times", client.patchCount)
+	}
+}
+
+// TestApproveDeletion_OwnerSendsAndClears pins that the replica that holds
+// the controller's shard sends the delete and clears the pending entry.
+func TestApproveDeletion_OwnerSendsAndClears(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := testController("mine", "ns", v1alpha1.ControllerPhaseConnected)
+	cr.Status.PendingItemDeletions = []v1alpha1.PendingDeletion{{Path: "team/job"}}
+	crdstore.MustSeed(client.store, cr)
+	ring := sharding.NewRing(256)
+	held := sharding.NewShardSet()
+	held.Add(ring.ShardFor("ns/mine"))
+	rec.SetShardOwnership(ring, held)
+	tr := &captureTransport{}
+	rec.miteTransport = tr
+
+	if err := rec.ApproveDeletion(context.Background(), "", "ns", "mine", "team/job"); err != nil {
+		t.Fatalf("approve deletion: %v", err)
+	}
+	if len(tr.imperatives) != 1 {
+		t.Fatalf("imperative commands = %d, want 1", len(tr.imperatives))
+	}
+	if got := tr.imperatives[0]; got.Type != mitev1.CommandTypeDeleteItem || got.Target != "team/job" {
+		t.Fatalf("command = %v %q, want %v %q", got.Type, got.Target, mitev1.CommandTypeDeleteItem, "team/job")
+	}
+	st := client.lastPatchedStatus
+	if st == nil {
+		t.Fatal("the owner did not write the status")
+	}
+	if len(st.PendingItemDeletions) != 0 {
+		t.Fatalf("pending deletions = %v, want none", st.PendingItemDeletions)
+	}
+	var found bool
+	for _, c := range st.Conditions {
+		if c.Type == v1alpha1.ConditionDeletionPending {
+			found = true
+			if c.Status != metav1.ConditionFalse {
+				t.Fatalf("DeletionPending = %s, want False", c.Status)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("DeletionPending condition missing")
+	}
+}
+
+// shardMovingImperativeTransport runs onSend inside SendImperative, so a
+// test can move the shard while the delete is in flight.
+type shardMovingImperativeTransport struct {
+	*captureTransport
+	onSend func()
+}
+
+func (s *shardMovingImperativeTransport) SendImperative(ctx context.Context, ns, name string, cmd *mitev1.ImperativeCommand) error {
+	s.onSend()
+	return s.captureTransport.SendImperative(ctx, ns, name, cmd)
+}
+
+// TestApproveDeletion_SkipsTheStatusWriteWhenTheShardMovesDuringTheSend
+// pins that a replica that loses the shard during the send does not write
+// the status from its stale read.
+func TestApproveDeletion_SkipsTheStatusWriteWhenTheShardMovesDuringTheSend(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := testController("moving", "ns", v1alpha1.ControllerPhaseConnected)
+	cr.Status.PendingItemDeletions = []v1alpha1.PendingDeletion{{Path: "team/job"}}
+	crdstore.MustSeed(client.store, cr)
+	ring := sharding.NewRing(256)
+	held := sharding.NewShardSet()
+	shard := ring.ShardFor("ns/moving")
+	held.Add(shard)
+	rec.SetShardOwnership(ring, held)
+	tr := &shardMovingImperativeTransport{captureTransport: &captureTransport{}, onSend: func() { held.Remove(shard) }}
+	rec.miteTransport = tr
+
+	if err := rec.ApproveDeletion(context.Background(), "", "ns", "moving", "team/job"); err != nil {
+		t.Fatalf("approve deletion: %v", err)
+	}
+	if len(tr.imperatives) != 1 {
+		t.Fatalf("imperative commands = %d, want 1", len(tr.imperatives))
+	}
+	if client.patchCount != 0 {
+		t.Fatalf("a replica that lost the shard wrote the status %d times", client.patchCount)
+	}
+}

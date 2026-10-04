@@ -713,7 +713,8 @@ func main() {
 
 	// Register BFF command subscribers as a leader-elected runnable so only
 	// the active replica processes reconcile and wake requests. Approve
-	// restart is served on every replica by approveRestartRunner.
+	// restart and approve deletion are served on every replica by
+	// approveRestartRunner and approveDeletionRunner.
 	crud := &controller.CommandCRUD{
 		Client:            clientsetClient,
 		Store:             clientsetClient,
@@ -768,6 +769,17 @@ func main() {
 		logger:     logger,
 	}); err != nil {
 		logger.Error("failed to add approve restart runner", "error", err)
+		os.Exit(1)
+	}
+
+	// Approve deletion runs on every replica; only the shard owner replies.
+	if err := mgr.Add(&approveDeletionRunner{
+		busConn:    busConn,
+		cluster:    cluster,
+		reconciler: reconciler,
+		logger:     logger,
+	}); err != nil {
+		logger.Error("failed to add approve deletion runner", "error", err)
 		os.Exit(1)
 	}
 
@@ -1356,23 +1368,6 @@ func (r *operatorCommandRunner) Start(ctx context.Context) error {
 		{"reprovision", bus.OperatorReprovisionSubject(r.cluster), reconcileAction("reprovision", func(req bus.ReconcileRequest) {
 			r.reconciler.Reprovision(r.cluster, req.Namespace, req.Name)
 		})},
-		{"approve deletion", bus.OperatorApproveDeletionSubject(r.cluster), func(data []byte) []byte {
-			var req bus.ApproveDeletionRequest
-			if err := json.Unmarshal(data, &req); err != nil {
-				r.logger.Warn("approve deletion request decode failed", "error", err)
-				resp, _ := json.Marshal(bus.ApproveDeletionResponse{Error: "invalid request"})
-				return resp
-			}
-			if err := r.reconciler.ApproveDeletion(context.Background(), r.cluster, req.Namespace, req.Name, req.Path); err != nil {
-				r.logger.Warn("approve deletion failed",
-					"controller", req.Namespace+"/"+req.Name,
-					"path", req.Path, "error", err)
-				resp, _ := json.Marshal(bus.ApproveDeletionResponse{Error: err.Error()})
-				return resp
-			}
-			resp, _ := json.Marshal(bus.ApproveDeletionResponse{})
-			return resp
-		}},
 		{"controllers.list", bus.OperatorControllersSubject(r.cluster, "list"), r.crud.HandleList},
 		{"controllers.get", bus.OperatorControllersSubject(r.cluster, "get"), r.crud.HandleGet},
 		{"controllers.create", bus.OperatorControllersSubject(r.cluster, "create"), r.crud.HandleCreate},
