@@ -465,6 +465,70 @@ func (a *Agent) replayRetainedLogChunks() {
 	}
 }
 
+// scheduleLogResend records seq as refused for runID, extends the run's
+// pause window to at least d from now, and arms the run's one re-send
+// timer for the window's end. A timer already armed for the run stops,
+// so timers never stack. The timer re-sends only on the stream that was
+// open when the BUSY ack arrived, and only while ctx is live: after a
+// disconnect the reconnect replay re-sends every retained chunk instead.
+//
+// Call it only from the processCommands dispatch loop. That loop runs on
+// the run-loop goroutine, which is the only writer of a.stream, so it
+// reads a.stream without sendMu. It must never take sendMu: a re-send pass
+// holds sendMu while it sends, and a read loop blocked behind it stops
+// draining the stream, so flow control stalls both directions.
+func (a *Agent) scheduleLogResend(ctx context.Context, runID string, seq int64, d time.Duration) {
+	armedStream := a.stream
+
+	s := a.logRetention
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	refused := s.busySeqs[runID]
+	if refused == nil {
+		refused = make(map[int64]struct{})
+		s.busySeqs[runID] = refused
+	}
+	refused[seq] = struct{}{}
+	until := s.extendPauseLocked(runID, d)
+	if old := s.resendTimers[runID]; old != nil {
+		old.timer.Stop()
+	}
+	// The callback compares slot identity, never the timer field, so it
+	// reads nothing this goroutine still writes.
+	slot := &logResendSlot{}
+	slot.timer = time.AfterFunc(time.Until(until), func() {
+		a.resendBusyLogChunks(ctx, runID, armedStream, slot)
+	})
+	s.resendTimers[runID] = slot
+}
+
+// resendBusyLogChunks is the body of one run's re-send timer. It sends,
+// in ascending order, every refused sequence of runID the mite still
+// retains. A timer that a later BUSY ack replaced sends nothing. It holds
+// sendMu for the whole pass, like the reconnect replay, and checks its
+// slot only after it holds sendMu: a BUSY ack that arrives while the
+// callback waits for sendMu then replaces the slot, and this pass sends
+// nothing inside the extended pause. Lock order: sendMu, then the store
+// lock.
+func (a *Agent) resendBusyLogChunks(ctx context.Context, runID string, armedStream mitev1.Mite_CommandStreamClient, slot *logResendSlot) {
+	a.sendMu.Lock()
+	defer a.sendMu.Unlock()
+	chunks, ok := a.logRetention.takeRefused(runID, slot)
+	if !ok || len(chunks) == 0 {
+		return
+	}
+	if ctx.Err() != nil || a.stream == nil || a.stream != armedStream {
+		return
+	}
+	for _, chunk := range chunks {
+		msg := &mitev1.MiteMessage{Message: &mitev1.MiteMessage_LogChunk{LogChunk: chunk}}
+		if err := a.stream.Send(msg); err != nil {
+			a.closeOnSendError(err)
+			return
+		}
+	}
+}
+
 // closeOnSendError closes the connection to unblock the receive loop, as
 // the root AGENTS.md's send-error pattern requires — but only for a genuine
 // send failure on a live stream. errStreamNotConnected means the stream, and
@@ -500,9 +564,11 @@ func (a *Agent) handleEventAck(ctx context.Context, ack *mitev1.EventAck) {
 
 // handleLogAck applies one OperatorMessage.log_ack. ack_seq is
 // status-dependent (design.md D3): STORED and REJECTED both name a
-// release point, cumulative for STORED and per-chunk for REJECTED. BUSY
-// opens a pause window on POST /v1/log for this run instead of releasing
-// anything.
+// release point, cumulative for STORED and per-chunk for REJECTED. On
+// BUSY, ack_seq names the refused sequence: the mite releases nothing,
+// opens a pause window on POST /v1/log for this run, and re-sends the
+// refused sequence when the window closes. ctx must be the stream
+// context, because the re-send never runs after that stream ends.
 func (a *Agent) handleLogAck(ctx context.Context, ack *mitev1.LogAck) {
 	if ack == nil {
 		return
@@ -517,7 +583,7 @@ func (a *Agent) handleLogAck(ctx context.Context, ack *mitev1.LogAck) {
 		if pauseMS <= 0 {
 			pauseMS = defaultLogBusyPauseMS
 		}
-		a.logRetention.pause(ack.RunId, time.Duration(pauseMS)*time.Millisecond)
+		a.scheduleLogResend(ctx, ack.RunId, ack.AckSeq, time.Duration(pauseMS)*time.Millisecond)
 	case ackStatusRejected:
 		freed := a.logRetention.release(ack.RunId, ack.AckSeq)
 		logChunksRetainedBytes.Add(ctx, -freed)
@@ -1448,22 +1514,60 @@ type retainedLogChunk struct {
 // ordered per run by ascending sequence, bounded by a total byte cap
 // (VARROA_MITE_LOG_RETAIN_BYTES). It also tracks a per-run BUSY pause
 // window: POST /v1/log answers 503 for a run while its window is open.
+// busySeqs holds the sequences BUSY acks refused, and resendTimers holds
+// at most one armed re-send timer per run.
 type logRetentionStore struct {
-	mu          sync.Mutex
-	byKey       map[logChunkKey]*retainedLogChunk
-	order       map[string][]int64 // runID -> retained sequences
-	totalBytes  int64
-	maxBytes    int64
-	pausedUntil map[string]time.Time
+	mu           sync.Mutex
+	byKey        map[logChunkKey]*retainedLogChunk
+	order        map[string][]int64 // runID -> retained sequences
+	totalBytes   int64
+	maxBytes     int64
+	pausedUntil  map[string]time.Time
+	busySeqs     map[string]map[int64]struct{}
+	resendTimers map[string]*logResendSlot
+}
+
+// logResendSlot is one run's armed re-send timer.
+type logResendSlot struct {
+	timer *time.Timer
 }
 
 func newLogRetentionStore(maxBytes int64) *logRetentionStore {
 	return &logRetentionStore{
-		byKey:       make(map[logChunkKey]*retainedLogChunk),
-		order:       make(map[string][]int64),
-		maxBytes:    maxBytes,
-		pausedUntil: make(map[string]time.Time),
+		byKey:        make(map[logChunkKey]*retainedLogChunk),
+		order:        make(map[string][]int64),
+		maxBytes:     maxBytes,
+		pausedUntil:  make(map[string]time.Time),
+		busySeqs:     make(map[string]map[int64]struct{}),
+		resendTimers: make(map[string]*logResendSlot),
 	}
+}
+
+// takeRefused clears runID's timer slot and returns the run's refused
+// sequences that are still retained, in ascending order, then clears the
+// refused set. It returns ok=false when slot is no longer the run's armed
+// slot, because a later BUSY ack replaced it.
+func (s *logRetentionStore) takeRefused(runID string, slot *logResendSlot) ([]*mitev1.LogChunk, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.resendTimers[runID] != slot {
+		return nil, false
+	}
+	delete(s.resendTimers, runID)
+	refused := s.busySeqs[runID]
+	delete(s.busySeqs, runID)
+	seqs := make([]int64, 0, len(refused))
+	for seq := range refused {
+		seqs = append(seqs, seq)
+	}
+	sort.Slice(seqs, func(i, j int) bool { return seqs[i] < seqs[j] })
+	out := make([]*mitev1.LogChunk, 0, len(seqs))
+	for _, seq := range seqs {
+		if entry, ok := s.byKey[logChunkKey{runID: runID, seq: seq}]; ok {
+			out = append(out, entry.chunk)
+		}
+	}
+	return out, true
 }
 
 // paused reports whether runID is inside an open BUSY pause window.
@@ -1474,11 +1578,24 @@ func (s *logRetentionStore) paused(runID string) bool {
 	return ok && time.Now().Before(until)
 }
 
-// pause opens a BUSY pause window for runID lasting d.
+// pause opens a BUSY pause window for runID lasting at least d.
 func (s *logRetentionStore) pause(runID string, d time.Duration) {
 	s.mu.Lock()
-	s.pausedUntil[runID] = time.Now().Add(d)
+	s.extendPauseLocked(runID, d)
 	s.mu.Unlock()
+}
+
+// extendPauseLocked moves runID's pause window end to d from now, or
+// keeps the current end when it is later, and returns the end. A window
+// only extends: a later BUSY ack never shortens a pause the gateway
+// asked for before. The caller holds s.mu.
+func (s *logRetentionStore) extendPauseLocked(runID string, d time.Duration) time.Time {
+	until := time.Now().Add(d)
+	if cur, ok := s.pausedUntil[runID]; ok && cur.After(until) {
+		until = cur
+	}
+	s.pausedUntil[runID] = until
+	return until
 }
 
 // reserve charges size against the byte cap. It returns false and charges
@@ -1544,6 +1661,11 @@ func (s *logRetentionStore) release(runID string, seq int64) int64 {
 		delete(s.order, runID)
 	} else {
 		s.order[runID] = kept
+	}
+	for sq := range s.busySeqs[runID] {
+		if sq <= seq {
+			delete(s.busySeqs[runID], sq)
+		}
 	}
 	return freed
 }

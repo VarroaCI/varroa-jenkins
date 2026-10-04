@@ -175,10 +175,18 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
     `handleLogAck` is open, so the plugin's own retry-with-backoff carries
     the back pressure with no new plugin rule. `handleLogAck`
     (`OperatorMessage.log_ack`) releases every retained chunk of a run at or
-    below `ack_seq` on `STORED` or `REJECTED`, and re-arms the pause window
-    on `BUSY`. Every retained chunk re-sends, in `seq` order, on the next
-    stream open — a mite restart loses the buffer, and the gateway detects
-    the resulting sequence gap.
+    below `ack_seq` on `STORED` or `REJECTED`. On `BUSY`, `ack_seq` names
+    the refused sequence: `scheduleLogResend` adds it to the run's refused
+    set, extends the pause window (never shortens it), and arms the run's
+    one re-send timer, stopping any armed one. When the window closes,
+    `resendBusyLogChunks` sends the refused sequences still retained, in
+    `seq` order, under `sendMu`. It sends only on the stream that was open
+    when the ack arrived and only while that stream's context is live. The
+    mite never re-sends a chunk the gateway holds as pending, because the
+    gateway queues a repeat before it drops it, and a full re-send would
+    spend the budget that caused the `BUSY`. Every retained chunk re-sends,
+    in `seq` order, on the next stream open — a mite restart loses the
+    buffer, and the gateway detects the resulting sequence gap.
   - **Cross-tenant routes** — four more routes on the same listener, gated
     by the same bearer token: `POST /v1/cross-tenant/build` accepts kind
     `build`; `.../status` accepts `status` and `last_successful`;

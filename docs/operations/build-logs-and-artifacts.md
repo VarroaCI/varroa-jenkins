@@ -22,7 +22,8 @@ A Pipeline step writes a line of console output. The chain from there to durable
 4. The gateway acknowledges the chunk only after both writes land.
 
 A build that outruns this chain loses no stored data. The mite's retained buffer applies
-back pressure: at its bound, the mite answers `503` and the plugin retries with backoff. Only the plugin's own per-build cap discards incoming
+back pressure: at its bound, the mite answers `503` and the plugin retries with backoff. When the
+gateway refuses a chunk as busy, the mite sends it again after the gateway's pause. Only the plugin's own per-build cap discards incoming
 bytes, and it counts every byte it drops.
 
 If the mite process restarts, its retained buffer is lost. The gateway detects the resulting

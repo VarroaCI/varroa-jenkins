@@ -253,7 +253,9 @@ func TestLogAckTableCumulativeRelease(t *testing.T) {
 		agent.loopbackToken = "tok"
 		newRetained(agent)
 
-		agent.handleLogAck(context.Background(), &mitev1.LogAck{RunId: "run-1", Status: ackStatusBusy, PauseMs: 5000})
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		agent.handleLogAck(ctx, &mitev1.LogAck{RunId: "run-1", AckSeq: 1, Status: ackStatusBusy, PauseMs: 5000})
 		if got := agent.logRetention.snapshotOrdered(); len(got) != 3 {
 			t.Fatalf("expected every chunk retained on BUSY, got %v", got)
 		}
@@ -280,6 +282,235 @@ func TestLogAckTableCumulativeRelease(t *testing.T) {
 			t.Fatalf("expected only seq 3 retained after REJECTED ack_seq=2, got %v", got)
 		}
 	})
+}
+
+// --- BUSY re-send on a live stream ---
+
+// busyResendHarness is an agent with run-1 chunks retained and a stream
+// that records every re-sent log chunk sequence.
+type busyResendHarness struct {
+	agent  *Agent
+	stream *concurrentSendStream
+	mu     sync.Mutex
+	sent   []int64
+	sentC  chan int64
+}
+
+func newBusyResendHarness(t *testing.T, seqs ...int64) *busyResendHarness {
+	t.Helper()
+	h := &busyResendHarness{sentC: make(chan int64, 64)}
+	h.agent = NewAgent(Config{})
+	h.agent.Logger = slog.Default()
+	h.agent.logRetention = newLogRetentionStore(1 << 30)
+	for _, seq := range seqs {
+		chunk := &mitev1.LogChunk{RunId: "run-1", Seq: seq, Data: []byte("x")}
+		h.agent.logRetention.reserve(1)
+		h.agent.logRetention.commit(chunk, 1)
+	}
+	h.stream = &concurrentSendStream{sendFn: h.record}
+	h.agent.stream = h.stream
+	return h
+}
+
+func (h *busyResendHarness) record(m *mitev1.MiteMessage) error {
+	seq := m.GetLogChunk().Seq
+	h.mu.Lock()
+	h.sent = append(h.sent, seq)
+	h.mu.Unlock()
+	h.sentC <- seq
+	return nil
+}
+
+func (h *busyResendHarness) busy(ctx context.Context, seq int64, pauseMS int) {
+	h.agent.handleLogAck(ctx, &mitev1.LogAck{RunId: "run-1", AckSeq: seq, Status: ackStatusBusy, PauseMs: pauseMS})
+}
+
+// waitSent waits for n re-sent sequences and returns them.
+func (h *busyResendHarness) waitSent(t *testing.T, n int) []int64 {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for i := 0; i < n; i++ {
+		select {
+		case <-h.sentC:
+		case <-deadline:
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			t.Fatalf("expected %d re-sent chunks, got %v", n, h.sent)
+		}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]int64(nil), h.sent...)
+}
+
+// expectQuiet asserts no further send arrives within d.
+func (h *busyResendHarness) expectQuiet(t *testing.T, d time.Duration) {
+	t.Helper()
+	select {
+	case seq := <-h.sentC:
+		t.Fatalf("unexpected send of seq %d", seq)
+	case <-time.After(d):
+	}
+}
+
+func TestLogBusyResendsRefusedChunksAfterPause(t *testing.T) {
+	h := newBusyResendHarness(t, 0, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	h.busy(ctx, 0, 20)
+	h.busy(ctx, 1, 20)
+	if !h.agent.logRetention.paused("run-1") {
+		t.Fatal("expected the pause window open after BUSY")
+	}
+
+	got := h.waitSent(t, 2)
+	if len(got) != 2 || got[0] != 0 || got[1] != 1 {
+		t.Fatalf("expected seq 0 then 1 re-sent after the pause, got %v", got)
+	}
+	h.expectQuiet(t, 100*time.Millisecond)
+	if got := h.agent.logRetention.snapshotOrdered(); len(got) != 2 {
+		t.Errorf("expected both chunks still retained until STORED, got %v", got)
+	}
+}
+
+func TestLogBusyResendSkipsPendingChunk(t *testing.T) {
+	h := newBusyResendHarness(t, 0, 1, 2)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	h.busy(ctx, 1, 20)
+
+	got := h.waitSent(t, 1)
+	if len(got) != 1 || got[0] != 1 {
+		t.Fatalf("expected only the refused seq 1 re-sent, got %v", got)
+	}
+	h.expectQuiet(t, 100*time.Millisecond)
+}
+
+func TestLogBusySecondBusyBeforeFireArmsOneTimer(t *testing.T) {
+	h := newBusyResendHarness(t, 0, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	start := time.Now()
+	h.busy(ctx, 0, 150)
+	h.busy(ctx, 1, 20)
+
+	got := h.waitSent(t, 2)
+	if elapsed := time.Since(start); elapsed < 150*time.Millisecond {
+		t.Errorf("expected the window to keep its later end, re-sent after %v", elapsed)
+	}
+	if len(got) != 2 || got[0] != 0 || got[1] != 1 {
+		t.Fatalf("expected one pass sending 0 then 1, got %v", got)
+	}
+	h.expectQuiet(t, 200*time.Millisecond)
+}
+
+func TestLogBusySecondBusyDuringResendRearms(t *testing.T) {
+	h := newBusyResendHarness(t, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var passes atomic.Int32
+	h.stream.sendFn = func(m *mitev1.MiteMessage) error {
+		// The gateway refuses the first re-send again. The ack arrives on
+		// the read loop while the pass still holds sendMu.
+		if passes.Add(1) == 1 {
+			go h.busy(ctx, 0, 20)
+		}
+		return h.record(m)
+	}
+	h.busy(ctx, 0, 20)
+
+	got := h.waitSent(t, 2)
+	if len(got) != 2 || got[0] != 0 || got[1] != 0 {
+		t.Fatalf("expected seq 0 re-sent twice, got %v", got)
+	}
+	h.expectQuiet(t, 150*time.Millisecond)
+}
+
+func TestLogBusyAckWhileResendWaitsForSendMu(t *testing.T) {
+	h := newBusyResendHarness(t, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Another sender holds sendMu while the first timer fires.
+	h.agent.sendMu.Lock()
+	h.busy(ctx, 0, 20)
+	time.Sleep(60 * time.Millisecond)
+
+	// A BUSY ack must not wait for sendMu, so the read loop keeps
+	// draining the stream.
+	done := make(chan struct{})
+	start := time.Now()
+	go func() {
+		h.busy(ctx, 0, 200)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		h.agent.sendMu.Unlock()
+		t.Fatal("BUSY ack blocked behind sendMu")
+	}
+	h.agent.sendMu.Unlock()
+
+	// The first callback finds its slot replaced and sends nothing. Only
+	// the second timer sends, at the extended window's end.
+	got := h.waitSent(t, 1)
+	if elapsed := time.Since(start); elapsed < 200*time.Millisecond {
+		t.Errorf("expected no send inside the extended pause, sent after %v", elapsed)
+	}
+	if len(got) != 1 || got[0] != 0 {
+		t.Fatalf("expected seq 0 re-sent once, got %v", got)
+	}
+	h.expectQuiet(t, 100*time.Millisecond)
+}
+
+func TestLogBusyTimerSkipsAfterDisconnect(t *testing.T) {
+	h := newBusyResendHarness(t, 0, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	h.busy(ctx, 0, 20)
+	cancel()
+	h.expectQuiet(t, 150*time.Millisecond)
+
+	h.agent.replayRetainedLogChunks()
+	got := h.waitSent(t, 2)
+	if len(got) != 2 || got[0] != 0 || got[1] != 1 {
+		t.Fatalf("expected the reconnect replay to send 0 then 1 once, got %v", got)
+	}
+	h.expectQuiet(t, 50*time.Millisecond)
+}
+
+func TestLogBusyTimerSkipsReplacedStream(t *testing.T) {
+	h := newBusyResendHarness(t, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	h.busy(ctx, 0, 20)
+	h.agent.sendMu.Lock()
+	h.agent.stream = &concurrentSendStream{sendFn: h.record}
+	h.agent.sendMu.Unlock()
+
+	h.expectQuiet(t, 150*time.Millisecond)
+}
+
+func TestLogBusyStoredBeforeFireSkipsReleased(t *testing.T) {
+	h := newBusyResendHarness(t, 0, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	h.busy(ctx, 0, 50)
+	h.busy(ctx, 1, 50)
+	h.agent.handleLogAck(ctx, &mitev1.LogAck{RunId: "run-1", AckSeq: 0, Status: ackStatusStored})
+
+	got := h.waitSent(t, 1)
+	if len(got) != 1 || got[0] != 1 {
+		t.Fatalf("expected only seq 1 re-sent after STORED released 0, got %v", got)
+	}
+	h.expectQuiet(t, 100*time.Millisecond)
 }
 
 // --- 2.7: replay on reconnect ---
