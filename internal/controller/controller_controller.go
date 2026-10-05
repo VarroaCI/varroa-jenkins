@@ -2016,9 +2016,14 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 		return nil
 	}
 
-	// Plugin-roll branch: when PendingPluginRoll is set, record the one-shot
-	// approval checksum so the next reconcile bumps the annotation.
-	if action == "plugin-roll" && cr.Status.PendingPluginRoll != nil {
+	// Plugin-roll branch: record the one-shot approval checksum so the next
+	// reconcile bumps the annotation. A plugin-roll approval never reaches
+	// the pending-restart path below, because that path sends the pending
+	// configuration change to the mite.
+	if action == "plugin-roll" {
+		if cr.Status.PendingPluginRoll == nil {
+			return fmt.Errorf("%w for %s", ErrNoPendingPluginRoll, key)
+		}
 		target := cr.Status.PendingPluginRoll.TargetChecksum
 		if _, err := crdstore.MutateStatus(ctx, r.store, name, namespace, func(fresh *v1alpha1.Controller) (bool, error) {
 			return approvePluginRoll(&fresh.Status, target)
@@ -2243,25 +2248,25 @@ func setRestartDrain(status *v1alpha1.ControllerStatus, cmdID string, now time.T
 	}
 }
 
-// errNoPendingPluginRoll is the answer to a plugin-roll approval that finds
-// no pending roll at its write.
-var errNoPendingPluginRoll = errors.New("no plugin roll is pending any more; it was approved or is no longer needed")
+// ErrNoPendingPluginRoll is the answer to a plugin-roll approval that finds
+// no pending roll at its read or at its write.
+var ErrNoPendingPluginRoll = errors.New("no plugin roll is pending; it was approved or is no longer needed")
 
-// errPluginRollChanged is the answer to a plugin-roll approval whose target
+// ErrPluginRollChanged is the answer to a plugin-roll approval whose target
 // is no longer the pending target.
-var errPluginRollChanged = errors.New("the pending plugin roll changed after it was read; check the pending roll and approve it again")
+var ErrPluginRollChanged = errors.New("the pending plugin roll changed after it was read; check the pending roll and approve it again")
 
 // approvePluginRoll records target as the approved plugin-roll checksum and
 // clears the pending roll. It approves only the target that the caller read:
-// a different pending target returns errPluginRollChanged. With no pending
-// roll it returns errNoPendingPluginRoll: an approval or a managed-set change
+// a different pending target returns ErrPluginRollChanged. With no pending
+// roll it returns ErrNoPendingPluginRoll: an approval or a managed-set change
 // removed the roll, and this call cannot tell which target that was.
 func approvePluginRoll(status *v1alpha1.ControllerStatus, target string) (bool, error) {
 	if status.PendingPluginRoll == nil {
-		return false, errNoPendingPluginRoll
+		return false, ErrNoPendingPluginRoll
 	}
 	if status.PendingPluginRoll.TargetChecksum != target {
-		return false, errPluginRollChanged
+		return false, ErrPluginRollChanged
 	}
 	status.ApprovedPluginRollChecksum = target
 	status.PendingPluginRoll = nil

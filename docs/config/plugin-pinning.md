@@ -76,7 +76,8 @@ kubectl get controller demo -n teams-platform \
 
 The approval applies to the target that is pending when the operator reads
 it. If that target changes before the write, the operator refuses the
-approval. Check again and approve again.
+approval. Check again and approve again. An approval with no pending roll
+gets a conflict and changes nothing.
 
 ## Troubleshoot
 

@@ -540,8 +540,8 @@ func TestApproveRestart_PluginRollRefusesAChangedTarget(t *testing.T) {
 	rec.miteTransport = &captureTransport{}
 
 	err := rec.ApproveRestart(context.Background(), "", "ns", "mine", "plugin-roll", "")
-	if !errors.Is(err, errPluginRollChanged) {
-		t.Fatalf("err = %v, want errPluginRollChanged", err)
+	if !errors.Is(err, ErrPluginRollChanged) {
+		t.Fatalf("err = %v, want ErrPluginRollChanged", err)
 	}
 	got, gerr := crdstore.Get[v1alpha1.Controller](context.Background(), client.store, "mine", "ns")
 	if gerr != nil {
@@ -641,8 +641,8 @@ func TestApproveRestart_KeepsAPendingRestartRaisedAfterTheRead(t *testing.T) {
 func TestApprovePluginRoll_NoPendingRollRefuses(t *testing.T) {
 	st := &v1alpha1.ControllerStatus{}
 	changed, err := approvePluginRoll(st, "abc")
-	if !errors.Is(err, errNoPendingPluginRoll) || changed {
-		t.Fatalf("approvePluginRoll = %v, %v; want false, errNoPendingPluginRoll", changed, err)
+	if !errors.Is(err, ErrNoPendingPluginRoll) || changed {
+		t.Fatalf("approvePluginRoll = %v, %v; want false, ErrNoPendingPluginRoll", changed, err)
 	}
 	if st.ApprovedPluginRollChecksum != "" {
 		t.Fatalf("approved = %q, want none", st.ApprovedPluginRollChecksum)

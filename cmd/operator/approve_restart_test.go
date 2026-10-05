@@ -87,6 +87,22 @@ func TestHandleApproveRestart_NoPendingRestartRepliesConflict(t *testing.T) {
 	}
 }
 
+// TestHandleApproveRestart_PluginRollRefusalsReplyConflict pins that the two
+// plugin-roll refusals are conflicts that keep their message.
+func TestHandleApproveRestart_PluginRollRefusalsReplyConflict(t *testing.T) {
+	for _, sentinel := range []error{controller.ErrNoPendingPluginRoll, controller.ErrPluginRollChanged} {
+		rec := &fakeApproveRestarter{err: fmt.Errorf("%w for team-a/ctrl", sentinel)}
+		var resp bus.ApproveRestartResponse
+		req := mustJSON(t, bus.ApproveRestartRequest{Namespace: "team-a", Name: "ctrl", Action: "plugin-roll"})
+		if err := json.Unmarshal(handleApproveRestart(context.Background(), slog.Default(), rec, "core", req), &resp); err != nil {
+			t.Fatalf("decode reply: %v", err)
+		}
+		if resp.Code != bus.CodeConflict || resp.Error != sentinel.Error()+" for team-a/ctrl" || len(resp.Changes) != 0 {
+			t.Fatalf("reply = %+v, want a conflict with the message and no changes", resp)
+		}
+	}
+}
+
 // TestHandleApproveRestart_ContentChangedRepliesConflictWithChanges pins
 // that a refusal for a changed pending change is a conflict that names the
 // new sections, and that the handler passes the reviewed hash through.

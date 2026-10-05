@@ -59,15 +59,17 @@ func handleApproveRestart(ctx context.Context, logger *slog.Logger, rec approveR
 	return resp
 }
 
-// approveRestartRefusal maps an approve error to its reply. Both refusals
-// for the state of the pending restart are conflicts, and a changed pending
-// change also names its sections.
+// approveRestartRefusal maps an approve error to its reply. Every refusal
+// for the state of the pending restart or the pending plugin roll is a
+// conflict, and a changed pending change also names its sections.
 func approveRestartRefusal(err error) bus.ApproveRestartResponse {
 	var changed *controller.PendingRestartChangedError
 	switch {
 	case errors.As(err, &changed):
 		return bus.ApproveRestartResponse{Error: err.Error(), Code: bus.CodeConflict, Changes: changed.Changes}
-	case errors.Is(err, controller.ErrNoPendingRestart):
+	case errors.Is(err, controller.ErrNoPendingRestart),
+		errors.Is(err, controller.ErrNoPendingPluginRoll),
+		errors.Is(err, controller.ErrPluginRollChanged):
 		return bus.ApproveRestartResponse{Error: err.Error(), Code: bus.CodeConflict}
 	default:
 		return bus.ApproveRestartResponse{Error: err.Error(), Code: bus.CodeInternal}

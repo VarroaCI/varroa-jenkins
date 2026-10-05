@@ -35,7 +35,10 @@ Conflict:
         $ref: './schemas.yaml#/Error'
 
 ApproveConflict:
-  description: Conflict — no pending restart, or the pending change is not the one the caller approved.
+  description: >-
+    Conflict — no pending restart, no pending plugin roll, the pending change is
+    not the one the caller approved, or the pending plugin roll changed after it
+    was read.
   content:
     application/json:
       schema:

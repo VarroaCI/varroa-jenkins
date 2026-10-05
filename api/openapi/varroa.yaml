@@ -164,8 +164,9 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/components_schemas_ApproveConflict'
-      description: Conflict — no pending restart, or the pending change is not the
-        one the caller approved.
+      description: Conflict — no pending restart, no pending plugin roll, the pending
+        change is not the one the caller approved, or the pending plugin roll changed
+        after it was read.
     components_responses_BadRequest:
       content:
         application/json:

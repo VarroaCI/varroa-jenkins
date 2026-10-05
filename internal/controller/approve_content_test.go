@@ -263,6 +263,34 @@ func TestApproveRestart_NoPendingRestartIsTyped(t *testing.T) {
 	}
 }
 
+// TestApproveRestart_PluginRollWithNoPendingRollSendsNothing pins that a
+// plugin-roll approval with no pending roll is refused with a typed error,
+// and that it does not release a pending restart to the mite.
+func TestApproveRestart_PluginRollWithNoPendingRollSendsNothing(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+	cr := testController("mine", "ns", v1alpha1.ControllerPhaseConnected)
+	cr.Status.PendingRestart = pendingRestartFor(t, rec, cr)
+	crdstore.MustSeed(client.store, cr)
+	transport := &captureTransport{}
+	rec.miteTransport = transport
+
+	err := rec.ApproveRestart(context.Background(), "", "ns", "mine", "plugin-roll", "")
+	if !errors.Is(err, ErrNoPendingPluginRoll) {
+		t.Fatalf("err = %v, want ErrNoPendingPluginRoll", err)
+	}
+	if transport.lastDesired != nil {
+		t.Fatal("the refused approval sent a desired state to the mite")
+	}
+	got := getController(t, client, "mine")
+	if got.Status.PendingRestart == nil {
+		t.Fatal("the refused approval cleared the pending restart")
+	}
+	if got.Status.ApprovedPluginRollChecksum != "" {
+		t.Fatalf("approved = %q, want none", got.Status.ApprovedPluginRollChecksum)
+	}
+}
+
 // TestRaisePendingRestart_KeepsTheRecordForTheSameContent pins that a raise
 // for the same content keeps DetectedAt and Changes and updates the full
 // hash, and that a raise for new content replaces the record.

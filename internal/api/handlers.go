@@ -1631,7 +1631,9 @@ func (s *Server) handleApproveRestart(w http.ResponseWriter, r *http.Request, cl
 			s.writeJSONErrorStatus(w, http.StatusConflict, changed.Error(), map[string]interface{}{"changes": changed.Changes})
 			return
 		}
-		if errors.Is(err, controller.ErrNoPendingRestart) {
+		if errors.Is(err, controller.ErrNoPendingRestart) ||
+			errors.Is(err, controller.ErrNoPendingPluginRoll) ||
+			errors.Is(err, controller.ErrPluginRollChanged) {
 			s.writeJSONError(w, http.StatusConflict, err.Error())
 			return
 		}

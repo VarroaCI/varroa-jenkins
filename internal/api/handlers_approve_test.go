@@ -98,6 +98,25 @@ func TestApproveRestartNoPendingSentinelReturns409(t *testing.T) {
 	}
 }
 
+// TestApproveRestartPluginRollRefusalsReturn409 pins that the two plugin-roll
+// refusals keep their 409 when they reach the BFF as the wrapped sentinel.
+func TestApproveRestartPluginRollRefusalsReturn409(t *testing.T) {
+	for _, sentinel := range []error{controller.ErrNoPendingPluginRoll, controller.ErrPluginRollChanged} {
+		srv, _ := approveTestServer(fmt.Errorf("%w for ns/ctrl", sentinel))
+		w := postApprove(t, srv, `{"action":"plugin-roll"}`)
+		if w.Code != http.StatusConflict {
+			t.Fatalf("%v: status = %d, want 409: %s", sentinel, w.Code, w.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if err := approve409Schema(t).VisitJSON(body); err != nil {
+			t.Fatalf("409 body does not match the spec: %v", err)
+		}
+	}
+}
+
 // TestApproveRestartNoPendingReturns409 pins that the coded refusal for a
 // controller with no pending restart keeps its 409 status and message.
 func TestApproveRestartNoPendingReturns409(t *testing.T) {
