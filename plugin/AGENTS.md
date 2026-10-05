@@ -209,6 +209,11 @@ the root AGENTS.md greenfield rule.
   shape (`bootCompletedEvent`), so either order ends the build at the journal's last-seen time
   with `jenkins-restart`. A lost claim skips only the event; the listener still closes the log
   storage. Either side releases the claim when the caps drop its event or the spool refuses it.
+  workflow-job refuses to resume a build older than its maximum resumption age (30 days): the
+  load marks it completed with no result, so it reports building until a timer thread calls
+  `finish`. `FailedProgramLoad.refusedResume` matches it: it started before this boot,
+  `Flows.onResumed` did not mark it, and its execution is not complete. `endedByRestart` joins
+  both matches. The boot reconcile tests it before the building test, and the same claim applies.
 - **Claim gate** (admits a queue item and claims a run id before dispatch, with no I/O
   under the Jenkins queue lock): `VarroaQueueDecisionHandler.java`
   (`Queue.QueueDecisionHandler`, stamps `VarroaIntentAction.java`), `IntentKey.java`
@@ -708,4 +713,13 @@ the root AGENTS.md greenfield rule.
 
 ```bash
 mvn -f plugin/pom.xml -B package   # requires JDK 21; runs unit + JCasC round-trip tests
+```
+
+Without a local JDK 21, run the suite in a container from `plugin/`. Do not pass `-o`: the
+local Maven repository does not hold the parent POM. The full suite takes about 12 minutes, so
+run the changed classes first with `-Dtest=<Class>,<Class>`.
+
+```bash
+docker run --rm -u $(id -u):$(id -g) -e HOME=/tmp/mvnhome -v ~/.m2:/tmp/mvnhome/.m2 \
+  -v $PWD:/src -w /src maven:3.9-eclipse-temurin-21 mvn -B test
 ```

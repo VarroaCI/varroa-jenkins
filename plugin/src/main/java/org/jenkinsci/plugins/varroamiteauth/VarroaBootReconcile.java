@@ -31,9 +31,9 @@ import java.util.logging.Logger;
  * two steps loses no event. A second boot then finds the spooled event
  * and sends no second one.
  *
- * <p>A pipeline build whose program does not load also gets a run
- * listener completion. {@link FailedProgramLoad#claim} lets only one of
- * the two send its event.
+ * <p>A pipeline build whose program does not load, or that Jenkins
+ * refuses to resume, also gets a run listener completion. {@link
+ * FailedProgramLoad#claim} lets only one of the two send its event.
  */
 public final class VarroaBootReconcile {
 
@@ -99,7 +99,12 @@ public final class VarroaBootReconcile {
             return false;
         }
         Run<?, ?> run = loadRun(entry);
-        if (run != null && run.isBuilding()) {
+        // A build that a restart ended before it did work here gets a second
+        // completion from the run listener. A build that Jenkins refused to
+        // resume still reports building until a timer thread finishes it, so
+        // this test comes before the building test.
+        boolean endedByRestart = run != null && FailedProgramLoad.endedByRestart(run);
+        if (run != null && run.isBuilding() && !endedByRestart) {
             // A pipeline resumes on its own. Its own completion deletes
             // the entry.
             return false;
@@ -112,11 +117,10 @@ public final class VarroaBootReconcile {
             journal.remove(entry.runId);
             return false;
         }
-        // A build whose program did not load gets a second completion from
-        // the run listener about one second after the load. The claim
-        // comes before the event is built, so only one of the two sends.
+        // The claim comes before the event is built, so only one of the
+        // boot reconcile and the run listener sends.
         List<String> claimIds = List.of();
-        if (run != null && FailedProgramLoad.matches(run)) {
+        if (endedByRestart) {
             claimIds = VarroaRunRecorder.claimIdsOf(run, entry.runId);
             if (!FailedProgramLoad.claim(claimIds)) {
                 LOGGER.log(Level.INFO, () -> "VarroaBootReconcile: the run listener already ended the build "
@@ -129,7 +133,7 @@ public final class VarroaBootReconcile {
             if (!spool.append(entry.runId, event)) {
                 // The entry is the only record of the lost run. It stays,
                 // so the next boot tries again. The run listener can now
-                // send the completion of a build whose program did not load.
+                // send the completion of a build that a restart ended.
                 FailedProgramLoad.release(claimIds);
                 LOGGER.log(Level.WARNING, () -> "VarroaBootReconcile: failed to spool the completion of run "
                         + entry.runId + "; keeping its entry");

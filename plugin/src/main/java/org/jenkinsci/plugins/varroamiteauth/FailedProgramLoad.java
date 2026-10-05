@@ -19,18 +19,23 @@ import org.jenkinsci.plugins.workflow.graph.FlowNode;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 
 /**
- * Finds a pipeline build that could not load its program after a Jenkins
- * restart, and keeps one completion for it in this process.
+ * Finds a pipeline build that a Jenkins restart ended before it did work
+ * in this process, and keeps one completion for it in this process.
  *
- * <p>A failed program load ends the execution with a {@code FlowEndNode}
- * at once. Jenkins then calls {@code WorkflowRun.finish} about one second
- * later, which fires {@code RunListener.onCompleted}. The boot reconcile
- * and the run listener can thus both end the same build, in either order.
- * Each one calls {@link #claim} first, and only the caller that gets the
- * claim sends the {@code COMPLETED} event.
+ * <p>Two cases match. In the first, the program does not load: the
+ * execution ends with a {@code FlowEndNode} at once, and Jenkins calls
+ * {@code WorkflowRun.finish} about one second later. In the second,
+ * workflow-job refuses to resume a build older than its maximum
+ * resumption age: the load marks the build completed with no result, and
+ * a timer thread calls {@code finish} later. In both cases {@code finish}
+ * fires {@code RunListener.onCompleted}, so the boot reconcile and the
+ * run listener can both end the same build, in either order. Each one
+ * calls {@link #claim} first, and only the caller that gets the claim
+ * sends the {@code COMPLETED} event.
  *
- * <p>The claim set holds only such builds, so it stays small. A new
- * Jenkins boot clears it.
+ * <p>The claim set holds only such builds, so it stays small. The set of
+ * resumed builds holds one entry for each build this process resumed. A
+ * new Jenkins boot clears both sets.
  */
 public final class FailedProgramLoad {
 
@@ -49,6 +54,12 @@ public final class FailedProgramLoad {
     /** Guarded by the class lock. */
     private static final Set<String> CLAIMED = new HashSet<>();
 
+    /**
+     * The external ids of the builds whose execution this process resumed.
+     * Guarded by the class lock.
+     */
+    private static final Set<String> RESUMED = new HashSet<>();
+
     private FailedProgramLoad() {
     }
 
@@ -64,6 +75,56 @@ public final class FailedProgramLoad {
     static synchronized void markBoot(long nowMillis) {
         bootMillis = nowMillis;
         CLAIMED.clear();
+        RESUMED.clear();
+    }
+
+    /**
+     * Records that this process resumed the execution of {@code run}.
+     * Jenkins calls {@code FlowExecutionListener.onResumed} inside the
+     * build load, so the mark is present before any caller reads it.
+     */
+    static synchronized void markResumed(Run<?, ?> run) {
+        if (run != null) {
+            RESUMED.add(run.getExternalizableId());
+        }
+    }
+
+    private static synchronized boolean wasResumed(Run<?, ?> run) {
+        return RESUMED.contains(run.getExternalizableId());
+    }
+
+    /**
+     * True when a Jenkins restart ended {@code run} before it did work in
+     * this process: its program did not load, or Jenkins refused to resume
+     * it.
+     */
+    static boolean endedByRestart(Run<?, ?> run) {
+        return matches(run) || refusedResume(run);
+    }
+
+    /**
+     * True when {@code run} is a pipeline build that started before this
+     * boot, that this process did not resume, and whose execution is not
+     * complete. workflow-job leaves a build in this state when it refuses
+     * to resume it: it skips {@code onResumed}, and it calls {@code finish}
+     * without an end node. A build that resumed and is then killed does
+     * not match, because the resume marks it first.
+     */
+    static boolean refusedResume(Run<?, ?> run) {
+        if (!(run instanceof WorkflowRun)) {
+            return false;
+        }
+        long boot = bootMillis;
+        if (boot == 0L || run.getStartTimeInMillis() >= boot || wasResumed(run)) {
+            return false;
+        }
+        try {
+            FlowExecution execution = ((WorkflowRun) run).getExecution();
+            return execution != null && !execution.isComplete();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, "FailedProgramLoad: could not read the execution of " + run, e);
+            return false;
+        }
     }
 
     /**
@@ -125,6 +186,11 @@ public final class FailedProgramLoad {
                 CLAIMED.remove(id);
             }
         }
+    }
+
+    /** Package-private for testing. */
+    static synchronized int resumedCountForTesting() {
+        return RESUMED.size();
     }
 
     /** Package-private for testing. */

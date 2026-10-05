@@ -743,8 +743,8 @@ public final class VarroaRunRecorder {
                 if (state != null) {
                     emitUnresolvedPodTemplates(run, state);
                 }
-                boolean failedLoad = FailedProgramLoad.matches(run);
-                if (failedLoad) {
+                boolean endedByRestart = FailedProgramLoad.endedByRestart(run);
+                if (endedByRestart) {
                     // The build did no work in this process. Its completion
                     // is the boot reconcile's event, from whichever caller
                     // claims it first.
@@ -808,7 +808,7 @@ public final class VarroaRunRecorder {
                     }
                 }
                 LogSummary logSummary = finishLogStorage(runId);
-                b.logSummary(failedLoad ? restartLogSummary() : logSummary);
+                b.logSummary(endedByRestart ? restartLogSummary() : logSummary);
                 applyTemplateFields(b, run);
                 // The completion reads the run's own action and never the
                 // cached value, so a run that lost its heartbeat still
@@ -886,10 +886,10 @@ public final class VarroaRunRecorder {
      * <p>{@code run} is the loaded build, or {@code null} when the build
      * does not load. A loaded build reports its loaded result and its own
      * metadata. A missing build reports {@code ABORTED} and the journal's
-     * identity alone. A build that recorded no duration, or whose program
-     * did not load, ends at the entry's last-seen time, never before its
-     * start. The run listener also sends this event for a build whose
-     * program did not load, when it claims the completion first.
+     * identity alone. A build that recorded no duration, or that a restart
+     * ended before it did work here, ends at the entry's last-seen time,
+     * never before its start. The run listener also sends this event for
+     * such a build, when it claims the completion first.
      *
      * <p>The log summary always reports {@code incomplete} with the reason
      * {@link LogSummary#REASON_JENKINS_RESTART}: the process that counted
@@ -919,9 +919,9 @@ public final class VarroaRunRecorder {
                 b.summary(summaryAction.getSummary());
             }
             startedAt = run.getStartTimeInMillis();
-            // finish() sets the duration of a build whose program did not
-            // load, but that build did no work in this process.
-            recordedDuration = run.getDuration() > 0 && !FailedProgramLoad.matches(run);
+            // finish() sets the duration of a build that a restart ended,
+            // but that build did no work in this process.
+            recordedDuration = run.getDuration() > 0 && !FailedProgramLoad.endedByRestart(run);
             if (run.getResult() == null) {
                 b.result(Result.ABORTED.toString());
             }
@@ -960,7 +960,7 @@ public final class VarroaRunRecorder {
     /**
      * Returns every run id a run can carry, plus {@code extraRunId}: the
      * ids under which the boot reconcile and the run listener claim the
-     * completion of a build whose program did not load.
+     * completion of a build that a restart ended.
      */
     static List<String> claimIdsOf(Run<?, ?> run, String extraRunId) {
         List<String> ids = new ArrayList<>();
@@ -1787,6 +1787,9 @@ public final class VarroaRunRecorder {
          */
         @Override
         public void onResumed(FlowExecution execution) {
+            // The mark does not depend on the gate: it only narrows which
+            // builds count as ended by a restart.
+            FailedProgramLoad.markResumed(runFor(execution));
             attach(execution);
         }
 
