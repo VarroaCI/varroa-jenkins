@@ -658,3 +658,200 @@ func TestShardManager_GracefulStopCallsNoReleaseHook(t *testing.T) {
 		t.Fatalf("onReleased calls after a graceful stop = %v, want none", *w.released)
 	}
 }
+
+// moveShardOneToANewcomer adds op-1 next to op-0, which holds all shards of
+// an 8-shard ring. The assignment gives op-1 the odd shards. op-1 runs one
+// pass, so op-0 sees its presence lease on the next pass.
+func moveShardOneToANewcomer(t *testing.T, h *testHarness, ring *Ring) (w0, w1 *testManagerWrap) {
+	t.Helper()
+	w0 = h.addManager("op-0", ring)
+	h.runRebalances(1)
+	if w0.m.held.Count() != ring.Shards() {
+		t.Fatalf("op-0 should hold all shards, got %d", w0.m.held.Count())
+	}
+	w1 = h.addManager("op-1", ring)
+	h.runSingleRebalance("op-1")
+	return w0, w1
+}
+
+// TestShardManager_ReleaseWaitsForInFlightWork pins that a voluntary release
+// keeps the lease while work runs on the shard, and releases it after the
+// work ends. Only then can the newcomer claim the shard.
+func TestShardManager_ReleaseWaitsForInFlightWork(t *testing.T) {
+	h := newHarness(t, time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC))
+	ring := NewRing(8)
+	w0, w1 := moveShardOneToANewcomer(t, h, ring)
+	w0.m.drainWait = 5 * time.Second
+	w0.m.cancelWait = time.Second
+
+	ctx, leave, ok := w0.m.held.Enter(context.Background(), 1)
+	if !ok {
+		t.Fatal("op-0 does not hold shard 1")
+	}
+	done := make(chan struct{})
+	go func() {
+		w0.m.rebalance(context.Background())
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("the pass ended while work ran on a released shard")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if got := h.leaseHolder("varroa-shard-1.varroa.dev"); got != "op-0" {
+		t.Fatalf("shard 1 holder during the drain = %q, want op-0", got)
+	}
+	h.runSingleRebalance("op-1")
+	if w1.m.held.Held(1) {
+		t.Fatal("op-1 claimed shard 1 while op-0 work ran on it")
+	}
+
+	if ctx.Err() != nil {
+		t.Fatalf("the release cancelled the work before its wait ended: %v", ctx.Err())
+	}
+	leave()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the pass did not end after the work ended")
+	}
+	if got := h.leaseHolder("varroa-shard-1.varroa.dev"); got != "" {
+		t.Fatalf("shard 1 holder after the drain = %q, want released", got)
+	}
+	h.runSingleRebalance("op-1")
+	if !w1.m.held.Held(1) {
+		t.Fatal("op-1 did not claim shard 1 after the release")
+	}
+}
+
+// TestShardManager_ReleaseCancelsWorkPastTheDrainWait pins that a release
+// cancels work that runs past the drain wait, and releases the lease after
+// that work ends.
+func TestShardManager_ReleaseCancelsWorkPastTheDrainWait(t *testing.T) {
+	h := newHarness(t, time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC))
+	ring := NewRing(8)
+	w0, _ := moveShardOneToANewcomer(t, h, ring)
+	w0.m.drainWait = 10 * time.Millisecond
+	w0.m.cancelWait = 2 * time.Second
+
+	ctx, leave, _ := w0.m.held.Enter(context.Background(), 1)
+	go func() {
+		<-ctx.Done()
+		leave()
+	}()
+	w0.m.rebalance(context.Background())
+
+	if ctx.Err() == nil {
+		t.Fatal("the release did not cancel the work")
+	}
+	if got := h.leaseHolder("varroa-shard-1.varroa.dev"); got != "" {
+		t.Fatalf("shard 1 holder = %q, want released", got)
+	}
+}
+
+// TestShardManager_ReleaseLeavesTheLeaseToExpireWhenWorkIgnoresCancel pins
+// that a release keeps the lease of a shard whose work still runs after the
+// cancel. The newcomer claims that shard only after the lease expires.
+func TestShardManager_ReleaseLeavesTheLeaseToExpireWhenWorkIgnoresCancel(t *testing.T) {
+	h := newHarness(t, time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC))
+	ring := NewRing(8)
+	w0, w1 := moveShardOneToANewcomer(t, h, ring)
+	w0.m.drainWait = 10 * time.Millisecond
+	w0.m.cancelWait = 10 * time.Millisecond
+
+	_, leave, _ := w0.m.held.Enter(context.Background(), 1)
+	defer leave()
+	w0.m.rebalance(context.Background())
+
+	if w0.m.held.Held(1) {
+		t.Fatal("op-0 still holds shard 1")
+	}
+	if got := h.leaseHolder("varroa-shard-1.varroa.dev"); got != "op-0" {
+		t.Fatalf("shard 1 holder = %q, want op-0 until expiry", got)
+	}
+	if got := h.leaseHolder("varroa-shard-3.varroa.dev"); got != "" {
+		t.Fatalf("shard 3 holder = %q, want released", got)
+	}
+	h.runSingleRebalance("op-1")
+	if w1.m.held.Held(1) {
+		t.Fatal("op-1 claimed shard 1 before its lease expired")
+	}
+
+	h.clock.advance(31 * time.Second)
+	h.runSingleRebalance("op-1")
+	if !w1.m.held.Held(1) {
+		t.Fatal("op-1 did not claim shard 1 after its lease expired")
+	}
+}
+
+// TestShardManager_LostLeaseCancelsInFlightWork pins that a replica cancels
+// the work on a shard whose lease another replica holds, without a wait.
+func TestShardManager_LostLeaseCancelsInFlightWork(t *testing.T) {
+	h := newHarness(t, time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC))
+	ring := NewRing(8)
+	w := h.addManager("op-0", ring)
+	h.runRebalances(1)
+
+	ctx, leave, _ := w.m.held.Enter(context.Background(), 0)
+	defer leave()
+
+	leaseName := "varroa-shard-0.varroa.dev"
+	lease, err := h.cs.CoordinationV1().Leases(h.ns).Get(context.Background(), leaseName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get lease: %v", err)
+	}
+	other := "other"
+	lease.Spec.HolderIdentity = &other
+	if _, err := h.cs.CoordinationV1().Leases(h.ns).Update(context.Background(), lease, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("failed to mutate lease: %v", err)
+	}
+
+	h.runRebalances(1)
+
+	if ctx.Err() == nil {
+		t.Fatal("the work on a lost shard was not cancelled")
+	}
+	if got := h.leaseHolder(leaseName); got != "other" {
+		t.Fatalf("shard 0 holder = %q, want other", got)
+	}
+}
+
+// TestShardManager_GracefulStopWaitsForInFlightWork pins that the shutdown
+// release keeps a lease while work runs on its shard.
+func TestShardManager_GracefulStopWaitsForInFlightWork(t *testing.T) {
+	h := newHarness(t, time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC))
+	ring := NewRing(8)
+	w := h.addManager("op-0", ring)
+	h.runRebalances(1)
+	w.m.shutdownDrainWait = 5 * time.Second
+	w.m.shutdownCancelWait = time.Second
+
+	_, leave, _ := w.m.held.Enter(context.Background(), 0)
+	done := make(chan struct{})
+	go func() {
+		w.m.releaseAll(context.Background())
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("the shutdown release ended while work ran on a shard")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if got := h.leaseHolder("varroa-shard-0.varroa.dev"); got != "op-0" {
+		t.Fatalf("shard 0 holder during the drain = %q, want op-0", got)
+	}
+
+	leave()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the shutdown release did not end after the work ended")
+	}
+	for i := 0; i < ring.Shards(); i++ {
+		if got := h.leaseHolder(fmt.Sprintf("varroa-shard-%d.varroa.dev", i)); got != "" {
+			t.Fatalf("shard %d holder = %q, want released", i, got)
+		}
+	}
+}

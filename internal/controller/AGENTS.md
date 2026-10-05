@@ -1164,7 +1164,7 @@ sections describe.
   on the new cell. A tenant delivery naks on an empty placement, a moving tenant
   (`Placed=False`/`TenantMoving`), or an absent/not-`Connected` target `Controller`;
   it terms only when the `Team` itself is gone.
-- `sharding/` (`ring.go`, `manager.go`) — consistent-hash shard ownership so multiple
+- `sharding/` (`ring.go`, `shardset.go`, `manager.go`) — consistent-hash shard ownership so multiple
   operator replicas split the `Controller` watch set; `SetShardOwnership`/
   `ownsController`/`EnqueueShards` on `*Reconciler` consume it. Only the owning
   replica may hold the inbound subscription of a mite: each holder answers the
@@ -1183,7 +1183,14 @@ sections describe.
   take `controllerLocks` (`keylock.go`) for the controller's `namespace/name`. The
   tick holds it from its first read to its end status write, so it cannot write
   back stale approve fields. The lock is local to the process: this is correct only
-  because the shard owner alone runs the tick and the approve. An approve waits at
+  because the shard owner alone runs the tick and the approve. `Reconcile` and both
+  approve methods enter the shard through `enterShard` (`ShardSet.EnterController`)
+  and use the returned context for every write. `ShardManager` releases a shard
+  through `ShardSet.Drain`: it waits for that work (`releaseDrainWait` 4s, at
+  shutdown `shutdownDrainWait` 10s), cancels what still runs, and waits once more.
+  It releases the lease only when the work ended; otherwise the lease must expire.
+  A lost lease calls `ShardSet.Revoke`, which cancels the work at once. The tick
+  checks `ctx.Err()` before its end writes. An approve waits at
   most `approveLockWait` (20s) and then fails with a plain-text "retry the approve"
   error. It writes nothing and sends nothing to the mite. A `plugin-roll` approval approves
   only the target checksum that it read (`errPluginRollChanged` otherwise). An

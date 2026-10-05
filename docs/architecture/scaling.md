@@ -14,9 +14,9 @@ Scale the Varroa control plane independently from Jenkins workloads. Each `Contr
 | NATS | 3 servers | `nats.config.cluster.*` |
 | Update center | Storage-dependent | `updateCenter.replicas`, storage type, upload mode |
 
-Gateway and BFF HPAs target 70 percent CPU utilization and require the Kubernetes metrics API. Resource requests must remain set for CPU scaling to work.
+Gateway and BFF HPAs target 70 percent CPU. They need the Kubernetes metrics API and resource requests.
 
-Operator replicas divide controller ownership through virtual shards. A replica that loses a shard stops listening to the mites of that shard. Increase `operator.maxConcurrentReconciles` only when the Kubernetes API and NATS can absorb more concurrent work. `operator.shardCount` must match across every replica. Changing it is disruptive and requires restarting all operator replicas together.
+Operator replicas divide controllers through virtual shards. A replica that loses a shard stops listening to its mites. A replica gives up a shard after its work ends. It waits at most 5 seconds. At shutdown, it waits at most 12 seconds. Increase `operator.maxConcurrentReconciles` only when the Kubernetes API and NATS can absorb more work. `operator.shardCount` must match across every replica. Changing it requires restarting all replicas together.
 
 ## Jenkins Capacity
 
@@ -35,7 +35,7 @@ Jenkins controllers do not scale horizontally. Add controllers to isolate teams 
 
 The chart defaults to a three-server NATS cluster. `jetStreamReplicas` derives from the NATS cluster size and is capped at three unless explicitly set. The chart rejects a JetStream replica count larger than the NATS server count.
 
-Size NATS persistent storage for control-plane state and the fixed activity transport buffer. That buffer is the `varroa_activity` JetStream stream. It holds at most 72 hours or 1 GiB, whichever it reaches first. The limit is fixed in code, not a chart value, because the buffer only hands events to the record-store recorder. It does not serve history.
+Size NATS persistent storage for control-plane state and the fixed activity transport buffer. That buffer is the `varroa_activity` JetStream stream. It holds at most 72 hours or 1 GiB, whichever it reaches first. The limit is fixed in code: the buffer only hands events to the recorder and serves no history.
 
 Durable activity history lives in Postgres, sized by `recordStore.retention.activity` (default `30d`), not by NATS. See [Build records](../operations/build-records.md#activity-history) for the retention arithmetic. If NATS loses quorum, API reads that depend on shared state and controller convergence can stall even when Jenkins remains available.
 

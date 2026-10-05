@@ -291,14 +291,20 @@ func (b *BusTransport) Send(ctx context.Context, ns, name string, msg *mitev1.Op
 // gateway restarts. JetStream delivery is at-least-once (a lost ack triggers
 // redelivery); the gateway only acks a command after the mite reports a matching
 // CommandResult, and the mite's actions (e.g. safe restart) are idempotent, so a
-// duplicate delivery is harmless.
-func (b *BusTransport) SendImperative(_ context.Context, ns, name string, cmd *mitev1.ImperativeCommand) error {
+// duplicate delivery is harmless. An ended ctx publishes nothing: a shard
+// release cancels ctx when another replica can own the controller.
+func (b *BusTransport) SendImperative(ctx context.Context, ns, name string, cmd *mitev1.ImperativeCommand) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	data, err := json.Marshal(&mitev1.OperatorMessage{
 		Message: &mitev1.OperatorMessage_Imperative{Imperative: cmd},
 	})
 	if err != nil {
 		return err
 	}
+	// The publish ignores ctx. A cancel during the ack wait would report a
+	// command that the server already has as not sent.
 	_, err = b.conn.PublishJetStream(bus.MiteOutSubject(b.cluster, ns, name), data)
 	return err
 }

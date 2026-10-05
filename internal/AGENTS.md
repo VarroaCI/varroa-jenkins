@@ -152,7 +152,8 @@ reading each package's entry point):
   for `LocalRegistry`, which has no bus hop) — a mite can hold a healthy gRPC
   stream while receiving no desired state at all. `BusTransport.Send` is a
   core NATS request answered by the gateway holding the stream; it stores
-  nothing and returns `ErrMiteUnreachable` when no gateway answers. There is
+  nothing and returns `ErrMiteUnreachable` when no gateway answers.
+  `BusTransport.SendImperative` publishes nothing for an ended context. There is
   no `ClearDesired`: no desired state is stored. `BusTransport.ensureSub`
   reads the inbound subscription's denial watcher under `b.mu` on every
   call. After a server denial, it subscribes again and keeps the result

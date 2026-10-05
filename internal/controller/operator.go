@@ -117,10 +117,13 @@ func (r *Reconciler) enqueueControllersForClass(ctx context.Context, obj client.
 // It drives the phase state machine: Pending→Provisioning→Running→Connected→Failed.
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	// Shard-ownership gate: if we don't own this controller, drop the request
-	// requeue-free — the owning replica maintains the periodic cycle.
-	if !r.ownsController(req.Namespace, req.Name) {
+	// requeue-free — the owning replica maintains the periodic cycle. A shard
+	// release waits for the tick, and cancels ctx when that wait ends.
+	ctx, leave, owned := r.enterShard(ctx, req.Namespace, req.Name)
+	if !owned {
 		return reconcile.Result{}, nil
 	}
+	defer leave()
 
 	// The tick writes status from the read below. An approve that wrote in
 	// between would be lost, so the approve methods take the same lock.
@@ -173,6 +176,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		r.Logger.Error("reconcile failed", "namespace", req.Namespace, "name", req.Name, "error", err)
 		// Return the error so controller-runtime applies rate-limited
 		// retries. Do not patch status on failed reconciles.
+		return reconcile.Result{}, err
+	}
+
+	// A shard release cancels ctx when the tick runs past its wait. Another
+	// replica can then own the controller, so the end writes must not land.
+	if err := ctx.Err(); err != nil {
 		return reconcile.Result{}, err
 	}
 

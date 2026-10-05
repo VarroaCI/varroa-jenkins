@@ -309,3 +309,33 @@ func TestBusReadModelTransport_PublishSafeRestart(t *testing.T) {
 		t.Error("BusReadModelTransport.Send should return error")
 	}
 }
+
+// TestBusTransport_SendImperativeRefusesAnEndedContext pins that an ended
+// context publishes no imperative command.
+func TestBusTransport_SendImperativeRefusesAnEndedContext(t *testing.T) {
+	s := startNATS(t)
+	tr := newBusTransport(t, s)
+	if err := tr.conn.EnsureStream(bus.StreamConfig("varroa")); err != nil {
+		t.Fatalf("ensure stream: %v", err)
+	}
+	ns, name := "ns", "ctrl"
+	sub, err := tr.conn.JetStream().SubscribeSync(bus.MiteOutSubject(bus.DefaultCluster, ns, name))
+	if err != nil {
+		t.Fatalf("subscribe mite-out: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = tr.SendImperative(ctx, ns, name, &mitev1.ImperativeCommand{
+		CommandId: "delete-1",
+		Type:      mitev1.CommandTypeDeleteItem,
+		Target:    "team/job",
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("SendImperative error = %v, want context.Canceled", err)
+	}
+	if msg, err := sub.NextMsg(200 * time.Millisecond); err == nil {
+		t.Fatalf("an ended context published %q", msg.Data)
+	}
+}

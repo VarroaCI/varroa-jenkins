@@ -265,7 +265,9 @@ type Reconciler struct {
 	// ApproveDeletion for one controller. The tick writes status from its
 	// first read, so an approve that writes between that read and the end
 	// write is lost. Only the shard owner runs either path, so a lock in
-	// this process is enough.
+	// this process is enough. Each path enters the shard first (enterShard),
+	// so a shard release waits for it before another replica can own the
+	// controller.
 	controllerLocks *keyLock
 	// approveLockWait limits how long an approve waits for a tick that
 	// holds controllerLocks. The approve request has its own deadline.
@@ -1377,6 +1379,19 @@ func (r *Reconciler) ownsController(ns, name string) bool {
 	return r.shardSet.OwnsController(r.shardRing, ns, name)
 }
 
+// enterShard registers shard-owned work for namespace/name. It returns false
+// when this replica does not own the controller. On success the caller must
+// call leave when the work ends, and must use the returned context for every
+// write. A shard release waits for this work before it gives up the lease,
+// and cancels the context when the wait ends. When sharding is not wired,
+// it owns all and leave does nothing.
+func (r *Reconciler) enterShard(ctx context.Context, ns, name string) (context.Context, func(), bool) {
+	if r.shardRing == nil || r.shardSet == nil {
+		return ctx, func() {}, true
+	}
+	return r.shardSet.EnterController(ctx, r.shardRing, ns, name)
+}
+
 // EnqueueShards re-enqueues every Controller whose key hashes into one of the
 // given shards. Called by the ShardManager after acquiring shards. The list is
 // retried: a controller missed here has no scheduled requeue on this replica
@@ -1955,9 +1970,11 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 	_ = cluster // operator always acts on its own cluster
 	// A send from a replica that does not own the controller subscribes to
 	// the mite there, and its status writes race the owner's.
-	if !r.ownsController(namespace, name) {
+	ctx, leave, owned := r.enterShard(ctx, namespace, name)
+	if !owned {
 		return ErrNotShardOwner
 	}
+	defer leave()
 	key := namespace + "/" + name
 	unlock, err := r.lockForApprove(ctx, key)
 	if err != nil {
@@ -2061,6 +2078,11 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 	// with an error that the caller can retry.
 	if !r.ownsController(namespace, name) {
 		return fmt.Errorf("controller %s moved to another operator replica; retry the approve", key)
+	}
+	// A shard release cancels ctx when another replica can own the
+	// controller.
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("controller %s moved to another operator replica; retry the approve: %w", key, err)
 	}
 	sendErr := r.miteTransport.Send(ctx, namespace, name, &mitev1.OperatorMessage{
 		Message: &mitev1.OperatorMessage_DesiredState{
@@ -2252,9 +2274,11 @@ func (r *Reconciler) ApproveDeletion(ctx context.Context, cluster, namespace, na
 	_ = cluster // operator always acts on its own cluster
 	// Only the shard owner holds the mite's subscription, so a send from
 	// another replica subscribes to the mite there.
-	if !r.ownsController(namespace, name) {
+	ctx, leave, owned := r.enterShard(ctx, namespace, name)
+	if !owned {
 		return ErrNotShardOwner
 	}
+	defer leave()
 	key := namespace + "/" + name
 	unlock, err := r.lockForApprove(ctx, key)
 	if err != nil {
@@ -2270,6 +2294,11 @@ func (r *Reconciler) ApproveDeletion(ctx context.Context, cluster, namespace, na
 		return fmt.Errorf("no pending deletion for %q on %s", path, key)
 	}
 
+	// A shard release cancels ctx when another replica can own the
+	// controller. That replica must not see a delete from this one.
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("controller %s moved to another operator replica; retry the approve: %w", key, err)
+	}
 	cmdID := fmt.Sprintf("%d", time.Now().UnixNano())
 	if err := r.miteTransport.SendImperative(ctx, namespace, name, &mitev1.ImperativeCommand{
 		CommandId: cmdID,
