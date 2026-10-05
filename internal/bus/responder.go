@@ -200,3 +200,28 @@ func (c *Conn) serveRequests(subject, queue string, handler RequestHandler, back
 	}
 	return &Responder{r}, nil
 }
+
+// ServeRequestsConcurrently is ServeRequests with up to limit handler calls
+// in flight at a time. Use it when one call can wait for a long time and
+// the other requests on the subject must not wait for it. The handler
+// must be safe for concurrent calls. Unsubscribe does not wait for the
+// calls in flight.
+func (c *Conn) ServeRequestsConcurrently(subject, queue string, limit int, handler RequestHandler) (*Responder, error) {
+	return c.serveRequestsConcurrently(subject, queue, limit, handler, responderBaseBackoff)
+}
+
+func (c *Conn) serveRequestsConcurrently(subject, queue string, limit int, handler RequestHandler, backoff time.Duration) (*Responder, error) {
+	if limit < 1 {
+		limit = 1
+	}
+	// Every subscribe attempt shares one set of slots. Calls of a denied
+	// attempt can still run, and a new set would let them exceed limit.
+	slots := make(chan struct{}, limit)
+	r, err := c.keepSubscribed("concurrent request responder", subject, queue, backoff, func() (*Sub, error) {
+		return c.subscribeRequestConcurrently(subject, queue, slots, handler)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &Responder{r}, nil
+}

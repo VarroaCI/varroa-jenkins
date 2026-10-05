@@ -478,6 +478,38 @@ func (c *Conn) SubscribeRequest(subject, queue string, handler RequestHandler) (
 	return &Sub{natsSub: natsSub}, nil
 }
 
+// subscribeRequestConcurrently subscribes like SubscribeRequest, but runs
+// each handler call in its own goroutine. A call takes one slot of slots
+// and holds it until the handler returns. The callback blocks while every
+// slot is in use, so delivery then waits as it does for SubscribeRequest.
+// nats.go gives each subscription its own delivery goroutine, so the block
+// holds only this subscription. A handler call can still run after
+// Unsubscribe returns, and it replies on the open connection.
+func (c *Conn) subscribeRequestConcurrently(subject, queue string, slots chan struct{}, handler RequestHandler) (*Sub, error) {
+	cb := func(msg *nats.Msg) {
+		slots <- struct{}{}
+		go func() {
+			defer func() { <-slots }()
+			if resp := handler(msg.Data); resp != nil {
+				_ = msg.Respond(resp)
+			}
+		}()
+	}
+	var (
+		natsSub *nats.Subscription
+		err     error
+	)
+	if queue != "" {
+		natsSub, err = c.nc.QueueSubscribe(subject, queue, cb)
+	} else {
+		natsSub, err = c.nc.Subscribe(subject, cb)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &Sub{natsSub: natsSub}, nil
+}
+
 // Close drains and closes the NATS connection.
 func (c *Conn) Close() {
 	if c.logger != nil {

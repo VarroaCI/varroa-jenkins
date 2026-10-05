@@ -59,7 +59,7 @@ type approveDeletionRunner struct {
 func (r *approveDeletionRunner) NeedLeaderElection() bool { return false }
 
 func (r *approveDeletionRunner) Start(ctx context.Context) error {
-	sub, err := r.busConn.ServeRequests(bus.OperatorApproveDeletionSubject(r.cluster), "", func(data []byte) []byte {
+	sub, err := r.busConn.ServeRequestsConcurrently(bus.OperatorApproveDeletionSubject(r.cluster), "", approveConcurrency, func(data []byte) []byte {
 		return handleApproveDeletion(ctx, r.logger, r.reconciler, r.cluster, data)
 	})
 	if err != nil {

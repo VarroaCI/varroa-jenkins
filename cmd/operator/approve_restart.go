@@ -17,6 +17,14 @@ import (
 // how long an approve holds the controller lock that the tick also takes.
 const approveRequestTimeout = 55 * time.Second
 
+// approveConcurrency limits the approve requests that one replica runs at a
+// time on one approve subject. An approve can wait 20 seconds for the
+// controller lock. While a slot is free, an approve for another controller
+// starts at once. When every slot is in use, the next approve waits for a
+// free slot. The controller lock still serializes the approves for one
+// controller.
+const approveConcurrency = 16
+
 // approveRestarter is the slice of *controller.Reconciler that the approve
 // restart handler needs, kept as an interface so the handler is testable
 // without a full Reconciler.
@@ -80,7 +88,7 @@ type approveRestartRunner struct {
 func (r *approveRestartRunner) NeedLeaderElection() bool { return false }
 
 func (r *approveRestartRunner) Start(ctx context.Context) error {
-	sub, err := r.busConn.ServeRequests(bus.OperatorApproveSubject(r.cluster), "", func(data []byte) []byte {
+	sub, err := r.busConn.ServeRequestsConcurrently(bus.OperatorApproveSubject(r.cluster), "", approveConcurrency, func(data []byte) []byte {
 		return handleApproveRestart(ctx, r.logger, r.reconciler, r.cluster, data)
 	})
 	if err != nil {

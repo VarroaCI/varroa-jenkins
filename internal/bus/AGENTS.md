@@ -168,6 +168,13 @@ control plane's async transport — no other package talks to NATS directly.
   responders; the operator's command responders, wake, ledger-action,
   brood, and webhook-result subscriptions; the BFF's brood, activity, and
   run fan-outs.
+  `ServeRequestsConcurrently(subject, queue, limit, handler)` is
+  `ServeRequests` with up to `limit` handler calls in flight, each in its own
+  goroutine. Every resubscribe shares the same slots. The NATS callback
+  blocks while every slot is in use. Its `Unsubscribe` does not wait for the
+  calls in flight. Use it only where one call can wait for a long time and
+  the handler is safe for concurrent calls. Users: the operator's two
+  approve responders.
 - **Test server** (`bustest/`) — `StartDenyServer(t, deny...)` runs an
   embedded NATS server whose restricted user may not subscribe to the deny
   list; `SetDeny` reloads it in place. It does not import `bus`, so the

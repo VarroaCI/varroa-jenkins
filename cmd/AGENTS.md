@@ -34,7 +34,12 @@ stating what it is/is not responsible for:
   With no owner during a handoff, the BFF request times out. Each handler gives
   the approve a 55-second deadline (`approveRequestTimeout`), under the BFF's
   60-second request timeout. The deadline also limits how long an approve holds
-  the controller lock that the reconcile tick takes. `controllerIssuer` (`main.go`) is the only choice of
+  the controller lock that the reconcile tick takes. Both runners serve through
+  `ServeRequestsConcurrently` with `approveConcurrency` (16) slots for each subject,
+  so an approve that waits for one controller's lock does not hold an approve for
+  another controller while a slot is free. When all 16 slots are in use, the next
+  approve waits for a free slot. The controller lock still serializes approves for one
+  controller. `controllerIssuer` (`main.go`) is the only choice of
   the issuer that controllers trust: the BFF URL in `local` and `ldap` modes,
   else the OIDC issuer. The operator exits in those two modes without
   `--bff-url`. One leader replica queue-subscribes
