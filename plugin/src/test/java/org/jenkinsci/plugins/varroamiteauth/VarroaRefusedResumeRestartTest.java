@@ -11,10 +11,18 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import hudson.model.Run;
+import hudson.model.TaskListener;
+import hudson.model.listeners.RunListener;
+
+import jenkins.model.Jenkins;
 
 import net.sf.json.JSONObject;
 
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
+import org.jenkinsci.plugins.workflow.cps.CpsFlowExecution;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.junit.After;
@@ -22,6 +30,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.JenkinsSessionRule;
+import org.jvnet.hudson.test.TestExtension;
 
 /**
  * Proves that a pipeline build that Jenkins refuses to resume after a
@@ -42,12 +51,18 @@ public class VarroaRefusedResumeRestartTest {
 
     private static final String JOB = "refused-resume";
 
+    private static final String AFTER_SLEEP = "after-sleep";
+
     @Rule
     public JenkinsSessionRule sessions = new JenkinsSessionRule();
 
     @After
     public void clearOverrides() throws Exception {
         setMaxResumptionAge(null);
+        Jenkins jenkins = Jenkins.getInstanceOrNull();
+        if (jenkins != null && jenkins.isQuietingDown()) {
+            jenkins.doCancelQuietDown();
+        }
         VarroaRunRecorder.setGateOverrideForTesting(null);
         VarroaBootReconcile.setSkipAtBootForTesting(false);
         VarroaRunRecorder.resetStateForTesting();
@@ -99,6 +114,85 @@ public class VarroaRefusedResumeRestartTest {
             assertEquals("the entry stays until the listener's event is on disk", 1,
                     new RunJournal().readAll().size());
         });
+    }
+
+    /**
+     * workflow-cps pauses every program it loads. Only the step resume
+     * that {@code FlowExecutionListener.fireResumed} starts unpauses it,
+     * and a refused build skips that call. A program that held a runnable
+     * thread when it was saved thus never reaches its end node, so
+     * workflow-job never calls {@code finish} a second time.
+     *
+     * <p>Quiet mode makes the fixture: the sleep ends while Jenkins
+     * quiets down, so the CPS VM pauses with a runnable thread and saves
+     * the program in that state.
+     */
+    @Test
+    public void aRefusedResumeOfARunnableProgramStaysPausedAndSendsOneCompleted() throws Throwable {
+        String runId = Uuid7.next();
+        // The build completes while the next session boots, so the count
+        // starts here and not inside that session.
+        CompletionCounter.count.set(0);
+        sessions.then(j -> startRunnableBuild(j, runId));
+        setMaxResumptionAge(Duration.ZERO);
+        sessions.then(j -> {
+            assertFalse("quiet mode does not cross the restart", j.jenkins.isQuietingDown());
+            WorkflowRun run = awaitFinish(j);
+            assertEquals("ABORTED", String.valueOf(run.getResult()));
+
+            CpsFlowExecution execution = (CpsFlowExecution) run.getExecution();
+            assertNotNull(execution);
+            long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(30);
+            while (!execution.isPaused() && System.currentTimeMillis() < deadline) {
+                Thread.sleep(100);
+            }
+            assertTrue("the loaded program stays paused", execution.isPaused());
+
+            // The window gives a runnable program time to reach its end
+            // node. The log cannot show it: after finish, workflow-job
+            // sends the program's output to a null listener.
+            Thread.sleep(TimeUnit.SECONDS.toMillis(10));
+            assertFalse("the program does not reach its end node", execution.isComplete());
+            assertTrue("the build is still ended by the restart", FailedProgramLoad.endedByRestart(run));
+            assertEquals("the run listener completes the build once", 1, CompletionCounter.count.get());
+            int completed = completedInSink(runId).size() + completedInSpool(j, runId).size();
+            assertEquals("the build gets one COMPLETED event", 1, completed);
+        });
+    }
+
+    /** Counts the run listener completions of the test job. */
+    @TestExtension("aRefusedResumeOfARunnableProgramStaysPausedAndSendsOneCompleted")
+    public static class CompletionCounter extends RunListener<Run<?, ?>> {
+        static final AtomicInteger count = new AtomicInteger();
+
+        @Override
+        public void onCompleted(Run<?, ?> run, TaskListener listener) {
+            if (JOB.equals(run.getParent().getFullName())) {
+                count.incrementAndGet();
+            }
+        }
+    }
+
+    /**
+     * Starts one build whose sleep ends while Jenkins quiets down. The
+     * CPS VM then pauses with a runnable thread before the next step, and
+     * the session's clean stop saves the program in that state.
+     */
+    private static void startRunnableBuild(JenkinsRule j, String runId) throws Exception {
+        VarroaRunRecorder.setGateOverrideForTesting("1");
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, JOB);
+        // Quiet mode must start before the sleep ends. The sleep is long, so
+        // a slow test host cannot let the next step run first.
+        job.setDefinition(new CpsFlowDefinition("sleep 10\necho '" + AFTER_SLEEP + "'\n", true));
+        VarroaIntentAction action = new VarroaIntentAction(runId, "", null, System.currentTimeMillis());
+        WorkflowRun run = job.scheduleBuild2(0, action).waitForStart();
+        j.waitForMessage("Sleeping for", run);
+        j.jenkins.doQuietDown();
+        j.waitForMessage("Pausing (Preparing for shutdown)", run);
+        assertFalse("the program pauses before its next step", JenkinsRule.getLog(run).contains(AFTER_SLEEP));
+        assertNotNull("the run listener writes the journal entry", new RunJournal().read(runId));
+        VarroaRunRecorder.resetStateForTesting();
+        BuildEventSink.get().resetForTesting();
     }
 
     /**
