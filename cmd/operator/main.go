@@ -262,7 +262,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer busConn.Close()
-	if err := busConn.RegisterMetrics(otel.Meter("varroa-operator"), "operator"); err != nil {
+	if err := busConn.RegisterMetrics(meterProvider.Meter("varroa-operator"), "operator"); err != nil {
 		logger.Warn("failed to register bus metrics", "error", err)
 	}
 	// JetStream replica count for streams and KV buckets (from the NATS
@@ -292,7 +292,7 @@ func main() {
 	miteTransport.Logger = logger
 
 	// --- Bundle resolver ---
-	resolver := bundle.NewResolver("/tmp/varroa-bundles")
+	resolver := bundle.NewResolver(meterProvider, "/tmp/varroa-bundles")
 	resolver.Logger = logger
 	if controllerIss != "" {
 		resolver.SetOIDCConfig(controllerIss, *oidcClientID, *oidcClientSecret)
@@ -315,7 +315,7 @@ func main() {
 	if dir := os.Getenv("VARROA_GIT_CACHE_DIR"); dir != "" {
 		maxRepos := envInt("VARROA_GIT_CACHE_MAX_REPOS", 50)
 		maxSizeMiB := int64(envInt("VARROA_GIT_CACHE_MAX_SIZE_MIB", 2048))
-		cc, err := bundle.NewCloneCache(dir, maxRepos, maxSizeMiB, logger)
+		cc, err := bundle.NewCloneCache(meterProvider, dir, maxRepos, maxSizeMiB, logger)
 		if err != nil {
 			logger.Warn("git clone cache disabled", "dir", dir, "error", err)
 		} else {
@@ -702,7 +702,8 @@ func main() {
 		identity = fmt.Sprintf("operator-%d", os.Getpid())
 		logger.Warn("failed to get hostname for shard manager identity", "error", hostErr, "fallback", identity)
 	}
-	sm := sharding.NewShardManager(
+	sm, err := sharding.NewShardManager(
+		meterProvider,
 		clientsetClient.Clientset().CoordinationV1().Leases(operatorNamespace),
 		operatorNamespace,
 		identity,
@@ -712,6 +713,10 @@ func main() {
 		func([]int) { reconciler.ForgetUnowned() },
 		logger,
 	)
+	if err != nil {
+		logger.Error("failed to create shard manager", "error", err)
+		os.Exit(1)
+	}
 	if err := mgr.Add(sm); err != nil {
 		logger.Error("failed to add shard manager", "error", err)
 		os.Exit(1)

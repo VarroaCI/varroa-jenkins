@@ -277,7 +277,14 @@ reading each package's entry point):
 - **`tenancy/`** — namespace classification and lifecycle (`NamespaceState`)
   for the control plane; the seam multi-cluster/team-scoping features build on.
 - **`telemetry/`** — OpenTelemetry config helpers, incl.
-  `Disabled()` reading `VARROA_TELEMETRY_DISABLED`.
+  `Disabled()` reading `VARROA_TELEMETRY_DISABLED`. `NewMeterProvider` builds
+  the provider that `InitTelemetry` installs as global; a test uses it and
+  never calls `InitTelemetry`. `initTelemetry` takes the install step as a
+  setter, so `init_meter_test.go` covers the install without the global provider. `meter_guard_test.go` is the repo-wide guard:
+  only a `cmd/*/main.go` or `cmd/recorder/run.go` reads `otel.Meter` or
+  `otel.GetMeterProvider`, and no test calls `SetMeterProvider` or
+  `InitTelemetry`. Its `globalMeterAllowlist` holds the remaining gateway, BFF,
+  and mite sites and can only shrink.
 - **`signing/`** — shared RSA JWT signing + JWKS primitives; both the mite
   operator-JWT signer (`internal/mite`) and `auth/local` consume the same
   `Signer` so the JWK `kid` matches across every token a given keypair issues.

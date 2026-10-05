@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -72,6 +74,13 @@ func newHarness(t *testing.T, startTime time.Time) *testHarness {
 }
 
 func (h *testHarness) addManager(identity string, ring *Ring) *testManagerWrap {
+	return h.addManagerWithMeterProvider(identity, ring, noop.NewMeterProvider())
+}
+
+// addManagerWithMeterProvider adds a manager that creates its instruments on
+// mp. A test that reads a shard metric passes a provider from
+// newTestMeterProvider.
+func (h *testHarness) addManagerWithMeterProvider(identity string, ring *Ring, mp metric.MeterProvider) *testManagerWrap {
 	held := NewShardSet()
 	acquired := make([][]int, 0)
 	var mu sync.Mutex
@@ -97,7 +106,10 @@ func (h *testHarness) addManager(identity string, ring *Ring) *testManagerWrap {
 	}
 
 	leases := h.cs.CoordinationV1().Leases(h.ns)
-	m := NewShardManager(leases, h.ns, identity, ring, held, onAcquired, onReleased, slog.Default())
+	m, err := NewShardManager(mp, leases, h.ns, identity, ring, held, onAcquired, onReleased, slog.Default())
+	if err != nil {
+		h.t.Fatalf("NewShardManager: %v", err)
+	}
 	m.clock = h.clock.Now
 	m.interval = 1 * time.Millisecond // fast for tests
 

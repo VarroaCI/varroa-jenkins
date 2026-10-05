@@ -369,7 +369,7 @@ func newTestReconcilerWithMeterProvider(mp metric.MeterProvider, client *testCli
 	seedClientCRDs(client)
 	rec := NewReconciler(
 		mp,
-		bundle.NewResolver("/tmp/test"),
+		bundle.NewResolver(noop.NewMeterProvider(), "/tmp/test"),
 		client,
 		client.store,
 		transport.NewLocalRegistry(mite.NewRegistry()),
@@ -1557,7 +1557,7 @@ func TestConditionsDoNotGrowUnbounded(t *testing.T) {
 	client := newTestClientWithBundle()
 	reg := transport.NewLocalRegistry(mite.NewRegistry())
 	signer := mite.NewTokenSigner(testKey)
-	rec := NewReconciler(noop.NewMeterProvider(), bundle.NewResolver("/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
+	rec := NewReconciler(noop.NewMeterProvider(), bundle.NewResolver(noop.NewMeterProvider(), "/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
 	rec.Logger = slog.Default()
 
 	recent := metav1.NewTime(time.Now())
@@ -1692,7 +1692,7 @@ func TestReprovisionFlagSetAndConsumed(t *testing.T) {
 	client := newTestClientWithBundle()
 	reg := transport.NewLocalRegistry(mite.NewRegistry())
 	signer := mite.NewTokenSigner(testKey)
-	rec := NewReconciler(noop.NewMeterProvider(), bundle.NewResolver("/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
+	rec := NewReconciler(noop.NewMeterProvider(), bundle.NewResolver(noop.NewMeterProvider(), "/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
 	rec.Logger = slog.Default()
 
 	recent := metav1.NewTime(time.Now())
@@ -2393,7 +2393,7 @@ func TestHandleConnected_ArtifactSecretReadFaultKeepsLastGood(t *testing.T) {
 	client.getSecretErrs = map[string]error{"abase-cell-big-0": errors.New("etcd unavailable")}
 	reg := transport.NewLocalRegistry(mite.NewRegistry())
 	signer := mite.NewTokenSigner(testKey)
-	rec := NewReconciler(noop.NewMeterProvider(), bundle.NewResolver("/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
+	rec := NewReconciler(noop.NewMeterProvider(), bundle.NewResolver(noop.NewMeterProvider(), "/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
 	rec.Logger = slog.Default()
 	rec.SetArtifactSecretBase("abase")
 	rec.SetBlobstoreURL("s3://my-bucket?region=us-east-1")

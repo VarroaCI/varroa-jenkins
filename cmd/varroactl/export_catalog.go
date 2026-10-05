@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"go.opentelemetry.io/otel/metric/noop"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
@@ -125,7 +126,7 @@ func runExportCatalog(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	resolver := bundle.NewResolver(tmpDir)
+	resolver := bundle.NewResolver(noop.NewMeterProvider(), tmpDir)
 	cloneDir := filepath.Join(tmpDir, "bundle")
 
 	if spec.OCIRef != "" {

@@ -16,12 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/otel"
-)
-
-var (
-	gitCacheHits, _   = otel.Meter("varroa-operator").Int64Counter("varroa.bundle.git.cache.hits")
-	gitCacheMisses, _ = otel.Meter("varroa-operator").Int64Counter("varroa.bundle.git.cache.misses")
+	"go.opentelemetry.io/otel/metric"
 )
 
 // repoLock serialises concurrent Checkout calls for the same cache key.
@@ -50,6 +45,9 @@ type CloneCache struct {
 	logger              *slog.Logger
 	allowLocalTransport bool
 
+	cacheHits   metric.Int64Counter
+	cacheMisses metric.Int64Counter
+
 	mu    sync.Mutex
 	locks map[string]*repoLock
 
@@ -57,20 +55,32 @@ type CloneCache struct {
 	fetchHook func()
 }
 
-// NewCloneCache creates a new CloneCache. It ensures the repos subdirectory
-// exists (MkdirAll) and runs the startup cleanup+eviction pass.
-func NewCloneCache(root string, maxRepos int, maxSizeMiB int64, logger *slog.Logger) (*CloneCache, error) {
+// NewCloneCache creates a new CloneCache. It creates the hit and miss
+// counters on the "varroa-operator" meter of mp, ensures the repos
+// subdirectory exists (MkdirAll), and runs the startup cleanup+eviction pass.
+func NewCloneCache(mp metric.MeterProvider, root string, maxRepos int, maxSizeMiB int64, logger *slog.Logger) (*CloneCache, error) {
+	meter := mp.Meter("varroa-operator")
+	cacheHits, err := meter.Int64Counter("varroa.bundle.git.cache.hits")
+	if err != nil {
+		return nil, fmt.Errorf("create git cache hits counter: %w", err)
+	}
+	cacheMisses, err := meter.Int64Counter("varroa.bundle.git.cache.misses")
+	if err != nil {
+		return nil, fmt.Errorf("create git cache misses counter: %w", err)
+	}
 	reposDir := filepath.Join(root, "repos")
 	if err := os.MkdirAll(reposDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create cache repos dir %s: %w", reposDir, err)
 	}
 	c := &CloneCache{
-		root:       root,
-		maxRepos:   maxRepos,
-		maxSizeMiB: maxSizeMiB,
-		cloner:     NewGitCloner(),
-		logger:     logger,
-		locks:      make(map[string]*repoLock),
+		root:        root,
+		maxRepos:    maxRepos,
+		maxSizeMiB:  maxSizeMiB,
+		cloner:      NewGitCloner(),
+		logger:      logger,
+		cacheHits:   cacheHits,
+		cacheMisses: cacheMisses,
+		locks:       make(map[string]*repoLock),
 	}
 	c.startupCleanup()
 	c.evict()
@@ -288,9 +298,9 @@ func (c *CloneCache) Checkout(ctx context.Context, repoURL, revision, targetDir 
 
 	// Step 6: metrics.
 	if hit {
-		gitCacheHits.Add(ctx, 1)
+		c.cacheHits.Add(ctx, 1)
 	} else {
-		gitCacheMisses.Add(ctx, 1)
+		c.cacheMisses.Add(ctx, 1)
 	}
 
 	if c.logger != nil {

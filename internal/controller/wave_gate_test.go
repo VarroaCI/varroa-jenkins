@@ -28,7 +28,7 @@ func newTestReconcilerForGate(client *testClient) (*Reconciler, *mite.Registry) 
 	registry := mite.NewRegistry()
 	rec := NewReconciler(
 		noop.NewMeterProvider(),
-		bundle.NewResolver("/tmp/test"),
+		bundle.NewResolver(noop.NewMeterProvider(), "/tmp/test"),
 		client,
 		client.store,
 		transport.NewLocalRegistry(registry),

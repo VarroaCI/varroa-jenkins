@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"go.opentelemetry.io/otel/metric/noop"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -87,7 +88,7 @@ func newComposedBundleReconciler(tc *catalogTestClient, t *testing.T) *CatalogRe
 	t.Helper()
 	cloner := bundle.NewGitCloner()
 	cloner.AllowLocalTransportForTest()
-	resolver := bundle.NewResolver(t.TempDir())
+	resolver := bundle.NewResolver(noop.NewMeterProvider(), t.TempDir())
 	resolver.Cloner().AllowLocalTransportForTest()
 	return NewCatalogReconciler(tc, tc.store, cloner, resolver, nil, t.TempDir(), discardLogger(), "", "", nil)
 }
@@ -535,7 +536,7 @@ func newComposedBundleReconcilerWithNS(tc *catalogTestClient, t *testing.T, oper
 	t.Helper()
 	cloner := bundle.NewGitCloner()
 	cloner.AllowLocalTransportForTest()
-	resolver := bundle.NewResolver(t.TempDir())
+	resolver := bundle.NewResolver(noop.NewMeterProvider(), t.TempDir())
 	resolver.Cloner().AllowLocalTransportForTest()
 	return NewCatalogReconciler(tc, tc.store, cloner, resolver, nil, t.TempDir(), discardLogger(), operatorNamespace, "", nil)
 }

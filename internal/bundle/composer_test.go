@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"go.opentelemetry.io/otel/metric/noop"
+
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
 
@@ -943,7 +945,7 @@ func TestComposer_GitInputMissingWorkDir(t *testing.T) {
 		t.Fatalf("precondition: workDir should not exist yet, stat err=%v", err)
 	}
 
-	c := NewComposer(&fakeItemLookup{}, NewResolver(t.TempDir()), workDir, "")
+	c := NewComposer(&fakeItemLookup{}, NewResolver(noop.NewMeterProvider(), t.TempDir()), workDir, "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{
 			{GitSource: &v1alpha1.GitBundleSource{

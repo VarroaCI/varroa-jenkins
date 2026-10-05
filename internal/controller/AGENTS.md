@@ -582,8 +582,8 @@ sections describe.
   metric builds the reconciler with `newTestReconcilerWithMeterProvider` and a
   provider from `newTestMeterProvider`. A hand-built `&Reconciler{}` that
   reaches a record site sets `metrics: newControllerMetrics(noop.NewMeterProvider())`.
-  No test replaces the global provider: `TestNoTestReplacesGlobalMeterProvider`
-  (`meter_guard_test.go`) fails on a `SetMeterProvider` call.
+  No test replaces the global provider. The repo-wide guard in
+  `internal/telemetry/meter_guard_test.go` enforces this.
 - `buildDesiredStateCommand` (`controller_controller.go:3457`) assembles the
   `mitev1.DesiredStateCommand`: strips `authorizationStrategy` and injects the
   project-naming strategy into `JcascYaml`; generates `RbacYaml` via
@@ -1169,6 +1169,9 @@ sections describe.
   `ownsController`/`EnqueueShards` on `*Reconciler` consume it. Only the owning
   replica may hold the inbound subscription of a mite: each holder answers the
   mite's token refresh, and a held result channel fills with no reader.
+  `NewShardManager` takes a `metric.MeterProvider` as its first parameter and
+  creates `varroa.operator.shards.held` and `varroa.operator.shard.handoffs` on
+  its `"varroa-operator"` meter; it returns an error that `main` exits on.
   `ShardManager` calls `onReleased` once per rebalance pass with the shards that
   the pass dropped, before the pass claims shards. The operator wires it to
   `Reconciler.ForgetUnowned`, which calls `Transport.ForgetMatching` for every

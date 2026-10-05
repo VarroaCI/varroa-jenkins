@@ -8,17 +8,18 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
 
 	"github.com/varroaci/varroa-jenkins/internal/telemetry"
 )
 
 // TestMetricsEndpointExposesOTelCounters asserts a counter the recorder
 // registers on the "varroa-recorder" OTel meter reaches the same
-// /metrics handler run() wires through newMux. It runs the exact
-// telemetry.InitTelemetry call main() runs, with the env the chart
-// renders, then reads /metrics through newMux and looks for the
+// /metrics handler run() wires through newMux. It builds the provider
+// through telemetry.NewMeterProvider, which InitTelemetry calls, with the
+// env the chart renders. The test does not install the provider as the
+// global provider. It reads /metrics through newMux and looks for the
 // counter name.
 func TestMetricsEndpointExposesOTelCounters(t *testing.T) {
 	t.Setenv("VARROA_SERVICE_NAME", "varroa-recorder")
@@ -29,14 +30,24 @@ func TestMetricsEndpointExposesOTelCounters(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	t.Setenv("METRICS_TOKEN", "")
 
-	shutdown := telemetry.InitTelemetry(context.Background())
+	res, err := resource.New(context.Background(), resource.WithAttributes(telemetry.ResourceAttributes()...))
+	if err != nil {
+		t.Fatalf("build telemetry resource: %v", err)
+	}
+	mp, err := telemetry.NewMeterProvider(context.Background(), res)
+	if err != nil {
+		t.Fatalf("build meter provider: %v", err)
+	}
+	if mp == nil {
+		t.Fatal("build meter provider: got nil, want the Prometheus provider")
+	}
 	t.Cleanup(func() {
-		if err := shutdown(context.Background()); err != nil {
-			t.Errorf("telemetry shutdown: %v", err)
+		if err := mp.Shutdown(context.Background()); err != nil {
+			t.Errorf("meter provider shutdown: %v", err)
 		}
 	})
 
-	meter := otel.Meter("varroa-recorder")
+	meter := mp.Meter("varroa-recorder")
 	counter, err := meter.Int64Counter("recorder_fence_veto_total",
 		metric.WithDescription("Claims the placement fence vetoed, labelled by reason"))
 	if err != nil {

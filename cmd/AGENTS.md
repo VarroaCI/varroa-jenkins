@@ -56,9 +56,9 @@ stating what it is/is not responsible for:
   (`reason="foreign_cluster"`) or an unknown kind (`reason="unknown_kind"`)
   rather than acting on it. `main` reads `otel.GetMeterProvider()` once,
   after `telemetry.InitTelemetry`, and passes it to `NewReconciler`,
-  `newLedgerActionMetrics`, and `newClusterHeartbeatCounter`. No operator
-  test replaces the global provider; `meter_guard_test.go` fails on a
-  `SetMeterProvider` call. `trigger_run` wakes a hibernated target through the same hibernation
+  `newLedgerActionMetrics`, `newClusterHeartbeatCounter`,
+  `sharding.NewShardManager`, `bundle.NewResolver`, `bundle.NewCloneCache`,
+  and the bus metrics. No operator test replaces the global provider. `trigger_run` wakes a hibernated target through the same hibernation
   call before it sends the command; a connected target is not woken.
   Every replica also subscribes to `events.brood.<cluster>`
   (`brood_watch.go`): a `disconnected` event enqueues an on-demand

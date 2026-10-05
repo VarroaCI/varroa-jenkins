@@ -21,12 +21,6 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/oci"
 )
 
-var (
-	bundleCloneDuration, _ = otel.Meter("varroa-operator").Float64Histogram("varroa.bundle.clone.duration",
-		metric.WithUnit("s"),
-	)
-)
-
 // Variables holds resolved bundle variables.
 type Variables map[string]string
 
@@ -117,7 +111,9 @@ type Resolver struct {
 	oidcUserClaim    string
 	oidcGroupClaim   string
 	localIssuer      string
-	Logger           *slog.Logger
+	// cloneDuration is nil on a Resolver that NewResolver did not build.
+	cloneDuration metric.Float64Histogram
+	Logger        *slog.Logger
 }
 
 // UseCloneCache sets an optional clone cache. When set, Materialize uses the
@@ -127,12 +123,23 @@ func (r *Resolver) UseCloneCache(c *CloneCache) { r.cloneCache = c }
 // Cloner returns the GitCloner used by this resolver.
 func (r *Resolver) Cloner() *GitCloner { return r.cloner }
 
-// NewResolver creates a new Resolver.
-func NewResolver(workDir string) *Resolver {
+// NewResolver creates a new Resolver. It creates the clone-duration
+// histogram on the "varroa-operator" meter of mp. When the histogram cannot
+// be created, NewResolver logs a warning and the Resolver records no
+// clone duration.
+func NewResolver(mp metric.MeterProvider, workDir string) *Resolver {
+	cloneDuration, err := mp.Meter("varroa-operator").Float64Histogram("varroa.bundle.clone.duration",
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		slog.Warn("failed to create bundle clone duration histogram", "error", err)
+		cloneDuration = nil
+	}
 	return &Resolver{
-		cloner:    NewGitCloner(),
-		validator: NewValidator(),
-		workDir:   workDir,
+		cloner:        NewGitCloner(),
+		validator:     NewValidator(),
+		workDir:       workDir,
+		cloneDuration: cloneDuration,
 	}
 }
 
@@ -225,9 +232,11 @@ func (r *Resolver) Materialize(ctx context.Context, repoURL, path, revision stri
 		if err != nil {
 			result = "error"
 		}
-		bundleCloneDuration.Record(ctx, duration, metric.WithAttributes(
-			attribute.String("result", result),
-		))
+		if r.cloneDuration != nil {
+			r.cloneDuration.Record(ctx, duration, metric.WithAttributes(
+				attribute.String("result", result),
+			))
+		}
 		return err
 	}(); err != nil {
 		if r.Logger != nil {

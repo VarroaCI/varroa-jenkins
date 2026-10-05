@@ -12,7 +12,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	coordinationv1client "k8s.io/client-go/kubernetes/typed/coordination/v1"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -42,9 +41,11 @@ type ShardManager struct {
 	handoffs   metric.Int64Counter
 }
 
-// NewShardManager creates a new ShardManager.
-func NewShardManager(leases coordinationv1client.LeaseInterface, namespace, identity string,
-	ring *Ring, held *ShardSet, onAcquired, onReleased func([]int), logger *slog.Logger) *ShardManager {
+// NewShardManager creates a new ShardManager. It creates the shard
+// instruments on the "varroa-operator" meter of mp and returns an error when
+// an instrument cannot be created.
+func NewShardManager(mp metric.MeterProvider, leases coordinationv1client.LeaseInterface, namespace, identity string,
+	ring *Ring, held *ShardSet, onAcquired, onReleased func([]int), logger *slog.Logger) (*ShardManager, error) {
 	m := &ShardManager{
 		leases:        leases,
 		namespace:     namespace,
@@ -59,8 +60,7 @@ func NewShardManager(leases coordinationv1client.LeaseInterface, namespace, iden
 		clock:         time.Now,
 	}
 
-	// Register metrics.
-	meter := otel.Meter("varroa-operator")
+	meter := mp.Meter("varroa-operator")
 
 	shardsHeld, err := meter.Int64ObservableGauge(
 		"varroa.operator.shards.held",
@@ -71,26 +71,24 @@ func NewShardManager(leases coordinationv1client.LeaseInterface, namespace, iden
 		}),
 	)
 	if err != nil {
-		logger.Warn("failed to register shards-held gauge", "error", err)
-	} else {
-		m.shardsHeld = shardsHeld
+		return nil, fmt.Errorf("create shards-held gauge: %w", err)
 	}
+	m.shardsHeld = shardsHeld
 
 	handoffs, err := meter.Int64Counter(
 		"varroa.operator.shard.handoffs",
 		metric.WithDescription("Number of shard handoff transitions"),
 	)
 	if err != nil {
-		logger.Warn("failed to register shard handoffs counter", "error", err)
-	} else {
-		m.handoffs = handoffs
+		return nil, fmt.Errorf("create shard handoffs counter: %w", err)
 	}
+	m.handoffs = handoffs
 
-	return m
+	return m, nil
 }
 
-// addHandoff records a handoff transition; nil-safe so a failed metric
-// registration can never panic the rebalance loop.
+// addHandoff records a handoff transition. A manager that a test builds
+// without NewShardManager has no counter, so addHandoff accepts a nil counter.
 func (m *ShardManager) addHandoff(ctx context.Context, direction string) {
 	if m.handoffs == nil {
 		return

@@ -12,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"go.opentelemetry.io/otel/metric/noop"
 )
 
 // ---------------------------------------------------------------------------
@@ -76,7 +78,7 @@ func must(t *testing.T, err error) {
 
 func newCacheForTest(t *testing.T, root string, maxRepos int, maxSizeMiB int64) *CloneCache {
 	t.Helper()
-	c, err := NewCloneCache(root, maxRepos, maxSizeMiB, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c, err := NewCloneCache(noop.NewMeterProvider(), root, maxRepos, maxSizeMiB, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	must(t, err)
 	c.AllowLocalTransportForTest()
 	return c
@@ -434,7 +436,7 @@ func TestStartupCleanup(t *testing.T) {
 	must(t, os.WriteFile(badMeta, []byte("not json"), 0o644))
 
 	// Now create cache (which runs startupCleanup).
-	c, err := NewCloneCache(root, 10, 1000, nil)
+	c, err := NewCloneCache(noop.NewMeterProvider(), root, 10, 1000, nil)
 	must(t, err)
 	_ = c
 

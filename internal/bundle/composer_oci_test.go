@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"go.opentelemetry.io/otel/metric/noop"
+
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
 
@@ -101,7 +103,7 @@ func TestComposer_Union_ThreeWayGuard_MultipleSet(t *testing.T) {
 // TestComposer_OCISource_MissingAuth guards that a secretRef with missing
 // resolvedOCIAuth errors (same as GitSource's missing auth pattern).
 func TestComposer_OCISource_MissingAuth(t *testing.T) {
-	r := NewResolver(t.TempDir())
+	r := NewResolver(noop.NewMeterProvider(), t.TempDir())
 	c := NewComposer(&fakeItemLookup{}, r, t.TempDir(), "")
 
 	spec := &v1alpha1.ComposedBundleSpec{
@@ -124,7 +126,7 @@ func TestComposer_OCISource_MissingAuth(t *testing.T) {
 // and auth, the OCI source path flows through without hard error. The actual
 // OCI pull will fail (no registry), but it should error softly into result.Errors.
 func TestComposer_OCISource_WithResolverAndAuth(t *testing.T) {
-	r := NewResolver(t.TempDir())
+	r := NewResolver(noop.NewMeterProvider(), t.TempDir())
 	c := NewComposer(&fakeItemLookup{}, r, t.TempDir(), "")
 
 	spec := &v1alpha1.ComposedBundleSpec{

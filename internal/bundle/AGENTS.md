@@ -202,6 +202,11 @@ index parsing, and pre-apply content validation.
 - `computeResolvedHash` argument order
   `(jenkins, plugins, items, rbac, pipelineTemplates, vars)` must stay
   stable — drift/recompose detection depends on it across releases.
+- `NewResolver` and `NewCloneCache` take a `metric.MeterProvider` as their
+  first parameter. They create `varroa.bundle.clone.duration` and the
+  `varroa.bundle.git.cache.hits`/`misses` counters on its `"varroa-operator"`
+  meter. A caller with no telemetry (`varroactl`, most tests) passes
+  `noop.NewMeterProvider()`. Never bind an instrument to a package variable.
 - Git URL validation lives solely in `validateRepoURL`; `GitCloner.Clone`,
   `GitCloner.RemoteSHA`, and `CloneCache.Checkout` all call the one function —
   don't add a second copy.

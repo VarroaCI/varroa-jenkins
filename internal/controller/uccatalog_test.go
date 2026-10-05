@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/metric/noop"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -66,7 +67,7 @@ func newUCTestServer(t *testing.T) *ucTestServer {
 func newUCReconciler(t *testing.T, tc *catalogTestClient, ucURL string) *CatalogReconciler {
 	t.Helper()
 	cloner := bundle.NewGitCloner()
-	resolver := bundle.NewResolver(t.TempDir())
+	resolver := bundle.NewResolver(noop.NewMeterProvider(), t.TempDir())
 	return NewCatalogReconciler(tc, tc.store, cloner, resolver, nil, t.TempDir(),
 		discardLogger(), testOperatorNS, ucURL, &http.Client{})
 }
