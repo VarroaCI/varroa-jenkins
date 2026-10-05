@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
@@ -30,22 +29,6 @@ const imperativeFailedEventType = "command.failed"
 // imperativeSucceededEventType is the activity type of one successful run
 // command that a person sent.
 const imperativeSucceededEventType = "command.succeeded"
-
-// imperativeResultsTotal counts every imperative command result the
-// operator drains, labelled by kind and outcome.
-var imperativeResultsTotal metric.Int64Counter
-
-func init() { bindImperativeOutcomeMetrics() }
-
-// bindImperativeOutcomeMetrics (re)binds the counter against the current
-// global MeterProvider. A test re-invokes it after it swaps in a test
-// MeterProvider.
-func bindImperativeOutcomeMetrics() {
-	m := otel.Meter("varroa-operator")
-	imperativeResultsTotal, _ = m.Int64Counter("varroa.imperative_command.results",
-		metric.WithDescription("Imperative command results from the mite, labelled by kind and outcome"),
-	)
-}
 
 // imperativeOutcome answers the outcome label of one result.
 func imperativeOutcome(res *mitev1.CommandResult) string {
@@ -122,7 +105,7 @@ func imperativeOutcomeEvent(cr *v1alpha1.Controller, res *mitev1.CommandResult, 
 // most one activity row for it (imperativeOutcomeEvent). The mite and the
 // gateway keep no other operator-visible record of a refused command.
 func (r *Reconciler) recordImperativeOutcome(ctx context.Context, cr *v1alpha1.Controller, res *mitev1.CommandResult) {
-	imperativeResultsTotal.Add(ctx, 1, metric.WithAttributes(
+	r.metrics.imperativeResultsTotal.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("kind", res.CommandType.Label()),
 		attribute.String("outcome", imperativeOutcome(res)),
 	))

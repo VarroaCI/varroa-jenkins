@@ -574,6 +574,16 @@ sections describe.
   condition was never set (so healthy controllers get zero status noise). New
   reconcile-blocking call sites should call `markReconcileBlocked` rather than
   inventing a parallel mechanism.
+- **Reconciler metrics** live in `controllerMetrics`, a field of `Reconciler`.
+  `NewReconciler` takes a `metric.MeterProvider` as its first parameter and
+  builds them on its `"varroa-operator"` meter. `cmd/operator` passes
+  `otel.GetMeterProvider()`. A new reconciler instrument goes into
+  `newControllerMetrics`, never into a package variable. A test that reads a
+  metric builds the reconciler with `newTestReconcilerWithMeterProvider` and a
+  provider from `newTestMeterProvider`. A hand-built `&Reconciler{}` that
+  reaches a record site sets `metrics: newControllerMetrics(noop.NewMeterProvider())`.
+  No test replaces the global provider: `TestNoTestReplacesGlobalMeterProvider`
+  (`meter_guard_test.go`) fails on a `SetMeterProvider` call.
 - `buildDesiredStateCommand` (`controller_controller.go:3457`) assembles the
   `mitev1.DesiredStateCommand`: strips `authorizationStrategy` and injects the
   project-naming strategy into `JcascYaml`; generates `RbacYaml` via

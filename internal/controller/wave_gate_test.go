@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/metric/noop"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -26,6 +27,7 @@ func newTestReconcilerForGate(client *testClient) (*Reconciler, *mite.Registry) 
 	seedClientCRDs(client)
 	registry := mite.NewRegistry()
 	rec := NewReconciler(
+		noop.NewMeterProvider(),
 		bundle.NewResolver("/tmp/test"),
 		client,
 		client.store,

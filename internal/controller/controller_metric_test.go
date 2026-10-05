@@ -6,44 +6,24 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"go.opentelemetry.io/otel"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
-// withRebindTestMeter swaps in a test MeterProvider backed by a ManualReader and
-// rebinds the package-level instruments against it, so a test exercises the REAL
-// package gauges (and the real recording call sites) rather than a throwaway
-// local gauge. It restores the original provider + instrument bindings on
-// cleanup. Package tests run sequentially, so the global swap is safe.
-func withRebindTestMeter(t *testing.T) *sdkmetric.ManualReader {
-	t.Helper()
-	reader := sdkmetric.NewManualReader()
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	prev := otel.GetMeterProvider()
-	otel.SetMeterProvider(mp)
-	bindControllerMetrics()
-	t.Cleanup(func() {
-		otel.SetMeterProvider(prev)
-		bindControllerMetrics()
-	})
-	return reader
-}
-
 // TestPluginLockConflictGaugeRecording drives the REAL surfacePluginConflict /
-// clearPluginConflict helpers and asserts, via a ManualReader over the rebound
-// package instrument, that varroa.controller.plugin_lock_conflict records 1 on
+// clearPluginConflict helpers and asserts, via a ManualReader over the test
+// provider of the reconciler, that varroa.controller.plugin_lock_conflict records 1 on
 // the conflict path and 0 on the clear path with the controller's attributes.
 // This validates production's instrumentation wiring, not just the OTel SDK.
 func TestPluginLockConflictGaugeRecording(t *testing.T) {
-	reader := withRebindTestMeter(t)
+	t.Parallel()
+	mp, reader := newTestMeterProvider(t)
 	ctx := context.Background()
 
 	client := newTestClient()
-	rec := newTestReconciler(client)
+	rec := newTestReconcilerWithMeterProvider(mp, client)
 	cr := testController("ctrl-pc", "ns-pc", v1alpha1.ControllerPhaseProvisioning)
 
 	// Real conflict path.
@@ -72,11 +52,12 @@ func TestPluginLockConflictGaugeRecording(t *testing.T) {
 // controller's attributes. This is the reconcileBlockedGauge's only direct
 // coverage.
 func TestReconcileBlockedGaugeRecording(t *testing.T) {
-	reader := withRebindTestMeter(t)
+	t.Parallel()
+	mp, reader := newTestMeterProvider(t)
 	ctx := context.Background()
 
 	client := newTestClient()
-	rec := newTestReconciler(client)
+	rec := newTestReconcilerWithMeterProvider(mp, client)
 	cr := testController("ctrl-rb", "ns-rb", v1alpha1.ControllerPhasePending)
 
 	rec.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedBundleUnreadable, "bundle content configmap missing")
@@ -95,7 +76,8 @@ func TestReconcileBlockedGaugeRecording(t *testing.T) {
 // running mite image differs from the operator-desired image and 0 when they
 // match, with the controller's attributes.
 func TestMiteImageStaleGaugeRecording(t *testing.T) {
-	reader := withRebindTestMeter(t)
+	t.Parallel()
+	mp, reader := newTestMeterProvider(t)
 	ctx := context.Background()
 
 	// Running mite image v1; class-desired mite image v2 → stale.
@@ -108,7 +90,7 @@ func TestMiteImageStaleGaugeRecording(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test-class"},
 		Spec:       v1alpha1.ControllerClassSpec{Mite: &v1alpha1.ClassMiteSpec{Image: "ghcr.io/varroaci/varroa-jenkins:v2"}},
 	}
-	rec := newTestReconciler(client)
+	rec := newTestReconcilerWithMeterProvider(mp, client)
 	cr := testController("ctrl-mis", "ns-mis", v1alpha1.ControllerPhaseConnected)
 	cr.Spec.ClassName = "test-class"
 

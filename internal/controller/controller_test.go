@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -357,8 +359,16 @@ func (t *testClient) storeRoleBindings() []*v1alpha1.VarroaRoleBinding {
 }
 
 func newTestReconciler(client *testClient) *Reconciler {
+	return newTestReconcilerWithMeterProvider(noop.NewMeterProvider(), client)
+}
+
+// newTestReconcilerWithMeterProvider builds the reconciler of
+// newTestReconciler on mp. A test that reads a metric passes the provider
+// from newTestMeterProvider.
+func newTestReconcilerWithMeterProvider(mp metric.MeterProvider, client *testClient) *Reconciler {
 	seedClientCRDs(client)
 	rec := NewReconciler(
+		mp,
 		bundle.NewResolver("/tmp/test"),
 		client,
 		client.store,
@@ -1547,7 +1557,7 @@ func TestConditionsDoNotGrowUnbounded(t *testing.T) {
 	client := newTestClientWithBundle()
 	reg := transport.NewLocalRegistry(mite.NewRegistry())
 	signer := mite.NewTokenSigner(testKey)
-	rec := NewReconciler(bundle.NewResolver("/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
+	rec := NewReconciler(noop.NewMeterProvider(), bundle.NewResolver("/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
 	rec.Logger = slog.Default()
 
 	recent := metav1.NewTime(time.Now())
@@ -1682,7 +1692,7 @@ func TestReprovisionFlagSetAndConsumed(t *testing.T) {
 	client := newTestClientWithBundle()
 	reg := transport.NewLocalRegistry(mite.NewRegistry())
 	signer := mite.NewTokenSigner(testKey)
-	rec := NewReconciler(bundle.NewResolver("/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
+	rec := NewReconciler(noop.NewMeterProvider(), bundle.NewResolver("/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
 	rec.Logger = slog.Default()
 
 	recent := metav1.NewTime(time.Now())
@@ -2383,7 +2393,7 @@ func TestHandleConnected_ArtifactSecretReadFaultKeepsLastGood(t *testing.T) {
 	client.getSecretErrs = map[string]error{"abase-cell-big-0": errors.New("etcd unavailable")}
 	reg := transport.NewLocalRegistry(mite.NewRegistry())
 	signer := mite.NewTokenSigner(testKey)
-	rec := NewReconciler(bundle.NewResolver("/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
+	rec := NewReconciler(noop.NewMeterProvider(), bundle.NewResolver("/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
 	rec.Logger = slog.Default()
 	rec.SetArtifactSecretBase("abase")
 	rec.SetBlobstoreURL("s3://my-bucket?region=us-east-1")

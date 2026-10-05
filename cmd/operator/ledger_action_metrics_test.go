@@ -5,30 +5,34 @@ import (
 	"encoding/json"
 	"testing"
 
-	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric/noop"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
-// withTestLedgerActionMeter swaps in a test MeterProvider backed by a
-// ManualReader and rebinds the package-level ledgerActionsRejected
-// instrument against it, so a test observes the real production counter
-// (design D15, task 9.1a) rather than a throwaway local one. It restores
-// the original provider and binding on cleanup.
-func withTestLedgerActionMeter(t *testing.T) *sdkmetric.ManualReader {
+// newTestLedgerActionMetrics returns ledger-action metrics on a meter
+// provider of the test, and the manual reader of that provider.
+func newTestLedgerActionMetrics(t *testing.T) (*ledgerActionMetrics, *sdkmetric.ManualReader) {
 	t.Helper()
-	reader := sdkmetric.NewManualReader()
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	prev := otel.GetMeterProvider()
-	otel.SetMeterProvider(mp)
-	bindLedgerActionMetrics()
-	t.Cleanup(func() {
-		otel.SetMeterProvider(prev)
-		bindLedgerActionMetrics()
-	})
-	return reader
+	mp, reader := newTestMeterProvider(t)
+	m, err := newLedgerActionMetrics(mp)
+	if err != nil {
+		t.Fatalf("create ledger action metrics: %v", err)
+	}
+	return m, reader
+}
+
+// noopLedgerActionMetrics returns ledger-action metrics on a no-op meter
+// provider, for a test that reads no metric.
+func noopLedgerActionMetrics(t *testing.T) *ledgerActionMetrics {
+	t.Helper()
+	m, err := newLedgerActionMetrics(noop.NewMeterProvider())
+	if err != nil {
+		t.Fatalf("create ledger action metrics: %v", err)
+	}
+	return m
 }
 
 // ledgerActionRejectedSum reads the current varroa_ledger_actions_rejected_total
@@ -67,12 +71,13 @@ func ledgerActionRejectedSum(t *testing.T, reader *sdkmetric.ManualReader, reaso
 // varroa_ledger_actions_rejected_total{reason="unknown_kind"} by one,
 // through the real handleLedgerAction call site.
 func TestHandleLedgerAction_UnknownKind_CountsRejection(t *testing.T) {
-	reader := withTestLedgerActionMeter(t)
+	t.Parallel()
+	metrics, reader := newTestLedgerActionMetrics(t)
 	rec := &fakeLedgerActionRunner{}
 	action := recordstore.LedgerAction{Kind: "delete_everything", Cluster: "core", Namespace: "cells-ns", Controller: "cell-a"}
 	data, _ := json.Marshal(action)
 
-	handleLedgerAction(context.Background(), testLogger(), "varroa.ledger.actions.core", "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), metrics, "varroa.ledger.actions.core", "core", rec, data)
 
 	if got := ledgerActionRejectedSum(t, reader, "unknown_kind"); got != 1 {
 		t.Fatalf("expected varroa_ledger_actions_rejected_total{reason=unknown_kind}=1, got %d", got)
@@ -85,7 +90,8 @@ func TestHandleLedgerAction_UnknownKind_CountsRejection(t *testing.T) {
 // varroa_ledger_actions_rejected_total{reason="foreign_cluster"} by one,
 // and leaves the unknown_kind count untouched.
 func TestHandleLedgerAction_OtherCluster_CountsForeignCluster(t *testing.T) {
-	reader := withTestLedgerActionMeter(t)
+	t.Parallel()
+	metrics, reader := newTestLedgerActionMetrics(t)
 	rec := &fakeLedgerActionRunner{}
 	action := recordstore.LedgerAction{
 		Kind: recordstore.LedgerActionWakeCell, Cluster: "hive-b",
@@ -93,7 +99,7 @@ func TestHandleLedgerAction_OtherCluster_CountsForeignCluster(t *testing.T) {
 	}
 	data, _ := json.Marshal(action)
 
-	handleLedgerAction(context.Background(), testLogger(), "varroa.ledger.actions.core", "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), metrics, "varroa.ledger.actions.core", "core", rec, data)
 
 	if rec.wokeCalls != 0 || len(rec.sent) != 0 {
 		t.Fatalf("expected no action for another cluster, got wokeCalls=%d sent=%d", rec.wokeCalls, len(rec.sent))

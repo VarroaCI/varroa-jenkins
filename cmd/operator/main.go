@@ -136,6 +136,19 @@ func main() {
 			}
 		}
 	}()
+	// Every operator instrument reads this provider. InitTelemetry installs
+	// it above, so read it only after that call.
+	meterProvider := otel.GetMeterProvider()
+	ledgerMetrics, err := newLedgerActionMetrics(meterProvider)
+	if err != nil {
+		logger.Error("failed to create ledger action metrics", "error", err)
+		os.Exit(1)
+	}
+	heartbeatCounter, err := newClusterHeartbeatCounter(meterProvider)
+	if err != nil {
+		logger.Error("failed to create cluster heartbeat counter", "error", err)
+		os.Exit(1)
+	}
 
 	if *busURL == "" {
 		if u := os.Getenv("VARROA_BUS_URL"); u != "" {
@@ -516,7 +529,7 @@ func main() {
 	rbacGen.Logger = logger
 
 	// --- Reconciler ---
-	reconciler := controller.NewReconciler(resolver, clientsetClient, clientsetClient, miteTransport, tokenSigner, rbacGen, composer)
+	reconciler := controller.NewReconciler(meterProvider, resolver, clientsetClient, clientsetClient, miteTransport, tokenSigner, rbacGen, composer)
 	reconciler.SetClusterName(cluster)
 	reconciler.SetMiteTokenSigner(miteTokenSigner)
 	reconciler.SetCAPEM(string(certAuth.CAPEM()))
@@ -748,6 +761,7 @@ func main() {
 		busConn:        busConn,
 		cluster:        cluster,
 		reconciler:     reconciler,
+		ledgerMetrics:  ledgerMetrics,
 		crud:           crud,
 		configCrud:     configCrud,
 		broodOps:       broodOps,
@@ -793,6 +807,7 @@ func main() {
 		lifecycle:   lifecycleStore,
 		beatNow:     make(chan struct{}, 1),
 		logger:      logger,
+		heartbeats:  heartbeatCounter,
 	}
 	if err := mgr.Add(hbRunner); err != nil {
 		logger.Error("failed to add cluster heartbeat runner", "error", err)
@@ -1255,6 +1270,7 @@ type operatorCommandRunner struct {
 	busConn        *bus.Conn
 	cluster        string
 	reconciler     *controller.Reconciler
+	ledgerMetrics  *ledgerActionMetrics
 	crud           *controller.CommandCRUD
 	configCrud     *controller.ConfigCRUD
 	broodOps       *controller.CommandBroodOps
@@ -1559,7 +1575,7 @@ func (r *operatorCommandRunner) Start(ctx context.Context) error {
 	// of one cluster across the replicas of that cluster's operator.
 	ledgerActionSub, err := subscribeLedgerActions(r.busConn, r.cluster, operatorQueue,
 		func(subject string, data []byte) {
-			handleLedgerAction(context.Background(), r.logger, subject, r.cluster, r.reconciler, data)
+			handleLedgerAction(context.Background(), r.logger, r.ledgerMetrics, subject, r.cluster, r.reconciler, data)
 		})
 	if err != nil {
 		return fmt.Errorf("subscribe ledger actions: %w", err)

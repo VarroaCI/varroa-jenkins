@@ -49,7 +49,11 @@ stating what it is/is not responsible for:
   onto the command, so the operator's outcome row names the recorder. The one core recorder publishes the actions of every
   cluster, so a member operator receives its actions over the shared bus. It logs at Warn and counts an action that names another cluster
   (`reason="foreign_cluster"`) or an unknown kind (`reason="unknown_kind"`)
-  rather than acting on it. `trigger_run` wakes a hibernated target through the same hibernation
+  rather than acting on it. `main` reads `otel.GetMeterProvider()` once,
+  after `telemetry.InitTelemetry`, and passes it to `NewReconciler`,
+  `newLedgerActionMetrics`, and `newClusterHeartbeatCounter`. No operator
+  test replaces the global provider; `meter_guard_test.go` fails on a
+  `SetMeterProvider` call. `trigger_run` wakes a hibernated target through the same hibernation
   call before it sends the command; a connected target is not woken.
   Every replica also subscribes to `events.brood.<cluster>`
   (`brood_watch.go`): a `disconnected` event enqueues an on-demand

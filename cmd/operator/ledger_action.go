@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"time"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
@@ -15,26 +15,23 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
-// ledgerActionsRejected counts an action the operator refused, labelled
-// by reason: "unknown_kind" for a kind the operator does not know, and
-// "foreign_cluster" for an action that names another cluster. Registered
-// once at package init.
-var ledgerActionsRejected metric.Int64Counter
+// ledgerActionMetrics holds the instruments of the ledger-action
+// subscriber. rejected counts an action the operator refused, labelled by
+// reason: "unknown_kind" for a kind the operator does not know, and
+// "foreign_cluster" for an action that names another cluster.
+type ledgerActionMetrics struct {
+	rejected metric.Int64Counter
+}
 
-func init() { bindLedgerActionMetrics() }
-
-// bindLedgerActionMetrics (re)binds the package-level instrument against
-// the current global MeterProvider. It runs once at package init; a test
-// re-invokes it after swapping in a test MeterProvider so it exercises
-// the real package instrument, not a throwaway local counter.
-func bindLedgerActionMetrics() {
-	meter := otel.Meter("varroa-operator")
-	var err error
-	ledgerActionsRejected, err = meter.Int64Counter("varroa_ledger_actions_rejected_total",
+// newLedgerActionMetrics creates the ledger-action instruments on the
+// "varroa-operator" meter of mp.
+func newLedgerActionMetrics(mp metric.MeterProvider) (*ledgerActionMetrics, error) {
+	rejected, err := mp.Meter("varroa-operator").Int64Counter("varroa_ledger_actions_rejected_total",
 		metric.WithDescription("Ledger actions the operator refused, labelled by reason"))
 	if err != nil {
-		panic("failed to register varroa_ledger_actions_rejected_total counter: " + err.Error())
+		return nil, fmt.Errorf("create varroa_ledger_actions_rejected_total counter: %w", err)
 	}
+	return &ledgerActionMetrics{rejected: rejected}, nil
 }
 
 // subscribeLedgerActions queue-subscribes handler to the ledger-action
@@ -122,7 +119,7 @@ const resumeCommandDeadlineSec = 120
 //
 // The imperative command's subject comes from the action's own namespace
 // and controller fields only — no other field ever names the target.
-func handleLedgerAction(ctx context.Context, logger *slog.Logger, subject, ownCluster string, rec ledgerActionRunner, data []byte) {
+func handleLedgerAction(ctx context.Context, logger *slog.Logger, metrics *ledgerActionMetrics, subject, ownCluster string, rec ledgerActionRunner, data []byte) {
 	var action recordstore.LedgerAction
 	if err := json.Unmarshal(data, &action); err != nil {
 		logger.Warn("ledger action decode failed", "error", err)
@@ -134,7 +131,7 @@ func handleLedgerAction(ctx context.Context, logger *slog.Logger, subject, ownCl
 		// subscription fault, and must be visible.
 		logger.Warn("ledger action for another cluster rejected",
 			"subject", subject, "actionCluster", action.Cluster, "ownCluster", ownCluster)
-		ledgerActionsRejected.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", "foreign_cluster")))
+		metrics.rejected.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", "foreign_cluster")))
 		return
 	}
 
@@ -250,6 +247,6 @@ func handleLedgerAction(ctx context.Context, logger *slog.Logger, subject, ownCl
 		rec.WakeHibernatedController(ctx, action.Namespace, action.Controller)
 	default:
 		logger.Warn("ledger action unknown kind rejected", "kind", action.Kind)
-		ledgerActionsRejected.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", "unknown_kind")))
+		metrics.rejected.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", "unknown_kind")))
 	}
 }

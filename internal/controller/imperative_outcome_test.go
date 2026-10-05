@@ -6,9 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -109,17 +107,9 @@ func TestImperativeOutcomeEventSkipsOtherSuccessesAndDeferral(t *testing.T) {
 // TestRecordImperativeOutcomeCountsBothOutcomes asserts the counter
 // records a success and a failure under their kind and outcome labels.
 func TestRecordImperativeOutcomeCountsBothOutcomes(t *testing.T) {
-	reader := sdkmetric.NewManualReader()
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	prev := otel.GetMeterProvider()
-	otel.SetMeterProvider(mp)
-	bindImperativeOutcomeMetrics()
-	t.Cleanup(func() {
-		otel.SetMeterProvider(prev)
-		bindImperativeOutcomeMetrics()
-	})
-
-	rec := newTestReconciler(newTestClient())
+	t.Parallel()
+	mp, reader := newTestMeterProvider(t)
+	rec := newTestReconcilerWithMeterProvider(mp, newTestClient())
 	ctx := context.Background()
 	cr := outcomeTestController()
 	rec.recordImperativeOutcome(ctx, cr, &mitev1.CommandResult{Success: true, CommandType: mitev1.CommandTypeCancelBuild})

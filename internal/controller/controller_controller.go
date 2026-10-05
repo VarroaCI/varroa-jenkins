@@ -92,44 +92,47 @@ func (r *Reconciler) reconcileFleetPodLabel(ctx context.Context, cr *v1alpha1.Co
 	}
 }
 
-var (
+// controllerMetrics holds the instruments the Reconciler records on the
+// "varroa-operator" meter. NewReconciler builds them from the provider it
+// receives, so a test reads the values through its own provider.
+type controllerMetrics struct {
 	reconcileDuration       metric.Int64Histogram
 	reconcileErrors         metric.Int64Counter
 	reconcileBlockedGauge   metric.Int64Gauge
 	jcascResolveDuration    metric.Float64Histogram
 	pluginLockConflictGauge metric.Int64Gauge
 	miteImageStaleGauge     metric.Int64Gauge
-)
+	imperativeResultsTotal  metric.Int64Counter
+}
 
-func init() { bindControllerMetrics() }
-
-// bindControllerMetrics (re)binds the package-level instruments against the
-// current global MeterProvider. It runs once at package init; tests re-invoke
-// it after swapping in a test MeterProvider so they exercise the real package
-// instruments (and the real recording call sites) rather than a throwaway
-// local gauge — validating the actual metric name/description/attribute wiring
-// that production code emits.
-func bindControllerMetrics() {
-	m := otel.Meter("varroa-operator")
-	reconcileDuration, _ = m.Int64Histogram("varroa.reconcile.duration",
+// newControllerMetrics creates the Reconciler instruments on the
+// "varroa-operator" meter of mp.
+func newControllerMetrics(mp metric.MeterProvider) controllerMetrics {
+	m := mp.Meter("varroa-operator")
+	var cm controllerMetrics
+	cm.reconcileDuration, _ = m.Int64Histogram("varroa.reconcile.duration",
 		metric.WithUnit("ms"),
 		metric.WithDescription("Reconciler tick duration"),
 	)
-	reconcileErrors, _ = m.Int64Counter("varroa.reconcile.errors",
+	cm.reconcileErrors, _ = m.Int64Counter("varroa.reconcile.errors",
 		metric.WithDescription("Reconciler error count"),
 	)
-	reconcileBlockedGauge, _ = m.Int64Gauge("varroa.controller.reconcile.blocked",
+	cm.reconcileBlockedGauge, _ = m.Int64Gauge("varroa.controller.reconcile.blocked",
 		metric.WithDescription("1 if the controller's reconcile loop is currently blocked by an unresolved error, 0 otherwise"),
 	)
-	jcascResolveDuration, _ = m.Float64Histogram("varroa.jcasc.resolve.duration",
+	cm.jcascResolveDuration, _ = m.Float64Histogram("varroa.jcasc.resolve.duration",
 		metric.WithUnit("s"),
 	)
-	pluginLockConflictGauge, _ = m.Int64Gauge("varroa.controller.plugin_lock_conflict",
+	cm.pluginLockConflictGauge, _ = m.Int64Gauge("varroa.controller.plugin_lock_conflict",
 		metric.WithDescription("1 if ConditionPluginConflict is currently True for the controller, 0 otherwise (mirrors ConditionPluginConflict)"),
 	)
-	miteImageStaleGauge, _ = m.Int64Gauge("varroa.controller.mite_image_stale",
+	cm.miteImageStaleGauge, _ = m.Int64Gauge("varroa.controller.mite_image_stale",
 		metric.WithDescription("1 if the controller's running mite image differs from the operator-desired image, 0 if current"),
 	)
+	cm.imperativeResultsTotal, _ = m.Int64Counter("varroa.imperative_command.results",
+		metric.WithDescription("Imperative command results from the mite, labelled by kind and outcome"),
+	)
+	return cm
 }
 
 // miteTokenEntry caches a signed JWT for a mite together with its expiry.
@@ -140,6 +143,7 @@ type miteTokenEntry struct {
 
 // Reconciler reconciles Controller CRs.
 type Reconciler struct {
+	metrics            controllerMetrics
 	Resolver           *bundle.Resolver
 	Composer           *bundle.Composer
 	rbacGenerator      *rbac.Generator
@@ -687,7 +691,7 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 		if len(unresolved) > 0 {
 			result = "error"
 		}
-		jcascResolveDuration.Record(ctx, duration, metric.WithAttributes(
+		r.metrics.jcascResolveDuration.Record(ctx, duration, metric.WithAttributes(
 			attribute.String("result", result),
 		))
 		if len(unresolved) > 0 {
@@ -1155,8 +1159,9 @@ func allowAllVersionRolls(context.Context, *v1alpha1.Controller, string, string)
 }
 
 // NewReconciler creates a new Reconciler.
-func NewReconciler(r *bundle.Resolver, client ResourceClient, store crdstore.Backend, miteTransport transport.Transport, signer *mite.TokenSigner, rbGen *rbac.Generator, composer *bundle.Composer) *Reconciler {
+func NewReconciler(mp metric.MeterProvider, r *bundle.Resolver, client ResourceClient, store crdstore.Backend, miteTransport transport.Transport, signer *mite.TokenSigner, rbGen *rbac.Generator, composer *bundle.Composer) *Reconciler {
 	rec := &Reconciler{
+		metrics:                 newControllerMetrics(mp),
 		Resolver:                r,
 		Composer:                composer,
 		rbacGenerator:           rbGen,
@@ -1533,7 +1538,7 @@ func (r *Reconciler) markReconcileBlocked(ctx context.Context, cr *v1alpha1.Cont
 	})
 	cr.Status.LastReconcileError = message
 	cr.Status.LastReconcileErrorAt = &now
-	reconcileBlockedGauge.Record(ctx, 1, metric.WithAttributes(
+	r.metrics.reconcileBlockedGauge.Record(ctx, 1, metric.WithAttributes(
 		attribute.String("namespace", cr.Namespace),
 		attribute.String("controller", cr.Name),
 	))
@@ -2379,7 +2384,7 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 		result := "success"
 		if reconcileErr != nil {
 			result = "error"
-			reconcileErrors.Add(ctx, 1, metric.WithAttributes(
+			r.metrics.reconcileErrors.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("phase", string(cr.Status.Phase)),
 			))
 		} else if oldPhase != v1alpha1.ControllerPhaseFailed {
@@ -2392,13 +2397,13 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 				})
 				cr.Status.LastReconcileError = ""
 				cr.Status.LastReconcileErrorAt = nil
-				reconcileBlockedGauge.Record(ctx, 0, metric.WithAttributes(
+				r.metrics.reconcileBlockedGauge.Record(ctx, 0, metric.WithAttributes(
 					attribute.String("namespace", cr.Namespace),
 					attribute.String("controller", cr.Name),
 				))
 			}
 		}
-		reconcileDuration.Record(ctx, duration.Milliseconds(), metric.WithAttributes(
+		r.metrics.reconcileDuration.Record(ctx, duration.Milliseconds(), metric.WithAttributes(
 			attribute.String("phase", string(cr.Status.Phase)),
 			attribute.String("result", result),
 		))
@@ -2428,11 +2433,11 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 		// removed, it resets to 0 and lingers there until the operator restarts —
 		// so consumers must alert on == 1, not on series presence (see the C2/C4
 		// specs and docs/operations/observability.md).
-		pluginLockConflictGauge.Record(ctx, 0, metric.WithAttributes(
+		r.metrics.pluginLockConflictGauge.Record(ctx, 0, metric.WithAttributes(
 			attribute.String("namespace", cr.Namespace),
 			attribute.String("controller", cr.Name),
 		))
-		miteImageStaleGauge.Record(ctx, 0, metric.WithAttributes(
+		r.metrics.miteImageStaleGauge.Record(ctx, 0, metric.WithAttributes(
 			attribute.String("namespace", cr.Namespace),
 			attribute.String("controller", cr.Name),
 		))
@@ -5114,7 +5119,7 @@ func (r *Reconciler) surfacePluginConflict(ctx context.Context, cr *v1alpha1.Con
 		Reason:  v1alpha1.ReasonPluginConflict,
 		Message: conflict,
 	})
-	pluginLockConflictGauge.Record(ctx, 1, metric.WithAttributes(
+	r.metrics.pluginLockConflictGauge.Record(ctx, 1, metric.WithAttributes(
 		attribute.String("namespace", cr.Namespace),
 		attribute.String("controller", cr.Name),
 	))
@@ -5141,7 +5146,7 @@ func (r *Reconciler) clearPluginConflict(ctx context.Context, cr *v1alpha1.Contr
 		Status: metav1.ConditionFalse,
 		Reason: "NoConflict",
 	})
-	pluginLockConflictGauge.Record(ctx, 0, metric.WithAttributes(
+	r.metrics.pluginLockConflictGauge.Record(ctx, 0, metric.WithAttributes(
 		attribute.String("namespace", cr.Namespace),
 		attribute.String("controller", cr.Name),
 	))
@@ -6019,7 +6024,7 @@ func (r *Reconciler) refreshMiteImageStaleness(ctx context.Context, cr *v1alpha1
 	if stale {
 		gaugeVal = 1
 	}
-	miteImageStaleGauge.Record(ctx, gaugeVal, metric.WithAttributes(
+	r.metrics.miteImageStaleGauge.Record(ctx, gaugeVal, metric.WithAttributes(
 		attribute.String("namespace", cr.Namespace),
 		attribute.String("controller", cr.Name),
 	))
