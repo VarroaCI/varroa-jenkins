@@ -722,7 +722,7 @@ nats:
     # against the existing JetStream store first.
     image:
       repository: nats
-      tag: 2.10.16-alpine
+      tag: 2.14.7-alpine
     # The JetStream encryption key. Only the NATS container reads it. The
     # varroa chart mints the Secret (see encryption.createSecret).
     env:

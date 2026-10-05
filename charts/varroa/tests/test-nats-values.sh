@@ -3,7 +3,7 @@
 # Golden render test: the NATS values the subchart reads
 # =============================================================================
 # Verifies that:
-#   - the default render runs the pinned server image nats:2.10.16-alpine
+#   - the default render runs the pinned server image nats:2.14.7-alpine
 #   - nats.container.image.tag reaches the NATS StatefulSet
 #   - nats.config.jetstream.fileStore.pvc.size reaches the JetStream claim
 #   - each retired key (nats.image, nats.persistence, nats.service.port,
@@ -50,8 +50,8 @@ RENDER=$(helm template varroa "$ROOT" "${BASE[@]}" 2>/dev/null) || {
   echo "FAIL: helm template failed"
   exit 1
 }
-grep -q 'image: nats:2.10.16-alpine$' <<<"$RENDER"
-check "default render runs nats:2.10.16-alpine" $?
+grep -q 'image: nats:2.14.7-alpine$' <<<"$RENDER"
+check "default render runs nats:2.14.7-alpine" $?
 
 OVERRIDE=$(helm template varroa "$ROOT" "${BASE[@]}" --set nats.container.image.tag=9.9.9-alpine 2>/dev/null)
 grep -q 'image: nats:9.9.9-alpine$' <<<"$OVERRIDE"

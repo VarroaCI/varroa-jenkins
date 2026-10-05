@@ -1,29 +1,26 @@
 # Observability
 
-Varroa exposes component metrics and a controller activity feed. Configure your existing Prometheus-compatible scraper and log platform to collect them.
+Varroa exposes component metrics and a controller activity feed for your own Prometheus-compatible scraper and log platform.
 
 ## Scrape metrics
 
-The chart exposes metrics for the operator, gateway, BFF, recorder (when `recordStore.enabled`), and enabled update center. Configure `telemetry.metricsToken` before exposing metrics, then allow the scraper through [Network policies](../install/network-policies.md).
+Metrics cover the operator, gateway, BFF, recorder (when `recordStore.enabled`), and the enabled update center. Set `telemetry.metricsToken` first, then allow the scraper through [Network policies](../install/network-policies.md).
 
 The operator, gateway, BFF, and recorder export `varroa.bus.connected`, tagged with a `component`
-attribute. It reads 1 while the component holds a NATS connection and 0 while it
-does not. Alert on a sustained 0. A brief 0 after a credential rotation clears
-itself; see [Troubleshooting](troubleshooting.md). The counter `varroa.bus.permission_violations`, with the
-same attribute, counts publishes and subscribes the NATS server denied. A denied publish returns no
+attribute: 1 with a NATS connection, 0 without. Alert on a sustained 0. A brief 0 after a credential
+rotation clears itself; see [Troubleshooting](troubleshooting.md). `varroa.bus.permission_violations`,
+with the same attribute, counts the publishes and subscribes NATS denied. A denied publish returns no
 error, so alert on any increase. The recorder also exports `recorder_fence_veto_total`,
 `recorder_claims_vetoed_total`, `recorder_claim_veto_marked_total`, and
 `recorder_job_home_changed_total`, and logs each refused
 claim; see [Build claims](build-claims.md).
 
-The operator exports `varroa.imperative_command.results`, tagged with `kind` and `outcome`. It
-counts every result of an imperative command that a mite reports, for example `cancel_build` or
-`trigger_build`. `outcome` is `success`, `failure`, or `deferred`. A deferred result is a restart
-that waits for running builds. The mite also logs each result: at info level on success, and at
-warning level on failure. The log line names the kind, the job path, the run, and the reason.
-A plugin refusal gives its plain text, and a Jenkins HTML refusal gives its page title.
-Both are cut at 300 characters.
-The gateway also logs a warning for a refused cancel, input answer, or replay.
+The operator exports `varroa.imperative_command.results`, tagged with `kind` (for example
+`cancel_build`) and `outcome` (`success`, `failure`, or `deferred`; a deferred restart waits for
+running builds). The mite logs each result with the kind, the job path, the run, and the reason:
+info on success, warning on failure. A refusal reason is the plugin's plain text or the Jenkins
+page title, cut at 300 characters. The gateway logs a warning for a refused cancel, input answer,
+or replay.
 
 ## Use activity history
 
@@ -34,22 +31,14 @@ varroactl activity --controller <name>
 varroactl activity --controller <name> --follow
 ```
 
-`varroactl activity` prints a backfill table, then, with `--follow`, streams new events live. Without the record store, the backfill table is always empty, and `--follow` shows only new events.
+`varroactl activity` prints a backfill table, then, with `--follow`, streams new events live. Without the record store the table is empty and `--follow` shows only new events. The feed records lifecycle and audit events; `varroactl logs <namespace>/<name> --follow` gives controller logs.
 
-The activity feed records lifecycle and audit events. Use `varroactl logs <namespace>/<name> --follow` for controller logs.
-
-Four [cell](cells.md) pipelines events appear in the feed. `build.interrupted` marks an
-interrupted run. `build.scheduled.backstop` marks a missed cron build that the backstop fires.
-`build.claim_expired` marks an accepted run that never claimed a build number.
-`build.claim_vetoed` marks a refused claim. The recorder
-writes all four directly to the store. A live subscriber sees each event only on its next
-backfill, never on the live stream.
+Four [cell](cells.md) pipelines events reach the feed only through the store, so a live subscriber sees them on its next backfill. They are `build.interrupted` (an interrupted run), `build.scheduled.backstop` (a missed cron build the backstop fires), `build.claim_expired` (an accepted run with no claimed build number), and `build.claim_vetoed` (a refused claim).
 
 The operator publishes one `command.failed` event for each imperative command that fails on a
-controller. The event names the sender in `actor`, the command kind in `reason`, the job path, the
-run, the HTTP status, and the error text. A person's successful cancel, input answer, or replay
-publishes one `command.succeeded` event with the same fields. Other successes and a deferred
-restart publish no event.
+controller, with the sender in `actor`, the kind in `reason`, the job path, the run, the HTTP
+status, and the error text. A person's successful cancel, input answer, or replay publishes
+`command.succeeded` with the same fields; other successes and a deferred restart publish no event.
 
 ## Read brood health
 

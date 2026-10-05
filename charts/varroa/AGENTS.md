@@ -186,7 +186,7 @@ the packaged CRDs. Does not own the Go source it packages
   consumer on 2.10.16 and 2.11.17. NATS converts a plain store in place on the first
   start with a key. Asserted by `tests/test-nats-encryption.sh`.
 - **NATS values go to the subchart's own keys.** `nats.container.image` pins the
-  server at `nats:2.10.16-alpine`; a change is a server upgrade that needs a live
+  server at `nats:2.14.7-alpine`; a change is a server upgrade that needs a live
   test against the existing JetStream store. The JetStream volume is
   `nats.config.jetstream.fileStore.pvc.*`. The client port 4222 and the monitor
   port 8222 are fixed: the bus URL, the NetworkPolicies, the external Service,

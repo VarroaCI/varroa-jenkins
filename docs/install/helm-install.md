@@ -164,30 +164,25 @@ To keep earlier values, use `--reset-then-reuse-values`. The chart refuses `--re
 ### Bus credentials and GitOps renders
 
 The chart mints the NATS passwords, the TLS material, and the JetStream
-encryption key once. On `helm upgrade` it re-reads them from the existing
-Secrets. Renderers that cannot read the cluster, such as `helm template`,
-ArgoCD, and Flux, mint fresh values on each render.
-
-Fresh passwords are safe. The components reread the Secret and recover in
-about a minute.
-
-A fresh key is not safe. NATS encrypts JetStream with the key in the
-`varroa-nats-js-key` Secret. A changed or lost key loses all JetStream state.
-Back up the key after the first install:
+encryption key once and re-reads them on `helm upgrade`. Renderers that cannot
+read the cluster (`helm template`, ArgoCD, Flux) mint fresh values on each render.
+Fresh passwords are safe: the components recover in about a minute. A fresh key
+is not: NATS encrypts JetStream with the key in `varroa-nats-js-key`, and a
+changed or lost key loses all JetStream state. Back up the key after the first
+install:
 
 ```bash
 kubectl get secret varroa-nats-js-key -n varroa-system -o jsonpath='{.data.key}' | base64 -d
 ```
 
 For a GitOps render, set `nats.encryption.createSecret: false` and create the
-Secret yourself. The key starts with a letter and holds only letters and digits:
+Secret yourself (a letter first, then letters and digits only):
 
 ```bash
 kubectl create secret generic varroa-nats-js-key -n varroa-system --from-literal=key=<key>
 ```
 
-Uninstall keeps the Secret. Without it, `helm upgrade` fails. Restore it from
-the backup.
+Uninstall keeps the Secret. Without it `helm upgrade` fails; restore it from the backup.
 
 ## Uninstall
 
