@@ -1353,208 +1353,11 @@ func handleWake(ctx context.Context, logger *slog.Logger, rec hibernationCommand
 func (r *operatorCommandRunner) Start(ctx context.Context) error {
 	const operatorQueue = "operator-workers"
 
-	// reconcileAction wraps a fire-and-forget reconciler call in the shared
-	// ReconcileRequest decode/response envelope.
-	reconcileAction := func(name string, act func(req bus.ReconcileRequest)) func([]byte) []byte {
-		return func(data []byte) []byte {
-			var req bus.ReconcileRequest
-			if err := json.Unmarshal(data, &req); err != nil {
-				r.logger.Warn(name+" request decode failed", "error", err)
-				resp, _ := json.Marshal(bus.ReconcileResponse{Error: err.Error()})
-				return resp
-			}
-			act(req)
-			resp, _ := json.Marshal(bus.ReconcileResponse{})
-			return resp
-		}
+	stopResponders, err := serveCommandResponders(r.busConn, operatorQueue, r.commandResponders(ctx), r.logger)
+	if err != nil {
+		return err
 	}
-
-	subscriptions := []struct {
-		name    string
-		subject string
-		handler bus.RequestHandler
-	}{
-		{"reconcile", bus.OperatorReconcileSubject(r.cluster), reconcileAction("reconcile", func(req bus.ReconcileRequest) {
-			r.reconciler.TriggerReconcile(r.cluster, req.Name, req.Namespace)
-		})},
-		{"nudge", bus.OperatorNudgeSubject(r.cluster), reconcileAction("nudge", func(req bus.ReconcileRequest) {
-			r.reconciler.WakeController(r.cluster, req.Namespace, req.Name)
-		})},
-		{"hibernate", bus.OperatorHibernateSubject(r.cluster), func(data []byte) []byte {
-			return handleHibernate(ctx, r.logger, r.reconciler, data)
-		}},
-		{"wake", bus.OperatorWakeSubject(r.cluster), func(data []byte) []byte {
-			return handleWake(ctx, r.logger, r.reconciler, data)
-		}},
-		{"reprovision", bus.OperatorReprovisionSubject(r.cluster), reconcileAction("reprovision", func(req bus.ReconcileRequest) {
-			r.reconciler.Reprovision(r.cluster, req.Namespace, req.Name)
-		})},
-		{"controllers.list", bus.OperatorControllersSubject(r.cluster, "list"), r.crud.HandleList},
-		{"controllers.get", bus.OperatorControllersSubject(r.cluster, "get"), r.crud.HandleGet},
-		{"controllers.create", bus.OperatorControllersSubject(r.cluster, "create"), r.crud.HandleCreate},
-		{"controllers.update", bus.OperatorControllersSubject(r.cluster, "update"), r.crud.HandleUpdate},
-		{"controllers.delete", bus.OperatorControllersSubject(r.cluster, "delete"), r.crud.HandleDelete},
-		{"controllers.deletepod", bus.OperatorControllersSubject(r.cluster, "deletepod"), r.crud.HandleDeletePod},
-		{"cluster.drain", bus.OperatorClusterSubject(r.cluster, "drain"), func(data []byte) []byte {
-			var req bus.ClusterDrainRequest
-			if err := json.Unmarshal(data, &req); err != nil {
-				resp, _ := json.Marshal(bus.ClusterDrainResponse{Error: "invalid request", Code: bus.CodeInvalid})
-				return resp
-			}
-			bctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-
-			st, err := r.lifecycle.Load(bctx)
-			if err != nil {
-				r.logger.Warn("cluster.drain: load failed", "error", err)
-				resp, _ := json.Marshal(bus.ClusterDrainResponse{Error: err.Error(), Code: bus.CodeInternal})
-				return resp
-			}
-
-			if st.State == bus.ClusterStateActive {
-				if err := r.lifecycle.SetDraining(bctx, req.RequestedBy); err != nil {
-					r.logger.Warn("cluster.drain: set draining failed", "error", err)
-					resp, _ := json.Marshal(bus.ClusterDrainResponse{Error: err.Error(), Code: bus.CodeInternal})
-					return resp
-				}
-
-				// Count controllers for activity event
-				ctrlCount := 0
-				if ctrls, listErr := crdstore.List[v1alpha1.Controller](bctx, r.crud.Store, "", ""); listErr == nil {
-					ctrlCount = len(ctrls)
-				}
-
-				if r.activity != nil {
-					r.activity.Publish(activity.Event{
-						Type:    "cluster.drain.started",
-						Source:  "operator",
-						Actor:   req.RequestedBy,
-						Message: fmt.Sprintf("cluster drain started (%d controllers)", ctrlCount),
-					})
-				}
-				if r.beatNow != nil {
-					r.beatNow()
-				}
-				resp, _ := json.Marshal(bus.ClusterDrainResponse{State: bus.ClusterStateDraining})
-				return resp
-			}
-
-			// Idempotent: already draining/drained, reply current state with no side effects.
-			resp, _ := json.Marshal(bus.ClusterDrainResponse{State: st.State})
-			return resp
-		}},
-		{"cluster.draincancel", bus.OperatorClusterSubject(r.cluster, "draincancel"), func(data []byte) []byte {
-			var req bus.ClusterDrainCancelRequest
-			if err := json.Unmarshal(data, &req); err != nil {
-				resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{Error: "invalid request", Code: bus.CodeInvalid})
-				return resp
-			}
-			bctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-
-			st, err := r.lifecycle.Load(bctx)
-			if err != nil {
-				r.logger.Warn("cluster.draincancel: load failed", "error", err)
-				resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{Error: err.Error(), Code: bus.CodeInternal})
-				return resp
-			}
-
-			if st.State == bus.ClusterStateActive {
-				resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{
-					Error: "cluster is not draining",
-					Code:  bus.CodeConflict,
-				})
-				return resp
-			}
-
-			// draining or drained → set active
-			if err := r.lifecycle.SetActive(bctx); err != nil {
-				r.logger.Warn("cluster.draincancel: set active failed", "error", err)
-				resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{Error: err.Error(), Code: bus.CodeInternal})
-				return resp
-			}
-
-			if r.activity != nil {
-				r.activity.Publish(activity.Event{
-					Type:    "cluster.drain.canceled",
-					Source:  "operator",
-					Actor:   req.RequestedBy,
-					Message: "cluster drain canceled",
-				})
-			}
-			if r.beatNow != nil {
-				r.beatNow()
-			}
-			resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{State: bus.ClusterStateActive})
-			return resp
-		}},
-		// BroodOps command handlers per design §3 (F2 cross-cluster brood ops).
-		{"broodops.create", bus.OperatorBroodOpsSubject(r.cluster, "create"), r.broodOps.HandleCreate},
-		{"broodops.get", bus.OperatorBroodOpsSubject(r.cluster, "get"), r.broodOps.HandleGet},
-		{"broodops.list", bus.OperatorBroodOpsSubject(r.cluster, "list"), r.broodOps.HandleList},
-		{"broodops.cancel", bus.OperatorBroodOpsSubject(r.cluster, "cancel"), r.broodOps.HandleCancel},
-		{"broodops.suspend", bus.OperatorBroodOpsSubject(r.cluster, "suspend"), r.broodOps.HandleSuspend},
-		{"broodops.preview", bus.OperatorBroodOpsSubject(r.cluster, "preview"), r.broodOps.HandlePreview},
-		// BroodSchedules command handlers.
-		{"broodschedules.create", bus.OperatorBroodSchedulesSubject(r.cluster, "create"), r.broodSchedules.HandleCreate},
-		{"broodschedules.get", bus.OperatorBroodSchedulesSubject(r.cluster, "get"), r.broodSchedules.HandleGet},
-		{"broodschedules.list", bus.OperatorBroodSchedulesSubject(r.cluster, "list"), r.broodSchedules.HandleList},
-		{"broodschedules.delete", bus.OperatorBroodSchedulesSubject(r.cluster, "delete"), r.broodSchedules.HandleDelete},
-		{"broodschedules.suspend", bus.OperatorBroodSchedulesSubject(r.cluster, "suspend"), r.broodSchedules.HandleSuspend},
-		// Config CRUD handlers (add-remote-config-authoring) — 27 subjects.
-		{"bundles.list", bus.OperatorBundlesSubject(r.cluster, "list"), r.configCrud.HandleBundlesList},
-		{"bundles.get", bus.OperatorBundlesSubject(r.cluster, "get"), r.configCrud.HandleBundlesGet},
-		{"bundles.create", bus.OperatorBundlesSubject(r.cluster, "create"), r.configCrud.HandleBundlesCreate},
-		{"bundles.update", bus.OperatorBundlesSubject(r.cluster, "update"), r.configCrud.HandleBundlesUpdate},
-		{"bundles.delete", bus.OperatorBundlesSubject(r.cluster, "delete"), r.configCrud.HandleBundlesDelete},
-		{"bundles.preview", bus.OperatorBundlesSubject(r.cluster, "preview"), r.configCrud.HandleBundlesPreview},
-		{"bundles.validate", bus.OperatorBundlesSubject(r.cluster, "validate"), r.configCrud.HandleBundlesValidate},
-		{"bundles.pause", bus.OperatorBundlesSubject(r.cluster, "pause"), r.configCrud.HandleBundlesPause},
-		{"bundles.resume", bus.OperatorBundlesSubject(r.cluster, "resume"), r.configCrud.HandleBundlesPause},
-		{"catalog.itemlist", bus.OperatorCatalogSubject(r.cluster, "itemlist"), r.configCrud.HandleItemsList},
-		{"catalog.itemget", bus.OperatorCatalogSubject(r.cluster, "itemget"), r.configCrud.HandleItemsGet},
-		{"catalog.sourcelist", bus.OperatorCatalogSubject(r.cluster, "sourcelist"), r.configCrud.HandleSourcesList},
-		{"catalog.sourceget", bus.OperatorCatalogSubject(r.cluster, "sourceget"), r.configCrud.HandleSourcesGet},
-		{"catalog.sourcecreate", bus.OperatorCatalogSubject(r.cluster, "sourcecreate"), r.configCrud.HandleSourcesCreate},
-		{"catalog.sourceupdate", bus.OperatorCatalogSubject(r.cluster, "sourceupdate"), r.configCrud.HandleSourcesUpdate},
-		{"catalog.sourcedelete", bus.OperatorCatalogSubject(r.cluster, "sourcedelete"), r.configCrud.HandleSourcesDelete},
-		{"catalog.sourcesync", bus.OperatorCatalogSubject(r.cluster, "sourcesync"), r.configCrud.HandleSourceSync},
-		{"rbac.rolelist", bus.OperatorRbacSubject(r.cluster, "rolelist"), r.configCrud.HandleRolesList},
-		{"rbac.roleget", bus.OperatorRbacSubject(r.cluster, "roleget"), r.configCrud.HandleRolesGet},
-		{"rbac.rolecreate", bus.OperatorRbacSubject(r.cluster, "rolecreate"), r.configCrud.HandleRolesCreate},
-		{"rbac.roleupdate", bus.OperatorRbacSubject(r.cluster, "roleupdate"), r.configCrud.HandleRolesUpdate},
-		{"rbac.roledelete", bus.OperatorRbacSubject(r.cluster, "roledelete"), r.configCrud.HandleRolesDelete},
-		{"rbac.bindinglist", bus.OperatorRbacSubject(r.cluster, "bindinglist"), r.configCrud.HandleBindingsList},
-		{"rbac.bindingget", bus.OperatorRbacSubject(r.cluster, "bindingget"), r.configCrud.HandleBindingsGet},
-		{"rbac.bindingcreate", bus.OperatorRbacSubject(r.cluster, "bindingcreate"), r.configCrud.HandleBindingsCreate},
-		{"rbac.bindingupdate", bus.OperatorRbacSubject(r.cluster, "bindingupdate"), r.configCrud.HandleBindingsUpdate},
-		{"rbac.bindingdelete", bus.OperatorRbacSubject(r.cluster, "bindingdelete"), r.configCrud.HandleBindingsDelete},
-		{"provisioningdefaults.get", bus.OperatorProvisioningDefaultsSubject(r.cluster, "get"), r.configCrud.HandleProvisioningDefaultsGet},
-		{"provisioningdefaults.update", bus.OperatorProvisioningDefaultsSubject(r.cluster, "update"), r.configCrud.HandleProvisioningDefaultsUpdate},
-		{"versionprofiles.list", bus.OperatorVersionProfilesSubject(r.cluster, "list"), r.configCrud.HandleVersionProfilesList},
-		{"versionprofiles.get", bus.OperatorVersionProfilesSubject(r.cluster, "get"), r.configCrud.HandleVersionProfilesGet},
-		{"versionprofiles.create", bus.OperatorVersionProfilesSubject(r.cluster, "create"), r.configCrud.HandleVersionProfilesCreate},
-		{"versionprofiles.update", bus.OperatorVersionProfilesSubject(r.cluster, "update"), r.configCrud.HandleVersionProfilesUpdate},
-		{"versionprofiles.delete", bus.OperatorVersionProfilesSubject(r.cluster, "delete"), r.configCrud.HandleVersionProfilesDelete},
-		{"versionprofiles.view", bus.OperatorVersionProfilesSubject(r.cluster, "view"), r.configCrud.HandleVersionProfilesView},
-		{"cellpools.list", bus.OperatorCellPoolsSubject(r.cluster, "list"), r.configCrud.HandleCellPoolsList},
-		{"cellpools.get", bus.OperatorCellPoolsSubject(r.cluster, "get"), r.configCrud.HandleCellPoolsGet},
-		{"cellpools.scale", bus.OperatorCellPoolsSubject(r.cluster, "scale"), r.configCrud.HandleCellPoolsScale},
-		// Namespace discovery (F4 add-cluster-namespace-discovery).
-		{"namespaces.list", bus.OperatorNamespacesSubject(r.cluster), r.crud.HandleNamespacesList},
-	}
-
-	for _, sp := range subscriptions {
-		sub, err := r.busConn.ServeRequests(sp.subject, operatorQueue, sp.handler)
-		if err != nil {
-			return fmt.Errorf("subscribe %s: %w", sp.name, err)
-		}
-		defer func(name string) {
-			if err := sub.Unsubscribe(); err != nil {
-				r.logger.Warn("unsubscribe "+name+" failed", "error", err)
-			}
-		}(sp.name)
-	}
+	defer stopResponders()
 
 	// Hibernation wake: the BFF publishes at-most-once on wake.<cluster>.<ns>.<ctrl>
 	// (nil payload; identity is in the subject). It does not fit the request/reply
@@ -1815,6 +1618,257 @@ func reconcileAllTeams(ctx context.Context, store crdstore.Backend, rec *control
 		if _, err := rec.Reconcile(ctx, req); err != nil {
 			logger.Warn("failed to reconcile Team", "team", t.Name, "error", err)
 		}
+	}
+}
+
+// serialResponder is the limit of a subject whose handler runs one request
+// at a time.
+const serialResponder = 1
+
+// composeConcurrency limits the bundle compose requests that the leader runs
+// at a time on each compose subject. Each subject has its own slots, so the
+// two compose subjects together can run twice this number. A compose can
+// wait a long time on a git clone or an OCI pull. While a slot is free, the
+// next compose starts at once. When every slot is in use, the next compose
+// waits for a free slot.
+const composeConcurrency = 4
+
+// commandResponder is one request-reply subject of the operator command
+// runner. A limit above serialResponder serves the subject through
+// ServeRequestsConcurrently with that number of slots.
+type commandResponder struct {
+	name    string
+	subject string
+	handler bus.RequestHandler
+	limit   int
+}
+
+// serveCommandResponders subscribes every responder in queue and returns a
+// function that stops all of them. On a subscribe error it stops the
+// responders that it already started and returns the error.
+func serveCommandResponders(conn *bus.Conn, queue string, responders []commandResponder, logger *slog.Logger) (func(), error) {
+	started := make([]*bus.Responder, 0, len(responders))
+	names := make([]string, 0, len(responders))
+	stop := func() {
+		for i, sub := range started {
+			if err := sub.Unsubscribe(); err != nil {
+				logger.Warn("unsubscribe "+names[i]+" failed", "error", err)
+			}
+		}
+	}
+	for _, cr := range responders {
+		var (
+			sub *bus.Responder
+			err error
+		)
+		if cr.limit > serialResponder {
+			sub, err = conn.ServeRequestsConcurrently(cr.subject, queue, cr.limit, cr.handler)
+		} else {
+			sub, err = conn.ServeRequests(cr.subject, queue, cr.handler)
+		}
+		if err != nil {
+			stop()
+			return nil, fmt.Errorf("subscribe %s: %w", cr.name, err)
+		}
+		started = append(started, sub)
+		names = append(names, cr.name)
+	}
+	return stop, nil
+}
+
+// commandResponders lists the request-reply subjects that the leader serves
+// in the operator-workers queue group, with the handler and the concurrency
+// limit of each subject. Only the leader runs this runner, so the queue group
+// has one member. A serial subject holds each request until the request
+// before it on that subject ends, for the whole cluster. Give a row a limit
+// above serialResponder only after you make sure that its handler is safe
+// for concurrent calls.
+func (r *operatorCommandRunner) commandResponders(ctx context.Context) []commandResponder {
+	// reconcileAction wraps a fire-and-forget reconciler call in the shared
+	// ReconcileRequest decode/response envelope.
+	reconcileAction := func(name string, act func(req bus.ReconcileRequest)) func([]byte) []byte {
+		return func(data []byte) []byte {
+			var req bus.ReconcileRequest
+			if err := json.Unmarshal(data, &req); err != nil {
+				r.logger.Warn(name+" request decode failed", "error", err)
+				resp, _ := json.Marshal(bus.ReconcileResponse{Error: err.Error()})
+				return resp
+			}
+			act(req)
+			resp, _ := json.Marshal(bus.ReconcileResponse{})
+			return resp
+		}
+	}
+
+	return []commandResponder{
+		{"reconcile", bus.OperatorReconcileSubject(r.cluster), reconcileAction("reconcile", func(req bus.ReconcileRequest) {
+			r.reconciler.TriggerReconcile(r.cluster, req.Name, req.Namespace)
+		}), serialResponder},
+		{"nudge", bus.OperatorNudgeSubject(r.cluster), reconcileAction("nudge", func(req bus.ReconcileRequest) {
+			r.reconciler.WakeController(r.cluster, req.Namespace, req.Name)
+		}), serialResponder},
+		{"hibernate", bus.OperatorHibernateSubject(r.cluster), func(data []byte) []byte {
+			return handleHibernate(ctx, r.logger, r.reconciler, data)
+		}, serialResponder},
+		{"wake", bus.OperatorWakeSubject(r.cluster), func(data []byte) []byte {
+			return handleWake(ctx, r.logger, r.reconciler, data)
+		}, serialResponder},
+		{"reprovision", bus.OperatorReprovisionSubject(r.cluster), reconcileAction("reprovision", func(req bus.ReconcileRequest) {
+			r.reconciler.Reprovision(r.cluster, req.Namespace, req.Name)
+		}), serialResponder},
+		{"controllers.list", bus.OperatorControllersSubject(r.cluster, "list"), r.crud.HandleList, serialResponder},
+		{"controllers.get", bus.OperatorControllersSubject(r.cluster, "get"), r.crud.HandleGet, serialResponder},
+		{"controllers.create", bus.OperatorControllersSubject(r.cluster, "create"), r.crud.HandleCreate, serialResponder},
+		{"controllers.update", bus.OperatorControllersSubject(r.cluster, "update"), r.crud.HandleUpdate, serialResponder},
+		{"controllers.delete", bus.OperatorControllersSubject(r.cluster, "delete"), r.crud.HandleDelete, serialResponder},
+		{"controllers.deletepod", bus.OperatorControllersSubject(r.cluster, "deletepod"), r.crud.HandleDeletePod, serialResponder},
+		{"cluster.drain", bus.OperatorClusterSubject(r.cluster, "drain"), func(data []byte) []byte {
+			var req bus.ClusterDrainRequest
+			if err := json.Unmarshal(data, &req); err != nil {
+				resp, _ := json.Marshal(bus.ClusterDrainResponse{Error: "invalid request", Code: bus.CodeInvalid})
+				return resp
+			}
+			bctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			st, err := r.lifecycle.Load(bctx)
+			if err != nil {
+				r.logger.Warn("cluster.drain: load failed", "error", err)
+				resp, _ := json.Marshal(bus.ClusterDrainResponse{Error: err.Error(), Code: bus.CodeInternal})
+				return resp
+			}
+
+			if st.State == bus.ClusterStateActive {
+				if err := r.lifecycle.SetDraining(bctx, req.RequestedBy); err != nil {
+					r.logger.Warn("cluster.drain: set draining failed", "error", err)
+					resp, _ := json.Marshal(bus.ClusterDrainResponse{Error: err.Error(), Code: bus.CodeInternal})
+					return resp
+				}
+
+				// Count controllers for activity event
+				ctrlCount := 0
+				if ctrls, listErr := crdstore.List[v1alpha1.Controller](bctx, r.crud.Store, "", ""); listErr == nil {
+					ctrlCount = len(ctrls)
+				}
+
+				if r.activity != nil {
+					r.activity.Publish(activity.Event{
+						Type:    "cluster.drain.started",
+						Source:  "operator",
+						Actor:   req.RequestedBy,
+						Message: fmt.Sprintf("cluster drain started (%d controllers)", ctrlCount),
+					})
+				}
+				if r.beatNow != nil {
+					r.beatNow()
+				}
+				resp, _ := json.Marshal(bus.ClusterDrainResponse{State: bus.ClusterStateDraining})
+				return resp
+			}
+
+			// Idempotent: already draining/drained, reply current state with no side effects.
+			resp, _ := json.Marshal(bus.ClusterDrainResponse{State: st.State})
+			return resp
+		}, serialResponder},
+		{"cluster.draincancel", bus.OperatorClusterSubject(r.cluster, "draincancel"), func(data []byte) []byte {
+			var req bus.ClusterDrainCancelRequest
+			if err := json.Unmarshal(data, &req); err != nil {
+				resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{Error: "invalid request", Code: bus.CodeInvalid})
+				return resp
+			}
+			bctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			st, err := r.lifecycle.Load(bctx)
+			if err != nil {
+				r.logger.Warn("cluster.draincancel: load failed", "error", err)
+				resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{Error: err.Error(), Code: bus.CodeInternal})
+				return resp
+			}
+
+			if st.State == bus.ClusterStateActive {
+				resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{
+					Error: "cluster is not draining",
+					Code:  bus.CodeConflict,
+				})
+				return resp
+			}
+
+			// draining or drained → set active
+			if err := r.lifecycle.SetActive(bctx); err != nil {
+				r.logger.Warn("cluster.draincancel: set active failed", "error", err)
+				resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{Error: err.Error(), Code: bus.CodeInternal})
+				return resp
+			}
+
+			if r.activity != nil {
+				r.activity.Publish(activity.Event{
+					Type:    "cluster.drain.canceled",
+					Source:  "operator",
+					Actor:   req.RequestedBy,
+					Message: "cluster drain canceled",
+				})
+			}
+			if r.beatNow != nil {
+				r.beatNow()
+			}
+			resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{State: bus.ClusterStateActive})
+			return resp
+		}, serialResponder},
+		// BroodOps command handlers per design §3 (F2 cross-cluster brood ops).
+		{"broodops.create", bus.OperatorBroodOpsSubject(r.cluster, "create"), r.broodOps.HandleCreate, serialResponder},
+		{"broodops.get", bus.OperatorBroodOpsSubject(r.cluster, "get"), r.broodOps.HandleGet, serialResponder},
+		{"broodops.list", bus.OperatorBroodOpsSubject(r.cluster, "list"), r.broodOps.HandleList, serialResponder},
+		{"broodops.cancel", bus.OperatorBroodOpsSubject(r.cluster, "cancel"), r.broodOps.HandleCancel, serialResponder},
+		{"broodops.suspend", bus.OperatorBroodOpsSubject(r.cluster, "suspend"), r.broodOps.HandleSuspend, serialResponder},
+		{"broodops.preview", bus.OperatorBroodOpsSubject(r.cluster, "preview"), r.broodOps.HandlePreview, serialResponder},
+		// BroodSchedules command handlers.
+		{"broodschedules.create", bus.OperatorBroodSchedulesSubject(r.cluster, "create"), r.broodSchedules.HandleCreate, serialResponder},
+		{"broodschedules.get", bus.OperatorBroodSchedulesSubject(r.cluster, "get"), r.broodSchedules.HandleGet, serialResponder},
+		{"broodschedules.list", bus.OperatorBroodSchedulesSubject(r.cluster, "list"), r.broodSchedules.HandleList, serialResponder},
+		{"broodschedules.delete", bus.OperatorBroodSchedulesSubject(r.cluster, "delete"), r.broodSchedules.HandleDelete, serialResponder},
+		{"broodschedules.suspend", bus.OperatorBroodSchedulesSubject(r.cluster, "suspend"), r.broodSchedules.HandleSuspend, serialResponder},
+		// Config CRUD handlers (add-remote-config-authoring) — 27 subjects.
+		{"bundles.list", bus.OperatorBundlesSubject(r.cluster, "list"), r.configCrud.HandleBundlesList, serialResponder},
+		{"bundles.get", bus.OperatorBundlesSubject(r.cluster, "get"), r.configCrud.HandleBundlesGet, serialResponder},
+		{"bundles.create", bus.OperatorBundlesSubject(r.cluster, "create"), r.configCrud.HandleBundlesCreate, serialResponder},
+		{"bundles.update", bus.OperatorBundlesSubject(r.cluster, "update"), r.configCrud.HandleBundlesUpdate, serialResponder},
+		{"bundles.delete", bus.OperatorBundlesSubject(r.cluster, "delete"), r.configCrud.HandleBundlesDelete, serialResponder},
+		{"bundles.preview", bus.OperatorBundlesSubject(r.cluster, "preview"), r.configCrud.HandleBundlesPreview, composeConcurrency},
+		{"bundles.validate", bus.OperatorBundlesSubject(r.cluster, "validate"), r.configCrud.HandleBundlesValidate, composeConcurrency},
+		{"bundles.pause", bus.OperatorBundlesSubject(r.cluster, "pause"), r.configCrud.HandleBundlesPause, serialResponder},
+		{"bundles.resume", bus.OperatorBundlesSubject(r.cluster, "resume"), r.configCrud.HandleBundlesPause, serialResponder},
+		{"catalog.itemlist", bus.OperatorCatalogSubject(r.cluster, "itemlist"), r.configCrud.HandleItemsList, serialResponder},
+		{"catalog.itemget", bus.OperatorCatalogSubject(r.cluster, "itemget"), r.configCrud.HandleItemsGet, serialResponder},
+		{"catalog.sourcelist", bus.OperatorCatalogSubject(r.cluster, "sourcelist"), r.configCrud.HandleSourcesList, serialResponder},
+		{"catalog.sourceget", bus.OperatorCatalogSubject(r.cluster, "sourceget"), r.configCrud.HandleSourcesGet, serialResponder},
+		{"catalog.sourcecreate", bus.OperatorCatalogSubject(r.cluster, "sourcecreate"), r.configCrud.HandleSourcesCreate, serialResponder},
+		{"catalog.sourceupdate", bus.OperatorCatalogSubject(r.cluster, "sourceupdate"), r.configCrud.HandleSourcesUpdate, serialResponder},
+		{"catalog.sourcedelete", bus.OperatorCatalogSubject(r.cluster, "sourcedelete"), r.configCrud.HandleSourcesDelete, serialResponder},
+		{"catalog.sourcesync", bus.OperatorCatalogSubject(r.cluster, "sourcesync"), r.configCrud.HandleSourceSync, serialResponder},
+		{"rbac.rolelist", bus.OperatorRbacSubject(r.cluster, "rolelist"), r.configCrud.HandleRolesList, serialResponder},
+		{"rbac.roleget", bus.OperatorRbacSubject(r.cluster, "roleget"), r.configCrud.HandleRolesGet, serialResponder},
+		{"rbac.rolecreate", bus.OperatorRbacSubject(r.cluster, "rolecreate"), r.configCrud.HandleRolesCreate, serialResponder},
+		{"rbac.roleupdate", bus.OperatorRbacSubject(r.cluster, "roleupdate"), r.configCrud.HandleRolesUpdate, serialResponder},
+		{"rbac.roledelete", bus.OperatorRbacSubject(r.cluster, "roledelete"), r.configCrud.HandleRolesDelete, serialResponder},
+		{"rbac.bindinglist", bus.OperatorRbacSubject(r.cluster, "bindinglist"), r.configCrud.HandleBindingsList, serialResponder},
+		{"rbac.bindingget", bus.OperatorRbacSubject(r.cluster, "bindingget"), r.configCrud.HandleBindingsGet, serialResponder},
+		{"rbac.bindingcreate", bus.OperatorRbacSubject(r.cluster, "bindingcreate"), r.configCrud.HandleBindingsCreate, serialResponder},
+		{"rbac.bindingupdate", bus.OperatorRbacSubject(r.cluster, "bindingupdate"), r.configCrud.HandleBindingsUpdate, serialResponder},
+		{"rbac.bindingdelete", bus.OperatorRbacSubject(r.cluster, "bindingdelete"), r.configCrud.HandleBindingsDelete, serialResponder},
+		{"provisioningdefaults.get", bus.OperatorProvisioningDefaultsSubject(r.cluster, "get"), r.configCrud.HandleProvisioningDefaultsGet, serialResponder},
+		{"provisioningdefaults.update", bus.OperatorProvisioningDefaultsSubject(r.cluster, "update"), r.configCrud.HandleProvisioningDefaultsUpdate, serialResponder},
+		{"versionprofiles.list", bus.OperatorVersionProfilesSubject(r.cluster, "list"), r.configCrud.HandleVersionProfilesList, serialResponder},
+		{"versionprofiles.get", bus.OperatorVersionProfilesSubject(r.cluster, "get"), r.configCrud.HandleVersionProfilesGet, serialResponder},
+		{"versionprofiles.create", bus.OperatorVersionProfilesSubject(r.cluster, "create"), r.configCrud.HandleVersionProfilesCreate, serialResponder},
+		{"versionprofiles.update", bus.OperatorVersionProfilesSubject(r.cluster, "update"), r.configCrud.HandleVersionProfilesUpdate, serialResponder},
+		{"versionprofiles.delete", bus.OperatorVersionProfilesSubject(r.cluster, "delete"), r.configCrud.HandleVersionProfilesDelete, serialResponder},
+		{"versionprofiles.view", bus.OperatorVersionProfilesSubject(r.cluster, "view"), r.configCrud.HandleVersionProfilesView, serialResponder},
+		{"cellpools.list", bus.OperatorCellPoolsSubject(r.cluster, "list"), r.configCrud.HandleCellPoolsList, serialResponder},
+		{"cellpools.get", bus.OperatorCellPoolsSubject(r.cluster, "get"), r.configCrud.HandleCellPoolsGet, serialResponder},
+		{"cellpools.scale", bus.OperatorCellPoolsSubject(r.cluster, "scale"), r.configCrud.HandleCellPoolsScale, serialResponder},
+		// Namespace discovery (F4 add-cluster-namespace-discovery).
+		{"namespaces.list", bus.OperatorNamespacesSubject(r.cluster), r.crud.HandleNamespacesList, serialResponder},
 	}
 }
 

@@ -39,7 +39,19 @@ stating what it is/is not responsible for:
   so an approve that waits for one controller's lock does not hold an approve for
   another controller while a slot is free. When all 16 slots are in use, the next
   approve waits for a free slot. The controller lock still serializes approves for one
-  controller. `controllerIssuer` (`main.go`) is the only choice of
+  controller. The leader alone serves the command subjects of
+  `commandResponders` (`main.go`) in the `operator-workers` queue group, so
+  the group has one member. A serial subject therefore holds each request for
+  the whole cluster until the request before it ends. Each row carries a
+  `limit`: `serialResponder` (1) uses `ServeRequests`, and a higher limit uses
+  `ServeRequestsConcurrently`. Only `bundles.preview` and `bundles.validate`
+  use `composeConcurrency` (4 slots on each subject), because a compose can
+  clone git or pull OCI content. Move a row to a higher limit only after its handler is safe for
+  concurrent calls. A compose context ends at `composeRequestTimeout` (55
+  seconds, `internal/controller/config_crud.go`), under the BFF's 60-second
+  timeout. A git process (`GitCloner.Clone`, `CloneCache.fetchBare`) does not
+  observe that context, so it can run past the deadline.
+  `controllerIssuer` (`main.go`) is the only choice of
   the issuer that controllers trust: the BFF URL in `local` and `ldap` modes,
   else the OIDC issuer. The operator exits in those two modes without
   `--bff-url`. One leader replica queue-subscribes

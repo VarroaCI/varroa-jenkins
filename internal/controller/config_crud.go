@@ -1156,6 +1156,13 @@ func (c *ConfigCRUD) HandleBundlesValidate(data []byte) []byte {
 	return c.composeBundle(data, true)
 }
 
+// composeRequestTimeout limits the work of one bundle compose request on the
+// operator. It stays under the requester's 60-second timeout, so a compose
+// that reaches it still sends a compose error before the requester stops.
+// Only the steps that observe the context stop at it. A git process does
+// not observe the context and can run past it.
+const composeRequestTimeout = 55 * time.Second
+
 // composeBundle is the shared handler for preview and validate.
 // It resolves git auth, runs the composer, and returns BundleComposeResponse
 // with errors as data (code:""), never as transport errors.
@@ -1165,7 +1172,7 @@ func (c *ConfigCRUD) composeBundle(data []byte, _ /* validateOnly — the BFF di
 		return c.configReply(bus.BundleComposeResponse{Error: "invalid request", Code: bus.CodeInvalid})
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), composeRequestTimeout)
 	defer cancel()
 
 	var spec v1alpha1.ComposedBundleSpec
