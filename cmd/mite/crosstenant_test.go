@@ -24,10 +24,10 @@ func TestCrossTenantUnknownKindRejected400(t *testing.T) {
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	var sent int32
-	agent.stream = &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error {
 		atomic.AddInt32(&sent, 1)
 		return nil
-	}}
+	}})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/cross-tenant/build", strings.NewReader(`{"kind":"delete"}`))
 	req.Header.Set("Authorization", "Bearer tok")
@@ -49,7 +49,7 @@ func TestCrossTenantKindOutsideOwnRouteRejected400(t *testing.T) {
 	agent := NewAgent(Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
-	agent.stream = &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }}
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/cross-tenant/build", strings.NewReader(`{"kind":"lock_acquire"}`))
 	req.Header.Set("Authorization", "Bearer tok")
@@ -65,7 +65,7 @@ func TestCrossTenantWrongTokenRejected401(t *testing.T) {
 	agent := NewAgent(Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
-	agent.stream = &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }}
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/cross-tenant/status", strings.NewReader(`{"kind":"status"}`))
 	req.Header.Set("Authorization", "Bearer wrong")
@@ -122,14 +122,14 @@ func TestCrossTenantTwoConcurrentKindsDoNotCross(t *testing.T) {
 		id   uint64
 		kind string
 	}, 2)
-	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		req := m.GetCrossTenantRequest()
 		captured <- struct {
 			id   uint64
 			kind string
 		}{*req.RequestId, req.Kind}
 		return nil
-	}}
+	}})
 
 	results := make(chan *httptest.ResponseRecorder, 2)
 	post := func(route, kind string) {
@@ -196,10 +196,10 @@ func TestCrossTenantLockForwardsTargetTenantVerbatim(t *testing.T) {
 	agent.crossTenantTimeout = 2 * time.Second
 
 	sent := make(chan *mitev1.CrossTenantRequest, 1)
-	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		sent <- m.GetCrossTenantRequest()
 		return nil
-	}}
+	}})
 
 	body := `{"kind":"lock_acquire","caller_job_path":"deploy","name":"deploy-prod",` +
 		`"target_tenant":"team-pay/ci","run_id":"r","lease_seconds":300}`
@@ -246,7 +246,7 @@ func TestCrossTenant504Timeout(t *testing.T) {
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	agent.crossTenantTimeout = 30 * time.Millisecond
-	agent.stream = &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }}
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/cross-tenant/artifact", strings.NewReader(crossTenantBody("artifact_list")))
 	req.Header.Set("Authorization", "Bearer tok")
@@ -275,10 +275,10 @@ func TestCrossTenant429Cap(t *testing.T) {
 		}
 	}
 	var sent int32
-	agent.stream = &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error {
 		atomic.AddInt32(&sent, 1)
 		return nil
-	}}
+	}})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/cross-tenant/lock", strings.NewReader(crossTenantBody("lock_acquire")))
 	req.Header.Set("Authorization", "Bearer tok")
@@ -297,7 +297,7 @@ func TestCrossTenant503StreamDown(t *testing.T) {
 	agent := NewAgent(Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
-	// agent.stream stays nil: the command stream has never connected.
+	// The agent holds no session: the command stream never connected.
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/cross-tenant/build", strings.NewReader(crossTenantBody("build")))
 	req.Header.Set("Authorization", "Bearer tok")
@@ -328,7 +328,7 @@ func TestProcessCommandsResolvesCrossTenantResponse(t *testing.T) {
 		}}},
 	}
 	idx := 0
-	agent.stream = &concurrentSendStream{
+	setTestStream(agent, &concurrentSendStream{
 		sendFn: func(*mitev1.MiteMessage) error { return nil },
 		recvFn: func() (*mitev1.OperatorMessage, error) {
 			if idx < len(msgs) {
@@ -338,7 +338,7 @@ func TestProcessCommandsResolvesCrossTenantResponse(t *testing.T) {
 			}
 			return nil, io.EOF
 		},
-	}
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -372,13 +372,13 @@ func TestProcessCommandsTeardownReleasesCrossTenantWaiters(t *testing.T) {
 	agent.Logger = slog.Default()
 
 	recvBlock := make(chan struct{})
-	agent.stream = &concurrentSendStream{
+	setTestStream(agent, &concurrentSendStream{
 		sendFn: func(*mitev1.MiteMessage) error { return nil },
 		recvFn: func() (*mitev1.OperatorMessage, error) {
 			<-recvBlock
 			return nil, io.EOF
 		},
-	}
+	})
 
 	ch1, ok1 := agent.crossTenantWaiters.register(1)
 	ch2, ok2 := agent.crossTenantWaiters.register(2)

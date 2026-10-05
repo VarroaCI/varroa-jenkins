@@ -112,12 +112,8 @@ func (a *Agent) startActivityPoller(ctx context.Context) {
 				},
 			}
 
-			a.sendMu.Lock()
-			err := a.stream.Send(msg)
-			a.sendMu.Unlock()
-			if err != nil {
+			if err := a.send(msg); err != nil {
 				logger.Warn("activity event send failed, dropping remaining batch", "error", err)
-				_ = a.conn.Close() // wake up processCommands
 				break
 			}
 			activityEventsForwarded.Add(ctx, 1)

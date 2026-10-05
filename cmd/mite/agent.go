@@ -83,10 +83,14 @@ type Config struct {
 // It connects to the Varroa server, streams state, and applies desired-state
 // commands.
 type Agent struct {
-	cfg               Config
-	conn              *grpc.ClientConn
-	client            mitev1.MiteClient
-	stream            mitev1.Mite_CommandStreamClient
+	cfg Config
+	// conn and client belong to the run loop. Only the run loop reads or
+	// writes them; every other goroutine reaches the gateway through sess.
+	conn   *grpc.ClientConn
+	client mitev1.MiteClient
+	// sess is the live command-stream session, or nil between sessions.
+	// sendMu guards it. Only the run loop replaces it.
+	sess              *miteSession
 	sendMu            sync.Mutex
 	cert              *tls.Certificate
 	certMu            sync.Mutex // guards cert (renewal loop vs. connect())
@@ -531,7 +535,9 @@ func (a *Agent) Run(ctx context.Context) error {
 		go a.startActivityPoller(streamCtx)
 		go a.startJobSchedulePoller(streamCtx)
 		go a.startPluginInventoryCollector(streamCtx)
-		go a.startCertRenewalLoop(streamCtx)
+		// The run loop is the only writer of a.sess, so it reads it here
+		// without sendMu.
+		go a.startCertRenewalLoop(streamCtx, a.sess.client)
 		// Wire the reactive refresh path: on session loss + token expiry,
 		// the client triggers a refresh before re-establishing.
 		a.getJenkinsClient().OnTokenExpired = func() {
@@ -540,7 +546,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		a.processCommands(streamCtx)
 		streamCancel()
 
-		_ = a.conn.Close()
+		a.teardownSession()
 		a.writeOperatorStatus(false)
 
 		// Clear health state so the next heartbeat does not report
@@ -605,7 +611,7 @@ func (a *Agent) loadOrCreateIdentity(ctx context.Context) (*identityState, error
 			}
 			// Certificate expired or stale: attempt renewal with the existing keypair.
 			if err := a.connect(ctx); err == nil {
-				if err := a.renewWithExistingKeypair(ctx); err == nil {
+				if err := a.renewWithExistingKeypair(ctx, a.client); err == nil {
 					a.saveIdentity()
 					return &identityState{isBootstrap: false}, nil
 				}
@@ -753,7 +759,7 @@ func (a *Agent) saveIdentity() {
 
 // renewWithExistingKeypair attempts certificate renewal using an already
 // authenticated connection.
-func (a *Agent) renewWithExistingKeypair(ctx context.Context) error {
+func (a *Agent) renewWithExistingKeypair(ctx context.Context, client mitev1.MiteClient) error {
 	pub := a.keypair.Public().(ed25519.PublicKey)
 	req := &mitev1.RegisterRequest{
 		ControllerName: a.cfg.ControllerName,
@@ -761,7 +767,7 @@ func (a *Agent) renewWithExistingKeypair(ctx context.Context) error {
 		PublicKey:      []byte(pub),
 		CellInstance:   a.cfg.CellInstance,
 	}
-	resp, err := a.client.Register(ctx, req)
+	resp, err := client.Register(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -909,11 +915,73 @@ func (a *Agent) openStream(ctx context.Context) error {
 	if err := stream.Send(hello); err != nil {
 		return err
 	}
-	// Guarded by sendMu: the loopback handlers read a.stream from their own
-	// goroutines, outside the connect/reconnect goroutine.
+	a.installSession(&miteSession{stream: stream, conn: a.conn, client: a.client})
+	return nil
+}
+
+// miteSession pairs one command stream with the connection and the client
+// that carry it. A send error on the stream closes this session's own
+// connection, never the connection of a later session.
+type miteSession struct {
+	stream mitev1.Mite_CommandStreamClient
+	conn   *grpc.ClientConn
+	client mitev1.MiteClient
+}
+
+// closeConn closes the session's connection. A nil connection is a no-op.
+func (s *miteSession) closeConn() {
+	if s.conn != nil {
+		_ = s.conn.Close()
+	}
+}
+
+// installSession makes s the live session under sendMu.
+func (a *Agent) installSession(s *miteSession) {
 	a.sendMu.Lock()
-	a.stream = stream
+	a.sess = s
 	a.sendMu.Unlock()
+}
+
+// teardownSession ends the session at the end of a run-loop pass. It
+// closes the connection before endSession takes sendMu: a send that flow
+// control stalls holds sendMu, and only the close unblocks it. It clears
+// the session before the next connect, so a late sender gets
+// errStreamNotConnected and never closes a later connection. Call it only
+// from the run loop.
+func (a *Agent) teardownSession() {
+	_ = a.conn.Close()
+	a.endSession()
+}
+
+// endSession clears the live session under sendMu. A send after it returns
+// errStreamNotConnected.
+func (a *Agent) endSession() {
+	a.sendMu.Lock()
+	a.sess = nil
+	a.sendMu.Unlock()
+}
+
+// send sends msg on the live session under sendMu.
+func (a *Agent) send(msg *mitev1.MiteMessage) error {
+	a.sendMu.Lock()
+	defer a.sendMu.Unlock()
+	return a.sendLocked(msg)
+}
+
+// sendLocked sends msg on the live session. The caller must hold sendMu.
+// With no live session it returns errStreamNotConnected. On a send error it
+// closes the connection of the session that owns the stream, which
+// unblocks that session's receive loop. It never closes a connection that
+// a later connect installed.
+func (a *Agent) sendLocked(msg *mitev1.MiteMessage) error {
+	s := a.sess
+	if s == nil || s.stream == nil {
+		return errStreamNotConnected
+	}
+	if err := s.stream.Send(msg); err != nil {
+		s.closeConn()
+		return err
+	}
 	return nil
 }
 
@@ -943,10 +1011,7 @@ func (a *Agent) sendStateSnapshot(ctx context.Context) {
 	msg := &mitev1.MiteMessage{
 		Message: &mitev1.MiteMessage_StateSnapshot{StateSnapshot: snap},
 	}
-	a.sendMu.Lock()
-	err := a.stream.Send(msg)
-	a.sendMu.Unlock()
-	if err != nil {
+	if err := a.send(msg); err != nil {
 		a.Logger.Warn("snapshot send failed", "error", err)
 	}
 }
@@ -1020,14 +1085,10 @@ func (a *Agent) sendHeartbeats(ctx context.Context) {
 			snapMsg := &mitev1.MiteMessage{
 				Message: &mitev1.MiteMessage_StateSnapshot{StateSnapshot: snap},
 			}
-			a.sendMu.Lock()
-			if err := a.stream.Send(snapMsg); err != nil {
-				a.sendMu.Unlock()
+			if err := a.send(snapMsg); err != nil {
 				a.Logger.Warn("snapshot send failed", "error", err)
-				_ = a.conn.Close() // wake up processCommands
 				return
 			}
-			a.sendMu.Unlock()
 
 			// Send heartbeat (carries version + hash for liveness).
 			hb := &mitev1.Heartbeat{
@@ -1049,14 +1110,10 @@ func (a *Agent) sendHeartbeats(ctx context.Context) {
 					Heartbeat: hb,
 				},
 			}
-			a.sendMu.Lock()
-			if err := a.stream.Send(hbMsg); err != nil {
-				a.sendMu.Unlock()
+			if err := a.send(hbMsg); err != nil {
 				a.Logger.Warn("heartbeat send failed", "error", err)
-				_ = a.conn.Close() // wake up processCommands
 				return
 			}
-			a.sendMu.Unlock()
 		}
 	}
 }
@@ -1256,12 +1313,23 @@ func (a *Agent) processCommands(ctx context.Context) {
 	// POST /v1/cross-tenant/*.
 	defer a.crossTenantWaiters.releaseAll()
 
+	// The receive goroutines use the session captured here. They never
+	// read a.sess, which the run loop clears when this function returns.
+	// This function runs on the run-loop goroutine, the only writer of
+	// a.sess, so it reads a.sess without sendMu. It must never take
+	// sendMu: a send that flow control stalls holds it, and the receive
+	// loop must still start.
+	sess := a.sess
+	if sess == nil {
+		return
+	}
+
 	go a.commandWorker(ctx, mb)
 
 	for {
 		ch := make(chan recvResult, 1)
 		go func() {
-			msg, err := a.stream.Recv()
+			msg, err := sess.stream.Recv()
 			ch <- recvResult{msg, err}
 		}()
 
@@ -1353,12 +1421,16 @@ func (a *Agent) processCommands(ctx context.Context) {
 			req := m.ContentRequest
 			if req != nil && req.RequestId != "" {
 				resp := buildContentResponse(a.miteDir, req.RequestId)
-				a.sendMu.Lock()
-				sendErr := a.stream.Send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_ContentResponse{ContentResponse: resp}})
-				a.sendMu.Unlock()
-				if sendErr != nil {
-					a.Logger.Error("send content response failed", "error", sendErr)
-				}
+				// Send off the run loop: the run loop must never wait for
+				// sendMu, which a send that flow control stalls holds.
+				go func() {
+					sendErr := a.send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_ContentResponse{ContentResponse: resp}})
+					// A session that ends before this send is an ordinary
+					// reconnect, not a fault, so it logs nothing.
+					if sendErr != nil && !errors.Is(sendErr, errStreamNotConnected) {
+						a.Logger.Error("send content response failed", "error", sendErr)
+					}
+				}()
 			}
 		}
 	}
@@ -1490,12 +1562,8 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 				},
 			},
 		}
-		a.sendMu.Lock()
-		err := a.stream.Send(resultMsg)
-		a.sendMu.Unlock()
-		if err != nil {
-			a.Logger.Warn("send command result failed, closing connection", "error", err)
-			_ = a.conn.Close()
+		if err := a.send(resultMsg); err != nil {
+			a.Logger.Warn("send command result failed", "error", err)
 			return
 		}
 	} else if w.imperativeCmd != nil {
@@ -1710,8 +1778,7 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 		}
 		jobPath, runID := imperativeCommandSubject(cmd)
 		a.logImperativeResult(cmd, jobPath, runID, success, errStr, httpStatus)
-		a.sendMu.Lock()
-		sendErr := a.stream.Send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_CommandResult{
+		sendErr := a.send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_CommandResult{
 			CommandResult: &mitev1.CommandResult{
 				CommandId: cmd.CommandId, Success: success, Error: errStr,
 				Deferred: deferred, DeferReason: deferReason, HttpStatus: httpStatus,
@@ -1719,10 +1786,8 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 				Actor: imperativeCommandActor(cmd),
 			},
 		}})
-		a.sendMu.Unlock()
 		if sendErr != nil {
-			a.Logger.Warn("send imperative result failed, closing connection", "error", sendErr)
-			_ = a.conn.Close()
+			a.Logger.Warn("send imperative result failed", "error", sendErr)
 			return
 		}
 	}
@@ -2718,10 +2783,7 @@ func (a *Agent) requestTokenRefresh(ctx context.Context) {
 			TokenRefreshRequest: &mitev1.TokenRefreshRequest{},
 		},
 	}
-	a.sendMu.Lock()
-	err := a.stream.Send(msg)
-	a.sendMu.Unlock()
-	if err != nil {
+	if err := a.send(msg); err != nil {
 		a.Logger.Warn("token refresh request send failed", "error", err)
 		a.removeWaiter(w)
 		return
@@ -3033,11 +3095,9 @@ func (a *Agent) observabilityProbeTick(ctx context.Context) {
 	report.Sources = sources
 	report.Capabilities = capabilities
 
-	a.sendMu.Lock()
-	err := a.stream.Send(&mitev1.MiteMessage{
+	err := a.send(&mitev1.MiteMessage{
 		Message: &mitev1.MiteMessage_ObservabilityReport{ObservabilityReport: report},
 	})
-	a.sendMu.Unlock()
 	if err != nil {
 		a.Logger.Warn("observability report send failed", "error", err)
 	}
@@ -3110,7 +3170,10 @@ func shouldRenewCert(notBefore, notAfter time.Time) bool {
 // startCertRenewalLoop proactively renews the mTLS client certificate once it
 // crosses the renewal threshold, so long-running mite processes never rely on
 // a pod restart to pick up a fresh cert before expiry.
-func (a *Agent) startCertRenewalLoop(ctx context.Context) {
+//
+// client is the session's own client. The loop never reads a.client, which
+// the run loop replaces on the next connect.
+func (a *Agent) startCertRenewalLoop(ctx context.Context, client mitev1.MiteClient) {
 	ticker := time.NewTicker(certRenewalCheckInterval)
 	defer ticker.Stop()
 	for {
@@ -3127,7 +3190,7 @@ func (a *Agent) startCertRenewalLoop(ctx context.Context) {
 			if !shouldRenewCert(cert.Leaf.NotBefore, cert.Leaf.NotAfter) {
 				continue
 			}
-			if err := a.renewWithExistingKeypair(ctx); err != nil {
+			if err := a.renewWithExistingKeypair(ctx, client); err != nil {
 				a.Logger.Warn("cert renewal failed, will retry", "error", err)
 				continue
 			}
@@ -3449,10 +3512,7 @@ func (a *Agent) pushInventoryUnlocked(_ context.Context, inv *plugininv.Inventor
 	msg := &mitev1.MiteMessage{
 		Message: &mitev1.MiteMessage_PluginInventory{PluginInventory: pi},
 	}
-	a.sendMu.Lock()
-	err := a.stream.Send(msg)
-	a.sendMu.Unlock()
-	if err != nil {
+	if err := a.send(msg); err != nil {
 		a.Logger.Warn("plugin inventory push failed", "error", err)
 		return
 	}

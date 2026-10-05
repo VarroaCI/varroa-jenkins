@@ -242,7 +242,7 @@ func (a *Agent) handleRunState(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := a.sendRunStateChunkLocked(chunk); err != nil {
-		a.closeOnSendError(err)
+		a.logForwardFailure(err)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
@@ -306,12 +306,7 @@ func parseRunStateHeaders(h http.Header) (*mitev1.RunStateChunk, bool) {
 // sendRunStateChunkLocked sends one chunk on the command stream under
 // the shared send lock.
 func (a *Agent) sendRunStateChunkLocked(chunk *mitev1.RunStateChunk) error {
-	a.sendMu.Lock()
-	defer a.sendMu.Unlock()
-	if a.stream == nil {
-		return errStreamNotConnected
-	}
-	return a.stream.Send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_RunStateChunk{RunStateChunk: chunk}})
+	return a.send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_RunStateChunk{RunStateChunk: chunk}})
 }
 
 // --- runStateWaiterMap ---
@@ -847,7 +842,7 @@ func (a *Agent) fetchRunStateFile(ctx context.Context, runID, relPath string, pu
 		PusherEpoch: pusherEpoch, StateGen: stateGen,
 	}
 	if err := a.sendRunStateRequestLocked(req); err != nil {
-		a.closeOnSendError(err)
+		a.logForwardFailure(err)
 		return nil, fmt.Errorf("fetch %s: %w", relPath, err)
 	}
 
@@ -896,12 +891,7 @@ func joinRunStateParts(parts map[int64][]byte, total int64) ([]byte, error) {
 // sendRunStateRequestLocked sends one fetch on the command stream under
 // the shared send lock.
 func (a *Agent) sendRunStateRequestLocked(req *mitev1.RunStateRequest) error {
-	a.sendMu.Lock()
-	defer a.sendMu.Unlock()
-	if a.stream == nil {
-		return errStreamNotConnected
-	}
-	return a.stream.Send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_RunStateRequest{RunStateRequest: req}})
+	return a.send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_RunStateRequest{RunStateRequest: req}})
 }
 
 // adoptNode posts one node name to the plugin's adopt route, the same

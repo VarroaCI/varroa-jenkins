@@ -40,7 +40,7 @@ func TestHeartbeatOmitsIdleBeforeFirstPoll(t *testing.T) {
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 	agent.heartbeatInterval = 30 * time.Millisecond
 
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
@@ -151,7 +151,7 @@ func TestHeartbeatIncludesIdleAfterPoll(t *testing.T) {
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 	agent.heartbeatInterval = 30 * time.Millisecond
 
 	gauges := &mitev1.IdleGauges{
@@ -245,7 +245,7 @@ func TestReplayWebhook200(t *testing.T) {
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "test-token"
 	agent.jenkinsTokenMu.Unlock()
@@ -309,7 +309,7 @@ func TestReplayWebhookSetsDeliveryHeaderAfterOverwritingForgery(t *testing.T) {
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "test-token"
 	agent.jenkinsTokenMu.Unlock()
@@ -367,7 +367,7 @@ func TestReplayWebhookSkipsDeliveryHeaderWhenEmpty(t *testing.T) {
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "test-token"
 	agent.jenkinsTokenMu.Unlock()
@@ -422,7 +422,7 @@ func TestReplayWebhookAllowlist(t *testing.T) {
 				JenkinsURL:     "http://localhost:1",
 			})
 			agent.Logger = slog.Default()
-			agent.stream = stream
+			setTestStream(agent, stream)
 			// Token is required for allowlisted paths to avoid
 			// connection-refused masking the allowlist check.
 			agent.jenkinsTokenMu.Lock()
@@ -484,7 +484,7 @@ func TestReplayWebhookConnectionRefused(t *testing.T) {
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "test-token"
 	agent.jenkinsTokenMu.Unlock()
@@ -528,7 +528,7 @@ func TestReplayWebhookNilPayload(t *testing.T) {
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 
 	cmd := &mitev1.ImperativeCommand{
 		CommandId:     replayCmdID,
@@ -564,7 +564,7 @@ func TestReplayWebhookNonAllowlistedRefusedWithoutHTTP(t *testing.T) {
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 	// No token set — if the handler tried an HTTP call it would get
 	// connection refused. But the allowlist check should reject first.
 

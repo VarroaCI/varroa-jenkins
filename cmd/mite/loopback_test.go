@@ -180,10 +180,10 @@ func TestEventsAcceptedBatchForwardsAndReturnsAcks(t *testing.T) {
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	var sent []*mitev1.BuildEvent
-	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		sent = append(sent, m.GetBuildEvent())
 		return nil
-	}}
+	}})
 	// A pre-buffered ack proves the response drains what processCommands
 	// collected since the previous call.
 	agent.eventAcks.push(&mitev1.EventAck{RunId: "r1", EventSeq: 1, Status: ackStatusStored})
@@ -218,7 +218,7 @@ func TestEventsDownstreamDown503(t *testing.T) {
 	agent := NewAgent(Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
-	// agent.stream and agent.conn stay nil: never connected.
+	// The agent holds no session: the stream never connected.
 
 	body := "[" + newBuildEventJSON(1, "STARTED") + "]"
 	req := httptest.NewRequest(http.MethodPost, "/v1/events", strings.NewReader(body))
@@ -237,10 +237,10 @@ func TestEventsRetentionFullRefusesNoDrop(t *testing.T) {
 	agent.loopbackToken = "tok"
 	agent.eventRetention = newEventRetentionStore(10) // tiny cap
 	var sent int32
-	agent.stream = &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error {
 		atomic.AddInt32(&sent, 1)
 		return nil
-	}}
+	}})
 
 	body := "[" + newBuildEventJSON(1, "STARTED") + "]"
 	req := httptest.NewRequest(http.MethodPost, "/v1/events", strings.NewReader(body))
@@ -263,17 +263,17 @@ func TestEventsSendErrorClosesAndAnswers503(t *testing.T) {
 	agent := NewAgent(Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
-	agent.stream = &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error {
 		return fmt.Errorf("boom")
-	}}
-	// A real (never-dialed) ClientConn so closeOnSendError's Close() call is
-	// safe — a nil *grpc.ClientConn would panic.
+	}})
+	// A real, never-dialed ClientConn, so the session's close on a send
+	// error acts on a real connection.
 	conn, err := grpc.NewClient("127.0.0.1:1", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	agent.conn = conn
+	setTestConn(agent, conn)
 
 	body := "[" + newBuildEventJSON(1, "STARTED") + "]"
 	req := httptest.NewRequest(http.MethodPost, "/v1/events", strings.NewReader(body))
@@ -436,10 +436,10 @@ func TestReplayAfterReconnectOrderedPerRun(t *testing.T) {
 		agent.eventRetention.commit(id, evt, size)
 	}
 	var sentSeqs []int64
-	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		sentSeqs = append(sentSeqs, m.GetBuildEvent().Seq)
 		return nil
-	}}
+	}})
 
 	agent.replayRetainedEvents()
 
@@ -457,7 +457,7 @@ func TestReplayAfterReconnectOrderedPerRun(t *testing.T) {
 func TestReplayWithNoRetainedEventsIsNoop(t *testing.T) {
 	agent := NewAgent(Config{})
 	agent.Logger = slog.Default()
-	agent.replayRetainedEvents() // agent.stream and agent.conn are nil; must not panic
+	agent.replayRetainedEvents() // no session; must not panic
 	if got := agent.eventRetention.snapshotOrdered(); len(got) != 0 {
 		t.Errorf("expected nothing retained with nothing ever added, got %v", got)
 	}
@@ -496,10 +496,10 @@ func TestEventsDuplicateDeliveryKeepsOneEntry(t *testing.T) {
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	var sendCount int32
-	agent.stream = &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error {
 		atomic.AddInt32(&sendCount, 1)
 		return nil
-	}}
+	}})
 
 	seq0 := newBuildEventJSON(0, "STARTED")
 	if rec := postEvents(t, agent, seq0); rec.Code != http.StatusAccepted {
@@ -906,10 +906,10 @@ func TestEventsRetryOfExistingKeyAtCapSucceeds(t *testing.T) {
 	size := decodedEventSize(t, seq0)
 	agent.eventRetention = newEventRetentionStore(size) // cap == exactly one event
 	var sendCount int32
-	agent.stream = &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error {
 		atomic.AddInt32(&sendCount, 1)
 		return nil
-	}}
+	}})
 
 	if rec := postEvents(t, agent, seq0); rec.Code != http.StatusAccepted {
 		t.Fatalf("first delivery: expected 202, got %d: %s", rec.Code, rec.Body.String())
@@ -942,10 +942,10 @@ func TestEventsLargerReplacementAtCapRefusedKeepsOldEntry(t *testing.T) {
 	smallSize := decodedEventSize(t, small)
 	agent.eventRetention = newEventRetentionStore(smallSize) // cap == exactly the small event
 	var sent []string
-	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		sent = append(sent, m.GetBuildEvent().Phase)
 		return nil
-	}}
+	}})
 
 	if rec := postEvents(t, agent, small); rec.Code != http.StatusAccepted {
 		t.Fatalf("first delivery: expected 202, got %d: %s", rec.Code, rec.Body.String())
@@ -979,20 +979,20 @@ func TestEventsMidBatchFailureRetainsEarlierEventOnce(t *testing.T) {
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	var sent []int64
-	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		evt := m.GetBuildEvent()
 		if evt.Seq == 1 {
 			return fmt.Errorf("boom")
 		}
 		sent = append(sent, evt.Seq)
 		return nil
-	}}
+	}})
 	conn, err := grpc.NewClient("127.0.0.1:1", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	agent.conn = conn
+	setTestConn(agent, conn)
 
 	seq0 := newBuildEventJSON(0, "STARTED")
 	seq1 := newBuildEventJSON(1, "STAGE")
@@ -1024,18 +1024,18 @@ func TestReplayAfterPartialBatchDeliverySendsEachRetainedEventOnce(t *testing.T)
 	agent.loopbackToken = "tok"
 
 	failSeq1 := true
-	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		if m.GetBuildEvent().Seq == 1 && failSeq1 {
 			return fmt.Errorf("boom")
 		}
 		return nil
-	}}
+	}})
 	conn, err := grpc.NewClient("127.0.0.1:1", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	agent.conn = conn
+	setTestConn(agent, conn)
 
 	seq0 := newBuildEventJSON(0, "STARTED")
 	seq1 := newBuildEventJSON(1, "STAGE")
@@ -1046,16 +1046,16 @@ func TestReplayAfterPartialBatchDeliverySendsEachRetainedEventOnce(t *testing.T)
 	// The plugin retries the whole batch once the mite reconnects and seq 1
 	// can now send.
 	failSeq1 = false
-	agent.stream = &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }}
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
 	if rec := postEvents(t, agent, seq0, seq1); rec.Code != http.StatusAccepted {
 		t.Fatalf("expected the retried delivery to succeed, got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	var replayed []int64
-	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		replayed = append(replayed, m.GetBuildEvent().Seq)
 		return nil
-	}}
+	}})
 	agent.replayRetainedEvents()
 
 	want := []int64{0, 1}
@@ -1076,7 +1076,7 @@ func TestReplayAfterDuplicateDeliverySendsSeqOnce(t *testing.T) {
 	agent := NewAgent(Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
-	agent.stream = &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }}
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
 
 	seq0 := newBuildEventJSON(0, "STARTED")
 	if rec := postEvents(t, agent, seq0); rec.Code != http.StatusAccepted {
@@ -1087,10 +1087,10 @@ func TestReplayAfterDuplicateDeliverySendsSeqOnce(t *testing.T) {
 	}
 
 	var replayed []int64
-	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		replayed = append(replayed, m.GetBuildEvent().Seq)
 		return nil
-	}}
+	}})
 	agent.replayRetainedEvents()
 
 	if len(replayed) != 1 || replayed[0] != 0 {
@@ -1120,10 +1120,10 @@ func TestClaimTwoInFlightDoNotCross(t *testing.T) {
 	agent.claimTimeout = 2 * time.Second
 
 	captured := make(chan string, 2)
-	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		captured <- m.GetClaimRequest().RequestId
 		return nil
-	}}
+	}})
 
 	results := make(chan *httptest.ResponseRecorder, 2)
 	post := func() {
@@ -1174,7 +1174,7 @@ func TestClaim504Timeout(t *testing.T) {
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	agent.claimTimeout = 30 * time.Millisecond
-	agent.stream = &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }}
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/claim", strings.NewReader(claimRequestBody()))
 	req.Header.Set("Authorization", "Bearer tok")
@@ -1204,10 +1204,10 @@ func TestClaim429Cap(t *testing.T) {
 		}
 	}
 	var sent int32
-	agent.stream = &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error {
 		atomic.AddInt32(&sent, 1)
 		return nil
-	}}
+	}})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/claim", strings.NewReader(claimRequestBody()))
 	req.Header.Set("Authorization", "Bearer tok")
@@ -1303,10 +1303,10 @@ func TestClaimRelaysAGatewayUnavailableReplyWithNoDecisionKey(t *testing.T) {
 	agent.claimTimeout = 2 * time.Second
 
 	captured := make(chan string, 1)
-	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		captured <- m.GetClaimRequest().RequestId
 		return nil
-	}}
+	}})
 
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
@@ -1374,14 +1374,13 @@ func TestRenewCarriesCellInstance(t *testing.T) {
 	fc := &fakeMiteClient{}
 	agent := NewAgent(Config{ControllerName: "c", Namespace: "ns", CellInstance: "pod-uid-456"})
 	agent.Logger = slog.Default()
-	agent.client = fc
 	_, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	agent.keypair = priv
 
-	_ = agent.renewWithExistingKeypair(context.Background())
+	_ = agent.renewWithExistingKeypair(context.Background(), fc)
 
 	if fc.registerReq == nil || fc.registerReq.CellInstance != "pod-uid-456" {
 		t.Errorf("expected renewal RegisterRequest.cell_instance %q, got %+v", "pod-uid-456", fc.registerReq)
@@ -1395,10 +1394,10 @@ func TestClaimCellInstanceOverwritesBody(t *testing.T) {
 	agent.claimTimeout = 50 * time.Millisecond // no response injected: fail fast via 504
 
 	var captured *mitev1.ClaimRequest
-	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		captured = m.GetClaimRequest()
 		return nil
-	}}
+	}})
 
 	body := `{"origin":"scm","intent_key":"k","run_id":"r","job_path":"j","cell_instance":"attacker-supplied"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/claim", strings.NewReader(body))
@@ -1427,10 +1426,10 @@ func TestClaimPassesStartMark(t *testing.T) {
 	agent.claimTimeout = 50 * time.Millisecond
 
 	var captured *mitev1.ClaimRequest
-	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		captured = m.GetClaimRequest()
 		return nil
-	}}
+	}})
 
 	body := `{"origin":"scm","intent_key":"k","run_id":"r","job_path":"j","start_mark":true}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/claim", strings.NewReader(body))
@@ -1473,7 +1472,7 @@ func TestProcessCommandsResolvesClaimAndReleasesEventAck(t *testing.T) {
 		}}},
 	}
 	idx := 0
-	agent.stream = &concurrentSendStream{
+	setTestStream(agent, &concurrentSendStream{
 		sendFn: func(*mitev1.MiteMessage) error { return nil },
 		recvFn: func() (*mitev1.OperatorMessage, error) {
 			if idx < len(msgs) {
@@ -1483,7 +1482,7 @@ func TestProcessCommandsResolvesClaimAndReleasesEventAck(t *testing.T) {
 			}
 			return nil, io.EOF
 		},
-	}
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -1525,13 +1524,13 @@ func TestProcessCommandsTeardownReleasesClaimWaiters(t *testing.T) {
 	agent.Logger = slog.Default()
 
 	recvBlock := make(chan struct{})
-	agent.stream = &concurrentSendStream{
+	setTestStream(agent, &concurrentSendStream{
 		sendFn: func(*mitev1.MiteMessage) error { return nil },
 		recvFn: func() (*mitev1.OperatorMessage, error) {
 			<-recvBlock
 			return nil, io.EOF
 		},
-	}
+	})
 
 	ch1, ok1 := agent.claimWaiters.register("req-1")
 	ch2, ok2 := agent.claimWaiters.register("req-2")
@@ -1626,10 +1625,10 @@ func TestClaimRelaysTheHomeSlotOfANotHomeVeto(t *testing.T) {
 			agent.loopbackToken = "tok"
 			agent.claimTimeout = 2 * time.Second
 			captured := make(chan string, 1)
-			agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+			setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 				captured <- m.GetClaimRequest().RequestId
 				return nil
-			}}
+			}})
 
 			done := make(chan *httptest.ResponseRecorder, 1)
 			go func() {

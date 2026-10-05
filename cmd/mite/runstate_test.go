@@ -273,7 +273,7 @@ func TestApplyResumeBuild_ExistingNodeConfigNotOverwrittenButAdopted(t *testing.
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "test-token"
 	agent.jenkinsTokenMu.Unlock()
-	agent.stream = runStateStreamResolvingFetch(t, agent, []byte("<from-gateway-node/>"))
+	setTestStream(agent, runStateStreamResolvingFetch(t, agent, []byte("<from-gateway-node/>")))
 
 	payload := &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: jobPath, BuildNumber: 7,
@@ -311,7 +311,7 @@ func TestApplyResumeBuild_FetchErrorFailsBeforeReload(t *testing.T) {
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "test-token"
 	agent.jenkinsTokenMu.Unlock()
-	agent.stream = runStateStreamFailingFetch(agent, "the gateway cannot read the stored file")
+	setTestStream(agent, runStateStreamFailingFetch(agent, "the gateway cannot read the stored file"))
 
 	payload := &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: jobPath, BuildNumber: 7,
@@ -488,7 +488,7 @@ func newResumeAgent(t *testing.T, home string, data []byte) *Agent {
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "test-token"
 	agent.jenkinsTokenMu.Unlock()
-	agent.stream = runStateStreamResolvingFetch(t, agent, data)
+	setTestStream(agent, runStateStreamResolvingFetch(t, agent, data))
 	return agent
 }
 
@@ -581,7 +581,7 @@ func TestApplyResumeBuild_ARedeliveredCommandTouchesNothing(t *testing.T) {
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "test-token"
 	agent.jenkinsTokenMu.Unlock()
-	agent.stream = runStateStreamFailingFetch(agent, "the gateway must not be asked")
+	setTestStream(agent, runStateStreamFailingFetch(agent, "the gateway must not be asked"))
 
 	err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
 		RunId: "run-1", JobPath: stubJobPath, BuildNumber: 7,
@@ -617,7 +617,7 @@ func TestApplyResumeBuild_TheAbsoluteDeadlineBoundsEveryStep(t *testing.T) {
 	agent.jenkinsToken = "test-token"
 	agent.jenkinsTokenMu.Unlock()
 	// The gateway never answers, so only the deadline ends the fetch.
-	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error { return nil }}
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error { return nil }})
 
 	started := time.Now()
 	err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
@@ -765,7 +765,7 @@ func TestApplyResumeBuild_FetchesEachFileAtItsEpoch(t *testing.T) {
 	var mu sync.Mutex
 	var seen []*mitev1.RunStateRequest
 	gz := gzipBytes(t, []byte("<build/>"))
-	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		req := m.GetRunStateRequest()
 		if req == nil {
 			return nil
@@ -778,7 +778,7 @@ func TestApplyResumeBuild_FetchesEachFileAtItsEpoch(t *testing.T) {
 			Seq: 0, Total: 1, GzipContent: gz, RawSize: int64(len("<build/>")),
 		})
 		return nil
-	}}
+	}})
 
 	const programPath = "jobs/team/jobs/pipeline/builds/7/program.dat"
 	const recordPath = "jobs/team/jobs/pipeline/builds/7/build.xml"

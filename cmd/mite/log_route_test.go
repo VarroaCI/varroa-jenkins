@@ -45,10 +45,10 @@ func TestLogHeaderMappingIncludesStampedInstance(t *testing.T) {
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	var sent *mitev1.LogChunk
-	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		sent = m.GetLogChunk()
 		return nil
-	}}
+	}})
 
 	req := newLogRequest("tok", "folder/job", 42, 7, "17", "12", 1757000000123, 5, "hello console")
 	rec := httptest.NewRecorder()
@@ -105,7 +105,7 @@ func TestLogResponseContractTable(t *testing.T) {
 		},
 		{
 			name:       "no stream open",
-			setup:      func(a *Agent) { a.stream = nil },
+			setup:      func(a *Agent) { setTestStream(a, nil) },
 			token:      "tok",
 			wantStatus: http.StatusServiceUnavailable,
 		},
@@ -130,7 +130,7 @@ func TestLogResponseContractTable(t *testing.T) {
 			agent := NewAgent(Config{})
 			agent.Logger = slog.Default()
 			agent.loopbackToken = "tok"
-			agent.stream = &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }}
+			setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
 			tc.setup(agent)
 
 			var req *http.Request
@@ -154,7 +154,7 @@ func TestLogOversizedBody413CarriesMaxChunkHeader(t *testing.T) {
 	agent := NewAgent(Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
-	agent.stream = &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }}
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
 
 	big := strings.Repeat("x", logChunkMaxBytes+1)
 	req := newLogRequest("tok", "j", 1, 1, "", "", 0, 0, big)
@@ -177,10 +177,10 @@ func TestLogRetentionBoundAnswers503AndDropsNothingRetained(t *testing.T) {
 	agent.loopbackToken = "tok"
 	agent.logRetention = newLogRetentionStore(10) // tiny cap
 	var sent int32
-	agent.stream = &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error {
 		atomic.AddInt32(&sent, 1)
 		return nil
-	}}
+	}})
 
 	req := newLogRequest("tok", "j", 1, 1, "", "", 0, 0, "this is far more than ten bytes")
 	rec := httptest.NewRecorder()
@@ -201,7 +201,7 @@ func TestLogRetentionHoldsChunkUntilAck(t *testing.T) {
 	agent := NewAgent(Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
-	agent.stream = &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }}
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
 
 	req := newLogRequest("tok", "j", 1, 3, "", "", 0, 0, "payload")
 	rec := httptest.NewRecorder()
@@ -223,7 +223,7 @@ func TestLogRetentionHoldsChunkUntilAck(t *testing.T) {
 
 func TestLogAckTableCumulativeRelease(t *testing.T) {
 	newRetained := func(a *Agent) {
-		a.stream = &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }}
+		setTestStream(a, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
 		for seq := int64(1); seq <= 3; seq++ {
 			req := newLogRequest("tok", "j", 1, seq, "", "", 0, 0, "x")
 			rec := httptest.NewRecorder()
@@ -308,7 +308,7 @@ func newBusyResendHarness(t *testing.T, seqs ...int64) *busyResendHarness {
 		h.agent.logRetention.commit(chunk, 1)
 	}
 	h.stream = &concurrentSendStream{sendFn: h.record}
-	h.agent.stream = h.stream
+	setTestStream(h.agent, h.stream)
 	return h
 }
 
@@ -490,9 +490,7 @@ func TestLogBusyTimerSkipsReplacedStream(t *testing.T) {
 	defer cancel()
 
 	h.busy(ctx, 0, 20)
-	h.agent.sendMu.Lock()
-	h.agent.stream = &concurrentSendStream{sendFn: h.record}
-	h.agent.sendMu.Unlock()
+	setTestStream(h.agent, &concurrentSendStream{sendFn: h.record})
 
 	h.expectQuiet(t, 150*time.Millisecond)
 }
@@ -528,12 +526,12 @@ func TestLogReplayAfterReconnectOrderedPerRun(t *testing.T) {
 
 	var mu sync.Mutex
 	var sentSeqs []int64
-	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		mu.Lock()
 		sentSeqs = append(sentSeqs, m.GetLogChunk().Seq)
 		mu.Unlock()
 		return nil
-	}}
+	}})
 
 	agent.replayRetainedLogChunks()
 
@@ -572,10 +570,10 @@ func TestHandleTailControlCallsJenkinsAndAcks(t *testing.T) {
 	var acked *mitev1.TailAck
 	agent := NewAgent(Config{})
 	agent.Logger = slog.Default()
-	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		acked = m.GetTailAck()
 		return nil
-	}}
+	}})
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "jwt-token"
 	agent.jenkinsTokenMu.Unlock()
@@ -611,7 +609,7 @@ func TestLogSendRaceWithHeartbeats(t *testing.T) {
 	agent.loopbackToken = "tok"
 	agent.heartbeatInterval = time.Millisecond
 	var sendCount int32
-	agent.stream = &concurrentSendStream{
+	setTestStream(agent, &concurrentSendStream{
 		sendFn: func(*mitev1.MiteMessage) error {
 			atomic.AddInt32(&sendCount, 1)
 			return nil
@@ -620,7 +618,7 @@ func TestLogSendRaceWithHeartbeats(t *testing.T) {
 			<-context.Background().Done()
 			return nil, context.Canceled
 		},
-	}
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()

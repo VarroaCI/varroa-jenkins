@@ -49,7 +49,7 @@ func TestResumeFetchesManyFilesQuickly(t *testing.T) {
 	agent := NewAgent(Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
 	agent.Logger = slog.Default()
 	agent.jenkinsHomeDir = t.TempDir()
-	agent.stream = newAsyncFetchStream(t, agent, []byte("<flow/>"))
+	setTestStream(agent, newAsyncFetchStream(t, agent, []byte("<flow/>")))
 
 	start := time.Now()
 	for i := 0; i < 25; i++ {

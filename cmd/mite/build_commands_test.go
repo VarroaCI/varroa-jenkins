@@ -94,7 +94,7 @@ func TestTriggerAndCancelBuildCommands(t *testing.T) {
 				JenkinsURL:     srv.URL,
 			})
 			agent.Logger = slog.Default()
-			agent.stream = stream
+			setTestStream(agent, stream)
 			agent.jenkinsTokenMu.Lock()
 			agent.jenkinsToken = "test-token"
 			agent.jenkinsTokenMu.Unlock()
@@ -169,7 +169,7 @@ func TestCancelBuildRefusedCarriesStatus(t *testing.T) {
 	stream, captured := testReplayStream(t)
 	agent := NewAgent(Config{ControllerName: "test", Namespace: "ns", JenkinsURL: srv.URL})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "test-token"
 	agent.jenkinsTokenMu.Unlock()
@@ -220,7 +220,7 @@ func TestTriggerBuildWaitsForJenkins(t *testing.T) {
 	stream, captured := testReplayStream(t)
 	agent := NewAgent(Config{ControllerName: "test", Namespace: "ns", JenkinsURL: srv.URL})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "test-token"
 	agent.jenkinsTokenMu.Unlock()
@@ -260,7 +260,7 @@ func TestTriggerBuildReadinessWaitExpires(t *testing.T) {
 	stream, captured := testReplayStream(t)
 	agent := NewAgent(Config{ControllerName: "test", Namespace: "ns", JenkinsURL: srv.URL})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 	agent.triggerReadyWait = 50 * time.Millisecond
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "test-token"
@@ -317,7 +317,7 @@ func TestTriggerBuildNilPayload(t *testing.T) {
 		JenkinsURL:     srv.URL,
 	})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 
 	cmd := &mitev1.ImperativeCommand{
 		CommandId: "trigger-nil-001",

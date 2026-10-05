@@ -47,8 +47,8 @@ Backend components are split: `varroa-operator` reconciles controllers, `varroa-
 ## Gotchas (non-obvious, won't survive a code read)
 
 - **gRPC keepalive**: server (`internal/mite/server.go`) sets `KeepaliveEnforcementPolicy(MinTime: 15s)` / `KeepaliveParams(Time: 30s)`; client (`cmd/mite/agent.go`) pings every 30s. Mismatched policies make the server send `GOAWAY ENHANCE_YOUR_CALM`, silently killing the stream.
-- **Send serialization**: `sendMu` (`agent.go:57`) serializes concurrent `stream.Send()` from the heartbeat goroutine and `processCommands`.
-- **Context unblocking**: `processCommands` wraps `stream.Recv()` in a goroutine + channel so `ctx.Done()` breaks the loop; on Send error, `sendHeartbeats` calls `a.conn.Close()` to unblock the Recv.
+- **Send serialization**: `sendMu` guards the mite's live session (`miteSession` in `cmd/mite/agent.go`: stream, connection, client) and serializes every send through `send`/`sendLocked`. The run loop clears the session before it reconnects, so a late send answers `errStreamNotConnected`.
+- **Context unblocking**: `processCommands` wraps `stream.Recv()` in a goroutine + channel so `ctx.Done()` breaks the loop; on a send error, `sendLocked` closes the connection of the session that owns the stream to unblock the Recv. It never closes a newer session's connection.
 - **Mite Jenkins auth**: Bearer JWT; the operator signs an RS256 JWT (`MiteTokenSigner` in `internal/mite/jenkinstoken.go`) and pushes it over gRPC. The mite caches it in-memory (`currentJenkinsToken()` in `cmd/mite/agent.go`). The Jenkins plugin verifies the JWT offline with the operator's public key (no Dex dependency).
 - **Waiting on cluster state**: a short retry/backoff loop beats a fixed sleep for anything waiting on reconciliation to converge: `for i in $(seq 1 30); do <check> && break; sleep 5; done`.
 - **Frontend commands**: always run `npm` commands from `frontend/`; don't assume the shell's cwd already points there.

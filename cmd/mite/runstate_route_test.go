@@ -48,7 +48,7 @@ func newRunStateTestAgent() *Agent {
 	agent := NewAgent(Config{CellInstance: "pod-uid-7"})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = runStateTestToken
-	agent.stream = &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }}
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
 	return agent
 }
 
@@ -108,10 +108,10 @@ func TestHandleRunState_ReasonHeaderOn503(t *testing.T) {
 func TestHandleRunState_ForwardsMiteOwnCellInstance(t *testing.T) {
 	agent := newRunStateTestAgent()
 	var sent *mitev1.RunStateChunk
-	agent.stream = &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		sent = m.GetRunStateChunk()
 		return nil
-	}}
+	}})
 
 	req := newRunStateRequest("run-1", "jobs/team/builds/1/program.dat", 1, 1, 0, 1, 5, 5, "hello")
 	rec := httptest.NewRecorder()

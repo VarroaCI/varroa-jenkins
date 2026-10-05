@@ -380,32 +380,17 @@ func (a *Agent) authenticated(r *http.Request) bool {
 // sendBuildEventLocked forwards evt under sendMu, so it never races the
 // heartbeat goroutine or another forward.
 func (a *Agent) sendBuildEventLocked(evt *mitev1.BuildEvent) error {
-	a.sendMu.Lock()
-	defer a.sendMu.Unlock()
-	if a.stream == nil {
-		return errStreamNotConnected
-	}
-	return a.stream.Send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_BuildEvent{BuildEvent: evt}})
+	return a.send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_BuildEvent{BuildEvent: evt}})
 }
 
 // sendClaimRequestLocked sends req under sendMu.
 func (a *Agent) sendClaimRequestLocked(req *mitev1.ClaimRequest) error {
-	a.sendMu.Lock()
-	defer a.sendMu.Unlock()
-	if a.stream == nil {
-		return errStreamNotConnected
-	}
-	return a.stream.Send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_ClaimRequest{ClaimRequest: req}})
+	return a.send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_ClaimRequest{ClaimRequest: req}})
 }
 
 // sendCrossTenantRequestLocked sends req under sendMu.
 func (a *Agent) sendCrossTenantRequestLocked(req *mitev1.CrossTenantRequest) error {
-	a.sendMu.Lock()
-	defer a.sendMu.Unlock()
-	if a.stream == nil {
-		return errStreamNotConnected
-	}
-	return a.stream.Send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_CrossTenantRequest{CrossTenantRequest: req}})
+	return a.send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_CrossTenantRequest{CrossTenantRequest: req}})
 }
 
 // replayRetainedEvents resends every retained build event, ordered per run
@@ -419,13 +404,10 @@ func (a *Agent) replayRetainedEvents() {
 	}
 	a.sendMu.Lock()
 	defer a.sendMu.Unlock()
-	if a.stream == nil {
-		return
-	}
 	for _, evt := range events {
 		msg := &mitev1.MiteMessage{Message: &mitev1.MiteMessage_BuildEvent{BuildEvent: evt}}
-		if err := a.stream.Send(msg); err != nil {
-			a.closeOnSendError(err)
+		if err := a.sendLocked(msg); err != nil {
+			a.logForwardFailure(err)
 			return
 		}
 	}
@@ -434,12 +416,7 @@ func (a *Agent) replayRetainedEvents() {
 // sendLogChunkLocked forwards chunk under sendMu, so it never races the
 // heartbeat goroutine or another forward.
 func (a *Agent) sendLogChunkLocked(chunk *mitev1.LogChunk) error {
-	a.sendMu.Lock()
-	defer a.sendMu.Unlock()
-	if a.stream == nil {
-		return errStreamNotConnected
-	}
-	return a.stream.Send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_LogChunk{LogChunk: chunk}})
+	return a.send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_LogChunk{LogChunk: chunk}})
 }
 
 // replayRetainedLogChunks resends every retained log chunk, ordered per
@@ -453,13 +430,10 @@ func (a *Agent) replayRetainedLogChunks() {
 	}
 	a.sendMu.Lock()
 	defer a.sendMu.Unlock()
-	if a.stream == nil {
-		return
-	}
 	for _, chunk := range chunks {
 		msg := &mitev1.MiteMessage{Message: &mitev1.MiteMessage_LogChunk{LogChunk: chunk}}
-		if err := a.stream.Send(msg); err != nil {
-			a.closeOnSendError(err)
+		if err := a.sendLocked(msg); err != nil {
+			a.logForwardFailure(err)
 			return
 		}
 	}
@@ -468,17 +442,17 @@ func (a *Agent) replayRetainedLogChunks() {
 // scheduleLogResend records seq as refused for runID, extends the run's
 // pause window to at least d from now, and arms the run's one re-send
 // timer for the window's end. A timer already armed for the run stops,
-// so timers never stack. The timer re-sends only on the stream that was
-// open when the BUSY ack arrived, and only while ctx is live: after a
+// so timers never stack. The timer re-sends only on the session that was
+// live when the BUSY ack arrived, and only while ctx is live: after a
 // disconnect the reconnect replay re-sends every retained chunk instead.
 //
 // Call it only from the processCommands dispatch loop. That loop runs on
-// the run-loop goroutine, which is the only writer of a.stream, so it
-// reads a.stream without sendMu. It must never take sendMu: a re-send pass
+// the run-loop goroutine, which is the only writer of a.sess, so it
+// reads a.sess without sendMu. It must never take sendMu: a re-send pass
 // holds sendMu while it sends, and a read loop blocked behind it stops
 // draining the stream, so flow control stalls both directions.
 func (a *Agent) scheduleLogResend(ctx context.Context, runID string, seq int64, d time.Duration) {
-	armedStream := a.stream
+	armedSession := a.sess
 
 	s := a.logRetention
 	s.mu.Lock()
@@ -497,7 +471,7 @@ func (a *Agent) scheduleLogResend(ctx context.Context, runID string, seq int64, 
 	// reads nothing this goroutine still writes.
 	slot := &logResendSlot{}
 	slot.timer = time.AfterFunc(time.Until(until), func() {
-		a.resendBusyLogChunks(ctx, runID, armedStream, slot)
+		a.resendBusyLogChunks(ctx, runID, armedSession, slot)
 	})
 	s.resendTimers[runID] = slot
 }
@@ -510,36 +484,33 @@ func (a *Agent) scheduleLogResend(ctx context.Context, runID string, seq int64, 
 // callback waits for sendMu then replaces the slot, and this pass sends
 // nothing inside the extended pause. Lock order: sendMu, then the store
 // lock.
-func (a *Agent) resendBusyLogChunks(ctx context.Context, runID string, armedStream mitev1.Mite_CommandStreamClient, slot *logResendSlot) {
+func (a *Agent) resendBusyLogChunks(ctx context.Context, runID string, armedSession *miteSession, slot *logResendSlot) {
 	a.sendMu.Lock()
 	defer a.sendMu.Unlock()
 	chunks, ok := a.logRetention.takeRefused(runID, slot)
 	if !ok || len(chunks) == 0 {
 		return
 	}
-	if ctx.Err() != nil || a.stream == nil || a.stream != armedStream {
+	if ctx.Err() != nil || a.sess == nil || a.sess != armedSession {
 		return
 	}
 	for _, chunk := range chunks {
 		msg := &mitev1.MiteMessage{Message: &mitev1.MiteMessage_LogChunk{LogChunk: chunk}}
-		if err := a.stream.Send(msg); err != nil {
-			a.closeOnSendError(err)
+		if err := a.sendLocked(msg); err != nil {
+			a.logForwardFailure(err)
 			return
 		}
 	}
 }
 
-// closeOnSendError closes the connection to unblock the receive loop, as
-// the root AGENTS.md's send-error pattern requires — but only for a genuine
-// send failure on a live stream. errStreamNotConnected means the stream, and
-// therefore a.conn, may never have been set; closing a nil *grpc.ClientConn
-// panics, so that case is a no-op here.
-func (a *Agent) closeOnSendError(err error) {
+// logForwardFailure logs a loopback forward that failed on a live session.
+// The send helper already closed that session's own connection. A send
+// with no live session logs nothing, because the route answers 503.
+func (a *Agent) logForwardFailure(err error) {
 	if errors.Is(err, errStreamNotConnected) {
 		return
 	}
-	a.Logger.Warn("loopback forward failed, closing connection", "error", err)
-	_ = a.conn.Close()
+	a.Logger.Warn("loopback forward failed; the session connection is closed", "error", err)
 }
 
 // handleEventAck applies one OperatorMessage.event_ack: it releases the
@@ -642,7 +613,7 @@ func (a *Agent) handleEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := a.sendBuildEventLocked(evt); err != nil {
 			a.eventRetention.rollback(id)
-			a.closeOnSendError(err)
+			a.logForwardFailure(err)
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
@@ -711,7 +682,7 @@ func (a *Agent) handleClaim(w http.ResponseWriter, r *http.Request) {
 
 	if err := a.sendClaimRequestLocked(&req); err != nil {
 		a.claimWaiters.cancel(req.RequestId)
-		a.closeOnSendError(err)
+		a.logForwardFailure(err)
 		a.writeClaimFailure(ctx, w, http.StatusServiceUnavailable, req.RequestId)
 		return
 	}
@@ -797,7 +768,7 @@ func (a *Agent) handleCrossTenant(w http.ResponseWriter, r *http.Request, allowe
 	req := &mitev1.CrossTenantRequest{RequestId: &requestID, Kind: kf.Kind, PayloadJson: string(body)}
 	if err := a.sendCrossTenantRequestLocked(req); err != nil {
 		a.crossTenantWaiters.cancel(requestID)
-		a.closeOnSendError(err)
+		a.logForwardFailure(err)
 		writeCrossTenantFailure(w, http.StatusServiceUnavailable, &requestID, kf.Kind)
 		return
 	}
@@ -895,7 +866,7 @@ func (a *Agent) handleLog(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := a.sendLogChunkLocked(chunk); err != nil {
 		a.logRetention.rollback(size)
-		a.closeOnSendError(err)
+		a.logForwardFailure(err)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
@@ -1014,10 +985,7 @@ func (a *Agent) handleTailControl(ctx context.Context, tc *mitev1.TailControl) {
 	}
 
 	ack := &mitev1.TailAck{RunId: tc.RunId, ControlId: tc.ControlId, Active: active, Error: errStr}
-	a.sendMu.Lock()
-	sendErr := a.stream.Send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_TailAck{TailAck: ack}})
-	a.sendMu.Unlock()
-	if sendErr != nil {
+	if sendErr := a.send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_TailAck{TailAck: ack}}); sendErr != nil {
 		a.Logger.Warn("send tail ack failed", "error", sendErr)
 	}
 }

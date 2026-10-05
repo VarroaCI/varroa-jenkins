@@ -133,7 +133,7 @@ func TestConcurrentSendDoesNotRace(t *testing.T) {
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 	agent.heartbeatInterval = 30 * time.Millisecond
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
@@ -857,7 +857,7 @@ func TestDesiredStateCoalescingDoesNotEndSession(t *testing.T) {
 	})
 	agent.Logger = slog.Default()
 	agent.miteDir = t.TempDir()
-	agent.stream = stream
+	setTestStream(agent, stream)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -909,7 +909,7 @@ func TestSerializedCommandExecution(t *testing.T) {
 	})
 	agent.Logger = slog.Default()
 	agent.miteDir = t.TempDir()
-	agent.stream = stream
+	setTestStream(agent, stream)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

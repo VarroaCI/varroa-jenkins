@@ -125,7 +125,7 @@ func itemsGateAgent(t *testing.T, f *itemsGateJenkins) (*Agent, func() []*mitev1
 	}
 	agent := NewAgent(Config{ControllerName: "test", Namespace: "ns", JenkinsURL: f.srv.URL})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 	agent.miteDir = t.TempDir()
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "test-token"

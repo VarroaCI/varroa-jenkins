@@ -32,17 +32,30 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
     `startObservabilityProbe`, `startFingerprintTicker`,
     `startActivityPoller`, `startPluginInventoryCollector`,
     `startCertRenewalLoop`, and `processCommands`.
-  - **Send serialization** — `sendMu` (`agent.go:57`) guards every
-    `stream.Send()` call; the heartbeat goroutine and `processCommands`
-    (command results, content responses, token-refresh requests) all take it.
+  - **Send serialization** — every send goes through `send` or, with
+    `sendMu` already held, `sendLocked`. `sendMu` guards `a.sess`, the live
+    `miteSession`, which pairs the stream with the connection and client
+    that carry it. `openStream` installs the session. When
+    `processCommands` returns, `Run` calls `teardownSession`: it closes the
+    connection first, because a send that flow control stalls holds
+    `sendMu` and only the close unblocks it. Then it clears the session,
+    before the next `connect`. With no session, a send
+    returns `errStreamNotConnected`, and each loopback route answers `503`.
+    Only the run loop reads or writes `a.conn` and `a.client`. Never call
+    `a.stream.Send` or `a.conn.Close` from another goroutine.
   - **Content answer** — `buildContentResponse` answers a `ContentRequest` from
     `last-jcasc.yaml`, `last-items.yaml`, and `last-plugins.txt`, and passes the
     first two through `internal/secretredact`. The files on disk stay
-    unredacted, because the convergence hashes read them.
-  - **Recv/ctx unblocking** — `processCommands` (`agent.go:896`) wraps
-    `stream.Recv()` in a goroutine + channel so `ctx.Done()` can break the
-    loop without waiting on a blocking Recv; on a Send error `sendHeartbeats`
-    calls `a.conn.Close()` to unblock a stuck Recv.
+    unredacted, because the convergence hashes read them. The answer is sent
+    from its own goroutine, because the run loop must never wait for
+    `sendMu`.
+  - **Recv/ctx unblocking** — `processCommands` captures the session at
+    entry, without `sendMu`, and wraps its `stream.Recv()` in a goroutine + channel so
+    `ctx.Done()` can break the loop without waiting on a blocking Recv. On
+    a send error, `sendLocked` closes the connection of the session that
+    owns the stream, which unblocks that session's Recv. It never closes
+    the connection of a later session. `startCertRenewalLoop` gets the
+    session's client when it starts and never reads `a.client`.
   - **Command dispatch** — `commandMailbox` (`agent.go:834`): desired-state
     commands coalesce into a single replace-on-arrival slot (newest wins,
     never queued); imperative commands go through a bounded (cap 16) FIFO
@@ -180,8 +193,8 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
     set, extends the pause window (never shortens it), and arms the run's
     one re-send timer, stopping any armed one. When the window closes,
     `resendBusyLogChunks` sends the refused sequences still retained, in
-    `seq` order, under `sendMu`. It sends only on the stream that was open
-    when the ack arrived and only while that stream's context is live. The
+    `seq` order, under `sendMu`. It sends only on the session that was live
+    when the ack arrived and only while that session's context is live. The
     mite never re-sends a chunk the gateway holds as pending, because the
     gateway queues a repeat before it drops it, and a full re-send would
     spend the budget that caused the `BUSY`. Every retained chunk re-sends,
