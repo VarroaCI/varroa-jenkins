@@ -479,6 +479,13 @@ type ControllerStatus struct {
 	// DesiredStateHash is the combined hash of the desired state.
 	DesiredStateHash string `json:"desiredStateHash,omitempty"`
 
+	// DesiredContentHash is the content hash of the last delivered desired
+	// state: its JCasC, RBAC, and items, without tenant homes. In manual
+	// mode, a change that keeps this hash is a placement-only change and
+	// needs no approval.
+	// +optional
+	DesiredContentHash string `json:"desiredContentHash,omitempty"`
+
 	// MiteStatus holds the mite sidecar connection status.
 	MiteStatus *MiteStatus `json:"miteStatus,omitempty"`
 

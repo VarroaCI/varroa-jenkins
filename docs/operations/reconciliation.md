@@ -8,7 +8,7 @@ Reconciliation compares a controller's desired configuration with its running Je
 |---|---|
 | `automatic` | Apply desired state when drift is detected. |
 | `idle` | Defer an apply while builds run, up to the configured maximum. |
-| `manual` | Hold changes until an authorized user approves them. |
+| `manual` | Hold content changes until approval; placement changes apply. |
 
 Configure the policy in `ProvisioningDefaults` or the controller specification. `interval` sets the check interval, `drainTimeoutSeconds` limits the drain before a restart, and `maxDeferSeconds` limits idle-mode delay.
 

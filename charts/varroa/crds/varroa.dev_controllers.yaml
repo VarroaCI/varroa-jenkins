@@ -4282,6 +4282,13 @@ spec:
               configHash:
                 description: ConfigHash is the hash of the JCasC configuration.
                 type: string
+              desiredContentHash:
+                description: |-
+                  DesiredContentHash is the content hash of the last delivered desired
+                  state: its JCasC, RBAC, and items, without tenant homes. In manual
+                  mode, a change that keeps this hash is a placement-only change and
+                  needs no approval.
+                type: string
               desiredStateHash:
                 description: DesiredStateHash is the combined hash of the desired
                   state.

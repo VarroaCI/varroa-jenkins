@@ -3307,6 +3307,11 @@ func controllerStatusPatch(status *v1alpha1.ControllerStatus) map[string]interfa
 	if status.DesiredStateHash != "" {
 		statusPatch["desiredStateHash"] = status.DesiredStateHash
 	}
+	// desiredContentHash pairs with desiredStateHash, so it follows the
+	// same non-empty rule: a patch never clears one hash of the pair.
+	if status.DesiredContentHash != "" {
+		statusPatch["desiredContentHash"] = status.DesiredContentHash
+	}
 	if status.FirstConnectedAt != nil {
 		statusPatch["firstConnectedAt"] = status.FirstConnectedAt
 	}

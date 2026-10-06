@@ -177,7 +177,13 @@ sections describe.
     connection epoch is recorded only after a delivered push, and a reconnect
     whose hash equals `DesiredStateHash` is pushed past the pause, manual-mode,
     and wave gates (`redeliver`), because the removed KV bucket no longer
-    replays it.
+    replays it. Each delivered push also stamps `DesiredContentHash`
+    (`computeDesiredContentHash`, no tenant homes). In `manual` mode,
+    `manualPlacementChange` pushes a change that keeps that content hash at once
+    when `LastApplyResult` shows the delivered hash applied, holds it with no
+    pending restart while that hash has no result (an approved push can wait for
+    idle builds, and the mite keeps only the newest state), and raises a pending
+    restart when that apply failed.
   - `handleRunning` never changes the phase of a disconnected mite. Its
     `provisioningTimeout` guard skips a controller whose `StreamLost`
     transition is later than `ProvisioningStartedAt` (`streamLostSince`); a
@@ -1200,7 +1206,8 @@ sections describe.
   through `raisePendingRestart`, and returns `*PendingRestartChangedError` with the new
   sections. A non-empty `expectedContentHash` must equal the pending content hash too.
   `raisePendingRestart` is the only code that sets `pendingRestart`: for the same content
-  hash it keeps `detectedAt` and `changes`. A missing pending restart is
+  hash it keeps `detectedAt` and `changes`. An approval stamps `desiredContentHash` with
+  `desiredStateHash`; both are sticky in `controllerStatusPatch`. A missing pending restart is
   `ErrNoPendingRestart`. The 10-minute shard-resync tick calls
   `ForgetUnowned` too, because a reconcile in flight during a release can
   subscribe again. The shutdown release (`releaseAll`) calls no hook.

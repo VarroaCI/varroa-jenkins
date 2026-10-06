@@ -128,6 +128,9 @@ func TestApproveRestart_ProceedsWhenOnlyTenantHomesChanged(t *testing.T) {
 	if got.Status.DesiredStateHash != fresh.DesiredStateHash {
 		t.Fatalf("desiredStateHash = %q, want the hash with the current homes %q", got.Status.DesiredStateHash, fresh.DesiredStateHash)
 	}
+	if got.Status.DesiredContentHash != fresh.ContentHash {
+		t.Fatalf("desiredContentHash = %q, want the approved content %q", got.Status.DesiredContentHash, fresh.ContentHash)
+	}
 }
 
 // TestApproveRestart_MatchingContentClearsThePendingRestart pins that every

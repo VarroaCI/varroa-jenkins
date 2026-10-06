@@ -2130,6 +2130,7 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 			fresh.Status.PendingRestart = nil
 		}
 		fresh.Status.DesiredStateHash = desiredHash
+		fresh.Status.DesiredContentHash = computeDesiredContentHash(desired)
 		if action == "restart" {
 			setRestartDrain(&fresh.Status, restartCmdID, restartAt, drainSec)
 		}
@@ -4200,6 +4201,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 			})
 			if cr.Status.DesiredStateHash == desiredHash {
 				cr.Status.DesiredStateHash = "" // clear stale desired hash so manual mode re-flags on resume
+				cr.Status.DesiredContentHash = ""
 			}
 			logger.Info("rollout paused by bundle annotation", "bundle", bundleIdent.Namespace+"/"+bundleIdent.Name)
 			return nil
@@ -4223,19 +4225,31 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		// the new configuration. Don't re-set PendingRestart yet — wait for
 		// the snapshot to catch up. Only re-flag if the mite reported a
 		// failure for this hash.
+		contentHash := computeDesiredContentHash(desired)
 		if cr.Status.DesiredStateHash == desiredHash {
 			if hasResultFailureForHash(results, desired, desiredHash) {
-				raisePendingRestart(&cr.Status, now, desiredHash, computeDesiredContentHash(desired),
+				raisePendingRestart(&cr.Status, now, desiredHash, contentHash,
 					computeChangedSections(snapshot, desired))
 				logger.Info("manual mode, mite reported failure for pending hash, re-flagging")
 			}
 			return nil
 		}
-		// Manual mode: set PendingRestart instead of auto-pushing.
-		raisePendingRestart(&cr.Status, now, desiredHash, computeDesiredContentHash(desired),
-			computeChangedSections(snapshot, desired))
-		logger.Info("manual mode, config drift detected, pending approval")
-		return nil
+		switch manualPlacementChange(&cr.Status, contentHash) {
+		case placementPush:
+			// The content is the delivered and applied content, so the
+			// push carries only placement data. It needs no approval.
+			cr.Status.PendingRestart = nil
+			logger.Info("manual mode, placement-only change, pushing without approval")
+		case placementHold:
+			logger.Debug("manual mode, placement-only change waits for the delivered push to apply")
+			return nil
+		default:
+			// Manual mode: set PendingRestart instead of auto-pushing.
+			raisePendingRestart(&cr.Status, now, desiredHash, contentHash,
+				computeChangedSections(snapshot, desired))
+			logger.Info("manual mode, config drift detected, pending approval")
+			return nil
+		}
 	}
 
 	// Wave rollout gate: for controllers with rolloutWave > 0, block the push
@@ -4357,6 +4371,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		return fmt.Errorf("send desired state: %w", sendErr)
 	default:
 		cr.Status.DesiredStateHash = desiredHash
+		cr.Status.DesiredContentHash = computeDesiredContentHash(desired)
 		cr.Status.LastDesiredPushAt = &now
 		if reconnected {
 			r.miteTokenMu.Lock()
@@ -6490,6 +6505,40 @@ func raisePendingRestart(status *v1alpha1.ControllerStatus, now metav1.Time, des
 		ContentHash:      contentHash,
 		Changes:          changes,
 	}
+}
+
+// placementVerdict is the manual-mode answer for a desired state whose
+// full hash differs from the delivered one.
+type placementVerdict int
+
+const (
+	// placementApproval: the content changed, the delivered content hash
+	// is unknown, or the delivered push failed. A user must approve.
+	placementApproval placementVerdict = iota
+	// placementPush: only placement data changed, and the delivered push
+	// applied. The tick pushes at once.
+	placementPush
+	// placementHold: only placement data changed, but the delivered push
+	// has no apply result yet. The tick sends nothing, so a newer push
+	// does not replace an approved push that waits for idle builds.
+	placementHold
+)
+
+// manualPlacementChange classifies a manual-mode change by its content
+// hash. Tenant homes stay outside the content hash, so a change that keeps
+// the delivered content hash changes only placement data.
+func manualPlacementChange(status *v1alpha1.ControllerStatus, contentHash string) placementVerdict {
+	if status.DesiredContentHash == "" || status.DesiredContentHash != contentHash {
+		return placementApproval
+	}
+	applied := status.LastApplyResult
+	if applied == nil || applied.Hash != status.DesiredStateHash {
+		return placementHold
+	}
+	if applied.Succeeded {
+		return placementPush
+	}
+	return placementApproval
 }
 
 // tenantHomesHash answers a stable hash of a desired state's tenant home
