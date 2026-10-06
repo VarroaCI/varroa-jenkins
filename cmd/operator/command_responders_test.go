@@ -96,13 +96,18 @@ func TestServeCommandResponders_HeldPreviewDoesNotBlockSecond(t *testing.T) {
 // TestCommandResponders_OnlyComposeRowsAreConcurrent pins which subjects
 // run more than one request at a time. A row may move to a concurrent
 // limit only after its handler is known to be safe for concurrent calls.
+// It also pins that the operator serves no bundles.validate subject: the
+// BFF sends every compose on bundles.preview.
 func TestCommandResponders_OnlyComposeRowsAreConcurrent(t *testing.T) {
 	r := &operatorCommandRunner{cluster: "core", logger: slog.Default()}
-	concurrent := map[string]bool{"bundles.preview": true, "bundles.validate": true}
+	concurrent := map[string]bool{"bundles.preview": true}
 	seen := map[string]bool{}
 	for _, cr := range r.commandResponders(context.Background()) {
 		if seen[cr.subject] {
 			t.Errorf("subject %s is served twice", cr.subject)
+		}
+		if cr.subject == bus.OperatorBundlesSubject("core", "validate") {
+			t.Errorf("subject %s is served but has no sender", cr.subject)
 		}
 		seen[cr.subject] = true
 		if concurrent[cr.name] {

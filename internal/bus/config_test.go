@@ -17,7 +17,6 @@ func TestOperatorBundlesSubject(t *testing.T) {
 		{"my-cluster", "update", "operator.my-cluster.bundles.update"},
 		{"my-cluster", "delete", "operator.my-cluster.bundles.delete"},
 		{"my-cluster", "preview", "operator.my-cluster.bundles.preview"},
-		{"my-cluster", "validate", "operator.my-cluster.bundles.validate"},
 		{"my-cluster", "pause", "operator.my-cluster.bundles.pause"},
 		{"my-cluster", "resume", "operator.my-cluster.bundles.resume"},
 	}
@@ -77,13 +76,13 @@ func TestOperatorRbacSubject(t *testing.T) {
 	}
 }
 
-// TestAll27Subjects verifies that the union of all three subject builders
-// produces exactly 27 subjects for a sample cluster.
-func TestAll27Subjects(t *testing.T) {
+// TestAll26Subjects verifies that the union of all three subject builders
+// produces exactly 26 subjects for a sample cluster.
+func TestAll26Subjects(t *testing.T) {
 	cluster := "dev-cluster"
 	got := make(map[string]bool)
 
-	bundleVerbs := []string{"list", "get", "create", "update", "delete", "preview", "validate", "pause", "resume"}
+	bundleVerbs := []string{"list", "get", "create", "update", "delete", "preview", "pause", "resume"}
 	for _, v := range bundleVerbs {
 		got[OperatorBundlesSubject(cluster, v)] = true
 	}
@@ -98,8 +97,8 @@ func TestAll27Subjects(t *testing.T) {
 		got[OperatorRbacSubject(cluster, v)] = true
 	}
 
-	if len(got) != 27 {
-		t.Errorf("expected 27 unique subjects, got %d", len(got))
+	if len(got) != 26 {
+		t.Errorf("expected 26 unique subjects, got %d", len(got))
 	}
 
 	want := map[string]bool{
@@ -109,7 +108,6 @@ func TestAll27Subjects(t *testing.T) {
 		"operator.dev-cluster.bundles.update":       true,
 		"operator.dev-cluster.bundles.delete":       true,
 		"operator.dev-cluster.bundles.preview":      true,
-		"operator.dev-cluster.bundles.validate":     true,
 		"operator.dev-cluster.bundles.pause":        true,
 		"operator.dev-cluster.bundles.resume":       true,
 		"operator.dev-cluster.catalog.itemlist":     true,

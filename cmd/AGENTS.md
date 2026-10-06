@@ -44,9 +44,10 @@ stating what it is/is not responsible for:
   the group has one member. A serial subject therefore holds each request for
   the whole cluster until the request before it ends. Each row carries a
   `limit`: `serialResponder` (1) uses `ServeRequests`, and a higher limit uses
-  `ServeRequestsConcurrently`. Only `bundles.preview` and `bundles.validate`
-  use `composeConcurrency` (4 slots on each subject), because a compose can
-  clone git or pull OCI content. Move a row to a higher limit only after its handler is safe for
+  `ServeRequestsConcurrently`. Only `bundles.preview` uses
+  `composeConcurrency` (4 slots), because a compose can clone git or pull
+  OCI content. The BFF sends its validate route's compose on that same
+  subject; there is no `bundles.validate` subject. Move a row to a higher limit only after its handler is safe for
   concurrent calls. A compose context ends at `composeRequestTimeout` (55
   seconds, `internal/controller/config_crud.go`), under the BFF's 60-second
   timeout. A git process (`GitCloner.Clone`, `CloneCache.fetchBare`) does not

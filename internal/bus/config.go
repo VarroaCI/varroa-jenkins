@@ -3,7 +3,7 @@ package bus
 import "encoding/json"
 
 // OperatorBundlesSubject returns operator.<cluster>.bundles.<verb>.
-// verb ∈ list|get|create|update|delete|preview|validate|pause|resume.
+// verb ∈ list|get|create|update|delete|preview|pause|resume.
 // Request/response types per verb are defined below in this file.
 func OperatorBundlesSubject(cluster, verb string) string {
 	return "operator." + cluster + ".bundles." + verb
@@ -206,13 +206,13 @@ type BundlePauseResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
-// BundleComposeRequest is the payload for bundles.preview and bundles.validate.
+// BundleComposeRequest is the payload for bundles.preview.
 type BundleComposeRequest struct {
 	Namespace string          `json:"namespace"`
 	Spec      json.RawMessage `json:"spec"`
 }
 
-// BundleComposeResponse is the reply for bundles.preview and bundles.validate.
+// BundleComposeResponse is the reply for bundles.preview.
 type BundleComposeResponse struct {
 	Preview *BundleComposePreview `json:"preview,omitempty"`
 	Code    string                `json:"code,omitempty"`

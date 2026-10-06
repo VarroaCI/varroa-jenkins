@@ -1143,17 +1143,14 @@ func (c *ConfigCRUD) HandleSourceSync(data []byte) []byte {
 }
 
 // ---------------------------------------------------------------------------
-// Bundles preview/validate — shared compose helper
+// Bundles preview — the one compose subject
 // ---------------------------------------------------------------------------
 
-// HandleBundlesPreview handles operator.<cluster>.bundles.preview.
+// HandleBundlesPreview handles operator.<cluster>.bundles.preview. The BFF
+// sends every compose, for its preview and its validate route, on this one
+// subject.
 func (c *ConfigCRUD) HandleBundlesPreview(data []byte) []byte {
-	return c.composeBundle(data, false)
-}
-
-// HandleBundlesValidate handles operator.<cluster>.bundles.validate.
-func (c *ConfigCRUD) HandleBundlesValidate(data []byte) []byte {
-	return c.composeBundle(data, true)
+	return c.composeBundle(data)
 }
 
 // composeRequestTimeout limits the work of one bundle compose request on the
@@ -1163,10 +1160,10 @@ func (c *ConfigCRUD) HandleBundlesValidate(data []byte) []byte {
 // not observe the context and can run past it.
 const composeRequestTimeout = 55 * time.Second
 
-// composeBundle is the shared handler for preview and validate.
-// It resolves git auth, runs the composer, and returns BundleComposeResponse
-// with errors as data (code:""), never as transport errors.
-func (c *ConfigCRUD) composeBundle(data []byte, _ /* validateOnly — the BFF distinguishes by endpoint, operator side always composes */ bool) []byte {
+// composeBundle resolves git auth, runs the composer, and returns
+// BundleComposeResponse with errors as data (code:""), never as transport
+// errors.
+func (c *ConfigCRUD) composeBundle(data []byte) []byte {
 	var req bus.BundleComposeRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		return c.configReply(bus.BundleComposeResponse{Error: "invalid request", Code: bus.CodeInvalid})
