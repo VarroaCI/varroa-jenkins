@@ -109,7 +109,8 @@ func main() {
 		os.Exit(1)
 	}
 	defer busConn.Close()
-	if err := busConn.RegisterMetrics(otel.Meter("varroa-gateway"), "gateway"); err != nil {
+	meterProvider := otel.GetMeterProvider()
+	if err := busConn.RegisterMetrics(meterProvider.Meter("varroa-gateway"), "gateway"); err != nil {
 		logger.Warn("failed to register bus metrics", "error", err)
 	}
 	// JetStream replica count for KV buckets and the imperative command stream
@@ -216,7 +217,11 @@ func main() {
 	// --- Activity publisher (mode-agnostic, publishes to activity.* subjects) ---
 	actPub := activity.NewPublisher(cluster, busConn)
 
-	handler := mitesrv.NewBusHandler(cluster, busConn, snapshotKV, presenceKV, actPub)
+	handler, err := mitesrv.NewBusHandler(meterProvider, cluster, busConn, snapshotKV, presenceKV, actPub)
+	if err != nil {
+		logger.Error("failed to create the mite stream handler", "error", err)
+		os.Exit(1)
+	}
 	srv.SetStreamHandler(handler)
 	defer handler.Close()
 	logger.Info("gateway using bus transport for mite streams", "endpoint", endpoint)

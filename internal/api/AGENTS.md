@@ -464,7 +464,9 @@ federation, activity persistence, and SSE fanout.
   `activity.>` and generic bus subjects and redelivers them as `Record`s to per-key
   subscribers — this backs live tailing for `/activity/stream` and `/stream/brood`.
   `BusFanout` and `RunFanout` subscribe through `bus.Conn.Listen`, so they
-  recover from a denied subscription without a restart.
+  recover from a denied subscription without a restart. `NewRunFanout` takes
+  a `metric.MeterProvider` and creates `bff.run_notify.unmatched` on its
+  `varroa-bff` meter; a test passes `noop.NewMeterProvider()` or a test provider.
   `HandleBroodStream`/`HandleControllerStream`/`HandleMiteStream` (`sse/handlers.go`)
   are the actual chunked-flush SSE `http.HandlerFunc`s.
 - `handlers.go` (~3350 lines, the largest file) is the central handler file:

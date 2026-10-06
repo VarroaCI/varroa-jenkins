@@ -88,7 +88,9 @@ stating what it is/is not responsible for:
   sidecars on `:9090` and bridges each `CommandStream` to NATS
   (`mite.<cluster>.<ns>.<name>.{in,out,content,desired}`). Loads the shared CA from the `varroa-ca`
   Secret. Also serves an apikey-verify HTTP endpoint (default `:9092`). Does
-  not reconcile controllers.
+  not reconcile controllers. `main` reads `otel.GetMeterProvider()` once,
+  after `telemetry.InitTelemetry`, and passes it to `mite.NewBusHandler` and
+  the bus metrics.
 - **`bff/`** (`bin/varroa-bff`) — Backend-For-Frontend; REST API + SSE on
   `:8080`. Stateless — mite telemetry comes from the NATS bus, OIDC JWT needs
   no server-side session. Multiple replicas run behind a load balancer
@@ -97,7 +99,9 @@ stating what it is/is not responsible for:
   Reads `VARROA_CELLS_MAX_TENANTS` into `Deps.CellMaxTenants`, unconditionally
   and not inside the record-store block: it is the chart tier of the cell
   usage reads' tenant cap, and one chart value renders it into this binary and
-  into the operator, so the two agree.
+  into the operator, so the two agree. `main` reads `otel.GetMeterProvider()`
+  once, after `telemetry.InitTelemetry`, and passes it to `sse.NewRunFanout`,
+  the bus metrics, and the `varroa.clusters.known` gauge.
 - **`updatecenter/`** (`bin/varroa-updatecenter`) — opt-in in-cluster Jenkins
   update center on `:8080` (`VARROA_UC_LISTEN`); thin main over
   `internal/updatecenter`, configured entirely via `VARROA_UC_*` env vars
@@ -152,6 +156,8 @@ stating what it is/is not responsible for:
   `CommandStream`s against a gateway (embedded self-contained NATS+gateway by
   default, or `--gateway ADDR` against a real one) to profile CPU/etcd QPS/
   mTLS handshake storms/shard rebalancing. Never shipped in the product image.
+  It starts no telemetry and passes `noop.NewMeterProvider()` to
+  `mite.NewBusHandler`.
 - **`protogen/`** — codegen helper that parses `.proto` files
   (`github.com/emicklei/proto`) and renders Go types via the templates in
   `protogen/templates/` for `internal/mite/proto/mitev1/`. Invoked by

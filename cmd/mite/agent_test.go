@@ -46,7 +46,7 @@ func TestRunReconnectsOnStreamFailure(t *testing.T) {
 		Namespace:      "ns",
 		BootstrapFile:  tokenFile,
 	}
-	agent := NewAgent(cfg)
+	agent := mustNewAgent(t, cfg)
 	agent.Logger = slog.Default()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
@@ -87,7 +87,7 @@ func (s *concurrentSendStream) RecvMsg(m interface{}) error  { return nil }
 // TestHeartbeatReprobesJenkinsHealth verifies that sendHeartbeats re-probes
 // Jenkins health on every tick instead of caching stale values from startup.
 func TestHeartbeatReprobesJenkinsHealth(t *testing.T) {
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
@@ -127,7 +127,7 @@ func TestConcurrentSendDoesNotRace(t *testing.T) {
 		return nil, context.DeadlineExceeded
 	}
 
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
@@ -159,7 +159,7 @@ func TestConcurrentSendDoesNotRace(t *testing.T) {
 // --- Token grant cache tests ---
 
 func TestTokenGrantUpdatesCache(t *testing.T) {
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
@@ -192,7 +192,7 @@ func TestTokenGrantUpdatesCache(t *testing.T) {
 }
 
 func TestTokenGrantOlderExpDoesNotOverwrite(t *testing.T) {
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
@@ -284,7 +284,7 @@ func TestAllComponentsSucceeded(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := (&Agent{}).allComponentsSucceeded(tt.result, tt.cmd)
+			got := (&Agent{metrics: noopMiteMetrics()}).allComponentsSucceeded(tt.result, tt.cmd)
 			if got != tt.want {
 				t.Errorf("allComponentsSucceeded = %v, want %v", got, tt.want)
 			}
@@ -297,7 +297,7 @@ func TestAllComponentsSucceeded(t *testing.T) {
 // the heartbeat goroutine read lastHealth while the health-probe goroutine
 // wrote it without synchronization. Run with -race.
 func TestHealthCacheConcurrentAccess(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 
 	var wg sync.WaitGroup
@@ -328,7 +328,7 @@ func TestHealthCacheConcurrentAccess(t *testing.T) {
 // the convergence/first-boot logic can be exercised hermetically.
 func newTestAgent(t *testing.T) *Agent {
 	t.Helper()
-	a := NewAgent(Config{ControllerName: "test", Namespace: "ns"})
+	a := mustNewAgent(t, Config{ControllerName: "test", Namespace: "ns"})
 	a.Logger = slog.Default()
 	a.miteDir = t.TempDir()
 	return a
@@ -338,7 +338,7 @@ func newTestAgent(t *testing.T) *Agent {
 // points at the given stub server URL.
 func newTestAgentWithJenkins(t *testing.T, jenkinsURL string) *Agent {
 	t.Helper()
-	a := NewAgent(Config{ControllerName: "test", Namespace: "ns", JenkinsURL: jenkinsURL})
+	a := mustNewAgent(t, Config{ControllerName: "test", Namespace: "ns", JenkinsURL: jenkinsURL})
 	a.Logger = slog.Default()
 	a.miteDir = t.TempDir()
 	return a
@@ -682,12 +682,12 @@ func TestFailedApplyLeavesMarkerStale(t *testing.T) {
 // mite process restart (a new Agent pointed at the same dir sees the marker).
 func TestMarkerSurvivesRestart(t *testing.T) {
 	dir := t.TempDir()
-	a1 := NewAgent(Config{})
+	a1 := mustNewAgent(t, Config{})
 	a1.Logger = slog.Default()
 	a1.miteDir = dir
 	a1.writeMarker(appliedMarker{composite: "persisted-hash", session: "sess-1"})
 
-	a2 := NewAgent(Config{})
+	a2 := mustNewAgent(t, Config{})
 	a2.Logger = slog.Default()
 	a2.miteDir = dir
 	m := a2.readMarker()
@@ -720,7 +720,7 @@ func TestComponentCachesWithoutMarkerIsFirstBoot(t *testing.T) {
 // refresh callers share one qualifying TokenGrant without orphaning earlier
 // waiters.
 func TestConcurrentRefreshWaitersShareGrant(t *testing.T) {
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
@@ -771,7 +771,7 @@ func TestConcurrentRefreshWaitersShareGrant(t *testing.T) {
 // unblock a waiter whose baseline is fresher than both the cached and
 // grant tokens.
 func TestStaleGrantDoesNotCompleteExpiredTokenWaiter(t *testing.T) {
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
@@ -850,7 +850,7 @@ func TestDesiredStateCoalescingDoesNotEndSession(t *testing.T) {
 	}
 
 	srv, _ := fakeJenkins(t, "sess-1")
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     srv.URL,
@@ -902,7 +902,7 @@ func TestSerializedCommandExecution(t *testing.T) {
 	_ = stream
 
 	srv, _ := fakeJenkins(t, "sess-1")
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     srv.URL,
@@ -1205,7 +1205,7 @@ func TestApplyConfigViaReloadHappyPath(t *testing.T) {
 		return http.StatusOK, ""
 	})
 	client := jenkins.NewClient(srv.URL, "varroa-mite", "test-token")
-	agent := &Agent{Logger: slog.Default()}
+	agent := &Agent{metrics: noopMiteMetrics(), Logger: slog.Default()}
 
 	cmd := &mitev1.DesiredStateCommand{
 		JcascYaml: "jenkins:\n  systemMessage: \"hello from casc\"\n",
@@ -1268,7 +1268,7 @@ func TestApplyConfigViaReloadRollbackRestored(t *testing.T) {
 		return http.StatusOK, ""
 	})
 	client := jenkins.NewClient(srv.URL, "varroa-mite", "test-token")
-	agent := &Agent{Logger: slog.Default()}
+	agent := &Agent{metrics: noopMiteMetrics(), Logger: slog.Default()}
 
 	cmd := &mitev1.DesiredStateCommand{
 		JcascYaml: "jenkins:\n  systemMessage: \"risky\"\n",
@@ -1313,7 +1313,7 @@ func TestApplyConfigViaReloadRollbackAlsoFailed(t *testing.T) {
 		return http.StatusInternalServerError, "reload exploded"
 	})
 	client := jenkins.NewClient(srv.URL, "varroa-mite", "test-token")
-	agent := &Agent{Logger: slog.Default()}
+	agent := &Agent{metrics: noopMiteMetrics(), Logger: slog.Default()}
 
 	cmd := &mitev1.DesiredStateCommand{
 		JcascYaml: "jenkins:\n  systemMessage: \"risky\"\n",
@@ -1338,7 +1338,7 @@ func TestApplyConfigViaReloadNoLastGood(t *testing.T) {
 		return http.StatusInternalServerError, "reload exploded"
 	})
 	client := jenkins.NewClient(srv.URL, "varroa-mite", "test-token")
-	agent := &Agent{Logger: slog.Default()}
+	agent := &Agent{metrics: noopMiteMetrics(), Logger: slog.Default()}
 
 	cmd := &mitev1.DesiredStateCommand{
 		JcascYaml: "jenkins:\n  systemMessage: \"first ever\"\n",
@@ -1375,7 +1375,7 @@ func TestApplyConfigViaReloadWritesRbacYaml(t *testing.T) {
 		return http.StatusOK, ""
 	})
 	client := jenkins.NewClient(srv.URL, "varroa-mite", "test-token")
-	agent := &Agent{Logger: slog.Default()}
+	agent := &Agent{metrics: noopMiteMetrics(), Logger: slog.Default()}
 
 	cmd := &mitev1.DesiredStateCommand{
 		JcascYaml: "jenkins:\n  systemMessage: \"hello\"\n",
@@ -1468,7 +1468,7 @@ func TestCertRenewalConcurrentAccess(t *testing.T) {
 		t.Fatalf("generate key: %v", err)
 	}
 
-	agent := NewAgent(Config{ControllerName: "test", Namespace: "ns"})
+	agent := mustNewAgent(t, Config{ControllerName: "test", Namespace: "ns"})
 	agent.Logger = slog.Default()
 	agent.keypair = priv
 	agent.miteDir = t.TempDir() // keep cert writes off the real shared path

@@ -52,11 +52,6 @@ const (
 	stateReasonBudgetFull = "gateway-budget-full"
 )
 
-var (
-	runStateBytes    metric.Int64Counter
-	runStateRejected metric.Int64Counter
-)
-
 // runStateBuffer holds the chunks of one file of one push generation,
 // until every sequence is present.
 type runStateBuffer struct {
@@ -254,7 +249,7 @@ func (h *BusHandler) OnRunStateChunk(name, ns string, chunk *mitev1.RunStateChun
 		}
 	}
 	if outcome.status == stateAckStatusRejected {
-		runStateRejected.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", outcome.reason)))
+		h.metrics.runStateRejected.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", outcome.reason)))
 	}
 
 	h.sendRunStateAck(ns, name, chunk, outcome.status, outcome.reason, outcome.pauseMS)
@@ -438,7 +433,7 @@ func (h *BusHandler) storeRunStateObject(ctx context.Context, e *runStateEntry, 
 	e.completed[chunk.Relpath] = storedPush{epoch: chunk.PusherEpoch, gen: outcome.stateGen}
 	h.stateMu.Unlock()
 
-	runStateBytes.Add(ctx, outcome.bytes)
+	h.metrics.runStateBytes.Add(ctx, outcome.bytes)
 	outcome.status = stateAckStatusStored
 	return outcome
 }
@@ -517,7 +512,7 @@ func (h *BusHandler) stateBudgetPauseMSLocked() int {
 
 // rejectRunState answers one refusal and counts it by its reason.
 func (h *BusHandler) rejectRunState(ctx context.Context, ns, name string, chunk *mitev1.RunStateChunk, reason string) {
-	runStateRejected.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", reason)))
+	h.metrics.runStateRejected.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", reason)))
 	h.sendRunStateAck(ns, name, chunk, stateAckStatusRejected, reason, 0)
 	if reason == stateReasonStateCap {
 		h.publishRunStateOutcome(ns, name, chunk, runStateOutcome{status: stateAckStatusRejected, reason: reason})

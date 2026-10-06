@@ -23,8 +23,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/metric"
 
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
@@ -122,67 +120,6 @@ var crossTenantRouteKinds = map[string]map[string]bool{
 		"lock_renew":   true,
 		"lock_release": true,
 	},
-}
-
-var (
-	claimsGranted   metric.Int64Counter
-	claimsDuplicate metric.Int64Counter
-	claimsVetoed    metric.Int64Counter
-	claimsFailed    metric.Int64Counter
-
-	buildEventsForwarded metric.Int64Counter
-	buildEventsAcked     metric.Int64Counter
-	buildEventsRejected  metric.Int64Counter
-	// buildEventsRetainedBytes is an UpDownCounter, not a Gauge: it moves up
-	// on every retained event and down on every release or rollback.
-	buildEventsRetainedBytes metric.Int64UpDownCounter
-
-	logChunksForwarded metric.Int64Counter
-	logChunksAcked     metric.Int64Counter
-	logChunksRejected  metric.Int64Counter
-	// logChunksRetainedBytes is an UpDownCounter for the same reason as
-	// buildEventsRetainedBytes above.
-	logChunksRetainedBytes metric.Int64UpDownCounter
-)
-
-func init() {
-	meter := otel.Meter("varroa-mite")
-	claimsGranted, _ = meter.Int64Counter("varroa.mite.claims.granted",
-		metric.WithDescription("Run claims the recorder granted"),
-	)
-	claimsDuplicate, _ = meter.Int64Counter("varroa.mite.claims.duplicate",
-		metric.WithDescription("Run claims the recorder marked duplicate"),
-	)
-	claimsVetoed, _ = meter.Int64Counter("varroa.mite.claims.vetoed",
-		metric.WithDescription("Run claims the recorder vetoed"),
-	)
-	claimsFailed, _ = meter.Int64Counter("varroa.mite.claims.failed",
-		metric.WithDescription("Run claims that ended with no decision (timeout, cap, disconnect)"),
-	)
-	buildEventsForwarded, _ = meter.Int64Counter("varroa.mite.build_events.forwarded",
-		metric.WithDescription("Build events sent on the command stream"),
-	)
-	buildEventsAcked, _ = meter.Int64Counter("varroa.mite.build_events.acked",
-		metric.WithDescription("Build events the gateway acknowledged as stored"),
-	)
-	buildEventsRejected, _ = meter.Int64Counter("varroa.mite.build_events.rejected",
-		metric.WithDescription("Build events the gateway acknowledged as rejected"),
-	)
-	buildEventsRetainedBytes, _ = meter.Int64UpDownCounter("varroa.mite.build_events.retained_bytes",
-		metric.WithDescription("Bytes of build events retained pending acknowledgement"),
-	)
-	logChunksForwarded, _ = meter.Int64Counter("varroa.mite.log_chunks.forwarded",
-		metric.WithDescription("Console-log chunks sent on the command stream"),
-	)
-	logChunksAcked, _ = meter.Int64Counter("varroa.mite.log_chunks.acked",
-		metric.WithDescription("Console-log chunks the gateway acknowledged as stored"),
-	)
-	logChunksRejected, _ = meter.Int64Counter("varroa.mite.log_chunks.rejected",
-		metric.WithDescription("Console-log chunks the gateway acknowledged as rejected"),
-	)
-	logChunksRetainedBytes, _ = meter.Int64UpDownCounter("varroa.mite.log_chunks.retained_bytes",
-		metric.WithDescription("Bytes of console-log chunks retained pending acknowledgement"),
-	)
 }
 
 // logRetainBytesFromEnv resolves VARROA_MITE_LOG_RETAIN_BYTES, defaulting
@@ -522,13 +459,13 @@ func (a *Agent) handleEventAck(ctx context.Context, ack *mitev1.EventAck) {
 		return
 	}
 	if freed, ok := a.eventRetention.release(ack.RunId, ack.EventSeq, ack.Status); ok {
-		buildEventsRetainedBytes.Add(ctx, -freed)
+		a.metrics.buildEventsRetainedBytes.Add(ctx, -freed)
 	}
 	switch ack.Status {
 	case ackStatusStored:
-		buildEventsAcked.Add(ctx, 1)
+		a.metrics.buildEventsAcked.Add(ctx, 1)
 	case ackStatusRejected:
-		buildEventsRejected.Add(ctx, 1)
+		a.metrics.buildEventsRejected.Add(ctx, 1)
 	}
 	a.eventAcks.push(ack)
 }
@@ -547,8 +484,8 @@ func (a *Agent) handleLogAck(ctx context.Context, ack *mitev1.LogAck) {
 	switch ack.Status {
 	case ackStatusStored:
 		freed := a.logRetention.release(ack.RunId, ack.AckSeq)
-		logChunksRetainedBytes.Add(ctx, -freed)
-		logChunksAcked.Add(ctx, 1)
+		a.metrics.logChunksRetainedBytes.Add(ctx, -freed)
+		a.metrics.logChunksAcked.Add(ctx, 1)
 	case ackStatusBusy:
 		pauseMS := ack.PauseMs
 		if pauseMS <= 0 {
@@ -557,8 +494,8 @@ func (a *Agent) handleLogAck(ctx context.Context, ack *mitev1.LogAck) {
 		a.scheduleLogResend(ctx, ack.RunId, ack.AckSeq, time.Duration(pauseMS)*time.Millisecond)
 	case ackStatusRejected:
 		freed := a.logRetention.release(ack.RunId, ack.AckSeq)
-		logChunksRetainedBytes.Add(ctx, -freed)
-		logChunksRejected.Add(ctx, 1)
+		a.metrics.logChunksRetainedBytes.Add(ctx, -freed)
+		a.metrics.logChunksRejected.Add(ctx, 1)
 	}
 }
 
@@ -598,7 +535,7 @@ func (a *Agent) handleEvents(w http.ResponseWriter, r *http.Request) {
 		if evt.Phase == heartbeatPhase {
 			// Best-effort: dropped, not retained, when the stream is down.
 			if err := a.sendBuildEventLocked(evt); err == nil {
-				buildEventsForwarded.Add(ctx, 1)
+				a.metrics.buildEventsForwarded.Add(ctx, 1)
 			}
 			continue
 		}
@@ -621,8 +558,8 @@ func (a *Agent) handleEvents(w http.ResponseWriter, r *http.Request) {
 		// can supersede this reservation before this commit call runs, and
 		// only commit knows whether it still owns the charge it must
 		// report.
-		buildEventsRetainedBytes.Add(ctx, a.eventRetention.commit(id, evt, size))
-		buildEventsForwarded.Add(ctx, 1)
+		a.metrics.buildEventsRetainedBytes.Add(ctx, a.eventRetention.commit(id, evt, size))
+		a.metrics.buildEventsForwarded.Add(ctx, 1)
 	}
 
 	acks := a.eventAcks.drain()
@@ -692,7 +629,7 @@ func (a *Agent) handleClaim(w http.ResponseWriter, r *http.Request) {
 
 	select {
 	case resp := <-ch:
-		countClaimDecision(ctx, resp)
+		a.countClaimDecision(ctx, resp)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(resp)
@@ -871,8 +808,8 @@ func (a *Agent) handleLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.logRetention.commit(chunk, size)
-	logChunksRetainedBytes.Add(r.Context(), size)
-	logChunksForwarded.Add(r.Context(), 1)
+	a.metrics.logChunksRetainedBytes.Add(r.Context(), size)
+	a.metrics.logChunksForwarded.Add(r.Context(), 1)
 	w.WriteHeader(http.StatusAccepted)
 }
 
@@ -1000,7 +937,7 @@ func unavailableClaimResponse(requestID string) *mitev1.ClaimResponse {
 // and counts it.
 func (a *Agent) writeClaimFailure(ctx context.Context, w http.ResponseWriter, status int, requestID string) {
 	resp := unavailableClaimResponse(requestID)
-	countClaimDecision(ctx, resp)
+	a.countClaimDecision(ctx, resp)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(resp)
@@ -1009,16 +946,16 @@ func (a *Agent) writeClaimFailure(ctx context.Context, w http.ResponseWriter, st
 // countClaimDecision counts a ClaimResponse under the counter its decision
 // names. An empty decision — every mite-generated failure and a gateway
 // failure alike — counts as failed.
-func countClaimDecision(ctx context.Context, resp *mitev1.ClaimResponse) {
+func (a *Agent) countClaimDecision(ctx context.Context, resp *mitev1.ClaimResponse) {
 	switch resp.Decision {
 	case "granted":
-		claimsGranted.Add(ctx, 1)
+		a.metrics.claimsGranted.Add(ctx, 1)
 	case "duplicate":
-		claimsDuplicate.Add(ctx, 1)
+		a.metrics.claimsDuplicate.Add(ctx, 1)
 	case "vetoed":
-		claimsVetoed.Add(ctx, 1)
+		a.metrics.claimsVetoed.Add(ctx, 1)
 	default:
-		claimsFailed.Add(ctx, 1)
+		a.metrics.claimsFailed.Add(ctx, 1)
 	}
 }
 

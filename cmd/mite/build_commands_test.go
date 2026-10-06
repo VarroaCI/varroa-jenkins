@@ -88,7 +88,7 @@ func TestTriggerAndCancelBuildCommands(t *testing.T) {
 			t.Cleanup(srv.Close)
 
 			stream, captured := testReplayStream(t)
-			agent := NewAgent(Config{
+			agent := mustNewAgent(t, Config{
 				ControllerName: "test",
 				Namespace:      "ns",
 				JenkinsURL:     srv.URL,
@@ -167,7 +167,7 @@ func TestCancelBuildRefusedCarriesStatus(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	stream, captured := testReplayStream(t)
-	agent := NewAgent(Config{ControllerName: "test", Namespace: "ns", JenkinsURL: srv.URL})
+	agent := mustNewAgent(t, Config{ControllerName: "test", Namespace: "ns", JenkinsURL: srv.URL})
 	agent.Logger = slog.Default()
 	setTestStream(agent, stream)
 	agent.jenkinsTokenMu.Lock()
@@ -218,7 +218,7 @@ func TestTriggerBuildWaitsForJenkins(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	stream, captured := testReplayStream(t)
-	agent := NewAgent(Config{ControllerName: "test", Namespace: "ns", JenkinsURL: srv.URL})
+	agent := mustNewAgent(t, Config{ControllerName: "test", Namespace: "ns", JenkinsURL: srv.URL})
 	agent.Logger = slog.Default()
 	setTestStream(agent, stream)
 	agent.jenkinsTokenMu.Lock()
@@ -258,7 +258,7 @@ func TestTriggerBuildReadinessWaitExpires(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	stream, captured := testReplayStream(t)
-	agent := NewAgent(Config{ControllerName: "test", Namespace: "ns", JenkinsURL: srv.URL})
+	agent := mustNewAgent(t, Config{ControllerName: "test", Namespace: "ns", JenkinsURL: srv.URL})
 	agent.Logger = slog.Default()
 	setTestStream(agent, stream)
 	agent.triggerReadyWait = 50 * time.Millisecond
@@ -311,7 +311,7 @@ func TestTriggerBuildNilPayload(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	stream, captured := testReplayStream(t)
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     srv.URL,

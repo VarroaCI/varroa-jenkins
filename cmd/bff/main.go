@@ -220,7 +220,8 @@ func main() {
 		os.Exit(1)
 	}
 	defer busConn.Close()
-	if err := busConn.RegisterMetrics(otel.Meter("varroa-bff"), "bff"); err != nil {
+	meterProvider := otel.GetMeterProvider()
+	if err := busConn.RegisterMetrics(meterProvider.Meter("varroa-bff"), "bff"); err != nil {
 		logger.Warn("failed to register bus metrics", "error", err)
 	}
 	// JetStream replica count for streams and KV buckets (from the NATS cluster
@@ -290,7 +291,11 @@ func main() {
 	}()
 
 	// --- Live run notification fanout (one key per cluster and tenant) ---
-	runFanout := sse.NewRunFanout(busConn, otel.Meter("varroa-bff"))
+	runFanout, err := sse.NewRunFanout(busConn, meterProvider)
+	if err != nil {
+		logger.Error("failed to create run fanout", "error", err)
+		os.Exit(1)
+	}
 	runFanout.Logger = logger
 	go func() {
 		if err := runFanout.Start(ctx); err != nil {
@@ -300,8 +305,7 @@ func main() {
 
 	// --- Cluster membership gauge (15s ticker) ---
 	go func() {
-		meter := otel.Meter("varroa-bff")
-		gauge, _ := meter.Int64Gauge("varroa.clusters.known",
+		gauge, _ := meterProvider.Meter("varroa-bff").Int64Gauge("varroa.clusters.known",
 			metric.WithDescription("Member clusters currently present in varroa_clusters"))
 		t := time.NewTicker(15 * time.Second)
 		defer t.Stop()

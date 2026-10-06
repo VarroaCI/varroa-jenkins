@@ -42,8 +42,9 @@ func generateTestCAPEM(t *testing.T) []byte {
 func TestBootstrapTLSConfig_CAPEMSet(t *testing.T) {
 	caPEM := generateTestCAPEM(t)
 	agent := &Agent{
-		cfg:    Config{CAPEM: string(caPEM)},
-		Logger: slog.Default(),
+		metrics: noopMiteMetrics(),
+		cfg:     Config{CAPEM: string(caPEM)},
+		Logger:  slog.Default(),
 	}
 
 	tlsCfg, err := agent.bootstrapTLSConfig()
@@ -73,8 +74,9 @@ func TestBootstrapTLSConfig_MalformedCAPEM(t *testing.T) {
 	// PEM wrapping garbage bytes that won't parse as a cert.
 	badPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte("not-a-valid-der")})
 	agent := &Agent{
-		cfg:    Config{CAPEM: string(badPEM)},
-		Logger: slog.Default(),
+		metrics: noopMiteMetrics(),
+		cfg:     Config{CAPEM: string(badPEM)},
+		Logger:  slog.Default(),
 	}
 
 	_, err := agent.bootstrapTLSConfig()
@@ -87,8 +89,9 @@ func TestBootstrapTLSConfig_CAPEMEmpty(t *testing.T) {
 	// Fail-closed: with no CA PEM, bootstrap must refuse rather than fall back to an
 	// insecure (unverified) connection.
 	agent := &Agent{
-		cfg:    Config{CAPEM: ""},
-		Logger: slog.Default(),
+		metrics: noopMiteMetrics(),
+		cfg:     Config{CAPEM: ""},
+		Logger:  slog.Default(),
 	}
 
 	tlsCfg, err := agent.bootstrapTLSConfig()
@@ -110,6 +113,7 @@ func TestConnectWithCertNotBrokenByRefactor(t *testing.T) {
 	// connect() will hit the a.cert != nil branch, try to read ca.pem
 	// from varroaMiteDir, and fail with an fs error — not a crash.
 	agent := &Agent{
+		metrics: noopMiteMetrics(),
 		cfg:     Config{CAPEM: ""},
 		cert:    &tls.Certificate{},
 		Logger:  slog.Default(),

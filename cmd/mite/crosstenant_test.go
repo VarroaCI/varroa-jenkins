@@ -20,7 +20,7 @@ import (
 // --- 6.1: routes, unknown kind, wrong token ---
 
 func TestCrossTenantUnknownKindRejected400(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	var sent int32
@@ -46,7 +46,7 @@ func TestCrossTenantUnknownKindRejected400(t *testing.T) {
 // to a different cross-tenant route is refused on this one: each route
 // accepts only the kinds design.md D2's table names for it.
 func TestCrossTenantKindOutsideOwnRouteRejected400(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
@@ -62,7 +62,7 @@ func TestCrossTenantKindOutsideOwnRouteRejected400(t *testing.T) {
 }
 
 func TestCrossTenantWrongTokenRejected401(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
@@ -113,7 +113,7 @@ func crossTenantBody(kind string) string {
 // status poll and a lock renew wait on one mite; resolving one reply must
 // release only its own caller.
 func TestCrossTenantTwoConcurrentKindsDoNotCross(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	agent.crossTenantTimeout = 2 * time.Second
@@ -190,7 +190,7 @@ func TestCrossTenantTwoConcurrentKindsDoNotCross(t *testing.T) {
 // target_tenant and the bare name, so the mite must neither drop nor join
 // the two fields.
 func TestCrossTenantLockForwardsTargetTenantVerbatim(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	agent.crossTenantTimeout = 2 * time.Second
@@ -242,7 +242,7 @@ func TestCrossTenantLockForwardsTargetTenantVerbatim(t *testing.T) {
 }
 
 func TestCrossTenant504Timeout(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	agent.crossTenantTimeout = 30 * time.Millisecond
@@ -266,7 +266,7 @@ func TestCrossTenant504Timeout(t *testing.T) {
 }
 
 func TestCrossTenant429Cap(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	for i := uint64(0); i < maxCrossTenantWaiters; i++ {
@@ -294,7 +294,7 @@ func TestCrossTenant429Cap(t *testing.T) {
 }
 
 func TestCrossTenant503StreamDown(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	// The agent holds no session: the command stream never connected.
@@ -313,7 +313,7 @@ func TestCrossTenant503StreamDown(t *testing.T) {
 // dispatch in agent.go delivers an OperatorMessage.cross_tenant_response to
 // the matching waiter.
 func TestProcessCommandsResolvesCrossTenantResponse(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 
 	ch, ok := agent.crossTenantWaiters.register(42)
@@ -368,7 +368,7 @@ func TestProcessCommandsResolvesCrossTenantResponse(t *testing.T) {
 // route's teardown test: no goroutine remains blocked on a cross-tenant
 // call after a stream teardown with waiters open.
 func TestProcessCommandsTeardownReleasesCrossTenantWaiters(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 
 	recvBlock := make(chan struct{})

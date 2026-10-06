@@ -20,6 +20,7 @@ import (
 func newTailTestHandler(t *testing.T, leaseTimeout, ackTimeout time.Duration) *BusHandler {
 	t.Helper()
 	return &BusHandler{
+		metrics:          noopGatewayMetrics(),
 		cluster:          "core",
 		tailLeases:       make(map[string]*runTailLease),
 		tailLeaseTimeout: leaseTimeout,

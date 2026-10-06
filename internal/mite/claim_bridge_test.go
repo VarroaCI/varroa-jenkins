@@ -64,6 +64,7 @@ func (f *fakeLedger) requestCount() int {
 
 func newClaimTestHandler(ledger ledgerRequester) *BusHandler {
 	return &BusHandler{
+		metrics:        noopGatewayMetrics(),
 		cluster:        "cluster1",
 		ledger:         ledger,
 		cellInstances:  make(map[string]string),

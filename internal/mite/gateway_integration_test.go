@@ -70,7 +70,7 @@ func startGatewayWithCA(t *testing.T, natsURL string, opts ...func(*BusHandler))
 	}
 	srv := NewServer(certAuth, tokenSigner, "localhost")
 	srv.ServerEndpoint = "127.0.0.1:0"
-	handler := NewBusHandler(bus.DefaultCluster, busConn, snapshotKV, presenceKV, nil)
+	handler := mustNewBusHandler(t, busConn, snapshotKV, presenceKV)
 	for _, opt := range opts {
 		opt(handler)
 	}

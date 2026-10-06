@@ -236,6 +236,12 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   `IdleGauges` (queue/build activity) on a ticker and caches the latest
   result for `sendHeartbeats` to attach; emits
   `varroa.mite.activity.events.{dropped,forwarded}` metrics.
+- **`metrics.go`** — `miteMetrics` holds every mite instrument (scope
+  `varroa-mite`). `NewAgent` takes a `metric.MeterProvider` as its first
+  parameter and creates them; `main` passes `otel.GetMeterProvider()` after
+  `telemetry.InitTelemetry`. Never bind an instrument to a package variable
+  or an `init` function. A test builds an agent with `mustNewAgent(t, cfg)`,
+  and an `Agent` literal sets `metrics: noopMiteMetrics()`.
 - **`job_schedule_poller.go`** — `startJobSchedulePoller` polls
   `GET /varroa-activity/schedules` and caches the decoded set for
   `sendHeartbeats` to attach as `StateSnapshot.job_schedules`.

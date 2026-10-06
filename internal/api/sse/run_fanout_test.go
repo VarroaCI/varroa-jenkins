@@ -5,9 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
+	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
@@ -36,7 +39,7 @@ func waitRecord(t *testing.T, ch <-chan Record) Record {
 // registered under two keys receives a notification for each one, and
 // nothing for a third key.
 func TestRunFanout_SubscriberReceivesItsOwnKeysOnly(t *testing.T) {
-	rf := NewRunFanout(nil, nil)
+	rf := mustNewRunFanout(t, nil, noop.NewMeterProvider())
 	ch := rf.Subscribe([]string{"core/team-a", "core/team-b"}, nil)
 	defer rf.Unsubscribe([]string{"core/team-a", "core/team-b"}, ch)
 
@@ -63,7 +66,7 @@ func TestRunFanout_SubscriberReceivesItsOwnKeysOnly(t *testing.T) {
 // TestRunFanout_FullBufferDropsOneRecord proves a full buffer drops the
 // overflow record and keeps the subscription alive.
 func TestRunFanout_FullBufferDropsOneRecord(t *testing.T) {
-	rf := NewRunFanout(nil, nil)
+	rf := mustNewRunFanout(t, nil, noop.NewMeterProvider())
 	keys := []string{"core/team-a"}
 	ch := rf.Subscribe(keys, nil)
 	defer rf.Unsubscribe(keys, ch)
@@ -95,7 +98,7 @@ func TestRunFanout_FullBufferDropsOneRecord(t *testing.T) {
 // a body it cannot decode, a body with no cluster, and a body with no
 // tenant, and that no subscriber sees any of them.
 func TestRunFanout_DropsUndecodableAndIncompleteKey(t *testing.T) {
-	rf := NewRunFanout(nil, nil)
+	rf := mustNewRunFanout(t, nil, noop.NewMeterProvider())
 	keys := []string{"core/team-a", "/team-a", "core/"}
 	ch := rf.Subscribe(keys, nil)
 	defer rf.Unsubscribe(keys, ch)
@@ -115,10 +118,11 @@ func TestRunFanout_DropsUndecodableAndIncompleteKey(t *testing.T) {
 // TestRunFanout_UnmatchedRaisesCounter proves a notification whose key
 // holds no subscriber raises bff.run_notify.unmatched.
 func TestRunFanout_UnmatchedRaisesCounter(t *testing.T) {
+	t.Parallel()
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 
-	rf := NewRunFanout(nil, mp.Meter("varroa-bff"))
+	rf := mustNewRunFanout(t, nil, mp)
 	keys := []string{"core/team-a"}
 	ch := rf.Subscribe(keys, nil)
 	defer rf.Unsubscribe(keys, ch)
@@ -137,6 +141,16 @@ func TestRunFanout_UnmatchedRaisesCounter(t *testing.T) {
 	}
 }
 
+// mustNewRunFanout calls NewRunFanout and fails the test on an error.
+func mustNewRunFanout(t *testing.T, conn *bus.Conn, mp metric.MeterProvider) *RunFanout {
+	t.Helper()
+	rf, err := NewRunFanout(conn, mp)
+	if err != nil {
+		t.Fatalf("NewRunFanout: %v", err)
+	}
+	return rf
+}
+
 // unmatchedCounterValue reads the unmatched counter's total from a
 // manual reader.
 func unmatchedCounterValue(t *testing.T, reader *sdkmetric.ManualReader) int64 {
@@ -149,6 +163,9 @@ func unmatchedCounterValue(t *testing.T, reader *sdkmetric.ManualReader) int64 {
 		for _, m := range scope.Metrics {
 			if m.Name != RunUnmatchedMetric {
 				continue
+			}
+			if scope.Scope.Name != "varroa-bff" {
+				t.Errorf("metric %s scope = %q, want varroa-bff", m.Name, scope.Scope.Name)
 			}
 			sum, ok := m.Data.(metricdata.Sum[int64])
 			if !ok {
@@ -171,7 +188,7 @@ func TestRunFanout_WildcardKeyReceivesNoRunNotification(t *testing.T) {
 	wildCh := bf.SubscribeAll()
 	defer bf.Unsubscribe("*", wildCh)
 
-	rf := NewRunFanout(nil, nil)
+	rf := mustNewRunFanout(t, nil, noop.NewMeterProvider())
 	keys := []string{"*"}
 	wild := rf.Subscribe(keys, nil)
 	defer rf.Unsubscribe(keys, wild)
@@ -191,7 +208,7 @@ func TestRunFanout_WildcardKeyReceivesNoRunNotification(t *testing.T) {
 // TestRunFanout_UnsubscribeClosesOnce proves one channel shared by two
 // keys closes once, and a second unsubscribe call is safe.
 func TestRunFanout_UnsubscribeClosesOnce(t *testing.T) {
-	rf := NewRunFanout(nil, nil)
+	rf := mustNewRunFanout(t, nil, noop.NewMeterProvider())
 	keys := []string{"core/team-a", "core/team-b"}
 	ch := rf.Subscribe(keys, nil)
 
@@ -207,7 +224,7 @@ func TestRunFanout_UnsubscribeClosesOnce(t *testing.T) {
 // list still leaves no registration, so a later delivery writes to no
 // closed channel.
 func TestRunFanout_UnsubscribeWithOneKeyRemovesEveryKey(t *testing.T) {
-	rf := NewRunFanout(nil, nil)
+	rf := mustNewRunFanout(t, nil, noop.NewMeterProvider())
 	ch := rf.Subscribe([]string{"core/team-a", "core/team-b"}, nil)
 
 	// The caller names one key alone.
@@ -230,7 +247,7 @@ func TestRunFanout_UnsubscribeWithOneKeyRemovesEveryKey(t *testing.T) {
 // TestRunFanout_NotificationForUnmatchedKeyKeepsRunning proves the
 // unmatched path leaves the fan-out's other keys working.
 func TestRunFanout_NotificationForUnmatchedKeyKeepsRunning(t *testing.T) {
-	rf := NewRunFanout(nil, nil)
+	rf := mustNewRunFanout(t, nil, noop.NewMeterProvider())
 	keys := []string{"core/team-a"}
 	ch := rf.Subscribe(keys, nil)
 	defer rf.Unsubscribe(keys, ch)

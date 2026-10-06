@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/metric/noop"
+
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/bus/bustest"
 )
@@ -99,7 +101,7 @@ func TestRunFanout_RecoversAfterDeniedSubscribe(t *testing.T) {
 	conn := fanoutConn(t, d, bustest.RestrictedUser, bustest.RestrictedPassword)
 	pub := fanoutConn(t, d, bustest.ClientUser, bustest.ClientPassword)
 
-	rf := NewRunFanout(conn, nil)
+	rf := mustNewRunFanout(t, conn, noop.NewMeterProvider())
 	ch := rf.Subscribe([]string{"core/team-a"}, nil)
 	startFanout(t, rf.Start)
 

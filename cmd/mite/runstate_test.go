@@ -267,7 +267,7 @@ func TestApplyResumeBuild_ExistingNodeConfigNotOverwrittenButAdopted(t *testing.
 		t.Fatal(err)
 	}
 
-	agent := NewAgent(Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
+	agent := mustNewAgent(t, Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
 	agent.Logger = slog.Default()
 	agent.jenkinsHomeDir = home
 	agent.jenkinsTokenMu.Lock()
@@ -305,7 +305,7 @@ func TestApplyResumeBuild_FetchErrorFailsBeforeReload(t *testing.T) {
 	const jobPath = stubJobPath
 	stub := startAdoptAndReloadStub(t)
 
-	agent := NewAgent(Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
+	agent := mustNewAgent(t, Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
 	agent.Logger = slog.Default()
 	agent.jenkinsHomeDir = t.TempDir()
 	agent.jenkinsTokenMu.Lock()
@@ -341,7 +341,7 @@ func TestApplyResumeBuild_FetchErrorFailsBeforeReload(t *testing.T) {
 // controller name and a different instance.
 func TestApplyResumeBuild_ForeignInstanceIsRefused(t *testing.T) {
 	home := t.TempDir()
-	agent := &Agent{jenkinsHomeDir: home, Logger: slog.Default()}
+	agent := &Agent{metrics: noopMiteMetrics(), jenkinsHomeDir: home, Logger: slog.Default()}
 	agent.cfg.CellInstance = "pod-live"
 
 	err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
@@ -369,6 +369,7 @@ func TestApplyResumeBuild_ForeignInstanceIsRefused(t *testing.T) {
 // the fence let it through.
 func TestApplyResumeBuild_OwnInstanceIsAccepted(t *testing.T) {
 	agent := &Agent{
+		metrics:         noopMiteMetrics(),
 		jenkinsHomeDir:  t.TempDir(),
 		Logger:          slog.Default(),
 		runStateWaiters: newRunStateWaiterMap(),
@@ -396,7 +397,7 @@ func TestApplyResumeBuild_OwnInstanceIsAccepted(t *testing.T) {
 // pod happens to own the controller.
 func TestApplyResumeBuild_MissingInstanceIsRefused(t *testing.T) {
 	home := t.TempDir()
-	agent := &Agent{jenkinsHomeDir: home, Logger: slog.Default()}
+	agent := &Agent{metrics: noopMiteMetrics(), jenkinsHomeDir: home, Logger: slog.Default()}
 	agent.cfg.CellInstance = "pod-live"
 
 	err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
@@ -425,7 +426,7 @@ func TestApplyResumeBuild_MissingInstanceIsRefused(t *testing.T) {
 // that wait: that window opens at pickup.
 func TestApplyResumeBuild_AnExpiredDeadlineIsRefused(t *testing.T) {
 	home := t.TempDir()
-	agent := &Agent{jenkinsHomeDir: home, Logger: slog.Default()}
+	agent := &Agent{metrics: noopMiteMetrics(), jenkinsHomeDir: home, Logger: slog.Default()}
 	agent.cfg.CellInstance = "pod-live"
 
 	err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
@@ -454,6 +455,7 @@ func TestApplyResumeBuild_AnExpiredDeadlineIsRefused(t *testing.T) {
 // test let it through.
 func TestApplyResumeBuild_AFutureDeadlineIsAccepted(t *testing.T) {
 	agent := &Agent{
+		metrics:         noopMiteMetrics(),
 		jenkinsHomeDir:  t.TempDir(),
 		Logger:          slog.Default(),
 		runStateWaiters: newRunStateWaiterMap(),
@@ -482,7 +484,7 @@ func TestApplyResumeBuild_AFutureDeadlineIsAccepted(t *testing.T) {
 // fetch answers data for every file.
 func newResumeAgent(t *testing.T, home string, data []byte) *Agent {
 	t.Helper()
-	agent := NewAgent(Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
+	agent := mustNewAgent(t, Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
 	agent.Logger = slog.Default()
 	agent.jenkinsHomeDir = home
 	agent.jenkinsTokenMu.Lock()
@@ -575,7 +577,7 @@ func TestApplyResumeBuild_ARedeliveredCommandTouchesNothing(t *testing.T) {
 	stub.answerProbe(true, false)
 
 	home := t.TempDir()
-	agent := NewAgent(Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
+	agent := mustNewAgent(t, Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
 	agent.Logger = slog.Default()
 	agent.jenkinsHomeDir = home
 	agent.jenkinsTokenMu.Lock()
@@ -610,7 +612,7 @@ func TestApplyResumeBuild_ARedeliveredCommandTouchesNothing(t *testing.T) {
 func TestApplyResumeBuild_TheAbsoluteDeadlineBoundsEveryStep(t *testing.T) {
 	stub := startAdoptAndReloadStub(t)
 
-	agent := NewAgent(Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
+	agent := mustNewAgent(t, Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
 	agent.Logger = slog.Default()
 	agent.jenkinsHomeDir = t.TempDir()
 	agent.jenkinsTokenMu.Lock()

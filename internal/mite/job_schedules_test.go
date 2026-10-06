@@ -60,6 +60,7 @@ func newJobScheduleTestHandler(t *testing.T, pub buildEventPublisher, resolver C
 	}
 
 	h := &BusHandler{
+		metrics:        noopGatewayMetrics(),
 		cluster:        bus.DefaultCluster,
 		conn:           busConn,
 		kv:             snapshotKV,

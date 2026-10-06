@@ -41,7 +41,7 @@ func newLogRequest(token, jobPath string, buildNumber, seq int64, nodeID, stageI
 // --- 2.1: header mapping ---
 
 func TestLogHeaderMappingIncludesStampedInstance(t *testing.T) {
-	agent := NewAgent(Config{CellInstance: "pod-uid-1"})
+	agent := mustNewAgent(t, Config{CellInstance: "pod-uid-1"})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	var sent *mitev1.LogChunk
@@ -127,7 +127,7 @@ func TestLogResponseContractTable(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			agent := NewAgent(Config{})
+			agent := mustNewAgent(t, Config{})
 			agent.Logger = slog.Default()
 			agent.loopbackToken = "tok"
 			setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
@@ -151,7 +151,7 @@ func TestLogResponseContractTable(t *testing.T) {
 }
 
 func TestLogOversizedBody413CarriesMaxChunkHeader(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
@@ -172,7 +172,7 @@ func TestLogOversizedBody413CarriesMaxChunkHeader(t *testing.T) {
 // --- 2.5: retained buffer bound and hold-until-ack ---
 
 func TestLogRetentionBoundAnswers503AndDropsNothingRetained(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	agent.logRetention = newLogRetentionStore(10) // tiny cap
@@ -198,7 +198,7 @@ func TestLogRetentionBoundAnswers503AndDropsNothingRetained(t *testing.T) {
 }
 
 func TestLogRetentionHoldsChunkUntilAck(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
@@ -235,7 +235,7 @@ func TestLogAckTableCumulativeRelease(t *testing.T) {
 	}
 
 	t.Run("STORED releases at or below ack_seq", func(t *testing.T) {
-		agent := NewAgent(Config{})
+		agent := mustNewAgent(t, Config{})
 		agent.Logger = slog.Default()
 		agent.loopbackToken = "tok"
 		newRetained(agent)
@@ -248,7 +248,7 @@ func TestLogAckTableCumulativeRelease(t *testing.T) {
 	})
 
 	t.Run("BUSY keeps every chunk and opens a pause window", func(t *testing.T) {
-		agent := NewAgent(Config{})
+		agent := mustNewAgent(t, Config{})
 		agent.Logger = slog.Default()
 		agent.loopbackToken = "tok"
 		newRetained(agent)
@@ -271,7 +271,7 @@ func TestLogAckTableCumulativeRelease(t *testing.T) {
 	})
 
 	t.Run("REJECTED releases ack_seq and every earlier chunk", func(t *testing.T) {
-		agent := NewAgent(Config{})
+		agent := mustNewAgent(t, Config{})
 		agent.Logger = slog.Default()
 		agent.loopbackToken = "tok"
 		newRetained(agent)
@@ -299,7 +299,7 @@ type busyResendHarness struct {
 func newBusyResendHarness(t *testing.T, seqs ...int64) *busyResendHarness {
 	t.Helper()
 	h := &busyResendHarness{sentC: make(chan int64, 64)}
-	h.agent = NewAgent(Config{})
+	h.agent = mustNewAgent(t, Config{})
 	h.agent.Logger = slog.Default()
 	h.agent.logRetention = newLogRetentionStore(1 << 30)
 	for _, seq := range seqs {
@@ -514,7 +514,7 @@ func TestLogBusyStoredBeforeFireSkipsReleased(t *testing.T) {
 // --- 2.7: replay on reconnect ---
 
 func TestLogReplayAfterReconnectOrderedPerRun(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.logRetention = newLogRetentionStore(1 << 30)
 
@@ -568,7 +568,7 @@ func TestHandleTailControlCallsJenkinsAndAcks(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	var acked *mitev1.TailAck
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		acked = m.GetTailAck()
@@ -604,7 +604,7 @@ func TestHandleTailControlCallsJenkinsAndAcks(t *testing.T) {
 // --- 2.3: race between /v1/log posts and heartbeats ---
 
 func TestLogSendRaceWithHeartbeats(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	agent.heartbeatInterval = time.Millisecond

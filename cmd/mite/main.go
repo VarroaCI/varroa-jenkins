@@ -9,6 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"go.opentelemetry.io/otel"
+
 	"github.com/varroaci/varroa-jenkins/internal/logging"
 	"github.com/varroaci/varroa-jenkins/internal/telemetry"
 )
@@ -69,7 +71,11 @@ func main() {
 		cfg.BootstrapFile = bf
 	}
 
-	agent := NewAgent(cfg)
+	agent, err := NewAgent(otel.GetMeterProvider(), cfg)
+	if err != nil {
+		logger.Error("failed to create the mite agent", "error", err)
+		os.Exit(1)
+	}
 	agent.Logger = logger
 	logger.Info("Mite agent starting",
 		"controller", cfg.ControllerName,

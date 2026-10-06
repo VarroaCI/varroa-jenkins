@@ -89,7 +89,7 @@ func (d *deniedServer) connect(user, pass string) *bus.Conn {
 
 func newDeniedTestHandler(t *testing.T, gw *bus.Conn) *BusHandler {
 	t.Helper()
-	h := NewBusHandler(bus.DefaultCluster, gw, nil, nil, nil)
+	h := mustNewBusHandler(t, gw, nil, nil)
 	h.watchBackoff = 20 * time.Millisecond
 	t.Cleanup(h.Close)
 	return h

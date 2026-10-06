@@ -72,6 +72,7 @@ func TestBuildEventIntegration_SyncPublishStored(t *testing.T) {
 	t.Cleanup(func() { _ = sub.Unsubscribe() })
 
 	handler := &BusHandler{
+		metrics:        noopGatewayMetrics(),
 		cluster:        bus.DefaultCluster,
 		conn:           busConn,
 		publisher:      busConn,

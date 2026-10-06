@@ -46,7 +46,7 @@ func newAsyncFetchStream(t *testing.T, a *Agent, data []byte) *asyncFetchStream 
 // about twenty five files, so this bounds the same work well under a
 // minute.
 func TestResumeFetchesManyFilesQuickly(t *testing.T) {
-	agent := NewAgent(Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
+	agent := mustNewAgent(t, Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
 	agent.Logger = slog.Default()
 	agent.jenkinsHomeDir = t.TempDir()
 	setTestStream(agent, newAsyncFetchStream(t, agent, []byte("<flow/>")))
@@ -70,7 +70,7 @@ func TestResumeFetchesManyFilesQuickly(t *testing.T) {
 // gateway refuses such a request every time, so a retry would spend the
 // command's deadline on an answer that never changes.
 func TestFetchRunStateFileRejectsAnUnnamedPush(t *testing.T) {
-	agent := NewAgent(Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
+	agent := mustNewAgent(t, Config{JenkinsURL: "http://localhost:8080", CellInstance: "pod-live"})
 	agent.Logger = slog.Default()
 
 	for _, tc := range []struct {

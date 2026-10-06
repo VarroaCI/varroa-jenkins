@@ -121,6 +121,7 @@ func newLogTestHandlerOnStore(t *testing.T, owner *fakeOwnerRequester, sender *r
 	t.Helper()
 	const ns, name = "ns1", "cell1"
 	h := &BusHandler{
+		metrics:        noopGatewayMetrics(),
 		cluster:        "core",
 		cellInstances:  make(map[string]string),
 		buildWorkers:   make(map[string]*registeredBuildWorker),
@@ -804,6 +805,7 @@ func TestOnLogChunkRestartMidGapLosesNothingAfterMiteReplay(t *testing.T) {
 	// The gateway crashes here. A fresh handler over the same blob store
 	// models the restart: it holds no memory of seq 5's pending entry.
 	h2 := &BusHandler{
+		metrics:        noopGatewayMetrics(),
 		cluster:        "core",
 		cellInstances:  make(map[string]string),
 		buildWorkers:   make(map[string]*registeredBuildWorker),
@@ -1797,7 +1799,7 @@ func TestGatewayBudgetPauseTracksDrainRate(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := &BusHandler{}
+			h := &BusHandler{metrics: noopGatewayMetrics()}
 			h.logDrain = logDrainMeter{rate: tc.rate, lastFreed: now.Add(-tc.lastFreedAgo)}
 			h.logBudgetCrossedAt = now.Add(-tc.crossedAgo)
 			for i := 0; i < 50; i++ {
@@ -1812,7 +1814,7 @@ func TestGatewayBudgetPauseTracksDrainRate(t *testing.T) {
 
 func TestGatewayBudgetPauseGrowsOnlyWithoutDrainProgress(t *testing.T) {
 	now := time.Now()
-	h := &BusHandler{}
+	h := &BusHandler{metrics: noopGatewayMetrics()}
 	// The budget has stayed crossed for five seconds, but the drain
 	// freed bytes 10 ms ago: the pause stays at the drain's own pace.
 	h.logBudgetCrossedAt = now.Add(-5 * time.Second)
@@ -1846,7 +1848,7 @@ func TestLogDrainMeterIgnoresIdleTime(t *testing.T) {
 
 func TestWarnStalledDrainNamesARunWhoseQueueMakesNoProgress(t *testing.T) {
 	var buf bytes.Buffer
-	h := &BusHandler{Logger: slog.New(slog.NewTextHandler(&buf, nil))}
+	h := &BusHandler{metrics: noopGatewayMetrics(), Logger: slog.New(slog.NewTextHandler(&buf, nil))}
 	now := time.Now()
 	st := &runLogState{queue: []queuedLogChunk{{chunk: &mitev1.LogChunk{Seq: 4}, admitted: now.Add(-2 * logHeartbeatInterval)}}}
 

@@ -3,10 +3,10 @@ package sse
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
@@ -47,20 +47,21 @@ type RunFanout struct {
 // subscriber. A reader on the poll path can read silence as one number.
 const RunUnmatchedMetric = "bff.run_notify.unmatched"
 
-// NewRunFanout creates a RunFanout over conn. A nil meter selects the
-// process meter, which is a no-op meter in a test. Call Start to receive.
-func NewRunFanout(conn *bus.Conn, meter metric.Meter) *RunFanout {
-	if meter == nil {
-		meter = otel.Meter("varroa-bff")
-	}
-	counter, _ := meter.Int64Counter(RunUnmatchedMetric,
+// NewRunFanout creates a RunFanout over conn. It creates the unmatched
+// counter on the "varroa-bff" meter of mp and returns an error when the
+// counter cannot be created. Call Start to receive.
+func NewRunFanout(conn *bus.Conn, mp metric.MeterProvider) (*RunFanout, error) {
+	counter, err := mp.Meter("varroa-bff").Int64Counter(RunUnmatchedMetric,
 		metric.WithDescription("Live run notifications whose key matched no local subscriber."),
 	)
+	if err != nil {
+		return nil, fmt.Errorf("create %s counter: %w", RunUnmatchedMetric, err)
+	}
 	return &RunFanout{
 		conn:        conn,
 		subscribers: make(map[string]map[*runSubscriber]struct{}),
 		unmatched:   counter,
-	}
+	}, nil
 }
 
 // Start subscribes the run notification subject and fans each message out

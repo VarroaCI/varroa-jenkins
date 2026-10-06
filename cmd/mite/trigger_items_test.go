@@ -123,7 +123,7 @@ func itemsGateAgent(t *testing.T, f *itemsGateJenkins) (*Agent, func() []*mitev1
 		},
 		recvFn: func() (*mitev1.OperatorMessage, error) { return nil, context.Canceled },
 	}
-	agent := NewAgent(Config{ControllerName: "test", Namespace: "ns", JenkinsURL: f.srv.URL})
+	agent := mustNewAgent(t, Config{ControllerName: "test", Namespace: "ns", JenkinsURL: f.srv.URL})
 	agent.Logger = slog.Default()
 	setTestStream(agent, stream)
 	agent.miteDir = t.TempDir()
@@ -298,7 +298,7 @@ func TestDesiredStateJenkinsDownKeepsGateClosed(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	t.Cleanup(srv.Close)
-	agent := NewAgent(Config{ControllerName: "test", Namespace: "ns", JenkinsURL: srv.URL})
+	agent := mustNewAgent(t, Config{ControllerName: "test", Namespace: "ns", JenkinsURL: srv.URL})
 	agent.Logger = slog.Default()
 	agent.miteDir = t.TempDir()
 	agent.jenkinsTokenMu.Lock()
@@ -318,7 +318,7 @@ func TestDesiredStateJenkinsDownKeepsGateClosed(t *testing.T) {
 // desired slot before the imperative queue while the items gate is closed.
 // TestCommandMailboxImperativePriority keeps the order for an open gate.
 func TestCommandMailboxDesiredFirstWhileItemsPending(t *testing.T) {
-	agent := NewAgent(Config{ControllerName: "test", Namespace: "ns"})
+	agent := mustNewAgent(t, Config{ControllerName: "test", Namespace: "ns"})
 	mb := newCommandMailbox()
 	mb.desiredFirst = func() bool { return !agent.itemsApplied() }
 

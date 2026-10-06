@@ -17,7 +17,7 @@ import (
 
 func newJobScheduleTestAgent(t *testing.T, url string) *Agent {
 	t.Helper()
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     url,

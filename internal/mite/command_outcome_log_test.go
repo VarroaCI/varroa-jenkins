@@ -43,7 +43,7 @@ func TestRecordCommandOutcome_RefusedRunCommandsLog(t *testing.T) {
 	for _, tc := range cases {
 		for _, storeEnabled := range []bool{false, true} {
 			var logs bytes.Buffer
-			h := &BusHandler{recordStoreEnabled: storeEnabled, publisher: &fakePublisher{},
+			h := &BusHandler{metrics: noopGatewayMetrics(), recordStoreEnabled: storeEnabled, publisher: &fakePublisher{},
 				Logger: slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo}))}
 			result := &mitev1.CommandResult{
 				CommandId: tc.cmd.CommandId, Success: false, Error: "build not found",

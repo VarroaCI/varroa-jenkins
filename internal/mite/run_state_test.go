@@ -38,6 +38,7 @@ func newRunStateTestHandlerOver(t *testing.T, owner *fakeOwnerRequester, sender 
 	t.Helper()
 	const ns, name = "ns1", "cell1"
 	h := &BusHandler{
+		metrics:        noopGatewayMetrics(),
 		cluster:        "core",
 		cellInstances:  make(map[string]string),
 		buildWorkers:   make(map[string]*registeredBuildWorker),

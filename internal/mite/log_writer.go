@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
@@ -75,31 +74,6 @@ const (
 	logReasonOwnerLookupFail  = "owner-lookup-failed"
 	logReasonGatewayGap       = "gateway-gap"
 )
-
-var (
-	logChunksRejected metric.Int64Counter
-	logChunksBusy     metric.Int64Counter
-	logAppendRetries  metric.Int64Counter
-)
-
-func init() {
-	meter := otel.Meter("varroa-gateway")
-	logChunksRejected, _ = meter.Int64Counter("varroa.gateway.log.chunk.rejected",
-		metric.WithDescription("Console-log chunks the gateway rejected (foreign run, empty run id, or the finalize deadline)"),
-	)
-	logChunksBusy, _ = meter.Int64Counter("varroa.gateway.log.chunk.busy",
-		metric.WithDescription("Console-log chunks the gateway answered BUSY, by reason"),
-	)
-	logAppendRetries, _ = meter.Int64Counter("varroa.gateway.log.append.retries",
-		metric.WithDescription("Blob store append retries for console-log chunks and index entries"),
-	)
-	runStateBytes, _ = meter.Int64Counter("varroa.gateway.run_state.bytes",
-		metric.WithDescription("Inflated bytes of run-state objects the gateway stored"),
-	)
-	runStateRejected, _ = meter.Int64Counter("varroa.gateway.run_state.rejected",
-		metric.WithDescription("Run-state chunks the gateway rejected, by reason"),
-	)
-}
 
 // runLogState is the gateway's per-run blob-writer state: the append
 // pipeline's write progress, its pending queue, and the run's
@@ -301,7 +275,7 @@ func (h *BusHandler) OnLogChunk(name, ns string, chunk *mitev1.LogChunk) {
 	ctx := context.Background()
 
 	if chunk.RunId == "" {
-		logChunksRejected.Add(ctx, 1)
+		h.metrics.logChunksRejected.Add(ctx, 1)
 		h.log().Warn("dropping log chunk with empty run_id", "controller", ns+"/"+name)
 		h.sendLogAck(ns, name, "", 0, logAckStatusRejected, logReasonEmptyRunID, 0)
 		return
@@ -320,7 +294,7 @@ func (h *BusHandler) OnLogChunk(name, ns string, chunk *mitev1.LogChunk) {
 	decision, tuple := h.checkOwner(ctx, h.cluster, ns, name, chunk.CellInstance, chunk.RunId)
 	switch decision {
 	case ownerForeign:
-		logChunksRejected.Add(ctx, 1)
+		h.metrics.logChunksRejected.Add(ctx, 1)
 		h.sendLogAck(ns, name, chunk.RunId, chunk.Seq, logAckStatusRejected, logReasonForeignRun, 0)
 		return
 	case ownerUnknown:
@@ -388,7 +362,7 @@ func (h *BusHandler) logPendingMaxBytesOrDefault() int64 {
 
 // answerBusy answers BUSY for one refused chunk and counts it by reason.
 func (h *BusHandler) answerBusy(ns, name string, chunk *mitev1.LogChunk, reason string, pauseMS int) {
-	logChunksBusy.Add(context.Background(), 1, metric.WithAttributes(attribute.String("reason", reason)))
+	h.metrics.logChunksBusy.Add(context.Background(), 1, metric.WithAttributes(attribute.String("reason", reason)))
 	h.log().Debug("log chunk busy", "run_id", chunk.RunId, "controller", ns+"/"+name,
 		"seq", chunk.Seq, "reason", reason, "pause_ms", pauseMS)
 	h.sendLogAck(ns, name, chunk.RunId, chunk.Seq, logAckStatusBusy, reason, pauseMS)
@@ -992,7 +966,7 @@ func (h *BusHandler) retryWrite(ctx context.Context, runID string, st *runLogSta
 			// flight: the write is abandoned, not retried.
 			return writeDeadline
 		}
-		logAppendRetries.Add(ctx, 1)
+		h.metrics.logAppendRetries.Add(ctx, 1)
 		h.log().Warn("log append retry", "run_id", runID, "key", key, "seq", seq, "error", err)
 		if deadlinePassed(st) {
 			return writeDeadline
@@ -1241,7 +1215,7 @@ func (h *BusHandler) ownerRecheck(ctx context.Context, runID, ns, name string, s
 // a writer that no longer owns the run. The run itself stays open for
 // the writer that owns it.
 func (h *BusHandler) refuseStaleWriterChunk(ns, name, runID string, chunk *mitev1.LogChunk) {
-	logChunksRejected.Add(context.Background(), 1)
+	h.metrics.logChunksRejected.Add(context.Background(), 1)
 	h.log().Warn("refusing a log chunk from a writer that no longer owns the run",
 		"run_id", runID, "controller", ns+"/"+name, "cell_instance", chunk.CellInstance, "seq", chunk.Seq)
 	h.sendLogAck(ns, name, runID, chunk.Seq, logAckStatusRejected, logReasonForeignRun, 0)

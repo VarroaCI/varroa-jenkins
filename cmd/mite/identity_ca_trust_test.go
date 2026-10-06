@@ -71,7 +71,7 @@ func TestLoadOrCreateIdentity_StaleCADiscarded(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		CAPEM:          string(caB.CAPEM()), // current CA differs from the saved identity's CA-A
@@ -112,7 +112,7 @@ func TestLoadOrCreateIdentity_CurrentCAReused(t *testing.T) {
 	}
 	writeMiteIdentity(t, miteDir, caA, "test", "ns")
 
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		CAPEM:          string(caA.CAPEM()), // current CA matches the saved identity
@@ -149,7 +149,7 @@ func TestLoadOrCreateIdentity_EmptyCAPEMExpiryOnly(t *testing.T) {
 	}
 	writeMiteIdentity(t, miteDir, caA, "test", "ns")
 
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		CAPEM:          "", // unset → expiry-only reuse
@@ -207,7 +207,7 @@ func TestLoadOrCreateIdentity_StaleInstanceRenews(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		CAPEM:          string(caA.CAPEM()),

@@ -124,6 +124,7 @@ func TestGatewayIntegration_SupersededStreamStopsDispatching(t *testing.T) {
 // gate depends on.
 func TestBusHandler_IsCurrentConnection(t *testing.T) {
 	h := &BusHandler{
+		metrics:              noopGatewayMetrics(),
 		cluster:              "core",
 		cancels:              make(map[string]context.CancelFunc),
 		certExpiry:           make(map[string]time.Time),

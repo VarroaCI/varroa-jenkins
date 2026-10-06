@@ -137,7 +137,7 @@ func (h *BusHandler) publishJobSchedules(ns, name string, set *mitev1.JobSchedul
 			// design.md D8 "The envelope": all or nothing. A nil row is
 			// as malformed as an unresolved tenant; it rejects the whole
 			// envelope the same way, not a skipped row.
-			buildEventsDropped.Add(context.Background(), 1)
+			h.metrics.buildEventsDropped.Add(context.Background(), 1)
 			h.log().Warn("job schedule row nil, publishing no envelope", "controller", key)
 			return false
 		}
@@ -146,7 +146,7 @@ func (h *BusHandler) publishJobSchedules(ns, name string, set *mitev1.JobSchedul
 			// design.md D8 "The envelope": all or nothing. One unresolved
 			// row rejects the whole envelope; the caller keeps the
 			// retained set for the next tick's retry.
-			buildEventsDropped.Add(context.Background(), 1)
+			h.metrics.buildEventsDropped.Add(context.Background(), 1)
 			h.log().Warn("job schedule row unresolved, publishing no envelope",
 				"controller", key, "job_path", item.JobPath)
 			return false
@@ -189,7 +189,7 @@ func (h *BusHandler) publishJobSchedules(ns, name string, set *mitev1.JobSchedul
 	}
 
 	if _, err := h.publisher.PublishJetStream(bus.BuildSubject(h.cluster, ns, name), data); err != nil {
-		buildEventsDropped.Add(context.Background(), 1)
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
 		h.log().Warn("job schedule publish failed, retaining for retry",
 			"controller", key, "error", err)
 		h.armJobScheduleStreamMissing(key)

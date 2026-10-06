@@ -141,6 +141,7 @@ func (f *fakeSender) acks() []*mitev1.EventAck {
 // seams, no NATS connection required for these narrow unit tests.
 func newBuildEventTestHandler(pub *fakePublisher) *BusHandler {
 	return &BusHandler{
+		metrics:        noopGatewayMetrics(),
 		cluster:        "cluster1",
 		publisher:      pub,
 		cellInstances:  make(map[string]string),

@@ -284,8 +284,7 @@ reading each package's entry point):
   setter, so `init_meter_test.go` covers the install without the global provider. `meter_guard_test.go` is the repo-wide guard:
   only a `cmd/*/main.go` or `cmd/recorder/run.go` reads `otel.Meter` or
   `otel.GetMeterProvider`, and no test calls `SetMeterProvider` or
-  `InitTelemetry`. Its `globalMeterAllowlist` holds the remaining gateway, BFF,
-  and mite sites and can only shrink.
+  `InitTelemetry`. The guard has no allowlist.
 - **`signing/`** — shared RSA JWT signing + JWKS primitives; both the mite
   operator-JWT signer (`internal/mite`) and `auth/local` consume the same
   `Signer` so the JWK `kid` matches across every token a given keypair issues.

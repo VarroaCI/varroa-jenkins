@@ -10,9 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/metric"
-
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
@@ -175,33 +172,6 @@ const gatewayEnvelopeBudget = 900 * 1024
 // errorTruncateChars is the character cap on every error field the gateway
 // publishes: a run.stage envelope's error and each command outcome record.
 const errorTruncateChars = 512
-
-var (
-	buildEventsDropped   metric.Int64Counter
-	triggerFailedTotal   metric.Int64Counter
-	triggerAcceptedTotal metric.Int64Counter
-	resumeFailedTotal    metric.Int64Counter
-	commandRefusedTotal  metric.Int64Counter
-)
-
-func init() {
-	meter := otel.Meter("varroa-gateway")
-	buildEventsDropped, _ = meter.Int64Counter("varroa.gateway.build_events.dropped",
-		metric.WithDescription("Build events and build event publishes the gateway dropped or rejected"),
-	)
-	triggerFailedTotal, _ = meter.Int64Counter("varroa.gateway.trigger_failed",
-		metric.WithDescription("Failed build triggers the gateway published as a record"),
-	)
-	triggerAcceptedTotal, _ = meter.Int64Counter("varroa.gateway.trigger_accepted",
-		metric.WithDescription("Accepted build triggers the gateway published as a record"),
-	)
-	resumeFailedTotal, _ = meter.Int64Counter("varroa.gateway.resume_failed",
-		metric.WithDescription("Failed build resumes the gateway published as a record"),
-	)
-	commandRefusedTotal, _ = meter.Int64Counter("varroa.gateway.command_refused",
-		metric.WithDescription("Refused cancels and input answers the gateway published as a record"),
-	)
-}
 
 // ingestEnvelope is the wire shape of one message on
 // builds.<cluster>.<ns>.<cell>. Field names and JSON tags mirror
@@ -1131,7 +1101,7 @@ func (h *BusHandler) publishWithRetry(ctx context.Context, subject string, data 
 		if err == nil {
 			return true
 		}
-		buildEventsDropped.Add(context.Background(), 1)
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
 		h.log().Warn("build event publish rejected, retrying",
 			"controller", ns+"/"+name, "kind", kind, "retryIn", delay, "error", err)
 		select {
@@ -1152,20 +1122,20 @@ func (h *BusHandler) publishWithRetry(ctx context.Context, subject string, data 
 func (h *BusHandler) publishHeartbeatEnvelope(ctx context.Context, subject string, env ingestEnvelope, ns, name string) {
 	data, err := json.Marshal(env)
 	if err != nil {
-		buildEventsDropped.Add(context.Background(), 1)
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
 		h.log().Error("marshal heartbeat envelope failed", "controller", ns+"/"+name, "error", err)
 		return
 	}
 	future, err := h.publisher.PublishJetStreamAsync(subject, data)
 	if err != nil {
-		buildEventsDropped.Add(context.Background(), 1)
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
 		h.log().Warn("heartbeat publish failed", "controller", ns+"/"+name, "error", err)
 		return
 	}
 	select {
 	case <-future.Ok():
 	case pubErr := <-future.Err():
-		buildEventsDropped.Add(context.Background(), 1)
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
 		h.log().Warn("heartbeat publish rejected", "controller", ns+"/"+name, "error", pubErr)
 	case <-ctx.Done():
 	}
@@ -1269,7 +1239,7 @@ func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.
 		// A cell must not write a record under a tenant it does not
 		// host. This is an admission refusal, not the back-pressure case
 		// below: the mite must release the event, not replay it forever.
-		buildEventsDropped.Add(context.Background(), 1)
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
 		if evt.Phase != phaseHeartbeat {
 			h.sendEventAck(w.send, evt.RunId, evt.Seq, eventAckRejected, "unhosted tenant")
 		}
@@ -1280,7 +1250,7 @@ func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.
 		env := h.buildEnvelope(ns, name, evt, kindRunHeartbeat, heartbeatPayload(evt), tenant)
 		item := buildEventItem{heartbeat: true, envelopes: []ingestEnvelope{env}}
 		if !w.tryEnqueueHeartbeat(item) {
-			buildEventsDropped.Add(context.Background(), 1)
+			h.metrics.buildEventsDropped.Add(context.Background(), 1)
 		}
 		return nil
 	}
@@ -1294,7 +1264,7 @@ func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.
 
 	kps, err := h.buildPayloadGroup(evt)
 	if err != nil {
-		buildEventsDropped.Add(context.Background(), 1)
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
 		h.sendEventAck(w.send, evt.RunId, evt.Seq, eventAckRejected, err.Error())
 		return nil
 	}
@@ -1303,7 +1273,7 @@ func (h *BusHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.
 	for _, kp := range kps {
 		env := h.buildEnvelope(ns, name, evt, kp.kind, kp.payload, tenant)
 		if !shrinkToBudget(&env) {
-			buildEventsDropped.Add(context.Background(), 1)
+			h.metrics.buildEventsDropped.Add(context.Background(), 1)
 			h.sendEventAck(w.send, evt.RunId, evt.Seq, eventAckRejected, "OVERSIZED")
 			return nil
 		}

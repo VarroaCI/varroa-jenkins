@@ -44,8 +44,8 @@ func newRunStateRequest(runID, relpath string, buildNumber, stateGen, seq, total
 
 // newRunStateTestAgent builds an Agent ready to serve handleRunState,
 // with a stream that accepts every forwarded message.
-func newRunStateTestAgent() *Agent {
-	agent := NewAgent(Config{CellInstance: "pod-uid-7"})
+func newRunStateTestAgent(t *testing.T) *Agent {
+	agent := mustNewAgent(t, Config{CellInstance: "pod-uid-7"})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = runStateTestToken
 	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
@@ -55,7 +55,7 @@ func newRunStateTestAgent() *Agent {
 // --- 9.2a: the /v1/run-state route ---
 
 func TestHandleRunState_MissingHeaderIs400(t *testing.T) {
-	agent := newRunStateTestAgent()
+	agent := newRunStateTestAgent(t)
 
 	// hdrStateRunID left unset makes parseRunStateHeaders fail.
 	req := newRunStateRequest("", "jobs/team/builds/1/build.xml", 1, 1, 0, 1, 5, 5, "x")
@@ -68,7 +68,7 @@ func TestHandleRunState_MissingHeaderIs400(t *testing.T) {
 }
 
 func TestHandleRunState_Oversized413CarriesMaxChunkHeader(t *testing.T) {
-	agent := newRunStateTestAgent()
+	agent := newRunStateTestAgent(t)
 
 	big := strings.Repeat("x", runStateChunkMaxBytes+1)
 	req := newRunStateRequest("run-1", "jobs/team/builds/1/program.dat",
@@ -85,7 +85,7 @@ func TestHandleRunState_Oversized413CarriesMaxChunkHeader(t *testing.T) {
 }
 
 func TestHandleRunState_ReasonHeaderOn503(t *testing.T) {
-	agent := newRunStateTestAgent()
+	agent := newRunStateTestAgent(t)
 	agent.runStateAcks.record(&mitev1.RunStateAck{RunId: "run-1", Status: ackStatusRejected, Reason: stateReasonStateCap})
 
 	req := newRunStateRequest("run-1", "jobs/team/builds/1/program.dat", 1, 1, 0, 1, 5, 5, "hello")
@@ -106,7 +106,7 @@ func TestHandleRunState_ReasonHeaderOn503(t *testing.T) {
 // header at all (design.md D5), so a caller cannot claim another
 // identity.
 func TestHandleRunState_ForwardsMiteOwnCellInstance(t *testing.T) {
-	agent := newRunStateTestAgent()
+	agent := newRunStateTestAgent(t)
 	var sent *mitev1.RunStateChunk
 	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		sent = m.GetRunStateChunk()

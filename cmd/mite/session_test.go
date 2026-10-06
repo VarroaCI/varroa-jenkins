@@ -69,7 +69,7 @@ func failingStream() *concurrentSendStream {
 // connection to a closed port.
 func newSessionTestAgent(t *testing.T) *Agent {
 	t.Helper()
-	agent := NewAgent(Config{VarroaEndpoint: "127.0.0.1:1", CAPEM: string(generateTestCAPEM(t))})
+	agent := mustNewAgent(t, Config{VarroaEndpoint: "127.0.0.1:1", CAPEM: string(generateTestCAPEM(t))})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = runStateTestToken
 	agent.crossTenantTimeout = time.Second

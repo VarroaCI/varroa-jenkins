@@ -506,6 +506,12 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   real audit history — do not add new periodic event types to that switch.
 - Wire changes go in `proto/mitev1/mite.proto` then regenerate; never hand-edit
   `mitev1_gen.go`.
+- `NewBusHandler` takes a `metric.MeterProvider` as its first parameter and
+  creates every gateway instrument into the `gatewayMetrics` field
+  (`metrics.go`, scope `varroa-gateway`). Put a new gateway instrument there;
+  never bind an instrument to a package variable or an `init` function. A
+  test that builds a `BusHandler` literal sets `metrics: noopGatewayMetrics()`.
+  A test that reads a metric passes the provider from `newTestMeterProvider`.
 
 ## Verification
 

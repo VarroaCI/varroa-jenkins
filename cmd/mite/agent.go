@@ -30,6 +30,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -83,7 +84,8 @@ type Config struct {
 // It connects to the Varroa server, streams state, and applies desired-state
 // commands.
 type Agent struct {
-	cfg Config
+	cfg     Config
+	metrics miteMetrics
 	// conn and client belong to the run loop. Only the run loop reads or
 	// writes them; every other goroutine reaches the gateway through sess.
 	conn   *grpc.ClientConn
@@ -334,10 +336,17 @@ type identityState struct {
 	isBootstrap    bool
 }
 
-// NewAgent creates a new mite agent with the given configuration.
-func NewAgent(cfg Config) *Agent {
+// NewAgent creates a new mite agent with the given configuration. It
+// creates the mite instruments on the "varroa-mite" meter of mp and returns
+// an error when an instrument cannot be created.
+func NewAgent(mp metric.MeterProvider, cfg Config) (*Agent, error) {
+	metrics, err := newMiteMetrics(mp)
+	if err != nil {
+		return nil, err
+	}
 	return &Agent{
 		cfg:                    cfg,
+		metrics:                metrics,
 		version:                version,
 		heartbeatInterval:      15 * time.Second,
 		jobScheduleInterval:    jobSchedulePollInterval,
@@ -360,7 +369,7 @@ func NewAgent(cfg Config) *Agent {
 		crossTenantWaiters:     newCrossTenantWaiterMap(),
 		runStateAcks:           newRunStateAckStore(),
 		runStateWaiters:        newRunStateWaiterMap(),
-	}
+	}, nil
 }
 
 // lastAppliedHashPath returns the convergence-marker path rooted at miteDir.

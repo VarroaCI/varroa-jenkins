@@ -29,7 +29,7 @@ import (
 // tests never collide on 9095. It cleans the listener up via ctx cancellation.
 func startTestLoopback(t *testing.T) (*Agent, int) {
 	t.Helper()
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackTokenDir = t.TempDir()
 	agent.loopbackPort = 0 // ask the OS for a free port
@@ -176,7 +176,7 @@ func newBuildEventJSON(seq int64, phase string) string {
 }
 
 func TestEventsAcceptedBatchForwardsAndReturnsAcks(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	var sent []*mitev1.BuildEvent
@@ -215,7 +215,7 @@ func TestEventsAcceptedBatchForwardsAndReturnsAcks(t *testing.T) {
 }
 
 func TestEventsDownstreamDown503(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	// The agent holds no session: the stream never connected.
@@ -232,7 +232,7 @@ func TestEventsDownstreamDown503(t *testing.T) {
 }
 
 func TestEventsRetentionFullRefusesNoDrop(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	agent.eventRetention = newEventRetentionStore(10) // tiny cap
@@ -260,7 +260,7 @@ func TestEventsRetentionFullRefusesNoDrop(t *testing.T) {
 }
 
 func TestEventsSendErrorClosesAndAnswers503(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error {
@@ -290,7 +290,7 @@ func TestEventsSendErrorClosesAndAnswers503(t *testing.T) {
 }
 
 func TestEventsBadJSONIs400(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 
@@ -305,7 +305,7 @@ func TestEventsBadJSONIs400(t *testing.T) {
 }
 
 func TestEventAckReleasesRetainedEventOnStored(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	evt := &mitev1.BuildEvent{RunId: "r1", Seq: 5, Phase: "COMPLETED", JobPath: "j", BuildNumber: 1}
 	size := eventSize(evt)
@@ -326,7 +326,7 @@ func TestEventAckReleasesRetainedEventOnStored(t *testing.T) {
 }
 
 func TestEventAckReleasesRetainedEventOnRejected(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	evt := &mitev1.BuildEvent{RunId: "r1", Seq: 7, Phase: "COMPLETED", JobPath: "j", BuildNumber: 1}
 	size := eventSize(evt)
@@ -348,7 +348,7 @@ func TestEventAckReleasesRetainedEventOnRejected(t *testing.T) {
 // sends nothing for this key — while the ack still reaches the plugin's
 // next /v1/events response.
 func TestEventAckBeforeCommitLeavesNoRetainedEntry(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	evt := &mitev1.BuildEvent{RunId: "r1", Seq: 1, Phase: "STAGE", JobPath: "j", BuildNumber: 1}
 	size := eventSize(evt)
@@ -392,7 +392,7 @@ func TestEventAckBeforeCommitLeavesNoRetainedEntry(t *testing.T) {
 // rollback must still leave nothing retained, refund the charge, and the
 // ack must still reach the plugin.
 func TestEventAckBeforeRollbackLeavesNoRetainedEntry(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	evt := &mitev1.BuildEvent{RunId: "r1", Seq: 1, Phase: "STAGE", JobPath: "j", BuildNumber: 1}
 	size := eventSize(evt)
@@ -427,7 +427,7 @@ func TestEventAckBeforeRollbackLeavesNoRetainedEntry(t *testing.T) {
 }
 
 func TestReplayAfterReconnectOrderedPerRun(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	for _, seq := range []int64{3, 1, 2} { // committed out of arrival order
 		evt := &mitev1.BuildEvent{RunId: "r1", Seq: seq, Phase: "STAGE", JobPath: "j", BuildNumber: 1}
@@ -455,7 +455,7 @@ func TestReplayAfterReconnectOrderedPerRun(t *testing.T) {
 }
 
 func TestReplayWithNoRetainedEventsIsNoop(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.replayRetainedEvents() // no session; must not panic
 	if got := agent.eventRetention.snapshotOrdered(); len(got) != 0 {
@@ -492,7 +492,7 @@ func decodedEventSize(t *testing.T, jsonBody string) int64 {
 // retained entry in place rather than doubling the ordering slice and
 // leaking the earlier reservation's bytes.
 func TestEventsDuplicateDeliveryKeepsOneEntry(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	var sendCount int32
@@ -898,7 +898,7 @@ func TestEventRetentionInvariantUnderRandomizedInterleaving(t *testing.T) {
 // reserve running before the duplicate replacement. The retry answers 202
 // and totalBytes stays at the cap rather than growing or bouncing to 503.
 func TestEventsRetryOfExistingKeyAtCapSucceeds(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 
@@ -934,7 +934,7 @@ func TestEventsRetryOfExistingKeyAtCapSucceeds(t *testing.T) {
 // exceed the cap, refuses with 503, and leaves the earlier entry retained
 // exactly as it was.
 func TestEventsLargerReplacementAtCapRefusedKeepsOldEntry(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 
@@ -975,7 +975,7 @@ func TestEventsLargerReplacementAtCapRefusedKeepsOldEntry(t *testing.T) {
 // failure scenario: seq 0 sends, seq 1 fails, so /v1/events answers 503
 // and only the successful earlier event stays retained, once.
 func TestEventsMidBatchFailureRetainsEarlierEventOnce(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	var sent []int64
@@ -1019,7 +1019,7 @@ func TestEventsMidBatchFailureRetainsEarlierEventOnce(t *testing.T) {
 // duplicate, seq 1 now succeeds), then a reconnect replay must send each
 // retained event exactly once, in sequence order.
 func TestReplayAfterPartialBatchDeliverySendsEachRetainedEventOnce(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 
@@ -1073,7 +1073,7 @@ func TestReplayAfterPartialBatchDeliverySendsEachRetainedEventOnce(t *testing.T)
 // closing check: after a duplicate delivery of the same event, a replay
 // sends it once, not twice.
 func TestReplayAfterDuplicateDeliverySendsSeqOnce(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
@@ -1114,7 +1114,7 @@ func oversizedClaimBody() string {
 }
 
 func TestClaimTwoInFlightDoNotCross(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	agent.claimTimeout = 2 * time.Second
@@ -1170,7 +1170,7 @@ func TestClaimTwoInFlightDoNotCross(t *testing.T) {
 }
 
 func TestClaim504Timeout(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	agent.claimTimeout = 30 * time.Millisecond
@@ -1195,7 +1195,7 @@ func TestClaim504Timeout(t *testing.T) {
 }
 
 func TestClaim429Cap(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	for i := 0; i < maxClaimWaiters; i++ {
@@ -1258,7 +1258,7 @@ func TestClaimFailureBodyIsOneShape(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			agent := NewAgent(Config{})
+			agent := mustNewAgent(t, Config{})
 			agent.Logger = slog.Default()
 			agent.loopbackToken = "tok"
 			rec := httptest.NewRecorder()
@@ -1297,7 +1297,7 @@ func assertUnavailableWireShape(t *testing.T, body []byte) {
 }
 
 func TestClaimRelaysAGatewayUnavailableReplyWithNoDecisionKey(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	agent.claimTimeout = 2 * time.Second
@@ -1355,7 +1355,7 @@ func (f *fakeMiteClient) CommandStream(_ context.Context, _ ...grpc.CallOption) 
 
 func TestRegisterCarriesCellInstance(t *testing.T) {
 	fc := &fakeMiteClient{}
-	agent := NewAgent(Config{ControllerName: "c", Namespace: "ns", CellInstance: "pod-uid-123"})
+	agent := mustNewAgent(t, Config{ControllerName: "c", Namespace: "ns", CellInstance: "pod-uid-123"})
 	agent.Logger = slog.Default()
 	agent.client = fc
 
@@ -1372,7 +1372,7 @@ func TestRegisterCarriesCellInstance(t *testing.T) {
 
 func TestRenewCarriesCellInstance(t *testing.T) {
 	fc := &fakeMiteClient{}
-	agent := NewAgent(Config{ControllerName: "c", Namespace: "ns", CellInstance: "pod-uid-456"})
+	agent := mustNewAgent(t, Config{ControllerName: "c", Namespace: "ns", CellInstance: "pod-uid-456"})
 	agent.Logger = slog.Default()
 	_, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -1388,7 +1388,7 @@ func TestRenewCarriesCellInstance(t *testing.T) {
 }
 
 func TestClaimCellInstanceOverwritesBody(t *testing.T) {
-	agent := NewAgent(Config{CellInstance: "pod-uid-789"})
+	agent := mustNewAgent(t, Config{CellInstance: "pod-uid-789"})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	agent.claimTimeout = 50 * time.Millisecond // no response injected: fail fast via 504
@@ -1420,7 +1420,7 @@ func TestClaimCellInstanceOverwritesBody(t *testing.T) {
 // start_mark unchanged, so the plugin's start mark reaches the gateway on
 // the claim's own stream message.
 func TestClaimPassesStartMark(t *testing.T) {
-	agent := NewAgent(Config{CellInstance: "pod-uid-789"})
+	agent := mustNewAgent(t, Config{CellInstance: "pod-uid-789"})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = "tok"
 	agent.claimTimeout = 50 * time.Millisecond
@@ -1450,7 +1450,7 @@ func TestClaimPassesStartMark(t *testing.T) {
 // --- 4.5: processCommands cases + teardown release ---
 
 func TestProcessCommandsResolvesClaimAndReleasesEventAck(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 
 	evt := &mitev1.BuildEvent{RunId: "r1", Seq: 9, Phase: "COMPLETED", JobPath: "j", BuildNumber: 1}
@@ -1520,7 +1520,7 @@ func TestProcessCommandsResolvesClaimAndReleasesEventAck(t *testing.T) {
 // claims. It checks this with a done-channel per waiter rather than goleak,
 // which is not a repo dependency.
 func TestProcessCommandsTeardownReleasesClaimWaiters(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 
 	recvBlock := make(chan struct{})
@@ -1576,35 +1576,6 @@ func TestProcessCommandsTeardownReleasesClaimWaiters(t *testing.T) {
 	}
 }
 
-// --- 4.6: metrics registered ---
-
-func TestLoopbackMetricsRegistered(t *testing.T) {
-	if claimsGranted == nil {
-		t.Error("varroa.mite.claims.granted was not registered")
-	}
-	if claimsDuplicate == nil {
-		t.Error("varroa.mite.claims.duplicate was not registered")
-	}
-	if claimsVetoed == nil {
-		t.Error("varroa.mite.claims.vetoed was not registered")
-	}
-	if claimsFailed == nil {
-		t.Error("varroa.mite.claims.failed was not registered")
-	}
-	if buildEventsForwarded == nil {
-		t.Error("varroa.mite.build_events.forwarded was not registered")
-	}
-	if buildEventsAcked == nil {
-		t.Error("varroa.mite.build_events.acked was not registered")
-	}
-	if buildEventsRejected == nil {
-		t.Error("varroa.mite.build_events.rejected was not registered")
-	}
-	if buildEventsRetainedBytes == nil {
-		t.Error("varroa.mite.build_events.retained_bytes was not registered")
-	}
-}
-
 // TestClaimRelaysTheHomeSlotOfANotHomeVeto asserts the /v1/claim body
 // carries home_slot when the gateway sets it, slot 0 included, and omits
 // the key when the gateway sets none.
@@ -1620,7 +1591,7 @@ func TestClaimRelaysTheHomeSlotOfANotHomeVeto(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			agent := NewAgent(Config{})
+			agent := mustNewAgent(t, Config{})
 			agent.Logger = slog.Default()
 			agent.loopbackToken = "tok"
 			agent.claimTimeout = 2 * time.Second

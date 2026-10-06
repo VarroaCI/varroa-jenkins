@@ -34,7 +34,7 @@ func TestHeartbeatOmitsIdleBeforeFirstPoll(t *testing.T) {
 		return nil, context.DeadlineExceeded
 	}
 
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
@@ -86,7 +86,7 @@ func TestGaugesMatchFixture(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     srv.URL,
@@ -145,7 +145,7 @@ func TestHeartbeatIncludesIdleAfterPoll(t *testing.T) {
 		return nil, context.DeadlineExceeded
 	}
 
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
@@ -239,7 +239,7 @@ func TestReplayWebhook200(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	stream, captured := testReplayStream(t)
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
@@ -303,7 +303,7 @@ func TestReplayWebhookSetsDeliveryHeaderAfterOverwritingForgery(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	stream, captured := testReplayStream(t)
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
@@ -361,7 +361,7 @@ func TestReplayWebhookSkipsDeliveryHeaderWhenEmpty(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	stream, captured := testReplayStream(t)
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
@@ -416,7 +416,7 @@ func TestReplayWebhookAllowlist(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stream, captured := testReplayStream(t)
-			agent := NewAgent(Config{
+			agent := mustNewAgent(t, Config{
 				ControllerName: "test",
 				Namespace:      "ns",
 				JenkinsURL:     "http://localhost:1",
@@ -478,7 +478,7 @@ func TestReplayWebhookAllowlist(t *testing.T) {
 // is not listening, the handler returns a failure result without panicking.
 func TestReplayWebhookConnectionRefused(t *testing.T) {
 	stream, captured := testReplayStream(t)
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
@@ -522,7 +522,7 @@ func TestReplayWebhookConnectionRefused(t *testing.T) {
 // a nil ReplayWebhook payload returns a failure result (not a crash).
 func TestReplayWebhookNilPayload(t *testing.T) {
 	stream, captured := testReplayStream(t)
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
@@ -558,7 +558,7 @@ func TestReplayWebhookNilPayload(t *testing.T) {
 // message about allowlist appears, not a connection error).
 func TestReplayWebhookNonAllowlistedRefusedWithoutHTTP(t *testing.T) {
 	stream, captured := testReplayStream(t)
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",

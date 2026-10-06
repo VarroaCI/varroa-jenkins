@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
@@ -20,28 +19,6 @@ import (
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
-
-var (
-	miteStreamConnections metric.Int64UpDownCounter
-	miteStreamDisconnects metric.Int64Counter
-	miteWatchFailures     metric.Int64Counter
-)
-
-func init() {
-	meter := otel.Meter("varroa-gateway")
-	// UpDownCounter, not a Gauge: these are +1/-1 deltas. A synchronous gauge
-	// takes last-value, so it would report literally 1 or -1 rather than the
-	// number of active connections.
-	miteStreamConnections, _ = meter.Int64UpDownCounter("varroa.mite.stream.connections",
-		metric.WithDescription("Active mite stream connections"),
-	)
-	miteStreamDisconnects, _ = meter.Int64Counter("varroa.mite.stream.disconnects",
-		metric.WithDescription("Mite stream disconnect count"),
-	)
-	miteWatchFailures, _ = meter.Int64Counter("varroa.mite.watch.failures",
-		metric.WithDescription("Bus watch setup failures per mite connection (bridge is degraded until it succeeds)"),
-	)
-}
 
 // buildEventPublisher is the seam over the JetStream publish calls the
 // build-event worker uses. *bus.Conn satisfies it; tests substitute a fake
@@ -81,6 +58,7 @@ type pendingImperative struct {
 type BusHandler struct {
 	cluster    string
 	conn       *bus.Conn
+	metrics    gatewayMetrics
 	kv         *bus.KV // snapshot KV
 	presenceKV *bus.KV // presence KV (written on connect/heartbeat, deleted on disconnect)
 	// desired is the desired-state request source. Nil when the handler
@@ -326,14 +304,21 @@ func (h *BusHandler) log() *slog.Logger {
 	return slog.Default()
 }
 
-// NewBusHandler creates a handler that bridges to the NATS bus.
+// NewBusHandler creates a handler that bridges to the NATS bus. It creates
+// the gateway instruments on the "varroa-gateway" meter of mp and returns an
+// error when an instrument cannot be created.
 // snapshotKV: mite_snapshots. presenceKV: mite_presence.
 // activityPub: publishes enriched activity events (may be nil; if nil, activity
 // events are not published).
-func NewBusHandler(cluster string, conn *bus.Conn, snapshotKV, presenceKV *bus.KV, activityPub *activity.Publisher) *BusHandler {
+func NewBusHandler(mp metric.MeterProvider, cluster string, conn *bus.Conn, snapshotKV, presenceKV *bus.KV, activityPub *activity.Publisher) (*BusHandler, error) {
+	metrics, err := newGatewayMetrics(mp)
+	if err != nil {
+		return nil, err
+	}
 	h := &BusHandler{
 		cluster:                    cluster,
 		conn:                       conn,
+		metrics:                    metrics,
 		kv:                         snapshotKV,
 		presenceKV:                 presenceKV,
 		activityPub:                activityPub,
@@ -378,7 +363,7 @@ func NewBusHandler(cluster string, conn *bus.Conn, snapshotKV, presenceKV *bus.K
 	}
 	// Start the content TTL sweeper goroutine.
 	go h.contentSweeper()
-	return h
+	return h, nil
 }
 
 // Close shuts down the content sweeper goroutine. Must be called before the
@@ -450,7 +435,7 @@ func (h *BusHandler) OnConnect(name, ns, version string, certExpiry interface{},
 	key := ns + "/" + name
 	h.log().Info("mite connected", "controller", key, "version", version)
 
-	miteStreamConnections.Add(context.Background(), 1)
+	h.metrics.miteStreamConnections.Add(context.Background(), 1)
 
 	ce, _ := certExpiry.(time.Time)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -717,7 +702,7 @@ func actingUserName(user *mitev1.ActingUser) string {
 func (h *BusHandler) publishCommandRefused(ns, name, command, runID, jobPath, actor string, result *mitev1.CommandResult) {
 	key := ns + "/" + name
 	if runID == "" {
-		buildEventsDropped.Add(context.Background(), 1)
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
 		h.log().Warn("refused run command names no run, publishing no envelope",
 			"controller", key, "command", command)
 		return
@@ -725,7 +710,7 @@ func (h *BusHandler) publishCommandRefused(ns, name, command, runID, jobPath, ac
 
 	tenant, _ := h.resolver().ResolveJobTenant(h.cluster, ns, name, jobPath)
 	if tenant == "" {
-		buildEventsDropped.Add(context.Background(), 1)
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
 		h.log().Warn("refused run command unresolved, publishing no envelope",
 			"controller", key, "command", command, "job_path", jobPath)
 		return
@@ -759,13 +744,13 @@ func (h *BusHandler) publishCommandRefused(ns, name, command, runID, jobPath, ac
 	}
 
 	if _, err := h.publisher.PublishJetStream(bus.BuildSubject(h.cluster, ns, name), data); err != nil {
-		buildEventsDropped.Add(context.Background(), 1)
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
 		h.log().Warn("command refusal publish failed, the run shows no refusal",
 			"controller", key, "run_id", runID, "error", err)
 		return
 	}
 
-	commandRefusedTotal.Add(context.Background(), 1,
+	h.metrics.commandRefusedTotal.Add(context.Background(), 1,
 		metric.WithAttributes(attribute.String("command", command)))
 }
 
@@ -779,7 +764,7 @@ func (h *BusHandler) publishTriggerFailed(ns, name string, payload *mitev1.Trigg
 
 	tenant, _ := h.resolver().ResolveJobTenant(h.cluster, ns, name, payload.JobPath)
 	if tenant == "" {
-		buildEventsDropped.Add(context.Background(), 1)
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
 		h.log().Warn("failed trigger unresolved, publishing no envelope",
 			"controller", key, "job_path", payload.JobPath)
 		return true
@@ -815,13 +800,13 @@ func (h *BusHandler) publishTriggerFailed(ns, name string, payload *mitev1.Trigg
 	}
 
 	if _, err := h.publisher.PublishJetStream(bus.BuildSubject(h.cluster, ns, name), data); err != nil {
-		buildEventsDropped.Add(context.Background(), 1)
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
 		h.log().Warn("trigger failure publish failed, leaving the command unacknowledged",
 			"controller", key, "error", err)
 		return false
 	}
 
-	triggerFailedTotal.Add(context.Background(), 1,
+	h.metrics.triggerFailedTotal.Add(context.Background(), 1,
 		metric.WithAttributes(attribute.String("reason_code", reasonCode)))
 	return true
 }
@@ -836,7 +821,7 @@ func (h *BusHandler) publishTriggerAccepted(ns, name string, payload *mitev1.Tri
 
 	tenant, _ := h.resolver().ResolveJobTenant(h.cluster, ns, name, payload.JobPath)
 	if tenant == "" {
-		buildEventsDropped.Add(context.Background(), 1)
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
 		h.log().Warn("accepted trigger unresolved, publishing no envelope",
 			"controller", key, "job_path", payload.JobPath)
 		return true
@@ -869,13 +854,13 @@ func (h *BusHandler) publishTriggerAccepted(ns, name string, payload *mitev1.Tri
 	}
 
 	if _, err := h.publisher.PublishJetStream(bus.BuildSubject(h.cluster, ns, name), data); err != nil {
-		buildEventsDropped.Add(context.Background(), 1)
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
 		h.log().Warn("accepted trigger publish failed, leaving the command unacknowledged",
 			"controller", key, "error", err)
 		return false
 	}
 
-	triggerAcceptedTotal.Add(context.Background(), 1)
+	h.metrics.triggerAcceptedTotal.Add(context.Background(), 1)
 	return true
 }
 
@@ -894,7 +879,7 @@ func (h *BusHandler) publishResumeFailed(ns, name string, payload *mitev1.Resume
 	key := ns + "/" + name
 
 	if payload == nil || payload.RunId == "" || payload.Instance == "" {
-		buildEventsDropped.Add(context.Background(), 1)
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
 		h.log().Warn("failed resume names no run or no instance, publishing no envelope",
 			"controller", key)
 		return
@@ -902,7 +887,7 @@ func (h *BusHandler) publishResumeFailed(ns, name string, payload *mitev1.Resume
 
 	tenant, _ := h.resolver().ResolveJobTenant(h.cluster, ns, name, payload.JobPath)
 	if tenant == "" {
-		buildEventsDropped.Add(context.Background(), 1)
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
 		h.log().Warn("failed resume unresolved, publishing no envelope",
 			"controller", key, "job_path", payload.JobPath)
 		return
@@ -936,13 +921,13 @@ func (h *BusHandler) publishResumeFailed(ns, name string, payload *mitev1.Resume
 	}
 
 	if _, err := h.publisher.PublishJetStream(bus.BuildSubject(h.cluster, ns, name), data); err != nil {
-		buildEventsDropped.Add(context.Background(), 1)
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
 		h.log().Warn("resume failure publish failed, the run keeps its resume deadline",
 			"controller", key, "run_id", payload.RunId, "error", err)
 		return
 	}
 
-	resumeFailedTotal.Add(context.Background(), 1,
+	h.metrics.resumeFailedTotal.Add(context.Background(), 1,
 		metric.WithAttributes(attribute.String("reason_code", reasonCode)))
 	h.log().Info("failed resume recorded",
 		"controller", key, "run_id", payload.RunId,
@@ -1184,8 +1169,8 @@ func (h *BusHandler) OnDisconnect(name, ns string, token int64) {
 	// A real stream ended either way, so the connection metrics move even when
 	// the teardown below is skipped — otherwise a superseded stream leaves the
 	// active-connection gauge permanently over-counted.
-	miteStreamConnections.Add(context.Background(), -1)
-	miteStreamDisconnects.Add(context.Background(), 1)
+	h.metrics.miteStreamConnections.Add(context.Background(), -1)
+	h.metrics.miteStreamDisconnects.Add(context.Background(), 1)
 
 	// Scoped by token, so this is correct to run even for a superseded
 	// stream's late teardown: it can only ever remove its own epoch's
@@ -1308,7 +1293,7 @@ func (h *BusHandler) retryEstablish(ctx context.Context, ns, name, watchKind str
 		}
 		h.log().Error("bus watch setup failed",
 			"controller", ns+"/"+name, "watch", watchKind, "attempt", attempt, "retryIn", delay, "error", err)
-		miteWatchFailures.Add(ctx, 1, metric.WithAttributes(
+		h.metrics.miteWatchFailures.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("controller", ns+"/"+name),
 			attribute.String("watch", watchKind),
 		))

@@ -117,6 +117,7 @@ func TestServeDesiredStateRetriesFailedSubscribe(t *testing.T) {
 	src := &flakyDesiredSource{failures: 2, inbox: inbox}
 
 	h := &BusHandler{
+		metrics:      noopGatewayMetrics(),
 		cluster:      "core",
 		desired:      src,
 		watchBackoff: 5 * time.Millisecond,
@@ -155,6 +156,7 @@ func TestServeDesiredStateRetriesFailedSubscribe(t *testing.T) {
 func TestServeDesiredStateRepliesOnlyAfterSend(t *testing.T) {
 	inbox := newFakeDesiredInbox()
 	h := &BusHandler{
+		metrics:      noopGatewayMetrics(),
 		cluster:      "core",
 		desired:      &flakyDesiredSource{inbox: inbox},
 		watchBackoff: 5 * time.Millisecond,
@@ -221,6 +223,7 @@ func TestServeDesiredStateRebuildsLostSubscription(t *testing.T) {
 	}}
 
 	h := &BusHandler{
+		metrics:       noopGatewayMetrics(),
 		cluster:       "core",
 		desired:       src,
 		watchBackoff:  5 * time.Millisecond,
@@ -271,6 +274,7 @@ func TestServeDesiredStateMarksAndClearsDegraded(t *testing.T) {
 	src := &flakyDesiredSource{failures: 3, inbox: newFakeDesiredInbox()}
 
 	h := &BusHandler{
+		metrics:      noopGatewayMetrics(),
 		cluster:      "core",
 		desired:      src,
 		watchBackoff: 20 * time.Millisecond,
@@ -308,7 +312,7 @@ func waitFor(t *testing.T, cond func() bool, timeout time.Duration, msg string) 
 // every bus->stream watcher. Setup failures must back off and retry rather
 // than returning, and must mark the controller degraded while failing.
 func TestRetryEstablishRetriesUntilSuccess(t *testing.T) {
-	h := &BusHandler{cluster: "core", watchBackoff: 5 * time.Millisecond}
+	h := &BusHandler{metrics: noopGatewayMetrics(), cluster: "core", watchBackoff: 5 * time.Millisecond}
 
 	var attempts int
 	ctx, cancel := context.WithCancel(context.Background())
@@ -336,7 +340,7 @@ func TestRetryEstablishRetriesUntilSuccess(t *testing.T) {
 // TestRetryEstablishMarksDegradedWhileFailing asserts the failure is visible
 // during the retry window, not only after it resolves.
 func TestRetryEstablishMarksDegradedWhileFailing(t *testing.T) {
-	h := &BusHandler{cluster: "core", watchBackoff: 5 * time.Millisecond}
+	h := &BusHandler{metrics: noopGatewayMetrics(), cluster: "core", watchBackoff: 5 * time.Millisecond}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -354,7 +358,7 @@ func TestRetryEstablishMarksDegradedWhileFailing(t *testing.T) {
 // TestRetryEstablishStopsOnContextCancel asserts the retry loop is bounded by
 // the connection lifetime and does not leak a goroutine per disconnect.
 func TestRetryEstablishStopsOnContextCancel(t *testing.T) {
-	h := &BusHandler{cluster: "core", watchBackoff: 5 * time.Millisecond}
+	h := &BusHandler{metrics: noopGatewayMetrics(), cluster: "core", watchBackoff: 5 * time.Millisecond}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan bool, 1)
@@ -382,6 +386,7 @@ func TestRetryEstablishStopsOnContextCancel(t *testing.T) {
 // mark would hide a still-broken desired-state watch, leaving it invisible.
 func TestWatchKindsTrackDegradationIndependently(t *testing.T) {
 	h := &BusHandler{
+		metrics:       noopGatewayMetrics(),
 		cluster:       "core",
 		watchBackoff:  5 * time.Millisecond,
 		watchDegraded: make(map[string]map[string]string),
@@ -431,6 +436,7 @@ func TestServeDesiredStateDoesNotSpinOnInstantDeath(t *testing.T) {
 	}}
 
 	h := &BusHandler{
+		metrics:       noopGatewayMetrics(),
 		cluster:       "core",
 		desired:       src,
 		watchBackoff:  50 * time.Millisecond,
@@ -466,6 +472,7 @@ func TestServeDesiredStateDoesNotSpinOnInstantDeath(t *testing.T) {
 // False alarm that nothing clears until its own watch dies.
 func TestMarkWatchDegradedIgnoresCancelledConnection(t *testing.T) {
 	h := &BusHandler{
+		metrics:       noopGatewayMetrics(),
 		cluster:       "core",
 		watchDegraded: make(map[string]map[string]string),
 		miteVersion:   make(map[string]string),
@@ -496,6 +503,7 @@ func TestMarkWatchDegradedIgnoresCancelledConnection(t *testing.T) {
 // leaving a Connected mite receiving no desired state.
 func TestOnDisconnectIgnoresSupersededStream(t *testing.T) {
 	h := &BusHandler{
+		metrics:              noopGatewayMetrics(),
 		cluster:              "core",
 		cancels:              make(map[string]context.CancelFunc),
 		certExpiry:           make(map[string]time.Time),
@@ -590,6 +598,7 @@ func TestOnConnectCancelsSupersededConnection(t *testing.T) {
 // dependencies, for tests that exercise connect/disconnect bookkeeping.
 func newTestBusHandler() *BusHandler {
 	return &BusHandler{
+		metrics:              noopGatewayMetrics(),
 		cluster:              "core",
 		cancels:              make(map[string]context.CancelFunc),
 		certExpiry:           make(map[string]time.Time),

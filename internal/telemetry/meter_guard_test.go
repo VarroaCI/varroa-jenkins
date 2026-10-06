@@ -18,20 +18,6 @@ const (
 	telemetryImportPath = "github.com/varroaci/varroa-jenkins/internal/telemetry"
 )
 
-// globalMeterAllowlist holds the non-main files that still read the global
-// meter provider, with the number of reads in each file. The list can only
-// shrink. Give the constructor a metric.MeterProvider and remove the entry;
-// never add an entry.
-var globalMeterAllowlist = map[string]int{
-	"cmd/mite/activity_poller.go":    1,
-	"cmd/mite/loopback.go":           1,
-	"internal/api/sse/run_fanout.go": 1,
-	"internal/mite/build_events.go":  1,
-	"internal/mite/bus_handler.go":   1,
-	"internal/mite/claim_bridge.go":  1,
-	"internal/mite/log_writer.go":    1,
-}
-
 // TestOnlyMainReadsGlobalMeterProvider fails when a non-test file outside
 // a cmd/*/main.go reads the global meter provider through otel.Meter or
 // otel.GetMeterProvider. A main reads the provider once and passes it to
@@ -40,36 +26,14 @@ var globalMeterAllowlist = map[string]int{
 func TestOnlyMainReadsGlobalMeterProvider(t *testing.T) {
 	t.Parallel()
 
-	found := map[string][]string{}
 	walkModuleGoFiles(t, func(rel string, fset *token.FileSet, file *ast.File) {
 		if strings.HasSuffix(rel, "_test.go") || mainMayReadGlobalMeter(rel) {
 			return
 		}
 		for _, pos := range packageCalls(file, otelImportPath, "Meter", "GetMeterProvider") {
-			found[rel] = append(found[rel], fset.Position(pos).String())
+			t.Errorf("%s reads the global meter provider: take a metric.MeterProvider in the constructor and let main pass it", fset.Position(pos))
 		}
 	})
-
-	for rel, sites := range found {
-		want, listed := globalMeterAllowlist[rel]
-		switch {
-		case !listed:
-			for _, site := range sites {
-				t.Errorf("%s reads the global meter provider: take a metric.MeterProvider in the constructor and let main pass it", site)
-			}
-		case len(sites) > want:
-			t.Errorf("%s reads the global meter provider %d times, the allowlist permits %d: the allowlist can only shrink (%s)",
-				rel, len(sites), want, strings.Join(sites, ", "))
-		case len(sites) < want:
-			t.Errorf("%s reads the global meter provider %d times, the allowlist permits %d: lower the entry in globalMeterAllowlist",
-				rel, len(sites), want)
-		}
-	}
-	for rel := range globalMeterAllowlist {
-		if _, ok := found[rel]; !ok {
-			t.Errorf("%s no longer reads the global meter provider: remove its entry from globalMeterAllowlist", rel)
-		}
-	}
 }
 
 // TestNoTestReplacesGlobalMeterProvider fails when a test file calls

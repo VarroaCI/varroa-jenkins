@@ -8,9 +8,6 @@ import (
 	"strconv"
 	"time"
 
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/metric"
-
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
@@ -20,18 +17,6 @@ import (
 // connection, so a slow record store cannot exhaust the gateway on one
 // controller's behalf.
 const maxInFlightClaims = 32
-
-// claimsRejected counts a claim the gateway refuses before it ever
-// reaches the record store: today, only a cell claim whose job path
-// names no tenant the cell hosts (design.md D14).
-var claimsRejected metric.Int64Counter
-
-func init() {
-	meter := otel.Meter("varroa-gateway")
-	claimsRejected, _ = meter.Int64Counter("varroa.gateway.claims.rejected",
-		metric.WithDescription("Claims the gateway refused before making a ledger request"),
-	)
-}
 
 // unhostedTenantMessage is the ClaimResponse error text a cell claim
 // receives when its job path's first segment names no tenant the cell
@@ -247,7 +232,7 @@ func (h *BusHandler) handleClaimRequest(name, ns string, req *mitev1.ClaimReques
 		// host. Fail closed with the record store's own unavailable code
 		// and no request at all — the queue then holds the build, which
 		// is the correct outcome for a job the cell should not run.
-		claimsRejected.Add(context.Background(), 1)
+		h.metrics.claimsRejected.Add(context.Background(), 1)
 		h.respondClaimUnavailable(send, ns, name, req.RequestId, unhostedTenantMessage)
 		return
 	}
