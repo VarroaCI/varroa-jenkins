@@ -64,6 +64,11 @@ func (a PreflightStore) PatchObjectMeta(ctx context.Context, gvr schema.GroupVer
 	return a.Store.PatchObjectMeta(ctx, gvr, ns, name, meta)
 }
 
+// PatchObjectMetaAt implements crdstore.Backend.
+func (a PreflightStore) PatchObjectMetaAt(ctx context.Context, gvr schema.GroupVersionResource, ns, name, resourceVersion string, meta map[string]any) (string, error) {
+	return a.Store.PatchObjectMetaAt(ctx, gvr, ns, name, resourceVersion, meta)
+}
+
 // ResourceClient methods needed by preflight
 
 // ListResourceQuotas delegates to Client.

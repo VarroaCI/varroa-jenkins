@@ -503,3 +503,62 @@ func TestFakeUpdateObjectStatus_BumpsResourceVersion(t *testing.T) {
 		t.Fatalf("second UpdateStatus = %v, want a conflict", err)
 	}
 }
+
+// TestPatchMetaAt_ConflictsOnStaleVersion pins that a metadata patch from a
+// stale resourceVersion answers a conflict and changes nothing, and that a
+// patch from the current version lands and returns the next version.
+func TestPatchMetaAt_ConflictsOnStaleVersion(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	seedCASController(t, f)
+	gvr, _ := GVRFor[v1alpha1.Controller]()
+	if err := f.PatchObjectStatus(ctx, gvr, "ns", "ctrl", map[string]any{"configHash": "other"}); err != nil {
+		t.Fatalf("concurrent patch: %v", err)
+	}
+
+	meta := map[string]any{"labels": map[string]any{"k": "v"}}
+	if _, err := PatchMetaAt[v1alpha1.Controller](ctx, f, "ctrl", "ns", "1", meta); !apierrors.IsConflict(err) {
+		t.Fatalf("stale PatchMetaAt error = %v, want a conflict", err)
+	}
+	got, err := Get[v1alpha1.Controller](ctx, f, "ctrl", "ns")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Labels["k"] != "" {
+		t.Fatalf("label after stale patch = %q, want none", got.Labels["k"])
+	}
+
+	rv, err := PatchMetaAt[v1alpha1.Controller](ctx, f, "ctrl", "ns", got.ResourceVersion, meta)
+	if err != nil {
+		t.Fatalf("current PatchMetaAt: %v", err)
+	}
+	got, err = Get[v1alpha1.Controller](ctx, f, "ctrl", "ns")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Labels["k"] != "v" {
+		t.Fatalf("label = %q, want v", got.Labels["k"])
+	}
+	if rv != "3" || got.ResourceVersion != "3" {
+		t.Fatalf("returned resourceVersion = %q, stored %q, want 3", rv, got.ResourceVersion)
+	}
+}
+
+// TestPatchMetaAt_NoChangeKeepsVersion pins that a patch that changes
+// nothing keeps the resourceVersion, as the apiserver does, so a caller that
+// chains its writes keeps a valid version.
+func TestPatchMetaAt_NoChangeKeepsVersion(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "ctrl", Namespace: "ns", ResourceVersion: "4", Finalizers: []string{"varroa.dev/finalizer"}},
+	})
+	rv, err := PatchMetaAt[v1alpha1.Controller](ctx, f, "ctrl", "ns", "4",
+		map[string]any{"finalizers": []string{"varroa.dev/finalizer"}})
+	if err != nil {
+		t.Fatalf("PatchMetaAt: %v", err)
+	}
+	if rv != "4" {
+		t.Fatalf("resourceVersion = %q, want 4", rv)
+	}
+}

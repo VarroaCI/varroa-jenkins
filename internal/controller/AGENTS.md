@@ -536,9 +536,11 @@ sections describe.
 - `SetProvisioningDefaults` and `RootDomain` share `provisioningDefaultsMu`; the
   every-replica defaults refresh feeds both reconcile policy and wake-server host
   resolution without racing HTTP requests.
-- `PatchControllerStatus` (`clientset_client.go`) sends a JSON **merge patch** with no
-  `resourceVersion` precondition. `controllerStatusPatch` builds its body, and the
-  test client applies the same body to its store. Fields only added to the body when
+- `PatchControllerStatus` (`clientset_client.go`) sends a JSON **merge patch** that
+  carries the caller's `resourceVersion` as a precondition, and returns the version
+  after the patch. An empty version is an error. `controllerStatusPatch` builds its
+  body, and the test client applies the same body to its store through
+  `Fake.PatchObjectStatusAt`, which enforces the precondition. Fields only added to the body when
   non-empty (`status.X != "" / != nil` guards — e.g. `desiredStateHash`,
   `AppliedBundleHash`, `FirstConnectedAt`, `WakeToken`, `LastDesiredPushAt`) are
   **sticky**: a merge patch that omits a key can never clear it server-side. Fields
@@ -1203,14 +1205,25 @@ sections describe.
   take `controllerLocks` (`keylock.go`) for the controller's `namespace/name`. The
   tick holds it from its first read to its end status write, so it cannot write
   back stale approve fields. The lock is local to the process: this is correct only
-  because the shard owner alone runs the tick and the approve. `Reconcile` and both
+  because the shard owner alone runs the tick and the approve, and because a stalled
+  former owner's end write conflicts on its stale `resourceVersion`. `Reconcile` and both
   approve methods enter the shard through `enterShard` (`ShardSet.EnterController`)
   and use the returned context for every write. `ShardManager` releases a shard
   through `ShardSet.Drain`: it waits for that work (`releaseDrainWait` 4s, at
   shutdown `shutdownDrainWait` 10s), cancels what still runs, and waits once more.
   It releases the lease only when the work ended; otherwise the lease must expire.
   A lost lease calls `ShardSet.Revoke`, which cancels the work at once. The tick
-  checks `ctx.Err()` before its end writes. An approve waits at
+  checks `ctx.Err()` before its end writes. A replica that stalls past its lease
+  still holds the shard until its next pass, so the tick writes are also fenced in
+  storage: every write of the tick to its own Controller goes through
+  `writeTickStatus` or `patchTickMeta`. Each sends `cr.ResourceVersion` as a
+  precondition and moves it forward on success, starting from the tick's read.
+  Never adopt a version from a fresh read (`SetHibernated`, `crdstore.Get`): that
+  defeats the fence. A conflict calls `fenceTick`, which cancels the tick context
+  (cause `*tickConflictError`), so the tick sends no further write of any kind.
+  `Reconcile` checks `tickFenced` after each write and after the phase machine:
+  one Info line, requeue after 1s, no error. A new tick write to the
+  Controller must use one of the two helpers. An approve waits at
   most `approveLockWait` (20s) and then fails with a plain-text "retry the approve"
   error. It writes nothing and sends nothing to the mite. A `plugin-roll` approval approves
   only the target checksum that it read (`errPluginRollChanged` otherwise). An

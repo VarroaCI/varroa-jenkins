@@ -105,8 +105,8 @@ func (s *stubClient) ApplyControllerSpecSSAIfExists(_ context.Context, _, _ stri
 func (s *stubClient) SetHibernated(_ context.Context, _, _ string, _ bool) (bool, error) {
 	return false, nil
 }
-func (s *stubClient) PatchControllerStatus(ctx context.Context, name, namespace string, status *v1alpha1.ControllerStatus) error {
-	return nil
+func (s *stubClient) PatchControllerStatus(_ context.Context, _, _, rv string, _ *v1alpha1.ControllerStatus) (string, error) {
+	return rv, nil
 }
 func (s *stubClient) PatchControllerCellStatus(ctx context.Context, name, namespace string, cell *v1alpha1.CellStatus) error {
 	return nil

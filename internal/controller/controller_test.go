@@ -675,20 +675,24 @@ func (t *testClient) SetHibernated(_ context.Context, name, namespace string, wa
 	}
 	return t.hibernatedChanged, nil
 }
-func (t *testClient) PatchControllerStatus(_ context.Context, name, namespace string, status *v1alpha1.ControllerStatus) error {
+func (t *testClient) PatchControllerStatus(_ context.Context, name, namespace, resourceVersion string, status *v1alpha1.ControllerStatus) (string, error) {
+	next := resourceVersion
+	if t.statusToStore {
+		gvr, err := crdstore.GVRFor[v1alpha1.Controller]()
+		if err != nil {
+			return "", err
+		}
+		next, err = t.store.PatchObjectStatusAt(context.Background(), gvr, namespace, name, resourceVersion, controllerStatusPatch(status))
+		if err != nil {
+			return "", err
+		}
+	}
 	t.statuses[name] = string(status.Phase)
 	cp := &v1alpha1.ControllerStatus{}
 	status.DeepCopyInto(cp)
 	t.lastPatchedStatus = cp
 	t.patchCount++
-	if t.statusToStore {
-		gvr, err := crdstore.GVRFor[v1alpha1.Controller]()
-		if err != nil {
-			return err
-		}
-		return t.store.PatchObjectStatus(context.Background(), gvr, namespace, name, controllerStatusPatch(status))
-	}
-	return nil
+	return next, nil
 }
 
 // cellStatusPatch records one PatchControllerCellStatus call.

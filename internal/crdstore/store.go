@@ -59,6 +59,12 @@ type Backend interface {
 	// PatchObjectMeta merge-patches {"metadata": meta} on the main resource
 	// (no subresource). meta is the raw map for the metadata field.
 	PatchObjectMeta(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, meta map[string]any) error
+
+	// PatchObjectMetaAt merge-patches {"metadata": meta} on the main
+	// resource only while the object still carries resourceVersion. Any
+	// write since that version surfaces as apierrors.IsConflict. It returns
+	// the resourceVersion after the patch.
+	PatchObjectMetaAt(ctx context.Context, gvr schema.GroupVersionResource, namespace, name, resourceVersion string, meta map[string]any) (string, error)
 }
 
 // ---------------------------------------------------------------------------
@@ -401,6 +407,24 @@ func PatchLabels[T any](ctx context.Context, b Backend, name, namespace string, 
 		return fmt.Errorf("patch %s labels: %w", info.gvr.Resource, err)
 	}
 	return nil
+}
+
+// PatchMetaAt merge-patches metadata only while the object still carries
+// resourceVersion, and returns the resourceVersion after the patch. A nil
+// value in meta deletes its key. A write since that version makes the patch
+// fail with a conflict, which apierrors.IsConflict reads through the %w wrap.
+// A caller that chains its writes from one read moves its own
+// resourceVersion forward with the result.
+func PatchMetaAt[T any](ctx context.Context, b Backend, name, namespace, resourceVersion string, meta map[string]any) (string, error) {
+	info, err := gvrInfo[T]()
+	if err != nil {
+		return "", err
+	}
+	rv, err := b.PatchObjectMetaAt(ctx, info.gvr, namespace, name, resourceVersion, meta)
+	if err != nil {
+		return "", fmt.Errorf("patch %s metadata: %w", info.gvr.Resource, err)
+	}
+	return rv, nil
 }
 
 // PatchFinalizers patches metadata.finalizers.

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"math/rand/v2"
 	"time"
@@ -125,6 +126,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 	defer leave()
 
+	// A conflict of a tick write cancels this context, so the tick sends no
+	// further write of any kind. See fenceTick.
+	ctx, cancelTick := context.WithCancelCause(ctx)
+	defer cancelTick(nil)
+	ctx = context.WithValue(ctx, tickFenceKey{}, cancelTick)
+
 	// The tick writes status from the read below. An approve that wrote in
 	// between would be lost, so the approve methods take the same lock.
 	lockKey := req.Namespace + "/" + req.Name
@@ -159,8 +166,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	honorsForceReprovision := cr.Status.Phase == v1alpha1.ControllerPhaseProvisioning ||
 		cr.Status.Phase == v1alpha1.ControllerPhaseConnected
 	if cr.Annotations[annotationForceReprovision] != "" && honorsForceReprovision {
-		if err := crdstore.PatchAnnotations[v1alpha1.Controller](ctx, r.store, cr.Name, cr.Namespace,
-			map[string]*string{annotationForceReprovision: nil}); err != nil {
+		if err := r.patchTickMeta(ctx, cr,
+			map[string]any{"annotations": map[string]any{annotationForceReprovision: nil}}); err != nil {
+			if res, fenced := r.tickFenced(ctx, cr); fenced {
+				return res, nil
+			}
 			r.Logger.Warn("failed to consume force-reprovision annotation, requeueing",
 				"namespace", req.Namespace, "name", req.Name, "error", err)
 			return reconcile.Result{}, err
@@ -172,7 +182,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Run the phase state machine.
 	beingDeleted := !cr.DeletionTimestamp.IsZero()
-	if err := r.reconcileController(ctx, cr); err != nil {
+	err = r.reconcileController(ctx, cr)
+	if res, fenced := r.tickFenced(ctx, cr); fenced {
+		return res, nil
+	}
+	if err != nil {
 		r.Logger.Error("reconcile failed", "namespace", req.Namespace, "name", req.Name, "error", err)
 		// Return the error so controller-runtime applies rate-limited
 		// retries. Do not patch status on failed reconciles.
@@ -191,7 +205,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// would be skipped by the len > 0 check. A missing finalizer patch
 	// leaves the CR stuck in Terminating.
 	if len(cr.Finalizers) > 0 || (beingDeleted && len(cr.Finalizers) == 0) {
-		if err := crdstore.PatchFinalizers[v1alpha1.Controller](ctx, r.store, cr.Name, cr.Namespace, cr.Finalizers); err != nil {
+		if err := r.patchTickMeta(ctx, cr, map[string]any{"finalizers": cr.Finalizers}); err != nil {
+			if res, fenced := r.tickFenced(ctx, cr); fenced {
+				return res, nil
+			}
 			r.Logger.Error("patch finalizers failed", "namespace", req.Namespace, "name", req.Name, "error", err)
 		}
 	}
@@ -207,7 +224,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// many status fields (MiteStatus, Conditions, hashes, timestamps, pending
 	// restart) in addition to Phase. The controller-runtime generation filter
 	// already prevents re-reconcile loops from status-only updates.
-	if err := r.client.PatchControllerStatus(ctx, cr.Name, cr.Namespace, &cr.Status); err != nil {
+	if err := r.writeTickStatus(ctx, cr); err != nil {
+		if res, fenced := r.tickFenced(ctx, cr); fenced {
+			return res, nil
+		}
 		r.Logger.Error("patch status failed", "namespace", req.Namespace, "name", req.Name, "error", err)
 		return reconcile.Result{}, err
 	}
@@ -215,6 +235,65 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Requeue based on phase (with backoff + jitter).
 	requeueAfter := r.nextRequeueDuration(cr)
 	return reconcile.Result{RequeueAfter: requeueAfter}, nil
+}
+
+// tickConflictRequeue is the requeue delay after a tick write conflicts.
+const tickConflictRequeue = 1 * time.Second
+
+// tickConflictReadTimeout limits the read of the current resourceVersion
+// for the conflict log line.
+const tickConflictReadTimeout = 1 * time.Second
+
+// tickFenceKey is the context key of the cancel function of one tick.
+type tickFenceKey struct{}
+
+// tickConflictError is the cancel cause of a tick whose write conflicted.
+type tickConflictError struct {
+	write   string
+	staleRV string
+}
+
+func (e *tickConflictError) Error() string {
+	return "tick " + e.write + " write conflicts at resourceVersion " + e.staleRV
+}
+
+// fenceTick cancels the tick of ctx when err is a conflict of a tick write.
+// Another writer changed the Controller since the tick read it. That writer
+// can be a replica that now owns the shard. So the tick must send no further
+// write of any kind, also no write that reads the Controller fresh, such as
+// SetHibernated. A context that no tick created is left as it is.
+func fenceTick(ctx context.Context, err error, write, staleRV string) {
+	if !apierrors.IsConflict(err) {
+		return
+	}
+	if cancel, ok := ctx.Value(tickFenceKey{}).(context.CancelCauseFunc); ok {
+		cancel(&tickConflictError{write: write, staleRV: staleRV})
+	}
+}
+
+// tickFenced reports whether a write of the tick conflicted. When it did,
+// it logs one Info line and returns the requeue. The next tick reads the
+// Controller again. A conflict is not a reconcile error, so the requeue does
+// not grow the rate-limited backoff.
+func (r *Reconciler) tickFenced(ctx context.Context, cr *v1alpha1.Controller) (reconcile.Result, bool) {
+	var conflict *tickConflictError
+	if !errors.As(context.Cause(ctx), &conflict) {
+		return reconcile.Result{}, false
+	}
+	// The tick context is cancelled, so the read for the log line gets its
+	// own short deadline. It must not hold the controller lock past the
+	// drain wait of a shard release.
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), tickConflictReadTimeout)
+	defer cancel()
+	current := ""
+	live, err := crdstore.Get[v1alpha1.Controller](readCtx, r.store, cr.Name, cr.Namespace)
+	if err == nil {
+		current = live.ResourceVersion
+	}
+	r.Logger.Info("tick write conflicts with a newer write, requeueing",
+		"controller", cr.Namespace+"/"+cr.Name, "write", conflict.write,
+		"staleResourceVersion", conflict.staleRV, "currentResourceVersion", current)
+	return reconcile.Result{RequeueAfter: tickConflictRequeue}, true
 }
 
 // streamLostRequeue is the requeue base for a Running controller whose mite

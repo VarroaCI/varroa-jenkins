@@ -1093,7 +1093,10 @@ type ResourceClient interface {
 	// SUBRESOURCE via Update carrying the fetched resourceVersion so a
 	// concurrent write conflicts instead of being clobbered.
 	SetHibernated(ctx context.Context, name, namespace string, want bool) (bool, error)
-	PatchControllerStatus(ctx context.Context, name, namespace string, status *v1alpha1.ControllerStatus) error
+	// PatchControllerStatus merge-patches status only while the Controller
+	// still carries resourceVersion, and returns the resourceVersion after
+	// the patch. A write since that version answers apierrors Conflict.
+	PatchControllerStatus(ctx context.Context, name, namespace, resourceVersion string, status *v1alpha1.ControllerStatus) (string, error)
 	// PatchControllerCellStatus is the placement pass's one narrow writer of
 	// status.cell.tenants (design D4). It merge-patches exactly
 	// {"status":{"cell":{"tenants":[...]}}} — never conditions, phase, or
@@ -1516,9 +1519,41 @@ func (r *Reconciler) resolveClassForCr(ctx context.Context, cr *v1alpha1.Control
 // the diagnostic keeps its last persisted value while the reconciler silently
 // retries.
 func (r *Reconciler) persistStatusDiagnostics(ctx context.Context, cr *v1alpha1.Controller) {
-	if err := r.client.PatchControllerStatus(ctx, cr.Name, cr.Namespace, &cr.Status); err != nil {
+	if err := r.writeTickStatus(ctx, cr); err != nil {
 		r.Logger.Warn("persist status diagnostics", "controller", cr.Namespace+"/"+cr.Name, "error", err)
 	}
+}
+
+// writeTickStatus writes cr.Status only while the Controller still carries
+// cr.ResourceVersion, and moves cr.ResourceVersion to the version after the
+// write. Every write of the tick to its own Controller goes through
+// writeTickStatus or patchTickMeta. The chain starts at the tick's read, so a
+// write by another replica since that read makes the next tick write
+// conflict. A replica that stalled past its shard lease therefore cannot
+// write a status that it computed before the new owner wrote. A conflict
+// cancels the tick context through fenceTick, so the tick sends no further
+// write.
+func (r *Reconciler) writeTickStatus(ctx context.Context, cr *v1alpha1.Controller) error {
+	rv, err := r.client.PatchControllerStatus(ctx, cr.Name, cr.Namespace, cr.ResourceVersion, &cr.Status)
+	if err != nil {
+		fenceTick(ctx, err, "status", cr.ResourceVersion)
+		return err
+	}
+	cr.ResourceVersion = rv
+	return nil
+}
+
+// patchTickMeta merge-patches the metadata of the tick's Controller only
+// while it still carries cr.ResourceVersion, and moves cr.ResourceVersion to
+// the version after the patch. See writeTickStatus.
+func (r *Reconciler) patchTickMeta(ctx context.Context, cr *v1alpha1.Controller, meta map[string]any) error {
+	rv, err := crdstore.PatchMetaAt[v1alpha1.Controller](ctx, r.store, cr.Name, cr.Namespace, cr.ResourceVersion, meta)
+	if err != nil {
+		fenceTick(ctx, err, "metadata", cr.ResourceVersion)
+		return err
+	}
+	cr.ResourceVersion = rv
+	return nil
 }
 
 const reconcileBlockedMessageCap = 2048
@@ -2621,8 +2656,13 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 			logger.Warn("failed to mint wake token", "error", mintErr)
 		} else if newToken != "" {
 			cr.Status.WakeToken = newToken
-			if perr := r.client.PatchControllerStatus(ctx, cr.Name, cr.Namespace, &cr.Status); perr != nil {
+			if perr := r.writeTickStatus(ctx, cr); perr != nil {
 				logger.Warn("failed to persist wake token", "error", perr)
+				// A conflict cancelled the tick. Stop before the phase
+				// handlers: some of their side effects take no context.
+				if ctx.Err() != nil {
+					return context.Cause(ctx)
+				}
 			}
 		}
 	}

@@ -165,3 +165,32 @@ func (c *ClientsetClient) PatchObjectMeta(ctx context.Context, gvr schema.GroupV
 	}
 	return err
 }
+
+// PatchObjectMetaAt merge-patches {"metadata": meta} with resourceVersion in
+// the body. The apiserver treats a resourceVersion in a patch as a
+// precondition and answers Conflict when the object moved since.
+func (c *ClientsetClient) PatchObjectMetaAt(ctx context.Context, gvr schema.GroupVersionResource, namespace, name, resourceVersion string, meta map[string]any) (string, error) {
+	// An empty resourceVersion in a patch is no precondition at all.
+	if resourceVersion == "" {
+		return "", fmt.Errorf("patch %s %q metadata: resourceVersion is required", gvr.Resource, name)
+	}
+	body := make(map[string]any, len(meta)+1)
+	for k, v := range meta {
+		body[k] = v
+	}
+	body["resourceVersion"] = resourceVersion
+	data, err := json.Marshal(map[string]any{"metadata": body})
+	if err != nil {
+		return "", fmt.Errorf("marshal metadata patch: %w", err)
+	}
+	var out *unstructured.Unstructured
+	if namespace == "" {
+		out, err = c.dynamic.Resource(gvr).Patch(ctx, name, types.MergePatchType, data, metav1.PatchOptions{})
+	} else {
+		out, err = c.dynamic.Resource(gvr).Namespace(namespace).Patch(ctx, name, types.MergePatchType, data, metav1.PatchOptions{})
+	}
+	if err != nil {
+		return "", err
+	}
+	return out.GetResourceVersion(), nil
+}

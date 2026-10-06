@@ -1437,7 +1437,7 @@ func TestPatchControllerStatus_ClearsLastReconcileErrorAt(t *testing.T) {
 	existing := &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "varroa.dev/v1alpha1",
 		"kind":       "Controller",
-		"metadata":   map[string]interface{}{"name": "ctrl", "namespace": "ns"},
+		"metadata":   map[string]interface{}{"name": "ctrl", "namespace": "ns", "resourceVersion": "7"},
 		"status": map[string]interface{}{
 			"phase":                "Running",
 			"lastReconcileError":   "some old error",
@@ -1452,7 +1452,7 @@ func TestPatchControllerStatus_ClearsLastReconcileErrorAt(t *testing.T) {
 	c := &ClientsetClient{dynamic: dyn}
 
 	// Patch with a nil LastReconcileErrorAt — this must explicitly null the field.
-	err := c.PatchControllerStatus(context.Background(), "ctrl", "ns", &v1alpha1.ControllerStatus{
+	_, err := c.PatchControllerStatus(context.Background(), "ctrl", "ns", "7", &v1alpha1.ControllerStatus{
 		Phase:                v1alpha1.ControllerPhaseRunning,
 		LastReconcileError:   "",
 		LastReconcileErrorAt: nil,
@@ -1493,7 +1493,7 @@ func TestPatchControllerStatus_NilPendingDeletionsClearsStoredEntries(t *testing
 	existing := &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "varroa.dev/v1alpha1",
 		"kind":       "Controller",
-		"metadata":   map[string]interface{}{"name": "ctrl", "namespace": "ns"},
+		"metadata":   map[string]interface{}{"name": "ctrl", "namespace": "ns", "resourceVersion": "7"},
 		"status": map[string]interface{}{
 			"phase":                "Connected",
 			"pendingItemDeletions": []interface{}{map[string]interface{}{"path": "team/job"}},
@@ -1505,7 +1505,7 @@ func TestPatchControllerStatus_NilPendingDeletionsClearsStoredEntries(t *testing
 	)
 	c := &ClientsetClient{dynamic: dyn}
 
-	if err := c.PatchControllerStatus(context.Background(), "ctrl", "ns", &v1alpha1.ControllerStatus{
+	if _, err := c.PatchControllerStatus(context.Background(), "ctrl", "ns", "7", &v1alpha1.ControllerStatus{
 		Phase: v1alpha1.ControllerPhaseConnected,
 	}); err != nil {
 		t.Fatalf("PatchControllerStatus failed: %v", err)
@@ -1540,7 +1540,7 @@ func TestPatchControllerStatus_CellPatchShape(t *testing.T) {
 	existing := &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "varroa.dev/v1alpha1",
 		"kind":       "Controller",
-		"metadata":   map[string]interface{}{"name": "cell1", "namespace": "ns"},
+		"metadata":   map[string]interface{}{"name": "cell1", "namespace": "ns", "resourceVersion": "7"},
 		"status": map[string]interface{}{
 			"phase": "Connected",
 			"cell": map[string]interface{}{
@@ -1563,7 +1563,7 @@ func TestPatchControllerStatus_CellPatchShape(t *testing.T) {
 
 	unreadySince := metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	prevSeen := metav1.NewTime(time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC))
-	err := c.PatchControllerStatus(context.Background(), "cell1", "ns", &v1alpha1.ControllerStatus{
+	_, err := c.PatchControllerStatus(context.Background(), "cell1", "ns", "7", &v1alpha1.ControllerStatus{
 		Phase: v1alpha1.ControllerPhaseConnected,
 		Cell: &v1alpha1.CellStatus{
 			AppliedTenants:           []string{"payments"},
@@ -2439,5 +2439,120 @@ func TestPatchUpdateCenterStatus_ZeroesStoreBytes(t *testing.T) {
 	}
 	if pc, _, _ := unstructured.NestedInt64(status, "pluginCount"); pc != 72 {
 		t.Errorf("expected pluginCount=72 preserved, got: %d", pc)
+	}
+}
+
+// TestPatchControllerStatus_SendsResourceVersionPrecondition pins that the
+// status patch body carries the caller's resourceVersion. The apiserver
+// treats that value as a precondition. The client-go fake tracker does not
+// check it on a patch, so the test asserts the request body.
+func TestPatchControllerStatus_SendsResourceVersionPrecondition(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "Controller"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("ControllerList"), &unstructured.UnstructuredList{})
+
+	existing := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "Controller",
+		"metadata":   map[string]interface{}{"name": "ctrl", "namespace": "ns", "resourceVersion": "7"},
+		"status":     map[string]interface{}{"phase": "Running"},
+	}}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{controllerGVR: "ControllerList"},
+		existing,
+	)
+	var body []byte
+	var subresource string
+	dyn.PrependReactor("patch", "controllers", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		pa := action.(clienttesting.PatchActionImpl)
+		body = pa.GetPatch()
+		subresource = pa.GetSubresource()
+		return false, nil, nil
+	})
+	c := &ClientsetClient{dynamic: dyn}
+
+	if _, err := c.PatchControllerStatus(context.Background(), "ctrl", "ns", "7",
+		&v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected}); err != nil {
+		t.Fatalf("PatchControllerStatus failed: %v", err)
+	}
+	if subresource != "status" {
+		t.Errorf("subresource = %q, want status", subresource)
+	}
+	var patch map[string]any
+	if err := json.Unmarshal(body, &patch); err != nil {
+		t.Fatalf("patch is not JSON: %v", err)
+	}
+	if rv, _, _ := unstructured.NestedString(patch, "metadata", "resourceVersion"); rv != "7" {
+		t.Errorf("patch metadata.resourceVersion = %q, want 7", rv)
+	}
+	if phase, _, _ := unstructured.NestedString(patch, "status", "phase"); phase != "Connected" {
+		t.Errorf("patch status.phase = %q, want Connected", phase)
+	}
+}
+
+// TestPatchControllerStatus_RequiresResourceVersion pins that an empty
+// resourceVersion fails before any request: an empty value in a patch is no
+// precondition.
+func TestPatchControllerStatus_RequiresResourceVersion(t *testing.T) {
+	scheme := runtime.NewScheme()
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{controllerGVR: "ControllerList"})
+	c := &ClientsetClient{dynamic: dyn}
+	if _, err := c.PatchControllerStatus(context.Background(), "ctrl", "ns", "",
+		&v1alpha1.ControllerStatus{}); err == nil {
+		t.Fatal("PatchControllerStatus with an empty resourceVersion succeeded")
+	}
+	if n := len(dyn.Actions()); n != 0 {
+		t.Fatalf("requests sent = %d, want 0", n)
+	}
+}
+
+// TestPatchObjectMetaAt_SendsResourceVersionPrecondition pins that the
+// metadata patch body carries the caller's resourceVersion next to the
+// patched keys, and that an empty resourceVersion fails before any request.
+// The client-go fake tracker does not check a patch precondition, so the
+// test asserts the request body.
+func TestPatchObjectMetaAt_SendsResourceVersionPrecondition(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "Controller"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("ControllerList"), &unstructured.UnstructuredList{})
+	existing := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "Controller",
+		"metadata":   map[string]interface{}{"name": "ctrl", "namespace": "ns", "resourceVersion": "7"},
+	}}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{controllerGVR: "ControllerList"},
+		existing,
+	)
+	var body []byte
+	dyn.PrependReactor("patch", "controllers", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		body = action.(clienttesting.PatchActionImpl).GetPatch()
+		return false, nil, nil
+	})
+	c := &ClientsetClient{dynamic: dyn}
+
+	if _, err := c.PatchObjectMetaAt(context.Background(), controllerGVR, "ns", "ctrl", "",
+		map[string]any{"finalizers": []string{"f"}}); err == nil {
+		t.Fatal("PatchObjectMetaAt with an empty resourceVersion succeeded")
+	}
+	if body != nil {
+		t.Fatal("PatchObjectMetaAt with an empty resourceVersion sent a request")
+	}
+	if _, err := c.PatchObjectMetaAt(context.Background(), controllerGVR, "ns", "ctrl", "7",
+		map[string]any{"finalizers": []string{"f"}}); err != nil {
+		t.Fatalf("PatchObjectMetaAt: %v", err)
+	}
+	var patch map[string]any
+	if err := json.Unmarshal(body, &patch); err != nil {
+		t.Fatalf("patch is not JSON: %v", err)
+	}
+	if rv, _, _ := unstructured.NestedString(patch, "metadata", "resourceVersion"); rv != "7" {
+		t.Errorf("patch metadata.resourceVersion = %q, want 7", rv)
+	}
+	if fin, _, _ := unstructured.NestedStringSlice(patch, "metadata", "finalizers"); len(fin) != 1 || fin[0] != "f" {
+		t.Errorf("patch metadata.finalizers = %v, want [f]", fin)
 	}
 }

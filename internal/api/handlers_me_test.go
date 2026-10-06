@@ -306,8 +306,8 @@ func (f *fakeResourceClient) DeleteControllerCRD(_ context.Context, name, ns str
 func (f *fakeResourceClient) PatchControllerFinalizers(_ context.Context, name, ns string, fin []string) error {
 	return nil
 }
-func (f *fakeResourceClient) PatchControllerStatus(_ context.Context, name, ns string, st *v1alpha1.ControllerStatus) error {
-	return nil
+func (f *fakeResourceClient) PatchControllerStatus(_ context.Context, _, _, rv string, _ *v1alpha1.ControllerStatus) (string, error) {
+	return rv, nil
 }
 func (f *fakeResourceClient) PatchControllerCellStatus(_ context.Context, name, ns string, cell *v1alpha1.CellStatus) error {
 	return nil

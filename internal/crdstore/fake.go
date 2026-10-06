@@ -335,18 +335,55 @@ func (f *Fake) PatchObjectStatus(_ context.Context, gvr schema.GroupVersionResou
 	sp := StatusPatch{Namespace: namespace, Name: name, Status: status}
 	f.statusPatches[gvr] = append(f.statusPatches[gvr], sp)
 
-	// Apply as a JSON merge patch (RFC 7386), matching ClientsetClient's real
-	// merge-patch semantics: marshal the status value, unmarshal to
-	// map[string]any, and merge it onto the existing status rather than
-	// replacing the whole status, so omitempty fields the caller didn't set
-	// survive the patch. The merge recurses into nested objects and a null
-	// value deletes its key, as RFC 7386 requires; a non-object value replaces
-	// whatever it lands on, so a list is replaced wholesale rather than merged.
-	key := nsName(namespace, name)
-	obj := f.objects[gvr][key]
+	obj := f.objects[gvr][nsName(namespace, name)]
 	if obj == nil {
 		return nil // best-effort; the real API would also succeed if obj doesn't exist? No, it would fail. But for test ergonomics, be lenient.
 	}
+	return applyStatusPatch(obj, status)
+}
+
+// PatchObjectStatusAt applies a status merge patch only while the stored
+// object carries resourceVersion, the way the apiserver honors a
+// resourceVersion in a patch body. It records the call and shares the
+// "patchstatus" error-injection verb with PatchObjectStatus. A missing
+// object is not an error, as in PatchObjectStatus, and leaves
+// resourceVersion unchanged. It returns the resourceVersion after the patch.
+// It is not part of Backend: test clients use it to model a conditional
+// status patch.
+func (f *Fake) PatchObjectStatusAt(_ context.Context, gvr schema.GroupVersionResource, namespace, name, resourceVersion string, status any) (string, error) {
+	if err := f.inject("patchstatus", gvr); err != nil {
+		return "", err
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	obj := f.objects[gvr][nsName(namespace, name)]
+	if obj == nil {
+		f.statusPatches[gvr] = append(f.statusPatches[gvr], StatusPatch{Namespace: namespace, Name: name, Status: status})
+		return resourceVersion, nil
+	}
+	if obj.GetResourceVersion() != resourceVersion {
+		gr := schema.GroupResource{Group: gvr.Group, Resource: gvr.Resource}
+		return "", apierrors.NewConflict(gr, name,
+			fmt.Errorf("resourceVersion %q does not match %q", resourceVersion, obj.GetResourceVersion()))
+	}
+	f.statusPatches[gvr] = append(f.statusPatches[gvr], StatusPatch{Namespace: namespace, Name: name, Status: status})
+	if err := applyStatusPatch(obj, status); err != nil {
+		return "", err
+	}
+	return obj.GetResourceVersion(), nil
+}
+
+// applyStatusPatch applies status to obj as a JSON merge patch (RFC 7386),
+// matching ClientsetClient's real merge-patch semantics: marshal the status
+// value, unmarshal to map[string]any, and merge it onto the existing status
+// rather than replacing the whole status, so omitempty fields the caller
+// didn't set survive the patch. The merge recurses into nested objects and a
+// null value deletes its key, as RFC 7386 requires; a non-object value
+// replaces whatever it lands on, so a list is replaced wholesale rather than
+// merged.
+func applyStatusPatch(obj *unstructured.Unstructured, status any) error {
 	statusJSON, err := json.Marshal(status)
 	if err != nil {
 		return fmt.Errorf("marshal status: %w", err)
@@ -423,19 +460,53 @@ func (f *Fake) PatchObjectMeta(_ context.Context, gvr schema.GroupVersionResourc
 	defer f.mu.Unlock()
 	f.metaPatches[gvr] = append(f.metaPatches[gvr], MetaPatch{Namespace: namespace, Name: name, Meta: meta})
 
-	key := nsName(namespace, name)
-	obj := f.objects[gvr][key]
+	obj := f.objects[gvr][nsName(namespace, name)]
 	if obj == nil {
 		return nil // best-effort for test ergonomics
 	}
+	applyMetaPatch(obj, meta)
+	return nil
+}
 
+// PatchObjectMetaAt applies a metadata patch only while the stored object
+// carries resourceVersion, and records the call like PatchObjectMeta. It
+// shares the "patchmeta" error-injection verb with PatchObjectMeta. Like the
+// apiserver, it answers NotFound for a missing object, and it moves the
+// resourceVersion only when the patch changes the object.
+func (f *Fake) PatchObjectMetaAt(_ context.Context, gvr schema.GroupVersionResource, namespace, name, resourceVersion string, meta map[string]any) (string, error) {
+	if err := f.inject("patchmeta", gvr); err != nil {
+		return "", err
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.metaPatches[gvr] = append(f.metaPatches[gvr], MetaPatch{Namespace: namespace, Name: name, Meta: meta})
+
+	gr := schema.GroupResource{Group: gvr.Group, Resource: gvr.Resource}
+	obj := f.objects[gvr][nsName(namespace, name)]
+	if obj == nil {
+		return "", apierrors.NewNotFound(gr, name)
+	}
+	if obj.GetResourceVersion() != resourceVersion {
+		return "", apierrors.NewConflict(gr, name,
+			fmt.Errorf("resourceVersion %q does not match %q", resourceVersion, obj.GetResourceVersion()))
+	}
+	before := obj.DeepCopy()
+	applyMetaPatch(obj, meta)
+	if !reflect.DeepEqual(before.Object, obj.Object) {
+		bumpResourceVersion(obj)
+	}
+	return obj.GetResourceVersion(), nil
+}
+
+// applyMetaPatch shallow-merges each top-level key of meta into the
+// metadata of obj.
+func applyMetaPatch(obj *unstructured.Unstructured, meta map[string]any) {
 	objMeta, ok := obj.Object["metadata"].(map[string]any)
 	if !ok {
 		objMeta = make(map[string]any)
 		obj.Object["metadata"] = objMeta
 	}
-
-	// Shallow merge each top-level key from meta into objMeta.
 	for k, v := range meta {
 		// The real backend merge-patches over the wire, so the stored object
 		// holds JSON-native types. Normalize v the same way: otherwise a raw
@@ -452,7 +523,6 @@ func (f *Fake) PatchObjectMeta(_ context.Context, gvr schema.GroupVersionResourc
 			objMeta[k] = v
 		}
 	}
-	return nil
 }
 
 // mergeAnnotations merges annotation patches with nil-means-delete semantics.

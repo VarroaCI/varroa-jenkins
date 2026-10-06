@@ -336,8 +336,8 @@ func (f *fakeBroodClient) DynamicClient() dynamic.Interface { return nil }
 func (f *fakeBroodClient) PatchControllerFinalizers(_ context.Context, _, _ string, _ []string) error {
 	return nil
 }
-func (f *fakeBroodClient) PatchControllerStatus(_ context.Context, _, _ string, _ *v1alpha1.ControllerStatus) error {
-	return nil
+func (f *fakeBroodClient) PatchControllerStatus(_ context.Context, _, _, rv string, _ *v1alpha1.ControllerStatus) (string, error) {
+	return rv, nil
 }
 func (f *fakeBroodClient) PatchControllerCellStatus(_ context.Context, _, _ string, _ *v1alpha1.CellStatus) error {
 	return nil

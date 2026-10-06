@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -223,5 +224,111 @@ func TestApproveDeletion_SendsNothingAfterARevoke(t *testing.T) {
 	}
 	if len(tr.imperatives) != 0 {
 		t.Fatalf("imperatives = %v, want none after a revoke", tr.imperatives)
+	}
+}
+
+// stallAfterFirstRead installs a hook that runs during the first read of
+// ns/mine. The read already took its copy, so the hook models a replica that
+// stalls right after its tick read. During the stall, newOwner runs.
+func stallAfterFirstRead(t *testing.T, client *testClient, newOwner func()) {
+	t.Helper()
+	var fired atomic.Bool
+	client.store.SetAfterGet(mustControllerGVR(t), func(_, name string) {
+		if name != "mine" || !fired.CompareAndSwap(false, true) {
+			return
+		}
+		newOwner()
+	})
+}
+
+// TestReconcile_StalledReplicaEndWriteDoesNotLandAfterNewOwner models a
+// replica that stalls past its shard lease in the middle of a tick. Its held
+// set still names the shard, because no rebalance pass ran during the stall.
+// The new owner writes during the stall. The stalled tick then resumes, and
+// its end write conflicts instead of landing over the new owner's write.
+func TestReconcile_StalledReplicaEndWriteDoesNotLandAfterNewOwner(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.statusToStore = true
+	ring := sharding.NewRing(256)
+	shard := ring.ShardFor("ns/mine")
+	setA, setB := sharding.NewShardSet(), sharding.NewShardSet()
+	setA.Add(shard)
+	setB.Add(shard)
+	stalled := shardedReplica(client, ring, setA)
+	newOwner := shardedReplica(client, ring, setB)
+	cr := testController("mine", "ns", v1alpha1.ControllerPhaseFailed)
+	cr.ResourceVersion = "1"
+	crdstore.MustSeed(client.store, cr)
+
+	var ownerRV string
+	var ownerStatus v1alpha1.ControllerStatus
+	stallAfterFirstRead(t, client, func() {
+		if _, err := newOwner.Reconcile(context.Background(), mineRequest); err != nil {
+			t.Errorf("new owner reconcile: %v", err)
+		}
+		got, err := crdstore.Get[v1alpha1.Controller](context.Background(), client.store, "mine", "ns")
+		if err != nil {
+			t.Errorf("read after the new owner: %v", err)
+			return
+		}
+		ownerRV = got.ResourceVersion
+		ownerStatus = got.Status
+	})
+
+	res, err := stalled.Reconcile(context.Background(), mineRequest)
+	if err != nil {
+		t.Fatalf("stalled replica reconcile: %v", err)
+	}
+	if res.RequeueAfter != tickConflictRequeue {
+		t.Fatalf("stalled replica RequeueAfter = %v, want %v", res.RequeueAfter, tickConflictRequeue)
+	}
+	if ownerRV == "" || ownerRV == "1" {
+		t.Fatalf("new owner resourceVersion = %q, want a write after 1", ownerRV)
+	}
+	got, err := crdstore.Get[v1alpha1.Controller](context.Background(), client.store, "mine", "ns")
+	if err != nil {
+		t.Fatalf("final read: %v", err)
+	}
+	if got.ResourceVersion != ownerRV {
+		t.Fatalf("resourceVersion = %q, want the new owner's %q: the stalled write landed", got.ResourceVersion, ownerRV)
+	}
+	if !reflect.DeepEqual(got.Status, ownerStatus) {
+		t.Fatalf("status changed after the new owner's write:\n got %+v\nwant %+v", got.Status, ownerStatus)
+	}
+}
+
+// TestReconcile_StalledReplicaCannotRevertNewOwnersApprove pins that a
+// stalled tick cannot write back the approve fields it read before the new
+// owner accepted an approve.
+func TestReconcile_StalledReplicaCannotRevertNewOwnersApprove(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.statusToStore = true
+	ring := sharding.NewRing(256)
+	shard := ring.ShardFor("ns/mine")
+	setA, setB := sharding.NewShardSet(), sharding.NewShardSet()
+	setA.Add(shard)
+	setB.Add(shard)
+	stalled := shardedReplica(client, ring, setA)
+	newOwner := shardedReplica(client, ring, setB)
+	cr := testController("mine", "ns", v1alpha1.ControllerPhaseFailed)
+	cr.ResourceVersion = "1"
+	cr.Status.PendingPluginRoll = &v1alpha1.PendingPluginRoll{TargetChecksum: "abc"}
+	crdstore.MustSeed(client.store, cr)
+
+	stallAfterFirstRead(t, client, func() {
+		if err := newOwner.ApproveRestart(context.Background(), "", "ns", "mine", "plugin-roll", ""); err != nil {
+			t.Errorf("new owner approve: %v", err)
+		}
+	})
+
+	if _, err := stalled.Reconcile(context.Background(), mineRequest); err != nil {
+		t.Fatalf("stalled replica reconcile: %v", err)
+	}
+	got, err := crdstore.Get[v1alpha1.Controller](context.Background(), client.store, "mine", "ns")
+	if err != nil {
+		t.Fatalf("final read: %v", err)
+	}
+	if got.Status.ApprovedPluginRollChecksum != "abc" {
+		t.Fatalf("approved checksum = %q, want abc: the stalled tick reverted the approve", got.Status.ApprovedPluginRollChecksum)
 	}
 }

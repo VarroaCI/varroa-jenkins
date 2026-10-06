@@ -22,11 +22,13 @@ One-line contract per package without its own `AGENTS.md` (verified by
 reading each package's entry point):
 
 - **`crdstore/`** — the generic typed store for `varroa.dev` CRDs: an
-  8-method unstructured-level `Backend` seam (implemented by
+  10-method unstructured-level `Backend` seam (implemented by
   `controller.ClientsetClient` and the in-memory `Fake`), package-level
   generic helpers (`Get[T]`/`List[T]`/`Apply[T]`/`ApplyOwned[T]`/`Create`/
-  `Update`/`UpdateStatus`/`MutateStatus`/`Delete`/`PatchStatus`/`PatchAnnotations`/`PatchFinalizers`), and a static
-  type→GVR registry covering all 18 kinds. Every CRD read/write in the
+  `Update`/`UpdateStatus`/`MutateStatus`/`Delete`/`PatchStatus`/`PatchAnnotations`/`PatchFinalizers`/`PatchMetaAt`), and a static
+  type→GVR registry covering all 18 kinds. `PatchMetaAt` sends a
+  `resourceVersion` precondition in the metadata patch and returns the next
+  version; a write chained from one read uses it. Every CRD read/write in the
   operator, BFF, and MCP goes through it; new kinds register here instead
   of adding interface methods. `registry.go` is the **only** place a kind
   registers: a kind that also needs a deep Kubernetes operation carries a

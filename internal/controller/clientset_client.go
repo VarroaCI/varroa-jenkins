@@ -3253,22 +3253,35 @@ func isFieldManagerConflict(err error) bool {
 	return false
 }
 
-// PatchControllerStatus patches the status subresource of a Controller CRD.
-func (c *ClientsetClient) PatchControllerStatus(ctx context.Context, name, namespace string, status *v1alpha1.ControllerStatus) error {
+// PatchControllerStatus merge-patches the status subresource of a Controller
+// only while the object still carries resourceVersion. It returns the
+// resourceVersion after the patch. The apiserver treats a resourceVersion in
+// a patch as a precondition: a write by anyone since that version answers
+// Conflict, so a status that a replica computed from an older read cannot
+// overwrite a newer write.
+func (c *ClientsetClient) PatchControllerStatus(ctx context.Context, name, namespace, resourceVersion string, status *v1alpha1.ControllerStatus) (string, error) {
 	if status == nil {
-		return fmt.Errorf("status must not be nil")
+		return "", fmt.Errorf("status must not be nil")
+	}
+	// An empty resourceVersion in a patch is no precondition at all.
+	if resourceVersion == "" {
+		return "", fmt.Errorf("patch controller %s/%s status: resourceVersion is required", namespace, name)
 	}
 	patch := map[string]interface{}{
-		"status": controllerStatusPatch(status),
+		"metadata": map[string]interface{}{"resourceVersion": resourceVersion},
+		"status":   controllerStatusPatch(status),
 	}
 	patchBytes, err := json.Marshal(patch)
 	if err != nil {
-		return fmt.Errorf("marshal status patch: %w", err)
+		return "", fmt.Errorf("marshal status patch: %w", err)
 	}
-	_, err = c.dynamic.Resource(controllerGVR).Namespace(namespace).Patch(
+	out, err := c.dynamic.Resource(controllerGVR).Namespace(namespace).Patch(
 		ctx, name, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status",
 	)
-	return err
+	if err != nil {
+		return "", err
+	}
+	return out.GetResourceVersion(), nil
 }
 
 // controllerStatusPatch builds the status body of the PatchControllerStatus
