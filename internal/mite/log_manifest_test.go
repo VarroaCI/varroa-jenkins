@@ -149,6 +149,34 @@ func TestBuildLogManifestUnattributedPartsAreEachServed(t *testing.T) {
 	}
 }
 
+// TestBuildLogManifestCountsNoPartOfAnotherWriter asserts that a part
+// of another writer above the index is neither an unattributed chunk nor
+// a counted byte. A lost cell's late write after a mesh takeover leaves
+// such a part, and the moved build later replaces it.
+func TestBuildLogManifestCountsNoPartOfAnotherWriter(t *testing.T) {
+	runID := newTestRunID()
+	store := newManifestTestStore(t)
+	ctx := context.Background()
+	for seq, part := range []struct{ data, writer string }{
+		{"b0 ", "ns1/cell1/inst2"}, {"b1 ", "ns1/cell1/inst2"}, {"a2 ", "ns1/cell1/inst1"},
+	} {
+		opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8",
+			CreatedAt: runCreatedAtFromUUIDv7(runID), Writer: part.writer}
+		if err := store.Append(ctx, blob.LogKey(runID), int64(seq), []byte(part.data), opts); err != nil {
+			t.Fatalf("append part %d: %v", seq, err)
+		}
+	}
+	appendIndexEntry(t, store, runID, LogIndexEntry{Seq: 0, Offset: 0, Len: 3, Writer: "ns1/cell1/inst2"})
+
+	m, err := BuildLogManifest(ctx, store, runID, nil)
+	if err != nil {
+		t.Fatalf("build manifest: %v", err)
+	}
+	if m.ByteCount != 6 || m.ChunkCount != 2 {
+		t.Fatalf("byteCount = %d chunkCount = %d, want 6 bytes in 2 chunks", m.ByteCount, m.ChunkCount)
+	}
+}
+
 // TestBuildLogManifestNoSummaryReportsIncomplete asserts a run with no
 // LogSummary always reports incomplete with the reason no-summary, and
 // still serves every stored chunk by counting an uncovered trailing byte

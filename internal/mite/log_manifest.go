@@ -26,8 +26,20 @@ type LogIndexEntry struct {
 	// Writer is the "namespace/cell/cell_instance" of the sender of the
 	// chunk. A restarted gateway reads it back to tell a moved build's
 	// first chunk from a repeat of the same writer. A crash-repair entry
-	// carries none.
+	// carries the writer of the part it repairs.
 	Writer string `json:"writer,omitempty"`
+}
+
+// indexWriter answers the writer of the highest entry at or below seq
+// that names one, or "" when none does. blob.UnindexedLogParts takes it
+// as the writer every recovered part must match.
+func indexWriter(entries map[int64]LogIndexEntry, seq int64) string {
+	for ; seq >= 0; seq-- {
+		if w := entries[seq].Writer; w != "" {
+			return w
+		}
+	}
+	return ""
 }
 
 // LogManifest is the computed, never-stored view of one run's console
@@ -55,9 +67,10 @@ type StoredLogSummary struct {
 	Finalized        bool
 }
 
-// BuildLogManifest reads logs/<run_id> to io.EOF, records bytesRead, and
-// reads every logindex/<run_id> entry, then computes the manifest.
-// summary is the run record's LogSummary, or nil when the run has none.
+// BuildLogManifest reads every logindex/<run_id> entry, then the length
+// of logs/<run_id> up to the bytes a reader may serve, and computes the
+// manifest. summary is the run record's LogSummary, or nil when the run
+// has none.
 //
 // An index entry whose offset is at or above bytesRead is a hole: its
 // metadata exists but its bytes are unreachable, because C1's range
@@ -66,18 +79,18 @@ type StoredLogSummary struct {
 // not a hole. A writer crash before the index append, or inside the
 // index flush, leaves such parts above the highest entry, and their
 // bytes are still served. blob.UnindexedLogParts names them, with the
-// same rule the gateway's restart recovery uses.
+// same rule the gateway's restart recovery uses. No byte past those
+// parts counts: a lost cell's late part above the index is not the
+// run's log.
+//
+// The index is read before the bytes. An indexed part is never written
+// again, so the bound stays true while the bytes are read.
 //
 // A run with no summary has an unknown declared chunk count. The
 // manifest then derives it from the index's own highest sequence, counts
 // each unattributed part as one more chunk, and always reports
 // incomplete true with the reason no-summary.
 func BuildLogManifest(ctx context.Context, store blob.Store, runID string, summary *StoredLogSummary) (LogManifest, error) {
-	bytesRead, err := logObjectLength(ctx, store, blob.LogKey(runID))
-	if err != nil {
-		return LogManifest{}, err
-	}
-
 	entries, maxSeq, finalSeen, err := readLogIndex(ctx, store, blob.LogIndexKey(runID))
 	if err != nil {
 		return LogManifest{}, err
@@ -94,12 +107,21 @@ func BuildLogManifest(ctx context.Context, store blob.Store, runID string, summa
 			maxEntryEnd = end
 		}
 	}
+	parts, _, err := blob.UnindexedLogParts(ctx, store, runID, maxSeq+1, indexWriter(entries, maxSeq))
+	if err != nil {
+		return LogManifest{}, err
+	}
+	accepted := maxEntryEnd
 	unattributed := map[int64]bool{}
+	for _, part := range parts {
+		accepted += part.Size
+	}
+
+	bytesRead, err := logObjectLength(ctx, store, blob.LogKey(runID), accepted)
+	if err != nil {
+		return LogManifest{}, err
+	}
 	if bytesRead > maxEntryEnd {
-		parts, err := blob.UnindexedLogParts(ctx, store, runID, maxSeq+1)
-		if err != nil {
-			return LogManifest{}, err
-		}
 		for _, part := range parts {
 			unattributed[part.Seq] = true
 		}
@@ -162,10 +184,14 @@ func BuildLogManifest(ctx context.Context, store blob.Store, runID string, summa
 	}, nil
 }
 
-// logObjectLength reads key to io.EOF and returns the byte count. A
-// missing object (no part ever written) reports zero, not an error.
-func logObjectLength(ctx context.Context, store blob.Store, key string) (int64, error) {
-	r, err := store.NewRangeReader(ctx, key, 0, -1)
+// logObjectLength reads at most limit bytes of key, or every byte for
+// limit -1, and returns the byte count. A missing object (no part ever
+// written) reports zero, not an error.
+func logObjectLength(ctx context.Context, store blob.Store, key string, limit int64) (int64, error) {
+	if limit == 0 {
+		return 0, nil
+	}
+	r, err := store.NewRangeReader(ctx, key, 0, limit)
 	if err != nil {
 		if errors.Is(err, blob.ErrObjectNotFound) {
 			return 0, nil

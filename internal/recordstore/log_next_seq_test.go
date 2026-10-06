@@ -78,6 +78,10 @@ func (failingLogReader) Parts(context.Context, string, int64) ([]blob.Part, erro
 	return nil, errors.New("blob tier unavailable")
 }
 
+func (failingLogReader) PartWriter(context.Context, string, int64) (string, error) {
+	return "", errors.New("blob tier unavailable")
+}
+
 // partsFailingStore reads the index but fails every part listing.
 type partsFailingStore struct{ blob.Store }
 
@@ -169,6 +173,34 @@ func TestStoredLogNextSeqStopsAtAnEmptyPart(t *testing.T) {
 	appendLogPart(t, store, logSeqTestRunID, 2, []byte("two\n"))
 	appendLogPart(t, store, logSeqTestRunID, 3, []byte{})
 	appendLogPart(t, store, logSeqTestRunID, 4, []byte("four\n"))
+	assertLogNextSeq(t, store, 3)
+}
+
+// TestStoredLogNextSeqStopsAtAnotherWritersPart asserts that a part of
+// another writer than the highest index entry's is not a sequence. A
+// lost cell's write can land after a takeover, and the gateway's
+// recovery stops at it.
+func TestStoredLogNextSeqStopsAtAnotherWritersPart(t *testing.T) {
+	store := newLogSeqTestStore(t)
+	ctx := context.Background()
+	for seq, w := range []string{"ns/b/i2", "ns/b/i2", "ns/b/i2", "ns/a/i1"} {
+		opts := logSeqTestOptions("text/plain; charset=utf-8")
+		opts.Writer = w
+		if err := store.Append(ctx, blob.LogKey(logSeqTestRunID), int64(seq), []byte("x\n"), opts); err != nil {
+			t.Fatalf("append log part %d: %v", seq, err)
+		}
+	}
+	for seq := int64(0); seq < 2; seq++ {
+		line, err := json.Marshal(map[string]any{"seq": seq, "offset": seq * 2, "len": 2, "writer": "ns/b/i2"})
+		if err != nil {
+			t.Fatalf("marshal index line: %v", err)
+		}
+		line = append(line, '\n')
+		if err := store.Append(ctx, blob.LogIndexKey(logSeqTestRunID), seq, line,
+			logSeqTestOptions("application/x-ndjson")); err != nil {
+			t.Fatalf("append index line %d: %v", seq, err)
+		}
+	}
 	assertLogNextSeq(t, store, 3)
 }
 

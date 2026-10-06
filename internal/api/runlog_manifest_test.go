@@ -48,6 +48,38 @@ func putRunLogConsole(t *testing.T, store blob.Store, runID string, data []byte)
 	}
 }
 
+// TestReadRunLogObject_StopsBeforeAnotherWritersPart proves the read
+// bound. Parts 0 and 1 are indexed for one writer. Part 2 holds bytes of
+// another writer that no entry names, as a lost cell's late write after
+// a mesh takeover leaves. A reader must not serve them.
+func TestReadRunLogObject_StopsBeforeAnotherWritersPart(t *testing.T) {
+	store := newRunLogTestStore(t)
+	runID := "run-foreign-part"
+	ctx := context.Background()
+	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: time.Now()}
+	for seq, part := range []struct{ data, writer string }{
+		{"b0\n", "ns/cell/inst2"}, {"b1\n", "ns/cell/inst2"}, {"a2\n", "ns/cell/inst1"},
+	} {
+		o := opts
+		o.Writer = part.writer
+		if err := store.Append(ctx, blob.LogKey(runID), int64(seq), []byte(part.data), o); err != nil {
+			t.Fatalf("append part %d: %v", seq, err)
+		}
+	}
+	putRunLogIndex(t, store, runID, []runLogIndexEntry{
+		{Seq: 0, Offset: 0, Len: 3, Writer: "ns/cell/inst2"},
+		{Seq: 1, Offset: 3, Len: 3, Writer: "ns/cell/inst2"},
+	})
+
+	got, err := readRunLogObject(ctx, store, runID)
+	if err != nil {
+		t.Fatalf("read console: %v", err)
+	}
+	if string(got) != "b0\nb1\n" {
+		t.Fatalf("console = %q, want the indexed parts only", got)
+	}
+}
+
 // --- 5.1: the history reader ---
 
 // TestRunLogHistory_LineNumbersOffsetsStageGroups proves the reader
@@ -66,7 +98,7 @@ func TestRunLogHistory_LineNumbersOffsetsStageGroups(t *testing.T) {
 	putRunLogConsole(t, store, runID, console)
 	putRunLogIndex(t, store, runID, entries)
 
-	consoleData, err := readRunLogObject(context.Background(), store, blob.LogKey(runID))
+	consoleData, err := readRunLogObject(context.Background(), store, runID)
 	if err != nil {
 		t.Fatalf("read console: %v", err)
 	}
@@ -147,7 +179,7 @@ func TestComputeRunLogManifest_UnattributedPartsAreServed(t *testing.T) {
 	}
 	putRunLogIndex(t, store, runID, []runLogIndexEntry{{Seq: 0, Offset: 0, Len: 3}})
 
-	consoleData, err := readRunLogObject(context.Background(), store, blob.LogKey(runID))
+	consoleData, err := readRunLogObject(context.Background(), store, runID)
 	if err != nil {
 		t.Fatalf("read console: %v", err)
 	}

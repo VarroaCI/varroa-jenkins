@@ -21,12 +21,20 @@ import (
 // write and on read, so this name stays lowercase.
 const digestMetadataKey = "digest"
 
+// writerMetadataKey is the gocloud.dev object-metadata key that holds a
+// part's ObjectOptions.Writer.
+const writerMetadataKey = "writer"
+
 // bucketStore is the Store driver over a gocloud.dev bucket. A chunked
 // object's parts live at "<key>/<seq padded to 12 digits>". A native
 // object lives at the bare key, so the two forms never share a key
 // space.
 type bucketStore struct {
 	bucket *blob.Bucket
+	// afterCheck, when not nil, runs between Append's existence check
+	// and its write. Only a test sets it, to put another writer's part
+	// into that window.
+	afterCheck func(key string)
 }
 
 // NewBucketStore returns a Store backed by bucket.
@@ -51,7 +59,7 @@ func (s *bucketStore) Put(ctx context.Context, key string, r io.Reader, opts Obj
 	if err != nil {
 		return fmt.Errorf("read object body: %w", err)
 	}
-	return s.writeObject(ctx, partKey(key, 0), data, opts)
+	return s.writeObject(ctx, partKey(key, 0), data, opts, false)
 }
 
 // Replace deletes every part under key and writes the new object as
@@ -69,7 +77,7 @@ func (s *bucketStore) Replace(ctx context.Context, key string, r io.Reader, opts
 	if err := s.Delete(ctx, key); err != nil {
 		return err
 	}
-	return s.writeObject(ctx, partKey(key, 0), data, opts)
+	return s.writeObject(ctx, partKey(key, 0), data, opts, false)
 }
 
 // Append writes one part object at sequence seq, with the digest in
@@ -88,7 +96,20 @@ func (s *bucketStore) Overwrite(ctx context.Context, key string, seq int64, p []
 	if err := opts.Validate(); err != nil {
 		return err
 	}
-	return s.writeObject(ctx, partKey(key, seq), p, opts)
+	return s.writeObject(ctx, partKey(key, seq), p, opts, false)
+}
+
+// PartWriter reads the writer from the part's object metadata.
+func (s *bucketStore) PartWriter(ctx context.Context, key string, seq int64) (string, error) {
+	attrs, err := s.bucket.Attributes(ctx, partKey(key, seq))
+	switch {
+	case err == nil:
+		return attrs.Metadata[writerMetadataKey], nil
+	case gcerrors.Code(err) == gcerrors.NotFound:
+		return "", ErrObjectNotFound
+	default:
+		return "", fmt.Errorf("read part attributes %q: %w", key, err)
+	}
 }
 
 // Parts lists every part under key at or above from, with the size the
@@ -246,28 +267,64 @@ func (s *bucketStore) anyPartExists(ctx context.Context, key string) (bool, erro
 // writePart applies the identical-or-conflict rule Append needs: an
 // identical retry succeeds, and a conflicting retry returns
 // ErrChunkConflict.
+//
+// The write carries If-None-Match: *, so the bucket checks that no part
+// exists when the write commits. The check before the write cannot do
+// this alone: a write that stalls after it would replace a part that
+// another writer created in the meantime. A bucket that does not support
+// a conditional write fails the write.
+//
+// Both checks compare the stored bytes, never the digest metadata. The
+// fileblob driver writes the metadata of a conditional write before it
+// finds the existing file, so after a lost race its digest can name the
+// losing bytes.
 func (s *bucketStore) writePart(ctx context.Context, key string, data []byte, opts ObjectOptions) error {
-	digest := sha256Digest(data)
-	attrs, err := s.bucket.Attributes(ctx, key)
-	switch {
-	case err == nil:
-		if attrs.Metadata[digestMetadataKey] == digest {
-			return nil
-		}
-		return ErrChunkConflict
-	case gcerrors.Code(err) == gcerrors.NotFound:
-		// No part yet at key. Fall through and write it.
-	default:
-		return fmt.Errorf("check existing part %q: %w", key, err)
+	if found, err := s.matchStoredPart(ctx, key, data); err != nil || found {
+		return err
 	}
-	return s.writeObject(ctx, key, data, opts)
+	if s.afterCheck != nil {
+		s.afterCheck(key)
+	}
+	err := s.writeObject(ctx, key, data, opts, true)
+	if err == nil || gcerrors.Code(err) != gcerrors.FailedPrecondition {
+		return err
+	}
+	if found, err := s.matchStoredPart(ctx, key, data); err != nil || found {
+		return err
+	}
+	return fmt.Errorf("check existing part %q: the bucket refused the write but holds no part", key)
 }
 
-// writeObject writes data at key with its digest in object metadata.
-func (s *bucketStore) writeObject(ctx context.Context, key string, data []byte, opts ObjectOptions) error {
+// matchStoredPart reads the part at key. found is false when key holds
+// no part. When it holds one, err is nil for the same bytes as data and
+// ErrChunkConflict for other bytes.
+func (s *bucketStore) matchStoredPart(ctx context.Context, key string, data []byte) (found bool, err error) {
+	stored, err := s.bucket.ReadAll(ctx, key)
+	switch {
+	case err == nil:
+		if bytes.Equal(stored, data) {
+			return true, nil
+		}
+		return true, ErrChunkConflict
+	case gcerrors.Code(err) == gcerrors.NotFound:
+		return false, nil
+	default:
+		return false, fmt.Errorf("check existing part %q: %w", key, err)
+	}
+}
+
+// writeObject writes data at key with its digest and its writer in
+// object metadata. ifNotExist makes the bucket refuse the write with
+// gcerrors.FailedPrecondition when key already exists.
+func (s *bucketStore) writeObject(ctx context.Context, key string, data []byte, opts ObjectOptions, ifNotExist bool) error {
+	md := map[string]string{digestMetadataKey: sha256Digest(data)}
+	if opts.Writer != "" {
+		md[writerMetadataKey] = opts.Writer
+	}
 	w, err := s.bucket.NewWriter(ctx, key, &blob.WriterOptions{
 		ContentType: opts.ContentType,
-		Metadata:    map[string]string{digestMetadataKey: sha256Digest(data)},
+		Metadata:    md,
+		IfNotExist:  ifNotExist,
 	})
 	if err != nil {
 		return fmt.Errorf("open writer %q: %w", key, err)

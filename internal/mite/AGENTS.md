@@ -361,30 +361,38 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   moved run can hold chunks of two cells in one queue. `runLogState.writer`
   records `ns/name/cell_instance`, and each index entry carries it as
   `writer` so `recoverRunState` restores it after a restart.
-  `recoverRunState` writes one `recovered` index entry for each log part
-  that `blob.UnindexedLogParts` names above the highest entry, with that
-  part's own size, and rebuilds `offset` from the end of the entry at
-  `ackSeq`, never from the log byte total. The repair stops at the first
-  missing part and at the first empty part: a blank-pass part must never
-  move `ackSeq`. The recorder's `StoredLogNextSeq` and both manifest
-  readers call the same helper, so the four agree.
+  Every log part carries its writer (`ObjectOptions.Writer`, the same
+  `ns/name/cell_instance` key). `recoverRunState` writes one `recovered`
+  index entry for each log part that `blob.UnindexedLogParts` names above
+  the highest entry, with that part's own size and writer, and rebuilds
+  `offset` from the end of the entry at `ackSeq`, never from the log byte
+  total. The repair stops at the first missing part, at the first empty
+  part, and at the first part whose writer differs from the highest
+  entry's (`indexWriter`): neither a blank-pass part nor a lost cell's
+  late write may move `ackSeq`. The recorder's `StoredLogNextSeq` and both
+  manifest readers call the same helper, so the four agree.
   `adoptWriter` treats a chunk from another writer as a move: after a
   fresh ledger read (`confirmOwner` invalidates the owner cache first) it
-  empties every stored part above `ackSeq` (`blankPartsAboveAckSeq`,
-  through `Parts` and an empty `Overwrite`) and drops the old writer's
-  `pendingEntries`, or refuses the chunk `foreign-run` when the sender does
-  not own the run. The empty parts matter: once the new writer fills the
-  hole, an old part above it would read after the new writer's bytes, and
-  restart recovery would index it. Recovery indexes every readable part, so
-  no part above `ackSeq` holds counted bytes. `ownerRecheck` reads the owner again
-  before each write attempt of a chunk queued longer than
-  `logOwnerRecheckAfter` (15s, below the 30s confirmed-gone grace), so a
-  store stall cannot land an old cell's chunk after a takeover. The same-writer rule is unchanged: a repeat at or below
+  empties every stored part above `ackSeq` that holds bytes of another
+  writer (`blankPartsAboveAckSeq`, through `Parts`, `PartWriter`, and an
+  empty `Overwrite`), reserves `ackSeq+1` with an empty part when none is
+  stored there (a conflict there empties only another writer's part), and drops the old writer's `pendingEntries`, or refuses
+  the chunk `foreign-run` when the sender does not own the run. The empty
+  parts matter: once the new writer fills the hole, an old part above it
+  would read after the new writer's bytes, and restart recovery could index
+  it. `ownerRecheck` reads the owner again before each write attempt of a
+  chunk queued longer than `logOwnerRecheckAfter` (15s, below the 30s
+  confirmed-gone grace). It cannot stop a store call already in flight on
+  another gateway replica: the store fences that write. `Append` is
+  write-once at commit, so a late write at the reservation or at a sequence
+  the new writer wrote conflicts and is refused; a late write above those
+  lands, and recovery stops at it by its writer. The same-writer rule is unchanged: a repeat at or below
   `ackSeq`, or still pending, is acked `STORED`, and a `BUSY` ack names the
   refused chunk's `seq`. `retryWrite` returns `ErrChunkConflict` at once;
   a log-key conflict from the owner replaces the stale part through
   `blob.Store.Overwrite` (`replaceStalePart`), and an index-key conflict
-  abandons the run. A drop or a replace marks the run `gateway-gap`.
+  abandons the run. A drop, or an empty or replace of a part that held
+  bytes, marks the run `gateway-gap`; replacing an empty part marks nothing.
   `adoptWriter` records `ackSeq` as `adoptedThrough`. `checkOldWriterPart`
   re-appends an already durable chunk of the new writer at or below it:
   same bytes are a repeat, and `ErrChunkConflict` marks the run
@@ -392,7 +400,8 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   `recoverRunState` rebuilds `adoptedThrough` from the index entries'
   `writer` fields, or sets it to `ackSeq` when no entry names a writer. `BuildLogManifest` (`log_manifest.go`) is the
   computed-never-stored view a reader calls: it walks the index, serves
-  each part `blob.UnindexedLogParts` names as one unattributed chunk, marks
+  each part `blob.UnindexedLogParts` names as one unattributed chunk (and
+  counts no byte past those parts), marks
   every other uncovered sequence as a hole, and reports `incomplete`
   with a reason token (`no-summary` when the run carries no `LogSummary` at
   all) — it is never itself written back to storage.

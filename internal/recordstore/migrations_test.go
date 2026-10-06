@@ -36,6 +36,7 @@ func TestMigrationsFSListsEveryFile(t *testing.T) {
 		"00023_run_intents_granted_at.sql":                 false,
 		"00024_tenant_placements_retired_incarnations.sql": false,
 		"00025_run_intents_start_marked_at.sql":            false,
+		"00026_log_chunks_writer.sql":                      false,
 	}
 	for _, entry := range entries {
 		if _, ok := want[entry.Name()]; !ok {

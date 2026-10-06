@@ -178,6 +178,50 @@ func RunConformance(
 		}
 	})
 
+	t.Run("PartWriterReadsTheStoredWriter", func(t *testing.T) {
+		key := "conformance/part-writer"
+		stamped := logOpts
+		stamped.Writer = "ns/cell/inst1"
+		if err := store.Append(ctx, key, 0, []byte("a"), stamped); err != nil {
+			t.Fatalf("append stamped part: %v", err)
+		}
+		if err := store.Append(ctx, key, 1, []byte("b"), logOpts); err != nil {
+			t.Fatalf("append unstamped part: %v", err)
+		}
+		if got, err := store.PartWriter(ctx, key, 0); err != nil || got != "ns/cell/inst1" {
+			t.Fatalf("PartWriter(0) = %q, %v, want ns/cell/inst1", got, err)
+		}
+		if got, err := store.PartWriter(ctx, key, 1); err != nil || got != "" {
+			t.Fatalf("PartWriter(1) = %q, %v, want an empty writer", got, err)
+		}
+		if _, err := store.PartWriter(ctx, key, 2); !errors.Is(err, ErrObjectNotFound) {
+			t.Fatalf("PartWriter(2): got %v, want ErrObjectNotFound", err)
+		}
+	})
+
+	t.Run("OverwriteReplacesTheWriter", func(t *testing.T) {
+		key := "conformance/overwrite-writer"
+		first := logOpts
+		first.Writer = "ns/cell/inst1"
+		if err := store.Append(ctx, key, 0, []byte("old"), first); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+		second := logOpts
+		second.Writer = "ns/cell/inst2"
+		if err := store.Overwrite(ctx, key, 0, []byte{}, second); err != nil {
+			t.Fatalf("overwrite: %v", err)
+		}
+		if got, err := store.PartWriter(ctx, key, 0); err != nil || got != "ns/cell/inst2" {
+			t.Fatalf("PartWriter = %q, %v, want ns/cell/inst2", got, err)
+		}
+		if err := store.Append(ctx, key, 0, []byte("late"), first); !errors.Is(err, ErrChunkConflict) {
+			t.Fatalf("late append over the emptied part: got %v, want ErrChunkConflict", err)
+		}
+		if got, err := store.PartWriter(ctx, key, 0); err != nil || got != "ns/cell/inst2" {
+			t.Fatalf("PartWriter after the refused append = %q, %v, want ns/cell/inst2", got, err)
+		}
+	})
+
 	t.Run("PartsListsPartsAboveAHoleWithSizes", func(t *testing.T) {
 		key := "conformance/parts"
 		for seq, data := range map[int64][]byte{0: []byte("a"), 1: []byte("bb"), 3: {}, 5: []byte("ccccc")} {

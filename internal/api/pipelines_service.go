@@ -30,7 +30,6 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/auth"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
-	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
 
 // RunSummary is one row of a run list: the same shape the pipelines
@@ -300,7 +299,7 @@ func (s *Server) GetRunLog(ctx context.Context, claims *auth.Claims, runID strin
 		return "", 0, serr
 	}
 
-	consoleData, err := readRunLogObject(ctx, s.deps.BlobStore, blob.LogKey(run.RunID))
+	consoleData, err := readRunLogObject(ctx, s.deps.BlobStore, run.RunID)
 	if err != nil {
 		s.deps.Logger.Error("read run log", "run_id", run.RunID, "error", err)
 		return "", 0, &ServiceError{Status: http.StatusInternalServerError, Message: "read run log failed"}

@@ -28,7 +28,9 @@ type Store interface {
 	// Append writes one chunk at sequence seq. The writer owns sequence
 	// assignment and starts at 0. A retry that carries identical bytes
 	// succeeds. A retry that carries different bytes returns
-	// ErrChunkConflict.
+	// ErrChunkConflict. The store itself enforces the write-once rule
+	// when the write commits: a call that started before another writer
+	// created the part never replaces that part, however late it lands.
 	Append(ctx context.Context, key string, seq int64, p []byte, opts ObjectOptions) error
 
 	// Overwrite writes one chunk at sequence seq, over any part that
@@ -43,6 +45,10 @@ type Store interface {
 	// sequence. It returns an empty list when key holds no such part.
 	// A driver answers the sizes from its listing and reads no part.
 	Parts(ctx context.Context, key string, from int64) ([]Part, error)
+	// PartWriter answers the ObjectOptions.Writer that the part at seq
+	// was last written with, or "" when that write named none. It
+	// returns ErrObjectNotFound when key holds no part at seq.
+	PartWriter(ctx context.Context, key string, seq int64) (string, error)
 
 	// NewRangeReader concatenates the parts of a chunked object in
 	// ascending sequence order, starting offset bytes from the start.
@@ -92,6 +98,11 @@ type ObjectOptions struct {
 	// primary key, so a default value would give a retry a different
 	// key and insert a second row.
 	CreatedAt time.Time
+	// Writer names the writer of a log part. The driver stores it with
+	// the part, and PartWriter reads it back. Restart recovery compares
+	// it to tell a moved build's parts from the parts of the cell that
+	// lost the build. It is optional.
+	Writer string
 }
 
 // Validate reports ErrInvalidOptions when ObjectClass is empty or

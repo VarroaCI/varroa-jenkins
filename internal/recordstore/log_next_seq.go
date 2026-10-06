@@ -15,13 +15,14 @@ import (
 // recorder passes its blob.Store value.
 type LogIndexReader interface {
 	NewRangeReader(ctx context.Context, key string, offset, length int64) (io.ReadCloser, error)
-	blob.PartLister
+	blob.LogPartReader
 }
 
-// storedLogIndexEntry holds the field of one gateway log index line
+// storedLogIndexEntry holds the fields of one gateway log index line
 // that the next sequence depends on. The gateway owns the full shape.
 type storedLogIndexEntry struct {
-	Seq int64 `json:"seq"`
+	Seq    int64  `json:"seq"`
+	Writer string `json:"writer,omitempty"`
 }
 
 // StoredLogNextSeq answers the next log sequence that the gateway
@@ -46,7 +47,11 @@ func StoredLogNextSeq(ctx context.Context, store LogIndexReader, runID string) (
 			maxSeq = seq
 		}
 	}
-	unindexed, err := blob.UnindexedLogParts(ctx, store, runID, maxSeq+1)
+	writer := ""
+	for seq := maxSeq; seq >= 0 && writer == ""; seq-- {
+		writer = entries[seq].Writer
+	}
+	unindexed, _, err := blob.UnindexedLogParts(ctx, store, runID, maxSeq+1, writer)
 	if err != nil {
 		return 0, fmt.Errorf("list log parts: %w", err)
 	}

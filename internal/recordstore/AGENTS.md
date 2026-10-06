@@ -133,7 +133,10 @@ of the fleet's audit activity, once a controller becomes disposable.
   on `runs`. `00003_job_schedules.sql` adds `job_schedules` and
   `job_schedule_cells`. `00010_run_state_object_class.sql` widens
   `log_chunks_object_class_check` to accept the class `state`, which the
-  pipeline mesh's run-state objects carry. `00005_tenant_placements.sql` adds
+  pipeline mesh's run-state objects carry. `00026_log_chunks_writer.sql`
+  adds `log_chunks.writer`, the writer a part was last written with
+  (`blob.Store.PartWriter`); `varroa_gateway` holds `UPDATE` on it.
+  `00005_tenant_placements.sql` adds
   `tenant_placements`, the placement-fencing authority: one row per
   `(cluster, tenant)`, holding the placement identity, the rehydration
   seed (`rehydrated_instance`, `pending_jobs`), and the cell-liveness

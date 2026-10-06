@@ -151,6 +151,7 @@ var expectedColumns = map[string][]columnSpec{
 		{"content_type", "text", true},
 		{"digest", "text", false},
 		{"bytes", "bytea", false},
+		{"writer", "text", false},
 	},
 	"activity": {
 		{"event_key", "text", false},

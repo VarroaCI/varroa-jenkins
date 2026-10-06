@@ -28,27 +28,41 @@ GCS, Azure Blob, and the local filesystem.
   `CreatedAt` returns `ErrInvalidOptions`. `CreatedAt` must be the same
   value for every part of one object, because `pgblob` uses it in the
   `log_chunks` primary key.
-- **Append is write-once per `(key, seq)`** — an identical retry
-  succeeds; a retry with different bytes returns `ErrChunkConflict`.
-  `pgblob` checks this with `ON CONFLICT (created_at, object_key,
-  chunk_seq) DO NOTHING` plus a stored-digest comparison. The
-  `gocloud.dev` adapter checks it against the part's `digest` object
-  metadata.
+- **Append is write-once per `(key, seq)`, enforced at commit** — an
+  identical retry succeeds; a retry with different bytes returns
+  `ErrChunkConflict`. A call that stalled never replaces a part another
+  writer created meanwhile. `pgblob` gets this from `ON CONFLICT
+  (created_at, object_key, chunk_seq) DO NOTHING` plus a stored-digest
+  comparison. The `gocloud.dev` adapter writes with `IfNotExist`
+  (`If-None-Match: *`). Its check before the write and its check after a
+  refused write both compare the stored bytes, never the `digest`
+  metadata: `fileblob` writes a refused conditional write's metadata
+  anyway, so on that driver alone a lost race can leave the loser's
+  `digest` and `writer` metadata. The chart never renders `fileblob`. A bucket without conditional writes
+  fails every `Append`; no fallback exists. `afterCheck` is a test-only
+  seam into that window.
 - **`Overwrite` replaces one part** — it writes `(key, seq)` over any
-  stored part and stores the new digest, so `Append` stays write-once
+  stored part and stores the new digest and writer, so `Append` stays write-once
   against the new bytes. Only the gateway log writer calls it, for a log
   part that a lost writer left above a hole. `pgblob` uses `ON CONFLICT
-  … DO UPDATE` that sets `digest` and `bytes` alone, because role
-  `varroa_gateway` holds `UPDATE` on those two columns and no other.
+  … DO UPDATE` that sets `digest`, `bytes`, and `writer` alone, because
+  role `varroa_gateway` holds `UPDATE` on those three columns and no other.
 - **`Parts` lists past a hole, with sizes** — it answers every chunked
   part at or above `from` as a `Part{Seq, Size}`, holes included, where
   `NewRangeReader` stops at the first missing part. A driver answers the
   sizes from its listing and reads no part: the `gocloud.dev` adapter
   from `ListObject.Size`, `pgblob` from `octet_length(bytes)`. The log
   writer uses it to find the old parts a moved build must empty.
+- **Writer stamp** — `ObjectOptions.Writer` names a part's writer.
+  `pgblob` stores it in `log_chunks.writer`, the adapter in object metadata
+  `writer`; `Overwrite` replaces it. `PartWriter` reads it back (one
+  attribute read on the object tier) and answers `ErrObjectNotFound` for an
+  absent part. `Parts` never answers it, so a listing stays one call.
 - **`UnindexedLogParts`** (`logparts.go`) — the one rule for the log parts
   a restarted gateway indexes: the run of parts directly above the highest
-  index entry, up to the first missing part or the first part of size 0.
+  index entry, up to the first missing part, the first part of size 0, or
+  the first part whose writer differs from the baseline (the caller's
+  highest-entry writer, else the first part's). It returns that baseline.
   The gateway's `recoverRunState`, the recorder's `StoredLogNextSeq`, and
   both manifest readers call it, and they must not compute it another way.
 - **`Open`** (`open.go`) accepts `pgblob:`, `s3://`, `gs://`, `azblob://`,

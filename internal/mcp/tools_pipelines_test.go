@@ -129,16 +129,20 @@ func (f *fakePipelineTransport) SendImperative(_ context.Context, _, _ string, c
 	return nil
 }
 
-// --- fakeLogBlobStore: a blob.Store serving one fixed console object
-// for every key, native-object style (offset/length honored, no
-// chunking). ---
+// --- fakeLogBlobStore: a blob.Store serving one fixed console object as
+// a single log part at sequence 0, with no index. The BFF reader reads
+// the index first and lists the parts above it, so the fake answers
+// those calls too. ---
 
 type fakeLogBlobStore struct {
 	blob.Store
 	data []byte
 }
 
-func (f *fakeLogBlobStore) NewRangeReader(_ context.Context, _ string, offset, length int64) (io.ReadCloser, error) {
+func (f *fakeLogBlobStore) NewRangeReader(_ context.Context, key string, offset, length int64) (io.ReadCloser, error) {
+	if strings.HasPrefix(key, "logindex/") {
+		return nil, blob.ErrObjectNotFound
+	}
 	end := int64(len(f.data))
 	if offset > end {
 		offset = end
@@ -147,6 +151,20 @@ func (f *fakeLogBlobStore) NewRangeReader(_ context.Context, _ string, offset, l
 		end = offset + length
 	}
 	return io.NopCloser(bytes.NewReader(f.data[offset:end])), nil
+}
+
+func (f *fakeLogBlobStore) Parts(_ context.Context, _ string, from int64) ([]blob.Part, error) {
+	if from > 0 || len(f.data) == 0 {
+		return []blob.Part{}, nil
+	}
+	return []blob.Part{{Seq: 0, Size: int64(len(f.data))}}, nil
+}
+
+func (f *fakeLogBlobStore) PartWriter(_ context.Context, _ string, seq int64) (string, error) {
+	if seq != 0 || len(f.data) == 0 {
+		return "", blob.ErrObjectNotFound
+	}
+	return "", nil
 }
 
 // pipelinesTestAuthorizer grants verb on "pipelines" for tenant

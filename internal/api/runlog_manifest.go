@@ -40,14 +40,40 @@ type runLogIndexEntry struct {
 	Dropped   int64  `json:"dropped,omitempty"`
 	Final     bool   `json:"final,omitempty"`
 	Recovered bool   `json:"recovered,omitempty"`
+	Writer    string `json:"writer,omitempty"`
 }
 
-// readRunLogObject reads key to io.EOF and returns every byte. A missing
-// object returns an empty slice, not an error: a queued run's console
-// object may not exist yet (run-log-viewer, "A run with no log yet is
-// not an error").
-func readRunLogObject(ctx context.Context, store blob.Store, key string) ([]byte, error) {
-	r, err := store.NewRangeReader(ctx, key, 0, -1)
+// readRunLogObject reads the console object of runID and returns the
+// bytes a reader may serve. A missing object returns an empty slice, not
+// an error: a queued run's console object may not exist yet
+// (run-log-viewer, "A run with no log yet is not an error").
+//
+// The range reader concatenates every part up to the first missing one.
+// The answer stops at the end of the bytes that the index names, plus
+// the unindexed parts that blob.UnindexedLogParts accepts. A lost
+// cell's write can land after a mesh takeover, above the moved build's
+// highest index entry, and the moved build later replaces that part. A
+// reader that served it would show the lost cell's bytes, and a live
+// viewer could skip the replacement at that offset.
+//
+// The index and the accepted parts are read before the bytes, and the
+// bytes are read only up to that length. An indexed part is never
+// written again, so the bytes cannot change under the bound. Reading the
+// bytes first would let a replacement and its index entry land between
+// the two reads and accept the replaced bytes.
+func readRunLogObject(ctx context.Context, store blob.Store, runID string) ([]byte, error) {
+	entries, maxSeq, err := readRunLogIndex(ctx, store, blob.LogIndexKey(runID))
+	if err != nil {
+		return nil, err
+	}
+	accepted, err := acceptedRunLogLength(ctx, store, runID, entries, maxSeq)
+	if err != nil {
+		return nil, err
+	}
+	if accepted == 0 {
+		return nil, nil
+	}
+	r, err := store.NewRangeReader(ctx, blob.LogKey(runID), 0, accepted)
 	if err != nil {
 		if errors.Is(err, blob.ErrObjectNotFound) {
 			return nil, nil
@@ -56,6 +82,38 @@ func readRunLogObject(ctx context.Context, store blob.Store, key string) ([]byte
 	}
 	defer func() { _ = r.Close() }()
 	return io.ReadAll(r)
+}
+
+// acceptedRunLogLength answers how many bytes of the console object a
+// reader may serve: the end of the highest index entry, plus the size of
+// each unindexed part that blob.UnindexedLogParts accepts. The range
+// reader still stops early at a missing part.
+func acceptedRunLogLength(ctx context.Context, store blob.Store, runID string, entries map[int64]runLogIndexEntry, maxSeq int64) (int64, error) {
+	var accepted int64
+	for _, e := range entries {
+		if end := e.Offset + e.Len; end > accepted {
+			accepted = end
+		}
+	}
+	parts, _, err := blob.UnindexedLogParts(ctx, store, runID, maxSeq+1, runLogIndexWriter(entries, maxSeq))
+	if err != nil {
+		return 0, err
+	}
+	for _, part := range parts {
+		accepted += part.Size
+	}
+	return accepted, nil
+}
+
+// runLogIndexWriter answers the writer of the highest entry at or below
+// seq that names one, or "" when none does.
+func runLogIndexWriter(entries map[int64]runLogIndexEntry, seq int64) string {
+	for ; seq >= 0; seq-- {
+		if w := entries[seq].Writer; w != "" {
+			return w
+		}
+	}
+	return ""
 }
 
 // readRunLogIndex reads key to io.EOF and parses each ndjson line into a
@@ -124,7 +182,7 @@ func readRunLogUnattributed(ctx context.Context, store blob.Store, runID string,
 	if bytesRead <= maxEntryEnd {
 		return unattributed, nil
 	}
-	parts, err := blob.UnindexedLogParts(ctx, store, runID, maxSeq+1)
+	parts, _, err := blob.UnindexedLogParts(ctx, store, runID, maxSeq+1, runLogIndexWriter(entries, maxSeq))
 	if err != nil {
 		return nil, err
 	}

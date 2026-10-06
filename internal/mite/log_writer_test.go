@@ -234,7 +234,7 @@ func TestOnLogChunkRedeliveredChunkDoesNotChangeOffset(t *testing.T) {
 		t.Fatalf("expected a second STORED ack for the redelivery, got %+v", acks[1])
 	}
 
-	n, err := logObjectLength(context.Background(), h.logStore, blob.LogKey(runID))
+	n, err := logObjectLength(context.Background(), h.logStore, blob.LogKey(runID), -1)
 	if err != nil {
 		t.Fatalf("log length: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestOnLogChunkForeignCellRefused(t *testing.T) {
 	if acks[0].Status != logAckStatusRejected || acks[0].Reason != logReasonForeignRun {
 		t.Fatalf("expected REJECTED foreign-run, got %+v", acks[0])
 	}
-	n, _ := logObjectLength(context.Background(), h.logStore, blob.LogKey(runID))
+	n, _ := logObjectLength(context.Background(), h.logStore, blob.LogKey(runID), -1)
 	if n != 0 {
 		t.Fatalf("expected nothing written for a foreign run, wrote %d bytes", n)
 	}
@@ -302,7 +302,7 @@ func TestOnLogChunkOwnershipTimeoutAnswersBusy(t *testing.T) {
 	if acks[0].Status != logAckStatusBusy || acks[0].Reason != logReasonOwnerLookupFail {
 		t.Fatalf("expected BUSY owner-lookup-failed, got %+v", acks[0])
 	}
-	n, _ := logObjectLength(context.Background(), h.logStore, blob.LogKey(runID))
+	n, _ := logObjectLength(context.Background(), h.logStore, blob.LogKey(runID), -1)
 	if n != 0 {
 		t.Fatalf("expected nothing written on a failed lookup, wrote %d bytes", n)
 	}
@@ -327,7 +327,7 @@ func TestOnLogChunkOwnerDatabaseErrorAnswersBusyAndIsNotCached(t *testing.T) {
 	if acks[0].Status != logAckStatusBusy || acks[0].Reason != logReasonOwnerLookupFail {
 		t.Fatalf("expected BUSY owner-lookup-failed for a recorder database error, got %+v", acks[0])
 	}
-	n, _ := logObjectLength(context.Background(), h.logStore, blob.LogKey(runID))
+	n, _ := logObjectLength(context.Background(), h.logStore, blob.LogKey(runID), -1)
 	if n != 0 {
 		t.Fatalf("expected nothing written on a database error, wrote %d bytes", n)
 	}
@@ -587,7 +587,7 @@ func seedIndexedRunWithUnindexedParts(t *testing.T, owner *fakeOwnerRequester, r
 		h.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: seq, Data: []byte(fmt.Sprintf("a%d ", seq)), CellInstance: "inst1"})
 		waitForLogAcks(t, sender, i+1)
 	}
-	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: runCreatedAtFromUUIDv7(runID)}
+	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: runCreatedAtFromUUIDv7(runID), Writer: "ns1/cell1/inst1"}
 	for seq, data := range extra {
 		if data == nil {
 			continue
@@ -827,7 +827,7 @@ func TestOnLogChunkSkippedSequenceMarksIncompleteAtFinalizeDeadline(t *testing.T
 	if entries[0].Offset != 0 {
 		t.Fatalf("expected seq 0's offset to stay truthful at 0, got %+v", entries[0])
 	}
-	n, err := logObjectLength(context.Background(), h.logStore, blob.LogKey(runID))
+	n, err := logObjectLength(context.Background(), h.logStore, blob.LogKey(runID), -1)
 	if err != nil {
 		t.Fatalf("log length: %v", err)
 	}
@@ -1940,6 +1940,228 @@ func TestOnLogChunkRestartKeepsTheAdoptionBoundary(t *testing.T) {
 	assertRunGatewayGap(t, restarted, runID)
 	if got, want := readStoredLog(t, h.logStore, runID), "a0 a1 a2 a3 b4 b5 "; got != want {
 		t.Fatalf("stored log = %q, want %q", got, want)
+	}
+}
+
+// gatedLogPartStore wraps a store and holds the Append of one log part
+// until the test closes release. It closes entered when the held call
+// starts. The held call reaches the store only after release, so it
+// models a store call that commits after another gateway replica acted.
+type gatedLogPartStore struct {
+	blob.Store
+	key     string
+	seq     int64
+	entered chan struct{}
+	release chan struct{}
+}
+
+func newGatedLogPartStore(store blob.Store, runID string, seq int64) *gatedLogPartStore {
+	return &gatedLogPartStore{Store: store, key: blob.LogKey(runID), seq: seq,
+		entered: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (g *gatedLogPartStore) Append(ctx context.Context, key string, seq int64, p []byte, opts blob.ObjectOptions) error {
+	if key == g.key && seq == g.seq {
+		close(g.entered)
+		select {
+		case <-g.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return g.Store.Append(ctx, key, seq, p, opts)
+}
+
+// waitForGate fails the test unless the held call starts within a bounded
+// wait.
+func waitForGate(t *testing.T, g *gatedLogPartStore) {
+	t.Helper()
+	select {
+	case <-g.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the held log part write never started")
+	}
+}
+
+// startOldReplicaWithAHeldPart builds the old cell's gateway replica,
+// stores a0 and a1 through it, and then admits the old cell's chunk at
+// heldSeq, whose log part write the store holds. It returns the shared
+// store, the replica's sender, and the gate.
+func startOldReplicaWithAHeldPart(t *testing.T, owner *fakeOwnerRequester, runID string, heldSeq int64) (blob.Store, *recordingSender, *gatedLogPartStore) {
+	t.Helper()
+	sender := &recordingSender{}
+	old := newLogTestHandler(t, owner, sender)
+	store := old.logStore
+	for i, seq := range []int64{0, 1} {
+		old.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: seq, Data: []byte(fmt.Sprintf("a%d ", seq)), CellInstance: "inst1"})
+		waitForLogAcks(t, sender, i+1)
+	}
+	gate := newGatedLogPartStore(store, runID, heldSeq)
+	old.logStore = gate
+	old.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: heldSeq, Data: []byte(fmt.Sprintf("a%d ", heldSeq)), CellInstance: "inst1"})
+	waitForGate(t, gate)
+	return store, sender, gate
+}
+
+// TestOnLogChunkLateOldWriterPartAboveTheNewIndexIsNotRecovered proves
+// the fence for a lost cell's write that lands after a mesh takeover.
+// The old replica's write of part 3 is in flight while the new cell's
+// replica writes and indexes chunk 2. The old part lands after that,
+// above the new writer's highest index entry. After a gateway restart,
+// recovery must not index it: the stored log holds the new writer's
+// chunks only.
+func TestOnLogChunkLateOldWriterPartAboveTheNewIndexIsNotRecovered(t *testing.T) {
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	store, oldSender, gate := startOldReplicaWithAHeldPart(t, owner, runID, 3)
+
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst2"})
+	newSender := &recordingSender{}
+	replica := newLogTestHandlerOnStore(t, owner, newSender, store)
+	replica.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: 2, Data: []byte("b2 "), CellInstance: "inst2"})
+	if ack := waitForLogAcks(t, newSender, 1)[0]; ack.Status != logAckStatusStored || ack.AckSeq != 2 {
+		t.Fatalf("new writer's chunk 2: expected STORED ack_seq=2, got %+v", ack)
+	}
+
+	close(gate.release)
+	waitForLogAcks(t, oldSender, 3)
+	parts, err := store.Parts(context.Background(), blob.LogKey(runID), 3)
+	if err != nil || len(parts) != 1 || parts[0].Seq != 3 || parts[0].Size == 0 {
+		t.Fatalf("parts at 3 = %+v (%v), want the old writer's late part", parts, err)
+	}
+
+	restartedSender := &recordingSender{}
+	restarted := newLogTestHandlerOnStore(t, owner, restartedSender, store)
+	restarted.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: 3, Data: []byte("b3 "), CellInstance: "inst2"})
+	if ack := waitForLogAcks(t, restartedSender, 1)[0]; ack.Status != logAckStatusStored || ack.AckSeq != 3 {
+		t.Fatalf("new writer's chunk 3: expected STORED ack_seq=3, got %+v", ack)
+	}
+	if got, want := readStoredLog(t, store, runID), "a0 a1 b2 b3 "; got != want {
+		t.Fatalf("stored log = %q, want %q", got, want)
+	}
+}
+
+// TestOnLogChunkLateOldWriterPartAtTheReservationIsRefused proves the
+// reservation. The old replica's write of part 2 is in flight when the
+// new cell's first chunk, 3, arrives at another replica. The new
+// replica reserves sequence 2 with an empty part, so the late write
+// conflicts and the old cell's chunk is refused. A gateway restart
+// before the new writer's first index entry then stops at the
+// reservation, and the moved build's chunk 2 replaces it.
+func TestOnLogChunkLateOldWriterPartAtTheReservationIsRefused(t *testing.T) {
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	store, oldSender, gate := startOldReplicaWithAHeldPart(t, owner, runID, 2)
+
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst2"})
+	newSender := &recordingSender{}
+	replica := newLogTestHandlerOnStore(t, owner, newSender, store)
+	replica.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: 3, Data: []byte("b3 "), CellInstance: "inst2"})
+	if ack := waitForLogAcks(t, newSender, 1)[0]; ack.Status != logAckStatusStored || ack.AckSeq != 1 {
+		t.Fatalf("new writer's chunk 3: expected STORED ack_seq=1, got %+v", ack)
+	}
+
+	close(gate.release)
+	acks := waitForLogAcks(t, oldSender, 3)
+	if got := acks[2]; got.Status != logAckStatusRejected || got.Reason != logReasonForeignRun || got.AckSeq != 2 {
+		t.Fatalf("old writer's late chunk 2: expected REJECTED foreign-run, got %+v", got)
+	}
+
+	restartedSender := &recordingSender{}
+	restarted := newLogTestHandlerOnStore(t, owner, restartedSender, store)
+	for i, seq := range []int64{2, 3} {
+		restarted.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{
+			RunId: runID, Seq: seq, Data: []byte(fmt.Sprintf("b%d ", seq)), CellInstance: "inst2",
+		})
+		if got := waitForLogAcks(t, restartedSender, i+1)[i]; got.Status != logAckStatusStored || got.AckSeq != seq {
+			t.Fatalf("chunk %d: expected STORED ack_seq=%d, got %+v", seq, seq, got)
+		}
+	}
+	if got, want := readStoredLog(t, store, runID), "a0 a1 b2 b3 "; got != want {
+		t.Fatalf("stored log = %q, want %q", got, want)
+	}
+	if incomplete, reason := restarted.runIncompleteness(runID); incomplete {
+		t.Fatalf("run incomplete with %q, want no gap: no stored line was lost", reason)
+	}
+}
+
+// TestOnLogChunkMovedBuildReplacingAnEmptyReservationMarksNoGap asserts
+// that a move with no old part above the hole loses no line. The blank
+// pass reserves the next sequence, and the new writer's chunk replaces
+// that empty part without a gap marker.
+func TestOnLogChunkMovedBuildReplacingAnEmptyReservationMarksNoGap(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	h := newLogTestHandler(t, owner, sender)
+	for i, seq := range []int64{0, 1} {
+		h.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: seq, Data: []byte(fmt.Sprintf("a%d ", seq)), CellInstance: "inst1"})
+		waitForLogAcks(t, sender, i+1)
+	}
+
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst2"})
+	h.ownerCache.invalidate(runID)
+	h.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: 2, Data: []byte("b2 "), CellInstance: "inst2"})
+	if ack := waitForLogAcks(t, sender, 3)[2]; ack.Status != logAckStatusStored || ack.AckSeq != 2 {
+		t.Fatalf("expected STORED ack_seq=2, got %+v", ack)
+	}
+	if got, want := readStoredLog(t, h.logStore, runID), "a0 a1 b2 "; got != want {
+		t.Fatalf("stored log = %q, want %q", got, want)
+	}
+	if incomplete, reason := h.runIncompleteness(runID); incomplete {
+		t.Fatalf("run incomplete with %q, want no gap", reason)
+	}
+}
+
+// staleListingStore answers an empty list to every Parts call on key,
+// the view a blank pass has when a part commits right after its listing.
+type staleListingStore struct {
+	blob.Store
+	key string
+}
+
+func (s staleListingStore) Parts(ctx context.Context, key string, from int64) ([]blob.Part, error) {
+	if key == s.key {
+		return []blob.Part{}, nil
+	}
+	return s.Store.Parts(ctx, key, from)
+}
+
+// TestOnLogChunkReservationConflictKeepsTheNewWritersOwnPart asserts
+// that the reservation keeps a part the new writer stored through
+// another gateway replica after the listing. Only another writer's part
+// holds old bytes.
+func TestOnLogChunkReservationConflictKeepsTheNewWritersOwnPart(t *testing.T) {
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	oldSender := &recordingSender{}
+	old := newLogTestHandler(t, owner, oldSender)
+	for i, seq := range []int64{0, 1} {
+		old.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: seq, Data: []byte(fmt.Sprintf("a%d ", seq)), CellInstance: "inst1"})
+		waitForLogAcks(t, oldSender, i+1)
+	}
+	store := old.logStore
+	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8",
+		CreatedAt: runCreatedAtFromUUIDv7(runID), Writer: "ns1/cell1/inst2"}
+	if err := store.Append(context.Background(), blob.LogKey(runID), 2, []byte("b2 "), opts); err != nil {
+		t.Fatalf("store the other replica's part: %v", err)
+	}
+
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst2"})
+	sender := &recordingSender{}
+	replica := newLogTestHandlerOnStore(t, owner, sender, staleListingStore{Store: store, key: blob.LogKey(runID)})
+	replica.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: 3, Data: []byte("b3 "), CellInstance: "inst2"})
+	waitForLogAcks(t, sender, 1)
+
+	if got, want := readStoredLog(t, store, runID), "a0 a1 b2 b3 "; got != want {
+		t.Fatalf("stored log = %q, want %q", got, want)
+	}
+	if incomplete, reason := replica.runIncompleteness(runID); incomplete {
+		t.Fatalf("run incomplete with %q, want no gap", reason)
 	}
 }
 

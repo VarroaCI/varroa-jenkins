@@ -93,7 +93,7 @@ func (s *Server) handleStreamRunLog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.URL.Query().Get("raw") == "true" {
-		consoleData, err := readRunLogObject(ctx, s.deps.BlobStore, blob.LogKey(run.RunID))
+		consoleData, err := readRunLogObject(ctx, s.deps.BlobStore, run.RunID)
 		if err != nil {
 			s.deps.Logger.Error("read run log", "run_id", run.RunID, "error", err)
 			s.writeJSONError(w, http.StatusInternalServerError, "read run log failed")
@@ -136,7 +136,7 @@ func (s *Server) handleStreamRunLog(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	consoleData, err := readRunLogObject(ctx, s.deps.BlobStore, blob.LogKey(run.RunID))
+	consoleData, err := readRunLogObject(ctx, s.deps.BlobStore, run.RunID)
 	if err != nil {
 		s.deps.Logger.Error("read run log", "run_id", run.RunID, "error", err)
 		s.writeJSONError(w, http.StatusInternalServerError, "read run log failed")
@@ -325,7 +325,7 @@ func (s *Server) emitRunLogLiveChunk(ctx context.Context, w io.Writer, flusher r
 // or the console object ends before need, and the assembler then stays
 // unchanged.
 func (s *Server) resyncRunLogFromBlob(ctx context.Context, run recordstore.Run, assembler *runLogLiveAssembler, need int64) (lines []runLogLine, ok bool) {
-	consoleData, err := readRunLogObject(ctx, s.deps.BlobStore, blob.LogKey(run.RunID))
+	consoleData, err := readRunLogObject(ctx, s.deps.BlobStore, run.RunID)
 	if err != nil {
 		s.deps.Logger.Warn("run log tail gap: read run log failed", "run_id", run.RunID, "error", err)
 		return nil, false

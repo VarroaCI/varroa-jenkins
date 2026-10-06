@@ -24,13 +24,18 @@ func TestStoredLogNextSeqMatchesGatewayRecovery(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		trailing map[int64]string
-		want     int64
+		// foreign names the trailing parts that another cell instance
+		// wrote, as a lost cell's late write after a takeover does.
+		foreign map[int64]bool
+		want    int64
 	}{
 		{name: "indexed log", want: 2},
 		{name: "one unindexed part", trailing: map[int64]string{2: "unindexed trailing line\n"}, want: 3},
 		{name: "two unindexed parts", trailing: map[int64]string{2: "two\n", 3: "three\n"}, want: 4},
 		{name: "a hole above the index", trailing: map[int64]string{2: "two\n", 4: "four\n"}, want: 3},
 		{name: "an empty part above the index", trailing: map[int64]string{2: "two\n", 3: "", 4: "four\n"}, want: 3},
+		{name: "another writer's part above the index", trailing: map[int64]string{2: "two\n", 3: "late\n"}, foreign: map[int64]bool{3: true}, want: 3},
+		{name: "another writer's part at the index end", trailing: map[int64]string{2: "late\n", 3: "three\n"}, foreign: map[int64]bool{2: true}, want: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -50,9 +55,12 @@ func TestStoredLogNextSeqMatchesGatewayRecovery(t *testing.T) {
 				})
 				waitForLogAcks(t, oldSender, int(seq)+1)
 			}
-			opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8",
-				CreatedAt: runCreatedAtFromUUIDv7(runID)}
 			for seq, data := range tc.trailing {
+				opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8",
+					CreatedAt: runCreatedAtFromUUIDv7(runID), Writer: "ns1/cell1/inst1"}
+				if tc.foreign[seq] {
+					opts.Writer = "ns1/cell1/inst9"
+				}
 				if err := store.Append(ctx, blob.LogKey(runID), seq, []byte(data), opts); err != nil {
 					t.Fatalf("append unindexed part %d: %v", seq, err)
 				}

@@ -774,7 +774,7 @@ func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st
 	}
 
 	createdAt := runCreatedAtFromUUIDv7(runID)
-	logOpts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: createdAt}
+	logOpts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: createdAt, Writer: logWriterKey(ns, name, chunk)}
 	recheck := h.ownerRecheck(ctx, runID, ns, name, st, chunk, admitted)
 	logKey := blob.LogKey(runID)
 	switch h.retryWrite(ctx, runID, st, logKey, chunk.Seq, recheck, func(c context.Context) error {
@@ -849,7 +849,7 @@ func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st
 // is marked gateway-gap. A sender that no longer owns the run is refused
 // and marks nothing. ok is false when the finalize deadline passed.
 func (h *BusHandler) checkOldWriterPart(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk, admitted time.Time) (appendOutcome, bool) {
-	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: runCreatedAtFromUUIDv7(runID)}
+	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: runCreatedAtFromUUIDv7(runID), Writer: logWriterKey(ns, name, chunk)}
 	key := blob.LogKey(runID)
 	recheck := h.ownerRecheck(ctx, runID, ns, name, st, chunk, admitted)
 	switch h.retryWrite(ctx, runID, st, key, chunk.Seq, recheck, func(c context.Context) error {
@@ -1053,7 +1053,7 @@ func (h *BusHandler) adoptWriter(ctx context.Context, runID, ns, name string, st
 		return false, appendDone
 	}
 
-	blanked, ok := h.blankPartsAboveAckSeq(ctx, runID, st)
+	blanked, ok := h.blankPartsAboveAckSeq(ctx, runID, st, writer)
 	if !ok {
 		return false, appendAbandon
 	}
@@ -1088,59 +1088,141 @@ func logWriterKey(ns, name string, chunk *mitev1.LogChunk) string {
 }
 
 // blankPartsAboveAckSeq replaces every stored log part above ackSeq with
-// an empty part, before a new writer appends anything. No index entry
-// names such a part: restart recovery indexes every readable part, so
-// the first sequence above ackSeq is always missing or empty. Once the
-// new writer fills the hole below an old part, the range reader would
-// read the old part's bytes after the new writer's, and restart recovery
-// would index them as a recovered entry and drop the new writer's chunk
+// an empty part of writer, before writer appends anything. It skips a
+// part that is already empty, and a part that writer itself stored
+// before a gateway restart. No index entry names such a part, because
+// restart recovery already indexed every part it accepts. Once the new
+// writer fills the hole below an old part, the range reader would read
+// the old part's bytes after the new writer's. Restart recovery could
+// then index them as a recovered entry and drop the new writer's chunk
 // at that sequence. An empty part adds no bytes, and recovery stops at
 // it. The new writer's own chunk at that sequence then conflicts with
-// the empty part and replaces it through replaceStalePart. ok is false
-// when the finalize deadline passed first.
-func (h *BusHandler) blankPartsAboveAckSeq(ctx context.Context, runID string, st *runLogState) (blanked int, ok bool) {
+// the empty part and replaces it through replaceStalePart.
+//
+// When no part is stored at ackSeq+1, it also reserves that sequence
+// with an empty part. The old writer's store call can still be in
+// flight on another gateway replica, and the listing cannot see a part
+// that commits after it. Append is write-once in the store, so such a
+// late part never replaces the reservation. Until writer's first index
+// entry is durable, restart recovery stops at the reservation. After
+// that, it stops at the late part, whose writer differs.
+//
+// blanked counts the parts that held old bytes, not the reservation. ok
+// is false when the finalize deadline passed first.
+func (h *BusHandler) blankPartsAboveAckSeq(ctx context.Context, runID string, st *runLogState, writer string) (blanked int, ok bool) {
 	st.mu.Lock()
 	from := st.ackSeq + 1
 	st.mu.Unlock()
 
 	key := blob.LogKey(runID)
-	var parts []blob.Part
-	for {
-		var err error
-		parts, err = h.logStore.Parts(ctx, key, from)
-		if err == nil {
-			break
-		}
-		h.log().Warn("list log parts failed, retrying", "run_id", runID, "error", err)
-		if deadlinePassed(st) {
-			return 0, false
-		}
-		select {
-		case <-ctx.Done():
-			return 0, false
-		case <-time.After(logAppendBackoffFloor):
-		}
+	parts, ok := h.listLogParts(ctx, runID, st, key, from)
+	if !ok {
+		return 0, false
 	}
 
-	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: runCreatedAtFromUUIDv7(runID)}
-	for _, part := range parts {
-		seq := part.Seq
-		if h.retryWrite(ctx, runID, st, key, seq, nil, func(c context.Context) error {
+	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: runCreatedAtFromUUIDv7(runID), Writer: writer}
+	blank := func(seq int64) bool {
+		return h.retryWrite(ctx, runID, st, key, seq, nil, func(c context.Context) error {
 			return h.logStore.Overwrite(c, key, seq, []byte{}, opts)
-		}) != writeDone {
+		}) == writeDone
+	}
+	for _, part := range parts {
+		if part.Size == 0 {
+			continue
+		}
+		partWriter, ok := h.readPartWriter(ctx, runID, st, key, part.Seq)
+		if !ok {
+			return blanked, false
+		}
+		if partWriter == writer {
+			// The new writer stored this part before a gateway restart.
+			// It still holds the chunk, so the part is not old.
+			continue
+		}
+		if !blank(part.Seq) {
 			return blanked, false
 		}
 		blanked++
 	}
+	if len(parts) > 0 && parts[0].Seq == from {
+		return blanked, true
+	}
+
+	switch h.retryWrite(ctx, runID, st, key, from, nil, func(c context.Context) error {
+		return h.logStore.Append(c, key, from, []byte{}, opts)
+	}) {
+	case writeDone:
+	case writeConflict:
+		// A part committed after the listing. Another gateway replica
+		// that serves the same writer can store that writer's own chunk
+		// there, and that part is not old. Only another writer's part
+		// holds old bytes, and it is emptied like a listed part.
+		partWriter, ok := h.readPartWriter(ctx, runID, st, key, from)
+		if !ok {
+			return blanked, false
+		}
+		if partWriter == writer {
+			return blanked, true
+		}
+		if !blank(from) {
+			return blanked, false
+		}
+		blanked++
+	default:
+		return blanked, false
+	}
 	return blanked, true
+}
+
+// readPartWriter reads the writer of the log part at seq, and retries a
+// failed read until the run's finalize deadline. A part that is gone
+// answers "". ok is false when the deadline passed first.
+func (h *BusHandler) readPartWriter(ctx context.Context, runID string, st *runLogState, key string, seq int64) (writer string, ok bool) {
+	for {
+		writer, err := h.logStore.PartWriter(ctx, key, seq)
+		if err == nil || errors.Is(err, blob.ErrObjectNotFound) {
+			return writer, true
+		}
+		h.log().Warn("read log part writer failed, retrying", "run_id", runID, "seq", seq, "error", err)
+		if deadlinePassed(st) {
+			return "", false
+		}
+		select {
+		case <-ctx.Done():
+			return "", false
+		case <-time.After(logAppendBackoffFloor):
+		}
+	}
+}
+
+// listLogParts lists the log parts of key at or above from, and retries
+// a failed listing until the run's finalize deadline. ok is false when
+// the deadline passed first.
+func (h *BusHandler) listLogParts(ctx context.Context, runID string, st *runLogState, key string, from int64) (parts []blob.Part, ok bool) {
+	for {
+		parts, err := h.logStore.Parts(ctx, key, from)
+		if err == nil {
+			return parts, true
+		}
+		h.log().Warn("list log parts failed, retrying", "run_id", runID, "error", err)
+		if deadlinePassed(st) {
+			return nil, false
+		}
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-time.After(logAppendBackoffFloor):
+		}
+	}
 }
 
 // replaceStalePart handles a log part that already holds other bytes at
 // the chunk's sequence. The sequence is above ackSeq and not in
 // pendingEntries, so no index entry names that part: a writer that lost
-// the run left it above a hole. When the chunk's sender owns the run in
-// a fresh ledger read, the chunk replaces the part, and the run is
-// marked as a gap because the old part's lines are lost. Otherwise the
+// the run left it above a hole, or a blank pass left it empty. When the
+// chunk's sender owns the run in a fresh ledger read, the chunk replaces
+// the part. A part that held bytes marks the run as a gap, because the
+// old part's lines are lost. An empty part marks nothing. Otherwise the
 // sender is the stale writer, and its chunk is refused, because it must
 // not replace a part of the writer that now owns the run.
 func (h *BusHandler) replaceStalePart(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk, opts blob.ObjectOptions, recheck func() writeResult) (bool, appendOutcome) {
@@ -1154,6 +1236,14 @@ func (h *BusHandler) replaceStalePart(ctx context.Context, runID, ns, name strin
 	}
 
 	key := blob.LogKey(runID)
+	stored, ok := h.listLogParts(ctx, runID, st, key, chunk.Seq)
+	if !ok {
+		return false, appendAbandon
+	}
+	// An empty part is a blank-pass part or a reservation. Its old
+	// bytes, if any, were already counted as lost when it was emptied.
+	replacesEmpty := len(stored) > 0 && stored[0].Seq == chunk.Seq && stored[0].Size == 0
+
 	switch h.retryWrite(ctx, runID, st, key, chunk.Seq, recheck, func(c context.Context) error {
 		return h.logStore.Overwrite(c, key, chunk.Seq, chunk.Data, opts)
 	}) {
@@ -1163,6 +1253,10 @@ func (h *BusHandler) replaceStalePart(ctx context.Context, runID, ns, name strin
 		return false, appendDone
 	default:
 		return false, appendAbandon
+	}
+
+	if replacesEmpty {
+		return true, appendDone
 	}
 
 	st.mu.Lock()
@@ -1264,8 +1358,10 @@ func jitteredDelay(d time.Duration) time.Duration {
 // and its index append, or inside flushContiguousLogIndex, leaves log
 // parts above the highest index entry with no entry of their own. It
 // writes one recovered entry for each such part, with that part's own
-// size, before anything else appends. blob.UnindexedLogParts names the
-// parts, and the recorder's next log sequence uses the same rule.
+// size and writer, before anything else appends. blob.UnindexedLogParts
+// names the parts, and the recorder's next log sequence uses the same
+// rule. The rule skips a part of another writer than the highest index
+// entry's: a lost cell's write can land after a mesh takeover.
 //
 // st.offset is the end of the index entry at ackSeq, never the log's
 // byte total: a part above the recovered run is not counted, and its
@@ -1293,14 +1389,14 @@ func (h *BusHandler) recoverRunState(ctx context.Context, runID string, st *runL
 		highestWritten = maxSeq
 	}
 
-	unindexed, err := blob.UnindexedLogParts(ctx, h.logStore, runID, highestWritten+1)
+	unindexed, partWriter, err := blob.UnindexedLogParts(ctx, h.logStore, runID, highestWritten+1, indexWriter(entries, maxSeq))
 	if err != nil {
 		return err
 	}
 	createdAt := runCreatedAtFromUUIDv7(runID)
 	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "application/x-ndjson", CreatedAt: createdAt}
 	for _, part := range unindexed {
-		entry := LogIndexEntry{Seq: part.Seq, Offset: offset, Len: part.Size, Recovered: true}
+		entry := LogIndexEntry{Seq: part.Seq, Offset: offset, Len: part.Size, Recovered: true, Writer: partWriter}
 		line, err := json.Marshal(entry)
 		if err != nil {
 			return err
@@ -1342,9 +1438,10 @@ func (h *BusHandler) recoverRunState(ctx context.Context, runID string, st *runL
 
 	// adoptedThrough is the sequence below the writer's lowest own entry,
 	// once an entry of another writer lies below it. A recovered entry
-	// names no writer and does not end the walk. An index that names no
-	// writer at all cannot show whose bytes it holds, so every entry is
-	// checked as a part of another writer.
+	// names the writer stamped on its part. An entry that names no writer
+	// does not end the walk. An index that names no writer at all cannot
+	// show whose bytes it holds, so every entry is checked as a part of
+	// another writer.
 	adoptedThrough, own := int64(-1), int64(-1)
 	if writer == "" {
 		adoptedThrough = ackSeq

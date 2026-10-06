@@ -216,7 +216,7 @@ func computeLogTail(ctx context.Context, store blob.Store, runID string, stageID
 	if store == nil {
 		return nil, true
 	}
-	consoleData, err := readRunLogObject(ctx, store, blob.LogKey(runID))
+	consoleData, err := readRunLogObject(ctx, store, runID)
 	if err != nil {
 		return nil, true
 	}

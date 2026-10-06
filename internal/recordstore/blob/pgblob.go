@@ -60,9 +60,9 @@ func (s *pgStore) Put(ctx context.Context, key string, r io.Reader, opts ObjectO
 	}
 
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO varroa.log_chunks (object_key, chunk_seq, created_at, object_class, content_type, digest, bytes)
-		VALUES ($1, 0, $2, $3, $4, $5, $6)
-	`, key, opts.CreatedAt, opts.ObjectClass, nullableString(opts.ContentType), sha256Digest(data), data); err != nil {
+		INSERT INTO varroa.log_chunks (object_key, chunk_seq, created_at, object_class, content_type, digest, bytes, writer)
+		VALUES ($1, 0, $2, $3, $4, $5, $6, $7)
+	`, key, opts.CreatedAt, opts.ObjectClass, nullableString(opts.ContentType), sha256Digest(data), data, opts.Writer); err != nil {
 		if isUniqueViolation(err) {
 			return ErrObjectExists
 		}
@@ -99,9 +99,9 @@ func (s *pgStore) Replace(ctx context.Context, key string, r io.Reader, opts Obj
 		return fmt.Errorf("delete replaced object: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO varroa.log_chunks (object_key, chunk_seq, created_at, object_class, content_type, digest, bytes)
-		VALUES ($1, 0, $2, $3, $4, $5, $6)
-	`, key, opts.CreatedAt, opts.ObjectClass, nullableString(opts.ContentType), sha256Digest(data), data); err != nil {
+		INSERT INTO varroa.log_chunks (object_key, chunk_seq, created_at, object_class, content_type, digest, bytes, writer)
+		VALUES ($1, 0, $2, $3, $4, $5, $6, $7)
+	`, key, opts.CreatedAt, opts.ObjectClass, nullableString(opts.ContentType), sha256Digest(data), data, opts.Writer); err != nil {
 		return fmt.Errorf("insert replaced object: %w", err)
 	}
 
@@ -122,10 +122,10 @@ func (s *pgStore) Append(ctx context.Context, key string, seq int64, p []byte, o
 	digest := sha256Digest(p)
 
 	if _, err := s.pool.Exec(ctx, `
-		INSERT INTO varroa.log_chunks (object_key, chunk_seq, created_at, object_class, content_type, digest, bytes)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO varroa.log_chunks (object_key, chunk_seq, created_at, object_class, content_type, digest, bytes, writer)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (created_at, object_key, chunk_seq) DO NOTHING
-	`, key, seq, opts.CreatedAt, opts.ObjectClass, nullableString(opts.ContentType), digest, p); err != nil {
+	`, key, seq, opts.CreatedAt, opts.ObjectClass, nullableString(opts.ContentType), digest, p, opts.Writer); err != nil {
 		return fmt.Errorf("append chunk: %w", err)
 	}
 
@@ -142,22 +142,39 @@ func (s *pgStore) Append(ctx context.Context, key string, seq int64, p []byte, o
 	return nil
 }
 
-// Overwrite inserts one row, or replaces the bytes and digest of the
-// row already at the same primary key. It sets no other column, because
-// role varroa_gateway holds UPDATE on digest and bytes alone.
+// Overwrite inserts one row, or replaces the bytes, the digest, and the
+// writer of the row already at the same primary key. It sets no other
+// column, because role varroa_gateway holds UPDATE on those three alone.
 func (s *pgStore) Overwrite(ctx context.Context, key string, seq int64, p []byte, opts ObjectOptions) error {
 	if err := opts.Validate(); err != nil {
 		return err
 	}
 	if _, err := s.pool.Exec(ctx, `
-		INSERT INTO varroa.log_chunks (object_key, chunk_seq, created_at, object_class, content_type, digest, bytes)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO varroa.log_chunks (object_key, chunk_seq, created_at, object_class, content_type, digest, bytes, writer)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (created_at, object_key, chunk_seq) DO UPDATE
-		SET digest = EXCLUDED.digest, bytes = EXCLUDED.bytes
-	`, key, seq, opts.CreatedAt, opts.ObjectClass, nullableString(opts.ContentType), sha256Digest(p), p); err != nil {
+		SET digest = EXCLUDED.digest, bytes = EXCLUDED.bytes, writer = EXCLUDED.writer
+	`, key, seq, opts.CreatedAt, opts.ObjectClass, nullableString(opts.ContentType), sha256Digest(p), p, opts.Writer); err != nil {
 		return fmt.Errorf("overwrite chunk: %w", err)
 	}
 	return nil
+}
+
+// PartWriter reads the writer column of the row at seq.
+func (s *pgStore) PartWriter(ctx context.Context, key string, seq int64) (string, error) {
+	var writer string
+	err := s.pool.QueryRow(ctx, `
+		SELECT writer FROM varroa.log_chunks
+		WHERE object_key = $1 AND chunk_seq = $2
+		LIMIT 1
+	`, key, seq).Scan(&writer)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return "", ErrObjectNotFound
+	case err != nil:
+		return "", fmt.Errorf("read part writer: %w", err)
+	}
+	return writer, nil
 }
 
 // Parts lists every chunked row of key at or above from, with its byte

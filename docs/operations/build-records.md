@@ -4,8 +4,7 @@ The build record store keeps build history outside each Jenkins controller. It r
 per build: its stages, its test summary, its artifact index, and a durable build-number ledger.
 It is optional and off by default.
 
-The store holds no job configuration. Logs and artifacts live in a separate blob store, and the
-record store holds only their index. See [Build logs and
+Logs and artifacts live in a separate blob store, and the record store holds only their index. See [Build logs and
 artifacts](build-logs-and-artifacts.md).
 
 ## Enable the store
@@ -54,8 +53,9 @@ recordStore:
       existingSecret: my-s3-credentials
 ```
 
-`recorder.image`, `recorder.replicas`, and `recorder.resources` configure the `varroa-recorder`
-component the same way `bff.*` configures the BFF.
+The bucket must support a conditional PUT (`If-None-Match: *`). AWS S3 and MinIO do.
+
+`recorder.*` configures the `varroa-recorder` component as `bff.*` configures the BFF.
 
 ## Install CloudNativePG first
 

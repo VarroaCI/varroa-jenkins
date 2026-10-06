@@ -314,7 +314,7 @@ the packaged CRDs. Does not own the Go source it packages
   `postgres-secrets.yaml`: `varroa_recorder` (the database owner),
   `varroa_client` (read plus `INSERT` on `log_chunks`, the BFF), and
   `varroa_gateway` (the same read-plus-log-chunks-insert shape plus `UPDATE
-  (digest, bytes)` on `log_chunks` for `blob.Store.Overwrite`, the gateway,
+  (digest, bytes, writer)` on `log_chunks` for `blob.Store.Overwrite`, the gateway,
   only reached in `recordStore.blobs.mode: postgres`). `external` mode
   creates none of the three; every component shares the one `existingSecret`
   DSN instead. `recordStore.blobs.s3.artifactSecret` names the **base**
