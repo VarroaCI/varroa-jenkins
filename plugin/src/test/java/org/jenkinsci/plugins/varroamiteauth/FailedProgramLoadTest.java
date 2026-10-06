@@ -48,6 +48,36 @@ public class FailedProgramLoadTest {
     }
 
     @Test
+    public void aClaimedIdIsReportedUnderAnyOfTheRunIds() {
+        FailedProgramLoad.markBoot(System.currentTimeMillis());
+        String entryId = Uuid7.next();
+        String actionId = Uuid7.next();
+        assertFalse(FailedProgramLoad.claimed(List.of(entryId)));
+
+        assertTrue(FailedProgramLoad.claim(Arrays.asList(entryId, actionId)));
+        assertTrue(FailedProgramLoad.claimed(Arrays.asList("", actionId)));
+        assertTrue(FailedProgramLoad.claimed(List.of(entryId)));
+        assertFalse("an unrelated run is not claimed", FailedProgramLoad.claimed(List.of(Uuid7.next())));
+        assertEquals("the read takes no claim", 2, FailedProgramLoad.claimedCountForTesting());
+    }
+
+    @Test
+    public void aReleasedClaimIsNotClaimed() {
+        FailedProgramLoad.markBoot(System.currentTimeMillis());
+        List<String> ids = List.of(Uuid7.next());
+        assertTrue(FailedProgramLoad.claim(ids));
+        FailedProgramLoad.release(ids);
+        assertFalse(FailedProgramLoad.claimed(ids));
+    }
+
+    @Test
+    public void nullAndEmptyIdsAreNeverClaimed() {
+        FailedProgramLoad.markBoot(System.currentTimeMillis());
+        assertTrue(FailedProgramLoad.claim(Arrays.asList(null, "", Uuid7.next())));
+        assertFalse(FailedProgramLoad.claimed(Arrays.asList(null, "")));
+    }
+
+    @Test
     public void aNewBootClearsTheClaims() {
         FailedProgramLoad.markBoot(System.currentTimeMillis());
         assertTrue(FailedProgramLoad.claim(List.of(Uuid7.next())));

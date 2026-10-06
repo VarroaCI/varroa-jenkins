@@ -160,6 +160,67 @@ public class VarroaRefusedResumeRestartTest {
         });
     }
 
+    /**
+     * A user can unpause the program of a refused build. The program then
+     * reaches its end node, and workflow-job calls {@code finish} a second
+     * time, which fires the run listener again. The build must still get
+     * one {@code COMPLETED} event, with the reason {@code jenkins-restart}.
+     *
+     * <p>{@code finish} fires {@code RunListener.onFinalized} after {@code
+     * onCompleted} on the same thread, so a second finalization means the
+     * second completion call has returned.
+     */
+    @Test
+    public void aManualUnpauseOfARefusedBuildSendsNoSecondCompleted() throws Throwable {
+        String runId = Uuid7.next();
+        FinalizationCounter.count.set(0);
+        sessions.then(j -> startRunnableBuild(j, runId));
+        setMaxResumptionAge(Duration.ZERO);
+        sessions.then(j -> {
+            WorkflowRun run = awaitFinish(j);
+            assertEquals("ABORTED", String.valueOf(run.getResult()));
+            CpsFlowExecution execution = (CpsFlowExecution) run.getExecution();
+            assertNotNull(execution);
+            long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(30);
+            while ((!execution.isPaused() || FinalizationCounter.count.get() < 1)
+                    && System.currentTimeMillis() < deadline) {
+                Thread.sleep(100);
+            }
+            assertTrue("the loaded program stays paused", execution.isPaused());
+            assertEquals("the timer finishes the build once", 1, FinalizationCounter.count.get());
+
+            execution.pause(false);
+            deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(60);
+            while (FinalizationCounter.count.get() < 2 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(100);
+            }
+            assertTrue("the unpaused program reaches its end node", execution.isComplete());
+            assertEquals("workflow-job finishes the build a second time", 2, FinalizationCounter.count.get());
+
+            List<JSONObject> completed = new ArrayList<>();
+            for (BuildEvent e : completedInSink(runId)) {
+                completed.add(e.toJson());
+            }
+            completed.addAll(completedInSpool(j, runId));
+            assertEquals("the build gets one COMPLETED event", 1, completed.size());
+            JSONObject summary = completed.get(0).getJSONObject("log_summary");
+            assertEquals(LogSummary.REASON_JENKINS_RESTART, summary.getString("incomplete_reason"));
+        });
+    }
+
+    /** Counts the finalizations of the test job's builds. */
+    @TestExtension("aManualUnpauseOfARefusedBuildSendsNoSecondCompleted")
+    public static class FinalizationCounter extends RunListener<Run<?, ?>> {
+        static final AtomicInteger count = new AtomicInteger();
+
+        @Override
+        public void onFinalized(Run<?, ?> run) {
+            if (JOB.equals(run.getParent().getFullName())) {
+                count.incrementAndGet();
+            }
+        }
+    }
+
     /** Counts the run listener completions of the test job. */
     @TestExtension("aRefusedResumeOfARunnableProgramStaysPausedAndSendsOneCompleted")
     public static class CompletionCounter extends RunListener<Run<?, ?>> {

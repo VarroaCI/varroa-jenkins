@@ -768,6 +768,15 @@ public final class VarroaRunRecorder {
                         return;
                     }
                 }
+                if (!endedByRestart && FailedProgramLoad.claimed(claimIdsOf(run, runId))) {
+                    // A restart ended this build in this boot, and its
+                    // completion already went out. Jenkins calls finish
+                    // again when a user unpauses the refused program.
+                    finishLogStorage(runId);
+                    LOGGER.log(Level.FINE, () -> "VarroaRunRecorder.Runs: a restart already ended "
+                            + jobPath + "#" + buildNumber);
+                    return;
+                }
                 // A completion with no live state still orders after every
                 // earlier event of the run, so it stamps the wall clock and
                 // not a fresh counter.

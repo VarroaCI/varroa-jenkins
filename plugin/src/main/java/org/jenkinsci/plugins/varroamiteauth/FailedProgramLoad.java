@@ -33,6 +33,12 @@ import org.jenkinsci.plugins.workflow.job.WorkflowRun;
  * calls {@link #claim} first, and only the caller that gets the claim
  * sends the {@code COMPLETED} event.
  *
+ * <p>The claim stays until the next boot. A user can unpause the program
+ * of a refused build, and the program then reaches its end node. Jenkins
+ * then calls {@code finish} again, and the run listener fires a second
+ * time. The run listener reads {@link #claimed} first, and sends nothing
+ * for a claimed build.
+ *
  * <p>The claim set holds only such builds, so it stays small. The set of
  * resumed builds holds one entry for each build this process resumed. A
  * new Jenkins boot clears both sets.
@@ -177,6 +183,20 @@ public final class FailedProgramLoad {
             }
         }
         return true;
+    }
+
+    /**
+     * Returns true when an earlier call claimed any of the ids, so a
+     * completion of the build already went out in this boot. Empty and
+     * null ids are ignored.
+     */
+    static synchronized boolean claimed(Collection<String> runIds) {
+        for (String id : runIds) {
+            if (id != null && !id.isEmpty() && CLAIMED.contains(id)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Releases a claim, so that the other caller can send the event. */

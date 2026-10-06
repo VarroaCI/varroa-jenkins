@@ -214,6 +214,9 @@ the root AGENTS.md greenfield rule.
   `finish`. `FailedProgramLoad.refusedResume` matches it: it started before this boot,
   `Flows.onResumed` did not mark it, and its execution is not complete. `endedByRestart` joins
   both matches. The boot reconcile tests it before the building test, and the same claim applies.
+  A claim stays until the next boot. A manual unpause of a refused build makes workflow-job call
+  `finish` again, so `Runs.onCompleted` reads `FailedProgramLoad.claimed` first. For a claimed
+  build it closes the log storage and sends nothing.
 - **Claim gate** (admits a queue item and claims a run id before dispatch, with no I/O
   under the Jenkins queue lock): `VarroaQueueDecisionHandler.java`
   (`Queue.QueueDecisionHandler`, stamps `VarroaIntentAction.java`), `IntentKey.java`
