@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"testing"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
 	"github.com/varroaci/varroa-jenkins/internal/controller/runners"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
 // deliveredBeforeTheMove is the full hash of a delivered desired state
@@ -69,6 +72,46 @@ func TestReconcileConnected_ManualModePushesAPlacementOnlyChange(t *testing.T) {
 	}
 	if cr.Status.DesiredStateHash != tr.last.DesiredStateHash {
 		t.Fatalf("desiredStateHash = %q, want the pushed hash %q", cr.Status.DesiredStateHash, tr.last.DesiredStateHash)
+	}
+}
+
+// unframedCompositeHash answers a composite hash in the encoding that
+// wrote the section hashes with no frame. The test uses it as a stored
+// hash that a new encoding does not produce.
+func unframedCompositeHash(cmd *mitev1.DesiredStateCommand) string {
+	h := sha256.New()
+	for _, body := range []string{cmd.JcascYaml, cmd.RbacYaml, cmd.ItemsYaml} {
+		if body != "" {
+			sum := sha256.Sum256([]byte(body))
+			h.Write([]byte(hex.EncodeToString(sum[:])))
+		}
+	}
+	h.Write([]byte(tenantHomesHash(cmd.TenantHomes)))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// TestReconcileConnected_ManualModePushesAHashSchemeChange pins the
+// upgrade path of a manual-mode controller. Its stored composite hash has
+// another encoding, but its content hash is the same. The tick pushes the
+// state once, with no approval.
+func TestReconcileConnected_ManualModePushesAHashSchemeChange(t *testing.T) {
+	rec, tr, cr := manualAfterDeliveredPush(t, "ctl-hash-scheme")
+	stored := unframedCompositeHash(tr.last)
+	if stored == computeDesiredStateHash(tr.last) {
+		t.Fatal("the unframed hash equals the framed hash")
+	}
+	cr.Status.DesiredStateHash = stored
+	cr.Status.LastApplyResult = &v1alpha1.ApplyResult{Hash: stored, Succeeded: true}
+
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if tr.sends != 2 {
+		t.Fatalf("sends = %d, want 2: the new encoding must go out once", tr.sends)
+	}
+	if cr.Status.PendingRestart != nil {
+		t.Fatalf("pending restart = %+v, want none", cr.Status.PendingRestart)
+	}
+	if want := computeDesiredStateHash(tr.last); cr.Status.DesiredStateHash != want {
+		t.Fatalf("desiredStateHash = %q, want the framed hash %q", cr.Status.DesiredStateHash, want)
 	}
 }
 

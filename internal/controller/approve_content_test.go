@@ -340,6 +340,17 @@ func TestComputeDesiredContentHash_FramesEachSection(t *testing.T) {
 	}
 }
 
+// TestComputeDesiredContentHash_GoldenValue pins the encoding of the
+// content hash. Stored pending restarts hold this value, so a change of
+// the encoding would refuse every approval that waits.
+func TestComputeDesiredContentHash_GoldenValue(t *testing.T) {
+	cmd := &mitev1.DesiredStateCommand{JcascYaml: "a: 1", RbacYaml: "b: 2", ItemsYaml: "c: 3"}
+	const want = "940162aba690891a240c5ee1fe88b7423ea83c20461e7594070a1bfa8173b58e"
+	if got := computeDesiredContentHash(cmd); got != want {
+		t.Fatalf("content hash = %s, want %s", got, want)
+	}
+}
+
 // TestReconcileConnected_ManualModeKeepsDetectedAtForTheSameContent pins
 // that the manual-mode tick records the content hash and keeps DetectedAt
 // while the content stays the same.

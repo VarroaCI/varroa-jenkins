@@ -1531,3 +1531,22 @@ func TestCertRenewalConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 }
+
+// TestComputeStateHash_FramesEachSection pins that a section hash in
+// another position answers another state hash. A missing section must not
+// let the next section take its place.
+func TestComputeStateHash_FramesEachSection(t *testing.T) {
+	const x = "abc"
+	seen := map[string]string{}
+	for name, got := range map[string]string{
+		"config":  computeStateHash(x, "", "", ""),
+		"plugins": computeStateHash("", x, "", ""),
+		"rbac":    computeStateHash("", "", x, ""),
+		"items":   computeStateHash("", "", "", x),
+	} {
+		if other, ok := seen[got]; ok {
+			t.Fatalf("the same hash in %s and %s answers the same state hash", name, other)
+		}
+		seen[got] = name
+	}
+}

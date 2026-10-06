@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"log/slog"
 	"net"
@@ -6467,24 +6468,16 @@ func varroaBaseURL(redirectURL string) string {
 	return u.Scheme + "://" + u.Host
 }
 
+// computeDesiredStateHash answers the composite hash of a desired state:
+// the content hash and the tenant homes hash, each framed with its name
+// and length. Plugins stay outside, because they converge through the
+// init-container pod roll. The rehydration bundle stays outside, because
+// it changes after every build. The cell flag stays outside, because the
+// role of a controller does not change the applied content.
 func computeDesiredStateHash(cmd *mitev1.DesiredStateCommand) string {
-	// Compute per-component hashes the same way the mite computes file hashes.
-	jcascHash := sha256Hex([]byte(cmd.JcascYaml))
-	rbacHash := sha256Hex([]byte(cmd.RbacYaml))
-	itemsHash := sha256Hex([]byte(cmd.ItemsYaml))
-
-	// Composite hash (without plugins, which converge via the init-container
-	// pod roll and are no longer sent to the mite).
 	h := sha256.New()
-	h.Write([]byte(jcascHash))
-	h.Write([]byte(rbacHash))
-	h.Write([]byte(itemsHash))
-	// tenant_homes is inside the hash. It changes only when a slot
-	// changes or a job's home changes, so it costs at most one push for
-	// each such change. The rehydration bundle stays outside for its own
-	// reason: it changes after every build. The cell flag stays outside
-	// too: the role of a controller does not change the applied content.
-	h.Write([]byte(tenantHomesHash(cmd.TenantHomes)))
+	writeFramedPart(h, "content", computeDesiredContentHash(cmd))
+	writeFramedPart(h, "homes", tenantHomesHash(cmd.TenantHomes))
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -6492,16 +6485,22 @@ func computeDesiredStateHash(cmd *mitev1.DesiredStateCommand) string {
 // reviews before an approval: the JCasC, RBAC, and items. Tenant homes are
 // placement data that the operator owns, so they stay outside this hash.
 // Each section is framed with its name and length, so content that moves
-// from one section to another changes the hash.
+// from one section to another changes the hash. Stored pending restarts
+// hold this value, so its encoding must not change.
 func computeDesiredContentHash(cmd *mitev1.DesiredStateCommand) string {
 	h := sha256.New()
-	for _, part := range []struct{ name, body string }{
-		{"jcasc", cmd.JcascYaml}, {"rbac", cmd.RbacYaml}, {"items", cmd.ItemsYaml},
-	} {
-		fmt.Fprintf(h, "%s:%d:", part.name, len(part.body))
-		h.Write([]byte(part.body))
-	}
+	writeFramedPart(h, "jcasc", cmd.JcascYaml)
+	writeFramedPart(h, "rbac", cmd.RbacYaml)
+	writeFramedPart(h, "items", cmd.ItemsYaml)
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// writeFramedPart writes one part of a composite hash as "name:length:"
+// and then the body. The frame makes the boundary of each part
+// unambiguous, so an empty part cannot shift the next part into its place.
+func writeFramedPart(h hash.Hash, name, body string) {
+	fmt.Fprintf(h, "%s:%d:", name, len(body))
+	_, _ = io.WriteString(h, body)
 }
 
 // raisePendingRestart records a pending restart for a desired state. While

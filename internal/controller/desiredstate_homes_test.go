@@ -90,3 +90,48 @@ func TestComputeDesiredStateHash_IgnoresCellFlag(t *testing.T) {
 		t.Error("the hash changes when only the cell flag changes")
 	}
 }
+
+// TestComputeDesiredStateHash_FramesEachSection pins that the same text in
+// another section answers another composite hash. An empty section must
+// not let the next section take its place.
+func TestComputeDesiredStateHash_FramesEachSection(t *testing.T) {
+	inJcasc := computeDesiredStateHash(&mitev1.DesiredStateCommand{JcascYaml: "x: 1"})
+	inRbac := computeDesiredStateHash(&mitev1.DesiredStateCommand{RbacYaml: "x: 1"})
+	inItems := computeDesiredStateHash(&mitev1.DesiredStateCommand{ItemsYaml: "x: 1"})
+	if inJcasc == inRbac || inRbac == inItems || inJcasc == inItems {
+		t.Fatalf("the same text in two sections answers the same hash: jcasc=%s rbac=%s items=%s",
+			inJcasc, inRbac, inItems)
+	}
+}
+
+// TestComputeDesiredStateHash_SeparatesContentFromHomes pins the boundary
+// between the content and the tenant homes. The JCasC text below is the
+// byte form that tenantHomesHash hashes for the homes entry. Without the
+// frame, the JCasC hash and the homes hash are the same 64 characters in
+// the same place, so the two states answer the same composite hash.
+func TestComputeDesiredStateHash_SeparatesContentFromHomes(t *testing.T) {
+	homes := []*mitev1.TenantHomes{{Tenant: "payments", Slot: 0, Role: "active"}}
+	jcasc := "payments\x000\x00active\x00"
+	if sha256Hex([]byte(jcasc)) != tenantHomesHash(homes) {
+		t.Fatal("the JCasC text is not the byte form of the homes entry")
+	}
+	contentOnly := computeDesiredStateHash(&mitev1.DesiredStateCommand{JcascYaml: jcasc})
+	homesOnly := computeDesiredStateHash(&mitev1.DesiredStateCommand{TenantHomes: homes})
+	if contentOnly == homesOnly {
+		t.Fatalf("a JCasC section and a homes entry answer the same hash %s", contentOnly)
+	}
+}
+
+// TestComputeDesiredStateHash_ComposesContentAndHomes pins the rule that
+// the manual-mode placement check uses: a home move keeps the content hash
+// and changes the composite hash. It guards the composition, not the frame.
+func TestComputeDesiredStateHash_ComposesContentAndHomes(t *testing.T) {
+	a := baseHomesCommand([]*mitev1.TenantHomes{{Tenant: "t", JobHomes: map[string]int{"j": 0}}})
+	b := baseHomesCommand([]*mitev1.TenantHomes{{Tenant: "t", JobHomes: map[string]int{"j": 1}}})
+	if computeDesiredContentHash(a) != computeDesiredContentHash(b) {
+		t.Fatal("a home move changed the content hash")
+	}
+	if computeDesiredStateHash(a) == computeDesiredStateHash(b) {
+		t.Fatal("a home move did not change the composite hash")
+	}
+}

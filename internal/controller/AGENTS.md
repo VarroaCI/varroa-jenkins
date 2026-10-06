@@ -604,8 +604,16 @@ sections describe.
   MANAGE-gated `/configuration-as-code/reload` path, never the admin-gated apply
   path); `Cell` (field 19) is `isCellController(cr)`, so the mite can tell a cell
   with no tenant from a controller that is not a cell. `cmd.DesiredStateHash =
-  computeDesiredStateHash(cmd)` hashes `JcascYaml` + `RbacYaml` + `ItemsYaml` +
-  `tenant_homes`; `Cell` and `rehydration` stay outside the hash.
+  computeDesiredStateHash(cmd)` hashes the content hash
+  (`computeDesiredContentHash`: `JcascYaml`, `RbacYaml`, `ItemsYaml`) and the
+  `tenant_homes` hash; `Cell` and `rehydration` stay outside the hash. Both
+  hashes frame each part with `writeFramedPart` (`name:length:body`), so content
+  that moves between sections changes the hash. Do not change the content-hash
+  encoding: stored `pendingRestart.contentHash` values hold it, and
+  `TestComputeDesiredContentHash_GoldenValue` pins it. A change of the composite
+  encoding costs one push for each controller; in `manual` mode
+  `manualOperatorOwnedChange` sends it without approval when the content hash
+  matches.
 - **Every imperative result leaves a trace** (`imperative_outcome.go`) —
   `handleConnected`'s result drain calls `recordImperativeOutcome` for each
   result without a desired-state payload, before it writes

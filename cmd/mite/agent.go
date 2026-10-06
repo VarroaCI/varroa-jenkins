@@ -3383,13 +3383,17 @@ func sha256hex(data []byte) string {
 }
 
 // computeStateHash combines the config, plugins, RBAC, and items hashes
-// into a single state hash.
+// into a single state hash. A section hash is empty when its file is
+// missing, so each part is framed with its name and length. Without the
+// frame, a missing section would let the next section take its place.
 func computeStateHash(configHash, pluginsHash, rbacHash, itemsHash string) string {
 	h := sha256.New()
-	h.Write([]byte(configHash))
-	h.Write([]byte(pluginsHash))
-	h.Write([]byte(rbacHash))
-	h.Write([]byte(itemsHash))
+	for _, part := range []struct{ name, body string }{
+		{"config", configHash}, {"plugins", pluginsHash}, {"rbac", rbacHash}, {"items", itemsHash},
+	} {
+		fmt.Fprintf(h, "%s:%d:", part.name, len(part.body))
+		_, _ = io.WriteString(h, part.body)
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 
