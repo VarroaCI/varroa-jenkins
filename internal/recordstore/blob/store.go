@@ -37,11 +37,12 @@ type Store interface {
 	// writer calls it for a part that a lost writer left above a hole.
 	Overwrite(ctx context.Context, key string, seq int64, p []byte, opts ObjectOptions) error
 
-	// PartSeqs lists the sequence of every chunked part of key at or
-	// above from, in ascending order, holes included. Unlike
-	// NewRangeReader, it does not stop at a missing sequence. It
-	// returns an empty list when key holds no such part.
-	PartSeqs(ctx context.Context, key string, from int64) ([]int64, error)
+	// Parts lists every chunked part of key at or above from, in
+	// ascending sequence order, holes included, with the byte size of
+	// each part. Unlike NewRangeReader, it does not stop at a missing
+	// sequence. It returns an empty list when key holds no such part.
+	// A driver answers the sizes from its listing and reads no part.
+	Parts(ctx context.Context, key string, from int64) ([]Part, error)
 
 	// NewRangeReader concatenates the parts of a chunked object in
 	// ascending sequence order, starting offset bytes from the start.
@@ -70,6 +71,13 @@ type Store interface {
 	// suffix: the caller owns the key layout. It returns ErrUnsupported
 	// on a tier that cannot sign a URL.
 	SignedURL(ctx context.Context, key string, ttl time.Duration) (string, error)
+}
+
+// Part names one chunked part of an object: its sequence and its byte
+// size.
+type Part struct {
+	Seq  int64
+	Size int64
 }
 
 // ObjectOptions carries the metadata a write needs.

@@ -178,26 +178,26 @@ func RunConformance(
 		}
 	})
 
-	t.Run("PartSeqsListsPartsAboveAHole", func(t *testing.T) {
-		key := "conformance/part-seqs"
-		for _, seq := range []int64{0, 1, 3, 5} {
-			if err := store.Append(ctx, key, seq, []byte("x"), logOpts); err != nil {
+	t.Run("PartsListsPartsAboveAHoleWithSizes", func(t *testing.T) {
+		key := "conformance/parts"
+		for seq, data := range map[int64][]byte{0: []byte("a"), 1: []byte("bb"), 3: {}, 5: []byte("ccccc")} {
+			if err := store.Append(ctx, key, seq, data, logOpts); err != nil {
 				t.Fatalf("append %d: %v", seq, err)
 			}
 		}
-		got, err := store.PartSeqs(ctx, key, 1)
+		got, err := store.Parts(ctx, key, 1)
 		if err != nil {
-			t.Fatalf("PartSeqs: %v", err)
+			t.Fatalf("Parts: %v", err)
 		}
-		if fmt.Sprint(got) != "[1 3 5]" {
-			t.Fatalf("PartSeqs from 1 = %v, want [1 3 5]", got)
+		if want := "[{1 2} {3 0} {5 5}]"; fmt.Sprint(got) != want {
+			t.Fatalf("Parts from 1 = %v, want %s", got, want)
 		}
-		none, err := store.PartSeqs(ctx, "conformance/part-seqs-absent", 0)
+		none, err := store.Parts(ctx, "conformance/parts-absent", 0)
 		if err != nil {
-			t.Fatalf("PartSeqs of an absent key: %v", err)
+			t.Fatalf("Parts of an absent key: %v", err)
 		}
 		if len(none) != 0 {
-			t.Fatalf("PartSeqs of an absent key = %v, want none", none)
+			t.Fatalf("Parts of an absent key = %v, want none", none)
 		}
 	})
 

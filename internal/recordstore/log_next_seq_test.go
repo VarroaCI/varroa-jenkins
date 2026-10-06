@@ -43,7 +43,7 @@ func appendLogPart(t *testing.T, store blob.Store, runID string, seq int64, data
 // appendIndexLine writes one index line at indexSeq that names seq.
 func appendIndexLine(t *testing.T, store blob.Store, runID string, indexSeq, seq, offset, length int64) {
 	t.Helper()
-	line, err := json.Marshal(storedLogIndexEntry{Seq: seq, Offset: offset, Len: length})
+	line, err := json.Marshal(map[string]int64{"seq": seq, "offset": offset, "len": length})
 	if err != nil {
 		t.Fatalf("marshal index line: %v", err)
 	}
@@ -71,6 +71,17 @@ func writeStoredLog(t *testing.T, store blob.Store, runID string, n int64) {
 type failingLogReader struct{}
 
 func (failingLogReader) NewRangeReader(context.Context, string, int64, int64) (io.ReadCloser, error) {
+	return nil, errors.New("blob tier unavailable")
+}
+
+func (failingLogReader) Parts(context.Context, string, int64) ([]blob.Part, error) {
+	return nil, errors.New("blob tier unavailable")
+}
+
+// partsFailingStore reads the index but fails every part listing.
+type partsFailingStore struct{ blob.Store }
+
+func (partsFailingStore) Parts(context.Context, string, int64) ([]blob.Part, error) {
 	return nil, errors.New("blob tier unavailable")
 }
 
@@ -116,19 +127,70 @@ func TestStoredLogNextSeqStopsAtFirstHole(t *testing.T) {
 	}
 }
 
-// TestStoredLogNextSeqCountsUnindexedTrailingBytes asserts log bytes past
-// the last index line count as one more sequence. The gateway writes a
-// recovered index line for them, so it drops a chunk at that sequence.
+// TestStoredLogNextSeqCountsUnindexedTrailingBytes asserts a log part
+// past the last index line counts as one more sequence. The gateway
+// writes a recovered index line for it, so it drops a chunk at that
+// sequence.
 func TestStoredLogNextSeqCountsUnindexedTrailingBytes(t *testing.T) {
 	store := newLogSeqTestStore(t)
 	writeStoredLog(t, store, logSeqTestRunID, 2)
 	appendLogPart(t, store, logSeqTestRunID, 2, []byte("no index line\n"))
+	assertLogNextSeq(t, store, 3)
+}
+
+// TestStoredLogNextSeqCountsEachUnindexedPart asserts that each readable
+// part past the last index line is its own sequence. The gateway writes
+// one recovered entry for each of them.
+func TestStoredLogNextSeqCountsEachUnindexedPart(t *testing.T) {
+	store := newLogSeqTestStore(t)
+	writeStoredLog(t, store, logSeqTestRunID, 2)
+	appendLogPart(t, store, logSeqTestRunID, 2, []byte("two\n"))
+	appendLogPart(t, store, logSeqTestRunID, 3, []byte("three\n"))
+	assertLogNextSeq(t, store, 4)
+}
+
+// TestStoredLogNextSeqStopsAtAMissingPart asserts that a part above a
+// missing part is not a sequence. The gateway's recovery stops at the
+// hole.
+func TestStoredLogNextSeqStopsAtAMissingPart(t *testing.T) {
+	store := newLogSeqTestStore(t)
+	writeStoredLog(t, store, logSeqTestRunID, 2)
+	appendLogPart(t, store, logSeqTestRunID, 2, []byte("two\n"))
+	appendLogPart(t, store, logSeqTestRunID, 4, []byte("four\n"))
+	assertLogNextSeq(t, store, 3)
+}
+
+// TestStoredLogNextSeqStopsAtAnEmptyPart asserts that an empty part is
+// not a sequence. The gateway's recovery stops at an empty part, because
+// a blank pass writes empty parts above a hole.
+func TestStoredLogNextSeqStopsAtAnEmptyPart(t *testing.T) {
+	store := newLogSeqTestStore(t)
+	writeStoredLog(t, store, logSeqTestRunID, 2)
+	appendLogPart(t, store, logSeqTestRunID, 2, []byte("two\n"))
+	appendLogPart(t, store, logSeqTestRunID, 3, []byte{})
+	appendLogPart(t, store, logSeqTestRunID, 4, []byte("four\n"))
+	assertLogNextSeq(t, store, 3)
+}
+
+// TestStoredLogNextSeqPartListFailureIsAnError asserts that a failed part
+// listing is an error, not a guess.
+func TestStoredLogNextSeqPartListFailureIsAnError(t *testing.T) {
+	store := newLogSeqTestStore(t)
+	writeStoredLog(t, store, logSeqTestRunID, 2)
+	if _, err := StoredLogNextSeq(context.Background(), partsFailingStore{store}, logSeqTestRunID); err == nil {
+		t.Fatal("want an error from a failing part listing")
+	}
+}
+
+// assertLogNextSeq asserts StoredLogNextSeq answers want.
+func assertLogNextSeq(t *testing.T, store blob.Store, want int64) {
+	t.Helper()
 	got, err := StoredLogNextSeq(context.Background(), store, logSeqTestRunID)
 	if err != nil {
 		t.Fatalf("StoredLogNextSeq: %v", err)
 	}
-	if got != 3 {
-		t.Fatalf("next = %d, want 3", got)
+	if got != want {
+		t.Fatalf("next = %d, want %d", got, want)
 	}
 }
 
@@ -139,9 +201,9 @@ func TestStoredLogNextSeqReadFailureIsAnError(t *testing.T) {
 }
 
 // TestStoredLogNextSeqMeasuresTrailingBytesFromTheHighestEntry asserts
-// the trailing-bytes test starts at the end of the highest index entry,
-// as the gateway's recovery does. Readable bytes above an index hole are
-// then not one more sequence, and the gateway accepts the missing one.
+// the part listing starts above the highest index entry, as the
+// gateway's recovery does. Readable parts below an index hole are then
+// not more sequences, and the gateway accepts the missing one.
 func TestStoredLogNextSeqMeasuresTrailingBytesFromTheHighestEntry(t *testing.T) {
 	store := newLogSeqTestStore(t)
 	for seq := int64(0); seq < 3; seq++ {

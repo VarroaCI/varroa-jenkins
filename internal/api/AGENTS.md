@@ -331,7 +331,9 @@ federation, activity persistence, and SSE fanout.
   `runlog_events.go`, `runlog_manifest.go`, `runlog_live.go`, `runlog_poll.go`,
   `runlog_tail.go`, `runlog_notes.go`, `tenantresolver.go`, `pipelines_service.go`):
   serves the `/pipelines/{team}/...` and `/runs/{run}/...` paths over
-  `internal/recordstore`. `TenantResolver` (`tenantresolver.go`, `deps.TenantResolver`)
+  `internal/recordstore`. The run log manifest (`computeRunLogManifest`) serves each
+  log part that `readRunLogUnattributed` names through `blob.UnindexedLogParts` as one
+  unattributed chunk, never a missing sequence. `TenantResolver` (`tenantresolver.go`, `deps.TenantResolver`)
   is the one seam that maps a `{team}` URL segment onto record-store tenants: a placed
   Team resolves to one tenant, an unplaced Team fans out over its namespaces, a name
   matching no local Team resolves from the record store's placement rows of another

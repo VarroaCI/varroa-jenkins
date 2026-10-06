@@ -91,19 +91,20 @@ func (s *bucketStore) Overwrite(ctx context.Context, key string, seq int64, p []
 	return s.writeObject(ctx, partKey(key, seq), p, opts)
 }
 
-// PartSeqs lists the sequence of every part under key at or above from.
-func (s *bucketStore) PartSeqs(ctx context.Context, key string, from int64) ([]int64, error) {
+// Parts lists every part under key at or above from, with the size the
+// bucket listing reports. It reads no part.
+func (s *bucketStore) Parts(ctx context.Context, key string, from int64) ([]Part, error) {
 	parts, err := s.listParts(ctx, key)
 	if err != nil {
 		return nil, err
 	}
-	seqs := []int64{}
+	out := []Part{}
 	for _, part := range parts {
 		if part.seq >= from {
-			seqs = append(seqs, part.seq)
+			out = append(out, Part{Seq: part.seq, Size: part.size})
 		}
 	}
-	return seqs, nil
+	return out, nil
 }
 
 // NewRangeReader concatenates the parts under key in ascending sequence
@@ -198,8 +199,9 @@ func (s *bucketStore) DeletePrefix(ctx context.Context, prefix string) error {
 
 // bucketPart names one chunked-object part found under a key's prefix.
 type bucketPart struct {
-	seq int64
-	key string
+	seq  int64
+	key  string
+	size int64
 }
 
 // listParts lists every part under "<key>/", in ascending sequence
@@ -220,7 +222,7 @@ func (s *bucketStore) listParts(ctx context.Context, key string) ([]bucketPart, 
 		if err != nil {
 			return nil, fmt.Errorf("parse part sequence %q: %w", obj.Key, err)
 		}
-		parts = append(parts, bucketPart{seq: seq, key: obj.Key})
+		parts = append(parts, bucketPart{seq: seq, key: obj.Key, size: obj.Size})
 	}
 	sort.Slice(parts, func(i, j int) bool { return parts[i].seq < parts[j].seq })
 	return parts, nil

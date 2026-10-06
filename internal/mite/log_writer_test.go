@@ -575,6 +575,143 @@ func TestRecoverRunStateIndexOneEntryShortWritesRecovered(t *testing.T) {
 	}
 }
 
+// seedIndexedRunWithUnindexedParts indexes chunks 0 and 1 through a
+// live gateway, then stores each of extra as a log part with no index
+// entry, the state a crash inside the index flush leaves. A nil value
+// leaves that sequence missing.
+func seedIndexedRunWithUnindexedParts(t *testing.T, owner *fakeOwnerRequester, runID string, extra map[int64][]byte) blob.Store {
+	t.Helper()
+	sender := &recordingSender{}
+	h := newLogTestHandler(t, owner, sender)
+	for i, seq := range []int64{0, 1} {
+		h.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: seq, Data: []byte(fmt.Sprintf("a%d ", seq)), CellInstance: "inst1"})
+		waitForLogAcks(t, sender, i+1)
+	}
+	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: runCreatedAtFromUUIDv7(runID)}
+	for seq, data := range extra {
+		if data == nil {
+			continue
+		}
+		if err := h.logStore.Append(context.Background(), blob.LogKey(runID), seq, data, opts); err != nil {
+			t.Fatalf("append part %d: %v", seq, err)
+		}
+	}
+	return h.logStore
+}
+
+// assertIndexInsideLog asserts that every index entry of runID lies
+// inside the readable log, and that the entries are contiguous.
+func assertIndexInsideLog(t *testing.T, store blob.Store, runID string) map[int64]LogIndexEntry {
+	t.Helper()
+	logLen := int64(len(readStoredLog(t, store, runID)))
+	entries, maxSeq, _, err := readLogIndex(context.Background(), store, blob.LogIndexKey(runID))
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	var end int64
+	for seq := int64(0); seq <= maxSeq; seq++ {
+		e, ok := entries[seq]
+		if !ok {
+			t.Fatalf("index has no entry at %d (maxSeq %d)", seq, maxSeq)
+		}
+		if e.Offset != end || e.Offset+e.Len > logLen {
+			t.Fatalf("entry %d = %+v, want offset %d and an end inside the %d-byte log", seq, e, end, logLen)
+		}
+		end = e.Offset + e.Len
+	}
+	return entries
+}
+
+// TestRecoverRunStateWritesOneEntryPerReadablePart proves the per-part
+// repair. Chunks 0 and 1 are indexed, and parts 2 and 3 hold bytes with
+// no index entry. Recovery writes one entry for each part, with its own
+// length. The mite's replay of chunk 3 is then already stored, and the
+// next chunk lands at the true end of the log.
+func TestRecoverRunStateWritesOneEntryPerReadablePart(t *testing.T) {
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	store := seedIndexedRunWithUnindexedParts(t, owner, runID, map[int64][]byte{2: []byte("a2 "), 3: []byte("a3-long ")})
+
+	sender := &recordingSender{}
+	restarted := newLogTestHandlerOnStore(t, owner, sender, store)
+	restarted.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: 3, Data: []byte("a3-long "), CellInstance: "inst1"})
+	acks := waitForLogAcks(t, sender, 1)
+	if acks[0].Status != logAckStatusStored || acks[0].AckSeq != 3 {
+		t.Fatalf("replay ack = %+v, want STORED ack_seq=3", acks[0])
+	}
+
+	entries := assertIndexInsideLog(t, store, runID)
+	for seq, want := range map[int64]int64{2: 3, 3: 8} {
+		if e := entries[seq]; !e.Recovered || e.Len != want {
+			t.Fatalf("entry %d = %+v, want a recovered entry of length %d", seq, e, want)
+		}
+	}
+	if len(entries) != 4 {
+		t.Fatalf("index holds %d entries, want 4", len(entries))
+	}
+
+	restarted.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: 4, Data: []byte("a4 "), CellInstance: "inst1"})
+	waitForLogAcks(t, sender, 2)
+	entries = assertIndexInsideLog(t, store, runID)
+	if e := entries[4]; e.Offset != int64(len("a0 a1 a2 a3-long ")) {
+		t.Fatalf("entry 4 = %+v, want the offset at the end of part 3", e)
+	}
+	if incomplete, reason := restarted.runIncompleteness(runID); incomplete {
+		t.Fatalf("run incomplete with %q, want a complete run", reason)
+	}
+}
+
+// TestRecoverRunStateStopsAtAHoleAboveTheIndex asserts that recovery
+// writes no entry above a missing part. Part 4 waits for the mite to
+// send chunk 3 and chunk 4 again.
+func TestRecoverRunStateStopsAtAHoleAboveTheIndex(t *testing.T) {
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	store := seedIndexedRunWithUnindexedParts(t, owner, runID, map[int64][]byte{2: []byte("a2 "), 4: []byte("a4 ")})
+
+	sender := &recordingSender{}
+	restarted := newLogTestHandlerOnStore(t, owner, sender, store)
+	st := &runLogState{ns: "ns1", name: "cell1", ackSeq: -1}
+	if err := restarted.recoverRunState(context.Background(), runID, st); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if st.ackSeq != 2 || st.offset != int64(len("a0 a1 a2 ")) {
+		t.Fatalf("recovered state = ackSeq=%d offset=%d, want 2/%d", st.ackSeq, st.offset, len("a0 a1 a2 "))
+	}
+	entries := assertIndexInsideLog(t, store, runID)
+	if _, ok := entries[4]; ok || len(entries) != 3 {
+		t.Fatalf("index = %+v, want entries 0 to 2 only", entries)
+	}
+}
+
+// TestRecoverRunStateStopsAtAnEmptyPart asserts that recovery writes no
+// entry for an empty part, or for any part above it. A blank pass writes
+// empty parts, and an entry for one would drop the new writer's chunk.
+func TestRecoverRunStateStopsAtAnEmptyPart(t *testing.T) {
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	store := seedIndexedRunWithUnindexedParts(t, owner, runID, map[int64][]byte{2: []byte("a2 "), 3: {}, 4: []byte("a4 ")})
+
+	restarted := newLogTestHandlerOnStore(t, owner, &recordingSender{}, store)
+	st := &runLogState{ns: "ns1", name: "cell1", ackSeq: -1}
+	if err := restarted.recoverRunState(context.Background(), runID, st); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if st.ackSeq != 2 || st.offset != int64(len("a0 a1 a2 ")) {
+		t.Fatalf("recovered state = ackSeq=%d offset=%d, want 2/%d", st.ackSeq, st.offset, len("a0 a1 a2 "))
+	}
+	entries, maxSeq, _, err := readLogIndex(context.Background(), store, blob.LogIndexKey(runID))
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	if maxSeq != 2 || len(entries) != 3 {
+		t.Fatalf("index = %+v (maxSeq %d), want entries 0 to 2 only", entries, maxSeq)
+	}
+}
+
 // TestRecoverRunStateRestoresFinalMarkerAndHoldsOffHeartbeat proves
 // design.md D4's restart claim directly: "A restarted gateway reads the
 // entry back and needs no memory." It seeds a durable final log part and
@@ -1488,41 +1625,32 @@ func TestOnLogChunkLongQueuedChunkOfALostOwnerIsRefused(t *testing.T) {
 	}
 }
 
-// TestOnLogChunkMovedBuildNeverReplacesAPartARecoveredEntryCounts pins
-// the readable-run guard. A crash between a log append and its index
-// append leaves parts 2 and 3 readable, and recovery counts both in one
-// recovered entry. A moved build's chunk 3 must not replace part 3,
-// because the index already counts its bytes.
-func TestOnLogChunkMovedBuildNeverReplacesAPartARecoveredEntryCounts(t *testing.T) {
-	sender := &recordingSender{}
+// TestOnLogChunkMovedBuildAfterRecoveryContinuesAboveTheRecoveredParts
+// pins a move after a crash inside the index flush. Parts 2 and 3 are
+// readable with no index entry. Recovery writes one entry for each, so
+// the moved build continues at 4, and the run is not a gap.
+func TestOnLogChunkMovedBuildAfterRecoveryContinuesAboveTheRecoveredParts(t *testing.T) {
 	owner := newFakeOwnerRequester()
 	runID := newTestRunID()
 	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
-	h := newLogTestHandler(t, owner, sender)
-	for i, seq := range []int64{0, 1} {
-		h.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: seq, Data: []byte(fmt.Sprintf("a%d ", seq)), CellInstance: "inst1"})
-		waitForLogAcks(t, sender, i+1)
-	}
-	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: runCreatedAtFromUUIDv7(runID)}
-	for _, seq := range []int64{2, 3} {
-		if err := h.logStore.Append(context.Background(), blob.LogKey(runID), seq, []byte(fmt.Sprintf("a%d ", seq)), opts); err != nil {
-			t.Fatalf("append part %d: %v", seq, err)
-		}
-	}
+	store := seedIndexedRunWithUnindexedParts(t, owner, runID, map[int64][]byte{2: []byte("a2 "), 3: []byte("a3 ")})
 
 	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst2"})
 	restartedSender := &recordingSender{}
-	restarted := newLogTestHandlerOnStore(t, owner, restartedSender, h.logStore)
-	restarted.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: 3, Data: []byte("b3 "), CellInstance: "inst2"})
+	restarted := newLogTestHandlerOnStore(t, owner, restartedSender, store)
+	restarted.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: 4, Data: []byte("b4 "), CellInstance: "inst2"})
 
 	acks := waitForLogAcks(t, restartedSender, 1)
-	if acks[0].Status != logAckStatusRejected {
-		t.Fatalf("expected the chunk rejected once the run is abandoned, got %+v", acks[0])
+	if acks[0].Status != logAckStatusStored || acks[0].AckSeq != 4 {
+		t.Fatalf("expected STORED ack_seq=4 for the moved build's chunk, got %+v", acks[0])
 	}
-	assertRunGatewayGap(t, restarted, runID)
-	if got, want := readStoredLog(t, h.logStore, runID), "a0 a1 a2 a3 "; got != want {
+	if incomplete, reason := restarted.runIncompleteness(runID); incomplete {
+		t.Fatalf("run incomplete with %q, want a complete run", reason)
+	}
+	if got, want := readStoredLog(t, store, runID), "a0 a1 a2 a3 b4 "; got != want {
 		t.Fatalf("stored log = %q, want %q", got, want)
 	}
+	assertIndexInsideLog(t, store, runID)
 }
 
 // TestOnLogChunkSecondMoveReplacesAnEmptyPartOfTheFirstMove pins that an

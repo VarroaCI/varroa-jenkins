@@ -27,8 +27,8 @@ import (
 )
 
 // runLogIndexEntry is one JSON line of logindex/<run_id>. A full entry
-// carries every field; a recovery entry (the gateway's repair for an
-// unindexed byte range after a restart) carries only seq, offset, len,
+// carries every field; a recovery entry (the gateway's repair for one
+// unindexed log part after a restart) carries only seq, offset, len,
 // and recovered.
 type runLogIndexEntry struct {
 	Seq       int64  `json:"seq"`
@@ -108,6 +108,32 @@ type runLogManifest struct {
 	Complete     bool
 }
 
+// readRunLogUnattributed answers the sequences of the parts that hold
+// readable bytes past every index entry. A gateway crash before or inside
+// its index flush leaves such parts above the highest entry. They are
+// served data, not holes. blob.UnindexedLogParts names them with the same
+// rule the gateway's restart recovery uses, so each part is one sequence.
+func readRunLogUnattributed(ctx context.Context, store blob.Store, runID string, bytesRead int64, entries map[int64]runLogIndexEntry, maxSeq int64) (map[int64]bool, error) {
+	var maxEntryEnd int64
+	for _, e := range entries {
+		if end := e.Offset + e.Len; end > maxEntryEnd {
+			maxEntryEnd = end
+		}
+	}
+	unattributed := map[int64]bool{}
+	if bytesRead <= maxEntryEnd {
+		return unattributed, nil
+	}
+	parts, err := blob.UnindexedLogParts(ctx, store, runID, maxSeq+1)
+	if err != nil {
+		return nil, err
+	}
+	for _, part := range parts {
+		unattributed[part.Seq] = true
+	}
+	return unattributed, nil
+}
+
 // computeRunLogManifest scans bytesRead and entries the way
 // run-log-viewer's manifest requirement states: a declared chunk count
 // (from summary when the run carries one, else derived from the index
@@ -115,31 +141,19 @@ type runLogManifest struct {
 // reported as missing, and completeness the negation of that. A run with
 // no summary at all is always incomplete — its declared count is not yet
 // known from anywhere but the index, so it cannot be trusted complete.
-func computeRunLogManifest(bytesRead int64, entries map[int64]runLogIndexEntry, maxSeq int64, summary *runLogSummaryFields) runLogManifest {
-	var maxEntryEnd int64
-	for _, e := range entries {
-		if end := e.Offset + e.Len; end > maxEntryEnd {
-			maxEntryEnd = end
-		}
-	}
-	unattributedSeq := int64(-1)
-	if bytesRead > maxEntryEnd {
-		unattributedSeq = maxSeq + 1
-	}
-
+// unattributed holds the sequences readRunLogUnattributed answers; each
+// one is served data, never a missing sequence.
+func computeRunLogManifest(bytesRead int64, entries map[int64]runLogIndexEntry, maxSeq int64, unattributed map[int64]bool, summary *runLogSummaryFields) runLogManifest {
 	var declaredCount int64
 	if summary != nil {
 		declaredCount = summary.ChunkCount
 	} else {
-		declaredCount = maxSeq + 1
-		if unattributedSeq >= 0 {
-			declaredCount++
-		}
+		declaredCount = maxSeq + 1 + int64(len(unattributed))
 	}
 
 	var missing []int64
 	for seq := int64(0); seq < declaredCount; seq++ {
-		if seq == unattributedSeq {
+		if unattributed[seq] {
 			continue
 		}
 		// A sequence is covered when the console object holds its whole

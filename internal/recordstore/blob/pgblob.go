@@ -160,33 +160,33 @@ func (s *pgStore) Overwrite(ctx context.Context, key string, seq int64, p []byte
 	return nil
 }
 
-// PartSeqs lists the sequence of every chunked row of key at or above
-// from. The native row, at chunk_seq -1, is never a part.
-func (s *pgStore) PartSeqs(ctx context.Context, key string, from int64) ([]int64, error) {
+// Parts lists every chunked row of key at or above from, with its byte
+// size. The native row, at chunk_seq -1, is never a part.
+func (s *pgStore) Parts(ctx context.Context, key string, from int64) ([]Part, error) {
 	if from < 0 {
 		from = 0
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT chunk_seq FROM varroa.log_chunks
+		SELECT chunk_seq, octet_length(bytes) FROM varroa.log_chunks
 		WHERE object_key = $1 AND chunk_seq >= $2
 		ORDER BY chunk_seq ASC
 	`, key, from)
 	if err != nil {
-		return nil, fmt.Errorf("query part sequences: %w", err)
+		return nil, fmt.Errorf("query parts: %w", err)
 	}
 	defer rows.Close()
-	seqs := []int64{}
+	parts := []Part{}
 	for rows.Next() {
-		var seq int64
-		if err := rows.Scan(&seq); err != nil {
-			return nil, fmt.Errorf("scan part sequence: %w", err)
+		var p Part
+		if err := rows.Scan(&p.Seq, &p.Size); err != nil {
+			return nil, fmt.Errorf("scan part: %w", err)
 		}
-		seqs = append(seqs, seq)
+		parts = append(parts, p)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate part sequences: %w", err)
+		return nil, fmt.Errorf("iterate parts: %w", err)
 	}
-	return seqs, nil
+	return parts, nil
 }
 
 // NewRangeReader concatenates the chunked parts of key in ascending

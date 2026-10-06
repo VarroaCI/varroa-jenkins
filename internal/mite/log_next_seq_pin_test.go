@@ -16,17 +16,21 @@ import (
 // its log at the recorder's value. A lower value names a sequence the
 // gateway drops, and a higher value leaves a hole it never fills.
 //
-// The trailing case writes a log part with no index line, the state a
-// gateway crash between the two appends leaves. The gateway recovers
-// that part as one more sequence, so the recorder must count it too.
+// Each trailing case writes log parts with no index line, the state a
+// gateway crash before or inside the index flush leaves. The gateway
+// recovers each readable, non-empty part as one more sequence, so the
+// recorder must count the same parts.
 func TestStoredLogNextSeqMatchesGatewayRecovery(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
-		trailing bool
+		trailing map[int64]string
 		want     int64
 	}{
-		{name: "indexed log", trailing: false, want: 2},
-		{name: "unindexed trailing bytes", trailing: true, want: 3},
+		{name: "indexed log", want: 2},
+		{name: "one unindexed part", trailing: map[int64]string{2: "unindexed trailing line\n"}, want: 3},
+		{name: "two unindexed parts", trailing: map[int64]string{2: "two\n", 3: "three\n"}, want: 4},
+		{name: "a hole above the index", trailing: map[int64]string{2: "two\n", 4: "four\n"}, want: 3},
+		{name: "an empty part above the index", trailing: map[int64]string{2: "two\n", 3: "", 4: "four\n"}, want: 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -46,11 +50,11 @@ func TestStoredLogNextSeqMatchesGatewayRecovery(t *testing.T) {
 				})
 				waitForLogAcks(t, oldSender, int(seq)+1)
 			}
-			if tc.trailing {
-				opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8",
-					CreatedAt: runCreatedAtFromUUIDv7(runID)}
-				if err := store.Append(ctx, blob.LogKey(runID), 2, []byte("unindexed trailing line\n"), opts); err != nil {
-					t.Fatalf("append unindexed part: %v", err)
+			opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8",
+				CreatedAt: runCreatedAtFromUUIDv7(runID)}
+			for seq, data := range tc.trailing {
+				if err := store.Append(ctx, blob.LogKey(runID), seq, []byte(data), opts); err != nil {
+					t.Fatalf("append unindexed part %d: %v", seq, err)
 				}
 			}
 
@@ -63,11 +67,13 @@ func TestStoredLogNextSeqMatchesGatewayRecovery(t *testing.T) {
 			}
 
 			// A fresh gateway recovers from the store, as the gateway that
-			// serves the moved build does.
+			// serves the moved build does. The moved build is another cell
+			// instance, so the gateway empties the old parts above the hole.
+			owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst2"})
 			newSender := &recordingSender{}
 			newGateway := newLogTestHandlerOnStore(t, owner, newSender, store)
 			newGateway.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{
-				RunId: runID, Seq: next, Data: []byte("Resuming build\n"), Final: true, CellInstance: "inst1",
+				RunId: runID, Seq: next, Data: []byte("Resuming build\n"), Final: true, CellInstance: "inst2",
 			})
 			acks := waitForLogAcks(t, newSender, 1)
 			if acks[0].Status != logAckStatusStored || acks[0].AckSeq != next {
@@ -80,6 +86,11 @@ func TestStoredLogNextSeqMatchesGatewayRecovery(t *testing.T) {
 			}
 			if e, ok := entries[next]; !ok || e.Len != int64(len("Resuming build\n")) || !finalSeen {
 				t.Fatalf("index entry at %d = %+v (present %v, final %v), want the new chunk", next, e, ok, finalSeen)
+			}
+			for seq := int64(0); seq < next; seq++ {
+				if _, ok := entries[seq]; !ok {
+					t.Fatalf("index has no entry at %d below the next sequence %d", seq, next)
+				}
 			}
 			if !waitForLogSuffix(t, store, runID, "Resuming build\n") {
 				t.Fatal("the stored log does not end with the moved build's line")

@@ -94,7 +94,7 @@ func TestRunLogHistory_LineNumbersOffsetsStageGroups(t *testing.T) {
 	}
 
 	summary := runLogSummaryFields{ChunkCount: 3, Finalized: true}
-	manifest := computeRunLogManifest(int64(len(consoleData)), idx, maxSeq, &summary)
+	manifest := computeRunLogManifest(int64(len(consoleData)), idx, maxSeq, nil, &summary)
 	if manifest.ChunkCount != 3 || manifest.ByteCount != int64(len(console)) || !manifest.Complete {
 		t.Fatalf("manifest = %+v", manifest)
 	}
@@ -120,15 +120,57 @@ func TestComputeRunLogManifest_ByteLessFinalChunkIsCovered(t *testing.T) {
 	}
 	summary := runLogSummaryFields{ChunkCount: 3, Finalized: true}
 
-	manifest := computeRunLogManifest(11, entries, 2, &summary)
+	manifest := computeRunLogManifest(11, entries, 2, nil, &summary)
 	if len(manifest.MissingSeq) != 0 || !manifest.Complete || manifest.TruncatedAt != nil {
 		t.Fatalf("byte-less final chunk reported as a gap: %+v", manifest)
 	}
 
 	entries[2] = runLogIndexEntry{Seq: 2, Offset: 11, Len: 4, Final: true}
-	manifest = computeRunLogManifest(11, entries, 2, &summary)
+	manifest = computeRunLogManifest(11, entries, 2, nil, &summary)
 	if len(manifest.MissingSeq) != 1 || manifest.MissingSeq[0] != 2 || manifest.Complete {
 		t.Fatalf("unwritten final bytes not reported as a gap: %+v", manifest)
+	}
+}
+
+// TestComputeRunLogManifest_UnattributedPartsAreServed proves that each
+// log part above the highest index entry is its own served sequence. A
+// gateway crash inside its index flush leaves several such parts, and
+// none of them is a gap.
+func TestComputeRunLogManifest_UnattributedPartsAreServed(t *testing.T) {
+	store := newRunLogTestStore(t)
+	runID := "run-unattributed-parts"
+	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: time.Now()}
+	for seq, data := range []string{"a0\n", "a1\n", "a2\n", "a3\n"} {
+		if err := store.Append(context.Background(), blob.LogKey(runID), int64(seq), []byte(data), opts); err != nil {
+			t.Fatalf("append part %d: %v", seq, err)
+		}
+	}
+	putRunLogIndex(t, store, runID, []runLogIndexEntry{{Seq: 0, Offset: 0, Len: 3}})
+
+	consoleData, err := readRunLogObject(context.Background(), store, blob.LogKey(runID))
+	if err != nil {
+		t.Fatalf("read console: %v", err)
+	}
+	entries, maxSeq, err := readRunLogIndex(context.Background(), store, blob.LogIndexKey(runID))
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	unattributed, err := readRunLogUnattributed(context.Background(), store, runID, int64(len(consoleData)), entries, maxSeq)
+	if err != nil {
+		t.Fatalf("read unattributed parts: %v", err)
+	}
+	if len(unattributed) != 3 || !unattributed[1] || !unattributed[2] || !unattributed[3] {
+		t.Fatalf("unattributed = %v, want 1, 2, and 3", unattributed)
+	}
+
+	summary := runLogSummaryFields{ChunkCount: 4}
+	manifest := computeRunLogManifest(int64(len(consoleData)), entries, maxSeq, unattributed, &summary)
+	if len(manifest.MissingSeq) != 0 || !manifest.Complete {
+		t.Fatalf("manifest = %+v, want every part served and the log complete", manifest)
+	}
+	manifest = computeRunLogManifest(int64(len(consoleData)), entries, maxSeq, unattributed, nil)
+	if manifest.ChunkCount != 4 || len(manifest.MissingSeq) != 0 {
+		t.Fatalf("manifest with no summary = %+v, want 4 chunks and none missing", manifest)
 	}
 }
 

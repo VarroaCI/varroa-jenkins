@@ -84,8 +84,10 @@ of the fleet's audit activity, once a controller becomes disposable.
   the gateway accepts, read by `StoredLogNextSeq` (`log_next_seq.go`) after
   the takeover commits. It parses the gateway's log index itself, because
   this package cannot import `internal/mite`; its rule must equal the
-  gateway's `recoverRunState`, and `TestStoredLogNextSeqMatchesGatewayRecovery`
-  in `internal/mite` pins the two. A read failure publishes 0 and logs the
+  gateway's `recoverRunState`. Both count each part that
+  `blob.UnindexedLogParts` names as one sequence, and the scenario table
+  in `internal/mite`'s `TestStoredLogNextSeqMatchesGatewayRecovery` pins
+  the two. A read failure publishes 0 and logs the
   running failure count. `TakeOverLostRuns` claims a lost run in two steps: it
   arms every `RUNNING` run whose owner is confirmed gone and whose anchor
   is fresh, then dispatches once `resumeTargetForRun` answers a seeded

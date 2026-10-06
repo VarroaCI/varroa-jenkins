@@ -40,10 +40,17 @@ GCS, Azure Blob, and the local filesystem.
   part that a lost writer left above a hole. `pgblob` uses `ON CONFLICT
   … DO UPDATE` that sets `digest` and `bytes` alone, because role
   `varroa_gateway` holds `UPDATE` on those two columns and no other.
-- **`PartSeqs` lists past a hole** — it answers every chunked part's
-  sequence at or above `from`, holes included, where `NewRangeReader`
-  stops at the first missing part. The log writer uses it to find the
-  old parts a moved build must empty.
+- **`Parts` lists past a hole, with sizes** — it answers every chunked
+  part at or above `from` as a `Part{Seq, Size}`, holes included, where
+  `NewRangeReader` stops at the first missing part. A driver answers the
+  sizes from its listing and reads no part: the `gocloud.dev` adapter
+  from `ListObject.Size`, `pgblob` from `octet_length(bytes)`. The log
+  writer uses it to find the old parts a moved build must empty.
+- **`UnindexedLogParts`** (`logparts.go`) — the one rule for the log parts
+  a restarted gateway indexes: the run of parts directly above the highest
+  index entry, up to the first missing part or the first part of size 0.
+  The gateway's `recoverRunState`, the recorder's `StoredLogNextSeq`, and
+  both manifest readers call it, and they must not compute it another way.
 - **`Open`** (`open.go`) accepts `pgblob:`, `s3://`, `gs://`, `azblob://`,
   and `file://`. `pgblob:` needs a non-nil `*pgxpool.Pool`; every other
   scheme opens a `gocloud.dev/blob` bucket and ignores the pool. Every

@@ -11,29 +11,29 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
 
-// LogIndexReader is the one blob method StoredLogNextSeq needs. The
+// LogIndexReader is the blob methods StoredLogNextSeq needs. The
 // recorder passes its blob.Store value.
 type LogIndexReader interface {
 	NewRangeReader(ctx context.Context, key string, offset, length int64) (io.ReadCloser, error)
+	blob.PartLister
 }
 
-// storedLogIndexEntry holds the fields of one gateway log index line
+// storedLogIndexEntry holds the field of one gateway log index line
 // that the next sequence depends on. The gateway owns the full shape.
 type storedLogIndexEntry struct {
-	Seq    int64 `json:"seq"`
-	Offset int64 `json:"offset"`
-	Len    int64 `json:"len"`
+	Seq int64 `json:"seq"`
 }
 
 // StoredLogNextSeq answers the next log sequence that the gateway
 // accepts for runID: the highest stored sequence with no hole below it,
 // plus 1. It answers 0 when the run has no stored log.
 //
-// The rule must equal the gateway's own restart recovery. Log bytes past
-// the end of the index entry with the highest sequence are one more
-// sequence, because the gateway writes a recovered index entry for them
-// before it appends anything. A lower answer names a sequence the gateway drops, and a
-// higher answer leaves a hole that the gateway never fills.
+// The rule must equal the gateway's own restart recovery. The gateway
+// writes one recovered index entry for each part that
+// blob.UnindexedLogParts names above the highest index entry, before it
+// appends anything, so each such part is one more sequence. A lower
+// answer names a sequence the gateway drops, and a higher answer leaves
+// a hole that the gateway never fills.
 func StoredLogNextSeq(ctx context.Context, store LogIndexReader, runID string) (int64, error) {
 	entries, err := readStoredLogIndex(ctx, store, blob.LogIndexKey(runID))
 	if err != nil {
@@ -46,17 +46,12 @@ func StoredLogNextSeq(ctx context.Context, store LogIndexReader, runID string) (
 			maxSeq = seq
 		}
 	}
-	var covered int64
-	if maxSeq >= 0 {
-		covered = entries[maxSeq].Offset + entries[maxSeq].Len
-	}
-	trailing, err := hasLogBytesAt(ctx, store, blob.LogKey(runID), covered)
+	unindexed, err := blob.UnindexedLogParts(ctx, store, runID, maxSeq+1)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("list log parts: %w", err)
 	}
-	// The gateway recovers the trailing bytes as one entry at maxSeq+1.
-	if trailing {
-		entries[maxSeq+1] = storedLogIndexEntry{Seq: maxSeq + 1}
+	for _, part := range unindexed {
+		entries[part.Seq] = storedLogIndexEntry{Seq: part.Seq}
 	}
 
 	next := int64(0)
@@ -99,22 +94,4 @@ func readStoredLogIndex(ctx context.Context, store LogIndexReader, key string) (
 		return nil, fmt.Errorf("scan log index: %w", err)
 	}
 	return entries, nil
-}
-
-// hasLogBytesAt reports whether the readable log at key holds a byte at
-// offset.
-func hasLogBytesAt(ctx context.Context, store LogIndexReader, key string, offset int64) (bool, error) {
-	r, err := store.NewRangeReader(ctx, key, offset, 1)
-	if err != nil {
-		if errors.Is(err, blob.ErrObjectNotFound) {
-			return false, nil
-		}
-		return false, fmt.Errorf("read log: %w", err)
-	}
-	defer func() { _ = r.Close() }()
-	n, err := io.Copy(io.Discard, r)
-	if err != nil {
-		return false, fmt.Errorf("read log: %w", err)
-	}
-	return n > 0, nil
 }

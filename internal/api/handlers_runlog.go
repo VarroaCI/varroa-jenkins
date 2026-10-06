@@ -155,7 +155,13 @@ func (s *Server) handleStreamRunLog(w http.ResponseWriter, r *http.Request) {
 	if hasSummary {
 		summaryPtr = &summary
 	}
-	manifest := computeRunLogManifest(int64(len(consoleData)), entries, maxSeq, summaryPtr)
+	unattributed, err := readRunLogUnattributed(ctx, s.deps.BlobStore, run.RunID, int64(len(consoleData)), entries, maxSeq)
+	if err != nil {
+		s.deps.Logger.Error("list run log parts", "run_id", run.RunID, "error", err)
+		s.writeJSONError(w, http.StatusInternalServerError, "list run log parts failed")
+		return
+	}
+	manifest := computeRunLogManifest(int64(len(consoleData)), entries, maxSeq, unattributed, summaryPtr)
 	lines := splitRunLogLines(consoleData, entries)
 	// An unfinished build's snapshot may end mid-line. That fragment is
 	// held back for the live assembler, which completes it when the next

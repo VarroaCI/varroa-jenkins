@@ -91,17 +91,6 @@ type runLogState struct {
 	// hole belong to a log the new writer does not continue.
 	writer string
 
-	// ackSeqRecovered reports that the index entry at ackSeq is a
-	// recovered entry, which can count the bytes of several parts.
-	// recoverRunState sets it.
-	ackSeqRecovered bool
-
-	// readableThrough is the highest part sequence above ackSeq whose
-	// bytes the recovered entry at ackSeq counts. blankPartsAboveAckSeq
-	// sets it. A part at or below it must never be emptied or replaced:
-	// the index and offset already count its bytes. -1 means none.
-	readableThrough int64
-
 	// jobPath is the run's job path, recorded from the first call that
 	// creates this state and never changed after. publishRunLogBestEffort
 	// resolves the run's tenant from it, so a best-effort envelope stamps
@@ -247,7 +236,7 @@ func (h *BusHandler) getOrCreateRunState(runID, ns, name, jobPath string) *runLo
 	st, ok := h.logRuns[runID]
 	if !ok {
 		appendCtx, appendCancel := context.WithCancel(context.Background())
-		st = &runLogState{ns: ns, name: name, jobPath: jobPath, ackSeq: -1, readableThrough: -1, appendCtx: appendCtx, appendCancel: appendCancel}
+		st = &runLogState{ns: ns, name: name, jobPath: jobPath, ackSeq: -1, appendCtx: appendCtx, appendCancel: appendCancel}
 		h.logRuns[runID] = st
 	}
 	return st
@@ -894,7 +883,6 @@ func (h *BusHandler) flushContiguousLogIndex(ctx context.Context, ns, name, runI
 		st.mu.Lock()
 		st.offset += e.Len
 		st.ackSeq = e.Seq
-		st.ackSeqRecovered = false
 		delete(st.pendingEntries, e.Seq)
 		data := st.pendingData[e.Seq]
 		delete(st.pendingData, e.Seq)
@@ -1047,26 +1035,26 @@ func logWriterKey(ns, name string, chunk *mitev1.LogChunk) string {
 }
 
 // blankPartsAboveAckSeq replaces every stored log part above ackSeq with
-// an empty part, before a new writer appends anything, and skips the
-// parts that restart recovery already counted. No index entry names a
-// part above that readable run. Once the new writer fills the hole below it, the
-// range reader would read the old part's bytes after the new writer's,
-// and restart recovery would index them as a recovered entry and drop
-// the new writer's chunk at that sequence. An empty part adds no bytes.
-// The new writer's own chunk at that sequence then conflicts with the
-// empty part and replaces it through replaceStalePart. ok is false when
-// the finalize deadline passed first.
+// an empty part, before a new writer appends anything. No index entry
+// names such a part: restart recovery indexes every readable part, so
+// the first sequence above ackSeq is always missing or empty. Once the
+// new writer fills the hole below an old part, the range reader would
+// read the old part's bytes after the new writer's, and restart recovery
+// would index them as a recovered entry and drop the new writer's chunk
+// at that sequence. An empty part adds no bytes, and recovery stops at
+// it. The new writer's own chunk at that sequence then conflicts with
+// the empty part and replaces it through replaceStalePart. ok is false
+// when the finalize deadline passed first.
 func (h *BusHandler) blankPartsAboveAckSeq(ctx context.Context, runID string, st *runLogState) (blanked int, ok bool) {
 	st.mu.Lock()
 	from := st.ackSeq + 1
-	recovered := st.ackSeqRecovered
 	st.mu.Unlock()
 
 	key := blob.LogKey(runID)
-	var seqs []int64
+	var parts []blob.Part
 	for {
 		var err error
-		seqs, err = h.logStore.PartSeqs(ctx, key, from)
+		parts, err = h.logStore.Parts(ctx, key, from)
 		if err == nil {
 			break
 		}
@@ -1081,19 +1069,9 @@ func (h *BusHandler) blankPartsAboveAckSeq(ctx context.Context, runID string, st
 		}
 	}
 
-	// A recovered entry at ackSeq counts the bytes of the run of parts
-	// directly above it. Without one, such a run holds only empty parts
-	// of an earlier blank pass, and emptying them again is harmless.
-	readable := 0
-	for recovered && readable < len(seqs) && seqs[readable] == from+int64(readable) {
-		readable++
-	}
-	st.mu.Lock()
-	st.readableThrough = from + int64(readable) - 1
-	st.mu.Unlock()
-
 	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: runCreatedAtFromUUIDv7(runID)}
-	for _, seq := range seqs[readable:] {
+	for _, part := range parts {
+		seq := part.Seq
 		if h.retryWrite(ctx, runID, st, key, seq, nil, func(c context.Context) error {
 			return h.logStore.Overwrite(c, key, seq, []byte{}, opts)
 		}) != writeDone {
@@ -1113,20 +1091,6 @@ func (h *BusHandler) blankPartsAboveAckSeq(ctx context.Context, runID string, st
 // sender is the stale writer, and its chunk is refused, because it must
 // not replace a part of the writer that now owns the run.
 func (h *BusHandler) replaceStalePart(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk, opts blob.ObjectOptions, recheck func() writeResult) (bool, appendOutcome) {
-	st.mu.Lock()
-	counted := chunk.Seq <= st.readableThrough
-	if counted {
-		st.incomplete = true
-		st.incompleteReason = logReasonGatewayGap
-	}
-	st.mu.Unlock()
-	if counted {
-		// A recovered entry already counts this part's bytes. New bytes
-		// of another length would move every later offset.
-		h.log().Error("log part conflicts inside a recovered entry", "run_id", runID, "seq", chunk.Seq)
-		return false, appendAbandon
-	}
-
 	decision, ok := h.confirmOwner(ctx, runID, ns, name, chunk.CellInstance, st)
 	if !ok {
 		return false, appendAbandon
@@ -1243,11 +1207,16 @@ func jitteredDelay(d time.Duration) time.Duration {
 }
 
 // recoverRunState rebuilds a run's write progress from the store on the
-// first chunk the gateway handles for it. When the log holds more bytes
-// than the index covers — a crash between the log append and the index
-// append — it writes one recovered entry for the missing one before
-// anything else appends, so the index never carries a permanent gap for
-// a shortfall the writer can still repair.
+// first chunk the gateway handles for it. A crash between a log append
+// and its index append, or inside flushContiguousLogIndex, leaves log
+// parts above the highest index entry with no entry of their own. It
+// writes one recovered entry for each such part, with that part's own
+// size, before anything else appends. blob.UnindexedLogParts names the
+// parts, and the recorder's next log sequence uses the same rule.
+//
+// st.offset is the end of the index entry at ackSeq, never the log's
+// byte total: a part above the recovered run is not counted, and its
+// writer's later chunk gets its entry at the true offset.
 //
 // It also restores the run's final-marker state from the index's own
 // durable evidence: a restarted gateway that reads back an entry whose
@@ -1258,38 +1227,38 @@ func jitteredDelay(d time.Duration) time.Duration {
 // and leave the recorder's finalize sweep free to call it not-finalized
 // despite the durable evidence sitting right there in the index.
 func (h *BusHandler) recoverRunState(ctx context.Context, runID string, st *runLogState) error {
-	bytesRead, err := logObjectLength(ctx, h.logStore, blob.LogKey(runID))
-	if err != nil {
-		return err
-	}
 	entries, maxSeq, finalSeen, err := readLogIndex(ctx, h.logStore, blob.LogIndexKey(runID))
 	if err != nil {
 		return err
 	}
 
-	var indexCovered int64
+	var offset int64
 	highestWritten := int64(-1)
 	if maxSeq >= 0 {
 		last := entries[maxSeq]
-		indexCovered = last.Offset + last.Len
+		offset = last.Offset + last.Len
 		highestWritten = maxSeq
 	}
 
-	if bytesRead > indexCovered {
-		repairSeq := highestWritten + 1
-		entry := LogIndexEntry{Seq: repairSeq, Offset: indexCovered, Len: bytesRead - indexCovered, Recovered: true}
+	unindexed, err := blob.UnindexedLogParts(ctx, h.logStore, runID, highestWritten+1)
+	if err != nil {
+		return err
+	}
+	createdAt := runCreatedAtFromUUIDv7(runID)
+	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "application/x-ndjson", CreatedAt: createdAt}
+	for _, part := range unindexed {
+		entry := LogIndexEntry{Seq: part.Seq, Offset: offset, Len: part.Size, Recovered: true}
 		line, err := json.Marshal(entry)
 		if err != nil {
 			return err
 		}
 		line = append(line, '\n')
-		createdAt := runCreatedAtFromUUIDv7(runID)
-		opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "application/x-ndjson", CreatedAt: createdAt}
-		if err := h.logStore.Append(ctx, blob.LogIndexKey(runID), repairSeq, line, opts); err != nil {
+		if err := h.logStore.Append(ctx, blob.LogIndexKey(runID), part.Seq, line, opts); err != nil {
 			return err
 		}
-		entries[repairSeq] = entry
-		highestWritten = repairSeq
+		entries[part.Seq] = entry
+		highestWritten = part.Seq
+		offset += part.Size
 	}
 
 	// ackSeq is the highest sequence with no hole below it: the
@@ -1318,8 +1287,15 @@ func (h *BusHandler) recoverRunState(ctx context.Context, runID string, st *runL
 		writer = entries[seq].Writer
 	}
 
+	// The next entry this writer flushes is ackSeq+1, so its offset is
+	// the end of the entry at ackSeq.
+	var ackEnd int64
+	if ackSeq >= 0 {
+		ackEnd = entries[ackSeq].Offset + entries[ackSeq].Len
+	}
+
 	st.mu.Lock()
-	st.offset = bytesRead
+	st.offset = ackEnd
 	st.ackSeq = ackSeq
 	st.pendingEntries = nil
 	st.pendingData = nil
@@ -1327,7 +1303,6 @@ func (h *BusHandler) recoverRunState(ctx context.Context, runID string, st *runL
 	if st.writer == "" {
 		st.writer = writer
 	}
-	st.ackSeqRecovered = ackSeq >= 0 && entries[ackSeq].Recovered
 	st.mu.Unlock()
 	return nil
 }

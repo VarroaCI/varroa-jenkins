@@ -62,14 +62,15 @@ type StoredLogSummary struct {
 // An index entry whose offset is at or above bytesRead is a hole: its
 // metadata exists but its bytes are unreachable, because C1's range
 // reader stops at the first missing part and hides every later one. A
-// byte range below bytesRead that no entry covers is an unattributed
-// chunk, not a hole — a writer crash between the log append and the
-// index append leaves exactly one such range, at most, and the bytes are
-// still served.
+// part below bytesRead that no entry covers is an unattributed chunk,
+// not a hole. A writer crash before the index append, or inside the
+// index flush, leaves such parts above the highest entry, and their
+// bytes are still served. blob.UnindexedLogParts names them, with the
+// same rule the gateway's restart recovery uses.
 //
 // A run with no summary has an unknown declared chunk count. The
 // manifest then derives it from the index's own highest sequence, counts
-// an uncovered trailing byte range as one more chunk, and always reports
+// each unattributed part as one more chunk, and always reports
 // incomplete true with the reason no-summary.
 func BuildLogManifest(ctx context.Context, store blob.Store, runID string, summary *StoredLogSummary) (LogManifest, error) {
 	bytesRead, err := logObjectLength(ctx, store, blob.LogKey(runID))
@@ -82,22 +83,26 @@ func BuildLogManifest(ctx context.Context, store blob.Store, runID string, summa
 		return LogManifest{}, err
 	}
 
-	// maxEntryEnd is the byte total the index's entries account for. A
-	// trailing byte range below bytesRead that no entry covers belongs to
-	// exactly one sequence, maxSeq+1 (design.md D4: the shortfall from a
-	// writer crash is always exactly one entry, and always the last one).
-	// That sequence is unattributed, served data — not a hole — so it is
-	// computed before the hole scan below, and the scan then skips it by
-	// identity rather than by re-deriving the same condition.
+	// maxEntryEnd is the byte total the index's entries account for.
+	// Readable bytes past it belong to the parts directly above maxSeq
+	// that no entry names. Those parts are unattributed, served data, not
+	// holes, so they are computed before the hole scan below, and the
+	// scan then skips them by identity.
 	var maxEntryEnd int64
 	for _, e := range entries {
 		if end := e.Offset + e.Len; end > maxEntryEnd {
 			maxEntryEnd = end
 		}
 	}
-	unattributedSeq := int64(-1)
+	unattributed := map[int64]bool{}
 	if bytesRead > maxEntryEnd {
-		unattributedSeq = maxSeq + 1
+		parts, err := blob.UnindexedLogParts(ctx, store, runID, maxSeq+1)
+		if err != nil {
+			return LogManifest{}, err
+		}
+		for _, part := range parts {
+			unattributed[part.Seq] = true
+		}
 	}
 
 	var declaredCount int64
@@ -106,18 +111,14 @@ func BuildLogManifest(ctx context.Context, store blob.Store, runID string, summa
 		declaredCount = summary.ChunkCount
 	} else {
 		// A run with no summary cannot know its declared count in
-		// advance. The uncovered trailing range, if any, is real served
-		// data: count it as one more chunk rather than silently dropping
-		// it.
-		declaredCount = maxSeq + 1
-		if unattributedSeq >= 0 {
-			declaredCount++
-		}
+		// advance. Each unattributed part is real served data: count it
+		// as one more chunk rather than silently dropping it.
+		declaredCount = maxSeq + 1 + int64(len(unattributed))
 	}
 
 	var missing []int64
 	for seq := int64(0); seq < declaredCount; seq++ {
-		if seq == unattributedSeq {
+		if unattributed[seq] {
 			continue
 		}
 		e, ok := entries[seq]

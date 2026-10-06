@@ -118,6 +118,37 @@ func TestBuildLogManifestUnattributedChunk(t *testing.T) {
 	}
 }
 
+// TestBuildLogManifestUnattributedPartsAreEachServed asserts that each
+// part above the highest index entry is its own unattributed chunk. A
+// crash inside the index flush leaves several such parts, and none of
+// them is a hole.
+func TestBuildLogManifestUnattributedPartsAreEachServed(t *testing.T) {
+	runID := newTestRunID()
+	store := newManifestTestStore(t)
+
+	appendLogPart(t, store, runID, 0, "a0 ")
+	appendIndexEntry(t, store, runID, LogIndexEntry{Seq: 0, Offset: 0, Len: 3})
+	for seq, data := range []string{"a1 ", "a2 ", "a3 "} {
+		appendLogPart(t, store, runID, int64(seq)+1, data)
+	}
+
+	m, err := BuildLogManifest(context.Background(), store, runID, &StoredLogSummary{ChunkCount: 4})
+	if err != nil {
+		t.Fatalf("build manifest: %v", err)
+	}
+	if len(m.MissingSeq) != 0 || m.Incomplete {
+		t.Fatalf("missingSeq = %v incomplete = %v, want none: every unattributed part is served", m.MissingSeq, m.Incomplete)
+	}
+
+	m, err = BuildLogManifest(context.Background(), store, runID, nil)
+	if err != nil {
+		t.Fatalf("build manifest with no summary: %v", err)
+	}
+	if m.ChunkCount != 4 || len(m.MissingSeq) != 0 {
+		t.Fatalf("chunkCount = %d missingSeq = %v, want 4 chunks and none missing", m.ChunkCount, m.MissingSeq)
+	}
+}
+
 // TestBuildLogManifestNoSummaryReportsIncomplete asserts a run with no
 // LogSummary always reports incomplete with the reason no-summary, and
 // still serves every stored chunk by counting an uncovered trailing byte
