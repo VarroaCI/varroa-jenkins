@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -202,5 +203,139 @@ func TestControllerStatusPatch_CarriesDesiredContentHash(t *testing.T) {
 	patch = controllerStatusPatch(&v1alpha1.ControllerStatus{})
 	if _, ok := patch["desiredContentHash"]; ok {
 		t.Fatal("an empty desiredContentHash is in the patch")
+	}
+}
+
+// manualCellWithPendingRehydration answers a manual-mode cell whose last
+// delivered push holds the current desired state, with one tenant whose
+// rehydration is not applied. The first tick runs in automatic mode, so it
+// delivers and stamps both hashes. records answers the record store.
+func manualCellWithPendingRehydration(t *testing.T, name string, records cells.RecordsFunc) (*Reconciler, *scriptedSendTransport, *v1alpha1.Controller) {
+	t.Helper()
+	client := newTestClientWithGateBundle()
+	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
+	rec, registry := newTestReconcilerForGate(client)
+	rec.homesFunc = func(context.Context, cells.HomesRequest) (cells.HomesResult, error) {
+		return cells.HomesResult{JobHomes: map[string]int32{"build": 0}}, nil
+	}
+	rec.SetRecordsFunc(records)
+	crdstore.MustSeed(client.store, &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "team-a"},
+		Spec:       v1alpha1.TeamSpec{Pipelines: &v1alpha1.TeamPipelinesSpec{}},
+		Status: v1alpha1.TeamStatus{
+			Placement: &v1alpha1.TeamPlacementStatus{Cell: name, CellNamespace: "default", Generation: 1},
+		},
+	})
+	tr := &scriptedSendTransport{Transport: rec.miteTransport, epoch: 1}
+	rec.miteTransport = tr
+
+	cr := newGateCtrl(name, 0, "", nil)
+	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
+	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"team-a"}, Instance: "uid-1"}
+	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if tr.sends != 1 || cr.Status.DesiredStateHash == "" || cr.Status.DesiredContentHash == "" {
+		t.Fatalf("first push: sends=%d hash=%q content=%q, want one delivered push with both hashes",
+			tr.sends, cr.Status.DesiredStateHash, cr.Status.DesiredContentHash)
+	}
+	cr.Spec.ReconciliationPolicy.Mode = v1alpha1.ReconciliationModeManual
+	return rec, tr, cr
+}
+
+// oneJobRecords answers a record store with one job of team-a.
+func oneJobRecords(context.Context, cells.RecordsRequest) (cells.RecordsResult, error) {
+	return cells.RecordsResult{Jobs: []cells.JobRecords{{JobPath: "team-a/build", NextBuildNumber: 5}}}, nil
+}
+
+// TestReconcileConnected_ManualCellPushesAPendingRehydrationBundle pins
+// that a manual-mode cell pushes a pending rehydration bundle with no
+// approval. The bundle stays outside the full hash, so the hash does not
+// change, and the delivered push applied. A stale pending restart is
+// cleared.
+func TestReconcileConnected_ManualCellPushesAPendingRehydrationBundle(t *testing.T) {
+	rec, tr, cr := manualCellWithPendingRehydration(t, "cell-rehydration-push", oneJobRecords)
+	delivered := cr.Status.DesiredStateHash
+	cr.Status.LastApplyResult = &v1alpha1.ApplyResult{Hash: delivered, Succeeded: true}
+	cr.Status.PendingRestart = &v1alpha1.PendingRestart{
+		DesiredStateHash: "stale",
+		ContentHash:      "other-content",
+		Changes:          []string{"config"},
+	}
+
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if tr.sends != 2 {
+		t.Fatalf("sends = %d, want 2: the pending rehydration bundle must go out", tr.sends)
+	}
+	if tr.last.Rehydration == nil {
+		t.Fatal("the push carries no rehydration bundle")
+	}
+	if tr.last.ApplyWhen != "" {
+		t.Fatalf("applyWhen = %q, want an immediate apply", tr.last.ApplyWhen)
+	}
+	if cr.Status.PendingRestart != nil {
+		t.Fatalf("pending restart = %+v, want none", cr.Status.PendingRestart)
+	}
+	if cr.Status.DesiredStateHash != delivered {
+		t.Fatalf("desiredStateHash = %q, want the unchanged hash %q", cr.Status.DesiredStateHash, delivered)
+	}
+	entries := cr.Status.Cell.Rehydration
+	if len(entries) != 1 || entries[0].CommandID != tr.last.CommandId {
+		t.Fatalf("rehydration entries = %+v, want one entry for the sent command %q", entries, tr.last.CommandId)
+	}
+}
+
+// TestReconcileConnected_ManualCellHoldsRehydrationWhileTheDeliveredPushIsPending
+// pins that a rehydration bundle does not replace a delivered push with no
+// apply result yet. That push can be an approval that waits for idle
+// builds, and a newer push would apply its content at once.
+func TestReconcileConnected_ManualCellHoldsRehydrationWhileTheDeliveredPushIsPending(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		result *v1alpha1.ApplyResult
+	}{
+		{"no result", nil},
+		{"result for an older push", &v1alpha1.ApplyResult{Hash: "older", Succeeded: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec, tr, cr := manualCellWithPendingRehydration(t, "cell-rehydration-hold", oneJobRecords)
+			cr.Status.LastApplyResult = tc.result
+
+			_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+			if tr.sends != 1 {
+				t.Fatalf("sends = %d, want 1: the tick must hold", tr.sends)
+			}
+			if cr.Status.PendingRestart != nil {
+				t.Fatalf("pending restart = %+v, want none", cr.Status.PendingRestart)
+			}
+		})
+	}
+}
+
+// TestReconcileConnected_ManualCellHoldsRehydrationAfterAFailedApply pins
+// that a failed apply of the delivered content stops the rehydration
+// push. The user approves the content again first.
+func TestReconcileConnected_ManualCellHoldsRehydrationAfterAFailedApply(t *testing.T) {
+	rec, tr, cr := manualCellWithPendingRehydration(t, "cell-rehydration-failed", oneJobRecords)
+	cr.Status.LastApplyResult = &v1alpha1.ApplyResult{Hash: cr.Status.DesiredStateHash, Succeeded: false}
+
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if tr.sends != 1 {
+		t.Fatalf("sends = %d, want 1: the tick must hold", tr.sends)
+	}
+}
+
+// TestReconcileConnected_ManualCellSendsNothingWithoutABundle pins that a
+// tenant that is pending with no bundle sends no push. Such a push would
+// only send the delivered state again.
+func TestReconcileConnected_ManualCellSendsNothingWithoutABundle(t *testing.T) {
+	failing := func(context.Context, cells.RecordsRequest) (cells.RecordsResult, error) {
+		return cells.RecordsResult{}, errors.New("record store unavailable")
+	}
+	rec, tr, cr := manualCellWithPendingRehydration(t, "cell-rehydration-nobundle", failing)
+	cr.Status.LastApplyResult = &v1alpha1.ApplyResult{Hash: cr.Status.DesiredStateHash, Succeeded: true}
+
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if tr.sends != 1 {
+		t.Fatalf("sends = %d, want 1: a pending tenant with no bundle sends nothing", tr.sends)
 	}
 }

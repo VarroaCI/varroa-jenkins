@@ -179,11 +179,13 @@ sections describe.
     and wave gates (`redeliver`), because the removed KV bucket no longer
     replays it. Each delivered push also stamps `DesiredContentHash`
     (`computeDesiredContentHash`, no tenant homes). In `manual` mode,
-    `manualPlacementChange` pushes a change that keeps that content hash at once
+    `manualOperatorOwnedChange` pushes a change that keeps that content hash at once
     when `LastApplyResult` shows the delivered hash applied, holds it with no
     pending restart while that hash has no result (an approved push can wait for
     idle builds, and the mite keeps only the newest state), and raises a pending
-    restart when that apply failed.
+    restart when that apply failed. A cell whose full hash is unchanged pushes an
+    attached rehydration bundle under the same push and hold rule; it raises no
+    pending restart and clears a stale one.
   - `handleRunning` never changes the phase of a disconnected mite. Its
     `provisioningTimeout` guard skips a controller whose `StreamLost`
     transition is later than `ProvisioningStartedAt` (`streamLostSince`); a

@@ -4231,24 +4231,38 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 				raisePendingRestart(&cr.Status, now, desiredHash, contentHash,
 					computeChangedSections(snapshot, desired))
 				logger.Info("manual mode, mite reported failure for pending hash, re-flagging")
+				return nil
 			}
-			return nil
-		}
-		switch manualPlacementChange(&cr.Status, contentHash) {
-		case placementPush:
-			// The content is the delivered and applied content, so the
-			// push carries only placement data. It needs no approval.
+			// The rehydration bundle stays outside the full hash, so a
+			// pending bundle arrives with an unchanged hash. It is
+			// operator-owned build-record data and needs no approval. It
+			// waits for an apply result of the delivered push, the same
+			// rule as a placement-only change.
+			if desired.Rehydration == nil ||
+				manualOperatorOwnedChange(&cr.Status, contentHash) != placementPush {
+				return nil
+			}
+			// The push carries the delivered and applied content, so a
+			// pending restart that remains is stale.
 			cr.Status.PendingRestart = nil
-			logger.Info("manual mode, placement-only change, pushing without approval")
-		case placementHold:
-			logger.Debug("manual mode, placement-only change waits for the delivered push to apply")
-			return nil
-		default:
-			// Manual mode: set PendingRestart instead of auto-pushing.
-			raisePendingRestart(&cr.Status, now, desiredHash, contentHash,
-				computeChangedSections(snapshot, desired))
-			logger.Info("manual mode, config drift detected, pending approval")
-			return nil
+			logger.Info("manual mode, pending rehydration bundle, pushing without approval")
+		} else {
+			switch manualOperatorOwnedChange(&cr.Status, contentHash) {
+			case placementPush:
+				// The content is the delivered and applied content, so the
+				// push carries only placement data. It needs no approval.
+				cr.Status.PendingRestart = nil
+				logger.Info("manual mode, placement-only change, pushing without approval")
+			case placementHold:
+				logger.Debug("manual mode, placement-only change waits for the delivered push to apply")
+				return nil
+			default:
+				// Manual mode: set PendingRestart instead of auto-pushing.
+				raisePendingRestart(&cr.Status, now, desiredHash, contentHash,
+					computeChangedSections(snapshot, desired))
+				logger.Info("manual mode, config drift detected, pending approval")
+				return nil
+			}
 		}
 	}
 
@@ -6507,8 +6521,9 @@ func raisePendingRestart(status *v1alpha1.ControllerStatus, now metav1.Time, des
 	}
 }
 
-// placementVerdict is the manual-mode answer for a desired state whose
-// full hash differs from the delivered one.
+// placementVerdict is the manual-mode answer for a desired state that
+// differs from the delivered one only in operator-owned data: the tenant
+// homes or the rehydration bundle.
 type placementVerdict int
 
 const (
@@ -6524,10 +6539,11 @@ const (
 	placementHold
 )
 
-// manualPlacementChange classifies a manual-mode change by its content
-// hash. Tenant homes stay outside the content hash, so a change that keeps
-// the delivered content hash changes only placement data.
-func manualPlacementChange(status *v1alpha1.ControllerStatus, contentHash string) placementVerdict {
+// manualOperatorOwnedChange classifies a manual-mode change by its content
+// hash. Tenant homes and the rehydration bundle stay outside the content
+// hash, so a change that keeps the delivered content hash changes only
+// operator-owned data.
+func manualOperatorOwnedChange(status *v1alpha1.ControllerStatus, contentHash string) placementVerdict {
 	if status.DesiredContentHash == "" || status.DesiredContentHash != contentHash {
 		return placementApproval
 	}
