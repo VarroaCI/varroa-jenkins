@@ -1156,8 +1156,9 @@ func (c *ConfigCRUD) HandleBundlesPreview(data []byte) []byte {
 // composeRequestTimeout limits the work of one bundle compose request on the
 // operator. It stays under the requester's 60-second timeout, so a compose
 // that reaches it still sends a compose error before the requester stops.
-// Only the steps that observe the context stop at it. A git process does
-// not observe the context and can run past it.
+// Every step of the compose must observe the context: git and OCI fetches,
+// and the wait for the per-repo git cache lock. A step that ignores the
+// context holds the compose and its compose slot past this limit.
 const composeRequestTimeout = 55 * time.Second
 
 // composeBundle resolves git auth, runs the composer, and returns

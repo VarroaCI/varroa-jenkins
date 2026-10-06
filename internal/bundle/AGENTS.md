@@ -154,7 +154,9 @@ index parsing, and pre-apply content validation.
   locally from the bare store into a private `refs/varroa/*` namespace — never
   `refs/heads/*` directly, since git refuses to fetch into a non-bare repo's
   checked-out (even unborn) branch. Nil `*CloneCache` = disabled;
-  `Resolver.Materialize` falls back to `GitCloner.Clone` directly.
+  `Resolver.Materialize` falls back to `GitCloner.Clone` directly. The
+  per-key lock is a one-slot channel, not a mutex: a waiter leaves when its
+  context is done, so a compose never inherits another caller's stuck fetch.
 - **`GitCloner`** (`git.go`) — `validateRepoURL` is the RCE defense: only
   `https://`, `ssh://`, scp-like `[user@]host:path`; any `"<transport>::"`
   form and `file://` (except test-only `AllowLocalTransportForTest`) rejected
@@ -162,6 +164,14 @@ index parsing, and pre-apply content validation.
   `GitAuth` supports basic (askpass script, avoids argv leak) or SSH (temp
   key, mode 0600, optional pinned `known_hosts`). `redactURL` strips creds
   before logging.
+- **Git deadlines** — every git process in this package starts through
+  `gitCommand(ctx, ...)` (`gitcmd_unix.go`). It runs git in its own process
+  group, kills the whole group when ctx is done, and sets a 5s `WaitDelay`.
+  `exec.CommandContext` alone is not sufficient: it kills only `git`, and
+  the `git-remote-https`/`ssh` child keeps the stderr pipe and the connection
+  open. `Clone`, `RemoteSHA`, and `CloneCache.Checkout` take a context, and a
+  failure that ctx causes wraps `ctx.Err()`. `gitcmd_other.go` (non-Unix) has
+  no group kill. Never add a bare `exec.Command("git", ...)` here.
 - **Manifest/validation** — `ParseManifest` requires `bundle.yaml` with
   `id`/`version`/`apiVersion` (`"1"`/`"2"`) and ≥1 `jcasc` file; all
   referenced paths must exist and must not escape the bundle directory.
@@ -221,7 +231,8 @@ make lint
 
 Key tests: `composer_test.go`/`composer_namespace_test.go` (merge strategy,
 itemRef fallback/shadowing), `clonecache_test.go`, `git_test.go` (URL
-validation/RCE guard), `validator_test.go`, `unresolved_test.go`,
+validation/RCE guard), `git_deadline_test.go` (git stops at the context
+deadline, against a silent 127.0.0.1 listener), `validator_test.go`, `unresolved_test.go`,
 `location_test.go`, `bundle_test.go`, `pipelinetemplates_test.go`
 (`InjectPipelineTemplates`), `pipelinetemplate/corpus_test.go` (the shared
 golden corpus, `testdata/schema-corpus/`, that the plugin and the frontend

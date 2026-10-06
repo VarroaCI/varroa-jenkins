@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel/metric/noop"
 
@@ -1188,4 +1189,34 @@ func TestComposer_RejectsInvalidItemRefAsInput(t *testing.T) {
 	if result.Materialized == nil || !strings.Contains(result.Materialized.JenkinsYAML, "key: val") {
 		t.Errorf("good-item content missing from composed output")
 	}
+}
+
+// A git input whose remote never answers ends at the compose deadline. The
+// compose then reports a compose error for the input as data.
+func TestCompose_GitInputStopsAtDeadline(t *testing.T) {
+	remote := newSilentRemote(t)
+	c := NewComposer(&fakeItemLookup{}, NewResolver(noop.NewMeterProvider(), t.TempDir()), t.TempDir(), "")
+	spec := &v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{
+			{GitSource: &v1alpha1.GitBundleSource{RepoURL: remote.url, Path: ".", Revision: "main"}},
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	start := time.Now()
+	result, err := c.Compose(ctx, "ns", spec, nil, nil)
+	elapsed := time.Since(start)
+	if elapsed > time.Second+deadlineReturnBound {
+		t.Errorf("Compose returned after %v, want at most %v", elapsed, time.Second+deadlineReturnBound)
+	}
+	if err != nil {
+		t.Fatalf("Compose returned a hard error, want the failure as data: %v", err)
+	}
+	if len(result.Errors) != 1 ||
+		!strings.Contains(result.Errors[0], "git input[0]") ||
+		!strings.Contains(result.Errors[0], context.DeadlineExceeded.Error()) {
+		t.Errorf("result.Errors = %q, want one git input[0] deadline error", result.Errors)
+	}
+	remote.assertPeerClosed(t)
 }

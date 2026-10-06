@@ -397,7 +397,9 @@ func TestEvict_SkipsInUse(t *testing.T) {
 	// Acquire the lock for repo1 (simulate in-flight checkout).
 	key1 := cacheKey(bareURL1)
 	lock := c.perRepoLock(key1)
-	lock.mu.Lock()
+	if !lock.tryLock() {
+		t.Fatal("repo1 lock is unexpectedly held")
+	}
 
 	var fc atomic.Int32
 	c.fetchHook = func() { fc.Add(1) }
@@ -408,7 +410,7 @@ func TestEvict_SkipsInUse(t *testing.T) {
 	_, _, err = c.Checkout(context.Background(), bareURL2, "main", dir2, nil)
 	must(t, err)
 
-	lock.mu.Unlock()
+	lock.unlock()
 
 	if n := fc.Load(); n != 1 {
 		t.Errorf("in-use skip: fetch count = %d, want 1", n)

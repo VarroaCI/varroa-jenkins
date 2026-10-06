@@ -690,7 +690,11 @@ sections describe.
     drift loop has OCI branches parallel to the git branches: resolves creds via
     `OCIAuthFromSecret`, resolves manifest digest via `oci.RegistryStore.Resolve`,
     populates `resolvedOCIAuth[i]`, and `hasNewOCIInputs` gates the skip path.
-    `Composer.Compose` receives `resolvedOCIAuth` as its 5th argument. An
+    `Composer.Compose` receives `resolvedOCIAuth` as its 5th argument.
+    `catalogFetchTimeout` (2m) bounds the remote fetch work (git and OCI) of
+    one source sync and of one bundle's drift checks plus compose, because the
+    ticker runs them in series. Status writes keep the ticker ctx, never the
+    timed one, so a timed-out sync still records its error. An
     `itemRef` that no longer resolves records the `ItemMissingRevision`
     sentinel (`"<missing>"`, never valid sha256 hex) rather than being skipped:
     skipping left no `observedRevisions` entry, so the gate saw no drift and the

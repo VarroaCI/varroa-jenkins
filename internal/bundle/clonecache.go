@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -19,11 +18,43 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// repoLock serialises concurrent Checkout calls for the same cache key.
+// repoLock serialises concurrent Checkout calls for the same cache key. It
+// is a one-slot channel, not a mutex, so that a waiter stops when its
+// context is done. A git process that holds the lock can take as long as
+// its own context allows, and a waiter must not inherit that time.
 type repoLock struct {
-	mu    sync.Mutex
+	sem   chan struct{}
 	inUse int
 }
+
+func newRepoLock() *repoLock {
+	return &repoLock{sem: make(chan struct{}, 1)}
+}
+
+// lock takes the lock, or returns ctx.Err() when ctx is done first.
+func (l *repoLock) lock(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case l.sem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// tryLock takes the lock only when it is free.
+func (l *repoLock) tryLock() bool {
+	select {
+	case l.sem <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (l *repoLock) unlock() { <-l.sem }
 
 // repoMeta is the per-entry metadata persisted on disk.
 type repoMeta struct {
@@ -157,7 +188,7 @@ func (c *CloneCache) perRepoLock(key string) *repoLock {
 	defer c.mu.Unlock()
 	rl, ok := c.locks[key]
 	if !ok {
-		rl = &repoLock{}
+		rl = newRepoLock()
 		c.locks[key] = rl
 	}
 	rl.inUse++
@@ -229,12 +260,12 @@ func (c *CloneCache) Checkout(ctx context.Context, repoURL, revision, targetDir 
 		sha = revision
 		isPinned = true
 	} else if revision == "" {
-		sha, err = c.cloner.RemoteSHA(repoURL, "HEAD", auth)
+		sha, err = c.cloner.RemoteSHA(ctx, repoURL, "HEAD", auth)
 		if err != nil {
 			return "", false, fmt.Errorf("resolve HEAD: %w", err)
 		}
 	} else {
-		sha, err = c.cloner.RemoteSHA(repoURL, revision, auth)
+		sha, err = c.cloner.RemoteSHA(ctx, repoURL, revision, auth)
 		if err != nil {
 			return "", false, fmt.Errorf("resolve revision %s: %w", revision, err)
 		}
@@ -244,9 +275,12 @@ func (c *CloneCache) Checkout(ctx context.Context, repoURL, revision, targetDir 
 
 	// Step 3: per-repo lock.
 	lock := c.perRepoLock(key)
-	lock.mu.Lock()
+	if err := lock.lock(ctx); err != nil {
+		c.releaseRepoLock(key)
+		return "", false, fmt.Errorf("wait for git cache lock on %s: %w", redactURL(repoURL), err)
+	}
 	defer func() {
-		lock.mu.Unlock()
+		lock.unlock()
 		c.releaseRepoLock(key)
 	}()
 
@@ -254,13 +288,13 @@ func (c *CloneCache) Checkout(ctx context.Context, repoURL, revision, targetDir 
 
 	// Step 4: ensure bare repository exists.
 	if _, statErr := os.Stat(bare); os.IsNotExist(statErr) {
-		if err := c.initBare(key, bare, repoURL); err != nil {
+		if err := c.initBare(ctx, key, bare, repoURL); err != nil {
 			return "", false, err
 		}
 	}
 
 	// Step 5: hit check.
-	hit = c.catFileExists(bare, sha)
+	hit = c.catFileExists(ctx, bare, sha)
 	if !hit {
 		// MISS — fetch.
 		if c.fetchHook != nil {
@@ -271,17 +305,20 @@ func (c *CloneCache) Checkout(ctx context.Context, repoURL, revision, targetDir 
 		}
 
 		// Race re-resolution (ls-remote vs fetch).
-		if !c.catFileExists(bare, sha) && !isPinned {
+		if !c.catFileExists(ctx, bare, sha) && !isPinned {
 			ref := revision
 			if ref == "" {
 				ref = "HEAD"
 			}
-			out, err := exec.Command("git", "-C", bare, "rev-parse", "refs/varroa/"+ref).Output()
+			out, err := gitCommand(ctx, "-C", bare, "rev-parse", "refs/varroa/"+ref).Output()
 			if err == nil {
 				sha = strings.TrimSpace(string(out))
 			}
 		}
-		if !c.catFileExists(bare, sha) {
+		if !c.catFileExists(ctx, bare, sha) {
+			if ctx.Err() != nil {
+				return "", false, fmt.Errorf("check fetched SHA %s for %s: %w", sha, redactURL(repoURL), ctx.Err())
+			}
 			return "", false, fmt.Errorf("desired SHA %s is absent after fetch for %s", sha, redactURL(repoURL))
 		}
 
@@ -312,7 +349,7 @@ func (c *CloneCache) Checkout(ctx context.Context, repoURL, revision, targetDir 
 	}
 
 	// Step 7: materialize via local clone + checkout.
-	if err := c.localClone(bare, targetDir, sha); err != nil {
+	if err := c.localClone(ctx, bare, targetDir, sha); err != nil {
 		return "", false, err
 	}
 
@@ -330,11 +367,14 @@ func (c *CloneCache) Checkout(ctx context.Context, repoURL, revision, targetDir 
 }
 
 // initBare creates a new bare repository and its metadata file.
-func (c *CloneCache) initBare(key, bare, repoURL string) error {
-	cmd := exec.Command("git", "init", "--bare", bare)
+func (c *CloneCache) initBare(ctx context.Context, key, bare, repoURL string) error {
+	cmd := gitCommand(ctx, "init", "--bare", bare)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("git init --bare %s: %w", bare, ctx.Err())
+		}
 		return fmt.Errorf("git init --bare %s: %s", bare, stderr.String())
 	}
 
@@ -350,14 +390,14 @@ func (c *CloneCache) initBare(key, bare, repoURL string) error {
 }
 
 // catFileExists checks if the given SHA exists as a commit object in the bare repo.
-func (c *CloneCache) catFileExists(bare, sha string) bool {
-	cmd := exec.Command("git", "-C", bare, "cat-file", "-e", sha+"^{commit}")
+func (c *CloneCache) catFileExists(ctx context.Context, bare, sha string) bool {
+	cmd := gitCommand(ctx, "-C", bare, "cat-file", "-e", sha+"^{commit}")
 	return cmd.Run() == nil
 }
 
 // fetchBare performs a shallow fetch into the bare repository. The URL is passed
-// as argv, never configured as a remote.
-func (c *CloneCache) fetchBare(_ context.Context, bare, repoURL, sha, revision string, auth *GitAuth) error {
+// as argv, never configured as a remote. The fetch stops when ctx is done.
+func (c *CloneCache) fetchBare(ctx context.Context, bare, repoURL, sha, revision string, auth *GitAuth) error {
 	authEnv, cleanup, err := gitAuthEnv(auth)
 	if err != nil {
 		return fmt.Errorf("setup git auth: %w", err)
@@ -377,10 +417,13 @@ func (c *CloneCache) fetchBare(_ context.Context, bare, repoURL, sha, revision s
 	if isCommitSHA(revision) {
 		// Pinned SHA: fetch into a ref so it's reachable for clone.
 		ref := "refs/varroa/pinned/" + sha
-		cmd := exec.Command("git", "-C", bare, "fetch", "--depth=1", repoURL, "+"+sha+":"+ref)
+		cmd := gitCommand(ctx, "-C", bare, "fetch", "--depth=1", repoURL, "+"+sha+":"+ref)
 		cmd.Env = gitEnv
 		cmd.Stderr = &stderr
 		if err := cmd.Run(); err != nil {
+			if ctx.Err() != nil {
+				return fmt.Errorf("git fetch %s: %w", redactURL(repoURL), ctx.Err())
+			}
 			return fmt.Errorf("git fetch %s: %s", redactURL(repoURL), stderr.String())
 		}
 	} else {
@@ -388,10 +431,13 @@ func (c *CloneCache) fetchBare(_ context.Context, bare, repoURL, sha, revision s
 		if ref == "" {
 			ref = "HEAD"
 		}
-		cmd := exec.Command("git", "-C", bare, "fetch", "--depth=1", "--no-tags", repoURL, "+"+ref+":refs/varroa/"+ref)
+		cmd := gitCommand(ctx, "-C", bare, "fetch", "--depth=1", "--no-tags", repoURL, "+"+ref+":refs/varroa/"+ref)
 		cmd.Env = gitEnv
 		cmd.Stderr = &stderr
 		if err := cmd.Run(); err != nil {
+			if ctx.Err() != nil {
+				return fmt.Errorf("git fetch %s %s: %w", redactURL(repoURL), ref, ctx.Err())
+			}
 			return fmt.Errorf("git fetch %s %s: %s", redactURL(repoURL), ref, stderr.String())
 		}
 	}
@@ -409,23 +455,26 @@ func (c *CloneCache) fetchBare(_ context.Context, bare, repoURL, sha, revision s
 // unborn init.defaultBranch of a fresh `git init` — so any repo tracking a
 // branch of that name would fail to materialize. The SHA
 // checkout below detaches HEAD and only needs the objects, not branch refs.
-func (c *CloneCache) localClone(bare, targetDir, sha string) error {
+func (c *CloneCache) localClone(ctx context.Context, bare, targetDir, sha string) error {
 	gitEnv := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	gitEnv = append(gitEnv, "GIT_ALLOW_PROTOCOL=https:ssh:file")
 
 	var stderr bytes.Buffer
 
 	// Step 1: init and add remote.
-	initCmd := exec.Command("git", "init", targetDir)
+	initCmd := gitCommand(ctx, "init", targetDir)
 	initCmd.Env = gitEnv
 	initCmd.Stderr = &stderr
 	if err := initCmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("git init %s: %w", targetDir, ctx.Err())
+		}
 		return fmt.Errorf("git init %s: %s", targetDir, stderr.String())
 	}
 
 	// Step 2: fetch from the bare into the private refs/varroa/* namespace.
 	stderr.Reset()
-	fetchCmd := exec.Command("git", "-C", targetDir, "fetch", "--no-tags", bare,
+	fetchCmd := gitCommand(ctx, "-C", targetDir, "fetch", "--no-tags", bare,
 		"refs/varroa/*:refs/varroa/*",
 		"refs/heads/*:refs/varroa/heads/*",
 	)
@@ -435,15 +484,21 @@ func (c *CloneCache) localClone(bare, targetDir, sha string) error {
 		// If the bare has no refs at all (empty initial cache entry before fetch),
 		// the fetch legitimately fails. In that case there's nothing to check out
 		// and the caller should have already ensured the SHA is present.
+		if ctx.Err() != nil {
+			return fmt.Errorf("git fetch (local cache) %s: %w", bare, ctx.Err())
+		}
 		return fmt.Errorf("git fetch (local cache) %s: %s", bare, stderr.String())
 	}
 
 	// Step 3: checkout the desired SHA.
 	stderr.Reset()
-	checkoutCmd := exec.Command("git", "-C", targetDir, "checkout", "--quiet", sha)
+	checkoutCmd := gitCommand(ctx, "-C", targetDir, "checkout", "--quiet", sha)
 	checkoutCmd.Env = gitEnv
 	checkoutCmd.Stderr = &stderr
 	if err := checkoutCmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("git checkout %s: %w", sha, ctx.Err())
+		}
 		return fmt.Errorf("git checkout %s: %s", sha, stderr.String())
 	}
 	return nil
@@ -488,10 +543,10 @@ func (c *CloneCache) evict() {
 				continue
 			}
 			if rl, ok := c.locks[e.key]; ok {
-				if !rl.mu.TryLock() {
+				if !rl.tryLock() {
 					continue
 				}
-				rl.mu.Unlock()
+				rl.unlock()
 			}
 			victim = e
 			break

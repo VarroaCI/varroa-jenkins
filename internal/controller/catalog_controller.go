@@ -49,6 +49,15 @@ const (
 	// out of band, and writes that failed with a warning on an earlier pass.
 	ucFullPassInterval = 30 * time.Minute
 
+	// catalogFetchTimeout limits the remote fetch work of one CatalogSource
+	// sync or one ComposedBundle reconcile: the git clone or ls-remote, the
+	// OCI resolve and pull, and the compose. The catalog ticker reconciles
+	// every source and bundle in series, so a git remote or a registry that
+	// never answers must not stop every catalog sync. Status writes use the
+	// ticker context, so a sync that reaches this limit still records its
+	// error.
+	catalogFetchTimeout = 2 * time.Minute
+
 	// catalogSourceLabel is the label key set on CatalogItems to identify their
 	// originating CatalogSource.
 	catalogSourceLabel = "varroa.dev/catalog-source"
@@ -189,6 +198,8 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, src *v1alpha1.Catalog
 	}
 
 	// Clone the repository with optional git auth, or pull OCI artifact.
+	fetchCtx, cancelFetch := context.WithTimeout(ctx, catalogFetchTimeout)
+	defer cancelFetch()
 	var rev string
 	if src.Spec.RepoURL != "" {
 		var auth *bundle.GitAuth
@@ -219,18 +230,18 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, src *v1alpha1.Catalog
 
 		if r.cloneCache != nil {
 			var err error
-			rev, _, err = r.cloneCache.Checkout(ctx, src.Spec.RepoURL, src.Spec.Revision, dir, auth)
+			rev, _, err = r.cloneCache.Checkout(fetchCtx, src.Spec.RepoURL, src.Spec.Revision, dir, auth)
 			if err != nil {
 				r.setError(ctx, src, fmt.Sprintf("clone repo: %v", err))
 				return
 			}
 		} else {
-			if err := r.cloner.Clone(src.Spec.RepoURL, src.Spec.Revision, dir, auth); err != nil {
+			if err := r.cloner.Clone(fetchCtx, src.Spec.RepoURL, src.Spec.Revision, dir, auth); err != nil {
 				r.setError(ctx, src, fmt.Sprintf("clone repo: %v", err))
 				return
 			}
 			var err error
-			rev, err = getGitRevision(dir)
+			rev, err = getGitRevision(fetchCtx, dir)
 			if err != nil {
 				r.setError(ctx, src, fmt.Sprintf("resolve revision: %v", err))
 				return
@@ -276,7 +287,7 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, src *v1alpha1.Catalog
 		}
 
 		// Resolve the manifest digest for ObservedRevision.
-		desc, err := store.Resolve(ctx, src.Spec.OCIRef)
+		desc, err := store.Resolve(fetchCtx, src.Spec.OCIRef)
 		if err != nil {
 			r.setError(ctx, src, fmt.Sprintf("resolve OCI ref %q: %v", src.Spec.OCIRef, err))
 			return
@@ -284,7 +295,7 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, src *v1alpha1.Catalog
 		rev = desc.Digest
 
 		// Pull the manifest to find the catalog bundle layer.
-		manifest, err := store.Pull(ctx, src.Spec.OCIRef)
+		manifest, err := store.Pull(fetchCtx, src.Spec.OCIRef)
 		if err != nil {
 			r.setError(ctx, src, fmt.Sprintf("pull OCI artifact %q: %v", src.Spec.OCIRef, err))
 			return
@@ -303,7 +314,7 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, src *v1alpha1.Catalog
 			return
 		}
 
-		rc, err := store.FetchBlob(ctx, layer.Digest)
+		rc, err := store.FetchBlob(fetchCtx, layer.Digest)
 		if err != nil {
 			r.setError(ctx, src, fmt.Sprintf("fetch catalog layer %q: %v", layer.Digest, err))
 			return
@@ -444,6 +455,9 @@ func (r *CatalogReconciler) ReconcileComposedBundle(ctx context.Context, cb *v1a
 	}
 
 	logger := r.logger.With("name", cb.Name, "namespace", cb.Namespace)
+
+	fetchCtx, cancelFetch := context.WithTimeout(ctx, catalogFetchTimeout)
+	defer cancelFetch()
 
 	previousPhase := cb.Status.Phase
 	previousContentRef := cb.Status.ContentRef
@@ -611,7 +625,7 @@ func (r *CatalogReconciler) ReconcileComposedBundle(ctx context.Context, cb *v1a
 			}
 
 			// Check remote SHA for drift detection.
-			sha, err := r.cloner.RemoteSHA(gs.RepoURL, gs.Revision, auth)
+			sha, err := r.cloner.RemoteSHA(fetchCtx, gs.RepoURL, gs.Revision, auth)
 			if err != nil {
 				logger.Warn("git ls-remote failed", "input", i, "repo", gs.RepoURL, "error", err)
 				continue
@@ -682,7 +696,7 @@ func (r *CatalogReconciler) ReconcileComposedBundle(ctx context.Context, cb *v1a
 			}
 
 			// Resolve CURRENT manifest digest for drift detection.
-			desc, err := store.Resolve(ctx, ocs.Ref)
+			desc, err := store.Resolve(fetchCtx, ocs.Ref)
 			if err != nil {
 				logger.Warn("OCI resolve failed", "input", i, "ref", ocs.Ref, "error", err)
 				continue
@@ -742,7 +756,7 @@ func (r *CatalogReconciler) ReconcileComposedBundle(ctx context.Context, cb *v1a
 
 	// Run the composition pipeline with pre-resolved git auth.
 	composer := bundle.NewComposer(storeItemLookup{r.store}, r.resolver, r.workDir, r.operatorNamespace)
-	result, err := composer.Compose(ctx, cb.Namespace, &cb.Spec, resolvedAuth, resolvedOCIAuth)
+	result, err := composer.Compose(fetchCtx, cb.Namespace, &cb.Spec, resolvedAuth, resolvedOCIAuth)
 	if err != nil {
 		status := r.buildStatus(cb, v1alpha1.ComposedBundleInvalid, len(cb.Spec.Inputs), "",
 			previousContentRef, observedRevisions,
@@ -1047,10 +1061,13 @@ func (r *CatalogReconciler) setError(ctx context.Context, src *v1alpha1.CatalogS
 }
 
 // getGitRevision returns the full SHA of HEAD in the given git repository.
-func getGitRevision(dir string) (string, error) {
-	cmd := exec.Command("git", "-C", dir, "rev-parse", "HEAD")
+func getGitRevision(ctx context.Context, dir string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "HEAD")
 	out, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("git rev-parse HEAD: %w", ctx.Err())
+		}
 		return "", fmt.Errorf("git rev-parse HEAD: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
