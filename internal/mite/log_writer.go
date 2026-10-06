@@ -129,6 +129,12 @@ type runLogState struct {
 	ackSeq         int64
 	pendingEntries map[int64]LogIndexEntry
 
+	// adoptedThrough is the ackSeq at the moment the current writer was
+	// adopted from another writer, or -1 when it never was. A part at or
+	// below it can hold the old writer's bytes, so a chunk of the current
+	// writer at or below it is checked against the stored part.
+	adoptedThrough int64
+
 	// pendingData holds the raw console bytes for a sequence whose log
 	// part is durable but whose index entry has not yet flushed. It
 	// mirrors pendingEntries and clears with it. flushContiguousLogIndex
@@ -236,7 +242,7 @@ func (h *BusHandler) getOrCreateRunState(runID, ns, name, jobPath string) *runLo
 	st, ok := h.logRuns[runID]
 	if !ok {
 		appendCtx, appendCancel := context.WithCancel(context.Background())
-		st = &runLogState{ns: ns, name: name, jobPath: jobPath, ackSeq: -1, appendCtx: appendCtx, appendCancel: appendCancel}
+		st = &runLogState{ns: ns, name: name, jobPath: jobPath, ackSeq: -1, adoptedThrough: -1, appendCtx: appendCtx, appendCancel: appendCancel}
 		h.logRuns[runID] = st
 	}
 	return st
@@ -751,12 +757,18 @@ func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st
 	alreadyDurable := chunk.Seq <= ackSeq || pending
 	fillsHole := chunk.Seq == ackSeq+1
 	wasFinalDurable := st.finalDurable
+	overlapsOldWriter := alreadyDurable && chunk.Seq <= st.adoptedThrough
 	st.mu.Unlock()
 
 	if alreadyDurable {
 		// Already durable: a redelivery after a lost acknowledgement, or
 		// a repeat of a chunk this run already wrote out of order.
 		// Nothing to append, but the mite still needs the release.
+		if overlapsOldWriter {
+			if outcome, ok := h.checkOldWriterPart(ctx, runID, ns, name, st, chunk, admitted); !ok {
+				return outcome
+			}
+		}
 		h.ackStored(ns, name, runID, st)
 		return appendDone
 	}
@@ -826,6 +838,46 @@ func (h *BusHandler) appendChunk(ctx context.Context, runID, ns, name string, st
 		h.clearTailLeaseOnFinal(chunk.RunId)
 	}
 	return appendDone
+}
+
+// checkOldWriterPart handles a chunk of the current writer at or below
+// adoptedThrough. The part at that sequence can hold the old writer's
+// bytes, or the current writer's own bytes that restart recovery indexed
+// with no writer. Append with the same bytes succeeds and changes
+// nothing, so the chunk is a plain repeat. A conflict means the part
+// holds the old writer's bytes: the chunk's lines are lost, and the run
+// is marked gateway-gap. A sender that no longer owns the run is refused
+// and marks nothing. ok is false when the finalize deadline passed.
+func (h *BusHandler) checkOldWriterPart(ctx context.Context, runID, ns, name string, st *runLogState, chunk *mitev1.LogChunk, admitted time.Time) (appendOutcome, bool) {
+	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: runCreatedAtFromUUIDv7(runID)}
+	key := blob.LogKey(runID)
+	recheck := h.ownerRecheck(ctx, runID, ns, name, st, chunk, admitted)
+	switch h.retryWrite(ctx, runID, st, key, chunk.Seq, recheck, func(c context.Context) error {
+		return h.logStore.Append(c, key, chunk.Seq, chunk.Data, opts)
+	}) {
+	case writeDone:
+		return appendDone, true
+	case writeRefused:
+		h.refuseStaleWriterChunk(ns, name, runID, chunk)
+		return appendDone, false
+	case writeConflict:
+	default:
+		return appendAbandon, false
+	}
+
+	st.mu.Lock()
+	newGap := !st.incomplete || st.incompleteReason != logReasonGatewayGap
+	st.incomplete = true
+	st.incompleteReason = logReasonGatewayGap
+	st.mu.Unlock()
+	if newGap {
+		h.log().Warn("moved writer sent a chunk on a part of the old writer, its lines are lost",
+			"run_id", runID, "seq", chunk.Seq)
+		h.publishRunLogBestEffort(ns, name, runID, st.jobPath, map[string]interface{}{
+			"incomplete": true, "incomplete_reason": logReasonGatewayGap,
+		})
+	}
+	return appendDone, true
 }
 
 // flushContiguousLogIndex writes the index entry for every sequence
@@ -1011,6 +1063,7 @@ func (h *BusHandler) adoptWriter(ctx context.Context, runID, ns, name string, st
 	st.pendingEntries = nil
 	st.pendingData = nil
 	st.writer = writer
+	st.adoptedThrough = st.ackSeq
 	st.ns, st.name = ns, name
 	if dropped > 0 || blanked > 0 {
 		st.incomplete = true
@@ -1287,6 +1340,24 @@ func (h *BusHandler) recoverRunState(ctx context.Context, runID string, st *runL
 		writer = entries[seq].Writer
 	}
 
+	// adoptedThrough is the sequence below the writer's lowest own entry,
+	// once an entry of another writer lies below it. A recovered entry
+	// names no writer and does not end the walk. An index that names no
+	// writer at all cannot show whose bytes it holds, so every entry is
+	// checked as a part of another writer.
+	adoptedThrough, own := int64(-1), int64(-1)
+	if writer == "" {
+		adoptedThrough = ackSeq
+	}
+	for seq := ackSeq; seq >= 0; seq-- {
+		if w := entries[seq].Writer; w == writer {
+			own = seq
+		} else if w != "" {
+			adoptedThrough = own - 1
+			break
+		}
+	}
+
 	// The next entry this writer flushes is ackSeq+1, so its offset is
 	// the end of the entry at ackSeq.
 	var ackEnd int64
@@ -1302,6 +1373,7 @@ func (h *BusHandler) recoverRunState(ctx context.Context, runID string, st *runL
 	st.finalDurable = finalSeen
 	if st.writer == "" {
 		st.writer = writer
+		st.adoptedThrough = adoptedThrough
 	}
 	st.mu.Unlock()
 	return nil

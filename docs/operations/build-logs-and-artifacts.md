@@ -94,7 +94,7 @@ A log's manifest can report `incomplete` true with a reason token:
 | `terminal-response` | A chunk post ended on a permanent HTTP error. |
 | `jenkins-restart` | A Jenkins restart ended the build; the plugin rebuilt its completion. |
 | `rejected` | The gateway refused a chunk on the run-ownership check. |
-| `gateway-gap` | The gateway observed a sequence number it can never fill, or a moved build replaced a lost cell's parts. |
+| `gateway-gap` | The gateway observed a sequence it can never fill, or a moved build overlapped a lost cell's parts. |
 | `finalize-deadline` | The finalization deadline passed with chunks unstored. |
 | `not-finalized` | The recorder's sweep finalized a run that produced no final chunk. |
 | `no-summary` | The run record carries no log summary. The read path serves every stored chunk. |

@@ -1687,6 +1687,262 @@ func TestOnLogChunkSecondMoveReplacesAnEmptyPartOfTheFirstMove(t *testing.T) {
 	}
 }
 
+// storeIndexedRunFromOneWriter indexes chunks 0 to last of runID from
+// the writer ns1/cell1/inst1 and waits for each STORED ack.
+func storeIndexedRunFromOneWriter(t *testing.T, h *BusHandler, sender *recordingSender, runID string, last int64) {
+	t.Helper()
+	for seq := int64(0); seq <= last; seq++ {
+		h.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{
+			RunId: runID, Seq: seq, Data: []byte(fmt.Sprintf("a%d ", seq)), CellInstance: "inst1",
+		})
+		acks := waitForLogAcks(t, sender, int(seq)+1)
+		if got := acks[seq]; got.Status != logAckStatusStored || got.AckSeq != seq {
+			t.Fatalf("chunk %d: expected STORED ack_seq=%d, got %+v", seq, seq, got)
+		}
+	}
+}
+
+// sendAndExpectStored sends one chunk of runID from the moved writer
+// ns1/cell1/inst2 and asserts that its ack is STORED with ackSeq.
+func sendAndExpectStored(t *testing.T, h *BusHandler, sender *recordingSender, runID string, seq, ackSeq int64) {
+	t.Helper()
+	before := len(sender.logAcks())
+	h.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{
+		RunId: runID, Seq: seq, Data: []byte(fmt.Sprintf("b%d ", seq)), CellInstance: "inst2",
+	})
+	acks := waitForLogAcks(t, sender, before+1)
+	if got := acks[before]; got.Status != logAckStatusStored || got.AckSeq != ackSeq {
+		t.Fatalf("chunk %d: expected STORED ack_seq=%d, got %+v", seq, ackSeq, got)
+	}
+}
+
+// gatewayGapPublishes counts the run.log envelopes that carry the
+// gateway-gap reason.
+func gatewayGapPublishes(pub *fakePublisher) int {
+	n := 0
+	for i := 0; i < pub.publishedCount(); i++ {
+		if reason, _ := pub.envelopeAt(i).Payload["incomplete_reason"].(string); reason == logReasonGatewayGap {
+			n++
+		}
+	}
+	return n
+}
+
+// TestOnLogChunkMovedBuildAtOrBelowAckSeqMarksGatewayGap pins a moved
+// build whose log starts below the old writer's indexed parts. The old
+// parts keep their bytes, so the moved build's chunk is lost: the run is
+// a gap, and the moved build still gets STORED to release the chunk.
+func TestOnLogChunkMovedBuildAtOrBelowAckSeqMarksGatewayGap(t *testing.T) {
+	oldSender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	pub := &fakePublisher{}
+	h := newLogTestHandler(t, owner, oldSender)
+	h.publisher = pub
+	storeIndexedRunFromOneWriter(t, h, oldSender, runID, 3)
+
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst2"})
+	h.ownerCache.invalidate(runID)
+	sendAndExpectStored(t, h, oldSender, runID, 2, 3)
+	assertRunGatewayGap(t, h, runID)
+	if n := gatewayGapPublishes(pub); n != 1 {
+		t.Fatalf("expected one gateway-gap publish, got %d", n)
+	}
+
+	// A second overlapping chunk publishes no second marker.
+	sendAndExpectStored(t, h, oldSender, runID, 3, 3)
+	if n := gatewayGapPublishes(pub); n != 1 {
+		t.Fatalf("expected the marker published once, got %d", n)
+	}
+
+	sendAndExpectStored(t, h, oldSender, runID, 4, 4)
+	if got, want := readStoredLog(t, h.logStore, runID), "a0 a1 a2 a3 b4 "; got != want {
+		t.Fatalf("stored log = %q, want %q", got, want)
+	}
+}
+
+// TestOnLogChunkMovedBuildOverlapsRecoveredPartsMarksGatewayGap pins a
+// move after a crash inside the index flush, when the moved build starts
+// below the recovered parts. Recovery indexes the old writer's parts 2
+// and 3, so the moved build's chunk 2 is lost and the run is a gap.
+func TestOnLogChunkMovedBuildOverlapsRecoveredPartsMarksGatewayGap(t *testing.T) {
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	store := seedIndexedRunWithUnindexedParts(t, owner, runID, map[int64][]byte{2: []byte("a2 "), 3: []byte("a3 ")})
+
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst2"})
+	sender := &recordingSender{}
+	restarted := newLogTestHandlerOnStore(t, owner, sender, store)
+	sendAndExpectStored(t, restarted, sender, runID, 2, 3)
+	assertRunGatewayGap(t, restarted, runID)
+
+	sendAndExpectStored(t, restarted, sender, runID, 4, 4)
+	if got, want := readStoredLog(t, store, runID), "a0 a1 a2 a3 b4 "; got != want {
+		t.Fatalf("stored log = %q, want %q", got, want)
+	}
+	assertIndexInsideLog(t, store, runID)
+}
+
+// TestOnLogChunkMovedBuildRedeliveryAboveItsAdoptionIsNotAGap pins that
+// a moved build's repeat of its own stored chunk stays a plain repeat.
+func TestOnLogChunkMovedBuildRedeliveryAboveItsAdoptionIsNotAGap(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	h := newLogTestHandler(t, owner, sender)
+	storeIndexedRunFromOneWriter(t, h, sender, runID, 1)
+
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst2"})
+	h.ownerCache.invalidate(runID)
+	sendAndExpectStored(t, h, sender, runID, 2, 2)
+	sendAndExpectStored(t, h, sender, runID, 3, 3)
+	sendAndExpectStored(t, h, sender, runID, 3, 3)
+
+	if incomplete, reason := h.runIncompleteness(runID); incomplete {
+		t.Fatalf("run incomplete with %q, want a complete run", reason)
+	}
+	if got, want := readStoredLog(t, h.logStore, runID), "a0 a1 b2 b3 "; got != want {
+		t.Fatalf("stored log = %q, want %q", got, want)
+	}
+}
+
+// TestOnLogChunkMovedBuildRepeatOfItsRecoveredPartIsNotAGap pins a crash
+// after the moved build's first part and before its index entry.
+// Recovery indexes that part with no writer and restores the old writer.
+// The moved build's repeat carries the same bytes, so no line is lost.
+func TestOnLogChunkMovedBuildRepeatOfItsRecoveredPartIsNotAGap(t *testing.T) {
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	store := seedIndexedRunWithUnindexedParts(t, owner, runID, map[int64][]byte{2: []byte("b2 ")})
+
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst2"})
+	sender := &recordingSender{}
+	restarted := newLogTestHandlerOnStore(t, owner, sender, store)
+	sendAndExpectStored(t, restarted, sender, runID, 2, 2)
+	if incomplete, reason := restarted.runIncompleteness(runID); incomplete {
+		t.Fatalf("run incomplete with %q, want a complete run", reason)
+	}
+	sendAndExpectStored(t, restarted, sender, runID, 3, 3)
+	if got, want := readStoredLog(t, store, runID), "a0 a1 b2 b3 "; got != want {
+		t.Fatalf("stored log = %q, want %q", got, want)
+	}
+}
+
+// TestOnLogChunkFullyRecoveredIndexChecksEveryPart pins an index that
+// names no writer: a crash before the first index entry, then a restart.
+// The gateway cannot tell whose bytes the parts hold, so it checks a
+// chunk at or below ackSeq against the stored part.
+func TestOnLogChunkFullyRecoveredIndexChecksEveryPart(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		stored string
+		gap    bool
+	}{
+		{name: "a moved build on another writer's part", stored: "a0 ", gap: true},
+		{name: "a repeat of the same bytes", stored: "b0 ", gap: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, err := blob.Open(context.Background(), "file://"+t.TempDir(), nil)
+			if err != nil {
+				t.Fatalf("open blob store: %v", err)
+			}
+			runID := newTestRunID()
+			opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: runCreatedAtFromUUIDv7(runID)}
+			if err := store.Append(context.Background(), blob.LogKey(runID), 0, []byte(tc.stored), opts); err != nil {
+				t.Fatalf("append part 0: %v", err)
+			}
+
+			owner := newFakeOwnerRequester()
+			owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst2"})
+			sender := &recordingSender{}
+			h := newLogTestHandlerOnStore(t, owner, sender, store)
+			sendAndExpectStored(t, h, sender, runID, 0, 0)
+
+			incomplete, reason := h.runIncompleteness(runID)
+			if tc.gap && (!incomplete || reason != logReasonGatewayGap) {
+				t.Fatalf("expected the run incomplete with %q, got incomplete=%v reason=%q", logReasonGatewayGap, incomplete, reason)
+			}
+			if !tc.gap && incomplete {
+				t.Fatalf("run incomplete with %q, want a complete run", reason)
+			}
+		})
+	}
+}
+
+// TestOnLogChunkLongQueuedOverlapOfALostOwnerIsRefused pins the owner
+// recheck before the check of an old writer's part. A chunk that waited
+// past the recheck age must not mark the run after another move.
+func TestOnLogChunkLongQueuedOverlapOfALostOwnerIsRefused(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	h := newLogTestHandler(t, owner, sender)
+	storeIndexedRunFromOneWriter(t, h, sender, runID, 3)
+
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst2"})
+	h.ownerCache.invalidate(runID)
+	sendAndExpectStored(t, h, sender, runID, 4, 4)
+
+	release := make(chan struct{})
+	base := h.logStore
+	h.logStore = blockingAppendStore{Store: base, release: release}
+	h.logOwnerRecheckAge = 20 * time.Millisecond
+	before := len(sender.logAcks())
+	h.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: 5, Data: []byte("b5 "), CellInstance: "inst2"})
+	h.OnLogChunk("cell1", "ns1", &mitev1.LogChunk{RunId: runID, Seq: 2, Data: []byte("b2 "), CellInstance: "inst2"})
+
+	// The run moves again while chunk 2 waits behind the stalled store.
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst3"})
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+
+	acks := waitForLogAcks(t, sender, before+2)
+	if got := acks[before+1]; got.Status != logAckStatusRejected || got.Reason != logReasonForeignRun || got.AckSeq != 2 {
+		t.Fatalf("expected chunk 2 refused foreign-run after the move, got %+v", got)
+	}
+	if incomplete, reason := h.runIncompleteness(runID); incomplete {
+		t.Fatalf("run incomplete with %q, want no marker from a lost owner", reason)
+	}
+}
+
+// TestOnLogChunkRestartKeepsTheAdoptionBoundary pins that restart
+// recovery rebuilds the adoption boundary from the index writers. A
+// moved build's chunk on an old writer's part after the restart still
+// marks the run a gap.
+func TestOnLogChunkRestartKeepsTheAdoptionBoundary(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	h := newLogTestHandler(t, owner, sender)
+	storeIndexedRunFromOneWriter(t, h, sender, runID, 3)
+
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst2"})
+	h.ownerCache.invalidate(runID)
+	sendAndExpectStored(t, h, sender, runID, 4, 4)
+	sendAndExpectStored(t, h, sender, runID, 5, 5)
+	if incomplete, reason := h.runIncompleteness(runID); incomplete {
+		t.Fatalf("run incomplete with %q before the overlap, want a complete run", reason)
+	}
+
+	restartedSender := &recordingSender{}
+	restarted := newLogTestHandlerOnStore(t, owner, restartedSender, h.logStore)
+	sendAndExpectStored(t, restarted, restartedSender, runID, 5, 5)
+	if incomplete, reason := restarted.runIncompleteness(runID); incomplete {
+		t.Fatalf("run incomplete with %q on the moved build's own repeat, want a complete run", reason)
+	}
+	sendAndExpectStored(t, restarted, restartedSender, runID, 2, 5)
+	assertRunGatewayGap(t, restarted, runID)
+	if got, want := readStoredLog(t, h.logStore, runID), "a0 a1 a2 a3 b4 b5 "; got != want {
+		t.Fatalf("stored log = %q, want %q", got, want)
+	}
+}
+
 // --- gateway-budget pause under a small budget ---
 
 // latencyAppendStore adds a fixed latency to every Append.

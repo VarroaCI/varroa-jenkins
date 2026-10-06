@@ -384,7 +384,13 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   refused chunk's `seq`. `retryWrite` returns `ErrChunkConflict` at once;
   a log-key conflict from the owner replaces the stale part through
   `blob.Store.Overwrite` (`replaceStalePart`), and an index-key conflict
-  abandons the run. A drop or a replace marks the run `gateway-gap`. `BuildLogManifest` (`log_manifest.go`) is the
+  abandons the run. A drop or a replace marks the run `gateway-gap`.
+  `adoptWriter` records `ackSeq` as `adoptedThrough`. `checkOldWriterPart`
+  re-appends an already durable chunk of the new writer at or below it:
+  same bytes are a repeat, and `ErrChunkConflict` marks the run
+  `gateway-gap` once. Both ack `STORED`; the owner recheck applies.
+  `recoverRunState` rebuilds `adoptedThrough` from the index entries'
+  `writer` fields, or sets it to `ackSeq` when no entry names a writer. `BuildLogManifest` (`log_manifest.go`) is the
   computed-never-stored view a reader calls: it walks the index, serves
   each part `blob.UnindexedLogParts` names as one unattributed chunk, marks
   every other uncovered sequence as a hole, and reports `incomplete`
