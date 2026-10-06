@@ -83,7 +83,7 @@ public class LogReadCacheTest {
 
         // run-active stays "active" for the whole test (never calls finish()).
         LogChunkSender sender = new LogChunkSender("http://127.0.0.1:9095/v1/log", new LoopbackTokenFile(),
-                (url, c, token, timeout) -> new LogChunkSender.Attempt(202, -1, false),
+                (url, c, token, timeout) -> new LogChunkSender.Attempt(202, -1, -1, false),
                 ms -> { }, java.util.concurrent.Executors.newSingleThreadExecutor());
         LogChunkBuffer activeBuffer = new LogChunkBuffer("run-active", "j", 1, sender, cache, LogReadCache.ResumePoint.FRESH);
 

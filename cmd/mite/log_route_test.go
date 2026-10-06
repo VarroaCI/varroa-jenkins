@@ -83,6 +83,9 @@ func TestLogResponseContractTable(t *testing.T) {
 		malformed  bool
 		wantStatus int
 		wantMaxHdr bool
+		// wantPause is true only for the 503 the mite raises inside a
+		// BUSY pause window. Every other answer carries no pause header.
+		wantPause bool
 	}{
 		{
 			name:       "success",
@@ -122,6 +125,7 @@ func TestLogResponseContractTable(t *testing.T) {
 			},
 			token:      "tok",
 			wantStatus: http.StatusServiceUnavailable,
+			wantPause:  true,
 		},
 	}
 
@@ -146,7 +150,72 @@ func TestLogResponseContractTable(t *testing.T) {
 			if rec.Code != tc.wantStatus {
 				t.Fatalf("%s: got %d, want %d (%s)", tc.name, rec.Code, tc.wantStatus, rec.Body.String())
 			}
+			if got := rec.Header().Get(hdrPauseMs) != ""; got != tc.wantPause {
+				t.Errorf("%s: %s present = %v, want %v", tc.name, hdrPauseMs, got, tc.wantPause)
+			}
 		})
+	}
+}
+
+func TestLogPauseHeaderReportsTimeLeft(t *testing.T) {
+	agent := mustNewAgent(t, Config{})
+	agent.Logger = slog.Default()
+	agent.loopbackToken = "tok"
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
+	agent.logRetention.pause("run-1", 3*time.Second)
+
+	rec := httptest.NewRecorder()
+	agent.handleLog(rec, newLogRequest("tok", "j", 1, 1, "", "", 0, 0, "xx"))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 inside the pause window, got %d", rec.Code)
+	}
+	left, err := strconv.Atoi(rec.Header().Get(hdrPauseMs))
+	if err != nil {
+		t.Fatalf("%s = %q: %v", hdrPauseMs, rec.Header().Get(hdrPauseMs), err)
+	}
+	if left < 2900 || left > 3000 {
+		t.Errorf("%s = %d, want the time left in a 3000 ms window", hdrPauseMs, left)
+	}
+}
+
+func TestLogExpiredPauseWindowForwardsTheChunk(t *testing.T) {
+	agent := mustNewAgent(t, Config{})
+	agent.Logger = slog.Default()
+	agent.loopbackToken = "tok"
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
+	agent.logRetention.pause("run-1", -time.Second)
+
+	if left := agent.logRetention.pauseLeftMS("run-1"); left != 0 {
+		t.Fatalf("pauseLeftMS after the window closed = %d, want 0", left)
+	}
+	rec := httptest.NewRecorder()
+	agent.handleLog(rec, newLogRequest("tok", "j", 1, 1, "", "", 0, 0, "xx"))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 after the window closed, got %d", rec.Code)
+	}
+	if rec.Header().Get(hdrPauseMs) != "" {
+		t.Errorf("expected no %s after the window closed", hdrPauseMs)
+	}
+}
+
+func TestPauseLeftMSRoundsUp(t *testing.T) {
+	now := time.Now()
+	cases := []struct {
+		until time.Time
+		want  int
+	}{
+		{time.Time{}, 0},
+		{now, 0},
+		{now.Add(-time.Millisecond), 0},
+		{now.Add(time.Microsecond), 1},
+		{now.Add(100 * time.Millisecond), 100},
+		{now.Add(100*time.Millisecond + time.Microsecond), 101},
+	}
+	for _, tc := range cases {
+		if got := pauseLeftMS(tc.until, now); got != tc.want {
+			t.Errorf("pauseLeftMS(now%+v) = %d, want %d", tc.until.Sub(now), got, tc.want)
+		}
 	}
 }
 
@@ -259,7 +328,7 @@ func TestLogAckTableCumulativeRelease(t *testing.T) {
 		if got := agent.logRetention.snapshotOrdered(); len(got) != 3 {
 			t.Fatalf("expected every chunk retained on BUSY, got %v", got)
 		}
-		if !agent.logRetention.paused("run-1") {
+		if agent.logRetention.pauseLeftMS("run-1") <= 0 {
 			t.Error("expected the pause window open after BUSY")
 		}
 		req := newLogRequest("tok", "j", 1, 4, "", "", 0, 0, "x")
@@ -360,7 +429,7 @@ func TestLogBusyResendsRefusedChunksAfterPause(t *testing.T) {
 
 	h.busy(ctx, 0, 20)
 	h.busy(ctx, 1, 20)
-	if !h.agent.logRetention.paused("run-1") {
+	if h.agent.logRetention.pauseLeftMS("run-1") <= 0 {
 		t.Fatal("expected the pause window open after BUSY")
 	}
 

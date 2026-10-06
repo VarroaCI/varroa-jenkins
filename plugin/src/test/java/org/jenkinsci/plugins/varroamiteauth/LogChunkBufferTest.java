@@ -36,7 +36,7 @@ public class LogChunkBufferTest {
         LogChunkSender.resetChunkCapForTesting();
         LogChunkSender.Transport alwaysAccept = (url, chunk, token, timeout) -> {
             posted.add(chunk);
-            return new LogChunkSender.Attempt(202, -1, false);
+            return new LogChunkSender.Attempt(202, -1, -1, false);
         };
         sender = new LogChunkSender("http://127.0.0.1:9095/v1/log", new LoopbackTokenFile(),
                 alwaysAccept, ms -> { }, directExecutor());
@@ -180,7 +180,7 @@ public class LogChunkBufferTest {
     @Test
     public void aTerminalResponseBeforeFinishMarksTheSummaryIncomplete() {
         LogChunkSender.Transport terminal400 = (url, chunk, token, timeout) ->
-                new LogChunkSender.Attempt(400, -1, false);
+                new LogChunkSender.Attempt(400, -1, -1, false);
         LogChunkSender terminalSender = new LogChunkSender("http://127.0.0.1:9095/v1/log",
                 new LoopbackTokenFile(), terminal400, ms -> { }, directExecutor());
         LogChunkBuffer buffer = new LogChunkBuffer("run-2", "folder/job", 1, terminalSender, recordingCache(),
@@ -390,7 +390,7 @@ public class LogChunkBufferTest {
     @Test
     public void shutdownRecordsAPendingDropWithNoBufferedBytes() {
         LogChunkSender stuck = new LogChunkSender("http://127.0.0.1:9095/v1/log", new LoopbackTokenFile(),
-                (url, chunk, token, timeout) -> new LogChunkSender.Attempt(503, -1, false),
+                (url, chunk, token, timeout) -> new LogChunkSender.Attempt(503, -1, -1, false),
                 ms -> { throw new InterruptedException("stop"); }, neverRunsExecutor());
         LogChunkBuffer buffer = new LogChunkBuffer("run-drop", "folder/job", 1, stuck, recordingCache(),
                 4, 1_000_000, () -> 4, clockMillis::get);

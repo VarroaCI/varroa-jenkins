@@ -25,6 +25,10 @@ import java.util.logging.Logger;
  * <p>A queued chunk is retried forever on a transport failure, a timeout, or
  * {@code 503}. It ends only on acceptance ({@code 202}) or a terminal
  * {@code 400}/{@code 413}. No cap and no timer discards a queued chunk (D2).
+ *
+ * <p>A {@code 503} that carries {@code X-Varroa-Pause-Ms} names the time left
+ * in the mite's busy pause window. The sender waits that time, plus up to 10%
+ * jitter, and does not grow its backoff. Every other retry uses the backoff.
  */
 class LogChunkSender {
 
@@ -36,6 +40,9 @@ class LogChunkSender {
     private static final long DEFAULT_POST_TIMEOUT_MS = 5000L;
     private static final long BACKOFF_MIN_MS = 250L;
     private static final long BACKOFF_MAX_MS = 5000L;
+    /** The longest pause the sender honours. The gateway asks for at most 8000 ms. */
+    static final long PAUSE_MAX_MS = 10_000L;
+    static final String PAUSE_HEADER = "X-Varroa-Pause-Ms";
     private static final int STATUS_ACCEPTED = 202;
     private static final int STATUS_BAD_REQUEST = 400;
     private static final int STATUS_UNAUTHORIZED = 401;
@@ -160,16 +167,24 @@ class LogChunkSender {
                 rq.owner.onChunkTerminallyFailed(chunk);
                 return true;
             }
-            if (!result.transportFailure && result.statusCode == STATUS_UNAUTHORIZED) {
-                token = tokenFile.onUnauthorized();
-            } else if (!result.transportFailure && result.statusCode == STATUS_UNAVAILABLE) {
-                LOGGER.log(Level.FINE, "LogChunkSender: mite answered 503, retrying");
+            long waitMillis;
+            if (!result.transportFailure && result.statusCode == STATUS_UNAVAILABLE && result.pauseMillis > 0) {
+                LOGGER.log(Level.FINE, "LogChunkSender: mite answered 503 with a "
+                        + result.pauseMillis + " ms pause, retrying");
+                waitMillis = pauseWaitMillis(result.pauseMillis);
             } else {
-                LOGGER.log(Level.FINE, "LogChunkSender: post failed, status=" + result.statusCode);
+                if (!result.transportFailure && result.statusCode == STATUS_UNAUTHORIZED) {
+                    token = tokenFile.onUnauthorized();
+                } else if (!result.transportFailure && result.statusCode == STATUS_UNAVAILABLE) {
+                    LOGGER.log(Level.FINE, "LogChunkSender: mite answered 503, retrying");
+                } else {
+                    LOGGER.log(Level.FINE, "LogChunkSender: post failed, status=" + result.statusCode);
+                }
+                attempt++;
+                waitMillis = backoffMillis(attempt);
             }
-            attempt++;
             try {
-                sleeper.sleep(backoffMillis(attempt));
+                sleeper.sleep(waitMillis);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return false;
@@ -209,6 +224,34 @@ class LogChunkSender {
         return BACKOFF_MIN_MS + jitter;
     }
 
+    /**
+     * The wait for a {@code 503} that names a pause: the pause, clamped to
+     * {@link #PAUSE_MAX_MS}, plus 0% to 10% jitter. The jitter only adds, so
+     * the retry never lands before the window closes. Package-private for testing.
+     */
+    static long pauseWaitMillis(long pauseMillis) {
+        long base = Math.min(pauseMillis, PAUSE_MAX_MS);
+        long spread = base / 10;
+        long jitter = spread > 0 ? ThreadLocalRandom.current().nextLong(spread + 1) : 0;
+        return base + jitter;
+    }
+
+    /**
+     * Parses {@code X-Varroa-Pause-Ms}. Answers -1 for a missing, malformed,
+     * zero, or negative value, so the sender keeps its backoff. Package-private for testing.
+     */
+    static long parsePauseMillis(String raw) {
+        if (raw == null) {
+            return -1L;
+        }
+        try {
+            long parsed = Long.parseLong(raw.trim());
+            return parsed > 0 ? parsed : -1L;
+        } catch (NumberFormatException e) {
+            return -1L;
+        }
+    }
+
     private static void threadSleep(long millis) throws InterruptedException {
         Thread.sleep(millis);
     }
@@ -240,13 +283,14 @@ class LogChunkSender {
             }
             HttpResponse<byte[]> resp = SHARED_CLIENT.send(b.build(), HttpResponse.BodyHandlers.ofByteArray());
             long maxChunkBytes = parseMaxChunkBytesHeader(resp);
-            return new Attempt(resp.statusCode(), maxChunkBytes, false);
+            long pauseMillis = parsePauseMillis(resp.headers().firstValue(PAUSE_HEADER).orElse(null));
+            return new Attempt(resp.statusCode(), maxChunkBytes, pauseMillis, false);
         } catch (HttpTimeoutException e) {
             LOGGER.log(Level.FINE, "LogChunkSender: timeout posting chunk seq=" + chunk.seq, e);
-            return new Attempt(0, -1, true);
+            return new Attempt(0, -1, -1, true);
         } catch (Exception e) {
             LOGGER.log(Level.FINE, "LogChunkSender: transport failure posting chunk seq=" + chunk.seq, e);
-            return new Attempt(0, -1, true);
+            return new Attempt(0, -1, -1, true);
         }
     }
 
@@ -279,15 +323,17 @@ class LogChunkSender {
         void sleep(long millis) throws InterruptedException;
     }
 
-    /** One HTTP attempt's outcome. */
+    /** One HTTP attempt's outcome. {@code pauseMillis} is -1 when the response names no pause. */
     static final class Attempt {
         final int statusCode;
         final long maxChunkBytes;
+        final long pauseMillis;
         final boolean transportFailure;
 
-        Attempt(int statusCode, long maxChunkBytes, boolean transportFailure) {
+        Attempt(int statusCode, long maxChunkBytes, long pauseMillis, boolean transportFailure) {
             this.statusCode = statusCode;
             this.maxChunkBytes = maxChunkBytes;
+            this.pauseMillis = pauseMillis;
             this.transportFailure = transportFailure;
         }
     }

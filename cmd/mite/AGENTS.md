@@ -185,8 +185,10 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
     event retention pattern above, at `VARROA_MITE_LOG_RETAIN_BYTES`
     (default 64 MiB, `logRetentionStore`). `handleLog` answers `503` once
     the bound is reached, and again while a per-run `BUSY` pause window from
-    `handleLogAck` is open, so the plugin's own retry-with-backoff carries
-    the back pressure with no new plugin rule. `handleLogAck`
+    `handleLogAck` is open. Only the pause-window `503` carries
+    `X-Varroa-Pause-Ms` (`hdrPauseMs`): the time left in the window, rounded
+    up to whole milliseconds by `pauseLeftMS`. The plugin waits that time;
+    every other `503` leaves it on its own backoff. `handleLogAck`
     (`OperatorMessage.log_ack`) releases every retained chunk of a run at or
     below `ack_seq` on `STORED` or `REJECTED`. On `BUSY`, `ack_seq` names
     the refused sequence: `scheduleLogResend` adds it to the run's refused
@@ -376,7 +378,9 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   the last step: files alone leave nothing for a cancel to stop. `runStateAckStore` records the gateway's `RunStateAck` per run, so
   the route answers `503` with `X-Varroa-State-Reason` on that run's next
   post; `state-cap` and `foreign-run` are permanent, and
-  `gateway-budget-full` names a pause instead.
+  `gateway-budget-full` names a pause instead. That `503` carries
+  `X-Varroa-Pause-Ms` with the time left in the busy window, the same
+  header and meaning as the log route.
 
 ## Verification
 

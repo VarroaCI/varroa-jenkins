@@ -46,7 +46,7 @@ public class VarroaLogStorageTest {
         VarroaLogStorageFactory factory = VarroaLogStorageFactory.get();
         LogChunkSender.Transport recording = (url, chunk, token, timeout) -> {
             captured.add(chunk);
-            return new LogChunkSender.Attempt(202, -1, false);
+            return new LogChunkSender.Attempt(202, -1, -1, false);
         };
         LogChunkSender sender = new LogChunkSender("http://127.0.0.1:9095/v1/log", new LoopbackTokenFile(),
                 recording, ms -> { }, Executors.newCachedThreadPool());

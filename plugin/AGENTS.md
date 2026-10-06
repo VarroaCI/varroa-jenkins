@@ -404,7 +404,9 @@ the root AGENTS.md greenfield rule.
   `TaskListenerDecorator` chain — a bound credential never reaches a chunk —
   before it reaches `LogChunkBuffer.java` (ordered chunks, a per-build cap,
   node-id splitting). `LogChunkSender.java` posts each build's chunks one at
-  a time to the mite loopback with a jittered backoff. `LogReadCache.java`
+  a time to the mite loopback with a jittered backoff. A `503` with
+  `X-Varroa-Pause-Ms` waits that value instead (clamped to 10 s, plus 0% to 10%
+  jitter) and does not grow the backoff. `LogReadCache.java`
   serves `overallLog`/`stepLog` reads back from disk.
   **A resumed build continues its log `seq`; it never starts again at 0.** The
   gateway ignores a chunk at or below the `seq` it already stored. A restart at 0

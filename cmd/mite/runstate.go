@@ -37,10 +37,8 @@ const (
 	hdrStateObjectSize  = "X-Varroa-Object-Size"
 	hdrStatePusherEpoch = "X-Varroa-Pusher-Epoch"
 
-	// hdrStateReason names the gateway's refusal on a 503, and
-	// hdrStatePauseMs names the wait a busy answer asks for.
-	hdrStateReason  = "X-Varroa-State-Reason"
-	hdrStatePauseMs = "X-Varroa-Pause-Ms"
+	// hdrStateReason names the gateway's refusal on a 503.
+	hdrStateReason = "X-Varroa-State-Reason"
 
 	// runStateChunkMaxBytes is the mite's own cap on one POST
 	// /v1/run-state body, matching every other loopback route.
@@ -117,11 +115,10 @@ const (
 // runStateRefusal is what the gateway last answered for one run. A
 // permanent refusal answers 503 for every later post of that run; a
 // transient one answers 503 once and clears; a busy answer names a
-// pause window.
+// pause window that ends at until.
 type runStateRefusal struct {
 	reason    string
 	permanent bool
-	pauseMS   int
 	until     time.Time
 }
 
@@ -154,9 +151,8 @@ func (s *runStateAckStore) record(ack *mitev1.RunStateAck) {
 			pause = defaultLogBusyPauseMS
 		}
 		s.refusals[ack.RunId] = runStateRefusal{
-			reason:  ack.Reason,
-			pauseMS: pause,
-			until:   time.Now().Add(time.Duration(pause) * time.Millisecond),
+			reason: ack.Reason,
+			until:  time.Now().Add(time.Duration(pause) * time.Millisecond),
 		}
 	case ackStatusRejected:
 		permanent := ack.Reason == stateReasonStateCap || ack.Reason == stateReasonForeignRun
@@ -234,8 +230,10 @@ func (a *Agent) handleRunState(w http.ResponseWriter, r *http.Request) {
 
 	if refusal, refused := a.runStateAcks.take(chunk.RunId); refused {
 		w.Header().Set(hdrStateReason, refusal.reason)
-		if refusal.reason == stateReasonBudgetFull && refusal.pauseMS > 0 {
-			w.Header().Set(hdrStatePauseMs, strconv.Itoa(refusal.pauseMS))
+		if refusal.reason == stateReasonBudgetFull {
+			if left := pauseLeftMS(refusal.until, time.Now()); left > 0 {
+				w.Header().Set(hdrPauseMs, strconv.Itoa(left))
+			}
 		}
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return

@@ -74,7 +74,8 @@ const (
 	hdrLogDroppedBytes     = "X-Varroa-Dropped-Bytes"
 	hdrLogFinal            = "X-Varroa-Final"
 	hdrLogMaxChunkBytes    = "X-Varroa-Max-Chunk-Bytes"
-	defaultLogRetainBytes  = 64 * 1024 * 1024 // 64 MiB
+	hdrPauseMs             = "X-Varroa-Pause-Ms" // time left in a busy pause window, on a 503
+	defaultLogRetainBytes  = 64 * 1024 * 1024    // 64 MiB
 	defaultLogBusyPauseMS  = 1000
 	varroaLogTailPath      = "/varroa-log/tail" // Jenkins root action the plugin registers
 	tailControlActionStart = "start"
@@ -758,7 +759,7 @@ func writeCrossTenantFailure(w http.ResponseWriter, status int, requestID *uint6
 // 400 for malformed metadata, 401 for a bad bearer, 413 for a body over
 // the mite's own chunk cap, and 503 when no stream is open, when the
 // retained buffer is at its bound, or while a BUSY pause window is open
-// for this run.
+// for this run. Only the pause-window 503 carries hdrPauseMs.
 func (a *Agent) handleLog(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -791,7 +792,8 @@ func (a *Agent) handleLog(w http.ResponseWriter, r *http.Request) {
 	}
 	chunk.Data = body
 
-	if a.logRetention.paused(chunk.RunId) {
+	if left := a.logRetention.pauseLeftMS(chunk.RunId); left > 0 {
+		w.Header().Set(hdrPauseMs, strconv.Itoa(left))
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
@@ -1475,12 +1477,22 @@ func (s *logRetentionStore) takeRefused(runID string, slot *logResendSlot) ([]*m
 	return out, true
 }
 
-// paused reports whether runID is inside an open BUSY pause window.
-func (s *logRetentionStore) paused(runID string) bool {
+// pauseLeftMS answers the milliseconds left in runID's BUSY pause
+// window, or 0 when no window is open.
+func (s *logRetentionStore) pauseLeftMS(runID string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	until, ok := s.pausedUntil[runID]
-	return ok && time.Now().Before(until)
+	return pauseLeftMS(s.pausedUntil[runID], time.Now())
+}
+
+// pauseLeftMS answers the time from now to until in whole milliseconds,
+// rounded up so a caller never retries before the window closes. It
+// answers 0 when until is zero or not after now.
+func pauseLeftMS(until, now time.Time) int {
+	if until.IsZero() || !until.After(now) {
+		return 0
+	}
+	return int((until.Sub(now) + time.Millisecond - 1) / time.Millisecond)
 }
 
 // pause opens a BUSY pause window for runID lasting at least d.

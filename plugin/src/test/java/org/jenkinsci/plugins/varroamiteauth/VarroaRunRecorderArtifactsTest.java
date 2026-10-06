@@ -45,7 +45,7 @@ public class VarroaRunRecorderArtifactsTest {
         VarroaLogStorageFactory factory = VarroaLogStorageFactory.get();
         factory.setCollaboratorsForTesting(
                 new LogChunkSender("http://127.0.0.1:9095/v1/log", new LoopbackTokenFile(),
-                        (url, chunk, token, timeout) -> new LogChunkSender.Attempt(202, -1, false),
+                        (url, chunk, token, timeout) -> new LogChunkSender.Attempt(202, -1, -1, false),
                         ms -> { }, java.util.concurrent.Executors.newCachedThreadPool()),
                 new LogReadCache());
 
@@ -87,7 +87,7 @@ public class VarroaRunRecorderArtifactsTest {
         VarroaLogStorageFactory factory = VarroaLogStorageFactory.get();
         factory.setCollaboratorsForTesting(
                 new LogChunkSender("http://127.0.0.1:9095/v1/log", new LoopbackTokenFile(),
-                        (url, chunk, token, timeout) -> new LogChunkSender.Attempt(202, -1, false),
+                        (url, chunk, token, timeout) -> new LogChunkSender.Attempt(202, -1, -1, false),
                         ms -> { }, java.util.concurrent.Executors.newCachedThreadPool()),
                 new LogReadCache());
         String prefix = "artifacts/core/varroa/cell-a/";
